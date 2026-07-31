@@ -17,13 +17,12 @@ import functools
 import hashlib
 import json
 import sys
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from lib import http_utils
+from lib import codegen_utils, http_utils
 
 REPO = "NixOS/nix"
 SCHEMA_PATH = "doc/manual/source/protocols/json/schema"
@@ -37,7 +36,8 @@ _HTTP_MAX_ATTEMPTS = 3
 _HTTP_BACKOFF_BASE_SECONDS = 0.5
 _HTTP_BACKOFF_MAX_SECONDS = 5.0
 
-type ProgressReporter = Callable[[str], None]
+ProgressReporter = codegen_utils.ProgressReporter
+_emit_progress = codegen_utils.emit_progress
 
 
 class SchemaVersionManifest(BaseModel):
@@ -150,13 +150,6 @@ def _https_get(url: str, headers: dict[str, str] | None = None) -> bytes:
         raise RuntimeError(msg) from exc
     else:
         return payload
-
-
-def _emit_progress(progress: ProgressReporter | None, message: str) -> None:
-    """Invoke the optional fetch progress reporter."""
-    if progress is None:
-        return
-    progress(message)
 
 
 def _write_version(commit_sha: str, branch: str, files: list[dict[str, str]]) -> None:

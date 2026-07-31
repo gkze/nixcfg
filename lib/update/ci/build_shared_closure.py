@@ -31,6 +31,7 @@ from lib.nix.commands.base import (
 )
 from lib.nix.commands.build import nix_build_dry_run
 from lib.nix.commands.store import nix_store_realise
+from lib.update.ci import verbosity
 from lib.update.ci._cli import (
     make_dual_typer_apps,
     make_main,
@@ -75,31 +76,14 @@ _parse_internal_json_line = parse_internal_json_line
 _write_profile_report = write_profile_report
 BuildProfileEvent = _BuildProfileEvent
 AggregatedProfileRow = _AggregatedProfileRow
+_nix_verbosity_args = verbosity.nix_verbosity_args
+_nix_verbosity_from_cli = verbosity.nix_verbosity_from_cli
+_python_log_level = verbosity.python_log_level
 
 
 def _log_profile_summary(events: list[AggregatedProfileRow]) -> None:
     """Log profile summaries through this module's logger for test patching."""
     log_profile_summary(events, logger=log)
-
-
-def _python_log_level(verbosity: int) -> int:
-    """Map CLI verbosity count to Python logging level."""
-    return logging.DEBUG if verbosity > 0 else logging.INFO
-
-
-def _nix_verbosity_args(nix_verbosity: int) -> list[str]:
-    """Return nix/nix-store verbosity arguments for *nix_verbosity* level."""
-    if nix_verbosity <= 0:
-        return []
-    return ["-" + ("v" * nix_verbosity)]
-
-
-def _nix_verbosity_from_cli(verbosity: int) -> int:
-    """Map CLI verbosity to nix verbosity level.
-
-    ``-v`` enables Python DEBUG logs only; ``-vv`` starts forwarding ``-v`` to Nix.
-    """
-    return max(0, verbosity - 1)
 
 
 def _dry_run_env_for_ref(ref: str) -> Mapping[str, str] | None:

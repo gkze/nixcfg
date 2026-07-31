@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import json
 import logging
 import os
@@ -331,11 +330,6 @@ def test_render_helpers_cover_additional_branches(
     assert _render.compose_imports_block({"import"}) == ""
     assert _render.compose_imports_block({"import os\nimport sys"}) == ""
     assert _render.compose_imports_block({"if True:\n    pass"}) == ""
-    assert _render._format_import_alias(ast.alias(name="os")) == "os"
-    assert (
-        _render._format_import_alias(ast.alias(name="os", asname="operating_system"))
-        == "os as operating_system"
-    )
     assert _render._import_module_sort_key("os") == (0, "os")
     assert _render._import_module_sort_key("pydantic") == (1, "pydantic")
 
@@ -539,13 +533,6 @@ def test_lockfile_helper_error_and_metadata_branches(  # noqa: PLR0915
     assert codegen_lockfile._normalize_posix_string("/") == "/"
     monkeypatch.setattr(codegen_lockfile, "PurePosixPath", original_pure_posix_path)
 
-    regular = tmp_path / "regular.txt"
-    regular.write_text("x", encoding="utf-8")
-    symlink = tmp_path / "regular-link.txt"
-    symlink.symlink_to(regular)
-    assert codegen_lockfile._is_regular_file(regular) is True
-    assert codegen_lockfile._is_regular_file(symlink) is False
-
     missing_dir = tmp_path / "missing"
     with pytest.raises(RuntimeError, match="does not exist"):
         codegen_lockfile._iter_materialized_directory_files(
@@ -563,7 +550,7 @@ def test_lockfile_helper_error_and_metadata_branches(  # noqa: PLR0915
 
     symlink_dir = tmp_path / "symlinked"
     symlink_dir.mkdir()
-    (symlink_dir / "linked.txt").symlink_to(regular)
+    (symlink_dir / "linked.txt").symlink_to(not_dir)
     with pytest.raises(RuntimeError, match="unsupported symlink"):
         codegen_lockfile._iter_materialized_directory_files(
             source_root=symlink_dir,

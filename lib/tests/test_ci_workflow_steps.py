@@ -84,9 +84,7 @@ def test_generate_pr_body_includes_sources_section(
     monkeypatch.setattr(
         workflow_steps,
         "run_sources_diff",
-        lambda _old, _new, output_format: (
-            _unified_diff if output_format == "unified" else ""
-        ),
+        lambda _old, _new: _unified_diff,
     )
 
     exit_code = workflow_steps.main([

@@ -23,12 +23,10 @@ from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
 from lib.update.nix import _build_package_path_attr_expr
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
-from lib.update.updaters import strategies as updater_strategies
 from lib.update.updaters.core import source_override_env
-from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Iterable
 
 HASH_A = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 HASH_B = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
@@ -50,14 +48,7 @@ def _module_fixture(path: str, fixture_name: str) -> object:
 code_cursor_module = _module_fixture(
     "overlays/code-cursor/updater.py", "code_cursor_module"
 )
-datagrip_module = _module_fixture("overlays/datagrip/updater.py", "datagrip_module")
-google_chrome_module = _module_fixture(
-    "overlays/google-chrome/updater.py", "google_chrome_module"
-)
 goose_v8_module = _module_fixture("overlays/goose-v8/updater.py", "goose_v8_module")
-netnewswire_module = _module_fixture(
-    "packages/netnewswire/updater.py", "netnewswire_module"
-)
 sentry_cli_module = _module_fixture(
     "overlays/sentry-cli/updater.py", "sentry_cli_module"
 )
@@ -71,7 +62,6 @@ superconductor_module = _module_fixture(
     "packages/superconductor/updater.py", "superconductor_module"
 )
 tsgolint_module = _module_fixture("overlays/tsgolint/updater.py", "tsgolint_module")
-sculptor_module = _module_fixture("packages/sculptor/updater.py", "sculptor_module")
 neutils_module = _module_fixture("packages/neutils/updater.py", "neutils_module")
 
 
@@ -455,162 +445,6 @@ def test_code_cursor_fetch_latest_from_download_page(
         latest.metadata["platform_info"]["aarch64-linux"]["downloadUrl"]
         == (resolved_urls["linux-arm64"])
     )
-
-
-def test_datagrip_updater_paths(
-    datagrip_module: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Exercise DataGrip release parsing and checksum retrieval."""
-    updater = datagrip_module.DataGripUpdater()
-    payload = {
-        "DG": [
-            {
-                "version": "2025.1",
-                "downloads": {
-                    "mac": {"checksumLink": "https://c/mac", "link": "https://d/mac"},
-                    "macM1": {"checksumLink": "https://c/m1", "link": "https://d/m1"},
-                    "linuxARM64": {
-                        "checksumLink": "https://c/a64",
-                        "link": "https://d/a64",
-                    },
-                    "linux": {"checksumLink": "https://c/x64", "link": "https://d/x64"},
-                },
-            }
-        ]
-    }
-
-    monkeypatch.setattr(
-        datagrip_module,
-        "fetch_json",
-        lambda *_a, **_k: asyncio.sleep(0, result=payload),
-    )
-    info = _run(updater.fetch_latest(object()))
-    assert info.version == "2025.1"
-
-    monkeypatch.setattr(
-        datagrip_module,
-        "fetch_json",
-        lambda *_a, **_k: asyncio.sleep(0, result={"DG": []}),
-    )
-    with pytest.raises(RuntimeError, match="No DataGrip releases"):
-        _run(updater.fetch_latest(object()))
-
-    monkeypatch.setattr(
-        datagrip_module,
-        "fetch_json",
-        lambda *_a, **_k: asyncio.sleep(0, result={"DG": [{"downloads": {}}]}),
-    )
-    with pytest.raises(RuntimeError, match="Missing DataGrip version"):
-        _run(updater.fetch_latest(object()))
-
-    urls_seen: dict[str, str] = {}
-
-    async def _fetch_checksums(
-        _session: object,
-        urls: dict[str, str],
-        parser: Callable[[bytes, str], str] | None = None,
-    ) -> dict[str, str]:
-        for platform, url in urls.items():
-            urls_seen[platform] = parser(b"abcd  file", url) if parser else ""
-        return dict.fromkeys(urls, "abcd")
-
-    monkeypatch.setattr(updater, "_fetch_checksums_from_urls", _fetch_checksums)
-    parsed_checksums = _run(updater.fetch_checksums(info, object()))
-    assert parsed_checksums == dict.fromkeys(updater.PLATFORMS, "abcd")
-    assert set(urls_seen) == set(updater.PLATFORMS)
-
-    result = updater.build_result(
-        info,
-        {
-            "x86_64-darwin": HASH_A,
-            "x86_64-linux": HASH_A,
-        },
-    )
-    urls = expect_not_none(result.urls)
-    assert urls["x86_64-darwin"] == "https://d/mac"
-    assert urls["x86_64-linux"] == "https://d/x64"
-
-
-def test_google_chrome_updater_paths(
-    google_chrome_module: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Exercise Google Chrome release parsing edge cases."""
-    updater = google_chrome_module.GoogleChromeUpdater()
-    assert updater.materialize_when_current is True
-    assert updater.PLATFORMS["aarch64-darwin"] == updater.PLATFORMS["x86_64-darwin"]
-    monkeypatch.setattr(
-        google_chrome_module,
-        "fetch_json",
-        lambda *_a, **_k: asyncio.sleep(0, result=[{"version": "133.0.1"}]),
-    )
-    latest = _run(updater.fetch_latest(object()))
-    assert latest.version == "133.0.1"
-
-    monkeypatch.setattr(
-        google_chrome_module,
-        "fetch_json",
-        lambda *_a, **_k: asyncio.sleep(0, result=[]),
-    )
-    with pytest.raises(RuntimeError, match="No Chrome releases"):
-        _run(updater.fetch_latest(object()))
-
-    monkeypatch.setattr(
-        google_chrome_module,
-        "fetch_json",
-        lambda *_a, **_k: asyncio.sleep(0, result=[{}]),
-    )
-    with pytest.raises(RuntimeError, match="Missing version"):
-        _run(updater.fetch_latest(object()))
-
-
-def test_netnewswire_updater_paths(
-    netnewswire_module: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Exercise NetNewsWire appcast parsing and download URL selection."""
-    updater = netnewswire_module.NetNewsWireUpdater()
-
-    async def _items(*_args: object, **_kwargs: object):
-        return (
-            SparkleAppcastItem(
-                "100",
-                "6.2.1",
-                "https://example.com/NetNewsWire.zip",
-            ),
-        )
-
-    monkeypatch.setattr(updater_strategies, "fetch_sparkle_appcast_items", _items)
-    latest = _run(updater.fetch_latest(object()))
-    assert latest.version == "6.2.1"
-    assert latest.metadata["url"] == "https://example.com/NetNewsWire.zip"
-
-    assert (
-        updater.get_download_url("aarch64-darwin", latest)
-        == "https://example.com/NetNewsWire.zip"
-    )
-
-    async def _missing_version(*_args: object, **_kwargs: object):
-        return (SparkleAppcastItem("100", None, "https://example.com/app.zip"),)
-
-    monkeypatch.setattr(
-        updater_strategies,
-        "fetch_sparkle_appcast_items",
-        _missing_version,
-    )
-    with pytest.raises(RuntimeError, match="Missing version"):
-        _run(updater.fetch_latest(object()))
-
-    async def _missing_url(*_args: object, **_kwargs: object):
-        return (SparkleAppcastItem("100", "6.2.1", None),)
-
-    monkeypatch.setattr(
-        updater_strategies,
-        "fetch_sparkle_appcast_items",
-        _missing_url,
-    )
-    with pytest.raises(RuntimeError, match="Missing download URL"):
-        _run(updater.fetch_latest(object()))
 
 
 def test_goose_v8_updater_skips_unchanged_pinned_revision(
@@ -1039,44 +873,6 @@ def test_neutils_updater_emits_generated_artifact_and_src_hash(
     assert hashes == [HashEntry.create("srcHash", HASH_A)]
     assert updater.materialize_when_current is True
     assert updater.generated_artifact_files == ("build.zig.zon.nix",)
-
-
-def test_sculptor_updater_paths(
-    sculptor_module: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Exercise Sculptor Last-Modified parsing and fallback behavior."""
-    updater = sculptor_module.SculptorUpdater()
-
-    monkeypatch.setattr(
-        sculptor_module,
-        "fetch_headers",
-        lambda *_a, **_k: asyncio.sleep(
-            0, result={"Last-Modified": "Tue, 20 Feb 2024 12:34:56 GMT"}
-        ),
-    )
-    latest = _run(updater.fetch_latest(object()))
-    assert latest.version == "2024-02-20"
-
-    monkeypatch.setattr(
-        sculptor_module,
-        "parsedate_to_datetime",
-        lambda _value: (_ for _ in ()).throw(ValueError("bad date")),
-    )
-    monkeypatch.setattr(
-        sculptor_module,
-        "fetch_headers",
-        lambda *_a, **_k: asyncio.sleep(0, result={"Last-Modified": "invalid-date"}),
-    )
-    fallback = _run(updater.fetch_latest(object()))
-    assert fallback.version == "invalid-da"
-
-    monkeypatch.setattr(
-        sculptor_module,
-        "fetch_headers",
-        lambda *_a, **_k: asyncio.sleep(0, result={"Last-Modified": ""}),
-    )
-    with pytest.raises(RuntimeError, match="No Last-Modified header"):
-        _run(updater.fetch_latest(object()))
 
 
 def test_code_cursor_download_page_requires_all_platform_links(

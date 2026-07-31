@@ -1000,7 +1000,7 @@ def test_profile_bundle_leak_audit_script_reports_managed_bundle_exposure(
         """
         {
           inherit label packagePaths;
-          managedBundleNames = uniqueManagedBundleNames;
+          managedBundleNames = unique managedBundleNames;
         }
         """,
     )
@@ -1065,7 +1065,7 @@ def test_remove_profile_copies_script_removes_read_only_stale_bundles(
         """
         {
           inherit targetDirectory;
-          bundleNames = uniqueBundleNames;
+          bundleNames = unique bundleNames;
         }
         """,
     )
@@ -1824,7 +1824,13 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
 
     def dock_items(
         relative_path: str,
-    ) -> tuple[str, list[str], NixList, list[str], FunctionCall, list[Inherit]]:
+    ) -> tuple[
+        str,
+        list[str],
+        FunctionCall,
+        list[Inherit],
+        list[Inherit],
+    ]:
         expr = expect_instance(
             nix_file_expr(relative_path),
             FunctionDefinition,
@@ -1841,34 +1847,34 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
                 expect_binding(args.values, "apps").value, NixList
             ).value
         ]
-        others = expect_instance(expect_binding(args.values, "others").value, NixList)
-        remove_others = [
-            item.rebuild()
-            for item in expect_instance(
-                expect_binding(args.values, "removeOthers").value, NixList
-            ).value
-        ]
         dock_context = expect_instance(
             expect_scope_binding(call, "dockContext").value, FunctionCall
         )
         context_inherits = [value for value in call.scope if isinstance(value, Inherit)]
-        return activation, apps, others, remove_others, dock_context, context_inherits
+        argument_inherits = [
+            value for value in args.values if isinstance(value, Inherit)
+        ]
+        return (
+            activation,
+            apps,
+            dock_context,
+            context_inherits,
+            argument_inherits,
+        )
 
     (
         george_activation,
         george_dock,
-        george_others,
-        george_remove_others,
         george_context,
         george_context_inherits,
+        george_argument_inherits,
     ) = dock_items("modules/darwin/george/dock-apps.nix")
     (
         town_activation,
         town_dock,
-        town_others,
-        town_remove_others,
         town_context,
         town_context_inherits,
+        town_argument_inherits,
     ) = dock_items("modules/darwin/george/town-dock-apps.nix")
 
     assert george_activation == "nixcfgPersonalDock"
@@ -1890,6 +1896,13 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
             and [name.rebuild() for name in inherit_expr.names]
             == ["appPath", "homeDirectory"]
             for inherit_expr in context_inherits
+        )
+    for argument_inherits in (george_argument_inherits, town_argument_inherits):
+        assert any(
+            inherit_expr.from_expression is None
+            and [name.rebuild() for name in inherit_expr.names]
+            == ["homeDirectory", "options", "pkgs"]
+            for inherit_expr in argument_inherits
         )
 
     for apps in (george_dock, town_dock):
@@ -1917,32 +1930,6 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
     assert '"/Applications/OpenCode Desktop Dev.app"' not in town_dock
     assert '"/Applications/Cursor.app"' not in town_dock
     assert '"/Applications/Visual Studio Code - Insiders.app"' not in town_dock
-
-    for others in (george_others, town_others):
-        assert_nix_ast_equal(
-            others,
-            """
-            [
-              {
-                path = "/Applications";
-                sort = "name";
-              }
-              {
-                path = "/Applications/Utilities";
-                sort = "name";
-              }
-              {
-                path = "${homeDirectory}/Downloads";
-                sort = "datemodified";
-              }
-            ]
-            """,
-        )
-        assert '"${homeDirectory}/Applications"' not in others.rebuild()
-
-    for remove_others in (george_remove_others, town_remove_others):
-        assert '"${homeDirectory}/Applications"' in remove_others
-        assert '"/Applications"' not in remove_others
 
 
 def test_dock_activation_updates_and_orders_items_without_clearing_the_dock() -> None:

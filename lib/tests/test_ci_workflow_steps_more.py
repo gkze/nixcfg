@@ -239,7 +239,7 @@ def test_workflow_certification_helper_error_paths(tmp_path: Path) -> None:
         }
     })
     with pytest.raises(TypeError, match="non-empty string target"):
-        cert._certification_matrix_targets(
+        cert._certification_matrix_entries(
             invalid_matrix,
             job_id="darwin-priority-heavy",
         )
@@ -283,7 +283,7 @@ def test_workflow_certification_helper_error_paths(tmp_path: Path) -> None:
         )
 
     with pytest.raises(RuntimeError, match="must build exactly one darwin host"):
-        cert._certification_darwin_host_targets(
+        cert._certification_darwin_host_entries(
             WorkflowAnalysis.from_jobs({
                 "darwin-argus": {"steps": []},
                 "darwin-rocinante": {

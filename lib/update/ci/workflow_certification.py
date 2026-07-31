@@ -224,15 +224,6 @@ def _certification_matrix_entries(
     return _ordered_unique_pairs(entries)
 
 
-def _certification_matrix_targets(
-    workflow: WorkflowAnalysis, *, job_id: str
-) -> tuple[str, ...]:
-    return tuple(
-        target
-        for _package, target in _certification_matrix_entries(workflow, job_id=job_id)
-    )
-
-
 def _certification_shared_closure_refs(
     workflow: WorkflowAnalysis,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -283,12 +274,6 @@ def _certification_darwin_host_entries(
             raise RuntimeError(msg)
         entries.append((job_id, f".#darwinConfigurations.{hosts[0]}.system"))
     return tuple(entries)
-
-
-def _certification_darwin_host_targets(workflow: WorkflowAnalysis) -> tuple[str, ...]:
-    return tuple(
-        target for _job_id, target in _certification_darwin_host_entries(workflow)
-    )
 
 
 def _certification_linux_targets(workflow: WorkflowAnalysis) -> tuple[str, ...]:

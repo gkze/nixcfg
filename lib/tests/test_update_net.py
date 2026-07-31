@@ -686,27 +686,11 @@ def test_fetch_github_api_paginated_requires_list_payload(
         )
 
 
-def test_json_expect_helpers_and_optional_type_errors() -> None:
-    """Validate JSON coercion helpers and option parser type errors."""
-    with pytest.raises(RuntimeError, match="Expected JSON object"):
-        object.__getattribute__(net, "_expect_json_dict")([], context="ctx")
-
-    with pytest.raises(RuntimeError, match="Expected JSON object"):
-        object.__getattribute__(net, "_expect_json_dict")(
-            {"nested": {1, 2}},
-            context="ctx",
-        )
-
+def test_json_list_and_optional_type_errors() -> None:
+    """Validate list coercion and option parser type errors."""
     with pytest.raises(RuntimeError, match="Expected JSON array"):
         object.__getattribute__(net, "_expect_json_list")(
             [{"nested": {1, 2}}],
-            context="ctx",
-        )
-
-    with pytest.raises(RuntimeError, match="Expected string field 'x' in ctx"):
-        object.__getattribute__(net, "_expect_json_string_field")(
-            {},
-            "x",
             context="ctx",
         )
 

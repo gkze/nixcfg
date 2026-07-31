@@ -1,0 +1,18 @@
+{
+  "hashes": [
+    {
+      "hash": "sha256-unqualified",
+      "hashType": "srcHash"
+    },
+    {
+      "hash": "sha256-platform",
+      "hashType": "srcHash",
+      "platform": "aarch64-darwin"
+    },
+    {
+      "hash": "sha256-null-platform",
+      "hashType": "nullPlatform",
+      "platform": null
+    }
+  ]
+}

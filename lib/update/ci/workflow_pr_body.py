@@ -195,7 +195,7 @@ def _build_source_changes(
             encoding="utf-8",
         )
 
-        pkg_diff = run_sources_diff(old_json, new_json, output_format="unified")
+        pkg_diff = run_sources_diff(old_json, new_json)
         if pkg_diff == no_changes_message:
             continue
 

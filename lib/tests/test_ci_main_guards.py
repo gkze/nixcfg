@@ -13,7 +13,6 @@ import pytest
     "module_name",
     [
         "lib.update.ci.build_shared_closure",
-        "lib.update.ci.dedup_cargo_lock",
         "lib.update.ci.flake_lock_diff",
         "lib.update.ci.merge_sources",
         "lib.update.ci.resolve_versions",
@@ -21,7 +20,6 @@ import pytest
         "lib.update.ci.workflow_steps",
         "lib.update.ci.warm_fod_cache",
         "lib.update.ci.profile_generations",
-        "lib.update.ci.test_pipeline",
     ],
 )
 def test_module_main_guard_executes(

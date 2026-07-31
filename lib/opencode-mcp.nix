@@ -49,6 +49,16 @@ let
 
   sparseMcpServerOverrideMapType = types.attrsOf sparseMcpServerOverrideType;
 
+  mkLocalServer = command: {
+    type = "local";
+    inherit command;
+  };
+
+  mkRemoteServer = url: {
+    type = "remote";
+    inherit url;
+  };
+
   mcpServerType = types.submodule {
     freeformType = types.attrsOf types.anything;
 
@@ -163,7 +173,9 @@ let
 in
 {
   inherit
+    mkLocalServer
     mkProfileOverlayConfig
+    mkRemoteServer
     mkServerAssertions
     mcpServerMapType
     mcpServerType

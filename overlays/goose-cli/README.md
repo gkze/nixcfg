@@ -34,7 +34,7 @@ graph, while still preserving Goose's custom V8 setup.
   - keeps proc-macro / build-script / generator links off lld and off fatal-linker-warnings mode
     under our Darwin toolchain layout
 - `normalize_cargo_nix.py`
-  - post-processes freshly generated `Cargo.nix`
+  - pure package-specific callback that post-processes freshly generated `Cargo.nix`
   - uses `nix-manipulator` to add `rootSrc` and rewrite local source paths via the parsed Nix AST
     instead of regex-based text replacement
 - `updater.py`
@@ -175,8 +175,7 @@ regenerated, use this flow from the repo root.
 1. Normalize the generated file for this repo layout:
 
    ```bash
-   python overlays/goose-cli/normalize_cargo_nix.py \
-     overlays/goose-cli/Cargo.nix
+   nix run path:.#nixcfg -- ci pipeline crate2nix normalize goose-cli
    ```
 
 1. Rebuild and continue iterating on any crate overrides that are still needed.

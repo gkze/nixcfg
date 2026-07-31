@@ -25,7 +25,6 @@ import asyncio
 import json
 import logging
 import os
-import platform
 import shutil
 import time
 from dataclasses import dataclass
@@ -41,7 +40,7 @@ from lib.update.ci._time import format_duration
 from lib.update.nix import (
     _build_overlay_attr_expr,
     _build_package_path_attr_expr,
-    normalize_nix_platform,
+    get_current_nix_platform,
 )
 from lib.update.paths import SOURCES_FILE_NAME, package_file_map
 
@@ -86,16 +85,12 @@ class FodTarget:
 
 
 _format_duration = format_duration
+_detect_system = get_current_nix_platform
 
 
 def _target_label(target: FodTarget) -> str:
     """Return the human-readable label used in logs and matrix entries."""
     return f"{target.package}{target.fod_attr}"
-
-
-def _detect_system() -> str:
-    """Return the current Nix system identifier (e.g. ``aarch64-darwin``)."""
-    return normalize_nix_platform(platform.machine(), platform.system())
 
 
 def _platform_fod_entries(entry: SourceEntry, system: str) -> list[HashEntry]:

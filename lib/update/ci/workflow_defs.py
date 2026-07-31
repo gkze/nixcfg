@@ -90,35 +90,43 @@ _NIX_CACHE_COMMENTS = (
     "archive-based CI caches can restore malformed databases.",
 )
 
-_UPDATE_HASH_FILES = (
+_SOURCE_HASH_FILES = (
     "flake.lock",
     "packages/**/sources.json",
     "overlays/**/sources.json",
+)
+_UPDATE_GENERATOR_HASH_FILES = (
     "packages/**/uv.lock",
     "packages/**/deno-deps.json",
     "packages/**/build.zig.zon.nix",
+)
+_GENERATED_BUILD_HASH_FILES = (
     "packages/**/Cargo.nix",
     "packages/**/crate-hashes.json",
     "overlays/**/Cargo.nix",
     "overlays/**/crate-hashes.json",
     "packages/superset/bun.nix",
     "packages/superset/bun.lock",
+)
+_T3_RUNTIME_LOCK_FILES = (
     "packages/t3code/bun.lock",
     "packages/t3code-desktop/bun.lock",
 )
-_CERTIFY_HASH_FILES = _UPDATE_HASH_FILES[:-2]
+_UPDATE_HASH_FILES = (
+    *_SOURCE_HASH_FILES,
+    *_UPDATE_GENERATOR_HASH_FILES,
+    *_GENERATED_BUILD_HASH_FILES,
+    *_T3_RUNTIME_LOCK_FILES,
+)
+_CERTIFY_HASH_FILES = (
+    *_SOURCE_HASH_FILES,
+    *_UPDATE_GENERATOR_HASH_FILES,
+    *_GENERATED_BUILD_HASH_FILES,
+)
 _CI_HASH_FILES = (
-    "flake.lock",
-    "packages/**/sources.json",
-    "overlays/**/sources.json",
-    "packages/**/Cargo.nix",
-    "packages/**/crate-hashes.json",
-    "overlays/**/Cargo.nix",
-    "overlays/**/crate-hashes.json",
-    "packages/superset/bun.nix",
-    "packages/superset/bun.lock",
-    "packages/t3code/bun.lock",
-    "packages/t3code-desktop/bun.lock",
+    *_SOURCE_HASH_FILES,
+    *_GENERATED_BUILD_HASH_FILES,
+    *_T3_RUNTIME_LOCK_FILES,
 )
 
 # The refresh PR artifact contents are shared with the aggregation helper so
@@ -349,8 +357,12 @@ FAST_QUALITY_CHECKS = (
 )
 DEEP_QUALITY_CHECKS = (
     "test-nix-default-api",
-    "test-nix-package-helpers",
+    "test-nix-dock-defaults",
+    "test-nix-nvim-keymaps",
     "test-nix-opencode-desktop",
+    "test-nix-opencode-mcp",
+    "test-nix-package-helpers",
+    "test-nix-source-hashes",
     "cache-electron-runtimes",
     "test-python-pytest",
     "verify-workflow-generated",

@@ -35,8 +35,6 @@ def test_format_helpers_cover_non_github_and_missing_fields() -> None:
     assert fld._format_source(plain_info) == "alpha"
     assert "https://github.com/example/alpha" in fld._format_source_cell(github_info)
     assert fld._format_source_cell(plain_info) == "alpha"
-    assert fld._format_rev_date(github_info) == "aaaaaaa (2024-01-01)"
-    assert fld._format_rev_date(plain_info) == "aaaaaaa"
     assert "/commit/aaaaaaaa" in fld._format_revision_cell(github_info)
     assert fld._format_revision_cell(plain_info) == "aaaaaaa"
     assert "/compare/aaaaaaaa...bbbbbbbb" in fld._format_compare_cell(
@@ -45,18 +43,9 @@ def test_format_helpers_cover_non_github_and_missing_fields() -> None:
     assert fld._format_compare_cell(github_info, _info(type="gitlab")) == "-"
 
 
-def test_append_helpers_and_markdown_escape() -> None:
-    """Append sections/tables only when data exists and escape pipes."""
+def test_append_table_and_markdown_escape() -> None:
+    """Append tables only when data exists and escape pipes."""
     lines: list[str] = []
-    fld._append_section(lines, "### A", [])
-    assert lines == []
-
-    fld._append_section(lines, "### A", ["line"])
-    assert lines == ["### A", "line"]
-
-    fld._append_section(lines, "### B", ["line2"])
-    assert lines[2] == ""
-
     fld._append_table(lines, "### T", ["C"], [["x|y"]])
     assert any("x\\|y" in line for line in lines)
 

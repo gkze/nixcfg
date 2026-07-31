@@ -19,7 +19,8 @@ from nix_manipulator.expressions.set import AttributeSet
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update import nix as update_nix
 from lib.update import sources as update_sources
-from lib.update.nix import _build_package_path_attr_expr, _select_attrs
+from lib.update.nix import _build_package_path_attr_expr
+from lib.update.nix_expr import select_attrs
 from lib.update.paths import REPO_ROOT, sources_file_for
 from lib.update.updaters import (
     HashEntryUpdater,
@@ -116,8 +117,8 @@ class GooseDesktopUpdater(HashEntryUpdater):
 
     @classmethod
     def _goose_cli_override_expr(cls, cargo_nix_path: Path) -> Select:
-        flake_lib = _select_attrs(Identifier(name="flake"), "lib")
-        flake_sources = _select_attrs(flake_lib, "sources")
+        flake_lib = select_attrs(Identifier(name="flake"), "lib")
+        flake_sources = select_attrs(flake_lib, "sources")
         fragment = FunctionCall(
             name=FunctionCall(
                 name=Identifier(name="import"),
@@ -132,7 +133,7 @@ class GooseDesktopUpdater(HashEntryUpdater):
                     Binding(name="sources", value=flake_sources),
                     Binding(
                         name="selfSource",
-                        value=_select_attrs(flake_sources, "goose-cli"),
+                        value=select_attrs(flake_sources, "goose-cli"),
                     ),
                     Binding(
                         name="cargoNixFn",

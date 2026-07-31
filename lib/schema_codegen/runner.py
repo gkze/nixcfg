@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
 import yaml
 
-from lib import http_utils
+from lib import codegen_utils, http_utils
 from lib.schema_codegen.config import (
     CodegenTarget,
     DirectorySource,
@@ -21,7 +20,8 @@ from lib.update.paths import get_repo_root
 
 from . import _prepare, _render
 
-type ProgressReporter = Callable[[str], None]
+ProgressReporter = codegen_utils.ProgressReporter
+_emit_progress = codegen_utils.emit_progress
 
 
 def default_config_path() -> Path:
@@ -44,13 +44,6 @@ class _ResolvedTarget:
     generator_options: dict[str, object]
     name: str
     target: CodegenTarget
-
-
-def _emit_progress(progress: ProgressReporter | None, message: str) -> None:
-    """Invoke the optional progress reporter."""
-    if progress is None:
-        return
-    progress(message)
 
 
 def _read_url_source(source: URLSource) -> str:

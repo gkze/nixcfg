@@ -31,7 +31,6 @@ from lib.update.nix import (
     _build_fetch_from_github_call,
     _build_fetch_from_github_expr,
     _build_fetch_pnpm_deps_expr,
-    _build_fetch_yarn_deps_expr,
     _build_fetchgit_call,
     _build_fetchgit_expr,
     _build_flake_attr_expr,
@@ -389,54 +388,6 @@ def test_build_flake_attr_expr_quotes_dynamic_segments() -> None:
                 '"x86_64-linux"',
                 "deno",
                 "version",
-            ),
-        ),
-    )
-
-
-def test_build_fetch_yarn_deps_expr_is_parseable() -> None:
-    """FetchYarnDeps helper should build the yarnLock path via the Nix AST."""
-    expr = _build_fetch_yarn_deps_expr(
-        _build_fetch_from_github_call(
-            "element-hq",
-            "element-desktop",
-            rev="v1.11.0",
-            hash_value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-        )
-    )
-
-    assert_nix_ast_equal(
-        expr,
-        LetExpression(
-            local_variables=[
-                Binding(
-                    name="src",
-                    value=_build_fetch_from_github_call(
-                        "element-hq",
-                        "element-desktop",
-                        rev="v1.11.0",
-                        hash_value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-                    ),
-                ),
-            ],
-            value=FunctionCall(
-                name=identifier_attr_path("pkgs", "fetchYarnDeps"),
-                argument=AttributeSet(
-                    values=[
-                        Binding(
-                            name="yarnLock",
-                            value=BinaryExpression(
-                                left=identifier_attr_path("src"),
-                                operator=Operator(name="+"),
-                                right=StringPrimitive(value="/yarn.lock"),
-                            ),
-                        ),
-                        Binding(
-                            name="hash",
-                            value=identifier_attr_path("pkgs", "lib", "fakeHash"),
-                        ),
-                    ],
-                ),
             ),
         ),
     )

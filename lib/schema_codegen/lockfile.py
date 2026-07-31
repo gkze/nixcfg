@@ -7,14 +7,14 @@ import hashlib
 import json
 import os
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
 import yaml
 
-from lib import http_utils
+from lib import codegen_utils, http_utils
 from lib.schema_codegen.models._generated import CodegenLockfile, CodegenManifest
 
 DEFAULT_LOCKFILE_NAME = "codegen.lock.json"
@@ -26,14 +26,8 @@ type JsonScalar = str | int | bool | None
 type CanonicalJsonValue = (
     JsonScalar | list[CanonicalJsonValue] | dict[str, CanonicalJsonValue]
 )
-type ProgressReporter = Callable[[str], None]
-
-
-def _emit_progress(progress: ProgressReporter | None, message: str) -> None:
-    """Invoke the optional lockfile progress reporter."""
-    if progress is None:
-        return
-    progress(message)
+ProgressReporter = codegen_utils.ProgressReporter
+_emit_progress = codegen_utils.emit_progress
 
 
 def _ensure_mapping(value: object, *, context: str) -> Mapping[str, object]:
@@ -90,11 +84,6 @@ def _normalize_posix_string(value: str) -> str:
 def _normalize_relative_posix_path(*, path: Path, start: Path) -> str:
     """Return a normalized relative POSIX path from ``start`` to ``path``."""
     return _normalize_posix_string(os.path.relpath(path, start))
-
-
-def _is_regular_file(path: Path) -> bool:
-    """Return whether ``path`` is a non-symlink regular file."""
-    return path.is_file() and not path.is_symlink()
 
 
 def _compile_include_pattern(pattern: str) -> re.Pattern[str]:

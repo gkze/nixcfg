@@ -989,7 +989,6 @@ dependencies = [
     { name = "rich" },
     { name = "tenacity" },
     { name = "tomlkit" },
-    { name = "tree-sitter" },
     { name = "typer" },
 ]
 
@@ -1009,6 +1008,7 @@ dev = [
     { name = "pyupgrade" },
     { name = "referencing" },
     { name = "ruff" },
+    { name = "tree-sitter" },
     { name = "tree-sitter-bash" },
     { name = "ty" },
 ]
@@ -1037,7 +1037,6 @@ requires-dist = [
     { name = "rich", specifier = ">=14.3.3" },
     { name = "tenacity", specifier = ">=9.1.4" },
     { name = "tomlkit", specifier = ">=0.14.0" },
-    { name = "tree-sitter", specifier = ">=0.25.2" },
     { name = "typer", specifier = ">=0.24.1" },
 ]
 provides-extras = ["codegen"]
@@ -1052,6 +1051,7 @@ dev = [
     { name = "pyupgrade", specifier = ">=3.21.2" },
     { name = "referencing", specifier = ">=0.37.0" },
     { name = "ruff", specifier = ">=0.15.2" },
+    { name = "tree-sitter", specifier = ">=0.25.2" },
     { name = "tree-sitter-bash", specifier = ">=0.25.0" },
     { name = "ty", specifier = ">=0.0.18" },
 ]

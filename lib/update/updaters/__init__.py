@@ -16,7 +16,6 @@ from lib.update.paths import REPO_ROOT, package_file_map
 from lib.update.sources import read_pinned_source_version
 from lib.update.updaters.core import (
     AssetURLsMetadataUpdater,
-    CargoLockGitDep,
     ChecksumProvidedUpdater,
     DownloadHashUpdater,
     DownloadUrlMetadataUpdater,
@@ -152,7 +151,6 @@ __all__ = [
     "UPDATERS",
     "AssetURLsMetadataUpdater",
     "BunNodeModulesHashUpdater",
-    "CargoLockGitDep",
     "CargoVendorHashUpdater",
     "ChecksumProvidedUpdater",
     "Crate2NixArtifactsMixin",

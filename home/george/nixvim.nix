@@ -13,24 +13,7 @@ let
     ;
   inherit (lib.attrsets) listToAttrs mapAttrsToList;
   inherit (lib.lists) flatten;
-
-  intersperse =
-    sep: list:
-    let
-      go =
-        xs:
-        if xs == [ ] then
-          [ ]
-        else if builtins.length xs == 1 then
-          [ (head xs) ]
-        else
-          [
-            (head xs)
-            sep
-          ]
-          ++ go (builtins.tail xs);
-    in
-    go list;
+  inherit (lib) intersperse;
 
   keymapData = import ./nvim-keymaps.nix;
   helpers = config.lib.nixvim;
@@ -54,6 +37,7 @@ let
   tsgolintCmd = lib.getExe pkgs.tsgolint;
 
   scopeSectionTitles = scope: map (section: section.title) scope.sections;
+  itemMode = scope: item: item.mode or (scope.mode or "n");
 
   sectionItems =
     scope: sectionNames:
@@ -68,7 +52,7 @@ let
     map (item: {
       inherit (item) key;
       inherit (item) action;
-      mode = item.mode or "n";
+      mode = itemMode scope item;
       options = {
         desc = item.desc or item.summary or "";
       };
@@ -124,7 +108,7 @@ let
               inherit (scope) kind;
               context = scope.context or "";
               inherit (item) key;
-              mode = item.mode or "n";
+              mode = itemMode scope item;
               displayAction = itemDisplayAction item;
               desc = item.desc or item.summary or "";
             }) section.items
@@ -140,7 +124,7 @@ let
         if scope ? context && scope.context != "" then "Context: ${scope.context}\n\n" else "";
       renderItem =
         item:
-        "- `${item.key}` (`${item.mode or "n"}`) → `${itemDisplayAction item}` — ${
+        "- `${item.key}` (`${itemMode scope item}`) → `${itemDisplayAction item}` — ${
           item.desc or item.summary or ""
         }";
     in
@@ -160,18 +144,7 @@ let
       }
     '';
 
-  pickerScopes = [
-    keymapData.global
-    keymapData.lsp
-    keymapData.treesitterTextobjectsLegend
-    keymapData.treesitterSelection
-    keymapData.treesitterTextobjectsMove
-    keymapData.treesitterTextobjectsSelect
-    keymapData.blinkCmp
-    keymapData.telescope
-    keymapData.gitlinker
-    keymapData.alpha
-  ];
+  pickerScopes = keymapData.scopes;
 
   globalKeymaps = mkKeymapList keymapData.global;
   lspExtraKeymaps = mkKeymapListFromSections keymapData.lsp [ "Docs / diagnostics" ];

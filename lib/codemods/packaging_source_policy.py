@@ -18,8 +18,8 @@ if TYPE_CHECKING:
 
     from nix_manipulator.expressions.expression import NixExpression
 
-type NixSubstituteSite = tuple[str, int, str]
-type PythonRewriteSite = tuple[str, int, int, int, int, str]
+type NixSubstituteSite = tuple[str, str]
+type PythonRewriteSite = tuple[str, str]
 
 SUBSTITUTE_IN_PLACE_PATTERN: Final = re.compile(r"\bsubstituteInPlace\b")
 PYTHON_AD_HOC_REWRITE_ATTRS: Final = frozenset({"replace", "sub", "subn"})
@@ -125,7 +125,7 @@ class NixSubstituteAudit:
         )
         lines = expr.rebuild().splitlines()
         return tuple(
-            (self._relative_path(path), index + 1, self._command_from(lines, index))
+            (self._relative_path(path), self._command_from(lines, index))
             for index, line in enumerate(lines)
             if self.pattern.search(line)
         )
@@ -166,14 +166,19 @@ class PythonRewriteAudit:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         if path.name in self.patch_script_names:
             return self._patch_script_sites(path, tree)
+        seen_calls: set[ast.Call] = set()
         return tuple(
             sorted(
-                {
+                [
                     site
                     for node in ast.walk(tree)
                     if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-                    for site in self._function_sites(path, node)
-                },
+                    for site in self._function_sites(
+                        path,
+                        node,
+                        seen_calls=seen_calls,
+                    )
+                ],
             ),
         )
 
@@ -184,84 +189,95 @@ class PythonRewriteAudit:
     ) -> tuple[PythonRewriteSite, ...]:
         relative_path = self._relative_path(path)
         return tuple(
-            sorted(
-                (relative_path, line, column, end_line, end_column, name)
-                for line, column, end_line, end_column, name in self._call_sites(tree)
-            ),
+            sorted((relative_path, call) for call in self._rewrite_calls(tree)),
         )
 
     def _function_sites(
         self,
         path: Path,
         function: ast.FunctionDef | ast.AsyncFunctionDef,
+        *,
+        seen_calls: set[ast.Call] | None = None,
     ) -> tuple[PythonRewriteSite, ...]:
         relative_path = self._relative_path(path)
-        assigned_rewrites: dict[str, list[tuple[int, int, int, int, str]]] = {}
-        inline_write_sites: list[PythonRewriteSite] = []
+        observed_calls = set() if seen_calls is None else seen_calls
+        assigned_rewrites: dict[str, list[str]] = {}
+        inline_write_calls: list[str] = []
         written_names: set[str] = set()
 
         for node in ast.walk(function):
             if isinstance(node, ast.Assign):
-                self._record_assignment(node.value, node.targets, assigned_rewrites)
+                self._record_assignment(
+                    node.value,
+                    node.targets,
+                    assigned_rewrites,
+                    seen_calls=observed_calls,
+                )
             elif isinstance(node, ast.AnnAssign):
-                self._record_assignment(node.value, (node.target,), assigned_rewrites)
+                self._record_assignment(
+                    node.value,
+                    (node.target,),
+                    assigned_rewrites,
+                    seen_calls=observed_calls,
+                )
             elif isinstance(node, ast.Call) and self._is_write_text_call(node):
-                inline_write_sites.extend(
-                    (relative_path, line, column, end_line, end_column, name)
-                    for line, column, end_line, end_column, name in self._call_sites(
-                        node,
-                    )
+                inline_write_calls.extend(
+                    self._rewrite_calls(node, seen_calls=observed_calls)
                 )
                 if payload_name := self._write_text_payload_name(node):
                     written_names.add(payload_name)
 
         assigned_write_sites = [
-            (relative_path, line, column, end_line, end_column, name)
+            (relative_path, call)
             for variable in sorted(written_names & assigned_rewrites.keys())
-            for line, column, end_line, end_column, name in assigned_rewrites[variable]
+            for call in assigned_rewrites[variable]
         ]
-        return tuple(sorted({*inline_write_sites, *assigned_write_sites}))
+        inline_write_sites = [(relative_path, call) for call in inline_write_calls]
+        return tuple(sorted([*inline_write_sites, *assigned_write_sites]))
 
-    def _call_name(self, node: ast.Call) -> str | None:
+    def _rewrite_call(self, node: ast.Call) -> str | None:
         match node.func:
             case ast.Attribute(attr=attr) if attr in self.rewrite_attrs:
-                return attr
+                return ast.unparse(node)
             case _:
                 return None
 
-    def _call_sites(self, node: ast.AST) -> tuple[tuple[int, int, int, int, str], ...]:
-        sites: list[tuple[int, int, int, int, str]] = []
+    def _rewrite_calls(
+        self,
+        node: ast.AST,
+        *,
+        seen_calls: set[ast.Call] | None = None,
+    ) -> tuple[str, ...]:
+        calls: list[str] = []
         for child in ast.walk(node):
             if not isinstance(child, ast.Call):
                 continue
-            name = self._call_name(child)
-            if name is None:
+            if seen_calls is not None and child in seen_calls:
                 continue
-            sites.append(
-                (
-                    child.lineno,
-                    child.col_offset,
-                    child.end_lineno or child.lineno,
-                    child.end_col_offset or child.col_offset,
-                    name,
-                ),
-            )
-        return tuple(sites)
+            call = self._rewrite_call(child)
+            if call is None:
+                continue
+            if seen_calls is not None:
+                seen_calls.add(child)
+            calls.append(call)
+        return tuple(calls)
 
     def _record_assignment(
         self,
         value: ast.expr | None,
         targets: tuple[ast.expr, ...] | list[ast.expr],
-        assigned_rewrites: dict[str, list[tuple[int, int, int, int, str]]],
+        assigned_rewrites: dict[str, list[str]],
+        *,
+        seen_calls: set[ast.Call] | None = None,
     ) -> None:
         if value is None:
             return
-        rewrite_sites = self._call_sites(value)
-        if not rewrite_sites:
+        rewrite_calls = self._rewrite_calls(value, seen_calls=seen_calls)
+        if not rewrite_calls:
             return
         for target in targets:
             for name in self._assigned_names(target):
-                assigned_rewrites.setdefault(name, []).extend(rewrite_sites)
+                assigned_rewrites.setdefault(name, []).extend(rewrite_calls)
 
     @staticmethod
     def _assigned_names(target: ast.expr) -> tuple[str, ...]:

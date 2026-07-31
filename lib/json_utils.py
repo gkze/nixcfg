@@ -8,7 +8,6 @@ type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
 type JsonObject = dict[str, JsonValue]
 
-_JSON_OBJECT_ADAPTER = TypeAdapter(JsonObject)
 _JSON_LIST_ADAPTER = TypeAdapter(list[JsonValue])
 _OBJECT_LIST_ADAPTER = TypeAdapter(list[object])
 _STRING_ADAPTER = TypeAdapter(str)
@@ -34,15 +33,6 @@ def as_object_list(value: object, *, context: str) -> list[object]:
         return _OBJECT_LIST_ADAPTER.validate_python(value, strict=True)
     except ValidationError as exc:
         msg = f"Expected JSON array for {context}"
-        raise TypeError(msg) from exc
-
-
-def as_json_object(value: object, *, context: str) -> JsonObject:
-    """Return ``value`` as :data:`JsonObject` or raise ``TypeError``."""
-    try:
-        return _JSON_OBJECT_ADAPTER.validate_python(value, strict=True)
-    except ValidationError as exc:
-        msg = f"Expected JSON object for {context}"
         raise TypeError(msg) from exc
 
 

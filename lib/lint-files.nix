@@ -68,7 +68,6 @@ in
     globs = [ "*.css" ];
     excludeGlobs = [
       ".direnv/**"
-      "misc/zellij-plugin-wasm-ts/assembly/index.ts"
       ".venv/**"
       "node_modules/**"
       "result/**"
@@ -82,7 +81,6 @@ in
       "*.js"
       "*.cjs"
       "commitlint.config.ts"
-      "misc/zellij-plugin-wasm-ts/scripts/*.ts"
       "packages/**/*.ts"
       "*.json"
       "*.jsonc"
@@ -90,7 +88,6 @@ in
     ];
     excludeGlobs = [
       "schemas/codegen/testdata/lockfile-golden/expected.codegen.lock.json"
-      "misc/zellij-plugin-wasm-ts/assembly/**"
       ".direnv/**"
       ".claude/worktrees/**"
       ".venv/**"
@@ -108,7 +105,6 @@ in
       "*.ts"
     ];
     excludeGlobs = [
-      "misc/zellij-plugin-wasm-ts/assembly/**"
       ".direnv/**"
       ".claude/worktrees/**"
       ".venv/**"
@@ -170,7 +166,6 @@ in
       ".root"
       "LICENSE"
       "NIXOS_VERSION"
-      "misc/zellij-plugin-wasm-ts/assembly/index.ts"
       "*.cfg"
       "*.jsonl"
       "*.patch"

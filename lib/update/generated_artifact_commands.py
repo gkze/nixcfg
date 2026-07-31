@@ -7,6 +7,7 @@ from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from lib.update import events as update_events
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import (
     CommandResult,
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
 type ArtifactSnapshot = dict[Path, str | None]
 
 _ARTIFACT_LOCKS: dict[tuple[int, Path], asyncio.Lock] = {}
+_raise_failed_command = update_events.raise_failed_command
 
 
 def _artifact_path(path: str | Path, *, repo_root: Path) -> Path:
@@ -89,16 +91,6 @@ def _read_artifacts(
             raise RuntimeError(msg)
         artifacts.append(GeneratedArtifact.text(path, resolved.read_text("utf-8")))
     return tuple(artifacts)
-
-
-def _raise_failed_command(action: str, result: CommandResult) -> None:
-    if result.returncode == 0:
-        return
-    detail = result.stderr.strip() or result.stdout.strip()
-    message = f"{action} failed (exit {result.returncode})"
-    if detail:
-        message = f"{message}: {detail}"
-    raise RuntimeError(message)
 
 
 async def stream_command_materialized_artifacts(

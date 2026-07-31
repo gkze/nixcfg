@@ -763,7 +763,7 @@ def test_nixcfg_ci_registers_sources_json_diff() -> None:
     result = runner.invoke(nixcfg.app, ["ci", "diff", "sources", "--help"])
 
     assert result.exit_code == 0
-    assert "--format" in result.output
+    assert "--format" not in result.output
 
 
 def test_nixcfg_ci_subcommand_help_includes_resolve_options() -> None:
@@ -789,6 +789,38 @@ def test_nixcfg_ci_subcommand_help_includes_crate2nix_options() -> None:
     assert result.exit_code == 0
     assert "--package" in result.output
     assert "--write" in result.output
+
+
+def test_nixcfg_ci_crate2nix_exposes_central_normalizer_command() -> None:
+    """Expose one supported manual path for package-specific Cargo normalization."""
+    runner = CliRunner()
+    result = runner.invoke(
+        nixcfg.app,
+        ["ci", "pipeline", "crate2nix", "normalize", "--help"],
+    )
+
+    assert result.exit_code == 0
+    assert "TARGET" in result.output
+    assert "PATH" in result.output
+
+
+def test_nixcfg_ci_omits_retired_pipeline_commands() -> None:
+    """Keep obsolete lifecycle diagnostics out of the public command tree."""
+    root = cast("click.Group", get_command(nixcfg.app))
+    ci = cast("click.Group", root.commands["ci"])
+    pipeline = cast("click.Group", ci.commands["pipeline"])
+
+    assert {"cargo-lock", "merge-probe"}.isdisjoint(pipeline.commands)
+
+
+def test_nixcfg_ci_exposes_truthful_current_tree_parity_command() -> None:
+    """Keep local parity scoped to the hosted current-tree gates it runs."""
+    runner = CliRunner()
+    result = runner.invoke(nixcfg.app, ["ci", "pipeline", "test", "--help"])
+
+    assert result.exit_code == 0
+    assert "x86_64-linux" in result.output
+    assert "Commit-range linting" in result.output
 
 
 def test_nixcfg_ci_cache_generations_help_exposes_profile_options() -> None:

@@ -13,6 +13,7 @@ let
 
   cfg = config.profiles.work;
   opencodeMcpLib = import ../../lib/opencode-mcp.nix { inherit lib; };
+  inherit (opencodeMcpLib) mkLocalServer mkRemoteServer;
   mcpRemote = import ../../lib/mcp-remote-wrapper.nix { inherit lib pkgs; };
   workProfileSkeleton = import ../_profiles-work-skeleton.nix {
     enableDescription = "work profile — adds work packages, MCP servers, and shell integrations";
@@ -31,65 +32,36 @@ let
   };
 
   defaultOpencodeMcp = {
-    axiom = {
-      type = "remote";
-      url = "https://mcp.axiom.co/mcp";
-    };
-    convex = {
-      type = "local";
-      command = [
-        "bunx"
-        "--bun"
-        "convex@latest"
-        "mcp"
-        "start"
-      ];
-    };
-    docusign = {
-      type = "remote";
-      url = "https://mcp-d.docusign.com/mcp";
-    };
-    figma = {
-      type = "remote";
-      url = "https://mcp.figma.com/mcp";
-    };
-    linear = {
-      type = "remote";
-      url = "https://mcp.linear.app/mcp";
-    };
-    notion = {
-      type = "remote";
-      url = "https://mcp.notion.com/mcp";
+    axiom = mkRemoteServer "https://mcp.axiom.co/mcp";
+    convex = mkLocalServer [
+      "bunx"
+      "--bun"
+      "convex@latest"
+      "mcp"
+      "start"
+    ];
+    docusign = mkRemoteServer "https://mcp-d.docusign.com/mcp";
+    figma = mkRemoteServer "https://mcp.figma.com/mcp";
+    linear = mkRemoteServer "https://mcp.linear.app/mcp";
+    notion = mkRemoteServer "https://mcp.notion.com/mcp" // {
       oauth = { };
     };
     # PlanetScale MCP (hosted remote server) - authenticates via `opencode mcp auth planetscale`
-    planetscale = {
-      type = "remote";
-      url = "https://mcp.pscale.dev/mcp/planetscale";
-    };
-    sentry = {
-      type = "remote";
-      url = "https://mcp.sentry.dev/mcp";
-    };
-    vanta = {
-      type = "local";
-      command = [
+    planetscale = mkRemoteServer "https://mcp.pscale.dev/mcp/planetscale";
+    sentry = mkRemoteServer "https://mcp.sentry.dev/mcp";
+    vanta =
+      mkLocalServer [
         "bunx"
         "--bun"
         "@vantasdk/vanta-mcp-server"
-      ];
-      environment.VANTA_ENV_FILE = "${config.home.homeDirectory}/.config/vanta-credentials.env";
-    };
-    vercel = {
-      type = "remote";
-      url = "https://mcp.vercel.com";
-    };
+      ]
+      // {
+        environment.VANTA_ENV_FILE = "${config.home.homeDirectory}/.config/vanta-credentials.env";
+      };
+    vercel = mkRemoteServer "https://mcp.vercel.com";
     # GitHub MCP (remote via mcp-remote proxy) - uses PAT from sops secret
     # Toolsets: repos, pull_requests, actions
-    github = {
-      type = "local";
-      command = [ "${github-mcp-wrapper}" ];
-    };
+    github = mkLocalServer [ "${github-mcp-wrapper}" ];
   }
   // lib.optionalAttrs pkgs.stdenv.isDarwin (
     let
@@ -116,15 +88,9 @@ let
       '';
     in
     {
-      slack = {
-        type = "local";
-        command = [ "${slack-mcp-wrapper}" ];
-      };
+      slack = mkLocalServer [ "${slack-mcp-wrapper}" ];
       # Render MCP (remote via mcp-remote proxy) - uses API key from macOS Keychain.
-      render = {
-        type = "local";
-        command = [ "${render-mcp-wrapper}" ];
-      };
+      render = mkLocalServer [ "${render-mcp-wrapper}" ];
     }
   );
 in

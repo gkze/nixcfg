@@ -41,7 +41,7 @@ from lib.update.events import (
     require_value,
 )
 from lib.update.flake import nixpkgs_expression
-from lib.update.nix_expr import compact_nix_expr
+from lib.update.nix_expr import compact_nix_expr, select_attrs
 from lib.update.paths import get_repo_file, local_flake_url
 from lib.update.process import (
     NixBuildOptions,
@@ -117,13 +117,6 @@ def _quote_attr(name: str) -> str:
     return StringPrimitive(value=name).rebuild()
 
 
-def _select_attrs(expression: NixExpression, *attributes: str) -> NixExpression:
-    selected = expression
-    for attribute in attributes:
-        selected = Select(expression=selected, attribute=attribute)
-    return selected
-
-
 def _nix_string_or_expr(value: str | NixExpression) -> NixExpression:
     if isinstance(value, NixExpression):
         return value
@@ -131,17 +124,17 @@ def _nix_string_or_expr(value: str | NixExpression) -> NixExpression:
 
 
 def _fake_hash_expr() -> NixExpression:
-    return _select_attrs(Identifier(name="pkgs"), "lib", "fakeHash")
+    return select_attrs(Identifier(name="pkgs"), "lib", "fakeHash")
 
 
 def _build_pnpm_10_nodejs_22_expr() -> FunctionCall:
     return FunctionCall(
-        name=_select_attrs(Identifier(name="pkgs"), "pnpm_10", "override"),
+        name=select_attrs(Identifier(name="pkgs"), "pnpm_10", "override"),
         argument=AttributeSet(
             values=[
                 Binding(
                     name="nodejs-slim",
-                    value=_select_attrs(Identifier(name="pkgs"), "nodejs_22"),
+                    value=select_attrs(Identifier(name="pkgs"), "nodejs_22"),
                 ),
             ]
         ),
@@ -150,7 +143,7 @@ def _build_pnpm_10_nodejs_22_expr() -> FunctionCall:
 
 def _build_get_flake_expr(flake_url: str) -> FunctionCall:
     return FunctionCall(
-        name=_select_attrs(Identifier(name="builtins"), "getFlake"),
+        name=select_attrs(Identifier(name="builtins"), "getFlake"),
         argument=StringPrimitive(value=flake_url),
     )
 
@@ -190,7 +183,7 @@ def _build_fetch_from_github_call(
             Binding(name="fetchSubmodules", value=Primitive(value=fetch_submodules))
         )
     return FunctionCall(
-        name=_select_attrs(Identifier(name="pkgs"), "fetchFromGitHub"),
+        name=select_attrs(Identifier(name="pkgs"), "fetchFromGitHub"),
         argument=AttributeSet(values=bindings),
     )
 
@@ -239,7 +232,7 @@ def _build_fetchgit_call(
         Binding(name="fetchSubmodules", value=Primitive(value=fetch_submodules))
     )
     return FunctionCall(
-        name=_select_attrs(Identifier(name="pkgs"), "fetchgit"),
+        name=select_attrs(Identifier(name="pkgs"), "fetchgit"),
         argument=AttributeSet(values=bindings),
     )
 
@@ -259,39 +252,6 @@ def _build_fetchgit_expr(
             fetch_submodules=fetch_submodules,
         ).rebuild(),
     )
-
-
-def _build_fetch_yarn_deps_expr(
-    src_expr: NixExpression,
-    *,
-    yarn_lock_suffix: str = "/yarn.lock",
-    hash_value: str | NixExpression | None = None,
-) -> str:
-    expression = LetExpression(
-        local_variables=[Binding(name="src", value=src_expr)],
-        value=FunctionCall(
-            name=_select_attrs(Identifier(name="pkgs"), "fetchYarnDeps"),
-            argument=AttributeSet(
-                values=[
-                    Binding(
-                        name="yarnLock",
-                        value=BinaryExpression(
-                            left=Identifier(name="src"),
-                            operator=Operator(name="+"),
-                            right=StringPrimitive(value=yarn_lock_suffix),
-                        ),
-                    ),
-                    Binding(
-                        name="hash",
-                        value=_fake_hash_expr()
-                        if hash_value is None
-                        else _nix_string_or_expr(hash_value),
-                    ),
-                ]
-            ),
-        ),
-    )
-    return compact_nix_expr(expression.rebuild())
 
 
 def _build_fetch_pnpm_deps_expr(
@@ -322,7 +282,7 @@ def _build_fetch_pnpm_deps_expr(
     expression = LetExpression(
         local_variables=[Binding(name="src", value=src_expr)],
         value=FunctionCall(
-            name=_select_attrs(Identifier(name="pkgs"), "fetchPnpmDeps"),
+            name=select_attrs(Identifier(name="pkgs"), "fetchPnpmDeps"),
             argument=AttributeSet(values=fetch_pnpm_bindings),
         ),
     )
@@ -375,13 +335,13 @@ def _build_package_path_attr_expr(
     repo_path = get_repo_file(".") if repo_root is None else Path(repo_root).resolve()
     flake_url = local_flake_url(repo_path)
     system_expr: NixExpression = (
-        _select_attrs(Identifier(name="builtins"), "currentSystem")
+        select_attrs(Identifier(name="builtins"), "currentSystem")
         if system is None
         else StringPrimitive(value=system)
     )
     import_nixpkgs = FunctionCall(
         name=Identifier(name="import"),
-        argument=_select_attrs(Identifier(name="flake"), "inputs", "nixpkgs"),
+        argument=select_attrs(Identifier(name="flake"), "inputs", "nixpkgs"),
     )
     config_expr = AttributeSet(
         values=[
@@ -398,7 +358,7 @@ def _build_package_path_attr_expr(
     package_expr: NixExpression = FunctionCall(
         name=FunctionCall(
             name=FunctionCall(
-                name=_select_attrs(Identifier(name="pkgs"), "lib", "callPackageWith"),
+                name=select_attrs(Identifier(name="pkgs"), "lib", "callPackageWith"),
                 argument=Identifier(name="applied"),
             ),
             argument=NixPath(path=f"./packages/{package}/default.nix"),
@@ -407,7 +367,7 @@ def _build_package_path_attr_expr(
             values=[
                 Binding(
                     name="inputs",
-                    value=_select_attrs(Identifier(name="flake"), "inputs"),
+                    value=select_attrs(Identifier(name="flake"), "inputs"),
                 ),
                 Binding(name="outputs", value=Identifier(name="flake")),
                 *(
@@ -417,7 +377,7 @@ def _build_package_path_attr_expr(
             ]
         ),
     )
-    overlay_fn = _select_attrs(Identifier(name="flake"), "overlays", "default")
+    overlay_fn = select_attrs(Identifier(name="flake"), "overlays", "default")
     overlay_applied = FunctionCall(
         name=FunctionCall(name=overlay_fn, argument=Identifier(name="self")),
         argument=Identifier(name="pkgs"),
@@ -448,7 +408,7 @@ def _build_package_path_attr_expr(
             Binding(
                 name="applied",
                 value=FunctionCall(
-                    name=_select_attrs(Identifier(name="pkgs"), "lib", "fix"),
+                    name=select_attrs(Identifier(name="pkgs"), "lib", "fix"),
                     argument=Parenthesis(
                         value=FunctionDefinition(
                             argument_set=Identifier(name="self"),
@@ -678,7 +638,7 @@ def _build_drv_path_expr(body: str | NixExpression) -> str:
                 value=parse(body).expr if isinstance(body, str) else body,
             ),
         ],
-        value=_select_attrs(Identifier(name="drv"), "drvPath"),
+        value=select_attrs(Identifier(name="drv"), "drvPath"),
     )
     return compact_nix_expr(expression.rebuild())
 
@@ -706,13 +666,13 @@ def _build_overlay_expression(
     repo_path = get_repo_file(".") if repo_root is None else Path(repo_root).resolve()
     flake_url = local_flake_url(repo_path)
     system_expr: NixExpression = (
-        _select_attrs(Identifier(name="builtins"), "currentSystem")
+        select_attrs(Identifier(name="builtins"), "currentSystem")
         if system is None
         else StringPrimitive(value=system)
     )
     import_nixpkgs = FunctionCall(
         name=Identifier(name="import"),
-        argument=_select_attrs(Identifier(name="flake"), "inputs", "nixpkgs"),
+        argument=select_attrs(Identifier(name="flake"), "inputs", "nixpkgs"),
     )
     config_expr = AttributeSet(
         values=[
@@ -726,7 +686,7 @@ def _build_overlay_expression(
             ),
         ],
     )
-    overlay_fn = _select_attrs(Identifier(name="flake"), "overlays", "default")
+    overlay_fn = select_attrs(Identifier(name="flake"), "overlays", "default")
     overlay_applied = FunctionCall(
         name=FunctionCall(name=overlay_fn, argument=Identifier(name="self")),
         argument=Identifier(name="pkgs"),
@@ -750,7 +710,7 @@ def _build_overlay_expression(
             Binding(
                 name="applied",
                 value=FunctionCall(
-                    name=_select_attrs(Identifier(name="pkgs"), "lib", "fix"),
+                    name=select_attrs(Identifier(name="pkgs"), "lib", "fix"),
                     argument=Parenthesis(
                         value=FunctionDefinition(
                             argument_set=Identifier(name="self"),
@@ -885,7 +845,6 @@ async def compute_expr_drv_fingerprint(
 __all__ = [
     "_build_fetch_from_github_call",
     "_build_fetch_from_github_expr",
-    "_build_fetch_yarn_deps_expr",
     "_build_fetchgit_call",
     "_build_fetchgit_expr",
     "_build_flake_attr_expr",

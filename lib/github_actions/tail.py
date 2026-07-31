@@ -819,10 +819,6 @@ def _parse_live_job_page_from_html(html: str, *, job_url: str) -> LiveJobPageInf
     return info
 
 
-def _parse_steps_url_from_html(html: str, *, job_url: str) -> str | None:
-    return _parse_live_job_page_from_html(html, job_url=job_url).steps_url
-
-
 def _job_page_has_live_metadata(info: LiveJobPageInfo) -> bool:
     return info.steps_url is not None or bool(info.backscroll_urls)
 
@@ -1002,5 +998,4 @@ __all__ = [
     "LiveLogLine",
     "LiveStepRecord",
     "_parse_live_job_page_from_html",
-    "_parse_steps_url_from_html",
 ]

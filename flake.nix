@@ -380,6 +380,16 @@
               ${resolve command}
               touch $out
             '';
+          mkEvalOnlyCheck =
+            checkName: test:
+            {
+              pkgs,
+              ...
+            }@context:
+            assert test context;
+            pkgs.runCommand "check-${checkName}" { } ''
+              touch $out
+            '';
           # Evaluate the nixcfg package once per system and share it across
           # every check below instead of re-deriving it per check.
           nixcfgPackages = lib.genAttrs systems (
@@ -853,33 +863,53 @@
               ''
             );
 
-            "test-nix-default-api" =
-              { pkgs, ... }:
-              assert import ./tests/nix/default-api/default-api.nix { src = ./.; };
-              pkgs.runCommand "check-test-nix-default-api" { } ''
-                touch $out
-              '';
+            "test-nix-default-api" = mkEvalOnlyCheck "test-nix-default-api" (
+              _: import ./tests/nix/default-api/default-api.nix { src = ./.; }
+            );
 
-            "test-nix-gpg-session" =
+            "test-nix-dock-defaults" = mkEvalOnlyCheck "test-nix-dock-defaults" (
               { pkgs, ... }:
-              assert import ./tests/nix/gpg-session { inherit self; };
-              pkgs.runCommand "check-test-nix-gpg-session" { } ''
-                touch $out
-              '';
+              import ./tests/nix/dock-defaults.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
 
-            "test-nix-package-helpers" =
-              { pkgs, ... }:
-              assert import ./tests/nix/package-helpers.nix { src = ./.; };
-              pkgs.runCommand "check-test-nix-package-helpers" { } ''
-                touch $out
-              '';
+            "test-nix-gpg-session" = mkEvalOnlyCheck "test-nix-gpg-session" (
+              _: import ./tests/nix/gpg-session { inherit self; }
+            );
 
-            "test-nix-opencode-desktop" =
+            "test-nix-nvim-keymaps" = mkEvalOnlyCheck "test-nix-nvim-keymaps" (
+              _:
+              import ./tests/nix/nvim-keymaps.nix {
+                config = self.homeConfigurations.george.config;
+                src = ./.;
+              }
+            );
+
+            "test-nix-opencode-desktop" = mkEvalOnlyCheck "test-nix-opencode-desktop" (
+              _: import ./packages/opencode-desktop/tests.nix { inherit self; }
+            );
+
+            "test-nix-opencode-mcp" = mkEvalOnlyCheck "test-nix-opencode-mcp" (
               { pkgs, ... }:
-              assert import ./packages/opencode-desktop/tests.nix { inherit self; };
-              pkgs.runCommand "check-test-nix-opencode-desktop" { } ''
-                touch $out
-              '';
+              import ./tests/nix/opencode-mcp.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
+
+            "test-nix-package-helpers" = mkEvalOnlyCheck "test-nix-package-helpers" (
+              _: import ./tests/nix/package-helpers.nix { src = ./.; }
+            );
+
+            "test-nix-source-hashes" = mkEvalOnlyCheck "test-nix-source-hashes" (
+              { pkgs, ... }:
+              import ./tests/nix/source-hashes.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
 
             "test-nix-direnv-batched-gcroots" = { pkgs, ... }: pkgs.nix-direnv.tests.batchedFlakeInputGcRoots;
 
@@ -914,12 +944,9 @@
             "test-nix-prefetch-git-darwin-heredoc" =
               { pkgs, ... }: import ./tests/nix/nix-prefetch-git-darwin-heredoc { inherit pkgs; };
 
-            "test-nix-rio-overlay-platforms" =
-              { pkgs, ... }:
-              assert import ./tests/nix/rio-overlay-platforms { };
-              pkgs.runCommand "check-test-nix-rio-overlay-platforms" { } ''
-                touch "$out"
-              '';
+            "test-nix-rio-overlay-platforms" = mkEvalOnlyCheck "test-nix-rio-overlay-platforms" (
+              _: import ./tests/nix/rio-overlay-platforms { }
+            );
 
             "test-sops-age-policy" =
               { pkgs, ... }:

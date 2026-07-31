@@ -220,7 +220,7 @@ def _cookie_jar() -> httpx.Cookies:
     return jar
 
 
-def test_parse_steps_url_from_html_supports_attribute_and_json_key() -> None:
+def test_parse_live_job_page_supports_attribute_and_json_key() -> None:
     """Extract hidden live transport URLs from both known HTML shapes."""
     attr_html = (
         '<check-steps job-steps-url="/acme/demo/actions/runs/9/jobs/55/steps" '
@@ -248,10 +248,10 @@ def test_parse_steps_url_from_html_supports_attribute_and_json_key() -> None:
 
     regex_html = '{"jobStepsUrl":"/acme/demo/actions/runs/9/jobs/66/steps?change_id=0"}'
     assert (
-        gha_tail._parse_steps_url_from_html(
+        gha_tail._parse_live_job_page_from_html(
             regex_html,
             job_url="https://github.com/acme/demo/actions/runs/9/job/42",
-        )
+        ).steps_url
         == "https://github.com/acme/demo/actions/runs/9/jobs/66/steps"
     )
 
@@ -280,13 +280,13 @@ def test_parse_steps_url_from_html_supports_attribute_and_json_key() -> None:
     assert static_steps_info.logged_in is False
 
     with pytest.raises(ValueError, match="steps URL path"):
-        gha_tail._parse_steps_url_from_html(
+        gha_tail._parse_live_job_page_from_html(
             '{"jobStepsUrl":"/acme/demo/actions/runs/9/jobs/66/not-steps"}',
             job_url="https://github.com/acme/demo/actions/runs/9/job/42",
         )
 
     with pytest.raises(ValueError, match="steps URL origin"):
-        gha_tail._parse_steps_url_from_html(
+        gha_tail._parse_live_job_page_from_html(
             '{"jobStepsUrl":"https://example.com/acme/demo/actions/runs/9/jobs/66/steps"}',
             job_url="https://github.com/acme/demo/actions/runs/9/job/42",
         )

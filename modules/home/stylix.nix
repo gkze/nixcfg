@@ -84,32 +84,24 @@ in
             }";
           inherit (fonts.monospace) size;
         };
-        fonts = {
-          serif = {
-            inherit (fonts.serif)
-              name
-              package
-              ;
+        fonts =
+          lib.genAttrs
+            [
+              "serif"
+              "sansSerif"
+              "monospace"
+            ]
+            (font: {
+              inherit (fonts.${font}) name package;
+            })
+          // {
+            sizes = lib.genAttrs [
+              "applications"
+              "desktop"
+              "popups"
+              "terminal"
+            ] (_: fonts.monospace.size);
           };
-          sansSerif = {
-            inherit (fonts.sansSerif)
-              name
-              package
-              ;
-          };
-          monospace = {
-            inherit (fonts.monospace)
-              name
-              package
-              ;
-          };
-          sizes = {
-            applications = fonts.monospace.size;
-            desktop = fonts.monospace.size;
-            popups = fonts.monospace.size;
-            terminal = fonts.monospace.size;
-          };
-        };
       })
       // lib.optionalAttrs (cfg.wallpaper != null) {
         image = cfg.wallpaper;

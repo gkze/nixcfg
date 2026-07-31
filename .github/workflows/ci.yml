@@ -114,8 +114,12 @@ jobs:
           - lint-python-ty
           - lint-workflows-actionlint
           - test-nix-default-api
-          - test-nix-package-helpers
+          - test-nix-dock-defaults
+          - test-nix-nvim-keymaps
           - test-nix-opencode-desktop
+          - test-nix-opencode-mcp
+          - test-nix-package-helpers
+          - test-nix-source-hashes
           - cache-electron-runtimes
           - test-python-pytest
           - verify-workflow-generated

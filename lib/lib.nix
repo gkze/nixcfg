@@ -56,6 +56,32 @@ let
     sourceOverrides = readSourceOverrides (getEnv "UPDATE_SOURCE_OVERRIDES_JSON");
     fakeHashes = getEnv "FAKE_HASHES" == "1";
   };
+  selectSourceHashEntry =
+    sourceEntry: fakeHashMode: name: hashType: platformArgs:
+    let
+      platformSpecific = platformArgs ? platform;
+      platform = platformArgs.platform or null;
+    in
+    if fakeHashMode then
+      {
+        hash = lib.fakeHash;
+        inherit hashType;
+      }
+      // optionalAttrs platformSpecific platformArgs
+      // optionalAttrs (!platformSpecific) { gitDep = "fake-dep"; }
+    else
+      let
+        hashes = (sourceEntry name).hashes or [ ];
+        matchesPlatform =
+          hash: if platformSpecific then (hash.platform or null) == platform else !(hash ? platform);
+        matchEntry = findFirst (hash: hash.hashType == hashType && matchesPlatform hash) null hashes;
+      in
+      if matchEntry == null then
+        throw "sources.json for '${name}' missing ${hashType}${
+          if platformSpecific then " on ${platform}" else ""
+        }"
+      else
+        matchEntry;
 in
 rec {
   inherit (crate2nixTauri)
@@ -82,43 +108,11 @@ rec {
     name: if hasAttr name sources then sources.${name} else throw "sources.json missing for '${name}'";
 
   # Find hash entry matching hashType and optionally platform
-  sourceHashEntry =
-    name: hashType:
-    if fakeHashMode then
-      {
-        hash = lib.fakeHash;
-        inherit hashType;
-        gitDep = "fake-dep";
-      }
-    else
-      let
-        entry = sourceEntry name;
-        hashes = entry.hashes or [ ];
-        matchEntry = findFirst (hash: hash.hashType == hashType && !(hash ? platform)) null hashes;
-      in
-      if matchEntry == null then throw "sources.json for '${name}' missing ${hashType}" else matchEntry;
+  sourceHashEntry = name: hashType: selectSourceHashEntry sourceEntry fakeHashMode name hashType { };
 
-  # Find hash entry matching hashType and specific platform
   sourceHashEntryForPlatform =
     name: hashType: platform:
-    if fakeHashMode then
-      {
-        hash = lib.fakeHash;
-        inherit hashType;
-        inherit platform;
-      }
-    else
-      let
-        entry = sourceEntry name;
-        hashes = entry.hashes or [ ];
-        matchEntry = findFirst (
-          hash: hash.hashType == hashType && (hash.platform or null) == platform
-        ) null hashes;
-      in
-      if matchEntry == null then
-        throw "sources.json for '${name}' missing ${hashType} on ${platform}"
-      else
-        matchEntry;
+    selectSourceHashEntry sourceEntry fakeHashMode name hashType { inherit platform; };
 
   sourceHash = name: hashType: (sourceHashEntry name hashType).hash;
 

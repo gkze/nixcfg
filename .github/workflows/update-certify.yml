@@ -134,8 +134,12 @@ jobs:
       - name: Run shared deep verification checks
         run: |
           nix build .#checks.x86_64-linux.test-nix-default-api
-          nix build .#checks.x86_64-linux.test-nix-package-helpers
+          nix build .#checks.x86_64-linux.test-nix-dock-defaults
+          nix build .#checks.x86_64-linux.test-nix-nvim-keymaps
           nix build .#checks.x86_64-linux.test-nix-opencode-desktop
+          nix build .#checks.x86_64-linux.test-nix-opencode-mcp
+          nix build .#checks.x86_64-linux.test-nix-package-helpers
+          nix build .#checks.x86_64-linux.test-nix-source-hashes
           nix build .#checks.x86_64-linux.cache-electron-runtimes
           nix build .#checks.x86_64-linux.test-python-pytest
           nix build .#checks.x86_64-linux.verify-workflow-generated

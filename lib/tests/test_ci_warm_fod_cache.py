@@ -17,18 +17,11 @@ if TYPE_CHECKING:
     from collections.abc import Coroutine
 
 
-def test_format_duration_and_detect_system(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_format_duration() -> None:
     """Run this test case."""
     assert object.__getattribute__(wfc, "_format_duration")(2.0) == "2.0s"
     assert object.__getattribute__(wfc, "_format_duration")(90) == "1m 30s"
     assert object.__getattribute__(wfc, "_format_duration")(4000) == "1h 6m"
-
-    monkeypatch.setattr(
-        wfc, "normalize_nix_platform", lambda machine, system: f"{machine}-{system}"
-    )
-    monkeypatch.setattr(wfc.platform, "machine", lambda: "x86")
-    monkeypatch.setattr(wfc.platform, "system", lambda: "linux")
-    assert object.__getattribute__(wfc, "_detect_system")() == "x86-linux"
 
 
 def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> None:

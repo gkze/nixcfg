@@ -368,12 +368,9 @@ rec {
       bundleNames,
       targetDirectory,
     }:
-    let
-      uniqueBundleNames = unique bundleNames;
-    in
     callMacAppsHelper "remove-profile-copies" {
       inherit targetDirectory;
-      bundleNames = uniqueBundleNames;
+      bundleNames = unique bundleNames;
     };
 
   profileBundleLeakAuditScript =
@@ -382,12 +379,9 @@ rec {
       managedBundleNames,
       label ? "home.packages",
     }:
-    let
-      uniqueManagedBundleNames = unique managedBundleNames;
-    in
     callMacAppsHelper "profile-bundle-leak-audit" {
       inherit label packagePaths;
-      managedBundleNames = uniqueManagedBundleNames;
+      managedBundleNames = unique managedBundleNames;
     };
 
   applicationsScript =

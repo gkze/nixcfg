@@ -50,15 +50,6 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class CargoLockGitDep:
-    """Cargo git dependency descriptor used for output hash collection."""
-
-    git_dep: str
-    hash_type: HashType
-    match_name: str
-
-
-@dataclass(frozen=True)
 class FixedOutputHashStep:
     """One fixed-output hash computation in a sequential hash pipeline."""
 
@@ -751,7 +742,6 @@ class HashEntryUpdater(Updater):
 
 __all__ = [
     "AssetURLsMetadataUpdater",
-    "CargoLockGitDep",
     "ChecksumProvidedUpdater",
     "DownloadHashUpdater",
     "DownloadUrlMetadataUpdater",

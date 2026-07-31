@@ -230,36 +230,6 @@ def test_plan_hash_recovery_to_dict_and_managed_paths(
     assert plan.to_dict()["write_paths"] == ()
 
 
-def test_apply_hash_recovery_skips_missing_removals_without_staging(
-    tmp_path: Path,
-) -> None:
-    """Do not stage or fail when a scheduled removal is already absent."""
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    snapshot = tmp_path / "snapshot"
-    snapshot.mkdir()
-    (snapshot / "flake.lock").write_text('{"nodes": {"new": true}}\n', encoding="utf-8")
-
-    plan = rh.HashRecoveryPlan(
-        generation="/run/current-system",
-        resolved_target="/nix/store/current-system",
-        deriver="/nix/store/demo.drv",
-        snapshot=str(snapshot),
-        repo_root=str(repo_root),
-        write_paths=("flake.lock",),
-        remove_paths=("overlays/missing/sources.json",),
-    )
-
-    assert rh.apply_hash_recovery(plan) == ("flake.lock",)
-    assert (
-        json.loads((repo_root / "flake.lock").read_text(encoding="utf-8"))["nodes"][
-            "new"
-        ]
-        is True
-    )
-
-
 def test_render_plain_covers_empty_restore_and_apply_remove_branches() -> None:
     """Render the remaining plain-text summary branches for hash recovery."""
     empty_plan = rh.HashRecoveryPlan(

@@ -36,7 +36,6 @@ dependencies = [
   "tomlkit>=0.14.0",
   "typer>=0.24.1",
   "githubkit>=0.15.1",
-  "tree-sitter>=0.25.2",
 ]
 
 [project.scripts]
@@ -248,6 +247,7 @@ dev = [
   "datamodel-code-generator[http]>=0.54.0",
   "pytest>=9.0.2",
   "pytest-xdist>=3.8.0",
+  "tree-sitter>=0.25.2",
   "tree-sitter-bash>=0.25.0",
   "pyupgrade>=3.21.2",
   "referencing>=0.37.0",

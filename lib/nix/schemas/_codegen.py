@@ -13,14 +13,16 @@ from __future__ import annotations
 import importlib
 import json
 import re
-from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, TypeIs, cast
+from typing import TYPE_CHECKING, Protocol, TypeIs, cast
 
 import yaml
 
 from lib import codegen_utils, json_utils
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 SCHEMAS_DIR = Path(__file__).resolve().parent
 MODELS_DIR = SCHEMAS_DIR.parent / "models"
@@ -43,19 +45,13 @@ TOP_LEVEL_SCHEMAS = [
 
 type JsonValue = json_utils.JsonValue
 type JsonObject = json_utils.JsonObject
-type ProgressReporter = Callable[[str], None]
+ProgressReporter = codegen_utils.ProgressReporter
+_emit_progress = codegen_utils.emit_progress
 
 
 _as_object_dict = json_utils.as_object_dict
 _coerce_json_value = json_utils.coerce_json_value
 _coerce_json_object = json_utils.coerce_json_object
-
-
-def _emit_progress(progress: ProgressReporter | None, message: str) -> None:
-    """Invoke the optional codegen progress reporter."""
-    if progress is None:
-        return
-    progress(message)
 
 
 def _is_registry_like(value: object) -> TypeIs[_RegistryLike]:

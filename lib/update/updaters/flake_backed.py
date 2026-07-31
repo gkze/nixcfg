@@ -20,6 +20,7 @@ from lib.nix.models.sources import (
     SourceHashes,
 )
 from lib.update import deno_lock
+from lib.update import events as update_events
 from lib.update import flake as update_flake
 from lib.update import net as update_net
 from lib.update import nix as update_nix
@@ -66,6 +67,8 @@ if TYPE_CHECKING:
     from lib.nix.models.flake_lock import FlakeLockNode
     from lib.update.config import UpdateConfig
 
+_raise_failed_command = update_events.raise_failed_command
+
 
 def _ensure_user_writable_tree(root: Path) -> None:
     for dirpath, _dirnames, filenames in os.walk(root):
@@ -76,16 +79,6 @@ def _ensure_user_writable_tree(root: Path) -> None:
             if file_path.is_symlink():
                 continue
             file_path.chmod(file_path.stat().st_mode | 0o200)
-
-
-def _raise_failed_command(action: str, result: CommandResult) -> None:
-    if result.returncode == 0:
-        return
-    detail = result.stderr.strip() or result.stdout.strip()
-    message = f"{action} failed (exit {result.returncode})"
-    if detail:
-        message = f"{message}: {detail}"
-    raise RuntimeError(message)
 
 
 class FlakeInputUpdater(Updater):

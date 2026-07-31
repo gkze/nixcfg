@@ -6,7 +6,6 @@ import urllib.parse
 import warnings
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import cast
 
 import aiohttp
 from githubkit import GitHub
@@ -24,36 +23,11 @@ type JSONDict = dict[str, JSONValue]
 type JSONList = list[JSONValue]
 
 
-def _expect_json_dict(payload: JSONValue, *, context: str) -> JSONDict:
-    try:
-        return json_utils.as_json_object(payload, context=context)
-    except TypeError as exc:
-        msg = f"Expected JSON object from {context}, got {type(payload).__name__}"
-        raise RuntimeError(msg) from exc
-
-
 def _expect_json_list(payload: JSONValue, *, context: str) -> JSONList:
     try:
         return json_utils.as_json_list(payload, context=context)
     except TypeError as exc:
         msg = f"Expected JSON array from {context}, got {type(payload).__name__}"
-        raise RuntimeError(msg) from exc
-
-
-def _expect_json_string_field(
-    payload: JSONDict,
-    field: str,
-    *,
-    context: str,
-) -> str:
-    try:
-        return json_utils.get_required_str(
-            cast("dict[str, object]", payload),
-            field,
-            context=context,
-        )
-    except TypeError as exc:
-        msg = f"Expected string field {field!r} in {context}"
         raise RuntimeError(msg) from exc
 
 

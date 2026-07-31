@@ -58,10 +58,76 @@ let
       | ${pkgs.findutils}/bin/xargs -0 ${lib.getExe pkgs.actionlint}
   '';
 
+  standardHookSpecs = {
+    lint-editorconfig = {
+      package = pkgs."editorconfig-checker";
+      entry = "editorconfig-checker -exclude ^\\.pre-commit-config\\.yaml$";
+    };
+    format-yaml-yamlfmt = {
+      package = pkgs.yamlfmt;
+      entry = "yamlfmt -lint -gitignore_excludes -conf .yamlfmt .";
+    };
+    lint-yaml-yamllint = {
+      package = pkgs.yamllint;
+      entry = "yamllint -c .yamllint .";
+    };
+    lint-agentic-workflows-gh-aw = {
+      package = pkgs.gh;
+      entry = "gh aw compile update-self-heal --no-check-update --no-emit --approve";
+    };
+    format-web-oxfmt = {
+      package = pkgs.oxfmt;
+      entry = "oxfmt --check --config .oxfmtrc.json --no-error-on-unmatched-pattern ${lib.escapeShellArgs oxfmtPatterns}";
+    };
+    lint-web-oxlint = {
+      package = pkgs.oxlint;
+      entry = "env OXLINT_TSGOLINT_PATH=${lib.getExe pkgs.tsgolint} oxlint --config .oxlintrc.json --type-aware --quiet .";
+    };
+    format-python-pyupgrade = {
+      package = pythonPyupgradeCheck;
+      entry = "${pythonPyupgradeCheck}/bin/check-python-pyupgrade";
+    };
+    format-python-ruff = {
+      package = pythonToolBins;
+      entry = "${ruffExe} format --check --config pyproject.toml .";
+    };
+    lint-python-compile = {
+      package = pythonCompileCheck;
+      entry = "${pythonCompileCheck}/bin/check-python-compile";
+    };
+    lint-python-ruff = {
+      package = pythonToolBins;
+      entry = "${ruffExe} check --config pyproject.toml .";
+    };
+    lint-python-ty = {
+      package = pythonToolBins;
+      entry = "${tyExe} check${tyPythonFlag} .";
+    };
+    lint-workflows-actionlint = {
+      package = workflowActionlintCheck;
+      entry = "${workflowActionlintCheck}/bin/check-workflow-actionlint";
+    };
+    lint-pins-pinact = {
+      package = pkgs.pinact;
+      entry = "pinact run --check";
+    };
+  };
+  standardHooks = lib.mapAttrs (
+    name: spec:
+    {
+      enable = true;
+      inherit name;
+      pass_filenames = false;
+      always_run = true;
+      priority = hookPriority;
+    }
+    // spec
+  ) standardHookSpecs;
+
   pre-commit-check = gitHooks.lib.${pkgs.system}.run {
     inherit src;
     package = pkgs.prek;
-    hooks = {
+    hooks = standardHooks // {
       format-repo = {
         enable = true;
         name = "format-repo";
@@ -71,136 +137,6 @@ let
         always_run = true;
         priority = hookPriority;
         stages = [ "manual" ];
-      };
-
-      lint-editorconfig = {
-        enable = true;
-        name = "lint-editorconfig";
-        package = pkgs."editorconfig-checker";
-        entry = "editorconfig-checker -exclude ^\\.pre-commit-config\\.yaml$";
-        pass_filenames = false;
-        always_run = true;
-        priority = hookPriority;
-      };
-
-      format-yaml-yamlfmt = {
-        enable = true;
-        name = "format-yaml-yamlfmt";
-        package = pkgs.yamlfmt;
-        entry = "yamlfmt -lint -gitignore_excludes -conf .yamlfmt .";
-        pass_filenames = false;
-        always_run = true;
-        priority = hookPriority;
-      };
-
-      lint-yaml-yamllint = {
-        enable = true;
-        name = "lint-yaml-yamllint";
-        package = pkgs.yamllint;
-        entry = "yamllint -c .yamllint .";
-        pass_filenames = false;
-        always_run = true;
-        priority = hookPriority;
-      };
-
-      lint-agentic-workflows-gh-aw = {
-        enable = true;
-        name = "lint-agentic-workflows-gh-aw";
-        package = pkgs.gh;
-        entry = "gh aw compile update-self-heal --no-check-update --no-emit --approve";
-        pass_filenames = false;
-        always_run = true;
-        priority = hookPriority;
-      };
-
-      format-web-oxfmt = {
-        enable = true;
-        name = "format-web-oxfmt";
-        package = pkgs.oxfmt;
-        entry = "oxfmt --check --config .oxfmtrc.json --no-error-on-unmatched-pattern ${lib.escapeShellArgs oxfmtPatterns}";
-        pass_filenames = false;
-        always_run = true;
-        priority = hookPriority;
-      };
-
-      lint-web-oxlint = {
-        enable = true;
-        name = "lint-web-oxlint";
-        package = pkgs.oxlint;
-        entry = "env OXLINT_TSGOLINT_PATH=${lib.getExe pkgs.tsgolint} oxlint --config .oxlintrc.json --type-aware --quiet .";
-        pass_filenames = false;
-        always_run = true;
-        priority = hookPriority;
-      };
-
-      format-python-pyupgrade = {
-        enable = true;
-        name = "format-python-pyupgrade";
-        package = pythonPyupgradeCheck;
-        entry = "${pythonPyupgradeCheck}/bin/check-python-pyupgrade";
-        pass_filenames = false;
-        always_run = true;
-        priority = hookPriority;
-      };
-
-      format-python-ruff = {
-        enable = true;
-        name = "format-python-ruff";
-        package = pythonToolBins;
-        entry = "${ruffExe} format --check --config pyproject.toml .";
-        pass_filenames = false;
-        always_run = true;
-        priority = hookPriority;
-      };
-
-      lint-python-compile = {
-        enable = true;
-        name = "lint-python-compile";
-        package = pythonCompileCheck;
-        entry = "${pythonCompileCheck}/bin/check-python-compile";
-        pass_filenames = false;
-        always_run = true;
-        priority = hookPriority;
-      };
-
-      lint-python-ruff = {
-        enable = true;
-        name = "lint-python-ruff";
-        package = pythonToolBins;
-        entry = "${ruffExe} check --config pyproject.toml .";
-        pass_filenames = false;
-        always_run = true;
-        priority = hookPriority;
-      };
-
-      lint-python-ty = {
-        enable = true;
-        name = "lint-python-ty";
-        package = pythonToolBins;
-        entry = "${tyExe} check${tyPythonFlag} .";
-        pass_filenames = false;
-        always_run = true;
-        priority = hookPriority;
-      };
-
-      lint-workflows-actionlint = {
-        enable = true;
-        name = "lint-workflows-actionlint";
-        package = workflowActionlintCheck;
-        entry = "${workflowActionlintCheck}/bin/check-workflow-actionlint";
-        pass_filenames = false;
-        always_run = true;
-        priority = hookPriority;
-      };
-
-      lint-pins-pinact = {
-        enable = true;
-        name = "lint-pins-pinact";
-        package = pkgs.pinact;
-        entry = "pinact run --check";
-        pass_filenames = false;
-        always_run = true;
-        priority = hookPriority;
       };
 
       commit-message-commitlint = {

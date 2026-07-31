@@ -16,7 +16,7 @@ This package builds Codex with `crate2nix` from the upstream Rust workspace.
   - crate overrides and install/smoke checks
   - final package assembly
 - `normalize_cargo_nix.py`
-  - package-specific wrapper around `lib/cargo_nix_normalizer.py`
+  - pure package-specific callback loaded by the central crate2nix normalizer
 
 ## Current strategy
 
@@ -41,7 +41,7 @@ crate2nix generate \
   -o packages/codex/Cargo.nix \
   -h packages/codex/crate-hashes.json \
   --default-features
-python packages/codex/normalize_cargo_nix.py packages/codex/Cargo.nix
+nix run path:.#nixcfg -- ci pipeline crate2nix normalize codex
 ```
 
 ## Recommended validation

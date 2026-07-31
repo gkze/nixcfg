@@ -88,11 +88,6 @@ def collect_imports(code: str) -> tuple[set[str], str]:
     return imports, module.with_changes(body=tuple(body)).code.strip("\n")
 
 
-def _format_import_alias(alias: ast.alias) -> str:
-    """Render one import alias back to source form."""
-    return alias.name if alias.asname is None else f"{alias.name} as {alias.asname}"
-
-
 def _import_module_sort_key(module: str) -> tuple[int, str]:
     """Sort stdlib imports ahead of third-party imports."""
     return (1 if module.startswith("pydantic") else 0, module)

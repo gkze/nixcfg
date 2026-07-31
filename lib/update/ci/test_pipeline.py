@@ -1,295 +1,62 @@
-"""Local CI pipeline simulation.
-
-Runs the same phases as ``.github/workflows/update.yml`` on the local
-machine, leveraging the nix-rosetta-builder for Linux cross-builds.
-
-Phases executed:
-  1. Resolve upstream versions  (``pipeline versions``)
-  2. Compute hashes             (``update --pinned-versions``)
-  3. Validate merged output     (sources.json round-trip check)
-
-An optional ``--full`` flag also exercises the split-and-merge path:
-it partitions the computed sources.json files by platform into separate
-artifact directories, then merges them back — exactly as CI does.
-"""
+"""Run the current-tree gates from the hosted CI workflow."""
 
 from __future__ import annotations
 
-import asyncio
-import json
-import shutil
-import sys
-import tempfile
-from pathlib import Path
-from typing import Annotated
+import shlex
+import subprocess
 
 import typer
-from pydantic import ValidationError
 
-from lib.nix.models.sources import SourceEntry
-from lib.update import cli as update_cli
-from lib.update.ci import crate2nix, merge_sources, resolve_versions
-from lib.update.ci._cli import make_main, make_typer_app
-from lib.update.paths import SOURCES_FILE_NAME, package_file_map
+from lib.update.ci._cli import make_typer_app
+from lib.update.ci.workflow_defs import DEEP_QUALITY_CHECKS, FAST_QUALITY_CHECKS
+from lib.update.paths import get_repo_root
 
-# Platforms matching the CI matrix.
-CI_PLATFORMS = ("aarch64-darwin", "x86_64-linux", "aarch64-linux")
-
-
-def _log(msg: str) -> None:
-    sys.stderr.write(f"[pipeline-test] {msg}\n")
-
-
-# ── Phase 1: Resolve versions ────────────────────────────────────────
-
-
-def _phase_resolve(pinned_path: Path) -> bool:
-    _log("Phase 1: Resolving upstream versions...")
-    rc = resolve_versions.main(["--output", str(pinned_path)])
-    if rc != 0:
-        _log(f"FAIL: pipeline versions exited {rc}")
-        return False
-
-    with pinned_path.open() as f:
-        data = json.load(f)
-    _log(f"  Resolved {len(data)} versions")
-    # Verify serialization round-trip.
-    json.dumps(data, indent=2, sort_keys=True)
-    _log("  JSON round-trip OK")
-    return True
+_QUALITY_SYSTEM = "x86_64-linux"
+_CURRENT_TREE_COMMANDS = (
+    *(
+        ("nix", "build", f"path:.#checks.{_QUALITY_SYSTEM}.{check}")
+        for check in (*FAST_QUALITY_CHECKS, *DEEP_QUALITY_CHECKS)
+    ),
+    (
+        "nix",
+        "run",
+        "--inputs-from",
+        "path:.",
+        "nixpkgs#pinact",
+        "--",
+        "run",
+        "--check",
+    ),
+    ("nix", "run", "path:.#nixcfg", "--", "ci", "pipeline", "crate2nix"),
+)
 
 
-# ── Phase 2: Compute hashes ──────────────────────────────────────────
+def _run_command(command: tuple[str, ...]) -> int:
+    typer.echo(f"+ {shlex.join(command)}", err=True)
+    return subprocess.run(  # noqa: S603
+        command,
+        cwd=get_repo_root(),
+        check=False,
+    ).returncode
 
 
-def _phase_compute(
-    pinned_path: Path,
-    source: str | None = None,
-) -> bool:
-    _log("Phase 2: Computing hashes (all platforms)...")
-    opts = update_cli.UpdateOptions(
-        pinned_versions=str(pinned_path),
-        source=source,
-    )
-    result = update_cli.run_updates(opts)
-    rc = asyncio.run(result) if asyncio.iscoroutine(result) else int(result)
-    if rc != 0:
-        _log(f"FAIL: update exited {rc}")
-        return False
-    _log("  Hash computation OK")
-    return True
-
-
-# ── Phase 3: Split & merge (optional) ────────────────────────────────
-
-
-def _split_sources_by_platform(work_dir: Path) -> dict[str, Path]:
-    """Copy per-package sources.json into platform-keyed artifact dirs.
-
-    Each ``sources.json`` is copied into *every* platform directory
-    (mirroring how each CI runner produces a complete copy of sources).
-    In real CI, each copy only contains hashes for that runner's
-    platform — but for local testing the content is identical and the
-    merge logic still validates correctness.
-    """
-    source_files = package_file_map(SOURCES_FILE_NAME)
-    platform_dirs: dict[str, Path] = {}
-    for plat in CI_PLATFORMS:
-        pdir = work_dir / f"sources-{plat}"
-        platform_dirs[plat] = pdir
-        for src_path in source_files.values():
-            rel = src_path.relative_to(Path.cwd())
-            dest = pdir / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_path, dest)
-
-    return platform_dirs
-
-
-def _phase_merge(work_dir: Path) -> bool:
-    _log("Phase 3: Split & merge sources...")
-    platform_dirs = _split_sources_by_platform(work_dir)
-    roots = [str(d) for d in platform_dirs.values()]
-    _log(f"  Created {len(roots)} platform artifact dirs")
-
-    rc = merge_sources.main(roots)
-    if rc != 0:
-        _log(f"FAIL: pipeline sources exited {rc}")
-        return False
-    _log("  Merge OK")
-    return True
-
-
-# ── Phase 4: Validate ────────────────────────────────────────────────
-
-
-def _phase_validate() -> bool:
-    _log("Phase 4: Validating sources.json files...")
-    source_files = package_file_map(SOURCES_FILE_NAME)
-    errors = 0
-    for name, path in sorted(source_files.items()):
-        try:
-            with path.open() as f:
-                data = json.load(f)
-            SourceEntry.model_validate(data)
-        except (OSError, json.JSONDecodeError, ValidationError) as exc:
-            _log(f"  INVALID: {name} ({path}): {exc}")
-            errors += 1
-
-    if errors:
-        _log(f"  {errors} invalid sources.json files")
-        return False
-
-    _log(f"  All {len(source_files)} sources.json files valid")
-    return True
-
-
-def _phase_crate2nix() -> bool:
-    _log("Phase 5: Validating checked-in crate2nix artifacts...")
-    rc = crate2nix.main([])
-    if rc != 0:
-        _log(f"FAIL: pipeline crate2nix exited {rc}")
-        return False
-    _log("  crate2nix freshness OK")
-    return True
-
-
-# ── Entrypoint ────────────────────────────────────────────────────────
-
-
-def run(
-    *,
-    full: bool = False,
-    source: str | None = None,
-    resolve_only: bool = False,
-    keep_artifacts: bool = False,
-) -> int:
-    """Run the local CI pipeline simulation with explicit options."""
-    work_dir = Path(tempfile.mkdtemp("nixcfg-ci-test-"))
-    pinned_path = work_dir / "pinned-versions.json"
-
-    _log(f"Work directory: {work_dir}")
-
-    phases: list[tuple[str, bool]] = []
-
-    # Phase 1: Resolve versions
-    ok = _phase_resolve(pinned_path)
-    phases.append(("pipeline versions", ok))
-    if not ok or resolve_only:
-        _print_summary(phases, work_dir, keep=keep_artifacts)
-        return 0 if ok else 1
-
-    # Phase 2: Compute hashes
-    ok = _phase_compute(pinned_path, source)
-    phases.append(("compute-hashes", ok))
-    if not ok:
-        _print_summary(phases, work_dir, keep=keep_artifacts)
-        return 1
-
-    # Phase 3: Split & merge (optional)
-    if full:
-        ok = _phase_merge(work_dir)
-        phases.append(("pipeline sources", ok))
-        if not ok:
-            _print_summary(phases, work_dir, keep=keep_artifacts)
-            return 1
-
-    # Phase 4: Validate
-    ok = _phase_validate()
-    phases.append(("validate", ok))
-    if not ok:
-        _print_summary(phases, work_dir, keep=keep_artifacts)
-        return 1
-
-    # Phase 5: Validate checked-in crate2nix artifacts
-    ok = _phase_crate2nix()
-    phases.append(("crate2nix", ok))
-
-    _print_summary(phases, work_dir, keep=keep_artifacts)
-    return 0 if ok else 1
+def run() -> int:
+    """Run the hosted workflow's current-tree gates, failing fast."""
+    for command in _CURRENT_TREE_COMMANDS:
+        if returncode := _run_command(command):
+            return returncode
+    return 0
 
 
 app = make_typer_app(
-    help_text="Simulate the CI update pipeline locally.",
-    no_args_is_help=False,
+    help_text=(
+        "Run hosted CI's current-tree gates on x86_64-linux. "
+        "Commit-range linting remains GitHub-only."
+    ),
 )
 
 
 @app.callback(invoke_without_command=True)
-def cli(
-    *,
-    full: Annotated[
-        bool,
-        typer.Option(
-            "-f",
-            "--full",
-            help="Also run the split-and-merge phase (tests merge logic).",
-        ),
-    ] = False,
-    keep_artifacts: Annotated[
-        bool,
-        typer.Option(
-            "-k",
-            "--keep-artifacts",
-            help="Keep the temp directory with intermediate artifacts.",
-        ),
-    ] = False,
-    resolve_only: Annotated[
-        bool,
-        typer.Option(
-            "-r",
-            "--resolve-only",
-            help="Only run the version resolution phase (fastest smoke test).",
-        ),
-    ] = False,
-    source: Annotated[
-        str | None,
-        typer.Option(
-            "-s",
-            "--source",
-            help="Only compute hashes for a single source (faster iteration).",
-        ),
-    ] = None,
-) -> None:
-    """Run the local CI pipeline simulation."""
-    raise typer.Exit(
-        code=run(
-            full=full,
-            keep_artifacts=keep_artifacts,
-            resolve_only=resolve_only,
-            source=source,
-        )
-    )
-
-
-main = make_main(app, prog_name="pipeline test")
-
-
-def _print_summary(
-    phases: list[tuple[str, bool]],
-    work_dir: Path,
-    *,
-    keep: bool,
-) -> None:
-    _log("")
-    _log("Pipeline summary:")
-    all_ok = True
-    for name, ok in phases:
-        status = "PASS" if ok else "FAIL"
-        _log(f"  {status}: {name}")
-        if not ok:
-            all_ok = False
-
-    if keep:
-        _log(f"Artifacts kept at: {work_dir}")
-    elif work_dir.exists():
-        shutil.rmtree(work_dir)
-
-    if all_ok:
-        _log("All phases passed.")
-    else:
-        _log("Pipeline FAILED.")
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+def cli() -> None:
+    """Run quality, action-pin, and crate2nix freshness gates."""
+    raise typer.Exit(code=run())

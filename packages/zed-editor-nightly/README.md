@@ -22,7 +22,7 @@ package. The repo-local package expression is responsible for:
   - source preparation for workspace-relative assets/build scripts
   - shared crate overrides and platform-specific install logic
 - `normalize_cargo_nix.py`
-  - thin package-specific wrapper around `lib/cargo_nix_normalizer.py`
+  - pure package-specific callback loaded by the central crate2nix normalizer
 - `install_zed_nightly_app.sh`
   - Darwin app bundle installer used by the crate2nix build
 
@@ -57,8 +57,7 @@ crate2nix generate \
   -h packages/zed-editor-nightly/crate-hashes.json \
   --default-features
 
-python packages/zed-editor-nightly/normalize_cargo_nix.py \
-  packages/zed-editor-nightly/Cargo.nix
+nix run path:.#nixcfg -- ci pipeline crate2nix normalize zed-editor-nightly
 ```
 
 ## Recommended validation

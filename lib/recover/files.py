@@ -7,9 +7,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 
 from lib.recover._cli import emit_error, emit_success, require_apply_for_stage
-from lib.recover._common import files_equal, stage_paths
+from lib.recover._common import apply_recovery_paths, files_equal
 from lib.recover.snapshot import DEFAULT_GENERATION, plan_snapshot_recovery
-from lib.update import io as update_io
 from lib.update.paths import REPO_ROOT
 
 
@@ -143,26 +142,13 @@ def apply_file_recovery(
     stage: bool = False,
 ) -> tuple[str, ...]:
     """Apply a file recovery plan and optionally stage the changes."""
-    repo_root = Path(plan.repo_root)
-    snapshot_root = Path(plan.snapshot)
-    changed_paths: list[str] = []
-
-    for relative_path in plan.write_paths:
-        source_path = snapshot_root / relative_path
-        target_path = repo_root / relative_path
-        update_io.atomic_write_bytes(target_path, source_path.read_bytes(), mkdir=True)
-        changed_paths.append(relative_path)
-
-    for relative_path in plan.remove_paths:
-        target_path = repo_root / relative_path
-        if target_path.exists():
-            target_path.unlink()
-            changed_paths.append(relative_path)
-
-    changed_tuple = tuple(changed_paths)
-    if stage:
-        stage_paths(repo_root, changed_tuple)
-    return changed_tuple
+    return apply_recovery_paths(
+        repo_root=Path(plan.repo_root),
+        snapshot_root=Path(plan.snapshot),
+        write_paths=plan.write_paths,
+        remove_paths=plan.remove_paths,
+        stage=stage,
+    )
 
 
 def _render_plain(

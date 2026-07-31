@@ -19,6 +19,7 @@ from lib.nix.commands.base import (
     run_nix,
     stream_process,
 )
+from lib.update.ci import verbosity
 from lib.update.ci._cli import (
     make_dual_typer_apps,
     make_main,
@@ -58,26 +59,9 @@ class GenerationTarget:
 
 
 _format_duration = format_duration
-
-
-def _python_log_level(verbosity: int) -> int:
-    """Map CLI verbosity count to Python logging level."""
-    return logging.DEBUG if verbosity > 0 else logging.INFO
-
-
-def _nix_verbosity_args(nix_verbosity: int) -> list[str]:
-    """Return nix verbosity arguments for *nix_verbosity* level."""
-    if nix_verbosity <= 0:
-        return []
-    return ["-" + ("v" * nix_verbosity)]
-
-
-def _nix_verbosity_from_cli(verbosity: int) -> int:
-    """Map CLI verbosity to nix verbosity level.
-
-    ``-v`` enables Python DEBUG logs only; ``-vv`` forwards ``-v`` to Nix.
-    """
-    return max(0, verbosity - 1)
+_nix_verbosity_args = verbosity.nix_verbosity_args
+_nix_verbosity_from_cli = verbosity.nix_verbosity_from_cli
+_python_log_level = verbosity.python_log_level
 
 
 def _default_home_profile() -> str:

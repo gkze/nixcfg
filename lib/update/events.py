@@ -128,6 +128,15 @@ def expect_command_result(payload: object) -> CommandResult:
     raise TypeError(msg)
 
 
+def raise_failed_command(action: str, result: CommandResult) -> None:
+    """Raise a concise ``RuntimeError`` when *result* reports failure."""
+    if result.returncode == 0:
+        return
+    detail = result.stderr.strip() or result.stdout.strip()
+    message = f"{action} failed (exit {result.returncode})"
+    raise RuntimeError(f"{message}: {detail}" if detail else message)
+
+
 def expect_str(payload: object) -> str:
     """Return payload as ``str`` or raise ``TypeError``."""
     if isinstance(payload, str):

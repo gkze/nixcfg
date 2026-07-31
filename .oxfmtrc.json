@@ -13,7 +13,6 @@
   "ignorePatterns": [
     "**/*pre-commit-config.json",
     "schemas/codegen/testdata/lockfile-golden/expected.codegen.lock.json",
-    "misc/zellij-plugin-wasm-ts/assembly/**",
     "**/.direnv",
     "**/.claude/worktrees",
     "**/.venv",

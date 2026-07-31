@@ -545,46 +545,25 @@
             "bind \"Alt L\"".GoToNextTab = { };
             "bind \"Alt H\"".GoToPreviousTab = { };
           };
-          pane._children = [
-            # Symmetric directional splits; Zellij core supports Left/Up even
-            # though the shipped defaults only expose Down/Right shortcuts.
-            {
-              bind = {
-                _args = [ "H" ];
-                _children = [
-                  { NewPane._args = [ "Left" ]; }
-                  { SwitchToMode._args = [ "Normal" ]; }
-                ];
+          # Symmetric directional splits; Zellij core supports Left/Up even
+          # though the shipped defaults only expose Down/Right shortcuts.
+          pane._children =
+            lib.mapAttrsToList
+              (key: direction: {
+                bind = {
+                  _args = [ key ];
+                  _children = [
+                    { NewPane._args = [ direction ]; }
+                    { SwitchToMode._args = [ "Normal" ]; }
+                  ];
+                };
+              })
+              {
+                H = "Left";
+                J = "Down";
+                K = "Up";
+                L = "Right";
               };
-            }
-            {
-              bind = {
-                _args = [ "J" ];
-                _children = [
-                  { NewPane._args = [ "Down" ]; }
-                  { SwitchToMode._args = [ "Normal" ]; }
-                ];
-              };
-            }
-            {
-              bind = {
-                _args = [ "K" ];
-                _children = [
-                  { NewPane._args = [ "Up" ]; }
-                  { SwitchToMode._args = [ "Normal" ]; }
-                ];
-              };
-            }
-            {
-              bind = {
-                _args = [ "L" ];
-                _children = [
-                  { NewPane._args = [ "Right" ]; }
-                  { SwitchToMode._args = [ "Normal" ]; }
-                ];
-              };
-            }
-          ];
         };
         default_layout = "compact";
         pane_frames = false;

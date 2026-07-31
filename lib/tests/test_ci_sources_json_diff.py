@@ -1,170 +1,80 @@
-"""Tests for per-package sources.json diff rendering."""
+"""Behavioral tests for the canonical sources.json diff contract."""
 
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, Protocol
+from pathlib import Path
 
-from lib.update.ci.sources_json_diff import run_diff
+import pytest
+from typer.testing import CliRunner
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
-
-class _MonkeyPatchLike(Protocol):
-    def setattr(self, target: str, value: object) -> None: ...
+from lib.update.ci import sources_json_diff
 
 
-def _write_json(path: Path, payload: dict[str, object]) -> None:
+def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_run_diff_returns_no_changes_message(tmp_path: Path) -> None:
-    """Return stable no-change text when JSON payloads are equal."""
+def test_run_diff_returns_no_changes_for_semantically_equal_json(
+    tmp_path: Path,
+) -> None:
+    """Ignore source formatting and object-key order."""
     old_file = tmp_path / "old.json"
     new_file = tmp_path / "new.json"
-    payload = {"version": "1.0.0", "hashes": [{"hashType": "sha256", "hash": "abc"}]}
-    _write_json(old_file, payload)
-    _write_json(new_file, payload)
+    old_file.write_text('{"version":"1.0.0","input":"demo"}', encoding="utf-8")
+    new_file.write_text(
+        '{\n  "input": "demo",\n  "version": "1.0.0"\n}\n',
+        encoding="utf-8",
+    )
 
-    diff = run_diff(old_file, new_file)
+    assert (
+        sources_json_diff.run_diff(old_file, new_file)
+        == "No source entry changes detected."
+    )
 
-    assert diff == "No source entry changes detected."
 
-
-def test_run_diff_prefers_jd_output_when_available(
-    tmp_path: Path,
-    monkeypatch: _MonkeyPatchLike,
-) -> None:
-    """Use jd output first so CLI diffs align with jd style."""
+def test_run_diff_renders_canonical_unified_json(tmp_path: Path) -> None:
+    """Render one deterministic, in-process diff for changed source entries."""
     old_file = tmp_path / "old.json"
     new_file = tmp_path / "new.json"
     _write_json(old_file, {"version": "1.0.0"})
     _write_json(new_file, {"version": "1.1.0"})
 
-    monkeypatch.setattr(
-        "lib.update.ci.sources_json_diff._render_jd_diff",
-        lambda _old_path, _new_path: '@ ["version"]\n- "1.0.0"\n+ "1.1.0"',
+    assert sources_json_diff.run_diff(old_file, new_file) == (
+        "--- old/source-entry.json\n"
+        "+++ new/source-entry.json\n"
+        "@@ -1,3 +1,3 @@\n"
+        " {\n"
+        '-  "version": "1.0.0"\n'
+        '+  "version": "1.1.0"\n'
+        " }"
     )
 
-    diff = run_diff(old_file, new_file)
 
-    assert diff.startswith('@ ["version"]')
-    assert '+ "1.1.0"' in diff
-
-
-def test_run_diff_uses_jd_command_output_on_auto_mode(
-    tmp_path: Path,
-    monkeypatch: _MonkeyPatchLike,
-) -> None:
-    """Execute external ``jd`` output path when it returns diff data."""
+def test_run_diff_requires_source_entry_objects(tmp_path: Path) -> None:
+    """Reject top-level JSON values that cannot be a sources.json entry."""
     old_file = tmp_path / "old.json"
     new_file = tmp_path / "new.json"
-    _write_json(old_file, {"version": "1.0.0"})
-    _write_json(new_file, {"version": "1.1.0"})
+    _write_json(old_file, [])
+    _write_json(new_file, {})
 
-    executed: dict[str, list[str]] = {}
-
-    def _fake_run(cmd: list[str], **_kw: object) -> SimpleNamespace:
-        executed["cmd"] = list(cmd)
-        return SimpleNamespace(
-            returncode=1,
-            stdout='@ ["version"]\n- "1.0.0"\n+ "1.1.0"',
-            stderr="",
-        )
-
-    monkeypatch.setattr(
-        "lib.update.ci.sources_json_diff.shutil.which", lambda _: "/usr/bin/jd"
-    )
-    monkeypatch.setattr("lib.update.ci.sources_json_diff._run_command", _fake_run)
-
-    diff = run_diff(old_file, new_file)
-
-    assert diff == '@ ["version"]\n- "1.0.0"\n+ "1.1.0"'
-    assert executed["cmd"] == ["/usr/bin/jd", str(old_file), str(new_file)]
+    with pytest.raises(TypeError, match="Expected JSON object"):
+        sources_json_diff.run_diff(old_file, new_file)
 
 
-def test_run_diff_uses_structural_fallback_when_jd_not_available(
-    tmp_path: Path,
-    monkeypatch: _MonkeyPatchLike,
-) -> None:
-    """Render path-based hunks when jd and graphtage are unavailable."""
+def test_cli_prints_the_canonical_diff_without_format_selection(tmp_path: Path) -> None:
+    """Expose the same single diff contract through the public command."""
     old_file = tmp_path / "old.json"
     new_file = tmp_path / "new.json"
-    _write_json(old_file, {"hashes": [{"hash": "old"}]})
-    _write_json(new_file, {"hashes": [{"hash": "new"}]})
+    _write_json(old_file, {"version": "1"})
+    _write_json(new_file, {"version": "2"})
 
-    monkeypatch.setattr(
-        "lib.update.ci.sources_json_diff._render_jd_diff",
-        lambda _old_path, _new_path: "",
-    )
-    monkeypatch.setattr(
-        "lib.update.ci.sources_json_diff._render_graphtage_diff",
-        lambda _old_data, _new_data: "",
+    result = CliRunner().invoke(
+        sources_json_diff.app,
+        [str(old_file), str(new_file)],
     )
 
-    diff = run_diff(old_file, new_file)
-
-    assert '@ ["hashes", 0, "hash"]' in diff
-    assert '- "old"' in diff
-    assert '+ "new"' in diff
-
-
-def test_run_diff_explicit_jd_format_falls_back_when_jd_unavailable(
-    tmp_path: Path,
-    monkeypatch: _MonkeyPatchLike,
-) -> None:
-    """Avoid false no-change output when --format jd is unavailable."""
-    old_file = tmp_path / "old.json"
-    new_file = tmp_path / "new.json"
-    _write_json(old_file, {"version": "1.0.0"})
-    _write_json(new_file, {"version": "1.1.0"})
-
-    monkeypatch.setattr(
-        "lib.update.ci.sources_json_diff._render_jd_diff",
-        lambda _old_path, _new_path: "",
-    )
-
-    diff = run_diff(old_file, new_file, output_format="jd")
-
-    assert diff != "No source entry changes detected."
-    assert '@ ["version"]' in diff
-
-
-def test_run_diff_summary_format_is_legible(tmp_path: Path) -> None:
-    """Render concise field-level summary output for PR body readability."""
-    old_file = tmp_path / "old.json"
-    new_file = tmp_path / "new.json"
-    _write_json(
-        old_file,
-        {
-            "version": "1.0.0",
-            "hashes": {"x86_64-linux": "oldhash"},
-        },
-    )
-    _write_json(
-        new_file,
-        {
-            "version": "1.1.0",
-            "hashes": {"x86_64-linux": "newhash", "aarch64-darwin": "darwinhash"},
-        },
-    )
-
-    diff = run_diff(old_file, new_file, output_format="summary")
-
-    assert 'changed version: "1.0.0" -> "1.1.0"' in diff
-    assert 'changed hashes.x86_64-linux: "oldhash" -> "newhash"' in diff
-    assert 'added hashes.aarch64-darwin: "darwinhash"' in diff
-
-
-def test_run_diff_summary_format_handles_removed_fields(tmp_path: Path) -> None:
-    """Render removed entries clearly in summary mode."""
-    old_file = tmp_path / "old.json"
-    new_file = tmp_path / "new.json"
-    _write_json(old_file, {"input": "demo", "urls": {"linux": "https://example.test"}})
-    _write_json(new_file, {"input": "demo"})
-
-    diff = run_diff(old_file, new_file, output_format="summary")
-
-    assert 'removed urls.linux: "https://example.test"' in diff
+    assert result.exit_code == 0
+    assert result.output.startswith("--- old/source-entry.json\n")
+    assert '-  "version": "1"' in result.output
+    assert '+  "version": "2"' in result.output

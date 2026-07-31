@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shlex
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -22,6 +23,7 @@ from lib.update.events import (
 )
 from lib.update.generated_artifact_commands import stream_command_materialized_artifacts
 from lib.update.nix import _build_overlay_attr_expr
+from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
@@ -235,8 +237,7 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
         _fake_compute_fixed_output_hash,
     )
     monkeypatch.setattr(
-        module,
-        "stream_command_materialized_artifacts",
+        "lib.update.updaters.t3_runtime.stream_command_materialized_artifacts",
         _fake_materialize_runtime_locks,
     )
     monkeypatch.setattr(
@@ -343,8 +344,7 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
         yield UpdateEvent.value(source, NEW_HASH)
 
     monkeypatch.setattr(
-        module,
-        "stream_command_materialized_artifacts",
+        "lib.update.updaters.t3_runtime.stream_command_materialized_artifacts",
         _fake_materialize_runtime_locks,
     )
     monkeypatch.setattr(
@@ -367,7 +367,11 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
     )
 
     assert captured["source"] == package_name
-    assert captured["args"] == module._runtime_lock_command()
+    assert captured["args"][:2] == ["sh", "-c"]
+    assert captured["args"][2] == (
+        f"cd {shlex.quote(str(REPO_ROOT))} && "
+        "nix run .#t3code-desktop.passthru.updateRuntimeLocks"
+    )
     assert captured["artifact_paths"] == (
         "packages/t3code/bun.lock",
         "packages/t3code-desktop/bun.lock",

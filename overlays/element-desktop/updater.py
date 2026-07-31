@@ -40,15 +40,6 @@ class ElementDesktopUpdater(HashEntryUpdater):
         version = read_pinned_source_version(self.name)
         return VersionInfo(version=version, metadata=NO_METADATA)
 
-    async def _is_latest(
-        self,
-        context: UpdateContext | SourceEntry | None,
-        info: VersionInfo,
-    ) -> bool:
-        """Recompute hashes for pinned versions before equality checks."""
-        _ = (context, info)
-        return False
-
     @staticmethod
     def _src_expr(version: str) -> str:
         return _build_fetch_from_github_expr(

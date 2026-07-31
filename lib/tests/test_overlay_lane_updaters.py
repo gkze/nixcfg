@@ -328,6 +328,8 @@ def test_google_chrome_fetch_latest_returns_version_without_metadata(
 
     assert latest.version == "133.0.6943.54"
     assert latest.metadata is module.NO_METADATA
+    assert updater.materialize_when_current is True
+    assert updater.PLATFORMS["aarch64-darwin"] == updater.PLATFORMS["x86_64-darwin"]
 
 
 def test_sentry_cli_fetch_hashes_handles_event_flow_and_type_errors(

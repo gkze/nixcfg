@@ -38,12 +38,6 @@ def _format_source_cell(info: InputInfo) -> str:
     return source
 
 
-def _format_rev_date(info: InputInfo) -> str:
-    if info.date:
-        return f"{info.rev} ({info.date})"
-    return info.rev
-
-
 def _format_revision_cell(info: InputInfo) -> str:
     label = info.rev
     if info.owner and info.repo and info.type == "github" and info.rev_full:
@@ -97,15 +91,6 @@ def _collect_changes(
             updated.append((old_info, new_info))
 
     return added, removed, updated
-
-
-def _append_section(lines: list[str], heading: str, section_lines: list[str]) -> None:
-    if not section_lines:
-        return
-    if lines:
-        lines.append("")
-    lines.append(heading)
-    lines.extend(section_lines)
 
 
 def _escape_md(value: str) -> str:

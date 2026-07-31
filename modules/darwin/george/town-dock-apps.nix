@@ -20,6 +20,7 @@ let
 in
 dock.mkDockModule {
   inherit
+    homeDirectory
     options
     pkgs
     ;
@@ -46,22 +47,5 @@ dock.mkDockModule {
     (appPath "linear" "Linear.app")
     (appPath "spotify" "Spotify.app")
     "/System/Applications/System Settings.app"
-  ];
-  others = [
-    {
-      path = "/Applications";
-      sort = "name";
-    }
-    {
-      path = "/Applications/Utilities";
-      sort = "name";
-    }
-    {
-      path = "${homeDirectory}/Downloads";
-      sort = "datemodified";
-    }
-  ];
-  removeOthers = [
-    "${homeDirectory}/Applications"
   ];
 }

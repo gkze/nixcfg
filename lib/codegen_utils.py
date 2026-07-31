@@ -1,11 +1,20 @@
-"""Shared helpers for post-processing generated Pydantic code."""
+"""Shared helpers for schema code generation."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import override
 
 import isort
 import libcst as cst
+
+type ProgressReporter = Callable[[str], None]
+
+
+def emit_progress(progress: ProgressReporter | None, message: str) -> None:
+    """Invoke an optional schema-codegen progress reporter."""
+    if progress is not None:
+        progress(message)
 
 
 class _ConstrAnnotationTransformer(cst.CSTTransformer):

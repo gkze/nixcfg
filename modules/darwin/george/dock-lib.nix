@@ -1,4 +1,23 @@
 { lib }:
+let
+  standardOthers = homeDirectory: [
+    {
+      path = "/Applications";
+      sort = "name";
+    }
+    {
+      path = "/Applications/Utilities";
+      sort = "name";
+    }
+    {
+      path = "${homeDirectory}/Downloads";
+      sort = "datemodified";
+    }
+  ];
+  standardRemoveOthers = homeDirectory: [
+    "${homeDirectory}/Applications"
+  ];
+in
 {
   mkDockContext =
     {
@@ -33,10 +52,11 @@
     {
       activationName,
       apps,
+      homeDirectory,
       options,
-      others,
+      others ? standardOthers homeDirectory,
       pkgs ? null,
-      removeOthers ? [ ],
+      removeOthers ? standardRemoveOthers homeDirectory,
     }:
     let
       inherit (lib)

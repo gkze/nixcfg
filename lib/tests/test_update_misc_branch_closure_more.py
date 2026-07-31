@@ -16,7 +16,6 @@ from lib.nix.commands.base import NixCommandError, ProcessDone, ProcessLine
 from lib.nix.models.sources import HashEntry
 from lib.update.events import (
     CommandResult,
-    GatheredValues,
     UpdateEvent,
     UpdateEventKind,
     expect_source_hashes,
@@ -92,58 +91,6 @@ def test_compute_drv_fingerprint_without_store_prefix(
 
     monkeypatch.setattr("lib.update.nix.run_command", _run_command)
     assert asyncio.run(compute_drv_fingerprint("demo")) == "abc123"
-
-
-def test_nix_cargo_yields_passthrough_events(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Forward non-gather events from ``gather_event_streams``."""
-    from lib.update.nix_cargo import compute_import_cargo_lock_output_hashes
-    from lib.update.updaters import CargoLockGitDep
-
-    async def _fake_gather(_streams: object) -> AsyncIterator[object]:
-        yield UpdateEvent.status("demo", "prefetching")
-        yield GatheredValues(values={"crate-1.0.0": "sha256-demo"})
-
-    monkeypatch.setattr("lib.update.nix_cargo.gather_event_streams", _fake_gather)
-    monkeypatch.setattr(
-        "lib.update.nix_cargo.get_flake_input_node",
-        lambda _name: type(
-            "_Node",
-            (),
-            {"locked": type("_L", (), {"owner": "o", "repo": "r", "rev": "v"})()},
-        )(),
-    )
-
-    class _Session:
-        async def __aenter__(self) -> object:
-            return object()
-
-        async def __aexit__(self, *_args: object) -> bool:
-            return False
-
-    monkeypatch.setattr("lib.update.nix_cargo.aiohttp.ClientSession", _Session)
-    monkeypatch.setattr(
-        "lib.update.nix_cargo.fetch_url",
-        lambda *_args, **_kwargs: asyncio.sleep(
-            0,
-            result=(
-                b'[[package]]\nname = "crate"\nversion = "1.0.0"\n'
-                b'source = "git+https://github.com/a/b?x#deadbeef"\n'
-            ),
-        ),
-    )
-
-    deps = [
-        CargoLockGitDep(git_dep="crate-1.0.0", hash_type="sha256", match_name="crate")
-    ]
-    events = _collect(
-        compute_import_cargo_lock_output_hashes(
-            "demo",
-            "input",
-            lockfile_path="Cargo.lock",
-            git_deps=deps,
-        )
-    )
-    assert any(event.kind == UpdateEventKind.STATUS for event in events)
 
 
 def test_stream_command_timeout_override_and_empty_sanitized_line(
@@ -268,7 +215,7 @@ def test_packaging_source_policy_parser_and_python_audit_edges() -> None:
     )
 
     audit = policy.PythonRewriteAudit(allowed_sites=())
-    assigned: dict[str, list[tuple[int, int, int, int, str]]] = {}
+    assigned: dict[str, list[str]] = {}
     audit._record_assignment(None, (), assigned)
     audit._record_assignment(ast.Constant(1), [ast.Name("plain")], assigned)
     assert assigned == {}
@@ -291,8 +238,35 @@ def test_packaging_source_policy_parser_and_python_audit_edges() -> None:
     function = module.body[0]
     assert isinstance(function, ast.FunctionDef)
     sites = audit._function_sites(REPO_ROOT / "packages/demo/updater.py", function)
-    site_names = {site[-1] for site in sites}
-    assert {"replace", "sub", "subn"} <= site_names
+    site_calls = {site[1] for site in sites}
+    assert {
+        "pattern.replace('old', 'new')",
+        "pattern.subn('x', 'y')",
+        "pattern.sub('a', 'b')",
+        "pattern.replace('c', 'd')",
+    } <= site_calls
+
+    nested_module = ast.parse(
+        "def outer(path, pattern):\n"
+        "    path.write_text(pattern.replace('same', 'value'))\n"
+        "    def inner():\n"
+        "        path.write_text(pattern.replace('same', 'value'))\n"
+    )
+    seen_calls: set[ast.Call] = set()
+    nested_sites = [
+        site
+        for node in ast.walk(nested_module)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        for site in audit._function_sites(
+            REPO_ROOT / "packages/demo/updater.py",
+            node,
+            seen_calls=seen_calls,
+        )
+    ]
+    assert [site[1] for site in nested_sites] == [
+        "pattern.replace('same', 'value')",
+        "pattern.replace('same', 'value')",
+    ]
 
     plain_call = ast.parse("func(value)").body[0]
     assert isinstance(plain_call, ast.Expr)
