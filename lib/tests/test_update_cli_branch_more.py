@@ -52,7 +52,7 @@ from lib.update.source_runner import (
     run_sources_phase,
     update_source_task,
 )
-from lib.update.updaters import DenoDepsHashUpdater, VersionInfo
+from lib.update.updaters import DenoDepsHashUpdater, UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -499,7 +499,10 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
 def test_update_source_task_collects_artifact_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Return generated artifacts emitted by updater streams in stable path order."""
+    """Return source and artifact results while forwarding effective source state."""
+    updated_entry = SourceEntry(version="2.0.0", hashes={})
+    effective_sources = {"dependency": SourceEntry(version="1.0.0", hashes={})}
+    seen_contexts: list[UpdateContext] = []
 
     class _ArtifactUpdater:
         def __init__(self, *, config: object | None = None) -> None:
@@ -511,8 +514,12 @@ def test_update_source_task_collects_artifact_events(
             session: aiohttp.ClientSession,
             *,
             pinned_version: VersionInfo | None = None,
+            context: UpdateContext | None = None,
         ) -> AsyncIterator[UpdateEvent]:
             _ = (current, session, pinned_version)
+            if context is None:
+                raise AssertionError
+            seen_contexts.append(context)
             yield UpdateEvent.artifact(
                 "demo",
                 [
@@ -520,7 +527,7 @@ def test_update_source_task_collects_artifact_events(
                     GeneratedArtifact.text("packages/demo/a.txt", "a\n"),
                 ],
             )
-            yield UpdateEvent.result("demo")
+            yield UpdateEvent.result("demo", updated_entry)
 
     async def _run_queue_task(
         *, source: str, queue: asyncio.Queue[UpdateEvent | None], task
@@ -545,6 +552,7 @@ def test_update_source_task_collects_artifact_events(
                     update_input_tasks={},
                     queue=queue,
                     generated_artifacts={},
+                    effective_sources=effective_sources,
                     config=resolve_config(),
                 ),
             )
@@ -552,6 +560,8 @@ def test_update_source_task_collects_artifact_events(
     result = _run(_run_case())
 
     assert result.completed is True
+    assert result.source_update is updated_entry
+    assert seen_contexts[0].effective_sources is effective_sources
     assert [artifact.path for artifact in result.artifacts] == [
         GeneratedArtifact.text("packages/demo/a.txt", "a\n").path,
         GeneratedArtifact.text("packages/demo/z.txt", "z\n").path,
@@ -722,10 +732,13 @@ def test_run_sources_phase_serializes_flake_input_refreshes(
     assert max_active_refreshes == 1
 
 
-def test_run_sources_phase_passes_companion_artifacts_between_waves(
+@pytest.mark.parametrize("native_only", [False, True])
+def test_run_sources_phase_passes_companion_state_between_waves(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    native_only: bool,
 ) -> None:
-    """Companion waves should see generated artifacts emitted by earlier primaries."""
+    """Companions see source and artifact updates emitted by earlier primaries."""
 
     class _CodexUpdater:
         pass
@@ -734,6 +747,17 @@ def test_run_sources_phase_passes_companion_artifacts_between_waves(
         companion_of = "codex"
 
     seen_overrides: list[dict[str, str]] = []
+    seen_sources: list[SourceEntry] = []
+    baseline_entry = SourceEntry(
+        version="1.0.0",
+        hashes={},
+        urls={"existing": "https://example.com/existing"},
+    )
+    source_update = SourceEntry(
+        version="2.0.0",
+        hashes={},
+        urls={"added": "https://example.com/added"},
+    )
 
     async def _update_source(
         name: str, *, context: SourceTaskContext
@@ -747,11 +771,13 @@ def test_run_sources_phase_passes_companion_artifacts_between_waves(
                         '{ "v8" = rec { version = "147.4.0"; }; }\n',
                     ),
                 ),
+                source_update=source_update,
             )
 
         seen_overrides.append({
             str(path): content for path, content in context.generated_artifacts.items()
         })
+        seen_sources.append(context.effective_sources["codex"])
         return SourceTaskResult(completed=True)
 
     monkeypatch.setattr(
@@ -766,13 +792,13 @@ def test_run_sources_phase_passes_companion_artifacts_between_waves(
                 source_names=["codex", "codex-v8"],
                 sources=SourcesFile(
                     entries={
-                        "codex": SourceEntry(hashes={}),
+                        "codex": baseline_entry,
                         "codex-v8": SourceEntry(hashes={}),
                     }
                 ),
                 queue=asyncio.Queue(),
                 update_input=False,
-                native_only=False,
+                native_only=native_only,
                 config=resolve_config(),
                 pinned={},
             )
@@ -782,6 +808,10 @@ def test_run_sources_phase_passes_companion_artifacts_between_waves(
     assert seen_overrides == [
         {"packages/codex/Cargo.nix": '{ "v8" = rec { version = "147.4.0"; }; }\n'}
     ]
+    expected_source = (
+        baseline_entry.merge(source_update) if native_only else source_update
+    )
+    assert seen_sources == [expected_source]
 
 
 def test_run_sources_phase_skips_companions_after_failed_parent(

@@ -98,6 +98,10 @@ let
         src = dependencySource;
         inherit pnpm;
         fetcherVersion = 4;
+        pnpmInstallFlags = [
+          "--fetch-retries=5"
+          "--network-concurrency=1"
+        ];
         hash = outputs.lib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system;
       };
     in

@@ -1,4 +1,5 @@
 {
+  cargoNixFn ? import ./Cargo.nix,
   prev,
   slib,
   sources,
@@ -57,7 +58,6 @@ let
   v8NativeDrv = v8Build.nativeDrv;
   inherit (v8Build) chromiumToolchainBundle;
 
-  cargoNixFn = import ./Cargo.nix;
   cargoNixGooseVersion = (cargoNixFn { pkgs = prev; }).internal.crates."goose-cli".version;
   cargoNixV8Version = (cargoNixFn { pkgs = prev; }).internal.crates."v8-goose".version;
   cargoNixVersionCheck =

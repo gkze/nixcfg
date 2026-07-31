@@ -9,7 +9,6 @@ import pytest
 
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.updaters import VersionInfo
 
 
 def _load_module() -> ModuleType:
@@ -43,27 +42,36 @@ def test_jacq_resolves_latest_redirect_to_versioned_dmg() -> None:
     """The official latest URL should discover the immutable Jacq release URL."""
     module = _load_module()
     updater = module.JacqUpdater()
-    session = _FakeSession(
-        _FakeResponse(
-            url=(
-                "https://downloads.jacquard.dev/releases/0.3.2186/"
-                "Jacq-0.3.2186-arm64.dmg"
-            )
-        )
+    resolved_url = (
+        "https://downloads.jacquard.dev/desktop/releases/0.3.2609/"
+        "Jacq-0.3.2609-arm64.dmg"
     )
+    session = _FakeSession(_FakeResponse(url=resolved_url))
 
     info = _run(updater.fetch_latest(session))
 
-    assert info == VersionInfo(version="0.3.2186")
-    assert updater.get_download_url("aarch64-darwin", info) == (
-        "https://downloads.jacquard.dev/releases/0.3.2186/Jacq-0.3.2186-arm64.dmg"
-    )
+    assert info.version == "0.3.2609"
+    assert updater.get_download_url("aarch64-darwin", info) == resolved_url
     assert [(method, url) for method, url, _kwargs in session.calls] == [
         ("HEAD", "https://downloads.jacquard.dev/latest/mac-arm64.dmg")
     ]
     [(_method, _url, kwargs)] = session.calls
     assert kwargs["allow_redirects"] is True
     assert kwargs["timeout"].total == updater.config.default_timeout
+
+
+def test_jacq_accepts_legacy_versioned_dmg_path() -> None:
+    """Previously published Jacq release paths remain valid updater metadata."""
+    module = _load_module()
+    updater = module.JacqUpdater()
+    resolved_url = (
+        "https://downloads.jacquard.dev/releases/0.3.2186/Jacq-0.3.2186-arm64.dmg"
+    )
+
+    info = _run(updater.fetch_latest(_FakeSession(_FakeResponse(url=resolved_url))))
+
+    assert info.version == "0.3.2186"
+    assert updater.get_download_url("aarch64-darwin", info) == resolved_url
 
 
 @pytest.mark.parametrize(
@@ -73,6 +81,8 @@ def test_jacq_resolves_latest_redirect_to_versioned_dmg() -> None:
         "https://example.test/releases/1.2.3/Jacq-1.2.3-arm64.dmg",
         "https://downloads.jacquard.dev/latest/mac-arm64.dmg",
         "https://downloads.jacquard.dev/releases/1.2.3/Jacq-1.2.4-arm64.dmg",
+        "https://downloads.jacquard.dev/prefix/releases/1.2.3/Jacq-1.2.3-arm64.dmg",
+        "https://downloads.jacquard.dev/releases/1.2.3/Jacq-1.2.3-arm64.dmg.bak",
     ],
 )
 def test_jacq_rejects_untrusted_or_malformed_latest_redirects(

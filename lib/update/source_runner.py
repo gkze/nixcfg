@@ -20,6 +20,7 @@ from lib.update.events import (
     UpdateEvent,
     UpdateEventKind,
     expect_artifact_updates,
+    expect_source_entry,
 )
 from lib.update.refs import FlakeInputRef, RefTaskOptions
 from lib.update.updaters import UPDATERS, ensure_updaters_loaded
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable
     from pathlib import Path
 
-    from lib.nix.models.sources import SourcesFile
+    from lib.nix.models.sources import SourceEntry, SourcesFile
     from lib.update.artifacts import GeneratedArtifact
     from lib.update.updaters import UpdaterClass
     from lib.update.updaters.metadata import VersionInfo
@@ -61,6 +62,7 @@ class SourceTaskContext:
     config: UpdateConfig | None = None
     pinned_version: VersionInfo | None = None
     dry_run: bool = False
+    effective_sources: dict[str, SourceEntry] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -83,6 +85,7 @@ class SourceTaskResult:
 
     completed: bool
     artifacts: tuple[GeneratedArtifact, ...] = field(default_factory=tuple)
+    source_update: SourceEntry | None = None
 
 
 async def _refresh_input_task(
@@ -147,12 +150,13 @@ async def update_source_task(
     *,
     context: SourceTaskContext,
 ) -> SourceTaskResult:
-    """Run one source updater and collect emitted generated artifacts."""
+    """Run one source updater and collect its source and artifact results."""
     artifacts_by_path: dict[Path, GeneratedArtifact] = {}
+    source_update: SourceEntry | None = None
     completed = False
 
     async def _run() -> None:
-        nonlocal completed
+        nonlocal completed, source_update
         resolved_config = resolve_active_config(context.config)
         current = context.sources.entries.get(name)
         updater = _get_updaters()[name](config=resolved_config)
@@ -164,6 +168,7 @@ async def update_source_task(
             current=current,
             dry_run=context.dry_run,
             generated_artifacts=context.generated_artifacts,
+            effective_sources=context.effective_sources,
         )
 
         await put(
@@ -190,6 +195,8 @@ async def update_source_task(
             if event.kind is UpdateEventKind.ARTIFACT and event.payload is not None:
                 for artifact in expect_artifact_updates(event.payload):
                     artifacts_by_path[artifact.path] = artifact
+            elif event.kind is UpdateEventKind.RESULT and event.payload is not None:
+                source_update = expect_source_entry(event.payload)
             await put(event)
 
         completed = True
@@ -204,6 +211,7 @@ async def update_source_task(
                 key=lambda item: item[0],
             )
         ),
+        source_update=source_update,
     )
 
 
@@ -243,6 +251,7 @@ async def run_sources_phase(context: SourcesPhaseContext) -> None:
         update_input_lock = asyncio.Lock()
         update_input_tasks: dict[str, asyncio.Task[None]] = {}
         generated_artifacts: dict[Path, str] = {}
+        effective_sources = dict(context.sources.entries)
         updaters = _get_updaters()
         source_waves = update_planner.source_update_waves(
             context.source_names, updaters
@@ -259,6 +268,7 @@ async def run_sources_phase(context: SourcesPhaseContext) -> None:
                 update_input_tasks=update_input_tasks,
                 queue=context.queue,
                 generated_artifacts=generated_artifacts,
+                effective_sources=effective_sources,
                 config=context.config,
                 pinned_version=context.pinned.get(name),
                 dry_run=context.dry_run,
@@ -314,6 +324,13 @@ async def run_sources_phase(context: SourcesPhaseContext) -> None:
                     continue
                 for artifact in result.artifacts:
                     generated_artifacts[artifact.path] = artifact.content
+                if result.source_update is not None:
+                    current = effective_sources.get(name)
+                    effective_sources[name] = (
+                        current.merge(result.source_update)
+                        if context.native_only and current is not None
+                        else result.source_update
+                    )
 
 
 __all__ = [

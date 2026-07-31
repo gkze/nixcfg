@@ -29,7 +29,7 @@ workspaces:
           url: https://www.town.com
           role: essential
       - GitHub:
-          url: https://github.com/coder
+          url: https://github.com
           role: essential
       - AI / LLM:
           collapsed: false

@@ -2,10 +2,10 @@
   "drvHash": "w8l0cc6sn75yjn45bl53f2gmsg141bkl",
   "hashes": [
     {
-      "hash": "sha256-JgF+MiOh/jiMlJsx4yFROHAUcMy3CcQoosADwC0U8B4=",
+      "hash": "sha256-jQD06RWI7+DZMAUuF9LZREcy6hjayIhMKYD8WCDCxxY=",
       "hashType": "npmDepsHash"
     }
   ],
   "input": "gitbutler",
-  "version": "0.21.2"
+  "version": "0.22.0"
 }

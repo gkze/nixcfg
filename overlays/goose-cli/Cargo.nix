@@ -1668,9 +1668,9 @@ rec {
       };
       "async-utility" = rec {
         crateName = "async-utility";
-        version = "0.3.1";
+        version = "0.3.2";
         edition = "2021";
-        sha256 = "0lf1sb9w4j3g8cz0k3jf3d2why13hvjc65i4hc3i0yks41bknjm3";
+        sha256 = "1sfg71lk24ls9xd1q94lqv2jlv8dn3ni2mjhdqrqrbwql6wq73qq";
         libName = "async_utility";
         authors = [
           "Yuki Kishimoto <yukikishimoto@protonmail.com>"
@@ -14808,7 +14808,7 @@ rec {
       };
       "goose" = rec {
         crateName = "goose";
-        version = "1.44.0";
+        version = "1.45.0";
         edition = "2021";
         crateBin = [
           {
@@ -15250,7 +15250,7 @@ rec {
           }
           {
             name = "rmcp";
-            packageId = "rmcp";
+            packageId = "rmcp 2.2.0";
             usesDefaultFeatures = false;
             features = [ "schemars" "auth" "client" "transport-child-process" "transport-streamable-http-client" "transport-streamable-http-client-reqwest" "transport-streamable-http-client-unix-socket" ];
           }
@@ -15596,7 +15596,7 @@ rec {
           }
           {
             name = "rmcp";
-            packageId = "rmcp";
+            packageId = "rmcp 2.2.0";
             usesDefaultFeatures = false;
             features = [ "schemars" "auth" "transport-streamable-http-server" ];
           }
@@ -15651,7 +15651,7 @@ rec {
       };
       "goose-acp-macros" = rec {
         crateName = "goose-acp-macros";
-        version = "1.44.0";
+        version = "1.45.0";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-acp-macros"; };
         procMacro = true;
@@ -15676,7 +15676,7 @@ rec {
       };
       "goose-cli" = rec {
         crateName = "goose-cli";
-        version = "1.44.0";
+        version = "1.45.0";
         edition = "2021";
         crateBin = [
           {
@@ -15852,7 +15852,7 @@ rec {
           }
           {
             name = "rmcp";
-            packageId = "rmcp";
+            packageId = "rmcp 2.2.0";
             usesDefaultFeatures = false;
             features = [ "schemars" "auth" ];
           }
@@ -16012,7 +16012,7 @@ rec {
       };
       "goose-download-manager" = rec {
         crateName = "goose-download-manager";
-        version = "0.1.0-alpha.0";
+        version = "0.1.0-alpha.5";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-download-manager"; };
         libName = "goose_download_manager";
@@ -16061,7 +16061,7 @@ rec {
       };
       "goose-local-inference" = rec {
         crateName = "goose-local-inference";
-        version = "0.1.0-alpha.0";
+        version = "0.1.0-alpha.5";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-local-inference"; };
         libName = "goose_local_inference";
@@ -16180,7 +16180,7 @@ rec {
           }
           {
             name = "rmcp";
-            packageId = "rmcp";
+            packageId = "rmcp 2.2.0";
             usesDefaultFeatures = false;
             features = [ "schemars" "auth" ];
           }
@@ -16236,7 +16236,7 @@ rec {
       };
       "goose-mcp" = rec {
         crateName = "goose-mcp";
-        version = "1.44.0";
+        version = "1.45.0";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-mcp"; };
         libName = "goose_mcp";
@@ -16304,7 +16304,7 @@ rec {
             name = "process-wrap";
             packageId = "process-wrap";
             usesDefaultFeatures = false;
-            features = [ "std" ];
+            features = [ "std" "process-session" ];
           }
           {
             name = "reqwest";
@@ -16314,7 +16314,7 @@ rec {
           }
           {
             name = "rmcp";
-            packageId = "rmcp";
+            packageId = "rmcp 2.2.0";
             usesDefaultFeatures = false;
             features = [ "schemars" "auth" "server" "client" "transport-io" "macros" ];
           }
@@ -16351,6 +16351,7 @@ rec {
             name = "tokio";
             packageId = "tokio";
             usesDefaultFeatures = false;
+            features = [ "process" "io-util" ];
           }
           {
             name = "tracing";
@@ -16389,7 +16390,7 @@ rec {
       };
       "goose-provider-types" = rec {
         crateName = "goose-provider-types";
-        version = "0.1.0-alpha.0";
+        version = "0.1.0-alpha.5";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-provider-types"; };
         libName = "goose_provider_types";
@@ -16455,7 +16456,7 @@ rec {
           }
           {
             name = "rmcp";
-            packageId = "rmcp";
+            packageId = "rmcp 2.2.0";
             usesDefaultFeatures = false;
             features = [ "schemars" "auth" "server" "macros" ];
           }
@@ -16539,7 +16540,7 @@ rec {
       };
       "goose-providers" = rec {
         crateName = "goose-providers";
-        version = "0.1.0-alpha.0";
+        version = "0.1.0-alpha.5";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-providers"; };
         libName = "goose_providers";
@@ -16599,7 +16600,7 @@ rec {
           }
           {
             name = "rmcp";
-            packageId = "rmcp";
+            packageId = "rmcp 2.2.0";
             usesDefaultFeatures = false;
             features = [ "schemars" "auth" "server" "macros" ];
           }
@@ -16695,7 +16696,7 @@ rec {
       };
       "goose-sdk" = rec {
         crateName = "goose-sdk";
-        version = "0.1.0-alpha.0";
+        version = "0.1.0-alpha.5";
         edition = "2021";
         crateBin = [
           {
@@ -16749,13 +16750,13 @@ rec {
           }
         ];
         features = {
-          "uniffi" = [ "dep:uniffi" "dep:thiserror" "dep:anyhow" "dep:goose-providers" "dep:futures" "dep:serde_json" "dep:tokio" ];
+          "uniffi" = [ "dep:uniffi" "dep:thiserror" "dep:anyhow" "dep:goose-providers" "dep:futures" "dep:serde_json" "dep:tokio" "dep:rmcp" "dep:base64" ];
         };
         resolvedDefaultFeatures = [ "default" ];
       };
       "goose-sdk-types" = rec {
         crateName = "goose-sdk-types";
-        version = "0.1.0-alpha.0";
+        version = "0.1.0-alpha.5";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-sdk-types"; };
         libName = "goose_sdk_types";
@@ -16798,7 +16799,7 @@ rec {
       };
       "goose-test" = rec {
         crateName = "goose-test";
-        version = "1.44.0";
+        version = "1.45.0";
         edition = "2021";
         crateBin = [
           {
@@ -16830,7 +16831,7 @@ rec {
       };
       "goose-test-support" = rec {
         crateName = "goose-test-support";
-        version = "1.44.0";
+        version = "1.45.0";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/goose-test-support"; };
         libName = "goose_test_support";
@@ -16856,7 +16857,7 @@ rec {
           }
           {
             name = "rmcp";
-            packageId = "rmcp";
+            packageId = "rmcp 2.2.0";
             usesDefaultFeatures = false;
             features = [ "schemars" "auth" "server" "macros" "transport-streamable-http-server" ];
           }
@@ -22106,9 +22107,9 @@ rec {
       };
       "nostr" = rec {
         crateName = "nostr";
-        version = "0.44.4";
+        version = "0.44.6";
         edition = "2021";
-        sha256 = "0w2d0vxqa18y340kv16jj6v1x28mmhirkxz5b508y7qdswamvkwq";
+        sha256 = "1kxjxq34v3bmgjcc21r060hghblkj85y481r55djrpl9hijds9p8";
         authors = [
           "Yuki Kishimoto <yukikishimoto@protonmail.com>"
           "Rust Nostr Developers"
@@ -25371,7 +25372,7 @@ rec {
           }
           {
             name = "rmcp";
-            packageId = "rmcp";
+            packageId = "rmcp 1.8.0";
           }
           {
             name = "serde";
@@ -25416,7 +25417,7 @@ rec {
           }
           {
             name = "rmcp";
-            packageId = "rmcp";
+            packageId = "rmcp 1.8.0";
           }
           {
             name = "serde";
@@ -25623,7 +25624,7 @@ rec {
           }
           {
             name = "rmcp";
-            packageId = "rmcp";
+            packageId = "rmcp 1.8.0";
             features = [ "client" "transport-streamable-http-client-reqwest" "transport-child-process" ];
           }
           {
@@ -25775,7 +25776,7 @@ rec {
           }
           {
             name = "rmcp";
-            packageId = "rmcp";
+            packageId = "rmcp 1.8.0";
           }
           {
             name = "serde";
@@ -29243,7 +29244,7 @@ rec {
         };
         resolvedDefaultFeatures = [ "alloc" "default" "dev_urandom_fallback" "wasm32_unknown_unknown_js" ];
       };
-      "rmcp" = rec {
+      "rmcp 1.8.0" = rec {
         crateName = "rmcp";
         version = "1.8.0";
         edition = "2024";
@@ -29257,6 +29258,157 @@ rec {
             name = "base64";
             packageId = "base64 0.22.1";
             optional = true;
+          }
+          {
+            name = "chrono";
+            packageId = "chrono";
+            usesDefaultFeatures = false;
+            target = { target, features }: ((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null));
+            features = [ "serde" "clock" "std" "oldtime" ];
+          }
+          {
+            name = "chrono";
+            packageId = "chrono";
+            usesDefaultFeatures = false;
+            target = { target, features }: (!((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null)));
+            features = [ "serde" "now" ];
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "http";
+            packageId = "http 1.4.2";
+            optional = true;
+          }
+          {
+            name = "pastey";
+            packageId = "pastey";
+            optional = true;
+          }
+          {
+            name = "pin-project-lite";
+            packageId = "pin-project-lite";
+          }
+          {
+            name = "process-wrap";
+            packageId = "process-wrap";
+            optional = true;
+            features = [ "tokio1" ];
+          }
+          {
+            name = "reqwest";
+            packageId = "reqwest 0.13.4";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "json" "stream" ];
+          }
+          {
+            name = "rmcp-macros";
+            packageId = "rmcp-macros 1.8.0";
+            optional = true;
+          }
+          {
+            name = "schemars";
+            packageId = "schemars 1.2.1";
+            optional = true;
+            features = [ "chrono04" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "sse-stream";
+            packageId = "sse-stream";
+            optional = true;
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.18";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "sync" "macros" "rt" "time" ];
+          }
+          {
+            name = "tokio-stream";
+            packageId = "tokio-stream";
+            optional = true;
+          }
+          {
+            name = "tokio-util";
+            packageId = "tokio-util";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "schemars";
+            packageId = "schemars 1.2.1";
+            features = [ "chrono04" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "full" ];
+          }
+        ];
+        features = {
+          "__reqwest" = [ "dep:reqwest" ];
+          "auth" = [ "dep:oauth2" "__reqwest" "dep:url" ];
+          "auth-client-credentials-jwt" = [ "auth" "dep:jsonwebtoken" "uuid" ];
+          "base64" = [ "dep:base64" ];
+          "client" = [ "dep:tokio-stream" ];
+          "client-side-sse" = [ "dep:sse-stream" "dep:http" ];
+          "default" = [ "base64" "macros" "server" ];
+          "elicitation" = [ "dep:url" ];
+          "local" = [ "rmcp-macros?/local" ];
+          "macros" = [ "dep:rmcp-macros" "dep:pastey" ];
+          "reqwest" = [ "__reqwest" "reqwest?/rustls" ];
+          "reqwest-native-tls" = [ "__reqwest" "reqwest?/native-tls" ];
+          "reqwest-tls-no-provider" = [ "__reqwest" "reqwest?/rustls-no-provider" ];
+          "schemars" = [ "dep:schemars" ];
+          "server" = [ "transport-async-rw" "dep:schemars" "dep:pastey" ];
+          "server-side-http" = [ "uuid" "dep:rand" "dep:tokio-stream" "dep:http" "dep:http-body" "dep:http-body-util" "dep:bytes" "dep:sse-stream" "tower" ];
+          "tower" = [ "dep:tower-service" ];
+          "transport-async-rw" = [ "tokio/io-util" "tokio-util/codec" ];
+          "transport-child-process" = [ "transport-async-rw" "tokio/process" "dep:process-wrap" ];
+          "transport-io" = [ "transport-async-rw" "tokio/io-std" ];
+          "transport-streamable-http-client" = [ "client-side-sse" "transport-worker" ];
+          "transport-streamable-http-client-reqwest" = [ "transport-streamable-http-client" "__reqwest" ];
+          "transport-streamable-http-client-unix-socket" = [ "transport-streamable-http-client" "dep:hyper" "dep:hyper-util" "dep:http-body-util" "dep:http" "dep:bytes" "tokio/net" ];
+          "transport-streamable-http-server" = [ "transport-streamable-http-server-session" "server-side-http" "transport-worker" ];
+          "transport-streamable-http-server-session" = [ "transport-async-rw" "dep:tokio-stream" ];
+          "transport-worker" = [ "dep:tokio-stream" ];
+          "uuid" = [ "dep:uuid" ];
+          "which-command" = [ "transport-child-process" "dep:which" ];
+        };
+        resolvedDefaultFeatures = [ "__reqwest" "base64" "client" "client-side-sse" "default" "macros" "server" "transport-async-rw" "transport-child-process" "transport-streamable-http-client" "transport-streamable-http-client-reqwest" "transport-worker" ];
+      };
+      "rmcp 2.2.0" = rec {
+        crateName = "rmcp";
+        version = "2.2.0";
+        edition = "2024";
+        sha256 = "1bq1mxbx643z2fhjbb1rmqv82vfhnyzc3adi1a0n3fm92zp4inql";
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
           }
           {
             name = "bytes";
@@ -29343,7 +29495,7 @@ rec {
           }
           {
             name = "rmcp-macros";
-            packageId = "rmcp-macros";
+            packageId = "rmcp-macros 2.2.0";
             optional = true;
           }
           {
@@ -29469,13 +29621,46 @@ rec {
           "uuid" = [ "dep:uuid" ];
           "which-command" = [ "transport-child-process" "dep:which" ];
         };
-        resolvedDefaultFeatures = [ "__reqwest" "auth" "base64" "client" "client-side-sse" "default" "macros" "reqwest" "schemars" "server" "server-side-http" "tower" "transport-async-rw" "transport-child-process" "transport-io" "transport-streamable-http-client" "transport-streamable-http-client-reqwest" "transport-streamable-http-client-unix-socket" "transport-streamable-http-server" "transport-streamable-http-server-session" "transport-worker" "uuid" ];
+        resolvedDefaultFeatures = [ "__reqwest" "auth" "client" "client-side-sse" "macros" "reqwest" "schemars" "server" "server-side-http" "tower" "transport-async-rw" "transport-child-process" "transport-io" "transport-streamable-http-client" "transport-streamable-http-client-reqwest" "transport-streamable-http-client-unix-socket" "transport-streamable-http-server" "transport-streamable-http-server-session" "transport-worker" "uuid" ];
       };
-      "rmcp-macros" = rec {
+      "rmcp-macros 1.8.0" = rec {
         crateName = "rmcp-macros";
         version = "1.8.0";
         edition = "2024";
         sha256 = "1mg1nlkqzskfb4z0a2ar4fiflvby684bb5gag0npi04knqsh1b8s";
+        procMacro = true;
+        libName = "rmcp_macros";
+        dependencies = [
+          {
+            name = "darling";
+            packageId = "darling 0.23.0";
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.118";
+            features = [ "full" ];
+          }
+        ];
+        features = {
+        };
+      };
+      "rmcp-macros 2.2.0" = rec {
+        crateName = "rmcp-macros";
+        version = "2.2.0";
+        edition = "2024";
+        sha256 = "1qxpd1y967zk37jw3448clf51bqikv2as69hy62v44qqy9xphgbq";
         procMacro = true;
         libName = "rmcp_macros";
         dependencies = [

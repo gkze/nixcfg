@@ -908,16 +908,16 @@
     "gitbutler": {
       "flake": false,
       "locked": {
-        "lastModified": 1784669199,
-        "narHash": "sha256-aFKy761lkcWbeGeET+RB+kjuyhaNK3qitptXC8i6Y9A=",
+        "lastModified": 1785408119,
+        "narHash": "sha256-iiUgqpoLixyBG+MKQZBQbt4aCsRPrM8lPmwJHReAgPk=",
         "owner": "gitbutlerapp",
         "repo": "gitbutler",
-        "rev": "440a16312187b554d79d68f019234ca9ce525443",
+        "rev": "73b73c2eca4a048b7759e9798cc8073627540af0",
         "type": "github"
       },
       "original": {
         "owner": "gitbutlerapp",
-        "ref": "release/0.21.2",
+        "ref": "release/0.22.0",
         "repo": "gitbutler",
         "type": "github"
       }
@@ -2293,11 +2293,11 @@
     "t3code": {
       "flake": false,
       "locked": {
-        "lastModified": 1785348063,
-        "narHash": "sha256-KFGwgAIOqHbi3enmNAPt95+UAakm6pmClPK1nYNoOlk=",
+        "lastModified": 1785442085,
+        "narHash": "sha256-+nh5X9a8SwBc+QHq3ujHPMdA5ZUZ0mp5z1bye7xO/hY=",
         "owner": "pingdotgg",
         "repo": "t3code",
-        "rev": "e6987965f65914861f0dabd0db03729fe5cd2508",
+        "rev": "5b2577f6a941527e4db4ae32d6d0992e435d58a4",
         "type": "github"
       },
       "original": {
@@ -2605,11 +2605,11 @@
         "rust-overlay": "rust-overlay_4"
       },
       "locked": {
-        "lastModified": 1785343238,
-        "narHash": "sha256-84hmX5V4hnyHlFCmQd7HQsM2lej4W9TrNxT9HhZs+Dg=",
+        "lastModified": 1785442051,
+        "narHash": "sha256-+qssBFPlTSTYyGqhWmoH94whxkIpW135hU8foslOdEE=",
         "owner": "zed-industries",
         "repo": "zed",
-        "rev": "f620cbc04e8855a38a822ce7cf19e9ed44b00808",
+        "rev": "5638be1fe521b98c39c1ffa04034f51029a9a515",
         "type": "github"
       },
       "original": {

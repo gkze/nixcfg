@@ -16542,16 +16542,12 @@ rec {
             packageId = "anyhow";
           }
           {
-            name = "collections";
-            packageId = "collections";
+            name = "credentials_provider";
+            packageId = "credentials_provider";
           }
           {
             name = "dirs";
             packageId = "dirs";
-          }
-          {
-            name = "fs";
-            packageId = "fs";
           }
           {
             name = "futures";
@@ -16590,8 +16586,8 @@ rec {
             packageId = "settings";
           }
           {
-            name = "sqlez";
-            packageId = "sqlez";
+            name = "zed_credentials_provider";
+            packageId = "zed_credentials_provider";
           }
         ];
         devDependencies = [
@@ -16606,13 +16602,9 @@ rec {
             packageId = "serde_json";
             features = [ "preserve_order" "raw_value" ];
           }
-          {
-            name = "tempfile";
-            packageId = "tempfile";
-          }
         ];
         features = {
-          "test-support" = [ "collections/test-support" "gpui/test-support" "settings/test-support" ];
+          "test-support" = [ "gpui/test-support" "settings/test-support" ];
         };
         resolvedDefaultFeatures = [ "default" ];
       };
@@ -16630,6 +16622,10 @@ rec {
           {
             name = "copilot";
             packageId = "copilot";
+          }
+          {
+            name = "copilot_chat";
+            packageId = "copilot_chat";
           }
           {
             name = "gpui";
@@ -25349,6 +25345,10 @@ rec {
             packageId = "command_palette_hooks";
           }
           {
+            name = "component";
+            packageId = "component";
+          }
+          {
             name = "db";
             packageId = "db";
           }
@@ -25420,11 +25420,6 @@ rec {
           {
             name = "settings";
             packageId = "settings";
-          }
-          {
-            name = "smallvec";
-            packageId = "smallvec";
-            features = [ "union" "const_new" ];
           }
           {
             name = "strum";
@@ -27526,20 +27521,17 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "gpui_util";
+            packageId = "gpui_util";
+          }
+          {
             name = "log";
             packageId = "log";
             features = [ "kv_unstable_serde" "serde" ];
           }
           {
-            name = "util";
-            packageId = "util";
-          }
-        ];
-        devDependencies = [
-          {
-            name = "util";
-            packageId = "util";
-            features = [ "test-support" ];
+            name = "path";
+            packageId = "path";
           }
         ];
 
@@ -27561,12 +27553,16 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "gpui_util";
+            packageId = "gpui_util";
+          }
+          {
             name = "nucleo";
             packageId = "nucleo";
           }
           {
-            name = "util";
-            packageId = "util";
+            name = "path";
+            packageId = "path";
           }
         ];
         devDependencies = [
@@ -27579,11 +27575,6 @@ rec {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
-            features = [ "test-support" ];
-          }
-          {
-            name = "util";
-            packageId = "util";
             features = [ "test-support" ];
           }
         ];
@@ -34537,6 +34528,14 @@ rec {
             packageId = "editor";
             features = [ "test-support" ];
           }
+          {
+            name = "fs";
+            packageId = "fs";
+          }
+          {
+            name = "theme";
+            packageId = "theme";
+          }
         ];
         features = {
           "test-support" = [ "gpui/test-support" "editor/test-support" ];
@@ -37394,10 +37393,6 @@ rec {
           {
             name = "convert_case";
             packageId = "convert_case 0.11.0";
-          }
-          {
-            name = "copilot";
-            packageId = "copilot";
           }
           {
             name = "copilot_chat";

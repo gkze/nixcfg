@@ -370,6 +370,7 @@ def _build_package_path_attr_expr(
     *,
     system: str | None = None,
     repo_root: str | None = None,
+    package_args: Mapping[str, NixExpression] | None = None,
 ) -> str:
     repo_path = get_repo_file(".") if repo_root is None else Path(repo_root).resolve()
     flake_url = local_flake_url(repo_path)
@@ -409,6 +410,10 @@ def _build_package_path_attr_expr(
                     value=_select_attrs(Identifier(name="flake"), "inputs"),
                 ),
                 Binding(name="outputs", value=Identifier(name="flake")),
+                *(
+                    Binding(name=name, value=value)
+                    for name, value in (package_args or {}).items()
+                ),
             ]
         ),
     )

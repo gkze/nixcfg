@@ -102,6 +102,7 @@ class UpdateContext:
     dry_run: bool = False
     generated_artifacts: dict[Path, str] = field(default_factory=dict)
     hashes_fully_computed: bool = True
+    effective_sources: dict[str, SourceEntry] = field(default_factory=dict)
 
 
 def _coerce_context(context: UpdateContext | SourceEntry | None) -> UpdateContext:

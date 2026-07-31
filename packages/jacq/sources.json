@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-8tSS85IWDZg42CYdkSsMhF+9P1o3fSF/GqMWB+kJqf4="
+    "aarch64-darwin": "sha256-alPGJ006t4Go5GePfaIPeTE+Eib75SuCYd1XSyfwB9I="
   },
   "urls": {
-    "aarch64-darwin": "https://downloads.jacquard.dev/releases/0.3.2450/Jacq-0.3.2450-arm64.dmg"
+    "aarch64-darwin": "https://downloads.jacquard.dev/desktop/releases/0.3.2609/Jacq-0.3.2609-arm64.dmg"
   },
-  "version": "0.3.2450"
+  "version": "0.3.2609"
 }

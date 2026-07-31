@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import nullcontext
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -18,8 +20,9 @@ from lib.tests._updater_helpers import run_async as _run
 from lib.update import flake as update_flake
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
+from lib.update.nix import _build_package_path_attr_expr
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters import strategies as updater_strategies
 from lib.update.updaters.core import source_override_env
 from lib.update.updaters.vendor_feeds import SparkleAppcastItem
@@ -92,6 +95,15 @@ def test_goose_desktop_updater_uses_goose_cli_source_file(
         lambda path: entry if path == source_file else None,
     )
 
+    effective_entry = SourceEntry.model_validate({
+        "version": "1.38.0",
+        "hashes": [],
+    })
+    context = UpdateContext(
+        current=None,
+        effective_sources={"goose-cli": effective_entry},
+    )
+    assert _run(updater.fetch_latest(object(), context=context)).version == "1.38.0"
     assert _run(updater.fetch_latest(object())).version == "1.37.0"
 
     monkeypatch.setattr(goose_desktop_module, "sources_file_for", lambda _name: None)
@@ -114,11 +126,31 @@ def test_goose_desktop_updater_uses_goose_cli_source_file(
 
 
 def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
-    goose_desktop_module: ModuleType, monkeypatch: pytest.MonkeyPatch
+    goose_desktop_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    """The dependency hash should target the package's fixed-output pnpm deps."""
+    """Hash the package with the effective Goose source and generated Cargo graph."""
     updater = goose_desktop_module.GooseDesktopUpdater()
     captured: dict[str, object] = {}
+    cargo_nix_text = '{ internal.crates."goose-cli".version = "1.37.0"; }\n'
+    cargo_nix_path = tmp_path / "Cargo.nix"
+    goose_cli_source = SourceEntry.model_validate({
+        "version": "1.37.0",
+        "hashes": [
+            {
+                "hashType": "srcHash",
+                "hash": HASH_B,
+            }
+        ],
+    })
+    context = UpdateContext(
+        current=None,
+        generated_artifacts={
+            Path("overlays/goose-cli/Cargo.nix"): cargo_nix_text,
+        },
+        effective_sources={"goose-cli": goose_cli_source},
+    )
 
     async def _fake_compute_fixed_output_hash(
         source: str,
@@ -128,14 +160,28 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
         config: object | None = None,
     ) -> EventStream:
         captured.update({"source": source, "expr": expr, "env": env, "config": config})
+        assert cargo_nix_path.read_text(encoding="utf-8") == cargo_nix_text
         yield UpdateEvent.value(source, HASH_A)
 
+    monkeypatch.setattr(
+        goose_desktop_module.tempfile,
+        "TemporaryDirectory",
+        lambda **_kwargs: nullcontext(str(tmp_path)),
+    )
     monkeypatch.setattr(
         "lib.update.nix.compute_fixed_output_hash",
         _fake_compute_fixed_output_hash,
     )
 
-    events = _run(_collect(updater.fetch_hashes(VersionInfo("1.37.0"), object())))
+    events = _run(
+        _collect(
+            updater.fetch_hashes(
+                VersionInfo("1.37.0"),
+                object(),
+                context=context,
+            )
+        )
+    )
     payload = _require_hash_entries(events[-1].payload)
     assert payload == [
         HashEntry.create("nodeModulesHash", HASH_A),
@@ -144,6 +190,7 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
     env = expect_instance(captured["env"], dict)
     override_payload = json.loads(env["UPDATE_SOURCE_OVERRIDES_JSON"])
     assert override_payload == {
+        "goose-cli": goose_cli_source.to_dict(),
         "goose-desktop": {
             "version": "1.37.0",
             "hashes": [
@@ -153,9 +200,28 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
                     "platform": "aarch64-darwin",
                 }
             ],
-        }
+        },
     }
-    assert 'packages."aarch64-darwin"."goose-desktop".pnpmDeps' in str(captured["expr"])
+    expected_override = parse_nix_expr(
+        f"""
+        (import {REPO_ROOT}/overlays/goose-cli/default.nix {{
+          prev = pkgs;
+          slib = flake.lib;
+          sources = flake.lib.sources;
+          selfSource = flake.lib.sources.goose-cli;
+          cargoNixFn = import {cargo_nix_path};
+        }}).goose-cli
+        """
+    )
+    assert_nix_ast_equal(
+        expect_instance(captured["expr"], str),
+        _build_package_path_attr_expr(
+            "goose-desktop",
+            ".pnpmDeps",
+            system="aarch64-darwin",
+            package_args={"goose-cli": expected_override},
+        ),
+    )
 
     result = updater.build_result(VersionInfo("1.37.0"), payload)
     assert result.version == "1.37.0"
@@ -169,6 +235,20 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
 
     with pytest.raises(RuntimeError, match="expected structured hash entries"):
         updater.build_result(VersionInfo("1.37.0"), {"aarch64-darwin": HASH_A})
+
+    with pytest.raises(RuntimeError, match="does not match goose-desktop version"):
+        _run(
+            _collect(
+                updater.fetch_hashes(
+                    VersionInfo("1.38.0"),
+                    object(),
+                    context=context,
+                )
+            )
+        )
+
+    with updater._cargo_nix_path(UpdateContext(current=None)) as fallback_path:
+        assert fallback_path == REPO_ROOT / "overlays/goose-cli/Cargo.nix"
 
 
 class _FakeHeadResponse:

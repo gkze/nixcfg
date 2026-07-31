@@ -24,7 +24,6 @@ from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.inherit import Inherit
 from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.parenthesis import Parenthesis
-from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
@@ -41,7 +40,6 @@ from lib.tests._nix_ast import (
 )
 from lib.tests._nix_eval import (
     nix_attrset,
-    nix_eval_json,
     nix_eval_raw,
     nix_import,
     nix_let,
@@ -1575,56 +1573,33 @@ def test_george_config_manages_mutable_gui_apps_via_scoped_applications() -> Non
     )
 
 
-@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_spacedrive_overlay_only_clears_broken_metadata_on_darwin() -> None:
-    """Nix evaluation is needed because AST structure cannot prove overrideAttrs merges."""
-    flake = FunctionCall(
-        name=identifier_attr_path("builtins", "getFlake"),
-        argument=Parenthesis(
-            value=FunctionCall(
-                name=Identifier(name="toString"),
-                argument=NixPath(path=str(REPO_ROOT)),
-            )
-        ),
+    """The overlay should preserve Linux's broken flag while enabling the Darwin app."""
+    overlay_root = _module_output("overlays/default.nix")
+    default_overlay = expect_instance(
+        expect_binding(overlay_root.values, "default").value,
+        FunctionDefinition,
     )
-    result = nix_eval_json(
-        nix_let(
-            {"flake": flake},
-            nix_attrset({
-                "bundleName": identifier_attr_path(
-                    "flake",
-                    "pkgs",
-                    "aarch64-darwin",
-                    "spacedrive",
-                    "passthru",
-                    "macApp",
-                    "bundleName",
-                ),
-                "darwinBroken": identifier_attr_path(
-                    "flake",
-                    "pkgs",
-                    "aarch64-darwin",
-                    "spacedrive",
-                    "meta",
-                    "broken",
-                ),
-                "linuxBroken": identifier_attr_path(
-                    "flake",
-                    "pkgs",
-                    "x86_64-linux",
-                    "spacedrive",
-                    "meta",
-                    "broken",
-                ),
-            }),
-        )
+    overlay_fn = expect_instance(default_overlay.output, FunctionDefinition)
+    tiny_overlays = expect_instance(
+        expect_scope_binding(overlay_fn.output, "tinyOverlays").value,
+        AttributeSet,
     )
 
-    assert result == {
-        "bundleName": "Spacedrive.app",
-        "darwinBroken": False,
-        "linuxBroken": True,
-    }
+    assert_nix_ast_equal(
+        expect_binding(tiny_overlays.values, "spacedrive").value,
+        """
+withManagedMacApp
+  (prev.spacedrive.overrideAttrs (old: {
+    meta =
+      old.meta
+      // prev.lib.optionalAttrs prev.stdenv.hostPlatform.isDarwin {
+        broken = false;
+      };
+  }))
+  "Spacedrive.app"
+""",
+    )
 
 
 def test_managed_gui_app_tiny_overlays_keep_copy_mode_metadata_contracts() -> None:

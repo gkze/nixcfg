@@ -765,6 +765,36 @@ def test_build_package_path_attr_expr_calls_package_with_flake_context() -> None
         ),
     )
 
+    override_expr = _build_package_path_attr_expr(
+        "t3code-workspace",
+        "",
+        system="aarch64-darwin",
+        repo_root=str(REPO_ROOT),
+        package_args={"dependency": Identifier(name="replacement")},
+    )
+    assert_nix_ast_equal(
+        override_expr,
+        LetExpression(
+            local_variables=expected.local_variables,
+            value=FunctionCall(
+                name=package_expr.name,
+                argument=AttributeSet(
+                    values=[
+                        Binding(
+                            name="inputs",
+                            value=identifier_attr_path("flake", "inputs"),
+                        ),
+                        Binding(name="outputs", value=Identifier(name="flake")),
+                        Binding(
+                            name="dependency",
+                            value=Identifier(name="replacement"),
+                        ),
+                    ]
+                ),
+            ),
+        ),
+    )
+
 
 def test_nix_source_names_uses_parseable_ast_expression(
     monkeypatch: pytest.MonkeyPatch,
