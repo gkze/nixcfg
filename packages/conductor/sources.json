@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-ta0ibKPwh7cBe4zQtYppud2JC5vyDyca9zt1Pcply8Q=",
-    "x86_64-darwin": "sha256-ADLESt+G9hzFYgBMq2HJ3cByXC+o5YVL7lYWnJmyTxQ="
+    "aarch64-darwin": "sha256-KP48rCYFox0WQ201M16pJfcbbh9/QD4LLtAIyXQJG6M=",
+    "x86_64-darwin": "sha256-PGS3PynZJw9mbxJICXkvG5fDxOUdKl5K18ztaEG4Eps="
   },
   "urls": {
-    "aarch64-darwin": "https://cdn.crabnebula.app/asset/01KYNZQHP2BBX9ZCRJKH3SW069",
-    "x86_64-darwin": "https://cdn.crabnebula.app/asset/01KYNZQVDXSRGNG229D2RY0WS0"
+    "aarch64-darwin": "https://cdn.crabnebula.app/asset/01KYTD2BRC1Z3TBDSZ7CTAFTXH",
+    "x86_64-darwin": "https://cdn.crabnebula.app/asset/01KYTD2HK06XQ3NTCABMV1AQ2Z"
   },
-  "version": "0.77.5"
+  "version": "0.78.1"
 }

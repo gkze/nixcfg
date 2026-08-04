@@ -914,6 +914,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "git_ui_core" = rec {
+      packageId = "git_ui_core";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "git_ui_core";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "go_to_line" = rec {
       packageId = "go_to_line";
       build = internal.buildRustCrateWithFeatures {
@@ -4547,8 +4557,8 @@ rec {
             packageId = "git";
           }
           {
-            name = "git_ui";
-            packageId = "git_ui";
+            name = "git_ui_core";
+            packageId = "git_ui_core";
           }
           {
             name = "gpui";
@@ -25755,10 +25765,6 @@ rec {
             packageId = "inventory";
           }
           {
-            name = "release_channel";
-            packageId = "release_channel";
-          }
-          {
             name = "schemars";
             packageId = "schemars 1.0.4";
             features = [ "indexmap2" ];
@@ -25960,10 +25966,6 @@ rec {
           {
             name = "project";
             packageId = "project";
-          }
-          {
-            name = "project_panel";
-            packageId = "project_panel";
           }
           {
             name = "serde";
@@ -28468,10 +28470,6 @@ rec {
             packageId = "file_icons";
           }
           {
-            name = "fs";
-            packageId = "fs";
-          }
-          {
             name = "futures";
             packageId = "futures";
           }
@@ -28490,6 +28488,10 @@ rec {
           {
             name = "git";
             packageId = "git";
+          }
+          {
+            name = "git_ui_core";
+            packageId = "git_ui_core";
           }
           {
             name = "gpui";
@@ -28546,20 +28548,12 @@ rec {
             packageId = "prompt_store";
           }
           {
-            name = "proto";
-            packageId = "proto";
-          }
-          {
             name = "rand";
             packageId = "rand 0.9.4";
           }
           {
             name = "release_channel";
             packageId = "release_channel";
-          }
-          {
-            name = "remote";
-            packageId = "remote";
           }
           {
             name = "remote_connection";
@@ -28569,10 +28563,6 @@ rec {
             name = "schemars";
             packageId = "schemars 1.0.4";
             features = [ "indexmap2" ];
-          }
-          {
-            name = "search";
-            packageId = "search";
           }
           {
             name = "serde";
@@ -28666,10 +28656,6 @@ rec {
             packageId = "zed_actions";
           }
           {
-            name = "zeroize";
-            packageId = "zeroize";
-          }
-          {
             name = "ztracing";
             packageId = "ztracing";
           }
@@ -28729,6 +28715,10 @@ rec {
             features = [ "test-support" ];
           }
           {
+            name = "search";
+            packageId = "search";
+          }
+          {
             name = "settings";
             packageId = "settings";
             features = [ "test-support" ];
@@ -28756,6 +28746,211 @@ rec {
           "test-support" = [ "multi_buffer/test-support" "remote_connection/test-support" ];
         };
         resolvedDefaultFeatures = [ "call" "test-support" ];
+      };
+      "git_ui_core" = rec {
+        crateName = "git_ui_core";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/git_ui_core"; };
+        libPath = "src/git_ui_core.rs";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "askpass";
+            packageId = "askpass";
+          }
+          {
+            name = "buffer_diff";
+            packageId = "buffer_diff";
+          }
+          {
+            name = "collections";
+            packageId = "collections";
+          }
+          {
+            name = "db";
+            packageId = "db";
+          }
+          {
+            name = "editor";
+            packageId = "editor";
+          }
+          {
+            name = "fs";
+            packageId = "fs";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "fuzzy";
+            packageId = "fuzzy";
+          }
+          {
+            name = "git";
+            packageId = "git";
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "language";
+            packageId = "language";
+          }
+          {
+            name = "log";
+            packageId = "log";
+            features = [ "kv_unstable_serde" "serde" ];
+          }
+          {
+            name = "menu";
+            packageId = "menu";
+          }
+          {
+            name = "notifications";
+            packageId = "notifications";
+          }
+          {
+            name = "picker";
+            packageId = "picker";
+          }
+          {
+            name = "project";
+            packageId = "project";
+          }
+          {
+            name = "proto";
+            packageId = "proto";
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.9.4";
+          }
+          {
+            name = "remote";
+            packageId = "remote";
+          }
+          {
+            name = "remote_connection";
+            packageId = "remote_connection";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "preserve_order" "raw_value" ];
+          }
+          {
+            name = "settings";
+            packageId = "settings";
+          }
+          {
+            name = "terminal";
+            packageId = "terminal";
+          }
+          {
+            name = "ui";
+            packageId = "ui";
+          }
+          {
+            name = "util";
+            packageId = "util";
+          }
+          {
+            name = "watch";
+            packageId = "watch";
+          }
+          {
+            name = "workspace";
+            packageId = "workspace";
+          }
+          {
+            name = "zed_actions";
+            packageId = "zed_actions";
+          }
+          {
+            name = "zeroize";
+            packageId = "zeroize";
+          }
+          {
+            name = "ztracing";
+            packageId = "ztracing";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "editor";
+            packageId = "editor";
+            features = [ "test-support" ];
+          }
+          {
+            name = "fs";
+            packageId = "fs";
+            features = [ "test-support" ];
+          }
+          {
+            name = "git";
+            packageId = "git";
+            features = [ "test-support" ];
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+            features = [ "test-support" ];
+          }
+          {
+            name = "project";
+            packageId = "project";
+            features = [ "test-support" ];
+          }
+          {
+            name = "remote_connection";
+            packageId = "remote_connection";
+            features = [ "test-support" ];
+          }
+          {
+            name = "settings";
+            packageId = "settings";
+            features = [ "test-support" ];
+          }
+          {
+            name = "task";
+            packageId = "task";
+          }
+          {
+            name = "theme";
+            packageId = "theme";
+          }
+          {
+            name = "theme_settings";
+            packageId = "theme_settings";
+          }
+          {
+            name = "unindent";
+            packageId = "unindent";
+          }
+          {
+            name = "workspace";
+            packageId = "workspace";
+            features = [ "test-support" ];
+          }
+          {
+            name = "zlog";
+            packageId = "zlog";
+          }
+        ];
+
       };
       "gl_generator" = rec {
         crateName = "gl_generator";
@@ -47476,10 +47671,6 @@ rec {
             packageId = "project";
           }
           {
-            name = "project_panel";
-            packageId = "project_panel";
-          }
-          {
             name = "schemars";
             packageId = "schemars 1.0.4";
             features = [ "indexmap2" ];
@@ -53252,8 +53443,8 @@ rec {
             packageId = "git";
           }
           {
-            name = "git_ui";
-            packageId = "git_ui";
+            name = "git_ui_core";
+            packageId = "git_ui_core";
           }
           {
             name = "gpui";
@@ -53306,10 +53497,6 @@ rec {
             name = "schemars";
             packageId = "schemars 1.0.4";
             features = [ "indexmap2" ];
-          }
-          {
-            name = "search";
-            packageId = "search";
           }
           {
             name = "serde";
@@ -60373,6 +60560,11 @@ rec {
             packageId = "tempfile";
             target = { target, features }: ("macos" == target."os" or null);
           }
+          {
+            name = "windows-registry";
+            packageId = "windows-registry 0.6.1";
+            target = { target, features }: ("windows" == target."os" or null);
+          }
         ];
         devDependencies = [
           {
@@ -63606,8 +63798,8 @@ rec {
             packageId = "git";
           }
           {
-            name = "git_ui";
-            packageId = "git_ui";
+            name = "git_ui_core";
+            packageId = "git_ui_core";
           }
           {
             name = "gpui";
@@ -70011,8 +70203,8 @@ rec {
             packageId = "fs";
           }
           {
-            name = "git_ui";
-            packageId = "git_ui";
+            name = "git_ui_core";
+            packageId = "git_ui_core";
           }
           {
             name = "gpui";
@@ -89518,6 +89710,10 @@ rec {
             features = [ "call" ];
           }
           {
+            name = "git_ui_core";
+            packageId = "git_ui_core";
+          }
+          {
             name = "go_to_line";
             packageId = "go_to_line";
           }
@@ -90009,6 +90205,11 @@ rec {
             features = [ "test-support" ];
           }
           {
+            name = "fs";
+            packageId = "fs";
+            features = [ "test-support" ];
+          }
+          {
             name = "gpui";
             packageId = "gpui";
             usesDefaultFeatures = false;
@@ -90042,6 +90243,16 @@ rec {
           {
             name = "project";
             packageId = "project";
+            features = [ "test-support" ];
+          }
+          {
+            name = "remote";
+            packageId = "remote";
+            features = [ "test-support" ];
+          }
+          {
+            name = "remote_server";
+            packageId = "remote_server";
             features = [ "test-support" ];
           }
           {

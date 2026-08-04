@@ -5,7 +5,6 @@
   inputs,
   lib,
   makeWrapper,
-  nodejs_22,
   openssh,
   python312,
   ripgrep,
@@ -33,6 +32,7 @@ else
       "daytona"
       "dingtalk"
       "feishu"
+      "google"
       "homeassistant"
       "honcho"
       "mcp"
@@ -41,8 +41,10 @@ else
       "sms"
       "tts-premium"
       "web"
+      "youtube"
     ];
     hermesSource = inputs.hermes-agent;
+    hermesRevision = hermesSource.rev or null;
 
     python312ForHermes = python312.override {
       packageOverrides = _pyFinal: pyPrev: {
@@ -71,9 +73,6 @@ else
     npm-lockfile-fix = inputs.hermes-agent.inputs.npm-lockfile-fix.packages.${system}.default;
     hermesNpmLib = callPackage (hermesSource + "/nix/lib.nix") {
       inherit npm-lockfile-fix;
-      # Upstream pins the npm toolchain to nodejs_22 (nix/hermes-agent.nix);
-      # keep the build toolchain in lockstep with the wrapper's HERMES_NODE.
-      nodejs = nodejs_22;
     };
     hermesTui = callPackage (hermesSource + "/nix/tui.nix") {
       inherit hermesNpmLib;
@@ -103,9 +102,14 @@ else
           "/.pytest_cache/"
         ]);
     };
+    bundledLocales = lib.cleanSource (hermesSource + "/locales");
+    bundledOptionalMcps = lib.cleanSourceWith {
+      src = hermesSource + "/optional-mcps";
+      filter = path: _type: !(lib.hasInfix "/__pycache__/" path);
+    };
 
     runtimePath = lib.makeBinPath [
-      nodejs_22
+      hermesNpmLib.nodejs
       ripgrep
       git
       openssh
@@ -121,10 +125,7 @@ else
 
     dontUnpack = true;
     dontBuild = true;
-    nativeBuildInputs = [
-      makeWrapper
-      nodejs_22
-    ];
+    nativeBuildInputs = [ makeWrapper ];
 
     installPhase = ''
       runHook preInstall
@@ -133,6 +134,8 @@ else
       cp -r ${bundledSkills} $out/share/hermes-agent/skills
       cp -r ${bundledOptionalSkills} $out/share/hermes-agent/optional-skills
       cp -r ${bundledPlugins} $out/share/hermes-agent/plugins
+      cp -r ${bundledLocales} $out/share/hermes-agent/locales
+      cp -r ${bundledOptionalMcps} $out/share/hermes-agent/optional-mcps
       cp -r ${hermesWeb} $out/share/hermes-agent/web_dist
 
       mkdir -p $out/ui-tui
@@ -145,10 +148,16 @@ else
             --set HERMES_BUNDLED_SKILLS $out/share/hermes-agent/skills \
             --set HERMES_OPTIONAL_SKILLS $out/share/hermes-agent/optional-skills \
             --set HERMES_BUNDLED_PLUGINS $out/share/hermes-agent/plugins \
+            --set HERMES_BUNDLED_LOCALES $out/share/hermes-agent/locales \
+            --set HERMES_OPTIONAL_MCPS $out/share/hermes-agent/optional-mcps \
             --set HERMES_WEB_DIST $out/share/hermes-agent/web_dist \
             --set HERMES_TUI_DIR $out/ui-tui \
             --set HERMES_PYTHON ${hermesVenv}/bin/python3 \
-            --set HERMES_NODE ${nodejs_22}/bin/node
+            --set HERMES_NODE ${lib.getExe hermesNpmLib.nodejs}${
+              lib.optionalString (
+                hermesRevision != null
+              ) " \\\n            --set HERMES_REVISION ${hermesRevision}"
+            }
         '')
         [
           "hermes"
@@ -160,13 +169,21 @@ else
       runHook postInstall
     '';
 
-    passthru = (builtins.removeAttrs (upstreamPackage.passthru or { }) [ "devShellHook" ]) // {
-      inherit hermesVenv upstreamPackage;
+    # Upstream desktop/dev passthru closes over the unadapted package, so do
+    # not expose those outputs as if they used this Darwin-specific venv.
+    passthru = {
+      inherit
+        hermesNpmLib
+        hermesTui
+        hermesVenv
+        hermesWeb
+        upstreamPackage
+        ;
     };
 
     meta = upstreamPackage.meta // {
-      # The upstream "all" extra includes local voice transcription, and
-      # "messaging" currently reactivates voice-capable Discord dependencies.
+      # The upstream default/full package includes local voice transcription,
+      # and "messaging" currently reactivates voice-capable Discord dependencies.
       # On Darwin that pulls in faster-whisper and av, whose import check is
       # killed during local builds. Keep the CLI package usable and leave those
       # integrations to upstream.

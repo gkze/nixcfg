@@ -84,7 +84,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v2026.7.20";
+      url = "github:NousResearch/hermes-agent/v2026.8.3";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         pyproject-build-systems.follows = "pyproject-build-systems";
@@ -138,7 +138,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.70.0";
+      url = "github:max-sixty/worktrunk/v0.71.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -175,7 +175,7 @@
       flake = false;
     };
     openai-cli = {
-      url = "github:openai/openai-cli/v1.6.0";
+      url = "github:openai/openai-cli/v1.7.0";
       flake = false;
     };
     github-desktop = {

@@ -1,13 +1,13 @@
 {
   "hashes": [
     {
-      "hash": "sha256-Px9+qySREX6Xpmn2LE5WhlC+ex0NMQHTCCRca3WyGyM=",
+      "hash": "sha256-5yfYpjwfQtioSTnpO9VIv4+V7A+Hrv6X/LItfbyw2i4=",
       "hashType": "srcHash"
     },
     {
-      "hash": "sha256-HGsySgR+J2Pm4rodcToS9fPYF8UWIVAgUbdnStBh6DQ=",
+      "hash": "sha256-qXR+z31tZ3FWclBUWkBF0k/F463iKSGZ6dCgJMBcWi8=",
       "hashType": "vendorHash"
     }
   ],
-  "version": "0.87.0"
+  "version": "0.88.0"
 }

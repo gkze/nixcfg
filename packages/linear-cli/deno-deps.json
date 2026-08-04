@@ -4322,7 +4322,7 @@
         {
           "cache_path": "remote/https/jsr.io/88776d701a5322c48462df5f91ac6c8b7a21829e5028adaf550c980040633fb3",
           "media_type": "application/json",
-          "sha256": "d72207b060d0723893194ef8b9df8e948c5825b59a05d712bfbcc107f83febcc",
+          "sha256": "f54b320b3b2e4b6aec05507c7ff92dc6ebb2c27cf4f992e49b652df81486c1e5",
           "url": "https://jsr.io/@std/data-structures/meta.json"
         }
       ],
@@ -4401,7 +4401,7 @@
         {
           "cache_path": "remote/https/jsr.io/6e93eacee453ae985c9af5b017821e0621908a939b7f2e0907574bba27c31ed0",
           "media_type": "application/json",
-          "sha256": "7ea374d01ac49140b3a50a12d1dd6489a1f0562e0006ff241fd2aabc8f0771f1",
+          "sha256": "2523d4adb361f85f73de2b173da04e2403fc57c6c10cffd564c27e5d2fd62106",
           "url": "https://jsr.io/@std/dotenv/meta.json"
         }
       ],
@@ -7381,7 +7381,7 @@
         {
           "cache_path": "remote/https/jsr.io/74c61ee77cf3d5bd22bc1763e1946f7d9691ff3ad4370527c5e7b6ab9b4fea20",
           "media_type": "application/json",
-          "sha256": "f00ed660adea6fbb57fa96ea4bac719b7c117f0cedb71d8f1a22c54529af0738",
+          "sha256": "35346674a58d89a6d4e94f5431fb0dfa28830e046007e167f3f3c6daf434cacf",
           "url": "https://jsr.io/@std/testing/meta.json"
         }
       ],
@@ -7610,7 +7610,7 @@
         {
           "cache_path": "remote/https/jsr.io/74c61ee77cf3d5bd22bc1763e1946f7d9691ff3ad4370527c5e7b6ab9b4fea20",
           "media_type": "application/json",
-          "sha256": "f00ed660adea6fbb57fa96ea4bac719b7c117f0cedb71d8f1a22c54529af0738",
+          "sha256": "35346674a58d89a6d4e94f5431fb0dfa28830e046007e167f3f3c6daf434cacf",
           "url": "https://jsr.io/@std/testing/meta.json"
         }
       ],
