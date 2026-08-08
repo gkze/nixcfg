@@ -403,7 +403,10 @@
       enable = true;
       nix-direnv.enable = true;
       enableZshIntegration = true;
-      config.warn_timeout = 0;
+      config.global = {
+        bash_path = "${pkgs.bash-dynamic-pipe-heredoc}/bin/bash";
+        warn_timeout = 0;
+      };
     };
     fzf = {
       enable = true;

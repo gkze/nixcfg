@@ -151,6 +151,82 @@ def test_update_workflow_final_artifact_matches_python_specs() -> None:
     assert tuple(path.splitlines()) == REFRESH_FINAL_ARTIFACT_ALLOWED_SPECS
 
 
+def test_darwin_compute_hashes_preserves_zen_source_before_artifact_staging() -> None:
+    """Cache the mutable Twilight source immediately after its successful update."""
+    data = _parse(
+        workflow_defs.render_generated_workflows()[".github/workflows/update.yml"]
+    )
+    jobs = data["jobs"]
+    assert isinstance(jobs, dict)
+    darwin_compute = jobs["compute-hashes-aarch64-darwin"]
+    assert isinstance(darwin_compute, dict)
+    steps = darwin_compute["steps"]
+    assert isinstance(steps, list)
+
+    update_index = next(
+        index
+        for index, step in enumerate(steps)
+        if isinstance(step, dict) and step.get("id") == "update-target"
+    )
+    preserve_index = next(
+        index
+        for index, step in enumerate(steps)
+        if isinstance(step, dict)
+        and step.get("name") == "Preserve Zen Twilight source in Cachix"
+    )
+    stage_index = next(
+        index
+        for index, step in enumerate(steps)
+        if isinstance(step, dict) and step.get("name") == "Stage target artifact"
+    )
+    assert update_index < preserve_index < stage_index
+
+    preserve = steps[preserve_index]
+    assert isinstance(preserve, dict)
+    assert preserve == {
+        "name": "Preserve Zen Twilight source in Cachix",
+        "id": "preserve-zen-twilight-source",
+        "if": (
+            "steps.update-target.outcome == 'success' && "
+            "matrix.target == 'zen-twilight'"
+        ),
+        "run": "nix run .#nixcfg -- ci cache fod --package zen-twilight",
+    }
+    stage = steps[stage_index]
+    assert isinstance(stage, dict)
+    stage_env = stage["env"]
+    assert isinstance(stage_env, dict)
+    assert stage_env["PRESERVE_OUTCOME"] == (
+        "${{ steps.preserve-zen-twilight-source.outcome }}"
+    )
+    stage_run = stage["run"]
+    assert isinstance(stage_run, str)
+    assert '""|success|skipped)' in stage_run
+    assert 'if [ "$UPDATE_OUTCOME" = "success" ]; then' in stage_run
+
+    for platform in ("x86_64-linux", "aarch64-linux"):
+        job = jobs[f"compute-hashes-{platform}"]
+        assert isinstance(job, dict)
+        platform_steps = job["steps"]
+        assert isinstance(platform_steps, list)
+        assert all(
+            not isinstance(step, dict)
+            or step.get("name") != "Preserve Zen Twilight source in Cachix"
+            for step in platform_steps
+        )
+        platform_stage = next(
+            step
+            for step in platform_steps
+            if isinstance(step, dict) and step.get("name") == "Stage target artifact"
+        )
+        platform_stage_env = platform_stage["env"]
+        assert isinstance(platform_stage_env, dict)
+        assert "PRESERVE_OUTCOME" not in platform_stage_env
+        platform_stage_run = platform_stage["run"]
+        assert isinstance(platform_stage_run, str)
+        assert "PRESERVE_OUTCOME" not in platform_stage_run
+
+
 def test_ci_quality_matrix_covers_fast_and_deep_checks() -> None:
     """The CI quality matrix is the concatenated shared check inventory."""
     data = _parse(

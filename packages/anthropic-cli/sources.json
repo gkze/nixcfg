@@ -1,11 +1,11 @@
 {
-  "drvHash": "b48qrpygdkybh29mjq5fl4gpx24ac4r5",
+  "drvHash": "h2ggai36x8bq0l1j3h4049zkgixwxq4l",
   "hashes": [
     {
-      "hash": "sha256-iGkK77+MtKp/UeBRqbH88tt7H8V8PKJT3H0MNs0p7MM=",
+      "hash": "sha256-n64faF1uWdqDJalNsWxW1/IjlR/LOJyO/WhtHdzAFBE=",
       "hashType": "vendorHash"
     }
   ],
   "input": "anthropic-cli",
-  "version": "v1.21.0"
+  "version": "v1.22.1"
 }

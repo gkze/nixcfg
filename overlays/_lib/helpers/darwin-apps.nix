@@ -86,10 +86,11 @@ let
       dontFixup,
       macApp,
       meta,
+      stdenv ? prev.stdenvNoCC,
       srcName ? null,
       unpack,
     }:
-    prev.stdenvNoCC.mkDerivation (
+    stdenv.mkDerivation (
       {
         inherit pname dontFixup meta;
         inherit (info) version;
@@ -178,6 +179,8 @@ in
       dontFixup ? false,
       macApp ? { },
       meta ? { },
+      sourceName ? null,
+      stdenv ? prev.stdenvNoCC,
     }:
     let
       arch = if system == "aarch64-darwin" then "aarch64" else "x86_64";
@@ -202,9 +205,11 @@ in
         dontFixup
         macApp
         meta
+        stdenv
         ;
       bundleName = resolvedBundleName;
-      srcName = "${capitalizedAppName}_${info.version}_${arch}.dmg";
+      srcName =
+        if sourceName == null then "${capitalizedAppName}_${info.version}_${arch}.dmg" else sourceName;
 
       unpack = {
         nativeBuildInputs = [

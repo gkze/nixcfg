@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from filelock import FileLock
@@ -27,15 +27,30 @@ def _resolve_repo_path(path: Path, *, repo_root: Path = REPO_ROOT) -> Path:
 
 @dataclass(frozen=True)
 class GeneratedArtifact:
-    """A generated text artifact produced by an updater."""
+    """A generated text artifact and its optional producer-observed change state."""
 
     path: Path
     content: str
+    changed_from_snapshot: bool | None = field(
+        default=None,
+        compare=False,
+        repr=False,
+    )
 
     @classmethod
-    def text(cls, path: str | Path, content: str) -> GeneratedArtifact:
+    def text(
+        cls,
+        path: str | Path,
+        content: str,
+        *,
+        changed_from_snapshot: bool | None = None,
+    ) -> GeneratedArtifact:
         """Build a text artifact from raw string content."""
-        return cls(path=Path(path), content=content)
+        return cls(
+            path=Path(path),
+            content=content,
+            changed_from_snapshot=changed_from_snapshot,
+        )
 
     @classmethod
     def json(

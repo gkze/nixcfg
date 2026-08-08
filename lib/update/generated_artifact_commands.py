@@ -81,6 +81,7 @@ def _restore_artifacts(snapshot: ArtifactSnapshot) -> None:
 def _read_artifacts(
     artifact_paths: Iterable[str | Path],
     *,
+    snapshot: ArtifactSnapshot,
     repo_root: Path,
 ) -> tuple[GeneratedArtifact, ...]:
     artifacts: list[GeneratedArtifact] = []
@@ -89,7 +90,14 @@ def _read_artifacts(
         if not resolved.is_file():
             msg = f"Generated artifact was not produced: {path}"
             raise RuntimeError(msg)
-        artifacts.append(GeneratedArtifact.text(path, resolved.read_text("utf-8")))
+        content = resolved.read_text("utf-8")
+        artifacts.append(
+            GeneratedArtifact.text(
+                path,
+                content,
+                changed_from_snapshot=snapshot[resolved] != content,
+            )
+        )
     return tuple(artifacts)
 
 
@@ -138,7 +146,11 @@ async def stream_command_materialized_artifacts(
             result = require_value(result_drain, f"Missing {detail} command result")
             _raise_failed_command(f"Refresh {detail}", result)
 
-            artifacts = _read_artifacts(artifact_paths, repo_root=repo_root)
+            artifacts = _read_artifacts(
+                artifact_paths,
+                snapshot=snapshot,
+                repo_root=repo_root,
+            )
             yield UpdateEvent.artifact(source, list(artifacts))
             yield UpdateEvent.status(
                 source,

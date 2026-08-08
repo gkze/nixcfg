@@ -31,5 +31,8 @@ class VSCodeInsidersUpdater(PlatformAPIUpdater):
     def _api_url(self, _api_platform: str) -> str:
         return f"https://update.code.visualstudio.com/api/update/{_api_platform}/insider/latest"
 
-    def _download_url(self, _api_platform: str, info: VersionInfo) -> str:
-        return f"https://update.code.visualstudio.com/{info.version}/{_api_platform}/insider"
+    def _download_urls(self, info: VersionInfo) -> dict[str, str]:
+        return self._require_platform_str_field(
+            self._metadata(info).platform_info,
+            field="url",
+        )

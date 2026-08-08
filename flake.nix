@@ -138,7 +138,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.71.0";
+      url = "github:max-sixty/worktrunk/v0.72.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -146,7 +146,7 @@
       flake = false;
     };
     anthropic-cli = {
-      url = "github:anthropics/anthropic-cli/v1.21.0";
+      url = "github:anthropics/anthropic-cli/v1.22.1";
       flake = false;
     };
     catppuccin = {
@@ -163,7 +163,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.146.0";
+      url = "github:openai/codex/rust-v0.147.0";
       flake = false;
     };
     curator = {
@@ -175,7 +175,7 @@
       flake = false;
     };
     openai-cli = {
-      url = "github:openai/openai-cli/v1.7.0";
+      url = "github:openai/openai-cli/v1.7.1";
       flake = false;
     };
     github-desktop = {
@@ -216,7 +216,7 @@
       flake = false;
     };
     linear-cli = {
-      url = "github:schpet/linear-cli/v2.3.0";
+      url = "github:schpet/linear-cli/v2.4.0";
       flake = false;
     };
     macfuse = {

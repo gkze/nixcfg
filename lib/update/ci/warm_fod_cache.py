@@ -25,11 +25,13 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated
 
+import aiohttp
 import typer
 
 from lib.nix.commands import base as nix_base
@@ -37,6 +39,8 @@ from lib.nix.commands.build import nix_build
 from lib.update import sources as update_sources
 from lib.update.ci._cli import make_main, make_typer_app
 from lib.update.ci._time import format_duration
+from lib.update.config import resolve_config
+from lib.update.net import fetch_url
 from lib.update.nix import (
     _build_overlay_attr_expr,
     _build_package_path_attr_expr,
@@ -51,6 +55,18 @@ log = logging.getLogger(__name__)
 
 # Generous timeout — FODs may download large dependency trees.
 BUILD_TIMEOUT = 3600.0
+
+# Cachix can take a moment to publish narinfo after a successful push. Keep the
+# retry bounded so a missing cache entry fails the warm-up job promptly.
+CACHIX_READBACK_ATTEMPTS = 5
+CACHIX_READBACK_DELAY = 2.0
+CACHIX_READBACK_REQUEST_TIMEOUT = 5.0
+_CACHIX_READBACK_CONFIG = resolve_config(retries=1, retry_backoff=0.0)
+
+_CACHIX_CACHE_NAME_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+_NIX_STORE_PATH_RE = re.compile(
+    r"/nix/store/(?P<hash>[0-9abcdfghijklmnpqrsvwxyz]{32})-[^/\s]+"
+)
 
 # Default map from hash type to the Nix attribute suffix that evaluates to the
 # FOD sub-derivation. Each entry uses dot-separated path components appended to
@@ -82,6 +98,17 @@ class FodTarget:
     package: str
     hash_type: str
     fod_attr: str
+    verify_cache_readback: bool = False
+
+
+_EXPLICIT_PACKAGE_FOD_TARGETS: dict[tuple[str, str], FodTarget] = {
+    ("zen-twilight", "aarch64-darwin"): FodTarget(
+        package="zen-twilight",
+        hash_type="sha256",
+        fod_attr=".src",
+        verify_cache_readback=True,
+    ),
+}
 
 
 _format_duration = format_duration
@@ -148,6 +175,18 @@ def _find_fod_targets(system: str) -> list[FodTarget]:
         )
         msg = f"Failed to load per-package sources.json entries: {details}"
         raise RuntimeError(msg)
+
+    for (name, target_system), target in sorted(_EXPLICIT_PACKAGE_FOD_TARGETS.items()):
+        if target_system != system:
+            continue
+        if name not in source_entries:
+            msg = (
+                f"Required FOD target {_target_label(target)} has no matching "
+                f"{SOURCES_FILE_NAME} entry"
+            )
+            raise RuntimeError(msg)
+        seen.add((target.package, target.fod_attr))
+        targets.append(target)
 
     for name, entry in sorted(source_entries.items()):
         for h in _platform_fod_entries(entry, system):
@@ -344,6 +383,95 @@ async def _push_to_cachix(store_paths: list[str], cache_name: str) -> bool:
     return True
 
 
+def _cachix_narinfo_url(cache_name: str, store_path: str) -> str:
+    """Return the public narinfo URL for one validated Cachix store path."""
+    if _CACHIX_CACHE_NAME_RE.fullmatch(cache_name) is None:
+        msg = f"Invalid Cachix cache name: {cache_name!r}"
+        raise ValueError(msg)
+    match = _NIX_STORE_PATH_RE.fullmatch(store_path)
+    if match is None:
+        msg = f"Invalid Nix store path: {store_path!r}"
+        raise ValueError(msg)
+    return f"https://{cache_name}.cachix.org/{match.group('hash')}.narinfo"
+
+
+async def _read_cachix_narinfo(
+    session: aiohttp.ClientSession,
+    url: str,
+    store_path: str,
+) -> bool:
+    """Return whether *url* publishes narinfo for the exact store path."""
+    try:
+        payload = await fetch_url(
+            session,
+            url,
+            request_timeout=CACHIX_READBACK_REQUEST_TIMEOUT,
+            config=_CACHIX_READBACK_CONFIG,
+        )
+    except RuntimeError as exc:
+        log.debug("Cachix readback unavailable at %s: %s", url, exc)
+        return False
+
+    expected_line = f"StorePath: {store_path}".encode()
+    if expected_line in payload.splitlines():
+        return True
+    log.warning("Cachix narinfo at %s did not name %s", url, store_path)
+    return False
+
+
+async def _verify_cachix_readback(
+    store_paths: list[str],
+    cache_name: str,
+) -> bool:
+    """Require every pushed path to become readable from the public cache."""
+    if not store_paths:
+        return True
+
+    try:
+        urls = {
+            store_path: _cachix_narinfo_url(cache_name, store_path)
+            for store_path in dict.fromkeys(store_paths)
+        }
+    except ValueError:
+        log.exception("Cannot verify Cachix readback")
+        return False
+
+    pending = urls
+    async with aiohttp.ClientSession() as session:
+        for attempt in range(1, CACHIX_READBACK_ATTEMPTS + 1):
+            results = await asyncio.gather(
+                *(
+                    _read_cachix_narinfo(session, url, store_path)
+                    for store_path, url in pending.items()
+                )
+            )
+            pending = {
+                store_path: url
+                for (store_path, url), available in zip(
+                    pending.items(), results, strict=True
+                )
+                if not available
+            }
+            if not pending:
+                log.info("Verified %d path(s) in Cachix", len(urls))
+                return True
+            if attempt < CACHIX_READBACK_ATTEMPTS:
+                log.info(
+                    "Waiting for %d Cachix path(s) to become readable (attempt %d/%d)",
+                    len(pending),
+                    attempt,
+                    CACHIX_READBACK_ATTEMPTS,
+                )
+                await asyncio.sleep(CACHIX_READBACK_DELAY)
+
+    log.error(
+        "Cachix did not publish narinfo for %d path(s): %s",
+        len(pending),
+        ", ".join(pending),
+    )
+    return False
+
+
 async def _build_one(target: FodTarget, system: str, *, cache_name: str | None) -> bool:
     """Build a single FOD sub-derivation, returning ``True`` on success.
 
@@ -385,6 +513,11 @@ async def _build_one(target: FodTarget, system: str, *, cache_name: str | None) 
             return False
         if not await _push_to_cachix(store_paths, cache_name):
             log.error("Failed to push %s to cachix cache %r", label, cache_name)
+            return False
+        if target.verify_cache_readback and not await _verify_cachix_readback(
+            store_paths, cache_name
+        ):
+            log.error("Failed to read back %s from cachix cache %r", label, cache_name)
             return False
 
     return True

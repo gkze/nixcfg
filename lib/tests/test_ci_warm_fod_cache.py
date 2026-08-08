@@ -12,6 +12,7 @@ import pytest
 from lib.nix.commands.base import CommandResult, NixCommandError
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.update.ci import warm_fod_cache as wfc
+from lib.update.config import UpdateConfig
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -76,6 +77,57 @@ def test_platform_entries_and_find_targets(monkeypatch: pytest.MonkeyPatch) -> N
     assert len(targets) == 1
     assert targets[0].package == "t3code-workspace"
     assert targets[0].fod_attr == ""
+
+    twilight_entry = SourceEntry(
+        version="1.22t-20260806121746",
+        hashes=HashCollection(
+            mapping={
+                "aarch64-darwin": (
+                    "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                ),
+                "x86_64-darwin": (
+                    "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                ),
+            }
+        ),
+        urls={
+            "aarch64-darwin": (
+                "https://github.com/zen-browser/desktop/releases/download/"
+                "twilight-1/zen.macos-universal.dmg"
+            ),
+            "x86_64-darwin": (
+                "https://github.com/zen-browser/desktop/releases/download/"
+                "twilight-1/zen.macos-universal.dmg"
+            ),
+        },
+    )
+    monkeypatch.setattr(
+        wfc,
+        "package_file_map",
+        lambda name: (
+            {"zen-twilight": Path("path")} if name == wfc.SOURCES_FILE_NAME else {}
+        ),
+    )
+    monkeypatch.setattr(
+        "lib.update.sources.load_source_entry", lambda _path: twilight_entry
+    )
+    targets = object.__getattribute__(wfc, "_find_fod_targets")("aarch64-darwin")
+    assert targets == [
+        wfc.FodTarget(
+            package="zen-twilight",
+            hash_type="sha256",
+            fod_attr=".src",
+            verify_cache_readback=True,
+        )
+    ]
+
+    monkeypatch.setattr(
+        wfc,
+        "package_file_map",
+        lambda name: {"demo": Path("path")} if name == wfc.SOURCES_FILE_NAME else {},
+    )
+    with pytest.raises(RuntimeError, match="Required FOD target zen-twilight.src"):
+        object.__getattribute__(wfc, "_find_fod_targets")("aarch64-darwin")
 
     deno_entry = SourceEntry(
         version="1",
@@ -468,6 +520,134 @@ def test_push_to_cachix_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def test_cachix_narinfo_url_validates_cache_and_store_path() -> None:
+    """Derive one Cachix narinfo URL without allowing host or path injection."""
+    store_path = "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-zen-source.dmg"
+    assert object.__getattribute__(wfc, "_cachix_narinfo_url")("gkze", store_path) == (
+        "https://gkze.cachix.org/0123456789abcdfghijklmnpqrsvwxyz.narinfo"
+    )
+
+    with pytest.raises(ValueError, match="Invalid Cachix cache name"):
+        object.__getattribute__(wfc, "_cachix_narinfo_url")(
+            "gkze.example.com", store_path
+        )
+    with pytest.raises(ValueError, match="Invalid Nix store path"):
+        object.__getattribute__(wfc, "_cachix_narinfo_url")(
+            "gkze", "/nix/store/not-a-store-hash-zen-source.dmg"
+        )
+
+
+def test_read_cachix_narinfo_requires_matching_store_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accept a narinfo only when it names the exact pushed store path."""
+    store_path = "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-zen-source.dmg"
+    fetch_kwargs: dict[str, object] = {}
+
+    async def _fetch(*_args: object, **kwargs: object) -> bytes:
+        fetch_kwargs.update(kwargs)
+        return f"StorePath: {store_path}\nNarHash: sha256:abc\n".encode()
+
+    monkeypatch.setattr(wfc, "fetch_url", _fetch)
+    assert (
+        asyncio.run(
+            object.__getattribute__(wfc, "_read_cachix_narinfo")(
+                object(), "https://gkze.cachix.org/hash.narinfo", store_path
+            )
+        )
+        is True
+    )
+    assert fetch_kwargs["request_timeout"] == wfc.CACHIX_READBACK_REQUEST_TIMEOUT
+    config = fetch_kwargs["config"]
+    assert isinstance(config, UpdateConfig)
+    assert config.default_retries == 1
+    assert config.default_retry_backoff == 0
+    assert "retries" not in fetch_kwargs
+
+    async def _fetch_other(*_args: object, **_kwargs: object) -> bytes:
+        return b"StorePath: /nix/store/other\n"
+
+    monkeypatch.setattr(wfc, "fetch_url", _fetch_other)
+    assert (
+        asyncio.run(
+            object.__getattribute__(wfc, "_read_cachix_narinfo")(
+                object(), "https://gkze.cachix.org/hash.narinfo", store_path
+            )
+        )
+        is False
+    )
+
+    async def _fetch_failure(*_args: object, **_kwargs: object) -> bytes:
+        msg = "not found"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(wfc, "fetch_url", _fetch_failure)
+    assert (
+        asyncio.run(
+            object.__getattribute__(wfc, "_read_cachix_narinfo")(
+                object(), "https://gkze.cachix.org/hash.narinfo", store_path
+            )
+        )
+        is False
+    )
+
+
+def test_verify_cachix_readback_retries_and_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry propagation briefly and fail when pushed narinfo never appears."""
+    store_path = "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-zen-source.dmg"
+    attempts = 0
+
+    async def _eventually_available(
+        _session: object,
+        _url: str,
+        _store_path: str,
+    ) -> bool:
+        nonlocal attempts
+        attempts += 1
+        return attempts == 2
+
+    monkeypatch.setattr(wfc, "_read_cachix_narinfo", _eventually_available)
+    monkeypatch.setattr(wfc, "CACHIX_READBACK_ATTEMPTS", 3)
+    monkeypatch.setattr(wfc, "CACHIX_READBACK_DELAY", 0.0)
+    assert (
+        asyncio.run(
+            object.__getattribute__(wfc, "_verify_cachix_readback")(
+                [store_path], "gkze"
+            )
+        )
+        is True
+    )
+    assert attempts == 2
+
+    monkeypatch.setattr(
+        wfc,
+        "_read_cachix_narinfo",
+        lambda *_args: asyncio.sleep(0, result=False),
+    )
+    assert (
+        asyncio.run(
+            object.__getattribute__(wfc, "_verify_cachix_readback")(
+                [store_path], "gkze"
+            )
+        )
+        is False
+    )
+    assert (
+        asyncio.run(object.__getattribute__(wfc, "_verify_cachix_readback")([], "gkze"))
+        is True
+    )
+    assert (
+        asyncio.run(
+            object.__getattribute__(wfc, "_verify_cachix_readback")(
+                [store_path], "unsafe.example.com"
+            )
+        )
+        is False
+    )
+
+
 def test_build_one_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
     target = wfc.FodTarget(
@@ -488,6 +668,14 @@ def test_build_one_paths(monkeypatch: pytest.MonkeyPatch) -> None:
             0, result=pushed.append((paths, cache)) is None or True
         ),
     )
+    read_back: list[tuple[list[str], str]] = []
+    monkeypatch.setattr(
+        wfc,
+        "_verify_cachix_readback",
+        lambda paths, cache: asyncio.sleep(
+            0, result=read_back.append((paths, cache)) is None or True
+        ),
+    )
 
     assert (
         asyncio.run(
@@ -506,6 +694,7 @@ def test_build_one_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         is True
     )
     assert pushed == [(["/nix/store/a"], "cache")]
+    assert read_back == []
 
     monkeypatch.setattr(
         wfc, "_resolve_output_paths", lambda _expr: asyncio.sleep(0, result=[])
@@ -550,6 +739,40 @@ def test_build_one_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         is False
     )
+
+
+def test_build_one_requires_readback_only_for_explicit_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail Twilight preservation unless its pushed source reads back."""
+    target = wfc.FodTarget(
+        package="zen-twilight",
+        hash_type="sha256",
+        fod_attr=".src",
+        verify_cache_readback=True,
+    )
+    monkeypatch.setattr(wfc, "_build_fod_expr", lambda *_args, **_kwargs: "expr")
+    monkeypatch.setattr(wfc, "nix_build", lambda **_kwargs: asyncio.sleep(0))
+    monkeypatch.setattr(
+        wfc,
+        "_resolve_output_paths",
+        lambda _expr: asyncio.sleep(0, result=["/nix/store/a"]),
+    )
+    monkeypatch.setattr(
+        wfc,
+        "_push_to_cachix",
+        lambda *_args: asyncio.sleep(0, result=True),
+    )
+    readback_results = iter((False, True))
+    monkeypatch.setattr(
+        wfc,
+        "_verify_cachix_readback",
+        lambda *_args: asyncio.sleep(0, result=next(readback_results)),
+    )
+
+    build_one = object.__getattribute__(wfc, "_build_one")
+    assert asyncio.run(build_one(target, "aarch64-darwin", cache_name="gkze")) is False
+    assert asyncio.run(build_one(target, "aarch64-darwin", cache_name="gkze")) is True
 
 
 def test_async_main_and_main(monkeypatch: pytest.MonkeyPatch) -> None:

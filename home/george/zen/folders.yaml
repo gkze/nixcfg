@@ -37,7 +37,7 @@ workspaces:
             - Anthropic: https://platform.claude.com/dashboard
             - Capy: https://capy.ai
             - Cursor: https://cursor.com/dashboard
-            - Devin: https://app.devin.ai/org/michael-lai
+            - Devin: https://app.devin.ai/org/town-8
             - Exa: https://dashboard.exa.ai/home
             - OpenAI: https://platform.openai.com
             - OpenRouter: https://openrouter.ai

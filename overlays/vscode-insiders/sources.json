@@ -1,16 +1,16 @@
 {
-  "commit": "5918810374de37fc9ded1ffae4173dcc93090333",
+  "commit": "36cb0da730a61b80beb0e12f31c8f915ed0afebb",
   "hashes": {
-    "aarch64-darwin": "sha256-iT6McpD2DaBpLr/r5GBToDmcYdOO+OIXD7JjP9wDiF4=",
-    "aarch64-linux": "sha256-9+pIEru6/8266Uc7A//WvVitIW5NNoMMaTzDkiFzCy0=",
-    "x86_64-darwin": "sha256-7bGY6cy4B1j9R8/m0+nEHbn9ToVg2fyctRlM/dP3FDs=",
-    "x86_64-linux": "sha256-Fz64IfplnN1LxUfM0N9tPmq7Xtskvnfkyyyud4v1teE="
+    "aarch64-darwin": "sha256-WumNns6LzQ6prg8p8H4YAiLSbRb9DWObSXrU1+sQvEQ=",
+    "aarch64-linux": "sha256-zRJAC/Fmqwp4YmyBEwAkx6PW8rF/oCTesRNfngbEBag=",
+    "x86_64-darwin": "sha256-o4JO+aU4qKy4B0uVni2B1Y00zhVLL+wngizVSEYEULQ=",
+    "x86_64-linux": "sha256-KQ33p9nSoIixfah8Y0xzOqJBoeHR3P/w3LMAmjw40Gs="
   },
   "urls": {
-    "aarch64-darwin": "https://update.code.visualstudio.com/1.132.0-insider/darwin-arm64/insider",
-    "aarch64-linux": "https://update.code.visualstudio.com/1.132.0-insider/linux-arm64/insider",
-    "x86_64-darwin": "https://update.code.visualstudio.com/1.132.0-insider/darwin/insider",
-    "x86_64-linux": "https://update.code.visualstudio.com/1.132.0-insider/linux-x64/insider"
+    "aarch64-darwin": "https://vscode.download.prss.microsoft.com/dbazure/download/insider/36cb0da730a61b80beb0e12f31c8f915ed0afebb/VSCode-darwin-arm64.zip",
+    "aarch64-linux": "https://vscode.download.prss.microsoft.com/dbazure/download/insider/36cb0da730a61b80beb0e12f31c8f915ed0afebb/code-insider-arm64-1786101494.tar.gz",
+    "x86_64-darwin": "https://vscode.download.prss.microsoft.com/dbazure/download/insider/36cb0da730a61b80beb0e12f31c8f915ed0afebb/VSCode-darwin.zip",
+    "x86_64-linux": "https://vscode.download.prss.microsoft.com/dbazure/download/insider/36cb0da730a61b80beb0e12f31c8f915ed0afebb/code-insider-x64-1786101494.tar.gz"
   },
-  "version": "1.132.0-insider"
+  "version": "1.133.0-insider"
 }

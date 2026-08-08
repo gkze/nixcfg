@@ -53,13 +53,23 @@ def persist_generated_artifacts(
         return
     if dry_run or not artifact_updates:
         return
-    successful_updates = {
+    completed_updates = {
         source: artifacts
         for source, artifacts in artifact_updates.items()
+        if details.get(source) in {"updated", "no_change"}
+    }
+    successful_updates = {
+        source: artifacts
+        for source, artifacts in completed_updates.items()
         if details.get(source) == "updated"
     }
     if not successful_updates:
         return
+    # A no-change producer can still disagree with a changed producer for the
+    # same path. Validate every completed producer before dropping baselines.
+    update_artifacts.dedupe_generated_artifacts(
+        flatten_artifact_updates(completed_updates)
+    )
     update_artifacts.save_generated_artifacts(
         flatten_artifact_updates(successful_updates)
     )

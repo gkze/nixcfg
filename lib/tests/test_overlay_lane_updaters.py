@@ -14,6 +14,7 @@ from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEvent, UpdateEventKind
 from lib.update.updaters import VersionInfo
 from lib.update.updaters.metadata import (
+    JsonObject,
     PlatformAPIMetadata,
     ReleasePayloadMetadata,
 )
@@ -394,6 +395,10 @@ def test_vscode_insiders_fetch_latest_checksums_and_urls(
         return {
             "productVersion": "1.100.0-insider",
             "sha256hash": f"sha256-{api_platform}",
+            "url": (
+                "https://vscode.download.example/insider/"
+                f"67c59a1440590a328f6fd0f15c37383c7576a236/{api_platform}"
+            ),
             "version": "67c59a1440590a328f6fd0f15c37383c7576a236",
         }
 
@@ -408,6 +413,52 @@ def test_vscode_insiders_fetch_latest_checksums_and_urls(
     assert checksums["aarch64-linux"] == "sha256-linux-arm64"
     assert result.commit == "67c59a1440590a328f6fd0f15c37383c7576a236"
     assert result.urls == {
-        platform: f"https://update.code.visualstudio.com/1.100.0-insider/{api_platform}/insider"
-        for platform, api_platform in updater.PLATFORMS.items()
+        "aarch64-darwin": (
+            "https://vscode.download.example/insider/"
+            "67c59a1440590a328f6fd0f15c37383c7576a236/darwin-arm64"
+        ),
+        "x86_64-darwin": (
+            "https://vscode.download.example/insider/"
+            "67c59a1440590a328f6fd0f15c37383c7576a236/darwin"
+        ),
+        "aarch64-linux": (
+            "https://vscode.download.example/insider/"
+            "67c59a1440590a328f6fd0f15c37383c7576a236/linux-arm64"
+        ),
+        "x86_64-linux": (
+            "https://vscode.download.example/insider/"
+            "67c59a1440590a328f6fd0f15c37383c7576a236/linux-x64"
+        ),
     }
+
+
+@pytest.mark.parametrize(
+    "platform_payload",
+    [{}, {"url": 42}],
+    ids=["missing", "non-string"],
+)
+def test_vscode_insiders_rejects_invalid_download_url(
+    platform_payload: JsonObject,
+) -> None:
+    """VS Code Insiders should reject absent or non-string artifact URLs."""
+    module = _load_module(
+        "overlays/vscode-insiders/updater.py",
+        "vscode_insiders_lane_invalid_url_test",
+    )
+    updater = module.VSCodeInsidersUpdater()
+    platform_info: dict[str, JsonObject] = {
+        platform: {"url": f"https://vscode.download.example/{platform}"}
+        for platform in updater.PLATFORMS
+    }
+    platform_info["aarch64-darwin"] = platform_payload
+    info = VersionInfo(
+        version="1.100.0-insider",
+        metadata=PlatformAPIMetadata(
+            platform_info=platform_info,
+            equality_fields={},
+            commit="67c59a1440590a328f6fd0f15c37383c7576a236",
+        ),
+    )
+
+    with pytest.raises(TypeError, match="Expected string field 'url'"):
+        updater.build_result(info, dict.fromkeys(updater.PLATFORMS, HASH_A))

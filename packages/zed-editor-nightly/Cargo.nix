@@ -10828,7 +10828,7 @@ rec {
           }
           {
             name = "itertools";
-            packageId = "itertools 0.11.0";
+            packageId = "itertools 0.10.5";
             usesDefaultFeatures = false;
           }
           {
@@ -10910,7 +10910,7 @@ rec {
           }
           {
             name = "itertools";
-            packageId = "itertools 0.11.0";
+            packageId = "itertools 0.10.5";
             usesDefaultFeatures = false;
           }
           {
@@ -16552,12 +16552,12 @@ rec {
             packageId = "anyhow";
           }
           {
-            name = "credentials_provider";
-            packageId = "credentials_provider";
+            name = "collections";
+            packageId = "collections";
           }
           {
-            name = "dirs";
-            packageId = "dirs";
+            name = "credentials_provider";
+            packageId = "credentials_provider";
           }
           {
             name = "futures";
@@ -16573,13 +16573,13 @@ rec {
             packageId = "http_client";
           }
           {
+            name = "language_model";
+            packageId = "language_model";
+          }
+          {
             name = "log";
             packageId = "log";
             features = [ "kv_unstable_serde" "serde" ];
-          }
-          {
-            name = "paths";
-            packageId = "paths";
           }
           {
             name = "serde";
@@ -16592,12 +16592,8 @@ rec {
             features = [ "preserve_order" "raw_value" ];
           }
           {
-            name = "settings";
-            packageId = "settings";
-          }
-          {
-            name = "zed_credentials_provider";
-            packageId = "zed_credentials_provider";
+            name = "util";
+            packageId = "util";
           }
         ];
         devDependencies = [
@@ -16614,7 +16610,7 @@ rec {
           }
         ];
         features = {
-          "test-support" = [ "gpui/test-support" "settings/test-support" ];
+          "test-support" = [ "gpui/test-support" ];
         };
         resolvedDefaultFeatures = [ "default" ];
       };
@@ -18837,9 +18833,9 @@ rec {
       };
       "ctor" = rec {
         crateName = "ctor";
-        version = "1.0.6";
+        version = "1.0.12";
         edition = "2021";
-        sha256 = "1ia9wwwk8y212jyx44h91gb359axw5g5y67aw0qhv8dxq2qmwxkd";
+        sha256 = "0zypq22kn415hyv6gwjbl5pjqnbasf6af0kbimq30f47g9zcp0rd";
         authors = [
           "Matt Mastracci <matthew@mastracci.com>"
         ];
@@ -21657,13 +21653,13 @@ rec {
       };
       "dugong" = rec {
         crateName = "dugong";
-        version = "0.6.2";
+        version = "0.7.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/merman";
-          rev = "9acc3960f04a7deeb08079d60fa8183f15e8bde1";
-          sha256 = "00k1rxlf77ipavasysz5r14ab2r1s1x4254ma6gw28fxk9xdxbsa";
+          rev = "a3ed8d9f3fd1d74c802f25ed9edd501743796504";
+          sha256 = "043nb7vzm0fivbn2gn7zamlpychzx17mm7hgzrbv93agippx9pcd";
         };
         authors = [
           "Mingzhen Zhuang <superfrankie621@gmail.com>"
@@ -21687,6 +21683,10 @@ rec {
             packageId = "serde_json";
             features = [ "preserve_order" ];
           }
+          {
+            name = "web-time";
+            packageId = "web-time";
+          }
         ];
         features = {
           "default" = [ "dagreish" ];
@@ -21695,13 +21695,13 @@ rec {
       };
       "dugong-graphlib" = rec {
         crateName = "dugong-graphlib";
-        version = "0.6.2";
+        version = "0.7.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/merman";
-          rev = "9acc3960f04a7deeb08079d60fa8183f15e8bde1";
-          sha256 = "00k1rxlf77ipavasysz5r14ab2r1s1x4254ma6gw28fxk9xdxbsa";
+          rev = "a3ed8d9f3fd1d74c802f25ed9edd501743796504";
+          sha256 = "043nb7vzm0fivbn2gn7zamlpychzx17mm7hgzrbv93agippx9pcd";
         };
         libName = "dugong_graphlib";
         authors = [
@@ -21715,6 +21715,16 @@ rec {
           {
             name = "rustc-hash";
             packageId = "rustc-hash 2.1.1";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "preserve_order" ];
           }
         ];
 
@@ -24240,7 +24250,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Diagnostics_Debug" ];
           }
@@ -25381,6 +25391,10 @@ rec {
           {
             name = "fuzzy";
             packageId = "fuzzy";
+          }
+          {
+            name = "git";
+            packageId = "git";
           }
           {
             name = "gpui";
@@ -28129,7 +28143,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Networking_WinSock" ];
           }
@@ -30371,6 +30385,10 @@ rec {
             packageId = "thiserror 2.0.17";
           }
           {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
             name = "ttf-parser";
             packageId = "ttf-parser";
           }
@@ -30426,6 +30444,10 @@ rec {
             optional = true;
             usesDefaultFeatures = false;
             target = { target, features }: (("linux" == target."os" or null) || ("freebsd" == target."os" or null) || ("windows" == target."os" or null));
+          }
+          {
+            name = "ztracing";
+            packageId = "ztracing";
           }
         ];
         buildDependencies = [
@@ -31355,7 +31377,7 @@ rec {
             name = "web-sys";
             packageId = "web-sys";
             target = { target, features }: (builtins.elem "wasm" target."family");
-            features = [ "console" "Clipboard" "ClipboardEvent" "CompositionEvent" "CssStyleDeclaration" "DataTransfer" "Document" "DomRect" "DragEvent" "Element" "EventTarget" "HtmlCanvasElement" "HtmlElement" "HtmlInputElement" "IdleDeadline" "IdleRequestOptions" "KeyboardEvent" "MediaQueryList" "MediaQueryListEvent" "MouseEvent" "Navigator" "PointerEvent" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverSize" "ResizeObserverOptions" "Screen" "Storage" "VisualViewport" "Headers" "Request" "RequestCredentials" "RequestInit" "RequestRedirect" "Response" "WheelEvent" "Window" ];
+            features = [ "console" "Clipboard" "ClipboardEvent" "CompositionEvent" "CssStyleDeclaration" "DataTransfer" "Document" "DomRect" "DragEvent" "Element" "EventTarget" "HtmlCanvasElement" "HtmlElement" "HtmlInputElement" "IdleDeadline" "IdleRequestOptions" "KeyboardEvent" "Location" "MediaQueryList" "MediaQueryListEvent" "MouseEvent" "Navigator" "PointerEvent" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverSize" "ResizeObserverOptions" "Screen" "Storage" "VisualViewport" "Headers" "Request" "RequestCredentials" "RequestInit" "RequestRedirect" "Response" "WheelEvent" "Window" ];
           }
           {
             name = "web-time";
@@ -31476,6 +31498,12 @@ rec {
             packageId = "wgpu";
           }
           {
+            name = "wgpu";
+            packageId = "wgpu";
+            target = { target, features }: (builtins.elem "wasm" target."family");
+            features = [ "webgl" ];
+          }
+          {
             name = "zed-font-kit";
             packageId = "zed-font-kit";
             rename = "font-kit";
@@ -31487,6 +31515,11 @@ rec {
             name = "criterion";
             packageId = "criterion";
             features = [ "html_reports" ];
+          }
+          {
+            name = "naga";
+            packageId = "naga";
+            features = [ "wgsl-in" ];
           }
         ];
         features = {
@@ -34041,7 +34074,7 @@ rec {
           }
           {
             name = "windows-core";
-            packageId = "windows-core 0.62.2";
+            packageId = "windows-core 0.56.0";
             target = { target, features }: ("windows" == target."os" or null);
           }
         ];
@@ -38909,9 +38942,9 @@ rec {
       };
       "link-section" = rec {
         crateName = "link-section";
-        version = "0.17.2";
+        version = "0.19.2";
         edition = "2021";
-        sha256 = "1030yd8z9yb1dp1gn1g8670w8h7azqv4mf23axr9yvkd865907jd";
+        sha256 = "1m7kc6x38vnr475zijmcn7rxs0hflvxl5ny2gcpfibsjwbba1qay";
         libName = "link_section";
         authors = [
           "Matt Mastracci <matthew@mastracci.com>"
@@ -38939,9 +38972,9 @@ rec {
       };
       "linktime-proc-macro" = rec {
         crateName = "linktime-proc-macro";
-        version = "0.1.0";
+        version = "0.2.2";
         edition = "2021";
-        sha256 = "108gasagydcdmb9hrqcd4a0y49ya21jicw905gikwl0dzw3dfk54";
+        sha256 = "1psv95fpixms7j3qs4nz3gyz5nj1a7y7azraswk3n5pwn5sh139l";
         procMacro = true;
         libName = "linktime_proc_macro";
         authors = [
@@ -40565,13 +40598,13 @@ rec {
       };
       "manatee" = rec {
         crateName = "manatee";
-        version = "0.6.2";
+        version = "0.7.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/merman";
-          rev = "9acc3960f04a7deeb08079d60fa8183f15e8bde1";
-          sha256 = "00k1rxlf77ipavasysz5r14ab2r1s1x4254ma6gw28fxk9xdxbsa";
+          rev = "a3ed8d9f3fd1d74c802f25ed9edd501743796504";
+          sha256 = "043nb7vzm0fivbn2gn7zamlpychzx17mm7hgzrbv93agippx9pcd";
         };
         authors = [
           "Mingzhen Zhuang <superfrankie621@gmail.com>"
@@ -40595,6 +40628,10 @@ rec {
           {
             name = "thiserror";
             packageId = "thiserror 2.0.17";
+          }
+          {
+            name = "web-time";
+            packageId = "web-time";
           }
         ];
 
@@ -40732,6 +40769,10 @@ rec {
             packageId = "image";
             usesDefaultFeatures = false;
             features = [ "bmp" "dds" "exr" "ff" "gif" "hdr" "ico" "jpeg" "png" "pnm" "qoi" "rayon" "tga" "tiff" "webp" ];
+          }
+          {
+            name = "indoc";
+            packageId = "indoc";
           }
           {
             name = "language";
@@ -41518,6 +41559,14 @@ rec {
             packageId = "serde_json";
             features = [ "preserve_order" "raw_value" ];
           }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "ztracing";
+            packageId = "ztracing";
+          }
         ];
         devDependencies = [
           {
@@ -41543,18 +41592,23 @@ rec {
       };
       "merman" = rec {
         crateName = "merman";
-        version = "0.6.2";
+        version = "0.7.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/merman";
-          rev = "9acc3960f04a7deeb08079d60fa8183f15e8bde1";
-          sha256 = "00k1rxlf77ipavasysz5r14ab2r1s1x4254ma6gw28fxk9xdxbsa";
+          rev = "a3ed8d9f3fd1d74c802f25ed9edd501743796504";
+          sha256 = "043nb7vzm0fivbn2gn7zamlpychzx17mm7hgzrbv93agippx9pcd";
         };
         authors = [
           "Mingzhen Zhuang <superfrankie621@gmail.com>"
         ];
         dependencies = [
+          {
+            name = "chrono";
+            packageId = "chrono";
+            features = [ "clock" ];
+          }
           {
             name = "merman-core";
             packageId = "merman-core";
@@ -41571,20 +41625,23 @@ rec {
           }
         ];
         features = {
+          "ascii" = [ "dep:merman-ascii" "dep:thiserror" ];
+          "egui-example" = [ "raster" "dep:eframe" ];
           "raster" = [ "render" "dep:image" "dep:resvg" "dep:usvg" "dep:tiny-skia" "dep:svg2pdf" ];
+          "ratex-math" = [ "render" "merman-render/ratex-math" ];
           "render" = [ "dep:merman-render" "dep:thiserror" ];
         };
         resolvedDefaultFeatures = [ "default" "render" ];
       };
       "merman-core" = rec {
         crateName = "merman-core";
-        version = "0.6.2";
+        version = "0.7.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/merman";
-          rev = "9acc3960f04a7deeb08079d60fa8183f15e8bde1";
-          sha256 = "00k1rxlf77ipavasysz5r14ab2r1s1x4254ma6gw28fxk9xdxbsa";
+          rev = "a3ed8d9f3fd1d74c802f25ed9edd501743796504";
+          sha256 = "043nb7vzm0fivbn2gn7zamlpychzx17mm7hgzrbv93agippx9pcd";
         };
         libName = "merman_core";
         authors = [
@@ -41667,7 +41724,11 @@ rec {
           {
             name = "uuid";
             packageId = "uuid";
-            features = [ "v4" ];
+            features = [ "v4" "js" ];
+          }
+          {
+            name = "web-time";
+            packageId = "web-time";
           }
         ];
         buildDependencies = [
@@ -41683,13 +41744,13 @@ rec {
       };
       "merman-render" = rec {
         crateName = "merman-render";
-        version = "0.6.2";
+        version = "0.7.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/merman";
-          rev = "9acc3960f04a7deeb08079d60fa8183f15e8bde1";
-          sha256 = "00k1rxlf77ipavasysz5r14ab2r1s1x4254ma6gw28fxk9xdxbsa";
+          rev = "a3ed8d9f3fd1d74c802f25ed9edd501743796504";
+          sha256 = "043nb7vzm0fivbn2gn7zamlpychzx17mm7hgzrbv93agippx9pcd";
         };
         libName = "merman_render";
         authors = [
@@ -41725,10 +41786,6 @@ rec {
           {
             name = "pulldown-cmark";
             packageId = "pulldown-cmark 0.12.2";
-          }
-          {
-            name = "regex";
-            packageId = "regex";
           }
           {
             name = "roughr-merman";
@@ -41769,8 +41826,15 @@ rec {
             name = "url";
             packageId = "url";
           }
+          {
+            name = "web-time";
+            packageId = "web-time";
+          }
         ];
-
+        features = {
+          "ratex-math" = [ "dep:ratex-layout" "dep:ratex-parser" "dep:ratex-svg" "dep:ratex-types" "ratex-svg/embed-fonts" "ratex-svg/standalone" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
       };
       "metal" = rec {
         crateName = "metal";
@@ -48994,9 +49058,9 @@ rec {
       };
       "pathfinder_simd" = rec {
         crateName = "pathfinder_simd";
-        version = "0.5.5";
+        version = "0.5.6";
         edition = "2018";
-        sha256 = "0mxdnmcagfv0h18ns8kdmirgk9c1993ih6c4z7zkmgsm0fb2g45z";
+        sha256 = "0xsp8dh6pgrkm3anwdc4870bdv0sinaknvzk4gag2jif60606025";
         authors = [
           "Patrick Walton <pcwalton@mimiga.net>"
         ];
@@ -53423,10 +53487,6 @@ rec {
             packageId = "editor";
           }
           {
-            name = "feature_flags";
-            packageId = "feature_flags";
-          }
-          {
             name = "file_icons";
             packageId = "file_icons";
           }
@@ -54140,7 +54200,7 @@ rec {
           }
           {
             name = "itertools";
-            packageId = "itertools 0.11.0";
+            packageId = "itertools 0.10.5";
             usesDefaultFeatures = false;
             features = [ "use_alloc" ];
           }
@@ -54291,7 +54351,7 @@ rec {
           }
           {
             name = "itertools";
-            packageId = "itertools 0.11.0";
+            packageId = "itertools 0.10.5";
             usesDefaultFeatures = false;
             features = [ "use_alloc" ];
           }
@@ -58824,8 +58884,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/merman";
-          rev = "9acc3960f04a7deeb08079d60fa8183f15e8bde1";
-          sha256 = "00k1rxlf77ipavasysz5r14ab2r1s1x4254ma6gw28fxk9xdxbsa";
+          rev = "a3ed8d9f3fd1d74c802f25ed9edd501743796504";
+          sha256 = "043nb7vzm0fivbn2gn7zamlpychzx17mm7hgzrbv93agippx9pcd";
         };
         libName = "roughr";
         authors = [
@@ -58839,6 +58899,12 @@ rec {
           {
             name = "euclid";
             packageId = "euclid";
+          }
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.2.16";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "js" ];
           }
           {
             name = "num-traits";
@@ -59752,7 +59818,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" ];
           }
@@ -68668,7 +68734,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Storage_FileSystem" "Win32_Foundation" ];
           }
@@ -78136,7 +78202,7 @@ rec {
           "default" = [ "std" ];
           "std" = [ "wasm-bindgen/std" "js-sys/std" ];
         };
-        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AngleInstancedArrays" "AudioBuffer" "AudioBufferSourceNode" "AudioContext" "AudioContextOptions" "AudioContextState" "AudioDestinationNode" "AudioNode" "AudioScheduledSourceNode" "BaseAudioContext" "BinaryType" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "Clipboard" "ClipboardEvent" "CloseEvent" "CompositionEvent" "CssStyleDeclaration" "DataTransfer" "DedicatedWorkerGlobalScope" "Document" "DomRect" "DomRectReadOnly" "DragEvent" "Element" "Event" "EventTarget" "ExtBlendMinmax" "ExtColorBufferFloat" "ExtColorBufferHalfFloat" "ExtDisjointTimerQuery" "ExtFragDepth" "ExtSRgb" "ExtShaderTextureLod" "ExtTextureFilterAnisotropic" "File" "FormData" "Headers" "HtmlCanvasElement" "HtmlElement" "HtmlImageElement" "HtmlInputElement" "HtmlMediaElement" "HtmlVideoElement" "IdleDeadline" "IdleRequestOptions" "ImageBitmap" "ImageData" "KeyboardEvent" "MediaQueryList" "MediaQueryListEvent" "MessageEvent" "MouseEvent" "Navigator" "Node" "NodeList" "OesElementIndexUint" "OesStandardDerivatives" "OesTextureFloat" "OesTextureFloatLinear" "OesTextureHalfFloat" "OesTextureHalfFloatLinear" "OesVertexArrayObject" "OffscreenCanvas" "OvrMultiview2" "PointerEvent" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "RequestRedirect" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Response" "RtcDataChannel" "RtcDataChannelEvent" "RtcDataChannelState" "RtcIceCandidate" "RtcPeerConnection" "RtcPeerConnectionIceEvent" "RtcSdpType" "RtcSessionDescriptionInit" "RtcSignalingState" "Screen" "ServiceWorkerGlobalScope" "Storage" "StreamPipeOptions" "TransformStream" "TransformStreamDefaultController" "Transformer" "UiEvent" "UnderlyingSink" "UnderlyingSource" "Url" "VideoFrame" "VisualViewport" "WebGl2RenderingContext" "WebGlActiveInfo" "WebGlBuffer" "WebGlFramebuffer" "WebGlProgram" "WebGlQuery" "WebGlRenderbuffer" "WebGlRenderingContext" "WebGlSampler" "WebGlShader" "WebGlShaderPrecisionFormat" "WebGlSync" "WebGlTexture" "WebGlTransformFeedback" "WebGlUniformLocation" "WebGlVertexArrayObject" "WebSocket" "WebglColorBufferFloat" "WebglCompressedTextureAstc" "WebglCompressedTextureEtc" "WebglCompressedTextureEtc1" "WebglCompressedTexturePvrtc" "WebglCompressedTextureS3tc" "WebglCompressedTextureS3tcSrgb" "WebglDebugRendererInfo" "WebglDebugShaders" "WebglDepthTexture" "WebglDrawBuffers" "WebglLoseContext" "WheelEvent" "Window" "Worker" "WorkerGlobalScope" "WorkerNavigator" "WorkerOptions" "WorkerType" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "console" "default" "std" ];
+        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AngleInstancedArrays" "AudioBuffer" "AudioBufferSourceNode" "AudioContext" "AudioContextOptions" "AudioContextState" "AudioDestinationNode" "AudioNode" "AudioScheduledSourceNode" "BaseAudioContext" "BinaryType" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "Clipboard" "ClipboardEvent" "CloseEvent" "CompositionEvent" "CssStyleDeclaration" "DataTransfer" "DedicatedWorkerGlobalScope" "Document" "DomRect" "DomRectReadOnly" "DragEvent" "Element" "Event" "EventTarget" "ExtBlendMinmax" "ExtColorBufferFloat" "ExtColorBufferHalfFloat" "ExtDisjointTimerQuery" "ExtFragDepth" "ExtSRgb" "ExtShaderTextureLod" "ExtTextureFilterAnisotropic" "File" "FormData" "Headers" "HtmlCanvasElement" "HtmlElement" "HtmlImageElement" "HtmlInputElement" "HtmlMediaElement" "HtmlVideoElement" "IdleDeadline" "IdleRequestOptions" "ImageBitmap" "ImageData" "KeyboardEvent" "Location" "MediaQueryList" "MediaQueryListEvent" "MessageEvent" "MouseEvent" "Navigator" "Node" "NodeList" "OesElementIndexUint" "OesStandardDerivatives" "OesTextureFloat" "OesTextureFloatLinear" "OesTextureHalfFloat" "OesTextureHalfFloatLinear" "OesVertexArrayObject" "OffscreenCanvas" "OvrMultiview2" "PointerEvent" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "RequestRedirect" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Response" "RtcDataChannel" "RtcDataChannelEvent" "RtcDataChannelState" "RtcIceCandidate" "RtcPeerConnection" "RtcPeerConnectionIceEvent" "RtcSdpType" "RtcSessionDescriptionInit" "RtcSignalingState" "Screen" "ServiceWorkerGlobalScope" "Storage" "StreamPipeOptions" "TransformStream" "TransformStreamDefaultController" "Transformer" "UiEvent" "UnderlyingSink" "UnderlyingSource" "Url" "VideoFrame" "VisualViewport" "WebGl2RenderingContext" "WebGlActiveInfo" "WebGlBuffer" "WebGlFramebuffer" "WebGlProgram" "WebGlQuery" "WebGlRenderbuffer" "WebGlRenderingContext" "WebGlSampler" "WebGlShader" "WebGlShaderPrecisionFormat" "WebGlSync" "WebGlTexture" "WebGlTransformFeedback" "WebGlUniformLocation" "WebGlVertexArrayObject" "WebSocket" "WebglColorBufferFloat" "WebglCompressedTextureAstc" "WebglCompressedTextureEtc" "WebglCompressedTextureEtc1" "WebglCompressedTexturePvrtc" "WebglCompressedTextureS3tc" "WebglCompressedTextureS3tcSrgb" "WebglDebugRendererInfo" "WebglDebugShaders" "WebglDepthTexture" "WebglDrawBuffers" "WebglLoseContext" "WheelEvent" "Window" "Worker" "WorkerGlobalScope" "WorkerNavigator" "WorkerOptions" "WorkerType" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "console" "default" "std" ];
       };
       "web-time" = rec {
         crateName = "web-time";
@@ -78654,7 +78720,7 @@ rec {
           "wgpu-core" = [ "dep:wgpu-core" ];
           "wgsl" = [ "wgpu-core?/wgsl" ];
         };
-        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "parking_lot" "std" "vulkan" "web" "webgpu" "wgsl" ];
+        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "parking_lot" "std" "vulkan" "web" "webgl" "webgpu" "wgpu-core" "wgsl" ];
       };
       "wgpu-core" = rec {
         crateName = "wgpu-core";
@@ -78766,6 +78832,12 @@ rec {
             target = { target, features }: ("emscripten" == target."os" or null);
           }
           {
+            name = "wgpu-core-deps-wasm";
+            packageId = "wgpu-core-deps-wasm";
+            optional = true;
+            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
+          }
+          {
             name = "wgpu-core-deps-windows-linux-android";
             packageId = "wgpu-core-deps-windows-linux-android";
             optional = true;
@@ -78819,7 +78891,7 @@ rec {
           "wgpu-core-deps-windows-linux-android" = [ "dep:wgpu-core-deps-windows-linux-android" ];
           "wgsl" = [ "naga/wgsl-in" ];
         };
-        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "portable-atomic" "renderdoc" "std" "vulkan" "wgpu-core-deps-apple" "wgpu-core-deps-emscripten" "wgpu-core-deps-windows-linux-android" "wgsl" ];
+        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "portable-atomic" "renderdoc" "std" "vulkan" "webgl" "wgpu-core-deps-apple" "wgpu-core-deps-emscripten" "wgpu-core-deps-wasm" "wgpu-core-deps-windows-linux-android" "wgsl" ];
       };
       "wgpu-core-deps-apple" = rec {
         crateName = "wgpu-core-deps-apple";
@@ -78864,6 +78936,27 @@ rec {
           "gles" = [ "wgpu-hal/gles" ];
         };
         resolvedDefaultFeatures = [ "gles" ];
+      };
+      "wgpu-core-deps-wasm" = rec {
+        crateName = "wgpu-core-deps-wasm";
+        version = "29.0.4";
+        edition = "2021";
+        sha256 = "0n9hjjf37g35k31brs2hmwscpc4vsdr4y8jcgm4i5ag2idwv27xg";
+        libName = "wgpu_core_deps_wasm";
+        authors = [
+          "gfx-rs developers"
+        ];
+        dependencies = [
+          {
+            name = "wgpu-hal";
+            packageId = "wgpu-hal";
+            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
+          }
+        ];
+        features = {
+          "webgl" = [ "wgpu-hal/gles" ];
+        };
+        resolvedDefaultFeatures = [ "webgl" ];
       };
       "wgpu-core-deps-windows-linux-android" = rec {
         crateName = "wgpu-core-deps-windows-linux-android";
@@ -79646,7 +79739,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.48.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" "Win32_System_SystemInformation" ];
           }
@@ -84770,7 +84863,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_Threading" "Win32_System_Time" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_Time" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "default" ];
       };
       "windows-sys 0.52.0" = rec {
         crateName = "windows-sys";
@@ -85018,7 +85111,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_IO" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
       };
       "windows-sys 0.59.0" = rec {
         crateName = "windows-sys";
@@ -89453,7 +89546,7 @@ rec {
       };
       "zed" = rec {
         crateName = "zed";
-        version = "1.15.0";
+        version = "1.16.0";
         edition = "2024";
         crateBin = [
           {
@@ -90152,6 +90245,10 @@ rec {
           {
             name = "zed_actions";
             packageId = "zed_actions";
+          }
+          {
+            name = "zed_credentials_provider";
+            packageId = "zed_credentials_provider";
           }
           {
             name = "zed_env_vars";

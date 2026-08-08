@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator, Iterable
 from datetime import UTC, datetime
+from types import ModuleType
 
 import pytest
 from nix_manipulator.expressions.binding import Binding
@@ -11,17 +13,68 @@ from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.let import LetExpression
 from nix_manipulator.expressions.primitive import StringPrimitive
 
-from lib.nix.models.sources import HashEntry
+from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import install_fixed_hash_stream
 from lib.tests._updater_helpers import load_repo_module as _load_updater
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.events import UpdateEventKind
+from lib.update.config import resolve_config
+from lib.update.derivation_validation import DerivationValidation
+from lib.update.events import (
+    StatusInfo,
+    StatusKind,
+    StatusPayload,
+    UpdateEvent,
+    UpdateEventKind,
+)
 from lib.update.updaters import VersionInfo
 from lib.update.updaters import strategies as updater_strategies
 from lib.update.updaters.metadata import GranolaFeedMetadata
 from lib.update.updaters.vendor_feeds import SparkleAppcastItem
+
+
+def _install_twilight_feed(
+    monkeypatch: pytest.MonkeyPatch,
+    module: ModuleType,
+    build_ids: Iterable[str],
+) -> list[str]:
+    builds = iter(build_ids)
+    calls: list[str] = []
+
+    async def _fetch_url(_session: object, _url: str, **_kwargs: object) -> bytes:
+        build_id = next(builds)
+        calls.append(build_id)
+        return (
+            f'<updates><update appVersion="1.22t" buildID="{build_id}" /></updates>'
+        ).encode()
+
+    monkeypatch.setattr(module, "fetch_url", _fetch_url)
+    return calls
+
+
+def _install_twilight_hashes(
+    monkeypatch: pytest.MonkeyPatch,
+    hash_values: Iterable[str],
+) -> list[tuple[str, ...]]:
+    values = iter(hash_values)
+    calls: list[tuple[str, ...]] = []
+
+    async def _compute_url_hashes(
+        source: str, urls: Iterable[str]
+    ) -> AsyncIterator[UpdateEvent]:
+        resolved_urls = tuple(urls)
+        calls.append(resolved_urls)
+        yield UpdateEvent.value(
+            source,
+            dict.fromkeys(resolved_urls, next(values)),
+        )
+
+    monkeypatch.setattr(
+        "lib.update.process.compute_url_hashes",
+        _compute_url_hashes,
+    )
+    return calls
 
 
 def test_granola_fetch_latest_and_download_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -379,29 +432,341 @@ def test_sculptor_rejects_missing_last_modified_header(
         _run(updater.fetch_latest(object()))
 
 
-def test_zen_twilight_reads_pinned_channel_and_recomputes_hashes(
+def test_zen_twilight_reads_channel_version_and_recomputes_hashes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Keep Twilight pinned to its channel artifact while forcing hash refreshes."""
+    """Version the mutable Twilight DMG from its official update metadata."""
     module = _load_updater(
         "packages/zen-twilight/updater.py", "zen_twilight_updater_test"
     )
     updater = module.ZenTwilightUpdater()
-    pinned_version = "1.2.3"
-    monkeypatch.setattr(
-        module,
-        "read_pinned_source_version",
-        lambda name: pinned_version if name == "zen-twilight" else "",
-    )
+
+    async def _fetch_url(_session: object, url: str, **kwargs: object) -> bytes:
+        assert url == updater.TWILIGHT_UPDATE_URL
+        assert kwargs == {
+            "request_timeout": updater.config.default_timeout,
+            "config": updater.config,
+        }
+        return (
+            b'<updates><update appVersion="1.22t" buildID="20260803113308" /></updates>'
+        )
+
+    monkeypatch.setattr(module, "fetch_url", _fetch_url)
 
     latest = _run(updater.fetch_latest(object()))
 
-    assert latest == VersionInfo(version=pinned_version)
+    assert latest == VersionInfo(version="1.22t-20260803113308")
     assert updater.PLATFORMS == {
         "aarch64-darwin": updater.TWILIGHT_DMG_URL,
         "x86_64-darwin": updater.TWILIGHT_DMG_URL,
     }
+    assert updater.supported_platforms == tuple(updater.PLATFORMS)
     assert _run(updater._is_latest(None, latest)) is False
+
+
+def test_zen_twilight_skips_unsupported_linux_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep Linux update lanes away from the Darwin-only mutable channel."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py",
+        "zen_twilight_updater_test_unsupported_platform",
+    )
+    updater = module.ZenTwilightUpdater()
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "x86_64-linux",
+    )
+
+    async def _fail_fetch_latest(_session: object) -> VersionInfo:
+        raise AssertionError("unsupported runners must not fetch the Twilight feed")
+
+    monkeypatch.setattr(updater, "fetch_latest", _fail_fetch_latest)
+
+    events = _run(_collect_events(updater.update_stream(None, object())))
+
+    assert [event.kind for event in events] == [
+        UpdateEventKind.STATUS,
+        UpdateEventKind.RESULT,
+    ]
+    status = events[0].payload
+    assert isinstance(status, StatusPayload)
+    assert status.info == StatusInfo(
+        kind=StatusKind.UNSUPPORTED_PLATFORM,
+        value="x86_64-linux",
+    )
+
+
+@pytest.mark.parametrize(
+    ("payload", "match"),
+    [
+        (b"<", "Invalid Twilight update XML"),
+        (b"<updates />", "No update found"),
+        (b'<updates><update buildID="20260803113308" /></updates>', "Missing version"),
+        (b'<updates><update appVersion="1.22t" /></updates>', "Missing version"),
+    ],
+)
+def test_zen_twilight_rejects_invalid_update_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: bytes,
+    match: str,
+) -> None:
+    """Reject malformed or incomplete Twilight update metadata."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py", "zen_twilight_updater_test_errors"
+    )
+    updater = module.ZenTwilightUpdater()
+    monkeypatch.setattr(
+        module,
+        "fetch_url",
+        lambda *_args, **_kwargs: asyncio.sleep(0, result=payload),
+    )
+
+    with pytest.raises(RuntimeError, match=match):
+        _run(updater.fetch_latest(object()))
+
+
+def test_zen_twilight_hashes_one_stable_channel_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Publish hashes only when the feed stays on the resolved build."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py", "zen_twilight_updater_test_stable"
+    )
+    updater = module.ZenTwilightUpdater(config=resolve_config(retry_backoff=0))
+    feed_calls = _install_twilight_feed(
+        monkeypatch,
+        module,
+        ("20260803113308",) * 3,
+    )
+    hash_calls = _install_twilight_hashes(monkeypatch, ("sha256-stable",))
+
+    events = _run(_collect_events(updater.update_stream(None, object())))
+
+    results = [
+        event.payload
+        for event in events
+        if event.kind is UpdateEventKind.RESULT and event.payload is not None
+    ]
+    assert results == [
+        SourceEntry(
+            version="1.22t-20260803113308",
+            hashes={
+                "aarch64-darwin": "sha256-stable",
+                "x86_64-darwin": "sha256-stable",
+            },
+            urls={
+                "aarch64-darwin": updater.TWILIGHT_DMG_URL,
+                "x86_64-darwin": updater.TWILIGHT_DMG_URL,
+            },
+        )
+    ]
+    assert feed_calls == ["20260803113308"] * 3
+    assert hash_calls == [
+        (updater.TWILIGHT_DMG_URL, updater.TWILIGHT_DMG_URL),
+    ]
+
+
+def test_zen_twilight_forwards_hash_diagnostics_before_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Expose prefetch diagnostics even when hashing ultimately fails."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py",
+        "zen_twilight_updater_test_hash_failure_diagnostics",
+    )
+    updater = module.ZenTwilightUpdater(config=resolve_config(retry_backoff=0))
+    _install_twilight_feed(
+        monkeypatch,
+        module,
+        ("20260803113308",),
+    )
+    command_start = UpdateEvent(
+        source=updater.name,
+        kind=UpdateEventKind.COMMAND_START,
+        message="nix-prefetch-url ...",
+    )
+    retry = UpdateEvent.status(
+        updater.name,
+        "nix-prefetch-url hit a transient failure; retrying...",
+        operation="compute_hash",
+        status=StatusInfo(kind=StatusKind.RETRY, value="attempt 2/2"),
+    )
+
+    async def _failing_hashes(
+        _source: str,
+        _urls: Iterable[str],
+    ) -> AsyncIterator[UpdateEvent]:
+        yield command_start
+        yield retry
+        raise RuntimeError("permanent prefetch failure")
+
+    monkeypatch.setattr(
+        "lib.update.process.compute_url_hashes",
+        _failing_hashes,
+    )
+
+    events: list[UpdateEvent] = []
+
+    async def _consume_failure() -> None:
+        async for event in updater.fetch_hashes(
+            VersionInfo("1.22t-20260803113308"),
+            object(),
+        ):
+            events.append(event)
+
+    with pytest.raises(RuntimeError, match="permanent prefetch failure"):
+        _run(_consume_failure())
+
+    assert events == [command_start, retry]
+
+
+def test_zen_twilight_validates_the_aarch64_darwin_build() -> None:
+    """Build the real Darwin package only on its supported validation runner."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py", "zen_twilight_updater_test_validation"
+    )
+    updater = module.ZenTwilightUpdater()
+
+    assert updater.get_derivation_validations() == (
+        DerivationValidation(
+            installable=".#pkgs.aarch64-darwin.zen-twilight",
+            systems=("aarch64-darwin",),
+            mode="build",
+        ),
+    )
+
+
+def test_zen_twilight_retries_the_whole_unpinned_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolve a fresh version before retrying a channel that moved mid-hash."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py", "zen_twilight_updater_test_retry"
+    )
+    updater = module.ZenTwilightUpdater(config=resolve_config(retry_backoff=0))
+    _install_twilight_feed(
+        monkeypatch,
+        module,
+        (
+            "20260803113308",  # first version resolution
+            "20260803113308",  # first pre-hash check
+            "20260804121500",  # first post-hash check detects movement
+            "20260804121500",  # retry version resolution
+            "20260804121500",  # retry pre-hash check
+            "20260804121500",  # retry post-hash check
+        ),
+    )
+    hash_calls = _install_twilight_hashes(
+        monkeypatch,
+        ("sha256-raced", "sha256-current"),
+    )
+
+    events = _run(_collect_events(updater.update_stream(None, object())))
+
+    result_payloads = [
+        event.payload
+        for event in events
+        if event.kind is UpdateEventKind.RESULT and event.payload is not None
+    ]
+    assert result_payloads == [
+        SourceEntry(
+            version="1.22t-20260804121500",
+            hashes={
+                "aarch64-darwin": "sha256-current",
+                "x86_64-darwin": "sha256-current",
+            },
+            urls={
+                "aarch64-darwin": updater.TWILIGHT_DMG_URL,
+                "x86_64-darwin": updater.TWILIGHT_DMG_URL,
+            },
+        )
+    ]
+    retry_statuses = [
+        event.payload.info
+        for event in events
+        if event.kind is UpdateEventKind.STATUS
+        and isinstance(event.payload, StatusPayload)
+        and event.payload.info == StatusInfo(kind=StatusKind.RETRY, value="attempt 2/2")
+    ]
+    assert retry_statuses == [
+        StatusInfo(kind=StatusKind.RETRY, value="attempt 2/2"),
+    ]
+    assert len(hash_calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("feed_builds", "expected_hash_calls"),
+    [
+        (("20260804121500",), 0),
+        (("20260803113308", "20260804121500"), 1),
+    ],
+)
+def test_zen_twilight_pinned_snapshot_fails_closed_when_channel_moves(
+    monkeypatch: pytest.MonkeyPatch,
+    feed_builds: tuple[str, ...],
+    expected_hash_calls: int,
+) -> None:
+    """Require CI to resolve versions again instead of advancing a pinned build."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py", "zen_twilight_updater_test_pinned"
+    )
+    updater = module.ZenTwilightUpdater(config=resolve_config(retry_backoff=0))
+    _install_twilight_feed(monkeypatch, module, feed_builds)
+    hash_calls = _install_twilight_hashes(monkeypatch, ("sha256-raced",))
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "Pinned Twilight version 1.22t-20260803113308 no longer matches "
+            r"the channel \(1.22t-20260804121500\); rerun version resolution"
+        ),
+    ):
+        _run(
+            _collect_events(
+                updater.update_stream(
+                    None,
+                    object(),
+                    pinned_version=VersionInfo("1.22t-20260803113308"),
+                )
+            )
+        )
+
+    assert len(hash_calls) == expected_hash_calls
+
+
+def test_zen_twilight_bounds_repeated_unpinned_snapshot_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stop after two complete raced snapshots instead of retrying forever."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py", "zen_twilight_updater_test_retry_bound"
+    )
+    updater = module.ZenTwilightUpdater(config=resolve_config(retry_backoff=0))
+    _install_twilight_feed(
+        monkeypatch,
+        module,
+        (
+            "20260803113308",
+            "20260803113308",
+            "20260804121500",
+            "20260804121500",
+            "20260804121500",
+            "20260805103000",
+        ),
+    )
+    hash_calls = _install_twilight_hashes(
+        monkeypatch,
+        ("sha256-first", "sha256-second"),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Twilight channel changed repeatedly while hashing",
+    ):
+        _run(_collect_events(updater.update_stream(None, object())))
+
+    assert len(hash_calls) == 2
 
 
 def test_scratch_expr_builders_fetch_hashes_and_build_result(

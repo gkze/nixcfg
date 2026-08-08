@@ -11,6 +11,7 @@ from pathlib import Path
 
 MAX_PIPES = 400
 PIPE_TARGET_CAPACITY = 64 * 1024
+REDUCED_PIPE_CAPACITY = 512
 EXPECTED_ARGUMENT_COUNT = 2
 ERROR_EXIT_STATUS = 2
 
@@ -34,7 +35,7 @@ def main() -> int:
         except BlockingIOError:
             written = 0
 
-        if written < len(payload):
+        if written == REDUCED_PIPE_CAPACITY:
             Path(sys.argv[1]).write_text(f"{written}\n", encoding="utf-8")
             while True:
                 signal.pause()

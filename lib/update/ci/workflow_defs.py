@@ -554,18 +554,39 @@ def _pinned_versions_download_steps() -> tuple[Step, Step]:
 def _stage_target_artifact_step(*, platform: str) -> Step:
     """Build the per-target artifact staging step for one platform."""
     matrix_key = f"artifact_paths_{platform.replace('-', '_')}"
+    preserve_outcome_env = (
+        {"PRESERVE_OUTCOME": ("${{ steps.preserve-zen-twilight-source.outcome }}")}
+        if platform == "aarch64-darwin"
+        else {}
+    )
+    outcome_lines = (
+        (
+            'case "$PRESERVE_OUTCOME" in',
+            '  ""|success|skipped)',
+            '    if [ "$UPDATE_OUTCOME" = "success" ]; then',
+            "      exit_code=0",
+            "    fi",
+            "    ;;",
+            "esac",
+        )
+        if platform == "aarch64-darwin"
+        else (
+            'if [ "$UPDATE_OUTCOME" = "success" ]; then',
+            "  exit_code=0",
+            "fi",
+        )
+    )
     return Step(
         name="Stage target artifact",
         if_="always()",
         env={
             "ARTIFACT_PATHS_JSON": "${{ toJSON(matrix." + matrix_key + ") }}",
+            **preserve_outcome_env,
             "UPDATE_OUTCOME": "${{ steps.update-target.outcome }}",
         },
         run=_lines(
             "exit_code=1",
-            'if [ "$UPDATE_OUTCOME" = "success" ]; then',
-            "  exit_code=0",
-            "fi",
+            *outcome_lines,
             "python3 lib/update/ci/update_target_artifacts.py stage \\",
             "  --root . \\",
             "  --output update-target-artifact \\",
@@ -615,6 +636,21 @@ def _compute_hashes_job(*, platform: str) -> Job:
                 name="Regenerate T3 Code runtime Bun locks",
                 if_="matrix.regenerate_runtime_locks == true",
                 run="nix run .#t3code-desktop.passthru.updateRuntimeLocks",
+            ),
+        )
+        if is_darwin
+        else ()
+    )
+    preserve_mutable_source_steps = (
+        (
+            Step(
+                name="Preserve Zen Twilight source in Cachix",
+                id="preserve-zen-twilight-source",
+                if_=(
+                    "steps.update-target.outcome == 'success' && "
+                    "matrix.target == 'zen-twilight'"
+                ),
+                run=("nix run .#nixcfg -- ci cache fod --package zen-twilight"),
             ),
         )
         if is_darwin
@@ -681,6 +717,7 @@ def _compute_hashes_job(*, platform: str) -> Job:
                     else _COMPUTE_HASHES_RUN_FOLDED
                 ),
             ),
+            *preserve_mutable_source_steps,
             _stage_target_artifact_step(platform=platform),
             _upload_step(
                 if_="always()",

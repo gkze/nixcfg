@@ -99,6 +99,7 @@ class EventConsumer:
         self.update_details: dict[str, SummaryStatus] = {}
         self.source_updates: dict[str, SourceEntry] = {}
         self.artifact_updates: dict[str, dict[Path, GeneratedArtifact]] = {}
+        self._artifact_observations: dict[Path, dict[str, GeneratedArtifact]] = {}
 
         self.renderer = Renderer(
             self.items,
@@ -341,16 +342,14 @@ class EventConsumer:
         else:
             self.renderer.log(event.source, "Updated")
 
-    def _artifact_changed(self, artifact: GeneratedArtifact) -> bool:
-        """Return whether *artifact* differs from the current or staged content."""
+    def _artifact_changed(self, source: str, artifact: GeneratedArtifact) -> bool:
+        """Return whether *artifact* differs from this source's stable baseline."""
         path = artifact.resolved_path()
-        staged = None
-        for artifacts in self.artifact_updates.values():
-            staged = artifacts.get(path)
-            if staged is not None:
-                break
+        staged = self.artifact_updates.get(source, {}).get(path)
         if staged is not None:
             return staged.content != artifact.content
+        if artifact.changed_from_snapshot is not None:
+            return artifact.changed_from_snapshot
         return artifact.has_changed()
 
     def _store_artifact(self, source: str, artifact: GeneratedArtifact) -> None:
@@ -358,17 +357,33 @@ class EventConsumer:
         path = artifact.resolved_path()
         self.artifact_updates.setdefault(source, {})[path] = artifact
 
+    def _surface_artifact_conflicts(
+        self,
+        source: str,
+        artifact: GeneratedArtifact,
+    ) -> None:
+        """Retain every producer when one artifact path has conflicting content."""
+        path = artifact.resolved_path()
+        observations = self._artifact_observations.setdefault(path, {})
+        observations[source] = artifact
+        if len({observed.content for observed in observations.values()}) == 1:
+            return
+        for observed_source, observed in observations.items():
+            self._store_artifact(observed_source, observed)
+
     def _handle_artifact(self, event: UpdateEvent, item: ItemState) -> None:
         """Record generated artifact updates and log changed paths."""
         _ = item
         artifacts = expect_artifact_updates(event.payload)
         changed_paths: list[str] = []
         for artifact in artifacts:
-            if not self._artifact_changed(artifact):
+            changed = self._artifact_changed(event.source, artifact)
+            self._surface_artifact_conflicts(event.source, artifact)
+            if not changed:
                 continue
+            self._store_artifact(event.source, artifact)
             changed_paths.append(str(artifact.repo_relative_path()))
             self._set_detail(event.source, "updated")
-            self._store_artifact(event.source, artifact)
 
         if not changed_paths:
             return

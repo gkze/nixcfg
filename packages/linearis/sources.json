@@ -1,10 +1,10 @@
 {
   "hashes": [
     {
-      "hash": "sha256-J4TLJACD5VLZHRAIurZ7RQ55iyczVAFuX7Oyyxxewnk=",
+      "hash": "sha256-QyICHDNPv4g8BY99zvPYX73ysqUIHsL/r8VNW/4mFqc=",
       "hashType": "sha256",
-      "url": "https://registry.npmjs.org/linearis/-/linearis-2026.6.0.tgz"
+      "url": "https://registry.npmjs.org/linearis/-/linearis-2026.7.0.tgz"
     }
   ],
-  "version": "2026.6.0"
+  "version": "2026.7.0"
 }

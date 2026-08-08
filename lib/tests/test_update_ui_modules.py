@@ -1600,8 +1600,12 @@ def test_event_consumer_artifact_paths(
 
     staged_same = GeneratedArtifact.text("demo.txt", "new\n")
     staged_changed = GeneratedArtifact.text("demo.txt", "newer\n")
-    assert not object.__getattribute__(consumer, "_artifact_changed")(staged_same)
-    assert object.__getattribute__(consumer, "_artifact_changed")(staged_changed)
+    assert not object.__getattribute__(consumer, "_artifact_changed")(
+        "demo", staged_same
+    )
+    assert object.__getattribute__(consumer, "_artifact_changed")(
+        "demo", staged_changed
+    )
 
     consumer_same, _queue = _consumer(monkeypatch, is_tty=True)
     item_same = consumer_same.items["demo"]

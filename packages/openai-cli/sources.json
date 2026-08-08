@@ -1,5 +1,5 @@
 {
-  "drvHash": "3i2fpbbrr8bhzzmr8pbnfqfbfdfjpy50",
+  "drvHash": "4mps9dlgc5cmd3mav575lrs4xpjch4z6",
   "hashes": [
     {
       "hash": "sha256-qc43EQN/TqIwNc0zLosNs+bHKNnjUaJ0lisRTqbiO6s=",
@@ -7,5 +7,5 @@
     }
   ],
   "input": "openai-cli",
-  "version": "v1.7.0"
+  "version": "v1.7.1"
 }

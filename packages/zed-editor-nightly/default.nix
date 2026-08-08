@@ -2,6 +2,7 @@
   pkgs,
   inputs,
   lib,
+  bash-dynamic-pipe-heredoc,
   symlinkJoin,
   makeFontsConf,
   git,
@@ -451,7 +452,10 @@ let
         ''
           runHook preInstall
 
-          ${pkgs.stdenv.shell} ${./install_zed_nightly_app.sh} \
+          # The installer embeds plist fragments through command substitutions
+          # in a heredoc. Bash 5.3 can deadlock there after XNU reduces pipe
+          # capacity, so scope the upstream backport to this one script.
+          ${bash-dynamic-pipe-heredoc}/bin/bash ${./install_zed_nightly_app.sh} \
             "$out" \
             "$TMPDIR" \
             ${lib.escapeShellArg appVersion} \

@@ -46,7 +46,13 @@ from lib.tests._nix_eval import (
     nix_list,
 )
 from lib.tests._nix_source import nix_file_expr, nix_source_fragment_expr
-from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
+from lib.tests._shell_ast import (
+    command_texts,
+    indented_string_body,
+    iter_nodes,
+    node_text,
+    parse_shell,
+)
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
 
@@ -415,6 +421,73 @@ def test_shared_darwin_app_helpers_default_to_copy_mode_metadata() -> None:
         expect_binding(mac_app.values, "installMode").value,
         StringPrimitive(value="copy"),
     )
+
+
+def test_dmg_app_helper_forwards_custom_stdenv_to_derivation() -> None:
+    """A custom DMG stdenv should reach the shared derivation constructor."""
+    mk_unpacked_app = expect_instance(
+        nix_source_fragment_expr(
+            "overlays/_lib/helpers/darwin-apps.nix",
+            "  mkUnpackedApp =\n",
+            ";\nin\n",
+        ),
+        FunctionDefinition,
+    )
+    assert "stdenv ? prev.stdenvNoCC" in [
+        argument.rebuild() for argument in mk_unpacked_app.argument_set
+    ]
+    unpacked_derivation = expect_instance(mk_unpacked_app.output, FunctionCall)
+    assert_nix_ast_equal(unpacked_derivation.name, "stdenv.mkDerivation")
+
+    mk_dmg_app = expect_instance(
+        nix_source_fragment_expr(
+            "overlays/_lib/helpers/darwin-apps.nix",
+            "  mkDmgApp =\n",
+            ";\n\n  mkDmgApp7zz =",
+        ),
+        FunctionDefinition,
+    )
+    assert "stdenv ? prev.stdenvNoCC" in [
+        argument.rebuild() for argument in mk_dmg_app.argument_set
+    ]
+    unpacked_call = expect_instance(mk_dmg_app.output, FunctionCall)
+    assert_nix_ast_equal(unpacked_call.name, Identifier(name="mkUnpackedApp"))
+    unpacked_args = expect_instance(unpacked_call.argument, AttributeSet)
+    inherited_names = {
+        name.rebuild()
+        for inherit in unpacked_args.values
+        if isinstance(inherit, Inherit)
+        for name in inherit.names
+    }
+    assert "stdenv" in inherited_names
+
+
+def test_dmg_app_helper_supports_an_explicit_source_name() -> None:
+    """DMG callers may override the versioned source name without changing its default."""
+    mk_dmg_app = expect_instance(
+        nix_source_fragment_expr(
+            "overlays/_lib/helpers/darwin-apps.nix",
+            "  mkDmgApp =\n",
+            ";\n\n  mkDmgApp7zz =",
+        ),
+        FunctionDefinition,
+    )
+    assert "sourceName ? null" in [
+        argument.rebuild() for argument in mk_dmg_app.argument_set
+    ]
+
+    unpacked_call = expect_instance(mk_dmg_app.output, FunctionCall)
+    unpacked_args = expect_instance(unpacked_call.argument, AttributeSet)
+    source_name = expect_instance(
+        expect_binding(unpacked_args.values, "srcName").value,
+        IfExpression,
+    )
+    assert_nix_ast_equal(source_name.condition, "sourceName == null")
+    assert_nix_ast_equal(
+        source_name.consequence,
+        '"${capitalizedAppName}_${info.version}_${arch}.dmg"',
+    )
+    assert_nix_ast_equal(source_name.alternative, Identifier(name="sourceName"))
 
 
 def test_pkg_app_packages_use_shared_helper() -> None:
@@ -1412,6 +1485,10 @@ def test_zen_twilight_package_embeds_autoconfig_and_resigns_app() -> None:
         StringPrimitive(value="zen"),
     )
     assert_nix_ast_equal(
+        expect_binding(derivation_args.values, "sourceName").value,
+        StringPrimitive(value="zen.macos-universal.dmg"),
+    )
+    assert_nix_ast_equal(
         expect_binding(derivation_args.values, "codesignApp").value,
         Primitive(value=True),
     )
@@ -1419,12 +1496,42 @@ def test_zen_twilight_package_embeds_autoconfig_and_resigns_app() -> None:
         expect_binding(derivation_args.values, "macApp").value,
         '{ installMode = "copy"; }',
     )
+    assert_nix_ast_equal(
+        expect_binding(derivation_args.values, "stdenv").value,
+        """
+        stdenvNoCC.override (old: {
+          shell = "${bash-dynamic-pipe-heredoc}/bin/bash";
+          initialPath = [ bash-dynamic-pipe-heredoc ] ++ old.initialPath;
+          allowedRequisites = old.allowedRequisites ++ [ bash-dynamic-pipe-heredoc ];
+          extraAttrs = old.extraAttrs // {
+            shellPackage = bash-dynamic-pipe-heredoc;
+          };
+        })
+        """,
+    )
 
     install_hook = expect_instance(
         expect_binding(derivation_args.values, "postInstallApp").value,
         IndentedString,
     )
     install_shell = parse_shell(indented_string_body(install_hook.rebuild()))
+    commands = command_texts(install_shell)
+    assignments = {
+        node_text(node, install_shell.sanitized)
+        for node in iter_nodes(install_shell.tree.root_node, "variable_assignment")
+    }
+
+    assert_nix_ast_equal(
+        nix_source_fragment_expr(
+            "packages/zen-twilight/default.nix",
+            "    expected_version=${",
+            "}\n",
+        ),
+        "lib.escapeShellArg selfSource.version",
+    )
+    assert "expected_version=__NIX_INTERP__" in assignments
+    assert 'actual_version="$app_version-$build_id"' in assignments
+    assert '[[ "$actual_version" != "$expected_version" ]]' in commands
 
     assert command_texts(install_shell, "mkdir") == [
         'mkdir -p "$resources/defaults/pref"',
@@ -1438,6 +1545,68 @@ def test_zen_twilight_package_embeds_autoconfig_and_resigns_app() -> None:
     ]
     assert command_texts(install_shell, "zip") == []
     assert command_texts(install_shell, "unzip") == []
+
+
+def test_zed_nightly_darwin_installer_uses_dynamic_pipe_safe_bash() -> None:
+    """Zed's plist heredoc should run under the patched Darwin Bash."""
+    package_path = "packages/zed-editor-nightly/default.nix"
+    package = expect_instance(
+        parse_nix_expr(Path(REPO_ROOT / package_path).read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+    zed_override = expect_instance(
+        expect_scope_binding(package.output, "zedOverride").value,
+        FunctionDefinition,
+    )
+    install_phase = expect_instance(
+        expect_binding(zed_override.output.values, "installPhase").value,
+        IfExpression,
+    )
+    install_shell = parse_shell(
+        indented_string_body(
+            expect_instance(install_phase.consequence, IndentedString).rebuild()
+        )
+    )
+
+    assert_nix_ast_equal(
+        nix_source_fragment_expr(
+            package_path,
+            "capacity, so scope the upstream backport to this one script.\n          ${",
+            "}/bin/bash ${./install_zed_nightly_app.sh}",
+        ),
+        Identifier(name="bash-dynamic-pipe-heredoc"),
+    )
+    assert len(command_texts(install_shell, "__NIX_INTERP__/bin/bash")) == 1
+
+
+def test_george_direnv_uses_dynamic_pipe_safe_bash() -> None:
+    """Production direnv config should select the patched Darwin Bash."""
+    root = _module_output("home/george/configuration.nix")
+    programs = expect_instance(
+        expect_binding(root.values, "programs").value,
+        AttributeSet,
+    )
+    direnv = expect_instance(
+        expect_binding(programs.values, "direnv").value,
+        AttributeSet,
+    )
+    direnv_config = expect_instance(
+        expect_binding(direnv.values, "config").value,
+        AttributeSet,
+    )
+    global_config = expect_instance(
+        expect_binding(direnv_config.values, "global").value,
+        AttributeSet,
+    )
+
+    assert_nix_ast_equal(
+        expect_binding(global_config.values, "bash_path").value,
+        '"${pkgs.bash-dynamic-pipe-heredoc}/bin/bash"',
+    )
+    assert_nix_ast_equal(
+        expect_binding(global_config.values, "warn_timeout").value,
+        Primitive(value=0),
+    )
 
 
 def test_george_config_manages_mutable_gui_apps_via_scoped_applications() -> None:

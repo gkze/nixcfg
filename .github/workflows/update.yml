@@ -346,16 +346,25 @@ jobs:
         run: >-
           nix run .#nixcfg -- update --native-only --pinned-versions pinned-versions.json "${{
           matrix.target }}"
+      - name: Preserve Zen Twilight source in Cachix
+        id: preserve-zen-twilight-source
+        if: steps.update-target.outcome == 'success' && matrix.target == 'zen-twilight'
+        run: nix run .#nixcfg -- ci cache fod --package zen-twilight
       - name: Stage target artifact
         if: always()
         env:
           ARTIFACT_PATHS_JSON: ${{ toJSON(matrix.artifact_paths_aarch64_darwin) }}
+          PRESERVE_OUTCOME: ${{ steps.preserve-zen-twilight-source.outcome }}
           UPDATE_OUTCOME: ${{ steps.update-target.outcome }}
         run: |
           exit_code=1
-          if [ "$UPDATE_OUTCOME" = "success" ]; then
-            exit_code=0
-          fi
+          case "$PRESERVE_OUTCOME" in
+            ""|success|skipped)
+              if [ "$UPDATE_OUTCOME" = "success" ]; then
+                exit_code=0
+              fi
+              ;;
+          esac
           python3 lib/update/ci/update_target_artifacts.py stage \
             --root . \
             --output update-target-artifact \

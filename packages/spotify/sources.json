@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-vtAD7Jz4AQqTbAd0YtsS9aeBr1ES0YegLwB7A8XFKJc="
+    "aarch64-darwin": "sha256-YtgHIOTt9RtKh6oEOMsdRKnlbbbFoDb6ExewL4pRRIY="
   },
   "urls": {
     "aarch64-darwin": "https://download.scdn.co/SpotifyARM64.dmg"
   },
-  "version": "20260716"
+  "version": "20260805"
 }

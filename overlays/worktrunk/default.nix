@@ -24,6 +24,7 @@ let
       path: type:
       (craneLib.filterCargoSources path type)
       || (baseNameOf path == "gemini-extension.json")
+      || (baseNameOf path == "large-repository-fixture")
       || (lib.hasInfix "/templates/" path)
       || (baseNameOf (dirOf path) == "templates")
       || (lib.hasInfix "/dev/" path)
