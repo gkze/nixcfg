@@ -1,13 +1,13 @@
 {
   "hashes": [
     {
-      "hash": "sha256-ZFbuOtR8P0APs3O8NlaB28izzkCHrou3EaMvwgRgQvQ=",
+      "hash": "sha256-PgHjOyrCnFFJ/tqffO5xeVgl1ouMjVN1bbwyKBDrpOM=",
       "hashType": "cargoHash"
     },
     {
-      "hash": "sha256-bpzMU6NAsBjcMyRqLJyF3ZfJ2jd7eTYo0Q7S2pNHbE0=",
+      "hash": "sha256-Zd7fEeVIPmE49vsF76K9+S96zj4/co2vId93G9AI5Vw=",
       "hashType": "srcHash"
     }
   ],
-  "version": "0.5.19"
+  "version": "0.5.20"
 }

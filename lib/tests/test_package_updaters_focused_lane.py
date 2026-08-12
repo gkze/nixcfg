@@ -77,6 +77,14 @@ def _install_twilight_hashes(
     return calls
 
 
+@pytest.fixture
+def _twilight_darwin_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+
 def test_granola_fetch_latest_and_download_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """Parse the Electron feed and build the versioned download URL."""
     module = _load_updater("packages/granola/updater.py", "granola_updater_test")
@@ -526,6 +534,7 @@ def test_zen_twilight_rejects_invalid_update_metadata(
         _run(updater.fetch_latest(object()))
 
 
+@pytest.mark.usefixtures("_twilight_darwin_platform")
 def test_zen_twilight_hashes_one_stable_channel_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -637,6 +646,7 @@ def test_zen_twilight_validates_the_aarch64_darwin_build() -> None:
     )
 
 
+@pytest.mark.usefixtures("_twilight_darwin_platform")
 def test_zen_twilight_retries_the_whole_unpinned_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -702,6 +712,7 @@ def test_zen_twilight_retries_the_whole_unpinned_snapshot(
         (("20260803113308", "20260804121500"), 1),
     ],
 )
+@pytest.mark.usefixtures("_twilight_darwin_platform")
 def test_zen_twilight_pinned_snapshot_fails_closed_when_channel_moves(
     monkeypatch: pytest.MonkeyPatch,
     feed_builds: tuple[str, ...],
@@ -735,6 +746,7 @@ def test_zen_twilight_pinned_snapshot_fails_closed_when_channel_moves(
     assert len(hash_calls) == expected_hash_calls
 
 
+@pytest.mark.usefixtures("_twilight_darwin_platform")
 def test_zen_twilight_bounds_repeated_unpinned_snapshot_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

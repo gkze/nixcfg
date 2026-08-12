@@ -115,7 +115,10 @@ def test_render_runtime_package_json_resolves_catalog_dependencies(
         "@effect/platform-node": "4.0.0-beta.45",
         "electron-updater": "^6.6.2",
     }
-    assert payload["devDependencies"] == {"electron-builder": "26.8.1"}
+    assert payload["devDependencies"] == {
+        "electron-builder": "26.8.1",
+        "electron-builder-squirrel-windows": "26.8.1",
+    }
     assert payload["overrides"] == {"effect": "4.0.0-beta.45"}
     assert "electron" not in payload["dependencies"]
 

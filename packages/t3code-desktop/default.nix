@@ -21,7 +21,11 @@ let
   appBundleName = "${appName}.app";
   appId = "com.t3tools.t3code";
   appProtocolScheme = "t3";
-  electronBuilderVersion = "26.8.1";
+  # 26.8.1 launched package-manager collectors through a shell on every
+  # platform, which can leave electron-builder waiting forever on Darwin.
+  # 26.15.x executes them directly off Windows and uses a dedicated safe
+  # PowerShell path for Windows .cmd shims.
+  electronBuilderVersion = "26.15.7";
   updateRuntimeLocksTemplate = ./update_runtime_locks.py;
 
   shared = import ../t3code/_shared.nix {
@@ -238,19 +242,55 @@ stdenv.mkDerivation {
 
     ${electronBuild.copyDist}
 
-    ./node_modules/.bin/electron-builder \
-      --mac dir \
-      --publish never \
-      -c.appId=${lib.escapeShellArg appId} \
-      -c.productName=${lib.escapeShellArg appName} \
-      -c.directories.buildResources=apps/desktop/resources \
-      -c.mac.icon=icon.icns \
-      -c.mac.category=public.app-category.developer-tools \
-      -c.mac.identity=null \
-      -c.mac.hardenedRuntime=false \
-      -c.mac.notarize=false \
-      ${electronBuild.electronBuilderConfigFlags} \
-      -c.npmRebuild=false
+    T3CODE_APP_ID=${lib.escapeShellArg appId} \
+    T3CODE_APP_NAME=${lib.escapeShellArg appName} \
+    T3CODE_ELECTRON_DIST="$electronDistDir" \
+    T3CODE_ELECTRON_VERSION=${lib.escapeShellArg electronRuntimeVersion} \
+      ${lib.getExe nodejs} <<'NODE'
+    "use strict";
+
+    const { Arch, Platform, build } = require("electron-builder");
+
+    function requireEnv(name) {
+      const value = process.env[name];
+      if (!value) {
+        throw new Error(`Missing required environment variable: ''${name}`);
+      }
+      return value;
+    }
+
+    async function main() {
+      const config = {
+        appId: requireEnv("T3CODE_APP_ID"),
+        productName: requireEnv("T3CODE_APP_NAME"),
+        directories: { buildResources: "apps/desktop/resources" },
+        electronDist: requireEnv("T3CODE_ELECTRON_DIST"),
+        electronVersion: requireEnv("T3CODE_ELECTRON_VERSION"),
+        mac: {
+          category: "public.app-category.developer-tools",
+          hardenedRuntime: false,
+          icon: "icon.icns",
+          identity: null,
+          notarize: false,
+        },
+        npmRebuild: false,
+      };
+
+      await build({
+        config,
+        publish: "never",
+        targets: Platform.MAC.createTarget("dir", Arch.arm64),
+      });
+    }
+
+    main().then(
+      () => process.exit(0),
+      (error) => {
+        console.error(error);
+        process.exit(1);
+      },
+    );
+    NODE
 
     appResources="dist/mac-arm64/${appBundleName}/Contents/Resources"
     appAsar="$appResources/app.asar"

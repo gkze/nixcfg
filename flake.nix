@@ -171,7 +171,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.34.1";
+      url = "github:steipete/gogcli/v0.35.0";
       flake = false;
     };
     openai-cli = {
@@ -216,7 +216,7 @@
       flake = false;
     };
     linear-cli = {
-      url = "github:schpet/linear-cli/v2.4.0";
+      url = "github:schpet/linear-cli/v2.5.0";
       flake = false;
     };
     macfuse = {
@@ -548,6 +548,7 @@
                     pkgs.cacert
                     pkgs.git
                     pkgs.nix
+                    pkgs.nodejs
                   ];
                 };
               setup =

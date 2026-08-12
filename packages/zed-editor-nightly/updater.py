@@ -28,6 +28,7 @@ class ZedEditorNightlyUpdater(Crate2NixMetadataUpdater):
 
     name = "zed-editor-nightly"
     input_name = "zed"
+    additional_input_names = ("rust-overlay",)
     _MANIFEST_PATH = "crates/zed/Cargo.toml"
 
     async def fetch_latest(

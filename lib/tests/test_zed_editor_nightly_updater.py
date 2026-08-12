@@ -26,6 +26,13 @@ def _load_module(module_name: str):
     return load_repo_module("packages/zed-editor-nightly/updater.py", module_name)
 
 
+def test_zed_editor_nightly_updater_refreshes_root_rust_overlay() -> None:
+    """Refresh the root Rust overlay consumed by the Zed derivation."""
+    module = _load_module("zed_editor_nightly_updater_input_dependencies_test")
+
+    assert module.ZedEditorNightlyUpdater.additional_input_names == ("rust-overlay",)
+
+
 def test_zed_editor_nightly_updater_tracks_manifest_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

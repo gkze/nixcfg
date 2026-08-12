@@ -971,6 +971,76 @@ def test_update_source_task_dedupes_shared_input_refreshes(
     )
 
 
+def test_update_source_task_refreshes_additional_inputs_before_updater(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refresh every declared flake input before resolving source metadata."""
+    calls: list[str] = []
+
+    class _Updater:
+        input_name = "zed"
+        additional_input_names = ("rust-overlay",)
+
+        def __init__(self, *, config: object | None = None) -> None:
+            _ = config
+
+        async def update_stream(
+            self,
+            current: SourceEntry | None,
+            session: aiohttp.ClientSession,
+            *,
+            pinned_version: VersionInfo | None = None,
+        ) -> AsyncIterator[UpdateEvent]:
+            _ = (current, session, pinned_version)
+            calls.append("update")
+            yield UpdateEvent.result("zed-editor-nightly")
+
+    async def _run_queue_task(
+        *, source: str, queue: asyncio.Queue[UpdateEvent | None], task
+    ) -> None:
+        _ = (source, queue)
+        await task()
+
+    async def _update_input(
+        input_name: str, *, source: str
+    ) -> AsyncIterator[UpdateEvent]:
+        _ = source
+        calls.append(f"refresh:{input_name}")
+        if False:
+            yield UpdateEvent.status("zed-editor-nightly", "unused")
+
+    monkeypatch.setattr(
+        "lib.update.source_runner.UPDATERS",
+        {"zed-editor-nightly": _Updater},
+    )
+    monkeypatch.setattr("lib.update.process.run_queue_task", _run_queue_task)
+    monkeypatch.setattr("lib.update.flake.update_flake_input", _update_input)
+
+    async def _run_case() -> None:
+        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+        async with aiohttp.ClientSession() as session:
+            await update_source_task(
+                "zed-editor-nightly",
+                context=SourceTaskContext(
+                    sources=SourcesFile(
+                        entries={"zed-editor-nightly": SourceEntry(hashes={})}
+                    ),
+                    update_input=True,
+                    native_only=False,
+                    session=session,
+                    update_input_lock=asyncio.Lock(),
+                    update_input_tasks={},
+                    queue=queue,
+                    generated_artifacts={},
+                    config=resolve_config(),
+                ),
+            )
+
+    _run(_run_case())
+
+    assert calls == ["refresh:zed", "refresh:rust-overlay", "update"]
+
+
 def test_update_source_task_sets_native_only_for_deno_updater(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

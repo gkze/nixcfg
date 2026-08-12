@@ -1,5 +1,5 @@
 {
-  "commit": "cf349ba477e35eacd5223f2b111218d48d752e70",
+  "commit": "dcbb7ab372692906243a521a86d6d8b24e5811af",
   "hashes": [
     {
       "hash": "sha256-yS8onaFZwGxYl9Bt8LZ2RwlQDzNSaPiEdI32a14XG10=",
@@ -27,5 +27,5 @@
     }
   ],
   "input": "linear-cli",
-  "version": "v2.4.0"
+  "version": "v2.5.0"
 }

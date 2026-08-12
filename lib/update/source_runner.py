@@ -163,6 +163,10 @@ async def update_source_task(
         if isinstance(updater, FlakeInputHashUpdater):
             updater.native_only = context.native_only
         input_name = getattr(updater, "input_name", None)
+        input_names = (
+            *((input_name,) if input_name else ()),
+            *getattr(updater, "additional_input_names", ()),
+        )
         put = context.queue.put
         update_context = UpdateContext(
             current=current,
@@ -178,12 +182,13 @@ async def update_source_task(
                 operation="check_version",
             )
         )
-        if context.update_input and input_name:
-            await _ensure_input_refreshed(
-                name,
-                input_name,
-                context=context,
-            )
+        if context.update_input:
+            for refresh_input_name in dict.fromkeys(input_names):
+                await _ensure_input_refreshed(
+                    name,
+                    refresh_input_name,
+                    context=context,
+                )
 
         async for event in _call_with_optional_context(
             updater.update_stream,

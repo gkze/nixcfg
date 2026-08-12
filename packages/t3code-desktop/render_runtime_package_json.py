@@ -331,7 +331,10 @@ def build_runtime_manifest(
             "catalog": catalog,
         }
     if electron_builder_version:
-        payload["devDependencies"] = {"electron-builder": electron_builder_version}
+        payload["devDependencies"] = {
+            "electron-builder": electron_builder_version,
+            "electron-builder-squirrel-windows": electron_builder_version,
+        }
     if commit_hash:
         payload["t3codeCommitHash"] = commit_hash
     return payload

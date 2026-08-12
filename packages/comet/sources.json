@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-yAYdnv44sf89OSRK6JIUyiJJlAm/NJdoPDJ3dF1vIvE=",
-    "x86_64-darwin": "sha256-yAYdnv44sf89OSRK6JIUyiJJlAm/NJdoPDJ3dF1vIvE="
+    "aarch64-darwin": "sha256-mpnAaxoZafKINfjzQd+zkJWAN6X49F/HEk3zH0S3rGM=",
+    "x86_64-darwin": "sha256-mpnAaxoZafKINfjzQd+zkJWAN6X49F/HEk3zH0S3rGM="
   },
   "urls": {
     "aarch64-darwin": "https://www.perplexity.ai/rest/browser/download?channel=stable&platform=mac_arm64",
     "x86_64-darwin": "https://www.perplexity.ai/rest/browser/download?channel=stable&platform=mac_x64"
   },
-  "version": "150.0.7871.228"
+  "version": "151.0.7922.247"
 }

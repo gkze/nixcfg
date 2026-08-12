@@ -227,12 +227,22 @@ def test_render_build_zig_zon_nix_renders_artifact_with_resolved_tools(
     assert command_calls[0][1].env["XDG_CACHE_HOME"].endswith("/.cache")
 
 
+@pytest.mark.parametrize(
+    ("stderr", "match"),
+    [
+        ("bad lockfile", "bad lockfile"),
+        ("error: GettingZigDep", "GettingZigDep"),
+    ],
+)
 def test_render_build_zig_zon_nix_surfaces_zon2nix_failure(
     monkeypatch: pytest.MonkeyPatch,
+    stderr: str,
+    match: str,
 ) -> None:
-    """Raise the zon2nix stderr when the helper command fails."""
+    """Raise non-transient zon2nix stderr without retrying the command."""
     module = _load_module("neutils_updater_test_render_failure")
     updater = module.NeutilsUpdater()
+    command_calls = 0
 
     async def _fetch_url(*_args, **_kwargs):
         return _build_archive()
@@ -241,12 +251,12 @@ def test_render_build_zig_zon_nix_surfaces_zon2nix_failure(
         yield UpdateEvent.value(updater.name, "/nix/store/tool")
 
     async def _run_command(args: list[str], *, options):
+        nonlocal command_calls
         _ = (args, options)
+        command_calls += 1
         yield UpdateEvent.value(
             updater.name,
-            CommandResult(
-                args=["zon2nix"], returncode=1, stdout="", stderr="bad lockfile"
-            ),
+            CommandResult(args=["zon2nix"], returncode=1, stdout="", stderr=stderr),
         )
 
     monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
@@ -262,7 +272,7 @@ def test_render_build_zig_zon_nix_surfaces_zon2nix_failure(
     monkeypatch.setattr(updater, "_resolve_installable_path", _resolve)
     monkeypatch.setattr(module, "run_command", _run_command)
 
-    with pytest.raises(RuntimeError, match="bad lockfile"):
+    with pytest.raises(RuntimeError, match=match):
         _run(
             _collect_events(
                 updater._render_build_zig_zon_nix(
@@ -270,6 +280,7 @@ def test_render_build_zig_zon_nix_surfaces_zon2nix_failure(
                 )
             )
         )
+    assert command_calls == 1
 
 
 @pytest.mark.parametrize(
@@ -573,6 +584,107 @@ def test_fetch_hashes_preserves_existing_artifact_after_current_transient_failur
         "Preserving existing build.zig.zon.nix after transient zon2nix failure."
     )
     artifacts = expect_artifact_updates(events[3].payload)
+    assert len(artifacts) == 1
+    assert artifacts[0].path == artifact_path
+    assert artifacts[0].content == "# existing artifact\n"
+    assert events[-1].payload == [HashEntry.create("srcHash", "sha256-src")]
+
+
+@pytest.mark.parametrize(
+    "transient_stderr",
+    [
+        (
+            "err(zig): fetching zig dep: error: unable to connect to "
+            "server: ConnectionTimedOut\nerror: GettingZigDep"
+        ),
+        "err(default): TlsInitializationFailed",
+    ],
+)
+def test_fetch_hashes_retries_transient_zon2nix_failure_before_preserving_current_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    transient_stderr: str,
+) -> None:
+    """Retry zon2nix transport failures before preserving current output."""
+    module = _load_module("neutils_updater_test_transient_failure_retry")
+    updater = module.NeutilsUpdater()
+    pkg_dir = tmp_path / "neutils"
+    pkg_dir.mkdir()
+    artifact_path = pkg_dir / "build.zig.zon.nix"
+    artifact_path.write_text("# existing artifact\n", encoding="utf-8")
+    command_calls: list[list[str]] = []
+    sleep_delays: list[float] = []
+
+    async def _fetch_url(*_args: object, **_kwargs: object) -> bytes:
+        return _build_archive()
+
+    async def _resolve(_installable: str):
+        yield UpdateEvent.value(updater.name, "/nix/store/tool")
+
+    async def _run_command(args: list[str], *, options: object):
+        _ = options
+        command_calls.append(args)
+        yield UpdateEvent.value(
+            updater.name,
+            CommandResult(
+                args=args,
+                returncode=1,
+                stdout="",
+                stderr=transient_stderr,
+            ),
+        )
+
+    async def _sleep(delay: float) -> None:
+        sleep_delays.append(delay)
+
+    async def _fixed_hash(name: str, expr: str, *, config=None):
+        assert name == updater.name
+        assert_nix_ast_equal(expr, updater._src_expr("0.7.2"))
+        assert config == updater.config
+        yield UpdateEvent.value(name, "sha256-src")
+
+    monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
+    )
+    monkeypatch.setattr(module, "get_repo_file", lambda _path: Path("/repo/root"))
+    monkeypatch.setattr(updater, "_resolve_installable_path", _resolve)
+    monkeypatch.setattr(module, "run_command", _run_command)
+    monkeypatch.setattr(module.asyncio, "sleep", _sleep)
+    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: pkg_dir)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
+
+    events = _run(
+        _collect_events(
+            updater.fetch_hashes(
+                VersionInfo(version="0.7.2"),
+                object(),
+                context=_source_entry("0.7.2"),
+            )
+        )
+    )
+
+    assert len(command_calls) == updater._ZON2NIX_MAX_ATTEMPTS
+    assert sleep_delays == [
+        updater.config.default_retry_backoff,
+        updater.config.default_retry_backoff,
+    ]
+    status_messages = [
+        event.message for event in events if event.kind is UpdateEventKind.STATUS
+    ]
+    assert (
+        status_messages.count("zon2nix hit a transient fetch failure; retrying...") == 2
+    )
+    assert (
+        "Preserving existing build.zig.zon.nix after transient zon2nix failure."
+        in status_messages
+    )
+    artifacts = [
+        artifact
+        for event in events
+        if event.kind is UpdateEventKind.ARTIFACT
+        for artifact in expect_artifact_updates(event.payload)
+    ]
     assert len(artifacts) == 1
     assert artifacts[0].path == artifact_path
     assert artifacts[0].content == "# existing artifact\n"

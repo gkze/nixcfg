@@ -289,6 +289,7 @@ class Updater(ABC):
     generated_artifact_files: ClassVar[tuple[str, ...]] = ()
     derivation_validations: ClassVar[tuple[DerivationValidation, ...]] = ()
     companion_of: ClassVar[str | None] = None
+    additional_input_names: ClassVar[tuple[str, ...]] = ()
     # Optional tuple of Nix system strings (for example ``"aarch64-darwin"``)
     # this updater may run on. ``None`` means "all platforms" (the default).
     # When set, ``update_stream`` short-circuits on other platforms before
