@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from contextlib import nullcontext
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -23,7 +22,6 @@ from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
 from lib.update.nix import _build_package_path_attr_expr
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
-from lib.update.updaters.core import source_override_env
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -177,20 +175,19 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
         HashEntry.create("nodeModulesHash", HASH_A),
     ]
     assert captured["source"] == "goose-desktop"
-    env = expect_instance(captured["env"], dict)
-    override_payload = json.loads(env["UPDATE_SOURCE_OVERRIDES_JSON"])
-    assert override_payload == {
-        "goose-cli": goose_cli_source.to_dict(),
-        "goose-desktop": {
-            "version": "1.37.0",
-            "hashes": [
-                {
-                    "hashType": "nodeModulesHash",
-                    "hash": updater.config.fake_hash,
-                    "platform": "aarch64-darwin",
-                }
+    assert captured["env"] is None
+    source_overrides = {
+        "goose-cli": goose_cli_source,
+        "goose-desktop": SourceEntry(
+            version="1.37.0",
+            hashes=[
+                HashEntry.create(
+                    "nodeModulesHash",
+                    updater.config.fake_hash,
+                    platform="aarch64-darwin",
+                )
             ],
-        },
+        ),
     }
     expected_override = parse_nix_expr(
         f"""
@@ -210,6 +207,7 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
             ".pnpmDeps",
             system="aarch64-darwin",
             package_args={"goose-cli": expected_override},
+            source_overrides=source_overrides,
         ),
     )
 
@@ -381,7 +379,13 @@ def test_code_cursor_updater_paths(
         == "https://example.com/darwin-arm64.zip"
     )
 
-    async def _hashes(_name: str, urls: Iterable[str]) -> EventStream:
+    async def _hashes(
+        _name: str,
+        urls: Iterable[str],
+        *,
+        config: object,
+    ) -> EventStream:
+        assert config is updater.config
         url_map = dict.fromkeys(urls, HASH_A)
         yield UpdateEvent.status("code-cursor", "hashing")
         yield UpdateEvent.value("code-cursor", url_map)
@@ -789,7 +793,7 @@ def test_scratch_updater_paths(
 def test_tsgolint_updater_paths(
     tsgolint_module: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Exercise tsgolint release parsing and override payload shape."""
+    """Exercise tsgolint release parsing and latest-version checks."""
     updater = tsgolint_module.TsgolintUpdater()
 
     monkeypatch.setattr(
@@ -798,24 +802,6 @@ def test_tsgolint_updater_paths(
     )
     latest = _run(updater.fetch_latest(object()))
     assert latest.version == "0.21.0"
-
-    env = source_override_env(
-        "tsgolint",
-        version=latest.version,
-        src_hash=HASH_A,
-        dependency_hash_type="vendorHash",
-        dependency_hash=HASH_B,
-    )
-    payload = json.loads(env["UPDATE_SOURCE_OVERRIDES_JSON"])
-    assert payload == {
-        "tsgolint": {
-            "version": "0.21.0",
-            "hashes": [
-                {"hashType": "srcHash", "hash": HASH_A},
-                {"hashType": "vendorHash", "hash": HASH_B},
-            ],
-        }
-    }
 
     fake_current = SourceEntry(
         version=latest.version,
@@ -847,7 +833,7 @@ def test_neutils_updater_emits_generated_artifact_and_src_hash(
 
     monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
     monkeypatch.setattr(
-        "lib.update.paths.package_dir_for",
+        "lib.update.paths.updater_dir_for",
         lambda _name: REPO_ROOT / "packages" / "neutils",
     )
 

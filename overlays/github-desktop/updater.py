@@ -135,7 +135,6 @@ class GitHubDesktopUpdater(FlakeInputUpdater):
                 update_nix.compute_fixed_output_hash(
                     self.name,
                     _build_overlay_attr_expr(self.name, attr_path),
-                    env={"FAKE_HASHES": "1"},
                     config=self.config,
                 ),
                 hash_drain,

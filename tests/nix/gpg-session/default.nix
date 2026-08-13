@@ -17,9 +17,6 @@ let
       gpgHome = homeConfig.programs.gpg.homedir;
       inherit (homeConfig.launchd) agents;
       loginSetter = agents.gpg-home.config;
-      sopsEnvironment = homeConfig.sops.environment;
-      sopsAgentEnvironment = agents.sops-nix.config.EnvironmentVariables;
-      ageKeyFile = "${homeConfig.xdg.dataHome}/sops-nix/age-key.txt";
     in
     [
       (assertEq "${hostName} shell GPG home" gpgHome homeConfig.home.sessionVariables.GNUPGHOME)
@@ -36,14 +33,6 @@ let
         builtins.hasAttr ".gnupg" homeConfig.home.file
       ))
       (assertEq "${hostName} legacy GPG home adoption" true homeConfig.home.file.".gnupg".force)
-      (assertEq "${hostName} sops GPG home" null homeConfig.sops.gnupg.home)
-      (assertEq "${hostName} sops age key" ageKeyFile homeConfig.sops.age.keyFile)
-      (assertEq "${hostName} sops isolated GPG home" "/var/empty" sopsEnvironment.GNUPGHOME)
-      (assertEq "${hostName} sops disabled GPG executable" "/usr/bin/false" sopsEnvironment.SOPS_GPG_EXEC)
-      (assertEq "${hostName} sops agent isolated GPG home" "/var/empty" sopsAgentEnvironment.GNUPGHOME)
-      (assertEq "${hostName} sops agent disabled GPG executable" "/usr/bin/false"
-        sopsAgentEnvironment.SOPS_GPG_EXEC
-      )
     ];
 
   checks = builtins.concatMap checksFor [

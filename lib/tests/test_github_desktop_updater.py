@@ -150,7 +150,7 @@ def test_github_desktop_fetch_hashes_computes_both_yarn_caches(
     )
 
     assert [call["name"] for call in calls] == ["github-desktop", "github-desktop"]
-    assert all(call["env"] == {"FAKE_HASHES": "1"} for call in calls)
+    assert all(call["env"] is None for call in calls)
     assert "cacheRoot" in cast("str", calls[0]["expr"])
     assert "cacheApp" in cast("str", calls[1]["expr"])
     assert events[-1].kind is UpdateEventKind.VALUE

@@ -46,7 +46,7 @@ def _run(status: str) -> gha_client.WorkflowRun:
         check_suite_node_id="CS_100",
         head_branch="main",
         head_sha="deadbeef",
-        path=".github/workflows/update.yml@refs/heads/main",
+        path=".github/workflows/demo.yml@refs/heads/main",
         run_number=1,
         run_attempt=1,
         referenced_workflows=[],

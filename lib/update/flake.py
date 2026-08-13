@@ -5,17 +5,14 @@ from __future__ import annotations
 import functools
 import os
 import shlex
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.identifier import Identifier
-from nix_manipulator.expressions.operator import Operator
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.path import NixPath
-from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
+from nix_manipulator.expressions.primitive import Primitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.commands.flake import nix_flake_lock_update
@@ -26,7 +23,7 @@ from lib.update.events import (
     UpdateEvent,
     UpdateEventKind,
 )
-from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
+from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import get_repo_root
 
 if TYPE_CHECKING:
@@ -187,33 +184,6 @@ def nixpkgs_expression() -> NixExpression:
             {"system": identifier_attr_path("builtins", "currentSystem")},
         ),
     )
-
-
-def nixpkgs_lib_expression() -> NixExpression:
-    """Build an import of nixpkgs' ``lib`` tree without importing the full package set."""
-    source = _nixpkgs_source_expression()
-    lib_source: NixExpression = (
-        NixPath(path=str(Path(source.path) / "lib"))
-        if isinstance(source, NixPath)
-        else BinaryExpression(
-            left=Parenthesis(value=source),
-            operator=Operator(name="+"),
-            right=StringPrimitive(value="/lib"),
-        )
-    )
-    return FunctionCall(
-        name=Identifier(name="import"),
-        argument=(
-            lib_source
-            if isinstance(lib_source, NixPath)
-            else Parenthesis(value=lib_source)
-        ),
-    )
-
-
-def nixpkgs_expr() -> str:
-    """Build a nixpkgs import expression from the pinned flake input."""
-    return compact_nix_expr(nixpkgs_expression().rebuild())
 
 
 async def update_flake_input(input_name: str, *, source: str) -> EventStream:

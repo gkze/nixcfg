@@ -51,7 +51,6 @@ class _UpdateOptionsInitKwargs(TypedDict, total=False):
     retry_backoff: float | None
     fake_hash: str | None
     deno_platforms: str | None
-    pinned_versions: str | None
 
 
 class UpdateOptionsKwargs(_UpdateOptionsInitKwargs, total=False):
@@ -90,7 +89,6 @@ class UpdateOptions:
     retry_backoff: float | None = None
     fake_hash: str | None = None
     deno_platforms: str | None = None
-    pinned_versions: str | None = None
 
     def __post_init__(self) -> None:
         """Normalize target aliases while preserving the legacy ``source`` field."""

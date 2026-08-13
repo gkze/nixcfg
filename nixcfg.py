@@ -18,11 +18,13 @@ from lib.github_actions.cli import app as github_actions_app
 from lib.nix.schemas import check as schema_check
 from lib.nix.schemas import codegen_main
 from lib.nix.schemas import fetch as fetch_schemas
+from lib.nix.schemas import verify_generated_models as verify_nix_schema_models
 from lib.recover.cli import app as recover_app
 from lib.schema_codegen import (
     default_config_path,
     generate_schema_codegen_target,
     list_schema_codegen_targets,
+    verify_schema_codegen_target,
     write_codegen_lockfile,
 )
 from lib.update.ci import app as update_ci_app
@@ -257,6 +259,34 @@ def schema_lock(
 def schema_codegen() -> None:
     """Run the Pydantic model code generator."""
     codegen_main(progress=_schema_progress)
+
+
+@schema_app.command(
+    name="verify",
+    help="Verify both generated Python model families are fresh.",
+)
+def schema_verify() -> None:
+    """Check generated models without modifying the working tree."""
+    resolved_config = _resolve_schema_config_path(None)
+    try:
+        all_fresh = verify_nix_schema_models(progress=_schema_progress)
+        for target in list_schema_codegen_targets(config_path=resolved_config):
+            all_fresh = (
+                verify_schema_codegen_target(
+                    config_path=resolved_config,
+                    progress=_schema_progress,
+                    target_name=target.name,
+                )
+                and all_fresh
+            )
+    except (FileNotFoundError, RuntimeError, TypeError, ValueError) as exc:
+        typer.echo(f"Generated schema verification failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if not all_fresh:
+        typer.echo("Generated schema models are stale.", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("Generated schema models are fresh.")
 
 
 @schema_app.command(

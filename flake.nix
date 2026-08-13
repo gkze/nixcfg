@@ -112,10 +112,6 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    sops-nix = {
-      url = "github:Mic92/sops-nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     scratch = {
       url = "github:erictli/scratch/v1.0.0";
       flake = false;
@@ -138,7 +134,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.72.0";
+      url = "github:max-sixty/worktrunk/v0.73.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -224,7 +220,7 @@
       flake = false;
     };
     mux = {
-      url = "github:coder/mux/v0.28.1";
+      url = "github:coder/mux/v0.28.2";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mountpoint-s3 = {
@@ -527,14 +523,25 @@
                 '';
             };
 
-            "lint-workflows-actionlint" = {
-              repoWritable = true;
+            "verify-python-generated" = {
+              nixcfg = true;
               command =
-                { lib, pkgs, ... }:
+                { nixcfgVenv, ... }:
                 ''
-                  ${lib.getExe pkgs.git} init -q .
-                  ${pkgs.findutils}/bin/find .github/workflows -maxdepth 1 -type f ! -name '*.lock.yml' \( -name '*.yml' -o -name '*.yaml' \) -print0 \
-                    | ${pkgs.findutils}/bin/xargs -0 ${lib.getExe pkgs.actionlint}
+                  ${nixcfgVenv}/bin/python ./nixcfg.py schema verify
+                '';
+            };
+
+            "verify-runtime-package" = {
+              nixcfg = true;
+              command =
+                { nixcfgVenv, ... }:
+                ''
+                  site_packages="$(${nixcfgVenv}/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+                  test ! -e "$site_packages/lib/tests"
+                  test -f "$site_packages/lib/nix/py.typed"
+                  test -f "$site_packages/lib/nix/schemas/_version.json"
+                  test -f "$site_packages/lib/nix/schemas/store-v1.yaml"
                 '';
             };
 
@@ -577,14 +584,6 @@
                 '';
             };
 
-            "verify-workflow-generated" = {
-              nixcfg = true;
-              command =
-                { nixcfgPkg, ... }:
-                ''
-                  ${nixcfgPkg}/bin/nixcfg ci workflow verify-generated
-                '';
-            };
           };
         in
         {
@@ -948,13 +947,6 @@
             "test-nix-rio-overlay-platforms" = mkEvalOnlyCheck "test-nix-rio-overlay-platforms" (
               _: import ./tests/nix/rio-overlay-platforms { }
             );
-
-            "test-sops-age-policy" =
-              { pkgs, ... }:
-              import ./tests/nix/sops-age-policy {
-                inherit pkgs;
-                src = ./.;
-              };
 
             "test-zsh-gpg-tty" =
               { pkgs, ... }:

@@ -7,7 +7,12 @@ import pytest
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourcesFile
 from lib.update.persistence import persist_source_updates
-from lib.update.sources import load_all_sources, load_source_entry
+from lib.update.sources import (
+    load_all_sources,
+    load_source_entry,
+    read_pinned_source_version,
+    save_source_updates,
+)
 from lib.update.sources import save_sources as save_all_sources
 
 
@@ -60,6 +65,49 @@ def test_load_source_entry_accepts_legacy_list_payload(tmp_path: Path) -> None:
         raise AssertionError
     assert len(entries) == 1
     assert entries[0].platform == "x86_64-linux"
+
+
+def test_source_reads_and_new_writes_follow_authoritative_sidecars(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ignore shadow directories when source and updater sidecars identify owners."""
+    source_dir = tmp_path / "packages" / "demo"
+    updater_dir = tmp_path / "overlays" / "new-demo"
+    for path in (
+        source_dir,
+        tmp_path / "overlays" / "demo",
+        updater_dir,
+        tmp_path / "packages" / "new-demo",
+    ):
+        path.mkdir(parents=True)
+    (source_dir / "sources.json").write_text(
+        json.dumps({"hashes": {}, "version": "1.2.3"}),
+        encoding="utf-8",
+    )
+    (updater_dir / "updater.py").write_text("# updater\n", encoding="utf-8")
+    flat_updater = tmp_path / "overlays" / "flat-demo.updater.py"
+    flat_updater.write_text("# updater\n", encoding="utf-8")
+    monkeypatch.setattr("lib.update.paths.get_repo_root", lambda: tmp_path)
+
+    assert read_pinned_source_version("demo") == "1.2.3"
+
+    save_source_updates(
+        {
+            "new-demo": SourceEntry(hashes={}, version="2.0.0"),
+            "flat-demo": SourceEntry(hashes={}, version="3.0.0"),
+        },
+    )
+    created = json.loads(
+        (updater_dir / "sources.json").read_text(encoding="utf-8"),
+    )
+    assert created["version"] == "2.0.0"
+    flat_created = json.loads(
+        (tmp_path / "overlays" / "flat-demo.sources.json").read_text(
+            encoding="utf-8",
+        ),
+    )
+    assert flat_created["version"] == "3.0.0"
 
 
 def test_save_sources_raises_for_unknown_source_name(

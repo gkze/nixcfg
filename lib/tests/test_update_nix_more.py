@@ -358,17 +358,17 @@ def test_get_nix_build_semaphore_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         _get_nix_build_semaphore(cfg)
 
 
-def test_compute_overlay_hash_passes_fake_hash_env(
+def test_compute_overlay_hash_embeds_fake_hash_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Delegate overlay hash computation with FAKE_HASHES env."""
+    """Delegate overlay hashing without ambient environment configuration."""
     captured: dict[str, object] = {}
 
     async def _fake_compute(
         source: str,
         expr: str,
         *,
-        env: dict[str, str],
+        env: dict[str, str] | None = None,
         config: object,
     ) -> AsyncIterator[UpdateEvent]:
         captured.update({"source": source, "expr": expr, "env": env, "config": config})
@@ -378,7 +378,7 @@ def test_compute_overlay_hash_passes_fake_hash_env(
     events = _collect_events(compute_overlay_hash("demo", system="x86_64-linux"))
     assert events[-1].payload == "ok"
     assert captured["source"] == "demo"
-    assert captured["env"] == {"FAKE_HASHES": "1"}
+    assert captured["env"] is None
 
 
 def test_compute_drv_fingerprint_paths(monkeypatch: pytest.MonkeyPatch) -> None:

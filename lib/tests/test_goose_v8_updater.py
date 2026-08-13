@@ -158,7 +158,8 @@ def test_goose_v8_fetch_hashes_success_path(monkeypatch: pytest.MonkeyPatch) -> 
         fetched_urls.append((session, url, request_timeout, config))
         return b'[package]\nversion = "999.0.0"\n'
 
-    async def _url_hashes(name: str, urls):
+    async def _url_hashes(name: str, urls, *, config=None):
+        assert config is updater.config
         batch = list(urls)
         url_hash_batches.append(batch)
         yield module.UpdateEvent.status(name, "hashing release assets")
@@ -301,7 +302,8 @@ def test_goose_v8_fetch_hashes_rejects_missing_asset_hash(
         _ = (request_timeout, config)
         return b'[package]\nversion = "999.0.0"\n'
 
-    async def _url_hashes(name: str, urls):
+    async def _url_hashes(name: str, urls, *, config=None):
+        assert config is updater.config
         batch = list(urls)
         yield module.UpdateEvent.value(
             name,
@@ -342,7 +344,8 @@ def test_goose_v8_fetch_hashes_requires_asset_hash_capture(
         _ = (request_timeout, config)
         return b'[package]\nversion = "999.0.0"\n'
 
-    async def _missing_assets(name: str, _urls):
+    async def _missing_assets(name: str, _urls, *, config=None):
+        assert config is updater.config
         yield module.UpdateEvent.status(name, "hashing release assets")
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
@@ -375,7 +378,8 @@ def test_goose_v8_fetch_hashes_handles_missing_wrapped_asset_capture(
         _ = (request_timeout, config)
         return b'[package]\nversion = "999.0.0"\n'
 
-    async def _url_hashes(name: str, _urls):
+    async def _url_hashes(name: str, _urls, *, config=None):
+        assert config is updater.config
         yield module.UpdateEvent.status(name, "hashing release assets")
 
     async def _capture_selectively(events, *, error: str):

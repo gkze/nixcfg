@@ -51,6 +51,13 @@ class DereferenceMode(StrEnum):
     NONE = "none"
 
 
+class RecursiveRefMode(StrEnum):
+    """How inline dereferencing handles recursive references."""
+
+    AS_OBJECT = "as-object"
+    ERROR = "error"
+
+
 class SchemaTransform(StrEnum):
     """Schema-shape transforms applied before code generation."""
 
@@ -161,8 +168,19 @@ class PrepareConfig(BaseModel):
 
     dereference: DereferenceMode = DereferenceMode.NONE
     merge_ref_siblings: bool = False
+    preserve_root_ref: bool = False
     python_transforms: tuple[PythonTransform, ...] = ()
+    recursive_ref: RecursiveRefMode = RecursiveRefMode.ERROR
     schema_transforms: tuple[SchemaTransform, ...] = ()
+
+
+class GeneratedModuleHeader(BaseModel):
+    """Documentation rendered at the top of a generated Python module."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = "Auto-generated Pydantic models from JSON schemas."
+    regenerate_command: str | None = None
 
 
 class CodegenTarget(BaseModel):
@@ -172,6 +190,7 @@ class CodegenTarget(BaseModel):
 
     entrypoints: tuple[str, ...]
     generator: GeneratorOptions
+    header: GeneratedModuleHeader = Field(default_factory=GeneratedModuleHeader)
     prepare: PrepareConfig = Field(default_factory=PrepareConfig)
     registry_profile: str
     sources: tuple[str, ...]

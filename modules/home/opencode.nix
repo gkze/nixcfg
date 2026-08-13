@@ -5,7 +5,6 @@
 }:
 let
   inherit (lib)
-    attrByPath
     concatLists
     mapAttrsToList
     mkEnableOption
@@ -17,14 +16,6 @@ let
 
   cfg = config.nixcfg.opencode;
   opencodeMcpLib = import ../../lib/opencode-mcp.nix { inherit lib; };
-  inherit (opencodeMcpLib) mkLocalServer mkRemoteServer;
-  twilightAppPath = attrByPath [
-    "nixcfg"
-    "macApps"
-    "resolved"
-    "zen-twilight"
-    "path"
-  ] "/Applications/Twilight.app" config;
 
   profileType = types.submodule {
     options = {
@@ -94,69 +85,13 @@ in
 
     mcpServers = mkOption {
       type = opencodeMcpLib.mcpServerMapType;
-      default = {
-        aws-knowledge = mkRemoteServer "https://knowledge-mcp.global.api.aws";
-
-        aws-mcp = mkLocalServer [
-          "uvx"
-          "mcp-proxy-for-aws@latest"
-          "https://aws-mcp.us-east-1.api.aws/mcp"
-        ];
-
-        chrome-devtools =
-          mkLocalServer [
-            # Use Node's npx here instead of bunx. Hard-verified on argus: the
-            # same chrome-devtools-mcp --autoConnect --channel=stable command
-            # succeeds via npx but fails via bunx after MCP init/tool discovery on
-            # the first browser attach/list_pages call. The bundled Puppeteer/ws
-            # transport inside chrome-devtools-mcp hits Bun websocket upgrade
-            # compatibility issues and can surface misleading
-            # "Could not find DevToolsActivePort" errors even when the file
-            # exists. Relevant upstream Bun threads: #5951, #28114, #25777,
-            # #8320, #27859, and #28828.
-            "npx"
-            "-y"
-            "chrome-devtools-mcp@latest"
-            "--autoConnect"
-            "--channel=stable"
-          ]
-          // {
-            enable = false;
-          };
-
-        firefox-devtools = mkLocalServer [
-          "npx"
-          "-y"
-          "@padenot/firefox-devtools-mcp@latest"
-          "--firefoxPath=${twilightAppPath}/Contents/MacOS/zen"
-        ];
-
-        macos-automator = mkLocalServer [
-          "bunx"
-          "--bun"
-          "@steipete/macos-automator-mcp@latest"
-        ];
-
-        markitdown = mkLocalServer [
-          "uvx"
-          "markitdown-mcp@0.0.1a4"
-        ];
-
-        next-devtools = mkLocalServer [
-          "bunx"
-          "--bun"
-          "next-devtools-mcp@latest"
-        ];
-
-      };
+      default = { };
       description = "Base MCP server definitions written to the global OpenCode config; servers default to disabled and can be enabled on demand.";
     };
 
     plugins = mkOption {
       type = types.listOf types.str;
-      default = [
-        # "@mohak34/opencode-notifier@latest"
-      ];
+      default = [ ];
       description = "OpenCode plugins to install.";
     };
   };

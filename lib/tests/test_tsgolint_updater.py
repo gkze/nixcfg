@@ -13,7 +13,6 @@ from lib.tests._updater_helpers import run_async as _run
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.nix import _build_fetch_from_github_call, _build_overlay_expr
 from lib.update.updaters import VersionInfo
-from lib.update.updaters.core import source_override_env
 
 if TYPE_CHECKING:
     import pytest
@@ -159,15 +158,23 @@ def test_tsgolint_fetch_hashes_computes_src_and_vendor_hashes(
     )
     assert_nix_ast_equal(
         str(calls[1]["expr"]),
-        _build_overlay_expr("tsgolint"),
+        _build_overlay_expr(
+            "tsgolint",
+            source_overrides={
+                "tsgolint": SourceEntry(
+                    version="0.21.0",
+                    hashes=[
+                        HashEntry.create(
+                            "srcHash",
+                            "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                        ),
+                        HashEntry.create("vendorHash", updater.config.fake_hash),
+                    ],
+                )
+            },
+        ),
     )
-    assert calls[1]["env"] == source_override_env(
-        "tsgolint",
-        version="0.21.0",
-        src_hash="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-        dependency_hash_type="vendorHash",
-        dependency_hash=updater.config.fake_hash,
-    )
+    assert calls[1]["env"] is None
     assert events[-1].payload == [
         HashEntry.create(
             "srcHash",

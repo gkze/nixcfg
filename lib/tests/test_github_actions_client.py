@@ -38,7 +38,7 @@ def _run(run_id: int, status: str = "queued") -> gha_client.WorkflowRun:
         check_suite_node_id=f"CS_{run_id}",
         head_branch="main",
         head_sha="deadbeef",
-        path=".github/workflows/update.yml@refs/heads/main",
+        path=".github/workflows/demo.yml@refs/heads/main",
         run_number=run_id,
         run_attempt=1,
         referenced_workflows=[],
@@ -364,14 +364,14 @@ def test_selection_and_live_helpers_cover_matching_modes() -> None:
         gha_client.select_named_workflow((_workflow("Build"),), "build").name == "Build"
     )
     update_workflow = _workflow("Update").model_copy(
-        update={"path": ".github/workflows/update.yml"}
+        update={"path": ".github/workflows/demo.yml"}
     )
-    assert gha_client.select_named_workflow((update_workflow,), "update.yml").name == (
+    assert gha_client.select_named_workflow((update_workflow,), "demo.yml").name == (
         "Update"
     )
     assert (
         gha_client.select_named_workflow(
-            (update_workflow,), ".github/workflows/update.yml"
+            (update_workflow,), ".github/workflows/demo.yml"
         ).name
         == "Update"
     )

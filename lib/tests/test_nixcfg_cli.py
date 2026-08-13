@@ -37,7 +37,7 @@ def _workflow_record() -> Workflow:
         id=1,
         node_id="WF_1",
         name="Update",
-        path=".github/workflows/update.yml",
+        path=".github/workflows/demo.yml",
         state="active",
         created_at=timestamp,
         updated_at=timestamp,
@@ -60,7 +60,7 @@ def _workflow_run_record(status: str) -> WorkflowRun:
         check_suite_node_id="CS_100",
         head_branch="main",
         head_sha="deadbeef",
-        path=".github/workflows/update.yml@refs/heads/main",
+        path=".github/workflows/demo.yml@refs/heads/main",
         run_number=683,
         run_attempt=1,
         referenced_workflows=[],
@@ -288,7 +288,7 @@ def test_nixcfg_update_help_includes_typer_options() -> None:
 
     assert result.exit_code == 0
     assert "--native-only" in result.output
-    assert "--pinned-versions" in result.output
+    assert "--pinned-versions" not in result.output
     assert "--no-sources" in result.output
 
 
@@ -392,6 +392,66 @@ def test_nixcfg_schema_generate_reports_errors_cleanly(
 
     assert result.exit_code == 1
     assert "Schema generation failed: unknown target" in result.output
+
+
+def test_nixcfg_schema_verify_checks_both_generated_model_families(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Verify vendored-Nix and declarative generated models in one command."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "nixcfg.verify_nix_schema_models",
+        lambda **_kwargs: calls.append("nix") or True,
+    )
+    monkeypatch.setattr(
+        "nixcfg.list_schema_codegen_targets",
+        lambda **_kwargs: (SchemaTargetSummary("manifest", Path("models.py")),),
+    )
+    monkeypatch.setattr(
+        "nixcfg.verify_schema_codegen_target",
+        lambda *, target_name, **_kwargs: calls.append(target_name) or True,
+    )
+
+    result = CliRunner().invoke(nixcfg.app, ["schema", "verify"])
+
+    assert result.exit_code == 0
+    assert calls == ["nix", "manifest"]
+    assert "Generated schema models are fresh." in result.output
+
+
+def test_nixcfg_schema_verify_fails_on_any_stale_model_family(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Fail the check-only command when either generated family is stale."""
+    monkeypatch.setattr("nixcfg.verify_nix_schema_models", lambda **_kwargs: False)
+    monkeypatch.setattr(
+        "nixcfg.list_schema_codegen_targets",
+        lambda **_kwargs: (SchemaTargetSummary("manifest", Path("models.py")),),
+    )
+    monkeypatch.setattr(
+        "nixcfg.verify_schema_codegen_target",
+        lambda **_kwargs: True,
+    )
+
+    result = CliRunner().invoke(nixcfg.app, ["schema", "verify"])
+
+    assert result.exit_code == 1
+    assert "Generated schema models are stale." in result.output
+
+
+def test_nixcfg_schema_verify_reports_expected_errors(
+    monkeypatch: _MonkeyPatchLike,
+) -> None:
+    """Turn expected configuration/render failures into a concise exit code 1."""
+    monkeypatch.setattr(
+        "nixcfg.verify_nix_schema_models",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("cannot render")),
+    )
+
+    result = CliRunner().invoke(nixcfg.app, ["schema", "verify"])
+
+    assert result.exit_code == 1
+    assert "Generated schema verification failed: cannot render" in result.output
 
 
 def test_nixcfg_schema_lock_forwards_manifest_output_and_metadata(
@@ -551,7 +611,7 @@ def test_nixcfg_actions_workflows_renders_rows(
 
     assert result.exit_code == 0
     assert "Update" in result.output
-    assert ".github/workflows/update.yml" in result.output
+    assert ".github/workflows/demo.yml" in result.output
     assert "#683 success" in result.output
 
 
@@ -757,27 +817,6 @@ def test_nixcfg_actions_tail_surfaces_request_errors_cleanly(
     assert "FrozenInstanceError" not in result.output
 
 
-def test_nixcfg_ci_registers_sources_json_diff() -> None:
-    """Ensure nested `nixcfg ci diff sources` is available."""
-    runner = CliRunner()
-    result = runner.invoke(nixcfg.app, ["ci", "diff", "sources", "--help"])
-
-    assert result.exit_code == 0
-    assert "--format" not in result.output
-
-
-def test_nixcfg_ci_subcommand_help_includes_resolve_options() -> None:
-    """Ensure mounted CI apps expose their native option help."""
-    runner = CliRunner()
-    result = runner.invoke(
-        nixcfg.app,
-        ["ci", "pipeline", "versions", "--help"],
-    )
-
-    assert result.exit_code == 0
-    assert "--output" in result.output
-
-
 def test_nixcfg_ci_subcommand_help_includes_crate2nix_options() -> None:
     """Ensure mounted crate2nix CI app is registered with its flags."""
     runner = CliRunner()
@@ -804,35 +843,14 @@ def test_nixcfg_ci_crate2nix_exposes_central_normalizer_command() -> None:
     assert "PATH" in result.output
 
 
-def test_nixcfg_ci_omits_retired_pipeline_commands() -> None:
-    """Keep obsolete lifecycle diagnostics out of the public command tree."""
+def test_nixcfg_ci_omits_retired_workflow_commands() -> None:
+    """Keep deleted workflow orchestration out of the public command tree."""
     root = cast("click.Group", get_command(nixcfg.app))
     ci = cast("click.Group", root.commands["ci"])
     pipeline = cast("click.Group", ci.commands["pipeline"])
 
-    assert {"cargo-lock", "merge-probe"}.isdisjoint(pipeline.commands)
-
-
-def test_nixcfg_ci_exposes_truthful_current_tree_parity_command() -> None:
-    """Keep local parity scoped to the hosted current-tree gates it runs."""
-    runner = CliRunner()
-    result = runner.invoke(nixcfg.app, ["ci", "pipeline", "test", "--help"])
-
-    assert result.exit_code == 0
-    assert "x86_64-linux" in result.output
-    assert "Commit-range linting" in result.output
-
-
-def test_nixcfg_ci_cache_generations_help_exposes_profile_options() -> None:
-    """Ensure mounted generation profiling command is registered."""
-    runner = CliRunner()
-    result = runner.invoke(
-        nixcfg.app,
-        ["ci", "cache", "generations", "--help"],
-    )
-
-    assert result.exit_code == 0
-    assert "--profile-output" in result.output
+    assert {"cache", "diff", "workflow"}.isdisjoint(ci.commands)
+    assert set(pipeline.commands) == {"bun-lock", "crate2nix"}
 
 
 def test_nixcfg_recover_snapshot_help_exposes_recovery_options() -> None:
@@ -889,25 +907,28 @@ def test_nixcfg_tree_shows_declared_command_descriptions() -> None:
         "actions - GitHub Actions workflow discovery and live-tail helpers."
         in result.output
     )
-    assert "ci - CI helper tools for update pipelines." in result.output
-    assert "pr-body - Pull request body generation workflow step." in result.output
+    assert "ci - Package-maintenance tools." in result.output
     assert (
         "update - Update source versions/hashes and flake input refs." in result.output
     )
 
 
-def test_nixcfg_tree_colors_empty_groups_like_leaf_commands() -> None:
-    """Color callable groups without visible children like leaf commands."""
+def test_nixcfg_tree_distinguishes_groups_from_leaf_commands() -> None:
+    """Color command groups and their leaf commands distinctly."""
     root = cast("click.Group", get_command(nixcfg.app))
     ci = cast("click.Group", root.commands["ci"])
-    cache = cast("click.Group", ci.commands["cache"])
-    closure = cache.commands["closure"]
+    pipeline = cast("click.Group", ci.commands["pipeline"])
+    crate2nix = cast("click.Group", pipeline.commands["crate2nix"])
+    normalize = crate2nix.commands["normalize"]
 
-    assert nixcfg._command_label("cache", cache).startswith(
-        "[bold cyan]cache[/bold cyan]"
+    assert nixcfg._command_label("pipeline", pipeline).startswith(
+        "[bold cyan]pipeline[/bold cyan]"
     )
-    assert nixcfg._command_label("closure", closure).startswith(
-        "[green]closure[/green]"
+    assert nixcfg._command_label("crate2nix", crate2nix).startswith(
+        "[bold cyan]crate2nix[/bold cyan]"
+    )
+    assert nixcfg._command_label("normalize", normalize).startswith(
+        "[green]normalize[/green]"
     )
 
 

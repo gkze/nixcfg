@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lib.nix.models.sources import HashEntry
+from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module
@@ -24,8 +24,10 @@ def test_goose_cli_updater_builds_github_tagged_src_expr(
     module = _load_module("goose_cli_updater_hash_test")
     updater = module.GooseCliUpdater()
     calls: list[str] = []
+    artifact_overrides: list[dict[str, SourceEntry] | None] = []
 
-    async def _artifacts():
+    async def _artifacts(*, source_overrides=None):
+        artifact_overrides.append(source_overrides)
         if False:
             yield None
 
@@ -51,6 +53,19 @@ def test_goose_cli_updater_builds_github_tagged_src_expr(
             "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         )
     ]
+    assert artifact_overrides == [
+        {
+            "goose-cli": SourceEntry(
+                version="1.2.3",
+                hashes=HashCollection.from_value([
+                    HashEntry.create(
+                        "srcHash",
+                        "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    )
+                ]),
+            )
+        }
+    ]
 
 
 def test_goose_cli_updater_forwards_fixed_hash_progress_events(
@@ -60,7 +75,7 @@ def test_goose_cli_updater_forwards_fixed_hash_progress_events(
     module = _load_module("goose_cli_updater_progress_test")
     updater = module.GooseCliUpdater()
 
-    async def _artifacts():
+    async def _artifacts(**_kwargs):
         if False:
             yield None
 
@@ -87,7 +102,7 @@ def test_goose_cli_updater_forwards_materialized_artifact_events(
     module = _load_module("goose_cli_updater_artifact_test")
     updater = module.GooseCliUpdater()
 
-    async def _artifacts():
+    async def _artifacts(**_kwargs):
         yield module.UpdateEvent.status("goose-cli", "materialized cargo artifacts")
 
     async def _fixed_hash(_name: str, _expr: str, **_kwargs):
@@ -112,7 +127,7 @@ def test_goose_cli_updater_requires_src_hash_output(
     module = _load_module("goose_cli_updater_missing_hash_test")
     updater = module.GooseCliUpdater()
 
-    async def _artifacts():
+    async def _artifacts(**_kwargs):
         if False:
             yield None
 

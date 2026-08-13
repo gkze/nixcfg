@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
 import platform
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,9 +17,9 @@ from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.inherit import Inherit
 from nix_manipulator.expressions.let import LetExpression
+from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.operator import Operator
 from nix_manipulator.expressions.parenthesis import Parenthesis
-from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
@@ -53,6 +54,8 @@ from lib.update.process import (
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    from lib.nix.models.sources import SourceEntry
 
 
 _ARCH_ALIASES = {
@@ -313,9 +316,14 @@ def _build_overlay_attr_expr(
     attr_path: str,
     *,
     system: str | None = None,
+    source_overrides: Mapping[str, SourceEntry] | None = None,
 ) -> str:
     expression: NixExpression = Parenthesis(
-        value=_build_overlay_expression(source, system=system),
+        value=_build_overlay_expression(
+            source,
+            system=system,
+            source_overrides=source_overrides,
+        ),
     )
     for attribute in attr_path.removeprefix(".").split("."):
         if not attribute:
@@ -331,43 +339,71 @@ def _build_package_path_attr_expr(
     system: str | None = None,
     repo_root: str | None = None,
     package_args: Mapping[str, NixExpression] | None = None,
+    source_overrides: Mapping[str, SourceEntry] | None = None,
 ) -> str:
-    repo_path = get_repo_file(".") if repo_root is None else Path(repo_root).resolve()
-    flake_url = local_flake_url(repo_path)
-    system_expr: NixExpression = (
-        select_attrs(Identifier(name="builtins"), "currentSystem")
-        if system is None
-        else StringPrimitive(value=system)
+    return _build_call_package_attr_expr(
+        select_attrs(
+            Identifier(name="flake"),
+            "packagePaths",
+            _quote_attr(package),
+        ),
+        attr_path,
+        system=system,
+        repo_root=repo_root,
+        package_args=package_args,
+        source_overrides=source_overrides,
     )
-    import_nixpkgs = FunctionCall(
-        name=Identifier(name="import"),
-        argument=select_attrs(Identifier(name="flake"), "inputs", "nixpkgs"),
+
+
+def _build_repo_package_attr_expr(
+    package_file: str,
+    attr_path: str,
+    *,
+    system: str | None = None,
+    repo_root: str | None = None,
+    package_args: Mapping[str, NixExpression] | None = None,
+    source_overrides: Mapping[str, SourceEntry] | None = None,
+) -> str:
+    """Evaluate an internal package file that is intentionally not exported."""
+    package_path = Parenthesis(
+        value=BinaryExpression(
+            operator=Operator(name="+"),
+            left=select_attrs(Identifier(name="rootFlake"), "outPath"),
+            right=StringPrimitive(value=f"/{package_file}"),
+        )
     )
-    config_expr = AttributeSet(
-        values=[
-            Binding(name="allowUnfree", value=Primitive(value=True)),
-            Binding(
-                name="allowInsecurePredicate",
-                value=FunctionDefinition(
-                    argument_set=Identifier(name="_"),
-                    output=Primitive(value=True),
-                ),
-            ),
-        ],
+    return _build_call_package_attr_expr(
+        package_path,
+        attr_path,
+        system=system,
+        repo_root=repo_root,
+        package_args=package_args,
+        source_overrides=source_overrides,
     )
+
+
+def _build_call_package_attr_expr(
+    package_path: NixExpression,
+    attr_path: str,
+    *,
+    system: str | None,
+    repo_root: str | None,
+    package_args: Mapping[str, NixExpression] | None,
+    source_overrides: Mapping[str, SourceEntry] | None,
+) -> str:
     package_expr: NixExpression = FunctionCall(
         name=FunctionCall(
             name=FunctionCall(
                 name=select_attrs(Identifier(name="pkgs"), "lib", "callPackageWith"),
                 argument=Identifier(name="applied"),
             ),
-            argument=NixPath(path=f"./packages/{package}/default.nix"),
+            argument=package_path,
         ),
         argument=AttributeSet(
             values=[
                 Binding(
                     name="inputs",
-                    value=select_attrs(Identifier(name="flake"), "inputs"),
+                    value=select_attrs(Identifier(name="rootFlake"), "inputs"),
                 ),
                 Binding(name="outputs", value=Identifier(name="flake")),
                 *(
@@ -377,11 +413,6 @@ def _build_package_path_attr_expr(
             ]
         ),
     )
-    overlay_fn = select_attrs(Identifier(name="flake"), "overlays", "default")
-    overlay_applied = FunctionCall(
-        name=FunctionCall(name=overlay_fn, argument=Identifier(name="self")),
-        argument=Identifier(name="pkgs"),
-    )
     expression = package_expr
     for attribute in attr_path.removeprefix(".").split("."):
         if not attribute:
@@ -390,38 +421,11 @@ def _build_package_path_attr_expr(
             expression = Parenthesis(value=expression)
         expression = Select(expression=expression, attribute=attribute)
     expression = LetExpression(
-        local_variables=[
-            Binding(name="flake", value=_build_get_flake_expr(flake_url)),
-            Binding(name="system", value=system_expr),
-            Binding(
-                name="pkgs",
-                value=FunctionCall(
-                    name=import_nixpkgs,
-                    argument=AttributeSet(
-                        values=[
-                            Inherit(names=[Identifier(name="system")]),
-                            Binding(name="config", value=config_expr),
-                        ],
-                    ),
-                ),
-            ),
-            Binding(
-                name="applied",
-                value=FunctionCall(
-                    name=select_attrs(Identifier(name="pkgs"), "lib", "fix"),
-                    argument=Parenthesis(
-                        value=FunctionDefinition(
-                            argument_set=Identifier(name="self"),
-                            output=BinaryExpression(
-                                operator=Operator(name="//"),
-                                left=Identifier(name="pkgs"),
-                                right=overlay_applied,
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        ],
+        local_variables=_contextual_overlay_bindings(
+            system=system,
+            repo_root=repo_root,
+            source_overrides=source_overrides,
+        ),
         value=expression,
     )
     return compact_nix_expr(expression.rebuild())
@@ -648,6 +652,7 @@ def _build_overlay_expression(
     *,
     system: str | None = None,
     repo_root: str | None = None,
+    source_overrides: Mapping[str, SourceEntry] | None = None,
 ) -> NixExpression:
     """Build a Nix expression that evaluates an overlay package.
 
@@ -663,67 +668,12 @@ def _build_overlay_expression(
     parameter correctly resolves to ``pkgs // overlay final pkgs`` without
     hitting the aliases.nix ``with self`` trap.
     """
-    repo_path = get_repo_file(".") if repo_root is None else Path(repo_root).resolve()
-    flake_url = local_flake_url(repo_path)
-    system_expr: NixExpression = (
-        select_attrs(Identifier(name="builtins"), "currentSystem")
-        if system is None
-        else StringPrimitive(value=system)
-    )
-    import_nixpkgs = FunctionCall(
-        name=Identifier(name="import"),
-        argument=select_attrs(Identifier(name="flake"), "inputs", "nixpkgs"),
-    )
-    config_expr = AttributeSet(
-        values=[
-            Binding(name="allowUnfree", value=Primitive(value=True)),
-            Binding(
-                name="allowInsecurePredicate",
-                value=FunctionDefinition(
-                    argument_set=Identifier(name="_"),
-                    output=Primitive(value=True),
-                ),
-            ),
-        ],
-    )
-    overlay_fn = select_attrs(Identifier(name="flake"), "overlays", "default")
-    overlay_applied = FunctionCall(
-        name=FunctionCall(name=overlay_fn, argument=Identifier(name="self")),
-        argument=Identifier(name="pkgs"),
-    )
     return LetExpression(
-        local_variables=[
-            Binding(name="flake", value=_build_get_flake_expr(flake_url)),
-            Binding(name="system", value=system_expr),
-            Binding(
-                name="pkgs",
-                value=FunctionCall(
-                    name=import_nixpkgs,
-                    argument=AttributeSet(
-                        values=[
-                            Inherit(names=[Identifier(name="system")]),
-                            Binding(name="config", value=config_expr),
-                        ],
-                    ),
-                ),
-            ),
-            Binding(
-                name="applied",
-                value=FunctionCall(
-                    name=select_attrs(Identifier(name="pkgs"), "lib", "fix"),
-                    argument=Parenthesis(
-                        value=FunctionDefinition(
-                            argument_set=Identifier(name="self"),
-                            output=BinaryExpression(
-                                operator=Operator(name="//"),
-                                left=Identifier(name="pkgs"),
-                                right=overlay_applied,
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        ],
+        local_variables=_contextual_overlay_bindings(
+            system=system,
+            repo_root=repo_root,
+            source_overrides=source_overrides,
+        ),
         value=Select(
             expression=Identifier(name="applied"),
             attribute=_quote_attr(source),
@@ -731,17 +681,133 @@ def _build_overlay_expression(
     )
 
 
+def _contextual_overlay_bindings(
+    *,
+    system: str | None,
+    repo_root: str | None,
+    source_overrides: Mapping[str, SourceEntry] | None,
+) -> list[Binding | Inherit]:
+    """Build one explicit update-evaluation scope shared by package probes."""
+    repo_path = get_repo_file(".") if repo_root is None else Path(repo_root).resolve()
+    flake_url = local_flake_url(repo_path)
+    system_expr: NixExpression = (
+        select_attrs(Identifier(name="builtins"), "currentSystem")
+        if system is None
+        else StringPrimitive(value=system)
+    )
+    source_overrides_expr: NixExpression = (
+        FunctionCall(
+            name=select_attrs(Identifier(name="builtins"), "fromJSON"),
+            argument=StringPrimitive(
+                value=json.dumps(
+                    {name: entry.to_dict() for name, entry in source_overrides.items()},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            ),
+        )
+        if source_overrides
+        else AttributeSet(values=[])
+    )
+    contextual_import = FunctionCall(
+        name=FunctionCall(
+            name=Identifier(name="import"),
+            argument=Parenthesis(
+                value=BinaryExpression(
+                    operator=Operator(name="+"),
+                    left=select_attrs(Identifier(name="rootFlake"), "outPath"),
+                    right=StringPrimitive(value="/default.nix"),
+                )
+            ),
+        ),
+        argument=AttributeSet.from_dict({
+            "src": select_attrs(Identifier(name="rootFlake"), "outPath"),
+            "inputs": select_attrs(Identifier(name="rootFlake"), "inputs"),
+            "lib": select_attrs(Identifier(name="pkgs"), "lib"),
+            "pkgsFor": FunctionCall(
+                name=select_attrs(Identifier(name="builtins"), "listToAttrs"),
+                argument=NixList(
+                    value=[
+                        AttributeSet.from_dict({
+                            "name": Identifier(name="system"),
+                            "value": Identifier(name="pkgs"),
+                        })
+                    ]
+                ),
+            ),
+            "evaluationContext": AttributeSet.from_dict({
+                "fakeHashes": Primitive(value=source_overrides is None),
+                "sourceOverrides": source_overrides_expr,
+            }),
+        }),
+    )
+    return [
+        Binding(name="rootFlake", value=_build_get_flake_expr(flake_url)),
+        Binding(name="system", value=system_expr),
+        Binding(
+            name="pkgs",
+            value=FunctionCall(
+                name=FunctionCall(
+                    name=Identifier(name="import"),
+                    argument=select_attrs(
+                        Identifier(name="rootFlake"), "inputs", "nixpkgs"
+                    ),
+                ),
+                argument=AttributeSet.from_dict({
+                    "system": Identifier(name="system"),
+                    "config": AttributeSet.from_dict({
+                        "allowUnfree": Primitive(value=True),
+                        "allowInsecurePredicate": FunctionDefinition(
+                            argument_set=Identifier(name="_"),
+                            output=Primitive(value=True),
+                        ),
+                    }),
+                }),
+            ),
+        ),
+        Binding(name="flake", value=contextual_import),
+        Binding(
+            name="applied",
+            value=FunctionCall(
+                name=select_attrs(Identifier(name="pkgs"), "lib", "fix"),
+                argument=Parenthesis(
+                    value=FunctionDefinition(
+                        argument_set=Identifier(name="self"),
+                        output=BinaryExpression(
+                            operator=Operator(name="//"),
+                            left=Identifier(name="pkgs"),
+                            right=FunctionCall(
+                                name=FunctionCall(
+                                    name=select_attrs(
+                                        Identifier(name="flake"),
+                                        "overlays",
+                                        "default",
+                                    ),
+                                    argument=Identifier(name="self"),
+                                ),
+                                argument=Identifier(name="pkgs"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    ]
+
+
 def _build_overlay_expr(
     source: str,
     *,
     system: str | None = None,
     repo_root: str | None = None,
+    source_overrides: Mapping[str, SourceEntry] | None = None,
 ) -> str:
     return compact_nix_expr(
         _build_overlay_expression(
             source,
             system=system,
             repo_root=repo_root,
+            source_overrides=source_overrides,
         ).rebuild()
     )
 
@@ -753,12 +819,11 @@ async def compute_overlay_hash(
     config: UpdateConfig | None = None,
     repo_root: str | None = None,
 ) -> EventStream:
-    """Compute a hash by building the overlay package with ``FAKE_HASHES=1``.
+    """Compute a hash by building the overlay with explicit fake-hash context.
 
-    Builds ``pkgs."{source}"`` with ``FAKE_HASHES=1`` so that ``lib.nix``'s
-    ``sourceHash*`` functions return ``lib.fakeHash``.  The real overlay
-    derivation then fails with a hash-mismatch error from which we extract
-    the correct hash.
+    The contextual library makes its source hash helpers return ``lib.fakeHash``.
+    The real overlay derivation then fails with a hash mismatch from which we
+    extract the correct hash.
 
     The overlay definition in ``overlays/default.nix`` is the single source of truth.
     """
@@ -767,7 +832,6 @@ async def compute_overlay_hash(
         source,
         expr,
         config=config,
-        env={"FAKE_HASHES": "1"},
     ):
         yield event
 
@@ -781,10 +845,9 @@ async def compute_drv_fingerprint(
 ) -> str:
     """Compute a stable derivation fingerprint for staleness detection.
 
-    Evaluates the package with ``FAKE_HASHES=1`` and extracts the ``.drv``
-    store-path hash using ``nix eval --raw <expr>.drvPath``. Because the fake
-    hash is a constant sentinel, the ``.drv`` path is a pure function of the
-    build input closure (source, toolchain, build script, stdenv, etc.).
+    Evaluates the package with explicit fake-hash context and extracts the
+    ``.drv`` store-path hash using ``nix eval --raw <expr>.drvPath``. Because
+    the fake hash is constant, the path is a pure function of the build closure.
 
     Any change to *any* transitive build input — a nixpkgs bump, a Deno
     version change, a source force-push, a build-script edit — changes the
@@ -814,7 +877,6 @@ async def compute_expr_drv_fingerprint(
             options=RunCommandOptions(
                 source=source,
                 error="nix eval did not return output",
-                env={"FAKE_HASHES": "1"},
                 config=config,
             ),
         ),
@@ -852,6 +914,7 @@ __all__ = [
     "_build_overlay_attr_expr",
     "_build_overlay_expr",
     "_build_package_path_attr_expr",
+    "_build_repo_package_attr_expr",
     "_emit_sri_hash_from_build_result",
     "_run_fixed_output_build",
     "compute_drv_fingerprint",

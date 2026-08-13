@@ -475,7 +475,7 @@ def test_fetch_hashes_requires_package_directory(
     module = _load_module("neutils_updater_test_missing_pkg_dir")
     updater = module.NeutilsUpdater()
 
-    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: None)
+    monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: None)
 
     with pytest.raises(RuntimeError, match="Package directory not found for neutils"):
         _run(
@@ -505,7 +505,7 @@ def test_fetch_hashes_emits_generated_artifact_and_src_hash(
 
     monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
     monkeypatch.setattr(
-        "lib.update.paths.package_dir_for",
+        "lib.update.paths.updater_dir_for",
         lambda _name: REPO_ROOT / "packages" / "neutils",
     )
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
@@ -560,7 +560,7 @@ def test_fetch_hashes_preserves_existing_artifact_after_current_transient_failur
         yield UpdateEvent.value(name, "sha256-src")
 
     monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
-    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: pkg_dir)
+    monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: pkg_dir)
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
     events = _run(
@@ -651,7 +651,7 @@ def test_fetch_hashes_retries_transient_zon2nix_failure_before_preserving_curren
     monkeypatch.setattr(updater, "_resolve_installable_path", _resolve)
     monkeypatch.setattr(module, "run_command", _run_command)
     monkeypatch.setattr(module.asyncio, "sleep", _sleep)
-    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: pkg_dir)
+    monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: pkg_dir)
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
     events = _run(
@@ -724,7 +724,7 @@ def test_fetch_hashes_rejects_preserve_when_artifact_is_not_current(
         yield UpdateEvent.value(updater.name, "sha256-src")
 
     monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
-    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: pkg_dir)
+    monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: pkg_dir)
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
     with pytest.raises(RuntimeError, match="Command timed out after 180s"):

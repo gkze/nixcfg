@@ -44,7 +44,8 @@ def test_code_cursor_fetch_checksums_and_download_url_validation(
         ),
     )
 
-    async def _compute_url_hashes(name: str, urls) -> object:
+    async def _compute_url_hashes(name: str, urls, *, config: object) -> object:
+        assert config is updater.config
         url_list = list(urls)
         assert name == updater.name
         assert url_list == [

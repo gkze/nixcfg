@@ -7,6 +7,12 @@ import pytest
 from lib import json_utils
 
 
+def test_as_object_dict_rejects_non_string_keys() -> None:
+    """Reject object mappings that cannot satisfy the JSON object contract."""
+    with pytest.raises(TypeError, match="Expected string key in payload, got int"):
+        json_utils.as_object_dict({1: "value"}, context="payload")
+
+
 @pytest.mark.parametrize(
     ("value", "message"),
     [

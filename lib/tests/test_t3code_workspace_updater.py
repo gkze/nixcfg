@@ -5,6 +5,15 @@ from __future__ import annotations
 from types import ModuleType
 
 import pytest
+from nix_manipulator.expressions.binary import BinaryExpression
+from nix_manipulator.expressions.binding import Binding
+from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.let import LetExpression
+from nix_manipulator.expressions.operator import Operator
+from nix_manipulator.expressions.parenthesis import Parenthesis
+from nix_manipulator.expressions.primitive import StringPrimitive
+from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import SourceEntry
 from lib.tests._nix_ast import assert_nix_ast_equal
@@ -12,6 +21,8 @@ from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEvent, UpdateEventKind
+from lib.update.nix import _contextual_overlay_bindings
+from lib.update.nix_expr import identifier_attr_path
 from lib.update.updaters import VersionInfo
 from lib.update.updaters.core import UpdateContext
 
@@ -42,6 +53,53 @@ def _source_entry(*, drv_hash: str | None = None) -> SourceEntry:
     return SourceEntry.model_validate(payload)
 
 
+def _install_main_version(
+    monkeypatch: pytest.MonkeyPatch,
+    updater: object,
+) -> None:
+    async def _fetch_latest(_session: object) -> VersionInfo:
+        return VersionInfo(version="main")
+
+    monkeypatch.setattr(updater, "fetch_latest", _fetch_latest)
+
+
+def _expected_workspace_expr() -> LetExpression:
+    package_expr = FunctionCall(
+        name=FunctionCall(
+            name=FunctionCall(
+                name=identifier_attr_path("pkgs", "lib", "callPackageWith"),
+                argument=Identifier(name="applied"),
+            ),
+            argument=Parenthesis(
+                value=BinaryExpression(
+                    operator=Operator(name="+"),
+                    left=identifier_attr_path("rootFlake", "outPath"),
+                    right=StringPrimitive(
+                        value="/packages/t3code-workspace/default.nix"
+                    ),
+                )
+            ),
+        ),
+        argument=AttributeSet(
+            values=[
+                Binding(
+                    name="inputs",
+                    value=identifier_attr_path("rootFlake", "inputs"),
+                ),
+                Binding(name="outputs", value=Identifier(name="flake")),
+            ]
+        ),
+    )
+    return LetExpression(
+        local_variables=_contextual_overlay_bindings(
+            system="aarch64-darwin",
+            repo_root=None,
+            source_overrides=None,
+        ),
+        value=package_expr,
+    )
+
+
 def test_t3code_workspace_updater_tracks_only_aarch64_darwin() -> None:
     """The helper package should only run on its single supported platform."""
     updater_cls = _load_module().T3CodeWorkspaceUpdater
@@ -66,7 +124,7 @@ def test_t3code_workspace_fetch_hashes_uses_shared_fixed_output_hash_probe(
         source: str,
         expr: str,
         *,
-        env: dict[str, str],
+        env: dict[str, str] | None = None,
         config: object,
     ):
         captured["source"] = source
@@ -83,8 +141,8 @@ def test_t3code_workspace_fetch_hashes_uses_shared_fixed_output_hash_probe(
     assert captured["source"] == updater.name
     expr = captured["expr"]
     assert isinstance(expr, str)
-    assert_nix_ast_equal(expr, module.T3CodeWorkspaceUpdater._workspace_expression())
-    assert captured["env"] == {"FAKE_HASHES": "1"}
+    assert_nix_ast_equal(expr, _expected_workspace_expr())
+    assert captured["env"] is None
     assert captured["config"] is updater.config
     assert events[0].message == "retrying"
     assert events[-1].kind is UpdateEventKind.VALUE
@@ -124,7 +182,7 @@ def test_t3code_workspace_is_latest_uses_direct_fingerprint_expr(
 
     assert _run(updater._is_latest(current, VersionInfo(version="main"))) is True
     assert captured["source"] == "t3code-workspace"
-    assert "./packages/t3code-workspace/default.nix" in captured["expr"]
+    assert_nix_ast_equal(str(captured["expr"]), _expected_workspace_expr())
 
 
 def test_t3code_workspace_is_latest_rejects_missing_metadata() -> None:
@@ -160,6 +218,7 @@ def test_t3code_workspace_rechecks_node_modules_when_drv_fingerprint_matches(
     """A matching drvHash must not hide stale workspace nodeModulesHash data."""
     module = _load_module()
     updater = module.T3CodeWorkspaceUpdater()
+    _install_main_version(monkeypatch, updater)
     captured: dict[str, object] = {}
 
     async def _fake_fingerprint(source: str, expr: str, *, config: object) -> str:
@@ -170,7 +229,7 @@ def test_t3code_workspace_rechecks_node_modules_when_drv_fingerprint_matches(
         source: str,
         expr: str,
         *,
-        env: dict[str, str],
+        env: dict[str, str] | None = None,
         config: object,
     ):
         captured.update({
@@ -193,7 +252,6 @@ def test_t3code_workspace_rechecks_node_modules_when_drv_fingerprint_matches(
             updater.update_stream(
                 _source_entry(drv_hash="abc123"),
                 object(),
-                pinned_version=VersionInfo(version="main"),
             )
         )
     )
@@ -211,7 +269,7 @@ def test_t3code_workspace_rechecks_node_modules_when_drv_fingerprint_matches(
     assert captured["fingerprint_source"] == "t3code-workspace"
     assert captured["hash_source"] == "t3code-workspace"
     assert captured["hash_expr"] == captured["expr"]
-    assert captured["hash_env"] == {"FAKE_HASHES": "1"}
+    assert captured["hash_env"] is None
     assert captured["hash_config"] is updater.config
 
 
@@ -221,6 +279,7 @@ def test_t3code_workspace_persists_settled_post_materialization_fingerprint(
     """Persist the derivation identity that settles after dependency materialization."""
     module = _load_module()
     updater = module.T3CodeWorkspaceUpdater()
+    _install_main_version(monkeypatch, updater)
     fingerprints = iter(("before", "transient", "after", "after"))
 
     async def _fake_fingerprint(*_args: object, **_kwargs: object) -> str:
@@ -241,7 +300,6 @@ def test_t3code_workspace_persists_settled_post_materialization_fingerprint(
             updater.update_stream(
                 _source_entry(drv_hash="before"),
                 object(),
-                pinned_version=VersionInfo(version="main"),
             )
         )
     )
@@ -262,6 +320,7 @@ def test_t3code_workspace_rejects_unstable_post_materialization_fingerprint(
     """Do not publish source metadata when derivation identity keeps changing."""
     module = _load_module()
     updater = module.T3CodeWorkspaceUpdater()
+    _install_main_version(monkeypatch, updater)
     fingerprints = iter(("before", "one", "two", "three"))
 
     async def _fake_fingerprint(*_args: object, **_kwargs: object) -> str:
@@ -286,7 +345,6 @@ def test_t3code_workspace_rejects_unstable_post_materialization_fingerprint(
                 updater.update_stream(
                     _source_entry(drv_hash="before"),
                     object(),
-                    pinned_version=VersionInfo(version="main"),
                 )
             )
         )

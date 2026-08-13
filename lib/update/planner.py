@@ -207,7 +207,7 @@ def resolve_update_targets[ResolvedTargetsT](
     target_names = opts.target_names
     source_names = select_target_source_names(target_names, updaters)
 
-    # --native-only implies --no-refs: in CI, refs are managed by the pipeline.
+    # --native-only computes current-platform source hashes, not input refs.
     do_refs = not opts.no_refs and not opts.native_only
     do_sources = not opts.no_sources
     if target_names:

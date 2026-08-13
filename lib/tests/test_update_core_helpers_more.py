@@ -141,7 +141,6 @@ def test_find_root_prefers_env_and_root_marker_search(
     monkeypatch.setattr(update_paths.Path, "cwd", staticmethod(lambda: nested))
     assert update_paths.find_root() == repo_root.resolve()
     assert update_paths.find_root(existing_tool) == repo_root.resolve()
-    assert update_paths.find_repo_root(existing_tool) == repo_root.resolve()
 
     update_paths.find_root.cache_clear()
     with pytest.raises(RuntimeError, match=r"Could not find repo root"):

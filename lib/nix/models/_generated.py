@@ -11,9 +11,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, StringConstraints
 
+
 # === hash-v1 ===
-
-
 class Hash(RootModel[str]):
     root: Annotated[
         str,
@@ -37,8 +36,6 @@ class Algorithm(StrEnum):
 
 
 # === store-path-v1 ===
-
-
 class StorePath(RootModel[str]):
     root: Annotated[
         str,
@@ -51,8 +48,6 @@ class StorePath(RootModel[str]):
 
 
 # === content-address-v1 ===
-
-
 class Method(StrEnum):
     FLAT = "flat"
     NAR = "nar"
@@ -79,8 +74,6 @@ class ContentAddress(BaseModel):
 
 
 # === file-system-object-v1 ===
-
-
 class Type(StrEnum):
     REGULAR = "regular"
     SYMLINK = "symlink"
@@ -148,10 +141,14 @@ class FileSystemObject(
 
 FileSystemObject2.model_rebuild()
 Directory.model_rebuild()
+
+
 # === build-trace-entry-v2 ===
-
-
 class BuildTraceEntry(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
+    __pydantic_extra__: dict[str, Any]
     id: Any
     out_path: Annotated[Any, Field(alias="outPath")]
     signatures: Any
@@ -189,8 +186,6 @@ class Value(BaseModel):
 
 
 # === build-result-v1 ===
-
-
 class Status(StrEnum):
     BUILT = "Built"
     SUBSTITUTED = "Substituted"
@@ -199,6 +194,10 @@ class Status(StrEnum):
 
 
 class BuiltOutputs(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
+    __pydantic_extra__: dict[str, Any]
     id: Any
     out_path: Annotated[Any, Field(alias="outPath")]
     signatures: Any
@@ -310,8 +309,6 @@ class Failure(BaseModel):
 
 
 # === deriving-path-v1 ===
-
-
 class DerivingPath1(RootModel[str]):
     root: Annotated[
         str,
@@ -336,9 +333,9 @@ class DerivingPath(RootModel[DerivingPath1 | DerivingPath2]):
 
 
 DerivingPath2.model_rebuild()
+
+
 # === derivation-v4 ===
-
-
 class Outputs(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -468,8 +465,6 @@ class DynamicOutputs(BaseModel):
 
 
 # === derivation-options-v1 ===
-
-
 class AllowedReferences(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -955,9 +950,9 @@ AllowedRequisites2.model_rebuild()
 DisallowedReferences2.model_rebuild()
 DisallowedRequisites2.model_rebuild()
 ExportReferencesGraph1.model_rebuild()
+
+
 # === store-object-info-v2 ===
-
-
 class Reference(RootModel[str]):
     root: Annotated[
         str,

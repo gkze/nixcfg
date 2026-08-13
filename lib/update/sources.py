@@ -25,7 +25,10 @@ from lib.update.paths import (
     REPO_ROOT,
     local_flake_url,
     package_dir_for,
+    package_file_for,
     package_file_map,
+    sources_file_for,
+    sources_file_for_updater,
 )
 from lib.update.surfaces import validate_repo_update_surface_coverage
 
@@ -71,11 +74,11 @@ def load_source_entry(path: Path) -> SourceEntry:
 
 def read_pinned_source_version(name: str) -> str:
     """Read the pinned version from one updater-managed ``sources.json`` file."""
-    pkg_dir = package_dir_for(name)
-    if pkg_dir is None:
-        msg = f"Package directory not found for {name}"
+    source_path = sources_file_for(name)
+    if source_path is None:
+        msg = f"sources.json not found for {name}"
         raise RuntimeError(msg)
-    entry = load_source_entry(pkg_dir / "sources.json")
+    entry = load_source_entry(source_path)
     version = entry.version
     if not isinstance(version, str) or not version:
         msg = f"{name} sources.json is missing a pinned version"
@@ -166,6 +169,9 @@ def save_source_updates(
     for name in source_updates:
         if name in path_map:
             continue
+        if updater_path := package_file_for(name, "updater.py"):
+            path_map[name] = sources_file_for_updater(updater_path, name)
+            continue
         pkg_dir = package_dir_for(name)
         if pkg_dir is None:
             missing.append(name)
@@ -198,8 +204,3 @@ def save_source_updates(
 def save_sources(sources: SourcesFile) -> None:
     """Write every entry in ``sources`` to its per-package ``sources.json``."""
     save_source_updates(sources.entries)
-
-
-def save_source_entry(path: Path, entry: SourceEntry) -> None:
-    """Write one per-package ``sources.json`` entry atomically."""
-    atomic_write_json(path, entry.to_dict())

@@ -157,7 +157,13 @@ def test_downloading_platform_fetch_hashes_forwards_hash_progress(
         ),
     )
 
-    async def _compute_url_hashes(name: str, urls: object) -> object:
+    async def _compute_url_hashes(
+        name: str,
+        urls: object,
+        *,
+        config: object,
+    ) -> object:
+        assert config is updater.config
         url_list = list(urls)  # type: ignore[arg-type]
         assert name == updater.name
         assert url_list == [

@@ -455,8 +455,3 @@ async def resolve_deno_deps(lock_path: Path) -> DenoDepManifest:
         jsr_packages=jsr_packages,
         npm_packages=npm_packages,
     )
-
-
-def resolve_deno_deps_sync(lock_path: Path) -> DenoDepManifest:
-    """Run :func:`resolve_deno_deps` synchronously."""
-    return asyncio.run(resolve_deno_deps(lock_path))

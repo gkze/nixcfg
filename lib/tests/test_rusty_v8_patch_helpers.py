@@ -16,7 +16,7 @@ def _scripts_dir() -> Path:
 
 
 def _load_script(script_name: str) -> dict[str, Any]:
-    return cast("dict[str, Any]", runpy.run_path(str(_scripts_dir() / script_name)))
+    return runpy.run_path(str(_scripts_dir() / script_name))
 
 
 def _write_with_extra_anchor(target: Path, namespace: dict[str, Any]) -> None:

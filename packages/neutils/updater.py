@@ -308,7 +308,7 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Generate ``build.zig.zon.nix`` and compute the pinned source hash."""
-        pkg_dir = update_paths.package_dir_for(self.name)
+        pkg_dir = update_paths.updater_dir_for(self.name)
         if pkg_dir is None:
             msg = f"Package directory not found for {self.name}"
             raise RuntimeError(msg)

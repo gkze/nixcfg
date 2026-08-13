@@ -348,14 +348,18 @@ def _is_retryable_prefetch_error(exc: NixCommandError) -> bool:
     )
 
 
-async def compute_sri_hash(source: str, url: str) -> EventStream:
+async def compute_sri_hash(
+    source: str,
+    url: str,
+    *,
+    config: UpdateConfig,
+) -> EventStream:
     """Prefetch a URL and return its SRI hash via :func:`lib.nix.commands.hash.nix_prefetch_url`."""
     args = ["nix-prefetch-url", "--type", "sha256"]
     prefetch_name = _nix_prefetch_name(url)
     if prefetch_name is not None:
         args.extend(["--name", prefetch_name])
     args.append(url)
-    config = resolve_active_config(None)
     attempts = max(1, config.default_retries)
     for attempt in range(
         1, attempts + 1
@@ -365,7 +369,11 @@ async def compute_sri_hash(source: str, url: str) -> EventStream:
                 source=source,
                 args=args,
                 message=shlex.join(args),
-                runner=lambda: libnix_prefetch_url(url, name=prefetch_name),
+                runner=lambda: libnix_prefetch_url(
+                    url,
+                    name=prefetch_name,
+                    command_timeout=config.default_subprocess_timeout,
+                ),
             ):
                 yield event
         except NixCommandError as exc:
@@ -397,10 +405,15 @@ async def compute_sri_hash(source: str, url: str) -> EventStream:
             return
 
 
-async def compute_url_hashes(source: str, urls: Iterable[str]) -> EventStream:
+async def compute_url_hashes(
+    source: str,
+    urls: Iterable[str],
+    *,
+    config: UpdateConfig,
+) -> EventStream:
     """Compute SRI hashes for URLs and emit a final URL-to-hash mapping."""
     streams: dict[str, EventStream] = {
-        url: compute_sri_hash(source, url) for url in dict.fromkeys(urls)
+        url: compute_sri_hash(source, url, config=config) for url in dict.fromkeys(urls)
     }
     async for item in gather_event_streams(streams):
         if isinstance(item, GatheredValues):

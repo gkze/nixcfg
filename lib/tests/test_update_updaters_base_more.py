@@ -504,25 +504,13 @@ def test_updater_is_latest_and_update_stream_paths() -> None:
         "hashes": {"x86_64-linux": HASH_A},
     })
 
-    async def _collect(
-        current: SourceEntry | None,
-        pinned: VersionInfo | None = None,
-    ) -> list[UpdateEvent]:
+    async def _collect(current: SourceEntry | None) -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
-            return [
-                event
-                async for event in updater.update_stream(
-                    current,
-                    session,
-                    pinned_version=pinned,
-                )
-            ]
+            return [event async for event in updater.update_stream(current, session)]
 
-    pinned_events = asyncio.run(
-        _collect(current, pinned=VersionInfo(version="1.0.0", metadata={}))
-    )
-    assert any(e.message == "Using pinned version: 1.0.0" for e in pinned_events)
-    assert any(e.message and e.message.startswith("Up to date") for e in pinned_events)
+    current_events = asyncio.run(_collect(current))
+    assert any(e.message == "Latest version: 1.0.0" for e in current_events)
+    assert any(e.message and e.message.startswith("Up to date") for e in current_events)
 
     changed_events = asyncio.run(_collect(_entry(version="0.9.0")))
     assert any(
@@ -653,7 +641,7 @@ def test_stream_fixed_output_hashes_emits_entries_in_sequence(
         if expr == "src":
             yield UpdateEvent.value(source, HASH_A)
             return
-        assert env == {"FROM": HASH_A}
+        assert env is None
         yield UpdateEvent.value(source, HASH_B)
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
@@ -673,7 +661,6 @@ def test_stream_fixed_output_hashes_emits_entries_in_sequence(
                         hash_type="vendorHash",
                         error="Missing vendorHash output",
                         expr=lambda resolved: f"vendor:{resolved['srcHash']}",
-                        env=lambda resolved, _config: {"FROM": resolved["srcHash"]},
                     ),
                 ),
             )
@@ -930,7 +917,13 @@ def test_download_hash_updater(monkeypatch: pytest.MonkeyPatch) -> None:
     urls = expect_not_none(result.urls)
     assert urls["x86_64-linux"].endswith("linux.tar.gz")
 
-    async def _hashes(_name: str, urls: Iterable[str]) -> EventStream:
+    async def _hashes(
+        _name: str,
+        urls: Iterable[str],
+        *,
+        config: object,
+    ) -> EventStream:
+        assert config is updater.config
         mapping = dict.fromkeys(urls, HASH_A)
         yield UpdateEvent.value("download", mapping)
 
@@ -1082,10 +1075,10 @@ def test_flake_input_fetch_latest_reads_lock_metadata(
     assert latest.version == "2.0.0"
 
 
-def test_flake_hash_is_latest_uses_derivation_fingerprint(
+def test_flake_hash_is_latest_uses_version_and_derivation_fingerprint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Existing drvHash values should prove latest status when fingerprints match."""
+    """Version and drvHash values should jointly determine latest status."""
     updater = _DummyFlakeInput()
 
     current = _entry(version="1.0.0", drv_hash="drv")
@@ -1115,6 +1108,16 @@ def test_flake_hash_is_latest_uses_derivation_fingerprint(
     assert (
         asyncio.run(object.__getattribute__(updater, "_is_latest")(current, info))
         is True
+    )
+    monkeypatch.setattr(
+        "lib.update.nix.compute_drv_fingerprint",
+        lambda *_a, **_k: asyncio.sleep(0, result="changed"),
+    )
+    assert (
+        asyncio.run(
+            object.__getattribute__(_DummyFlakeInput(), "_is_latest")(current, info)
+        )
+        is False
     )
 
 
@@ -1941,7 +1944,7 @@ def _install_deno_manifest_success(
         "lib.update.deno_lock.resolve_deno_deps",
         lambda _path: asyncio.sleep(0, result=manifest),
     )
-    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: tmp_path)
+    monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: tmp_path)
     monkeypatch.setattr(
         "lib.update.net.fetch_url",
         lambda *_a, **_k: asyncio.sleep(0, result=b"{}"),
@@ -2000,7 +2003,7 @@ def test_deno_manifest_updater_requires_package_directory(
         "lib.update.flake.get_flake_input_node",
         lambda _name: _deno_manifest_node(),
     )
-    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: None)
+    monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: None)
     monkeypatch.setattr(
         "lib.update.net.fetch_url",
         lambda *_a, **_k: asyncio.sleep(0, result=b"{}"),
@@ -2046,7 +2049,7 @@ def _install_uv_lock_success(
     monkeypatch.setattr(
         "lib.update.flake.get_flake_input_node", lambda _name: _uv_lock_node()
     )
-    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: tmp_path)
+    monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: tmp_path)
 
     async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
         _ = options
@@ -2113,7 +2116,7 @@ def test_uv_lock_updater_rejects_failed_uv_lock_command(
     monkeypatch.setattr(
         "lib.update.flake.get_flake_input_node", lambda _name: _uv_lock_node()
     )
-    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: tmp_path)
+    monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: tmp_path)
 
     async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
         _ = options
@@ -2182,7 +2185,7 @@ def test_uv_lock_updater_requires_package_directory(
     monkeypatch.setattr(
         "lib.update.flake.get_flake_input_node", lambda _name: _uv_lock_node()
     )
-    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: None)
+    monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: None)
 
     async def _resolve_only(args: list[str], *, options: object) -> EventStream:
         _ = options
@@ -2272,7 +2275,7 @@ def test_uv_lock_updater_rejects_empty_source_path(
         ),
     )
     monkeypatch.setattr("lib.update.flake.get_flake_input_node", lambda _name: node)
-    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: tmp_path)
+    monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: tmp_path)
 
     async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
         _ = options
@@ -2308,7 +2311,7 @@ def test_uv_lock_updater_rejects_failed_source_resolution(
     monkeypatch.setattr(
         "lib.update.flake.get_flake_input_node", lambda _name: _uv_lock_node()
     )
-    monkeypatch.setattr("lib.update.paths.package_dir_for", lambda _name: tmp_path)
+    monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: tmp_path)
 
     async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
         _ = options
@@ -2750,6 +2753,11 @@ def test_emdash_uses_platform_specific_npm_hashes() -> None:
     updater = _fresh_loaded_updaters()["emdash"]
     assert getattr(updater, "hash_type", None) == "npmDepsHash"
     assert getattr(updater, "platform_specific", False) is True
+    assert getattr(updater, "supported_platforms", None) == (
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-linux",
+    )
 
 
 def test_linearis_tracks_the_published_npm_tarball() -> None:

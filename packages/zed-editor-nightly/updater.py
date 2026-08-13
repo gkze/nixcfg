@@ -5,8 +5,6 @@ from __future__ import annotations
 import tomllib
 from typing import TYPE_CHECKING
 
-from lib.update import crate2nix as _crate2nix
-from lib.update.crate2nix_compat import patch_installed_crate2nix_target
 from lib.update.net import fetch_url
 from lib.update.updaters import (
     Crate2NixMetadataUpdater,
@@ -17,9 +15,6 @@ from lib.update.updaters.metadata import FlakeInputMetadata
 
 if TYPE_CHECKING:
     import aiohttp
-
-
-patch_installed_crate2nix_target(_crate2nix, "zed-editor-nightly")
 
 
 @register_updater

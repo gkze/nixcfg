@@ -4,12 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from lib.nix.models.sources import HashEntry, SourceHashes
-from lib.update import crate2nix as _crate2nix
-from lib.update.crate2nix_compat import (
-    patch_installed_crate2nix_missing_hashes,
-    patch_installed_crate2nix_target,
-)
+from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update.events import (
     EventStream,
     UpdateEvent,
@@ -29,12 +24,6 @@ from lib.update.updaters.github_release import GitHubReleaseUpdater
 
 if TYPE_CHECKING:
     import aiohttp
-
-    from lib.nix.models.sources import SourceEntry
-
-
-patch_installed_crate2nix_missing_hashes(_crate2nix)
-patch_installed_crate2nix_target(_crate2nix, "goose-cli")
 
 
 @register_updater
@@ -63,9 +52,6 @@ class GooseCliUpdater(Crate2NixArtifactsMixin, GitHubReleaseUpdater):
         """Compute the fixed-output source hash for Goose."""
         _ = (session, context)
 
-        async for event in self.stream_materialized_artifacts():
-            yield event
-
         src_hash_drain = ValueDrain[str]()
         async for event in drain_value_events(
             compute_fixed_output_hash(
@@ -78,6 +64,18 @@ class GooseCliUpdater(Crate2NixArtifactsMixin, GitHubReleaseUpdater):
         ):
             yield event
         src_hash = require_value(src_hash_drain, "Missing srcHash output")
+
+        async for event in self.stream_materialized_artifacts(
+            source_overrides={
+                self.name: SourceEntry(
+                    version=info.version,
+                    hashes=HashCollection.from_value([
+                        HashEntry.create("srcHash", src_hash)
+                    ]),
+                )
+            }
+        ):
+            yield event
 
         hashes: SourceHashes = [HashEntry.create("srcHash", src_hash)]
         yield UpdateEvent.value(self.name, hashes)

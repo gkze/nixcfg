@@ -7,13 +7,12 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from lib.nix.models.sources import HashEntry
+from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import install_fixed_hash_stream, load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.nix import _build_overlay_expr
 from lib.update.updaters import VersionInfo
-from lib.update.updaters.core import source_override_env
 
 
 def _load_module() -> ModuleType:
@@ -337,14 +336,19 @@ def test_fetch_hashes_computes_src_and_vendor_hashes(
         },
         {
             "name": "crush",
-            "expr": _build_overlay_expr("crush"),
-            "env": source_override_env(
+            "expr": _build_overlay_expr(
                 "crush",
-                version=info.version,
-                src_hash="sha256-src",
-                dependency_hash_type="vendorHash",
-                dependency_hash=updater.config.fake_hash,
+                source_overrides={
+                    "crush": SourceEntry(
+                        version=info.version,
+                        hashes=[
+                            HashEntry.create("srcHash", "sha256-src"),
+                            HashEntry.create("vendorHash", updater.config.fake_hash),
+                        ],
+                    )
+                },
             ),
+            "env": None,
             "config": updater.config,
         },
     ]

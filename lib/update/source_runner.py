@@ -13,7 +13,6 @@ from lib.update import planner as update_planner
 from lib.update import process as update_process
 from lib.update import refs as update_refs
 from lib.update import updaters as updater_module
-from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.events import (
     StatusInfo,
     StatusKind,
@@ -28,6 +27,7 @@ from lib.update.updaters.core import UpdateContext, _call_with_optional_context
 from lib.update.updaters.flake_backed import FlakeInputHashUpdater
 
 _AIOHTTP_MAX_FIELD_SIZE = 64 * 1024
+_SUMMARY_STATUS_PRIORITY = {"no_change": 0, "updated": 1, "error": 2}
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -35,8 +35,9 @@ if TYPE_CHECKING:
 
     from lib.nix.models.sources import SourceEntry, SourcesFile
     from lib.update.artifacts import GeneratedArtifact
+    from lib.update.config import UpdateConfig
+    from lib.update.ui_state import SummaryStatus
     from lib.update.updaters import UpdaterClass
-    from lib.update.updaters.metadata import VersionInfo
 
 
 class EventPut(Protocol):
@@ -59,8 +60,7 @@ class SourceTaskContext:
     update_input_tasks: dict[str, asyncio.Task[None]]
     queue: asyncio.Queue[UpdateEvent | None]
     generated_artifacts: dict[Path, str]
-    config: UpdateConfig | None = None
-    pinned_version: VersionInfo | None = None
+    config: UpdateConfig
     dry_run: bool = False
     effective_sources: dict[str, SourceEntry] = field(default_factory=dict)
 
@@ -75,7 +75,6 @@ class SourcesPhaseContext:
     update_input: bool
     native_only: bool
     config: UpdateConfig
-    pinned: dict[str, VersionInfo]
     dry_run: bool = False
 
 
@@ -86,6 +85,76 @@ class SourceTaskResult:
     completed: bool
     artifacts: tuple[GeneratedArtifact, ...] = field(default_factory=tuple)
     source_update: SourceEntry | None = None
+
+
+@dataclass(frozen=True)
+class UpdatePhaseResult:
+    """Authoritative domain outcome from one update phase."""
+
+    details: dict[str, SummaryStatus] = field(default_factory=dict)
+    source_updates: dict[str, SourceEntry] = field(default_factory=dict)
+    artifact_updates: dict[str, tuple[GeneratedArtifact, ...]] = field(
+        default_factory=dict
+    )
+
+    @property
+    def errors(self) -> int:
+        """Return the number of failed update targets."""
+        return sum(status == "error" for status in self.details.values())
+
+    def merged(self, other: UpdatePhaseResult) -> UpdatePhaseResult:
+        """Combine sequential phase outcomes into one run result."""
+        details = dict(self.details)
+        for name, status in other.details.items():
+            details[name] = max(
+                details.get(name, "no_change"),
+                status,
+                key=_SUMMARY_STATUS_PRIORITY.__getitem__,
+            )
+        return UpdatePhaseResult(
+            details=details,
+            source_updates={**self.source_updates, **other.source_updates},
+            artifact_updates={**self.artifact_updates, **other.artifact_updates},
+        )
+
+
+def _summarize_source_results(
+    source_names: list[str],
+    results: dict[str, SourceTaskResult],
+) -> UpdatePhaseResult:
+    observations: dict[Path, dict[str, GeneratedArtifact]] = {}
+    artifact_updates: dict[str, list[GeneratedArtifact]] = {}
+    details: dict[str, SummaryStatus] = {}
+    source_updates: dict[str, SourceEntry] = {}
+    for name in source_names:
+        result = results.get(name, SourceTaskResult(completed=False))
+        if not result.completed:
+            details[name] = "error"
+            continue
+        if result.source_update is not None:
+            source_updates[name] = result.source_update
+        details[name] = "updated" if result.source_update is not None else "no_change"
+        for artifact in result.artifacts:
+            path = artifact.resolved_path()
+            observations.setdefault(path, {})[name] = artifact
+            changed = artifact.changed_from_snapshot
+            if changed if changed is not None else artifact.has_changed():
+                artifact_updates.setdefault(name, []).append(artifact)
+                details[name] = "updated"
+
+    for producers in observations.values():
+        if len({artifact.content for artifact in producers.values()}) > 1:
+            for name, artifact in producers.items():
+                updates = artifact_updates.setdefault(name, [])
+                if artifact not in updates:
+                    updates.append(artifact)
+    return UpdatePhaseResult(
+        details=details,
+        source_updates=source_updates,
+        artifact_updates={
+            name: tuple(updates) for name, updates in artifact_updates.items()
+        },
+    )
 
 
 async def _refresh_input_task(
@@ -157,9 +226,8 @@ async def update_source_task(
 
     async def _run() -> None:
         nonlocal completed, source_update
-        resolved_config = resolve_active_config(context.config)
         current = context.sources.entries.get(name)
-        updater = _get_updaters()[name](config=resolved_config)
+        updater = _get_updaters()[name](config=context.config)
         if isinstance(updater, FlakeInputHashUpdater):
             updater.native_only = context.native_only
         input_name = getattr(updater, "input_name", None)
@@ -194,7 +262,6 @@ async def update_source_task(
             updater.update_stream,
             current,
             context.session,
-            pinned_version=context.pinned_version,
             context=update_context,
         ):
             if event.kind is UpdateEventKind.ARTIFACT and event.payload is not None:
@@ -209,13 +276,7 @@ async def update_source_task(
     await update_process.run_queue_task(source=name, queue=context.queue, task=_run)
     return SourceTaskResult(
         completed=completed,
-        artifacts=tuple(
-            artifact
-            for _, artifact in sorted(
-                artifacts_by_path.items(),
-                key=lambda item: item[0],
-            )
-        ),
+        artifacts=tuple(artifacts_by_path[path] for path in sorted(artifacts_by_path)),
         source_update=source_update,
     )
 
@@ -226,15 +287,15 @@ async def run_ref_phase(
     queue: asyncio.Queue[UpdateEvent | None],
     dry_run: bool,
     config: UpdateConfig,
-) -> None:
+) -> UpdatePhaseResult:
     """Run the flake ref update phase."""
     async with aiohttp.ClientSession(
         max_field_size=_AIOHTTP_MAX_FIELD_SIZE,
     ) as session:
         flake_edit_lock = asyncio.Lock()
         async with asyncio.TaskGroup() as group:
-            for inp in ref_inputs:
-                group.create_task(
+            tasks = {
+                inp.name: group.create_task(
                     update_refs.update_refs_task(
                         inp,
                         session,
@@ -246,9 +307,14 @@ async def run_ref_phase(
                         ),
                     ),
                 )
+                for inp in ref_inputs
+            }
+        return UpdatePhaseResult(
+            details={name: task.result() for name, task in tasks.items()}
+        )
 
 
-async def run_sources_phase(context: SourcesPhaseContext) -> None:
+async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
     """Run source update tasks in dependency-respecting waves."""
     async with aiohttp.ClientSession(
         max_field_size=_AIOHTTP_MAX_FIELD_SIZE,
@@ -263,7 +329,7 @@ async def run_sources_phase(context: SourcesPhaseContext) -> None:
         )
         source_task_slots = asyncio.Semaphore(context.config.max_nix_builds)
 
-        def _source_task_context(name: str) -> SourceTaskContext:
+        def _source_task_context() -> SourceTaskContext:
             return SourceTaskContext(
                 sources=context.sources,
                 update_input=context.update_input,
@@ -275,7 +341,6 @@ async def run_sources_phase(context: SourcesPhaseContext) -> None:
                 generated_artifacts=generated_artifacts,
                 effective_sources=effective_sources,
                 config=context.config,
-                pinned_version=context.pinned.get(name),
                 dry_run=context.dry_run,
             )
 
@@ -283,48 +348,38 @@ async def run_sources_phase(context: SourcesPhaseContext) -> None:
             async with source_task_slots:
                 return await update_source_task(
                     name,
-                    context=_source_task_context(name),
+                    context=_source_task_context(),
                 )
 
-        completed_sources: dict[str, bool] = {}
+        all_results: dict[str, SourceTaskResult] = {}
         for wave in source_waves:
             runnable: list[str] = []
             for name in wave:
                 parent = getattr(updaters.get(name), "companion_of", None)
                 if (
                     isinstance(parent, str)
-                    and parent in completed_sources
-                    and not completed_sources[parent]
+                    and parent in all_results
+                    and not all_results[parent].completed
                 ):
                     await context.queue.put(
                         UpdateEvent.error(name, f"Prerequisite update failed: {parent}")
                     )
-                    completed_sources[name] = False
+                    all_results[name] = SourceTaskResult(completed=False)
                     continue
                 runnable.append(name)
 
             if not runnable:
                 continue
 
-            wave_results: dict[str, SourceTaskResult] = {}
-            if context.config.max_nix_builds == 1 or len(runnable) == 1:
-                for name in runnable:
-                    result = await update_source_task(
-                        name,
-                        context=_source_task_context(name),
-                    )
-                    wave_results[name] = result
-            else:
-                async with asyncio.TaskGroup() as group:
-                    tasks = {
-                        name: group.create_task(_run_source_with_limit(name))
-                        for name in runnable
-                    }
-                wave_results = {name: task.result() for name, task in tasks.items()}
+            async with asyncio.TaskGroup() as group:
+                tasks = {
+                    name: group.create_task(_run_source_with_limit(name))
+                    for name in runnable
+                }
 
             for name in runnable:
-                result = wave_results[name]
-                completed_sources[name] = result.completed
+                result = tasks[name].result()
+                all_results[name] = result
                 if not result.completed:
                     continue
                 for artifact in result.artifacts:
@@ -337,11 +392,14 @@ async def run_sources_phase(context: SourcesPhaseContext) -> None:
                         else result.source_update
                     )
 
+        return _summarize_source_results(context.source_names, all_results)
+
 
 __all__ = [
     "SourceTaskContext",
     "SourceTaskResult",
     "SourcesPhaseContext",
+    "UpdatePhaseResult",
     "run_ref_phase",
     "run_sources_phase",
     "update_source_task",

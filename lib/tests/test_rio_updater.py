@@ -16,7 +16,6 @@ from lib.tests._updater_helpers import (
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import UpdateEventKind
 from lib.update.nix import _build_fetch_from_github_call, _build_overlay_expr
-from lib.update.updaters.core import source_override_env
 
 if TYPE_CHECKING:
     import pytest
@@ -93,15 +92,20 @@ def test_rio_update_uses_latest_source_when_release_has_no_rio_dmg(
     )
     assert_nix_ast_equal(
         str(calls[1]["expr"]),
-        _build_overlay_expr("rio"),
+        _build_overlay_expr(
+            "rio",
+            source_overrides={
+                "rio": SourceEntry(
+                    version="0.5.0",
+                    hashes=[
+                        HashEntry.create("srcHash", SRC_HASH),
+                        HashEntry.create("cargoHash", updater.config.fake_hash),
+                    ],
+                )
+            },
+        ),
     )
-    assert calls[1]["env"] == source_override_env(
-        "rio",
-        version="0.5.0",
-        src_hash=SRC_HASH,
-        dependency_hash_type="cargoHash",
-        dependency_hash=updater.config.fake_hash,
-    )
+    assert calls[1]["env"] is None
 
     result_events = [event for event in events if event.kind is UpdateEventKind.RESULT]
     assert len(result_events) == 1

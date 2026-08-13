@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
     import aiohttp
 
+    from lib.update.ui_state import SummaryStatus
+
 from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.events import (
     CommandResult,
@@ -25,7 +27,7 @@ from lib.update.events import (
     UpdateEvent,
     UpdateEventKind,
 )
-from lib.update.flake import load_flake_lock
+from lib.update.flake import invalidate_flake_lock, load_flake_lock
 from lib.update.net import fetch_github_api_paginated
 from lib.update.paths import get_repo_root
 from lib.update.process import StreamCommandOptions, run_queue_task, stream_command
@@ -515,6 +517,7 @@ async def update_flake_ref(
         error_prefix="nix flake lock failed",
     ):
         yield event
+    invalidate_flake_lock()
 
 
 async def _run_checked_command(
@@ -551,11 +554,13 @@ async def update_refs_task(
     queue: asyncio.Queue[UpdateEvent | None],
     *,
     options: RefTaskOptions | None = None,
-) -> None:
+) -> SummaryStatus:
     """Run a single flake-ref update, emitting events to *queue*."""
     task_options = options or RefTaskOptions()
+    detail: SummaryStatus = "error"
 
     async def _run() -> None:
+        nonlocal detail
         resolved_config = resolve_active_config(task_options.config)
         source = input_ref.name
         put = queue.put
@@ -595,6 +600,7 @@ async def update_refs_task(
                 ),
             )
             await put(UpdateEvent.result(source))
+            detail = "no_change"
             return
 
         latest_ref = result.latest_ref
@@ -619,6 +625,7 @@ async def update_refs_task(
                 ),
             )
             await put(UpdateEvent.result(source, update_payload))
+            detail = "updated"
             return
 
         async def do_update() -> None:
@@ -632,8 +639,10 @@ async def update_refs_task(
             await do_update()
 
         await put(UpdateEvent.result(source, update_payload))
+        detail = "updated"
 
     await run_queue_task(source=input_ref.name, queue=queue, task=_run)
+    return detail
 
 
 __all__ = [

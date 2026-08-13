@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import subprocess
-from io import StringIO
 
 import pytest
 
 from lib.update import derivation_validation as validation
-from lib.update.ci.workflow_core import cmd_validate_update_derivations
 from lib.update.derivation_validation import (
     DerivationValidation,
     DerivationValidationFailure,
@@ -343,64 +341,3 @@ def test_validate_derivations_reports_process_errors(
     assert len(failures) == 1
     assert failures[0].source == "portable"
     assert expected in failures[0].message
-
-
-def test_cmd_validate_update_derivations_checks_current_system_and_fails() -> None:
-    """Expose runner-native merged-tree validation as a failing command."""
-    stderr = StringIO()
-    calls: list[tuple[list[str], bool, float]] = []
-    failure = DerivationValidationFailure(
-        source="demo",
-        installable=".#demo.drvPath",
-        message="broken graph",
-    )
-
-    def _validate(
-        names: list[str],
-        *,
-        updaters: object,
-        all_declared_systems: bool,
-        timeout: float,
-    ) -> tuple[DerivationValidationFailure, ...]:
-        _ = updaters
-        calls.append((names, all_declared_systems, timeout))
-        return (failure,)
-
-    assert (
-        cmd_validate_update_derivations(
-            validate=_validate,
-            updaters={"zeta": _NoValidationUpdater, "demo": _PortableUpdater},
-            stderr=stderr,
-            timeout=12,
-        )
-        == 1
-    )
-    assert calls == [(["demo", "zeta"], False, 12)]
-    assert "[demo] Derivation validation failed" in stderr.getvalue()
-    assert "broken graph" in stderr.getvalue()
-
-
-def test_cmd_validate_update_derivations_succeeds_without_failures() -> None:
-    """Succeed when every declared merged-tree derivation validates."""
-    timeouts: list[float] = []
-
-    def _validate(
-        _names: list[str],
-        *,
-        updaters: object,
-        all_declared_systems: bool,
-        timeout: float,
-    ) -> tuple[DerivationValidationFailure, ...]:
-        _ = updaters, all_declared_systems
-        timeouts.append(timeout)
-        return ()
-
-    assert (
-        cmd_validate_update_derivations(
-            validate=_validate,
-            updaters={"demo": _PortableUpdater},
-            stderr=StringIO(),
-        )
-        == 0
-    )
-    assert timeouts == [1200]

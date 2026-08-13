@@ -3,7 +3,7 @@
 }:
 let
   modulesRoot = src + "/modules";
-  apiVersion = 1;
+  apiVersion = 2;
   constructorNames = [
     "mkSystem"
     "mkDarwinHost"
@@ -16,20 +16,17 @@ let
     nixosModules = {
       nixcfgCommon = modulesRoot + "/common.nix";
       nixcfgBase = modulesRoot + "/nixos/base.nix";
-      nixcfgProfiles = modulesRoot + "/nixos/profiles.nix";
     };
 
     darwinModules = {
       nixcfgCommon = modulesRoot + "/common.nix";
       nixcfgBase = modulesRoot + "/darwin/base.nix";
-      nixcfgProfiles = modulesRoot + "/darwin/profiles.nix";
       nixcfgHomebrew = modulesRoot + "/darwin/homebrew.nix";
     };
 
     homeModules = {
       nixcfgBase = modulesRoot + "/home/base.nix";
       nixcfgGit = modulesRoot + "/home/git.nix";
-      nixcfgProfiles = modulesRoot + "/home/profiles.nix";
       nixcfgPackages = modulesRoot + "/home/packages.nix";
       nixcfgOpencode = modulesRoot + "/home/opencode.nix";
       nixcfgTheme = modulesRoot + "/home/theme.nix";

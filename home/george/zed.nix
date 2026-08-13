@@ -5,46 +5,7 @@
   ...
 }:
 let
-  mcpRemote = import ../../lib/mcp-remote-wrapper.nix { inherit lib pkgs; };
-  githubMcpWrapper = mcpRemote.mkMcpRemoteWrapper {
-    name = "zed-github-mcp";
-    tokenCommand = "gh auth token";
-    url = "https://api.githubcopilot.com/mcp/";
-    extraHeaders = [ "X-MCP-Toolsets: repos,pull_requests,actions" ];
-  };
-  phoneMcpWrapper = mcpRemote.mkMcpRemoteWrapper {
-    name = "zed-phone-mcp";
-    tokenEnv = "PHONE_AGENT_API_KEY";
-    url = "https://phone.kote.fyi/mcp";
-  };
-  renderMcpWrapper = mcpRemote.mkMcpRemoteWrapper {
-    name = "zed-render-mcp";
-    tokenCommand = ''security find-internet-password -s "mcp.render.com" -a "$USER" -r "htps" -w'';
-    url = "https://mcp.render.com/mcp";
-  };
-  twilightAppPath = lib.attrByPath [
-    "nixcfg"
-    "macApps"
-    "resolved"
-    "zen-twilight"
-    "path"
-  ] "/Applications/Twilight.app" config;
-
-  disabledLocalMcp = command: args: {
-    enabled = false;
-    inherit args command;
-  };
-
-  disabledRemoteMcp = url: {
-    enabled = false;
-    inherit url;
-  };
-
-  extensionMcp = enabled: {
-    inherit enabled;
-    remote = false;
-    settings = { };
-  };
+  mcpCatalog = import ./mcp-catalog.nix { inherit config lib pkgs; };
 in
 {
   programs.zed-editor = {
@@ -107,66 +68,7 @@ in
       buffer_font_size = 12.0;
       collaboration_panel.dock = "left";
       font_family = config.fonts.monospace.name;
-      context_servers = {
-        aws-knowledge = disabledRemoteMcp "https://knowledge-mcp.global.api.aws";
-        aws-mcp = disabledLocalMcp "uvx" [
-          "mcp-proxy-for-aws@latest"
-          "https://aws-mcp.us-east-1.api.aws/mcp"
-        ];
-        axiom = disabledRemoteMcp "https://mcp.axiom.co/mcp";
-        chrome-devtools = disabledLocalMcp "npx" [
-          "-y"
-          "chrome-devtools-mcp@latest"
-          "--autoConnect"
-          "--channel=stable"
-        ];
-        browser-tools-context-server = extensionMcp true;
-        clerk = disabledRemoteMcp "https://mcp.clerk.com/mcp";
-        convex = disabledLocalMcp "bunx" [
-          "--bun"
-          "convex@latest"
-          "mcp"
-          "start"
-        ];
-        docusign = disabledRemoteMcp "https://mcp-d.docusign.com/mcp";
-        figma = disabledRemoteMcp "https://mcp.figma.com/mcp";
-        firefox-devtools = disabledLocalMcp "npx" [
-          "-y"
-          "@padenot/firefox-devtools-mcp@latest"
-          "--firefoxPath=${twilightAppPath}/Contents/MacOS/zen"
-        ];
-        github = disabledLocalMcp "${githubMcpWrapper}" [ ];
-        linear = disabledRemoteMcp "https://mcp.linear.app/mcp";
-        macos-automator = disabledLocalMcp "bunx" [
-          "--bun"
-          "@steipete/macos-automator-mcp@latest"
-        ];
-        markitdown = disabledLocalMcp "uvx" [
-          "markitdown-mcp@0.0.1a4"
-        ];
-        mcp-server-exa-search = extensionMcp false;
-        next-devtools = disabledLocalMcp "bunx" [
-          "--bun"
-          "next-devtools-mcp@latest"
-        ];
-        notion = disabledRemoteMcp "https://mcp.notion.com/mcp";
-        phone = disabledLocalMcp "${phoneMcpWrapper}" [ ];
-        planetscale = disabledRemoteMcp "https://mcp.pscale.dev/mcp/planetscale";
-        planetscale-context-server = extensionMcp false;
-        render = disabledLocalMcp "${renderMcpWrapper}" [ ];
-        sentry = disabledRemoteMcp "https://mcp.sentry.dev/mcp";
-        slack = disabledLocalMcp "${config.home.homeDirectory}/.local/bin/slack-mcp-wrapper" [ ];
-        supabase = disabledRemoteMcp "https://mcp.supabase.com/mcp?project_ref=xfgralojsgvvibogtjxo";
-        vanta =
-          (disabledLocalMcp "bunx" [
-            "--bun"
-            "@vantasdk/vanta-mcp-server"
-          ])
-          // {
-            env.VANTA_ENV_FILE = "${config.home.homeDirectory}/.config/vanta-credentials.env";
-          };
-        vercel = disabledRemoteMcp "https://mcp.vercel.com";
-      };
+      context_servers = mcpCatalog.zed;
       diff_view_style = "split";
       disable_ai = false;
       language_models.openai.available_models = [

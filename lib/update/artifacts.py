@@ -12,7 +12,7 @@ from lib.update import io as update_io
 from lib.update.paths import REPO_ROOT
 
 
-def _resolve_repo_path(path: Path, *, repo_root: Path = REPO_ROOT) -> Path:
+def resolve_repo_path(path: Path, *, repo_root: Path = REPO_ROOT) -> Path:
     """Resolve *path* under ``repo_root`` and ensure it stays inside the repo."""
     resolved_root = repo_root.resolve()
     candidate = path if path.is_absolute() else resolved_root / path
@@ -67,7 +67,7 @@ class GeneratedArtifact:
 
     def resolved_path(self, *, repo_root: Path = REPO_ROOT) -> Path:
         """Return this artifact's absolute repository path."""
-        return _resolve_repo_path(self.path, repo_root=repo_root)
+        return resolve_repo_path(self.path, repo_root=repo_root)
 
     def repo_relative_path(self, *, repo_root: Path = REPO_ROOT) -> Path:
         """Return this artifact path relative to the repository root."""
@@ -120,5 +120,6 @@ def save_generated_artifacts(
 __all__ = [
     "GeneratedArtifact",
     "dedupe_generated_artifacts",
+    "resolve_repo_path",
     "save_generated_artifacts",
 ]

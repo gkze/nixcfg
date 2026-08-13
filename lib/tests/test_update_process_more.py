@@ -267,10 +267,15 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
     convert_events = _collect_stream(convert_nix_hash_to_sri("demo", "deadbeef"))
     assert convert_events[-1].payload == "sha256-AAA="
 
-    prefetch_calls: list[tuple[str, str | None]] = []
+    prefetch_calls: list[tuple[str, str | None, float | None]] = []
 
-    async def _prefetch_url(url: str, *, name: str | None = None) -> str:
-        prefetch_calls.append((url, name))
+    async def _prefetch_url(
+        url: str,
+        *,
+        name: str | None = None,
+        command_timeout: float | None = None,
+    ) -> str:
+        prefetch_calls.append((url, name, command_timeout))
         return "sha256-BBB="
 
     monkeypatch.setattr("lib.update.process.libnix_prefetch_url", _prefetch_url)
@@ -278,6 +283,7 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
         compute_sri_hash(
             "demo",
             "https://example.com/releases/Town%20Assistant-1.8-33.dmg",
+            config=resolve_config(subprocess_timeout=12),
         )
     )
     start_message = prefetch_events[0].message
@@ -285,14 +291,21 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
     assert "--name Town-Assistant-1.8-33.dmg" in start_message
     assert prefetch_events[-1].payload == "sha256-BBB="
 
-    _collect_stream(compute_sri_hash("demo", "https://example.com/app.dmg"))
+    _collect_stream(
+        compute_sri_hash(
+            "demo",
+            "https://example.com/app.dmg",
+            config=resolve_config(subprocess_timeout=12),
+        )
+    )
     assert _nix_prefetch_name("https://example.com/releases/") is None
     assert prefetch_calls == [
         (
             "https://example.com/releases/Town%20Assistant-1.8-33.dmg",
             "Town-Assistant-1.8-33.dmg",
+            12,
         ),
-        ("https://example.com/app.dmg", None),
+        ("https://example.com/app.dmg", None, 12),
     ]
 
 
@@ -302,11 +315,17 @@ def test_compute_sri_hash_retries_transient_prefetch_failure(
     """Retry transient nix-prefetch-url failures before surfacing an error."""
     calls = 0
 
-    async def _prefetch_url(url: str, *, name: str | None = None) -> str:
+    async def _prefetch_url(
+        url: str,
+        *,
+        name: str | None = None,
+        command_timeout: float | None = None,
+    ) -> str:
         nonlocal calls
         calls += 1
         assert url == "https://example.com/archive.tar.gz"
         assert name is None
+        assert command_timeout == 19
         if calls == 1:
             raise NixCommandError(
                 LibCommandResult(
@@ -320,13 +339,17 @@ def test_compute_sri_hash_retries_transient_prefetch_failure(
         return "sha256-CCC="
 
     monkeypatch.setattr("lib.update.process.libnix_prefetch_url", _prefetch_url)
-    monkeypatch.setattr(
-        "lib.update.process.resolve_active_config",
-        lambda _config: resolve_config(retries=2, retry_backoff=0),
-    )
 
     events = _collect_stream(
-        compute_sri_hash("demo", "https://example.com/archive.tar.gz")
+        compute_sri_hash(
+            "demo",
+            "https://example.com/archive.tar.gz",
+            config=resolve_config(
+                retries=2,
+                retry_backoff=0,
+                subprocess_timeout=19,
+            ),
+        )
     )
 
     assert calls == 2
@@ -356,14 +379,23 @@ def test_compute_url_hashes_gather_and_type_errors(
     """Gather per-URL hash values into a single mapping payload."""
 
     async def _fake_compute_sri_hash(
-        source: str, url: str
+        source: str,
+        url: str,
+        *,
+        config: object,
     ) -> AsyncIterator[UpdateEvent]:
+        assert config is explicit_config
         yield UpdateEvent.status(source, f"hashing {url}")
         yield UpdateEvent.value(source, f"hash:{url}")
 
     monkeypatch.setattr("lib.update.process.compute_sri_hash", _fake_compute_sri_hash)
+    explicit_config = resolve_config()
     events = _collect_stream(
-        compute_url_hashes("demo", ["https://a", "https://a", "https://b"])
+        compute_url_hashes(
+            "demo",
+            ["https://a", "https://a", "https://b"],
+            config=explicit_config,
+        )
     )
     status_count = sum(1 for event in events if event.kind == UpdateEventKind.STATUS)
     assert status_count == 2
@@ -378,4 +410,6 @@ def test_compute_url_hashes_gather_and_type_errors(
 
     monkeypatch.setattr("lib.update.process.gather_event_streams", _fake_gather)
     with pytest.raises(TypeError, match="Expected URL key to be str"):
-        _collect_stream(compute_url_hashes("demo", ["https://a"]))
+        _collect_stream(
+            compute_url_hashes("demo", ["https://a"], config=explicit_config)
+        )

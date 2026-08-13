@@ -51,13 +51,6 @@ let
     ${pythonExe} ${./check_python_compile.py} ${lib.escapeShellArgs lintFiles.python.compilePaths}
   '';
 
-  workflowActionlintCheck = pkgs.writeShellScriptBin "check-workflow-actionlint" ''
-    set -euo pipefail
-
-    ${pkgs.findutils}/bin/find .github/workflows -maxdepth 1 -type f ! -name '*.lock.yml' \( -name '*.yml' -o -name '*.yaml' \) -print0 \
-      | ${pkgs.findutils}/bin/xargs -0 ${lib.getExe pkgs.actionlint}
-  '';
-
   standardHookSpecs = {
     lint-editorconfig = {
       package = pkgs."editorconfig-checker";
@@ -70,10 +63,6 @@ let
     lint-yaml-yamllint = {
       package = pkgs.yamllint;
       entry = "yamllint -c .yamllint .";
-    };
-    lint-agentic-workflows-gh-aw = {
-      package = pkgs.gh;
-      entry = "gh aw compile update-self-heal --no-check-update --no-emit --approve";
     };
     format-web-oxfmt = {
       package = pkgs.oxfmt;
@@ -103,13 +92,9 @@ let
       package = pythonToolBins;
       entry = "${tyExe} check${tyPythonFlag} .";
     };
-    lint-workflows-actionlint = {
-      package = workflowActionlintCheck;
-      entry = "${workflowActionlintCheck}/bin/check-workflow-actionlint";
-    };
-    lint-pins-pinact = {
-      package = pkgs.pinact;
-      entry = "pinact run --check";
+    verify-python-generated = {
+      package = pythonToolBins;
+      entry = "${pythonExe} ./nixcfg.py schema verify";
     };
   };
   standardHooks = lib.mapAttrs (
@@ -193,9 +178,7 @@ pkgs.devshell.mkShell {
       oxlint
       tsgolint
       nurl
-      pinact
       prek
-      sops
       taplo
       uv
       yamlfmt

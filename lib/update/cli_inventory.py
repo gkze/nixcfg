@@ -13,12 +13,13 @@ from rich.console import Console
 from rich.table import Table
 
 from lib.update import updaters as updater_module
+from lib.update.artifacts import resolve_repo_path
 from lib.update.flake import load_flake_lock, resolve_root_input_node
 from lib.update.paths import (
     get_repo_root,
-    package_dir_for,
     package_file_map,
     sources_file_for,
+    updater_dir_for,
 )
 from lib.update.planner import source_backing_input_name
 from lib.update.refs import get_flake_inputs_with_refs
@@ -33,7 +34,6 @@ from lib.update.updaters.core import (
 from lib.update.updaters.flake_backed import (
     DenoManifestUpdater,
     FlakeInputHashUpdater,
-    UvLockUpdater,
 )
 from lib.update.updaters.platform_api import PlatformAPIUpdater
 
@@ -153,7 +153,7 @@ class _InventoryTarget:
 
     def write_labels(self) -> tuple[str, ...]:
         labels: list[str] = []
-        if self.handles.ref_update:
+        if self.handles.ref_update or self.handles.input_refresh:
             labels.append("flake.lock")
         if self.source_target is not None:
             source_path = self.source_target.path
@@ -226,36 +226,22 @@ def _generated_artifact_paths(
     updater_cls: type[Updater],
 ) -> tuple[str, ...]:
     crate2nix_paths = _crate2nix_generated_artifact_paths(name)
-    declared_paths = getattr(updater_cls, "generated_artifact_files", ())
-    needs_package_dir = bool(declared_paths) or issubclass(
-        updater_cls, (DenoManifestUpdater, UvLockUpdater)
-    )
-    if not needs_package_dir:
+    declared_paths = updater_cls.get_generated_artifact_files()
+    if not declared_paths:
         return crate2nix_paths
 
-    pkg_dir = package_dir_for(name)
+    pkg_dir = updater_dir_for(name)
     if pkg_dir is None:
         return ()
 
-    artifact_paths: tuple[str, ...] = ()
-    if declared_paths:
-        artifact_paths = tuple(
-            resolved
-            for relative in declared_paths
-            if (resolved := _repo_relative_path(pkg_dir / relative)) is not None
+    artifact_paths = tuple(
+        relative_path
+        for relative in declared_paths
+        for artifact_path in (
+            resolve_repo_path(pkg_dir / relative, repo_root=get_repo_root()),
         )
-
-    if not artifact_paths:
-        artifact_name: str | None = None
-        if issubclass(updater_cls, UvLockUpdater):
-            artifact_name = getattr(updater_cls, "lock_file", "uv.lock")
-        elif issubclass(updater_cls, DenoManifestUpdater):
-            artifact_name = getattr(updater_cls, "manifest_file", "deno-deps.json")
-
-        if artifact_name is not None:
-            path = _repo_relative_path(pkg_dir / artifact_name)
-            if path is not None:
-                artifact_paths = (path,)
+        if (relative_path := _repo_relative_path(artifact_path)) is not None
+    )
 
     return tuple(dict.fromkeys((*artifact_paths, *crate2nix_paths)))
 

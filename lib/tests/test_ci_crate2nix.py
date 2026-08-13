@@ -16,6 +16,7 @@ from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.primitive import Primitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
@@ -23,7 +24,6 @@ from lib.tests._nix_ast import (
     expect_scope_binding,
     parse_nix_expr,
 )
-from lib.tests._updater_helpers import load_repo_module
 from lib.update import crate2nix
 from lib.update.events import (
     StatusInfo,
@@ -519,45 +519,6 @@ def test_targets_use_dedicated_source_installables() -> None:
     }
 
 
-def test_worktree_crate2nix_updaters_patch_old_installed_cli_targets(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Worktree updaters should keep old installed nixcfg CLIs off raw path URLs."""
-    target_names = ("codex", "goose-cli", "gitbutler", "zed-editor-nightly")
-    targets = {
-        name: crate2nix.Crate2NixTarget(
-            name=name,
-            patched_src_installable=f"path:.#{name}-crate2nix-src",
-            cargo_nix=Path(f"packages/{name}/Cargo.nix"),
-            crate_hashes=Path(f"packages/{name}/crate-hashes.json"),
-            normalizer_path=Path(f"packages/{name}/normalize_cargo_nix.py"),
-            supported_platforms=("aarch64-darwin",),
-        )
-        for name in target_names
-    }
-    monkeypatch.setattr(crate2nix, "TARGETS", targets)
-    monkeypatch.delattr(crate2nix, "_local_flake_installable", raising=False)
-    monkeypatch.setattr(
-        "lib.update.paths.get_repo_file", lambda _path: Path("/repo/root")
-    )
-
-    for path, module_name in (
-        ("packages/codex/updater.py", "codex"),
-        ("overlays/goose-cli/updater.py", "goose"),
-        ("packages/gitbutler/updater.py", "gitbutler"),
-        ("packages/zed-editor-nightly/updater.py", "zed"),
-    ):
-        load_repo_module(path, f"crate2nix_compat_{module_name}")
-
-    assert {
-        name: target.patched_src_installable
-        for name, target in crate2nix.TARGETS.items()
-    } == {
-        name: f"git+file:///repo/root?dirty=1#{name}-crate2nix-src"
-        for name in target_names
-    }
-
-
 def test_crate2nix_companion_discovery_uses_package_registry() -> None:
     """Package registry contracts should discover crate2nix companions."""
     packages_root = (crate2nix.REPO_ROOT / "packages").resolve()
@@ -660,6 +621,19 @@ def test_crate2nix_source_files_exist_for_registered_targets() -> None:
         "zed": str(packages_root / "zed-editor-nightly/crate2nix-src.nix"),
     }
     assert all(Path(path).is_file() for path in selected_paths.values())
+
+
+def test_goose_crate2nix_companion_declares_overlay_dependency() -> None:
+    """Expose the Goose overlay source as an injectable package argument."""
+    assert_nix_ast_equal(
+        (crate2nix.REPO_ROOT / "packages/goose-cli/crate2nix-src.nix").read_text(
+            encoding="utf-8"
+        ),
+        """
+        { goose-cli-crate2nix-src, ... }:
+        goose-cli-crate2nix-src
+        """,
+    )
 
 
 def test_crate2nix_target_platforms_match_registry_constraints() -> None:
@@ -850,13 +824,13 @@ def test_load_normalizer_handles_success_and_type_errors(tmp_path: Path) -> None
         "def normalize(text):\n    return text + '! ', 1, True\n",
         encoding="utf-8",
     )
-    normalize = crate2nix._load_normalizer(good)
+    normalize = crate2nix.load_normalizer(good)
     assert normalize("demo") == ("demo! ", 1, True)
 
     missing = tmp_path / "missing.py"
     missing.write_text("VALUE = 1\n", encoding="utf-8")
     with pytest.raises(TypeError, match="does not expose normalize"):
-        crate2nix._load_normalizer(missing)
+        crate2nix.load_normalizer(missing)
 
     invalid = tmp_path / "invalid.py"
     invalid.write_text(
@@ -864,7 +838,7 @@ def test_load_normalizer_handles_success_and_type_errors(tmp_path: Path) -> None
         encoding="utf-8",
     )
     with pytest.raises(TypeError, match="returned an invalid result"):
-        crate2nix._load_normalizer(invalid)("demo")
+        crate2nix.load_normalizer(invalid)("demo")
 
     invalid_types = tmp_path / "invalid_types.py"
     invalid_types.write_text(
@@ -872,7 +846,7 @@ def test_load_normalizer_handles_success_and_type_errors(tmp_path: Path) -> None
         encoding="utf-8",
     )
     with pytest.raises(TypeError, match="returned an invalid result"):
-        crate2nix._load_normalizer(invalid_types)("demo")
+        crate2nix.load_normalizer(invalid_types)("demo")
 
     invalid_bool_count = tmp_path / "invalid_bool_count.py"
     invalid_bool_count.write_text(
@@ -880,7 +854,7 @@ def test_load_normalizer_handles_success_and_type_errors(tmp_path: Path) -> None
         encoding="utf-8",
     )
     with pytest.raises(TypeError, match="returned an invalid result"):
-        crate2nix._load_normalizer(invalid_bool_count)("demo")
+        crate2nix.load_normalizer(invalid_bool_count)("demo")
 
 
 def test_load_normalizer_rejects_missing_spec(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -891,7 +865,7 @@ def test_load_normalizer_rejects_missing_spec(monkeypatch: pytest.MonkeyPatch) -
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     with pytest.raises(RuntimeError, match="Could not load normalizer"):
-        crate2nix._load_normalizer(Path("missing.py"))
+        crate2nix.load_normalizer(Path("missing.py"))
 
 
 def test_run_helper_and_build_patched_src_error_paths(
@@ -1036,6 +1010,75 @@ def test_build_patched_src_rewrites_local_path_installable(
         )
     ) == Path("/tmp/demo")
     assert captured[-1] == "git+file:///repo?dirty=1#demo"
+
+
+def test_build_patched_src_uses_contextual_source_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Generate crate graphs from the source selected by the current update wave."""
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable="path:.#demo-crate2nix-src",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("aarch64-darwin",),
+    )
+    source = SourceEntry(
+        version="2.0.0",
+        hashes=HashCollection.from_value([
+            HashEntry.create(
+                "srcHash",
+                "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            )
+        ]),
+    )
+    captured: dict[str, object] = {}
+
+    def _expr(
+        package: str,
+        attr_path: str,
+        *,
+        source_overrides: dict[str, SourceEntry],
+    ) -> str:
+        captured.update({
+            "package": package,
+            "attr_path": attr_path,
+            "source_overrides": source_overrides,
+        })
+        return "contextual-package-expression"
+
+    monkeypatch.setattr(crate2nix, "_build_package_path_attr_expr", _expr)
+
+    def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        captured["args"] = args
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout="/nix/store/demo\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(crate2nix, "_run", _run)
+
+    assert crate2nix._build_patched_src(
+        target,
+        source_overrides={"demo": source},
+    ) == Path("/nix/store/demo")
+    assert captured == {
+        "package": "demo-crate2nix-src",
+        "attr_path": "",
+        "source_overrides": {"demo": source},
+        "args": [
+            "nix",
+            "build",
+            "--impure",
+            "--no-link",
+            "--print-out-paths",
+            "--expr",
+            "contextual-package-expression",
+        ],
+    }
 
 
 def test_run_crate2nix_generate_retries_transient_prefetch_cleanup_failure(
@@ -1238,7 +1281,7 @@ def test_refresh_target_materializes_normalized_outputs(
     monkeypatch.setattr(crate2nix, "_crate2nix_cargo_home", lambda: cargo_home)
     monkeypatch.setattr(
         crate2nix,
-        "_load_normalizer",
+        "load_normalizer",
         lambda _path: lambda text: (text.replace("raw", "normalized") + "\n", 2, True),
     )
 
@@ -1400,19 +1443,3 @@ def test_resolve_targets_and_run_cover_remaining_control_flow(
     assert (
         "All checked-in crate2nix artifacts are up to date." in capsys.readouterr().err
     )
-
-
-def test_cli_callback_exits_with_run_status(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The Typer callback should forward arguments into run()."""
-    import lib.update.ci.crate2nix as crate2nix_cli
-
-    called: dict[str, object] = {}
-
-    def _fake_run(*, packages: tuple[str, ...] = (), write: bool = False) -> int:
-        called["packages"] = packages
-        called["write"] = write
-        return 7
-
-    monkeypatch.setattr(crate2nix_cli, "run", _fake_run)
-    assert crate2nix_cli.main(["--package", "demo", "--write"]) == 7
-    assert called == {"packages": ("demo",), "write": True}

@@ -20,17 +20,20 @@ from lib.update.updaters.metadata import VersionInfo, metadata_get_str
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.config import UpdateConfig
+
 
 async def stream_single_url_hash_entry(
     source_name: str,
     url: str,
     *,
+    config: UpdateConfig,
     error: str = "Missing hash output",
 ) -> EventStream:
     """Hash one URL and emit a single sha256 :class:`HashEntry` with that URL."""
     hash_drain = ValueDrain[dict[str, str]]()
     async for event in drain_value_events(
-        update_process.compute_url_hashes(source_name, [url]),
+        update_process.compute_url_hashes(source_name, [url], config=config),
         hash_drain,
         parse=expect_hash_mapping,
     ):
@@ -73,6 +76,7 @@ class SingleURLHashEntryUpdater(HashEntryUpdater):
         async for event in stream_single_url_hash_entry(
             self.name,
             self.get_download_url(info),
+            config=self.config,
         ):
             yield event
 

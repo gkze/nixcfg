@@ -19,6 +19,7 @@ from lib.schema_codegen.config import (
     DereferenceMode,
     DirectorySource,
     LoadedSchemaCodegenConfig,
+    RecursiveRefMode,
     ResourceMode,
     RetrieveKind,
     SchemaFormat,
@@ -375,6 +376,8 @@ def _inline_references(
     obj: JsonValue,
     *,
     merge_ref_siblings: bool,
+    preserve_root_ref: bool,
+    recursive_ref: RecursiveRefMode,
     resolver: _ResolverLike,
     stack: tuple[str, ...],
 ) -> JsonValue:
@@ -384,6 +387,8 @@ def _inline_references(
             _inline_references(
                 item,
                 merge_ref_siblings=merge_ref_siblings,
+                preserve_root_ref=preserve_root_ref,
+                recursive_ref=recursive_ref,
                 resolver=resolver,
                 stack=stack,
             )
@@ -398,12 +403,16 @@ def _inline_references(
             key: _inline_references(
                 value,
                 merge_ref_siblings=merge_ref_siblings,
+                preserve_root_ref=preserve_root_ref,
+                recursive_ref=recursive_ref,
                 resolver=resolver,
                 stack=stack,
             )
             for key, value in obj.items()
             if isinstance(key, str)
         }
+    if ref_obj == "#" and preserve_root_ref:
+        return _coerce_json_value(obj, context="preserved recursive schema ref")
 
     resolved = resolver.lookup(ref_obj)
     resolved_contents = _coerce_json_value(
@@ -411,6 +420,8 @@ def _inline_references(
         context=f"resolved schema {ref_obj}",
     )
     if ref_obj in stack:
+        if recursive_ref is RecursiveRefMode.AS_OBJECT:
+            return {"type": "object"}
         msg = f"Recursive $ref not supported during inline dereference: {ref_obj}"
         raise RuntimeError(msg)
 
@@ -422,6 +433,8 @@ def _inline_references(
     return _inline_references(
         merged,
         merge_ref_siblings=merge_ref_siblings,
+        preserve_root_ref=preserve_root_ref,
+        recursive_ref=recursive_ref,
         resolver=resolved.resolver,
         stack=(*stack, ref_obj),
     )
@@ -445,6 +458,8 @@ def prepare_entrypoint_schema(
         contents = _inline_references(
             contents,
             merge_ref_siblings=target.prepare.merge_ref_siblings,
+            preserve_root_ref=target.prepare.preserve_root_ref,
+            recursive_ref=target.prepare.recursive_ref,
             resolver=registry.resolver_with_root(resource),
             stack=(),
         )

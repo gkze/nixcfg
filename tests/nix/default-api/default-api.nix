@@ -166,6 +166,10 @@ let
 
   checks = [
     (import ./constructors.nix { inherit src; })
+    (assertEq "public API version" 2 exports.api.version)
+    (assertEq "public module sets exclude site profiles" false (
+      builtins.any (moduleSet: moduleSet ? nixcfgProfiles) (builtins.attrValues exports.moduleSets)
+    ))
     (assertEq "default api version symmetry" exports.api.version flake.api.version)
     (assertEq "default top-level api version symmetry" exports.api.version flake.apiVersion)
     (assertEq "default constructor names symmetry" exports.constructorNames flake.constructorNames)

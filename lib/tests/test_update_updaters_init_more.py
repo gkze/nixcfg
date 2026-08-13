@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import cast
 
 from lib.update.paths import package_file_map
 from lib.update.updaters import (
@@ -147,7 +148,7 @@ def test_ensure_updaters_loaded_fast_path_skips_discovery(monkeypatch) -> None:
     """Return the existing registry immediately when discovery already ran."""
     complete = True
     monkeypatch.setitem(_DISCOVERY_STATE, "complete", complete)
-    monkeypatch.setitem(UPDATERS, "demo", object)
+    monkeypatch.setitem(cast("dict[str, object]", UPDATERS), "demo", object)
 
     calls: list[str] = []
     monkeypatch.setattr(
@@ -166,7 +167,7 @@ def test_ensure_updaters_loaded_rediscovers_empty_registry(monkeypatch) -> None:
     UPDATERS.clear()
 
     def _discover() -> None:
-        UPDATERS["demo"] = object
+        cast("dict[str, object]", UPDATERS)["demo"] = object
 
     monkeypatch.setattr("lib.update.updaters._discover_updaters", _discover)
 
@@ -181,7 +182,7 @@ def test_ensure_updaters_loaded_rechecks_state_inside_lock(monkeypatch) -> None:
     class _Lock:
         def __enter__(self) -> None:
             _DISCOVERY_STATE["complete"] = True
-            UPDATERS["demo"] = object
+            cast("dict[str, object]", UPDATERS)["demo"] = object
 
         def __exit__(self, exc_type, exc, tb) -> bool:
             return False

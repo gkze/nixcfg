@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -49,25 +48,24 @@ class GooseDesktopUpdater(HashEntryUpdater):
     companion_of = "goose-cli"
     supported_platforms = (DARWIN_PLATFORM,)
 
-    def _dependency_hash_override_env(
+    def _dependency_hash_overrides(
         self,
         version: str,
         goose_cli_source: SourceEntry,
-    ) -> dict[str, str]:
-        payload = {
-            "goose-cli": goose_cli_source.to_dict(),
-            self.name: {
-                "version": version,
-                "hashes": [
-                    {
-                        "hashType": "nodeModulesHash",
-                        "hash": self.config.fake_hash,
-                        "platform": self.DARWIN_PLATFORM,
-                    }
-                ],
-            },
+    ) -> dict[str, SourceEntry]:
+        return {
+            "goose-cli": goose_cli_source,
+            self.name: SourceEntry(
+                version=version,
+                hashes=HashCollection.from_value([
+                    HashEntry.create(
+                        "nodeModulesHash",
+                        self.config.fake_hash,
+                        platform=self.DARWIN_PLATFORM,
+                    )
+                ]),
+            ),
         }
-        return {"UPDATE_SOURCE_OVERRIDES_JSON": json.dumps(payload)}
 
     @staticmethod
     def _goose_cli_source(
@@ -151,7 +149,11 @@ class GooseDesktopUpdater(HashEntryUpdater):
         )
 
     @classmethod
-    def _pnpm_deps_expr(cls, cargo_nix_path: Path) -> str:
+    def _pnpm_deps_expr(
+        cls,
+        cargo_nix_path: Path,
+        source_overrides: dict[str, SourceEntry],
+    ) -> str:
         return _build_package_path_attr_expr(
             cls.name,
             ".pnpmDeps",
@@ -159,6 +161,7 @@ class GooseDesktopUpdater(HashEntryUpdater):
             package_args={
                 "goose-cli": cls._goose_cli_override_expr(cargo_nix_path),
             },
+            source_overrides=source_overrides,
         )
 
     async def fetch_hashes(
@@ -179,13 +182,13 @@ class GooseDesktopUpdater(HashEntryUpdater):
             raise RuntimeError(msg)
 
         with self._cargo_nix_path(context) as cargo_nix_path:
+            source_overrides = self._dependency_hash_overrides(
+                info.version,
+                goose_cli_source,
+            )
             hash_stream = update_nix.compute_fixed_output_hash(
                 self.name,
-                self._pnpm_deps_expr(cargo_nix_path),
-                env=self._dependency_hash_override_env(
-                    info.version,
-                    goose_cli_source,
-                ),
+                self._pnpm_deps_expr(cargo_nix_path, source_overrides),
                 config=self.config,
             )
             async for event in self._emit_single_hash_entry(

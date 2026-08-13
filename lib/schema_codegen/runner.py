@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -159,18 +160,17 @@ _entrypoint_class_suffix = _render.entrypoint_class_suffix
 _resolve_body_class_conflicts = _render.resolve_body_class_conflicts
 
 
-def generate_schema_codegen_target(
+def _render_schema_codegen_target(
+    loaded: LoadedSchemaCodegenConfig,
     *,
-    config_path: Path | None = None,
-    progress: ProgressReporter | None = None,
-    target_name: str,
-) -> Path:
-    """Render one configured target to its declared output path."""
-    loaded = load_schema_codegen_config(config_path=config_path)
-    resolved_target = _resolve_target(loaded, target_name=target_name)
-    output_path = cast("Path", resolved_target.generator_options["output"])
-
-    _emit_progress(progress, f"Building schema registry for target {target_name}.")
+    progress: ProgressReporter | None,
+    resolved_target: _ResolvedTarget,
+) -> str:
+    """Render one already-resolved target without writing it."""
+    _emit_progress(
+        progress,
+        f"Building schema registry for target {resolved_target.name}.",
+    )
     registry = _build_registry(loaded, target=resolved_target.target)
 
     all_imports: set[str] = set()
@@ -202,10 +202,14 @@ def generate_schema_codegen_target(
             f"\n# === {_render.normalize_entrypoint_name(entrypoint)} ===\n{body}"
         )
 
+    regenerate_command = (
+        resolved_target.target.header.regenerate_command
+        or f"nixcfg schema generate {resolved_target.name}"
+    )
     header = (
-        '"""Auto-generated Pydantic models from JSON schemas.\n\n'
+        f'"""{resolved_target.target.header.description}\n\n'
         "DO NOT EDIT MANUALLY. Regenerate with:\n"
-        f"    nixcfg schema generate {target_name}\n"
+        f"    {regenerate_command}\n"
         '"""\n\n'
         "from __future__ import annotations\n"
     )
@@ -215,10 +219,69 @@ def generate_schema_codegen_target(
     rendered = _render.dedupe_classes(rendered)
     rendered = _render.collapse_excess_blank_lines(rendered)
     rendered = _render.apply_python_transforms(rendered, target=resolved_target.target)
+    rendered = _render.format_generated_python(
+        rendered,
+        generator_options=resolved_target.generator_options,
+    )
     if not rendered.endswith("\n"):
         rendered = f"{rendered}\n"
+    return rendered
+
+
+def generate_schema_codegen_target(
+    *,
+    config_path: Path | None = None,
+    progress: ProgressReporter | None = None,
+    target_name: str,
+) -> Path:
+    """Render one configured target to its declared output path."""
+    loaded = load_schema_codegen_config(config_path=config_path)
+    resolved_target = _resolve_target(loaded, target_name=target_name)
+    output_path = cast("Path", resolved_target.generator_options["output"])
+    rendered = _render_schema_codegen_target(
+        loaded,
+        progress=progress,
+        resolved_target=resolved_target,
+    )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(rendered, encoding="utf-8")
     _emit_progress(progress, f"Wrote generated models to {output_path}.")
     return output_path
+
+
+def verify_schema_codegen_target(
+    *,
+    config_path: Path | None = None,
+    progress: ProgressReporter | None = None,
+    target_name: str,
+) -> bool:
+    """Return whether one generated target matches a fresh isolated render."""
+    loaded = load_schema_codegen_config(config_path=config_path)
+    resolved_target = _resolve_target(loaded, target_name=target_name)
+    expected_output = cast("Path", resolved_target.generator_options["output"])
+    if not expected_output.is_file():
+        _emit_progress(progress, f"Missing generated models: {expected_output}")
+        return False
+
+    rendered = _render_schema_codegen_target(
+        loaded,
+        progress=progress,
+        resolved_target=resolved_target,
+    )
+
+    committed = expected_output.read_text(encoding="utf-8")
+    if committed == rendered:
+        _emit_progress(progress, f"Verified generated models: {expected_output}")
+        return True
+
+    diff = "".join(
+        difflib.unified_diff(
+            committed.splitlines(keepends=True),
+            rendered.splitlines(keepends=True),
+            fromfile=str(expected_output),
+            tofile=f"generated:{target_name}",
+        )
+    )
+    _emit_progress(progress, diff.rstrip())
+    return False

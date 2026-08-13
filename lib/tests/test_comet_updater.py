@@ -157,7 +157,10 @@ def test_comet_hashes_fresh_signed_artifact_and_persists_canonical_urls(
     async def _hash_urls(
         source_name: str,
         urls_by_key: dict[str, str],
+        *,
+        config: object,
     ) -> AsyncIterator[UpdateEvent]:
+        assert config is updater.config
         assert source_name == "comet"
         captured_urls.update(urls_by_key)
         yield UpdateEvent.value(

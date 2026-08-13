@@ -42,12 +42,25 @@ class Crate2NixArtifactsMixin(MaterializesArtifactsMixin):
             ),
         )
 
-    async def stream_materialized_artifacts(self) -> EventStream:
+    async def stream_materialized_artifacts(
+        self,
+        *,
+        source_overrides: dict[str, SourceEntry] | None = None,
+    ) -> EventStream:
         """Emit crate2nix artifact events using the standard materialization phase."""
-        async for event in stream_crate2nix_artifact_updates(
-            self.name,
-            operation=self.artifact_operation,
-        ):
+        stream = (
+            stream_crate2nix_artifact_updates(
+                self.name,
+                operation=self.artifact_operation,
+                source_overrides=source_overrides,
+            )
+            if source_overrides is not None
+            else stream_crate2nix_artifact_updates(
+                self.name,
+                operation=self.artifact_operation,
+            )
+        )
+        async for event in stream:
             yield event
 
 

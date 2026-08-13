@@ -75,7 +75,7 @@ class GitHubRawFileUpdater(HashEntryUpdater):
             raise TypeError(msg) from exc
         url = github_raw_url(self.owner, self.repo, rev, self.path)
         async for item in capture_stream_value(
-            compute_url_hashes(self.name, [url]),
+            compute_url_hashes(self.name, [url], config=self.config),
             error="Missing hash output",
         ):
             if isinstance(item, CapturedValue):

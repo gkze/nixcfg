@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
@@ -17,11 +18,11 @@ from rich.console import Console
 from lib.cli import HELP_CONTEXT_SETTINGS
 from lib.nix.models.sources import SourcesFile
 from lib.update import derivation_validation as update_derivation_validation
+from lib.update import flake as update_flake
 from lib.update import persistence as update_persistence
 from lib.update import planner as update_planner
 from lib.update import source_runner as update_source_runner
 from lib.update import updaters as updater_module
-from lib.update.ci.resolve_versions import load_pinned_versions
 from lib.update.cli_inventory import handle_list_targets_request
 from lib.update.cli_options import (
     UpdateOptions,
@@ -50,9 +51,10 @@ from lib.update.ui_state import ItemMeta, OperationKind, SummaryStatus
 from lib.update.updaters import UPDATERS, UpdaterClass, ensure_updaters_loaded
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from lib.update.events import UpdateEvent
     from lib.update.updaters.core import Updater
-    from lib.update.updaters.metadata import VersionInfo
 
 _TRAILING_TARGET_FLAG_OPTIONS: dict[str, tuple[str, bool]] = {
     "--check": ("check", True),
@@ -93,8 +95,6 @@ _TRAILING_TARGET_VALUE_OPTIONS: dict[str, tuple[str, str]] = {
     "-L": ("log_tail_lines", "int"),
     "--max-nix-builds": ("max_nix_builds", "int"),
     "-m": ("max_nix_builds", "int"),
-    "--pinned-versions": ("pinned_versions", "str"),
-    "-p": ("pinned_versions", "str"),
     "--render-interval": ("render_interval", "float"),
     "-r": ("render_interval", "float"),
     "--retries": ("retries", "int"),
@@ -671,21 +671,6 @@ def _load_sources_for_run(resolved: ResolvedTargets) -> SourcesFile:
     return SourcesFile(entries={})
 
 
-def _load_pinned_versions(
-    opts: UpdateOptions,
-    out: OutputOptions,
-) -> dict[str, VersionInfo]:
-    if not opts.pinned_versions:
-        return {}
-
-    pinned = load_pinned_versions(Path(opts.pinned_versions))
-    out.print(
-        f"Loaded {len(pinned)} pinned versions from {opts.pinned_versions}",
-        style="dim",
-    )
-    return pinned
-
-
 @dataclass(frozen=True)
 class _RunPlan:
     resolved: ResolvedTargets
@@ -694,6 +679,34 @@ class _RunPlan:
     sources: SourcesFile
     item_meta: dict[str, ItemMeta]
     order: list[str]
+
+
+@dataclass(frozen=True)
+class _RunExecutionResult:
+    """Validated phase result awaiting promotion into the live checkout."""
+
+    summary: UpdateSummary
+    had_errors: bool
+    written_paths: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
+class _RunPlanError:
+    """Target-selection failure discovered inside the isolated checkout."""
+
+    message: str
+    unknown_targets: tuple[str, ...]
+    available_targets: tuple[str, ...]
+
+
+@dataclass
+class _RunOutcome:
+    """Final update result emitted only after workspace teardown."""
+
+    summary: UpdateSummary = field(default_factory=UpdateSummary)
+    had_errors: bool = False
+    plan_error: _RunPlanError | None = None
+    workspace_error: str | None = None
 
 
 def _handle_preflight_requests(opts: UpdateOptions, out: OutputOptions) -> int | None:
@@ -712,7 +725,7 @@ def _handle_preflight_requests(opts: UpdateOptions, out: OutputOptions) -> int |
     return handle_validate_request(opts, out)
 
 
-def _build_run_plan(opts: UpdateOptions, out: OutputOptions) -> _RunPlan | int:
+def _build_run_plan(opts: UpdateOptions) -> _RunPlan | _RunPlanError | None:
     resolved = ResolvedTargets.from_options(opts)
     tty_enabled, show_phase_headers = _resolve_tty_settings(opts, resolved)
 
@@ -721,21 +734,17 @@ def _build_run_plan(opts: UpdateOptions, out: OutputOptions) -> _RunPlan | int:
     ]
     if unknown_targets:
         if len(unknown_targets) == 1:
-            out.print_error(f"Error: Unknown source or input '{unknown_targets[0]}'")
+            message = f"Unknown source or input '{unknown_targets[0]}'"
         else:
-            out.print_error(
-                "Error: Unknown sources or inputs: " + ", ".join(unknown_targets)
-            )
-        out.print_error(f"Available: {', '.join(sorted(resolved.all_known_names))}")
-        return 1
+            message = "Unknown sources or inputs: " + ", ".join(unknown_targets)
+        return _RunPlanError(
+            message=message,
+            unknown_targets=tuple(unknown_targets),
+            available_targets=tuple(sorted(resolved.all_known_names)),
+        )
 
     if not resolved.ref_inputs and not resolved.source_names:
-        return _emit_summary(
-            UpdateSummary(),
-            had_errors=False,
-            out=out,
-            dry_run=resolved.dry_run,
-        )
+        return None
 
     sources = _load_sources_for_run(resolved)
     item_meta, order = _build_item_meta(
@@ -743,12 +752,7 @@ def _build_run_plan(opts: UpdateOptions, out: OutputOptions) -> _RunPlan | int:
         sources if resolved.do_sources else None,
     )
     if not order:
-        return _emit_summary(
-            UpdateSummary(),
-            had_errors=False,
-            out=out,
-            dry_run=resolved.dry_run,
-        )
+        return None
 
     return _RunPlan(
         resolved=resolved,
@@ -760,12 +764,14 @@ def _build_run_plan(opts: UpdateOptions, out: OutputOptions) -> _RunPlan | int:
     )
 
 
-async def _execute_run_plan(
+async def _execute_run_plan_result(
     opts: UpdateOptions,
     out: OutputOptions,
     config: UpdateConfig,
     plan: _RunPlan,
-) -> int:
+) -> _RunExecutionResult:
+    # Every plan runs in a disposable workspace. ``resolved.dry_run`` controls
+    # reporting and live promotion, not whether the candidate is materialized.
     queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
     is_tty = plan.tty_enabled and not opts.quiet and not opts.json
     full_output = _resolve_full_output(
@@ -789,73 +795,166 @@ async def _execute_run_plan(
         ),
     )
 
-    if plan.resolved.do_refs and plan.resolved.ref_inputs:
-        if plan.show_phase_headers:
-            out.print("\nPhase 1: flake input refs", style="dim")
-        await update_source_runner.run_ref_phase(
-            ref_inputs=plan.resolved.ref_inputs,
-            queue=queue,
-            dry_run=plan.resolved.dry_run,
-            config=config,
-        )
-
-    if plan.resolved.do_sources and plan.resolved.source_names:
-        if plan.show_phase_headers:
-            out.print("\nPhase 2: sources.json updates", style="dim")
-        pinned = _load_pinned_versions(opts, out)
-        await update_source_runner.run_sources_phase(
-            update_source_runner.SourcesPhaseContext(
-                source_names=plan.resolved.source_names,
-                sources=plan.sources,
+    phase_result = update_source_runner.UpdatePhaseResult()
+    validation_failures = ()
+    try:
+        if plan.resolved.do_refs and plan.resolved.ref_inputs:
+            if plan.show_phase_headers:
+                out.print("\nPhase 1: flake input refs", style="dim")
+            ref_result = await update_source_runner.run_ref_phase(
+                ref_inputs=plan.resolved.ref_inputs,
                 queue=queue,
-                update_input=(
-                    plan.resolved.do_input_refresh and not plan.resolved.dry_run
-                ),
-                native_only=plan.resolved.native_only,
+                dry_run=False,
                 config=config,
-                pinned=pinned,
-                dry_run=plan.resolved.dry_run,
-            ),
+            )
+            phase_result = phase_result.merged(ref_result)
+
+        if plan.resolved.do_sources and plan.resolved.source_names:
+            if plan.show_phase_headers:
+                out.print("\nPhase 2: sources.json updates", style="dim")
+            source_result = await update_source_runner.run_sources_phase(
+                update_source_runner.SourcesPhaseContext(
+                    source_names=plan.resolved.source_names,
+                    sources=plan.sources,
+                    queue=queue,
+                    update_input=plan.resolved.do_input_refresh,
+                    native_only=plan.resolved.native_only,
+                    config=config,
+                    dry_run=False,
+                ),
+            )
+            phase_result = phase_result.merged(source_result)
+
+        await queue.put(None)
+        await consumer
+
+        written_paths = update_persistence.persist_materialized_updates(
+            do_sources=plan.resolved.do_sources,
+            source_names=plan.resolved.source_names,
+            dry_run=False,
+            native_only=plan.resolved.native_only,
+            sources=plan.sources,
+            source_updates=phase_result.source_updates,
+            artifact_updates=phase_result.artifact_updates,
+            details=phase_result.details,
         )
 
-    await queue.put(None)
-    consume_result = await consumer
+        if phase_result.errors == 0:
+            completed = [
+                name for name in plan.order if phase_result.details.get(name) != "error"
+            ]
+            validation_failures = update_derivation_validation.validate_derivations(
+                completed,
+                updaters=_get_updaters(),
+                timeout=config.default_subprocess_timeout,
+            )
+    except BaseException:
+        await queue.put(None)
+        with contextlib.suppress(BaseException):
+            await consumer
+        raise
 
     summary = UpdateSummary()
-    summary.accumulate(consume_result.details)
-    update_persistence.persist_materialized_updates(
-        do_sources=plan.resolved.do_sources,
-        source_names=plan.resolved.source_names,
-        dry_run=plan.resolved.dry_run,
-        native_only=plan.resolved.native_only,
-        sources=plan.sources,
-        source_updates=consume_result.source_updates,
-        artifact_updates=consume_result.artifact_updates,
-        details=consume_result.details,
+    summary.accumulate(phase_result.details)
+    if validation_failures:
+        summary.accumulate({failure.source: "error" for failure in validation_failures})
+        for failure in validation_failures:
+            out.print_error(
+                f"[{failure.source}] Derivation validation failed for "
+                f"{failure.installable}:\n{failure.message}"
+            )
+
+    return _RunExecutionResult(
+        summary=summary,
+        had_errors=phase_result.errors > 0 or bool(validation_failures),
+        written_paths=tuple(written_paths or ()),
     )
 
-    validation_failures = ()
-    if not plan.resolved.dry_run and consume_result.errors == 0:
-        validation_failures = update_derivation_validation.validate_derivations(
-            plan.order,
-            updaters=_get_updaters(),
-            timeout=config.default_subprocess_timeout,
-        )
-        if validation_failures:
-            summary.accumulate({
-                failure.source: "error" for failure in validation_failures
-            })
-            for failure in validation_failures:
-                out.print_error(
-                    f"[{failure.source}] Derivation validation failed for "
-                    f"{failure.installable}:\n{failure.message}"
-                )
 
+def _workspace_relative_paths(
+    root: Path,
+    paths: Iterable[Path],
+) -> tuple[Path, ...]:
+    """Normalize absolute update outputs to paths owned by one workspace."""
+    root = root.resolve()
+    relative_paths: list[Path] = []
+    for raw_path in paths:
+        path = (raw_path if raw_path.is_absolute() else root / raw_path).resolve()
+        try:
+            relative_paths.append(path.relative_to(root))
+        except ValueError as error:
+            msg = f"Update output escapes isolated workspace: {path}"
+            raise update_persistence.UpdateWorkspaceError(msg) from error
+    return tuple(relative_paths)
+
+
+def _workspace_allowed_paths(
+    root: Path,
+    declared_paths: Iterable[Path],
+    written_paths: Iterable[Path],
+    explicit_phase_outputs: Iterable[Path],
+) -> tuple[Path, ...]:
+    """Return exact write authority within the predeclared upper bound."""
+    declared = _workspace_relative_paths(root, declared_paths)
+    authorized = _workspace_relative_paths(
+        root,
+        (*written_paths, *explicit_phase_outputs),
+    )
+    declared_set = set(declared)
+    if unexpected := tuple(path for path in authorized if path not in declared_set):
+        raise update_persistence.UpdateWorkspaceUnexpectedPathsError(unexpected)
+    return tuple(sorted(set(authorized)))
+
+
+def _sources_refresh_flake_lock(
+    source_names: Iterable[str],
+    updaters: dict[str, UpdaterClass],
+) -> bool:
+    """Return whether selected source tasks invoke any input refresh."""
+    return any(
+        update_planner.source_backing_input_name(name, updaters.get(name))
+        or getattr(updaters.get(name), "additional_input_names", ())
+        for name in source_names
+    )
+
+
+def _emit_run_outcome(
+    outcome: _RunOutcome,
+    *,
+    out: OutputOptions,
+    dry_run: bool,
+) -> int:
+    """Emit exactly one final result after isolated workspace teardown."""
+    plan_error = outcome.plan_error
+    workspace_error = outcome.workspace_error
+    if out.json_output:
+        payload = cast("dict[str, object]", outcome.summary.to_dict())
+        if plan_error is not None:
+            payload.update({
+                "unknownTargets": list(plan_error.unknown_targets),
+                "availableTargets": list(plan_error.available_targets),
+            })
+            error_key = "planError" if workspace_error is not None else "error"
+            payload[error_key] = plan_error.message
+        if workspace_error is not None:
+            payload["error"] = workspace_error
+        sys.stdout.write(f"{json.dumps(payload)}\n")
+        return 1 if outcome.had_errors else 0
+
+    if plan_error is not None:
+        out.print_error(f"Error: {plan_error.message}")
+        out.print_error(
+            f"Available: {', '.join(plan_error.available_targets)}",
+        )
+    if workspace_error is not None:
+        out.print_error(f"Error: {workspace_error}")
+    if plan_error is not None:
+        return 1
     return _emit_summary(
-        summary,
-        had_errors=consume_result.errors > 0 or bool(validation_failures),
+        outcome.summary,
+        had_errors=outcome.had_errors,
         out=out,
-        dry_run=plan.resolved.dry_run,
+        dry_run=dry_run,
     )
 
 
@@ -868,11 +967,74 @@ async def run_updates(opts: UpdateOptions) -> int:
     if preflight_result is not None:
         return preflight_result
 
-    run_plan = _build_run_plan(opts, out)
-    if isinstance(run_plan, int):
-        return run_plan
+    outcome = _RunOutcome()
+    try:
+        with update_persistence.IsolatedUpdateWorkspace(
+            get_repo_root(),
+        ) as workspace:
+            update_flake.invalidate_flake_lock()
+            run_plan = _build_run_plan(opts)
+            if isinstance(run_plan, _RunPlanError):
+                outcome.plan_error = run_plan
+                outcome.summary.accumulate(
+                    dict.fromkeys(run_plan.unknown_targets, "error")
+                )
+                outcome.had_errors = True
+            elif run_plan is not None:
+                updaters = _get_updaters()
+                declared_paths = list(
+                    update_persistence.planned_update_paths(
+                        run_plan.resolved.source_names,
+                        updaters,
+                    )
+                )
+                explicit_phase_outputs: list[Path] = []
+                updates_refs = bool(
+                    run_plan.resolved.do_refs and run_plan.resolved.ref_inputs
+                )
+                refreshes_source_inputs = bool(
+                    run_plan.resolved.do_sources
+                    and run_plan.resolved.source_names
+                    and run_plan.resolved.do_input_refresh
+                    and _sources_refresh_flake_lock(
+                        run_plan.resolved.source_names,
+                        updaters,
+                    )
+                )
+                if updates_refs:
+                    flake_nix = workspace.root / "flake.nix"
+                    declared_paths.append(flake_nix)
+                    explicit_phase_outputs.append(flake_nix)
+                if updates_refs or refreshes_source_inputs:
+                    flake_lock = workspace.root / "flake.lock"
+                    declared_paths.append(flake_lock)
+                    explicit_phase_outputs.append(flake_lock)
+                result = await _execute_run_plan_result(opts, out, config, run_plan)
+                outcome.summary = result.summary
+                outcome.had_errors = result.had_errors
+                allowed_paths = _workspace_allowed_paths(
+                    workspace.root,
+                    declared_paths,
+                    result.written_paths,
+                    explicit_phase_outputs,
+                )
+                if not outcome.had_errors:
+                    if opts.check:
+                        workspace.validate_changes(allowed_paths)
+                    else:
+                        workspace.promote(allowed_paths)
+    except update_persistence.UpdateWorkspaceError as error:
+        outcome.summary.accumulate({"workspace": "error"})
+        outcome.had_errors = True
+        outcome.workspace_error = str(error)
+    finally:
+        update_flake.invalidate_flake_lock()
 
-    return await _execute_run_plan(opts, out, config, run_plan)
+    return _emit_run_outcome(
+        outcome,
+        out=out,
+        dry_run=opts.check,
+    )
 
 
 def run_update_command(
@@ -911,7 +1073,7 @@ app = typer.Typer(
 
 
 @app.callback(invoke_without_command=True)
-def cli(  # noqa: PLR0913
+def cli(
     targets: Annotated[
         list[str] | None,
         typer.Argument(help="Sources or flake inputs to update (default: all)."),
@@ -919,7 +1081,11 @@ def cli(  # noqa: PLR0913
     *,
     check: Annotated[
         bool,
-        typer.Option("--check", "-c", help="Dry run: check without applying."),
+        typer.Option(
+            "--check",
+            "-c",
+            help="Validate a prospective update in isolation without applying.",
+        ),
     ] = False,
     deno_platforms: Annotated[
         str | None,
@@ -962,7 +1128,7 @@ def cli(  # noqa: PLR0913
         typer.Option(
             "--native-only",
             "-n",
-            help="Only compute hashes for current platform (CI). Implies --no-refs.",
+            help="Only compute hashes for the current platform. Implies --no-refs.",
         ),
     ] = False,
     no_input: Annotated[
@@ -981,10 +1147,6 @@ def cli(  # noqa: PLR0913
         bool,
         typer.Option("--no-sources", "-S", help="Skip sources.json hash updates."),
     ] = False,
-    pinned_versions: Annotated[
-        str | None,
-        typer.Option("-p", "--pinned-versions", help="Path to pinned-versions.json."),
-    ] = None,
     quiet: Annotated[
         bool,
         typer.Option("--quiet", "-q", help="Suppress progress output."),

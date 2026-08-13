@@ -4,14 +4,14 @@ let
 in
 lib.mkDarwinHost {
   user = "george";
-  work = true;
   # The default 6 GiB Rosetta Linux builder VM is too small for some of
   # the heavier x86_64-linux Rust builds we run from argus. The setting
-  # is gated on the builder being enabled so CI evals (which skip the
-  # builder) don't trip over an undeclared option.
+  # is gated on the builder being enabled so an explicit no-builder caller
+  # does not trip over an undeclared option.
   rosettaBuilderMemory = "16GiB";
   brewAppsModule = "${lib.modulesPath}/darwin/george/brew-apps.nix";
   extraHomeModules = [
+    ../home/george/work.nix
     "${lib.modulesPath}/home/darwin-closure-priority.nix"
     "${lib.modulesPath}/darwin/george/town-dock-apps.nix"
     (
@@ -28,6 +28,8 @@ lib.mkDarwinHost {
     )
   ];
   extraSystemModules = [
+    "${lib.modulesPath}/darwin/george/caches.nix"
+    "${lib.modulesPath}/darwin/george/work.nix"
     {
       # Preserve any pre-existing app/editor settings the first time Home Manager
       # takes over files like ~/.gemini/settings.json and VS Code Insiders

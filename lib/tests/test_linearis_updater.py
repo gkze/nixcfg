@@ -97,7 +97,13 @@ def test_linearis_fetch_hashes_emits_single_tarball_hash(
     tarball = "https://registry.npmjs.org/linearis/-/linearis-1.2.3.tgz"
     hash_value = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
-    async def _compute_url_hashes(name: str, urls: list[str]):
+    async def _compute_url_hashes(
+        name: str,
+        urls: list[str],
+        *,
+        config: object,
+    ):
+        assert config is updater.config
         assert name == "linearis"
         assert urls == [tarball]
         yield UpdateEvent.status(name, "hashing tarball")

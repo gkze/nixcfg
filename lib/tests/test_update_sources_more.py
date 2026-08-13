@@ -9,11 +9,9 @@ from types import SimpleNamespace
 import pytest
 
 import lib.update.sources as update_sources_module
-from lib.nix.models.sources import SourceEntry
 from lib.update.sources import (
     nix_source_names,
     python_source_names,
-    save_source_entry,
     validate_source_discovery_consistency,
 )
 
@@ -54,11 +52,10 @@ def test_nix_source_names_error_and_payload_validation(
         nix_source_names()
 
 
-def test_validate_source_discovery_consistency_and_save_source_entry(
-    tmp_path: Path,
+def test_validate_source_discovery_consistency(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Detect source discovery mismatches and write single source entries."""
+    """Detect source discovery mismatches."""
     monkeypatch.setattr("lib.update.sources.python_source_names", lambda: {"a", "b"})
     monkeypatch.setattr("lib.update.sources.nix_source_names", lambda: {"b", "c"})
     with pytest.raises(RuntimeError, match=r"Missing in nix outputs\.lib\.sources: a"):
@@ -72,11 +69,6 @@ def test_validate_source_discovery_consistency_and_save_source_entry(
     monkeypatch.setattr("lib.update.sources.python_source_names", lambda: {"a"})
     monkeypatch.setattr("lib.update.sources.nix_source_names", lambda: {"a"})
     validate_source_discovery_consistency()
-
-    target = tmp_path / "sources.json"
-    save_source_entry(target, SourceEntry(hashes={"x86_64-linux": "sha256-demo"}))
-    payload = json.loads(target.read_text(encoding="utf-8"))
-    assert payload["hashes"]["x86_64-linux"] == "sha256-demo"
 
 
 def test_run_nix_eval_uses_thread_pool_when_loop_is_running(

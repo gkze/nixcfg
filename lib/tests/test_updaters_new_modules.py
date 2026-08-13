@@ -8,7 +8,7 @@ from types import ModuleType
 
 import pytest
 
-from lib.nix.models.sources import HashEntry
+from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module_for_test as _load_module
@@ -23,7 +23,6 @@ from lib.update.events import (
     UpdateEventKind,
 )
 from lib.update.updaters import VersionInfo
-from lib.update.updaters import github_release as github_release_module
 from lib.update.updaters import materialization as materialization_mod
 from lib.update.updaters.flake_backed import FlakeInputMetadataUpdater
 
@@ -56,12 +55,6 @@ def goose_cli_module() -> ModuleType:
 def element_desktop_module() -> ModuleType:
     """Load the element-desktop updater module."""
     return _load_module("overlays/element-desktop/updater.py", prefix="element_desktop")
-
-
-@pytest.fixture(scope="module")
-def superset_module() -> ModuleType:
-    """Load the superset updater module."""
-    return _load_module("packages/superset/updater.py", prefix="superset")
 
 
 @pytest.fixture(scope="module")
@@ -127,14 +120,15 @@ def test_codex_updater_refreshes_crate2nix_artifacts(
     assert events[-1].payload == []
 
 
-def test_goose_cli_updater_emits_crate2nix_artifacts_before_src_hash(
+def test_goose_cli_updater_materializes_crate2nix_from_resolved_src_hash(
     goose_cli_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Goose should refresh crate2nix artifacts before computing srcHash."""
+    """Goose should refresh crate2nix artifacts from the newly resolved source."""
     updater = goose_cli_module.GooseCliUpdater()
     assert updater.materialize_when_current is True
     assert updater.shows_materialize_artifacts_phase is True
+    artifact_overrides: dict[str, object] = {}
 
     async def _stream(name: str) -> EventStream:
         yield UpdateEvent.artifact(
@@ -150,10 +144,14 @@ def test_goose_cli_updater_emits_crate2nix_artifacts_before_src_hash(
             "goose-cli", "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
         )
 
+    def _materialize(_self: object, *, source_overrides: dict[str, object]):
+        artifact_overrides.update(source_overrides)
+        return _stream("goose-cli")
+
     monkeypatch.setattr(
         goose_cli_module.GooseCliUpdater,
         "stream_materialized_artifacts",
-        lambda _self: _stream("goose-cli"),
+        _materialize,
     )
     monkeypatch.setattr(goose_cli_module, "compute_fixed_output_hash", _fixed_hash)
 
@@ -172,6 +170,9 @@ def test_goose_cli_updater_emits_crate2nix_artifacts_before_src_hash(
     payload = expect_instance(events[value_index].payload, list)
     hash_entry = expect_instance(payload[0], HashEntry)
     assert hash_entry.hash_type == "srcHash"
+    source = expect_instance(artifact_overrides["goose-cli"], SourceEntry)
+    assert source.version == "1.0.0"
+    assert source.hashes.entries == [hash_entry]
 
 
 def test_crate2nix_artifacts_mixin_streams_shared_materialization_events(
@@ -585,100 +586,6 @@ def test_flake_input_metadata_updater_emits_empty_hash_entries() -> None:
     assert [event.kind for event in events] == [UpdateEventKind.VALUE]
     assert events[0].source == "demo"
     assert events[0].payload == []
-
-
-def test_superset_fetches_desktop_release_assets(
-    superset_module: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Resolve desktop version and release asset URL from GitHub releases."""
-    updater = superset_module.SupersetUpdater()
-    monkeypatch.setattr(
-        github_release_module,
-        "fetch_github_api",
-        lambda *_a, **_k: asyncio.sleep(
-            0,
-            result={
-                "tag_name": "desktop-v1.2.3",
-                "assets": [
-                    {
-                        "name": "superset-1.2.3-x86_64.AppImage",
-                        "browser_download_url": "https://example.test/superset-1.2.3-x86_64.AppImage",
-                    }
-                ],
-            },
-        ),
-    )
-
-    latest = _run(updater.fetch_latest(object()))
-    assert latest.version == "1.2.3"
-    assert (
-        updater.get_download_url("x86_64-linux", latest)
-        == "https://example.test/superset-1.2.3-x86_64.AppImage"
-    )
-
-
-def test_superset_rejects_release_without_expected_asset(
-    superset_module: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Fail when latest desktop release misses the expected Linux AppImage."""
-    updater = superset_module.SupersetUpdater()
-    monkeypatch.setattr(
-        github_release_module,
-        "fetch_github_api",
-        lambda *_a, **_k: asyncio.sleep(
-            0,
-            result={
-                "tag_name": "desktop-v1.2.3",
-                "assets": [
-                    {
-                        "name": "superset-1.2.3-arm64.AppImage",
-                        "browser_download_url": "https://example.test/other.AppImage",
-                    }
-                ],
-            },
-        ),
-    )
-
-    with pytest.raises(
-        RuntimeError, match="Could not find Superset desktop release asset"
-    ):
-        _run(updater.fetch_latest(object()))
-
-
-def test_superset_rejects_unexpected_release_tag(
-    superset_module: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Reject release payloads that are not desktop-tagged."""
-    updater = superset_module.SupersetUpdater()
-    monkeypatch.setattr(
-        github_release_module,
-        "fetch_github_api",
-        lambda *_a, **_k: asyncio.sleep(
-            0,
-            result={
-                "tag_name": "v1.2.3",
-                "assets": [],
-            },
-        ),
-    )
-
-    with pytest.raises(RuntimeError, match="Unexpected Superset release tag format"):
-        _run(updater.fetch_latest(object()))
-
-
-def test_superset_release_url_format(superset_module: ModuleType) -> None:
-    """Generate fallback release URL and reject unsupported platforms."""
-    updater = superset_module.SupersetUpdater()
-    url = updater.get_download_url("x86_64-linux", VersionInfo("1.2.3", {}))
-    assert (
-        url
-        == "https://github.com/superset-sh/superset/releases/download/desktop-v1.2.3/superset-1.2.3-x86_64.AppImage"
-    )
-    with pytest.raises(RuntimeError, match="Unsupported platform"):
-        updater.get_download_url("aarch64-linux", VersionInfo("1.2.3", {}))
 
 
 def test_crush_prefers_newest_release_compatible_with_repo_go_floor(

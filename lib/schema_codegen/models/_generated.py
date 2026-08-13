@@ -16,12 +16,11 @@ from pydantic import (
     ConfigDict,
     Field,
     RootModel,
-    constr,
+    StringConstraints,
 )
 
+
 # === codegen.schema ===
-
-
 class Fetch(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -299,37 +298,51 @@ class CodegenManifest(BaseModel):
     defaults: Annotated[Defaults | None, Field(title="Defaults")] = None
     sources: Annotated[
         dict[
-            constr(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$"), Sources | Sources1 | Sources2
+            Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$")],
+            Sources | Sources1 | Sources2,
         ],
-        Field(title="SourceMap"),
+        Field(min_length=1, title="SourceMap"),
     ]
     """
     Named source definitions materialized locally before generators run.
     """
     registry_profiles: Annotated[
-        dict[constr(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$"), RegistryProfiles] | None,
+        dict[
+            Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$")],
+            RegistryProfiles,
+        ]
+        | None,
         Field(title="RegistryProfileMap"),
     ] = None
     """
     Reusable schema registry profiles for JSON Schema-oriented inputs.
     """
     inputs: Annotated[
-        dict[constr(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$"), Inputs | Inputs1],
-        Field(title="InputMap"),
+        dict[
+            Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$")],
+            Inputs | Inputs1,
+        ],
+        Field(min_length=1, title="InputMap"),
     ]
     """
     Prepared logical inputs derived from one or more sources.
     """
     generators: Annotated[
-        dict[constr(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$"), Generators],
-        Field(title="GeneratorMap"),
+        dict[
+            Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$")],
+            Generators,
+        ],
+        Field(min_length=1, title="GeneratorMap"),
     ]
     """
     Named generator profiles. Generators are tool-specific but source-agnostic.
     """
     products: Annotated[
-        dict[constr(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$"), Products],
-        Field(title="ProductMap"),
+        dict[
+            Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$")],
+            Products,
+        ],
+        Field(min_length=1, title="ProductMap"),
     ]
     """
     Named products generated from configured inputs and generators.
@@ -813,8 +826,6 @@ class GeneratorRefList(RootModel[list[GeneratorRefListItem]]):
 
 
 # === codegen-lock.schema ===
-
-
 class SourcesCodegenLockSchema(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -904,12 +915,12 @@ class CodegenLockfile(BaseModel):
     """
     sources: Annotated[
         dict[
-            constr(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$"),
+            Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$")],
             SourcesCodegenLockSchema
             | Sources1CodegenLockSchema
             | Sources2CodegenLockSchema,
         ],
-        Field(title="LockedSourceMap"),
+        Field(min_length=1, title="LockedSourceMap"),
     ]
 
 

@@ -49,7 +49,6 @@ from lib.update.ui_state import (
     hash_diff_lines,
     is_terminal_status,
     operation_for_command,
-    operation_for_status,
 )
 
 HASH_A = "sha256-JnkqDwuC7lNsjafV+jOGfvs8K1xC8rk5CTOW+spjiCA="
@@ -187,72 +186,6 @@ def test_ui_state_from_meta_and_command_mappers() -> None:
     assert operation_for_command(["echo", "ok"]) == OperationKind.COMPUTE_HASH
 
 
-@pytest.mark.parametrize(
-    ("payload", "kind"),
-    [
-        (
-            StatusPayload(operation=OperationKind.CHECK_VERSION.value),
-            OperationKind.CHECK_VERSION,
-        ),
-        (
-            StatusPayload(operation=OperationKind.UPDATE_REF.value),
-            OperationKind.UPDATE_REF,
-        ),
-        (
-            StatusPayload(operation=OperationKind.REFRESH_LOCK.value),
-            OperationKind.REFRESH_LOCK,
-        ),
-        (
-            StatusPayload(operation=OperationKind.COMPUTE_HASH.value),
-            OperationKind.COMPUTE_HASH,
-        ),
-    ],
-)
-def test_operation_for_status_matches_expected_kind(
-    payload: StatusPayload,
-    kind: OperationKind,
-) -> None:
-    """Run this test case."""
-    assert operation_for_status("status message", payload) == kind
-
-
-def test_operation_for_status_unknown_message_returns_none() -> None:
-    """Run this test case."""
-    assert operation_for_status("completely unrelated status") is None
-
-
-def test_operation_for_status_prefers_typed_payload() -> None:
-    """Use typed status payloads before message heuristics."""
-    assert (
-        operation_for_status(
-            "custom status",
-            StatusPayload(operation=OperationKind.REFRESH_LOCK.value),
-        )
-        == OperationKind.REFRESH_LOCK
-    )
-
-
-def test_operation_for_status_invalid_typed_payload_falls_back_or_none() -> None:
-    """Ignore untyped or unmapped payloads instead of parsing message text."""
-    assert operation_for_status("Update available: 1 -> 2", []) is None
-    assert operation_for_status("Update available: 1 -> 2", {"operation": 1}) is None
-    assert (
-        operation_for_status("custom status", StatusPayload(operation="not-real"))
-        is None
-    )
-    assert (
-        operation_for_status(
-            "custom status",
-            StatusPayload(info=StatusInfo(kind=StatusKind.FETCHING_HASHES)),
-        )
-        is None
-    )
-
-
-# test_payload_status_update_ignores_non_mapping_payload deleted: the dict
-# parsing helper is gone and non-StatusPayload payloads are ignored upstream.
-
-
 def test_apply_status_ignores_unrenderable_structured_update() -> None:
     """A recognized operation with no renderable status leaves state unchanged."""
     item = _item()
@@ -278,7 +211,6 @@ def test_apply_status_ignores_unrenderable_structured_update() -> None:
             "running",
             "current 1.0",
         ),
-        (StatusInfo(kind=StatusKind.PINNED_VERSION, value="2.0"), "running", "2.0"),
         (StatusInfo(kind=StatusKind.LATEST_VERSION, value="3.0"), "running", "3.0"),
         (
             StatusInfo(kind=StatusKind.UPDATE_AVAILABLE, current="1", latest="2"),
@@ -560,6 +492,13 @@ def test_apply_status_ignores_unknown_or_missing_operations() -> None:
     assert check_op.status == "pending"
 
     apply_status(item, "typed but unmapped", StatusPayload(operation="not-real"))
+    assert check_op.status == "pending"
+
+    apply_status(
+        item,
+        "typed without an operation",
+        StatusPayload(info=StatusInfo(kind=StatusKind.CHECKING_CURRENT)),
+    )
     assert check_op.status == "pending"
 
 
@@ -1181,18 +1120,12 @@ def _renderer(consumer: EventConsumer) -> _RendererStub:
     return expect_instance(renderer, _RendererStub)
 
 
-def test_event_consumer_detail_priority_and_status_handlers(
+def test_event_consumer_status_handlers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Run this test case."""
     consumer, _queue = _consumer(monkeypatch, is_tty=True, verbose=True)
     item = consumer.items["demo"]
-
-    object.__getattribute__(consumer, "_set_detail")("demo", "no_change")
-    object.__getattribute__(consumer, "_set_detail")("demo", "updated")
-    object.__getattribute__(consumer, "_set_detail")("demo", "no_change")
-    assert consumer.update_details["demo"] == "updated"
-    assert consumer.updated
 
     object.__getattribute__(consumer, "_handle_status")(
         UpdateEvent.status(
@@ -1234,13 +1167,6 @@ def test_event_consumer_detail_priority_and_status_handlers(
     )
     non_tty_renderer = _renderer(consumer_non_tty)
     assert ("demo", "Updated: 1.0 -> 1.1") in non_tty_renderer.logs
-
-    result = consumer.result
-    assert result.updated
-    assert result.errors == 0
-    assert result.details["demo"] == "updated"
-    assert result.source_updates == {}
-    assert result.artifact_updates == {}
 
 
 def test_event_consumer_command_start_line_and_end_paths(
@@ -1436,7 +1362,7 @@ def test_event_consumer_command_branches_and_source_result_dispatch(
         item,
     )
     assert not should_skip
-    assert consumer.source_updates["demo"].version == "2.0.0"
+    assert item.operations[OperationKind.CHECK_VERSION].message == "1.0.0 -> 2.0.0"
 
 
 def test_event_consumer_command_handlers_when_operation_missing(
@@ -1529,7 +1455,6 @@ def test_event_consumer_source_result_paths(monkeypatch: pytest.MonkeyPatch) -> 
     object.__getattribute__(consumer, "_handle_source_result")(
         UpdateEvent.result("demo", payload=changed), item, changed
     )
-    assert consumer.source_updates["demo"] == changed
     assert item.operations[OperationKind.CHECK_VERSION].message == "1.0.0 -> 2.0.0"
     renderer = _renderer(consumer)
     assert ("demo", "Updated: 1.0.0 -> 2.0.0") in renderer.logs
@@ -1568,7 +1493,7 @@ def test_event_consumer_artifact_paths(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Track changed, staged, and batched generated artifact updates."""
+    """Render changed and batched generated artifact observations."""
     monkeypatch.setattr(
         GeneratedArtifact,
         "resolved_path",
@@ -1591,21 +1516,8 @@ def test_event_consumer_artifact_paths(
         item,
     )
 
-    result = consumer.result
-    assert result.updated
-    assert result.details["demo"] == "updated"
-    assert result.artifact_updates["demo"] == (changed,)
     renderer = _renderer(consumer)
     assert ("demo", f"Updated artifact: {artifact_path.name}") in renderer.logs
-
-    staged_same = GeneratedArtifact.text("demo.txt", "new\n")
-    staged_changed = GeneratedArtifact.text("demo.txt", "newer\n")
-    assert not object.__getattribute__(consumer, "_artifact_changed")(
-        "demo", staged_same
-    )
-    assert object.__getattribute__(consumer, "_artifact_changed")(
-        "demo", staged_changed
-    )
 
     consumer_same, _queue = _consumer(monkeypatch, is_tty=True)
     item_same = consumer_same.items["demo"]
@@ -1614,10 +1526,6 @@ def test_event_consumer_artifact_paths(
         UpdateEvent.artifact("demo", same),
         item_same,
     )
-    same_result = consumer_same.result
-    assert not same_result.updated
-    assert same_result.details == {}
-    assert same_result.artifact_updates == {}
     same_renderer = _renderer(consumer_same)
     assert ("demo", f"Updated artifact: {artifact_path.name}") not in same_renderer.logs
 
@@ -1667,20 +1575,18 @@ def test_event_consumer_result_none_and_other_payload(
     object.__getattribute__(consumer, "_handle_result")(
         UpdateEvent.result("demo", payload="updated"), item
     )
-    assert consumer.update_details["demo"] == "updated"
 
     item.operations[OperationKind.CHECK_VERSION].status = "pending"
     object.__getattribute__(consumer, "_handle_result")(
         UpdateEvent.result("demo", payload=None), item
     )
-    assert consumer.update_details["demo"] == "updated"
+    assert item.operations[OperationKind.CHECK_VERSION].status == "no_change"
 
     consumer2, _queue = _consumer(monkeypatch, is_tty=True)
     item2 = consumer2.items["demo"]
     object.__getattribute__(consumer2, "_handle_result")(
         UpdateEvent.result("demo", payload=None), item2
     )
-    assert consumer2.update_details["demo"] == "no_change"
     assert item2.operations[OperationKind.CHECK_VERSION].status == "no_change"
 
 
@@ -1697,8 +1603,6 @@ def test_event_consumer_error_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         UpdateEvent.error("demo", "boom\ntrace line"),
         item,
     )
-    assert consumer.errors == 1
-    assert consumer.update_details["demo"] == "error"
     assert hash_op.status == "error"
     assert hash_op.message == "boom"
     assert hash_op.active_commands == 0
@@ -1774,7 +1678,7 @@ def test_event_consumer_run_non_tty(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
     consumer, queue = _consumer(monkeypatch, is_tty=False)
 
-    async def _run() -> ui_consumer_module.ConsumeEventsResult:
+    async def _run() -> None:
         await queue.put(UpdateEvent.status("demo", "Checking demo (current: 1.0)"))
         await queue.put(UpdateEvent.status("missing", "ignored"))
         await queue.put(
@@ -1783,12 +1687,7 @@ def test_event_consumer_run_non_tty(monkeypatch: pytest.MonkeyPatch) -> None:
         await queue.put(None)
         return await consumer.run()
 
-    result = asyncio.run(_run())
-    assert not result.updated
-    assert result.errors == 0
-    assert result.details == {}
-    assert result.source_updates == {}
-    assert result.artifact_updates == {}
+    assert asyncio.run(_run()) is None
     renderer = _renderer(consumer)
     assert renderer.request_calls >= TWO
     assert len(renderer.render_due_calls) >= TWO
@@ -1801,24 +1700,20 @@ def test_event_consumer_run_tty_and_wrapper(
     """Run this test case."""
     consumer, queue = _consumer(monkeypatch, is_tty=True)
 
-    async def _run_consumer() -> ui_consumer_module.ConsumeEventsResult:
+    async def _run_consumer() -> None:
         run_task = asyncio.create_task(consumer.run())
         await queue.put(UpdateEvent.status("demo", "Checking demo (current: 1.0)"))
         await asyncio.sleep(0)
         await queue.put(None)
         return await run_task
 
-    result = asyncio.run(_run_consumer())
-    assert not result.updated
-    assert result.errors == 0
-    assert result.source_updates == {}
-    assert result.artifact_updates == {}
+    assert asyncio.run(_run_consumer()) is None
     renderer = _renderer(consumer)
     assert renderer.request_calls == 1
     assert len(renderer.render_due_calls) == 1
     assert renderer.finalized
 
-    async def _run_wrapper() -> ui_consumer_module.ConsumeEventsResult:
+    async def _run_wrapper() -> None:
         wrapped_queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
         await wrapped_queue.put(None)
         return await consume_events(
@@ -1835,12 +1730,7 @@ def test_event_consumer_run_tty_and_wrapper(
             ),
         )
 
-    result = asyncio.run(_run_wrapper())
-    assert not result.updated
-    assert result.errors == 0
-    assert result.details == {}
-    assert result.source_updates == {}
-    assert result.artifact_updates == {}
+    assert asyncio.run(_run_wrapper()) is None
 
 
 def test_event_consumer_run_skip_render_and_result_map_guard(

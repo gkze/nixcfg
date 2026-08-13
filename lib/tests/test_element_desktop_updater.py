@@ -33,7 +33,9 @@ def test_element_desktop_fetch_latest_reads_pinned_version(
     updater = module.ElementDesktopUpdater()
 
     monkeypatch.setattr(
-        update_sources, "package_dir_for", lambda _name: Path("/tmp/element-desktop")
+        update_sources,
+        "sources_file_for",
+        lambda _name: Path("/tmp/element-desktop/sources.json"),
     )
     monkeypatch.setattr(
         update_sources,
@@ -50,7 +52,7 @@ def test_element_desktop_fetch_latest_reads_pinned_version(
 @pytest.mark.parametrize(
     ("pkg_dir", "version", "match"),
     [
-        (None, "1.11.99", "Package directory not found for element-desktop"),
+        (None, "1.11.99", "sources.json not found for element-desktop"),
         (Path("/tmp/element-desktop"), "", "missing a pinned version"),
         (Path("/tmp/element-desktop"), None, "missing a pinned version"),
     ],
@@ -65,7 +67,11 @@ def test_element_desktop_fetch_latest_rejects_missing_package_or_version(
     module = _load_module("element_desktop_updater_test_fetch_latest_error")
     updater = module.ElementDesktopUpdater()
 
-    monkeypatch.setattr(update_sources, "package_dir_for", lambda _name: pkg_dir)
+    monkeypatch.setattr(
+        update_sources,
+        "sources_file_for",
+        lambda _name: None if pkg_dir is None else pkg_dir / "sources.json",
+    )
     monkeypatch.setattr(
         update_sources,
         "load_source_entry",

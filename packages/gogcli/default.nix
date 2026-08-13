@@ -1,1 +1,2 @@
-args: args.gogcli
+{ gogcli, ... }:
+gogcli

@@ -51,6 +51,10 @@ let
 
   flake = import (src + "/default.nix") {
     inherit src;
+    inputs = {
+      nix-homebrew.darwinModules.nix-homebrew = "nix-homebrew-module";
+      nix-rosetta-builder.darwinModules.default = "rosetta-builder-module";
+    };
     lib = fakeLib;
     pkgsFor = { };
   };
@@ -60,10 +64,48 @@ let
   nonFunctions = builtins.filter (
     name: !(builtins.isFunction (builtins.getAttr name flake.constructors))
   ) expected;
+  emptyDarwinUsers = builtins.tryEval (
+    flake.lib.mkSystem {
+      system = "aarch64-darwin";
+      users = [ ];
+    }
+  );
+  emptyLinuxPrimaryUser =
+    (flake.lib.mkSystem {
+      system = "x86_64-linux";
+      users = [ ];
+    }).specialArgs.primaryUser;
+  contextualLib = flake.mkLib {
+    evaluationContext.sourceOverrides.context-demo = {
+      version = "explicit";
+      hashes = [ ];
+    };
+  };
+  defaultDarwinModules =
+    (flake.lib.mkDarwinHost {
+      user = "alice";
+      includeDefaultUserModule = false;
+    }).modules;
+  noRosettaDarwinModules =
+    (flake.lib.mkDarwinHost {
+      user = "alice";
+      includeDefaultUserModule = false;
+      enableRosettaBuilder = false;
+    }).modules;
 in
 if expected != actual then
   throw "default.nix constructors mismatch: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}"
 else if nonFunctions != [ ] then
   throw "default.nix constructors not functions: ${builtins.toJSON nonFunctions}"
+else if emptyDarwinUsers.success then
+  throw "mkSystem must reject a Darwin system without a primary user"
+else if emptyLinuxPrimaryUser != null then
+  throw "mkSystem must preserve userless NixOS support"
+else if (contextualLib.sourceEntry "context-demo").version != "explicit" then
+  throw "mkLib did not apply its explicit evaluation context"
+else if !(builtins.elem "rosetta-builder-module" defaultDarwinModules) then
+  throw "mkDarwinHost must enable its Rosetta builder by default"
+else if builtins.elem "rosetta-builder-module" noRosettaDarwinModules then
+  throw "mkDarwinHost must allow callers to disable its Rosetta builder"
 else
   true

@@ -412,6 +412,16 @@ def test_codegen_utils_defensive_transform_branches(
     assert codegen_utils.normalize_pydantic_imports("from pydantic import *\n") == (
         "from pydantic import *"
     )
+    assert (
+        codegen_utils.normalize_pydantic_imports("from pydantic import BaseModel\n")
+        == "from pydantic import BaseModel"
+    )
+    assert (
+        codegen_utils.normalize_pydantic_imports(
+            "from pydantic import StringConstraints, constr\n"
+        )
+        == "from pydantic import StringConstraints"
+    )
 
     import_transformer = codegen_utils._PydanticImportTransformer()
     non_alias_import = SimpleNamespace(module=cst.Name("pydantic"), names=(object(),))

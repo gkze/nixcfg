@@ -20,6 +20,7 @@
     outputs.homeModules.nixcfgLanguageBun
     outputs.homeModules.nixcfgGit
     outputs.homeModules.nixcfgLanguageGo
+    ./mcp.nix
     ./nixvim.nix
     ./zed.nix
     outputs.homeModules.nixcfgOpencode
@@ -31,18 +32,6 @@
     outputs.homeModules.nixcfgZsh
     inputs.catppuccin.homeModules.catppuccin
   ];
-
-  sops = {
-    age.keyFile = "${config.xdg.dataHome}/sops-nix/age-key.txt";
-    defaultSopsFile = ../../secrets.yaml;
-    environment = {
-      GNUPGHOME = "/var/empty";
-      PATH = lib.mkForce (lib.makeBinPath [ pkgs.coreutils ] + ":/usr/bin:/sbin");
-      SOPS_GPG_EXEC = "/usr/bin/false";
-    };
-    secrets.github_pat = { };
-    secrets.opencode_server_password = { };
-  };
 
   home = {
     activation.materializeVscodeSettings =
@@ -255,17 +244,6 @@
           scope = "system";
         };
         zoom.package = pkgs.zoom-us;
-      }
-      // lib.optionalAttrs config.profiles.work.enable {
-        cleanshot.package = pkgs.cleanshot;
-        freelens.package = pkgs.freelens;
-        onepassword = {
-          package = pkgs.onepassword;
-          scope = "system";
-        };
-        tailscale.package = pkgs.tailscale-app;
-        "town-assistant".package = pkgs.town-assistant-nightly;
-        "warp-preview".package = pkgs.warp-preview;
       };
       managedMacAppProjection = macAppHelpers.managedMacAppRoutingProjection managedMacAppRouting;
     in
@@ -312,20 +290,15 @@
         heavyOptional.enable = lib.mkDefault false;
         cloud.enable = lib.mkDefault false;
         inherit (managedMacAppProjection) excludePackagesByName;
-        extraPackages =
-          with pkgs;
-          [
-            claude-code
-            docker
-            docker-compose
-            docker-credential-helpers
-            kubectl
-            macfuse
-            mole-app
-          ]
-          ++ lib.optionals config.profiles.work.enable [
-            pkgs.pants-preview
-          ];
+        extraPackages = with pkgs; [
+          claude-code
+          docker
+          docker-compose
+          docker-credential-helpers
+          kubectl
+          macfuse
+          mole-app
+        ];
       };
       macApps.applications = managedMacAppProjection.applications;
       git = {

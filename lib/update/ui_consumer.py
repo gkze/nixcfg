@@ -1,4 +1,4 @@
-"""Event consumer driving update UI rendering and summary collection."""
+"""Observation-only event consumer driving update UI rendering."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import contextlib
 import shlex
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar
 
 from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.update.events import (
@@ -22,18 +22,12 @@ from lib.update.ui_state import (
     ItemState,
     OperationKind,
     OperationState,
-    SummaryStatus,
     apply_status,
     command_args_from_payload,
     hash_diff_lines,
     is_terminal_status,
     operation_for_command,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from lib.update.artifacts import GeneratedArtifact
 
 
 @dataclass(frozen=True)
@@ -50,27 +44,11 @@ class ConsumeEventsOptions:
     quiet: bool = False
 
 
-@dataclass(frozen=True)
-class ConsumeEventsResult:
-    """Aggregate update state collected while consuming queued events."""
-
-    updated: bool
-    errors: int
-    details: dict[str, SummaryStatus]
-    source_updates: dict[str, SourceEntry]
-    artifact_updates: dict[str, tuple[GeneratedArtifact, ...]]
-
-
 class EventConsumer:
-    """Process queued update events and collect summarized results."""
+    """Render queued update events without owning domain outcomes."""
 
     _ARTIFACT_LOG_PREVIEW_LIMIT: ClassVar[int] = 3
     _COMMAND_FAILURE_TAIL_LINES: ClassVar[int] = 10
-    _DETAIL_PRIORITY: ClassVar[dict[SummaryStatus, int]] = {
-        "no_change": 0,
-        "updated": 1,
-        "error": 2,
-    }
 
     def __init__(
         self,
@@ -94,13 +72,6 @@ class EventConsumer:
             for name in order
             if name in options.item_meta
         }
-        self.updated = False
-        self.errors = 0
-        self.update_details: dict[str, SummaryStatus] = {}
-        self.source_updates: dict[str, SourceEntry] = {}
-        self.artifact_updates: dict[str, dict[Path, GeneratedArtifact]] = {}
-        self._artifact_observations: dict[Path, dict[str, GeneratedArtifact]] = {}
-
         self.renderer = Renderer(
             self.items,
             order,
@@ -109,30 +80,6 @@ class EventConsumer:
             verbose=options.verbose,
             render_interval=options.render_interval,
             quiet=options.quiet,
-        )
-
-    def _set_detail(self, name: str, status: SummaryStatus) -> None:
-        current = self.update_details.get(name)
-        if (
-            current is None
-            or self._DETAIL_PRIORITY[status] > self._DETAIL_PRIORITY[current]
-        ):
-            self.update_details[name] = status
-        if status == "updated":
-            self.updated = True
-
-    @property
-    def result(self) -> ConsumeEventsResult:
-        """Return the aggregate consumer result object."""
-        return ConsumeEventsResult(
-            updated=self.updated,
-            errors=self.errors,
-            details=dict(self.update_details),
-            source_updates=dict(self.source_updates),
-            artifact_updates={
-                source: tuple(artifact for _, artifact in sorted(artifacts.items()))
-                for source, artifacts in self.artifact_updates.items()
-            },
         )
 
     def _handle_status(self, event: UpdateEvent, item: ItemState) -> None:
@@ -269,10 +216,7 @@ class EventConsumer:
                 )
             if isinstance(result, SourceEntry):
                 self._handle_source_result(event, item, result)
-            else:
-                self._set_detail(event.source, "updated")
         else:
-            self._set_detail(event.source, "no_change")
             check_op = item.operations.get(OperationKind.CHECK_VERSION)
             if check_op and check_op.status == "pending":
                 check_op.status = "no_change"
@@ -288,7 +232,6 @@ class EventConsumer:
         latest_payload = result_map.get("latest")
         if not isinstance(current_payload, str) or not isinstance(latest_payload, str):
             return True
-        self._set_detail(event.source, "updated")
         check_op = item.operations.get(OperationKind.CHECK_VERSION)
         if check_op:
             check_op.status = "success"
@@ -312,9 +255,6 @@ class EventConsumer:
         old_entry = self._sources.entries.get(event.source)
         old_version = old_entry.version if old_entry else None
         new_version = result.version
-        self.source_updates[event.source] = result
-        self._set_detail(event.source, "updated")
-
         check_op = item.operations.get(OperationKind.CHECK_VERSION)
         if check_op:
             if old_version and new_version and old_version != new_version:
@@ -342,48 +282,20 @@ class EventConsumer:
         else:
             self.renderer.log(event.source, "Updated")
 
-    def _artifact_changed(self, source: str, artifact: GeneratedArtifact) -> bool:
-        """Return whether *artifact* differs from this source's stable baseline."""
-        path = artifact.resolved_path()
-        staged = self.artifact_updates.get(source, {}).get(path)
-        if staged is not None:
-            return staged.content != artifact.content
-        if artifact.changed_from_snapshot is not None:
-            return artifact.changed_from_snapshot
-        return artifact.has_changed()
-
-    def _store_artifact(self, source: str, artifact: GeneratedArtifact) -> None:
-        """Store the latest artifact update for *source* keyed by path."""
-        path = artifact.resolved_path()
-        self.artifact_updates.setdefault(source, {})[path] = artifact
-
-    def _surface_artifact_conflicts(
-        self,
-        source: str,
-        artifact: GeneratedArtifact,
-    ) -> None:
-        """Retain every producer when one artifact path has conflicting content."""
-        path = artifact.resolved_path()
-        observations = self._artifact_observations.setdefault(path, {})
-        observations[source] = artifact
-        if len({observed.content for observed in observations.values()}) == 1:
-            return
-        for observed_source, observed in observations.items():
-            self._store_artifact(observed_source, observed)
-
     def _handle_artifact(self, event: UpdateEvent, item: ItemState) -> None:
-        """Record generated artifact updates and log changed paths."""
+        """Log generated artifact paths that differ from their baseline."""
         _ = item
         artifacts = expect_artifact_updates(event.payload)
         changed_paths: list[str] = []
         for artifact in artifacts:
-            changed = self._artifact_changed(event.source, artifact)
-            self._surface_artifact_conflicts(event.source, artifact)
+            changed = (
+                artifact.changed_from_snapshot
+                if artifact.changed_from_snapshot is not None
+                else artifact.has_changed()
+            )
             if not changed:
                 continue
-            self._store_artifact(event.source, artifact)
             changed_paths.append(str(artifact.repo_relative_path()))
-            self._set_detail(event.source, "updated")
 
         if not changed_paths:
             return
@@ -400,8 +312,6 @@ class EventConsumer:
         )
 
     def _handle_error(self, event: UpdateEvent, item: ItemState) -> None:
-        self.errors += 1
-        self._set_detail(event.source, "error")
         full_message = event.message or "Unknown error"
         message_lines = full_message.splitlines()
         message = full_message
@@ -443,8 +353,8 @@ class EventConsumer:
             self._handle_error(event, item)
         return False
 
-    async def run(self) -> ConsumeEventsResult:
-        """Consume events until sentinel and return aggregate results."""
+    async def run(self) -> None:
+        """Consume and render events until the sentinel arrives."""
         renderer = self.renderer
         delayed_render: asyncio.Task[None] | None = None
 
@@ -485,8 +395,6 @@ class EventConsumer:
                     await delayed_render
             renderer.finalize()
 
-        return self.result
-
 
 async def consume_events(
     queue: asyncio.Queue[UpdateEvent | None],
@@ -494,8 +402,8 @@ async def consume_events(
     sources: SourcesFile,
     *,
     options: ConsumeEventsOptions,
-) -> ConsumeEventsResult:
-    """Consume queued update events and return aggregate UI/update state."""
+) -> None:
+    """Consume queued update events as an observation-only UI adapter."""
     consumer = EventConsumer(
         queue,
         order,
@@ -507,7 +415,6 @@ async def consume_events(
 
 __all__ = [
     "ConsumeEventsOptions",
-    "ConsumeEventsResult",
     "EventConsumer",
     "consume_events",
 ]

@@ -1,4 +1,5 @@
 {
+  evaluationContext ? { },
   src ? ./.,
   inputs ? { },
   lib ? null,
@@ -53,20 +54,13 @@ let
     };
 
   mkLibImpl =
-    {
-      lib,
-      pkgsFor,
-      outputs,
-    }:
-    import (src + "/lib.nix") {
-      inherit
-        inputs
-        lib
-        outputs
-        pkgsFor
-        src
-        ;
-    };
+    args:
+    import (src + "/lib.nix") (
+      {
+        inherit evaluationContext inputs src;
+      }
+      // args
+    );
 
   self = rec {
     inherit (exports)

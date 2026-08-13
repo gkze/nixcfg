@@ -5,9 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from lib.nix.models.sources import HashEntry
-from lib.update import crate2nix as _crate2nix
 from lib.update import nix as update_nix
-from lib.update.crate2nix_compat import patch_installed_crate2nix_target
 from lib.update.events import (
     EventStream,
     UpdateEvent,
@@ -36,9 +34,6 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry
-
-
-patch_installed_crate2nix_target(_crate2nix, "gitbutler")
 
 
 @register_updater

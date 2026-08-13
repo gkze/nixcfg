@@ -50,6 +50,27 @@ _NORMALIZERS = (
 )
 
 
+def test_crate2nix_cli_exports_only_entrypoints() -> None:
+    """Keep regeneration internals behind the core crate2nix module boundary."""
+    assert crate2nix_cli.__all__ == ["app", "main"]
+
+
+def test_crate2nix_cli_forwards_regeneration_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Forward operator selections to the core regeneration command."""
+    called: dict[str, object] = {}
+
+    def _run(*, packages: tuple[str, ...] = (), write: bool = False) -> int:
+        called.update(packages=packages, write=write)
+        return 7
+
+    monkeypatch.setattr(crate2nix, "run", _run)
+
+    assert crate2nix_cli.main(["--package", "demo", "--write"]) == 7
+    assert called == {"packages": ("demo",), "write": True}
+
+
 def _load_normalizer(case: _NormalizerCase) -> ModuleType:
     return load_module_from_path(
         case.module_path,
@@ -145,7 +166,7 @@ def test_central_normalizer_command_uses_registered_default_path(
             supported_platforms=("test",),
         ),
     )
-    monkeypatch.setattr(crate2nix_cli, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
 
     result = CliRunner().invoke(
         crate2nix_cli.app,

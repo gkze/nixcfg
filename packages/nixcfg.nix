@@ -23,7 +23,14 @@ let
         ../pyproject.toml
         ../uv.lock
         ../nixcfg.py
-        (lib.fileset.fileFilter (file: file.hasExt "py" || file.hasExt "pyi") ../lib)
+        (lib.fileset.difference (lib.fileset.fileFilter (
+          file:
+          file.hasExt "py"
+          || file.hasExt "pyi"
+          || file.hasExt "yaml"
+          || file.hasExt "json"
+          || file.name == "py.typed"
+        ) ../lib) ../lib/tests)
       ];
     };
   };

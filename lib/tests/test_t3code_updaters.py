@@ -15,7 +15,8 @@ from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.artifacts import GeneratedArtifact, save_generated_artifacts
+from lib.update.artifacts import GeneratedArtifact
+from lib.update.config import resolve_config
 from lib.update.events import (
     CommandResult,
     UpdateEvent,
@@ -23,15 +24,15 @@ from lib.update.events import (
     expect_artifact_updates,
 )
 from lib.update.generated_artifact_commands import stream_command_materialized_artifacts
-from lib.update.nix import _build_overlay_attr_expr
+from lib.update.nix import _build_package_path_attr_expr
 from lib.update.paths import REPO_ROOT
 from lib.update.persistence import persist_generated_artifacts
-from lib.update.ui_consumer import (
-    ConsumeEventsOptions,
-    ConsumeEventsResult,
-    EventConsumer,
+from lib.update.source_runner import (
+    SourcesPhaseContext,
+    SourceTaskContext,
+    SourceTaskResult,
+    run_sources_phase,
 )
-from lib.update.ui_state import ItemMeta, OperationKind
 from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
@@ -39,6 +40,11 @@ if TYPE_CHECKING:
 
 HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 NEW_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+
+
+async def _unexpected_inner() -> AsyncIterator[UpdateEvent]:
+    raise AssertionError("invalid generated artifact reached hashing")
+    yield  # pragma: no cover -- makes this an async generator
 
 
 def _current_entry() -> SourceEntry:
@@ -70,10 +76,7 @@ def test_t3code_updater_tracks_platform_specific_runtime_hashes() -> None:
     assert module.T3CodeUpdater.platform_specific is True
     assert module.T3CodeUpdater.supported_platforms == ("aarch64-darwin",)
     assert module.T3CodeUpdater.input_name == "t3code"
-    assert_nix_ast_equal(
-        module.T3CodeUpdater._node_modules_expr(system="aarch64-darwin"),
-        _build_overlay_attr_expr("t3code", ".node_modules", system="aarch64-darwin"),
-    )
+    assert module.T3CodeUpdater.hash_attr_path == ".node_modules"
 
 
 def test_t3code_desktop_updater_targets_the_main_t3code_input() -> None:
@@ -92,12 +95,7 @@ def test_t3code_desktop_updater_targets_the_main_t3code_input() -> None:
     assert module.T3CodeDesktopUpdater.platform_specific is True
     assert module.T3CodeDesktopUpdater.supported_platforms == ("aarch64-darwin",)
     assert module.T3CodeDesktopUpdater.input_name == "t3code"
-    assert_nix_ast_equal(
-        module.T3CodeDesktopUpdater._node_modules_expr(system="aarch64-darwin"),
-        _build_overlay_attr_expr(
-            "t3code-desktop", ".node_modules", system="aarch64-darwin"
-        ),
-    )
+    assert module.T3CodeDesktopUpdater.hash_attr_path == ".node_modules"
 
 
 @pytest.mark.parametrize(
@@ -153,10 +151,10 @@ def test_t3code_updaters_hash_only_their_node_modules_attr(
     )
 
     assert captured["source"] == package_name
-    assert captured["env"] == {"FAKE_HASHES": "1"}
+    assert captured["env"] is None
     assert_nix_ast_equal(
         str(captured["expr"]),
-        _build_overlay_attr_expr(
+        _build_package_path_attr_expr(
             package_name, ".node_modules", system="aarch64-darwin"
         ),
     )
@@ -192,6 +190,11 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
     updater = getattr(module, class_name)()
     captured: dict[str, object] = {}
 
+    async def _fetch_latest(_session: object) -> VersionInfo:
+        return VersionInfo(version="main")
+
+    monkeypatch.setattr(updater, "fetch_latest", _fetch_latest)
+
     async def _fake_materialize_runtime_locks(
         source: str,
         *,
@@ -213,15 +216,15 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
         async for event in inner:
             yield event
 
-    async def _fake_compute_drv_fingerprint(
+    async def _fake_compute_expr_drv_fingerprint(
         source: str,
+        expr: str,
         *,
-        system: str | None = None,
         config: object | None = None,
     ) -> str:
         captured.update({
             "fingerprint_source": source,
-            "fingerprint_system": system,
+            "fingerprint_expr": expr,
             "fingerprint_config": config,
         })
         return "drv"
@@ -237,8 +240,8 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
         yield UpdateEvent.value(source, NEW_HASH)
 
     monkeypatch.setattr(
-        "lib.update.nix.compute_drv_fingerprint",
-        _fake_compute_drv_fingerprint,
+        "lib.update.nix.compute_expr_drv_fingerprint",
+        _fake_compute_expr_drv_fingerprint,
     )
     monkeypatch.setattr(
         "lib.update.nix.compute_fixed_output_hash",
@@ -258,7 +261,6 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
             updater.update_stream(
                 _current_entry(),
                 object(),
-                pinned_version=VersionInfo(version="main"),
             )
         )
     )
@@ -274,6 +276,10 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
     assert result.drv_hash == "drv"
     assert result.hashes.entries[0].hash == NEW_HASH
     assert captured["fingerprint_source"] == package_name
+    assert_nix_ast_equal(
+        str(captured["fingerprint_expr"]),
+        _build_package_path_attr_expr(package_name, ".node_modules"),
+    )
     assert captured["materialize_source"] == package_name
     assert captured["materialize_artifact_paths"] == (
         "packages/t3code/bun.lock",
@@ -281,10 +287,10 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
     )
     assert captured["materialize_detail"] == "T3 runtime Bun locks"
     assert captured["source"] == package_name
-    assert captured["env"] == {"FAKE_HASHES": "1"}
+    assert captured["env"] is None
     assert_nix_ast_equal(
         str(captured["expr"]),
-        _build_overlay_attr_expr(
+        _build_package_path_attr_expr(
             package_name, ".node_modules", system="aarch64-darwin"
         ),
     )
@@ -387,65 +393,36 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
     assert captured["dry_run"] is True
     assert captured["detail"] == "T3 runtime Bun locks"
     assert captured["hash_source"] == package_name
-    assert captured["env"] == {"FAKE_HASHES": "1"}
+    assert captured["env"] is None
     assert events[0] == UpdateEvent.status(package_name, "materialized")
     assert events[-1].kind is UpdateEventKind.VALUE
 
 
-def test_command_materialized_artifacts_preserve_change_state_through_restore(
+def test_command_materialized_artifacts_dry_run_skips_live_refresh(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Materialized artifacts retain their pre-refresh change state."""
+    """Dry-run hashes still run without commands touching checked-in artifacts."""
     first_lock = tmp_path / "packages/t3code/bun.lock"
     second_lock = tmp_path / "packages/t3code-desktop/bun.lock"
     first_lock.parent.mkdir(parents=True)
     second_lock.parent.mkdir(parents=True)
     first_lock.write_text("old standalone\n", encoding="utf-8")
     second_lock.write_text("old desktop\n", encoding="utf-8")
+    before = {
+        path: (path.stat().st_ino, path.stat().st_mtime_ns)
+        for path in (first_lock, second_lock)
+    }
     seen_by_hash: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        GeneratedArtifact,
-        "resolved_path",
-        lambda self, *, repo_root=tmp_path: tmp_path / self.path,
-    )
-    monkeypatch.setattr(
-        GeneratedArtifact,
-        "repo_relative_path",
-        lambda self, *, repo_root=tmp_path: self.path,
-    )
-    consumer = EventConsumer(
-        asyncio.Queue(),
-        ["t3code"],
-        SourcesFile(entries={"t3code": _current_entry()}),
-        options=ConsumeEventsOptions(
-            item_meta={
-                "t3code": ItemMeta(
-                    name="t3code",
-                    origin="packages/t3code",
-                    op_order=(
-                        OperationKind.MATERIALIZE_ARTIFACTS,
-                        OperationKind.COMPUTE_HASH,
-                    ),
-                )
-            },
-            max_lines=3,
-            is_tty=False,
-            full_output=False,
-        ),
-    )
 
-    async def _fake_run_command(
-        args: list[str],
+    async def _unexpected_run_command(
+        _args: list[str],
         *,
         options: RunCommandOptions,
     ) -> AsyncIterator[UpdateEvent]:
-        first_lock.write_text("new standalone\n", encoding="utf-8")
-        second_lock.write_text("new desktop\n", encoding="utf-8")
-        yield UpdateEvent.value(
-            options.source,
-            CommandResult(args=args, returncode=0, stdout="", stderr=""),
-        )
+        _ = options
+        raise AssertionError("dry-run invoked materializer")
+        yield  # pragma: no cover -- makes this an async generator
 
     async def _inner_hash() -> AsyncIterator[UpdateEvent]:
         seen_by_hash.append((
@@ -456,7 +433,7 @@ def test_command_materialized_artifacts_preserve_change_state_through_restore(
 
     monkeypatch.setattr(
         "lib.update.generated_artifact_commands._run_command",
-        _fake_run_command,
+        _unexpected_run_command,
     )
 
     async def _collect_with_change_detection() -> list[UpdateEvent]:
@@ -474,35 +451,219 @@ def test_command_materialized_artifacts_preserve_change_state_through_restore(
             repo_root=tmp_path,
         ):
             events.append(event)
-            if event.kind is UpdateEventKind.ARTIFACT:
-                object.__getattribute__(consumer, "_handle_artifact")(
-                    event,
-                    consumer.items["t3code"],
-                )
         return events
 
     events = _run(_collect_with_change_detection())
 
-    assert seen_by_hash == [("new standalone\n", "new desktop\n")]
+    assert seen_by_hash == [("old standalone\n", "old desktop\n")]
     assert first_lock.read_text(encoding="utf-8") == "old standalone\n"
     assert second_lock.read_text(encoding="utf-8") == "old desktop\n"
+    assert all(event.kind is not UpdateEventKind.ARTIFACT for event in events)
+    assert events[-1] == UpdateEvent.value("t3code", HASH)
+    assert {
+        path: (path.stat().st_ino, path.stat().st_mtime_ns)
+        for path in (first_lock, second_lock)
+    } == before
 
-    artifact_events = [
+
+def test_command_materialized_artifacts_restore_when_hashing_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Command-backed probes restore checked-in files even on inner failures."""
+    lock_file = tmp_path / "packages/t3code/bun.lock"
+    lock_file.parent.mkdir(parents=True)
+    lock_file.write_bytes(b"\xffbefore\n")
+    lock_file.chmod(0o640)
+
+    async def _refresh(
+        args: list[str],
+        *,
+        options: RunCommandOptions,
+    ) -> AsyncIterator[UpdateEvent]:
+        lock_file.write_text("temporary\n", encoding="utf-8")
+        lock_file.chmod(0o600)
+        yield UpdateEvent.value(
+            options.source,
+            CommandResult(args=args, returncode=0, stdout="", stderr=""),
+        )
+
+    async def _failed_hash() -> AsyncIterator[UpdateEvent]:
+        assert lock_file.read_text(encoding="utf-8") == "temporary\n"
+        assert lock_file.stat().st_mode & 0o777 == 0o600
+        raise RuntimeError("hash failed")
+        yield  # pragma: no cover -- makes this an async generator
+
+    monkeypatch.setattr("lib.update.generated_artifact_commands._run_command", _refresh)
+
+    with pytest.raises(RuntimeError, match="hash failed"):
+        _run(
+            _collect(
+                stream_command_materialized_artifacts(
+                    "t3code",
+                    args=["refresh-locks"],
+                    artifact_paths=("packages/t3code/bun.lock",),
+                    inner=_failed_hash(),
+                    dry_run=False,
+                    repo_root=tmp_path,
+                )
+            )
+        )
+
+    assert lock_file.read_bytes() == b"\xffbefore\n"
+    assert lock_file.is_file()
+    assert not lock_file.is_symlink()
+    assert lock_file.stat().st_mode & 0o777 == 0o640
+
+
+def test_command_materializer_does_not_rewrite_an_unchanged_artifact(
+    tmp_path: Path,
+) -> None:
+    """Keep the original inode when a materializer leaves its output unchanged."""
+    lock_file = tmp_path / "packages/t3code/bun.lock"
+    lock_file.parent.mkdir(parents=True)
+    lock_file.write_text("unchanged\n", encoding="utf-8")
+    before = lock_file.stat()
+
+    async def _hash() -> AsyncIterator[UpdateEvent]:
+        yield UpdateEvent.value("t3code", HASH)
+
+    events = _run(
+        _collect(
+            stream_command_materialized_artifacts(
+                "t3code",
+                args=["sh", "-c", "true"],
+                artifact_paths=("packages/t3code/bun.lock",),
+                inner=_hash(),
+                dry_run=False,
+                repo_root=tmp_path,
+            )
+        )
+    )
+
+    artifact_event = next(
         event for event in events if event.kind is UpdateEventKind.ARTIFACT
-    ]
-    assert len(artifact_events) == 1
-    artifacts = expect_artifact_updates(artifact_events[0].payload)
-    assert [(artifact.path.as_posix(), artifact.content) for artifact in artifacts] == [
-        ("packages/t3code/bun.lock", "new standalone\n"),
-        ("packages/t3code-desktop/bun.lock", "new desktop\n"),
-    ]
+    )
+    assert not expect_artifact_updates(artifact_event.payload)[0].changed_from_snapshot
+    after = lock_file.stat()
+    assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
 
-    retained = consumer.result.artifact_updates["t3code"]
-    assert retained == tuple(artifacts)
-    save_generated_artifacts(list(retained), repo_root=tmp_path)
-    assert first_lock.read_text(encoding="utf-8") == "new standalone\n"
-    assert second_lock.read_text(encoding="utf-8") == "new desktop\n"
-    assert not any(artifact.has_changed(repo_root=tmp_path) for artifact in retained)
+
+def test_command_materializer_removes_new_artifact_after_hashing(
+    tmp_path: Path,
+) -> None:
+    """Treat a newly generated file as changed and remove its probe copy."""
+    artifact = tmp_path / "packages/t3code/generated.lock"
+    seen_by_hash: list[str] = []
+
+    async def _hash() -> AsyncIterator[UpdateEvent]:
+        seen_by_hash.append(artifact.read_text(encoding="utf-8"))
+        yield UpdateEvent.value("t3code", HASH)
+
+    events = _run(
+        _collect(
+            stream_command_materialized_artifacts(
+                "t3code",
+                args=[
+                    "sh",
+                    "-c",
+                    f"mkdir -p {shlex.quote(str(artifact.parent))} && "
+                    f"printf 'generated\\n' > {shlex.quote(str(artifact))}",
+                ],
+                artifact_paths=("packages/t3code/generated.lock",),
+                inner=_hash(),
+                dry_run=False,
+                repo_root=tmp_path,
+            )
+        )
+    )
+
+    assert seen_by_hash == ["generated\n"]
+    artifact_event = next(
+        event for event in events if event.kind is UpdateEventKind.ARTIFACT
+    )
+    assert expect_artifact_updates(artifact_event.payload)[0].changed_from_snapshot
+    assert not artifact.exists()
+
+
+def test_command_materializer_rejects_preexisting_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject a declared artifact directory before invoking its generator."""
+    artifact = tmp_path / "packages/t3code/bun.lock"
+    artifact.mkdir(parents=True)
+
+    async def _unexpected_command(
+        _args: list[str],
+        *,
+        options: RunCommandOptions,
+    ) -> AsyncIterator[UpdateEvent]:
+        _ = options
+        raise AssertionError("generator ran for an invalid artifact path")
+        yield  # pragma: no cover -- makes this an async generator
+
+    monkeypatch.setattr(
+        "lib.update.generated_artifact_commands._run_command",
+        _unexpected_command,
+    )
+
+    with pytest.raises(RuntimeError, match="not a regular file"):
+        _run(
+            _collect(
+                stream_command_materialized_artifacts(
+                    "t3code",
+                    args=["refresh-locks"],
+                    artifact_paths=("packages/t3code/bun.lock",),
+                    inner=_unexpected_inner(),
+                    dry_run=False,
+                    repo_root=tmp_path,
+                )
+            )
+        )
+
+
+def test_command_materializer_restores_file_replaced_by_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Restore the original even when a broken generator changes its type."""
+    artifact = tmp_path / "packages/t3code/bun.lock"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("before\n", encoding="utf-8")
+
+    async def _replace_with_directory(
+        args: list[str],
+        *,
+        options: RunCommandOptions,
+    ) -> AsyncIterator[UpdateEvent]:
+        artifact.unlink()
+        artifact.mkdir()
+        yield UpdateEvent.value(
+            options.source,
+            CommandResult(args=args, returncode=0, stdout="", stderr=""),
+        )
+
+    monkeypatch.setattr(
+        "lib.update.generated_artifact_commands._run_command",
+        _replace_with_directory,
+    )
+
+    with pytest.raises(RuntimeError, match="was not produced"):
+        _run(
+            _collect(
+                stream_command_materialized_artifacts(
+                    "t3code",
+                    args=["refresh-locks"],
+                    artifact_paths=("packages/t3code/bun.lock",),
+                    inner=_unexpected_inner(),
+                    dry_run=False,
+                    repo_root=tmp_path,
+                )
+            )
+        )
+
+    assert artifact.read_text(encoding="utf-8") == "before\n"
 
 
 def test_shared_materialized_artifact_keeps_each_successful_source_owner(
@@ -524,40 +685,46 @@ def test_shared_materialized_artifact_keeps_each_successful_source_owner(
         lambda self, *, repo_root=tmp_path: self.path,
     )
     source_names = ["t3code", "t3code-desktop"]
-    consumer = EventConsumer(
-        asyncio.Queue(),
-        source_names,
-        SourcesFile(entries={name: _current_entry() for name in source_names}),
-        options=ConsumeEventsOptions(
-            item_meta={
-                name: ItemMeta(
-                    name=name,
-                    origin=f"packages/{name}",
-                    op_order=(OperationKind.MATERIALIZE_ARTIFACTS,),
-                )
-                for name in source_names
-            },
-            max_lines=3,
-            is_tty=False,
-            full_output=False,
-        ),
-    )
     artifact = GeneratedArtifact.text(
         "packages/t3code/bun.lock",
         "new\n",
         changed_from_snapshot=True,
     )
 
-    for source in source_names:
-        object.__getattribute__(consumer, "_handle_artifact")(
-            UpdateEvent.artifact(source, artifact),
-            consumer.items[source],
+    async def _update_source(
+        name: str, *, context: SourceTaskContext
+    ) -> SourceTaskResult:
+        _ = context
+        return SourceTaskResult(
+            completed=name == "t3code-desktop",
+            artifacts=(artifact,),
         )
-    object.__getattribute__(consumer, "_set_detail")("t3code", "error")
-    object.__getattribute__(consumer, "_set_detail")("t3code-desktop", "updated")
 
-    result = consumer.result
-    assert set(result.artifact_updates) == set(source_names)
+    monkeypatch.setattr("lib.update.source_runner.update_source_task", _update_source)
+    monkeypatch.setattr(
+        "lib.update.source_runner.update_planner.source_update_waves",
+        lambda *_args: [source_names],
+    )
+    monkeypatch.setattr(
+        "lib.update.source_runner._get_updaters",
+        lambda: dict.fromkeys(source_names, object),
+    )
+    result = _run(
+        run_sources_phase(
+            SourcesPhaseContext(
+                source_names=source_names,
+                sources=SourcesFile(
+                    entries={name: _current_entry() for name in source_names}
+                ),
+                queue=asyncio.Queue(),
+                update_input=False,
+                native_only=False,
+                config=resolve_config(),
+            )
+        )
+    )
+    assert result.details == {"t3code": "error", "t3code-desktop": "updated"}
+    assert result.artifact_updates == {"t3code-desktop": (artifact,)}
     persist_generated_artifacts(
         do_sources=True,
         source_names=source_names,
@@ -588,24 +755,6 @@ def test_shared_materialized_artifact_rejects_conflicting_successful_snapshots(
     )
     source_names = ["t3code", "t3code-desktop"]
     queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
-    consumer = EventConsumer(
-        queue,
-        source_names,
-        SourcesFile(entries={name: _current_entry() for name in source_names}),
-        options=ConsumeEventsOptions(
-            item_meta={
-                name: ItemMeta(
-                    name=name,
-                    origin=f"packages/{name}",
-                    op_order=(OperationKind.MATERIALIZE_ARTIFACTS,),
-                )
-                for name in source_names
-            },
-            max_lines=3,
-            is_tty=False,
-            full_output=False,
-        ),
-    )
     baseline = GeneratedArtifact.text(
         "packages/t3code/bun.lock",
         "baseline\n",
@@ -617,15 +766,36 @@ def test_shared_materialized_artifact_rejects_conflicting_successful_snapshots(
         changed_from_snapshot=True,
     )
 
-    async def _consume() -> ConsumeEventsResult:
-        await queue.put(UpdateEvent.artifact("t3code", baseline))
-        await queue.put(UpdateEvent.result("t3code"))
-        await queue.put(UpdateEvent.artifact("t3code-desktop", changed))
-        await queue.put(UpdateEvent.result("t3code-desktop", payload=_current_entry()))
-        await queue.put(None)
-        return await consumer.run()
+    async def _update_source(
+        name: str, *, context: SourceTaskContext
+    ) -> SourceTaskResult:
+        _ = context
+        artifact = baseline if name == "t3code" else changed
+        return SourceTaskResult(completed=True, artifacts=(artifact,))
 
-    result = _run(_consume())
+    monkeypatch.setattr("lib.update.source_runner.update_source_task", _update_source)
+    monkeypatch.setattr(
+        "lib.update.source_runner.update_planner.source_update_waves",
+        lambda *_args: [source_names],
+    )
+    monkeypatch.setattr(
+        "lib.update.source_runner._get_updaters",
+        lambda: dict.fromkeys(source_names, object),
+    )
+    result = _run(
+        run_sources_phase(
+            SourcesPhaseContext(
+                source_names=source_names,
+                sources=SourcesFile(
+                    entries={name: _current_entry() for name in source_names}
+                ),
+                queue=queue,
+                update_input=False,
+                native_only=False,
+                config=resolve_config(),
+            )
+        )
+    )
 
     assert result.artifact_updates == {
         "t3code": (baseline,),
@@ -690,7 +860,7 @@ def test_command_materialized_artifacts_serializes_overlapping_paths(
                     args=["refresh-locks"],
                     artifact_paths=("packages/t3code/bun.lock",),
                     inner=_inner_hash("first"),
-                    dry_run=True,
+                    dry_run=False,
                     repo_root=tmp_path,
                 )
             ),
@@ -700,7 +870,7 @@ def test_command_materialized_artifacts_serializes_overlapping_paths(
                     args=["refresh-locks"],
                     artifact_paths=("packages/t3code/bun.lock",),
                     inner=_inner_hash("second"),
-                    dry_run=True,
+                    dry_run=False,
                     repo_root=tmp_path,
                 )
             ),

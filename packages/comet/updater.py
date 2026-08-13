@@ -164,5 +164,6 @@ class CometUpdater(DownloadHashUpdater):
         async for event in stream_url_hash_mapping(
             self.name,
             self._deduplicated_hash_urls(artifacts),
+            config=self.config,
         ):
             yield event

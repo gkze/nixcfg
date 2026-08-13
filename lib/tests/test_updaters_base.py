@@ -3,17 +3,76 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from typing import ClassVar
+from unittest.mock import patch
 
 import aiohttp
 
+from lib.nix.commands.base import CommandResult as NixCommandResultData
+from lib.nix.commands.base import NixCommandError
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
+from lib.tests._nix_ast import assert_nix_ast_equal
+from lib.update.config import resolve_config
 from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
+from lib.update.nix import _build_package_path_attr_expr
 from lib.update.updaters import (
+    DownloadHashUpdater,
     FlakeInputHashUpdater,
     HashEntryUpdater,
     VersionInfo,
 )
+
+
+class _ConfiguredDownloadUpdater(DownloadHashUpdater):
+    name = "configured-download"
+    PLATFORMS: ClassVar[dict[str, str]] = {
+        "aarch64-darwin": "https://example.com/archive.tar.gz"
+    }
+
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        _ = session
+        return VersionInfo(version="1.0.0")
+
+
+def test_download_updater_applies_explicit_retry_and_timeout_config() -> None:
+    """The config bound at the updater seam governs URL prefetch subprocesses."""
+    calls: list[float] = []
+
+    async def _prefetch(
+        _url: str,
+        *,
+        name: str | None = None,
+        command_timeout: float,
+    ) -> str:
+        _ = name
+        calls.append(command_timeout)
+        if len(calls) == 1:
+            raise NixCommandError(
+                NixCommandResultData(
+                    args=["nix-prefetch-url"],
+                    returncode=1,
+                    stdout="",
+                    stderr="HTTP error 503",
+                ),
+                "transient prefetch failure",
+            )
+        return "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo="
+
+    async def _run() -> list[UpdateEvent]:
+        config = resolve_config(
+            retries=2,
+            retry_backoff=0,
+            subprocess_timeout=17,
+        )
+        updater = _ConfiguredDownloadUpdater(config=config)
+        with patch("lib.update.process.libnix_prefetch_url", _prefetch):
+            async with aiohttp.ClientSession() as session:
+                return [event async for event in updater.update_stream(None, session)]
+
+    events = asyncio.run(_run())
+
+    assert calls == [17, 17]
+    assert events[-1].kind is UpdateEventKind.RESULT
 
 
 class _FakeHashEntryUpdater(HashEntryUpdater):
@@ -104,168 +163,99 @@ def test_hash_entry_updater_recomputes_before_confirming_equivalence() -> None:
 # ---------------------------------------------------------------------------
 
 
-class _FakeFlakeInputUpdater(FlakeInputHashUpdater):
-    """Concrete FlakeInputHashUpdater for testing fingerprint logic."""
+def test_package_flake_input_updater_hashes_discovered_package_expression() -> None:
+    """Package-owned hash updaters should not require an overlay export."""
 
-    name = "fake-flake-input"
-    input_name = "fake-flake-input"
-    hash_type = "sha256"
+    class _PackageUpdater(FlakeInputHashUpdater):
+        name = "anthropic-cli"
+        hash_type = "vendorHash"
 
-    def __init__(self, *, version: str = "v1.0.0") -> None:
-        super().__init__()
-        self._version = version
-        self.fetch_hashes_called = False
+    captured: dict[str, object] = {}
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        """Run this test case."""
-        _ = session
-        return VersionInfo(
-            version=object.__getattribute__(self, "_version"), metadata={}
+    async def _compute_fixed_output_hash(
+        source: str,
+        expr: str,
+        *,
+        config: object,
+    ) -> EventStream:
+        captured.update({"source": source, "expr": expr, "config": config})
+        yield UpdateEvent.value(source, "sha256-package")
+
+    async def _collect() -> list[UpdateEvent]:
+        return [
+            event
+            async for event in updater._compute_hash_for_system(
+                VersionInfo(version="1.0.0"),
+                system="aarch64-darwin",
+            )
+        ]
+
+    updater = _PackageUpdater()
+    with (
+        patch(
+            "lib.update.nix.compute_fixed_output_hash",
+            _compute_fixed_output_hash,
+        ),
+        patch(
+            "lib.update.nix.compute_overlay_hash",
+            side_effect=AssertionError("package updater used overlay route"),
+        ),
+    ):
+        events = asyncio.run(_collect())
+
+    assert events == [UpdateEvent.value("anthropic-cli", "sha256-package")]
+    assert captured["source"] == "anthropic-cli"
+    assert_nix_ast_equal(
+        str(captured["expr"]),
+        _build_package_path_attr_expr(
+            "anthropic-cli",
+            "",
+            system="aarch64-darwin",
+        ),
+    )
+
+
+def test_package_flake_input_updater_fingerprints_discovered_package() -> None:
+    """Package-owned staleness checks should use the package derivation."""
+
+    class _PackageUpdater(FlakeInputHashUpdater):
+        name = "anthropic-cli"
+        hash_type = "vendorHash"
+
+    captured: dict[str, object] = {}
+
+    async def _compute_expr_drv_fingerprint(
+        source: str,
+        expr: str,
+        *,
+        config: object,
+    ) -> str:
+        captured.update({"source": source, "expr": expr, "config": config})
+        return "package-drv"
+
+    current = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "drvHash": "package-drv",
+        "hashes": [],
+    })
+    updater = _PackageUpdater()
+    with (
+        patch(
+            "lib.update.nix.compute_expr_drv_fingerprint",
+            _compute_expr_drv_fingerprint,
+        ),
+        patch(
+            "lib.update.nix.compute_drv_fingerprint",
+            side_effect=AssertionError("package updater used overlay fingerprint"),
+        ),
+    ):
+        is_latest = asyncio.run(
+            updater._is_latest(current, VersionInfo(version="1.0.0"))
         )
 
-    def _compute_hash(self, info: VersionInfo) -> EventStream:
-        _ = info
-        self.fetch_hashes_called = True
-        return object.__getattribute__(self, "_yield_fake_hash")()
-
-    async def _yield_fake_hash(self) -> EventStream:
-        yield UpdateEvent.value(
-            self.name,
-            "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
-        )
-
-
-def test_flake_input_updater_recomputes_when_no_drv_hash() -> None:
-    """Missing drvHash in sources.json forces recomputation."""
-
-    async def _run() -> bool:
-        updater = _FakeFlakeInputUpdater()
-        current = SourceEntry(
-            version="v1.0.0",
-            hashes=HashCollection(
-                entries=[
-                    HashEntry.create(
-                        hash_type="sha256",
-                        hash_value="sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
-                    ),
-                ],
-            ),
-            # No drv_hash — simulates pre-fingerprinting sources.json
-        )
-        info = VersionInfo(version="v1.0.0", metadata={})
-        return await object.__getattribute__(updater, "_is_latest")(current, info)
-
-    result = asyncio.run(_run())
-    assert result is False
-
-
-def test_flake_input_updater_recomputes_when_version_differs() -> None:
-    """Version mismatch must force recomputation before fingerprint checks."""
-
-    async def _run() -> bool:
-        updater = _FakeFlakeInputUpdater(version="v9.9.9")
-        current = SourceEntry.model_validate(
-            {
-                "version": "v1.0.0",
-                "hashes": [
-                    {
-                        "hashType": "sha256",
-                        "hash": "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
-                    },
-                ],
-                "drvHash": "abc123deadbeef",
-            },
-        )
-        info = VersionInfo(version="v9.9.9", metadata={})
-        with patch(
-            "lib.update.nix.compute_drv_fingerprint",
-            new_callable=AsyncMock,
-            return_value="abc123deadbeef",
-        ) as compute_drv_fingerprint:
-            result = await object.__getattribute__(updater, "_is_latest")(current, info)
-            compute_drv_fingerprint.assert_not_awaited()
-            return result
-
-    result = asyncio.run(_run())
-    assert result is False
-
-
-def test_flake_input_updater_skips_when_fingerprint_matches() -> None:
-    """Matching drvHash means nothing in the build closure changed."""
-
-    async def _run() -> bool:
-        updater = _FakeFlakeInputUpdater()
-        current = SourceEntry.model_validate({
-            "version": "v1.0.0",
-            "hashes": [
-                {
-                    "hashType": "sha256",
-                    "hash": "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
-                }
-            ],
-            "drvHash": "abc123deadbeef",
-        })
-        info = VersionInfo(version="v1.0.0", metadata={})
-        with patch(
-            "lib.update.nix.compute_drv_fingerprint",
-            new_callable=AsyncMock,
-            return_value="abc123deadbeef",
-        ):
-            return await object.__getattribute__(updater, "_is_latest")(current, info)
-
-    result = asyncio.run(_run())
-    assert result is True
-
-
-def test_flake_input_updater_recomputes_when_fingerprint_differs() -> None:
-    """Different drvHash means a build input changed — must recompute."""
-
-    async def _run() -> bool:
-        updater = _FakeFlakeInputUpdater()
-        current = SourceEntry.model_validate({
-            "version": "v1.0.0",
-            "hashes": [
-                {
-                    "hashType": "sha256",
-                    "hash": "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
-                }
-            ],
-            "drvHash": "abc123deadbeef",
-        })
-        info = VersionInfo(version="v1.0.0", metadata={})
-        with patch(
-            "lib.update.nix.compute_drv_fingerprint",
-            new_callable=AsyncMock,
-            return_value="different_fingerprint",
-        ):
-            return await object.__getattribute__(updater, "_is_latest")(current, info)
-
-    result = asyncio.run(_run())
-    assert result is False
-
-
-def test_flake_input_updater_recomputes_when_fingerprint_fails() -> None:
-    """Fingerprint computation failure conservatively triggers recomputation."""
-
-    async def _run() -> bool:
-        updater = _FakeFlakeInputUpdater()
-        current = SourceEntry.model_validate({
-            "version": "v1.0.0",
-            "hashes": [
-                {
-                    "hashType": "sha256",
-                    "hash": "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
-                }
-            ],
-            "drvHash": "abc123deadbeef",
-        })
-        info = VersionInfo(version="v1.0.0", metadata={})
-        with patch(
-            "lib.update.nix.compute_drv_fingerprint",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("nix eval failed"),
-        ):
-            return await object.__getattribute__(updater, "_is_latest")(current, info)
-
-    result = asyncio.run(_run())
-    assert result is False
+    assert is_latest is True
+    assert captured["source"] == "anthropic-cli"
+    assert_nix_ast_equal(
+        str(captured["expr"]),
+        _build_package_path_attr_expr("anthropic-cli", ""),
+    )

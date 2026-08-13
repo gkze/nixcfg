@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from lib import http_utils
-from lib.cli import HELP_CONTEXT_SETTINGS
+from lib.cli import HELP_CONTEXT_SETTINGS, make_main
 from lib.github_actions.client import (
     GitHubActionsClient,
     WorkflowListRow,
@@ -24,7 +24,6 @@ from lib.github_actions.client import (
 )
 from lib.github_actions.tail import GitHubActionsLiveClient, GitHubActionsTailer
 from lib.github_actions.web_auth import GitHubWebCookieProvider
-from lib.update.ci._cli import make_main
 
 app = typer.Typer(
     name="actions",

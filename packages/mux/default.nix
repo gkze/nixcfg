@@ -49,6 +49,9 @@ let
         mkdir -p "$out"
         cp "$src/package.json" "$out/package.json"
         cp "$src/bun.lock" "$out/bun.lock"
+        if [ -d "$src/patches" ]; then
+          cp -R "$src/patches" "$out/patches"
+        fi
       '';
     };
 

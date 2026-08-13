@@ -5,9 +5,7 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING, Literal
 
-from lib.update import nix as update_nix
 from lib.update.generated_artifact_commands import stream_command_materialized_artifacts
-from lib.update.nix import _build_overlay_attr_expr
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters.core import _coerce_context
 from lib.update.updaters.flake_backed import FlakeInputHashUpdater
@@ -40,30 +38,11 @@ class T3RuntimeUpdater(FlakeInputHashUpdater):
 
     input_name = "t3code"
     hash_type: Literal["nodeModulesHash"] = "nodeModulesHash"
+    hash_attr_path = ".node_modules"
     materialize_when_current = True
     shows_materialize_artifacts_phase = True
     platform_specific = True
     supported_platforms = ("aarch64-darwin",)
-
-    @classmethod
-    def _node_modules_expr(cls, *, system: str | None = None) -> str:
-        """Return the package-path expression for this package's FOD."""
-        return _build_overlay_attr_expr(cls.name, ".node_modules", system=system)
-
-    def _compute_hash_for_system(
-        self,
-        info: VersionInfo,
-        *,
-        system: str | None,
-    ) -> EventStream:
-        """Hash only the package's staged runtime cache."""
-        _ = info
-        return update_nix.compute_fixed_output_hash(
-            self.name,
-            self._node_modules_expr(system=system),
-            env={"FAKE_HASHES": "1"},
-            config=self.config,
-        )
 
     async def fetch_hashes(
         self,

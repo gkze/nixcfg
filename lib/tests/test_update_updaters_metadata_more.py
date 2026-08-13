@@ -3,24 +3,19 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import cast
 
 import pytest
-from pydantic import BaseModel
 
 from lib.nix.models.flake_lock import FlakeLockNode
 from lib.update.updaters import FlakeInputMetadataUpdater
 from lib.update.updaters import metadata as metadata_module
 from lib.update.updaters import registry as registry_module
 from lib.update.updaters.metadata import (
-    NO_METADATA,
     DownloadUrlMetadata,
     FlakeInputMetadata,
-    GranolaFeedMetadata,
     PlatformAPIMetadata,
-    ReleasePayloadMetadata,
     VersionInfo,
-    deserialize_metadata,
-    serialize_metadata,
 )
 from lib.update.updaters.registry import (
     UPDATERS,
@@ -82,6 +77,9 @@ def test_flake_input_metadata_validation_errors() -> None:
     """Reject malformed serialized flake metadata payloads."""
     with pytest.raises(TypeError, match="invalid node metadata"):
         FlakeInputMetadata.from_json({"node": "bad"})
+
+    with pytest.raises(TypeError, match="invalid node metadata"):
+        FlakeInputMetadata.from_json({"node": {"locked": {"type": "github"}}})
 
     with pytest.raises(TypeError, match="invalid commit metadata"):
         FlakeInputMetadata.from_json({
@@ -159,88 +157,6 @@ def test_typed_metadata_coercion_helpers() -> None:
         PlatformAPIMetadata.from_metadata({}, context="dummy metadata")
 
 
-def test_serialize_and_deserialize_metadata_paths() -> None:
-    """Cover typed, legacy, passthrough, and error metadata serialization paths."""
-
-    class _Model(BaseModel):
-        value: str
-
-    assert serialize_metadata(None) is None
-    assert serialize_metadata({"x": [1, 2]}) == {"x": [1, 2]}
-    assert metadata_module._json_safe_value(_Model(value="x")) == {"value": "x"}
-    assert metadata_module._json_safe_value(
-        DownloadUrlMetadata(url="https://example.test")
-    ) == {"url": "https://example.test"}
-    assert metadata_module._json_safe_value(
-        GranolaFeedMetadata(path="Granola-mac.zip", sha512="deadbeef")
-    ) == {"path": "Granola-mac.zip", "sha512": "deadbeef"}
-    release = ReleasePayloadMetadata(release={"version": "1.0.0"})
-    serialized = serialize_metadata(release)
-    assert isinstance(serialized, dict)
-    serialized_map = serialized if isinstance(serialized, dict) else {}
-    assert serialized_map["__kind__"] == "release_payload"
-
-    with pytest.raises(TypeError, match="not JSON-serializable"):
-        serialize_metadata(object())
-
-    assert deserialize_metadata(None) is None
-    assert deserialize_metadata("raw") == "raw"
-    assert deserialize_metadata({"plain": True}) == {"plain": True}
-    assert deserialize_metadata({"__kind__": "none", "payload": {}}) is NO_METADATA
-    assert (
-        deserialize_metadata({
-            "__kind__": "download_url",
-            "payload": {"url": "https://example.test"},
-        })["url"]
-        == "https://example.test"
-    )
-    assert (
-        deserialize_metadata({
-            "__kind__": "granola_feed",
-            "payload": {"path": "Granola-mac.zip", "sha512": "deadbeef"},
-        })["sha512"]
-        == "deadbeef"
-    )
-    assert (
-        deserialize_metadata({
-            "__kind__": "flake_input",
-            "payload": {
-                "node": {
-                    "locked": {
-                        "type": "github",
-                        "owner": "owner",
-                        "repo": "repo",
-                        "rev": "abc",
-                        "narHash": "sha256-test",
-                    }
-                }
-            },
-        })["node"]
-        is not None
-    )
-    legacy = deserialize_metadata({
-        "node": {
-            "locked": {
-                "type": "github",
-                "owner": "owner",
-                "repo": "repo",
-                "rev": "abc",
-                "narHash": "sha256-test",
-            }
-        }
-    })
-    assert isinstance(legacy, FlakeInputMetadata)
-
-    with pytest.raises(TypeError, match="Unknown pinned version metadata kind"):
-        deserialize_metadata({"__kind__": "unknown", "payload": {}})
-
-    with pytest.raises(TypeError, match="payload must be an object"):
-        deserialize_metadata({"__kind__": "download_url", "payload": "bad"})
-
-    with pytest.raises(TypeError, match="invalid platform_api metadata"):
-        deserialize_metadata({"__kind__": "platform_api", "payload": {}})
-
-
 def test_dataclass_payload_rejects_non_instances() -> None:
     """Reject non-dataclass values and dataclass classes."""
 
@@ -285,7 +201,7 @@ def test_register_updater_allows_test_duplicates_and_detects_test_classes() -> N
         __module__ = "lib.tests.test_demo"
         name = "test-only-updater"
 
-    UPDATERS["test-only-updater"] = _Existing
+    cast("dict[str, object]", UPDATERS)["test-only-updater"] = _Existing
 
     assert is_test_updater_class(_Replacement) is True
     assert register_updater(_Replacement) is _Replacement

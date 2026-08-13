@@ -183,7 +183,11 @@ class LinearCliUpdater(DenoManifestUpdater):
 
         hash_drain = ValueDrain()
         async for event in drain_value_events(
-            update_process.compute_url_hashes(self.name, urls.values()),
+            update_process.compute_url_hashes(
+                self.name,
+                urls.values(),
+                config=self.config,
+            ),
             hash_drain,
             parse=expect_hash_mapping,
         ):

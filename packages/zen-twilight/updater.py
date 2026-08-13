@@ -149,10 +149,9 @@ class ZenTwilightUpdater(DownloadHashUpdater):
         current: SourceEntry | None,
         session: aiohttp.ClientSession,
         *,
-        pinned_version: VersionInfo | None = None,
         context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
-        """Retry an unpinned update from version resolution after channel movement."""
+        """Resolve a fresh version and retry after channel movement."""
         for attempt in range(
             1, self.SNAPSHOT_ATTEMPTS + 1
         ):  # pragma: no branch -- every attempt returns, raises, or retries
@@ -160,18 +159,10 @@ class ZenTwilightUpdater(DownloadHashUpdater):
                 async for event in super().update_stream(
                     current,
                     session,
-                    pinned_version=pinned_version,
                     context=context,
                 ):
                     yield event
             except _TwilightSnapshotChangedError as exc:
-                if pinned_version is not None:
-                    msg = (
-                        f"Pinned Twilight version {pinned_version.version} no longer "
-                        f"matches the channel ({exc.observed}); rerun version "
-                        "resolution before computing hashes"
-                    )
-                    raise RuntimeError(msg) from exc
                 if attempt >= self.SNAPSHOT_ATTEMPTS:
                     msg = (
                         "Twilight channel changed repeatedly while hashing; "

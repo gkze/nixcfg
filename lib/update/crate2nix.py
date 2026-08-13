@@ -1,4 +1,4 @@
-"""Shared crate2nix regeneration logic for update workflows and CI helpers."""
+"""Shared crate2nix regeneration logic for updates and maintenance commands."""
 
 from __future__ import annotations
 
@@ -13,13 +13,16 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from lib.import_utils import load_module_from_path
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import EventStream, StatusInfo, StatusKind, UpdateEvent
-from lib.update.nix import get_current_nix_platform
+from lib.update.nix import _build_package_path_attr_expr, get_current_nix_platform
 from lib.update.paths import REPO_ROOT, local_flake_url
+
+if TYPE_CHECKING:
+    from lib.nix.models.sources import SourceEntry
 
 _NORMALIZER_RESULT_SIZE = 3
 _CRATE2NIX_COMMAND_TIMEOUT_SECONDS = 2400
@@ -154,10 +157,9 @@ def _stabilize_generated_root_src_paths(
 
 
 # Keep these tuples in sync with the system constraints declared in
-# packages/registry.nix for each target's `*-crate2nix-src` companion. The
-# compute-hashes job fans out across aarch64-darwin, x86_64-linux, and
-# aarch64-linux runners, and will fail if a target attempts to build its
-# crate2nix source on a platform the flake does not expose.
+# packages/registry.nix for each target's `*-crate2nix-src` companion. Local
+# artifact refresh must not attempt a companion output on a platform the flake
+# does not expose.
 TARGETS = {
     "codex": Crate2NixTarget(
         name="codex",
@@ -214,7 +216,8 @@ def _read_generated_hash_text(path: Path) -> str:
     return "{}\n"
 
 
-def _load_normalizer(path: Path) -> _Normalizer:
+def load_normalizer(path: Path) -> _Normalizer:
+    """Load and validate one registered Cargo.nix normalizer."""
     module_path = (REPO_ROOT / path).resolve()
     try:
         module = load_module_from_path(
@@ -341,14 +344,28 @@ def _run_crate2nix_generate(
                 attempt += 1
 
 
-def _build_patched_src(target: Crate2NixTarget) -> Path:
+def _build_patched_src(
+    target: Crate2NixTarget,
+    *,
+    source_overrides: dict[str, SourceEntry] | None = None,
+) -> Path:
+    installable = (
+        _build_package_path_attr_expr(
+            f"{target.name}-crate2nix-src",
+            "",
+            source_overrides=source_overrides,
+        )
+        if source_overrides
+        else _local_flake_installable(target.patched_src_installable)
+    )
     completed = _run([
         "nix",
         "build",
         "--impure",
         "--no-link",
         "--print-out-paths",
-        _local_flake_installable(target.patched_src_installable),
+        *(["--expr"] if source_overrides else []),
+        installable,
     ])
     out_paths = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
     if len(out_paths) != 1:
@@ -357,9 +374,17 @@ def _build_patched_src(target: Crate2NixTarget) -> Path:
     return Path(out_paths[0])
 
 
-def _refresh_target(target: Crate2NixTarget) -> RefreshResult:
-    patched_src = _build_patched_src(target)
-    normalize = _load_normalizer(target.normalizer_path)
+def _refresh_target(
+    target: Crate2NixTarget,
+    *,
+    source_overrides: dict[str, SourceEntry] | None = None,
+) -> RefreshResult:
+    patched_src = (
+        _build_patched_src(target, source_overrides=source_overrides)
+        if source_overrides is not None
+        else _build_patched_src(target)
+    )
+    normalize = load_normalizer(target.normalizer_path)
 
     with tempfile.TemporaryDirectory(prefix=f"crate2nix-{target.name}-") as tmp_dir:
         tmp_root = Path(tmp_dir)
@@ -407,7 +432,11 @@ def _refresh_target(target: Crate2NixTarget) -> RefreshResult:
         return RefreshResult(cargo_nix=cargo_text, crate_hashes=hash_text)
 
 
-def crate2nix_artifact_updates(name: str) -> tuple[GeneratedArtifact, ...]:
+def crate2nix_artifact_updates(
+    name: str,
+    *,
+    source_overrides: dict[str, SourceEntry] | None = None,
+) -> tuple[GeneratedArtifact, ...]:
     """Return changed checked-in crate2nix artifacts for one target."""
     target = TARGETS.get(name)
     if target is None:
@@ -415,7 +444,11 @@ def crate2nix_artifact_updates(name: str) -> tuple[GeneratedArtifact, ...]:
     if _current_platform() not in target.supported_platforms:
         return ()
 
-    refreshed = _refresh_target(target)
+    refreshed = (
+        _refresh_target(target, source_overrides=source_overrides)
+        if source_overrides is not None
+        else _refresh_target(target)
+    )
     return tuple(
         artifact
         for artifact in (
@@ -430,6 +463,7 @@ async def stream_crate2nix_artifact_updates(
     name: str,
     *,
     operation: str = "materialize_artifacts",
+    source_overrides: dict[str, SourceEntry] | None = None,
 ) -> EventStream:
     """Emit normal updater events for checked-in crate2nix artifacts."""
     target = TARGETS.get(name)
@@ -464,7 +498,15 @@ async def stream_crate2nix_artifact_updates(
         ),
     )
 
-    artifacts = await asyncio.to_thread(crate2nix_artifact_updates, name)
+    artifacts = await (
+        asyncio.to_thread(
+            crate2nix_artifact_updates,
+            name,
+            source_overrides=source_overrides,
+        )
+        if source_overrides is not None
+        else asyncio.to_thread(crate2nix_artifact_updates, name)
+    )
     if artifacts:
         yield UpdateEvent.artifact(name, list(artifacts))
         yield UpdateEvent.status(
@@ -608,6 +650,7 @@ __all__ = [
     "_target_has_changes",
     "_write_target",
     "crate2nix_artifact_updates",
+    "load_normalizer",
     "run",
     "stream_crate2nix_artifact_updates",
 ]

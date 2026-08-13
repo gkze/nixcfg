@@ -11,7 +11,6 @@ facade for external imports and compatibility.
 
 from lib.update.ui_consumer import (
     ConsumeEventsOptions,
-    ConsumeEventsResult,
     EventConsumer,
     consume_events,
 )
@@ -26,7 +25,6 @@ from lib.update.ui_state import (
 
 __all__ = [
     "ConsumeEventsOptions",
-    "ConsumeEventsResult",
     "EventConsumer",
     "ItemMeta",
     "ItemState",

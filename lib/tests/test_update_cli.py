@@ -3,19 +3,20 @@
 import asyncio
 import json
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Protocol
 
 import pytest
 
-from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourcesFile
+from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
+from lib.tests._run_updates_helpers import drain_events, make_run_plan
+from lib.update.artifacts import GeneratedArtifact
 from lib.update.cli import (
     OutputOptions,
-    ResolvedTargets,
     UpdateOptions,
     UpdateSummary,
     _emit_summary,
-    _RunPlan,
     run_updates,
 )
 from lib.update.cli_inventory import (
@@ -26,6 +27,9 @@ from lib.update.cli_inventory import (
 )
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.persistence import merge_source_updates
+from lib.update.refs import FlakeInputRef
+from lib.update.source_runner import UpdatePhaseResult
+from lib.update.updaters import Updater
 
 
 class _MonkeyPatchLike(Protocol):
@@ -41,32 +45,31 @@ class _CaptureLike(Protocol):
     def readouterr(self) -> _CapturedOut: ...
 
 
+class _PassthroughUpdateWorkspace:
+    """Keep lower-level orchestration tests focused on their existing seam."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    def __enter__(self) -> _PassthroughUpdateWorkspace:
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        return None
+
+    def promote(self, _allowed: object) -> tuple[Path, ...]:
+        return ()
+
+
+def _use_passthrough_workspace(monkeypatch: _MonkeyPatchLike) -> None:
+    monkeypatch.setattr(
+        "lib.update.persistence.IsolatedUpdateWorkspace",
+        _PassthroughUpdateWorkspace,
+    )
+
+
 def _entry_with_hashes(*entries: HashEntry) -> SourceEntry:
     return SourceEntry(hashes=HashCollection(entries=list(entries)))
-
-
-def _demo_run_plan(*, dry_run: bool) -> _RunPlan:
-    resolved = ResolvedTargets(
-        all_source_names={"demo"},
-        all_ref_inputs=[],
-        all_ref_names=set(),
-        all_known_names={"demo"},
-        do_refs=False,
-        do_sources=True,
-        do_input_refresh=False,
-        dry_run=dry_run,
-        native_only=False,
-        ref_inputs=[],
-        source_names=["demo"],
-    )
-    return _RunPlan(
-        resolved=resolved,
-        tty_enabled=False,
-        show_phase_headers=False,
-        sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
-        item_meta={"demo": SimpleNamespace(name="demo", origin="x", op_order=())},
-        order=["demo"],
-    )
 
 
 def test_merge_source_updates_native_only_preserves_other_platform_hashes() -> None:
@@ -299,25 +302,15 @@ def test_run_updates_persists_before_derivation_validation_failure(
     capsys: _CaptureLike,
 ) -> None:
     """Finish persistence, then fail even a no-op update on broken evaluation."""
+    _use_passthrough_workspace(monkeypatch)
 
-    class _ValidatingUpdater:
+    class _ValidatingUpdater(Updater):
         derivation_validations = (
             DerivationValidation(installable=".#packages.demo.drvPath"),
         )
 
-    plan = _demo_run_plan(dry_run=False)
+    plan = make_run_plan(source_names=("demo",))
     events: list[str] = []
-
-    async def _consume(*_args: object, **_kwargs: object) -> SimpleNamespace:
-        queue = _args[0]
-        while await queue.get() is not None:
-            pass
-        return SimpleNamespace(
-            errors=0,
-            details={"demo": "no_change"},
-            source_updates={},
-            artifact_updates={},
-        )
 
     def _persist(**_kwargs: object) -> None:
         events.append("persist")
@@ -335,18 +328,25 @@ def test_run_updates_persists_before_derivation_validation_failure(
             stderr="error: attribute 'missing-member' missing",
         )
 
-    monkeypatch.setattr("lib.update.cli._build_run_plan", lambda _opts, _out: plan)
+    monkeypatch.setattr("lib.update.cli._build_run_plan", lambda _opts: plan)
     monkeypatch.setattr(
         "lib.update.cli._get_updaters", lambda: {"demo": _ValidatingUpdater}
     )
-    monkeypatch.setattr("lib.update.cli.consume_events", _consume)
+    monkeypatch.setattr("lib.update.cli.consume_events", drain_events)
     monkeypatch.setattr(
         "lib.update.source_runner.run_sources_phase",
-        lambda _context: asyncio.sleep(0),
+        lambda _context: asyncio.sleep(
+            0,
+            result=UpdatePhaseResult(details={"demo": "no_change"}),
+        ),
     )
     monkeypatch.setattr(
         "lib.update.persistence.persist_materialized_updates",
         _persist,
+    )
+    monkeypatch.setattr(
+        "lib.update.persistence.planned_update_paths",
+        lambda *_args, **_kwargs: (),
     )
     monkeypatch.setattr("subprocess.run", _run_nix_eval)
 
@@ -359,61 +359,157 @@ def test_run_updates_persists_before_derivation_validation_failure(
     assert "attribute 'missing-member' missing" in captured.err
 
 
-@pytest.mark.parametrize(
-    ("dry_run", "update_errors", "detail", "expected_exit"),
-    [
-        (True, 0, "updated", 0),
-        (False, 1, "error", 1),
-    ],
-)
-def test_run_updates_skips_derivation_validation_for_incomplete_runs(
+def test_run_updates_skips_derivation_validation_after_phase_errors(
     monkeypatch: _MonkeyPatchLike,
-    dry_run: bool,
-    update_errors: int,
-    detail: str,
-    expected_exit: int,
 ) -> None:
-    """Do not evaluate a dry-run or a tree left incomplete by update errors."""
+    """Do not evaluate a candidate tree left incomplete by update errors."""
+    _use_passthrough_workspace(monkeypatch)
 
-    class _ValidatingUpdater:
+    class _ValidatingUpdater(Updater):
         derivation_validations = (
             DerivationValidation(installable=".#packages.demo.drvPath"),
-        )
-
-    async def _consume(*_args: object, **_kwargs: object) -> SimpleNamespace:
-        queue = _args[0]
-        while await queue.get() is not None:
-            pass
-        return SimpleNamespace(
-            errors=update_errors,
-            details={"demo": detail},
-            source_updates={},
-            artifact_updates={},
         )
 
     def _unexpected_eval(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("incomplete update must not evaluate derivations")
 
-    plan = _demo_run_plan(dry_run=dry_run)
-    monkeypatch.setattr("lib.update.cli._build_run_plan", lambda _opts, _out: plan)
+    plan = make_run_plan(source_names=("demo",))
+    monkeypatch.setattr("lib.update.cli._build_run_plan", lambda _opts: plan)
     monkeypatch.setattr(
         "lib.update.cli._get_updaters", lambda: {"demo": _ValidatingUpdater}
     )
-    monkeypatch.setattr("lib.update.cli.consume_events", _consume)
+    monkeypatch.setattr("lib.update.cli.consume_events", drain_events)
     monkeypatch.setattr(
         "lib.update.source_runner.run_sources_phase",
-        lambda _context: asyncio.sleep(0),
+        lambda _context: asyncio.sleep(
+            0,
+            result=UpdatePhaseResult(details={"demo": "error"}),
+        ),
     )
     monkeypatch.setattr(
         "lib.update.persistence.persist_materialized_updates",
         lambda **_kwargs: None,
     )
+    monkeypatch.setattr(
+        "lib.update.persistence.planned_update_paths",
+        lambda *_args, **_kwargs: (),
+    )
     monkeypatch.setattr("subprocess.run", _unexpected_eval)
 
-    assert (
-        asyncio.run(run_updates(UpdateOptions(targets=("demo",), check=dry_run)))
-        == expected_exit
+    assert asyncio.run(run_updates(UpdateOptions(targets=("demo",)))) == 1
+
+
+def test_run_updates_preserves_phase_error_priority_and_skips_validation(
+    monkeypatch: _MonkeyPatchLike,
+    tmp_path: Path,
+) -> None:
+    """A later source success cannot hide a ref error or trigger validation."""
+    _use_passthrough_workspace(monkeypatch)
+    flake_nix = tmp_path / "flake.nix"
+    flake_lock = tmp_path / "flake.lock"
+    source_file = tmp_path / "packages" / "good" / "sources.json"
+    artifact_file = tmp_path / "packages" / "good" / "generated.nix"
+    flake_nix.write_text("flake before\n", encoding="utf-8")
+    flake_lock.write_text("lock before\n", encoding="utf-8")
+    ref = FlakeInputRef("demo", "owner", "repo", "v1", "github")
+    plan = make_run_plan(source_names=("demo", "good"), ref_inputs=(ref,))
+
+    async def _run_ref_phase(**_kwargs: object) -> UpdatePhaseResult:
+        flake_nix.write_text("flake after\n", encoding="utf-8")
+        flake_lock.write_text("lock after\n", encoding="utf-8")
+        return UpdatePhaseResult(details={"demo": "error"})
+
+    async def _run_sources_phase(_context: object) -> UpdatePhaseResult:
+        entry = SourceEntry(hashes={"x86_64-linux": "sha256-updated"})
+        return UpdatePhaseResult(
+            details={"demo": "updated", "good": "updated"},
+            source_updates={"demo": entry, "good": entry},
+            artifact_updates={
+                "good": (GeneratedArtifact.text(artifact_file, "generated\n"),)
+            },
+        )
+
+    def _persist(**_kwargs: object) -> tuple[Path, Path]:
+        source_file.parent.mkdir(parents=True, exist_ok=True)
+        source_file.write_text("source after\n", encoding="utf-8")
+        artifact_file.write_text("artifact after\n", encoding="utf-8")
+        return source_file, artifact_file
+
+    def _unexpected_validation(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("a phase error must skip derivation validation")
+
+    monkeypatch.setattr("lib.update.cli._build_run_plan", lambda _opts: plan)
+    monkeypatch.setattr("lib.update.cli.consume_events", drain_events)
+    monkeypatch.setattr("lib.update.source_runner.run_ref_phase", _run_ref_phase)
+    monkeypatch.setattr(
+        "lib.update.source_runner.run_sources_phase", _run_sources_phase
     )
+    monkeypatch.setattr(
+        "lib.update.persistence.get_repo_root",
+        lambda: tmp_path,
+    )
+    monkeypatch.setattr(
+        "lib.update.persistence.planned_update_paths",
+        lambda *_args, **_kwargs: (source_file, artifact_file),
+    )
+    monkeypatch.setattr("lib.update.persistence.persist_materialized_updates", _persist)
+    monkeypatch.setattr("lib.update.cli._get_updaters", dict)
+    monkeypatch.setattr(
+        "lib.update.derivation_validation.validate_derivations",
+        _unexpected_validation,
+    )
+
+    assert asyncio.run(run_updates(UpdateOptions(targets=("demo", "good")))) == 1
+
+
+def test_run_updates_closes_consumer_when_phase_raises(
+    monkeypatch: _MonkeyPatchLike,
+    tmp_path: Path,
+) -> None:
+    """Unexpected phase exceptions cannot strand the UI task."""
+    _use_passthrough_workspace(monkeypatch)
+    flake_nix = tmp_path / "flake.nix"
+    flake_lock = tmp_path / "flake.lock"
+    flake_nix.write_text("before\n", encoding="utf-8")
+    flake_lock.write_text("before\n", encoding="utf-8")
+    consumer_closed = False
+
+    async def _consume(
+        queue: asyncio.Queue[object | None],
+        *_args: object,
+        **_kwargs: object,
+    ) -> None:
+        nonlocal consumer_closed
+        while await queue.get() is not None:
+            pass
+        consumer_closed = True
+
+    async def _raise(_context: object) -> UpdatePhaseResult:
+        flake_lock.write_text("during phase\n", encoding="utf-8")
+        raise RuntimeError("phase crashed")
+
+    monkeypatch.setattr(
+        "lib.update.cli._build_run_plan",
+        lambda _opts: make_run_plan(
+            source_names=("demo",),
+            do_input_refresh=True,
+        ),
+    )
+    monkeypatch.setattr("lib.update.cli.consume_events", _consume)
+    monkeypatch.setattr("lib.update.source_runner.run_sources_phase", _raise)
+    monkeypatch.setattr(
+        "lib.update.persistence.get_repo_root",
+        lambda: tmp_path,
+    )
+    monkeypatch.setattr(
+        "lib.update.persistence.planned_update_paths",
+        lambda *_args, **_kwargs: (),
+    )
+
+    with pytest.raises(RuntimeError, match="phase crashed"):
+        asyncio.run(run_updates(UpdateOptions(targets=("demo",))))
+
+    assert consumer_closed
 
 
 def test_run_updates_json_validation_failure_is_machine_readable(
@@ -421,21 +517,11 @@ def test_run_updates_json_validation_failure_is_machine_readable(
     capsys: _CaptureLike,
 ) -> None:
     """Return one valid failure payload without human diagnostics in JSON mode."""
+    _use_passthrough_workspace(monkeypatch)
 
-    class _ValidatingUpdater:
+    class _ValidatingUpdater(Updater):
         derivation_validations = (
             DerivationValidation(installable=".#packages.demo.drvPath"),
-        )
-
-    async def _consume(*_args: object, **_kwargs: object) -> SimpleNamespace:
-        queue = _args[0]
-        while await queue.get() is not None:
-            pass
-        return SimpleNamespace(
-            errors=0,
-            details={"demo": "no_change"},
-            source_updates={},
-            artifact_updates={},
         )
 
     def _failed_eval(
@@ -449,19 +535,26 @@ def test_run_updates_json_validation_failure_is_machine_readable(
             stderr="error: package assembly is invalid",
         )
 
-    plan = _demo_run_plan(dry_run=False)
-    monkeypatch.setattr("lib.update.cli._build_run_plan", lambda _opts, _out: plan)
+    plan = make_run_plan(source_names=("demo",))
+    monkeypatch.setattr("lib.update.cli._build_run_plan", lambda _opts: plan)
     monkeypatch.setattr(
         "lib.update.cli._get_updaters", lambda: {"demo": _ValidatingUpdater}
     )
-    monkeypatch.setattr("lib.update.cli.consume_events", _consume)
+    monkeypatch.setattr("lib.update.cli.consume_events", drain_events)
     monkeypatch.setattr(
         "lib.update.source_runner.run_sources_phase",
-        lambda _context: asyncio.sleep(0),
+        lambda _context: asyncio.sleep(
+            0,
+            result=UpdatePhaseResult(details={"demo": "no_change"}),
+        ),
     )
     monkeypatch.setattr(
         "lib.update.persistence.persist_materialized_updates",
         lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "lib.update.persistence.planned_update_paths",
+        lambda *_args, **_kwargs: (),
     )
     monkeypatch.setattr("subprocess.run", _failed_eval)
 

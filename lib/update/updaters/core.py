@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
@@ -56,9 +55,6 @@ class FixedOutputHashStep:
     hash_type: HashType
     error: str
     expr: Callable[[dict[str, str]], str]
-    env: Callable[[dict[str, str], UpdateConfig], Mapping[str, str] | None] | None = (
-        None
-    )
 
 
 def _verify_platform_versions(versions: dict[str, str], source_name: str) -> str:
@@ -138,12 +134,17 @@ async def stream_url_hash_mapping(
     source_name: str,
     urls_by_key: Mapping[str, str],
     *,
+    config: UpdateConfig,
     error: str = "Missing hash output",
 ) -> EventStream:
     """Hash a keyed URL mapping while forwarding progress events."""
     hash_drain = ValueDrain[HashMapping]()
     async for event in drain_value_events(
-        update_process.compute_url_hashes(source_name, urls_by_key.values()),
+        update_process.compute_url_hashes(
+            source_name,
+            urls_by_key.values(),
+            config=config,
+        ),
         hash_drain,
         parse=expect_hash_mapping,
     ):
@@ -168,12 +169,10 @@ async def stream_fixed_output_hashes(
 
     for step in steps:
         hash_drain = ValueDrain[str]()
-        env = step.env(resolved_hashes, config) if step.env is not None else None
         async for event in drain_value_events(
             update_nix.compute_fixed_output_hash(
                 source_name,
                 step.expr(resolved_hashes),
-                env=env,
                 config=config,
             ),
             hash_drain,
@@ -187,25 +186,23 @@ async def stream_fixed_output_hashes(
     yield UpdateEvent.value(source_name, entries)
 
 
-def source_override_env(
+def _source_override(
     source_name: str,
     *,
     version: str,
     src_hash: str,
     dependency_hash_type: HashType,
     dependency_hash: str,
-) -> dict[str, str]:
-    """Build source override JSON for second-pass dependency hash evaluation."""
-    payload = {
-        source_name: {
-            "version": version,
-            "hashes": [
-                {"hashType": "srcHash", "hash": src_hash},
-                {"hashType": dependency_hash_type, "hash": dependency_hash},
-            ],
-        },
-    }
-    return {"UPDATE_SOURCE_OVERRIDES_JSON": json.dumps(payload)}
+) -> SourceEntry:
+    """Build the temporary source used by a second-pass dependency probe."""
+    _ = source_name
+    return SourceEntry(
+        version=version,
+        hashes=HashCollection.from_value([
+            HashEntry.create("srcHash", src_hash),
+            HashEntry.create(dependency_hash_type, dependency_hash),
+        ]),
+    )
 
 
 async def stream_source_then_overlay_hashes(
@@ -213,11 +210,11 @@ async def stream_source_then_overlay_hashes(
     *,
     version: str,
     src_expr: str,
-    overlay_expr: str,
     dependency_hash_type: HashType,
     config: UpdateConfig | None = None,
 ) -> EventStream:
     """Compute srcHash, then an overlay dependency hash using source overrides."""
+    config = resolve_active_config(config)
     async for event in stream_fixed_output_hashes(
         source_name,
         steps=(
@@ -229,13 +226,17 @@ async def stream_source_then_overlay_hashes(
             FixedOutputHashStep(
                 hash_type=dependency_hash_type,
                 error=f"Missing {dependency_hash_type} output",
-                expr=lambda _resolved: overlay_expr,
-                env=lambda resolved, active_config: source_override_env(
+                expr=lambda resolved: _build_overlay_expr(
                     source_name,
-                    version=version,
-                    src_hash=resolved["srcHash"],
-                    dependency_hash_type=dependency_hash_type,
-                    dependency_hash=active_config.fake_hash,
+                    source_overrides={
+                        source_name: _source_override(
+                            source_name,
+                            version=version,
+                            src_hash=resolved["srcHash"],
+                            dependency_hash_type=dependency_hash_type,
+                            dependency_hash=config.fake_hash,
+                        )
+                    },
                 ),
             ),
         ),
@@ -271,7 +272,6 @@ class SourceThenOverlayHashMixin:
             self.name,
             version=info.version,
             src_expr=self._src_expr(info.version),
-            overlay_expr=_build_overlay_expr(self.name),
             dependency_hash_type=self.dependency_hash_type,
             config=self.config,
         ):
@@ -293,11 +293,8 @@ class Updater(ABC):
     # Optional tuple of Nix system strings (for example ``"aarch64-darwin"``)
     # this updater may run on. ``None`` means "all platforms" (the default).
     # When set, ``update_stream`` short-circuits on other platforms before
-    # hitting the network or the Nix store; per-platform compute-hashes CI
-    # runners can use this to skip packages whose system constraints in
-    # ``packages/registry.nix`` exclude them, or whose remote source registry
-    # rejects the matrix runner's IP (as crates.io currently does for some
-    # GitHub Actions Linux runners).
+    # hitting the network or the Nix store. Keep this aligned with the package
+    # systems in ``packages/registry.nix`` and any upstream platform limits.
     supported_platforms: ClassVar[tuple[str, ...] | None] = None
 
     def __init__(self, *, config: UpdateConfig | None = None) -> None:
@@ -308,6 +305,11 @@ class Updater(ABC):
     def get_derivation_validations(cls) -> tuple[DerivationValidation, ...]:
         """Return optional post-persistence derivation validation metadata."""
         return cls.derivation_validations
+
+    @classmethod
+    def get_generated_artifact_files(cls) -> tuple[str, ...]:
+        """Return checked-in artifact paths this updater may materialize."""
+        return cls.generated_artifact_files
 
     @abstractmethod
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
@@ -405,7 +407,6 @@ class Updater(ABC):
         current: SourceEntry | None,
         session: aiohttp.ClientSession,
         *,
-        pinned_version: VersionInfo | None = None,
         context: UpdateContext | SourceEntry | None = None,
     ) -> EventStream:
         """Run fetch/check/hash/update flow and emit update events."""
@@ -425,38 +426,26 @@ class Updater(ABC):
                 return
         context = _coerce_context(context)
         context.current = current
-        if pinned_version is not None:
-            yield UpdateEvent.status(
-                self.name,
-                f"Using pinned version: {pinned_version.version}",
-                operation="check_version",
-                status=StatusInfo(
-                    kind=StatusKind.PINNED_VERSION,
-                    value=pinned_version.version,
-                ),
-            )
-            info = pinned_version
-        else:
-            yield UpdateEvent.status(
-                self.name,
-                f"Fetching latest {self.name} version...",
-                operation="check_version",
-            )
-            info = await _call_with_optional_context(
-                self.fetch_latest,
-                session,
-                context=context,
-            )
+        yield UpdateEvent.status(
+            self.name,
+            f"Fetching latest {self.name} version...",
+            operation="check_version",
+        )
+        info = await _call_with_optional_context(
+            self.fetch_latest,
+            session,
+            context=context,
+        )
 
-            yield UpdateEvent.status(
-                self.name,
-                f"Latest version: {info.version}",
-                operation="check_version",
-                status=StatusInfo(
-                    kind=StatusKind.LATEST_VERSION,
-                    value=info.version,
-                ),
-            )
+        yield UpdateEvent.status(
+            self.name,
+            f"Latest version: {info.version}",
+            operation="check_version",
+            status=StatusInfo(
+                kind=StatusKind.LATEST_VERSION,
+                value=info.version,
+            ),
+        )
         is_latest = await self._is_latest(context, info)
         if is_latest and not self.materialize_when_current:
             yield UpdateEvent.status(
@@ -662,6 +651,7 @@ class DownloadHashUpdater(Updater):
         async for event in stream_url_hash_mapping(
             self.name,
             platform_urls,
+            config=self.config,
         ):
             yield event
 

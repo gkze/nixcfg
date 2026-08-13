@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -46,13 +45,21 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
 
-def _build_deno_deps_expr(source: str, platform: str) -> str:
+def _build_deno_deps_expr(
+    source: str,
+    platform: str,
+    source_override: SourceEntry | None = None,
+) -> str:
     """Build a Nix expression that evaluates the overlay package for *platform*.
 
     Used by the deno deps flow which needs per-platform hash computation
     with per-run source entry overrides.
     """
-    return _build_overlay_expr(source, system=platform)
+    return _build_overlay_expr(
+        source,
+        system=platform,
+        source_overrides={source: source_override} if source_override else None,
+    )
 
 
 def _build_deno_hash_entries(
@@ -101,10 +108,10 @@ async def _compute_deno_deps_hash_for_platform(
     _input_name: str,
     platform: str,
     *,
-    env: Mapping[str, str] | None = None,
+    source_override: SourceEntry | None = None,
     config: UpdateConfig | None = None,
 ) -> EventStream:
-    expr = _build_deno_deps_expr(source, platform)
+    expr = _build_deno_deps_expr(source, platform, source_override)
     result_drain = ValueDrain[CommandResult]()
     async for event in drain_value_events(
         _run_fixed_output_build(
@@ -115,7 +122,6 @@ async def _compute_deno_deps_hash_for_platform(
                     "Expected nix build to fail with hash mismatch "
                     f"for {platform}, but it succeeded"
                 ),
-                env=env,
                 config=config,
             ),
         ),
@@ -145,11 +151,6 @@ def _try_platform_hash_event(event: UpdateEvent) -> tuple[str, str] | None:
         if isinstance(first, str) and isinstance(second, str):
             return first, second
     return None
-
-
-def _build_source_override_env(source: str, entry: SourceEntry) -> dict[str, str]:
-    payload = json.dumps({source: entry.to_dict()})
-    return {"UPDATE_SOURCE_OVERRIDES_JSON": payload}
 
 
 def _existing_platform_hashes(original_entry: SourceEntry | None) -> dict[str, str]:
@@ -205,7 +206,7 @@ async def _process_platform_hash(
             context.source,
             context.input_name,
             platform_name,
-            env=_build_source_override_env(context.source, temp_entry),
+            source_override=temp_entry,
             config=context.config,
         ):
             payload = _try_platform_hash_event(event)
@@ -236,9 +237,9 @@ async def compute_deno_deps_hash(
 ) -> EventStream:
     """Compute Deno dependency hashes across configured platforms.
 
-    Nix reads per-package ``sources.json`` values during evaluation, so we
-    pass per-platform temporary overrides via ``UPDATE_SOURCE_OVERRIDES_JSON``
-    instead of mutating tracked ``sources.json`` files on disk.
+    Nix reads per-package ``sources.json`` values during evaluation, so each
+    expression receives a temporary source override without mutating tracked
+    files on disk.
     """
     config = resolve_active_config(config)
     current_platform = get_current_nix_platform()

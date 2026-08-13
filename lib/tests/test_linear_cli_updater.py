@@ -194,7 +194,8 @@ def test_linear_cli_fetch_hashes_forwards_events_and_emits_sorted_entries(
     async def _resolve_deno_version() -> str:
         return "2.3.4"
 
-    async def _compute_url_hashes(name: str, urls) -> object:
+    async def _compute_url_hashes(name: str, urls, *, config: object) -> object:
+        assert config is updater.config
         url_list = list(urls)
         assert name == "linear-cli"
         assert url_list == [
@@ -258,7 +259,8 @@ def test_linear_cli_fetch_hashes_retries_transient_manifest_failure(
     async def _resolve_deno_version() -> str:
         return "2.3.4"
 
-    async def _compute_url_hashes(name: str, urls) -> object:
+    async def _compute_url_hashes(name: str, urls, *, config: object) -> object:
+        assert config is updater.config
         url_list = list(urls)
         yield UpdateEvent.value(
             name,
@@ -315,8 +317,8 @@ def test_linear_cli_fetch_hashes_requires_denort_hash_mapping(monkeypatch) -> No
     async def _resolve_deno_version() -> str:
         return "2.3.4"
 
-    async def _compute_url_hashes(name: str, urls) -> object:
-        _ = (name, list(urls))
+    async def _compute_url_hashes(name: str, urls, *, config: object) -> object:
+        _ = (name, list(urls), config)
         yield UpdateEvent.status("linear-cli", "hashing denort")
 
     monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)
@@ -343,8 +345,8 @@ def test_linear_cli_fetch_hashes_rejects_non_mapping_hash_payload(monkeypatch) -
     async def _resolve_deno_version() -> str:
         return "2.3.4"
 
-    async def _compute_url_hashes(name: str, urls) -> object:
-        _ = (name, list(urls))
+    async def _compute_url_hashes(name: str, urls, *, config: object) -> object:
+        _ = (name, list(urls), config)
         yield UpdateEvent.value("linear-cli", "not-a-mapping")
 
     monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)

@@ -12,6 +12,7 @@ from lib.schema_codegen.runner import (
     generate_schema_codegen_target,
     list_schema_codegen_targets,
     load_schema_codegen_config,
+    verify_schema_codegen_target,
 )
 
 __all__ = [
@@ -23,5 +24,6 @@ __all__ = [
     "load_codegen_manifest",
     "load_schema_codegen_config",
     "render_codegen_lockfile",
+    "verify_schema_codegen_target",
     "write_codegen_lockfile",
 ]

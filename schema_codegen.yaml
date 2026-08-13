@@ -24,9 +24,12 @@ sources:
     include:
       - "*.json"
     format: json
-# Nix's vendored JSON schemas are intentionally generated through
-# nixcfg schema codegen / lib.nix.schemas._codegen; keep this declarative
-# config focused on the schema_codegen models.
+  nix-schemas:
+    kind: directory
+    path: lib/nix/schemas
+    include:
+      - "*.yaml"
+    format: yaml
 registry_profiles:
   local-relative:
     resource:
@@ -50,5 +53,45 @@ targets:
     prepare:
       dereference: inline-refs
       merge_ref_siblings: false
+      python_transforms:
+        - rewrite-constr-annotations
+        - normalize-pydantic-imports
     generator:
       output: lib/schema_codegen/models/_generated.py
+  nix-schema-models:
+    sources:
+      - nix-schemas
+    registry_profile: local-relative
+    entrypoints:
+      - ./hash-v1.yaml
+      - ./store-path-v1.yaml
+      - ./content-address-v1.yaml
+      - ./file-system-object-v1.yaml
+      - ./build-trace-entry-v2.yaml
+      - ./build-result-v1.yaml
+      - ./deriving-path-v1.yaml
+      - ./derivation-v4.yaml
+      - ./derivation-options-v1.yaml
+      - ./store-object-info-v2.yaml
+    header:
+      description: Auto-generated Pydantic models from Nix JSON schemas.
+      regenerate_command: python -m lib.nix.schemas._codegen
+    prepare:
+      dereference: inline-refs
+      merge_ref_siblings: true
+      preserve_root_ref: true
+      recursive_ref: as-object
+      schema_transforms:
+        - inline-mergeable-allof
+        - const-null-to-type-null
+        - drop-description
+      python_transforms:
+        - rewrite-constr-annotations
+        - normalize-pydantic-imports
+    generator:
+      output: lib/nix/models/_generated.py
+      use_exact_imports: false
+      use_schema_description: false
+      use_field_description: false
+      use_one_literal_as_default: true
+      use_default_kwarg: true

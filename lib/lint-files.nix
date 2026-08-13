@@ -6,8 +6,7 @@ let
   pythonRuntimeSensitiveHelpers = [
     "lib/crate2nix_tauri_env_rewrite.py"
     "lib/nix/schemas/_fetch.py"
-    "lib/update/ci/build_shared_closure.py"
-    "lib/update/ci/profile_generations.py"
+    "lib/update/persistence.py"
     "lib/update/updaters/_sourcefile.py"
     "packages/sculptor/updater.py"
   ];
@@ -135,7 +134,7 @@ in
   markdown = {
     regex = "\\.md$";
     globs = [ "*.md" ];
-    excludeGlobs = [ ".github/workflows/update-self-heal.md" ];
+    excludeGlobs = [ ];
   };
 
   protobuf = {

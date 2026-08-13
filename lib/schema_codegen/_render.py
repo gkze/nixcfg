@@ -29,9 +29,21 @@ class _DataModelCodeGeneratorConfigModule(Protocol):
 
 
 class _DataModelCodeGeneratorModule(Protocol):
+    PythonVersion: type
+
     def generate(
         self, source: Path | str | object, *, config: object
     ) -> str | None | object: ...
+
+
+class _CodeFormatterLike(Protocol):
+    def format_code(self, code: str) -> str: ...
+
+
+class _DataModelCodeGeneratorFormatModule(Protocol):
+    Formatter: type
+
+    def CodeFormatter(self, **kwargs: object) -> _CodeFormatterLike: ...  # noqa: N802
 
 
 _rewrite_constr_type_hints = codegen_utils.rewrite_constr_type_hints
@@ -250,6 +262,57 @@ def apply_python_transforms(code: str, *, target: CodegenTarget) -> str:
     if PythonTransform.NORMALIZE_PYDANTIC_IMPORTS in transforms:
         code = _normalize_pydantic_imports(code)
     return code
+
+
+def format_generated_python(
+    code: str,
+    *,
+    generator_options: dict[str, object],
+) -> str:
+    """Apply configured formatters once to the fully composed model module."""
+    formatter_values = cast("list[object]", generator_options.get("formatters", []))
+    if not formatter_values:
+        return code
+    datamodel_code_generator = cast(
+        "_DataModelCodeGeneratorModule",
+        _import_optional("datamodel_code_generator", feature="schema code generation"),
+    )
+    format_module = cast(
+        "_DataModelCodeGeneratorFormatModule",
+        _import_optional(
+            "datamodel_code_generator.format",
+            feature="schema code generation",
+        ),
+    )
+    python_version = datamodel_code_generator.PythonVersion(
+        str(generator_options.get("target_python_version", "3.10"))
+    )
+    formatters = [format_module.Formatter(str(value)) for value in formatter_values]
+    return format_module.CodeFormatter(
+        python_version=python_version,
+        settings_path=cast("Path | None", generator_options.get("settings_path")),
+        wrap_string_literal=cast(
+            "bool | None", generator_options.get("wrap_string_literal")
+        ),
+        skip_string_normalization=not bool(
+            generator_options.get("use_double_quotes", False)
+        ),
+        custom_formatters=cast(
+            "list[str] | None", generator_options.get("custom_formatters")
+        ),
+        custom_formatters_kwargs=cast(
+            "dict[str, object] | None",
+            generator_options.get("custom_formatters_kwargs"),
+        ),
+        encoding=str(generator_options.get("encoding", "utf-8")),
+        formatters=formatters,
+        builtin_format_line_length=cast(
+            "int | None", generator_options.get("builtin_format_line_length")
+        ),
+        use_type_checking_imports=bool(
+            generator_options.get("use_type_checking_imports", True)
+        ),
+    ).format_code(code)
 
 
 def _map_generator_options(options: dict[str, object]) -> object:

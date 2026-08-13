@@ -17,6 +17,7 @@ from lib.schema_codegen.config import (
     DereferenceMode,
     DirectorySource,
     LoadedSchemaCodegenConfig,
+    RecursiveRefMode,
     RegistryConfig,
     ResourceConfig,
     RetrieveConfig,
@@ -440,6 +441,8 @@ def test_inline_references_merges_ref_siblings() -> None:
     resolved = _prepare._inline_references(
         {"$ref": "#/defs/name", "description": "preferred display name"},
         merge_ref_siblings=True,
+        preserve_root_ref=False,
+        recursive_ref=RecursiveRefMode.ERROR,
         resolver=resolver,
         stack=(),
     )

@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from lib.import_utils import load_module_from_path
+from lib.nix import schemas as nix_schemas
+from lib.nix.schemas import _codegen as nix_schema_codegen
 from lib.schema_codegen import runner as codegen_runner
 from lib.schema_codegen.config import (
     DirectorySource,
@@ -25,6 +28,7 @@ from lib.schema_codegen.runner import (
     generate_schema_codegen_target,
     list_schema_codegen_targets,
     load_schema_codegen_config,
+    verify_schema_codegen_target,
 )
 
 
@@ -81,17 +85,60 @@ targets:
 
 
 def test_list_schema_codegen_targets_reads_repo_config() -> None:
-    """Load the checked-in config and expose the initial targets."""
+    """Load the checked-in config and expose every generated model target."""
     summaries = list_schema_codegen_targets(config_path=default_config_path())
 
     assert [summary.name for summary in summaries] == [
         "codegen-manifest-models",
+        "nix-schema-models",
     ]
     assert str(summaries[0].output).endswith("lib/schema_codegen/models/_generated.py")
-    assert all(
-        not str(summary.output).endswith("lib/nix/models/_generated.py")
-        for summary in summaries
+    assert str(summaries[1].output).endswith("lib/nix/models/_generated.py")
+
+
+def test_repo_nix_schema_models_are_fresh() -> None:
+    """Keep the declarative Nix schema target byte-identical to its output."""
+    assert verify_schema_codegen_target(
+        config_path=default_config_path(),
+        target_name="nix-schema-models",
     )
+
+
+def test_nix_schema_codegen_compatibility_aliases_declarative_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the historical module command as a thin declarative alias."""
+    calls: list[tuple[str, object]] = []
+    progress = calls.append
+
+    def _generate(*, target_name: str, progress: object) -> Path:
+        calls.append((target_name, progress))
+        return Path("generated.py")
+
+    def _verify(*, target_name: str, progress: object) -> bool:
+        calls.append((target_name, progress))
+        return True
+
+    monkeypatch.setattr(
+        nix_schemas,
+        "generate_schema_codegen_target",
+        _generate,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        nix_schemas,
+        "verify_schema_codegen_target",
+        _verify,
+        raising=False,
+    )
+
+    assert nix_schema_codegen.main is nix_schemas.codegen_main
+    nix_schemas.codegen_main(progress=progress)
+    assert nix_schemas.verify_generated_models(progress=progress)
+    assert calls == [
+        ("nix-schema-models", progress),
+        ("nix-schema-models", progress),
+    ]
 
 
 def test_load_schema_codegen_config_resolves_explicit_paths_from_cwd(
@@ -223,6 +270,111 @@ targets:
     assert output_path == (tmp_path / "generated.py").resolve()
     assert "class Person" in rendered
     assert "age:" in rendered
+
+
+def test_verify_schema_codegen_target_is_check_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Compare a fresh render without rewriting the committed target."""
+    output = tmp_path / "models.py"
+    output.write_text("current\n", encoding="utf-8")
+    loaded = object()
+    target = SimpleNamespace(generator_options={"output": output})
+    monkeypatch.setattr(
+        codegen_runner, "load_schema_codegen_config", lambda **_: loaded
+    )
+    monkeypatch.setattr(codegen_runner, "_resolve_target", lambda *_args, **_: target)
+    monkeypatch.setattr(
+        codegen_runner,
+        "_render_schema_codegen_target",
+        lambda *_args, **_: "current\n",
+    )
+    assert verify_schema_codegen_target(target_name="demo") is True
+    assert output.read_text(encoding="utf-8") == "current\n"
+
+    monkeypatch.setattr(
+        codegen_runner,
+        "_render_schema_codegen_target",
+        lambda *_args, **_: "stale\n",
+    )
+    progress: list[str] = []
+    assert (
+        verify_schema_codegen_target(target_name="demo", progress=progress.append)
+        is False
+    )
+    assert "generated:demo" in progress[-1]
+    assert output.read_text(encoding="utf-8") == "current\n"
+
+    output.unlink()
+    assert (
+        verify_schema_codegen_target(target_name="demo", progress=progress.append)
+        is False
+    )
+    assert progress[-1] == f"Missing generated models: {output}"
+
+
+def test_composed_generated_models_receive_final_formatting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Format the combined model after transforms introduce new long lines."""
+    formatted = "formatted\n"
+    seen: dict[str, object] = {}
+    imported: list[str] = []
+
+    class _Formatter:
+        def __init__(self, **kwargs: object) -> None:
+            seen["kwargs"] = kwargs
+
+        def format_code(self, code: str) -> str:
+            seen["code"] = code
+            return formatted
+
+    def _import_optional(name: str, *, feature: str) -> object:
+        assert feature == "schema code generation"
+        imported.append(name)
+        if name == "datamodel_code_generator":
+            return SimpleNamespace(PythonVersion=lambda value: f"python:{value}")
+        if name == "datamodel_code_generator.format":
+            return SimpleNamespace(
+                CodeFormatter=_Formatter,
+                Formatter=lambda value: f"formatter:{value}",
+            )
+        raise AssertionError(name)
+
+    monkeypatch.setattr(codegen_runner._render, "_import_optional", _import_optional)
+    assert (
+        codegen_runner._render.format_generated_python(
+            "already formatted\n",
+            generator_options={},
+        )
+        == "already formatted\n"
+    )
+    assert imported == []
+
+    assert (
+        codegen_runner._render.format_generated_python(
+            "unformatted\n",
+            generator_options={
+                "target_python_version": "3.14",
+                "formatters": ["ruff-format", "ruff-check"],
+            },
+        )
+        == formatted
+    )
+    assert seen["code"] == "unformatted\n"
+    assert seen["kwargs"] == {
+        "builtin_format_line_length": None,
+        "custom_formatters": None,
+        "custom_formatters_kwargs": None,
+        "encoding": "utf-8",
+        "formatters": ["formatter:ruff-format", "formatter:ruff-check"],
+        "python_version": "python:3.14",
+        "settings_path": None,
+        "skip_string_normalization": True,
+        "use_type_checking_imports": True,
+        "wrap_string_literal": None,
+    }
 
 
 def test_read_url_source_uses_extended_github_token_resolution(

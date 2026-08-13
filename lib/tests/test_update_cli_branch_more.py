@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import aiohttp
@@ -20,9 +19,7 @@ from lib.update.cli import (
     _build_run_plan,
     _build_update_options,
     _emit_summary,
-    _execute_run_plan,
     _is_tty,
-    _RunPlan,
     run_update_command,
 )
 from lib.update.cli_inventory import (
@@ -52,10 +49,12 @@ from lib.update.source_runner import (
     run_sources_phase,
     update_source_task,
 )
-from lib.update.updaters import DenoDepsHashUpdater, UpdateContext, VersionInfo
+from lib.update.updaters import DenoDepsHashUpdater, UpdateContext
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from lib.update.ui_state import SummaryStatus
 
 
 def _run[T](awaitable: object) -> T:
@@ -380,10 +379,8 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
             self,
             current: SourceEntry | None,
             session: aiohttp.ClientSession,
-            *,
-            pinned_version: VersionInfo | None = None,
         ) -> AsyncIterator[UpdateEvent]:
-            _ = (current, session, pinned_version)
+            _ = (current, session)
             yield UpdateEvent.status("demo", "updated")
             yield UpdateEvent.result("demo")
 
@@ -437,9 +434,10 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
         queue: asyncio.Queue[UpdateEvent | None],
         *,
         options: object | None = None,
-    ) -> None:
+    ) -> SummaryStatus:
         _ = (session, options)
         await queue.put(UpdateEvent.status(input_ref.name, "ref phase"))
+        return "no_change"
 
     monkeypatch.setattr("lib.update.refs.update_refs_task", _update_ref)
 
@@ -488,7 +486,6 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
                 update_input=False,
                 native_only=False,
                 config=resolve_config(),
-                pinned={},
             )
         )
     )
@@ -513,10 +510,9 @@ def test_update_source_task_collects_artifact_events(
             current: SourceEntry | None,
             session: aiohttp.ClientSession,
             *,
-            pinned_version: VersionInfo | None = None,
             context: UpdateContext | None = None,
         ) -> AsyncIterator[UpdateEvent]:
-            _ = (current, session, pinned_version)
+            _ = (current, session)
             if context is None:
                 raise AssertionError
             seen_contexts.append(context)
@@ -602,12 +598,50 @@ def test_run_sources_phase_serializes_when_max_nix_builds_is_one(
                 update_input=False,
                 native_only=False,
                 config=resolve_config(max_nix_builds=1),
-                pinned={},
             )
         )
     )
 
     assert max_active == 1
+
+
+def test_run_sources_phase_returns_authoritative_domain_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Callers receive updates and failures without reconstructing them in the UI."""
+    updated_entry = SourceEntry(version="2.0.0", hashes={})
+
+    async def _update_source(
+        name: str, *, context: SourceTaskContext
+    ) -> SourceTaskResult:
+        _ = context
+        if name == "failed":
+            return SourceTaskResult(completed=False)
+        return SourceTaskResult(completed=True, source_update=updated_entry)
+
+    monkeypatch.setattr("lib.update.source_runner.update_source_task", _update_source)
+
+    result = _run(
+        run_sources_phase(
+            SourcesPhaseContext(
+                source_names=["updated", "failed"],
+                sources=SourcesFile(
+                    entries={
+                        "updated": SourceEntry(version="1.0.0", hashes={}),
+                        "failed": SourceEntry(version="1.0.0", hashes={}),
+                    }
+                ),
+                queue=asyncio.Queue(),
+                update_input=False,
+                native_only=False,
+                config=resolve_config(),
+            )
+        )
+    )
+
+    assert result.details == {"updated": "updated", "failed": "error"}
+    assert result.source_updates == {"updated": updated_entry}
+    assert result.errors == 1
 
 
 def test_run_sources_phase_bounds_concurrent_tasks_within_wave(
@@ -644,7 +678,6 @@ def test_run_sources_phase_bounds_concurrent_tasks_within_wave(
                 update_input=False,
                 native_only=False,
                 config=resolve_config(max_nix_builds=2),
-                pinned={},
             )
         )
     )
@@ -668,10 +701,8 @@ def test_run_sources_phase_serializes_flake_input_refreshes(
             self,
             current: SourceEntry | None,
             session: aiohttp.ClientSession,
-            *,
-            pinned_version: VersionInfo | None = None,
         ) -> AsyncIterator[UpdateEvent]:
-            _ = (current, session, pinned_version)
+            _ = (current, session)
             yield UpdateEvent.result("first")
 
     class _SecondUpdater(_FirstUpdater):
@@ -681,10 +712,8 @@ def test_run_sources_phase_serializes_flake_input_refreshes(
             self,
             current: SourceEntry | None,
             session: aiohttp.ClientSession,
-            *,
-            pinned_version: VersionInfo | None = None,
         ) -> AsyncIterator[UpdateEvent]:
-            _ = (current, session, pinned_version)
+            _ = (current, session)
             yield UpdateEvent.result("second")
 
     active_refreshes = 0
@@ -724,7 +753,6 @@ def test_run_sources_phase_serializes_flake_input_refreshes(
                 update_input=True,
                 native_only=False,
                 config=resolve_config(max_nix_builds=2),
-                pinned={},
             )
         )
     )
@@ -800,7 +828,6 @@ def test_run_sources_phase_passes_companion_state_between_waves(
                 update_input=False,
                 native_only=native_only,
                 config=resolve_config(),
-                pinned={},
             )
         )
     )
@@ -855,7 +882,6 @@ def test_run_sources_phase_skips_companions_after_failed_parent(
                 update_input=False,
                 native_only=False,
                 config=resolve_config(),
-                pinned={},
             )
         )
         events: list[UpdateEvent] = []
@@ -885,10 +911,8 @@ def test_update_source_task_dedupes_shared_input_refreshes(
             self,
             current: SourceEntry | None,
             session: aiohttp.ClientSession,
-            *,
-            pinned_version: VersionInfo | None = None,
         ) -> AsyncIterator[UpdateEvent]:
-            _ = (current, session, pinned_version)
+            _ = (current, session)
             yield UpdateEvent.result("demo")
 
     async def _run_queue_task(
@@ -988,10 +1012,8 @@ def test_update_source_task_refreshes_additional_inputs_before_updater(
             self,
             current: SourceEntry | None,
             session: aiohttp.ClientSession,
-            *,
-            pinned_version: VersionInfo | None = None,
         ) -> AsyncIterator[UpdateEvent]:
-            _ = (current, session, pinned_version)
+            _ = (current, session)
             calls.append("update")
             yield UpdateEvent.result("zed-editor-nightly")
 
@@ -1059,10 +1081,8 @@ def test_update_source_task_sets_native_only_for_deno_updater(
             self,
             current: SourceEntry | None,
             session: aiohttp.ClientSession,
-            *,
-            pinned_version: VersionInfo | None = None,
         ) -> AsyncIterator[UpdateEvent]:
-            _ = (current, session, pinned_version)
+            _ = (current, session)
             yield UpdateEvent.result("demo")
 
     async def _run_queue_task(
@@ -1127,10 +1147,8 @@ def test_update_source_task_skips_input_update_when_disabled(
             self,
             current: SourceEntry | None,
             session: aiohttp.ClientSession,
-            *,
-            pinned_version: VersionInfo | None = None,
         ) -> AsyncIterator[UpdateEvent]:
-            _ = (current, session, pinned_version)
+            _ = (current, session)
             yield UpdateEvent.result("demo")
 
     async def _run_queue_task(
@@ -1233,125 +1251,13 @@ def test_persist_updates_and_build_plan_edge_paths(
 
     monkeypatch.setattr("lib.update.cli.UPDATERS", {})
     monkeypatch.setattr("lib.update.cli.get_flake_inputs_with_refs", list)
-    plan = _build_run_plan(
-        UpdateOptions(), OutputOptions(json_output=False, quiet=True)
-    )
-    assert plan == 0
+    assert _build_run_plan(UpdateOptions()) is None
 
 
-def test_execute_run_plan_branches_and_run_update_command_source_ref_check(
+def test_run_update_command_source_ref_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cover phase-header false branches and source-specific flake-edit detection."""
-    resolved = ResolvedTargets(
-        all_source_names={"src"},
-        all_ref_inputs=[
-            FlakeInputRef(
-                name="inp", owner="o", repo="r", ref="v1", input_type="github"
-            )
-        ],
-        all_ref_names={"inp"},
-        all_known_names={"src", "inp"},
-        do_refs=True,
-        do_sources=True,
-        do_input_refresh=True,
-        dry_run=False,
-        native_only=False,
-        ref_inputs=[
-            FlakeInputRef(
-                name="inp", owner="o", repo="r", ref="v1", input_type="github"
-            )
-        ],
-        source_names=["src"],
-    )
-    plan = _RunPlan(
-        resolved=resolved,
-        tty_enabled=False,
-        show_phase_headers=False,
-        sources=SourcesFile(entries={"src": SourceEntry(hashes={})}),
-        item_meta={"src": SimpleNamespace(name="src", origin="x", op_order=())},
-        order=["src"],
-    )
-
-    phase_calls: list[str] = []
-
-    async def _consume(
-        queue: asyncio.Queue[UpdateEvent | None],
-        _order: list[str],
-        _sources: SourcesFile,
-        *,
-        options: object,
-    ) -> SimpleNamespace:
-        _ = options
-        while await queue.get() is not None:
-            pass
-        return SimpleNamespace(
-            updated=False,
-            errors=0,
-            details={"src": "no_change"},
-            source_updates={},
-            artifact_updates={},
-        )
-
-    async def _run_ref_phase(**_kwargs: object) -> None:
-        phase_calls.append("refs")
-
-    async def _run_sources_phase(context: object) -> None:
-        _ = context
-        phase_calls.append("sources")
-
-    monkeypatch.setattr("lib.update.cli.consume_events", _consume)
-    monkeypatch.setattr("lib.update.source_runner.run_ref_phase", _run_ref_phase)
-    monkeypatch.setattr(
-        "lib.update.source_runner.run_sources_phase", _run_sources_phase
-    )
-    monkeypatch.setattr(
-        "lib.update.persistence.persist_materialized_updates",
-        lambda **_kwargs: None,
-    )
-
-    cfg = resolve_config()
-    code = _run(
-        _execute_run_plan(
-            UpdateOptions(), OutputOptions(json_output=False, quiet=True), cfg, plan
-        )
-    )
-    assert code == 0
-    assert phase_calls == ["refs", "sources"]
-
-    # Skip refs/sources branches in execute plan.
-    phase_calls.clear()
-    skip_plan = _RunPlan(
-        resolved=ResolvedTargets(
-            all_source_names=set(),
-            all_ref_inputs=[],
-            all_ref_names=set(),
-            all_known_names=set(),
-            do_refs=False,
-            do_sources=False,
-            do_input_refresh=False,
-            dry_run=False,
-            native_only=False,
-            ref_inputs=[],
-            source_names=[],
-        ),
-        tty_enabled=False,
-        show_phase_headers=False,
-        sources=SourcesFile(entries={}),
-        item_meta={},
-        order=[],
-    )
-    code = _run(
-        _execute_run_plan(
-            UpdateOptions(),
-            OutputOptions(json_output=False, quiet=True),
-            cfg,
-            skip_plan,
-        )
-    )
-    assert code == 0
-    assert phase_calls == []
-
+    """Require flake-edit only when the selected target needs ref updates."""
     seen: dict[str, object] = {}
 
     def _check_required_tools(**kwargs: object) -> list[str]:
@@ -1372,3 +1278,7 @@ def test_execute_run_plan_branches_and_run_update_command_source_ref_check(
     )
     assert run_update_command(source="src") == 0
     assert seen["include_flake_edit"] is False
+
+    seen.clear()
+    assert run_update_command(check=True) == 0
+    assert seen["include_flake_edit"] is True

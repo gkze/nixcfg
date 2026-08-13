@@ -217,7 +217,13 @@ def test_download_and_hash_entry_branch_yields(monkeypatch: pytest.MonkeyPatch) 
     info = VersionInfo(version="1", metadata={})
     assert updater.get_download_url("x86_64-linux", info) == "https://example.com/a"
 
-    async def _hashes(_source_name: str, _urls: object) -> AsyncIterator[UpdateEvent]:
+    async def _hashes(
+        _source_name: str,
+        _urls: object,
+        *,
+        config: object,
+    ) -> AsyncIterator[UpdateEvent]:
+        assert config is updater.config
         yield UpdateEvent.status("download-no-base", "computing")
         yield UpdateEvent.value("download-no-base", {"https://example.com/a": HASH_A})
 

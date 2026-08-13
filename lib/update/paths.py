@@ -61,14 +61,6 @@ def find_root(start: os.PathLike[str] | str | None = None) -> Path:
 cast("_CacheClearable", find_root).cache_clear = _clear_root_cache
 
 
-def find_repo_root(start: os.PathLike[str] | str | None = None) -> Path:
-    """Compatibility wrapper around :func:`find_root`."""
-    return find_root(start)
-
-
-cast("_CacheClearable", find_repo_root).cache_clear = _clear_root_cache
-
-
 def get_repo_root() -> Path:
     """Return the current repository root."""
     return find_root()
@@ -141,33 +133,7 @@ REPO_ROOT: Path = cast("Path", _RepoPathProxy())
 PACKAGE_DIRS = ("packages", "overlays")
 
 SOURCES_FILE_NAME = "sources.json"
-
-
-def package_file_git_pathspecs(filename: str) -> tuple[str, ...]:
-    """Return git pathspecs for directory and flat per-package files."""
-    return tuple(
-        pathspec
-        for directory in PACKAGE_DIRS
-        for pathspec in (
-            f":(glob){directory}/**/{filename}",
-            f":(glob){directory}/*.{filename}",
-        )
-    )
-
-
-SOURCES_GIT_PATHSPECS = package_file_git_pathspecs(SOURCES_FILE_NAME)
-
-
-def is_package_file_path(relative_path: str, filename: str) -> bool:
-    """Return whether a relative path matches per-package file layouts."""
-    if not any(relative_path.startswith(f"{directory}/") for directory in PACKAGE_DIRS):
-        return False
-    return relative_path.endswith((f"/{filename}", f".{filename}"))
-
-
-def is_sources_file_path(relative_path: str) -> bool:
-    """Return whether a relative path points at a per-package sources file."""
-    return is_package_file_path(relative_path, SOURCES_FILE_NAME)
+UPDATER_FILE_NAME = "updater.py"
 
 
 def get_repo_file(filename: str) -> Path:
@@ -274,6 +240,16 @@ def package_file_for(name: str, filename: str) -> Path | None:
     return package_file_map(filename).get(name)
 
 
+def sources_file_for_updater(updater_path: Path, name: str) -> Path:
+    """Return the source sidecar matching an updater's directory or flat layout."""
+    filename = (
+        SOURCES_FILE_NAME
+        if updater_path.name == UPDATER_FILE_NAME
+        else f"{name}.{SOURCES_FILE_NAME}"
+    )
+    return updater_path.with_name(filename)
+
+
 def package_dirs_for_in(root: Path, name: str) -> list[Path]:
     """Return matching package directories for ``name`` under ``root``."""
     resolved_root = root.resolve()
@@ -306,6 +282,14 @@ def package_dir_for_in(root: Path, name: str) -> Path | None:
 def package_dir_for(name: str) -> Path | None:
     """Return the unique package directory for ``name`` or ``None``."""
     return _unique_package_dir_for(get_repo_root(), name)
+
+
+def updater_dir_for(name: str) -> Path | None:
+    """Return the directory owning a named directory-layout updater sidecar."""
+    updater_path = package_file_for(name, UPDATER_FILE_NAME)
+    if updater_path is None or updater_path.name != UPDATER_FILE_NAME:
+        return None
+    return updater_path.parent
 
 
 def sources_file_for(name: str) -> Path | None:

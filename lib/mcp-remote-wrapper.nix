@@ -53,7 +53,7 @@ let
         --header "Authorization: Bearer $token"
       )
       ${concatMapStringsSep "\n      " (header: "args+=(--header ${escapeShellArg header})") extraHeaders}
-      exec ${bunxExe} --bun mcp-remote@latest "''${args[@]}"
+      exec ${bunxExe} --bun mcp-remote@0.1.38 "''${args[@]}"
     '';
 in
 {

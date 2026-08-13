@@ -9,3 +9,8 @@ class EmdashUpdater(NpmDepsHashUpdater):
 
     name = "emdash"
     platform_specific = True
+    supported_platforms = (
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-linux",
+    )

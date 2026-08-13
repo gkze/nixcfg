@@ -56,22 +56,7 @@ let
     bundleName: executableName:
     if executableName == null then prev.lib.removeSuffix ".app" bundleName else executableName;
 
-  # Symlink the bundle's main executable into $out/bin, failing loudly when
-  # the expected executable is missing from the installed bundle.
-  guardedBinLink =
-    {
-      bundleName,
-      executableName,
-      binaryName,
-    }:
-    ''
-      if [ ! -e "$out/Applications/${bundleName}/Contents/MacOS/${executableName}" ]; then
-        echo "Expected executable ${executableName} in ${bundleName}" >&2
-        find "$out/Applications/${bundleName}/Contents/MacOS" -maxdepth 1 -type f >&2
-        exit 1
-      fi
-      ln -s "$out/Applications/${bundleName}/Contents/MacOS/${executableName}" "$out/bin/${binaryName}"
-    '';
+  guardedBinLink = import ./guarded-bin-link.nix;
 
   # Shared derivation assembly for every mk*App builder below. Each builder is
   # a thin wrapper that resolves its naming defaults and supplies an `unpack`
@@ -238,9 +223,11 @@ in
           ${prev.lib.optionalString codesignApp ''
             /usr/bin/codesign --force --deep --sign - "$out/Applications/${resolvedBundleName}"
           ''}
-          ${prev.lib.optionalString makeBinary ''
-            ln -s "$out/Applications/${resolvedBundleName}/Contents/MacOS/${resolvedExecutableName}" "$out/bin/${binaryName}"
-          ''}
+          ${prev.lib.optionalString makeBinary (guardedBinLink {
+            bundleName = resolvedBundleName;
+            executableName = resolvedExecutableName;
+            inherit binaryName;
+          })}
 
           runHook postInstall
         '';
@@ -401,9 +388,11 @@ in
           cp -R "$app_bundle" "$out/Applications/${resolvedBundleName}"
           ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${resolvedBundleName}"
           ${postInstallApp}
-          ${prev.lib.optionalString makeBinary ''
-            ln -s "$out/Applications/${resolvedBundleName}/Contents/MacOS/${resolvedExecutableName}" "$out/bin/${binaryName}"
-          ''}
+          ${prev.lib.optionalString makeBinary (guardedBinLink {
+            bundleName = resolvedBundleName;
+            executableName = resolvedExecutableName;
+            inherit binaryName;
+          })}
 
           runHook postInstall
         '';

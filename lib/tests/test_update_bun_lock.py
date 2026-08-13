@@ -10,8 +10,10 @@ import tarfile
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from lib.update import bun_lock
+from lib.update.ci import bun_lock as bun_lock_cli
 
 
 def _tarball_bytes(
@@ -24,6 +26,62 @@ def _tarball_bytes(
         info.size = len(payload)
         archive.addfile(info, io.BytesIO(payload))
     return buffer.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("result", "message"), [(False, "Validated"), (True, "Relocked")]
+)
+def test_bun_lock_cli_prepares_source_package_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    result: bool,
+    message: str,
+) -> None:
+    """Expose the Superset lock repair through the supported maintenance CLI."""
+    calls: list[tuple[Path, Path, str]] = []
+
+    def _prepare(workspace: Path, lock: Path, *, bun_executable: str) -> bool:
+        calls.append((workspace, lock, bun_executable))
+        return result
+
+    monkeypatch.setattr(bun_lock_cli, "prepare_source_package_lock", _prepare)
+    workspace = tmp_path / "workspace"
+    lock = workspace / "bun.lock"
+    invocation = CliRunner().invoke(
+        bun_lock_cli.app,
+        [
+            "--workspace-root",
+            str(workspace),
+            "--lock-file",
+            str(lock),
+            "--bun-executable",
+            "/nix/store/bun/bin/bun",
+        ],
+    )
+
+    assert invocation.exit_code == 0
+    assert message in invocation.stdout
+    assert calls == [(workspace, lock, "/nix/store/bun/bin/bun")]
+
+
+def test_bun_lock_cli_reports_validation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Translate lock repair errors into a clean nonzero CLI result."""
+    message = "invalid source override"
+
+    def _prepare(*_args: object, **_kwargs: object) -> bool:
+        raise ValueError(message)
+
+    monkeypatch.setattr(bun_lock_cli, "prepare_source_package_lock", _prepare)
+    invocation = CliRunner().invoke(
+        bun_lock_cli.app,
+        ["--workspace-root", str(tmp_path), "--lock-file", str(tmp_path / "bun.lock")],
+    )
+
+    assert invocation.exit_code == 1
+    assert message in invocation.stderr
 
 
 def test_load_bun_lock_normalizes_textual_json(tmp_path: Path) -> None:

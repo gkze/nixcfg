@@ -31811,20 +31811,6 @@ rec {
         };
         resolvedDefaultFeatures = [ "load-grammars" "tree-sitter" "tree-sitter-bash" "tree-sitter-c" "tree-sitter-cpp" "tree-sitter-css" "tree-sitter-diff" "tree-sitter-gitcommit" "tree-sitter-go" "tree-sitter-go-mod" "tree-sitter-gowork" "tree-sitter-jsdoc" "tree-sitter-json" "tree-sitter-md" "tree-sitter-python" "tree-sitter-regex" "tree-sitter-rust" "tree-sitter-typescript" "tree-sitter-yaml" ];
       };
-      "grid" = rec {
-        crateName = "grid";
-        version = "1.0.1";
-        edition = "2018";
-        sha256 = "1xaz6mkb9pklakjmax7pk19vrqg4j4p01cfh6apndi324wjsj35l";
-        authors = [
-          "Armin Becher <armin.becher@gmai.com>"
-        ];
-        features = {
-          "default" = [ "std" ];
-          "serde" = [ "std" "dep:serde" ];
-        };
-        resolvedDefaultFeatures = [ "std" ];
-      };
       "group" = rec {
         crateName = "group";
         version = "0.12.1";
@@ -49605,8 +49591,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         dependencies = [
           {
@@ -49651,6 +49637,10 @@ rec {
           {
             name = "pet-global-virtualenvs";
             packageId = "pet-global-virtualenvs";
+          }
+          {
+            name = "pet-hatch";
+            packageId = "pet-hatch";
           }
           {
             name = "pet-homebrew";
@@ -49772,8 +49762,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_conda";
         dependencies = [
@@ -49843,8 +49833,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_core";
         dependencies = [
@@ -49894,8 +49884,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_env_var_path";
         dependencies = [
@@ -49947,14 +49937,19 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_fs";
         dependencies = [
           {
             name = "glob";
             packageId = "glob";
+          }
+          {
+            name = "lazy_static";
+            packageId = "lazy_static";
+            target = { target, features }: ("windows" == target."os" or null);
           }
           {
             name = "log";
@@ -49982,8 +49977,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_global_virtualenvs";
         dependencies = [
@@ -50016,6 +50011,46 @@ rec {
         ];
 
       };
+      "pet-hatch" = rec {
+        crateName = "pet-hatch";
+        version = "0.1.0";
+        edition = "2021";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/microsoft/python-environment-tools.git";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
+        };
+        libName = "pet_hatch";
+        dependencies = [
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "pet-core";
+            packageId = "pet-core";
+          }
+          {
+            name = "pet-fs";
+            packageId = "pet-fs";
+          }
+          {
+            name = "pet-python-utils";
+            packageId = "pet-python-utils";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "toml";
+            packageId = "toml 0.9.8";
+          }
+        ];
+
+      };
       "pet-homebrew" = rec {
         crateName = "pet-homebrew";
         version = "0.1.0";
@@ -50023,8 +50058,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_homebrew";
         dependencies = [
@@ -50089,8 +50124,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_jsonrpc";
         dependencies = [
@@ -50131,8 +50166,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_linux_global_python";
         dependencies = [
@@ -50172,8 +50207,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_mac_commandlinetools";
         dependencies = [
@@ -50213,8 +50248,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_mac_python_org";
         dependencies = [
@@ -50254,8 +50289,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_mac_xcode";
         dependencies = [
@@ -50295,8 +50330,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_pipenv";
         dependencies = [
@@ -50344,8 +50379,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_pixi";
         dependencies = [
@@ -50381,8 +50416,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_poetry";
         dependencies = [
@@ -50456,8 +50491,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_pyenv";
         dependencies = [
@@ -50518,8 +50553,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_python_utils";
         dependencies = [
@@ -50577,8 +50612,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_reporter";
         dependencies = [
@@ -50623,8 +50658,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_telemetry";
         dependencies = [
@@ -50672,11 +50707,15 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_uv";
         dependencies = [
+          {
+            name = "glob";
+            packageId = "glob";
+          }
           {
             name = "log";
             packageId = "log";
@@ -50684,6 +50723,10 @@ rec {
           {
             name = "pet-core";
             packageId = "pet-core";
+          }
+          {
+            name = "pet-fs";
+            packageId = "pet-fs";
           }
           {
             name = "pet-python-utils";
@@ -50708,8 +50751,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_venv";
         dependencies = [
@@ -50745,8 +50788,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_virtualenv";
         dependencies = [
@@ -50782,8 +50825,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_virtualenvwrapper";
         dependencies = [
@@ -50823,8 +50866,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_windows_registry";
         dependencies = [
@@ -50885,8 +50928,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_windows_store";
         dependencies = [
@@ -50939,8 +50982,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/microsoft/python-environment-tools.git";
-          rev = "9e61a22af989fe54937bf07c9f9cff1bc53d9056";
-          sha256 = "0mvzip2y2rdybnh1p67k6iw4m77a5k7qqjzaafv1xhqpd3ssh3y0";
+          rev = "bb8e04607b96a3865d6aa4bb2a5a5a82ce05b5f0";
+          sha256 = "1pyv5hanp4s9izy87pxxd6jynkrwdcd2047ix011dnk6ib8yk4pf";
         };
         libName = "pet_winpython";
         dependencies = [
@@ -54131,7 +54174,7 @@ rec {
           }
           {
             name = "heck";
-            packageId = "heck 0.5.0";
+            packageId = "heck 0.4.1";
           }
           {
             name = "itertools";
@@ -64665,7 +64708,7 @@ rec {
         dependencies = [
           {
             name = "heck";
-            packageId = "heck 0.5.0";
+            packageId = "heck 0.4.1";
             usesDefaultFeatures = false;
           }
           {
@@ -68192,9 +68235,9 @@ rec {
       };
       "taffy" = rec {
         crateName = "taffy";
-        version = "0.12.2";
+        version = "0.13.0";
         edition = "2021";
-        sha256 = "1x5yq3hqya5y7p0x3rc7z0hjlzyw05arb8w2vz09z0193xc0j2il";
+        sha256 = "03qxmgrg6m6sl1x98j86qxsm0wcpawjc4qrqlvd14np8drgy0d60";
         authors = [
           "Alice Cecile <alice.i.cecile@gmail.com>"
           "Johnathan Kelley <jkelleyrtp@gmail.com>"
@@ -68204,12 +68247,6 @@ rec {
           {
             name = "arrayvec";
             packageId = "arrayvec";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "grid";
-            packageId = "grid";
-            optional = true;
             usesDefaultFeatures = false;
           }
           {
@@ -68225,18 +68262,24 @@ rec {
             optional = true;
             usesDefaultFeatures = false;
           }
+          {
+            name = "smallvec";
+            packageId = "smallvec";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
         ];
         features = {
           "alloc" = [ "serde?/alloc" ];
           "debug" = [ "std" ];
           "default" = [ "std" "taffy_tree" "flexbox" "grid" "block_layout" "float_layout" "calc" "content_size" "detailed_layout_info" ];
           "document-features" = [ "dep:document-features" ];
-          "grid" = [ "alloc" "dep:grid" ];
+          "grid" = [ "alloc" "dep:smallvec" ];
           "parse" = [ "dep:cssparser" ];
           "parse_faster" = [ "parse" "cssparser/fast_match_byte" ];
           "profile" = [ "std" ];
           "serde" = [ "dep:serde" ];
-          "std" = [ "grid?/std" "serde?/std" "slotmap?/std" ];
+          "std" = [ "serde?/std" "slotmap?/std" ];
           "taffy_tree" = [ "dep:slotmap" ];
         };
         resolvedDefaultFeatures = [ "alloc" "block_layout" "calc" "content_size" "default" "detailed_layout_info" "flexbox" "float_layout" "grid" "std" "taffy_tree" ];
@@ -89477,7 +89520,7 @@ rec {
       };
       "zed" = rec {
         crateName = "zed";
-        version = "1.16.0";
+        version = "1.17.0";
         edition = "2024";
         crateBin = [
           {
@@ -91125,7 +91168,7 @@ rec {
       };
       "zed_proto" = rec {
         crateName = "zed_proto";
-        version = "0.3.2";
+        version = "0.3.3";
         edition = "2024";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/extensions/proto"; };
         libPath = "src/proto.rs";type = [ "cdylib" ];

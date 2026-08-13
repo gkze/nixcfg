@@ -41,22 +41,14 @@ in
     nix = {
       substituters = mkOption {
         type = types.listOf types.str;
-        default = [
-          "https://gkze.cachix.org"
-          "https://zed.cachix.org"
-          "https://cache.nixos.org"
-        ];
-        description = "Binary cache URLs configured in nix.settings.substituters.";
+        default = [ ];
+        description = "Additional binary cache URLs configured in nix.settings.substituters.";
       };
 
       trustedPublicKeys = mkOption {
         type = types.listOf types.str;
-        default = [
-          "gkze.cachix.org-1:vO2wq3fAFvRL1TA7R02JnU/R5iKGhoHMLGYbnzPRJjI="
-          "zed.cachix.org-1:/pHQ6dpMsAZk2DiP4WCL0p9YDNKWj2Q5FL20bNmw1cU="
-          "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
-        ];
-        description = "Trusted cache keys configured in nix.settings.trusted-public-keys.";
+        default = [ ];
+        description = "Additional cache keys configured in nix.settings.trusted-public-keys.";
       };
     };
   };
@@ -84,7 +76,11 @@ in
         ];
         keep-derivations = true;
         keep-outputs = true;
+      }
+      // lib.optionalAttrs (cfg.nix.substituters != [ ]) {
         inherit (cfg.nix) substituters;
+      }
+      // lib.optionalAttrs (cfg.nix.trustedPublicKeys != [ ]) {
         trusted-public-keys = cfg.nix.trustedPublicKeys;
       };
       channel.enable = false;

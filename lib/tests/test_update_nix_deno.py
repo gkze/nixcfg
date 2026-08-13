@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -23,7 +22,6 @@ from lib.update.nix_deno import (
     _build_deno_deps_expr,
     _build_deno_hash_entries,
     _build_deno_temp_entry,
-    _build_source_override_env,
     _compute_deno_deps_hash_for_platform,
     _existing_platform_hashes,
     _PlatformHashContext,
@@ -80,27 +78,29 @@ def test_hash_entry_builders_and_payload_helpers() -> None:
     assert _try_platform_hash_event(UpdateEvent.value("demo", ("x", 1))) is None
     assert _try_platform_hash_event(UpdateEvent.value("demo", ("x", "y", "z"))) is None
 
-    env = _build_source_override_env("demo", temp_new)
-    payload = json.loads(env["UPDATE_SOURCE_OVERRIDES_JSON"])
-    assert "demo" in payload
-
 
 def test_build_deno_deps_expr_delegates_to_overlay_builder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Build expression by forwarding source/system to overlay helper."""
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[str, str, object]] = []
 
-    def _fake_build_overlay_expr(source: str, *, system: str) -> str:
-        calls.append((source, system))
+    def _fake_build_overlay_expr(
+        source: str,
+        *,
+        system: str,
+        source_overrides: object,
+    ) -> str:
+        calls.append((source, system, source_overrides))
         return f"expr:{source}:{system}"
 
     monkeypatch.setattr(
         "lib.update.nix_deno._build_overlay_expr", _fake_build_overlay_expr
     )
-    expr = _build_deno_deps_expr("demo", "x86_64-linux")
+    override = SourceEntry(version="2.0.0", hashes={})
+    expr = _build_deno_deps_expr("demo", "x86_64-linux", override)
     assert expr == "expr:demo:x86_64-linux"
-    assert calls == [("demo", "x86_64-linux")]
+    assert calls == [("demo", "x86_64-linux", {"demo": override})]
 
 
 def test_compute_deno_deps_hash_for_platform_emits_value_and_errors(
@@ -189,10 +189,11 @@ def test_process_platform_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         _input_name: str,
         platform: str,
         *,
-        env: dict[str, str],
+        source_override: SourceEntry,
         config: object,
     ) -> AsyncIterator[UpdateEvent]:
-        _ = (env, config)
+        assert source_override.input == "input"
+        _ = config
         yield UpdateEvent.status("demo", f"build {platform}")
         hash_value = (
             "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="

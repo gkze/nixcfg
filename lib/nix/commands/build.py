@@ -182,7 +182,8 @@ async def nix_build_dry_run(
         A flake reference or store path to dry-run build.
     impure:
         Pass ``--impure`` to allow access to environment variables and mutable
-        paths. Defaults to ``True`` since CI detection relies on ``getEnv``.
+        paths. Defaults to ``True`` for compatibility; pure callers should pass
+        ``False`` explicitly.
     command_timeout:
         Maximum wall-clock seconds before the process is killed.
     env:

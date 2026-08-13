@@ -88,10 +88,8 @@ machine-specific.
 - `packages/*/uv.lock`
 - `overlays/*/sources.json`
 
-### Update / CI / workflow failures
+### Update / CI failures
 
-- `.github/workflows/ci.yml`
-- `.github/workflows/update.yml`
 - `lib/update/`
 - `lib/recover/`
 - `lib/update/ci/`
@@ -110,7 +108,8 @@ machine-specific.
 ### OpenCode / MCP / profile wiring
 
 - `modules/home/opencode.nix`
-- `modules/home/profiles.nix`
+- `home/george/mcp-catalog.nix`
+- `home/george/work.nix`
 - `darwin/argus.nix`
 - `darwin/rocinante.nix`
 
@@ -263,7 +262,6 @@ touched.
 
 Start from one of these before doing anything expensive:
 
-- the failing workflow job
 - the failing derivation log
 - the specific package or overlay
 - the generated artifact that drifted
@@ -294,15 +292,6 @@ Common failure classes here:
 - `Cargo.nix` / `crate-hashes.json` drift
 - `packages/superset/bun.nix` drift
 - `npmDepsHash` / `denoDepsHash` / `vendorHash` mismatches
-- workflow artifact naming/path mismatches
-
-The workflow YAML for `update.yml`, `ci.yml`, and `update-certify.yml` is generated from typed
-Python models. Never hand-edit those files; change the defs and regenerate. Relevant places:
-
-- `lib/update/ci/workflow_defs.py` (source of truth)
-- `lib/update/ci/workflow_model.py` (model, renderer, structural invariants)
-- `nixcfg ci workflow generate` / `nixcfg ci workflow verify-generated`
-- `lib/tests/test_ci_workflow_defs.py`
 
 ### When simplifying, remove accidental complexity without breaking discovery or exports
 
@@ -348,17 +337,18 @@ For source-backed packages, make sure the full pattern is coherent:
 - system constraint in `packages/registry.nix` if not universal
 - validation build for the real target platform
 
-### Updating CI or update workflow logic
+### Updating CI or update logic
 
-Understand which phase you are touching. The update workflow is phase-structured: lock update,
-version resolution, per-platform hash computation, merge, crate2nix refresh, then downstream
-validation/build steps. Make changes phase-consciously.
+The update pipeline is phase-structured: flake reference refresh, source discovery and hashing,
+generated-artifact materialization, derivation validation, then atomic promotion. Make changes
+phase-consciously. Platform-specific updater guards and crate2nix refreshes run locally through the
+CLI; no GitHub Actions workflows are tracked.
 
 ### Working on OpenCode / MCP / profile setup
 
-Use `modules/home/opencode.nix` and `modules/home/profiles.nix` as the source of truth. Do not
-scatter MCP or profile behavior across unrelated host files unless the behavior is truly
-host-specific.
+Keep the reusable OpenCode mechanism in `modules/home/opencode.nix`, George's MCP inventory in
+`home/george/mcp-catalog.nix`, and host-specific work policy in `home/george/work.nix`. Do not move
+personal MCP servers or work packages back into the exported module set.
 
 ### Working on Zen / Twilight
 
@@ -476,18 +466,11 @@ Only use this when the task truly requires an actual local apply:
 
 - `nh darwin switch --no-nom .`
 
-### Workflow / update / artifact validation
+### Update / artifact validation
 
-- `nix run .#nixcfg -- ci workflow verify-generated`
 - `uv run python -m lib.update.ci.crate2nix`
 - relevant `nix run .#nixcfg -- ci ...` subcommands
 - relevant `nix run .#nixcfg -- update ...` commands
-
-### Workflow hygiene tools enforced in CI
-
-- `pinact run --check`
-- `nix run --inputs-from . nixpkgs#actionlint`
-- `yamllint -c .yamllint ...`
 
 ### CSS / web-y additions
 
@@ -523,9 +506,6 @@ working alone.
 ### Do not hand-edit unless the task is explicitly about regeneration
 
 - `.pre-commit-config.yaml`
-- `.github/workflows/update.yml`, `.github/workflows/ci.yml`, and
-  `.github/workflows/update-certify.yml` (regenerate via `nixcfg ci workflow generate` from
-  `lib/update/ci/workflow_defs.py`)
 - `packages/**/Cargo.nix`
 - `packages/**/crate-hashes.json`
 - `packages/**/sources.json`
@@ -536,8 +516,6 @@ working alone.
 
 ### Treat carefully
 
-- `secrets.yaml`
-- `.sops.yaml`
 - `~/.pi`
 - `~/.claude`
 - `~/.local/share/opencode`

@@ -20,7 +20,6 @@ dependencies = [
   "defusedxml>=0.7.1",
   "deepdiff>=8.6.1",
   "filelock>=3.24.3",
-  "httpx-retries>=0.4.6",
   "httpx>=0.28.1",
   "isort>=8.0.1",
   "keyring>=25.7.0",
@@ -66,8 +65,7 @@ exclude = [
   "home/george/bin/zentool",
   "lib/crate2nix_tauri_env_rewrite.py",
   "lib/nix/schemas/_fetch.py",
-  "lib/update/ci/build_shared_closure.py",
-  "lib/update/ci/profile_generations.py",
+  "lib/update/persistence.py",
   "lib/update/updaters/_sourcefile.py",
   "packages/sculptor/updater.py",
 ]
@@ -114,10 +112,6 @@ explicit-preview-rules = true
   "TRY003",
   "TRY004",
 ]
-# Workflow definitions embed GitHub Actions secret expressions (not real
-# credentials) and CI-runner /tmp paths inside generated shell steps.
-"lib/update/ci/workflow_defs.py" = ["S105", "S108"]
-
 [tool.ruff.lint.isort]
 # Classify these imports as first-party for stable import ordering.
 known-first-party = ["lib", "nixcfg"]
@@ -153,6 +147,13 @@ py-modules = ["nixcfg"]
 [tool.setuptools.packages.find]
 # Include package directories rooted under `lib`.
 include = ["lib*"]
+# Keep repository-only tests out of installed runtime artifacts.
+exclude = ["lib.tests*"]
+
+[tool.setuptools.package-data]
+# Ship the type marker and schemas owned by the Nix model/codegen package.
+"lib.nix" = ["py.typed"]
+"lib.nix.schemas" = ["*.yaml", "_version.json"]
 
 [tool.ty.src]
 # Restrict Ty analysis to maintained source trees and explicit extensionless Python entrypoints.
@@ -179,20 +180,23 @@ missing-override-decorator = "ignore"
 missing-type-argument = "ignore"
 
 [[tool.ty.overrides]]
-# Test modules still contain intentionally dynamic fixtures and negative type
-# examples. Runtime modules remain checked with all Ty diagnostics as errors.
+# Dynamic mocks and deliberately invalid fixtures exercise runtime failure
+# contracts. Ignore only the diagnostic families those test seams require;
+# every other Ty rule remains enabled for tests.
 include = ["lib/tests/**/*.py"]
 
 [tool.ty.overrides.rules]
-all = "ignore"
-
-[[tool.ty.overrides]]
-# datamodel-code-generator still emits constrained-type expressions that Ty
-# rejects even though they are valid for Pydantic at runtime.
-include = ["lib/schema_codegen/models/_generated.py"]
-
-[tool.ty.overrides.rules]
-invalid-type-form = "ignore"
+invalid-argument-type = "ignore"
+invalid-key = "ignore"
+invalid-method-override = "ignore"
+invalid-return-type = "ignore"
+missing-argument = "ignore"
+missing-typed-dict-key = "ignore"
+not-iterable = "ignore"
+not-subscriptable = "ignore"
+unknown-argument = "ignore"
+unresolved-attribute = "ignore"
+unsupported-operator = "ignore"
 
 [tool.ty.terminal]
 # Return non-zero when Ty emits warnings.

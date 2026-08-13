@@ -149,8 +149,7 @@ def _status_update(info: StatusInfo, message: str | None) -> StatusUpdate | None
         case StatusKind.CHECKING_CURRENT:
             update = StatusUpdate("running", f"current {info.value}")
         case (
-            StatusKind.PINNED_VERSION
-            | StatusKind.LATEST_VERSION
+            StatusKind.LATEST_VERSION
             | StatusKind.REFRESH_LOCK
             | StatusKind.COMPUTING_HASH
         ):
@@ -197,17 +196,6 @@ def _operation_kind(operation: str | None) -> OperationKind | None:
         return OperationKind(operation)
     except ValueError:
         return None
-
-
-def operation_for_status(
-    message: str,
-    payload: object | None = None,
-) -> OperationKind | None:
-    """Map a status event payload to its UI operation group."""
-    _ = message
-    if not isinstance(payload, StatusPayload):
-        return None
-    return _operation_kind(payload.operation)
 
 
 def operation_for_command(args: list[str] | None) -> OperationKind:

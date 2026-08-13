@@ -4,14 +4,23 @@
 }:
 let
   fixture = ./source-hashes;
-  nixcfgLib = import (src + "/lib/lib.nix") {
-    inherit lib;
-    inputs = { };
-    outputs = { };
-    pkgsFor = { };
-    src = fixture;
-  };
   source = builtins.fromJSON (builtins.readFile (fixture + "/packages/demo/sources.json"));
+  mkNixcfgLib =
+    evaluationContext:
+    import (src + "/lib/lib.nix") {
+      inherit evaluationContext lib;
+      inputs = { };
+      outputs = { };
+      pkgsFor = { };
+      src = fixture;
+    };
+  nixcfgLib = mkNixcfgLib { };
+  updateLib = mkNixcfgLib {
+    fakeHashes = true;
+    sourceOverrides.demo = source // {
+      version = "override";
+    };
+  };
 
   assertEq =
     label: expected: actual:
@@ -42,6 +51,8 @@ let
     (assertEq "missing platform hash fails" false
       (builtins.tryEval (nixcfgLib.sourceHashEntryForPlatform "demo" "srcHash" "x86_64-linux")).success
     )
+    (assertEq "explicit source override" "override" (updateLib.sourceEntry "demo").version)
+    (assertEq "explicit fake hash mode" lib.fakeHash (updateLib.sourceHash "demo" "srcHash"))
   ];
 in
 builtins.deepSeq checks true

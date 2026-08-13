@@ -1,4 +1,5 @@
 {
+  evaluationContext ? { },
   inputs,
   lib,
   outputs,
@@ -11,7 +12,6 @@ let
     attrNames
     elemAt
     fromJSON
-    getEnv
     hasAttr
     isList
     length
@@ -23,8 +23,6 @@ let
     ;
   inherit (lib.lists) findFirst optionals;
   inherit (lib.attrsets) optionalAttrs;
-
-  isCI = getEnv "CI" != "";
 
   maybePath = p: if pathExists p then p else null;
   discovery = import ./discovery.nix;
@@ -51,11 +49,6 @@ let
     in
     builtins.mapAttrs (_name: path: fromJSON (readFile path)) sourceFiles.entries;
   packageSources = scanSourcesIn (src + "/packages") // scanSourcesIn (src + "/overlays");
-  readSourceOverrides = raw: if raw == "" then { } else fromJSON raw;
-  updateEvaluation = {
-    sourceOverrides = readSourceOverrides (getEnv "UPDATE_SOURCE_OVERRIDES_JSON");
-    fakeHashes = getEnv "FAKE_HASHES" == "1";
-  };
   selectSourceHashEntry =
     sourceEntry: fakeHashMode: name: hashType: platformArgs:
     let
@@ -93,16 +86,16 @@ rec {
   inherit (rustyV8) mkRustyV8Build mkRustyV8PrebuiltArtifacts;
   inherit modulesPath;
   flakeLock = (fromJSON (readFile (src + "/flake.lock"))).nodes;
-  # UPDATE_SOURCE_OVERRIDES_JSON allows update tooling to override selected
-  # sources entries during evaluation without mutating tracked sources.json files.
-  sources = packageSources // updateEvaluation.sourceOverrides;
+  # Update tooling may override selected sources entries during evaluation
+  # without mutating tracked sources.json files.
+  sources = packageSources // (evaluationContext.sourceOverrides or { });
 
-  # When FAKE_HASHES=1, all sourceHash* functions return lib.fakeHash instead
-  # of reading from sources.json.  This lets the update script evaluate the
+  # In fake-hash mode, all sourceHash* functions return lib.fakeHash instead
+  # of reading from sources.json. This lets the update script evaluate the
   # overlay derivations with placeholder hashes to trigger hash-mismatch errors
   # from which the correct hashes are extracted — without duplicating any
   # derivation logic.
-  fakeHashMode = updateEvaluation.fakeHashes;
+  fakeHashMode = evaluationContext.fakeHashes or false;
 
   sourceEntry =
     name: if hasAttr name sources then sources.${name} else throw "sources.json missing for '${name}'";
@@ -271,7 +264,6 @@ rec {
   # External home-manager modules from flake inputs
   homeExternalModules = [
     inputs.nixvim.homeModules.nixvim
-    inputs.sops-nix.homeManagerModules.sops
     inputs.stylix.homeModules.stylix
   ];
 
@@ -297,7 +289,6 @@ rec {
     ++ [
       "${modulesPath}/home/theme.nix"
       "${modulesPath}/home/fonts.nix"
-      "${modulesPath}/home/profiles.nix"
       "${modulesPath}/home/base.nix"
       "${modulesPath}/home/${kernel system}.nix"
     ]
@@ -355,6 +346,12 @@ rec {
       homeModulesList = toList homeModules;
       hasPerUserHomeModules = attrNames homeModulesByUser != [ ];
       hasPerUserHomeModuleArgs = attrNames homeModuleArgsByUser != [ ];
+      primaryUser = if users != [ ] then elemAt users 0 else null;
+      userContract =
+        if users == [ ] && kernel system == "darwin" then
+          throw "mkSystem: Darwin systems require at least one user"
+        else
+          null;
       enableHomeManager =
         users != [ ]
         && (
@@ -364,7 +361,7 @@ rec {
           || hasPerUserHomeModuleArgs
         );
     in
-    {
+    builtins.seq userContract {
       inherit system;
       specialArgs = {
         inherit
@@ -373,14 +370,13 @@ rec {
           src
           system
           ;
-        primaryUser = if users == [ ] then null else elemAt users 0;
+        inherit primaryUser;
         slib = outputs.lib;
       }
       // extraSpecialArgs;
       modules = [
         "${modulesPath}/common.nix"
         "${modulesPath}/${kernel system}/base.nix"
-        "${modulesPath}/${kernel system}/profiles.nix"
       ]
       ++ systemModules
       ++ optionals enableHomeManager [
@@ -446,7 +442,6 @@ rec {
     {
       user,
       system ? "aarch64-darwin",
-      work ? false,
       brewAppsModule ? null,
       extraHomeModules ? [ ],
       homeModulesByUser ? { },
@@ -455,7 +450,7 @@ rec {
       extraSpecialArgs ? { },
       homeManagerExtraSpecialArgs ? { },
       extraSystemModules ? [ ],
-      enableRosettaBuilder ? !isCI,
+      enableRosettaBuilder ? true,
       rosettaBuilderMemory ? null,
     }:
     mkSystem {
@@ -468,7 +463,7 @@ rec {
         ;
       includeDefaultUserModules = includeDefaultUserModule;
       users = [ user ];
-      homeModules = toList extraHomeModules ++ optionals work [ (_: { profiles.work.enable = true; }) ];
+      homeModules = toList extraHomeModules;
       systemModules = [
         inputs.nix-homebrew.darwinModules.nix-homebrew
         "${modulesPath}/darwin/homebrew.nix"
@@ -476,8 +471,7 @@ rec {
         # Linux builder for cross-platform Nix builds on Apple Silicon.
         # nix-rosetta-builder provides aarch64-linux and x86_64-linux builders
         # via Rosetta 2. Requires initial bootstrap with nix.linux-builder.
-        # Skipped in CI — the builder VM image requires aarch64-linux to build
-        # and GitHub Actions macOS runners lack a Linux builder.
+        # CI callers without a Linux builder must disable this explicitly.
       ]
       ++ optionals (brewAppsModule != null) [ brewAppsModule ]
       ++ optionals enableRosettaBuilder (
@@ -489,7 +483,6 @@ rec {
           { nix-rosetta-builder.memory = rosettaBuilderMemory; }
         ]
       )
-      ++ optionals work [ { profiles.work.enable = true; } ]
       ++ toList extraSystemModules;
     };
 }

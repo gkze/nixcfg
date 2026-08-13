@@ -286,7 +286,6 @@ def test_text_codemod_noop_write(tmp_path: Path) -> None:
 
 def test_small_module_helper_edges() -> None:
     """Cover tiny URL and assignment helper branches."""
-    from lib.nix.models.sources import _merge_drv_hash
     from lib.tests._updater_helpers import load_repo_module
     from lib.update import crate2nix
     from lib.update.updaters.github_release import GitHubReleaseAssetURLsUpdater
@@ -299,12 +298,6 @@ def test_small_module_helper_edges() -> None:
     )
     assert patch_compiler._assignment_indent("use_lld_extra = true", "use_lld") is None
     assert patch_compiler._assignment_indent("use_lld true", "use_lld") is None
-
-    assert _merge_drv_hash(None, "drv-new", baseline="drv-old") is None
-    assert _merge_drv_hash("drv-old", None, baseline="drv-new") is None
-    assert (
-        _merge_drv_hash("drv-current", "drv-old", baseline="drv-old") == "drv-current"
-    )
 
     repo_installable = f"path:{Path(crate2nix.REPO_ROOT).resolve()}#demo"
     assert crate2nix._local_flake_installable(repo_installable).endswith("#demo")
@@ -370,123 +363,49 @@ def test_small_module_helper_edges() -> None:
     )
 
 
-def test_crate2nix_compat_missing_hash_patch(tmp_path: Path) -> None:
-    """The compatibility shim should synthesize absent crate-hashes output."""
-    from lib.update import crate2nix, crate2nix_compat
-
-    target = crate2nix.Crate2NixTarget(
-        name="demo",
-        patched_src_installable="path:.#demo-crate2nix-src",
-        cargo_nix=Path("packages/demo/Cargo.nix"),
-        crate_hashes=Path("packages/demo/crate-hashes.json"),
-        normalizer_path=Path("packages/demo/normalize_cargo_nix.py"),
-        supported_platforms=("x86_64-linux",),
-    )
-
-    assert not crate2nix_compat.patch_installed_crate2nix_target(
-        SimpleNamespace(TARGETS={}),
-        "missing",
-    )
-
-    class FakeCrate2Nix:
-        RefreshResult = crate2nix.RefreshResult
-
-        def __init__(self) -> None:
-            self.TARGETS = {"demo": target}
-            self.write_hashes = True
-            self.generated_args: list[list[str]] = []
-
-        def _build_patched_src(self, _target: object) -> Path:
-            patched = tmp_path / "patched"
-            patched.mkdir(exist_ok=True)
-            (patched / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
-            return patched
-
-        def _load_normalizer(self, _path: Path):
-            return lambda text: (text + "normalized-root\n", 0, False)
-
-        def _crate2nix_cargo_home(self) -> Path:
-            return tmp_path / "cargo-home"
-
-        def _run_crate2nix_generate(
-            self,
-            args: list[str],
-            *,
-            env: dict[str, str],
-            generated_outputs: tuple[Path, Path],
-        ) -> None:
-            _ = env
-            self.generated_args.append(args)
-            cargo_nix, crate_hashes = generated_outputs
-            cargo_nix.write_text("generated-cargo\n", encoding="utf-8")
-            if self.write_hashes:
-                crate_hashes.write_text('{"crate":"hash"}\n', encoding="utf-8")
-
-        def _stabilize_generated_root_src_paths(
-            self,
-            cargo_text: str,
-            *,
-            patched_src: Path,
-            generated_cargo: Path,
-        ) -> str:
-            _ = (patched_src, generated_cargo)
-            return cargo_text.replace("generated", "stable")
-
-        def _stabilize_generated_command_comment(
-            self,
-            _target: object,
-            cargo_text: str,
-        ) -> str:
-            return cargo_text + "command-comment\n"
-
-        def _normalize_trailing_newline(self, text: str) -> str:
-            return text.rstrip("\n") + "\n"
-
-        def _normalize_json_text(self, text: str) -> str:
-            payload = json.loads(text)
-            return json.dumps(payload, sort_keys=True) + "\n"
-
-    fake = FakeCrate2Nix()
-    assert crate2nix_compat.patch_installed_crate2nix_missing_hashes(fake)
-    first = fake._refresh_target(target)
-    assert first.cargo_nix == "stable-cargo\nnormalized-root\ncommand-comment\n"
-    assert first.crate_hashes == '{"crate": "hash"}\n'
-    assert fake.generated_args[0][-1] == "--default-features"
-
-    fake.write_hashes = False
-    second = fake._refresh_target(target)
-    assert second.crate_hashes == "{}\n"
-
-
-def test_command_materialized_artifacts_failure_and_missing_paths(
+@pytest.mark.parametrize(
+    ("returncode", "stderr", "message"),
+    [
+        (0, "", "Generated artifact was not produced"),
+        (2, "bad command", "bad command"),
+    ],
+)
+def test_command_materialized_artifact_failures_leave_no_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+    stderr: str,
+    message: str,
 ) -> None:
-    """Materialized artifact commands should fail clearly and still restore files."""
+    """A failed command or missing output must not leave a generated artifact."""
     from lib.update.generated_artifact_commands import (
         stream_command_materialized_artifacts,
     )
+
+    async def _command(
+        args: list[str],
+        *,
+        options: RunCommandOptions,
+    ) -> AsyncIterator[UpdateEvent]:
+        yield UpdateEvent.value(
+            options.source,
+            CommandResult(
+                args=args,
+                returncode=returncode,
+                stdout="",
+                stderr=stderr,
+            ),
+        )
 
     async def _empty_inner() -> AsyncIterator[UpdateEvent]:
         for event in ():
             yield event
 
-    async def _missing_artifact_command(
-        args: list[str],
-        *,
-        options: object,
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.status("demo", "running")
-        yield UpdateEvent.value(
-            "demo",
-            CommandResult(args=args, returncode=0, stdout="", stderr=""),
-        )
-
     monkeypatch.setattr(
         "lib.update.generated_artifact_commands._run_command",
-        _missing_artifact_command,
+        _command,
     )
-    with pytest.raises(RuntimeError, match="Generated artifact was not produced"):
+    with pytest.raises(RuntimeError, match=message):
         _collect(
             stream_command_materialized_artifacts(
                 "demo",
@@ -498,41 +417,6 @@ def test_command_materialized_artifacts_failure_and_missing_paths(
             )
         )
     assert not (tmp_path / "generated.txt").exists()
-
-    async def _failing_command(
-        args: list[str],
-        *,
-        options: object,
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.value(
-            "demo",
-            CommandResult(args=args, returncode=2, stdout="", stderr="bad command"),
-        )
-
-    monkeypatch.setattr(
-        "lib.update.generated_artifact_commands._run_command",
-        _failing_command,
-    )
-    with pytest.raises(RuntimeError, match="bad command"):
-        _collect(
-            stream_command_materialized_artifacts(
-                "demo",
-                args=["refresh"],
-                artifact_paths=("generated.txt",),
-                inner=_empty_inner(),
-                dry_run=False,
-                repo_root=tmp_path,
-            )
-        )
-    assert not (tmp_path / "generated.txt").exists()
-
-    from lib.update import generated_artifact_commands as artifact_commands
-
-    with pytest.raises(RuntimeError, match=r"Refresh demo failed \(exit 1\)$"):
-        artifact_commands._raise_failed_command(
-            "Refresh demo",
-            CommandResult(args=["refresh"], returncode=1, stdout="", stderr=""),
-        )
 
 
 def test_deno_lock_retry_classifier_and_exhaustion(
@@ -592,9 +476,14 @@ def test_compute_sri_hash_reraises_non_retryable_prefetch_failure(
 
     calls = 0
 
-    async def _prefetch_url(_url: str, *, name: str | None = None) -> str:
+    async def _prefetch_url(
+        _url: str,
+        *,
+        name: str | None = None,
+        command_timeout: float | None = None,
+    ) -> str:
         nonlocal calls
-        _ = name
+        _ = (name, command_timeout)
         calls += 1
         raise NixCommandError(
             LibCommandResult(
@@ -607,17 +496,12 @@ def test_compute_sri_hash_reraises_non_retryable_prefetch_failure(
         )
 
     monkeypatch.setattr(update_process, "libnix_prefetch_url", _prefetch_url)
-    monkeypatch.setattr(
-        update_process,
-        "resolve_active_config",
-        lambda _config: resolve_config(retries=3, retry_backoff=0),
-    )
-
     with pytest.raises(NixCommandError, match="permanent failure"):
         _collect(
             update_process.compute_sri_hash(
                 "demo",
                 "https://example.com/archive.tar.gz",
+                config=resolve_config(retries=3, retry_backoff=0),
             )
         )
     assert calls == 1
@@ -779,7 +663,10 @@ def test_linear_cli_and_superconductor_branch_edges(
     async def _compute_url_hashes(
         name: str,
         urls: object,
+        *,
+        config: object,
     ) -> AsyncIterator[UpdateEvent]:
+        _ = config
         url_list = list(cast("Any", urls))
         yield UpdateEvent.value(name, {url_list[0]: "sha256-demo"})
 

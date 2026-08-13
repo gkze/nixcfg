@@ -206,7 +206,7 @@ def test_resolve_all_jsr_and_npm_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     assert npm[0].name == "@scope/pkg"
 
 
-def test_resolve_deno_deps_and_sync_wrapper(
+def test_resolve_deno_deps_warns_on_an_unknown_lock_version(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -241,9 +241,3 @@ def test_resolve_deno_deps_and_sync_wrapper(
     assert manifest.lock_version == "6"
     assert len(manifest.jsr_packages) == 1
     assert "Unexpected deno.lock version" in caplog.text
-
-    monkeypatch.setattr(
-        "lib.update.deno_lock.resolve_deno_deps",
-        lambda _path: asyncio.sleep(0, result=manifest),
-    )
-    assert deno_lock.resolve_deno_deps_sync(lock_file) == manifest

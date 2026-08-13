@@ -19,7 +19,7 @@ in
   };
 
   config = {
-    # External modules (nixvim, sops-nix, stylix) are imported via lib.mkHomeModules
+    # External modules (nixvim and stylix) are imported via lib.mkHomeModules.
     fonts.fontconfig.enable = true;
     home = {
       homeDirectory = lib.mkForce "${slib.homeDirBase system}/${username}";

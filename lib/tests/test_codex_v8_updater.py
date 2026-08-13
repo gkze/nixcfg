@@ -36,7 +36,8 @@ def test_codex_v8_updater_computes_recursive_src_hash(monkeypatch) -> None:
             "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         )
 
-    async def _url_hashes(_name: str, urls):
+    async def _url_hashes(_name: str, urls, *, config=None):
+        assert config is updater.config
         url_batches.append(list(urls))
         yield module.UpdateEvent.value(
             "codex-v8",
@@ -206,7 +207,8 @@ def test_codex_v8_fetch_hashes_forwards_non_value_events(monkeypatch) -> None:
             "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         )
 
-    async def _url_hashes(_name: str, urls):
+    async def _url_hashes(_name: str, urls, *, config=None):
+        assert config is updater.config
         urls = list(urls)
         yield module.UpdateEvent.status("codex-v8", "computing assets")
         yield module.UpdateEvent.value(

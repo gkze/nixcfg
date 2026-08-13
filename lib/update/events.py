@@ -39,7 +39,6 @@ class StatusKind(StrEnum):
     """Typed producer intent carried by status events."""
 
     CHECKING_CURRENT = "checking_current"
-    PINNED_VERSION = "pinned_version"
     LATEST_VERSION = "latest_version"
     UPDATE_AVAILABLE = "update_available"
     UP_TO_DATE = "up_to_date"

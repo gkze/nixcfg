@@ -7,12 +7,11 @@ from typing import TYPE_CHECKING
 import pytest
 
 from lib.update.paths import (
-    SOURCES_GIT_PATHSPECS,
-    is_sources_file_path,
     local_flake_url,
     package_dir_for_in,
     package_file_map_in,
     package_file_names_in,
+    updater_dir_for,
 )
 
 if TYPE_CHECKING:
@@ -63,27 +62,6 @@ def test_package_file_names_in_allows_duplicate_names(tmp_path: Path) -> None:
     assert package_file_names_in(tmp_path, "default.nix") == {"demo"}
 
 
-def test_sources_git_pathspecs_cover_directory_and_flat_layouts() -> None:
-    """Emit git pathspecs for both supported per-package sources layouts."""
-    assert SOURCES_GIT_PATHSPECS == (
-        ":(glob)packages/**/sources.json",
-        ":(glob)packages/*.sources.json",
-        ":(glob)overlays/**/sources.json",
-        ":(glob)overlays/*.sources.json",
-    )
-
-
-def test_is_sources_file_path_matches_supported_layouts() -> None:
-    """Recognize per-package sources paths under packages and overlays."""
-    assert is_sources_file_path("packages/demo/sources.json")
-    assert is_sources_file_path("packages/demo.sources.json")
-    assert is_sources_file_path("overlays/demo/sources.json")
-    assert is_sources_file_path("overlays/demo.sources.json")
-
-    assert not is_sources_file_path("misc/demo/sources.json")
-    assert not is_sources_file_path("packages/demo/default.nix")
-
-
 def test_package_dir_for_in_returns_unique_match(tmp_path: Path) -> None:
     """Resolve a unique package directory under an arbitrary root."""
     package_dir = tmp_path / "packages" / "demo"
@@ -99,6 +77,24 @@ def test_package_dir_for_in_rejects_duplicate_package_dirs(tmp_path: Path) -> No
 
     with pytest.raises(RuntimeError, match="Duplicate package directories"):
         package_dir_for_in(tmp_path, "demo")
+
+
+def test_updater_dir_for_uses_the_authoritative_directory_sidecar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolve updater ownership despite a same-named shadow directory."""
+    owner = tmp_path / "overlays" / "demo"
+    owner.mkdir(parents=True)
+    (tmp_path / "packages" / "demo").mkdir(parents=True)
+    (owner / "updater.py").write_text("# updater\n", encoding="utf-8")
+    flat = tmp_path / "overlays" / "flat.updater.py"
+    flat.write_text("# updater\n", encoding="utf-8")
+
+    monkeypatch.setattr("lib.update.paths.get_repo_root", lambda: tmp_path)
+    assert updater_dir_for("demo") == owner
+    assert updater_dir_for("flat") is None
+    assert updater_dir_for("missing") is None
 
 
 def test_local_flake_url_uses_git_source_view(tmp_path: Path) -> None:

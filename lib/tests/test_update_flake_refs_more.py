@@ -23,7 +23,6 @@ from lib.update.flake import (
     get_root_input_name,
     invalidate_flake_lock,
     load_flake_lock,
-    nixpkgs_expr,
     resolve_root_input_node,
     update_flake_input,
 )
@@ -534,18 +533,6 @@ def test_get_root_input_name_without_inputs(monkeypatch: pytest.MonkeyPatch) -> 
     assert get_root_input_name("nixpkgs") == "nixpkgs"
 
 
-def test_nixpkgs_expr_compacts_rebuilt_expression(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Build the nixpkgs expression through the compaction helper."""
-    monkeypatch.setattr(
-        "lib.update.flake.nixpkgs_expression",
-        lambda: SimpleNamespace(rebuild=lambda: "raw-expr"),
-    )
-    monkeypatch.setattr("lib.update.flake.compact_nix_expr", lambda expr: f"<{expr}>")
-    assert nixpkgs_expr() == "<raw-expr>"
-
-
 def test_fetch_first_matching_tag_falls_back_to_tags(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -962,6 +949,37 @@ def test_run_checked_command_and_update_flake_ref_paths(
                 FlakeInputRef("demo", "o", "r", "v1", "path"), "v2", source="demo"
             )
         )
+
+
+def test_update_flake_ref_invalidates_cached_lock_after_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Make the next source phase observe the newly locked candidate input."""
+    calls: list[list[str]] = []
+    invalidated_after: list[int] = []
+
+    async def _record_run_checked(
+        args: list[str],
+        **_kwargs: object,
+    ) -> AsyncIterator[UpdateEvent]:
+        calls.append(args)
+        yield UpdateEvent.status("demo", "ok")
+
+    monkeypatch.setattr("lib.update.refs._run_checked_command", _record_run_checked)
+    monkeypatch.setattr(
+        "lib.update.refs.invalidate_flake_lock",
+        lambda: invalidated_after.append(len(calls)),
+    )
+
+    _run_async(
+        update_flake_ref(
+            FlakeInputRef("demo", "owner", "repo", "v1", "github"),
+            "v2",
+            source="demo",
+        )
+    )
+
+    assert invalidated_after == [2]
 
 
 def test_update_refs_task_flow_variants(monkeypatch: pytest.MonkeyPatch) -> None:

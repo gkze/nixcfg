@@ -44,6 +44,7 @@ from lib.update.events import (
     require_value,
 )
 from lib.update.flake import flake_fetch_expr
+from lib.update.nix import _build_package_path_attr_expr
 from lib.update.platform_hashes import (
     PreservedPlatformHash,
     preserve_existing_platform_hash,
@@ -164,14 +165,15 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
     """Base updater for hash-only sources backed by flake inputs."""
 
     hash_type: HashType
+    hash_attr_path: ClassVar[str] = ""
     platform_specific: bool = False
     native_only: bool = False
     # Tuple of Nix system strings (e.g. ``"aarch64-darwin"``) this updater may
     # evaluate against. ``None`` means "all platforms" (the default). When set,
     # ``fetch_hashes`` short-circuits on unsupported platforms and preserves
     # any existing sources.json hashes. Mirror whatever system constraint the
-    # companion package has in ``packages/registry.nix`` so per-platform CI
-    # runners skip darwin-only / linux-only packages cleanly.
+    # companion package has in ``packages/registry.nix`` so local updates skip
+    # Darwin-only or Linux-only packages on unsupported hosts.
     supported_platforms: ClassVar[tuple[str, ...] | None] = None
     required_tools: ClassVar[tuple[str, ...]] = ("nix",)
 
@@ -201,10 +203,7 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         ):
             return False
         try:
-            new_fingerprint = await update_nix.compute_drv_fingerprint(
-                self.name,
-                config=self.config,
-            )
+            new_fingerprint = await self._compute_drv_fingerprint()
         except RuntimeError:
             return False
         context.drv_fingerprint = new_fingerprint
@@ -253,10 +252,7 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         try:
             drv_hash = context.drv_fingerprint
             if drv_hash is None:
-                drv_hash = await update_nix.compute_drv_fingerprint(
-                    self.name,
-                    config=self.config,
-                )
+                drv_hash = await self._compute_drv_fingerprint()
             result = result.model_copy(update={"drv_hash": drv_hash})
         except RuntimeError as exc:
             yield UpdateEvent.status(
@@ -313,8 +309,43 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         system: str | None,
     ) -> EventStream:
         _ = info
+        package_expr = self._package_hash_expr(system=system)
+        if package_expr is not None:
+            return update_nix.compute_fixed_output_hash(
+                self.name,
+                package_expr,
+                config=self.config,
+            )
         return update_nix.compute_overlay_hash(
             self.name, system=system, config=self.config
+        )
+
+    def _package_hash_expr(self, *, system: str | None) -> str | None:
+        updater_path = update_paths.package_file_for(
+            self.name,
+            update_paths.UPDATER_FILE_NAME,
+        )
+        if updater_path is None or not updater_path.is_relative_to(
+            update_paths.get_repo_file("packages")
+        ):
+            return None
+        return _build_package_path_attr_expr(
+            self.name,
+            self.hash_attr_path,
+            system=system,
+        )
+
+    async def _compute_drv_fingerprint(self) -> str:
+        package_expr = self._package_hash_expr(system=None)
+        if package_expr is None:
+            return await update_nix.compute_drv_fingerprint(
+                self.name,
+                config=self.config,
+            )
+        return await update_nix.compute_expr_drv_fingerprint(
+            self.name,
+            package_expr,
+            config=self.config,
         )
 
     def _compute_hash(self, info: VersionInfo) -> EventStream:
@@ -482,6 +513,11 @@ class DenoManifestUpdater(FlakeInputUpdater):
     required_tools: ClassVar[tuple[str, ...]] = ()
     materialize_when_current: ClassVar[bool] = True
 
+    @classmethod
+    def get_generated_artifact_files(cls) -> tuple[str, ...]:
+        """Return this updater's configurable Deno manifest path."""
+        return (cls.manifest_file,)
+
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build a source entry carrying the backing input identity."""
         return SourceEntry(
@@ -538,7 +574,7 @@ class DenoManifestUpdater(FlakeInputUpdater):
             with suppress(OSError):
                 await asyncio.to_thread(Path(tmp_name).unlink, missing_ok=True)
 
-        pkg_dir = update_paths.package_dir_for(self.name)
+        pkg_dir = update_paths.updater_dir_for(self.name)
         if pkg_dir is None:
             msg = f"Package directory not found for {self.name}"
             raise RuntimeError(msg)
@@ -568,6 +604,11 @@ class UvLockUpdater(FlakeInputUpdater):
     lock_env: ClassVar[dict[str, str]] = {}
     required_tools: ClassVar[tuple[str, ...]] = ("nix", "uv")
     materialize_when_current: ClassVar[bool] = True
+
+    @classmethod
+    def get_generated_artifact_files(cls) -> tuple[str, ...]:
+        """Return this updater's configurable uv lock path."""
+        return (cls.lock_file,)
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build a source entry tied to the updater's flake input."""
@@ -693,7 +734,7 @@ class UvLockUpdater(FlakeInputUpdater):
             yield event
         source_path = require_value(source_path_drain, "Missing resolved source path")
 
-        pkg_dir = update_paths.package_dir_for(self.name)
+        pkg_dir = update_paths.updater_dir_for(self.name)
         if pkg_dir is None:
             msg = f"Package directory not found for {self.name}"
             raise RuntimeError(msg)

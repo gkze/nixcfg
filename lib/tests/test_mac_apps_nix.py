@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import stat
 import subprocess
@@ -68,6 +69,19 @@ def _module_output(relative_path: str) -> AttributeSet:
         FunctionDefinition,
     )
     return expect_instance(expr.output, AttributeSet)
+
+
+@cache
+def _darwin_app_builder(name: str, next_name: str) -> FunctionDefinition:
+    """Parse one exported shared Darwin app builder."""
+    return expect_instance(
+        nix_source_fragment_expr(
+            "overlays/_lib/helpers/darwin-apps.nix",
+            f"  {name} =\n",
+            f";\n\n  {next_name} =",
+        ),
+        FunctionDefinition,
+    )
 
 
 @cache
@@ -439,14 +453,7 @@ def test_dmg_app_helper_forwards_custom_stdenv_to_derivation() -> None:
     unpacked_derivation = expect_instance(mk_unpacked_app.output, FunctionCall)
     assert_nix_ast_equal(unpacked_derivation.name, "stdenv.mkDerivation")
 
-    mk_dmg_app = expect_instance(
-        nix_source_fragment_expr(
-            "overlays/_lib/helpers/darwin-apps.nix",
-            "  mkDmgApp =\n",
-            ";\n\n  mkDmgApp7zz =",
-        ),
-        FunctionDefinition,
-    )
+    mk_dmg_app = _darwin_app_builder("mkDmgApp", "mkDmgApp7zz")
     assert "stdenv ? prev.stdenvNoCC" in [
         argument.rebuild() for argument in mk_dmg_app.argument_set
     ]
@@ -464,14 +471,7 @@ def test_dmg_app_helper_forwards_custom_stdenv_to_derivation() -> None:
 
 def test_dmg_app_helper_supports_an_explicit_source_name() -> None:
     """DMG callers may override the versioned source name without changing its default."""
-    mk_dmg_app = expect_instance(
-        nix_source_fragment_expr(
-            "overlays/_lib/helpers/darwin-apps.nix",
-            "  mkDmgApp =\n",
-            ";\n\n  mkDmgApp7zz =",
-        ),
-        FunctionDefinition,
-    )
+    mk_dmg_app = _darwin_app_builder("mkDmgApp", "mkDmgApp7zz")
     assert "sourceName ? null" in [
         argument.rebuild() for argument in mk_dmg_app.argument_set
     ]
@@ -488,6 +488,97 @@ def test_dmg_app_helper_supports_an_explicit_source_name() -> None:
         '"${capitalizedAppName}_${info.version}_${arch}.dmg"',
     )
     assert_nix_ast_equal(source_name.alternative, Identifier(name="sourceName"))
+
+
+@pytest.mark.parametrize(
+    ("name", "next_name"),
+    [
+        ("mkDmgApp", "mkDmgApp7zz"),
+        ("mkZipApp", "mkPkgApp"),
+    ],
+)
+def test_archive_app_helpers_reject_missing_bundle_executables(
+    name: str,
+    next_name: str,
+) -> None:
+    """Archive app builders must fail instead of emitting dangling bin links."""
+    helper = _darwin_app_builder(name, next_name)
+    unpacked_call = expect_instance(helper.output, FunctionCall)
+    unpacked_args = expect_instance(unpacked_call.argument, AttributeSet)
+    unpack = expect_instance(
+        expect_binding(unpacked_args.values, "unpack").value,
+        AttributeSet,
+    )
+    install_phase = expect_instance(
+        expect_binding(unpack.values, "installPhase").value,
+        IndentedString,
+    )
+
+    marker = "${prev.lib.optionalString makeBinary ("
+    rendered_phase = install_phase.rebuild()
+    guarded_call_source = rendered_phase.split(marker, 1)[1].split(")}", 1)[0]
+    assert_nix_ast_equal(
+        parse_nix_expr(guarded_call_source),
+        """
+        guardedBinLink {
+          bundleName = resolvedBundleName;
+          executableName = resolvedExecutableName;
+          inherit binaryName;
+        }
+        """,
+    )
+
+
+@cache
+def _guarded_bin_link_script() -> str:
+    """Evaluate the shared link guard; Nix ASTs cannot expose interpolated shell."""
+    return nix_eval_raw(
+        FunctionCall(
+            name=nix_import(REPO_ROOT / "overlays/_lib/helpers/guarded-bin-link.nix"),
+            argument=nix_attrset({
+                "binaryName": "demo",
+                "bundleName": "Demo.app",
+                "executableName": "Demo",
+            }),
+        )
+    )
+
+
+@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
+@pytest.mark.parametrize(
+    "executable_state", ["missing", "non_executable", "executable"]
+)
+def test_guarded_bin_link_requires_an_executable(
+    tmp_path: Path,
+    *,
+    executable_state: str,
+) -> None:
+    """The rendered guard must reject bad bundles and link a valid executable."""
+    output = tmp_path / "output"
+    executable = output / "Applications/Demo.app/Contents/MacOS/Demo"
+    executable.parent.mkdir(parents=True)
+    (output / "bin").mkdir()
+    if executable_state != "missing":
+        executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    if executable_state == "executable":
+        executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+
+    bash = shutil.which("bash")
+    assert bash is not None
+    result = subprocess.run(  # noqa: S603
+        [bash, "-eu", "-c", _guarded_bin_link_script()],
+        check=False,
+        capture_output=True,
+        env={**os.environ, "out": str(output)},
+        text=True,
+    )
+
+    link = output / "bin/demo"
+    executable_is_valid = executable_state == "executable"
+    assert result.returncode == (0 if executable_is_valid else 1)
+    assert link.is_symlink() is executable_is_valid
+    if executable_is_valid:
+        assert link.resolve() == executable
 
 
 def test_pkg_app_packages_use_shared_helper() -> None:
@@ -1639,26 +1730,27 @@ def test_george_config_manages_mutable_gui_apps_via_scoped_applications() -> Non
     )
     routing = expect_instance(
         expect_scope_binding(nixcfg, "managedMacAppRouting").value,
-        BinaryExpression,
+        AttributeSet,
     )
-    assert routing.operator.name == "//"
-    base_routing = expect_instance(routing.left, AttributeSet)
-    assert package_for(base_routing, "slack") == "pkgs.slack"
-    assert package_for(base_routing, "ghostty") == "pkgs.ghostty-tip"
-    assert package_for(base_routing, "zed") == "pkgs.zed-editor-nightly"
-    assert package_for(base_routing, "zen-twilight") == "pkgs.zen-twilight"
-    assert package_for(base_routing, "code-cursor") == "pkgs.code-cursor"
-    assert package_for(base_routing, "vscode-insiders") == "pkgs.vscode-insiders"
-    assert package_for(base_routing, "superset") == "pkgs.superset"
-    assert package_for(base_routing, "goose") == "pkgs.goose-desktop"
-    assert package_for(base_routing, "nordvpn") == "pkgs.nordvpn"
-    assert scope_for(base_routing, "nordvpn") == '"system"'
-    assert package_for(base_routing, "zoom") == "pkgs.zoom-us"
-    assert not has_scope(base_routing, "zoom")
+    assert package_for(routing, "slack") == "pkgs.slack"
+    assert package_for(routing, "ghostty") == "pkgs.ghostty-tip"
+    assert package_for(routing, "zed") == "pkgs.zed-editor-nightly"
+    assert package_for(routing, "zen-twilight") == "pkgs.zen-twilight"
+    assert package_for(routing, "code-cursor") == "pkgs.code-cursor"
+    assert package_for(routing, "vscode-insiders") == "pkgs.vscode-insiders"
+    assert package_for(routing, "superset") == "pkgs.superset"
+    assert package_for(routing, "goose") == "pkgs.goose-desktop"
+    assert package_for(routing, "nordvpn") == "pkgs.nordvpn"
+    assert scope_for(routing, "nordvpn") == '"system"'
+    assert package_for(routing, "zoom") == "pkgs.zoom-us"
+    assert not has_scope(routing, "zoom")
 
-    work_call = expect_instance(routing.right, FunctionCall)
-    assert work_call.name.rebuild() == "lib.optionalAttrs config.profiles.work.enable"
-    work_routing = expect_instance(work_call.argument, AttributeSet)
+    work_routing = expect_instance(
+        nix_source_fragment_expr(
+            "home/george/work.nix", "  routing = ", ";\n  projection ="
+        ),
+        AttributeSet,
+    )
     assert package_for(work_routing, "onepassword") == "pkgs.onepassword"
     assert scope_for(work_routing, "onepassword") == '"system"'
     tailscale = expect_instance(
@@ -1949,15 +2041,12 @@ def test_george_config_routes_only_the_unified_chatgpt_app() -> None:
     nixcfg = expect_instance(expect_binding(root.values, "nixcfg").value, AttributeSet)
     routing = expect_instance(
         expect_scope_binding(nixcfg, "managedMacAppRouting").value,
-        BinaryExpression,
+        AttributeSet,
     )
-    base_routing = expect_instance(routing.left, AttributeSet)
 
-    assert "chatgpt" not in binding_map(base_routing.values)
+    assert "chatgpt" not in binding_map(routing.values)
 
-    codex = expect_instance(
-        expect_binding(base_routing.values, "codex").value, AttributeSet
-    )
+    codex = expect_instance(expect_binding(routing.values, "codex").value, AttributeSet)
     assert (
         expect_binding(codex.values, "package").value.rebuild() == "pkgs.codex-desktop"
     )

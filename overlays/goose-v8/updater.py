@@ -146,7 +146,11 @@ class GooseV8Updater(FlakeInputUpdater, HashEntryUpdater):
             )
 
         async for asset_item in capture_stream_value(
-            update_process.compute_url_hashes(self.name, platform_urls.values()),
+            update_process.compute_url_hashes(
+                self.name,
+                platform_urls.values(),
+                config=self.config,
+            ),
             error="Missing prebuilt rusty_v8 hash output",
         ):
             if isinstance(asset_item, CapturedValue):

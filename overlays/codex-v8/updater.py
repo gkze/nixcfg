@@ -166,7 +166,11 @@ class CodexV8Updater(HashEntryUpdater):
             )
 
         async for item in capture_stream_value(
-            update_process.compute_url_hashes(self.name, platform_urls.values()),
+            update_process.compute_url_hashes(
+                self.name,
+                platform_urls.values(),
+                config=self.config,
+            ),
             error="Missing prebuilt rusty_v8 hash output",
         ):
             if isinstance(item, CapturedValue):

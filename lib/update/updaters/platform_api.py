@@ -34,7 +34,6 @@ from lib.update.updaters.metadata import (
 type JsonObject = json_utils.JsonObject
 
 _OBJECT_MAP_ADAPTER = TypeAdapter(JsonObject)
-_PLATFORM_INFO_ADAPTER = TypeAdapter(dict[str, JsonObject])
 
 
 class PlatformAPIUpdater(ChecksumProvidedUpdater):
@@ -181,6 +180,7 @@ class DownloadingPlatformAPIUpdater(PlatformAPIUpdater):
         async for event in stream_url_hash_mapping(
             self.name,
             self._download_urls(info),
+            config=self.config,
         ):
             yield event
 

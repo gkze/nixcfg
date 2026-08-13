@@ -61,8 +61,12 @@ def _install_twilight_hashes(
     calls: list[tuple[str, ...]] = []
 
     async def _compute_url_hashes(
-        source: str, urls: Iterable[str]
+        source: str,
+        urls: Iterable[str],
+        *,
+        config: object,
     ) -> AsyncIterator[UpdateEvent]:
+        _ = config
         resolved_urls = tuple(urls)
         calls.append(resolved_urls)
         yield UpdateEvent.value(
@@ -576,6 +580,31 @@ def test_zen_twilight_hashes_one_stable_channel_snapshot(
     ]
 
 
+def test_zen_twilight_rejects_a_snapshot_that_moves_before_hashing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not hash when the channel already differs from the resolved build."""
+    module = _load_updater(
+        "packages/zen-twilight/updater.py",
+        "zen_twilight_updater_test_pre_hash_movement",
+    )
+    updater = module.ZenTwilightUpdater(config=resolve_config(retry_backoff=0))
+    _install_twilight_feed(monkeypatch, module, ("20260804121500",))
+    hash_calls = _install_twilight_hashes(monkeypatch, ("sha256-unexpected",))
+
+    with pytest.raises(RuntimeError, match="changed before hashing"):
+        _run(
+            _collect_events(
+                updater.fetch_hashes(
+                    VersionInfo("1.22t-20260803113308"),
+                    object(),
+                )
+            )
+        )
+
+    assert hash_calls == []
+
+
 def test_zen_twilight_forwards_hash_diagnostics_before_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -605,7 +634,10 @@ def test_zen_twilight_forwards_hash_diagnostics_before_failure(
     async def _failing_hashes(
         _source: str,
         _urls: Iterable[str],
+        *,
+        config: object,
     ) -> AsyncIterator[UpdateEvent]:
+        _ = config
         yield command_start
         yield retry
         raise RuntimeError("permanent prefetch failure")
@@ -705,49 +737,8 @@ def test_zen_twilight_retries_the_whole_unpinned_snapshot(
     assert len(hash_calls) == 2
 
 
-@pytest.mark.parametrize(
-    ("feed_builds", "expected_hash_calls"),
-    [
-        (("20260804121500",), 0),
-        (("20260803113308", "20260804121500"), 1),
-    ],
-)
 @pytest.mark.usefixtures("_twilight_darwin_platform")
-def test_zen_twilight_pinned_snapshot_fails_closed_when_channel_moves(
-    monkeypatch: pytest.MonkeyPatch,
-    feed_builds: tuple[str, ...],
-    expected_hash_calls: int,
-) -> None:
-    """Require CI to resolve versions again instead of advancing a pinned build."""
-    module = _load_updater(
-        "packages/zen-twilight/updater.py", "zen_twilight_updater_test_pinned"
-    )
-    updater = module.ZenTwilightUpdater(config=resolve_config(retry_backoff=0))
-    _install_twilight_feed(monkeypatch, module, feed_builds)
-    hash_calls = _install_twilight_hashes(monkeypatch, ("sha256-raced",))
-
-    with pytest.raises(
-        RuntimeError,
-        match=(
-            "Pinned Twilight version 1.22t-20260803113308 no longer matches "
-            r"the channel \(1.22t-20260804121500\); rerun version resolution"
-        ),
-    ):
-        _run(
-            _collect_events(
-                updater.update_stream(
-                    None,
-                    object(),
-                    pinned_version=VersionInfo("1.22t-20260803113308"),
-                )
-            )
-        )
-
-    assert len(hash_calls) == expected_hash_calls
-
-
-@pytest.mark.usefixtures("_twilight_darwin_platform")
-def test_zen_twilight_bounds_repeated_unpinned_snapshot_changes(
+def test_zen_twilight_bounds_repeated_snapshot_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Stop after two complete raced snapshots instead of retrying forever."""

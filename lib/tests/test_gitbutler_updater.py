@@ -245,7 +245,7 @@ def test_gitbutler_update_keeps_drv_hash_when_artifacts_change(
     monkeypatch.setattr(updater, "stream_materialized_artifacts", _artifacts)
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
     monkeypatch.setattr(
-        "lib.update.nix.compute_drv_fingerprint",
+        "lib.update.nix.compute_expr_drv_fingerprint",
         _compute_drv_fingerprint,
     )
 
