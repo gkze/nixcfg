@@ -1,0 +1,24 @@
+{
+  "commit": "8c43aed2038721050ca0620f02967e03a9d5aa23",
+  "hashes": [
+    {
+      "hash": "sha256-K3wbtbqvMK9iX3qnLhAUCUU6vwYwMjAfHN+v3wV0yd4=",
+      "hashType": "sha256",
+      "url": "https://files.pythonhosted.org/packages/1b/5c/7645fb279567ab0f81751c284b8c916673e7721aee87acd841478cfab8b7/unsloth-2026.8.22.tar.gz"
+    },
+    {
+      "hash": "sha256-yohnJK7S7DEEy5oMYGk/PCz2JzSww08B+1hoRO4PJoY=",
+      "hashType": "sha256",
+      "url": "https://github.com/unslothai/unsloth/releases/download/v0.1.804-beta/latest.json"
+    },
+    {
+      "hash": "sha256-HPQu2gdFx5AMPkejUf5zIZqtx8FTwU+ZG7cxmm6tcp8=",
+      "hashType": "srcHash"
+    }
+  ],
+  "urls": {
+    "backendSdist": "https://files.pythonhosted.org/packages/1b/5c/7645fb279567ab0f81751c284b8c916673e7721aee87acd841478cfab8b7/unsloth-2026.8.22.tar.gz",
+    "releaseManifest": "https://github.com/unslothai/unsloth/releases/download/v0.1.804-beta/latest.json"
+  },
+  "version": "0.1.804-beta"
+}

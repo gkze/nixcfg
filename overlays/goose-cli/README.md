@@ -16,7 +16,8 @@ graph, while still preserving Goose's custom V8 setup.
 ### Hand-maintained
 
 - `default.nix`
-  - source surgery for Goose + V8
+  - update-time workspace surgery for Goose + V8
+  - build-time patches for the individual crates that need them
   - crate overrides and compatibility shims
   - final `goose-cli` package assembly
 - `rusty-v8-nix.patch`
@@ -38,8 +39,9 @@ graph, while still preserving Goose's custom V8 setup.
   - uses `nix-manipulator` to add `rootSrc` and rewrite local source paths via the parsed Nix AST
     instead of regex-based text replacement
 - `updater.py`
-  - updates only the upstream Goose source hash in `sources.json`
-  - it deliberately does **not** regenerate `Cargo.nix`
+  - advances the locked non-flake `goose` input
+  - records the locked revision in `sources.json`
+  - participates in the shared crate2nix artifact regeneration pipeline
 
 ## Why the package is complex
 
@@ -51,7 +53,8 @@ The complexity is coming from three places at once:
 
 That means this package is not just "generate Cargo.nix and build". It also needs:
 
-- a patched Goose source tree
+- a fully patched Goose source tree for crate2nix regeneration
+- evaluator-visible per-crate production sources from the locked Goose input
 - a checked-in `Cargo.nix`
 - a handful of crate-specific fixes
 - a custom V8 toolchain layout on Darwin
@@ -60,7 +63,12 @@ That means this package is not just "generate Cargo.nix and build". It also need
 
 ### Source preparation in `default.nix`
 
-The package now splits source preparation into two derivations so normal Goose workspace churn does
+The package separates update-time workspace preparation from production crate sources. `Cargo.nix`
+filters the locked, evaluator-visible Goose input into per-crate sources, and the affected crate
+overrides apply their own build-time patches. This preserves crate-level invalidation without
+requiring evaluation to realize a source-preparation derivation.
+
+The V8 preparation remains on separate derivation boundaries so normal Goose workspace churn does
 not invalidate the expensive V8 source input.
 
 - `patchedV8Src`
@@ -77,10 +85,11 @@ not invalidate the expensive V8 source input.
 - `patchedSrc`
   - prepares the Goose workspace and then copies in `patchedV8Src` under `vendor/v8-goose-src`
   - keeps Goose-only path rewrites, manifest edits, lockfile updates, and crate2nix inputs
+  - is consumed only by crate2nix regeneration, never inspected during production evaluation
 
-`patchedSrc` still does the non-negotiable Goose-side surgery:
+`patchedSrc` still does the non-negotiable update-time Goose-side surgery:
 
-- fetch Goose from the release tag in `sources.json`
+- copy Goose from the locked non-flake `goose` input
 - fetch the Goose-specific `rusty_v8` fork from `overlays/goose-v8/sources.json`
 - inject that fork under `vendor/v8-goose-src`
 - rewrite any Goose source files that still reference
@@ -91,6 +100,14 @@ not invalidate the expensive V8 source input.
   (`[workspace]`, `[profile.dev]`, dev dependencies, examples/tests/benches) so Cargo sees a clean
   library dependency inside Goose's workspace
 - rewrite the `v8-goose` entry in `Cargo.lock`
+- reconcile local `Cargo.lock` entries for workspace members that inherit
+  `workspace.package.version`, respecting `workspace.members` and `workspace.exclude` while leaving
+  explicitly versioned and registry packages byte-for-byte unchanged; ambiguous or incomplete
+  local entries fail before crate2nix runs
+
+For production, the `goose-cli` override copies only that filtered crate, rewrites its logo paths,
+and stages the two required logo assets. The generated dependency graph and the `v8-goose` crate
+override provide the V8 wiring without inspecting the prepared workspace during evaluation.
 
 ### CLI and server assembly
 
@@ -103,6 +120,11 @@ because the removed REST/OpenAPI server and the ACP server are not command- or p
 
 These are intentionally centralized in `crateOverrides` inside `default.nix`.
 
+- `bitcoinInternalsOverride`
+  - restores `rust-version = "1.74.0"` for the locked `bitcoin-internals` 0.5.0 and 0.6.0 crates
+  - compensates for crate2nix 0.15 omitting Cargo's `package.rust_version` metadata, which would
+    otherwise make `buildRustCrate` export an empty `CARGO_PKG_RUST_VERSION`
+  - rejects unreviewed future versions so their authoritative manifest metadata must be recorded
 - `gooseCliOverride`
   - native/build inputs for the Goose CLI crate
 - `xcapLinuxOverride`
@@ -133,31 +155,35 @@ Goose's git-based `llama-cpp-rs` workspace dependency. Once materialized inside 
 dependency no longer looked like a complete Cargo workspace to `cargo metadata`.
 
 Checking in `Cargo.nix` avoids that failure mode and keeps the actual package build free of
-crate2nix-at-build-time complexity.
+crate2nix-at-build-time complexity. Pointing it at the locked flake input also keeps evaluation
+free of import-from-derivation.
 
 ## Regenerating `Cargo.nix`
 
 Fast path:
 
 ```bash
-    nix run path:.#nixcfg -- ci pipeline crate2nix --write --package goose-cli
+nix run .#nixcfg -- ci pipeline crate2nix --write --package goose-cli
 ```
+
+The `.#` form evaluates Git's tracked source set. Stage new or renamed artifacts before invoking it
+so Nix can see them.
 
 Manual flow:
 
 When the Goose version or lockfile changes enough that the Rust dependency graph must be
 regenerated, use this flow from the repo root.
 
-1. Update source hashes first.
+1. Update the locked source first.
 
-   - `overlays/goose-cli/updater.py` updates the Goose source hash.
+   - `overlays/goose-cli/updater.py` advances the `goose` flake input and records its revision.
    - `overlays/goose-v8/sources.json` is maintained separately if the V8 fork revision changes.
 
 1. Build the already-patched Goose source tree:
 
    ```bash
    nix build --impure --no-link --print-out-paths \
-     path:.#goose-cli-crate2nix-src
+     .#goose-cli-crate2nix-src
    ```
 
    Save the printed store path as `PATCHED_SRC`.
@@ -175,7 +201,7 @@ regenerated, use this flow from the repo root.
 1. Normalize the generated file for this repo layout:
 
    ```bash
-   nix run path:.#nixcfg -- ci pipeline crate2nix normalize goose-cli
+   nix run .#nixcfg -- ci pipeline crate2nix normalize goose-cli
    ```
 
 1. Rebuild and continue iterating on any crate overrides that are still needed.
@@ -197,6 +223,7 @@ At minimum:
 
 ```bash
 nix run .#nixcfg -- ci pipeline crate2nix --package goose-cli
+nix eval --option allow-import-from-derivation false --raw .#goose-cli.drvPath
 nix build --impure -L -vv --show-trace .#goose-cli --no-link
 ```
 

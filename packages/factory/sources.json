@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-GgPzpSpnzTIcHo2PHf5tTg6ba3m6RiHh4ojwW3umK4k=",
+    "x86_64-darwin": "sha256-7SGwQn+jaDafhXX9LYCknuV/Q0McQrI95a53QEVoOeg="
+  },
+  "urls": {
+    "aarch64-darwin": "https://downloads.factory.ai/factory-desktop/releases/0.163.0/darwin/arm64/Factory-0.163.0-arm64.dmg",
+    "x86_64-darwin": "https://downloads.factory.ai/factory-desktop/releases/0.163.0/darwin/x64/Factory-0.163.0-x64.dmg"
+  },
+  "version": "0.163.0"
+}

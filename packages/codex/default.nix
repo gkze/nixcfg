@@ -19,12 +19,37 @@ let
   version = slib.getFlakeVersion "codex";
   src = "${inputs.codex}/codex-rs";
   pythonForSourcePrep = python3.withPackages (ps: [ ps.tomlkit ]);
+  nodeVersionPath = "${src}/node-version.txt";
+  jsReplSourcePath = "${src}/core/src/tools/js_repl/mod.rs";
+  nodeVersionFile =
+    if builtins.pathExists nodeVersionPath then
+      builtins.path {
+        path = nodeVersionPath;
+        name = "codex-node-version.txt";
+      }
+    else
+      null;
+  needsCoreNodeVersionPatch = nodeVersionFile != null && builtins.pathExists jsReplSourcePath;
+  bubblewrapVendorSrc = builtins.path {
+    path = "${src}/vendor/bubblewrap";
+    name = "codex-vendor-bubblewrap";
+  };
+
+  patchCoreNodeVersion =
+    target:
+    lib.optionalString needsCoreNodeVersionPatch ''
+      cp ${nodeVersionFile} "${target}/node-version.txt"
+      substituteInPlace "${target}/src/tools/js_repl/mod.rs" \
+        --replace-fail '../../../../node-version.txt' '../../../node-version.txt'
+    '';
 
   # Reuse the shared codex-v8 overlay source so updates only touch one pin.
   v8Source = slib.sources.codex-v8;
   rustyV8Src = pkgs.codex-v8;
-  v8ManifestVersion =
-    (builtins.fromTOML (builtins.readFile "${rustyV8Src}/Cargo.toml")).package.version;
+  # The updater records the release tag alongside the recursive source hash.
+  # Keep evaluation independent of the fetchgit result; update validation and
+  # the checked-in Cargo.nix version assertion guard this generated metadata.
+  v8ManifestVersion = lib.removePrefix "v" v8Source.version;
   prebuiltV8 =
     if pkgs.stdenv.hostPlatform.isLinux then
       slib.mkRustyV8PrebuiltArtifacts {
@@ -69,17 +94,19 @@ let
       ''
         cp -r ${src} "$out"
         chmod -R u+w "$out"
-        if [ -f "${src}/node-version.txt" ]; then
-          cp "${src}/node-version.txt" "$out/node-version.txt"
-          cp "${src}/node-version.txt" "$out/core/node-version.txt"
-          if [ -f "$out/core/src/tools/js_repl/mod.rs" ]; then
-            substituteInPlace "$out/core/src/tools/js_repl/mod.rs" \
-              --replace-fail '../../../../node-version.txt' '../../../node-version.txt'
-          fi
-        elif [ -f "$out/core/src/tools/js_repl/mod.rs" ]; then
-          echo "codex js_repl source still exists, but ${src}/node-version.txt is missing" >&2
-          exit 1
-        fi
+        ${
+          if nodeVersionFile != null then
+            ''
+              cp ${nodeVersionFile} "$out/node-version.txt"
+              cp ${nodeVersionFile} "$out/core/node-version.txt"
+              ${patchCoreNodeVersion "$out/core"}
+            ''
+          else
+            lib.optionalString (builtins.pathExists jsReplSourcePath) ''
+              echo "codex js_repl source still exists, but ${nodeVersionPath} is missing" >&2
+              exit 1
+            ''
+        }
 
         ${pythonForSourcePrep}/bin/python3 \
           ${./patch_cargo_lock_version.py} \
@@ -87,9 +114,24 @@ let
           ${lib.escapeShellArg version}
       '';
 
+  crateSource = (import ../../lib/crate2nix-source-slice.nix).sourceFor {
+    rootSrc = src;
+    source = {
+      cargoNixSha256 = builtins.hashFile "sha256" ./Cargo.nix;
+      input = "codex";
+      narHash = inputs.codex.narHash;
+      subdir = "codex-rs";
+    };
+    sourceInfo = builtins.fromJSON (builtins.readFile ./crate-sources.json);
+  };
+
   cargoNix = import ./Cargo.nix {
-    inherit pkgs;
-    rootSrc = patchedSrc;
+    inherit pkgs crateSource;
+    # Cargo.nix maps evaluator-visible flake input paths to updater-hashed,
+    # content-addressed per-crate sources. Package-only source surgery belongs
+    # in crate overrides below; the complete patched workspace remains an
+    # update-time artifact.
+    rootSrc = src;
   };
   cargoNixVersion = cargoNix.internal.crates."codex-cli".version;
   cargoNixV8Version = cargoNix.internal.crates.v8.version;
@@ -117,6 +159,14 @@ let
     '';
   };
 
+  codexCoreOverride = attrs: {
+    src = runCommand "codex-core-${attrs.version}-src" { } ''
+      cp -R ${attrs.src} "$out"
+      chmod -R u+w "$out"
+      ${patchCoreNodeVersion "$out"}
+    '';
+  };
+
   rmcpOverride =
     attrs:
     assert attrs ? crateName;
@@ -138,7 +188,7 @@ let
       postUnpack = (attrs.postUnpack or "") + ''
         vendor_dir="$(dirname "$sourceRoot")/vendor"
         mkdir -p "$vendor_dir"
-        ln -s ${patchedSrc}/vendor/bubblewrap "$vendor_dir/bubblewrap"
+        ln -s ${bubblewrapVendorSrc} "$vendor_dir/bubblewrap"
       '';
     };
 
@@ -170,15 +220,41 @@ let
     dontCheckForBrokenSymlinks = true;
   };
 
-  crateOverrides = pkgs.defaultCrateOverrides // {
-    codex-app-server-protocol = codexLinuxLowMemoryOverride;
-    crossterm = crosstermOverride;
-    codex-linux-sandbox = codexLinuxSandboxOverride;
-    rmcp = rmcpOverride;
-    runfiles = runfilesOverride;
-    v8 = v8Build.mkCrateOverride;
-    webrtc-sys = webrtcSysOverride;
+  # Each platform crate compiles CARGO_MANIFEST_DIR into its path helpers.
+  # crate2nix builds the library separately from its source, so the default
+  # value points into a transient producer sandbox. Embed the final library
+  # output instead and materialize the referenced protoc/include payload there.
+  protocBinVendoredPlatformOverride = attrs: {
+    preBuild = (attrs.preBuild or "") + ''
+      export CARGO_MANIFEST_DIR="$lib/share/${attrs.crateName}"
+    '';
+    postInstall = (attrs.postInstall or "") + ''
+      mkdir -p "$lib/share/${attrs.crateName}"
+      cp -R bin include "$lib/share/${attrs.crateName}/"
+    '';
   };
+  protocBinVendoredPlatformCrates = map (
+    dependency: cargoNix.internal.crates.${dependency.packageId}.crateName
+  ) cargoNix.internal.crates."protoc-bin-vendored".dependencies;
+  protocBinVendoredPlatformOverrides = lib.genAttrs protocBinVendoredPlatformCrates (
+    _: protocBinVendoredPlatformOverride
+  );
+
+  crateOverrides =
+    pkgs.defaultCrateOverrides
+    // protocBinVendoredPlatformOverrides
+    // {
+      codex-app-server-protocol = codexLinuxLowMemoryOverride;
+      crossterm = crosstermOverride;
+      codex-linux-sandbox = codexLinuxSandboxOverride;
+      rmcp = rmcpOverride;
+      runfiles = runfilesOverride;
+      v8 = v8Build.mkCrateOverride;
+      webrtc-sys = webrtcSysOverride;
+    }
+    // lib.optionalAttrs needsCoreNodeVersionPatch {
+      codex-core = codexCoreOverride;
+    };
 
   codexDrv = cargoNix.workspaceMembers.codex-cli.build.override {
     inherit crateOverrides;

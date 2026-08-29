@@ -1,0 +1,300 @@
+diff --git a/apps/desktop/src-tauri/Cargo.toml b/apps/desktop/src-tauri/Cargo.toml
+index 358b469..3002d22 100644
+--- a/apps/desktop/src-tauri/Cargo.toml
++++ b/apps/desktop/src-tauri/Cargo.toml
+@@ -35,7 +35,6 @@ thiserror = "2"
+ trash = "5"
+ base64 = "0.22"
+ tauri-plugin-store = "2.4.2"
+-tauri-plugin-updater = "2"
+ tauri-plugin-single-instance = "2"
+ tauri-plugin-webdriver = { version = "0.2", optional = true }
+
+diff --git a/apps/desktop/src-tauri/Cargo.lock b/apps/desktop/src-tauri/Cargo.lock
+index 4776e50..90688d0 100644
+--- a/apps/desktop/src-tauri/Cargo.lock
++++ b/apps/desktop/src-tauri/Cargo.lock
+@@ -875,7 +875,6 @@ dependencies = [
+  "tauri-plugin-opener",
+  "tauri-plugin-single-instance",
+  "tauri-plugin-store",
+- "tauri-plugin-updater",
+  "tauri-plugin-webdriver",
+  "tempfile",
+  "thiserror 2.0.18",
+diff --git a/apps/desktop/src-tauri/tauri.conf.json b/apps/desktop/src-tauri/tauri.conf.json
+index 639291e..99fa3eb 100644
+--- a/apps/desktop/src-tauri/tauri.conf.json
++++ b/apps/desktop/src-tauri/tauri.conf.json
+@@ -40,7 +40,7 @@
+   "bundle": {
+     "active": true,
+     "targets": "all",
+-    "createUpdaterArtifacts": true,
++    "createUpdaterArtifacts": false,
+     "macOS": {
+       "infoPlist": "Info.plist",
+       "entitlements": "./Entitlements.plist",
+@@ -62,13 +62,5 @@
+       "icons/icon.icns",
+       "icons/icon.ico"
+     ]
+-  },
+-  "plugins": {
+-    "updater": {
+-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENENEUyMDZFQjU0REVERTIKUldUaTdVMjFiaUJPelgxa29VQmgvbGN5TXFjQU5DTFFxQXR5S0hCYVJzY2hvRHJraFh2cXh2bFcK",
+-      "endpoints": [
+-        "https://github.com/joelbqz/writer-computer/releases/latest/download/latest.json"
+-      ]
+-    }
+   }
+ }
+diff --git a/apps/desktop/src-tauri/src/commands/mod.rs b/apps/desktop/src-tauri/src/commands/mod.rs
+index 81a62e9..df18c87 100644
+--- a/apps/desktop/src-tauri/src/commands/mod.rs
++++ b/apps/desktop/src-tauri/src/commands/mod.rs
+@@ -4,7 +4,5 @@ pub mod images;
+ pub mod recents;
+ pub mod search;
+ pub mod settings;
+-#[cfg(target_os = "macos")]
+-pub mod shell_install;
+ pub mod startup;
+ pub mod workspace;
+diff --git a/apps/desktop/src-tauri/src/lib.rs b/apps/desktop/src-tauri/src/lib.rs
+index dc9b49e..42a8323 100644
+--- a/apps/desktop/src-tauri/src/lib.rs
++++ b/apps/desktop/src-tauri/src/lib.rs
+@@ -8,8 +8,6 @@ mod ignore;
+ mod macos;
+ pub mod open_target;
+ mod state;
+-#[cfg(desktop)]
+-mod updater;
+ mod watcher;
+ pub mod writer_cli;
+
+@@ -19,21 +17,11 @@ use open_target::resolve_path;
+ pub use open_target::PendingOpenPayload;
+ use state::AppState;
+ use std::path::{Path, PathBuf};
+-#[cfg(target_os = "macos")]
+-use tauri::menu::MenuItem;
+ use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+ #[cfg(target_os = "macos")]
+ use tauri::RunEvent;
+ use tauri::{DragDropEvent, Emitter, Manager, PhysicalPosition, WebviewWindow, WindowEvent};
+
+-#[cfg(target_os = "macos")]
+-const CLI_MENU_INSTALL_LABEL: &str = "Install 'writer' Command Line Tool…";
+-#[cfg(target_os = "macos")]
+-const CLI_MENU_UNINSTALL_LABEL: &str = "Uninstall 'writer' Command Line Tool…";
+-
+-#[cfg(target_os = "macos")]
+-struct CliMenuItem(MenuItem<tauri::Wry>);
+-
+ const MAIN_WINDOW_LABEL: &str = "main";
+
+ /// Push an open payload into the target window's pending-open queue and emit
+@@ -252,42 +240,27 @@ fn position_new_window(app: &tauri::AppHandle, window: &WebviewWindow) {
+     let _ = window.set_position(PhysicalPosition::new(x, y));
+ }
+
+-/// Build the native menu bar and wire updater menu events. macOS only needs a
+-/// menu at all because of the auto-updater; the rest of the items are standard
+-/// predefined actions so nothing has to be rewired on the frontend.
++/// Build the native menu bar. Nix owns updates and CLI installation, while the
++/// app retains its standard native actions and Preferences event.
+ #[cfg(desktop)]
+-fn install_app_menu(
+-    app: &tauri::AppHandle,
+-    app_data_dir: PathBuf,
+-) -> Result<(), Box<dyn std::error::Error>> {
+-    let check_item = MenuItemBuilder::with_id("updater.check", "Check for Updates…").build(app)?;
+-
++fn install_app_menu(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+     let preferences_item = MenuItemBuilder::with_id("preferences.open", "Preferences…")
+         .accelerator("CmdOrCtrl+,")
+         .build(app)?;
+
+-    #[cfg(target_os = "macos")]
+-    let cli_item = MenuItemBuilder::with_id("cli.toggle", CLI_MENU_INSTALL_LABEL).build(app)?;
+-
+-    let app_submenu = {
+-        let b = SubmenuBuilder::new(app, "Writer")
+-            .item(&PredefinedMenuItem::about(app, Some("About Writer"), None)?)
+-            .separator()
+-            .item(&check_item)
+-            .separator()
+-            .item(&preferences_item);
+-        #[cfg(target_os = "macos")]
+-        let b = b.item(&cli_item);
+-        b.separator()
+-            .item(&PredefinedMenuItem::services(app, None)?)
+-            .separator()
+-            .item(&PredefinedMenuItem::hide(app, None)?)
+-            .item(&PredefinedMenuItem::hide_others(app, None)?)
+-            .item(&PredefinedMenuItem::show_all(app, None)?)
+-            .separator()
+-            .item(&PredefinedMenuItem::quit(app, None)?)
+-            .build()?
+-    };
++    let app_submenu = SubmenuBuilder::new(app, "Writer")
++        .item(&PredefinedMenuItem::about(app, Some("About Writer"), None)?)
++        .separator()
++        .item(&preferences_item)
++        .separator()
++        .item(&PredefinedMenuItem::services(app, None)?)
++        .separator()
++        .item(&PredefinedMenuItem::hide(app, None)?)
++        .item(&PredefinedMenuItem::hide_others(app, None)?)
++        .item(&PredefinedMenuItem::show_all(app, None)?)
++        .separator()
++        .item(&PredefinedMenuItem::quit(app, None)?)
++        .build()?;
+
+     let edit_submenu = SubmenuBuilder::new(app, "Edit")
+         .undo()
+@@ -313,20 +286,8 @@ fn install_app_menu(
+
+     app.set_menu(menu)?;
+
+-    let menu_items = updater::UpdaterMenuItems { check: check_item };
+-    app.manage(updater::UpdaterManager::new(menu_items, app_data_dir));
+-
+-    #[cfg(target_os = "macos")]
+-    {
+-        app.manage(CliMenuItem(cli_item));
+-        refresh_cli_menu(app);
+-    }
+-
+     app.on_menu_event(|app, event| match event.id().0.as_str() {
+-        "updater.check" => updater::start_check(app.clone(), true),
+         "preferences.open" => emit_to_focused_window(app, "menu:open-preferences"),
+-        #[cfg(target_os = "macos")]
+-        "cli.toggle" => run_cli_toggle(app.clone()),
+         _ => {}
+     });
+
+@@ -357,82 +318,6 @@ fn emit_to_focused_window(app: &tauri::AppHandle, event: &str) {
+     }
+ }
+
+-#[cfg(target_os = "macos")]
+-fn refresh_cli_menu(app: &tauri::AppHandle) {
+-    let installed = commands::shell_install::cli_status(app.clone()).installed;
+-    let label = if installed {
+-        CLI_MENU_UNINSTALL_LABEL
+-    } else {
+-        CLI_MENU_INSTALL_LABEL
+-    };
+-    if let Some(item) = app.try_state::<CliMenuItem>() {
+-        let _ = item.0.set_text(label);
+-    }
+-}
+-
+-#[cfg(target_os = "macos")]
+-fn run_cli_toggle(app: tauri::AppHandle) {
+-    if commands::shell_install::cli_status(app.clone()).installed {
+-        run_cli_uninstall(app);
+-    } else {
+-        run_cli_install(app);
+-    }
+-}
+-
+-#[cfg(target_os = "macos")]
+-fn run_cli_install(app: tauri::AppHandle) {
+-    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+-    tauri::async_runtime::spawn_blocking(move || {
+-        match commands::shell_install::install_cli(app.clone()) {
+-            Ok(status) => {
+-                refresh_cli_menu(&app);
+-                app.dialog()
+-                    .message(format!(
+-                        "The `writer` command is now installed at {}.\n\nRun `writer .` from any terminal to open the current folder.",
+-                        status.target
+-                    ))
+-                    .kind(MessageDialogKind::Info)
+-                    .title("Writer CLI Installed")
+-                    .show(|_| {});
+-            }
+-            Err(err) => {
+-                app.dialog()
+-                    .message(format!("Could not install the writer command.\n\n{err}"))
+-                    .kind(MessageDialogKind::Error)
+-                    .title("Writer CLI")
+-                    .show(|_| {});
+-            }
+-        }
+-    });
+-}
+-
+-#[cfg(target_os = "macos")]
+-fn run_cli_uninstall(app: tauri::AppHandle) {
+-    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+-    tauri::async_runtime::spawn_blocking(move || {
+-        match commands::shell_install::uninstall_cli(app.clone()) {
+-            Ok(status) => {
+-                refresh_cli_menu(&app);
+-                app.dialog()
+-                    .message(format!(
+-                        "The `writer` command has been removed from {}.",
+-                        status.target
+-                    ))
+-                    .kind(MessageDialogKind::Info)
+-                    .title("Writer CLI Removed")
+-                    .show(|_| {});
+-            }
+-            Err(err) => {
+-                app.dialog()
+-                    .message(format!("Could not remove the writer command.\n\n{err}"))
+-                    .kind(MessageDialogKind::Error)
+-                    .title("Writer CLI")
+-                    .show(|_| {});
+-            }
+-        }
+-    });
+-}
+-
+ /// Handle a second Writer launch while one is already running. With
+ /// `tauri-plugin-single-instance` the OS routes the second process's argv
+ /// here via the existing process; we translate that into either opening a
+@@ -511,24 +396,9 @@ pub fn run() {
+
+             #[cfg(desktop)]
+             {
+-                let config_dir = app
+-                    .path()
+-                    .app_data_dir()
+-                    .expect("failed to get app data dir");
+-                app.handle()
+-                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+-                install_app_menu(app.handle(), config_dir)?;
++                install_app_menu(app.handle())?;
+                 #[cfg(target_os = "macos")]
+                 dock_menu::install(app.handle());
+-
+-                // Kick off the launch check once the window is ready to show
+-                // any follow-up dialogs on top of a visible app.
+-                let handle = app.handle().clone();
+-                tauri::async_runtime::spawn(async move {
+-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+-                    updater::start_check(handle.clone(), false);
+-                    updater::spawn_daily_check(handle);
+-                });
+             }
+
+             // Attach drag-drop + close handlers on the main window.
+@@ -577,12 +447,6 @@ pub fn run() {
+             commands::settings::set_setting,
+             commands::settings::reset_setting,
+             commands::startup::get_startup_state,
+-            #[cfg(target_os = "macos")]
+-            commands::shell_install::cli_status,
+-            #[cfg(target_os = "macos")]
+-            commands::shell_install::install_cli,
+-            #[cfg(target_os = "macos")]
+-            commands::shell_install::uninstall_cli,
+         ])
+         .build(tauri::generate_context!())
+         .expect("error while building tauri application")

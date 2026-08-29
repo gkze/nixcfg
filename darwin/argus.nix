@@ -9,6 +9,7 @@ lib.mkDarwinHost {
   # is gated on the builder being enabled so an explicit no-builder caller
   # does not trip over an undeclared option.
   rosettaBuilderMemory = "16GiB";
+  rosettaBuilderLingerMinutes = 30;
   brewAppsModule = "${lib.modulesPath}/darwin/george/brew-apps.nix";
   extraHomeModules = [
     ../home/george/work.nix
@@ -30,7 +31,10 @@ lib.mkDarwinHost {
   extraSystemModules = [
     "${lib.modulesPath}/darwin/george/caches.nix"
     "${lib.modulesPath}/darwin/george/work.nix"
+    "${lib.modulesPath}/darwin/george/traycer-host.nix"
     {
+      # Home Manager initializes completion after adding plugin directories to fpath.
+      darwinDefaults.zsh.deferCompletionInitToHomeManager = true;
       # Preserve any pre-existing app/editor settings the first time Home Manager
       # takes over files like ~/.gemini/settings.json and VS Code Insiders
       # settings.json.

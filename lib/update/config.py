@@ -1,7 +1,5 @@
 """Configuration models and environment/CLI resolution helpers."""
 
-from __future__ import annotations
-
 import os
 from dataclasses import dataclass
 from typing import TypedDict, Unpack
@@ -13,11 +11,11 @@ from lib.update.constants import FAKE_HASH
 
 
 def default_max_nix_builds() -> int:
-    """Return a conservative default for concurrent nix build jobs."""
+    """Return a conservative default for concurrent update/build jobs."""
     cores = os.cpu_count()
     if cores is None:
-        return 4
-    return max(1, (cores * 7 + 9) // 10)
+        return 2
+    return max(1, min(cores, 2))
 
 
 @dataclass(frozen=True)

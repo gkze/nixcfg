@@ -1,0 +1,12 @@
+diff --git a/crates/gpui_apple/build.rs b/crates/gpui_apple/build.rs
+--- a/crates/gpui_apple/build.rs
++++ b/crates/gpui_apple/build.rs
+@@ -98,7 +98,7 @@ mod macos_build {
+ 
+     /// Locate the gpui crate directory relative to this crate.
+     fn find_gpui_crate_dir() -> PathBuf {
+-        gpui::GPUI_MANIFEST_DIR.into()
++        PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("workspace-gpui")
+     }
+ 
+     /// To enable runtime compilation, we need to "stitch" the shaders file with the generated header

@@ -36,3 +36,7 @@ indent_size = 2
 [*.css]
 indent_style = space
 indent_size = 2
+
+# Unified diffs can carry whitespace that is required for matching the source.
+[*.patch]
+trim_trailing_whitespace = false

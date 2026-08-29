@@ -8,6 +8,7 @@
 mkUv2nixPackage {
   name = "toad";
   src = inputs.toad;
+  uvLockFile = ./uv.lock;
   pythonVersion = python314;
   mainProgram = "toad";
   packageName = "batrachian-toad";

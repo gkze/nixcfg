@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-Mh3i8d5MKp6on8VfDMzrKc75iDJA7AMENaVtqYCd/Cg=",
+    "x86_64-darwin": "sha256-Mh3i8d5MKp6on8VfDMzrKc75iDJA7AMENaVtqYCd/Cg="
+  },
+  "urls": {
+    "aarch64-darwin": "https://voiceos-staging-releases.s3.amazonaws.com/releases/VoiceOS-0.1.24-universal-mac.zip",
+    "x86_64-darwin": "https://voiceos-staging-releases.s3.amazonaws.com/releases/VoiceOS-0.1.24-universal-mac.zip"
+  },
+  "version": "0.1.24"
+}

@@ -1,7 +1,5 @@
 """Patch Codex Cargo.lock placeholder package versions."""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import tomlkit

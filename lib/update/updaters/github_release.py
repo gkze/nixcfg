@@ -1,7 +1,7 @@
 """Shared helpers for GitHub latest-release updaters."""
 
-from __future__ import annotations
-
+import re
+import urllib.parse
 from typing import TYPE_CHECKING, ClassVar, cast
 
 from lib.update.net import fetch_github_api
@@ -22,6 +22,25 @@ class GitHubReleaseUpdater(Updater):
     GITHUB_OWNER: str
     GITHUB_REPO: str
     TAG_PREFIX = "v"
+    RESOLVE_TAG_COMMIT: ClassVar[bool] = False
+    RELEASE_DISPLAY_NAME: ClassVar[str] = ""
+
+    _COMMIT_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"^[0-9a-f]{40}$")
+
+    @property
+    def _release_display_name(self) -> str:
+        return self.RELEASE_DISPLAY_NAME or self.name
+
+    def _require_commit(self, info: VersionInfo) -> str:
+        """Return validated immutable release metadata for source consumers."""
+        commit = info.commit
+        if commit is None or self._COMMIT_PATTERN.fullmatch(commit) is None:
+            msg = (
+                f"{self._release_display_name} release metadata is missing an "
+                "immutable source commit"
+            )
+            raise RuntimeError(msg)
+        return commit
 
     async def _fetch_latest_release_payload(
         self,
@@ -54,11 +73,56 @@ class GitHubReleaseUpdater(Updater):
             raise RuntimeError(msg)
         return version
 
+    async def _resolve_release_tag_commit(
+        self,
+        session: aiohttp.ClientSession,
+        tag_name: str,
+    ) -> str:
+        tag_path = urllib.parse.quote(tag_name, safe="")
+        payload = await fetch_github_api(
+            session,
+            f"repos/{self.GITHUB_OWNER}/{self.GITHUB_REPO}/commits/{tag_path}",
+            config=self.config,
+        )
+        message = (
+            f"{self._release_display_name} release {tag_name} has no immutable "
+            "source commit"
+        )
+        if not isinstance(payload, dict):
+            raise TypeError(message)
+        commit = payload.get("sha")
+        if (
+            not isinstance(commit, str)
+            or self._COMMIT_PATTERN.fullmatch(commit) is None
+        ):
+            raise RuntimeError(message)
+        return commit
+
+    async def _fetch_release_version_tag_commit(
+        self,
+        session: aiohttp.ClientSession,
+    ) -> tuple[str, str, str]:
+        """Resolve the latest release to a version, tag, and immutable commit."""
+        payload = await self._fetch_latest_release_payload(session)
+        tag_name = self._release_tag_from_payload(payload)
+        version = self._normalize_release_version(tag_name)
+        commit = await self._resolve_release_tag_commit(session, tag_name)
+        return version, tag_name, commit
+
     async def fetch_latest(
         self,
         session: aiohttp.ClientSession,
     ) -> VersionInfo:
         """Resolve version metadata from the latest GitHub release tag."""
+        if self.RESOLVE_TAG_COMMIT:
+            version, tag_name, commit = await self._fetch_release_version_tag_commit(
+                session
+            )
+            return VersionInfo(
+                version=version,
+                metadata={"commit": commit, "tag": tag_name},
+            )
+
         payload = await self._fetch_latest_release_payload(session)
         tag_name = self._release_tag_from_payload(payload)
         return VersionInfo(

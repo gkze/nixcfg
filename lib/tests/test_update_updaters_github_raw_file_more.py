@@ -1,7 +1,5 @@
 """Tests for GitHub raw-file updater helpers."""
 
-from __future__ import annotations
-
 import asyncio
 from typing import TYPE_CHECKING
 

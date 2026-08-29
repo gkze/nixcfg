@@ -1,7 +1,5 @@
 """Tests for process task runners and error formatting helpers."""
 
-from __future__ import annotations
-
 import asyncio
 
 import pytest

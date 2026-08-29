@@ -1,7 +1,5 @@
 """Nix-based hash computation helpers for updater implementations."""
 
-from __future__ import annotations
-
 import asyncio
 import dataclasses
 import json
@@ -341,18 +339,75 @@ def _build_package_path_attr_expr(
     package_args: Mapping[str, NixExpression] | None = None,
     source_overrides: Mapping[str, SourceEntry] | None = None,
 ) -> str:
-    return _build_call_package_attr_expr(
-        select_attrs(
-            Identifier(name="flake"),
-            "packagePaths",
-            _quote_attr(package),
+    package_materialization = FunctionCall(
+        name=FunctionCall(
+            name=Identifier(name="import"),
+            argument=Parenthesis(
+                value=BinaryExpression(
+                    operator=Operator(name="+"),
+                    left=select_attrs(Identifier(name="rootFlake"), "outPath"),
+                    right=StringPrimitive(value="/lib/package-materialization.nix"),
+                )
+            ),
         ),
-        attr_path,
-        system=system,
-        repo_root=repo_root,
-        package_args=package_args,
-        source_overrides=source_overrides,
+        argument=AttributeSet.from_dict({
+            "src": select_attrs(Identifier(name="rootFlake"), "outPath"),
+            "lib": select_attrs(Identifier(name="pkgs"), "lib"),
+            "outputs": Identifier(name="flake"),
+        }),
     )
+    package_function = Select(
+        expression=Parenthesis(
+            value=FunctionCall(
+                name=select_attrs(
+                    Identifier(name="packageMaterialization"),
+                    "packageFunctionsForSystem",
+                ),
+                argument=Identifier(name="system"),
+            )
+        ),
+        attribute=_quote_attr(package),
+    )
+    package_expr: NixExpression = FunctionCall(
+        name=FunctionCall(
+            name=FunctionCall(
+                name=select_attrs(Identifier(name="pkgs"), "lib", "callPackageWith"),
+                argument=Identifier(name="applied"),
+            ),
+            argument=package_function,
+        ),
+        argument=AttributeSet(
+            values=[
+                Binding(
+                    name="inputs",
+                    value=select_attrs(Identifier(name="rootFlake"), "inputs"),
+                ),
+                Binding(name="outputs", value=Identifier(name="flake")),
+                *(
+                    Binding(name=name, value=value)
+                    for name, value in (package_args or {}).items()
+                ),
+            ]
+        ),
+    )
+    expression = package_expr
+    for attribute in attr_path.removeprefix(".").split("."):
+        if attribute:
+            if expression is package_expr:
+                expression = Parenthesis(value=expression)
+            expression = Select(expression=expression, attribute=attribute)
+    expression = LetExpression(
+        local_variables=[
+            *_contextual_overlay_bindings(
+                system=system,
+                repo_root=repo_root,
+                source_overrides=source_overrides,
+            ),
+            Binding(name="packageMaterialization", value=package_materialization),
+        ],
+        value=expression,
+    )
+    return compact_nix_expr(expression.rebuild())
 
 
 def _build_repo_package_attr_expr(
@@ -569,12 +624,18 @@ async def compute_fixed_output_hash(
     source: str,
     expr: str,
     *,
+    isolate_by_drv_hash: bool = False,
     env: Mapping[str, str] | None = None,
     config: UpdateConfig | None = None,
 ) -> EventStream:
-    """Compute an SRI hash by extracting nix fixed-output mismatch output."""
+    """Compute an SRI hash by extracting nix fixed-output mismatch output.
+
+    ``isolate_by_drv_hash`` salts the probe output using the unsalted derivation
+    path.  This prevents concurrent probes for distinct derivations that share
+    the same fake fixed-output hash from being coalesced by Nix.
+    """
     config = resolve_active_config(config)
-    expr = _build_nix_expr(expr)
+    expr = _build_nix_expr(expr, isolate_by_drv_hash=isolate_by_drv_hash)
     semaphore = _get_nix_build_semaphore(config)
     attempt = 1
     while True:
@@ -626,10 +687,45 @@ async def compute_fixed_output_hash(
         return
 
 
-def _build_nix_expr(body: str | NixExpression) -> str:
+def _build_nix_expr(
+    body: str | NixExpression,
+    *,
+    isolate_by_drv_hash: bool = False,
+) -> str:
+    body_expression = parse(body).expr if isinstance(body, str) else body
+    local_variables: list[Binding | Inherit] = [
+        Binding(name="pkgs", value=nixpkgs_expression())
+    ]
+    if isolate_by_drv_hash:
+        local_variables.append(
+            Binding(name="nixcfgFixedOutputProbe", value=body_expression)
+        )
+        body_expression = FunctionCall(
+            name=FunctionCall(
+                name=select_attrs(
+                    Identifier(name="pkgs"),
+                    "testers",
+                    "invalidateFetcherByDrvHash",
+                ),
+                argument=Parenthesis(
+                    value=FunctionDefinition(
+                        argument_set=Identifier(name="_"),
+                        output=Identifier(name="nixcfgFixedOutputProbe"),
+                    )
+                ),
+            ),
+            argument=AttributeSet(
+                values=[
+                    Binding(
+                        name="name",
+                        value="nixcfg-fixed-output-probe",
+                    )
+                ]
+            ),
+        )
     expression = LetExpression(
-        local_variables=[Binding(name="pkgs", value=nixpkgs_expression())],
-        value=parse(body).expr if isinstance(body, str) else body,
+        local_variables=local_variables,
+        value=body_expression,
     )
     return compact_nix_expr(expression.rebuild())
 

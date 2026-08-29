@@ -1,0 +1,74 @@
+{
+  "slices": {
+    "crates/goose": {
+      "hash": "sha256-Oh8GIAuBD5GBbMkN5QF5Plaj3bNLCz1GKVvqZ6Rk6mA=",
+      "name": "goose"
+    },
+    "crates/goose-acp-macros": {
+      "hash": "sha256-EdTcnBWma9jrMeT/anpqMrNIJDlMNru6pE7zbvOFKSM=",
+      "name": "goose-acp-macros"
+    },
+    "crates/goose-agent": {
+      "hash": "sha256-PWjzNM5y0blxhCk28+HFxl308QyuBOab3TmHmw9pw2M=",
+      "name": "goose-agent"
+    },
+    "crates/goose-cli": {
+      "hash": "sha256-Vosi5NHRkK4rYPtwtK/9g6mUs70Qsw+yf4Iga5MjoHI=",
+      "name": "goose-cli"
+    },
+    "crates/goose-context-management": {
+      "hash": "sha256-c8PPJFd2Xx+iSMKZRfmanCQH+NJYxA9DWsrMiIeyEug=",
+      "name": "goose-context-management"
+    },
+    "crates/goose-download-manager": {
+      "hash": "sha256-UdztRjo7SlsSHS3lsbU7lhrF2Qf+3AfvblsU/OsqO8o=",
+      "name": "goose-download-manager"
+    },
+    "crates/goose-local-inference": {
+      "hash": "sha256-ut46uKm2PSFVxYS6AR/1xspDA22mFGzpyX/pBtXrPdg=",
+      "name": "goose-local-inference"
+    },
+    "crates/goose-mcp": {
+      "hash": "sha256-ep0us6Bh0tw4F68NaDmRflJ+C0UqpL4ksGs9SkYf6DI=",
+      "name": "goose-mcp"
+    },
+    "crates/goose-provider-types": {
+      "hash": "sha256-v0breUajkmW6VwL3DVPgBjulxcaVM/5aeTIt/7K242I=",
+      "name": "goose-provider-types"
+    },
+    "crates/goose-providers": {
+      "hash": "sha256-pTcaKLR7cVNFXsMb1TBIX4T+kDnkmEHt1/ZIZGjziAA=",
+      "name": "goose-providers"
+    },
+    "crates/goose-roaming": {
+      "hash": "sha256-uNC1jlV/6LQS66ijAxERE8vRS6x/JWOj/au4mUbeu3E=",
+      "name": "goose-roaming"
+    },
+    "crates/goose-sdk": {
+      "hash": "sha256-NfyUynq8LJAM9bx8qku3DZWpfDnHnoJxwT81AW6UsFU=",
+      "name": "goose-sdk"
+    },
+    "crates/goose-sdk-types": {
+      "hash": "sha256-L3I5/ze54rTCLE5rPMX1+LDyBCxbbhCOit9JkV0cdHk=",
+      "name": "goose-sdk-types"
+    },
+    "crates/goose-test": {
+      "hash": "sha256-gX6a3pvEf2xnCexz19yHLBVL/8kgSv42ncYjjzSnjB0=",
+      "name": "goose-test"
+    },
+    "crates/goose-test-support": {
+      "hash": "sha256-iHlmCypBg1il8K5sukszUFc3ZNT16PnQg/kOv3VsNxc=",
+      "name": "goose-test-support"
+    },
+    "vendor/v8": {
+      "hash": "sha256-UDGCn0mt1KqYc9Zs/x3+x4sSzZwNFrOFOPGjXDnejcU=",
+      "name": "v8"
+    }
+  },
+  "source": {
+    "cargoNixSha256": "50c1c42398d906d319ce91a87d19a3c8366c95dbc94f4261db0ff767ba075d81",
+    "input": "goose",
+    "narHash": "sha256-8tKAAQdP9Rx7X0hEuCmSQ9sQQSYiXVMhJc2EQqIjaOY=",
+    "subdir": "."
+  }
+}

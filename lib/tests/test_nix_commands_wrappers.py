@@ -1,7 +1,5 @@
 """Tests for higher-level nix command wrapper modules."""
 
-from __future__ import annotations
-
 import asyncio
 from typing import TYPE_CHECKING, cast
 

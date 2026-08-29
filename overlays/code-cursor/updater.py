@@ -1,7 +1,5 @@
 """Updater for Cursor editor release metadata and downloads."""
 
-from __future__ import annotations
-
 import asyncio
 import re
 from typing import ClassVar

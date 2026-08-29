@@ -1,7 +1,5 @@
 """Structural regression tests for George's SSH configuration."""
 
-from __future__ import annotations
-
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.set import AttributeSet
 

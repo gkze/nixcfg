@@ -97,6 +97,8 @@ def _prepend_package_path(module_name: str, package_path: Path) -> None:
 def _prefer_repo_lib_paths() -> None:
     """Allow current-worktree helper modules to satisfy updater imports."""
     root = Path(REPO_ROOT)
+    repo_root = str(root)
+    sys.path[:] = [repo_root, *[entry for entry in sys.path if entry != repo_root]]
     _prepend_package_path("lib", root / "lib")
     _prepend_package_path("lib.update", root / "lib" / "update")
     _prepend_package_path(

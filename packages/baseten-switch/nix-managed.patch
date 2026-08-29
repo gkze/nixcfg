@@ -1,0 +1,275 @@
+diff --git a/scripts/build-menubar.sh b/scripts/build-menubar.sh
+--- a/scripts/build-menubar.sh
++++ b/scripts/build-menubar.sh
+@@ -118,17 +118,17 @@ APP_ICON_SOURCE="Assets/AppIcon.icns"
+ echo "==> swift build -c release (${BUILD_CHANNEL}, universal: arm64 + x86_64)"
+ if [[ -n "${BASETEN_SWITCH_SWIFT_BUILD_FLAGS:-}" ]]; then
+-    swift build -c release --arch arm64 --arch x86_64 "${SWIFT_BUILD_FLAGS[@]}"
++    /usr/bin/swift build -c release --arch arm64 --arch x86_64 "${SWIFT_BUILD_FLAGS[@]}"
+ else
+-    swift build -c release --arch arm64 --arch x86_64
++    /usr/bin/swift build -c release --arch arm64 --arch x86_64
+ fi
+ # With multiple --arch flags SwiftPM lipos the product into the
+ # .build/apple/Products/Release layout; --show-bin-path with the same
+ # arches resolves that path instead of hardcoding it.
+ if [[ -n "${BASETEN_SWITCH_SWIFT_BUILD_FLAGS:-}" ]]; then
+-    BIN_DIR="$(swift build -c release --arch arm64 --arch x86_64 \
++    BIN_DIR="$(/usr/bin/swift build -c release --arch arm64 --arch x86_64 \
+         "${SWIFT_BUILD_FLAGS[@]}" --show-bin-path)"
+ else
+-    BIN_DIR="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
++    BIN_DIR="$(/usr/bin/swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
+ fi
+ BIN="${BIN_DIR}/BasetenSwitch"
+ test -x "$BIN" || { echo "error: release binary not found at $BIN" >&2; exit 1; }
+diff --git a/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchState.swift b/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchState.swift
+--- a/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchState.swift
++++ b/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchState.swift
+@@ -1319,9 +1319,27 @@ final class BasetenSwitchState: ObservableObject {
+         starting = true
+         defer { starting = false }
+-        let result = await executeCLI(
++        var result = await executeCLI(
+             ["up"],
+             timeout: 30,
+             allowWhenPreviewDown: true)
++        if variant.channel == .stable,
++           !result.succeeded,
++           !result.timedOut,
++           result.standardError.contains("no gateway config at "),
++           result.standardError.contains("baseten-switch config init") {
++            let initialized = await executeCLI(
++                ["config", "init"],
++                timeout: 10,
++                allowWhenPreviewDown: true)
++            if initialized.succeeded {
++                result = await executeCLI(
++                    ["up"],
++                    timeout: 30,
++                    allowWhenPreviewDown: true)
++            } else {
++                result = initialized
++            }
++        }
+         guard result.succeeded else {
+             lastError = result.timedOut
+                 ? "Starting Baseten Switch timed out."
+@@ -1705,21 +1723,29 @@ final class BasetenSwitchState: ObservableObject {
+     nonisolated static func locateBasetenSwitchBinary(
+-        variant: AppVariant = .current()
++        variant: AppVariant = .current(),
++        bundleResourceURL: URL? = Bundle.main.resourceURL
+     ) -> URL? {
+         if variant.channel == .preview {
+             guard let path = variant.runtime.environment["BASETEN_SWITCH_GATEWAY_BIN"],
+                   FileManager.default.isExecutableFile(atPath: path) else {
+                 return nil
+             }
+             return URL(fileURLWithPath: path)
+         }
+         var candidates: [String] = []
++        if let bundled = bundleResourceURL?
++            .appendingPathComponent("baseten-switch").path {
++            candidates.append(bundled)
++        }
+         if let raw = variant.runtime.environment["BASETEN_SWITCH_GATEWAY_BIN"],
+            !raw.isEmpty {
+             candidates.append(raw)
+         } else if let raw = ProcessInfo.processInfo.environment["BASETEN_SWITCH_GATEWAY_BIN"],
+            !raw.isEmpty {
+             candidates.append(raw)
+         }
++        candidates.append("/etc/profiles/per-user/\(NSUserName())/bin/baseten-switch")
++        candidates.append("\(NSHomeDirectory())/.nix-profile/bin/baseten-switch")
++        candidates.append("/run/current-system/sw/bin/baseten-switch")
+         candidates.append("\(NSHomeDirectory())/.local/bin/baseten-switch")
+         candidates.append("/opt/homebrew/opt/baseten-switch/bin/baseten-switch")
+         candidates.append("/usr/local/opt/baseten-switch/bin/baseten-switch")
+diff --git a/mac/BasetenSwitch/Tests/BasetenSwitchTests/DisplayTests.swift b/mac/BasetenSwitch/Tests/BasetenSwitchTests/DisplayTests.swift
+--- a/mac/BasetenSwitch/Tests/BasetenSwitchTests/DisplayTests.swift
++++ b/mac/BasetenSwitch/Tests/BasetenSwitchTests/DisplayTests.swift
+@@ -882,11 +882,36 @@ final class DisplayTests: XCTestCase {
+     // Binary lookup: whatever the chain resolves must be executable.
+-    // The candidate order ($BASETEN_SWITCH_GATEWAY_BIN, ~/.local/bin, brew opt
+-    // paths, no repo-dev path) is pinned by code review; env vars
+-    // cannot be varied per-test portably.
++    // The candidate order (bundled CLI, explicit override, Nix profiles, then
++    // local and Homebrew fallbacks) is pinned by code review; ambient env vars
++    // cannot be varied per-test portably.
+     func testLocateBinaryReturnsExecutableOrNil() {
+         if let url = BasetenSwitchState.locateBasetenSwitchBinary() {
+             XCTAssertTrue(FileManager.default.isExecutableFile(atPath: url.path))
+         }
+     }
+-
++
++    func testStableLocateBinaryPrefersBundledCLI() throws {
++        let manager = FileManager.default
++        let resources = URL(fileURLWithPath: NSTemporaryDirectory())
++            .appendingPathComponent(UUID().uuidString, isDirectory: true)
++        let bundledCLI = resources.appendingPathComponent("baseten-switch")
++        try manager.createDirectory(
++            at: resources,
++            withIntermediateDirectories: false)
++        XCTAssertTrue(manager.createFile(
++            atPath: bundledCLI.path,
++            contents: Data(),
++            attributes: [.posixPermissions: NSNumber(value: 0o700)]))
++        addTeardownBlock { try? manager.removeItem(at: resources) }
++        let variant = AppVariant.resolve(
++            infoDictionary: [:],
++            homeDirectory: "/tmp/baseten-switch-home",
++            environment: ["BASETEN_SWITCH_GATEWAY_BIN": "/usr/bin/true"])
++
++        XCTAssertEqual(
++            BasetenSwitchState.locateBasetenSwitchBinary(
++                variant: variant,
++                bundleResourceURL: resources),
++            bundledCLI)
++    }
++
+     private func client(_ name: String, route: String, enabled: Bool = true,
+                         fallback: Bool = false) -> ClientStatus {
+         ClientStatus(dict: [
+diff --git a/mac/BasetenSwitch/Sources/BasetenSwitch/RuntimeCoordination.swift b/mac/BasetenSwitch/Sources/BasetenSwitch/RuntimeCoordination.swift
+--- a/mac/BasetenSwitch/Sources/BasetenSwitch/RuntimeCoordination.swift
++++ b/mac/BasetenSwitch/Sources/BasetenSwitch/RuntimeCoordination.swift
+@@ -467,7 +467,8 @@ func allowlistedCLIEnvironment(
+     overrides: [String: String]
+ ) -> [String: String] {
++    let homeDirectory = ambient["HOME"] ?? NSHomeDirectory()
+     let fixedPath =
+-        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
++        "/etc/profiles/per-user/\(NSUserName())/bin:\(homeDirectory)/.nix-profile/bin:/run/current-system/sw/bin:\(homeDirectory)/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+     let inherited = [
+         "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR",
+         "LANG", "LC_ALL",
+diff --git a/mac/BasetenSwitch/Tests/BasetenSwitchTests/RuntimeCoordinationTests.swift b/mac/BasetenSwitch/Tests/BasetenSwitchTests/RuntimeCoordinationTests.swift
+--- a/mac/BasetenSwitch/Tests/BasetenSwitchTests/RuntimeCoordinationTests.swift
++++ b/mac/BasetenSwitch/Tests/BasetenSwitchTests/RuntimeCoordinationTests.swift
+@@ -379,6 +379,44 @@ private actor BlockingFirstRunner: CLIRunning {
+     }
+ }
+
++private actor StartSystemRunner: CLIRunning {
++    enum Scenario {
++        case missingConfigThenSuccess
++        case unrelatedFailure
++    }
++
++    private(set) var arguments: [[String]] = []
++    private let scenario: Scenario
++
++    init(scenario: Scenario) {
++        self.scenario = scenario
++    }
++
++    func run(_ request: CLIExecutionRequest) async -> CLIExecutionResult {
++        arguments.append(request.arguments)
++        if scenario == .missingConfigThenSuccess {
++            if arguments.count == 1 {
++                return CLIExecutionResult(
++                    status: 1,
++                    standardOutput: "",
++                    standardError:
++                        "no gateway config at /tmp/gateway.yaml. Fix: run 'baseten-switch config init'",
++                    timedOut: false)
++            }
++            return CLIExecutionResult(
++                status: 0,
++                standardOutput: "",
++                standardError: "",
++                timedOut: false)
++        }
++        return CLIExecutionResult(
++            status: 1,
++            standardOutput: "",
++            standardError: "router port is already owned by another process",
++            timedOut: false)
++    }
++}
++
+ private actor ReconciliationReceiptRunner: CLIRunning {
+     private static let requestFingerprint =
+         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+@@ -1412,7 +1450,7 @@ final class RuntimeCoordinationTests: XCTestCase {
+         XCTAssertEqual(environment["HOME"], "/Users/test")
+         XCTAssertEqual(
+             environment["PATH"],
+-            "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
++            "/etc/profiles/per-user/\(NSUserName())/bin:/Users/test/.nix-profile/bin:/run/current-system/sw/bin:/Users/test/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+         XCTAssertFalse(environment["PATH"]?.contains("/attacker") ?? true)
+         XCTAssertEqual(
+             environment["BASETEN_SWITCH_CONFIG_PATH"],
+@@ -1849,6 +1887,53 @@ final class RuntimeCoordinationTests: XCTestCase {
+         return arguments[index + 1]
+     }
+
++    @MainActor
++    func testStableStartInitializesOnlyTheMissingDefaultConfig() async {
++        let runner = StartSystemRunner(scenario: .missingConfigThenSuccess)
++        let state = BasetenSwitchState(
++            variant: AppVariant.resolve(
++                infoDictionary: [:],
++                homeDirectory: "/tmp/baseten-switch-home",
++                environment: ["BASETEN_SWITCH_GATEWAY_BIN": "/usr/bin/true"]),
++            reader: CountingAdminReader(status: currentStatus()),
++            cliRunner: runner,
++            clock: RecordingClock(),
++            loginItemService: FakeLoginItemService(),
++            startPolling: false)
++
++        await state.startSystem()
++
++        let calls = await runner.arguments
++        XCTAssertEqual(
++            calls,
++            [["up"], ["config", "init"], ["up"]])
++        XCTAssertTrue(state.gatewayUp)
++        XCTAssertNil(state.lastError)
++        state.stop()
++    }
++
++    @MainActor
++    func testStableStartDoesNotInitializeConfigForUnrelatedFailures() async {
++        let runner = StartSystemRunner(scenario: .unrelatedFailure)
++        let state = BasetenSwitchState(
++            variant: AppVariant.resolve(
++                infoDictionary: [:],
++                homeDirectory: "/tmp/baseten-switch-home",
++                environment: ["BASETEN_SWITCH_GATEWAY_BIN": "/usr/bin/true"]),
++            reader: CountingAdminReader(status: currentStatus()),
++            cliRunner: runner,
++            clock: RecordingClock(),
++            loginItemService: FakeLoginItemService(),
++            startPolling: false)
++
++        await state.startSystem()
++
++        let calls = await runner.arguments
++        XCTAssertEqual(calls, [["up"]])
++        XCTAssertEqual(state.lastError, "Baseten Switch could not be started.")
++        state.stop()
++    }
++
+     func testSystemRunnerMarksTimeoutBeforeTerminatingProcess() async {
+         let started = Date()
+         let result = await SystemCLIRunner().run(CLIExecutionRequest(
+diff --git a/gateway/cmd/baseten-switch/version_probe.go b/gateway/cmd/baseten-switch/version_probe.go
+--- a/gateway/cmd/baseten-switch/version_probe.go
++++ b/gateway/cmd/baseten-switch/version_probe.go
+@@ -62,2 +62,12 @@ var menubarLocalBin = func() string {
+-	return filepath.Join(home, ".local", "bin", "baseten-switch")
++	for _, candidate := range []string{
++		filepath.Join("/etc/profiles/per-user", os.Getenv("USER"), "bin", "baseten-switch"),
++		filepath.Join(home, ".nix-profile", "bin", "baseten-switch"),
++		"/run/current-system/sw/bin/baseten-switch",
++		filepath.Join(home, ".local", "bin", "baseten-switch"),
++	} {
++		if isExecutable(candidate) {
++			return candidate
++		}
++	}
++	return filepath.Join(home, ".local", "bin", "baseten-switch")
+ }

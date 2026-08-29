@@ -1,8 +1,10 @@
 {
   inputs,
+  deadnix,
   flake-edit,
   mkResolvedBuildSystemsOverlay,
   nix-prefetch-git,
+  nixfmt,
   python314,
   callPackage,
   lib,
@@ -76,8 +78,10 @@ runCommand "nixcfg"
     makeWrapper ${venv}/bin/nixcfg $out/bin/nixcfg \
       --prefix PATH : ${
         lib.makeBinPath [
+          deadnix
           flake-edit
           nix-prefetch-git
+          nixfmt
         ]
       }
 

@@ -1,7 +1,5 @@
 """Internal schema loading, registry, and preparation helpers."""
 
-from __future__ import annotations
-
 import importlib
 import json
 from collections.abc import Callable, Iterable

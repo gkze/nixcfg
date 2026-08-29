@@ -1,7 +1,5 @@
 """Normalize tracked plain-text formats that lack a dedicated formatter."""
 
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 

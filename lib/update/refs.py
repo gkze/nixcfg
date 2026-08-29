@@ -1,7 +1,5 @@
 """Flake input ref discovery and version-tag update helpers."""
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -403,6 +401,31 @@ def _update_git_input_ref_in_flake(input_name: str, new_ref: str) -> None:
         flake_path.write_text(rewritten, encoding="utf-8")
 
 
+def _update_explicit_input_ref_in_flake(input_name: str, new_ref: str) -> bool:
+    """Update an existing split-form input ref and report whether it was found."""
+    flake_path = Path(get_repo_root()) / "flake.nix"
+    text = flake_path.read_text(encoding="utf-8")
+    start_re = re.compile(
+        _INPUT_ATTRSET_START_RE_TEMPLATE.format(name=re.escape(input_name))
+    )
+    input_indent = ""
+    inside = False
+    for line in text.splitlines():
+        if not inside:
+            if match := start_re.match(line):
+                inside = True
+                input_indent = match.group("indent")
+            continue
+        if _REF_BINDING_RE.match(line):
+            rewritten = _rewrite_git_input_ref(text, input_name, new_ref)
+            if rewritten != text:
+                flake_path.write_text(rewritten, encoding="utf-8")
+            return True
+        if re.match(rf"^{re.escape(input_indent)}\}};\s*$", line):
+            return False
+    return False
+
+
 @dataclass(frozen=True)
 class RefTaskOptions:
     """Options controlling ``update_refs_task`` behavior."""
@@ -487,10 +510,18 @@ async def update_flake_ref(
         ),
     )
 
-    if input_ref.input_type == "github":
-        new_url = f"github:{input_ref.owner}/{input_ref.repo}/{new_ref}"
-    elif input_ref.input_type == "gitlab":
-        new_url = f"gitlab:{input_ref.owner}/{input_ref.repo}/{new_ref}"
+    if input_ref.input_type in {"github", "gitlab"}:
+        if _update_explicit_input_ref_in_flake(input_ref.name, new_ref):
+            yield UpdateEvent.status(
+                source,
+                f"Updated flake.nix input ref: {input_ref.name} -> {new_ref}",
+                operation="update_ref",
+            )
+            new_url = None
+        else:
+            new_url = (
+                f"{input_ref.input_type}:{input_ref.owner}/{input_ref.repo}/{new_ref}"
+            )
     elif input_ref.input_type == "git":
         ref = _format_git_ref_update(input_ref.ref, new_ref)
         _update_git_input_ref_in_flake(input_ref.name, ref)

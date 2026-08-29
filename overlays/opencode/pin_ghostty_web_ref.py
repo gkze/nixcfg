@@ -1,7 +1,5 @@
 """Pin the ghostty-web workspace dependency to the commit already locked in bun.lock."""
 
-from __future__ import annotations
-
 import json
 import re
 import sys

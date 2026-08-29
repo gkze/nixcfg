@@ -1,0 +1,54 @@
+{
+  "fixPathEnv": {
+    "commit": "c4c45d503ea115a839aae718d02f79e7c7f0f673",
+    "hash": "sha256-bZCpcvb0Lhh5PU23QisWsCqF/b06eXLj7KfUStet1kc=",
+    "role": "cargo-lock-git-source-provenance-reference-only",
+    "url": "https://github.com/tauri-apps/fix-path-env-rs/archive/c4c45d503ea115a839aae718d02f79e7c7f0f673.tar.gz"
+  },
+  "llamaCpp": {
+    "commit": "7a556b8f93d601cb277c0545e3e6166b45ebfac8",
+    "hash": "sha256-o3b/1CHyCrF6HF+97Xi+uDd93+USi5eOOMyB1U5jYhk=",
+    "tag": "b10472-mix-4b653db",
+    "url": "https://github.com/unslothai/llama.cpp/releases/download/b10472-mix-4b653db/llama.cpp-source-commit-7a556b8f93d601cb277c0545e3e6166b45ebfac8.tar.gz"
+  },
+  "node": {
+    "hash": "sha256-9tleEKBDHuEGf8aqvp92KQi0cW3TUyTh3bSxRmt2ZZ8=",
+    "npmVersion": "11.17.0",
+    "url": "https://nodejs.org/dist/v24.19.0/node-v24.19.0.tar.xz",
+    "version": "24.19.0"
+  },
+  "stableDiffusionCpp": {
+    "commit": "13b9d92b5e9a1563536c9c980e700470f9ab6702",
+    "hash": "sha256-aW/710d1hUbpuMc5AI06Tg5aGuGryoKBR8Wdc7FuZ9U=",
+    "submodules": {
+      "examples/server/frontend": {
+        "commit": "c4bce3d6b3f236614cca21014f076083b7270ba8",
+        "hash": "sha256-EmVUPQLrq1YM7mc0s78Ukegxxr40NmR1BdaTndePKZM=",
+        "url": "https://github.com/leejet/sdcpp-webui/archive/c4bce3d6b3f236614cca21014f076083b7270ba8.tar.gz"
+      },
+      "ggml": {
+        "commit": "eced84c86f8b012c752c016f7fe789adea168e1e",
+        "hash": "sha256-gDb5MNvpCa/7zs3acTfWcVIHZNQ5aWLSucPfR2yynLA=",
+        "url": "https://github.com/leejet/ggml/archive/eced84c86f8b012c752c016f7fe789adea168e1e.tar.gz"
+      },
+      "thirdparty/libwebm": {
+        "commit": "5bf12267eea773a32fcf4949de52b0add158a8d5",
+        "hash": "sha256-KUBJoD015EgKlKXO2WyA6/1BFFVJZnCcjJfeTxm9lBo=",
+        "url": "https://github.com/webmproject/libwebm/archive/5bf12267eea773a32fcf4949de52b0add158a8d5.tar.gz"
+      },
+      "thirdparty/libwebp": {
+        "commit": "0c9546f7efc61eac7f79ae115c3f99c91c21c443",
+        "hash": "sha256-bLQzBwtEYReQZ7CQGmguThSyIDVPw1iEwbExWt7e/Jk=",
+        "url": "https://github.com/webmproject/libwebp/archive/0c9546f7efc61eac7f79ae115c3f99c91c21c443.tar.gz"
+      }
+    },
+    "tag": "master-813-bfbef5b-u13b9d92",
+    "url": "https://github.com/unslothai/stable-diffusion.cpp/archive/13b9d92b5e9a1563536c9c980e700470f9ab6702.tar.gz"
+  },
+  "whisperCpp": {
+    "commit": "306c88f4d1286aec1bf96e544632897886af5501",
+    "hash": "sha256-+kphN5LnSSl8X2hJIQqJ5DvCokk7zY6ESsCpC3om+FY=",
+    "tag": "v1.9.2-unsloth.11",
+    "url": "https://github.com/unslothai/whisper.cpp/releases/download/v1.9.2-unsloth.11/whisper.cpp-source-commit-306c88f4d1286aec1bf96e544632897886af5501.tar.gz"
+  }
+}

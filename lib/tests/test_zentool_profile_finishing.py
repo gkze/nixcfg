@@ -1,7 +1,5 @@
 """Focused finishing tests for remaining zentool profile/config branches."""
 
-from __future__ import annotations
-
 import configparser
 import os
 from pathlib import Path

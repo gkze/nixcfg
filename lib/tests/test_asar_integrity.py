@@ -1,13 +1,13 @@
 """Tests for Electron ASAR header integrity helpers."""
 
-from __future__ import annotations
-
 import hashlib
+import json
 import plistlib
 import runpy
 import struct
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -18,6 +18,71 @@ def _write_asar(path: Path, header: bytes) -> None:
     prefix = bytearray(16)
     struct.pack_into("<I", prefix, 12, len(header))
     path.write_bytes(bytes(prefix) + header + b"payload")
+
+
+def _write_raw_asar(
+    path: Path,
+    header_value: object,
+    payload: bytes,
+    *,
+    compact: bool = True,
+    archive_header_size: int | None = None,
+) -> None:
+    separators = (",", ":") if compact else None
+    header = json.dumps(header_value, separators=separators).encode()
+    resolved_archive_size = (
+        8 + len(header) if archive_header_size is None else archive_header_size
+    )
+    prefix = struct.pack(
+        "<IIII",
+        4,
+        resolved_archive_size,
+        4 + len(header),
+        len(header),
+    )
+    path.write_bytes(prefix + header + payload)
+
+
+def _write_packed_asar(
+    path: Path,
+    relative_path: str,
+    payload: bytes,
+    *,
+    block_size: int = 4,
+) -> dict[str, Any]:
+    blocks = [
+        hashlib.sha256(payload[offset : offset + block_size]).hexdigest()
+        for offset in range(0, len(payload), block_size)
+    ]
+    entry: dict[str, object] = {
+        "size": len(payload),
+        "offset": "0",
+        "integrity": {
+            "algorithm": "SHA256",
+            "hash": hashlib.sha256(payload).hexdigest(),
+            "blockSize": block_size,
+            "blocks": blocks,
+        },
+    }
+    files: dict[str, object] = {}
+    current = files
+    components = relative_path.split("/")
+    for component in components[:-1]:
+        child: dict[str, object] = {"files": {}}
+        current[component] = child
+        current = cast("dict[str, object]", child["files"])
+    current[components[-1]] = entry
+    header = {"files": files}
+    _write_raw_asar(path, header, payload)
+    return header
+
+
+def _test_entry(header: dict[str, Any], relative_path: str) -> dict[str, Any]:
+    node = header
+    for component in relative_path.split("/"):
+        files = cast("dict[str, Any]", node["files"])
+        node = cast("dict[str, Any]", files[component])
+    return node
 
 
 def _read_plist(path: Path) -> dict[str, object]:
@@ -47,6 +112,319 @@ def test_write_info_plist_hash_uses_asar_header_bytes(tmp_path: Path) -> None:
         }
     }
     assert asar_integrity.check_info_plist_hash(plist_path, asar_path) == digest
+
+
+def test_replace_packed_file_preserves_size_and_refreshes_integrity(
+    tmp_path: Path,
+) -> None:
+    """A policy patch should remain loadable under every ASAR integrity layer."""
+    asar_path = tmp_path / "app.asar"
+    original = b"before mutable updater after"
+    _write_packed_asar(asar_path, "dist/main.js", original)
+    original_size = asar_path.stat().st_size
+
+    digest = asar_integrity.replace_packed_file(
+        asar_path,
+        "dist/main.js",
+        lambda payload: payload.replace(b"mutable", b"managed"),
+    )
+
+    assert asar_path.stat().st_size == original_size
+    assert digest == asar_integrity.asar_header_hash(asar_path)
+    assert (
+        asar_integrity.read_packed_file(asar_path, "dist/main.js")
+        == b"before managed updater after"
+    )
+
+
+def test_replace_packed_file_preserving_header_keeps_vendor_serialization(
+    tmp_path: Path,
+) -> None:
+    """Digest updates may not reserialize a vendor ASAR header."""
+    asar_path = tmp_path / "app.asar"
+    original = b"before mutable updater after"
+    header = _write_packed_asar(asar_path, "dist/main.js", original)
+    _write_raw_asar(asar_path, header, original, compact=False)
+    original_header = asar_integrity.read_asar_header(asar_path)
+    original_size = asar_path.stat().st_size
+
+    digest = asar_integrity.replace_packed_file_preserving_header(
+        asar_path,
+        "dist/main.js",
+        lambda payload: payload.replace(b"mutable", b"managed"),
+    )
+
+    updated_header = asar_integrity.read_asar_header(asar_path)
+    assert asar_path.stat().st_size == original_size
+    assert len(updated_header) == len(original_header)
+    assert b'"files": {' in updated_header
+    assert digest == hashlib.sha256(updated_header).hexdigest()
+    assert (
+        asar_integrity.read_packed_file(asar_path, "dist/main.js")
+        == b"before managed updater after"
+    )
+
+
+def test_replace_packed_file_preserving_header_rejects_ambiguous_digests(
+    tmp_path: Path,
+) -> None:
+    """One old digest cannot represent two different replacement blocks."""
+    asar_path = tmp_path / "app.asar"
+    _write_packed_asar(asar_path, "main.js", b"aaaaaaaa")
+    original = asar_path.read_bytes()
+
+    with pytest.raises(
+        asar_integrity.AsarIntegrityError,
+        match="reused one old integrity digest",
+    ):
+        asar_integrity.replace_packed_file_preserving_header(
+            asar_path,
+            "main.js",
+            lambda _payload: b"aaaabbbb",
+        )
+
+    assert asar_path.read_bytes() == original
+
+
+def test_preserving_header_rejects_digest_count_mismatch_without_mutation(
+    tmp_path: Path,
+) -> None:
+    """A digest repeated outside integrity metadata must abort before mutation."""
+    asar_path = tmp_path / "app.asar"
+    original_payload = b"before mutable updater after"
+    header = _write_packed_asar(asar_path, "dist/main.js", original_payload)
+    entry = _test_entry(header, "dist/main.js")
+    integrity = cast("dict[str, Any]", entry["integrity"])
+    header["unrelatedDigest"] = integrity["hash"]
+    _write_raw_asar(asar_path, header, original_payload)
+    original_archive = asar_path.read_bytes()
+
+    with pytest.raises(
+        asar_integrity.AsarIntegrityError,
+        match=r"expected 1 ASAR integrity entries .* found 2",
+    ):
+        asar_integrity.replace_packed_file_preserving_header(
+            asar_path,
+            "dist/main.js",
+            lambda payload: payload.replace(b"mutable", b"managed"),
+        )
+
+    assert asar_path.read_bytes() == original_archive
+
+
+@pytest.mark.parametrize(
+    ("archive", "message"),
+    [
+        (b"short", "too short"),
+        (struct.pack("<IIII", 4, 108, 104, 100) + b"{}", "header is truncated"),
+        (struct.pack("<IIII", 4, 10, 6, 2) + b"xx", "not valid JSON"),
+        (struct.pack("<IIII", 4, 10, 6, 2) + b"[]", "not an object"),
+    ],
+)
+def test_read_packed_file_rejects_malformed_layouts(
+    tmp_path: Path,
+    archive: bytes,
+    message: str,
+) -> None:
+    """Packed-file access must fail before trusting malformed ASAR layouts."""
+    asar_path = tmp_path / "app.asar"
+    asar_path.write_bytes(archive)
+
+    with pytest.raises(asar_integrity.AsarIntegrityError, match=message):
+        asar_integrity.read_packed_file(asar_path, "main.js")
+
+
+def test_read_packed_file_rejects_overlapping_data(tmp_path: Path) -> None:
+    """A forged data offset must not permit reads from inside the header."""
+    asar_path = tmp_path / "app.asar"
+    _write_raw_asar(
+        asar_path,
+        {"files": {}},
+        b"",
+        archive_header_size=0,
+    )
+
+    with pytest.raises(asar_integrity.AsarIntegrityError, match="overlaps"):
+        asar_integrity.read_packed_file(asar_path, "main.js")
+
+
+def test_read_packed_file_rejects_missing_and_unpacked_entries(
+    tmp_path: Path,
+) -> None:
+    """The mutation helper owns packed payloads only."""
+    asar_path = tmp_path / "app.asar"
+    _write_raw_asar(asar_path, {"files": {}}, b"")
+    with pytest.raises(asar_integrity.AsarIntegrityError, match="missing packed"):
+        asar_integrity.read_packed_file(asar_path, "main.js")
+
+    header = _write_packed_asar(asar_path, "main.js", b"payload")
+    _test_entry(header, "main.js")["unpacked"] = True
+    _write_raw_asar(asar_path, header, b"payload")
+    with pytest.raises(asar_integrity.AsarIntegrityError, match="outside"):
+        asar_integrity.read_packed_file(asar_path, "main.js")
+
+
+@pytest.mark.parametrize(
+    ("updates", "message"),
+    [
+        ({"size": "bad"}, "invalid size or offset"),
+        ({"size": -1}, "invalid size or offset"),
+        ({"offset": -1}, "invalid size or offset"),
+        ({"integrity": None}, "lacks SHA256"),
+        ({"integrity": {"algorithm": "SHA1"}}, "lacks SHA256"),
+        (
+            {"integrity": {"algorithm": "SHA256", "hash": 1}},
+            "malformed integrity",
+        ),
+        (
+            {
+                "integrity": {
+                    "algorithm": "SHA256",
+                    "hash": "digest",
+                    "blockSize": "4",
+                }
+            },
+            "malformed integrity",
+        ),
+        (
+            {
+                "integrity": {
+                    "algorithm": "SHA256",
+                    "hash": "digest",
+                    "blockSize": 0,
+                }
+            },
+            "malformed integrity",
+        ),
+        (
+            {
+                "integrity": {
+                    "algorithm": "SHA256",
+                    "hash": "digest",
+                    "blockSize": 4,
+                    "blocks": "bad",
+                }
+            },
+            "malformed integrity",
+        ),
+        (
+            {
+                "integrity": {
+                    "algorithm": "SHA256",
+                    "hash": "digest",
+                    "blockSize": 4,
+                    "blocks": [1],
+                }
+            },
+            "malformed integrity",
+        ),
+    ],
+)
+def test_read_packed_file_rejects_invalid_entry_metadata(
+    tmp_path: Path,
+    updates: dict[str, object],
+    message: str,
+) -> None:
+    """Every offset and digest component is required before payload access."""
+    asar_path = tmp_path / "app.asar"
+    header = _write_packed_asar(asar_path, "main.js", b"payload")
+    _test_entry(header, "main.js").update(updates)
+    _write_raw_asar(asar_path, header, b"payload")
+
+    with pytest.raises(asar_integrity.AsarIntegrityError, match=message):
+        asar_integrity.read_packed_file(asar_path, "main.js")
+
+
+@pytest.mark.parametrize(
+    ("updates", "payload", "message"),
+    [
+        ({"size": 8}, b"payload", "is truncated"),
+        (
+            {
+                "integrity": {
+                    "algorithm": "SHA256",
+                    "hash": "0" * 64,
+                    "blockSize": 4,
+                    "blocks": [],
+                }
+            },
+            b"payload",
+            "integrity hash",
+        ),
+        (
+            {
+                "integrity": {
+                    "algorithm": "SHA256",
+                    "hash": hashlib.sha256(b"payload").hexdigest(),
+                    "blockSize": 4,
+                    "blocks": ["0" * 64, "0" * 64],
+                }
+            },
+            b"payload",
+            "block hashes",
+        ),
+    ],
+)
+def test_read_packed_file_rejects_payload_integrity_mismatches(
+    tmp_path: Path,
+    updates: dict[str, object],
+    payload: bytes,
+    message: str,
+) -> None:
+    """Corrupt packed payloads must never reach a policy transform."""
+    asar_path = tmp_path / "app.asar"
+    header = _write_packed_asar(asar_path, "main.js", payload)
+    _test_entry(header, "main.js").update(updates)
+    _write_raw_asar(asar_path, header, payload)
+
+    with pytest.raises(asar_integrity.AsarIntegrityError, match=message):
+        asar_integrity.read_packed_file(asar_path, "main.js")
+
+
+@pytest.mark.parametrize(
+    ("transform", "message"),
+    [
+        (lambda _payload: "not bytes", "must return bytes"),
+        (lambda payload: payload + b"x", "changed size"),
+    ],
+)
+def test_replace_packed_file_rejects_invalid_transform_results(
+    tmp_path: Path,
+    transform: object,
+    message: str,
+) -> None:
+    """A failed transform contract must leave the archive byte-for-byte intact."""
+    asar_path = tmp_path / "app.asar"
+    _write_packed_asar(asar_path, "main.js", b"payload")
+    original = asar_path.read_bytes()
+
+    with pytest.raises(asar_integrity.AsarIntegrityError, match=message):
+        asar_integrity.replace_packed_file(
+            asar_path,
+            "main.js",
+            cast("Any", transform),
+        )
+
+    assert asar_path.read_bytes() == original
+
+
+def test_replace_packed_file_rejects_noncanonical_header_growth(
+    tmp_path: Path,
+) -> None:
+    """Re-encoding must never move packed payload offsets implicitly."""
+    asar_path = tmp_path / "app.asar"
+    header = _write_packed_asar(asar_path, "main.js", b"payload")
+    _write_raw_asar(asar_path, header, b"payload", compact=False)
+    original = asar_path.read_bytes()
+
+    with pytest.raises(asar_integrity.AsarIntegrityError, match="header size"):
+        asar_integrity.replace_packed_file(
+            asar_path,
+            "main.js",
+            lambda payload: payload,
+        )
+
+    assert asar_path.read_bytes() == original
 
 
 def test_check_info_plist_hash_rejects_mismatches(tmp_path: Path) -> None:

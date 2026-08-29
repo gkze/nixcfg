@@ -2,14 +2,14 @@
 set -eu
 
 if [ "$#" -ne 9 ]; then
-  echo "usage: install_zed_nightly_app.sh <out> <tmpdir> <app-version> <patched-src> <magick> <png2icns> <git-bin> <cli-bin> <zed-bin>" >&2
+  echo "usage: install_zed_nightly_app.sh <out> <tmpdir> <app-version> <source> <magick> <png2icns> <git-bin> <cli-bin> <zed-bin>" >&2
   exit 1
 fi
 
 out_path="$1"
 tmpdir_path="$2"
 app_version="$3"
-patched_src="$4"
+source_path="$4"
 magick_bin="$5"
 png2icns_bin="$6"
 git_bin="$7"
@@ -63,22 +63,22 @@ cat >"$app_path/Contents/Info.plist" <<EOF
   <string>10.15.7</string>
   <key>NSHighResolutionCapable</key>
   <true/>
-$(cat "${patched_src}/crates/zed/resources/info/SupportedPlatforms.plist")
-$(cat "${patched_src}/crates/zed/resources/info/Permissions.plist")
-$(cat "${patched_src}/crates/zed/resources/info/DocumentTypes.plist")
+$(cat "${source_path}/crates/zed/resources/info/SupportedPlatforms.plist")
+$(cat "${source_path}/crates/zed/resources/info/Permissions.plist")
+$(cat "${source_path}/crates/zed/resources/info/DocumentTypes.plist")
 </dict>
 </plist>
 EOF
 
 mkdir -p "$iconset_dir"
 for size in 16 32 64 128 256; do
-  "$magick_bin" "${patched_src}/crates/zed/resources/app-icon-nightly.png" \
+  "$magick_bin" "${source_path}/crates/zed/resources/app-icon-nightly.png" \
     -resize "${size}x${size}" "$iconset_dir/${size}.png"
 done
-cp "${patched_src}/crates/zed/resources/app-icon-nightly.png" "$iconset_dir/512.png"
-cp "${patched_src}/crates/zed/resources/app-icon-nightly@2x.png" "$iconset_dir/1024.png"
+cp "${source_path}/crates/zed/resources/app-icon-nightly.png" "$iconset_dir/512.png"
+cp "${source_path}/crates/zed/resources/app-icon-nightly@2x.png" "$iconset_dir/1024.png"
 "$png2icns_bin" "$app_path/Contents/Resources/Zed Nightly.icns" "$iconset_dir"/*.png >/dev/null
-cp "${patched_src}/crates/zed/resources/Document.icns" "$app_path/Contents/Resources/Document.icns"
+cp "${source_path}/crates/zed/resources/Document.icns" "$app_path/Contents/Resources/Document.icns"
 
 cp "$zed_bin" "$app_path/Contents/MacOS/zed"
 ln -s "$git_bin" "$app_path/Contents/MacOS/git"

@@ -1,7 +1,5 @@
 """Updater for goose-v8 source hash."""
 
-from __future__ import annotations
-
 import tomllib
 from typing import TYPE_CHECKING, ClassVar
 

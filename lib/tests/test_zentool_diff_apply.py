@@ -1,7 +1,5 @@
 """Focused pure-Python tests for zentool diff/apply asset flows."""
 
-from __future__ import annotations
-
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING

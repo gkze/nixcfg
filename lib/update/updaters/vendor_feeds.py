@@ -1,7 +1,5 @@
 """Small parsers for vendor-owned update feeds."""
 
-from __future__ import annotations
-
 import email.utils
 import re
 import urllib.parse

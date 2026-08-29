@@ -79,6 +79,19 @@ let
       match = builtins.match "https?://([^/]+).*" url;
     in
     if match != null then builtins.elemAt match 0 else null;
+  copyBunWorkspacePathToStore =
+    path:
+    let
+      generatedRoot = "${toString ./.}/";
+      pathString = toString path;
+      relativePath = lib.removePrefix generatedRoot pathString;
+    in
+    assert lib.assertMsg (lib.hasPrefix generatedRoot pathString)
+      "Superset bun.nix referenced a path outside its generated workspace: ${pathString}";
+    # bun.nix is generated from the prepared upstream workspace, but source
+    # preparation only changes root metadata. Resolve its workspace entries
+    # against the locked input so evaluation never needs the prepared derivation.
+    pkgs.copyPathToStore (upstreamSrc + "/${relativePath}");
   bunWithFakeNode = stdenvNoCC.mkDerivation {
     name = "bun-with-fake-node";
     nativeBuildInputs = [ makeWrapper ];
@@ -125,6 +138,9 @@ let
     inherit version;
     src = upstreamSrc;
     dontUnpack = true;
+    # This derivation prepares source metadata, so its fixup hooks must not
+    # rewrite executable files inside the workspace packages consumed below.
+    dontFixup = true;
 
     nativeBuildInputs = [ bun ];
 
@@ -141,23 +157,30 @@ let
   bunDeps =
     let
       bunPackages = lib.filterAttrs (_: value: lib.isStorePath value) (
-        builtins.addErrorContext invalidBunNixErr (pkgs.callPackage "${srcWithBun}/bun.nix" { })
+        builtins.addErrorContext invalidBunNixErr (
+          pkgs.callPackage ./bun.nix {
+            copyPathToStore = copyBunWorkspacePathToStore;
+          }
+        )
       );
-      buildBunPackage =
-        name: pkg:
+      bunPackageEntries = lib.mapAttrsToList (name: package: { inherit name package; }) bunPackages;
+      # Keep the scheduler graph bounded without turning the entire Bun cache
+      # into one all-or-nothing derivation. A package name always selects the
+      # same bucket, so lockfile churn only invalidates the affected shards.
+      bunPackageShards = lib.groupBy (
+        entry: builtins.substring 0 2 (builtins.hashString "sha256" entry.name)
+      ) bunPackageEntries;
+      registryHostFor =
+        pkg:
         let
           pkgUrl = pkg.passthru.url or null;
-          registryHost =
-            if pkgUrl != null then
-              let
-                host = extractHost pkgUrl;
-              in
-              if host != null && host != "registry.npmjs.org" then host else null
-            else
-              null;
+          host = if pkgUrl != null then extractHost pkgUrl else null;
         in
+        if host != null && host != "registry.npmjs.org" then host else null;
+      buildBunShard =
+        shard: entries:
         stdenv.mkDerivation {
-          name = "bun-pkg-${name}";
+          name = "bun-cache-shard-${shard}";
 
           nativeBuildInputs = [ bunWithFakeNode ];
           phases = [
@@ -169,10 +192,15 @@ let
           extractPhase = ''
             runHook preExtract
 
-            ${lib.getExe python3} ${extractBunPackageHelper} \
-              --bsdtar ${lib.escapeShellArg (lib.getExe' libarchive "bsdtar")} \
-              --package "${pkg}" \
-              --out "$out/share/bun-packages/${name}"
+            ${lib.concatMapStringsSep "\n" (
+              { name, package }:
+              ''
+                ${lib.getExe python3} ${extractBunPackageHelper} \
+                  --bsdtar ${lib.escapeShellArg (lib.getExe' libarchive "bsdtar")} \
+                  --package "${package}" \
+                  --out "$out/share/bun-packages/${name}"
+              ''
+            ) entries}
 
             runHook postExtract
           '';
@@ -188,24 +216,38 @@ let
           cacheEntryPhase = ''
             runHook preCacheEntry
 
-            "${lib.getExe bunCacheEntryCreator}" \
-              --out "$out/share/bun-cache" \
-              --name "${name}" \
-              --package "$out/share/bun-packages/${name}" \
-              ${lib.optionalString (registryHost != null) ''
-                --registry "${registryHost}"
-              ''}
+            ${lib.concatMapStringsSep "\n" (
+              { name, package }:
+              let
+                registryHost = registryHostFor package;
+              in
+              ''
+                "${lib.getExe bunCacheEntryCreator}" \
+                  --out "$out/share/bun-cache" \
+                  --name "${name}" \
+                  --package "$out/share/bun-packages/${name}" \
+                  ${lib.optionalString (registryHost != null) ''
+                    --registry "${registryHost}"
+                  ''}
+              ''
+            ) entries}
 
             runHook postCacheEntry
           '';
 
           preferLocalBuild = true;
-          allowSubstitutes = false;
         };
+      shardSizes = builtins.map builtins.length (builtins.attrValues bunPackageShards);
     in
     pkgs.symlinkJoin {
       name = "bun-cache";
-      paths = builtins.attrValues (builtins.mapAttrs buildBunPackage bunPackages);
+      paths = builtins.attrValues (builtins.mapAttrs buildBunShard bunPackageShards);
+      passthru.nixcfg = {
+        packageCount = builtins.length bunPackageEntries;
+        shardCount = builtins.length shardSizes;
+        maxShardSize = builtins.foldl' lib.max 0 shardSizes;
+        minShardSize = builtins.foldl' lib.min (builtins.head shardSizes) (builtins.tail shardSizes);
+      };
     };
   # Electron externalizes these modules at runtime. Keep this list aligned
   # with apps/desktop/electron.vite.config.ts and validate-native-runtime.ts

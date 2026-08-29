@@ -1,7 +1,5 @@
 """Shared updater behavior for T3 Code runtime Bun caches."""
 
-from __future__ import annotations
-
 import shlex
 from typing import TYPE_CHECKING, Literal
 

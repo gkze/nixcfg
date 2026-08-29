@@ -1,7 +1,5 @@
 """Updater for GitButler source metadata and crate2nix artifacts."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, Literal
 
 from lib.nix.models.sources import HashEntry

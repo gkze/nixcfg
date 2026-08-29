@@ -1,7 +1,5 @@
 """Extract one Bun package into an output directory."""
 
-from __future__ import annotations
-
 import argparse
 import shutil
 import stat

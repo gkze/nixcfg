@@ -1,7 +1,5 @@
 """Patch node-addon-api headers for the Emdash Electron build."""
 
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 

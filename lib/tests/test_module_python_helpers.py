@@ -1,7 +1,5 @@
 """Tests for maintained Python helpers under modules/."""
 
-from __future__ import annotations
-
 import os
 import runpy
 import stat

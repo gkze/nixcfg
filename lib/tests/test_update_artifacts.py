@@ -1,7 +1,5 @@
 """Tests for generated artifact persistence helpers."""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest
@@ -25,6 +23,7 @@ def test_generated_artifact_json_save_and_change_detection(tmp_path: Path) -> No
 
     written = tmp_path / "nested" / "demo.json"
     assert written.read_text(encoding="utf-8") == '{\n  "a": 1,\n  "b": 2\n}\n'
+    assert not written.with_name("demo.json.lock").exists()
     assert not artifact.has_changed(repo_root=tmp_path)
 
 

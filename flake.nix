@@ -29,7 +29,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flakelight-darwin = {
-      url = "github:gkze/flakelight-darwin";
+      url = "github:nix-community/flakelight-darwin";
       inputs = {
         flakelight.follows = "flakelight";
         nix-darwin.follows = "nix-darwin";
@@ -48,7 +48,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gitbutler = {
-      url = "github:gitbutlerapp/gitbutler/release/0.22.0";
+      url = "github:gitbutlerapp/gitbutler/release/0.22.1";
       flake = false;
     };
     home-manager = {
@@ -84,7 +84,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v2026.8.3";
+      url = "github:NousResearch/hermes-agent/v2026.8.27";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         pyproject-build-systems.follows = "pyproject-build-systems";
@@ -134,23 +134,38 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.73.0";
+      url = "github:max-sixty/worktrunk/v0.75.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
-      url = "github:axiomhq/cli/v0.16.0";
+      url = "github:axiomhq/cli/v0.19.1";
       flake = false;
     };
     anthropic-cli = {
-      url = "github:anthropics/anthropic-cli/v1.22.1";
+      url = "github:anthropics/anthropic-cli/v1.28.0";
+      flake = false;
+    };
+    base16-schemes-src = {
+      # Match nixpkgs' base16-schemes source without requiring its derivation at eval time.
+      url = "github:tinted-theming/schemes/43dd14f6466a782bd57419fdfb5f398c74d6ac53";
       flake = false;
     };
     catppuccin = {
       url = "github:catppuccin/nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    catppuccin-element-src = {
+      # Match catppuccin/nix's Element port without realizing its derivation at eval time.
+      url = "github:catppuccin/element/f8236600302ef016c7366b96414a09e086996b71";
+      flake = false;
+    };
     catppuccin-bat = {
       url = "github:catppuccin/bat";
+      flake = false;
+    };
+    catppuccin-bottom-src = {
+      # Match catppuccin/nix's Bottom port without realizing its derivation at eval time.
+      url = "github:catppuccin/bottom/eadd75acd0ecad4a58ade9a1d6daa3b97ccec07c";
       flake = false;
     };
     # Temporary fork pin until the Twilight acrylic-gap fix lands upstream.
@@ -159,7 +174,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.147.0";
+      url = "github:openai/codex/rust-v0.150.1";
       flake = false;
     };
     curator = {
@@ -167,18 +182,25 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.35.0";
+      url = "github:steipete/gogcli/v0.38.1";
       flake = false;
     };
     openai-cli = {
-      url = "github:openai/openai-cli/v1.7.1";
+      url = "github:openai/openai-cli/v1.9.0";
       flake = false;
     };
     github-desktop = {
       type = "git";
       url = "https://github.com/desktop/desktop.git";
-      ref = "refs/tags/release-3.6.3";
+      ref = "refs/tags/release-3.6.4";
       submodules = true;
+      flake = false;
+    };
+    goose = {
+      type = "github";
+      owner = "aaif-goose";
+      repo = "goose";
+      ref = "v1.48.0";
       flake = false;
     };
     goose-v8 = {
@@ -299,6 +321,7 @@
               "40.7.0"
               "40.8.5"
               "40.9.3"
+              "40.10.2"
             ]
           );
       };
@@ -332,6 +355,7 @@
           inherit (lintFiles.python)
             compilePaths
             pyupgradePaths
+            pythonPyupgradeExcludes
             pythonScriptPaths
             ruffMutationExcludes
             ;
@@ -350,17 +374,86 @@
               inherit (self) inputs;
               outputs = self;
             };
+          # Keep each check keyed to the files it can observe. Read-only checks
+          # run from these immutable store paths; only mutation checks copy one.
+          mkCheckSource =
+            fileset:
+            lib.fileset.toSource {
+              root = ./.;
+              inherit fileset;
+            };
+          filesWithExtensions =
+            extensions:
+            lib.fileset.fileFilter (file: lib.any (extension: file.hasExt extension) extensions) ./.;
+          filesetFromPaths = paths: lib.fileset.unions (map (path: ./. + "/${path}") paths);
+          yamlFiles = lib.fileset.fileFilter (file: file.hasExt "yaml" || file.hasExt "yml") ./.;
+          yamlLintFiles = lib.fileset.difference yamlFiles (
+            lib.fileset.fileFilter (file: file.hasExt "yaml") ./lib/nix/schemas
+          );
+          webFormatFiles = lib.fileset.difference (filesWithExtensions [
+            "cjs"
+            "css"
+            "js"
+            "json"
+            "jsonc"
+            "ts"
+          ]) ./schemas/codegen/testdata/lockfile-golden/expected.codegen.lock.json;
+          webLintFiles = filesWithExtensions [
+            "cjs"
+            "js"
+            "ts"
+          ];
+          pythonFiles = lib.fileset.unions [
+            (filesWithExtensions [
+              "py"
+              "pyi"
+            ])
+            (filesetFromPaths pythonScriptPaths)
+          ];
+          generatedPythonFiles = lib.fileset.fileFilter (
+            file: (file.hasExt "py" || file.hasExt "pyi") && file.name == "_generated.py"
+          ) ./.;
+          pyupgradeExcludedFiles = filesetFromPaths pythonPyupgradeExcludes;
+          pyupgradeFiles = lib.fileset.unions [
+            ./.gitignore
+            (lib.fileset.difference pythonFiles (
+              lib.fileset.unions [
+                generatedPythonFiles
+                pyupgradeExcludedFiles
+              ]
+            ))
+          ];
+          ruffFormatFiles = lib.fileset.difference pythonFiles (filesetFromPaths ruffMutationExcludes);
+          pythonToolFiles = lib.fileset.unions [
+            ./.gitignore
+            ./pyproject.toml
+            pythonFiles
+          ];
+          ruffFormatToolFiles = lib.fileset.unions [
+            ./.gitignore
+            ./pyproject.toml
+            ruffFormatFiles
+          ];
+          schemaVerificationFiles = lib.fileset.unions [
+            ./.root
+            ./pyproject.toml
+            ./schema_codegen.yaml
+            ./nixcfg.py
+            ./lib/nix/models/_generated.py
+            ./lib/schema_codegen/models/_generated.py
+            (lib.fileset.fileFilter (file: file.hasExt "yaml") ./lib/nix/schemas)
+            (lib.fileset.fileFilter (file: file.hasExt "json") ./schemas/codegen)
+          ];
           mkRepoCheck =
             {
               name,
               runCommandAttrs ? { },
               repoWritable ? false,
-              workdir ? "src",
+              source,
               setup ? "",
               command,
             }:
             {
-              lib,
               pkgs,
               ...
             }@context:
@@ -370,9 +463,18 @@
             pkgs.runCommand name (resolve runCommandAttrs) ''
               export HOME="$TMPDIR"
               ${resolve setup}
-              cp -a ${./.} src
-              ${lib.optionalString repoWritable "chmod -R u+w src"}
-              cd ${workdir}
+              ${
+                if source == null then
+                  ""
+                else if repoWritable then
+                  ''
+                    cp -a ${source} src
+                    chmod -R u+w src
+                    cd src
+                  ''
+                else
+                  "cd ${source}"
+              }
               ${resolve command}
               touch $out
             '';
@@ -419,6 +521,7 @@
             );
           repoCheckSpecs = {
             "lint-editorconfig" = {
+              source = mkCheckSource ./.;
               command =
                 { lib, pkgs, ... }:
                 ''
@@ -427,6 +530,13 @@
             };
 
             "format-yaml-yamlfmt" = {
+              source = mkCheckSource (
+                lib.fileset.unions [
+                  ./.gitignore
+                  ./.yamlfmt
+                  yamlFiles
+                ]
+              );
               command =
                 { lib, pkgs, ... }:
                 ''
@@ -435,6 +545,12 @@
             };
 
             "lint-yaml-yamllint" = {
+              source = mkCheckSource (
+                lib.fileset.unions [
+                  ./.yamllint
+                  yamlLintFiles
+                ]
+              );
               command =
                 { lib, pkgs, ... }:
                 ''
@@ -443,6 +559,15 @@
             };
 
             "format-web-oxfmt" = {
+              source = mkCheckSource (
+                lib.fileset.unions [
+                  ./.editorconfig
+                  ./.oxfmtrc.json
+                  ./.gitignore
+                  ./flake.lock
+                  webFormatFiles
+                ]
+              );
               command =
                 { lib, pkgs, ... }:
                 ''
@@ -451,6 +576,13 @@
             };
 
             "lint-web-oxlint" = {
+              source = mkCheckSource (
+                lib.fileset.unions [
+                  ./.gitignore
+                  ./.oxlintrc.json
+                  webLintFiles
+                ]
+              );
               command =
                 { lib, pkgs, ... }:
                 ''
@@ -461,6 +593,7 @@
             "format-python-pyupgrade" = {
               repoWritable = true;
               nixcfg = true;
+              source = mkCheckSource pyupgradeFiles;
               command =
                 {
                   lib,
@@ -476,13 +609,14 @@
                     -type f \
                     \( -name '*.py' -o -name '*.pyi' ${pythonScriptFindPredicates} \) \
                     -print0 \
-                    | ${pkgs.findutils}/bin/xargs -0 -r ${nixcfgVenv}/bin/python -m lib.fix_python_multi_except --pyupgrade-exe ${nixcfgVenv}/bin/pyupgrade --pyupgrade-arg=--py313-plus
+                    | ${pkgs.findutils}/bin/xargs -0 -r ${nixcfgVenv}/bin/pyupgrade --py314-plus
                   ${lib.getExe pkgs.git} diff --exit-code -- .
                 '';
             };
 
             "lint-python-compile" = {
               nixcfg = true;
+              source = mkCheckSource pythonFiles;
               command =
                 { lib, nixcfgVenv, ... }:
                 ''
@@ -492,6 +626,7 @@
 
             "format-python-ruff" = {
               nixcfg = true;
+              source = mkCheckSource ruffFormatToolFiles;
               setup = ''
                 export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
               '';
@@ -504,6 +639,7 @@
 
             "lint-python-ruff" = {
               nixcfg = true;
+              source = mkCheckSource pythonToolFiles;
               setup = ''
                 export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
               '';
@@ -516,6 +652,7 @@
 
             "lint-python-ty" = {
               nixcfg = true;
+              source = mkCheckSource pythonToolFiles;
               command =
                 { nixcfgVenv, ... }:
                 ''
@@ -525,6 +662,7 @@
 
             "verify-python-generated" = {
               nixcfg = true;
+              source = mkCheckSource schemaVerificationFiles;
               command =
                 { nixcfgVenv, ... }:
                 ''
@@ -534,6 +672,7 @@
 
             "verify-runtime-package" = {
               nixcfg = true;
+              source = null;
               command =
                 { nixcfgVenv, ... }:
                 ''
@@ -548,14 +687,17 @@
             "test-python-pytest" = {
               repoWritable = true;
               nixcfg = true;
+              source = mkCheckSource ./.;
               runCommandAttrs =
                 { pkgs, ... }:
                 {
                   nativeBuildInputs = [
+                    pkgs.bun
                     pkgs.cacert
                     pkgs.git
                     pkgs.nix
                     pkgs.nodejs
+                    pkgs.rsync
                   ];
                 };
               setup =
@@ -579,6 +721,8 @@
                 ''
                   ${lib.getExe pkgs.git} init -q .
                   ${lib.getExe pkgs.git} add -A .
+                  mkdir -p node_modules
+                  ln -s ${pkgs.typescript}/lib/node_modules/typescript node_modules/typescript
                   ${nixcfgVenv}/bin/coverage run -m pytest
                   ${nixcfgVenv}/bin/coverage report
                 '';
@@ -634,7 +778,6 @@
             let
               nixcfgPkg = mkNixcfgPackage pkgs;
               nixcfgVenv = nixcfgPkg.passthru.venv;
-              pythonExe = "${nixcfgVenv}/bin/python";
               pyupgradeExe = "${nixcfgVenv}/bin/pyupgrade";
               ruffExe = "${nixcfgVenv}/bin/ruff";
               textHygieneScript = ./lib/format_text.py;
@@ -748,23 +891,14 @@
                   settings = {
                     excludes = lintFiles.nix.excludeGlobs;
                     formatter = {
-                      # Normalize invalid multi-except rewrites first so
-                      # pyupgrade and compile checks converge on valid Python 3
-                      # syntax using the uv-managed nixcfg runtime. Keep the
-                      # established pyupgrade floor until Python 3.14 rewrites
-                      # are applied as an intentional formatting migration.
                       python-pyupgrade = {
-                        command = pythonExe;
+                        command = pyupgradeExe;
                         options = [
-                          "-m"
-                          "lib.fix_python_multi_except"
-                          "--pyupgrade-exe"
-                          pyupgradeExe
-                          "--pyupgrade-arg=--py313-plus"
-                          "--pyupgrade-arg=--exit-zero-even-if-changed"
+                          "--py314-plus"
+                          "--exit-zero-even-if-changed"
                         ];
                         includes = pyupgradePaths;
-                        excludes = [ "**/_generated.py" ];
+                        excludes = [ "**/_generated.py" ] ++ pythonPyupgradeExcludes;
                       };
                       ruff-check = {
                         command = ruffExe;
@@ -813,7 +947,7 @@
                         command = lib.getExe' (pkgs.python3.withPackages (
                           ps: with ps; [
                             mdformat
-                            mdformat-tables
+                            mdformat-gfm
                           ]
                         )) "mdformat";
                         includes = lintFiles.markdown.globs;
@@ -867,9 +1001,45 @@
               _: import ./tests/nix/default-api/default-api.nix { src = ./.; }
             );
 
+            "test-nix-crate2nix-source-slice" =
+              { pkgs, ... }:
+              import ./tests/nix/crate2nix-source-slice.nix {
+                inherit pkgs;
+                src = ./.;
+              };
+
+            "test-nix-crate-cache-boundaries" = mkEvalOnlyCheck "test-nix-crate-cache-boundaries" (
+              { pkgs, ... }:
+              import ./tests/nix/crate-cache-boundaries.nix {
+                inherit (pkgs) lib;
+                system = pkgs.stdenv.hostPlatform.system;
+              }
+            );
+
+            "test-nix-codex-bundled-plugin-repair" =
+              { pkgs, ... }:
+              if pkgs.stdenv.hostPlatform.isDarwin then
+                import ./tests/nix/codex-bundled-plugin-repair.nix {
+                  inherit pkgs;
+                  inherit (pkgs) lib;
+                  src = ./.;
+                }
+              else
+                pkgs.runCommand "test-codex-bundled-plugin-repair-skipped" { } ''
+                  touch "$out"
+                '';
+
             "test-nix-dock-defaults" = mkEvalOnlyCheck "test-nix-dock-defaults" (
               { pkgs, ... }:
               import ./tests/nix/dock-defaults.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
+
+            "test-nix-common-maintenance" = mkEvalOnlyCheck "test-nix-common-maintenance" (
+              { pkgs, ... }:
+              import ./tests/nix/common-maintenance.nix {
                 inherit (pkgs) lib;
                 src = ./.;
               }
@@ -888,7 +1058,11 @@
             );
 
             "test-nix-opencode-desktop" = mkEvalOnlyCheck "test-nix-opencode-desktop" (
-              _: import ./packages/opencode-desktop/tests.nix { inherit self; }
+              { pkgs, ... }:
+              import ./packages/opencode-desktop/tests.nix {
+                inherit self;
+                system = pkgs.stdenv.hostPlatform.system;
+              }
             );
 
             "test-nix-opencode-mcp" = mkEvalOnlyCheck "test-nix-opencode-mcp" (
@@ -954,6 +1128,16 @@
                 inherit pkgs;
                 src = ./.;
               };
+
+            "test-nix-zsh-repo-plugins" =
+              { pkgs, ... }:
+              import ./tests/nix/zsh-repo-plugins.nix {
+                inherit pkgs;
+                inherit (pkgs) lib;
+                src = ./.;
+              };
+
+            "package-codesnap-nvim" = { pkgs, ... }: pkgs.vimPlugins.codesnap-nvim;
 
             "cache-electron-runtimes" = { pkgs, ... }: pkgs.electron-runtimes;
           }

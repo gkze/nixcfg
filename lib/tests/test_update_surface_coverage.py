@@ -1,7 +1,6 @@
 """Tests for logical updater coverage across packages and overlays."""
 
-from __future__ import annotations
-
+import annotationlib
 import inspect
 from dataclasses import fields
 from pathlib import Path
@@ -28,6 +27,7 @@ from lib.update.updaters import metadata as updater_metadata
 def test_surface_alias_and_exemption_contracts() -> None:
     """Keep explicit coverage exceptions small and intentional."""
     assert UPDATE_SURFACE_ALIASES == {
+        "claude-code-url-handler": "claude-code",
         "opencode-desktop-dev": "opencode-desktop",
     }
     assert {
@@ -38,12 +38,17 @@ def test_surface_alias_and_exemption_contracts() -> None:
         "nix-direnv",
         "nix-prefetch-git",
     } == UPDATE_SURFACE_EXEMPTIONS
+    assert canonical_update_surface_name("claude-code-url-handler") == "claude-code"
     assert canonical_update_surface_name("opencode-desktop-dev") == ("opencode-desktop")
 
 
 def test_update_runtime_has_no_cross_job_version_transport_surface() -> None:
     """Keep version discovery local to each isolated updater execution."""
-    assert "pinned_version" not in inspect.signature(Updater.update_stream).parameters
+    signature = inspect.signature(
+        Updater.update_stream,
+        annotation_format=annotationlib.Format.STRING,
+    )
+    assert "pinned_version" not in signature.parameters
     assert "pinned_version" not in {
         field.name for field in fields(source_runner.SourceTaskContext)
     }
@@ -126,10 +131,7 @@ def test_every_repo_source_has_a_plannable_transaction_destination() -> None:
             for relative in updater.get_generated_artifact_files()
         )
     for target in update_crate2nix.TARGETS.values():
-        expected.update(
-            (REPO_ROOT / path).resolve()
-            for path in (target.cargo_nix, target.crate_hashes)
-        )
+        expected.update((REPO_ROOT / path).resolve() for path in target.artifact_paths)
 
     assert set(planned_update_paths(sorted(updaters), updaters)) == expected
 

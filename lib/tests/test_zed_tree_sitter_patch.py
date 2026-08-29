@@ -1,7 +1,5 @@
 """Tests for Zed tree-sitter source patching."""
 
-from __future__ import annotations
-
 import runpy
 from pathlib import Path
 from types import ModuleType

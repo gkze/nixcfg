@@ -1,7 +1,5 @@
 """Updater for macai macOS releases."""
 
-from __future__ import annotations
-
 from typing import ClassVar
 
 from lib.update.updaters import SparkleAppcastUrlUpdater, register_updater

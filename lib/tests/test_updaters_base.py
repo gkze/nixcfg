@@ -1,7 +1,5 @@
 """Tests for shared updater base behavior."""
 
-from __future__ import annotations
-
 import asyncio
 from typing import ClassVar
 from unittest.mock import patch

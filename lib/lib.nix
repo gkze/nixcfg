@@ -452,6 +452,7 @@ rec {
       extraSystemModules ? [ ],
       enableRosettaBuilder ? true,
       rosettaBuilderMemory ? null,
+      rosettaBuilderLingerMinutes ? null,
     }:
     mkSystem {
       inherit
@@ -481,6 +482,9 @@ rec {
         ]
         ++ optionals (rosettaBuilderMemory != null) [
           { nix-rosetta-builder.memory = rosettaBuilderMemory; }
+        ]
+        ++ optionals (rosettaBuilderLingerMinutes != null) [
+          { nix-rosetta-builder.onDemandLingerMinutes = rosettaBuilderLingerMinutes; }
         ]
       )
       ++ toList extraSystemModules;

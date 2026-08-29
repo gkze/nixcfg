@@ -1,7 +1,5 @@
 """Shared helpers for schema code generation."""
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from typing import override
 

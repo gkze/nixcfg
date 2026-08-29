@@ -1,7 +1,5 @@
 """Error formatting utilities for update operations."""
 
-from __future__ import annotations
-
 import traceback
 
 

@@ -1,7 +1,5 @@
 """Tests for updater module discovery helper."""
 
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -127,6 +125,58 @@ def test_discover_updaters_prefers_repo_helper_modules(
     finally:
         sys.modules.pop("_updater_pkg.demo", None)
         sys.modules.pop("lib.update.updaters.local_helper", None)
+        for name, entries in package_paths.items():
+            sys.modules[name].__path__[:] = entries
+
+
+def test_ensure_updaters_loaded_resolves_repo_package_helpers(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Installed launchers can import helper modules from the current checkout."""
+    helper_dir = tmp_path / "packages" / "demo"
+    helper_dir.mkdir(parents=True)
+    (helper_dir / "helper.py").write_text(
+        "VALUE = 'repo helper'\n",
+        encoding="utf-8",
+    )
+    updater_file = helper_dir / "updater.py"
+    updater_file.write_text(
+        "from lib.update.updaters import UPDATERS\n"
+        "from packages.demo.helper import VALUE\n"
+        "UPDATERS['demo'] = VALUE\n",
+        encoding="utf-8",
+    )
+    original_registry = dict(UPDATERS)
+    original_state = dict(_DISCOVERY_STATE)
+    original_sys_path = list(sys.path)
+    package_paths = {
+        name: list(sys.modules[name].__path__)
+        for name in ("lib", "lib.update", "lib.update.updaters")
+    }
+    monkeypatch.setattr("lib.update.updaters.REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "lib.update.updaters._updater_module_paths",
+        lambda: {"demo": updater_file},
+    )
+
+    try:
+        sys.path[:] = [entry for entry in sys.path if entry != str(tmp_path)]
+        for name in ("packages.demo.helper", "packages.demo", "packages"):
+            sys.modules.pop(name, None)
+        sys.modules.pop("_updater_pkg.demo", None)
+        UPDATERS.clear()
+        _DISCOVERY_STATE["complete"] = False
+
+        assert ensure_updaters_loaded() == {"demo": "repo helper"}
+    finally:
+        sys.path[:] = original_sys_path
+        for name in ("packages.demo.helper", "packages.demo", "packages"):
+            sys.modules.pop(name, None)
+        sys.modules.pop("_updater_pkg.demo", None)
+        UPDATERS.clear()
+        UPDATERS.update(original_registry)
+        _DISCOVERY_STATE.clear()
+        _DISCOVERY_STATE.update(original_state)
         for name, entries in package_paths.items():
             sys.modules[name].__path__[:] = entries
 

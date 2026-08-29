@@ -1,7 +1,5 @@
 """flake.lock lookup helpers and flake input update streaming."""
 
-from __future__ import annotations
-
 import functools
 import os
 import shlex

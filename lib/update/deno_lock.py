@@ -6,8 +6,6 @@ a Nix builder can consume to construct a deterministic ``DENO_DIR`` from
 individual ``fetchurl`` calls.
 """
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import json

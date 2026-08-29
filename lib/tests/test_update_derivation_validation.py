@@ -1,7 +1,5 @@
 """Behavioral tests for target-aware update derivation validation."""
 
-from __future__ import annotations
-
 import subprocess
 
 import pytest
@@ -173,13 +171,20 @@ def test_validate_derivations_runs_nix_eval_from_repo_root() -> None:
         updaters={"portable": _PortableUpdater},
         timeout=42,
         run=_run,
-        clock=lambda: 100.0,
     )
 
     assert failures == ()
     assert calls == [
         (
-            ["nix", "eval", "--raw", ".#portable.drvPath"],
+            [
+                "nix",
+                "eval",
+                "--option",
+                "allow-import-from-derivation",
+                "false",
+                "--raw",
+                ".#portable.drvPath",
+            ],
             {
                 "cwd": get_repo_root(),
                 "text": True,
@@ -212,8 +217,8 @@ def test_validate_derivations_can_build_an_installable() -> None:
     assert calls == [["nix", "build", "--no-link", ".#portable"]]
 
 
-def test_validate_derivations_uses_one_total_deadline() -> None:
-    """Skip every remaining request after the shared validation deadline expires."""
+def test_validate_derivations_applies_timeout_to_each_request() -> None:
+    """Give every derivation its own subprocess timeout regardless of ordering."""
 
     class _FourSystemUpdater:
         derivation_validations = (
@@ -223,7 +228,6 @@ def test_validate_derivations_uses_one_total_deadline() -> None:
             ),
         )
 
-    ticks = iter((100.0, 100.0, 102.0, 106.0))
     timeouts: list[object] = []
 
     def _run(
@@ -239,22 +243,10 @@ def test_validate_derivations_uses_one_total_deadline() -> None:
         timeout=5,
         all_declared_systems=True,
         run=_run,
-        clock=lambda: next(ticks),
     )
 
-    assert timeouts == [5.0, 3.0]
-    assert failures == (
-        DerivationValidationFailure(
-            source="demo",
-            installable=".#pkgs.system-c.demo.drvPath",
-            message="skipped: total derivation validation deadline exhausted",
-        ),
-        DerivationValidationFailure(
-            source="demo",
-            installable=".#pkgs.system-d.demo.drvPath",
-            message="skipped: total derivation validation deadline exhausted",
-        ),
-    )
+    assert timeouts == [5, 5, 5, 5]
+    assert failures == ()
 
 
 @pytest.mark.parametrize(

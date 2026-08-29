@@ -1,7 +1,5 @@
 """Updater for Jacq macOS releases."""
 
-from __future__ import annotations
-
 import re
 from typing import ClassVar
 from urllib.parse import urlparse

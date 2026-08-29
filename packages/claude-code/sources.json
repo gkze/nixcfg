@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-xmpsxvougUW7Gm53gx8sr0uDaQ/wRlBQDfpuLAXKmXw="
+    "aarch64-darwin": "sha256-a8S6mS0nhsvwI3xEU8pTwf3ww7PYP/oAJcDYGQ7SeEg="
   },
   "urls": {
-    "aarch64-darwin": "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/2.1.222/darwin-arm64/claude"
+    "aarch64-darwin": "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/2.1.236/darwin-arm64/claude"
   },
-  "version": "2.1.222"
+  "version": "2.1.236"
 }

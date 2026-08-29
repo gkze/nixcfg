@@ -1,7 +1,5 @@
 """Tests for the repo-local Python compilation smoke-check helper."""
 
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 

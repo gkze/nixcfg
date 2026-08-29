@@ -1,7 +1,5 @@
 """Pure-Python tests for the T3 Code runtime lock update helper."""
 
-from __future__ import annotations
-
 import runpy
 import subprocess
 from pathlib import Path

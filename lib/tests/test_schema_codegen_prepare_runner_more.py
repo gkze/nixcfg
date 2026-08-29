@@ -1,7 +1,5 @@
 """Focused branch coverage for schema codegen preparation and runner helpers."""
 
-from __future__ import annotations
-
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast

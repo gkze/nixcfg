@@ -1,7 +1,5 @@
 """Focused pure-Python tests for zentool listing, check, and diff helpers."""
 
-from __future__ import annotations
-
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 

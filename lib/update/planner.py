@@ -1,13 +1,11 @@
 """Target planning helpers for update runs."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, Protocol
 
 from lib.update.updaters.flake_backed import FlakeInputUpdater
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from lib.nix.models.sources import SourceEntry
     from lib.update.refs import FlakeInputRef
@@ -17,11 +15,20 @@ class _UpdateOptionsLike(Protocol):
     @property
     def target_names(self) -> tuple[str, ...]: ...
 
-    no_refs: bool
-    native_only: bool
-    no_sources: bool
-    no_input: bool
-    check: bool
+    @property
+    def no_refs(self) -> bool: ...
+
+    @property
+    def native_only(self) -> bool: ...
+
+    @property
+    def no_sources(self) -> bool: ...
+
+    @property
+    def no_input(self) -> bool: ...
+
+    @property
+    def check(self) -> bool: ...
 
 
 def source_backing_input_name(
@@ -197,7 +204,7 @@ def resolve_update_targets[ResolvedTargetsT](
     *,
     updaters: Mapping[str, type[object]],
     ref_inputs: list[FlakeInputRef],
-    result_type: type[ResolvedTargetsT],
+    result_type: Callable[..., ResolvedTargetsT],
 ) -> ResolvedTargetsT:
     """Resolve target sets and operational flags from update options."""
     all_source_names = set(updaters.keys())

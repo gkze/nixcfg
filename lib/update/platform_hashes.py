@@ -1,7 +1,5 @@
 """Helpers for preserving platform hashes after non-native build failures."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 from lib.update.events import StatusInfo, StatusKind, UpdateEvent

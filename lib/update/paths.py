@@ -1,7 +1,5 @@
 """Repository path helpers used by update modules."""
 
-from __future__ import annotations
-
 import os
 from functools import cache
 from pathlib import Path

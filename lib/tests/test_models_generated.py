@@ -1,7 +1,5 @@
 """Tests for auto-generated Pydantic models in lib.nix.models._generated."""
 
-from __future__ import annotations
-
 import pytest
 from pydantic import ValidationError
 

@@ -1,7 +1,5 @@
 """Updater for Warp Preview."""
 
-from __future__ import annotations
-
 from typing import ClassVar
 
 from lib.update.updaters import JsonFieldDownloadUpdater, register_updater

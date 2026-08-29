@@ -1,7 +1,5 @@
 """Crash-recovery contracts for isolated update promotion."""
 
-from __future__ import annotations
-
 import json
 import os
 import shutil
@@ -148,6 +146,34 @@ def test_startup_finishes_postcommit_cleanup(
 
     assert not _retained(live, record).exists()
     assert not journal.exists()
+
+
+def test_workspace_disables_background_git_maintenance(tmp_path: Path) -> None:
+    """Disposable repositories must not outlive cleanup via detached maintenance."""
+    live = tmp_path / "live"
+    _init_repo(live)
+    git = shutil.which("git")
+    assert git is not None
+
+    with IsolatedUpdateWorkspace(live) as workspace:
+        config = subprocess.run(  # noqa: S603
+            [
+                git,
+                "config",
+                "--local",
+                "--get-regexp",
+                r"^(maintenance\.auto|gc\.auto)$",
+            ],
+            cwd=workspace.root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+
+    assert dict(line.split(maxsplit=1) for line in config) == {
+        "gc.auto": "0",
+        "maintenance.auto": "false",
+    }
 
 
 def test_startup_rolls_back_partial_multi_path_progress(

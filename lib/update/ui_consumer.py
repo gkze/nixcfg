@@ -1,7 +1,5 @@
 """Observation-only event consumer driving update UI rendering."""
 
-from __future__ import annotations
-
 import asyncio
 import contextlib
 import shlex

@@ -1,7 +1,5 @@
 """Focused pure-Python tests for zentool tab and folder helper seams."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 import pytest
@@ -181,6 +179,10 @@ def test_build_tab_reuses_active_entry_when_url_already_matches(
         attributes={"nested": ["value"]},
         pinned_icon="page-icon",
         has_static_icon=True,
+        _zenPinnedInitialState={
+            "entry": {"url": "https://stale.example", "title": "Old Label"},
+            "image": "data:image/png;base64,stale",
+        },
     )
     original_attributes = existing.attributes
     spec = zentool.TabSpec(name="Pinned Label", url="https://example.com")
@@ -214,6 +216,10 @@ def test_build_tab_reuses_active_entry_when_url_already_matches(
     assert built.last_accessed == 456
     assert built.attributes == {"nested": ["value"]}
     assert built.attributes is not original_attributes
+    assert built.model_dump(by_alias=True)["_zenPinnedInitialState"] == {
+        "entry": {"url": "https://example.com", "title": "Pinned Label"},
+        "image": None,
+    }
 
 
 def test_build_tab_resets_entry_for_mismatched_url(
@@ -228,6 +234,10 @@ def test_build_tab_resets_entry_for_mismatched_url(
         index=9,
         sync_id="old-sync",
         last_accessed=0,
+        _zenPinnedInitialState={
+            "entry": {"url": "https://old.example", "title": "Old"},
+            "image": "data:image/png;base64,old",
+        },
     )
     spec = zentool.ItemTabSpec(name="Folder Tab", url="https://new.example")
 
@@ -245,6 +255,13 @@ def test_build_tab_resets_entry_for_mismatched_url(
     assert built.entries == [
         zentool.SessionEntry(url="https://new.example", title="Folder Tab")
     ]
+    assert built.model_dump(by_alias=True)["_zenPinnedInitialState"] == {
+        "entry": {
+            "url": "https://new.example",
+            "title": "Folder Tab",
+        },
+        "image": None,
+    }
     assert built.index == 1
     assert built.zen_static_label == "Folder Tab"
     assert built.zen_pinned_icon is None
@@ -273,6 +290,58 @@ def test_build_tab_resolves_favicon_for_new_tab(
     )
 
     assert built.model_extra["image"] == "data:image/png;base64,https://example.com"
+    assert built.model_dump(by_alias=True)["_zenPinnedInitialState"] == {
+        "entry": {"url": "https://example.com", "title": "Example"},
+        "image": "data:image/png;base64,https://example.com",
+    }
+
+
+def test_build_tab_removes_canonical_state_when_tab_becomes_unpinned(
+    zentool: ModuleType,
+) -> None:
+    """Unpinned targets should not retain Zen's canonical pinned-tab state."""
+    existing = make_tab(
+        zentool,
+        entries=[make_entry(zentool, url="https://example.com", title="Example")],
+        pinned=True,
+        _zenPinnedInitialState={
+            "entry": {"url": "https://example.com", "title": "Example"},
+            "image": None,
+        },
+    )
+
+    built = zentool.build_tab(
+        zentool.TabSpec(name="Example", url="https://example.com"),
+        existing=existing,
+        sync_id="sync-existing",
+        pinned=False,
+        essential=False,
+        workspace_uuid="{workspace}",
+        folder_id=None,
+        user_context_id=0,
+    )
+
+    assert "_zenPinnedInitialState" not in built.model_dump(by_alias=True)
+
+
+def test_sync_unpinned_tab_without_extra_fields_is_a_noop(
+    zentool: ModuleType,
+) -> None:
+    """An unpinned tab without opaque session data should remain extra-free."""
+    tab = make_tab(
+        zentool,
+        entries=[make_entry(zentool, url="https://example.com", title="Example")],
+        pinned=False,
+    )
+    tab.__pydantic_extra__ = None
+
+    zentool.sync_pinned_initial_state(
+        tab,
+        name="Example",
+        url="https://example.com",
+    )
+
+    assert tab.model_extra is None
 
 
 def test_build_tab_preserves_same_origin_image_when_url_is_canonicalized(
@@ -283,6 +352,13 @@ def test_build_tab_preserves_same_origin_image_when_url_is_canonicalized(
         zentool,
         entries=[make_entry(zentool, url="https://example.com/dashboard", title="Old")],
         image="data:image/png;base64,old",
+        _zenPinnedInitialState={
+            "entry": {
+                "url": "https://example.com/dashboard",
+                "title": "Old",
+            },
+            "image": "data:image/png;base64,canonical",
+        },
     )
     spec = zentool.ItemTabSpec(name="Example", url="https://example.com")
 
@@ -302,6 +378,32 @@ def test_build_tab_preserves_same_origin_image_when_url_is_canonicalized(
         zentool.SessionEntry(url="https://example.com", title="Example")
     ]
     assert built.model_extra["image"] == "data:image/png;base64,old"
+    assert built.model_extra["_zenPinnedInitialState"] == {
+        "entry": {"url": "https://example.com", "title": "Example"},
+        "image": "data:image/png;base64,canonical",
+    }
+
+
+def test_set_tab_image_preserves_existing_canonical_pin_image(
+    zentool: ModuleType,
+) -> None:
+    """Runtime favicon repair should not replace a canonical pin icon."""
+    tab = make_tab(
+        zentool,
+        entries=[make_entry(zentool, url="https://example.com", title="Example")],
+        pinned=True,
+        _zenPinnedInitialState={
+            "entry": {"url": "https://example.com", "title": "Example"},
+            "image": "data:image/png;base64,canonical",
+        },
+    )
+
+    zentool.set_tab_image(tab, "data:image/png;base64,runtime")
+
+    assert zentool.tab_image(tab) == "data:image/png;base64,runtime"
+    assert tab.model_extra["_zenPinnedInitialState"]["image"] == (
+        "data:image/png;base64,canonical"
+    )
 
 
 def test_build_tab_replaces_cross_origin_image_when_url_changes(
@@ -312,6 +414,10 @@ def test_build_tab_replaces_cross_origin_image_when_url_changes(
         zentool,
         entries=[make_entry(zentool, url="https://old.example", title="Old")],
         image="data:image/png;base64,old",
+        _zenPinnedInitialState={
+            "entry": {"url": "https://old.example", "title": "Old"},
+            "image": "data:image/png;base64,canonical-old",
+        },
     )
     spec = zentool.ItemTabSpec(name="Example", url="https://new.example")
 
@@ -328,6 +434,10 @@ def test_build_tab_replaces_cross_origin_image_when_url_changes(
     )
 
     assert built.model_extra["image"] == "data:image/png;base64,new"
+    assert built.model_extra["_zenPinnedInitialState"] == {
+        "entry": {"url": "https://new.example", "title": "Example"},
+        "image": "data:image/png;base64,new",
+    }
 
 
 def test_resolve_missing_tab_images_updates_only_missing_nonempty_tabs(
@@ -337,6 +447,11 @@ def test_resolve_missing_tab_images_updates_only_missing_nonempty_tabs(
     missing = make_tab(
         zentool,
         entries=[make_entry(zentool, url="https://missing.example", title="Missing")],
+        pinned=True,
+        _zenPinnedInitialState={
+            "entry": {"url": "https://missing.example", "title": "Missing"},
+            "image": None,
+        },
     )
     existing = make_tab(
         zentool,
@@ -360,6 +475,9 @@ def test_resolve_missing_tab_images_updates_only_missing_nonempty_tabs(
     assert count == 1
     assert seen == ["https://missing.example"]
     assert missing.model_extra["image"] == "data:image/png;base64,missing"
+    assert missing.model_extra["_zenPinnedInitialState"]["image"] == (
+        "data:image/png;base64,missing"
+    )
     assert existing.model_extra["image"] == "data:image/png;base64,existing"
     assert empty.model_extra is None or "image" not in empty.model_extra
 

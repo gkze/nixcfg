@@ -1,7 +1,5 @@
 """Updater for Melty Conductor release artifacts."""
 
-from __future__ import annotations
-
 import re
 import urllib.parse
 from dataclasses import dataclass

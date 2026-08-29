@@ -1,7 +1,5 @@
 """Focused tests for a small non-overlapping package-updater lane."""
 
-from __future__ import annotations
-
 import asyncio
 from collections.abc import AsyncIterator, Iterable
 from datetime import UTC, datetime

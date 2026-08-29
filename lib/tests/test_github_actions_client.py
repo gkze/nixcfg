@@ -1,7 +1,5 @@
 """Focused tests for GitHub Actions API helpers."""
 
-from __future__ import annotations
-
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -144,7 +142,7 @@ def test_github_actions_client_wraps_actions_endpoints(
 ) -> None:
     auth = "token"
     actions = _FakeActions()
-    github = SimpleNamespace(rest=lambda _version: SimpleNamespace(actions=actions))
+    github = SimpleNamespace(rest=lambda: SimpleNamespace(actions=actions))
     context = gha_client.RepositoryContext(
         slug=gha_client.RepositorySlug(owner="acme", name="demo"),
         server_url="https://github.com",

@@ -1,7 +1,5 @@
 """Typed metadata models for updater version resolution."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass, fields, is_dataclass
 from typing import override
 

@@ -1,7 +1,5 @@
 """Additional branch coverage for GitHub Actions live tailing."""
 
-from __future__ import annotations
-
 import asyncio
 import io
 from datetime import UTC, datetime

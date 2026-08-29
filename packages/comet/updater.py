@@ -1,7 +1,5 @@
 """Updater for Comet browser macOS releases."""
 
-from __future__ import annotations
-
 import asyncio
 import re
 from dataclasses import dataclass

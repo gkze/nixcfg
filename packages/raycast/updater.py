@@ -1,7 +1,5 @@
 """Updater for Raycast DMG releases."""
 
-from __future__ import annotations
-
 from typing import ClassVar
 
 from lib.update.updaters import VersionInfo, register_updater

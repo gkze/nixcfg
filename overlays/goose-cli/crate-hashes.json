@@ -1,1 +1,5 @@
-{}
+{
+  "git+https://github.com/agentclientprotocol/rust-sdk?rev=c97a5203d3392f7f231514d84eea014f9f43e6fb#agent-client-protocol-derive@2.0.0": "1m2w1g8x6y48zjk7z0qjy66v34wcmlxql9i9lhkpziy8fbjmqq7b",
+  "git+https://github.com/agentclientprotocol/rust-sdk?rev=c97a5203d3392f7f231514d84eea014f9f43e6fb#agent-client-protocol-http@2.0.0": "1m2w1g8x6y48zjk7z0qjy66v34wcmlxql9i9lhkpziy8fbjmqq7b",
+  "git+https://github.com/agentclientprotocol/rust-sdk?rev=c97a5203d3392f7f231514d84eea014f9f43e6fb#agent-client-protocol@2.0.0": "1m2w1g8x6y48zjk7z0qjy66v34wcmlxql9i9lhkpziy8fbjmqq7b"
+}

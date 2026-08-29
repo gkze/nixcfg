@@ -1,7 +1,5 @@
 """Additional branch-focused tests for updater base internals."""
 
-from __future__ import annotations
-
 import asyncio
 from typing import TYPE_CHECKING, ClassVar
 
@@ -31,6 +29,9 @@ from lib.update.updaters.metadata import FlakeInputMetadata
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    class _TypingOnlyValue:
+        """A type intentionally unavailable to runtime annotation evaluation."""
 
 
 HASH_A = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -450,6 +451,22 @@ def test_optional_context_and_flake_helper_branches(
 
     with pytest.raises(TypeError, match="extra"):
         _call_with_optional_context(_only_args, context=context, extra=True)
+
+    def _typing_only_annotation(
+        _value: _TypingOnlyValue,
+        *,
+        context: UpdateContext,
+    ) -> UpdateContext:
+        return context
+
+    assert (
+        _call_with_optional_context(
+            _typing_only_annotation,
+            object(),
+            context=context,
+        )
+        is context
+    )
 
     updater = _DefaultFlake()
     typed_node = FlakeLockNode(locked=None)

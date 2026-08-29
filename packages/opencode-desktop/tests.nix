@@ -1,13 +1,8 @@
 {
   self,
+  system,
 }:
 let
-  exportedSystems = [
-    "aarch64-darwin"
-    "aarch64-linux"
-    "x86_64-linux"
-  ];
-
   supportedPlatforms = [
     "aarch64-darwin"
     "x86_64-darwin"
@@ -40,6 +35,8 @@ let
   ];
 
   packageFor = system: name: builtins.getAttr name (builtins.getAttr system self.packages);
+  prod = packageFor system "opencode-desktop";
+  dev = packageFor system "opencode-desktop-dev";
 
   assertEq =
     label: expected: actual:
@@ -103,59 +100,39 @@ let
     else
       throw "${label}: workspace dependency closure is missing ${builtins.toJSON missing}";
 
-  perSystemChecks = builtins.concatLists (
-    builtins.map (
-      system:
-      let
-        prod = packageFor system "opencode-desktop";
-        dev = packageFor system "opencode-desktop-dev";
-      in
-      [
-        (assertEq "prod channel (${system})" prodIdentity.opencodeChannel prod.passthru.opencodeChannel)
-        (assertEq "prod appName (${system})" prodIdentity.appName prod.passthru.appName)
-        (assertEq "prod appId (${system})" prodIdentity.appId prod.passthru.appId)
-        (assertEq "prod protocol scheme (${system})" prodIdentity.appProtocolScheme
-          prod.passthru.appProtocolScheme
-        )
-        (assertEq "prod runtime version (${system})" prod.passthru.electronVersion
-          prod.passthru.electronRuntimeVersion
-        )
-        (assertStorePath "prod electronDist (${system})" prod.passthru.electronDist)
-        (assertStorePath "prod drvPath (${system})" prod.drvPath)
-
-        (assertEq "dev channel (${system})" devIdentity.opencodeChannel dev.passthru.opencodeChannel)
-        (assertEq "dev appName (${system})" devIdentity.appName dev.passthru.appName)
-        (assertEq "dev appId (${system})" devIdentity.appId dev.passthru.appId)
-        (assertEq "dev protocol scheme (${system})" devIdentity.appProtocolScheme
-          dev.passthru.appProtocolScheme
-        )
-        (assertEq "dev runtime version (${system})" dev.passthru.electronVersion
-          dev.passthru.electronRuntimeVersion
-        )
-        (assertEq "dev runtime version matches prod (${system})" prod.passthru.electronRuntimeVersion
-          dev.passthru.electronRuntimeVersion
-        )
-        (assertStorePath "dev electronDist (${system})" dev.passthru.electronDist)
-        (assertStorePath "dev drvPath (${system})" dev.drvPath)
-      ]
-    ) exportedSystems
-  );
-
   checks = [
-    (assertEq "prod meta.platforms" supportedPlatforms
-      (packageFor "aarch64-darwin" "opencode-desktop").meta.platforms
-    )
-    (assertEq "dev meta.platforms" supportedPlatforms
-      (packageFor "aarch64-darwin" "opencode-desktop-dev").meta.platforms
-    )
+    (assertEq "prod meta.platforms" supportedPlatforms prod.meta.platforms)
+    (assertEq "dev meta.platforms" supportedPlatforms dev.meta.platforms)
     (assertContainsAll "desktop workspace filters include transitive workspaces"
       requiredDesktopWorkspacePaths
-      (packageFor "aarch64-darwin" "opencode-desktop").passthru.desktopWorkspacePaths
+      prod.passthru.desktopWorkspacePaths
     )
-    (assertWorkspaceDependencyClosure "desktop workspace filters" (
-      packageFor "aarch64-darwin" "opencode-desktop"
-    ))
-  ]
-  ++ perSystemChecks;
+    (assertWorkspaceDependencyClosure "desktop workspace filters" prod)
+    (assertEq "prod channel (${system})" prodIdentity.opencodeChannel prod.passthru.opencodeChannel)
+    (assertEq "prod appName (${system})" prodIdentity.appName prod.passthru.appName)
+    (assertEq "prod appId (${system})" prodIdentity.appId prod.passthru.appId)
+    (assertEq "prod protocol scheme (${system})" prodIdentity.appProtocolScheme
+      prod.passthru.appProtocolScheme
+    )
+    (assertEq "prod runtime version (${system})" prod.passthru.electronVersion
+      prod.passthru.electronRuntimeVersion
+    )
+    (assertStorePath "prod electronDist (${system})" prod.passthru.electronDist)
+    (assertStorePath "prod drvPath (${system})" prod.drvPath)
+    (assertEq "dev channel (${system})" devIdentity.opencodeChannel dev.passthru.opencodeChannel)
+    (assertEq "dev appName (${system})" devIdentity.appName dev.passthru.appName)
+    (assertEq "dev appId (${system})" devIdentity.appId dev.passthru.appId)
+    (assertEq "dev protocol scheme (${system})" devIdentity.appProtocolScheme
+      dev.passthru.appProtocolScheme
+    )
+    (assertEq "dev runtime version (${system})" dev.passthru.electronVersion
+      dev.passthru.electronRuntimeVersion
+    )
+    (assertEq "dev runtime version matches prod (${system})" prod.passthru.electronRuntimeVersion
+      dev.passthru.electronRuntimeVersion
+    )
+    (assertStorePath "dev electronDist (${system})" dev.passthru.electronDist)
+    (assertStorePath "dev drvPath (${system})" dev.drvPath)
+  ];
 in
 builtins.deepSeq checks true

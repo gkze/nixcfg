@@ -1,0 +1,13 @@
+{
+  "hashes": [
+    {
+      "hash": "sha256-tKu5yNwAuW4t2ryt7RNs7rAnYvG8zmXRvHRFk3OFXHA=",
+      "hashType": "srcHash"
+    },
+    {
+      "hash": "sha256-53KmaYxJ+HZLKSnwnVL9jUXf0i4R8OXH9R5fRUx4TZk=",
+      "hashType": "vendorHash"
+    }
+  ],
+  "version": "0.3.0"
+}

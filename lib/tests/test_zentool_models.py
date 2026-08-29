@@ -1,7 +1,5 @@
 """Focused pure-Python tests for zentool models and tiny helpers."""
 
-from __future__ import annotations
-
 import re
 import uuid
 from typing import TYPE_CHECKING

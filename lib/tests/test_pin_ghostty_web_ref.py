@@ -1,7 +1,5 @@
 """Tests for the ghostty-web lockfile pin helper."""
 
-from __future__ import annotations
-
 import json
 import runpy
 import sys

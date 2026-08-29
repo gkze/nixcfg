@@ -67,6 +67,25 @@ def test_load_source_entry_accepts_legacy_list_payload(tmp_path: Path) -> None:
     assert entries[0].platform == "x86_64-linux"
 
 
+def test_source_entry_preserves_and_updates_electron_version() -> None:
+    """Round-trip strict Electron metadata and merge newer values when supplied."""
+    original = SourceEntry.model_validate({
+        "hashes": {},
+        "electronVersion": "41.7.0",
+        "version": "0.38.0",
+    })
+
+    assert original.electron_version == "41.7.0"
+    assert original.to_dict()["electronVersion"] == "41.7.0"
+    assert original.merge(SourceEntry(hashes={})).electron_version == "41.7.0"
+    assert (
+        original.merge(
+            SourceEntry(hashes={}, electron_version="42.0.0"),
+        ).electron_version
+        == "42.0.0"
+    )
+
+
 def test_source_reads_and_new_writes_follow_authoritative_sidecars(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

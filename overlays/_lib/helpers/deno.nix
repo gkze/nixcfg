@@ -94,10 +94,6 @@
 
       denoDeps = prev.stdenvNoCC.mkDerivation {
         name = "${pname}-deno-deps";
-        nativeBuildInputs = [
-          prev.gnutar
-          prev.gzip
-        ];
         dontUnpack = true;
         buildPhase = ''
           mkdir -p $out

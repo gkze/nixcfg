@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-XhxKmmwUE9Ehhn0/5kKhN2DxBVpk/Yp0F6GFR7k6yT8="
+    "aarch64-darwin": "sha256-oRYbUUbWXslFGZ9rt0HIa3BXxPGurkHhDXwIIIBktks="
   },
   "urls": {
-    "aarch64-darwin": "https://pkgs.tailscale.com/stable/Tailscale-1.102.2-macos.pkg"
+    "aarch64-darwin": "https://pkgs.tailscale.com/stable/Tailscale-1.102.3-macos.pkg"
   },
-  "version": "1.102.2"
+  "version": "1.102.3"
 }

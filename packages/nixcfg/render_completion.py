@@ -1,7 +1,5 @@
 """Render shell completion scripts for the packaged nixcfg CLI."""
 
-from __future__ import annotations
-
 import sys
 
 from typer._completion_shared import get_completion_script

@@ -1,7 +1,5 @@
 """Shared helpers for JSON-producing Nix command wrappers."""
 
-from __future__ import annotations
-
 import json
 from typing import Protocol
 

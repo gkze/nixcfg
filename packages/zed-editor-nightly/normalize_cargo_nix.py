@@ -1,7 +1,5 @@
 """Normalize generated crate2nix output for the checked-in Zed Cargo.nix."""
 
-from __future__ import annotations
-
 import re
 
 from lib.cargo_nix_normalizer import normalize as normalize_cargo_nix

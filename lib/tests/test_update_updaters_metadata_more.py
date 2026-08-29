@@ -1,9 +1,6 @@
 """Additional tests for updater metadata and registry helpers."""
 
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
-from typing import cast
 
 import pytest
 
@@ -19,7 +16,6 @@ from lib.update.updaters.metadata import (
 )
 from lib.update.updaters.registry import (
     UPDATERS,
-    is_test_updater_class,
     register_updater,
 )
 
@@ -190,24 +186,28 @@ def test_register_updater_skips_name_less_and_abstract_classes() -> None:
     assert "abstract-updater-test" not in UPDATERS
 
 
-def test_register_updater_allows_test_duplicates_and_detects_test_classes() -> None:
-    """Allow test-only duplicates to replace existing registrations safely."""
+def test_register_updater_does_not_treat_test_filenames_as_registry_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concrete classes register regardless of where their caller is located."""
+    updater_name = "test-filename-independent-updater"
+    UPDATERS.pop(updater_name, None)
 
-    class _Existing:
-        __module__ = "lib.update.updaters.demo"
-        name = "test-only-updater"
+    class _ConcreteUpdater:
+        __module__ = "packages.demo.updater_test"
+        name = updater_name
 
-    class _Replacement:
-        __module__ = "lib.tests.test_demo"
-        name = "test-only-updater"
+    monkeypatch.setattr(
+        registry_module,
+        "updater_sourcefile",
+        lambda _cls: "/repo/packages/demo/updater_test.py",
+    )
 
-    cast("dict[str, object]", UPDATERS)["test-only-updater"] = _Existing
-
-    assert is_test_updater_class(_Replacement) is True
-    assert register_updater(_Replacement) is _Replacement
-    assert UPDATERS["test-only-updater"] is _Replacement
-
-    UPDATERS.pop("test-only-updater", None)
+    try:
+        assert register_updater(_ConcreteUpdater) is _ConcreteUpdater
+        assert UPDATERS[updater_name] is _ConcreteUpdater
+    finally:
+        UPDATERS.pop(updater_name, None)
 
 
 def test_registry_does_not_implicitly_materialize_crate2nix_targets() -> None:
@@ -216,7 +216,6 @@ def test_registry_does_not_implicitly_materialize_crate2nix_targets() -> None:
 
     try:
 
-        @registry_module.register_updater
         class _PlainCodexUpdater(FlakeInputMetadataUpdater):
             name = "codex"
             input_name = "codex"

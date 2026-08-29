@@ -1,7 +1,5 @@
 """Helpers for parsing focused Nix source fragments in tests."""
 
-from __future__ import annotations
-
 import textwrap
 from typing import TYPE_CHECKING
 

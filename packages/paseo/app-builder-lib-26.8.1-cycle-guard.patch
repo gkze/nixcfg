@@ -1,0 +1,44 @@
+diff --git a/node_modules/app-builder-lib/out/node-module-collector/nodeModulesCollector.js b/node_modules/app-builder-lib/out/node-module-collector/nodeModulesCollector.js
+index 079763e..d6b7c60 100644
+--- a/node_modules/app-builder-lib/out/node-module-collector/nodeModulesCollector.js
++++ b/node_modules/app-builder-lib/out/node-module-collector/nodeModulesCollector.js
+@@ -228,12 +228,15 @@ class NodeModulesCollector {
+             const deps = (obj[key] || {}).dependencies || [];
+             for (const dep of deps) {
+                 const child = this.transformToHoisterTree(obj, dep, nodes);
+-                node.dependencies.add(child);
++                // a package that declares itself as a dependency (e.g. libsql) must not produce a self-edge
++                if (child !== node) {
++                    node.dependencies.add(child);
++                }
+             }
+         }
+         return node;
+     }
+-    async _getNodeModules(dependencies, result) {
++    async _getNodeModules(dependencies, result, ancestors = new Set()) {
+         var _a;
+         if (dependencies.size === 0) {
+             return;
+@@ -239,6 +242,10 @@ class NodeModulesCollector {
+             return;
+         }
+         for (const d of dependencies.values()) {
++            // dependency cycles (including self-references) must not recurse
++            if (ancestors.has(d)) {
++                continue;
++            }
+             const reference = [...d.references][0];
+             const key = `${d.name}@${reference}`;
+             const p = (_a = this.allDependencies.get(key)) === null || _a === void 0 ? void 0 : _a.path;
+@@ -260,7 +267,9 @@ class NodeModulesCollector {
+             result.push(node);
+             if (d.dependencies.size > 0) {
+                 node.dependencies = [];
+-                await this._getNodeModules(d.dependencies, node.dependencies);
++                ancestors.add(d);
++                await this._getNodeModules(d.dependencies, node.dependencies, ancestors);
++                ancestors.delete(d);
+             }
+         }
+         result.sort((a, b) => a.name.localeCompare(b.name));

@@ -3,7 +3,6 @@
   lib,
   pkgs,
   slib,
-  src,
   system,
   ...
 }:
@@ -18,6 +17,12 @@ let
     ;
 
   cfg = config.nixcfg.zsh;
+
+  # Keep unrelated repository edits out of the Home Manager plugin source.
+  repoPluginsSource = lib.fileset.toSource {
+    root = ../../misc/zsh-plugins;
+    fileset = ../../misc/zsh-plugins;
+  };
 
   pluginType = types.submodule {
     options = {
@@ -160,11 +165,11 @@ in
         ++ optionals cfg.includeRepoPlugins [
           {
             name = "zsh-vi-mode-backward-kill-word";
-            src = "${src}/misc/zsh-plugins";
+            src = repoPluginsSource;
           }
           {
             name = "zsh-vi-mode-system-clipboard";
-            src = "${src}/misc/zsh-plugins";
+            src = repoPluginsSource;
           }
         ]
         ++ optionals cfg.includeDockerCompletion [

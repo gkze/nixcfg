@@ -1,0 +1,40 @@
+{
+  "app": {
+    "commit": "8c43aed2038721050ca0620f02967e03a9d5aa23",
+    "sourceHash": "sha256-HPQu2gdFx5AMPkejUf5zIZqtx8FTwU+ZG7cxmm6tcp8=",
+    "tag": "v0.1.804-beta",
+    "version": "0.1.804-beta"
+  },
+  "backend": {
+    "sdistHash": "sha256-K3wbtbqvMK9iX3qnLhAUCUU6vwYwMjAfHN+v3wV0yd4=",
+    "sourceTagVersion": "2026.8.22",
+    "version": "2026.8.22"
+  },
+  "blockers": [],
+  "closurePolicy": {
+    "allowPlaceholderHashes": false,
+    "allowPrebuiltHelperFallbacks": false,
+    "allowVendorDesktopBinary": false,
+    "requireSourceProvenance": true
+  },
+  "packageExported": true,
+  "patchPolicy": {
+    "backendEnvironment": "UNSLOTH_DISABLE_UPDATE_CHECK=1",
+    "backendPathCompileVariable": "UNSLOTH_NIX_BACKEND",
+    "desktopMutationsBlocked": [
+      "backend-first-run-install-command",
+      "backend-repair-command",
+      "backend-update-command",
+      "launch-agent",
+      "tauri-self-update"
+    ],
+    "managedModeCompileVariable": "UNSLOTH_NIX_MANAGED",
+    "verificationStatus": "exact-source-replay-and-behavior-tests-passed"
+  },
+  "releaseManifest": {
+    "hash": "sha256-yohnJK7S7DEEy5oMYGk/PCz2JzSww08B+1hoRO4PJoY=",
+    "pypiVersion": "2026.8.22",
+    "version": "0.1.804-beta"
+  },
+  "status": "exported-and-validated"
+}

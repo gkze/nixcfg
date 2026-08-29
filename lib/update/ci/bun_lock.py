@@ -1,7 +1,5 @@
 """CLI adapter for checked-in Bun lock maintenance."""
 
-from __future__ import annotations
-
 import pathlib
 from typing import Annotated
 

@@ -1,9 +1,6 @@
 """Target-aware Nix derivation validation after updater persistence."""
 
-from __future__ import annotations
-
 import subprocess
-import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -46,8 +43,6 @@ class DerivationValidationFailure:
 
 type _RunResult = subprocess.CompletedProcess[str]
 type _Runner = Callable[..., _RunResult]
-
-_DEADLINE_EXHAUSTED_MESSAGE = "skipped: total derivation validation deadline exhausted"
 
 
 def resolve_derivation_validations(
@@ -110,36 +105,28 @@ def validate_derivations(
     timeout: float | None = None,
     all_declared_systems: bool = False,
     run: _Runner | None = None,
-    clock: Callable[[], float] | None = None,
 ) -> tuple[DerivationValidationFailure, ...]:
-    """Validate declared derivations and return every failure."""
+    """Validate declared derivations with a timeout for each request."""
     runner = subprocess.run if run is None else run
-    monotonic = time.monotonic if clock is None else clock
     failures: list[DerivationValidationFailure] = []
     requests = resolve_derivation_validations(
         source_names,
         updaters=updaters,
         all_declared_systems=all_declared_systems,
     )
-    deadline = None if timeout is None else monotonic() + timeout
-    for index, request in enumerate(requests):
-        request_timeout = None
-        if deadline is not None:
-            request_timeout = deadline - monotonic()
-            if request_timeout <= 0:
-                failures.extend(
-                    DerivationValidationFailure(
-                        source=remaining.source,
-                        installable=remaining.installable,
-                        message=_DEADLINE_EXHAUSTED_MESSAGE,
-                    )
-                    for remaining in requests[index:]
-                )
-                break
+    for request in requests:
         args = (
             ["nix", "build", "--no-link", request.installable]
             if request.mode == "build"
-            else ["nix", "eval", "--raw", request.installable]
+            else [
+                "nix",
+                "eval",
+                "--option",
+                "allow-import-from-derivation",
+                "false",
+                "--raw",
+                request.installable,
+            ]
         )
         try:
             result = runner(
@@ -148,7 +135,7 @@ def validate_derivations(
                 text=True,
                 capture_output=True,
                 check=False,
-                timeout=request_timeout,
+                timeout=timeout,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             message = str(exc)

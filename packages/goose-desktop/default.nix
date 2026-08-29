@@ -1,6 +1,7 @@
 {
   fetchPnpmDeps ? null,
   goose-cli,
+  inputs,
   lib,
   makeWrapper,
   nixcfgElectron,
@@ -22,7 +23,7 @@ let
 
   inherit (stdenv.hostPlatform) system;
   inherit (goose-cli.passthru) version;
-  src = goose-cli.passthru.patchedSrc;
+  src = inputs.goose;
   nodejs = nodejs_24;
   pnpm = pnpm_10.override { nodejs-slim = nodejs; };
   slib = outputs.lib;
@@ -76,8 +77,12 @@ let
           src
           version
           ;
-        sourceRoot = "${src.name}/ui";
+        sourceRoot = "source/ui";
         fetcherVersion = 3;
+        pnpmInstallFlags = [
+          "--fetch-retries=5"
+          "--network-concurrency=8"
+        ];
         hash = slib.sourceHashForPlatform pname "nodeModulesHash" system;
       };
     in
@@ -93,7 +98,7 @@ stdenv.mkDerivation {
     version
     ;
 
-  sourceRoot = "${src.name}/ui";
+  sourceRoot = "source/ui";
 
   nativeBuildInputs = [
     makeWrapper

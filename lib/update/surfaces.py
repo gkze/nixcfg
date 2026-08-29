@@ -1,7 +1,5 @@
 """Update surface discovery and coverage helpers."""
 
-from __future__ import annotations
-
 import importlib
 from typing import TYPE_CHECKING
 
@@ -11,6 +9,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 UPDATE_SURFACE_ALIASES: dict[str, str] = {
+    # Generated wrapper: its version and executable are owned by claude-code.
+    "claude-code-url-handler": "claude-code",
     "opencode-desktop-dev": "opencode-desktop",
 }
 

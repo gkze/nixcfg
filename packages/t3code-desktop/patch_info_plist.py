@@ -1,7 +1,5 @@
 """Patch a copied Electron ``Info.plist`` with T3 Code desktop metadata."""
 
-from __future__ import annotations
-
 import argparse
 import plistlib
 from pathlib import Path

@@ -1,7 +1,5 @@
 """Patch tree-sitter build.rs with an exact-count source codemod."""
 
-from __future__ import annotations
-
 import re
 from pathlib import Path
 

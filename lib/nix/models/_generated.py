@@ -101,7 +101,7 @@ class Regular(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    type: Literal["regular"] = "regular"
+    type: Literal["regular"] | None = None
     contents: str
     executable: bool | None = False
 
@@ -110,7 +110,7 @@ class Symlink(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    type: Literal["symlink"] = "symlink"
+    type: Literal["symlink"] | None = None
     target: str
 
 
@@ -126,7 +126,7 @@ class Directory(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    type: Literal["directory"] = "directory"
+    type: Literal["directory"] | None = None
     entries: dict[str, FileSystemObject]
 
 

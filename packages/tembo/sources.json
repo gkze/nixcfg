@@ -1,0 +1,12 @@
+{
+  "commit": "815c0dda6cdff60c8ad1df03b71876135245d064",
+  "hashes": {
+    "aarch64-darwin": "sha256-ECOfpOpHp83CGRSwNiU9nYXHJNE5JgclIo0+rpYpnYw=",
+    "x86_64-darwin": "sha256-nLxGngNTjwiMLVNgB+4hv0N0sX/zuRce5x1J3bxY3ew="
+  },
+  "urls": {
+    "aarch64-darwin": "https://tembo-desktop-releases-844506114394.s3.us-east-1.amazonaws.com/releases/0.0.7/Tembo-0.0.7-arm64.dmg",
+    "x86_64-darwin": "https://tembo-desktop-releases-844506114394.s3.us-east-1.amazonaws.com/releases/0.0.7/Tembo-0.0.7-x64.dmg"
+  },
+  "version": "0.0.7"
+}

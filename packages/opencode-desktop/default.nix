@@ -254,7 +254,14 @@ stdenv.mkDerivation {
         runHook preBuild
 
         export HOME="$TMPDIR/home"
-        mkdir -p "$HOME"
+        codesignPath="$TMPDIR/opencode-codesign"
+        mkdir -p "$HOME" "$codesignPath"
+
+        # Upstream's prepare script signs the downloaded CLI sidecar by command
+        # name. Expose only Apple's signer instead of adding all of /usr/bin to
+        # the strict build PATH.
+        ln -s /usr/bin/codesign "$codesignPath/codesign"
+        export PATH="$codesignPath:$PATH"
 
         ${electronBuild.copyDist}
 

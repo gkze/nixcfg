@@ -4,13 +4,13 @@ diff --git a/src/bytes/serde.rs b/src/bytes/serde.rs
 @@ -1,10 +1,78 @@
 +use serde::de::{SeqAccess, Visitor};
  use serde::{Deserialize, Serialize};
-
+ 
  use super::HipByt;
  use crate::alloc::borrow::Cow;
 +use crate::alloc::fmt;
  use crate::alloc::vec::Vec;
  use crate::Backend;
-
+ 
 +struct BytesVisitor;
 +
 +impl<'de> Visitor<'de> for BytesVisitor {
@@ -89,7 +89,7 @@ diff --git a/src/bytes/serde.rs b/src/bytes/serde.rs
          Ok(Self::from(v))
      }
  }
-@@ -62,7 +130,7 @@ where
+@@ -62,6 +130,6 @@ where
      D: serde::Deserializer<'de>,
      B: Backend,
  {

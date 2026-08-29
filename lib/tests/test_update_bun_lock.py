@@ -1,7 +1,5 @@
 """Tests for Bun source-package lock validation."""
 
-from __future__ import annotations
-
 import dataclasses
 import io
 import json

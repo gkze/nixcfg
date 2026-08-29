@@ -1,7 +1,5 @@
 """Updater for sentry-cli source and cargo vendor hashes."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from nix_manipulator.expressions.function.call import FunctionCall

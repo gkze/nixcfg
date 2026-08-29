@@ -1,7 +1,5 @@
 """Exact-count text rewrite helpers for last-resort source codemods."""
 
-from __future__ import annotations
-
 import re
 from collections.abc import Callable
 from re import Pattern

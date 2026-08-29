@@ -1,7 +1,5 @@
 """Helpers for parsing shell bodies embedded in Nix strings."""
 
-from __future__ import annotations
-
 from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import cache

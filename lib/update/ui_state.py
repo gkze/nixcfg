@@ -1,7 +1,5 @@
 """State models and status mapping for update UI rendering."""
 
-from __future__ import annotations
-
 from collections import deque
 from dataclasses import dataclass, field
 from enum import StrEnum

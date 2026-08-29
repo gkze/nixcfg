@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Patch GitButler upstream sources for the Nix crate2nix build."""
 
-from __future__ import annotations
-
 import json
 import sys
 from pathlib import Path
@@ -10,11 +8,35 @@ from pathlib import Path
 from lib.codemods.errors import CodemodError
 from lib.codemods.text import replace_file_once
 
-EXPECTED_ARG_COUNT = 2
+WORKSPACE_ARG_COUNT = 2
+ISOLATED_CRATE_ARG_COUNT = 3
+EXPECTED_ARG_COUNTS = {WORKSPACE_ARG_COUNT, ISOLATED_CRATE_ARG_COUNT}
+PATCHED_CRATES = {"but", "gitbutler-tauri"}
+ISOLATED_TAURI_MANIFEST = """[package]
+name = "gitbutler-tauri"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+doctest = false
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[[bin]]
+name = "gitbutler-tauri"
+path = "src/main.rs"
+test = false
+
+[build-dependencies]
+tauri-build = { version = "2.6.1", features = [] }
+
+[dependencies]
+tauri = { version = "^2.11.1", features = ["unstable"] }
+"""
 
 
-def _patch_tauri_config(source_root: Path) -> None:
-    config_path = source_root / "crates/gitbutler-tauri/tauri.conf.json"
+def _patch_tauri_config(crate_root: Path) -> None:
+    config_path = crate_root / "tauri.conf.json"
     config = json.loads(config_path.read_text())
 
     config["productName"] = "GitButler"
@@ -37,8 +59,8 @@ def _patch_tauri_config(source_root: Path) -> None:
     config_path.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n")
 
 
-def _patch_build_rs(source_root: Path) -> None:
-    build_rs_path = source_root / "crates/gitbutler-tauri/build.rs"
+def _patch_build_rs(crate_root: Path) -> None:
+    build_rs_path = crate_root / "build.rs"
     old = """    let build_dir = manifest_dir
         .parent()
         .unwrap()
@@ -62,8 +84,16 @@ def _patch_build_rs(source_root: Path) -> None:
         raise SystemExit(msg) from exc
 
 
-def _patch_but_cli_alias_guard(source_root: Path) -> None:
-    lib_rs_path = source_root / "crates/but/src/lib.rs"
+def _write_isolated_tauri_manifest(crate_root: Path) -> None:
+    """Give tauri-build the package metadata it normally inherits from the workspace."""
+    (crate_root / "Cargo.toml").write_text(
+        ISOLATED_TAURI_MANIFEST,
+        encoding="utf-8",
+    )
+
+
+def _patch_but_cli_alias_guard(crate_root: Path) -> None:
+    lib_rs_path = crate_root / "src/lib.rs"
     old = """    match &parsed_args.cmd {
         Some(Subcommands::External(subcommand_args))
             if let Some(command_name) = subcommand_args.first() =>
@@ -86,71 +116,16 @@ def _patch_but_cli_alias_guard(source_root: Path) -> None:
         raise SystemExit(msg) from exc
 
 
-def _patch_but_uncommitted_file_index_guard(source_root: Path) -> None:
-    id_mod_path = source_root / "crates/but/src/id/mod.rs"
+def _patch_but_uncommitted_file_index_guard(crate_root: Path) -> None:
+    id_mod_path = crate_root / "src/id/mod.rs"
     old = """        match element.strip_prefix(INDEX_SEPARATOR) {
             Some(maybe_index) if let Ok(index) = usize::from_str(maybe_index) => {
-                if let Some((hunk_id, hunk_assignment)) = self.short_id_hunk_assignments.get(index)
-                {
-                    let cli_id = CliId::UncommittedHunkOrFile(UncommittedHunkOrFile {
-                        id: format!("{}:{}", self.short_id, hunk_id.short_id()),
-                        hunk_assignments: NonEmpty::new(hunk_assignment.to_owned()),
-                        is_entire_file: false,
-                    });
-                    Ok(vec![Box::new(Leaf { cli_id })])
-                } else {
-                    Ok(vec![])
-                }
-            }
-            _ => {
-                let matches = self
-                    .short_id_hunk_assignments
-                    .iter()
-                    .filter(|(hunk_id, _)| hunk_id.matches_prefix(element))
-                    .map(|(hunk_id, hunk_assignment)| {
-                        let cli_id = CliId::UncommittedHunkOrFile(UncommittedHunkOrFile {
-                            id: format!("{}:{}", self.short_id, hunk_id.short_id()),
-                            hunk_assignments: NonEmpty::new(hunk_assignment.to_owned()),
-                            is_entire_file: false,
-                        });
-                        Box::new(Leaf { cli_id }) as Box<dyn Node<'a> + 'a>
-                    });
-
-                Ok(matches.collect())
-            }
-        }
 """
-    new = """        if let Some(maybe_index) = element.strip_prefix(INDEX_SEPARATOR) {
-            if let Ok(index) = usize::from_str(maybe_index) {
-                return if let Some((hunk_id, hunk_assignment)) =
-                    self.short_id_hunk_assignments.get(index)
-                {
-                    let cli_id = CliId::UncommittedHunkOrFile(UncommittedHunkOrFile {
-                        id: format!("{}:{}", self.short_id, hunk_id.short_id()),
-                        hunk_assignments: NonEmpty::new(hunk_assignment.to_owned()),
-                        is_entire_file: false,
-                    });
-                    Ok(vec![Box::new(Leaf { cli_id })])
-                } else {
-                    Ok(vec![])
-                };
-            }
-        }
-
-        let matches = self
-            .short_id_hunk_assignments
-            .iter()
-            .filter(|(hunk_id, _)| hunk_id.matches_prefix(element))
-            .map(|(hunk_id, hunk_assignment)| {
-                let cli_id = CliId::UncommittedHunkOrFile(UncommittedHunkOrFile {
-                    id: format!("{}:{}", self.short_id, hunk_id.short_id()),
-                    hunk_assignments: NonEmpty::new(hunk_assignment.to_owned()),
-                    is_entire_file: false,
-                });
-                Box::new(Leaf { cli_id }) as Box<dyn Node<'a> + 'a>
-            });
-
-        Ok(matches.collect())
+    new = """        let maybe_index = element
+            .strip_prefix(INDEX_SEPARATOR)
+            .and_then(|value| usize::from_str(value).ok());
+        match maybe_index {
+            Some(index) => {
 """
     try:
         replace_file_once(
@@ -167,16 +142,35 @@ def _patch_but_uncommitted_file_index_guard(source_root: Path) -> None:
         raise SystemExit(msg) from exc
 
 
+def _patch_crate(crate_name: str, crate_root: Path) -> None:
+    if crate_name == "but":
+        _patch_but_cli_alias_guard(crate_root)
+        _patch_but_uncommitted_file_index_guard(crate_root)
+    elif crate_name == "gitbutler-tauri":
+        _patch_tauri_config(crate_root)
+        _patch_build_rs(crate_root)
+    else:  # pragma: no cover -- guarded by main before dispatch
+        msg = f"unsupported GitButler crate: {crate_name}"
+        raise SystemExit(msg)
+
+
 def main() -> int:
-    """Patch the GitButler source tree named on the command line."""
-    if len(sys.argv) != EXPECTED_ARG_COUNT:
-        msg = "usage: patch_sources.py <source-root>"
+    """Patch a GitButler workspace or one isolated workspace crate."""
+    if len(sys.argv) not in EXPECTED_ARG_COUNTS:
+        msg = "usage: patch_sources.py <source-root> [but|gitbutler-tauri]"
         raise SystemExit(msg)
     source_root = Path(sys.argv[1])
-    _patch_tauri_config(source_root)
-    _patch_build_rs(source_root)
-    _patch_but_cli_alias_guard(source_root)
-    _patch_but_uncommitted_file_index_guard(source_root)
+    if len(sys.argv) == ISOLATED_CRATE_ARG_COUNT:
+        crate_name = sys.argv[2]
+        if crate_name not in PATCHED_CRATES:
+            msg = f"unsupported GitButler crate: {crate_name}"
+            raise SystemExit(msg)
+        _patch_crate(crate_name, source_root)
+        if crate_name == "gitbutler-tauri":
+            _write_isolated_tauri_manifest(source_root)
+    else:
+        for crate_name in sorted(PATCHED_CRATES):
+            _patch_crate(crate_name, source_root / "crates" / crate_name)
     return 0
 
 

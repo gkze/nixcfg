@@ -1,7 +1,5 @@
 """Hand-written model for Nix flake.lock format (no official schema exists)."""
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING

@@ -1,9 +1,9 @@
 """Updater for Superset Desktop Linux AppImage metadata."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, ClassVar
 
+from lib.bun_nix_normalizer import normalize_bun_nix
+from lib.update.derivation_validation import DerivationValidation
 from lib.update.generated_artifact_commands import stream_command_materialized_artifacts
 from lib.update.updaters import register_updater
 from lib.update.updaters.core import _coerce_context
@@ -34,6 +34,12 @@ class SupersetUpdater(MaterializesArtifactsMixin, GitHubReleaseAssetURLsUpdater)
     GITHUB_OWNER = "superset-sh"
     GITHUB_REPO = "superset"
     TAG_PREFIX = "desktop-v"
+    derivation_validations = (
+        DerivationValidation(
+            installable=".#pkgs.{system}.{name}.drvPath",
+            systems=("aarch64-darwin", "x86_64-linux"),
+        ),
+    )
 
     PLATFORMS: ClassVar[dict[str, str]] = {
         "x86_64-linux": "x86_64",
@@ -82,5 +88,6 @@ class SupersetUpdater(MaterializesArtifactsMixin, GitHubReleaseAssetURLsUpdater)
             dry_run=context.dry_run,
             config=self.config,
             detail=_BUN_ARTIFACT_DETAIL,
+            artifact_normalizers={_BUN_ARTIFACTS[1]: normalize_bun_nix},
         ):
             yield event

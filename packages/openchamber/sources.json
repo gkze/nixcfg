@@ -1,0 +1,57 @@
+{
+  "commit": "ad7fd356339ccc5c9af5af1a6786662572d53ed0",
+  "electronVersion": "43.3.0",
+  "hashes": [
+    {
+      "hash": "sha256-ObS50y/oy6fM9wSGUL/wx6O0+fTWHC04mXJNd7w/2Z0=",
+      "hashType": "nodeModulesHash",
+      "platform": "aarch64-darwin",
+      "url": "https://github.com/anomalyco/opencode/archive/ef2880f379129aa048be9e9353e30aa168d42c17.tar.gz"
+    },
+    {
+      "hash": "sha256-bhjpFfKPhaBuAGJTnIiL5tYnp+UYc3HFTinxMzfVPDY=",
+      "hashType": "nodeModulesHash",
+      "platform": "aarch64-darwin",
+      "url": "https://github.com/openchamber/openchamber/archive/ad7fd356339ccc5c9af5af1a6786662572d53ed0.tar.gz"
+    },
+    {
+      "hash": "sha256-2LliIYKK1vl6x6wKt+lYcjQa92MAHogD6CZ2UsJlJiA=",
+      "hashType": "sha256",
+      "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-darwin-aarch64.zip"
+    },
+    {
+      "hash": "sha256-oM5nZTolH1bqQNLqsIeXk0ts/J201IdmeV2Xu5tNlg0=",
+      "hashType": "sha256",
+      "url": "https://registry.npmjs.org/node-addon-api/-/node-addon-api-8.3.0.tgz"
+    },
+    {
+      "hash": "sha256-YN10TB8kR8u1ekFfu6ZZTFo3RpT6j7fou/mLgveVlHE=",
+      "hashType": "sha256",
+      "url": "https://registry.npmjs.org/sherpa-onnx-node/-/sherpa-onnx-node-1.12.28.tgz"
+    },
+    {
+      "hash": "sha256-1iMdRFkZh6J82EDoPq3mFLXMGmdtbnLBgURtgrJRAlw=",
+      "hashType": "srcHash",
+      "url": "https://github.com/anomalyco/opencode/archive/ef2880f379129aa048be9e9353e30aa168d42c17.tar.gz"
+    },
+    {
+      "hash": "sha256-xwu45dJOT1yUdU0P6Vjr8XexSeGOOfQ/zt1lhcASm/8=",
+      "hashType": "srcHash",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/archive/330609dab49be6ee8b30702918ca7abbbad1286a.tar.gz"
+    },
+    {
+      "hash": "sha256-q9/c9bbIKAsdkkJuxrH7b6r5/WIo1XgrOQausMbULmg=",
+      "hashType": "srcHash",
+      "url": "https://github.com/openchamber/openchamber/archive/ad7fd356339ccc5c9af5af1a6786662572d53ed0.tar.gz"
+    }
+  ],
+  "urls": {
+    "bun": "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-darwin-aarch64.zip",
+    "nodeAddonApi": "https://registry.npmjs.org/node-addon-api/-/node-addon-api-8.3.0.tgz",
+    "openchamber": "https://github.com/openchamber/openchamber/archive/ad7fd356339ccc5c9af5af1a6786662572d53ed0.tar.gz",
+    "opencode": "https://github.com/anomalyco/opencode/archive/ef2880f379129aa048be9e9353e30aa168d42c17.tar.gz",
+    "sherpaOnnx": "https://github.com/k2-fsa/sherpa-onnx/archive/330609dab49be6ee8b30702918ca7abbbad1286a.tar.gz",
+    "sherpaOnnxNode": "https://registry.npmjs.org/sherpa-onnx-node/-/sherpa-onnx-node-1.12.28.tgz"
+  },
+  "version": "1.21.0"
+}

@@ -1,7 +1,5 @@
 """Deterministic codegen manifest lockfile materialization helpers."""
 
-from __future__ import annotations
-
 import glob
 import hashlib
 import json

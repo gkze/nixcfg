@@ -1,7 +1,5 @@
 """Compile configured Python files without polluting repo-local __pycache__ trees."""
 
-from __future__ import annotations
-
 import argparse
 import compileall
 import os

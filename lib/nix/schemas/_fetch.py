@@ -11,7 +11,6 @@ Usage:
     python -m lib.nix.schemas._fetch --check
 """
 
-from __future__ import annotations
 
 import functools
 import hashlib

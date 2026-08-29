@@ -1,7 +1,5 @@
 """Updater for linear-cli Deno dependency manifest and denort runtime hashes."""
 
-from __future__ import annotations
-
 import asyncio
 from typing import TYPE_CHECKING, ClassVar
 

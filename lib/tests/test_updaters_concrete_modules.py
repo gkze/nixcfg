@@ -1,7 +1,5 @@
 """Tests for concrete updater modules in overlays/packages."""
 
-from __future__ import annotations
-
 import asyncio
 from contextlib import nullcontext
 from pathlib import Path
@@ -122,7 +120,9 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
     updater = goose_desktop_module.GooseDesktopUpdater()
     captured: dict[str, object] = {}
     cargo_nix_text = '{ internal.crates."goose-cli".version = "1.37.0"; }\n'
+    crate_sources_text = '{"source": {"narHash": "sha256-demo="}}\n'
     cargo_nix_path = tmp_path / "Cargo.nix"
+    crate_sources_path = tmp_path / "crate-sources.json"
     goose_cli_source = SourceEntry.model_validate({
         "version": "1.37.0",
         "hashes": [
@@ -136,6 +136,7 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
         current=None,
         generated_artifacts={
             Path("overlays/goose-cli/Cargo.nix"): cargo_nix_text,
+            Path("overlays/goose-cli/crate-sources.json"): crate_sources_text,
         },
         effective_sources={"goose-cli": goose_cli_source},
     )
@@ -149,6 +150,7 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
     ) -> EventStream:
         captured.update({"source": source, "expr": expr, "env": env, "config": config})
         assert cargo_nix_path.read_text(encoding="utf-8") == cargo_nix_text
+        assert crate_sources_path.read_text(encoding="utf-8") == crate_sources_text
         yield UpdateEvent.value(source, HASH_A)
 
     monkeypatch.setattr(
@@ -192,11 +194,14 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
     expected_override = parse_nix_expr(
         f"""
         (import {REPO_ROOT}/overlays/goose-cli/default.nix {{
+          inputs = rootFlake.inputs;
           prev = pkgs;
           slib = flake.lib;
           sources = flake.lib.sources;
           selfSource = flake.lib.sources.goose-cli;
           cargoNixFn = import {cargo_nix_path};
+          cargoNixSha256 = builtins.hashFile "sha256" {cargo_nix_path};
+          crateSourceInfo = builtins.fromJSON (builtins.readFile {crate_sources_path});
         }}).goose-cli
         """
     )
@@ -237,6 +242,8 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
 
     with updater._cargo_nix_path(UpdateContext(current=None)) as fallback_path:
         assert fallback_path == REPO_ROOT / "overlays/goose-cli/Cargo.nix"
+    with updater._crate_sources_path(UpdateContext(current=None)) as fallback_path:
+        assert fallback_path == REPO_ROOT / "overlays/goose-cli/crate-sources.json"
 
 
 class _FakeHeadResponse:

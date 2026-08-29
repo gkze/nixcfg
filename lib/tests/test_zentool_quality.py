@@ -1,7 +1,5 @@
 """Regression tests for zentool's multi-except formatting safeguards."""
 
-from __future__ import annotations
-
 import ast
 import py_compile
 import runpy
@@ -12,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from lib.fix_python_multi_except import normalize_multi_except_text
 from lib.tests._zen_tooling import resolve_zen_script_path
 from lib.update.paths import REPO_ROOT
 
@@ -134,12 +131,9 @@ def _run_repo_python_quality_tools(temp_root: Path, script_path: Path) -> None:
         [
             sys.executable,
             "-m",
-            "lib.fix_python_multi_except",
-            "--pyupgrade-exe",
-            sys.executable,
-            "--pyupgrade-arg=-m",
-            "--pyupgrade-arg=pyupgrade",
-            "--pyupgrade-arg=--py313-plus",
+            "pyupgrade",
+            "--py314-plus",
+            "--exit-zero-even-if-changed",
             str(script_path),
         ],
         cwd=REPO_ROOT,
@@ -193,41 +187,16 @@ def test_zentool_main_guard_executes_help(
     assert "usage: zentool" in capsys.readouterr().out.lower()
 
 
-def test_parenthesized_zentool_multi_excepts_are_normalizer_stable() -> None:
-    """Already-valid zentool multi-excepts should not be rewritten."""
-    source = ZENTOOL_PATH.read_text(encoding="utf-8")
-
-    assert normalize_multi_except_text(source) == source
-    assert _collect_multi_except_handlers(ZENTOOL_PATH) == list(
-        _EXPECTED_MULTI_EXCEPT_HANDLERS
-    )
-
-
-def test_python_quality_tools_repair_deparenthesized_zentool_multi_excepts(
+def test_python_314_quality_tools_preserve_zentool_semantics(
     tmp_path: Path,
 ) -> None:
-    """If a bad rewrite lands, the Python quality toolchain should repair it."""
+    """The Python 3.14 rewrite should keep zentool parseable and equivalent."""
     source = ZENTOOL_PATH.read_text(encoding="utf-8")
-    broken_source = source
-    for types, name in _EXPECTED_MULTI_EXCEPT_HANDLERS:
-        snippet = f"except ({', '.join(types)})"
-        if name is not None:
-            snippet = f"{snippet} as {name}"
-        snippet = f"{snippet}:"
-        broken_source = broken_source.replace(
-            snippet, snippet.replace("(", "", 1).replace(")", "", 1)
-        )
-
-    temp_root, script_path = _copy_zentool_tree(tmp_path, source=broken_source)
-
-    with pytest.raises(
-        py_compile.PyCompileError,
-        match="multiple exception types must be parenthesized",
-    ):
-        py_compile.compile(str(script_path), doraise=True)
+    temp_root, script_path = _copy_zentool_tree(tmp_path, source=source)
 
     _run_repo_python_quality_tools(temp_root, script_path)
 
     assert _collect_multi_except_handlers(script_path) == list(
         _EXPECTED_MULTI_EXCEPT_HANDLERS
     )
+    assert _has_main_guard(_parse_python(script_path))

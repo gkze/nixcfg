@@ -1,7 +1,5 @@
 """Focused tests for the overlay-only updater lane."""
 
-from __future__ import annotations
-
 import asyncio
 
 import pytest

@@ -1,7 +1,5 @@
 """Updater for scratch npm and cargo dependency hashes."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from nix_manipulator.expressions.binary import BinaryExpression

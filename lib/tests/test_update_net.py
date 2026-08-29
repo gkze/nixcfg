@@ -1,7 +1,5 @@
 """Tests for HTTP/network helpers used by update flows."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from pathlib import Path
@@ -529,8 +527,7 @@ def test_githubkit_fetch_helpers_wrap_client_errors(
         ) -> None:
             created.append((token, user_agent, timeout))
 
-        def rest(self, version: str) -> object:
-            assert version == "2022-11-28"
+        def rest(self) -> object:
             return SimpleNamespace(repos=_Repos())
 
     monkeypatch.setattr(net, "_get_github_token", lambda: "token")
@@ -565,7 +562,7 @@ def test_githubkit_fetch_helpers_wrap_client_errors(
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             pass
 
-        def rest(self, _version: str) -> object:
+        def rest(self) -> object:
             return SimpleNamespace(repos=_FailingRepos())
 
     monkeypatch.setattr(net, "GitHubException", RuntimeError)

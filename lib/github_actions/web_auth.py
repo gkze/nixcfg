@@ -1,7 +1,5 @@
 """GitHub web-session cookie discovery for live Actions log tailing."""
 
-from __future__ import annotations
-
 import asyncio
 import importlib
 import json

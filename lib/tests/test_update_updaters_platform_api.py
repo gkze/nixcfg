@@ -1,7 +1,5 @@
 """Tests for PlatformAPIUpdater field extraction and validation."""
 
-from __future__ import annotations
-
 import asyncio
 from typing import TYPE_CHECKING, ClassVar
 

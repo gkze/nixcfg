@@ -1,7 +1,5 @@
 """Updater for opencode's platform-specific Bun offline cache hashes."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from lib.update.updaters import (

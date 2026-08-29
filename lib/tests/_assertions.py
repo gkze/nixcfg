@@ -1,7 +1,5 @@
 """Shared assertion helpers used by tests."""
 
-from __future__ import annotations
-
 
 def expect_not_none[T](value: T | None, message: object | None = None) -> T:
     """Return *value* when present, otherwise fail the test."""

@@ -1,7 +1,5 @@
 """Tests for low-level Deno lock resolution helpers."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 import pytest

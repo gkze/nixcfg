@@ -1,6 +1,5 @@
 """Persistence helpers for update source and artifact results."""
 
-from __future__ import annotations
 
 import ctypes
 import errno
@@ -1009,6 +1008,8 @@ class IsolatedUpdateWorkspace:
                 _validate_workspace_symlink(self._live_root, path, state)
                 _install_workspace_state(root / path, state)
             _run_git(root, "init", "--quiet")
+            _run_git(root, "config", "--local", "maintenance.auto", "false")
+            _run_git(root, "config", "--local", "gc.auto", "0")
             _run_git(root, "add", "--all", "--force")
             _run_git(
                 root,
@@ -1286,7 +1287,7 @@ def planned_update_paths(
         if target := update_crate2nix.TARGETS.get(name):
             paths.update(
                 update_artifacts.resolve_repo_path(path, repo_root=root)
-                for path in (target.cargo_nix, target.crate_hashes)
+                for path in target.artifact_paths
             )
     return tuple(sorted(paths))
 

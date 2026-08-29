@@ -1,15 +1,16 @@
 """Tests for nix-manipulator-backed Nix expression builders."""
 
-from __future__ import annotations
-
 import json
 
 import pytest
+from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.inherit import Inherit
 from nix_manipulator.expressions.let import LetExpression
+from nix_manipulator.expressions.operator import Operator
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
@@ -39,6 +40,7 @@ from lib.update.nix import (
     _build_overlay_expression,
     _build_package_path_attr_expr,
     _build_pnpm_10_nodejs_22_expr,
+    _build_repo_package_attr_expr,
     _contextual_overlay_bindings,
 )
 from lib.update.nix_expr import identifier_attr_path
@@ -206,6 +208,47 @@ def test_build_nix_expr_wraps_body_with_pkgs_binding() -> None:
         LetExpression(
             local_variables=[Binding(name="pkgs", value=nixpkgs_expression())],
             value=identifier_attr_path("pkgs", "hello"),
+        ),
+    )
+
+
+def test_build_nix_expr_can_isolate_fixed_output_probe_by_drv_hash() -> None:
+    """Opt-in hash probes must not share fake-hash outputs across derivations."""
+    expr = _build_nix_expr("pkgs.hello", isolate_by_drv_hash=True)
+
+    assert_nix_ast_equal(
+        expr,
+        LetExpression(
+            local_variables=[
+                Binding(name="pkgs", value=nixpkgs_expression()),
+                Binding(
+                    name="nixcfgFixedOutputProbe",
+                    value=identifier_attr_path("pkgs", "hello"),
+                ),
+            ],
+            value=FunctionCall(
+                name=FunctionCall(
+                    name=identifier_attr_path(
+                        "pkgs",
+                        "testers",
+                        "invalidateFetcherByDrvHash",
+                    ),
+                    argument=Parenthesis(
+                        value=FunctionDefinition(
+                            argument_set=Identifier(name="_"),
+                            output=Identifier(name="nixcfgFixedOutputProbe"),
+                        )
+                    ),
+                ),
+                argument=AttributeSet(
+                    values=[
+                        Binding(
+                            name="name",
+                            value="nixcfg-fixed-output-probe",
+                        )
+                    ]
+                ),
+            ),
         ),
     )
 
@@ -597,8 +640,8 @@ def test_build_overlay_attr_expr_skips_empty_attr_segments() -> None:
     )
 
 
-def test_build_package_path_attr_expr_calls_package_with_flake_context() -> None:
-    """Package path helper should evaluate runtime packages outside overlays."""
+def test_build_package_path_attr_expr_uses_shared_package_materialization() -> None:
+    """Package probes should retain normal package dependency injection."""
     expr = _build_package_path_attr_expr(
         "anthropic-cli",
         "",
@@ -606,17 +649,42 @@ def test_build_package_path_attr_expr_calls_package_with_flake_context() -> None
         repo_root=str(REPO_ROOT),
     )
 
+    package_materialization = FunctionCall(
+        name=FunctionCall(
+            name=Identifier(name="import"),
+            argument=Parenthesis(
+                value=BinaryExpression(
+                    operator=Operator(name="+"),
+                    left=identifier_attr_path("rootFlake", "outPath"),
+                    right=StringPrimitive(value="/lib/package-materialization.nix"),
+                )
+            ),
+        ),
+        argument=AttributeSet.from_dict({
+            "src": identifier_attr_path("rootFlake", "outPath"),
+            "lib": identifier_attr_path("pkgs", "lib"),
+            "outputs": Identifier(name="flake"),
+        }),
+    )
+    package_function = Select(
+        expression=Parenthesis(
+            value=FunctionCall(
+                name=identifier_attr_path(
+                    "packageMaterialization",
+                    "packageFunctionsForSystem",
+                ),
+                argument=Identifier(name="system"),
+            )
+        ),
+        attribute='"anthropic-cli"',
+    )
     package_expr = FunctionCall(
         name=FunctionCall(
             name=FunctionCall(
                 name=identifier_attr_path("pkgs", "lib", "callPackageWith"),
                 argument=Identifier(name="applied"),
             ),
-            argument=identifier_attr_path(
-                "flake",
-                "packagePaths",
-                '"anthropic-cli"',
-            ),
+            argument=package_function,
         ),
         argument=AttributeSet(
             values=[
@@ -629,11 +697,17 @@ def test_build_package_path_attr_expr_calls_package_with_flake_context() -> None
         ),
     )
     expected = LetExpression(
-        local_variables=_contextual_overlay_bindings(
-            system="aarch64-darwin",
-            repo_root=str(REPO_ROOT),
-            source_overrides=None,
-        ),
+        local_variables=[
+            *_contextual_overlay_bindings(
+                system="aarch64-darwin",
+                repo_root=str(REPO_ROOT),
+                source_overrides=None,
+            ),
+            Binding(
+                name="packageMaterialization",
+                value=package_materialization,
+            ),
+        ],
         value=package_expr,
     )
 
@@ -688,6 +762,23 @@ def test_build_package_path_attr_expr_calls_package_with_flake_context() -> None
             ),
         ),
     )
+
+
+def test_build_repo_package_attr_expr_selects_nested_attributes() -> None:
+    """Internal package probes should select nested attrs from the package call."""
+    expr = parse_nix_expr(
+        _build_repo_package_attr_expr(
+            "packages/example/package.nix",
+            ".passthru.node_modules",
+            system="aarch64-darwin",
+            repo_root=str(REPO_ROOT),
+        )
+    )
+    selection = expect_instance(expr, Select)
+    package_call = expect_instance(selection.expression, Parenthesis)
+
+    assert selection.attribute == "passthru.node_modules"
+    assert isinstance(package_call.value, FunctionCall)
 
 
 def test_gogcli_package_declares_its_overlay_dependency() -> None:

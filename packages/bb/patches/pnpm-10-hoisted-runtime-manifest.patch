@@ -1,0 +1,97 @@
+diff --git a/packages/plugin-build/scripts/generate-runtime-export-manifest.mjs b/packages/plugin-build/scripts/generate-runtime-export-manifest.mjs
+index a13a790..08a5971 100644
+--- a/packages/plugin-build/scripts/generate-runtime-export-manifest.mjs
++++ b/packages/plugin-build/scripts/generate-runtime-export-manifest.mjs
+@@ -77,20 +77,40 @@ async function loadRuntimeModule(moduleId) {
+     const pkgName = moduleId.startsWith("@")
+       ? parts.slice(0, 2).join("/")
+       : parts[0];
+     const subpath = `.${moduleId.slice(pkgName.length)}`;
+-    const pkgDir = path.join(
+-      scriptDir,
+-      "..",
+-      "..",
+-      "..",
+-      "apps",
+-      "app",
+-      "node_modules",
+-      pkgName,
+-    );
+-    const pkg = JSON.parse(
+-      await readFile(path.join(pkgDir, "package.json"), "utf8"),
+-    );
++    const packageDirs = [
++      path.join(
++        scriptDir,
++        "..",
++        "..",
++        "..",
++        "apps",
++        "app",
++        "node_modules",
++        pkgName,
++      ),
++      // pnpm 10 with node-linker=hoisted can place this direct workspace
++      // dependency only at the repository root.
++      path.join(scriptDir, "..", "..", "..", "node_modules", pkgName),
++    ];
++    let pkgDir;
++    let pkg;
++    for (const candidate of packageDirs) {
++      try {
++        pkg = JSON.parse(
++          await readFile(path.join(candidate, "package.json"), "utf8"),
++        );
++        pkgDir = candidate;
++        break;
++      } catch (error) {
++        if (error?.code !== "ENOENT") {
++          throw error;
++        }
++      }
++    }
++    if (pkgDir === undefined || pkg === undefined) {
++      throw new Error(`cannot find ${pkgName} from the app or workspace root`);
++    }
+     const entry = pkg.exports?.[subpath];
+     const rel =
+       typeof entry === "string" ? entry : (entry?.import ?? entry?.default);
+diff --git a/packages/plugin-build/scripts/generate-plugin-theme.mjs b/packages/plugin-build/scripts/generate-plugin-theme.mjs
+--- a/packages/plugin-build/scripts/generate-plugin-theme.mjs
++++ b/packages/plugin-build/scripts/generate-plugin-theme.mjs
+@@ -27,13 +27,28 @@ const themeCssPath = path.join(
+ // Read through apps/app's node_modules link so we vendor exactly the version
+ // the app ships (its package.json exports block require.resolve, so plain
+ // path reads are the only way in).
+-const twAnimateDir = path.join(
+-  repoRoot,
+-  "apps",
+-  "app",
+-  "node_modules",
+-  "tw-animate-css",
+-);
++const twAnimateDirs = [
++  path.join(repoRoot, "apps", "app", "node_modules", "tw-animate-css"),
++  // pnpm 10 with node-linker=hoisted can place this direct workspace
++  // dependency only at the repository root.
++  path.join(repoRoot, "node_modules", "tw-animate-css"),
++];
++async function findTwAnimateDir() {
++  for (const candidate of twAnimateDirs) {
++    try {
++      await readFile(path.join(candidate, "package.json"), "utf8");
++      return candidate;
++    } catch (error) {
++      if (error?.code !== "ENOENT") {
++        throw error;
++      }
++    }
++  }
++  throw new Error(
++    "cannot find tw-animate-css from the app or workspace root",
++  );
++}
++const twAnimateDir = await findTwAnimateDir();
+ const outPath = path.join(
+   packageRoot,
+   "src",

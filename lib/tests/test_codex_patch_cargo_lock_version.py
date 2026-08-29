@@ -1,7 +1,5 @@
 """Tests for the extracted Codex Cargo.lock patch helper."""
 
-from __future__ import annotations
-
 import runpy
 import tomllib
 from pathlib import Path

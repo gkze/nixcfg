@@ -1,7 +1,5 @@
 """Town Assistant nightly package and updater contracts."""
 
-from __future__ import annotations
-
 import json
 from typing import Protocol, cast
 

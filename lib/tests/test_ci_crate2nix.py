@@ -1,19 +1,29 @@
 """Tests for the crate2nix CI helper command."""
 
-from __future__ import annotations
-
 import asyncio
+import errno
+import hashlib
+import json
 import os
+import queue
 import subprocess
+import sys
+import threading
+import time
 from functools import cache
 from pathlib import Path
 
 import pytest
 from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.binding import Binding
+from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
+from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.import_expression import Import
 from nix_manipulator.expressions.list import NixList
+from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import Primitive
+from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
@@ -24,6 +34,7 @@ from lib.tests._nix_ast import (
     expect_scope_binding,
     parse_nix_expr,
 )
+from lib.tests._update_workspace_helpers import init_update_workspace_repo
 from lib.update import crate2nix
 from lib.update.events import (
     StatusInfo,
@@ -33,6 +44,35 @@ from lib.update.events import (
     UpdateEventKind,
     expect_artifact_updates,
 )
+
+
+def _process_exists(pid: int) -> bool:
+    """Return whether a process remains visible to the current user."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _wait_for_process_exit(pid: int, timeout: float = 2.0) -> bool:
+    """Wait briefly for a terminated descendant to be reaped by its parent or init."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _process_exists(pid):
+            return True
+        time.sleep(0.01)
+    return not _process_exists(pid)
+
+
+def _wait_for_path(path: Path, timeout: float = 2.0) -> bool:
+    """Wait for a subprocess to publish one coordination file."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists():
+            return True
+        time.sleep(0.01)
+    return path.exists()
 
 
 @cache
@@ -335,6 +375,257 @@ def test_stabilize_generated_root_src_paths_tolerates_spacing_drift() -> None:
     assert 'src="${rootSrc}/crates/demo"; };' in stabilized
 
 
+def test_generated_cargo_uses_injected_content_addressed_source_contract() -> None:
+    """Local crates should delegate source materialization to the caller contract."""
+    generated = """{ lib
+, rootSrc ? ./.
+}:
+rec {
+  demo = {
+    src = lib.cleanSourceWith {
+      filter = sourceFilter;
+      src = "${rootSrc}/crates/demo";
+    };
+  };
+}
+"""
+
+    normalized, source_paths = crate2nix._apply_crate_source_contract(generated)
+
+    assert source_paths == ("crates/demo",)
+    assert_nix_ast_equal(
+        normalized,
+        """{ lib
+, rootSrc ? ./.
+, crateSource ? relativePath: throw "Cargo.nix requires crateSource when a local crate source is evaluated"
+}:
+rec {
+  demo = {
+    src = crateSource sourceFilter "crates/demo";
+  };
+}
+""",
+    )
+
+
+def test_generated_cargo_contract_rejects_unparseable_nix() -> None:
+    """Fail closed if transformed Cargo.nix cannot be inspected structurally."""
+    with pytest.raises(
+        RuntimeError,
+        match="Could not parse transformed Cargo.nix source contract",
+    ):
+        crate2nix._apply_crate_source_contract("{ invalid = ; }")
+
+
+def test_crate_source_manifest_binds_slices_to_the_production_input(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Generated slice hashes must describe Cargo.nix's production rootSrc."""
+    production_root = tmp_path / "codex-input" / "codex-rs"
+    (production_root / "cli").mkdir(parents=True)
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable="path:.#demo-crate2nix-src",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("linux",),
+        source_input="codex",
+        root_src_relpath=Path("codex-rs"),
+        crate_sources=Path("demo/crate-sources.json"),
+        externally_overridden_source_paths=("vendor/v8-goose-src",),
+    )
+    seen_roots: list[Path] = []
+    monkeypatch.setattr(
+        crate2nix,
+        "_resolve_production_root",
+        lambda _target: (production_root, "sha256-root-input="),
+    )
+
+    def _materialize(
+        root: Path,
+        source_paths: tuple[str, ...],
+        cargo_nix: Path,
+        *,
+        root_source_name: str,
+    ) -> dict[str, object]:
+        seen_roots.append(root)
+        assert source_paths == ("cli",)
+        assert cargo_nix == tmp_path / "Cargo.nix"
+        assert root_source_name == "codex-rs"
+        return {
+            "cli": {
+                "hash": "sha256-cli-source=",
+                "name": "cli",
+            }
+        }
+
+    monkeypatch.setattr(crate2nix, "_materialize_source_slices", _materialize)
+    cargo_nix = tmp_path / "Cargo.nix"
+    cargo_nix.write_text("final generated Cargo.nix\n", encoding="utf-8")
+
+    rendered = crate2nix._render_crate_source_manifest(
+        target,
+        ("cli", "vendor/v8-goose-src"),
+        cargo_nix=cargo_nix,
+    )
+
+    assert seen_roots == [production_root]
+    assert json.loads(rendered) == {
+        "source": {
+            "input": "codex",
+            "narHash": "sha256-root-input=",
+            "subdir": "codex-rs",
+            "cargoNixSha256": hashlib.sha256(cargo_nix.read_bytes()).hexdigest(),
+        },
+        "slices": {
+            "cli": {
+                "hash": "sha256-cli-source=",
+                "name": "cli",
+            }
+        },
+    }
+
+
+def test_source_slice_materialization_uses_the_generated_cargo_filter(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The updater must pass Cargo.nix's generated filter to its Nix boundary."""
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    cargo_nix = tmp_path / "Cargo.nix"
+    cargo_nix.write_text(
+        "{ lib ? { } }: { internal.sourceFilter = name: type: true; }\n",
+        encoding="utf-8",
+    )
+    commands: list[list[str]] = []
+    responses = iter((
+        '{"crate": "/nix/store/demo-crate"}',
+        '{"/nix/store/demo-crate": {"narHash": "sha256-demo="}}',
+    ))
+
+    def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=next(responses),
+            stderr="",
+        )
+
+    monkeypatch.setattr(crate2nix, "_run", _run)
+
+    slices = crate2nix._materialize_source_slices(
+        source_root,
+        ("crate",),
+        cargo_nix,
+        root_source_name="workspace",
+    )
+
+    assert slices == {"crate": {"hash": "sha256-demo=", "name": "crate"}}
+    assert commands[0][:-1] == ["nix", "eval", "--impure", "--json", "--expr"]
+    assert commands[1] == [
+        "nix",
+        "path-info",
+        "--json",
+        "--json-format",
+        "1",
+        "/nix/store/demo-crate",
+    ]
+
+    materialize = expect_instance(parse_nix_expr(commands[0][-1]), FunctionCall)
+    helper_import = expect_instance(
+        expect_scope_binding(materialize, "helper").value,
+        Import,
+    )
+    assert expect_instance(helper_import.argument, NixPath).path == str(
+        crate2nix.REPO_ROOT / "lib/crate2nix-source-slice.nix"
+    )
+    cargo_call = expect_instance(
+        expect_scope_binding(materialize, "cargo").value,
+        FunctionCall,
+    )
+    cargo_import = expect_instance(cargo_call.name, Import)
+    assert expect_instance(cargo_import.argument, NixPath).path == str(cargo_nix)
+    cargo_arguments = expect_instance(cargo_call.argument, AttributeSet)
+    cargo_lib = expect_instance(
+        expect_binding(cargo_arguments.values, "lib").value,
+        Select,
+    )
+    assert expect_instance(cargo_lib.expression, Identifier).name == "helper"
+    assert cargo_lib.attribute == "sourceFilterLib"
+
+    materialize_name = expect_instance(materialize.name, Select)
+    assert expect_instance(materialize_name.expression, Identifier).name == "helper"
+    assert materialize_name.attribute == "materialize"
+    arguments = expect_instance(materialize.argument, AttributeSet)
+    root_src = expect_instance(
+        expect_binding(arguments.values, "rootSrc").value, NixPath
+    )
+    assert root_src.path == str(source_root)
+    source_filter = expect_instance(
+        expect_binding(arguments.values, "sourceFilter").value,
+        Select,
+    )
+    assert_nix_ast_equal(source_filter, "cargo.internal.sourceFilter")
+    sources = expect_instance(
+        expect_binding(arguments.values, "sources").value,
+        FunctionCall,
+    )
+    sources_name = expect_instance(sources.name, Select)
+    assert expect_instance(sources_name.expression, Identifier).name == "builtins"
+    assert sources_name.attribute == "fromJSON"
+    sources_json = json.loads(expect_instance(sources.argument, Primitive).rebuild())
+    assert isinstance(sources_json, str)
+    assert json.loads(sources_json) == {"crate": {"name": "crate"}}
+
+
+@pytest.mark.parametrize("relative_path", ["", "../escape", "/absolute"])
+def test_source_slice_materialization_rejects_unsafe_paths(
+    relative_path: str,
+    tmp_path: Path,
+) -> None:
+    """Generated source paths must remain inside the production root."""
+    with pytest.raises(ValueError, match="Invalid local crate source path"):
+        crate2nix._materialize_source_slices(
+            tmp_path,
+            (relative_path,),
+            tmp_path / "Cargo.nix",
+            root_source_name="workspace",
+        )
+
+
+def test_source_slice_materialization_rejects_missing_nar_hashes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Malformed Nix path metadata must fail instead of emitting a stale artifact."""
+    responses = iter((
+        '{"crate": "/nix/store/demo-crate"}',
+        '{"/nix/store/demo-crate": {}}',
+    ))
+    monkeypatch.setattr(
+        crate2nix,
+        "_run",
+        lambda _args: subprocess.CompletedProcess(
+            _args,
+            0,
+            stdout=next(responses),
+            stderr="",
+        ),
+    )
+
+    with pytest.raises(TypeError, match="did not report a NAR hash"):
+        crate2nix._materialize_source_slices(
+            tmp_path,
+            ("crate",),
+            tmp_path / "Cargo.nix",
+            root_source_name="workspace",
+        )
+
+
 def test_resolve_targets_skips_unsupported_platforms(monkeypatch) -> None:
     """Default target selection should skip platform-specific packages."""
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "x86_64-linux")
@@ -376,6 +667,7 @@ def test_stream_crate2nix_artifact_updates_emits_changed_artifacts(
         patched_src_installable="path:.#demo-crate2nix-src",
         cargo_nix=Path("packages/demo/Cargo.nix"),
         crate_hashes=Path("packages/demo/crate-hashes.json"),
+        crate_sources=Path("packages/demo/crate-sources.json"),
         normalizer_path=Path("packages/demo/normalize_cargo_nix.py"),
         supported_platforms=("linux",),
     )
@@ -384,9 +676,10 @@ def test_stream_crate2nix_artifact_updates_emits_changed_artifacts(
     monkeypatch.setattr(
         crate2nix,
         "_refresh_target",
-        lambda _target: crate2nix.RefreshResult(
+        lambda _target, **_kwargs: crate2nix.RefreshResult(
             cargo_nix="{ demo = true; }\n",
             crate_hashes='{"demo": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}\n',
+            crate_sources='{"source": {}, "slices": {}}\n',
         ),
     )
 
@@ -410,6 +703,7 @@ def test_stream_crate2nix_artifact_updates_emits_changed_artifacts(
     assert artifact_paths == (
         "packages/demo/Cargo.nix",
         "packages/demo/crate-hashes.json",
+        "packages/demo/crate-sources.json",
     )
 
 
@@ -430,7 +724,9 @@ def test_crate2nix_artifact_updates_skip_unknown_or_unsupported_targets(
     monkeypatch.setattr(
         crate2nix,
         "_refresh_target",
-        lambda _target: (_ for _ in ()).throw(AssertionError("should not refresh")),
+        lambda _target, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("should not refresh")
+        ),
     )
 
     assert crate2nix.crate2nix_artifact_updates("missing-target") == ()
@@ -478,10 +774,11 @@ def test_stream_crate2nix_artifact_updates_reports_up_to_date(
     """Emit an up-to-date status when regenerated artifacts are unchanged."""
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "x86_64-linux")
 
-    async def _to_thread(_func, _name: str) -> tuple[()]:
-        return ()
-
-    monkeypatch.setattr(crate2nix.asyncio, "to_thread", _to_thread)
+    monkeypatch.setattr(
+        crate2nix,
+        "crate2nix_artifact_updates",
+        lambda _name, **_kwargs: (),
+    )
 
     async def _collect() -> list[UpdateEvent]:
         return [
@@ -506,6 +803,132 @@ def test_stream_crate2nix_artifact_updates_reports_up_to_date(
     )
 
 
+def test_stream_crate2nix_artifact_updates_reports_bounded_live_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The async updater should surface sanitized progress while work is active."""
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "x86_64-linux")
+
+    def _artifacts(
+        _name: str,
+        *,
+        cancel_event: threading.Event,
+        progress,
+    ) -> tuple[()]:
+        assert not cancel_event.is_set()
+        progress("\x1b[31mPrefetching demo\x1b[0m" + "x" * 1000)
+        time.sleep(0.05)
+        return ()
+
+    monkeypatch.setattr(crate2nix, "crate2nix_artifact_updates", _artifacts)
+
+    async def _collect() -> list[UpdateEvent]:
+        return [
+            event
+            async for event in crate2nix.stream_crate2nix_artifact_updates("codex")
+        ]
+
+    events = asyncio.run(_collect())
+    progress_events = [event for event in events if event.kind == UpdateEventKind.LINE]
+    assert len(progress_events) == 1
+    assert progress_events[0].stream == "crate2nix"
+    assert progress_events[0].message is not None
+    assert progress_events[0].message.startswith("Prefetching demo")
+    assert "\x1b" not in progress_events[0].message
+    assert len(progress_events[0].message) <= crate2nix._CRATE2NIX_PROGRESS_LINE_LIMIT
+
+
+def test_progress_handoff_drops_old_messages_before_allocating_more() -> None:
+    """A chatty worker must have a hard cross-thread progress memory bound."""
+    progress_queue: queue.Queue[str] = queue.Queue(maxsize=3)
+
+    crate2nix._put_bounded_progress(progress_queue, "\x1b[31m\x1b[0m")
+    for index in range(10):
+        crate2nix._put_bounded_progress(progress_queue, f"progress {index}")
+
+    assert progress_queue.qsize() == 3
+    assert [progress_queue.get_nowait() for _ in range(3)] == [
+        "progress 7",
+        "progress 8",
+        "progress 9",
+    ]
+
+
+def test_stream_crate2nix_artifact_updates_cancels_worker_promptly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancelling the event stream should stop its worker instead of awaiting 2400s."""
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "x86_64-linux")
+    started = threading.Event()
+    stopped = threading.Event()
+
+    def _artifacts(
+        _name: str,
+        *,
+        cancel_event: threading.Event,
+        progress,
+    ) -> tuple[()]:
+        del progress
+        started.set()
+        assert cancel_event.wait(timeout=2.0)
+        stopped.set()
+        raise crate2nix.Crate2NixCommandCancelledError("cancelled")
+
+    monkeypatch.setattr(crate2nix, "crate2nix_artifact_updates", _artifacts)
+
+    async def _cancel() -> None:
+        stream = crate2nix.stream_crate2nix_artifact_updates("codex")
+        initial = await anext(stream)
+        assert initial.message == "Refreshing crate2nix artifacts..."
+        task = asyncio.create_task(anext(stream))
+        assert await asyncio.to_thread(started.wait, 1.0)
+        started_at = time.monotonic()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert time.monotonic() - started_at < 1.0
+        assert stopped.is_set()
+        await stream.aclose()
+
+    asyncio.run(_cancel())
+
+
+def test_stream_crate2nix_artifact_updates_close_cancels_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Closing a partially consumed stream should not strand its executor worker."""
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "x86_64-linux")
+    started = threading.Event()
+    stopped = threading.Event()
+
+    def _artifacts(
+        _name: str,
+        *,
+        cancel_event: threading.Event,
+        progress,
+    ) -> tuple[()]:
+        started.set()
+        progress("working")
+        assert cancel_event.wait(timeout=2.0)
+        stopped.set()
+        raise crate2nix.Crate2NixCommandCancelledError("cancelled")
+
+    monkeypatch.setattr(crate2nix, "crate2nix_artifact_updates", _artifacts)
+
+    async def _close() -> None:
+        stream = crate2nix.stream_crate2nix_artifact_updates("codex")
+        await anext(stream)
+        progress_event = await anext(stream)
+        assert progress_event.kind == UpdateEventKind.LINE
+        assert started.is_set()
+        started_at = time.monotonic()
+        await stream.aclose()
+        assert time.monotonic() - started_at < 1.0
+        assert stopped.is_set()
+
+    asyncio.run(_close())
+
+
 def test_targets_use_dedicated_source_installables() -> None:
     """Built-in targets should avoid final-package passthru source paths."""
     assert {
@@ -516,6 +939,15 @@ def test_targets_use_dedicated_source_installables() -> None:
         "goose-cli": "path:.#goose-cli-crate2nix-src",
         "gitbutler": "path:.#gitbutler-crate2nix-src",
         "zed-editor-nightly": "path:.#zed-editor-nightly-crate2nix-src",
+    }
+    assert {
+        name: target.externally_overridden_source_paths
+        for name, target in crate2nix.TARGETS.items()
+    } == {
+        "codex": (),
+        "goose-cli": ("vendor/v8-goose-src",),
+        "gitbutler": (),
+        "zed-editor-nightly": (),
     }
 
 
@@ -582,16 +1014,21 @@ def test_package_registry_metadata_overrides_are_intentional() -> None:
     ) == [
         "airfoil",
         "arc",
+        "aside",
+        "baseten-switch",
         "claude",
         "cleanshot",
+        "clearly",
         "codeedit",
         "codex-desktop",
         "comet",
         "commander",
         "conductor",
+        "factory",
         "figma",
         "framer",
         "granola",
+        "grok-bot",
         "keepingyouawake",
         "linear",
         "loom",
@@ -599,11 +1036,20 @@ def test_package_registry_metadata_overrides_are_intentional() -> None:
         "mole-app",
         "netnewswire",
         "raycast",
+        "screen-studio",
         "signal-beta",
+        "tembo",
+        "voiceos",
         "wispr-flow",
         "zen-twilight",
+        "zo",
     ]
+    assert overrides["executor"]["constraint"] == ["aarch64-darwin"]
+    assert overrides["github-copilot-app"]["constraint"] == ["aarch64-darwin"]
+    assert overrides["hermes-desktop"]["constraint"] == ["aarch64-darwin"]
     assert overrides["goose-desktop"]["constraint"] == ["aarch64-darwin"]
+    assert overrides["openchamber"]["constraint"] == ["aarch64-darwin"]
+    assert overrides["reflect-open"]["constraint"] == ["aarch64-darwin"]
     assert overrides["sculptor"]["constraint"] == [
         "aarch64-darwin",
         "x86_64-darwin",
@@ -621,6 +1067,41 @@ def test_crate2nix_source_files_exist_for_registered_targets() -> None:
         "zed": str(packages_root / "zed-editor-nightly/crate2nix-src.nix"),
     }
     assert all(Path(path).is_file() for path in selected_paths.values())
+
+
+@pytest.mark.parametrize("target_name", sorted(crate2nix.TARGETS))
+def test_registered_crate2nix_target_has_complete_current_artifacts(
+    target_name: str,
+) -> None:
+    """Every production target must check in a manifest bound to its Cargo.nix."""
+    target = crate2nix.TARGETS[target_name]
+    assert target.crate_sources is not None
+    cargo_path = crate2nix.REPO_ROOT / target.cargo_nix
+    hashes_path = crate2nix.REPO_ROOT / target.crate_hashes
+    manifest_path = crate2nix.REPO_ROOT / target.crate_sources
+
+    assert cargo_path.is_file()
+    assert hashes_path.is_file()
+    assert manifest_path.is_file()
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["source"] == {
+        "cargoNixSha256": hashlib.sha256(cargo_path.read_bytes()).hexdigest(),
+        "input": target.source_input,
+        "narHash": manifest["source"]["narHash"],
+        "subdir": target.root_src_relpath.as_posix(),
+    }
+    assert isinstance(manifest["source"]["narHash"], str)
+    assert manifest["source"]["narHash"]
+    assert manifest["slices"]
+    assert all(
+        set(source) == {"hash", "name"}
+        and isinstance(source["hash"], str)
+        and source["hash"].startswith("sha256-")
+        and isinstance(source["name"], str)
+        and source["name"]
+        for source in manifest["slices"].values()
+    )
 
 
 def test_goose_crate2nix_companion_declares_overlay_dependency() -> None:
@@ -736,7 +1217,11 @@ def test_crate2nix_target_platforms_match_registry_constraints() -> None:
     }
 
 
-def test_run_writes_refreshed_files(monkeypatch, tmp_path: Path) -> None:
+def test_run_writes_refreshed_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Write mode should persist refreshed Cargo.nix and crate-hashes.json."""
     target = crate2nix.Crate2NixTarget(
         name="demo",
@@ -746,18 +1231,23 @@ def test_run_writes_refreshed_files(monkeypatch, tmp_path: Path) -> None:
         normalizer_path=Path("demo/normalize.py"),
         supported_platforms=("linux",),
     )
-    demo_dir = tmp_path / "demo"
-    demo_dir.mkdir()
-    (demo_dir / "Cargo.nix").write_text("old cargo\n", encoding="utf-8")
-    (demo_dir / "crate-hashes.json").write_text('{"old": 1}\n', encoding="utf-8")
+    repo = tmp_path / "repo"
+    init_update_workspace_repo(
+        repo,
+        tracked_files={
+            "demo/Cargo.nix": "old cargo\n",
+            "demo/crate-hashes.json": '{"old": 1}\n',
+        },
+    )
+    demo_dir = repo / "demo"
 
-    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", repo)
     monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
     monkeypatch.setattr(
         crate2nix,
         "_refresh_target",
-        lambda _target: crate2nix.RefreshResult(
+        lambda _target, **_kwargs: crate2nix.RefreshResult(
             cargo_nix="new cargo\n",
             crate_hashes='{"new": 2}\n',
         ),
@@ -770,6 +1260,210 @@ def test_run_writes_refreshed_files(monkeypatch, tmp_path: Path) -> None:
     assert (demo_dir / "crate-hashes.json").read_text(
         encoding="utf-8"
     ) == '{"new": 2}\n'
+    assert capsys.readouterr().err == (
+        "Refreshing crate2nix artifacts for demo...\n"
+        "UPDATED demo\n"
+        "Wrote crate2nix drift for: demo\n"
+    )
+
+
+def test_write_target_rejects_incomplete_source_set_before_writing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Reject an incomplete three-artifact result without changing any artifact."""
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable="path:.#demo-crate2nix-src",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        crate_sources=Path("demo/crate-sources.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("linux",),
+    )
+    demo_dir = tmp_path / "demo"
+    demo_dir.mkdir()
+    cargo_path = demo_dir / "Cargo.nix"
+    hashes_path = demo_dir / "crate-hashes.json"
+    sources_path = demo_dir / "crate-sources.json"
+    cargo_path.write_text("old cargo\n", encoding="utf-8")
+    hashes_path.write_text('{"old": 1}\n', encoding="utf-8")
+    sources_path.write_text('{"old": true}\n', encoding="utf-8")
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
+
+    with pytest.raises(RuntimeError, match="Incomplete crate source artifact metadata"):
+        crate2nix._write_target(
+            target,
+            crate2nix.RefreshResult(
+                cargo_nix="new cargo\n",
+                crate_hashes='{"new": 2}\n',
+            ),
+        )
+
+    assert cargo_path.read_text(encoding="utf-8") == "old cargo\n"
+    assert hashes_path.read_text(encoding="utf-8") == '{"old": 1}\n'
+    assert sources_path.read_text(encoding="utf-8") == '{"old": true}\n'
+
+
+def test_run_write_failure_does_not_partially_promote_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A failed target write must leave the live three-artifact set unchanged."""
+    repo = tmp_path / "repo"
+    init_update_workspace_repo(
+        repo,
+        tracked_files={
+            "demo/Cargo.nix": "old cargo\n",
+            "demo/crate-hashes.json": '{"old": 1}\n',
+        },
+    )
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable="path:.#demo-crate2nix-src",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        crate_sources=Path("demo/crate-sources.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("linux",),
+    )
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", repo)
+    monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
+    monkeypatch.setattr(
+        crate2nix,
+        "_refresh_target",
+        lambda _target, **_kwargs: crate2nix.RefreshResult(
+            cargo_nix="new cargo\n",
+            crate_hashes='{"new": 2}\n',
+            crate_sources='{"source": {}, "slices": {}}\n',
+        ),
+    )
+
+    def _fail_third_write(
+        failing_target: crate2nix.Crate2NixTarget,
+        refreshed: crate2nix.RefreshResult,
+    ) -> None:
+        (crate2nix.REPO_ROOT / failing_target.cargo_nix).write_text(
+            refreshed.cargo_nix,
+            encoding="utf-8",
+        )
+        (crate2nix.REPO_ROOT / failing_target.crate_hashes).write_text(
+            refreshed.crate_hashes,
+            encoding="utf-8",
+        )
+        raise OSError("injected manifest write failure")
+
+    monkeypatch.setattr(crate2nix, "_write_target", _fail_third_write)
+
+    with pytest.raises(OSError, match="injected manifest write failure"):
+        crate2nix.run(packages=("demo",), write=True)
+
+    assert (repo / target.cargo_nix).read_text(encoding="utf-8") == "old cargo\n"
+    assert (repo / target.crate_hashes).read_text(encoding="utf-8") == '{"old": 1}\n'
+    assert not (repo / target.crate_sources).exists()
+
+
+def test_run_write_validation_failure_discards_isolated_changes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A contained target failure must abort the isolated write transaction."""
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable="path:.#demo-crate2nix-src",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("linux",),
+    )
+    repo = tmp_path / "repo"
+    init_update_workspace_repo(
+        repo,
+        tracked_files={
+            "demo/Cargo.nix": "old cargo\n",
+            "demo/crate-hashes.json": '{"old": 1}\n',
+        },
+    )
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", repo)
+    monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
+
+    def _invalid_refresh(
+        _target: crate2nix.Crate2NixTarget,
+        **_kwargs,
+    ) -> crate2nix.RefreshResult:
+        raise ValueError("invalid source metadata")
+
+    monkeypatch.setattr(crate2nix, "_refresh_target", _invalid_refresh)
+
+    assert crate2nix.run(packages=("demo",), write=True) == 1
+    assert (repo / target.cargo_nix).read_text(encoding="utf-8") == "old cargo\n"
+    assert capsys.readouterr().err == (
+        "Refreshing crate2nix artifacts for demo...\n"
+        "FAIL demo: invalid source metadata\n"
+    )
+
+
+def test_run_write_reports_workspace_setup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Keep isolated-workspace failures inside the write-mode CLI boundary."""
+    from lib.update import persistence
+
+    def _workspace_failure(_root: Path) -> None:
+        raise RuntimeError("workspace snapshot failed")
+
+    monkeypatch.setattr(persistence, "IsolatedUpdateWorkspace", _workspace_failure)
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
+
+    assert crate2nix.run(write=True) == 1
+    assert capsys.readouterr().err == "Error: workspace snapshot failed\n"
+
+
+def test_run_write_with_current_artifacts_has_nothing_to_promote(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An up-to-date write run should complete without a promotion summary."""
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable="path:.#demo-crate2nix-src",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("linux",),
+    )
+    repo = tmp_path / "repo"
+    init_update_workspace_repo(
+        repo,
+        tracked_files={
+            "demo/Cargo.nix": "current cargo\n",
+            "demo/crate-hashes.json": "{}\n",
+        },
+    )
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", repo)
+    monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
+    monkeypatch.setattr(
+        crate2nix,
+        "_refresh_target",
+        lambda _target, **_kwargs: crate2nix.RefreshResult(
+            cargo_nix="current cargo\n",
+            crate_hashes="{}\n",
+        ),
+    )
+
+    assert crate2nix.run(packages=("demo",), write=True) == 0
+    assert capsys.readouterr().err == (
+        "Refreshing crate2nix artifacts for demo...\n"
+        "OK demo\n"
+        "All checked-in crate2nix artifacts are up to date.\n"
+    )
 
 
 def test_run_fails_when_drift_is_detected(monkeypatch, tmp_path: Path) -> None:
@@ -793,7 +1487,7 @@ def test_run_fails_when_drift_is_detected(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         crate2nix,
         "_refresh_target",
-        lambda _target: crate2nix.RefreshResult(
+        lambda _target, **_kwargs: crate2nix.RefreshResult(
             cargo_nix="new cargo\n",
             crate_hashes='{"new": 2}\n',
         ),
@@ -872,60 +1566,22 @@ def test_run_helper_and_build_patched_src_error_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Surface subprocess failures and empty nix build output."""
-    seen_env: dict[str, str] = {}
+    completed = crate2nix._run(
+        [
+            sys.executable,
+            "-c",
+            "import os; print(os.environ['CRATE2NIX_TEST_FLAG'])",
+        ],
+        env={"CRATE2NIX_TEST_FLAG": "ok"},
+    )
+    assert completed.stdout == "ok\n"
 
-    def _success(
-        _args: list[str],
-        *,
-        cwd: Path,
-        env: dict[str, str] | None,
-        text: bool,
-        capture_output: bool,
-        check: bool,
-        timeout: float,
-    ) -> subprocess.CompletedProcess[str]:
-        del cwd, text, capture_output, check, timeout
-        if env is not None:
-            seen_env["FLAG"] = env["FLAG"]
-        return subprocess.CompletedProcess(["cmd"], 0, stdout="ok\n", stderr="")
-
-    monkeypatch.setattr(crate2nix.subprocess, "run", _success)
-    assert crate2nix._run(["cmd"], env={"FLAG": "1"}).stdout == "ok\n"
-    assert seen_env == {"FLAG": "1"}
-
-    def _failure(
-        _args: list[str],
-        *,
-        cwd: Path,
-        env: dict[str, str] | None,
-        text: bool,
-        capture_output: bool,
-        check: bool,
-        timeout: float,
-    ) -> subprocess.CompletedProcess[str]:
-        del cwd, env, text, capture_output, check, timeout
-        return subprocess.CompletedProcess(["cmd"], 1, stdout="", stderr="boom")
-
-    monkeypatch.setattr(crate2nix.subprocess, "run", _failure)
     with pytest.raises(RuntimeError, match="boom"):
-        crate2nix._run(["cmd"])
-
-    def _timeout(
-        args: list[str],
-        *,
-        cwd: Path,
-        env: dict[str, str] | None,
-        text: bool,
-        capture_output: bool,
-        check: bool,
-        timeout: float,
-    ) -> subprocess.CompletedProcess[str]:
-        del cwd, env, text, capture_output, check
-        raise subprocess.TimeoutExpired(args, timeout)
-
-    monkeypatch.setattr(crate2nix.subprocess, "run", _timeout)
-    with pytest.raises(RuntimeError, match="timed out"):
-        crate2nix._run(["cmd"])
+        crate2nix._run([
+            sys.executable,
+            "-c",
+            "import sys; sys.stderr.write('boom'); sys.exit(2)",
+        ])
 
     monkeypatch.setattr(
         crate2nix,
@@ -980,6 +1636,134 @@ def test_run_helper_and_build_patched_src_error_paths(
                 normalizer_path=Path("normalize.py"),
                 supported_platforms=("linux",),
             )
+        )
+
+
+def test_run_timeout_terminates_the_complete_descendant_group(tmp_path: Path) -> None:
+    """A timed-out crate2nix command must not leave its prefetch child alive."""
+    pid_file = tmp_path / "pids"
+    script = (
+        "import os, pathlib, subprocess, sys, time; "
+        "child = subprocess.Popen([sys.executable, '-c', "
+        "'import time; time.sleep(60)']); "
+        "pathlib.Path(sys.argv[1]).write_text("
+        "f'{os.getpid()} {child.pid}', encoding='utf-8'); "
+        "print('prefetch started', flush=True); time.sleep(60)"
+    )
+
+    started = time.monotonic()
+    with pytest.raises(crate2nix.Crate2NixCommandTimeoutError, match="timed out"):
+        crate2nix._run([sys.executable, "-c", script, str(pid_file)], timeout=0.2)
+    elapsed = time.monotonic() - started
+
+    parent_pid, child_pid = (int(value) for value in pid_file.read_text().split())
+    assert elapsed < 2.0
+    assert _wait_for_process_exit(parent_pid)
+    assert _wait_for_process_exit(child_pid)
+
+
+def test_run_cancellation_terminates_descendants_without_waiting_for_timeout(
+    tmp_path: Path,
+) -> None:
+    """Cancellation should wake the runner and stop its process tree promptly."""
+    pid_file = tmp_path / "pids"
+    cancel_event = threading.Event()
+    script = (
+        "import os, pathlib, subprocess, sys, time; "
+        "child = subprocess.Popen([sys.executable, '-c', "
+        "'import time; time.sleep(60)']); "
+        "pathlib.Path(sys.argv[1]).write_text("
+        "f'{os.getpid()} {child.pid}', encoding='utf-8'); time.sleep(60)"
+    )
+
+    async def _cancel() -> None:
+        task = asyncio.create_task(
+            asyncio.to_thread(
+                crate2nix._run,
+                [sys.executable, "-c", script, str(pid_file)],
+                timeout=60,
+                cancel_event=cancel_event,
+            )
+        )
+        assert await asyncio.to_thread(_wait_for_path, pid_file)
+        cancel_event.set()
+        with pytest.raises(crate2nix.Crate2NixCommandCancelledError):
+            await asyncio.wait_for(task, timeout=2.0)
+
+    asyncio.run(_cancel())
+
+    parent_pid, child_pid = (int(value) for value in pid_file.read_text().split())
+    assert _wait_for_process_exit(parent_pid)
+    assert _wait_for_process_exit(child_pid)
+
+
+def test_run_keyboard_interrupt_terminates_descendants(tmp_path: Path) -> None:
+    """Ctrl-C-style interruption should clean up the same isolated process group."""
+    pid_file = tmp_path / "pids"
+    script = (
+        "import os, pathlib, subprocess, sys, time; "
+        "child = subprocess.Popen([sys.executable, '-c', "
+        "'import time; time.sleep(60)']); "
+        "pathlib.Path(sys.argv[1]).write_text("
+        "f'{os.getpid()} {child.pid}', encoding='utf-8'); "
+        "print('ready', flush=True); time.sleep(60)"
+    )
+
+    def _interrupt(_message: str) -> None:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        crate2nix._run(
+            [sys.executable, "-c", script, str(pid_file)],
+            timeout=60,
+            progress=_interrupt,
+        )
+
+    parent_pid, child_pid = (int(value) for value in pid_file.read_text().split())
+    assert _wait_for_process_exit(parent_pid)
+    assert _wait_for_process_exit(child_pid)
+
+
+def test_run_reports_sanitized_bounded_progress_and_output() -> None:
+    """Command output should be sanitized and retained within fixed bounds."""
+    progress: list[str] = []
+    completed = crate2nix._run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "print('\\x1b[31mprefetching demo\\x1b[0m', flush=True); "
+                "sys.stdout.write('x' * 400000); sys.stdout.flush()"
+            ),
+        ],
+        timeout=2,
+        progress=progress.append,
+    )
+
+    assert any(message == "prefetching demo" for message in progress)
+    assert all("\x1b" not in message for message in progress)
+    assert all(
+        len(message) <= crate2nix._CRATE2NIX_PROGRESS_LINE_LIMIT for message in progress
+    )
+    assert len(completed.stdout) <= crate2nix._CRATE2NIX_CAPTURE_LIMIT_CHARS
+    assert "output truncated" in completed.stdout
+
+
+def test_run_classifies_enospc_without_retrying() -> None:
+    """Disk exhaustion is a distinct terminal failure, not a transient fetch flake."""
+    with pytest.raises(crate2nix.Crate2NixResourceError, match="ENOSPC"):
+        crate2nix._run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys; "
+                    "sys.stderr.write('No space left on device\\n' + 'x' * 400000); "
+                    "sys.exit(1)"
+                ),
+            ],
+            timeout=2,
         )
 
 
@@ -1088,6 +1872,7 @@ def test_run_crate2nix_generate_retries_transient_prefetch_cleanup_failure(
     """Retry the known nix-prefetch-git cleanup race without hiding real drift."""
     generated_cargo = tmp_path / "Cargo.nix"
     generated_hashes = tmp_path / "crate-hashes.json"
+    hash_seed = b'{"seed": "known-hash"}\n'
     sleeps: list[float] = []
     calls = 0
 
@@ -1095,11 +1880,14 @@ def test_run_crate2nix_generate_retries_transient_prefetch_cleanup_failure(
         args: list[str],
         *,
         env: dict[str, str] | None = None,
+        timeout: float,
     ) -> subprocess.CompletedProcess[str]:
         nonlocal calls
+        del timeout
         calls += 1
         assert args == ["nix", "run", "nixpkgs#crate2nix"]
         assert env == {"CARGO_HOME": "/tmp/cargo"}
+        assert generated_hashes.read_bytes() == hash_seed
         if calls == 1:
             generated_cargo.write_text("partial\n", encoding="utf-8")
             generated_hashes.write_text("partial\n", encoding="utf-8")
@@ -1111,7 +1899,6 @@ def test_run_crate2nix_generate_retries_transient_prefetch_cleanup_failure(
                 "nix-prefetch-git"
             )
         assert not generated_cargo.exists()
-        assert not generated_hashes.exists()
         return subprocess.CompletedProcess(args, 0, stdout="ok\n", stderr="")
 
     monkeypatch.setattr(crate2nix, "_run", _run)
@@ -1121,6 +1908,7 @@ def test_run_crate2nix_generate_retries_transient_prefetch_cleanup_failure(
         ["nix", "run", "nixpkgs#crate2nix"],
         env={"CARGO_HOME": "/tmp/cargo"},
         generated_outputs=(generated_cargo, generated_hashes),
+        seeded_outputs={generated_hashes: hash_seed},
     )
 
     assert result.returncode == 0
@@ -1139,8 +1927,9 @@ def test_run_crate2nix_generate_holds_shared_cargo_home_lock(
         args: list[str],
         *,
         env: dict[str, str] | None = None,
+        timeout: float,
     ) -> subprocess.CompletedProcess[str]:
-        del env
+        del env, timeout
         assert crate2nix._CRATE2NIX_GENERATE_LOCK.locked()
         return subprocess.CompletedProcess(args, 0, stdout="ok\n", stderr="")
 
@@ -1155,6 +1944,42 @@ def test_run_crate2nix_generate_holds_shared_cargo_home_lock(
     assert result.stdout == "ok\n"
 
 
+def test_run_crate2nix_generate_can_cancel_while_waiting_for_shared_lock(
+    tmp_path: Path,
+) -> None:
+    """A queued refresh must not trap its worker behind another long generation."""
+    cancel_event = threading.Event()
+    progress: list[str] = []
+
+    async def _cancel() -> None:
+        task = asyncio.create_task(
+            asyncio.to_thread(
+                crate2nix._run_crate2nix_generate,
+                ["unused"],
+                env={},
+                generated_outputs=(tmp_path / "Cargo.nix",),
+                cancel_event=cancel_event,
+                progress=progress.append,
+            )
+        )
+        await asyncio.sleep(0.05)
+        cancel_event.set()
+        await asyncio.sleep(0.2)
+        finished_promptly = task.done()
+        crate2nix._CRATE2NIX_GENERATE_LOCK.release()
+        result = (await asyncio.gather(task, return_exceptions=True))[0]
+        assert finished_promptly
+        assert isinstance(result, crate2nix.Crate2NixCommandCancelledError)
+        assert progress == ["Waiting for the shared crate2nix Cargo cache"]
+
+    crate2nix._CRATE2NIX_GENERATE_LOCK.acquire()
+    try:
+        asyncio.run(_cancel())
+    finally:
+        if crate2nix._CRATE2NIX_GENERATE_LOCK.locked():
+            crate2nix._CRATE2NIX_GENERATE_LOCK.release()
+
+
 def test_run_crate2nix_generate_does_not_retry_permanent_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1166,9 +1991,10 @@ def test_run_crate2nix_generate_does_not_retry_permanent_failure(
         args: list[str],
         *,
         env: dict[str, str] | None = None,
+        timeout: float,
     ) -> subprocess.CompletedProcess[str]:
         nonlocal calls
-        del env
+        del env, timeout
         calls += 1
         message = f"{' '.join(args)}\nreal crate graph error"
         raise RuntimeError(message)
@@ -1186,6 +2012,152 @@ def test_run_crate2nix_generate_does_not_retry_permanent_failure(
     assert calls == 1
 
 
+@pytest.mark.parametrize(
+    "failure",
+    [
+        crate2nix.Crate2NixCommandTimeoutError("timed out"),
+        crate2nix.Crate2NixCommandCancelledError("cancelled"),
+        crate2nix.Crate2NixResourceError("ENOSPC"),
+    ],
+    ids=("timeout", "cancelled", "enospc"),
+)
+def test_run_crate2nix_generate_does_not_retry_terminal_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    failure: RuntimeError,
+) -> None:
+    """Timeout, cancellation, and disk exhaustion must consume one attempt only."""
+    calls = 0
+
+    def _run(
+        _args: list[str],
+        *,
+        env: dict[str, str] | None = None,
+        timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        del env, timeout
+        calls += 1
+        raise failure
+
+    monkeypatch.setattr(crate2nix, "_run", _run)
+    monkeypatch.setattr(
+        crate2nix.time,
+        "sleep",
+        lambda _seconds: pytest.fail("terminal failures must not sleep"),
+    )
+
+    with pytest.raises(type(failure), match=str(failure)):
+        crate2nix._run_crate2nix_generate(
+            ["nix", "run", "nixpkgs#crate2nix"],
+            env={},
+            generated_outputs=(tmp_path / "Cargo.nix",),
+        )
+
+    assert calls == 1
+
+
+def test_run_crate2nix_generate_bounds_all_retries_by_one_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Retries share one wall-clock budget instead of multiplying the timeout."""
+    now = 100.0
+    timeouts: list[float] = []
+
+    def _monotonic() -> float:
+        return now
+
+    def _run(
+        args: list[str],
+        *,
+        env: dict[str, str] | None = None,
+        timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal now
+        del env
+        timeouts.append(timeout)
+        if len(timeouts) == 1:
+            now += 7.0
+            raise RuntimeError("nix-prefetch-git\nfatal: early EOF")
+        return subprocess.CompletedProcess(args, 0, stdout="ok\n", stderr="")
+
+    def _sleep(seconds: float) -> None:
+        nonlocal now
+        now += seconds
+
+    monkeypatch.setattr(crate2nix.time, "monotonic", _monotonic)
+    monkeypatch.setattr(crate2nix.time, "sleep", _sleep)
+    monkeypatch.setattr(crate2nix, "_run", _run)
+
+    result = crate2nix._run_crate2nix_generate(
+        ["nix", "run", "nixpkgs#crate2nix"],
+        env={},
+        generated_outputs=(tmp_path / "Cargo.nix",),
+        total_timeout=10.0,
+    )
+
+    assert result.stdout == "ok\n"
+    assert timeouts == [10.0, 1.0]
+
+
+def test_run_crate2nix_generate_classifies_seed_enospc_before_start(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A full temporary volume should fail before starting another prefetch."""
+    generated_hashes = tmp_path / "crate-hashes.json"
+
+    def _write_bytes(_path: Path, _content: bytes) -> int:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(Path, "write_bytes", _write_bytes)
+    monkeypatch.setattr(
+        crate2nix,
+        "_run",
+        lambda *_args, **_kwargs: pytest.fail("subprocess must not start"),
+    )
+
+    with pytest.raises(crate2nix.Crate2NixResourceError, match="ENOSPC"):
+        crate2nix._run_crate2nix_generate(
+            ["nix", "run", "nixpkgs#crate2nix"],
+            env={},
+            generated_outputs=(tmp_path / "Cargo.nix", generated_hashes),
+            seeded_outputs={generated_hashes: b"{}\n"},
+        )
+
+
+def test_refresh_target_classifies_temporary_directory_enospc(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Temporary-space exhaustion should surface as a distinct resource failure."""
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable="path:.#demo",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("linux",),
+    )
+    monkeypatch.setattr(crate2nix, "_build_patched_src", lambda _target: tmp_path)
+    monkeypatch.setattr(
+        crate2nix,
+        "load_normalizer",
+        lambda _path: lambda text: (text, 0, False),
+    )
+    monkeypatch.setattr(
+        crate2nix.tempfile,
+        "TemporaryDirectory",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            OSError(errno.ENOSPC, "No space left on device")
+        ),
+    )
+
+    with pytest.raises(crate2nix.Crate2NixResourceError, match="ENOSPC"):
+        crate2nix._refresh_target(target)
+
+
 def test_run_crate2nix_generate_gives_up_after_retry_budget(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1198,9 +2170,10 @@ def test_run_crate2nix_generate_gives_up_after_retry_budget(
         args: list[str],
         *,
         env: dict[str, str] | None = None,
+        timeout: float,
     ) -> subprocess.CompletedProcess[str]:
         nonlocal calls
-        del args, env
+        del args, env, timeout
         calls += 1
         raise RuntimeError(
             "Error: while prefetching crates for calculating sha256: "
@@ -1290,8 +2263,9 @@ def test_refresh_target_materializes_normalized_outputs(
         *,
         cwd: Path = crate2nix.REPO_ROOT,
         env: dict[str, str] | None = None,
+        timeout: float,
     ):
-        del cwd
+        del cwd, timeout
         assert args[:6] == [
             "nix",
             "run",
@@ -1331,6 +2305,200 @@ def test_refresh_target_materializes_normalized_outputs(
     assert refreshed.crate_hashes == '{\n  "a": 2,\n  "b": 1\n}\n'
 
 
+def test_refresh_target_seeds_only_unchanged_locked_git_sources(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Reuse checked hashes only when the new lock preserves the resolved source."""
+    repo = tmp_path / "repo"
+    package_dir = repo / "demo"
+    package_dir.mkdir(parents=True)
+    patched_src = tmp_path / "patched-src"
+    patched_src.mkdir()
+    (patched_src / "Cargo.lock").write_text(
+        """version = 3
+
+[[package]]
+name = "current"
+version = "1.0.0"
+source = "git+https://example.com/current?rev=aaaaaaaa#aaaaaaaa"
+
+[[package]]
+name = "branch-source"
+version = "2.0.0"
+source = "git+https://example.com/branch?branch=main#cccccccc"
+
+[[package]]
+name = "same-version-new-revision"
+version = "3.0.0"
+source = "git+https://example.com/stale?rev=dddddddd#dddddddd"
+""",
+        encoding="utf-8",
+    )
+    checked_hashes = {
+        "git+https://example.com/current?rev=aaaaaaaa#current@1.0.0": "hash-current",
+        "git+https://example.com/branch?branch=main#branch-source@2.0.0": "hash-branch",
+        "git+https://example.com/stale?rev=bbbbbbbb#same-version-new-revision@3.0.0": "hash-stale",
+        "git+https://example.com/removed?rev=eeeeeeee#removed@4.0.0": "hash-removed",
+    }
+    checked_hash_path = package_dir / "crate-hashes.json"
+    checked_hash_path.write_text(json.dumps(checked_hashes), encoding="utf-8")
+    (package_dir / "Cargo.nix").write_text(
+        """{ pkgs }:
+{
+  current.src = pkgs.fetchgit {
+    url = "https://example.com/current";
+    rev = "aaaaaaaa";
+    sha256 = "hash-current";
+  };
+  branch.src = pkgs.fetchgit {
+    url = "https://example.com/branch";
+    rev = "cccccccc";
+    sha256 = "hash-branch";
+  };
+  stale.src = pkgs.fetchgit {
+    url = "https://example.com/stale";
+    rev = "bbbbbbbb";
+    sha256 = "hash-stale";
+  };
+  removed.src = pkgs.fetchgit {
+    url = "https://example.com/removed";
+    rev = "eeeeeeee";
+    sha256 = "hash-removed";
+  };
+}
+""",
+        encoding="utf-8",
+    )
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable="path:.#demo",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("linux",),
+    )
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", repo)
+    monkeypatch.setattr(crate2nix, "_build_patched_src", lambda _target: patched_src)
+    monkeypatch.setattr(
+        crate2nix,
+        "load_normalizer",
+        lambda _path: lambda text: (text, 0, False),
+    )
+
+    def _generate(
+        args: list[str],
+        *,
+        env: dict[str, str],
+        generated_outputs: tuple[Path, ...],
+        seeded_outputs: dict[Path, bytes],
+    ) -> subprocess.CompletedProcess[str]:
+        del args, env
+        generated_cargo, generated_hashes = generated_outputs
+        assert json.loads(seeded_outputs[generated_hashes]) == {
+            "git+https://example.com/branch?branch=main#branch-source@2.0.0": "hash-branch",
+            "git+https://example.com/current?rev=aaaaaaaa#current@1.0.0": "hash-current",
+        }
+        assert checked_hash_path.read_text(encoding="utf-8") == json.dumps(
+            checked_hashes
+        )
+        generated_cargo.write_text("{}\n", encoding="utf-8")
+        generated_hashes.write_text("{}\n", encoding="utf-8")
+        return subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(crate2nix, "_run_crate2nix_generate", _generate)
+
+    crate2nix._refresh_target(target)
+
+    assert checked_hash_path.read_text(encoding="utf-8") == json.dumps(checked_hashes)
+
+
+def test_refresh_target_emits_source_slices_from_the_final_generated_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Refresh should hash local crates only after all Cargo.nix normalization."""
+    patched_src = tmp_path / "patched-src"
+    patched_src.mkdir()
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable="path:.#demo",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("linux",),
+        source_input="demo",
+        crate_sources=Path("demo/crate-sources.json"),
+    )
+    monkeypatch.setattr(crate2nix, "_build_patched_src", lambda _target: patched_src)
+    monkeypatch.setattr(
+        crate2nix,
+        "load_normalizer",
+        lambda _path: lambda text: (text, 1, True),
+    )
+
+    def _generate(
+        args: list[str],
+        *,
+        env: dict[str, str],
+        generated_outputs: tuple[Path, ...],
+        seeded_outputs: dict[Path, bytes],
+    ) -> subprocess.CompletedProcess[str]:
+        del args, env
+        assert seeded_outputs == {}
+        cargo_nix, crate_hashes = generated_outputs
+        cargo_nix.write_text(
+            """{ lib
+, rootSrc ? ./.
+}:
+rec {
+  demo = {
+    src = lib.cleanSourceWith {
+      filter = sourceFilter;
+      src = "${rootSrc}/crates/demo";
+    };
+  };
+  sourceFilter = _name: _type: true;
+}
+""",
+            encoding="utf-8",
+        )
+        crate_hashes.write_text("{}\n", encoding="utf-8")
+        return subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(crate2nix, "_run_crate2nix_generate", _generate)
+    seen: dict[str, object] = {}
+
+    def _manifest(
+        manifest_target: crate2nix.Crate2NixTarget,
+        source_paths: tuple[str, ...],
+        *,
+        cargo_nix: Path,
+    ) -> str:
+        seen["target"] = manifest_target
+        seen["paths"] = source_paths
+        seen["cargo"] = cargo_nix.read_text(encoding="utf-8")
+        return '{"source": {}, "slices": {}}\n'
+
+    monkeypatch.setattr(crate2nix, "_render_crate_source_manifest", _manifest)
+
+    refreshed = crate2nix._refresh_target(target)
+
+    assert seen["target"] == target
+    assert seen["paths"] == ("crates/demo",)
+    cargo = expect_instance(seen["cargo"], str)
+    cargo_function = expect_instance(parse_nix_expr(cargo), FunctionDefinition)
+    cargo_body = expect_instance(cargo_function.output, AttributeSet)
+    demo = expect_instance(
+        expect_binding(cargo_body.values, "demo").value, AttributeSet
+    )
+    assert_nix_ast_equal(
+        expect_binding(demo.values, "src").value,
+        'crateSource sourceFilter "crates/demo"',
+    )
+    assert refreshed.crate_sources == '{"source": {}, "slices": {}}\n'
+
+
 def test_crate2nix_cargo_home_defaults_to_xdg_cache(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1353,6 +2521,81 @@ def test_crate2nix_cargo_home_respects_override(
     monkeypatch.setenv("NIXCFG_CRATE2NIX_CARGO_HOME", str(cargo_home))
 
     assert crate2nix._crate2nix_cargo_home() == cargo_home
+
+
+@pytest.mark.parametrize(
+    "validation_error",
+    [
+        ValueError("Invalid local crate source path: '../escape'"),
+        TypeError("Nix returned invalid crate source path metadata"),
+    ],
+    ids=("value-error", "type-error"),
+)
+def test_run_reports_validation_failures_without_a_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    validation_error: ValueError | TypeError,
+) -> None:
+    """Expected validation failures should remain inside the CLI boundary."""
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable="path:.#demo",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("test-system",),
+    )
+    monkeypatch.setattr(crate2nix, "TARGETS", {target.name: target})
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "test-system")
+
+    def fail_validation(
+        _target: crate2nix.Crate2NixTarget,
+        **_kwargs,
+    ) -> crate2nix.RefreshResult:
+        raise validation_error
+
+    monkeypatch.setattr(crate2nix, "_refresh_target", fail_validation)
+
+    assert crate2nix.run(packages=(target.name,)) == 1
+    assert capsys.readouterr().err == (
+        f"Refreshing crate2nix artifacts for demo...\nFAIL demo: {validation_error}\n"
+    )
+
+
+def test_run_reports_live_crate2nix_progress(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The synchronous maintenance command should not look hung during generation."""
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable="path:.#demo",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("test-system",),
+    )
+    package_dir = tmp_path / "demo"
+    package_dir.mkdir()
+    (package_dir / "Cargo.nix").write_text("same\n", encoding="utf-8")
+    (package_dir / "crate-hashes.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(crate2nix, "TARGETS", {target.name: target})
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "test-system")
+
+    def _refresh(
+        _target: crate2nix.Crate2NixTarget,
+        *,
+        progress,
+    ) -> crate2nix.RefreshResult:
+        progress("Prefetching cached Git sources")
+        return crate2nix.RefreshResult(cargo_nix="same\n", crate_hashes="{}\n")
+
+    monkeypatch.setattr(crate2nix, "_refresh_target", _refresh)
+
+    assert crate2nix.run(packages=(target.name,)) == 0
+    assert "demo: Prefetching cached Git sources\n" in capsys.readouterr().err
 
 
 def test_resolve_targets_and_run_cover_remaining_control_flow(
@@ -1395,7 +2638,7 @@ def test_resolve_targets_and_run_cover_remaining_control_flow(
     monkeypatch.setattr(
         crate2nix,
         "_refresh_target",
-        lambda _target: (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda _target, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     assert crate2nix.run() == 1
     assert "Skipping unsupported crate2nix targets" not in capsys.readouterr().err
@@ -1412,7 +2655,7 @@ def test_resolve_targets_and_run_cover_remaining_control_flow(
     monkeypatch.setattr(
         crate2nix,
         "_refresh_target",
-        lambda _target: crate2nix.RefreshResult(
+        lambda _target, **_kwargs: crate2nix.RefreshResult(
             cargo_nix="same\n",
             crate_hashes='{\n  "a": 1\n}\n',
         ),
@@ -1426,7 +2669,7 @@ def test_resolve_targets_and_run_cover_remaining_control_flow(
     monkeypatch.setattr(
         crate2nix,
         "_refresh_target",
-        lambda _target: (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda _target, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     assert crate2nix.run() == 1
     assert "FAIL demo: boom" in capsys.readouterr().err
@@ -1434,7 +2677,7 @@ def test_resolve_targets_and_run_cover_remaining_control_flow(
     monkeypatch.setattr(
         crate2nix,
         "_refresh_target",
-        lambda _target: crate2nix.RefreshResult(
+        lambda _target, **_kwargs: crate2nix.RefreshResult(
             cargo_nix="same\n",
             crate_hashes='{\n  "a": 1\n}\n',
         ),

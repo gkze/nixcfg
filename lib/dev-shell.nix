@@ -30,19 +30,20 @@ let
   pythonScriptFindPredicates = lib.concatMapStringsSep " " (
     path: "-o -path './${path}'"
   ) lintFiles.python.pythonScriptPaths;
+  pythonPyupgradeFindPredicates = lib.concatMapStringsSep " " (
+    path: "-o -path './${path}'"
+  ) lintFiles.python.pythonPyupgradeExcludes;
   oxfmtPatterns = lintFiles.oxfmt.globs ++ map (glob: "!${glob}") lintFiles.oxfmt.excludeGlobs;
 
-  # Keep the established pyupgrade floor until Python 3.14 rewrites are applied
-  # as an intentional repo-wide formatting migration.
   pythonPyupgradeCheck = pkgs.writeShellScriptBin "check-python-pyupgrade" ''
     set -euo pipefail
 
     find . \
-      \( -path './.claude/worktrees' -o -path './.direnv' -o -path './.git' -o -path './.pytest_cache' -o -path './.ruff_cache' -o -path './.venv' -o -path './node_modules' -o -path './result' -o -name '_generated.py' \) -prune -o \
+      \( -path './.claude/worktrees' -o -path './.direnv' -o -path './.git' -o -path './.pytest_cache' -o -path './.ruff_cache' -o -path './.venv' -o -path './node_modules' -o -path './result' -o -name '_generated.py' ${pythonPyupgradeFindPredicates} \) -prune -o \
       -type f \
       \( -name '*.py' -o -name '*.pyi' ${pythonScriptFindPredicates} \) \
       -print0 \
-      | ${pkgs.findutils}/bin/xargs -0 -r ${pythonExe} -m lib.fix_python_multi_except --pyupgrade-exe ${pyupgradeExe} --pyupgrade-arg=--py313-plus
+      | ${pkgs.findutils}/bin/xargs -0 -r ${pyupgradeExe} --py314-plus
   '';
 
   pythonCompileCheck = pkgs.writeShellScriptBin "check-python-compile" ''
@@ -153,6 +154,7 @@ let
         enable = true;
         id = "fix-trailing-whitespace";
         name = "fix-trailing-whitespace";
+        excludes = [ "\\.patch$" ];
         priority = 2;
         stages = [
           "pre-commit"

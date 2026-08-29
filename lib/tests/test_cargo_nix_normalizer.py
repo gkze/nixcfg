@@ -1,7 +1,5 @@
 """Tests for the shared crate2nix Cargo.nix normalizer helpers."""
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -9,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from nix_manipulator import parse
 from nix_manipulator.expressions.path import NixPath
+from nix_manipulator.expressions.primitive import StringPrimitive
 
 from lib.cargo_nix_normalizer import (
     _ensure_root_src_argument,
@@ -16,6 +15,7 @@ from lib.cargo_nix_normalizer import (
     _rewrite_root_src_paths,
     normalize,
 )
+from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal
 
 
@@ -186,11 +186,7 @@ def test_ensure_root_src_argument_inserts_before_ellipses() -> None:
     root = parsed.expr
 
     assert _ensure_root_src_argument(root) is True
-    assert [argument.rebuild() for argument in root.argument_set] == [
-        "crateConfig",
-        "rootSrc ? ./.",
-        "...",
-    ]
+    assert_nix_ast_equal(root, "{ crateConfig, rootSrc ? ./., ... }: { }")
 
 
 def test_ensure_root_src_argument_inserts_before_ellipses_without_crate_config() -> (
@@ -201,11 +197,7 @@ def test_ensure_root_src_argument_inserts_before_ellipses_without_crate_config()
     parsed = parse(source)
 
     assert _ensure_root_src_argument(parsed.expr) is True
-    assert [argument.rebuild() for argument in parsed.expr.argument_set] == [
-        "nixpkgs",
-        "rootSrc ? ./.",
-        "...",
-    ]
+    assert_nix_ast_equal(parsed.expr, "{ nixpkgs, rootSrc ? ./., ... }: { }")
 
 
 def test_ensure_root_src_argument_appends_when_no_special_markers_exist() -> None:
@@ -214,10 +206,7 @@ def test_ensure_root_src_argument_appends_when_no_special_markers_exist() -> Non
     parsed = parse(source)
 
     assert _ensure_root_src_argument(parsed.expr) is True
-    assert [argument.rebuild() for argument in parsed.expr.argument_set] == [
-        "nixpkgs",
-        "rootSrc ? ./.",
-    ]
+    assert_nix_ast_equal(parsed.expr, "{ nixpkgs, rootSrc ? ./. }: { }")
 
 
 def test_ensure_root_src_argument_rejects_non_list_argument_sets() -> None:
@@ -420,7 +409,8 @@ def test_rewrite_root_src_paths_handles_mixed_lists() -> None:
     holder = _Holder(items=[object(), NixPath(path="./crates/foo")])
     assert _rewrite_root_src_paths(holder, local_path_prefixes=("crates",)) == 1
     assert holder.items[0].__class__ is object
-    assert holder.items[1].rebuild() == '"${rootSrc}/crates/foo"'
+    rewritten = expect_instance(holder.items[1], StringPrimitive)
+    assert rewritten.value == "${rootSrc}/crates/foo"
 
 
 def test_normalize_with_fallback_handles_existing_root_src_and_empty_prefixes() -> None:

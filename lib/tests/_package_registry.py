@@ -1,7 +1,5 @@
 """Test helpers for the package registry Nix metadata table."""
 
-from __future__ import annotations
-
 from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.list import NixList

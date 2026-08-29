@@ -1,7 +1,5 @@
 """Updater for macFUSE."""
 
-from __future__ import annotations
-
 import plistlib
 from typing import TYPE_CHECKING, ClassVar
 

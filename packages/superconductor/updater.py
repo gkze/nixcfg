@@ -1,7 +1,5 @@
 """Updater for Superconductor nightly macOS app archives."""
 
-from __future__ import annotations
-
 import re
 import urllib.parse
 from dataclasses import dataclass

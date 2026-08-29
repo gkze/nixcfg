@@ -1,7 +1,5 @@
 """Validate GitHub Desktop's packaged macOS bundle metadata."""
 
-from __future__ import annotations
-
 import argparse
 import plistlib
 from pathlib import Path

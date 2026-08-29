@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nixcfg-unsloth-runtime"
+version = "0.1.804b0"
+requires-python = "==3.12.*"
+dependencies = [
+  "unsloth[studio] @ https://files.pythonhosted.org/packages/1b/5c/7645fb279567ab0f81751c284b8c916673e7721aee87acd841478cfab8b7/unsloth-2026.8.22.tar.gz",
+]
+
+[tool.uv]
+environments = [
+  "sys_platform == 'darwin' and platform_machine == 'arm64' and python_version == '3.12'",
+]
+override-dependencies = [
+  "triton>=3.0.0 ; sys_platform == 'linux'",
+  "xformers>=0.0.27.post2 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+required-environments = [
+  "sys_platform == 'darwin' and platform_machine == 'arm64' and python_version == '3.12'",
+]
+
+[tool.setuptools]
+py-modules = []

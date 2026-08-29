@@ -4,8 +4,6 @@ These tests focus on argument parsing/dispatch glue, not the update pipeline
 implementation (which is covered elsewhere).
 """
 
-from __future__ import annotations
-
 import runpy
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +19,7 @@ from typer.testing import CliRunner
 import nixcfg
 from lib import http_utils
 from lib.github_actions.client import Workflow, WorkflowListRow, WorkflowRun
+from lib.schema_codegen import cli as schema_cli
 from lib.schema_codegen.runner import SchemaTargetSummary
 
 if TYPE_CHECKING:
@@ -297,7 +296,7 @@ def test_nixcfg_schema_targets_lists_configured_targets(
 ) -> None:
     """Ensure `nixcfg schema targets` renders target summaries."""
     monkeypatch.setattr(
-        "nixcfg.list_schema_codegen_targets",
+        "lib.schema_codegen.cli.list_schema_codegen_targets",
         lambda *, config_path: (
             SchemaTargetSummary(name="demo", output=config_path.parent / "demo.py"),
         ),
@@ -317,14 +316,18 @@ def test_nixcfg_schema_targets_uses_default_config_path_when_omitted(
     called: dict[str, Path] = {}
 
     monkeypatch.setattr(
-        "nixcfg.default_config_path", lambda: Path("/tmp/schema_codegen.yaml")
+        "lib.schema_codegen.cli.default_config_path",
+        lambda: Path("/tmp/schema_codegen.yaml"),
     )
 
     def _fake_targets(*, config_path: Path) -> tuple[SchemaTargetSummary, ...]:
         called["config_path"] = config_path
         return ()
 
-    monkeypatch.setattr("nixcfg.list_schema_codegen_targets", _fake_targets)
+    monkeypatch.setattr(
+        "lib.schema_codegen.cli.list_schema_codegen_targets",
+        _fake_targets,
+    )
 
     runner = CliRunner()
     result = runner.invoke(nixcfg.app, ["schema", "targets"])
@@ -338,7 +341,7 @@ def test_nixcfg_schema_targets_reports_errors_cleanly(
 ) -> None:
     """Schema target listing should format runtime failures without a traceback."""
     monkeypatch.setattr(
-        "nixcfg.list_schema_codegen_targets",
+        "lib.schema_codegen.cli.list_schema_codegen_targets",
         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("bad config")),
     )
 
@@ -363,7 +366,10 @@ def test_nixcfg_schema_generate_forwards_target_and_config(
         )
         return Path("/tmp/generated.py")
 
-    monkeypatch.setattr("nixcfg.generate_schema_codegen_target", _fake_generate)
+    monkeypatch.setattr(
+        "lib.schema_codegen.cli.generate_schema_codegen_target",
+        _fake_generate,
+    )
 
     runner = CliRunner()
     result = runner.invoke(
@@ -373,7 +379,7 @@ def test_nixcfg_schema_generate_forwards_target_and_config(
 
     assert result.exit_code == 0
     assert called["target_name"] == "demo"
-    assert called["progress"] is nixcfg._schema_progress
+    assert called["progress"] is schema_cli._schema_progress
     assert called["config_path"] == Path("alt-config.yaml")
     assert "Generated /tmp/generated.py" in result.output
 
@@ -383,7 +389,7 @@ def test_nixcfg_schema_generate_reports_errors_cleanly(
 ) -> None:
     """Schema generation should turn expected exceptions into exit code 1."""
     monkeypatch.setattr(
-        "nixcfg.generate_schema_codegen_target",
+        "lib.schema_codegen.cli.generate_schema_codegen_target",
         lambda **_kwargs: (_ for _ in ()).throw(ValueError("unknown target")),
     )
 
@@ -397,25 +403,24 @@ def test_nixcfg_schema_generate_reports_errors_cleanly(
 def test_nixcfg_schema_verify_checks_both_generated_model_families(
     monkeypatch: _MonkeyPatchLike,
 ) -> None:
-    """Verify vendored-Nix and declarative generated models in one command."""
+    """Verify each declarative generated-model target exactly once."""
     calls: list[str] = []
     monkeypatch.setattr(
-        "nixcfg.verify_nix_schema_models",
-        lambda **_kwargs: calls.append("nix") or True,
+        "lib.schema_codegen.cli.list_schema_codegen_targets",
+        lambda **_kwargs: (
+            SchemaTargetSummary("manifest", Path("models.py")),
+            SchemaTargetSummary("nix-schema-models", Path("nix-models.py")),
+        ),
     )
     monkeypatch.setattr(
-        "nixcfg.list_schema_codegen_targets",
-        lambda **_kwargs: (SchemaTargetSummary("manifest", Path("models.py")),),
-    )
-    monkeypatch.setattr(
-        "nixcfg.verify_schema_codegen_target",
+        "lib.schema_codegen.cli.verify_schema_codegen_target",
         lambda *, target_name, **_kwargs: calls.append(target_name) or True,
     )
 
     result = CliRunner().invoke(nixcfg.app, ["schema", "verify"])
 
     assert result.exit_code == 0
-    assert calls == ["nix", "manifest"]
+    assert calls == ["manifest", "nix-schema-models"]
     assert "Generated schema models are fresh." in result.output
 
 
@@ -423,14 +428,13 @@ def test_nixcfg_schema_verify_fails_on_any_stale_model_family(
     monkeypatch: _MonkeyPatchLike,
 ) -> None:
     """Fail the check-only command when either generated family is stale."""
-    monkeypatch.setattr("nixcfg.verify_nix_schema_models", lambda **_kwargs: False)
     monkeypatch.setattr(
-        "nixcfg.list_schema_codegen_targets",
+        "lib.schema_codegen.cli.list_schema_codegen_targets",
         lambda **_kwargs: (SchemaTargetSummary("manifest", Path("models.py")),),
     )
     monkeypatch.setattr(
-        "nixcfg.verify_schema_codegen_target",
-        lambda **_kwargs: True,
+        "lib.schema_codegen.cli.verify_schema_codegen_target",
+        lambda **_kwargs: False,
     )
 
     result = CliRunner().invoke(nixcfg.app, ["schema", "verify"])
@@ -444,8 +448,12 @@ def test_nixcfg_schema_verify_reports_expected_errors(
 ) -> None:
     """Turn expected configuration/render failures into a concise exit code 1."""
     monkeypatch.setattr(
-        "nixcfg.verify_nix_schema_models",
+        "lib.schema_codegen.cli.verify_schema_codegen_target",
         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("cannot render")),
+    )
+    monkeypatch.setattr(
+        "lib.schema_codegen.cli.list_schema_codegen_targets",
+        lambda **_kwargs: (SchemaTargetSummary("manifest", Path("models.py")),),
     )
 
     result = CliRunner().invoke(nixcfg.app, ["schema", "verify"])
@@ -475,7 +483,7 @@ def test_nixcfg_schema_lock_forwards_manifest_output_and_metadata(
         )
         return Path("/tmp/codegen.lock.json")
 
-    monkeypatch.setattr("nixcfg.write_codegen_lockfile", _fake_lock)
+    monkeypatch.setattr("lib.schema_codegen.cli.write_codegen_lockfile", _fake_lock)
 
     runner = CliRunner()
     result = runner.invoke(
@@ -494,7 +502,7 @@ def test_nixcfg_schema_lock_forwards_manifest_output_and_metadata(
     assert called["manifest_path"] == Path("codegen.yaml")
     assert called["lockfile_path"] == Path("custom.lock.json")
     assert called["include_metadata"] is True
-    assert called["progress"] is nixcfg._schema_progress
+    assert called["progress"] is schema_cli._schema_progress
     assert "Generated /tmp/codegen.lock.json" in result.output
 
 
@@ -503,7 +511,7 @@ def test_nixcfg_schema_lock_reports_http_errors_cleanly(
 ) -> None:
     """Schema lockfile generation should surface fetch failures without a traceback."""
     monkeypatch.setattr(
-        "nixcfg.write_codegen_lockfile",
+        "lib.schema_codegen.cli.write_codegen_lockfile",
         lambda **_kwargs: (_ for _ in ()).throw(httpx.HTTPError("download failed")),
     )
 
@@ -523,13 +531,13 @@ def test_nixcfg_schema_codegen_invokes_codegen_main(
     def _fake_codegen(*, progress: object) -> None:
         called["progress"] = progress
 
-    monkeypatch.setattr("nixcfg.codegen_main", _fake_codegen)
+    monkeypatch.setattr("lib.schema_codegen.cli.codegen_main", _fake_codegen)
 
     runner = CliRunner()
     result = runner.invoke(nixcfg.app, ["schema", "codegen"])
 
     assert result.exit_code == 0
-    assert called["progress"] is nixcfg._schema_progress
+    assert called["progress"] is schema_cli._schema_progress
 
 
 @pytest.mark.parametrize(("ok", "expected_exit"), [(True, 0), (False, 1)])
@@ -539,14 +547,14 @@ def test_nixcfg_schema_fetch_check_uses_validation_exit_code(
     expected_exit: int,
 ) -> None:
     """Schema fetch --check should return the schema-check status without downloading."""
-    monkeypatch.setattr("nixcfg.schema_check", lambda: ok)
+    monkeypatch.setattr("lib.schema_codegen.cli.schema_check", lambda: ok)
     monkeypatch.setattr(
-        "nixcfg.fetch_schemas",
+        "lib.schema_codegen.cli.fetch_schemas",
         lambda **_kwargs: (_ for _ in ()).throw(AssertionError("should not fetch")),
     )
 
     with pytest.raises(typer.Exit) as excinfo:
-        nixcfg.schema_fetch(check=True)
+        schema_cli.schema_fetch(check=True)
 
     assert excinfo.value.exit_code == expected_exit
 
@@ -556,7 +564,7 @@ def test_nixcfg_schema_fetch_reports_runtime_errors_cleanly(
 ) -> None:
     """Schema fetch should surface runtime failures without a traceback."""
     monkeypatch.setattr(
-        "nixcfg.fetch_schemas",
+        "lib.schema_codegen.cli.fetch_schemas",
         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("fetch failed")),
     )
 
@@ -839,8 +847,8 @@ def test_nixcfg_ci_crate2nix_exposes_central_normalizer_command() -> None:
     )
 
     assert result.exit_code == 0
-    assert "TARGET" in result.output
-    assert "PATH" in result.output
+    assert "{target}" in result.output
+    assert "[path]" in result.output
 
 
 def test_nixcfg_ci_omits_retired_workflow_commands() -> None:
@@ -970,7 +978,7 @@ def test_nixcfg_schema_progress_writes_to_stderr(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Schema progress helper should write to stderr for long-running commands."""
-    nixcfg._schema_progress("working")
+    schema_cli._schema_progress("working")
 
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -981,10 +989,13 @@ def test_nixcfg_display_schema_path_falls_back_outside_repo(
     monkeypatch: _MonkeyPatchLike,
 ) -> None:
     """Display paths should stay absolute when outputs live outside the repo."""
-    monkeypatch.setattr("nixcfg.get_repo_root", lambda: Path("/repo"))
+    monkeypatch.setattr(
+        "lib.schema_codegen.cli.get_repo_root",
+        lambda: Path("/repo"),
+    )
 
     assert (
-        nixcfg._display_schema_path(Path("/outside/generated.py"))
+        schema_cli._display_schema_path(Path("/outside/generated.py"))
         == "/outside/generated.py"
     )
 

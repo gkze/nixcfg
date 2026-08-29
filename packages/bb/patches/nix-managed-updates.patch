@@ -1,0 +1,10 @@
+diff --git a/apps/desktop/src/desktop-update-provider.ts b/apps/desktop/src/desktop-update-provider.ts
+--- a/apps/desktop/src/desktop-update-provider.ts
++++ b/apps/desktop/src/desktop-update-provider.ts
+@@ -98,5 +98,5 @@ export function resolveDesktopUpdateSupport(
+   args: ResolveDesktopUpdateSupportArgs,
+ ): DesktopUpdateSupport {
+   if (args.platform === "macos") {
+-    return { autoUpdate: true, versionCheck: true };
++    return { autoUpdate: false, versionCheck: true };
+   }

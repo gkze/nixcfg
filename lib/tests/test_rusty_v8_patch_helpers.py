@@ -1,7 +1,5 @@
 """Tests for the repo-local rusty_v8 patch helper scripts."""
 
-from __future__ import annotations
-
 import runpy
 import sys
 from collections.abc import Callable
@@ -137,6 +135,9 @@ def test_patch_apple_toolchain_main_guard_runs(
         '  use_lld   = is_clang && current_os != "zos"\n',
         '  use_lld = is_clang && current_os != "zos" && experimental_linker_path == "" &&\n'
         '            !(is_ios && current_cpu == "arm64e")\n',
+        "  use_lld =\n"
+        '      is_clang && current_os != "zos" && linker_path == "" &&\n'
+        '      !(is_ios && current_cpu == "arm64e") && !use_apple_linker\n',
     ],
 )
 def test_patch_compiler_gni_script_success_and_errors(
@@ -152,7 +153,7 @@ def test_patch_compiler_gni_script_success_and_errors(
     monkeypatch.setattr(sys, "argv", ["patch_compiler_gni.py", str(target)])
     assert _main(namespace)() == 0
     patched = target.read_text(encoding="utf-8")
-    assert "use_lld = false" in patched
+    assert patched == "prefix\n  use_lld = false\nsuffix\n"
 
     monkeypatch.setattr(sys, "argv", ["patch_compiler_gni.py"])
     with pytest.raises(SystemExit, match="usage: patch_compiler_gni.py"):

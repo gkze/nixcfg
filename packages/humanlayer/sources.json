@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-nrZrQN51tY3PvBiDEslV8klpTl96kah+4fK4HK3IYlw="
+  },
+  "urls": {
+    "aarch64-darwin": "https://github.com/humanlayer/homebrew-humanlayer/releases/download/riptide-v0.166.0/Riptide-darwin-arm64.dmg"
+  },
+  "version": "0.166.0"
+}

@@ -1,7 +1,5 @@
 """Typer CLI for GitHub Actions workflow discovery and polling-based live tailing."""
 
-from __future__ import annotations
-
 import asyncio
 import sys
 from typing import Annotated

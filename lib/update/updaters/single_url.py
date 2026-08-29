@@ -1,7 +1,5 @@
 """Shared helpers for updaters that hash one resolved download URL."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.sources import HashEntry, SourceEntry

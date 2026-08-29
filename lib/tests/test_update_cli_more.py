@@ -1,7 +1,5 @@
 """Additional tests for update CLI orchestration helpers."""
 
-from __future__ import annotations
-
 import asyncio
 import json
 import os
@@ -577,7 +575,8 @@ def test_preflight_handlers_schema_list_validate(
         ),
     ]
     monkeypatch.setattr(
-        "lib.update.cli_inventory.build_update_inventory",
+        cli_inventory_module,
+        "build_update_inventory",
         lambda: inventory,
     )
     list_code = handle_list_targets_request(UpdateOptions(list_targets=True, json=True))
@@ -806,7 +805,8 @@ def test_inventory_helpers_and_sorting(  # noqa: PLR0915
     assert _classify_updater_kind(_Custom) == "custom-hash"
 
     monkeypatch.setattr(
-        "lib.update.cli_inventory.updater_dir_for",
+        cli_inventory_module,
+        "updater_dir_for",
         lambda name: None if name == "missing" else REPO_ROOT / "packages" / name,
     )
 
@@ -825,7 +825,8 @@ def test_inventory_helpers_and_sorting(  # noqa: PLR0915
 
     with monkeypatch.context() as patches:
         patches.setattr(
-            "lib.update.cli_inventory.updater_dir_for",
+            cli_inventory_module,
+            "updater_dir_for",
             lambda _name: (_ for _ in ()).throw(
                 RuntimeError("Duplicate package directories")
             ),
@@ -834,7 +835,8 @@ def test_inventory_helpers_and_sorting(  # noqa: PLR0915
 
     with monkeypatch.context() as patches:
         patches.setattr(
-            "lib.update.cli_inventory._repo_relative_path",
+            cli_inventory_module,
+            "_repo_relative_path",
             lambda _path: None,
         )
         assert _generated_artifact_paths("custom-artifact", _CustomArtifact) == ()
@@ -1093,7 +1095,8 @@ def test_generated_artifact_inventory_normalizes_sibling_paths(
         generated_artifact_files = ("../sibling/generated.lock",)
 
     monkeypatch.setattr(
-        "lib.update.cli_inventory.updater_dir_for",
+        cli_inventory_module,
+        "updater_dir_for",
         lambda _name: REPO_ROOT / "packages/primary",
     )
 
@@ -1150,18 +1153,21 @@ def test_build_update_inventory_uses_logical_targets(
             return None
 
     monkeypatch.setattr(
-        "lib.update.cli_inventory.load_all_sources",
+        cli_inventory_module,
+        "load_all_sources",
         lambda: sources,
     )
     monkeypatch.setattr(
-        "lib.update.cli_inventory.package_file_map",
+        cli_inventory_module,
+        "package_file_map",
         lambda _filename: {
             "both": REPO_ROOT / "packages" / "both" / "sources.json",
             "desktop": REPO_ROOT / "packages" / "desktop" / "sources.json",
         },
     )
     monkeypatch.setattr(
-        "lib.update.cli_inventory.get_flake_inputs_with_refs",
+        cli_inventory_module,
+        "get_flake_inputs_with_refs",
         lambda: [
             FlakeInputRef(
                 name="both",
@@ -1179,9 +1185,10 @@ def test_build_update_inventory_uses_logical_targets(
             ),
         ],
     )
-    monkeypatch.setattr("lib.update.cli_inventory.load_flake_lock", _Lock)
+    monkeypatch.setattr(cli_inventory_module, "load_flake_lock", _Lock)
     monkeypatch.setattr(
-        "lib.update.cli_inventory.UPDATERS",
+        cli_inventory_module,
+        "UPDATERS",
         {
             "both": _BothUpdater,
             "desktop": _DesktopUpdater,
@@ -1189,11 +1196,13 @@ def test_build_update_inventory_uses_logical_targets(
         },
     )
     monkeypatch.setattr(
-        "lib.update.cli_inventory.sources_file_for",
+        cli_inventory_module,
+        "sources_file_for",
         lambda name: REPO_ROOT / "packages" / name / "sources.json",
     )
     monkeypatch.setattr(
-        "lib.update.cli_inventory.updater_dir_for",
+        cli_inventory_module,
+        "updater_dir_for",
         lambda package_name: REPO_ROOT / "packages" / package_name,
     )
 
@@ -1246,13 +1255,16 @@ def test_generated_artifact_paths_include_crate2nix_outputs(
     fake_module = SimpleNamespace(
         TARGETS={
             "demo": SimpleNamespace(
-                cargo_nix=Path("packages/demo/Cargo.nix"),
-                crate_hashes=Path("packages/demo/crate-hashes.json"),
+                artifact_paths=(
+                    Path("packages/demo/Cargo.nix"),
+                    Path("packages/demo/crate-hashes.json"),
+                ),
             )
         }
     )
     monkeypatch.setattr(
-        "lib.update.cli_inventory.importlib.import_module",
+        cli_inventory_module.importlib,
+        "import_module",
         lambda name: fake_module if name == "lib.update.crate2nix" else None,
     )
 
@@ -1262,7 +1274,8 @@ def test_generated_artifact_paths_include_crate2nix_outputs(
     )
 
     monkeypatch.setattr(
-        "lib.update.cli_inventory.updater_dir_for",
+        cli_inventory_module,
+        "updater_dir_for",
         lambda _name: REPO_ROOT / "packages" / "demo",
     )
     assert _generated_artifact_paths("demo", _DenoUpdater) == (
@@ -1281,7 +1294,8 @@ def test_generated_artifact_paths_fall_back_when_manifest_or_crate2nix_import_is
         name = "demo"
 
     monkeypatch.setattr(
-        "lib.update.cli_inventory.importlib.import_module",
+        cli_inventory_module.importlib,
+        "import_module",
         lambda _name: (_ for _ in ()).throw(ImportError),
     )
     assert _crate2nix_generated_artifact_paths("demo") == ()
@@ -1289,21 +1303,26 @@ def test_generated_artifact_paths_fall_back_when_manifest_or_crate2nix_import_is
     fake_module = SimpleNamespace(
         TARGETS={
             "demo": SimpleNamespace(
-                cargo_nix=Path("packages/demo/Cargo.nix"),
-                crate_hashes=Path("packages/demo/crate-hashes.json"),
+                artifact_paths=(
+                    Path("packages/demo/Cargo.nix"),
+                    Path("packages/demo/crate-hashes.json"),
+                ),
             )
         }
     )
     monkeypatch.setattr(
-        "lib.update.cli_inventory.importlib.import_module",
+        cli_inventory_module.importlib,
+        "import_module",
         lambda name: fake_module if name == "lib.update.crate2nix" else None,
     )
     monkeypatch.setattr(
-        "lib.update.cli_inventory.updater_dir_for",
+        cli_inventory_module,
+        "updater_dir_for",
         lambda _name: REPO_ROOT / "packages" / "demo",
     )
     monkeypatch.setattr(
-        "lib.update.cli_inventory._repo_relative_path",
+        cli_inventory_module,
+        "_repo_relative_path",
         lambda _path: None,
     )
 

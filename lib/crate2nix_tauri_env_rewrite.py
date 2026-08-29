@@ -1,6 +1,5 @@
 """Rewrite crate2nix Tauri env exports to stable metadata paths."""
 
-from __future__ import annotations
 
 import json
 import os

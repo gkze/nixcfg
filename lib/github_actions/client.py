@@ -7,8 +7,6 @@ all supported GitHub Actions API surfaces. The live log transport remains in
 endpoints there.
 """
 
-from __future__ import annotations
-
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -16,7 +14,7 @@ from typing import TYPE_CHECKING, Final, cast
 from urllib.parse import urlsplit
 
 from githubkit import GitHub
-from githubkit.versions.v2022_11_28.models import (
+from githubkit_schemas.v2026_03_10.models import (
     Job,
     ReposOwnerRepoActionsRunsRunIdJobsGetResponse200,
     ReposOwnerRepoActionsWorkflowsGetResponse200,
@@ -131,7 +129,7 @@ class GitHubActionsClient:
         """Create one client bound to a repository and GitHub token."""
         self.context = context
         self._github = github or build_github_client(token=token, context=context)
-        self._actions = self._github.rest("2022-11-28").actions
+        self._actions = self._github.rest().actions
 
     def list_workflows(self) -> tuple[Workflow, ...]:
         """Return all workflows configured for the repository."""

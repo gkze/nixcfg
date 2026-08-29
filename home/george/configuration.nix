@@ -217,13 +217,19 @@
         };
         notion.package = pkgs.notion-app;
         opencode.package = pkgs.opencode-desktop-dev;
-        orbstack.package = pkgs.orbstack;
+        orbstack = {
+          package = pkgs.orbstack;
+          scope = "system";
+        };
         pica.package = pkgs.pica;
         postman.package = pkgs.postman;
         raycast.package = pkgs.raycast;
         rectangle.package = pkgs.rectangle;
         rio.package = pkgs.rio;
-        "signal-beta".package = pkgs.signal-beta;
+        "signal-beta" = {
+          package = pkgs.signal-beta;
+          preventDowngrade = true;
+        };
         slack.package = pkgs.slack;
         sloth.package = pkgs.sloth-app;
         solo.package = pkgs.solo;
@@ -234,6 +240,7 @@
         t3code.package = pkgs.t3code-desktop;
         todoist.package = pkgs.todoist-desktop;
         tolaria.package = pkgs.tolaria;
+        utm.package = pkgs.utm;
         "vscode-insiders".package = pkgs.vscode-insiders;
         wave.package = pkgs.wave;
         "wispr-flow".package = pkgs.wispr-flow;
@@ -337,8 +344,30 @@
     # catppuccin/nix where we were previously unmanaged or where the dedicated
     # Catppuccin port gives us richer app-native theming.
     bottom.enable = true;
+    # The upstream module imports this TOML during evaluation, so override only
+    # its source while leaving flavor selection and settings ownership upstream.
+    sources.bottom =
+      let
+        inputSource = inputs.catppuccin-bottom-src;
+        moduleSource = (lib.importJSON "${inputs.catppuccin}/pkgs/sources.json").bottom;
+      in
+      assert lib.assertMsg (
+        inputSource.rev == moduleSource.rev && inputSource.narHash == moduleSource.hash
+      ) "catppuccin-bottom-src is out of sync with catppuccin/nix's Bottom source.";
+      "${inputSource}/themes";
     eza.enable = true;
     element-desktop.enable = true;
+    # The upstream module imports this JSON during evaluation, so override only
+    # its source while leaving flavor/accent selection and settings ownership upstream.
+    sources.element =
+      let
+        inputSource = inputs.catppuccin-element-src;
+        moduleSource = (lib.importJSON "${inputs.catppuccin}/pkgs/sources.json").element;
+      in
+      assert lib.assertMsg (
+        inputSource.rev == moduleSource.rev && inputSource.narHash == moduleSource.hash
+      ) "catppuccin-element-src is out of sync with catppuccin/nix's Element source.";
+      "${inputSource}/themes";
     vscode.profiles.default = {
       enable = true;
       icons.enable = true;

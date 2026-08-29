@@ -1,0 +1,6 @@
+diff --git a/cmake/onnxruntime.cmake b/cmake/onnxruntime.cmake
+--- a/cmake/onnxruntime.cmake
++++ b/cmake/onnxruntime.cmake
+@@ -217 +217 @@
+-    install(FILES ${onnxruntime_lib_files} DESTINATION lib)
++    # Paseo bundles the exact ONNX Runtime output separately.

@@ -1,7 +1,5 @@
 """Aggregate per-package sources.json files into a single SourcesFile."""
 
-from __future__ import annotations
-
 import asyncio
 import json
 import shutil

@@ -1,7 +1,5 @@
 """Helpers for command-backed generated artifact refreshes."""
 
-from __future__ import annotations
-
 import asyncio
 import shutil
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -28,9 +26,11 @@ from lib.update.process import RunCommandOptions
 from lib.update.process import run_command as _run_command
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterable, Mapping
+    from collections.abc import AsyncIterator, Callable, Iterable, Mapping
 
     from lib.update.config import UpdateConfig
+
+    type ArtifactNormalizer = Callable[[str], str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,7 +127,12 @@ def _read_artifacts(
     *,
     snapshot: ArtifactSnapshot,
     repo_root: Path,
+    artifact_normalizers: Mapping[str | Path, ArtifactNormalizer] | None = None,
 ) -> tuple[GeneratedArtifact, ...]:
+    resolved_normalizers = {
+        _artifact_path(path, repo_root=repo_root): normalizer
+        for path, normalizer in (artifact_normalizers or {}).items()
+    }
     artifacts: list[GeneratedArtifact] = []
     for path in artifact_paths:
         resolved = _artifact_path(path, repo_root=repo_root)
@@ -135,6 +140,9 @@ def _read_artifacts(
             msg = f"Generated artifact was not produced: {path}"
             raise RuntimeError(msg)
         content = resolved.read_text("utf-8")
+        normalizer = resolved_normalizers.get(resolved)
+        if normalizer is not None:
+            content = normalizer(content)
         original = snapshot[resolved]
         artifacts.append(
             GeneratedArtifact.text(
@@ -160,6 +168,7 @@ async def stream_command_materialized_artifacts(
     env: Mapping[str, str] | None = None,
     operation: str = "materialize_artifacts",
     repo_root: Path = REPO_ROOT,
+    artifact_normalizers: Mapping[str | Path, ArtifactNormalizer] | None = None,
 ) -> EventStream:
     """Refresh artifacts inside the run workspace, hash, and restore them."""
     if dry_run:
@@ -198,6 +207,7 @@ async def stream_command_materialized_artifacts(
                 artifact_paths,
                 snapshot=snapshot,
                 repo_root=repo_root,
+                artifact_normalizers=artifact_normalizers,
             )
             yield UpdateEvent.artifact(source, list(artifacts))
             yield UpdateEvent.status(

@@ -1,7 +1,5 @@
 """Tests for low-level nix command process helpers."""
 
-from __future__ import annotations
-
 import asyncio
 import sys
 import types
@@ -31,6 +29,40 @@ _THREE_SECONDS = 3.0
 class _NeverEndingStream:
     async def readline(self) -> bytes:
         await asyncio.Future()
+
+
+class _BlockingLineStream:
+    def __init__(self, first_line: bytes | None = None) -> None:
+        self._first_line = first_line
+        self.cancelled = False
+
+    async def readline(self) -> bytes:
+        if self._first_line is not None:
+            line = self._first_line
+            self._first_line = None
+            return line
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+
+
+class _LiveStreamProc:
+    def __init__(self) -> None:
+        self.stdout = _BlockingLineStream(b"ready\n")
+        self.stderr = _BlockingLineStream()
+        self.killed = False
+        self.returncode: int | None = None
+        self.wait_count = 0
+
+    def kill(self) -> None:
+        self.killed = True
+
+    async def wait(self) -> int:
+        self.wait_count += 1
+        self.returncode = -9
+        return self.returncode
 
 
 class _TimeoutProc:
@@ -416,6 +448,74 @@ def test_stream_nix_zero_timeout_uses_deadline_check() -> None:
 
     with pytest.raises(NixCommandError, match="timed out"):
         asyncio.run(_run())
+
+
+def test_stream_process_reaps_child_when_generator_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Closing a streamed command must stop its process and reader tasks."""
+    proc = _LiveStreamProc()
+
+    async def _create_subprocess_exec(
+        *_args: object, **_kwargs: object
+    ) -> _LiveStreamProc:
+        return proc
+
+    monkeypatch.setattr(
+        "lib.nix.commands.base.asyncio.create_subprocess_exec",
+        _create_subprocess_exec,
+    )
+
+    async def _run() -> None:
+        stream = stream_process(["nix", "build"], timeout=5.0)
+        assert await anext(stream) == ProcessLine("stdout", "ready\n")
+        await stream.aclose()
+        await stream.aclose()
+
+    asyncio.run(_run())
+
+    assert proc.killed
+    assert proc.wait_count == 1
+    assert proc.stdout.cancelled
+    assert proc.stderr.cancelled
+
+
+def test_stream_process_reaps_child_when_consumer_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Task cancellation must not leave a streamed subprocess running."""
+    proc = _LiveStreamProc()
+
+    async def _create_subprocess_exec(
+        *_args: object, **_kwargs: object
+    ) -> _LiveStreamProc:
+        return proc
+
+    monkeypatch.setattr(
+        "lib.nix.commands.base.asyncio.create_subprocess_exec",
+        _create_subprocess_exec,
+    )
+
+    async def _run() -> None:
+        first_line_seen = asyncio.Event()
+
+        async def _consume() -> None:
+            async for event in stream_process(["nix", "build"], timeout=5.0):
+                if event == ProcessLine("stdout", "ready\n"):
+                    first_line_seen.set()
+
+        task = asyncio.create_task(_consume())
+        await first_line_seen.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(_run())
+
+    assert proc.killed
+    assert proc.wait_count == 1
+    assert proc.stdout.cancelled
+    assert proc.stderr.cancelled
 
 
 def test_stream_nix_raises_when_subprocess_streams_missing(

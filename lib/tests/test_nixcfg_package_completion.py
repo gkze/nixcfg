@@ -1,7 +1,5 @@
 """Tests for the packaged nixcfg completion renderer."""
 
-from __future__ import annotations
-
 from types import ModuleType
 
 import pytest

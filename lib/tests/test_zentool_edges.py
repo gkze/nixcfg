@@ -1,7 +1,5 @@
 """Focused pure-Python tests for zentool edge-helper branches."""
 
-from __future__ import annotations
-
 import errno
 import json
 import subprocess

@@ -3,6 +3,9 @@ let
     "home/george/bin/git-ignore"
     "home/george/bin/zentool"
   ];
+  pythonPyupgradeExcludes = [
+    "lib/exact_text_patch.py"
+  ];
   pythonRuntimeSensitiveHelpers = [
     "lib/crate2nix_tauri_env_rewrite.py"
     "lib/nix/schemas/_fetch.py"
@@ -13,7 +16,7 @@ let
 in
 {
   python = {
-    inherit pythonScriptPaths pythonRuntimeSensitiveHelpers;
+    inherit pythonPyupgradeExcludes pythonScriptPaths pythonRuntimeSensitiveHelpers;
     pyupgradePaths = [
       "*.py"
       "*.pyi"
@@ -160,6 +163,7 @@ in
   text = {
     globs = [
       ".editorconfig"
+      ".gitattributes"
       ".gitignore"
       "**/.gitignore"
       ".root"

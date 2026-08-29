@@ -1,11 +1,9 @@
 """Helpers for building and evaluating Nix expressions in tests."""
 
-from __future__ import annotations
-
 import json
 import shutil
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from nix_manipulator.expressions.binding import Binding
@@ -85,10 +83,17 @@ def nix_let(bindings: Mapping[str, object], value: object) -> LetExpression:
     )
 
 
-def _run_nix_eval(expression: NixExpression, *, raw: bool) -> str:
+def nix_eval_result(
+    expression: NixExpression,
+    *,
+    raw: bool,
+    run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Evaluate *expression* and preserve stdout and stderr for semantic tests."""
     command = _nix_eval_command(raw=raw)
     command.extend(["--expr", expression.rebuild()])
-    result = subprocess.run(  # noqa: S603
+    runner = subprocess.run if run is None else run
+    return runner(
         command,
         check=True,
         capture_output=True,
@@ -96,7 +101,10 @@ def _run_nix_eval(expression: NixExpression, *, raw: bool) -> str:
         text=True,
         timeout=_NIX_EVAL_TIMEOUT_SECONDS,
     )
-    return result.stdout
+
+
+def _run_nix_eval(expression: NixExpression, *, raw: bool) -> str:
+    return nix_eval_result(expression, raw=raw).stdout
 
 
 def nix_eval_raw(expression: NixExpression) -> str:

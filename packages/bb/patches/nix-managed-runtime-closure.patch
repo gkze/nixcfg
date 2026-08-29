@@ -1,0 +1,24 @@
+diff --git a/apps/desktop/package.json b/apps/desktop/package.json
+--- a/apps/desktop/package.json
++++ b/apps/desktop/package.json
+@@ -39,6 +39,7 @@
+     "bb-app": "workspace:*",
+     "electron-updater": "^6.8.3",
+     "semver": "^7.7.0",
++    "wrappy": "1.0.2",
+     "zod": "^4.3.6"
+   },
+   "devDependencies": {
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -550,6 +550,9 @@ importers:
+       semver:
+         specifier: ^7.7.0
+         version: 7.7.4
++      wrappy:
++        specifier: 1.0.2
++        version: 1.0.2
+       zod:
+         specifier: 4.3.6
+         version: 4.3.6

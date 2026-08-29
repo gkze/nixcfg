@@ -1,7 +1,5 @@
 """Patch Codex's vendored Rust allocator for Darwin static linking."""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 _EXPECTED_ARGC = 1

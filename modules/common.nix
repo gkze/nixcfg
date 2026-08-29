@@ -69,6 +69,18 @@ in
         linux.dates = "09:30";
       }
       .${kernel};
+      optimise = {
+        automatic = true;
+      }
+      // {
+        darwin.interval = {
+          Weekday = 7;
+          Hour = 4;
+          Minute = 15;
+        };
+        linux.dates = "Sun 04:15";
+      }
+      .${kernel};
       settings = {
         experimental-features = [
           "nix-command"

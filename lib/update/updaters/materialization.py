@@ -1,7 +1,5 @@
 """Shared updater abstractions for artifact materialization phases."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.update.crate2nix import TARGETS, stream_crate2nix_artifact_updates

@@ -1,0 +1,38 @@
+{
+  "checks": [
+    "frontend-dist-manifest",
+    "oxc-valid-and-invalid-programs",
+    "python-import-and-cli",
+    "native-helper-arm64-and-help",
+    "app-plist-architecture-signature",
+    "store-path-app-candidate-backend-smoke",
+    "contained-direct-store-path-app-runtime",
+    "no-updater-or-runtime-installer-endpoints"
+  ],
+  "runtimeEvidence": {
+    "appCandidate": "/nix/store/3p63g8khynvbjd3454xbhxnqq8byz4in-unsloth-desktop-0.1.804-beta",
+    "appPid": 37014,
+    "backendExecutable": "/nix/store/pk7x6gndf87c9zibyad9cyqdkzzfspwf-unsloth-backend-2026.8.22/bin/unsloth",
+    "backendPid": 37047,
+    "backendRuntimeEntrypoint": "/nix/store/ks3cn0wppsyarqapxkq66vdzyvb4mw9d-unsloth-2026.8.22-venv/bin/unsloth",
+    "health": {
+      "service": "Unsloth UI Backend",
+      "status": "healthy",
+      "studio_root_id": "a0d81799bc7b93d3e80eb1130486c26cebf52fe07162b2083f94870ab7af1350"
+    },
+    "listenerAddress": "127.0.0.1:8888",
+    "listenerOwnership": "passed",
+    "ownedProcessGroups": [37014, 37047],
+    "port": 8888,
+    "protectedListenerCount": 1,
+    "protectedListenerIdentitySha256": "5ba058b715d1e6e19989947b912bb538f43e9fbec669fb08d49280743a2f911b",
+    "sandbox": "passed",
+    "schemaVersion": 2,
+    "sessionId": 37014,
+    "status": "passed",
+    "teardown": "passed"
+  },
+  "runtimeEvidenceSchemaVersion": 2,
+  "storePathAppCandidateSmokeOutput": "/nix/store/pxy4ny9v9s8v60rp95ry00p5cbl8mi50-unsloth-0.1.804-beta-store-path-app-candidate-smoke",
+  "status": "passed"
+}

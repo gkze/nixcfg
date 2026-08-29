@@ -1,7 +1,5 @@
 """Updater for Signal Desktop beta macOS releases."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, ClassVar, cast
 
 from lib.update.net import fetch_github_api_paginated

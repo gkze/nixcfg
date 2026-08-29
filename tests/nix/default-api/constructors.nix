@@ -92,6 +92,12 @@ let
       includeDefaultUserModule = false;
       enableRosettaBuilder = false;
     }).modules;
+  shortLingerDarwinModules =
+    (flake.lib.mkDarwinHost {
+      user = "alice";
+      includeDefaultUserModule = false;
+      rosettaBuilderLingerMinutes = 30;
+    }).modules;
 in
 if expected != actual then
   throw "default.nix constructors mismatch: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}"
@@ -107,5 +113,11 @@ else if !(builtins.elem "rosetta-builder-module" defaultDarwinModules) then
   throw "mkDarwinHost must enable its Rosetta builder by default"
 else if builtins.elem "rosetta-builder-module" noRosettaDarwinModules then
   throw "mkDarwinHost must allow callers to disable its Rosetta builder"
+else if
+  !(builtins.elem {
+    nix-rosetta-builder.onDemandLingerMinutes = 30;
+  } shortLingerDarwinModules)
+then
+  throw "mkDarwinHost must forward the Rosetta builder idle linger policy"
 else
   true

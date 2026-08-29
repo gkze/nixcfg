@@ -1,7 +1,5 @@
 """Normalize generated crate2nix output for the checked-in Codex Cargo.nix."""
 
-from __future__ import annotations
-
 from lib.cargo_nix_normalizer import normalize as normalize_cargo_nix
 
 _LOCAL_PATH_PREFIXES = (

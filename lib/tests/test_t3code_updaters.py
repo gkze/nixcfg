@@ -1,7 +1,5 @@
 """Tests for the T3 Code updater registrations."""
 
-from __future__ import annotations
-
 import asyncio
 import shlex
 from collections.abc import AsyncIterator

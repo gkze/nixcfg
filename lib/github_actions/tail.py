@@ -9,8 +9,6 @@ The transport is intentionally kept separate so it can be swapped cleanly if
 GitHub moves back to websocket-based live logs in the future.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import sys

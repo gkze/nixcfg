@@ -1,7 +1,5 @@
 """Updater for codex flake input metadata and crate2nix artifacts."""
 
-from __future__ import annotations
-
 from lib.update.updaters import Crate2NixMetadataUpdater, register_updater
 
 

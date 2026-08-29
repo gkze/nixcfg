@@ -1,7 +1,5 @@
 """Shared helpers for updater-focused tests."""
 
-from __future__ import annotations
-
 import asyncio
 from collections.abc import AsyncIterable, AsyncIterator, Coroutine, Sequence
 from pathlib import Path
@@ -82,11 +80,20 @@ def install_fixed_hash_stream(
         name: str,
         expr: str,
         *,
+        isolate_by_drv_hash: bool = False,
         env: object = None,
         config: object = None,
     ) -> AsyncIterator[UpdateEvent]:
         index = len(calls)
-        calls.append({"name": name, "expr": expr, "env": env, "config": config})
+        call = {
+            "name": name,
+            "expr": expr,
+            "env": env,
+            "config": config,
+        }
+        if isolate_by_drv_hash:
+            call["isolate_by_drv_hash"] = True
+        calls.append(call)
         if index >= len(output_steps):
             return
         status, value = output_steps[index]

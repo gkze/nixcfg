@@ -1,7 +1,5 @@
 """Behavioral tests for shared JSON validation helpers."""
 
-from __future__ import annotations
-
 import pytest
 
 from lib import json_utils

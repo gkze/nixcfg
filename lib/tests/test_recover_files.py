@@ -1,7 +1,5 @@
 """Tests for generic file recovery from source snapshots."""
 
-from __future__ import annotations
-
 import asyncio
 import json
 import subprocess

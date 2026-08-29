@@ -1,7 +1,5 @@
 """Additional tests for update config/constants/events helpers."""
 
-from __future__ import annotations
-
 import asyncio
 import builtins
 from typing import TYPE_CHECKING
@@ -48,12 +46,12 @@ if TYPE_CHECKING:
 
 
 def test_default_max_nix_builds_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Compute default max jobs for known and unknown CPU counts."""
+    """Keep the default update fan-out independent of large CPU counts."""
     monkeypatch.setattr("os.cpu_count", lambda: None)
-    assert default_max_nix_builds() == 4
+    assert default_max_nix_builds() == 2
 
     monkeypatch.setattr("os.cpu_count", lambda: 10)
-    assert default_max_nix_builds() == 7
+    assert default_max_nix_builds() == 2
 
     monkeypatch.setattr("os.cpu_count", lambda: 1)
     assert default_max_nix_builds() == 1

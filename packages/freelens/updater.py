@@ -1,7 +1,5 @@
 """Updater for Freelens."""
 
-from __future__ import annotations
-
 from typing import ClassVar
 
 from lib.update.updaters import GitHubReleaseAssetURLsUpdater, register_updater

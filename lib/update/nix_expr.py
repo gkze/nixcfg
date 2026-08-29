@@ -1,7 +1,5 @@
 """Helpers for building and normalizing generated Nix expressions."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from nix_manipulator.expressions.identifier import Identifier

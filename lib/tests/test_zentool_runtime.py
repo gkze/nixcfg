@@ -1,7 +1,5 @@
 """Focused pure-Python tests for zentool runtime and profile helpers."""
 
-from __future__ import annotations
-
 import configparser
 from pathlib import Path
 from typing import TYPE_CHECKING

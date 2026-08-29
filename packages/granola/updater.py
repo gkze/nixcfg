@@ -1,7 +1,5 @@
 """Updater for Granola macOS app releases."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, ClassVar
 
 import yaml

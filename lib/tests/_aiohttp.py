@@ -1,7 +1,5 @@
 """Shared aiohttp session helpers for test modules."""
 
-from __future__ import annotations
-
 import asyncio
 from typing import TYPE_CHECKING
 

@@ -1,7 +1,5 @@
 """Focused finishing tests for remaining zentool diff/export/list branches."""
 
-from __future__ import annotations
-
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING

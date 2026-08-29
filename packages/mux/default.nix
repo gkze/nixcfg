@@ -151,9 +151,9 @@ stdenv.mkDerivation {
 
         ${electronBuild.copyDist}
 
-        # Generate app icons once up front to avoid parallel make races inside
-        # scripts/generate-icons.ts writing build/icon.iconset.
-        bun scripts/generate-icons.ts png icns linux-icons
+        # Electron Builder converts the generated PNG to ICNS. Avoid the
+        # upstream iconutil-only path, which is unavailable in Nix sandboxes.
+        bun scripts/generate-icons.ts png linux-icons
 
         make SHELL=${stdenv.shell} build-main build-preload build-renderer build-static
         bun x electron-builder \
@@ -243,6 +243,8 @@ stdenv.mkDerivation {
     requiredRuntimePaths="
       $out/Applications/mux.app
       $out/Applications/mux.app/Contents/MacOS/mux
+      $out/Applications/mux.app/Contents/Info.plist
+      $out/Applications/mux.app/Contents/Resources/icon.icns
       $out/bin/mux
     "
 
@@ -252,6 +254,10 @@ stdenv.mkDerivation {
         exit 1
       fi
     done
+
+    plist="$out/Applications/mux.app/Contents/Info.plist"
+    test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$plist")" = \
+      "icon.icns"
 
     runHook postInstallCheck
   '';

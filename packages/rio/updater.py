@@ -1,7 +1,5 @@
 """Updater for the Rio source package."""
 
-from __future__ import annotations
-
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.updaters import (

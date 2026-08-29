@@ -1,7 +1,5 @@
 """Updater for Codex desktop Sparkle releases."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, cast
 

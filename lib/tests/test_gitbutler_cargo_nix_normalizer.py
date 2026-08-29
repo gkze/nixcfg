@@ -1,7 +1,5 @@
 """Tests for the GitButler crate2nix Cargo.nix normalizer."""
 
-from __future__ import annotations
-
 from types import ModuleType
 
 from lib.import_utils import load_module_from_path

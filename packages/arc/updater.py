@@ -1,7 +1,5 @@
 """Updater for Arc macOS releases."""
 
-from __future__ import annotations
-
 import re
 from typing import TYPE_CHECKING, ClassVar
 

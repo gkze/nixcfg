@@ -5,7 +5,6 @@ With no arguments, print the list of available template names.
 With one argument, print the corresponding `.gitignore` contents.
 """
 
-from __future__ import annotations
 
 import base64
 import http.client

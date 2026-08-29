@@ -1,7 +1,5 @@
 """Tests for shared synchronous HTTP and GitHub auth helpers."""
 
-from __future__ import annotations
-
 import base64
 import logging
 from pathlib import Path

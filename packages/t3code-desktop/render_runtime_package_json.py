@@ -1,7 +1,5 @@
 """Render the minimal runtime ``package.json`` for the packaged T3 Code desktop app."""
 
-from __future__ import annotations
-
 import argparse
 import json
 from pathlib import Path

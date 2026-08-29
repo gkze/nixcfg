@@ -2,8 +2,6 @@
 
 # ruff: noqa: INP001 -- standalone helper executed by a Nix derivation
 
-from __future__ import annotations
-
 import os
 import signal
 import sys

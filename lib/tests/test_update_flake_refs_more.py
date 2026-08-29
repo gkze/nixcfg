@@ -1,7 +1,5 @@
 """Additional tests for flake/refs update helpers."""
 
-from __future__ import annotations
-
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
@@ -43,6 +41,7 @@ from lib.update.refs import (
     _select_tag_from_releases,
     _select_tag_from_tags,
     _tag_matches_prefix,
+    _update_explicit_input_ref_in_flake,
     _update_git_input_ref_in_flake,
     check_flake_ref_update,
     fetch_github_latest_version_ref,
@@ -526,6 +525,35 @@ def test_update_git_input_ref_in_flake_writes_changed_ref(
     assert flake_path.read_text(encoding="utf-8") == updated_text
 
 
+def test_update_explicit_input_ref_reports_existing_and_missing_ref(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Distinguish an already-current split ref from an attrset without one."""
+    flake_path = tmp_path / "flake.nix"
+    monkeypatch.setattr("lib.update.refs.get_repo_root", lambda: tmp_path)
+    flake_path.write_text(
+        """{
+  inputs = {
+    current = {
+      type = "github";
+      ref = "v2";
+    };
+    missing = {
+      type = "github";
+    };
+  };
+}
+""",
+        encoding="utf-8",
+    )
+
+    before = flake_path.read_bytes()
+    assert _update_explicit_input_ref_in_flake("current", "v2") is True
+    assert flake_path.read_bytes() == before
+    assert _update_explicit_input_ref_in_flake("missing", "v2") is False
+
+
 def test_get_root_input_name_without_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
     """Return the requested name when the root node exposes no inputs."""
     model = SimpleNamespace(root_node=SimpleNamespace(inputs=None), nodes={})
@@ -980,6 +1008,53 @@ def test_update_flake_ref_invalidates_cached_lock_after_success(
     )
 
     assert invalidated_after == [2]
+
+
+def test_update_flake_ref_rewrites_split_github_input(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Update legal split-form GitHub inputs without relying on flake-edit."""
+    flake_path = tmp_path / "flake.nix"
+    flake_path.write_text(
+        """{
+  inputs = {
+    goose = {
+      type = "github";
+      owner = "aaif-goose";
+      repo = "goose";
+      ref = "v1.46.0";
+      flake = false;
+    };
+  };
+}
+""",
+        encoding="utf-8",
+    )
+    commands: list[list[str]] = []
+
+    async def _record_run_checked(
+        args: list[str],
+        **_kwargs: object,
+    ) -> AsyncIterator[UpdateEvent]:
+        commands.append(args)
+        yield UpdateEvent.status("goose", "ok")
+
+    monkeypatch.setattr("lib.update.refs.get_repo_root", lambda: tmp_path)
+    monkeypatch.setattr("lib.update.refs._run_checked_command", _record_run_checked)
+
+    _run_async(
+        update_flake_ref(
+            FlakeInputRef("goose", "aaif-goose", "goose", "v1.46.0", "github"),
+            "v1.47.0",
+            source="goose",
+        )
+    )
+
+    assert commands == [["nix", "flake", "lock", "--update-input", "goose"]]
+    root = expect_instance(parse_nix_expr(flake_path.read_text()), AttributeSet)
+    inputs = expect_instance(expect_binding(root.values, "inputs").value, AttributeSet)
+    goose = expect_instance(expect_binding(inputs.values, "goose").value, AttributeSet)
+    assert_nix_ast_equal(expect_binding(goose.values, "ref").value, '"v1.47.0"')
 
 
 def test_update_refs_task_flow_variants(monkeypatch: pytest.MonkeyPatch) -> None:

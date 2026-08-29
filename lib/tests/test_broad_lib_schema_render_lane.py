@@ -1,7 +1,5 @@
 """Coverage-focused tests for the broad-lib schema/render lane."""
 
-from __future__ import annotations
-
 import json
 import logging
 import os
@@ -904,6 +902,7 @@ def test_mac_apps_helper_additional_paths(  # noqa: PLR0915
             {
                 "bundleName": "Managed.app",
                 "mode": "symlink",
+                "preventDowngrade": False,
                 "sourcePath": str(managed_bundle),
             }
         ],
@@ -998,6 +997,19 @@ def test_mac_apps_helper_payload_validation_errors(
                 "entries": [1],
             }),
             "payload field 'entries[0]' must be an object",
+        ),
+        (
+            lambda: mac_apps_helper._system_applications({
+                **valid_system_payload,
+                "entries": [
+                    {
+                        "bundleName": "Managed.app",
+                        "mode": "symlink",
+                        "sourcePath": "/nix/store/fake/Applications/Managed.app",
+                    }
+                ],
+            }),
+            "missing required payload field: preventDowngrade",
         ),
         (
             lambda: mac_apps_helper._system_applications({

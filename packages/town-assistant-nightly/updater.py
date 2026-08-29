@@ -1,7 +1,5 @@
 """Updater for the Town Assistant nightly macOS appcast."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.update.updaters import SparkleAppcastUrlUpdater, register_updater

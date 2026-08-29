@@ -1,7 +1,5 @@
 """Updater for Figma desktop macOS releases."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, ClassVar
 
 from lib import json_utils

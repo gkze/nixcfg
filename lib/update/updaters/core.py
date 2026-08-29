@@ -1,7 +1,6 @@
 """Core updater abstractions and shared non-flake implementations."""
 
-from __future__ import annotations
-
+import annotationlib
 import asyncio
 import inspect
 from abc import ABC, abstractmethod
@@ -104,7 +103,7 @@ def _call_with_optional_context[T](
     context: UpdateContext,
     **kwargs: object,
 ) -> T:
-    signature = inspect.signature(func)
+    signature = inspect.signature(func, annotation_format=annotationlib.Format.STRING)
     bound_kwargs = dict(kwargs)
     if "context" in signature.parameters:
         bound_kwargs["context"] = context

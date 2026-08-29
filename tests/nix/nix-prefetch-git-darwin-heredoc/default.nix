@@ -1,13 +1,22 @@
 { pkgs }:
-if !pkgs.stdenv.hostPlatform.isDarwin then
+if !pkgs.stdenv.buildPlatform.isDarwin then
   assert pkgs.bash-dynamic-pipe-heredoc.drvPath == pkgs.bashNonInteractive.drvPath;
+  assert pkgs.gnutar-dynamic-pipe-heredoc.drvPath == pkgs.gnutar.drvPath;
   pkgs.runCommand "check-nix-prefetch-git-darwin-heredoc-skipped" { } ''
     touch $out
   ''
 else
+  let
+    gnutarBuilder = pkgs.gnutar-dynamic-pipe-heredoc.dynamicPipeHeredocBuilder;
+  in
+  assert pkgs.gnutar-dynamic-pipe-heredoc.builder == gnutarBuilder;
+  assert pkgs.lib.hasSuffix "/bin/bash" gnutarBuilder;
   pkgs.runCommand "check-nix-prefetch-git-darwin-heredoc"
     {
-      nativeBuildInputs = [ pkgs.coreutils ];
+      nativeBuildInputs = [
+        pkgs.coreutils
+        pkgs.gnutar-dynamic-pipe-heredoc
+      ];
     }
     ''
       unset BASH_COMPAT DIRENV_BASH
@@ -61,6 +70,10 @@ else
       probe_interpreter \
         bash-dynamic-pipe-heredoc \
         ${pkgs.bash-dynamic-pipe-heredoc}/bin/bash
+      probe_interpreter \
+        gnutar-builder \
+        ${gnutarBuilder}
+      ${pkgs.gnutar-dynamic-pipe-heredoc}/bin/tar --version >/dev/null
 
       zed_fixture_src="$TMPDIR/zed-fixture-src"
       zed_fixture_resources="$zed_fixture_src/crates/zed/resources"

@@ -1,7 +1,5 @@
 """Unified Typer app for package-maintenance tooling."""
 
-from __future__ import annotations
-
 import typer
 
 from lib.cli import HELP_CONTEXT_SETTINGS, make_main

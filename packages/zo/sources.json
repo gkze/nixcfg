@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-iAcRN3Nwo9VaFjGnDHS+3DJXczFyuz8RWGKnhpSAEiE=",
+    "x86_64-darwin": "sha256-iAcRN3Nwo9VaFjGnDHS+3DJXczFyuz8RWGKnhpSAEiE="
+  },
+  "urls": {
+    "aarch64-darwin": "https://github.com/zocomputer/Zo/releases/download/v1.5.13/Zo-1.5.13-universal-mac.zip",
+    "x86_64-darwin": "https://github.com/zocomputer/Zo/releases/download/v1.5.13/Zo-1.5.13-universal-mac.zip"
+  },
+  "version": "1.5.13"
+}

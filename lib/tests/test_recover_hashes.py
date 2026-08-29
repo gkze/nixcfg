@@ -1,7 +1,5 @@
 """Tests for hash-file recovery planning and application."""
 
-from __future__ import annotations
-
 import asyncio
 import json
 import subprocess

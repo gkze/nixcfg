@@ -1,7 +1,5 @@
 """CLI entry point for update workflows."""
 
-from __future__ import annotations
-
 import asyncio
 import contextlib
 import json

@@ -1,7 +1,5 @@
 """Focused pure-Python tests for zentool compilation and matching helpers."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 import pytest

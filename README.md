@@ -75,8 +75,11 @@ nix develop
 # Keep Python tooling in sync for editor/test workflows
 uv sync
 
-# Format and evaluate
+# Format and evaluate. The default no-build pass checks the current system;
+# the all-systems pass is the full purity matrix. Neither may inspect outputs.
 nix fmt
+nix flake check --no-build --option allow-import-from-derivation false
+nix flake check --all-systems --no-build --option allow-import-from-derivation false
 nix flake check
 
 # Pre-commit hooks

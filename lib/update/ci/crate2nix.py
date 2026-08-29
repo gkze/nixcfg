@@ -1,7 +1,5 @@
 """CLI wrapper for shared crate2nix regeneration logic."""
 
-from __future__ import annotations
-
 import pathlib  # noqa: TC003
 from typing import Annotated
 

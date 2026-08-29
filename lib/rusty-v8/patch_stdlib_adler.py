@@ -1,7 +1,5 @@
 """Patch Chromium Rust stdlib adler selection for Nix rustc."""
 
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 

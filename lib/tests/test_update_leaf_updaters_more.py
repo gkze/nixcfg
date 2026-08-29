@@ -1,7 +1,5 @@
 """Focused branch coverage for package-owned updater entrypoints."""
 
-from __future__ import annotations
-
 import plistlib
 from collections.abc import Callable
 from types import ModuleType
@@ -157,12 +155,6 @@ def test_ghostty_tip_requires_commit_url(monkeypatch: pytest.MonkeyPatch) -> Non
 @pytest.mark.parametrize(
     ("path", "payload", "expected_version", "expected_url"),
     [
-        (
-            "packages/antigravity/updater.py",
-            {"url": "https://host/antigravity-hub/1.2.3/app.zip"},
-            "1.2.3",
-            "https://host/antigravity-hub/1.2.3/app.dmg",
-        ),
         (
             "packages/claude/updater.py",
             {
@@ -599,7 +591,6 @@ def test_signal_beta_rejects_unexpected_tags(tag: str) -> None:
 @pytest.mark.parametrize(
     ("path", "payload"),
     [
-        ("packages/antigravity/updater.py", {"url": "https://example.com/app.zip"}),
         ("packages/arc/updater.py", None),
         ("packages/claude/updater.py", {"releases": []}),
         ("packages/cleanshot/updater.py", b"no version here"),

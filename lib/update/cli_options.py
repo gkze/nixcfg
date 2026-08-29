@@ -1,7 +1,5 @@
 """Shared CLI option models for update commands."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Literal, TypedDict, cast
 

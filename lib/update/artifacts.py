@@ -1,15 +1,23 @@
 """Generated artifact models and persistence helpers for updater workflows."""
 
-from __future__ import annotations
-
 import json
+import tempfile
 from dataclasses import dataclass, field
+from hashlib import sha256
 from pathlib import Path
 
 from filelock import FileLock
 
 from lib.update import io as update_io
 from lib.update.paths import REPO_ROOT
+
+
+def _artifact_lock_path(path: Path) -> Path:
+    """Return a stable cross-process lock path outside the repository tree."""
+    lock_root = Path(tempfile.gettempdir()) / "nixcfg-generated-artifact-locks"
+    lock_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path_digest = sha256(str(path).encode()).hexdigest()
+    return lock_root / f"{path_digest}.lock"
 
 
 def resolve_repo_path(path: Path, *, repo_root: Path = REPO_ROOT) -> Path:
@@ -84,7 +92,7 @@ class GeneratedArtifact:
     def write(self, *, repo_root: Path = REPO_ROOT) -> None:
         """Persist this artifact atomically under the repository root."""
         path = self.resolved_path(repo_root=repo_root)
-        lock_path = path.with_name(f"{path.name}.lock")
+        lock_path = _artifact_lock_path(path)
         with FileLock(lock_path):
             update_io.atomic_write_text(path, self.content, mkdir=True)
 

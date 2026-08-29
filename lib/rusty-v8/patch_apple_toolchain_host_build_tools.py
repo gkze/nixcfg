@@ -1,7 +1,5 @@
 """Patch V8's Apple toolchain host-build-tools settings for Nix builds."""
 
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 

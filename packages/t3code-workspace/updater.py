@@ -1,7 +1,5 @@
 """Updater for the internal T3 Code workspace dependency cache."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, Literal
 
 from lib.nix.models.sources import HashEntry, SourceEntry, SourceHashes

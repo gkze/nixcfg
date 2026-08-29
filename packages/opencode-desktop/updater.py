@@ -1,7 +1,5 @@
 """Updater for opencode-desktop's Bun node_modules hash."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from lib.update.updaters import (

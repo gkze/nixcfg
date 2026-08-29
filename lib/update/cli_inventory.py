@@ -1,7 +1,5 @@
 """Inventory models and helpers for the update CLI."""
 
-from __future__ import annotations
-
 import importlib
 import json
 import sys
@@ -255,7 +253,7 @@ def _crate2nix_generated_artifact_paths(name: str) -> tuple[str, ...]:
     target = getattr(crate2nix_module, "TARGETS", {}).get(name)
     if target is None:
         return ()
-    return (target.cargo_nix.as_posix(), target.crate_hashes.as_posix())
+    return tuple(path.as_posix() for path in target.artifact_paths)
 
 
 def _inventory_classification(handles: _InventoryHandles) -> str:

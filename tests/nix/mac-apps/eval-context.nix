@@ -41,6 +41,7 @@ let
     mkOption = value: value;
     optionalString = cond: value: if cond then value else "";
     types = rec {
+      bool = "bool";
       package = "package";
       str = "str";
       enum = values: {

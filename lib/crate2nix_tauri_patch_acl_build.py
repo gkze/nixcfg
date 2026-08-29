@@ -1,7 +1,5 @@
 """Patch tauri-utils ACL build.rs to survive crate2nix env var normalization."""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 _CANDIDATES = (

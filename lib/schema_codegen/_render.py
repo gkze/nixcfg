@@ -1,7 +1,5 @@
 """Internal Python rendering and post-processing helpers."""
 
-from __future__ import annotations
-
 import ast
 import importlib
 import json
@@ -33,7 +31,7 @@ class _DataModelCodeGeneratorModule(Protocol):
 
     def generate(
         self, source: Path | str | object, *, config: object
-    ) -> str | None | object: ...
+    ) -> str | object | None: ...
 
 
 class _CodeFormatterLike(Protocol):

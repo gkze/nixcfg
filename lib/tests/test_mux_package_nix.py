@@ -1,7 +1,5 @@
 """Behavioral contracts for the mux package's offline dependency cache."""
 
-from __future__ import annotations
-
 import os
 import shutil
 import subprocess

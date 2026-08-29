@@ -76,11 +76,21 @@ in
         description = "Maximum processes (launchd limit).";
       };
     };
+    zsh.deferCompletionInitToHomeManager = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Let Home Manager initialize zsh and bash completion after configuring fpath.";
+    };
     homebrew = {
       autoUpdate = mkOption {
         type = types.bool;
-        default = true;
-        description = "Automatically update Homebrew on activation.";
+        default = false;
+        description = "Allow Homebrew to auto-update during activation and manual commands.";
+      };
+      upgrade = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Upgrade Homebrew and Mac App Store packages on activation.";
       };
       cleanup = mkOption {
         type = types.enum [
@@ -162,6 +172,11 @@ in
 
     security.pam.services.sudo_local.touchIdAuth = cfg.security.touchIdSudo;
 
+    programs.zsh = lib.mkIf cfg.zsh.deferCompletionInitToHomeManager {
+      enableGlobalCompInit = false;
+      enableBashCompletion = false;
+    };
+
     launchd.daemons =
       lib.mapAttrs
         (name: limit: {
@@ -189,7 +204,7 @@ in
       global.autoUpdate = cfg.homebrew.autoUpdate;
       onActivation = {
         inherit (cfg.homebrew) autoUpdate cleanup;
-        upgrade = true;
+        upgrade = cfg.homebrew.upgrade;
       };
       taps = builtins.attrNames config.nix-homebrew.taps;
     };

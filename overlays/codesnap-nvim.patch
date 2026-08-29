@@ -1,0 +1,26 @@
+diff --git a/lua/codesnap/init.lua b/lua/codesnap/init.lua
+--- a/lua/codesnap/init.lua
++++ b/lua/codesnap/init.lua
+@@ -30,8 +30,8 @@ function main.save(save_path)
+ 
+   local matched_extension = string.match(save_path, "%.(.+)$")
+ 
+-  if matched_extension ~= "png" and matched_extension ~= nil then
+-    error("The extension of save_path should be .png", 0)
++  if matched_extension ~= nil and matched_extension ~= "png" and matched_extension ~= "svg" and matched_extension ~= "html" then
++    error("The extension of save_path should be .png, .svg, or .html", 0)
+   end
+ 
+   generator.save(save_path, config_module.get_config())
+diff --git a/lua/codesnap/utils/table.lua b/lua/codesnap/utils/table.lua
+--- a/lua/codesnap/utils/table.lua
++++ b/lua/codesnap/utils/table.lua
+@@ -36,7 +36,7 @@ function table_utils.merge_config(t1, t2)
+     end
+   end
+   for k, v in pairs(t2) do
+-    if t1[k] == nil and v ~= nil then
++    if t1[k] == nil and v ~= nil and v ~= "none" then
+       t1[k] = v
+     end
+   end

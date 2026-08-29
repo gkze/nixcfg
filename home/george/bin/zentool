@@ -22,7 +22,6 @@ The implementation intentionally has three layers:
 Anything in the managed subset that is not declared by config is removed.
 """
 
-from __future__ import annotations
 
 import base64
 import concurrent.futures
@@ -102,6 +101,7 @@ MANAGED_CHROME_MANIFEST: Final[str] = ".zentool-managed-chrome"
 MANAGED_USER_JS_MANIFEST: Final[str] = ".zentool-managed-user-js"
 INTERRUPTED_EXIT_CODE: Final[int] = 130
 SESSION_SPLIT_VIEW_EXTRA: Final[str] = "splitViewData"
+PINNED_INITIAL_STATE_EXTRA: Final[str] = "_zenPinnedInitialState"
 PROFILE_HELP: Final[str] = (
     "Zen profile directory name, a direct path to a profile directory/session file, "
     "or a human profile name from profiles.ini. Default: auto-detect the running "
@@ -2261,6 +2261,35 @@ def set_tab_image(tab: SessionTab, image: str | None) -> None:
         extra["image"] = image
     else:
         extra.pop("image", None)
+    pinned_initial_state = extra.get(PINNED_INITIAL_STATE_EXTRA)
+    if isinstance(pinned_initial_state, dict):
+        canonical_image = pinned_initial_state.get("image")
+        if image and not (isinstance(canonical_image, str) and canonical_image):
+            pinned_initial_state["image"] = image
+
+
+def sync_pinned_initial_state(tab: SessionTab, *, name: str, url: str) -> None:
+    """Reconcile Zen's canonical pinned-tab target with declarative state."""
+    extra = tab.model_extra
+    if not tab.pinned:
+        if extra is not None:
+            extra.pop(PINNED_INITIAL_STATE_EXTRA, None)
+        return
+    old_state = (extra or {}).get(PINNED_INITIAL_STATE_EXTRA)
+    old_entry = old_state.get("entry") if isinstance(old_state, dict) else None
+    old_url = old_entry.get("url") if isinstance(old_entry, dict) else None
+    old_image = old_state.get("image") if isinstance(old_state, dict) else None
+    preserve_old_image = (
+        isinstance(old_url, str)
+        and isinstance(old_image, str)
+        and bool(old_image)
+        and (old_url == url or _same_origin(old_url, url))
+    )
+    canonical_image = old_image if preserve_old_image else tab_image(tab)
+    _tab_extra(tab)[PINNED_INITIAL_STATE_EXTRA] = {
+        "entry": {"url": url, "title": name},
+        "image": canonical_image,
+    }
 
 
 def _content_type_from_url(url: str) -> str | None:
@@ -2486,6 +2515,7 @@ def build_tab(
         reset_runtime_entry=reset_runtime_entry,
         favicon_resolver=favicon_resolver,
     )
+    sync_pinned_initial_state(tab, name=spec.name, url=spec.url)
     tab.zen_glance_id = None
     tab.zen_is_glance = False
     tab.zen_live_folder_item_id = None

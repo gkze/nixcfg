@@ -1,0 +1,45 @@
+diff --git a/cmake/maccatalyst_prepare_objects_for_prelink.py b/cmake/maccatalyst_prepare_objects_for_prelink.py
+index a89535626..41f057cbf 100644
+--- a/cmake/maccatalyst_prepare_objects_for_prelink.py
++++ b/cmake/maccatalyst_prepare_objects_for_prelink.py
+@@ -15,7 +15,9 @@ def main():
+     dest_dir = sys.argv[2]
+     files_from_static_lib = sys.argv[3]
+     files_from_source_dir = []
+-    for subdir, _, files in os.walk(source_dir):
++    for subdir, dirs, files in os.walk(source_dir):
++        dirs.sort()
++        files.sort()
+         for file_name in files:
+             if file_name.endswith(".o"):
+                 files_from_source_dir.append(file_name.strip())
+@@ -66,6 +68,7 @@ def main():
+             "and the .o files extracted from static library for: ",
+             os.path.basename(source_dir),
+         )
++        raise SystemExit(1)
+-
+-
++
++
+ if __name__ == "__main__":
+diff --git a/cmake/onnxruntime.cmake b/cmake/onnxruntime.cmake
+index bcd1a0217..7082e4c9c 100644
+--- a/cmake/onnxruntime.cmake
++++ b/cmake/onnxruntime.cmake
+@@ -388,7 +388,7 @@ if(onnxruntime_BUILD_APPLE_FRAMEWORK)
+       set(CUR_STATIC_LIB_OBJ_DIR ${STATIC_LIB_TEMP_DIR}/$<TARGET_LINKER_FILE_BASE_NAME:${_LIB}>)
+       add_custom_command(TARGET onnxruntime POST_BUILD
+                          COMMAND ${CMAKE_COMMAND} -E make_directory ${CUR_STATIC_LIB_OBJ_DIR})
+-      if (PLATFORM_NAME STREQUAL "macabi")
++      if (TRUE)
+         # There exists several duplicate names for source files under different subdirectories within
+         # each onnxruntime library. (e.g. onnxruntime/contrib_ops/cpu/element_wise_ops.o
+         # vs. onnxruntime/providers/core/cpu/math/element_wise_ops.o)
+@@ -446,4 +446,6 @@ if(onnxruntime_BUILD_APPLE_FRAMEWORK)
+       foreach(dependency ${all_link_libraries})
++        # LINK_ONLY still names a required transitive static dependency.
++        string(REGEX REPLACE "^\\$<LINK_ONLY:([^>]+)>$" "\\1" dependency "${dependency}")
+         if(TARGET ${dependency})
+           process(${dependency})
+         endif()

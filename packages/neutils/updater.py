@@ -1,7 +1,5 @@
 """Updater for neutils source hash and generated Zig dependency materialization."""
 
-from __future__ import annotations
-
 import asyncio
 import io
 import os
@@ -70,6 +68,7 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         "ReadFailed",
         "Temporary failure in name resolution",
         "TlsInitializationFailed",
+        "UnknownHostName",
         "connection reset",
         "timed out",
     )

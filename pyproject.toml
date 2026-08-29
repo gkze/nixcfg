@@ -31,6 +31,7 @@ dependencies = [
   "pydantic>=2.12.5",
   "pyyaml>=6.0.3",
   "rich>=14.3.3",
+  "tree-sitter>=0.25.2,<0.26",
   "tenacity>=9.1.4",
   "tomlkit>=0.14.0",
   "typer>=0.24.1",
@@ -73,8 +74,10 @@ exclude = [
 [tool.ruff.lint]
 # Start from the full Ruff rule set.
 select = ["ALL"]
-# Keep only formatter/docstyle convention conflicts out of the active set.
-ignore = ["COM812", "D203", "D213"]
+# Keep formatter/docstyle convention conflicts and repo-wide policy migrations
+# out of the active set. Copyright headers and collection-literal wrapping need
+# deliberate adoption rather than appearing implicitly after a Ruff upgrade.
+ignore = ["COM812", "CPY001", "D203", "D213", "ISC004"]
 # Enable preview lint rules in addition to stable rules.
 preview = true
 # Require explicit preview rule codes to avoid accidental prefix selection.
@@ -82,7 +85,7 @@ explicit-preview-rules = true
 
 [tool.ruff.lint.per-file-ignores]
 # Keep high-signal linting in tests while allowing pragmatic test patterns.
-"lib/tests/**/*.py" = [
+"{lib/tests/**/*.py,packages/*/updater_test.py,overlays/*/updater_test.py}" = [
   "ANN001",
   "ANN002",
   "ANN003",
@@ -178,12 +181,18 @@ all = "error"
 # migrated deliberately.
 missing-override-decorator = "ignore"
 missing-type-argument = "ignore"
+unsound-assignment = "ignore"
+unsound-return-statement = "ignore"
 
 [[tool.ty.overrides]]
 # Dynamic mocks and deliberately invalid fixtures exercise runtime failure
 # contracts. Ignore only the diagnostic families those test seams require;
 # every other Ty rule remains enabled for tests.
-include = ["lib/tests/**/*.py"]
+include = [
+  "lib/tests/**/*.py",
+  "packages/*/updater_test.py",
+  "overlays/*/updater_test.py",
+]
 
 [tool.ty.overrides.rules]
 invalid-argument-type = "ignore"
@@ -208,9 +217,11 @@ respect-type-ignore-comments = false
 
 [tool.pytest.ini_options]
 # Enforce strict validation of pytest config keys and marker declarations.
-addopts = ["--strict-config", "--strict-markers"]
-# Limit default test discovery to the `lib` tree.
-testpaths = ["lib"]
+addopts = ["--strict-config", "--strict-markers", "--import-mode=importlib"]
+# Discover shared tests plus package- and overlay-owned sibling updater tests.
+testpaths = ["lib", "packages", "overlays"]
+# Preserve pytest's conventional prefix while supporting colocated sibling names.
+python_files = ["test_*.py", "*_test.py"]
 # Fail when xfail-marked tests unexpectedly pass.
 xfail_strict = true
 
@@ -226,7 +237,11 @@ source = ["nixcfg", "lib", "modules", "packages", "overlays", "home/george/bin"]
 # lower number.
 fail_under = 100
 # Exclude test modules from coverage totals.
-omit = ["lib/tests/*"]
+omit = [
+  "lib/tests/*",
+  "packages/*/updater_test.py",
+  "overlays/*/updater_test.py",
+]
 # Show exact missing lines in text coverage reports.
 show_missing = true
 # Replace the default bare-pragma with a reason-required form: only
@@ -251,7 +266,7 @@ dev = [
   "datamodel-code-generator[http]>=0.54.0",
   "pytest>=9.0.2",
   "pytest-xdist>=3.8.0",
-  "tree-sitter>=0.25.2",
+  "tree-sitter>=0.25.2,<0.26",
   "tree-sitter-bash>=0.25.0",
   "pyupgrade>=3.21.2",
   "referencing>=0.37.0",

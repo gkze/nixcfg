@@ -1,7 +1,5 @@
 """Patch rusty_v8 build.rs to accept a Nix-built GN output directory."""
 
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 

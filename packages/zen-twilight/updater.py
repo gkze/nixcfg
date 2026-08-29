@@ -1,7 +1,5 @@
 """Updater for the Zen Twilight channel DMG."""
 
-from __future__ import annotations
-
 import asyncio
 from typing import TYPE_CHECKING, ClassVar
 

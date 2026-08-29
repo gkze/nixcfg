@@ -1,0 +1,47 @@
+diff --git a/project.yml b/project.yml
+--- a/project.yml
++++ b/project.yml
+@@ -13,12 +13,7 @@ options:
+ packages:
+   cmark-gfm:
+-    url: https://github.com/brokenhandsio/cmark-gfm.git
+-    from: "2.1.0"
+-  Sparkle:
+-    url: https://github.com/sparkle-project/Sparkle
+-    from: "2.6.0"
++    path: nix-swift-deps/cmark-gfm
+   KeyboardShortcuts:
+-    url: https://github.com/sindresorhus/KeyboardShortcuts
+-    from: "2.1.0"
++    path: nix-swift-deps/KeyboardShortcuts
+   ClearlyCore:
+     path: Packages/ClearlyCore
+@@ -55,7 +50,6 @@ targets:
+       - package: ClearlyCore
+       - package: cmark-gfm
+         product: cmark
+-      - package: Sparkle
+       - package: KeyboardShortcuts
+       - target: ClearlyQuickLook
+         embed: true
+@@ -66,7 +60,7 @@ targets:
+         MARKETING_VERSION: "3.2.0"
+         CURRENT_PROJECT_VERSION: "1"
+         SWIFT_VERSION: "5.9"
+-        CODE_SIGN_ENTITLEMENTS: Clearly/Clearly.entitlements
++        CODE_SIGN_ENTITLEMENTS: Clearly/Clearly-AppStore.entitlements
+         INFOPLIST_FILE: Clearly/Info.plist
+         GENERATE_INFOPLIST_FILE: NO
+         ENABLE_HARDENED_RUNTIME: YES
+diff --git a/Packages/ClearlyCore/Package.swift b/Packages/ClearlyCore/Package.swift
+--- a/Packages/ClearlyCore/Package.swift
++++ b/Packages/ClearlyCore/Package.swift
+@@ -8,7 +8,7 @@ let package = Package(
+         .library(name: "ClearlyCore", targets: ["ClearlyCore"]),
+     ],
+     dependencies: [
+-        .package(url: "https://github.com/brokenhandsio/cmark-gfm.git", from: "2.1.0"),
++        .package(path: "../../nix-swift-deps/cmark-gfm"),
+     ],
+     targets: [
+         .target(

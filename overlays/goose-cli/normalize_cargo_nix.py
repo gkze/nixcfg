@@ -5,8 +5,6 @@ In this repo we instead check Cargo.nix into overlays/goose-cli/ and feed the
 real, already-patched Goose source tree separately via rootSrc.
 """
 
-from __future__ import annotations
-
 from lib.cargo_nix_normalizer import normalize as normalize_cargo_nix
 
 

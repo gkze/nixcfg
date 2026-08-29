@@ -1,18 +1,16 @@
 """Updater for Google Antigravity."""
 
-from __future__ import annotations
-
 import re
 from typing import TYPE_CHECKING, ClassVar
 
-from lib import json_utils
-from lib.update.net import fetch_json
+from lib.update.derivation_validation import DerivationValidation
 from lib.update.updaters import (
     DownloadUrlMetadataUpdater,
     VersionInfo,
     register_updater,
 )
 from lib.update.updaters.metadata import DownloadUrlMetadata
+from lib.update.updaters.vendor_feeds import fetch_electron_builder_feed
 
 if TYPE_CHECKING:
     import aiohttp
@@ -20,34 +18,64 @@ if TYPE_CHECKING:
 
 @register_updater
 class AntigravityUpdater(DownloadUrlMetadataUpdater):
-    """Resolve Google Antigravity from Google's updater service."""
+    """Resolve Google Antigravity from its packaged electron-builder feed."""
 
     name = "antigravity"
-    UPDATE_URL = (
-        "https://antigravity-auto-updater-974169037036.us-central1.run.app/"
-        "api/update/darwin-arm64/stable/latest"
+    FEED_URL = (
+        "https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/"
+        "manifest/latest-arm64-mac.yml"
     )
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "darwin-arm",
     }
     URL_METADATA_CONTEXT = "Google Antigravity metadata"
+    _ARTIFACT_URL = re.compile(
+        r"https://storage\.googleapis\.com/antigravity-public/antigravity-hub/"
+        r"(?P<release>[^/]+)/darwin-arm/Antigravity\.zip"
+    )
+    derivation_validations = (
+        DerivationValidation(
+            installable="path:.#pkgs.{system}.{name}",
+            systems=("aarch64-darwin",),
+            mode="build",
+        ),
+    )
+
+    @classmethod
+    def _parse_artifact_url(cls, url: str, product_version: str) -> tuple[str, str]:
+        """Validate one vendor ZIP and return its release token and DMG peer."""
+        match = cls._ARTIFACT_URL.fullmatch(url)
+        if match is None:
+            msg = f"Unexpected Google Antigravity artifact URL: {url}"
+            raise RuntimeError(msg)
+        release = match.group("release")
+        build_id = release.removeprefix(f"{product_version}-")
+        if build_id == release or not build_id.isdigit():
+            msg = (
+                "Google Antigravity artifact version does not match feed: "
+                f"{release} != {product_version}"
+            )
+            raise RuntimeError(msg)
+        return release, url.removesuffix(".zip") + ".dmg"
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Fetch the latest Antigravity version and immutable DMG URL."""
-        payload = await fetch_json(
+        product_version, artifact_urls = await fetch_electron_builder_feed(
             session,
-            self.UPDATE_URL,
-            request_timeout=self.config.default_timeout,
+            self.FEED_URL,
             config=self.config,
         )
-        data = json_utils.as_object_dict(payload, context=self.UPDATE_URL)
-        zip_url = json_utils.get_required_str(data, "url", context=self.UPDATE_URL)
-        match = re.search(r"/antigravity-hub/([^/]+)/", zip_url)
-        if match is None:
-            msg = f"Could not parse Antigravity version from URL: {zip_url}"
-            raise RuntimeError(msg)
-        url = zip_url.removesuffix(".zip") + ".dmg"
-        return VersionInfo(
-            version=match.group(1),
-            metadata=DownloadUrlMetadata(url=url),
-        )
+        for artifact_url in artifact_urls:
+            try:
+                version, dmg_url = self._parse_artifact_url(
+                    artifact_url,
+                    product_version,
+                )
+            except RuntimeError:
+                continue
+            return VersionInfo(
+                version=version,
+                metadata=DownloadUrlMetadata(url=dmg_url),
+            )
+        msg = f"No matching Google Antigravity artifact in {self.FEED_URL}"
+        raise RuntimeError(msg)

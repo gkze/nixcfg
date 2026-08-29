@@ -1,5 +1,6 @@
 {
   config,
+  inputs,
   lib,
   pkgs,
   ...
@@ -7,6 +8,20 @@
 let
   inherit (config) fonts theme;
   cfg = config.nixcfg.stylix;
+  base16SchemesSourceCheck =
+    let
+      inputSource = inputs.base16-schemes-src;
+      nixpkgsSource = pkgs.base16-schemes.src;
+    in
+    if inputSource.rev == nixpkgsSource.rev && inputSource.narHash == nixpkgsSource.outputHash then
+      true
+    else
+      throw ''
+        base16-schemes-src is out of sync with pkgs.base16-schemes.src.
+        Flake input: ${inputSource.rev} (${inputSource.narHash})
+        Nixpkgs source: ${nixpkgsSource.rev} (${nixpkgsSource.outputHash})
+        Update the base16-schemes-src pin in flake.nix and flake.lock to match nixpkgs.
+      '';
 in
 {
   options.nixcfg.stylix = {
@@ -54,7 +69,8 @@ in
           if cfg.base16Scheme != null then
             cfg.base16Scheme
           else
-            "${base16-schemes}/share/themes/${theme.slug}.yaml";
+            assert base16SchemesSourceCheck;
+            "${inputs.base16-schemes-src}/base16/${theme.slug}.yaml";
         inherit (theme) polarity;
         targets = {
           bat.enable = false;

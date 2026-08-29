@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-X12FJkdkstnJBfixcohsEiEsoUK1l4QUkiWwEYBMcJI="
+  },
+  "urls": {
+    "aarch64-darwin": "https://github.com/jordienr/agentlog-releases/releases/download/v0.4.2/Agentlog_0.4.2_aarch64.dmg"
+  },
+  "version": "0.4.2"
+}

@@ -1,7 +1,5 @@
 """Tests for per-package path discovery helpers."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 import pytest

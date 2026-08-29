@@ -1,7 +1,5 @@
 """Validate source-package consistency in textual ``bun.lock`` files."""
 
-from __future__ import annotations
-
 import io
 import json
 import os

@@ -1,7 +1,5 @@
 """Updater for NordVPN."""
 
-from __future__ import annotations
-
 from typing import ClassVar
 
 from lib.update.updaters import SparkleAppcastUpdater, register_updater

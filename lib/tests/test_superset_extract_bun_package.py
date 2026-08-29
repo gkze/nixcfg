@@ -1,7 +1,5 @@
 """Pure-Python tests for Superset's Bun package extraction helper."""
 
-from __future__ import annotations
-
 import runpy
 import stat
 import subprocess

@@ -6,7 +6,7 @@
       "name": "t3code",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "^0.3.170",
-        "@clerk/electron": "0.0.24",
+        "@clerk/electron": "0.0.37",
         "@clerk/electron-passkeys": "0.0.3",
         "@effect/platform-bun": "4.0.0-beta.103",
         "@effect/platform-node": "4.0.0-beta.103",
@@ -26,6 +26,7 @@
         "electron-store": "^8.2.0",
         "electron-updater": "^6.6.2",
         "jose": "6.2.2",
+        "msgpackr-extract": "3.0.4",
         "node-pty": "^1.1.0",
         "playwright-core": "1.60.0",
         "react-grab": "^0.1.32",
@@ -50,7 +51,7 @@
     },
     "packages/contracts": {
       "name": "@t3tools/contracts",
-      "version": "0.0.33",
+      "version": "0.0.34",
       "dependencies": {
         "effect": "catalog:",
       },
@@ -105,7 +106,15 @@
     },
   },
   "overrides": {
-    "@clerk/electron": "0.0.24",
+    "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-darwin-arm64": "-",
+    "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-darwin-x64": "-",
+    "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-linux-arm64": "-",
+    "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-linux-arm64-musl": "-",
+    "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-linux-x64": "-",
+    "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-linux-x64-musl": "-",
+    "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-win32-arm64": "-",
+    "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-win32-x64": "-",
+    "@clerk/electron": "0.0.37",
     "@clerk/electron-passkeys": "0.0.3",
     "@effect/platform-bun": "4.0.0-beta.103",
     "@effect/platform-node": "4.0.0-beta.103",
@@ -117,12 +126,12 @@
   },
   "catalog": {
     "@clerk/backend": "3.14.0",
-    "@clerk/clerk-js": "6.25.13",
-    "@clerk/electron": "0.0.24",
+    "@clerk/clerk-js": "6.30.1",
+    "@clerk/electron": "0.0.37",
     "@clerk/electron-passkeys": "0.0.3",
     "@clerk/expo": "4.2.0",
-    "@clerk/react": "6.12.10",
-    "@clerk/shared": "4.25.10",
+    "@clerk/react": "6.14.7",
+    "@clerk/shared": "4.30.1",
     "@effect/atom-react": "4.0.0-beta.103",
     "@effect/openapi-generator": "4.0.0-beta.103",
     "@effect/platform-bun": "4.0.0-beta.103",
@@ -206,9 +215,9 @@
 
     "@blazediff/core": ["@blazediff/core@1.9.1", "", {}, "sha512-ehg3jIkYKulZh+8om/O25vkvSsXXwC+skXmyA87FFx6A/45eqOkZsBltMw/TVteb0mloiGT8oGRTcjRAz66zaA=="],
 
-    "@clerk/clerk-js": ["@clerk/clerk-js@6.27.0", "", { "dependencies": { "@base-org/account": "2.0.1", "@clerk/shared": "^4.27.0", "@coinbase/wallet-sdk": "4.3.7", "@solana/wallet-adapter-base": "0.9.27", "@solana/wallet-adapter-react": "0.15.39", "@solana/wallet-standard": "1.1.4", "@stripe/stripe-js": "5.6.0", "@swc/helpers": "0.5.21", "@tanstack/query-core": "^5.100.6", "@wallet-standard/core": "1.1.1", "@zxcvbn-ts/core": "3.0.4", "@zxcvbn-ts/language-common": "3.0.4", "alien-signals": "2.0.6", "browser-tabs-lock": "1.3.0", "core-js": "3.47.0", "crypto-js": "^4.2.0", "dequal": "2.0.3" } }, "sha512-XTgqUOTniLEAt+K2IJdP3m2fxulcu/XUAujizLNvqtJPmWR3JohlVIGUh/2sy3F62lylBf1JtK7VmVI0D+vN9g=="],
+    "@clerk/clerk-js": ["@clerk/clerk-js@6.30.1", "", { "dependencies": { "@base-org/account": "2.0.1", "@clerk/shared": "^4.30.1", "@coinbase/wallet-sdk": "4.3.7", "@solana/wallet-adapter-base": "0.9.27", "@solana/wallet-adapter-react": "0.15.39", "@solana/wallet-standard": "1.1.4", "@stripe/stripe-js": "5.6.0", "@swc/helpers": "0.5.21", "@tanstack/query-core": "^5.100.6", "@wallet-standard/core": "1.1.1", "@zxcvbn-ts/core": "3.0.4", "@zxcvbn-ts/language-common": "3.0.4", "alien-signals": "2.0.6", "browser-tabs-lock": "1.3.0", "core-js": "3.47.0", "crypto-js": "^4.2.0", "dequal": "2.0.3" } }, "sha512-ipsUhTf1uPJ5az4eiLOCM1Qz8z0I4kl54N6RtnL3VbxezwptPEUHx1PlHnHKUjTCV/PHNVq/3vht9w+8VLOoHw=="],
 
-    "@clerk/electron": ["@clerk/electron@0.0.24", "", { "dependencies": { "@clerk/clerk-js": "^6.25.12", "@clerk/react": "^6.12.9", "@clerk/shared": "^4.25.9", "tslib": "2.8.1" }, "peerDependencies": { "@clerk/electron-passkeys": "*", "electron": ">=28", "electron-store": "^8.2.0", "react": "^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0", "react-dom": "^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0" }, "optionalPeers": ["@clerk/electron-passkeys", "electron-store", "react-dom"] }, "sha512-xORO51KLzCqmRQ4IVsa+Amp1M5NjG28QnvsaRBq1v4CUEjH8vAXDKCPiPBKAE+HuQB6HUhzYmzUkyTw2FcDonw=="],
+    "@clerk/electron": ["@clerk/electron@0.0.37", "", { "dependencies": { "@clerk/clerk-js": "^6.30.1", "@clerk/react": "^6.14.7", "@clerk/shared": "^4.30.1", "tslib": "2.8.1" }, "peerDependencies": { "@clerk/electron-passkeys": "*", "electron": ">=28", "electron-store": "^8.2.0", "react": "^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0", "react-dom": "^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0" }, "optionalPeers": ["@clerk/electron-passkeys", "electron-store", "react-dom"] }, "sha512-NsATM6rMISdL1K3mlKVPqZpDUA4h+uWmbGv8h9PK3zYfnwMgSpDKRX2y341Lt0fhz+eWkZpMU5SQmlZPNqwiww=="],
 
     "@clerk/electron-passkeys": ["@clerk/electron-passkeys@0.0.3", "", { "optionalDependencies": { "@clerk/electron-passkeys-darwin-arm64": "0.0.3", "@clerk/electron-passkeys-darwin-x64": "0.0.3", "@clerk/electron-passkeys-win32-arm64-msvc": "0.0.3", "@clerk/electron-passkeys-win32-x64-msvc": "0.0.3" } }, "sha512-OHhIe88qDL+FxyBalXdXNHAS5eEramr6Rerp+6iNkfkjqT8rx4hHNmfpmjg5/T1/am8QfknbOBZkqoXZlCrjPg=="],
 
@@ -220,9 +229,9 @@
 
     "@clerk/electron-passkeys-win32-x64-msvc": ["@clerk/electron-passkeys-win32-x64-msvc@0.0.3", "", { "os": "win32", "cpu": "x64" }, "sha512-gFaVqKlOKTF2SJ3lMwkZ0oonycQn93p1qSrp5kzzeZBeQ+tGB3gQnjXecrhQy21AzDUyWqVJJ8KrP2HRAwifWg=="],
 
-    "@clerk/react": ["@clerk/react@6.13.0", "", { "dependencies": { "@clerk/shared": "^4.27.0", "tslib": "2.8.1" }, "peerDependencies": { "react": "^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0", "react-dom": "^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0" } }, "sha512-iUQiwDn/i5vKpX7woU+GaxfPJA/mcIybN4h2ghw7TSs5CLlkvtgw0yZMVHX6Jsuji3IqLnJMkqzuKKp5GWnWLw=="],
+    "@clerk/react": ["@clerk/react@6.14.7", "", { "dependencies": { "@clerk/shared": "^4.30.1", "tslib": "2.8.1" }, "peerDependencies": { "react": "^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0", "react-dom": "^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0" } }, "sha512-+d+VqD4nZR3vBn5UU++H96zloHFDe+Ll0sGwMmLXnHtoIs9oMx91GaGXzXo9rU83kl660EfAmgeWcsLMfWnOYg=="],
 
-    "@clerk/shared": ["@clerk/shared@4.27.0", "", { "dependencies": { "@tanstack/query-core": "^5.100.6", "dequal": "2.0.3", "glob-to-regexp": "0.4.1", "js-cookie": "3.0.7" }, "peerDependencies": { "react": "^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0", "react-dom": "^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0" }, "optionalPeers": ["react", "react-dom"] }, "sha512-pl/LUHInewGBDhomewBD9fnqYRniC9MaWjr1new3cliXmwq8tpq+QA8Ejn2USKYMQ0UENKAqf8HiJPthBm6hmA=="],
+    "@clerk/shared": ["@clerk/shared@4.30.1", "", { "dependencies": { "@tanstack/query-core": "^5.100.6", "dequal": "2.0.3", "glob-to-regexp": "0.4.1", "js-cookie": "3.0.7" }, "peerDependencies": { "react": "^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0", "react-dom": "^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0" }, "optionalPeers": ["react", "react-dom"] }, "sha512-Mawatm7CTKZXBqIW8t/z9LfoAKgOHtRRxROpnJ4VIkTdgzj/mmAZhPOPjzUttPXXtulR1uLWisvQXEMNeF/jTQ=="],
 
     "@coinbase/wallet-sdk": ["@coinbase/wallet-sdk@4.3.7", "", { "dependencies": { "@noble/hashes": "^1.4.0", "clsx": "^1.2.1", "eventemitter3": "^5.0.1", "preact": "^10.24.2", "viem": "^2.27.2" } }, "sha512-z6e5XDw6EF06RqkeyEa+qD0dZ2ZbLci99vx3zwDY//XO8X7166tqKJrR2XlQnzVmtcUuJtCd5fCvr9Cu6zzX7w=="],
 

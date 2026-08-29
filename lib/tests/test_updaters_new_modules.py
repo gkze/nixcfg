@@ -1,14 +1,12 @@
 """Tests for newer updater modules added to the registry."""
 
-from __future__ import annotations
-
 import asyncio
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
-from lib.nix.models.sources import HashEntry, SourceEntry
+from lib.nix.models.flake_lock import FlakeLockNode
 from lib.tests._assertions import expect_instance
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module_for_test as _load_module
@@ -25,6 +23,7 @@ from lib.update.events import (
 from lib.update.updaters import VersionInfo
 from lib.update.updaters import materialization as materialization_mod
 from lib.update.updaters.flake_backed import FlakeInputMetadataUpdater
+from lib.update.updaters.metadata import FlakeInputMetadata
 
 
 @pytest.fixture(scope="module")
@@ -120,15 +119,15 @@ def test_codex_updater_refreshes_crate2nix_artifacts(
     assert events[-1].payload == []
 
 
-def test_goose_cli_updater_materializes_crate2nix_from_resolved_src_hash(
+def test_goose_cli_updater_materializes_crate2nix_from_locked_input(
     goose_cli_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Goose should refresh crate2nix artifacts from the newly resolved source."""
+    """Goose should refresh crate2nix artifacts from its locked flake input."""
     updater = goose_cli_module.GooseCliUpdater()
     assert updater.materialize_when_current is True
     assert updater.shows_materialize_artifacts_phase is True
-    artifact_overrides: dict[str, object] = {}
+    assert updater.input_name == "goose"
 
     async def _stream(name: str) -> EventStream:
         yield UpdateEvent.artifact(
@@ -139,13 +138,7 @@ def test_goose_cli_updater_materializes_crate2nix_from_resolved_src_hash(
             ),
         )
 
-    async def _fixed_hash(_name: str, _expr: str, **_kwargs: object) -> EventStream:
-        yield UpdateEvent.value(
-            "goose-cli", "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-        )
-
-    def _materialize(_self: object, *, source_overrides: dict[str, object]):
-        artifact_overrides.update(source_overrides)
+    def _materialize(_self: object):
         return _stream("goose-cli")
 
     monkeypatch.setattr(
@@ -153,7 +146,6 @@ def test_goose_cli_updater_materializes_crate2nix_from_resolved_src_hash(
         "stream_materialized_artifacts",
         _materialize,
     )
-    monkeypatch.setattr(goose_cli_module, "compute_fixed_output_hash", _fixed_hash)
 
     events = _run(_collect(updater.fetch_hashes(VersionInfo("1.0.0", {}), object())))
     artifact_index = next(
@@ -168,11 +160,37 @@ def test_goose_cli_updater_materializes_crate2nix_from_resolved_src_hash(
     )
     assert artifact_index < value_index
     payload = expect_instance(events[value_index].payload, list)
-    hash_entry = expect_instance(payload[0], HashEntry)
-    assert hash_entry.hash_type == "srcHash"
-    source = expect_instance(artifact_overrides["goose-cli"], SourceEntry)
-    assert source.version == "1.0.0"
-    assert source.hashes.entries == [hash_entry]
+    assert payload == []
+
+
+def test_goose_cli_updater_reads_version_and_commit_from_release_input(
+    goose_cli_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The package metadata should come from the locked Goose release source."""
+    node = FlakeLockNode.model_validate({
+        "original": {
+            "type": "github",
+            "owner": "aaif-goose",
+            "repo": "goose",
+            "ref": "v1.46.0",
+        },
+        "locked": {
+            "type": "github",
+            "owner": "aaif-goose",
+            "repo": "goose",
+            "rev": "a" * 40,
+            "narHash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        },
+    })
+    updater = goose_cli_module.GooseCliUpdater()
+    monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
+
+    info = _run(updater.fetch_latest(object()))
+
+    assert info.version == "1.46.0"
+    assert info.commit == "a" * 40
+    assert info.metadata == FlakeInputMetadata(node=node, commit="a" * 40)
 
 
 def test_crate2nix_artifacts_mixin_streams_shared_materialization_events(

@@ -1,7 +1,5 @@
 """Tests for the git-ignore helper script."""
 
-from __future__ import annotations
-
 import base64
 import runpy
 import sys

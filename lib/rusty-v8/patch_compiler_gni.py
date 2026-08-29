@@ -1,7 +1,5 @@
 """Patch Chromium compiler GN defaults for Nix-built rusty_v8."""
 
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -69,10 +67,16 @@ def _patch_gn_assignment(text: str, name: str, value: str) -> str:
             index += 1
             continue
 
+        assignment = line.lstrip()[len(name) :].lstrip()
+        has_inline_value = bool(assignment.removeprefix("=").strip())
         patched.append(f"{indent}{name} = {value}\n")
         replaced = True
         index += 1
-        while index < len(lines) and _line_continues_gn_expression(lines[index - 1]):
+        needs_value_line = not has_inline_value
+        while index < len(lines) and (
+            needs_value_line or _line_continues_gn_expression(lines[index - 1])
+        ):
+            needs_value_line = False
             index += 1
 
     if not replaced:

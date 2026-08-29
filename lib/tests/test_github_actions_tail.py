@@ -1,7 +1,5 @@
 """Tests for GitHub Actions live-tail HTML and polling helpers."""
 
-from __future__ import annotations
-
 import asyncio
 import io
 import json

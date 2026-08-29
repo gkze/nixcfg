@@ -7,8 +7,6 @@
   makeFontsConf,
   git,
   cmake,
-  curl,
-  perl,
   pkg-config,
   protobuf,
   xcodebuild,
@@ -51,6 +49,7 @@ let
   pname = "zed-editor-nightly";
   version = "unstable-${inputs.zed.shortRev or (builtins.substring 0 8 inputs.zed.rev)}";
   src = inputs.zed;
+  crateCachePolicy = import ./crate-cache-policy.nix { inherit lib; };
   zedManifest = builtins.fromTOML (builtins.readFile "${src}/crates/zed/Cargo.toml");
   appVersion = zedManifest.package.version;
   releaseChannel = "nightly";
@@ -65,140 +64,180 @@ let
     cargo = rustToolchain;
     rustc = rustToolchain;
   };
-  copyZedManifestFor = crateName: ''
-    if [ -d "$workspaceRoot/crates/${crateName}" ]; then
-      cp "$workspaceRoot/crates/zed/Cargo.toml" "$workspaceRoot/crates/${crateName}/zed-Cargo.toml"
-    fi
+  generatedLicenses = destination: ''
+    {
+      printf '# ###### THEME LICENSES ######\n\n'
+      cat ${src}/assets/themes/LICENSES
+      printf '\n# ###### ICON LICENSES ######\n\n'
+      cat ${src}/assets/icons/LICENSES
+      printf '\n# ###### CODE LICENSES ######\n\n'
+      printf 'Generated in Nix packaging; cargo-about step is pending.\n'
+    } > ${destination}
   '';
 
-  patchIfExists = relPath: body: ''
-    if [ -f "$workspaceRoot/${relPath}" ]; then
-      ${body}
-    fi
+  workspaceAssets = ''
+    cp -r ${src}/assets "$crateRoot/workspace-assets"
+    chmod -R u+w "$crateRoot/workspace-assets"
+    ${generatedLicenses ''"$crateRoot/workspace-assets/licenses.md"''}
   '';
 
-  preparedWorkspaceInputs = ''
-    cp -r "$workspaceRoot/assets" "$workspaceRoot/crates/assets/workspace-assets"
-    cp -r "$workspaceRoot/assets" "$workspaceRoot/crates/settings/workspace-assets"
-    cp -r "$workspaceRoot/crates/extension_api/wit" "$workspaceRoot/crates/extension_host/workspace-extension-api-wit"
-    cp -r "$workspaceRoot/crates/gpui" "$workspaceRoot/crates/gpui_macos/workspace-gpui"
-    cp "$workspaceRoot/crates/git_ui/src/commit_message_prompt.txt" "$workspaceRoot/crates/prompt_store/commit_message_prompt.txt"
-    cp "$workspaceRoot/script/uninstall.sh" "$workspaceRoot/crates/cli/uninstall.sh"
-    cp "$workspaceRoot/crates/zed/RELEASE_CHANNEL" "$workspaceRoot/crates/release_channel/RELEASE_CHANNEL"
+  # crate2nix filters each workspace member independently. Keep that cache
+  # boundary by preparing only the crates whose sources depend on files outside
+  # their own directory, or which need a packaging patch. The same map also
+  # drives the full prepared workspace used by update-time Cargo.nix generation.
+  crateSourcePreparations = {
+    assets = workspaceAssets + ''
+      substituteInPlace "$crateRoot/src/assets.rs" \
+        --replace-fail '#[folder = "../../assets"]' '#[folder = "workspace-assets"]' \
+        --replace-fail 'use rust_embed::RustEmbed;' 'use rust_embed::{Embed, RustEmbed};' \
+        --replace-fail ".filter_map(|p| {" ".filter_map(|p: std::borrow::Cow<'static, str>| {"
+    '';
 
-    if [ -d "$workspaceRoot/crates/edit_prediction_cli" ]; then
-      if [ -d "$workspaceRoot/crates/grammars/src" ]; then
-        cp -r "$workspaceRoot/crates/grammars/src" "$workspaceRoot/crates/edit_prediction_cli/workspace-language-configs-src"
-      elif [ -d "$workspaceRoot/crates/languages/src" ]; then
-        cp -r "$workspaceRoot/crates/languages/src" "$workspaceRoot/crates/edit_prediction_cli/workspace-language-configs-src"
+    cli = ''
+      cp ${src}/script/uninstall.sh "$crateRoot/uninstall.sh"
+      substituteInPlace "$crateRoot/src/main.rs" \
+        --replace-fail 'include_bytes!("../../../script/uninstall.sh")' 'include_bytes!("../uninstall.sh")'
+    '';
+
+    client = ''
+      (cd "$crateRoot" && patch -p3 < ${./stable-client-telemetry-os-version.patch})
+    '';
+
+    edit_prediction_cli = ''
+      cp ${src}/crates/zed/Cargo.toml "$crateRoot/zed-Cargo.toml"
+      if [ -d ${src}/crates/grammars/src ]; then
+        cp -r ${src}/crates/grammars/src "$crateRoot/workspace-language-configs-src"
+      elif [ -d ${src}/crates/languages/src ]; then
+        cp -r ${src}/crates/languages/src "$crateRoot/workspace-language-configs-src"
       fi
-    fi
 
-    ${copyZedManifestFor "remote_server"}
-    ${copyZedManifestFor "edit_prediction_cli"}
-    ${copyZedManifestFor "eval"}
-    ${copyZedManifestFor "eval_cli"}
-  '';
-
-  preparedWorkspacePatches = ''
-    substituteInPlace "$workspaceRoot/crates/release_channel/src/lib.rs" \
-      --replace-fail 'include_str!("../../zed/RELEASE_CHANNEL")' 'include_str!("../RELEASE_CHANNEL")'
-
-    substituteInPlace "$workspaceRoot/crates/assets/src/assets.rs" \
-      --replace-fail '#[folder = "../../assets"]' '#[folder = "workspace-assets"]' \
-      --replace-fail 'use rust_embed::RustEmbed;' 'use rust_embed::{Embed, RustEmbed};' \
-      --replace-fail ".filter_map(|p| {" ".filter_map(|p: std::borrow::Cow<'static, str>| {"
-
-    substituteInPlace "$workspaceRoot/crates/settings/src/settings.rs" \
-      --replace-fail '#[folder = "../../assets"]' '#[folder = "workspace-assets"]' \
-      --replace-fail 'use rust_embed::RustEmbed;' 'use rust_embed::{Embed, RustEmbed};'
-
-    substituteInPlace "$workspaceRoot/crates/prompt_store/src/prompt_store.rs" \
-      --replace-fail 'include_str!("../../git_ui/src/commit_message_prompt.txt")' 'include_str!("../commit_message_prompt.txt")'
-
-    substituteInPlace "$workspaceRoot/crates/extension_host/build.rs" \
-      --replace-fail 'PathBuf::from("../extension_api/wit")' 'PathBuf::from("workspace-extension-api-wit")'
-
-    for path in "$workspaceRoot"/crates/extension_host/src/wasm_host/wit/since_v*.rs; do
-      substituteInPlace "$path" \
-        --replace-fail 'path: "../extension_api/wit/' 'path: "workspace-extension-api-wit/'
-    done
-
-    ${patchIfExists "crates/remote_server/build.rs" ''
-      substituteInPlace "$workspaceRoot/crates/remote_server/build.rs" \
-        --replace-fail 'include_str!("../zed/Cargo.toml")' 'include_str!("./zed-Cargo.toml")'
-    ''}
-
-    ${patchIfExists "crates/edit_prediction_cli/build.rs" ''
-      substituteInPlace "$workspaceRoot/crates/edit_prediction_cli/build.rs" \
+      substituteInPlace "$crateRoot/build.rs" \
         --replace-fail 'std::fs::read_to_string("../zed/Cargo.toml")' 'std::fs::read_to_string("./zed-Cargo.toml")'
-    ''}
 
-    ${patchIfExists "crates/eval/build.rs" ''
-      substituteInPlace "$workspaceRoot/crates/eval/build.rs" \
-        --replace-fail 'std::fs::read_to_string("../zed/Cargo.toml")' 'std::fs::read_to_string("./zed-Cargo.toml")'
-    ''}
-
-    ${patchIfExists "crates/eval_cli/build.rs" ''
-      substituteInPlace "$workspaceRoot/crates/eval_cli/build.rs" \
-        --replace-fail 'std::fs::read_to_string("../zed/Cargo.toml")' 'std::fs::read_to_string("./zed-Cargo.toml")' \
-        --replace-fail 'println!("cargo:rerun-if-changed=../zed/Cargo.toml");' 'println!("cargo:rerun-if-changed=./zed-Cargo.toml");'
-    ''}
-
-    ${patchIfExists "crates/edit_prediction_cli/src/filter_languages.rs" ''
-      if grep -Fq '#[folder = "../grammars/src/"]' "$workspaceRoot/crates/edit_prediction_cli/src/filter_languages.rs"; then
-        substituteInPlace "$workspaceRoot/crates/edit_prediction_cli/src/filter_languages.rs" \
+      if grep -Fq '#[folder = "../grammars/src/"]' "$crateRoot/src/filter_languages.rs"; then
+        substituteInPlace "$crateRoot/src/filter_languages.rs" \
           --replace-fail '#[folder = "../grammars/src/"]' '#[folder = "workspace-language-configs-src/"]'
-      elif grep -Fq '#[folder = "../languages/src/"]' "$workspaceRoot/crates/edit_prediction_cli/src/filter_languages.rs"; then
-        substituteInPlace "$workspaceRoot/crates/edit_prediction_cli/src/filter_languages.rs" \
+      elif grep -Fq '#[folder = "../languages/src/"]' "$crateRoot/src/filter_languages.rs"; then
+        substituteInPlace "$crateRoot/src/filter_languages.rs" \
           --replace-fail '#[folder = "../languages/src/"]' '#[folder = "workspace-language-configs-src/"]'
       fi
 
-      if grep -Fq 'concat!(env!("CARGO_MANIFEST_DIR"), "/../grammars/src")' "$workspaceRoot/crates/edit_prediction_cli/src/filter_languages.rs"; then
-        substituteInPlace "$workspaceRoot/crates/edit_prediction_cli/src/filter_languages.rs" \
+      if grep -Fq 'concat!(env!("CARGO_MANIFEST_DIR"), "/../grammars/src")' "$crateRoot/src/filter_languages.rs"; then
+        substituteInPlace "$crateRoot/src/filter_languages.rs" \
           --replace-fail 'concat!(env!("CARGO_MANIFEST_DIR"), "/../grammars/src")' 'concat!(env!("CARGO_MANIFEST_DIR"), "/workspace-language-configs-src")'
-      elif grep -Fq 'concat!(env!("CARGO_MANIFEST_DIR"), "/../languages/src")' "$workspaceRoot/crates/edit_prediction_cli/src/filter_languages.rs"; then
-        substituteInPlace "$workspaceRoot/crates/edit_prediction_cli/src/filter_languages.rs" \
+      elif grep -Fq 'concat!(env!("CARGO_MANIFEST_DIR"), "/../languages/src")' "$crateRoot/src/filter_languages.rs"; then
+        substituteInPlace "$crateRoot/src/filter_languages.rs" \
           --replace-fail 'concat!(env!("CARGO_MANIFEST_DIR"), "/../languages/src")' 'concat!(env!("CARGO_MANIFEST_DIR"), "/workspace-language-configs-src")'
       fi
-    ''}
+    '';
 
-    substituteInPlace "$workspaceRoot/crates/cli/src/main.rs" \
-      --replace-fail 'include_bytes!("../../../script/uninstall.sh")' 'include_bytes!("../uninstall.sh")'
+    eval = ''
+      cp ${src}/crates/zed/Cargo.toml "$crateRoot/zed-Cargo.toml"
+      substituteInPlace "$crateRoot/build.rs" \
+        --replace-fail 'std::fs::read_to_string("../zed/Cargo.toml")' 'std::fs::read_to_string("./zed-Cargo.toml")'
+    '';
 
-    substituteInPlace "$workspaceRoot/crates/inspector_ui/build.rs" \
-      --replace-fail '    let mut path = std::path::PathBuf::from(&cargo_manifest_dir);' '    println!("cargo:rustc-env=ZED_REPO_DIR={}", cargo_manifest_dir);
+    eval_cli = ''
+      cp ${src}/crates/zed/Cargo.toml "$crateRoot/zed-Cargo.toml"
+      substituteInPlace "$crateRoot/build.rs" \
+        --replace-fail 'std::fs::read_to_string("../zed/Cargo.toml")' 'std::fs::read_to_string("./zed-Cargo.toml")' \
+        --replace-fail 'println!("cargo:rerun-if-changed=../zed/Cargo.toml");' 'println!("cargo:rerun-if-changed=./zed-Cargo.toml");'
+    '';
+
+    extension = ''
+      (cd "$crateRoot" && patch -p3 < ${./stable-wasi-sdk-asset-selection.patch})
+    '';
+
+    extension_host = ''
+      cp -r ${src}/crates/extension_api/wit "$crateRoot/workspace-extension-api-wit"
+      substituteInPlace "$crateRoot/build.rs" \
+        --replace-fail 'PathBuf::from("../extension_api/wit")' 'PathBuf::from("workspace-extension-api-wit")'
+      for path in "$crateRoot"/src/wasm_host/wit/since_v*.rs; do
+        substituteInPlace "$path" \
+          --replace-fail 'path: "../extension_api/wit/' 'path: "workspace-extension-api-wit/'
+      done
+    '';
+
+    gpui_apple = ''
+      cp -r ${src}/crates/gpui "$crateRoot/workspace-gpui"
+      (cd "$crateRoot" && patch -p3 < ${./crate2nix-gpui-manifest-dir.patch})
+    '';
+
+    inspector_ui = ''
+      substituteInPlace "$crateRoot/build.rs" \
+        --replace-fail '    let mut path = std::path::PathBuf::from(&cargo_manifest_dir);' '    println!("cargo:rustc-env=ZED_REPO_DIR={}", cargo_manifest_dir);
         return;
 
         let mut path = std::path::PathBuf::from(&cargo_manifest_dir);'
+    '';
 
-    substituteInPlace "$workspaceRoot/crates/gpui_macos/build.rs" \
-      --replace-fail '        gpui::GPUI_MANIFEST_DIR.into()' '        PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("workspace-gpui")'
-  '';
+    prompt_store = ''
+      cp ${src}/crates/git_ui/src/commit_message_prompt.txt "$crateRoot/commit_message_prompt.txt"
+      substituteInPlace "$crateRoot/src/prompt_store.rs" \
+        --replace-fail 'include_str!("../../git_ui/src/commit_message_prompt.txt")' 'include_str!("../commit_message_prompt.txt")'
+    '';
+
+    release_channel = ''
+      printf '${releaseChannel}\n' > "$crateRoot/RELEASE_CHANNEL"
+      substituteInPlace "$crateRoot/src/lib.rs" \
+        --replace-fail 'include_str!("../../zed/RELEASE_CHANNEL")' 'include_str!("../RELEASE_CHANNEL")'
+    '';
+
+    remote_server = ''
+      cp ${src}/crates/zed/Cargo.toml "$crateRoot/zed-Cargo.toml"
+      substituteInPlace "$crateRoot/build.rs" \
+        --replace-fail 'include_str!("../zed/Cargo.toml")' 'include_str!("./zed-Cargo.toml")'
+    '';
+
+    settings = workspaceAssets + ''
+      substituteInPlace "$crateRoot/src/settings.rs" \
+        --replace-fail '#[folder = "../../assets"]' '#[folder = "workspace-assets"]' \
+        --replace-fail 'use rust_embed::RustEmbed;' 'use rust_embed::{Embed, RustEmbed};'
+    '';
+
+    zed = ''
+      printf '${releaseChannel}\n' > "$crateRoot/RELEASE_CHANNEL"
+    '';
+  };
+
+  prepareCrateSource =
+    attrs:
+    pkgs.stdenvNoCC.mkDerivation {
+      name = crateCachePolicy.preparedSourceName attrs.crateName;
+      inherit (attrs) src;
+
+      postPatch = ''
+        crateRoot="$PWD"
+        ${crateSourcePreparations.${attrs.crateName}}
+      '';
+
+      installPhase = ''
+        runHook preInstall
+
+        mkdir -p "$out"
+        cp -R . "$out/"
+
+        runHook postInstall
+      '';
+
+      dontConfigure = true;
+      dontBuild = true;
+      dontFixup = true;
+      dontPatchShebangs = true;
+    };
 
   patchedSrc = pkgs.stdenvNoCC.mkDerivation {
     pname = "${pname}-src";
     inherit version src;
-    patches = [
-      ./stable-wasi-sdk-asset-selection.patch
-      ./stable-client-telemetry-os-version.patch
-    ];
-
     postPatch = ''
       workspaceRoot="$PWD"
-      {
-        printf '# ###### THEME LICENSES ######\n\n'
-        cat "$workspaceRoot/assets/themes/LICENSES"
-        printf '\n# ###### ICON LICENSES ######\n\n'
-        cat "$workspaceRoot/assets/icons/LICENSES"
-        printf '\n# ###### CODE LICENSES ######\n\n'
-        printf 'Generated in Nix packaging; cargo-about step is pending.\n'
-      } > "$workspaceRoot/assets/licenses.md"
-
-      printf '${releaseChannel}\n' > "$workspaceRoot/crates/zed/RELEASE_CHANNEL"
-
-      ${preparedWorkspaceInputs}
-      ${preparedWorkspacePatches}
+      ${generatedLicenses ''"$workspaceRoot/assets/licenses.md"''}
+      ${lib.concatMapStringsSep "\n" (crateName: ''
+        crateRoot="$workspaceRoot/crates/${crateName}"
+        if [ -d "$crateRoot" ]; then
+          ${crateSourcePreparations.${crateName}}
+        fi
+      '') (builtins.attrNames crateSourcePreparations)}
     '';
 
     installPhase = ''
@@ -216,9 +255,23 @@ let
     dontPatchShebangs = true;
   };
 
+  crateSource = (import ../../lib/crate2nix-source-slice.nix).sourceFor {
+    rootSrc = src;
+    source = {
+      cargoNixSha256 = builtins.hashFile "sha256" ./Cargo.nix;
+      input = "zed";
+      narHash = inputs.zed.narHash;
+      subdir = ".";
+    };
+    sourceInfo = builtins.fromJSON (builtins.readFile ./crate-sources.json);
+  };
+
   cargoNix = import ./Cargo.nix {
-    inherit pkgs;
-    rootSrc = patchedSrc;
+    inherit pkgs crateSource;
+    # The generated graph must only traverse evaluator-visible sources. Crates
+    # which need source surgery replace their own filtered source in
+    # scopedOverride below; no build output is inspected during evaluation.
+    rootSrc = src;
     buildRustCrateForPkgs = _: zedBuildRustCrate;
   };
   cargoNixVersion = cargoNix.internal.crates.zed.version;
@@ -249,22 +302,7 @@ let
       upstreamLivekitLibwebrtc;
   gpuLib = vulkan-loader;
 
-  commonNativeBuildInputs = [
-    cmake
-    curl
-    perl
-    pkg-config
-    protobuf
-    zedRustPlatform.bindgenHook
-  ]
-  ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
-    # Zed's Darwin binary is large enough that nixpkgs' ld64 can fail to
-    # synthesize ARM64 branch thunks.
-    lld
-    xcodebuild
-  ];
-
-  commonBuildInputs = [
+  zedBuildInputs = [
     fontconfig
     freetype
     libgit2
@@ -289,55 +327,108 @@ let
     libxrandr
     libx11
     libxcb
-  ]
-  ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+  ];
+
+  # These affect Darwin compilation and minimum-version semantics in ways that
+  # are not isolated to one audited build script. Keep their existing workspace
+  # scope until real source builds prove a narrower boundary safe.
+  darwinWorkspaceBuildInputs = lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
     apple-sdk_15
     (darwinMinVersionHook "10.15")
   ];
 
-  commonCrates =
-    if pkgs.stdenv.hostPlatform.isLinux then
-      # Linux builds compile external -sys crates (for X11/Wayland/GLib/etc.) as
-      # standalone crate2nix derivations, so they need the shared pkg-config and
-      # system library inputs as well.
-      builtins.attrNames cargoNix.internal.crates
-    else
-      builtins.attrNames cargoNix.workspaceMembers;
+  darwinWorkspaceCrates = lib.optionals pkgs.stdenv.hostPlatform.isDarwin (
+    builtins.attrNames cargoNix.workspaceMembers ++ [ "webrtc-sys" ]
+  );
 
-  commonOverride = attrs: {
-    nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ commonNativeBuildInputs;
+  scopedCrates = lib.unique (
+    builtins.attrNames crateSourcePreparations
+    ++ crateCachePolicy.bindgenConsumers
+    ++ crateCachePolicy.commitShaConsumers
+    ++ crateCachePolicy.fontConfigConsumers
+    ++ crateCachePolicy.lldConsumers
+    ++ crateCachePolicy.livekitWebrtcConsumers
+    ++ crateCachePolicy.pkgConfigConsumers
+    ++ crateCachePolicy.protocConsumers
+    ++ crateCachePolicy.releaseVersionConsumers
+    ++ crateCachePolicy.systemLibraryConsumers
+    ++ crateCachePolicy.updateExplanationConsumers
+    ++ crateCachePolicy.xcodebuildConsumers
+    ++ crateCachePolicy.zstdPkgConfigConsumers
+    ++ darwinWorkspaceCrates
+  );
 
-    buildInputs = (attrs.buildInputs or [ ]) ++ commonBuildInputs;
+  scopedOverride =
+    attrs:
+    let
+      inherit (attrs) crateName;
+    in
+    {
+      nativeBuildInputs =
+        (attrs.nativeBuildInputs or [ ])
+        ++
+          lib.optionals
+            (pkgs.stdenv.hostPlatform.isDarwin && builtins.elem crateName crateCachePolicy.bindgenConsumers)
+            [
+              zedRustPlatform.bindgenHook
+            ]
+        ++
+          lib.optionals
+            (pkgs.stdenv.hostPlatform.isLinux && builtins.elem crateName crateCachePolicy.pkgConfigConsumers)
+            [
+              pkg-config
+            ]
+        ++ lib.optionals (builtins.elem crateName crateCachePolicy.protocConsumers) [
+          protobuf
+        ]
+        ++
+          lib.optionals
+            (pkgs.stdenv.hostPlatform.isDarwin && builtins.elem crateName crateCachePolicy.lldConsumers)
+            [
+              # Zed's Darwin binary is large enough that nixpkgs' ld64 can fail to
+              # synthesize ARM64 branch thunks.
+              lld
+            ]
+        ++
+          lib.optionals
+            (pkgs.stdenv.hostPlatform.isDarwin && builtins.elem crateName crateCachePolicy.xcodebuildConsumers)
+            [
+              xcodebuild
+            ];
 
-    # Keep font discovery pointed at the raw flake input so cross-platform
-    # evaluation does not need to realize the Darwin-only patched workspace
-    # source derivation just to inspect the bundled fonts.
-    FONTCONFIG_FILE = makeFontsConf {
-      fontDirectories = [
-        "${src}/assets/fonts/lilex"
-        "${src}/assets/fonts/ibm-plex-sans"
-      ];
+      buildInputs =
+        (attrs.buildInputs or [ ])
+        ++ lib.optionals (builtins.elem crateName crateCachePolicy.systemLibraryConsumers) zedBuildInputs
+        ++ lib.optionals (builtins.elem crateName darwinWorkspaceCrates) darwinWorkspaceBuildInputs;
+    }
+    // lib.optionalAttrs (builtins.elem crateName crateCachePolicy.systemLibraryConsumers) {
+      NIX_LDFLAGS = lib.optionalString pkgs.stdenv.hostPlatform.isLinux "-rpath ${
+        lib.makeLibraryPath [
+          gpuLib
+          wayland
+          libva
+        ]
+      }";
+      NIX_OUTPATH_USED_AS_RANDOM_SEED = "norebuilds";
+      dontPatchELF = pkgs.stdenv.hostPlatform.isLinux;
+    }
+    // crateCachePolicy.forCrate {
+      inherit crateName;
+      commitSha = inputs.zed.rev or "";
+      fontConfig = makeFontsConf {
+        fontDirectories = [
+          "${src}/assets/fonts/lilex"
+          "${src}/assets/fonts/ibm-plex-sans"
+        ];
+      };
+      livekitWebrtc = livekitLibwebrtc;
+      protoc = "${protobuf}/bin/protoc";
+      releaseVersion = version;
+      updateExplanation = "Zed has been installed using Nix. Auto-updates have thus been disabled.";
+    }
+    // lib.optionalAttrs (builtins.hasAttr attrs.crateName crateSourcePreparations) {
+      src = prepareCrateSource attrs;
     };
-    LK_CUSTOM_WEBRTC = livekitLibwebrtc;
-    NIX_LDFLAGS = lib.optionalString pkgs.stdenv.hostPlatform.isLinux "-rpath ${
-      lib.makeLibraryPath [
-        gpuLib
-        wayland
-        libva
-      ]
-    }";
-    NIX_OUTPATH_USED_AS_RANDOM_SEED = "norebuilds";
-    PROTOC = "${protobuf}/bin/protoc";
-    RELEASE_VERSION = version;
-    ZED_COMMIT_SHA = inputs.zed.rev or "";
-    ZED_UPDATE_EXPLANATION = "Zed has been installed using Nix. Auto-updates have thus been disabled.";
-    ZSTD_SYS_USE_PKG_CONFIG = true;
-    dontPatchELF = pkgs.stdenv.hostPlatform.isLinux;
-  };
-
-  gpuiMacosOverride = attrs: {
-    nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [ pkgs.rust-cbindgen ];
-  };
 
   webrtcSysOverride = attrs: {
     dontCheckForBrokenSymlinks = true;
@@ -393,11 +484,9 @@ let
           echo "missing wasmtime-c-api-impl include path for tree-sitter" >&2
           exit 1
         fi
-      '';
-      postPatch = (attrs.postPatch or "") + ''
         PYTHONPATH=${import ../../lib/codemods-pythonpath.nix { inherit lib; }} ${lib.getExe python3} \
           ${./patch_tree_sitter_build_rs.py} \
-          binding_rust/build.rs
+          ${lib.escapeShellArg attrs.build}
       '';
     };
 
@@ -409,9 +498,9 @@ let
     cp "${cliDrv}/bin/cli" "$out/bin/zed"
     ln -s "$out/bin/zed" "$out/bin/zeditor"
 
-    install -D "${patchedSrc}/crates/zed/resources/app-icon-nightly@2x.png" \
+    install -D "${src}/crates/zed/resources/app-icon-nightly@2x.png" \
       "$out/share/icons/hicolor/1024x1024@2x/apps/zed.png"
-    install -D "${patchedSrc}/crates/zed/resources/app-icon-nightly.png" \
+    install -D "${src}/crates/zed/resources/app-icon-nightly.png" \
       "$out/share/icons/hicolor/512x512/apps/zed.png"
 
     (
@@ -421,7 +510,7 @@ let
       export APP_NAME="Zed Nightly"
       export APP_ARGS="%U"
       mkdir -p "$out/share/applications"
-      ${lib.getExe envsubst} < "${patchedSrc}/crates/zed/resources/zed.desktop.in" > \
+      ${lib.getExe envsubst} < "${src}/crates/zed/resources/zed.desktop.in" > \
         "$out/share/applications/dev.zed.Zed-Nightly.desktop"
       chmod +x "$out/share/applications/dev.zed.Zed-Nightly.desktop"
     )
@@ -459,7 +548,7 @@ let
             "$out" \
             "$TMPDIR" \
             ${lib.escapeShellArg appVersion} \
-            ${lib.escapeShellArg (toString patchedSrc)} \
+            ${lib.escapeShellArg (toString src)} \
             ${lib.escapeShellArg "${imagemagick}/bin/magick"} \
             ${lib.escapeShellArg "${libicns}/bin/png2icns"} \
             ${lib.escapeShellArg "${git}/bin/git"} \
@@ -472,25 +561,38 @@ let
         zedLinuxInstallPhase;
   };
 
-  commonCrateOverrides = lib.genAttrs commonCrates (_: commonOverride);
+  composeCrateOverride =
+    base: extension: attrs:
+    let
+      baseAttrs = base attrs;
+    in
+    baseAttrs // extension (attrs // baseAttrs);
 
+  scopedThen = extension: composeCrateOverride scopedOverride extension;
+
+  projectCrateOverrides = lib.genAttrs scopedCrates (_: scopedOverride) // {
+    documented = documentedOverride;
+    "av-scenechange" = _attrs: {
+      CARGO_ENCODED_RUSTFLAGS = "";
+    };
+    perf = scopedThen perfOverride;
+    rav1e = rav1eOverride;
+    rmcp = scopedThen rmcpOverride;
+    tree-sitter = treeSitterOverride;
+    wasmtime-c-api-impl = wasmtimeCApiImplOverride;
+    webrtc-sys = scopedThen webrtcSysOverride;
+    zed = scopedThen zedOverride;
+  };
+
+  # Project policy extends rather than replaces nixpkgs's targeted defaults.
+  # This keeps native OpenSSL/zstd/etc. inputs on their -sys consumers without
+  # reintroducing them across every Zed workspace or registry crate.
   crateOverrides =
     pkgs.defaultCrateOverrides
-    // commonCrateOverrides
-    // {
-      documented = documentedOverride;
-      "av-scenechange" = _attrs: {
-        CARGO_ENCODED_RUSTFLAGS = "";
-      };
-      gpui_macos = attrs: (commonOverride attrs) // (gpuiMacosOverride attrs);
-      perf = attrs: (commonOverride attrs) // (perfOverride attrs);
-      rav1e = rav1eOverride;
-      rmcp = attrs: (commonOverride attrs) // (rmcpOverride attrs);
-      tree-sitter = treeSitterOverride;
-      wasmtime-c-api-impl = wasmtimeCApiImplOverride;
-      webrtc-sys = attrs: (commonOverride attrs) // (webrtcSysOverride attrs);
-      zed = attrs: (commonOverride attrs) // (zedOverride attrs);
-    };
+    // lib.mapAttrs (
+      crateName: override:
+      composeCrateOverride (pkgs.defaultCrateOverrides.${crateName} or (_attrs: { })) override
+    ) projectCrateOverrides;
 
   cliDrv = cargoNix.workspaceMembers.cli.build.override {
     inherit crateOverrides;

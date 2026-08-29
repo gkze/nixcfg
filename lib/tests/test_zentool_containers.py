@@ -1,7 +1,5 @@
 """Focused tests for declarative zentool container management."""
 
-from __future__ import annotations
-
 import json
 import sqlite3
 from pathlib import Path

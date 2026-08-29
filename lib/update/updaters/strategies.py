@@ -7,8 +7,6 @@ updaters are a bare class body of attributes, and updaters that need extra
 logic override the relevant hook method on the same class.
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 from lib import json_utils

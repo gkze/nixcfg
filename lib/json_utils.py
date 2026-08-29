@@ -1,7 +1,5 @@
 """Shared JSON validation and coercion helpers."""
 
-from __future__ import annotations
-
 from pydantic import TypeAdapter, ValidationError
 
 type JsonScalar = str | int | float | bool | None

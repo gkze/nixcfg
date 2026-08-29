@@ -7,13 +7,12 @@ Hash-mismatch errors from fixed-output derivations are captured as
 raw otherwise — use :attr:`is_sri` to check and :meth:`to_sri` to convert).
 """
 
-from __future__ import annotations
-
 import asyncio
 import importlib
 import os
 import re
 import shlex
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -293,6 +292,19 @@ class ProcessDone:
 type ProcessEvent = ProcessLine | ProcessDone
 
 
+async def _stop_stream_process(
+    proc: asyncio.subprocess.Process,
+    tasks: list[asyncio.Task[None]],
+) -> None:
+    """Stop and reap a streamed subprocess and its pipe readers."""
+    for task in tasks:
+        task.cancel()
+    with suppress(ProcessLookupError):
+        proc.kill()
+    await proc.wait()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
 async def stream_process(
     args: list[str],
     *,
@@ -342,6 +354,7 @@ async def stream_process(
         asyncio.create_task(pump(proc.stderr, "stderr", stderr_chunks)),
     ]
 
+    process_finished = False
     try:
         done_streams = 0
         while done_streams < len(tasks):
@@ -355,13 +368,12 @@ async def stream_process(
             yield ProcessLine(label, text)
         await asyncio.gather(*tasks)
         returncode = await proc.wait()
+        process_finished = True
     except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
         raise TimeoutError from None
+    finally:
+        if not process_finished:
+            await _stop_stream_process(proc, tasks)
 
     result = CommandResult(
         args=args,

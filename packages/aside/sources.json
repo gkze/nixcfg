@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-kdPmwPwiVjOKHC+FrgSBss60ohwPFxBdTN8pu9U1ups=",
+    "x86_64-darwin": "sha256-kdPmwPwiVjOKHC+FrgSBss60ohwPFxBdTN8pu9U1ups="
+  },
+  "urls": {
+    "aarch64-darwin": "https://releases.aside.com/dev-updater/Aside-1.0.825.1.dmg",
+    "x86_64-darwin": "https://releases.aside.com/dev-updater/Aside-1.0.825.1.dmg"
+  },
+  "version": "1.0.825.1"
+}

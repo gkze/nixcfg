@@ -1,7 +1,5 @@
 """Updater for VS Code Insiders platform builds."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from lib.update.updaters import register_updater

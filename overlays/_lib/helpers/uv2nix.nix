@@ -8,10 +8,7 @@
       mainProgram,
       packageName ? name,
       venvName ? name,
-      uvLockFile ? builtins.path {
-        name = "${name}-uv.lock";
-        path = ../../../packages/${name}/uv.lock;
-      },
+      uvLockFile,
       extraOverlays ? [ ],
     }:
     let

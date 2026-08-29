@@ -1,6 +1,5 @@
 """Updater for Sculptor release artifacts."""
 
-from __future__ import annotations
 
 from datetime import UTC
 from email.utils import parsedate_to_datetime

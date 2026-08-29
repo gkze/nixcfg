@@ -1,7 +1,5 @@
 """Patch node-addon-api include paths in bundled binding.gyp files."""
 
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 

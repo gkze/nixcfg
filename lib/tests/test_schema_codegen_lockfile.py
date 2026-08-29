@@ -1,7 +1,5 @@
 """Tests for canonical codegen manifest lockfile materialization."""
 
-from __future__ import annotations
-
 import hashlib
 import json
 import shutil

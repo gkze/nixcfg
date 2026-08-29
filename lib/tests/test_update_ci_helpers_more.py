@@ -1,7 +1,5 @@
 """Tests for project-wide CLI helpers."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 import click

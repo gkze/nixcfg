@@ -1,19 +1,99 @@
 """Shared CLI defaults for Typer/Click applications."""
 
-from __future__ import annotations
-
+import importlib
 import sys
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
 import click
 import typer
+from typer.core import TyperGroup
+from typer.main import get_command
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, MutableMapping, Sequence
+
+    from typer import _click as typer_click
 
 HELP_CONTEXT_SETTINGS: Final[dict[str, list[str]]] = {
     "help_option_names": ["-h", "--help"],
 }
+
+
+def _lazy_typer_group(module_name: str, attribute_name: str) -> type[TyperGroup]:
+    """Create a Click group that imports its real Typer app only on dispatch."""
+
+    class LazyTyperGroup(TyperGroup):
+        _loaded_command: TyperGroup | None = None
+        _bootstrap_commands: MutableMapping[str, typer_click.Command]
+
+        @property
+        def commands(self) -> MutableMapping[str, typer_click.Command]:
+            """Expose the real command mapping to help, completion, and tests."""
+            return self._load_command().commands
+
+        @commands.setter
+        def commands(
+            self,
+            value: MutableMapping[str, typer_click.Command],
+        ) -> None:
+            self._bootstrap_commands = value
+
+        def _load_command(self) -> TyperGroup:
+            if self._loaded_command is None:
+                module = importlib.import_module(module_name)
+                loaded_app = cast("typer.Typer", getattr(module, attribute_name))
+                loaded_command = get_command(loaded_app)
+                if not isinstance(loaded_command, TyperGroup):
+                    msg = f"{module_name}.{attribute_name} is not a command group"
+                    raise TypeError(msg)
+                self._loaded_command = loaded_command
+            return self._loaded_command
+
+        def get_command(
+            self,
+            ctx: typer_click.Context,
+            cmd_name: str,
+        ) -> typer_click.Command | None:
+            return self._load_command().get_command(ctx, cmd_name)
+
+        def list_commands(self, ctx: typer_click.Context) -> list[str]:
+            return self._load_command().list_commands(ctx)
+
+        def get_help(self, ctx: typer_click.Context) -> str:
+            return self._load_command().get_help(ctx)
+
+        def invoke(self, ctx: typer_click.Context) -> object:
+            args = [*ctx._protected_args, *ctx.args]  # noqa: SLF001
+            result = self._load_command().main(
+                args=args,
+                prog_name=ctx.command_path,
+                standalone_mode=False,
+            )
+            if isinstance(result, int) and result != 0:
+                raise typer.Exit(code=result)
+            return result
+
+    return LazyTyperGroup
+
+
+def make_lazy_typer_app(
+    *,
+    module_name: str,
+    help_text: str,
+    attribute_name: str = "app",
+) -> typer.Typer:
+    """Create a lightweight placeholder for a command-specific Typer app."""
+    return typer.Typer(
+        cls=_lazy_typer_group(module_name, attribute_name),
+        help=help_text,
+        add_completion=False,
+        no_args_is_help=False,
+        context_settings={
+            **HELP_CONTEXT_SETTINGS,
+            "allow_extra_args": True,
+            "ignore_unknown_options": True,
+        },
+    )
 
 
 def make_typer_app(*, help_text: str, no_args_is_help: bool = False) -> typer.Typer:

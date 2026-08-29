@@ -1,7 +1,5 @@
 """Contract tests for package-specific crate2nix normalizer callbacks."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType

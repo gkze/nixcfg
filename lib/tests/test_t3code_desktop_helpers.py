@@ -1,7 +1,5 @@
 """Unit tests for T3 Code desktop packaging helpers."""
 
-from __future__ import annotations
-
 import json
 import plistlib
 import runpy

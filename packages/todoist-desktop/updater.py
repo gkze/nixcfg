@@ -1,7 +1,5 @@
 """Updater for the pinned Todoist desktop macOS app archive."""
 
-from __future__ import annotations
-
 from typing import ClassVar
 
 from lib.update.updaters import PinnedSourceDownloadUpdater, register_updater

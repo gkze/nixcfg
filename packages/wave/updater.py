@@ -1,7 +1,5 @@
 """Updater for Wave."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.update.updaters import ElectronBuilderAssetURLsUpdater, register_updater

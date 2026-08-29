@@ -1,7 +1,5 @@
 """Additional branch coverage tests for update CLI internals."""
 
-from __future__ import annotations
-
 import asyncio
 from typing import TYPE_CHECKING
 

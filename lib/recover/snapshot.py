@@ -1,7 +1,5 @@
 """Resolve the source snapshot that fed a realised generation build."""
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 from dataclasses import asdict, dataclass

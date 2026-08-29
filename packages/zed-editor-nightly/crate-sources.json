@@ -1,0 +1,1018 @@
+{
+  "slices": {
+    "crates/acp_thread": {
+      "hash": "sha256-K0xLpUhAWqqZotxq67KXGZJLzOtk+FyWbdGeONGKUJY=",
+      "name": "acp_thread"
+    },
+    "crates/acp_tools": {
+      "hash": "sha256-MyhQnGMen4pQVr0gdnU66fxEHsSmqjvHmcilg/HPXAM=",
+      "name": "acp_tools"
+    },
+    "crates/action_log": {
+      "hash": "sha256-t1uf+X/604ZtHGQ/bMx3vAZYtUL2W6jm5KkeJV/KXyA=",
+      "name": "action_log"
+    },
+    "crates/activity_indicator": {
+      "hash": "sha256-BO/jP7CQ1jZKsL446eDK2waFL7S3OvkKf0gCHA4D4hI=",
+      "name": "activity_indicator"
+    },
+    "crates/agent": {
+      "hash": "sha256-LSGq2GMfvmsGtEbHE6Gz/LER8Y9/13ZsduMrjzsV9Bc=",
+      "name": "agent"
+    },
+    "crates/agent_servers": {
+      "hash": "sha256-Gy4YtmTMRnXZfgbR6Um+Zg3EnFJfW69QMvZW6tE+//M=",
+      "name": "agent_servers"
+    },
+    "crates/agent_settings": {
+      "hash": "sha256-HMj2ZHtz3xeM8hVMK5rCT8ifCKafjnEYVwu171gpcOU=",
+      "name": "agent_settings"
+    },
+    "crates/agent_skills": {
+      "hash": "sha256-h6P6dgq2q4Wv97EMAgJbZl+WC4mP70zYnV24DNOUKgc=",
+      "name": "agent_skills"
+    },
+    "crates/agent_ui": {
+      "hash": "sha256-zXPjiIje2oMF2tEJ0SqZ1kODdQwxMgGP4xSmCyJMGNw=",
+      "name": "agent_ui"
+    },
+    "crates/ai_onboarding": {
+      "hash": "sha256-L/YRQkrtp85G1YKtB2oAMIfwM1rMlMKGJzMz3f/pSjU=",
+      "name": "ai_onboarding"
+    },
+    "crates/anthropic": {
+      "hash": "sha256-K64YoLmJeUfWCGhd3yh6EH2nfHnLnnjZGrtN9SYRPmI=",
+      "name": "anthropic"
+    },
+    "crates/askpass": {
+      "hash": "sha256-P6mrJsebC4yK2AplIuFNBr7oD60hhy+5wv1ops5WRp4=",
+      "name": "askpass"
+    },
+    "crates/assets": {
+      "hash": "sha256-TEAGwR93hvYZSzUw1Wgtt5bPOpQBZKxvXXa84pSPJsY=",
+      "name": "assets"
+    },
+    "crates/audio": {
+      "hash": "sha256-q/VaF3UMfLd20t6xJEItu8jZGTjQt+EfWkHV/8t/Sc0=",
+      "name": "audio"
+    },
+    "crates/auto_update": {
+      "hash": "sha256-5PBxq9HHGVPithqA3evfmHJlUnHYp+CDhKivLBy0NXM=",
+      "name": "auto_update"
+    },
+    "crates/auto_update_helper": {
+      "hash": "sha256-J3rIo+sl59pdNxFEIqIGUb99Ym1/TCEpA/TbwHciTqo=",
+      "name": "auto_update_helper"
+    },
+    "crates/auto_update_ui": {
+      "hash": "sha256-DMisfQPwl3yzUmbOekPEzzxtOoh0zB33gcpzsK2BwZ0=",
+      "name": "auto_update_ui"
+    },
+    "crates/aws_http_client": {
+      "hash": "sha256-qYuWP2rcK57hcbEAujrhAheemiMvtwhnF4ZeM0nL4l0=",
+      "name": "aws_http_client"
+    },
+    "crates/bedrock": {
+      "hash": "sha256-O5b79Vwwez2PFTbqFD0PFhecOT8AWJxd75DNqlqDj1k=",
+      "name": "bedrock"
+    },
+    "crates/benchmarks": {
+      "hash": "sha256-sqJTXmhi9ffS7fAW1yj8wCn2YWmJ+tG68xzBcjbIGoY=",
+      "name": "benchmarks"
+    },
+    "crates/breadcrumbs": {
+      "hash": "sha256-Sweu26f8kuITuVNaajeE4SjqEDZkrJblACeyzVvn4qw=",
+      "name": "breadcrumbs"
+    },
+    "crates/buffer_diff": {
+      "hash": "sha256-+A8t7T5/sd7Bgzz3c4gZnhtv9pOaHLV0AWjXUOyH/zo=",
+      "name": "buffer_diff"
+    },
+    "crates/call": {
+      "hash": "sha256-2p15Zi/wKC1BR1cdq7vCfE4ofl9d92hdW3k7w1Qsdns=",
+      "name": "call"
+    },
+    "crates/call_hierarchy": {
+      "hash": "sha256-1CR4M3wTNQCMfjW+TFVSBUYoj8HR9yDLIn4TsBC+uBc=",
+      "name": "call_hierarchy"
+    },
+    "crates/channel": {
+      "hash": "sha256-8JsiwjnjvSrgbBAT/vj0cl6Q1aN4B7x43I2P1Ikkt8c=",
+      "name": "channel"
+    },
+    "crates/cli": {
+      "hash": "sha256-/AmLmpb2pAym7NljmFmqUCvIaYF1BrNao8H/pcQADhM=",
+      "name": "cli"
+    },
+    "crates/client": {
+      "hash": "sha256-nUmytSzE6H7ObqdB2nnbBjH0QX/R3LA1K81WjtmswL4=",
+      "name": "client"
+    },
+    "crates/clock": {
+      "hash": "sha256-uXVCKJbvD9+Pr71604evrgxDObUysJoNyR90KQWyqsg=",
+      "name": "clock"
+    },
+    "crates/cloud_api_client": {
+      "hash": "sha256-ZiU8w4Yj2EE5r61GiU13pJZrq9Xfon75grO46ZvW/TA=",
+      "name": "cloud_api_client"
+    },
+    "crates/cloud_api_types": {
+      "hash": "sha256-MsNPDg8eE5mH0yEq+jjLiuCLLfB5cLjDiK9qLZZ6tOA=",
+      "name": "cloud_api_types"
+    },
+    "crates/cloud_llm_client": {
+      "hash": "sha256-k8au1Vp85T18Tp8UxTRkgaeygcfFb5yNypyvItEkwSg=",
+      "name": "cloud_llm_client"
+    },
+    "crates/codestral": {
+      "hash": "sha256-pRBjwkN9YZ8hfw7ftrWvzaD+/kBPzmyO0RH7NbFyilY=",
+      "name": "codestral"
+    },
+    "crates/collab": {
+      "hash": "sha256-rEOXa0hiEfO3nIhojCw/Fu2h+/itUImjfo8YwboYXZc=",
+      "name": "collab"
+    },
+    "crates/collab_ui": {
+      "hash": "sha256-D32jbonVuFHAx92rE3Vypp8e+gohIiPFC1j2gpqEfGI=",
+      "name": "collab_ui"
+    },
+    "crates/collections": {
+      "hash": "sha256-tpfrPHotVSuwp3iMCc2Uuo/dfEst6FPR7u+gOf533Lw=",
+      "name": "collections"
+    },
+    "crates/command_palette": {
+      "hash": "sha256-nNjM62sHjxkLf+w0/4uampzpmJAySjVo0boYaNNR050=",
+      "name": "command_palette"
+    },
+    "crates/command_palette_hooks": {
+      "hash": "sha256-DSBK25pIJQFwd5Du1qI8gpM4Ii09wim0d4lnfJLK0Ik=",
+      "name": "command_palette_hooks"
+    },
+    "crates/component": {
+      "hash": "sha256-NdNQbaaArLvZxyXcfdRvJb/+O5I9UXOP2FwZMzjaq0o=",
+      "name": "component"
+    },
+    "crates/component_preview": {
+      "hash": "sha256-cMpn992F2LIVgEVP3wno4XYPGxOZZa47gsR+l6RnApM=",
+      "name": "component_preview"
+    },
+    "crates/context_server": {
+      "hash": "sha256-HzdpeRqBowpxyGVXEvr7VeUlqSX4GC4gY5AAqe4+5MM=",
+      "name": "context_server"
+    },
+    "crates/copilot": {
+      "hash": "sha256-y5qfbSTxhcOgdzQIyeJt0y/gPADt70XRAGTxF8IMkig=",
+      "name": "copilot"
+    },
+    "crates/copilot_chat": {
+      "hash": "sha256-hufIK36UOWKNWTdPIBY4ydmnAqHrIGgoC7YjrzlPZsk=",
+      "name": "copilot_chat"
+    },
+    "crates/copilot_ui": {
+      "hash": "sha256-SyhuZ0zWHLCTMnHQ+TnD3Up8haNYXyLqh6dgAvdtoFc=",
+      "name": "copilot_ui"
+    },
+    "crates/crashes": {
+      "hash": "sha256-+42HxjdHhOeQnWPBWbbJNfyVnLEm1xTA0paiIAuY8G8=",
+      "name": "crashes"
+    },
+    "crates/credentials_provider": {
+      "hash": "sha256-C1VlyC6pdgpR3BcJ7DJfXqMtSp+2PU1B0Q2ywH09QEU=",
+      "name": "credentials_provider"
+    },
+    "crates/dap": {
+      "hash": "sha256-/xgwcxvYVrVq+NpqIKX2EEvX9H5Qlceubfoibs2s8Y4=",
+      "name": "dap"
+    },
+    "crates/dap_adapters": {
+      "hash": "sha256-GxQ3tc6SCuEuHY05NfpbRzKmerMjx5pm/sYhaUYgtfI=",
+      "name": "dap_adapters"
+    },
+    "crates/db": {
+      "hash": "sha256-KKLtTinCAUV4J3UoBjLVBVnyKahaBV0P/pNaZ/Snk7I=",
+      "name": "db"
+    },
+    "crates/debug_adapter_extension": {
+      "hash": "sha256-guoQnVP7x76TlJFXkG/nE4HerRPcykjH43lNukHHzoc=",
+      "name": "debug_adapter_extension"
+    },
+    "crates/debugger_tools": {
+      "hash": "sha256-u1blmDp5qS9j9sx5ADFcd+HEC4oav7YoRl3UdHyVYrk=",
+      "name": "debugger_tools"
+    },
+    "crates/debugger_ui": {
+      "hash": "sha256-qA6Aj9TuHldOCLhM59/T3FzPA8bXtitsltV1cD3889g=",
+      "name": "debugger_ui"
+    },
+    "crates/deepseek": {
+      "hash": "sha256-YdDaVybOy0YKT1IOwbWHltmDXCz1326MZOk/1Yg+dIo=",
+      "name": "deepseek"
+    },
+    "crates/dev_container": {
+      "hash": "sha256-ZBO3RfnYwGLfHEpat0Wp2wG1V/LOnIwm9SR11oBHp/Q=",
+      "name": "dev_container"
+    },
+    "crates/diagnostics": {
+      "hash": "sha256-bD36G+MxOM3Ugyum1DnCHJjjyYZ66EdarzittIcNDS0=",
+      "name": "diagnostics"
+    },
+    "crates/docs_preprocessor": {
+      "hash": "sha256-jv0ta7Q9HeOwelvApI6LyMPPOTAe1fsyXZi5tJOC7Vc=",
+      "name": "docs_preprocessor"
+    },
+    "crates/edit_prediction": {
+      "hash": "sha256-s/ujiFzmR+1JcMjxCwEUgxRLXobbGfBUVSiRnNJLwF8=",
+      "name": "edit_prediction"
+    },
+    "crates/edit_prediction_cli": {
+      "hash": "sha256-/CbYWiWHtvhqU28cnR0ytNf1J12obVJlLlGjWCbpsYU=",
+      "name": "edit_prediction_cli"
+    },
+    "crates/edit_prediction_context": {
+      "hash": "sha256-EqKcBu4+Bevx8vwus6PbzLBxnH9QGWQeTwIj5fkWOSo=",
+      "name": "edit_prediction_context"
+    },
+    "crates/edit_prediction_metrics": {
+      "hash": "sha256-jXh28lqE61OzbM3OY84XdAqVEURvsGVWPv7dRrec2L8=",
+      "name": "edit_prediction_metrics"
+    },
+    "crates/edit_prediction_types": {
+      "hash": "sha256-mZIfRO3DpbODEGHDhggBlLl7NrUG2IuxD5WYqF7QqYU=",
+      "name": "edit_prediction_types"
+    },
+    "crates/edit_prediction_ui": {
+      "hash": "sha256-bwwePrSjvj4JRccsF72zFK53DjShqzktBUUnNTqIAGM=",
+      "name": "edit_prediction_ui"
+    },
+    "crates/editor": {
+      "hash": "sha256-rTJ6N9ZHsmPpfV8qrZLVdSdTs7SirWooVISBFFqahIc=",
+      "name": "editor"
+    },
+    "crates/editor_benchmarks": {
+      "hash": "sha256-Oz7msa+splXLc7pchrmtr9XTLNtssHJaZ3fj0qu6cms=",
+      "name": "editor_benchmarks"
+    },
+    "crates/encoding_selector": {
+      "hash": "sha256-enShEAvo1MpEQNSpdJr12XWBfl02pFLa8OdQTWi5zBc=",
+      "name": "encoding_selector"
+    },
+    "crates/env_var": {
+      "hash": "sha256-3rNEmEzbcyP16qYzDHCIaFPB/61lP3qse3P8bV05ZOc=",
+      "name": "env_var"
+    },
+    "crates/etw_tracing": {
+      "hash": "sha256-CElaVL8ZLuqZpJE1zCjC4wDODCqtLJodFhgfuffIPCA=",
+      "name": "etw_tracing"
+    },
+    "crates/eval_cli": {
+      "hash": "sha256-vAgQtruB9wXJayi1M43cbzU5OwsVM2GppjjPk3EG2M4=",
+      "name": "eval_cli"
+    },
+    "crates/eval_utils": {
+      "hash": "sha256-HVG+9uoRjebTRcBjXMF6yiazdyX+eTXU6SP7VINGOFA=",
+      "name": "eval_utils"
+    },
+    "crates/explorer_command_injector": {
+      "hash": "sha256-h2GUa9+4vN855VevG9AxW1naqUmGWHVJon3ukhI0HXU=",
+      "name": "explorer_command_injector"
+    },
+    "crates/extension": {
+      "hash": "sha256-xfYZh/5oDDIxMOye3c2052jbEY0Y3/cpb+eKUpNNrkY=",
+      "name": "extension"
+    },
+    "crates/extension_api": {
+      "hash": "sha256-ElHGMQxc7Ty8WV9nGisn2QioLxbw0QhKeIWukD9AakI=",
+      "name": "extension_api"
+    },
+    "crates/extension_cli": {
+      "hash": "sha256-0JUGfd05viwMqiVCbweBObmwqf/mRfmtini4HwirE1Q=",
+      "name": "extension_cli"
+    },
+    "crates/extension_host": {
+      "hash": "sha256-WAv5AynmVcwuhLGIAYjqS9srdYzGTVDHgyVb6EWAWHw=",
+      "name": "extension_host"
+    },
+    "crates/extensions_ui": {
+      "hash": "sha256-I0j1ceMyPADkk7YUqxh6gsnsusiiS/HVJJmyg4+aQAY=",
+      "name": "extensions_ui"
+    },
+    "crates/feature_flags": {
+      "hash": "sha256-Fe5omTUHzA6ZDbALame81BoSpaA9I6YUKsOUOExhI1I=",
+      "name": "feature_flags"
+    },
+    "crates/feature_flags_macros": {
+      "hash": "sha256-qTPIeGl1/zBfE09ON19U+bF1kxCxJdhZ5J9EeCKy8Js=",
+      "name": "feature_flags_macros"
+    },
+    "crates/feedback": {
+      "hash": "sha256-xK88Tm1atMwUVyjRS0IFgH0Zc5BuKh1EUeU6QFtOWBs=",
+      "name": "feedback"
+    },
+    "crates/file_finder": {
+      "hash": "sha256-hMbyXUTzKw4hkVYtxXahNokRQQwKvbqQZrUu0pyv4Nc=",
+      "name": "file_finder"
+    },
+    "crates/file_icons": {
+      "hash": "sha256-huhumtLSdl9rx6ynZfyNkmkQdcx3HqvHUhOLMyG+Omc=",
+      "name": "file_icons"
+    },
+    "crates/fs": {
+      "hash": "sha256-PG1h79X65R0jsvps0hFnEpgaL9g5T/I62jxS+RD8oGU=",
+      "name": "fs"
+    },
+    "crates/fs_benchmarks": {
+      "hash": "sha256-PmrmxptOjduTuatJZEha6Ul3SfNzNtg0BoqPT7QmueA=",
+      "name": "fs_benchmarks"
+    },
+    "crates/fuzzy": {
+      "hash": "sha256-EGDa4+ir0P5SpJ0n4s/690Kucg1mG74AA3NITZLcIc0=",
+      "name": "fuzzy"
+    },
+    "crates/fuzzy_nucleo": {
+      "hash": "sha256-Z6qQgXtY26HTstGdHVAn+SdIb3VYgpDMSqzrJJXcg6w=",
+      "name": "fuzzy_nucleo"
+    },
+    "crates/git": {
+      "hash": "sha256-yAIfdcKSMDbCt5eVvWcz1KNEmux9xRW/MJrWPbCaFIc=",
+      "name": "git"
+    },
+    "crates/git_hosting_providers": {
+      "hash": "sha256-G9bBDd3knLIYe0KaO+C5HFGj5EdwwF2wj565/zdndBA=",
+      "name": "git_hosting_providers"
+    },
+    "crates/git_ui": {
+      "hash": "sha256-zUbW5oDZi+SokonR8Q9WvpykBeOjdAdH+JU8DE4NTQk=",
+      "name": "git_ui"
+    },
+    "crates/git_ui_core": {
+      "hash": "sha256-K87H0lYOKtnlcf+dJqrJt5KJsNN+xfJUUS71QoeDgRQ=",
+      "name": "git_ui_core"
+    },
+    "crates/go_to_line": {
+      "hash": "sha256-K54d7jxSaeZq9hZhQgatxhROu39Apxn+m8gsd6Ejo9o=",
+      "name": "go_to_line"
+    },
+    "crates/google_ai": {
+      "hash": "sha256-/qFUFNV9c3iLntBqH4fd0lwjQmnpKBHltxxKLsALECk=",
+      "name": "google_ai"
+    },
+    "crates/gpui": {
+      "hash": "sha256-d6iO7SHXpwQeoCGMDtZtgvwP98reWz7Wt6m8OFs7D/U=",
+      "name": "gpui"
+    },
+    "crates/gpui_apple": {
+      "hash": "sha256-dllDbAYOHczrCqyBwFSqZdkDqc7LOLQUZwo+Gd9f1YQ=",
+      "name": "gpui_apple"
+    },
+    "crates/gpui_linux": {
+      "hash": "sha256-Vf/jWnQuYzZWPaAtnhq7dx8wHvS1cKmBQwjTMk3Fu5U=",
+      "name": "gpui_linux"
+    },
+    "crates/gpui_macos": {
+      "hash": "sha256-+b1guaW5GOqx2uN9utwrtSk4+D89Ytp079JDwnuCeZE=",
+      "name": "gpui_macos"
+    },
+    "crates/gpui_macros": {
+      "hash": "sha256-dNFEfzutNzcSHKhgpZAPLu1m1zpBiZLeKPxGYn86hb4=",
+      "name": "gpui_macros"
+    },
+    "crates/gpui_platform": {
+      "hash": "sha256-H8MbOCVIT0u7ime4qdbHbBDLq4fFrTPjKM2JZ6reagI=",
+      "name": "gpui_platform"
+    },
+    "crates/gpui_shared_string": {
+      "hash": "sha256-wfvLcZ1AjsECw4oJUOFk+ijRSHjHN4UTxrLz9FCJxV0=",
+      "name": "gpui_shared_string"
+    },
+    "crates/gpui_tokio": {
+      "hash": "sha256-fX/p8Pdv5QHTSFdTC3QX5YXoS3DVCvg632Mdwj6j5bE=",
+      "name": "gpui_tokio"
+    },
+    "crates/gpui_util": {
+      "hash": "sha256-YRwqhRidgynppBWi+NPiIfc2hdWNV5vErZI8h3awIOQ=",
+      "name": "gpui_util"
+    },
+    "crates/gpui_web": {
+      "hash": "sha256-LxNVfqPHbuS1XQf78o6m3cRS07wUsmgu6xy4o3tPp2g=",
+      "name": "gpui_web"
+    },
+    "crates/gpui_wgpu": {
+      "hash": "sha256-LP/ihtfyztAHc8q8dQugEp1F53RvNoDqqdxyXGkvNLQ=",
+      "name": "gpui_wgpu"
+    },
+    "crates/gpui_windows": {
+      "hash": "sha256-SgrnpmRSO9D+KzWD5DfQkuKbwF18ocW18gNx1eZq2pU=",
+      "name": "gpui_windows"
+    },
+    "crates/grammars": {
+      "hash": "sha256-eQFRATGQC1AUdFQwQo+B/LGSaYkru4OjLftEAU7NRuo=",
+      "name": "grammars"
+    },
+    "crates/html_to_markdown": {
+      "hash": "sha256-cggOys2zZr1cR5eslN0Rc8nE9LMnSEyU3PFqsUCqvUg=",
+      "name": "html_to_markdown"
+    },
+    "crates/http_client": {
+      "hash": "sha256-yC2KPI1pUWjWvXA9rVvHAQYeeIpY2d6/AIRTsUsUXKE=",
+      "name": "http_client"
+    },
+    "crates/http_client_tls": {
+      "hash": "sha256-a4M/E11HV7KIcUdLcv2kQLNGr44x5fVmo5+sX2UOiTk=",
+      "name": "http_client_tls"
+    },
+    "crates/http_proxy": {
+      "hash": "sha256-cPwdvkzMDcJ3cNpkvvIlQiW1sMG4SRRfSUDXkcJI0AU=",
+      "name": "http_proxy"
+    },
+    "crates/icons": {
+      "hash": "sha256-1XERvPswWZKu+8bR/eU2UhTGC/b9Ni/bdxCzU8oeBiw=",
+      "name": "icons"
+    },
+    "crates/image_viewer": {
+      "hash": "sha256-56A0xZC8WSKC2P2aft3unSuG2Fa3h/tNAqCNM+rNVmQ=",
+      "name": "image_viewer"
+    },
+    "crates/input_latency_ui": {
+      "hash": "sha256-wYOAGOuBw0v4hmbckmVVX6Dp67IQHhCY2LQJ5QZH3NU=",
+      "name": "input_latency_ui"
+    },
+    "crates/inspector_ui": {
+      "hash": "sha256-uqiIXmRfIgAK5S0TDB0GDPwriivt27Llr+gS1UTUDMU=",
+      "name": "inspector_ui"
+    },
+    "crates/install_cli": {
+      "hash": "sha256-C3RAfOUptx5P6/k0+hzvKPk+gDJ1MT67HTA8V01qRow=",
+      "name": "install_cli"
+    },
+    "crates/journal": {
+      "hash": "sha256-z00+TaPEzWfHv4ifWvNRKj8QdxcrlcuSfXkoJ8LwT9c=",
+      "name": "journal"
+    },
+    "crates/json_schema_store": {
+      "hash": "sha256-q0LDvRFc4K8HuhIzr3Hekzscf4gslc46flAGfuqaWlw=",
+      "name": "json_schema_store"
+    },
+    "crates/keymap_editor": {
+      "hash": "sha256-aRayeEU7Ve9xmdXzcvchV72vdSR/Kbvu9AFDQg3pt7s=",
+      "name": "keymap_editor"
+    },
+    "crates/language": {
+      "hash": "sha256-GZuyqCrb5RWMhx+sE8v27dXlRyv4USUbdqzw/ZYAOmw=",
+      "name": "language"
+    },
+    "crates/language_core": {
+      "hash": "sha256-LUyTRjWC/GMPGWliq1p/JrcyAOJ1AKjWKNIQN2GGF3g=",
+      "name": "language_core"
+    },
+    "crates/language_extension": {
+      "hash": "sha256-/Z11L75co1jLYapLoUeMfLepFwPzYiy+vCMhshIXfh4=",
+      "name": "language_extension"
+    },
+    "crates/language_model": {
+      "hash": "sha256-sRY+4dFRCHD7OgLdy/W8c5o1LE5fju8UPUWnRjln3Xo=",
+      "name": "language_model"
+    },
+    "crates/language_model_core": {
+      "hash": "sha256-iMVg6hgvpwerzcYOn/jgrvycAef/eXc91TNnEITD49M=",
+      "name": "language_model_core"
+    },
+    "crates/language_models": {
+      "hash": "sha256-Qy8CighJPTinXi5siElCvQYs/Ra7LfC1aU7FIKfHg54=",
+      "name": "language_models"
+    },
+    "crates/language_models_cloud": {
+      "hash": "sha256-5k0wqWWgbAVFU4mmOD0sH68arM9RSYGjE04Wyp2le8A=",
+      "name": "language_models_cloud"
+    },
+    "crates/language_onboarding": {
+      "hash": "sha256-VuDOEXadDNIZGeZ2rlacvpbNSikCxH2F5VokBgRxhhg=",
+      "name": "language_onboarding"
+    },
+    "crates/language_selector": {
+      "hash": "sha256-FnnqoFhQNcLr3ncMwOB6Ma11r9Ysw/W1RzRpe/Wz1CE=",
+      "name": "language_selector"
+    },
+    "crates/language_tools": {
+      "hash": "sha256-5u+ATIU8Q7jPMkDPITImCN+cj6g3rB7Zc+gsuEW7BOY=",
+      "name": "language_tools"
+    },
+    "crates/languages": {
+      "hash": "sha256-GdqZhh8Oeltu3dvHpCseblmv7kSrtlSQKhy7HG+IACM=",
+      "name": "languages"
+    },
+    "crates/line_ending_selector": {
+      "hash": "sha256-5CNh7DeCj0xk1Yg6jApB8hjpPul9nkI9P5LyL4TQVZk=",
+      "name": "line_ending_selector"
+    },
+    "crates/livekit_api": {
+      "hash": "sha256-LzGvcDoNss1undbHRCsCJ0LgYabUU9lajro4jcUJ6bo=",
+      "name": "livekit_api"
+    },
+    "crates/livekit_client": {
+      "hash": "sha256-ChrFoOznOYeZczu19n28Guu7ys2Z2NfCnB2tuQkfzdY=",
+      "name": "livekit_client"
+    },
+    "crates/llama_cpp": {
+      "hash": "sha256-c8LeCDzTiSq9ilFR7OBOwqsWWCvEGNobgYJw/Dz74eQ=",
+      "name": "llama_cpp"
+    },
+    "crates/lmstudio": {
+      "hash": "sha256-G67Obm0U6Fzd4+1tSwl6Z8vKe0lstqkKM5uH5Wte68E=",
+      "name": "lmstudio"
+    },
+    "crates/lsp": {
+      "hash": "sha256-wc7vLoBNBNNiwh79TQMMYOSLQR5/pHlQJly4h5jbWoo=",
+      "name": "lsp"
+    },
+    "crates/lsp_locations": {
+      "hash": "sha256-OGR2eEchVPZyj7GT0i1ncgBrWGBy5iBfA7Gheu3oBDg=",
+      "name": "lsp_locations"
+    },
+    "crates/markdown": {
+      "hash": "sha256-ubG6eq2Ac4N5sTcCXt4Lm11BiXdtXTDvuGLZhFMeGsc=",
+      "name": "markdown"
+    },
+    "crates/markdown_preview": {
+      "hash": "sha256-L3vF8QdGybdwM6/9ADv3kHkohJBG2VB1YILmN0nufwc=",
+      "name": "markdown_preview"
+    },
+    "crates/media": {
+      "hash": "sha256-nxCGZB7KxgPiSJQnFmbXYPIy0f93ndP6qwqnX6ZRqWs=",
+      "name": "media"
+    },
+    "crates/menu": {
+      "hash": "sha256-2JU0oDrxfWrTySUmokmrGIJ7lT3aCHWL8tjKLzilbjg=",
+      "name": "menu"
+    },
+    "crates/mermaid_render": {
+      "hash": "sha256-0GbjB0gojNA2PcaCQTNpPj9n0b7EZEOEq/CyEsfQIzQ=",
+      "name": "mermaid_render"
+    },
+    "crates/migrator": {
+      "hash": "sha256-rha8r2H+8bMKxvEPvXiJ+RIKj0Y6doZItIV81VJc3Gk=",
+      "name": "migrator"
+    },
+    "crates/miniprofiler_ui": {
+      "hash": "sha256-NelIZlTE3wUsAGf/4epYTM5gqJ1PD5MdO4FprU2l70U=",
+      "name": "miniprofiler_ui"
+    },
+    "crates/mistral": {
+      "hash": "sha256-VGzTDaniHZw5IFP9J3AtnnDS9eBB0CMg8SCsi1ssCAU=",
+      "name": "mistral"
+    },
+    "crates/multi_buffer": {
+      "hash": "sha256-ViOOLjBRk+COglHIlDFgWyXPea/qZfCs/vX+fUOjJsI=",
+      "name": "multi_buffer"
+    },
+    "crates/net": {
+      "hash": "sha256-hNzM7hiv8IDum8NP06cQiFet4iC1GO4Xv+IDTNUTpXs=",
+      "name": "net"
+    },
+    "crates/node_runtime": {
+      "hash": "sha256-+JUEGrum3hNHNWTZWBcTwUjy3xOHdXna5ZwMr6ZOTTU=",
+      "name": "node_runtime"
+    },
+    "crates/notifications": {
+      "hash": "sha256-fnB84EPO0qbWOJy5xU3nxMHh1gR4dXSmnaT7XEBQH4E=",
+      "name": "notifications"
+    },
+    "crates/oauth_callback_server": {
+      "hash": "sha256-fJ4tMbwX2t6jf1odaTevE07iMe8TH4OM/9GR6Qh0ppc=",
+      "name": "oauth_callback_server"
+    },
+    "crates/ollama": {
+      "hash": "sha256-5frTm+5jfsoTycPZuGDBREN+vhni8fW0LYF1STKMjwY=",
+      "name": "ollama"
+    },
+    "crates/onboarding": {
+      "hash": "sha256-4H3IBM2JQfkQwWGC98cHitTVmhy49WpQ5CC/s/rlw+s=",
+      "name": "onboarding"
+    },
+    "crates/open_ai": {
+      "hash": "sha256-o79iWUloAxy2rumO0lGnkfQVyaku8hlQDsgLTBemq5k=",
+      "name": "open_ai"
+    },
+    "crates/open_path_prompt": {
+      "hash": "sha256-+V5llUXglTE8FAfPWY4PlAEmB9biGoQ5a0AsGElWIqI=",
+      "name": "open_path_prompt"
+    },
+    "crates/open_router": {
+      "hash": "sha256-uh6+TZ1HUpu1bI8JTNP3SNKuNMut9zQFXJmoJqCTljw=",
+      "name": "open_router"
+    },
+    "crates/openai_subscribed": {
+      "hash": "sha256-37l2EMPOVA1XktWXyQZ63zxiWcvxWS8swoSH0qTIcuk=",
+      "name": "openai_subscribed"
+    },
+    "crates/opencode": {
+      "hash": "sha256-ZtyFR0LEP3o6csMh4cU+SD3ZhDNrRZvcQMRKMp5iUFU=",
+      "name": "opencode"
+    },
+    "crates/outline": {
+      "hash": "sha256-R55auyPn92tXVAGQPGABQBkJCw1JVFLVODj93By1kSw=",
+      "name": "outline"
+    },
+    "crates/outline_panel": {
+      "hash": "sha256-nW6pLnqSLNBgpAoyP6qU52B/dabUwwOJLkx6ClCccyA=",
+      "name": "outline_panel"
+    },
+    "crates/panel": {
+      "hash": "sha256-Nk7XRR+zLMkcvb0Tu8GrhB+iA3p8h7vFW6Ib8xmn1Mk=",
+      "name": "panel"
+    },
+    "crates/path": {
+      "hash": "sha256-aVsuDLaNbLyR/sukBzi3enQ74dbXAIvsxy/PrkIm9b8=",
+      "name": "path"
+    },
+    "crates/paths": {
+      "hash": "sha256-6WbUMg1SwjF6W3bi3W74gmN0eEaWTYoYsMnSi2by/Mo=",
+      "name": "paths"
+    },
+    "crates/picker": {
+      "hash": "sha256-X3/uNcYkXs/FfOne4IbTG3zM4GjNimbIlMg8iwQJmCg=",
+      "name": "picker"
+    },
+    "crates/picker_preview": {
+      "hash": "sha256-qvueq0pQGtpzJJ+L/mVKIGd1OMgYgsNNG3syWCvmQx8=",
+      "name": "picker_preview"
+    },
+    "crates/platform_title_bar": {
+      "hash": "sha256-VJr7cWzYSCZOhLGYhy9eWfLYObu8rEW08d659n1JhgQ=",
+      "name": "platform_title_bar"
+    },
+    "crates/prettier": {
+      "hash": "sha256-FFzzXXQ96D9oOR9q0gNwNb6oUrUt+6mBWYoVUtjEBdo=",
+      "name": "prettier"
+    },
+    "crates/project": {
+      "hash": "sha256-wkwhcySD4X94daxYlw406B2NHxKz0ILA1nTeiIQhGs0=",
+      "name": "project"
+    },
+    "crates/project_benchmarks": {
+      "hash": "sha256-T9Xe3o69ET9NoD6P67r5pJ9eI2nMQs96zxyGz+zX+98=",
+      "name": "project_benchmarks"
+    },
+    "crates/project_panel": {
+      "hash": "sha256-f6dNwNQxcn97G2lO9V0ooy7dmaqkxEYxJZ2MHep5Y8c=",
+      "name": "project_panel"
+    },
+    "crates/project_symbols": {
+      "hash": "sha256-YB7r1hW9cGyNUWKRL/BgP7laqKEH6pmw2mIYf4DXP70=",
+      "name": "project_symbols"
+    },
+    "crates/prompt_store": {
+      "hash": "sha256-jj02bHY3UgDqjOpu3yLT5UbYx32T/6qSO1jzD231rH4=",
+      "name": "prompt_store"
+    },
+    "crates/proto": {
+      "hash": "sha256-8FtBOhxSI53P7wmGLmq5SsNCQRUIuX6UCfAbx7fNsb4=",
+      "name": "proto"
+    },
+    "crates/proxy_handshake": {
+      "hash": "sha256-6rh/f1dD5vGtbHaM3jcZninCMvFoDuOynTsyvaNcM1w=",
+      "name": "proxy_handshake"
+    },
+    "crates/recent_projects": {
+      "hash": "sha256-qMe/Ru5JyO/mfXEH4TvINw+uUt1cun/l/t/TVXAWLJ0=",
+      "name": "recent_projects"
+    },
+    "crates/refineable": {
+      "hash": "sha256-pB6TuNxcXp5Szvid5+VbFRb/R+bICjFWNRXoW3sy3Q8=",
+      "name": "refineable"
+    },
+    "crates/refineable/derive_refineable": {
+      "hash": "sha256-1RJc0HoPy6EDgdoHJvOwMykp4Tvdd0KC4fa1mr2r33I=",
+      "name": "derive_refineable"
+    },
+    "crates/release_channel": {
+      "hash": "sha256-hqekFOqfQdt2nzpfXGnqYLW7cyOC3vhBs+Xh0fgXUEI=",
+      "name": "release_channel"
+    },
+    "crates/remote": {
+      "hash": "sha256-dqr0p4agcOeFRACoBOtPiZmFHpsRq4qP2tgnKts68Xw=",
+      "name": "remote"
+    },
+    "crates/remote_connection": {
+      "hash": "sha256-KucYOJz8ndobpTwBkFIjHPfG6YEbYmVDDp063BpFwnE=",
+      "name": "remote_connection"
+    },
+    "crates/remote_server": {
+      "hash": "sha256-YoKu385GJqK6AqylKd8xWkTJjqrE+yWqaYa/Xa0ZSVk=",
+      "name": "remote_server"
+    },
+    "crates/repl": {
+      "hash": "sha256-6RXZ6PuWRbgWx3Pm55n9nhgodEr++tJm3ifqEf3GUuI=",
+      "name": "repl"
+    },
+    "crates/reqwest_client": {
+      "hash": "sha256-EPZs/ySDy/V8mXdlqloi1gKwztYZYdNjUVZrs4yYdKk=",
+      "name": "reqwest_client"
+    },
+    "crates/rope": {
+      "hash": "sha256-HT29XF06DB1eCYKwLSs5pPXpSW8l1CZ91A1DmSVitWQ=",
+      "name": "rope"
+    },
+    "crates/rpc": {
+      "hash": "sha256-az+FQg0AlI3UgEl/FEt0mWFBSsXTIEt4ANQSuu62ceo=",
+      "name": "rpc"
+    },
+    "crates/sandbox": {
+      "hash": "sha256-9h/YJLPwmVDc8j3Q4noLUg5qAmt8w2ecdhEGsb8FnD4=",
+      "name": "sandbox"
+    },
+    "crates/scheduler": {
+      "hash": "sha256-4AE90WV0E30CuZrx1SWTMB2PHQE2B3dDUpG/SqyFHI0=",
+      "name": "scheduler"
+    },
+    "crates/schema_generator": {
+      "hash": "sha256-Y+BVj91RAQi/CzhuWK1TqoI2xF2ZROkxrO5520HlvjM=",
+      "name": "schema_generator"
+    },
+    "crates/search": {
+      "hash": "sha256-K7YTygrynGgA056AEUPugcC5rKVKs9ItYjt1l+B1fC0=",
+      "name": "search"
+    },
+    "crates/session": {
+      "hash": "sha256-vjQslvS0kcRtpkodfVjEqja5+6Ks90/aFqX4BIqs7ao=",
+      "name": "session"
+    },
+    "crates/settings": {
+      "hash": "sha256-EgAvI1jqPzSn/ppWGlu3BQo937NbkHt3ffYqTMA4xwE=",
+      "name": "settings"
+    },
+    "crates/settings_content": {
+      "hash": "sha256-6iTd4JDZVg8HBsp3yOzYI+zzR/NsCUlm491D+8i5roA=",
+      "name": "settings_content"
+    },
+    "crates/settings_json": {
+      "hash": "sha256-B2yH6sBBln4QH6BRmuBHJt8MpjDMvWgl3xTKwVvuLek=",
+      "name": "settings_json"
+    },
+    "crates/settings_macros": {
+      "hash": "sha256-auHvD2VM91IpAnomR2yH4GCzPiEiPKUh25dPTjvZ4wY=",
+      "name": "settings_macros"
+    },
+    "crates/settings_profile_selector": {
+      "hash": "sha256-k13kJMfdpPr9b2ND4p8PzDLo6Uy8YXzLCk2G1/yv79w=",
+      "name": "settings_profile_selector"
+    },
+    "crates/settings_ui": {
+      "hash": "sha256-Y7cZjx1ckg1JdJhcw3/Rb74uqAAgUjY7Z4GmpgjB6SU=",
+      "name": "settings_ui"
+    },
+    "crates/shell_command_parser": {
+      "hash": "sha256-aCTJ/f1XidV0CRLuVqltgycRLuzgwzoQgiMYRFRCIwI=",
+      "name": "shell_command_parser"
+    },
+    "crates/sidebar": {
+      "hash": "sha256-xkQnp2z4QaB4DiYoeLxRSR9okuuHjH/6c01UnnUdAv0=",
+      "name": "sidebar"
+    },
+    "crates/snippet": {
+      "hash": "sha256-hReQhXG1lUgbzikFUspsfYhDrIgjgPnwgY2TIhYIPOE=",
+      "name": "snippet"
+    },
+    "crates/snippet_provider": {
+      "hash": "sha256-9cnfzL45ix4DiS/LH+DK6HCisJQLP0AWcg9/9peaHag=",
+      "name": "snippet_provider"
+    },
+    "crates/snippets_ui": {
+      "hash": "sha256-nwMkTz5OQrE4vmiKyZgZl5+YRwSBSZFcTwjd+sqUJsU=",
+      "name": "snippets_ui"
+    },
+    "crates/sqlez": {
+      "hash": "sha256-qf+0O7V6XCisB6AbSmuuZhghw2PqFBDs1i5YuMJQDpA=",
+      "name": "sqlez"
+    },
+    "crates/sqlez_macros": {
+      "hash": "sha256-m9qXCYl6vBVQQGKvcgO5ByTZhHJ51lNQ8Por5GWBFYw=",
+      "name": "sqlez_macros"
+    },
+    "crates/streaming_diff": {
+      "hash": "sha256-XM7kW/sYSS+EdQOajeMacxoagK3MHWGwzGpm0SyrcWE=",
+      "name": "streaming_diff"
+    },
+    "crates/sum_tree": {
+      "hash": "sha256-GMqdlV955RPkHt9aMWeh7hW9V6N2IHThIdf79L5vlr0=",
+      "name": "sum_tree"
+    },
+    "crates/svg_preview": {
+      "hash": "sha256-SKoaFO3jwL4sokVucjw9tJP+61zW12brSHIrzo0x/6M=",
+      "name": "svg_preview"
+    },
+    "crates/syntax_theme": {
+      "hash": "sha256-9cvl83MWb64F68AEtJ38DaVzbQuNxym0CiZeTauZe90=",
+      "name": "syntax_theme"
+    },
+    "crates/system_specs": {
+      "hash": "sha256-L2JcV97hxbw2UqNlBxsOizn30dJa71Zgipe1edf2WAk=",
+      "name": "system_specs"
+    },
+    "crates/tab_switcher": {
+      "hash": "sha256-pXIDjRsM1AdwqJwCrpG6Z5HoAj2XnhTWMU30oKYYvY4=",
+      "name": "tab_switcher"
+    },
+    "crates/tabular_data_preview": {
+      "hash": "sha256-8s24We21jwby1jtTXKt5lGuFVz+5evydkXefZOIa6Ok=",
+      "name": "tabular_data_preview"
+    },
+    "crates/task": {
+      "hash": "sha256-Z8Jyud1M/a5slGHWbRSsc2gAaon+Vdqm/jwpi0OtIHc=",
+      "name": "task"
+    },
+    "crates/tasks_ui": {
+      "hash": "sha256-DD7t+39P1+m15ES/FvKPeYN3mZI9FDueC+o9bnA6Pdg=",
+      "name": "tasks_ui"
+    },
+    "crates/telemetry": {
+      "hash": "sha256-HJWOU3ucQKiJmy05erglgok6048D8A5iGEn8La1M3+Q=",
+      "name": "telemetry"
+    },
+    "crates/telemetry_events": {
+      "hash": "sha256-5lPMpilmK4nCaqtpmCAPvqgI9nc/SSyeRsMGkOq4a0g=",
+      "name": "telemetry_events"
+    },
+    "crates/terminal": {
+      "hash": "sha256-LNpBPNyyoEBqtC7B/Xvskf7obQ0znc+UAH3aAwrt1wU=",
+      "name": "terminal"
+    },
+    "crates/terminal_view": {
+      "hash": "sha256-3sMNVqZqYyTAgaqZg1UJOGyMwxQRsekgIV3oo5Mts3Q=",
+      "name": "terminal_view"
+    },
+    "crates/text": {
+      "hash": "sha256-cqA/JBggG/PTETN1ki2cV2Tuux9lKYOfJW/Zeo3dJvg=",
+      "name": "text"
+    },
+    "crates/theme": {
+      "hash": "sha256-GNuDcu2gyDctaxpdOp2eJRMSOX3p2Vip0LP+Vf6Bu30=",
+      "name": "theme"
+    },
+    "crates/theme_extension": {
+      "hash": "sha256-3+kNTlX8S4YvBEg+KfnG9d1As1c9/37Am3HJHPdEqhY=",
+      "name": "theme_extension"
+    },
+    "crates/theme_importer": {
+      "hash": "sha256-Yd5EwmubrvV9I6oq/8MwmU5d3iPpPAvhE70FI3Mke8I=",
+      "name": "theme_importer"
+    },
+    "crates/theme_selector": {
+      "hash": "sha256-0yYhrzincoXR9wHtGtvwVegwJ60EJzpOfTci2Md8SNo=",
+      "name": "theme_selector"
+    },
+    "crates/theme_settings": {
+      "hash": "sha256-cvkyZW7ENlXdSOUO28Y7KvT3brsWVfSY0KmJf/x+RVQ=",
+      "name": "theme_settings"
+    },
+    "crates/time_format": {
+      "hash": "sha256-AFIO/MQVB2eKhsfm/+z94iAXvF/c4OK6fnVN8MvAd7k=",
+      "name": "time_format"
+    },
+    "crates/title_bar": {
+      "hash": "sha256-Ukfc04oTIRv7g8oOSKoAvN8qp1h0G18VgWf/kj8gsVo=",
+      "name": "title_bar"
+    },
+    "crates/toolchain_selector": {
+      "hash": "sha256-caqIvpVpSg6x5+Ti9KP6culddLAwtnWxOeCjP7b2DOo=",
+      "name": "toolchain_selector"
+    },
+    "crates/ui": {
+      "hash": "sha256-KYEZ/h88bZtgIefipdxM+VltLoKt8qUoQzatA5XoxnE=",
+      "name": "ui"
+    },
+    "crates/ui_input": {
+      "hash": "sha256-dXB2f8SviPBT+TwXQXV6BzHg/k0DUSAS3gxdsdeSUME=",
+      "name": "ui_input"
+    },
+    "crates/ui_macros": {
+      "hash": "sha256-eHk8pTP+Kbtwoo2ZL4QjgQzsB9YDdY8IS4phx7PWKCo=",
+      "name": "ui_macros"
+    },
+    "crates/ui_prompt": {
+      "hash": "sha256-0bwckmkZwUgUs0wF+5Q4FQdEK45XLnH5K/7Q7r4ePqo=",
+      "name": "ui_prompt"
+    },
+    "crates/util": {
+      "hash": "sha256-/21kLKi1JnyscKWWy2C9yfy8i9LW0aaxQ0g8PsnUSIU=",
+      "name": "util"
+    },
+    "crates/util_macros": {
+      "hash": "sha256-4RllQlxV0aOsS5YiTFYGXQNUdKdRlFwI1nQQsqb48YI=",
+      "name": "util_macros"
+    },
+    "crates/vim": {
+      "hash": "sha256-COATZLjHerL79wdOArbu/zmH6EysQehWfeH1o1Pku2k=",
+      "name": "vim"
+    },
+    "crates/vim_mode_setting": {
+      "hash": "sha256-+/KRPjtL6Qz+CzrGmDkGjBi1O0PNDayg5WqXCOvwEFA=",
+      "name": "vim_mode_setting"
+    },
+    "crates/watch": {
+      "hash": "sha256-stTbWvvl/N5H2bPoT48FT4iZjwvZvxVxj2X2chpnqcw=",
+      "name": "watch"
+    },
+    "crates/web_search": {
+      "hash": "sha256-MUpLBJE6eFsKF7X55mwlZU0vzHwKOMfwg9Eaxv07KGk=",
+      "name": "web_search"
+    },
+    "crates/web_search_providers": {
+      "hash": "sha256-c0wkteSd2BXazBqP8eEF1uQCJAluPAB3q3DrbvI4LhM=",
+      "name": "web_search_providers"
+    },
+    "crates/which_key": {
+      "hash": "sha256-Ci+w//YTypOA1pht0lLA6CmhgbqEIqFhQxGRKN42heA=",
+      "name": "which_key"
+    },
+    "crates/windows_resources": {
+      "hash": "sha256-EpujglP4tnBZTjn/HDCMBRDHTmX747Ijz7lxWPWm6/Y=",
+      "name": "windows_resources"
+    },
+    "crates/workspace": {
+      "hash": "sha256-9a9OmLrxGI3BM4lX8ENm28Ob1QQMpIrBBOfAaxdG9g8=",
+      "name": "workspace"
+    },
+    "crates/worktree": {
+      "hash": "sha256-Jx2K/vuUNIZxq5SZ4GrG5GKeUz4e4dQPq2Dw+YOjLOk=",
+      "name": "worktree"
+    },
+    "crates/worktree_benchmarks": {
+      "hash": "sha256-DxFyS6+ldbonMK0Hd88fm1h6JJqiN/pr//zZQZvyd94=",
+      "name": "worktree_benchmarks"
+    },
+    "crates/x_ai": {
+      "hash": "sha256-DkhB0EjIazNPpbYV7jriUkUYlBiwPR4m5Qe1aAJQENs=",
+      "name": "x_ai"
+    },
+    "crates/zed": {
+      "hash": "sha256-wV4Ofm1xerU4z1VwunG99isBahBn++0eGE+E7z6hUTE=",
+      "name": "zed"
+    },
+    "crates/zed_actions": {
+      "hash": "sha256-c3i7C1C1i+TrQJZY/ij3M0/2mUQMNOjqhq7XRDTJpgI=",
+      "name": "zed_actions"
+    },
+    "crates/zed_credentials_provider": {
+      "hash": "sha256-KUfgeIllicrvxvG2EXe2Ms7OVBZG/kVGjS/HN0fL9K4=",
+      "name": "zed_credentials_provider"
+    },
+    "crates/zed_env_vars": {
+      "hash": "sha256-4ntM7tF6FP94FJRpa4RrbSvKGP9gzqAy2miZI3Y0xxA=",
+      "name": "zed_env_vars"
+    },
+    "crates/zeta_prompt": {
+      "hash": "sha256-ld2qo53QsnBAjISxQVHlZJ21edVNh/KjGx/T9RoofRo=",
+      "name": "zeta_prompt"
+    },
+    "crates/zlog": {
+      "hash": "sha256-Gu5FsB1GbnjDbSVo7kGKpbcR5UoZCjiMmvrxB7WbIBo=",
+      "name": "zlog"
+    },
+    "crates/zlog_settings": {
+      "hash": "sha256-0kxWvK1l1bkr+32bAO2ZOn5E0tJGJQynMHRN2fkEfRA=",
+      "name": "zlog_settings"
+    },
+    "crates/ztracing": {
+      "hash": "sha256-dW6wSOwGqxe8vZushm/MRh++wMDWg4F0k/37GU3EuSE=",
+      "name": "ztracing"
+    },
+    "crates/ztracing_macro": {
+      "hash": "sha256-ADr5Gg4cnahnOAXA4MEjpTxo41Va17pV+S1uA4SfM/Q=",
+      "name": "ztracing_macro"
+    },
+    "extensions/glsl": {
+      "hash": "sha256-Un+3Ecf3SfKexlNp1r1ReVoZXSpXTnrSGsh4gH67csw=",
+      "name": "glsl"
+    },
+    "extensions/html": {
+      "hash": "sha256-37Emv0fqrkwPTBUrqMFak92ko8GX29XqKMm21fZpvY4=",
+      "name": "html"
+    },
+    "extensions/proto": {
+      "hash": "sha256-iZCC1kDi9EJevJm5KjujOJcMnVIqliUnweQsDZSQwzc=",
+      "name": "proto"
+    },
+    "extensions/test-extension": {
+      "hash": "sha256-NAEYkjFlCG/h6t2X5/Zwfi0jRMujgH5fgiuRjqFLrQk=",
+      "name": "test-extension"
+    },
+    "tooling/compliance": {
+      "hash": "sha256-MU1jbnmK9gMBfcArb91xf6VTN8b4iHtHmXoW4yqI3Pw=",
+      "name": "compliance"
+    },
+    "tooling/perf": {
+      "hash": "sha256-9EiMTmxx8Lfy7TJMb9PA9IWeT/pHklsm7ziBfnF2GM8=",
+      "name": "perf"
+    },
+    "tooling/xtask": {
+      "hash": "sha256-Vzanu/ApD+4NYj0pIn1MKCmwY/Qk1AlI1KoGlS5CWPI=",
+      "name": "xtask"
+    }
+  },
+  "source": {
+    "cargoNixSha256": "ceb8f50f7d0dc8972564af1a708fab2706aad555db5c167ae1806a4650939232",
+    "input": "zed",
+    "narHash": "sha256-QLiC2IuYTHHh1xrYYojOtPKvYBnUWWr9DZOlEx7/xWk=",
+    "subdir": "."
+  }
+}

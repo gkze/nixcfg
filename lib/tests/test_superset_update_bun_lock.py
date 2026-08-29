@@ -1,7 +1,6 @@
 """Pure-Python tests for the Superset bun lock update helper."""
 
-from __future__ import annotations
-
+import json
 import os
 import runpy
 import stat
@@ -10,6 +9,14 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from nix_manipulator.expressions.binding import Binding
+from nix_manipulator.expressions.ellipses import Ellipses
+from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.function.definition import FunctionDefinition
+from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.path import NixPath
+from nix_manipulator.expressions.primitive import StringPrimitive
+from nix_manipulator.expressions.set import AttributeSet
 
 from lib.import_utils import load_module_from_path
 from lib.update.paths import REPO_ROOT
@@ -101,6 +108,255 @@ def test_run_translates_called_process_error(monkeypatch: pytest.MonkeyPatch) ->
         module._run(["nix", "run", "demo"])
 
 
+def test_workspace_paths_from_bun_nix_evaluates_generated_local_paths(
+    tmp_path: Path,
+) -> None:
+    """Use a tiny real Nix eval because applying bun.nix cannot be proven from its AST alone."""
+    module = _load_module()
+    workspace = tmp_path / "apps" / "desktop"
+    workspace.mkdir(parents=True)
+    bun_nix = tmp_path / "bun.nix"
+    expression = FunctionDefinition(
+        argument_set=[
+            Identifier(name="copyPathToStore"),
+            Identifier(name="fetchFromGitHub"),
+            Identifier(name="fetchgit"),
+            Identifier(name="fetchurl"),
+            Ellipses(),
+        ],
+        output=AttributeSet(
+            values=[
+                Binding(
+                    name="remote",
+                    value=FunctionCall(
+                        name=Identifier(name="fetchurl"),
+                        argument=AttributeSet(
+                            values=[
+                                Binding(
+                                    name="url",
+                                    value=StringPrimitive(
+                                        value="https://example.test/package.tgz"
+                                    ),
+                                )
+                            ]
+                        ),
+                    ),
+                ),
+                Binding(
+                    name="github",
+                    value=FunctionCall(
+                        name=Identifier(name="fetchFromGitHub"),
+                        argument=AttributeSet(
+                            values=[
+                                Binding(
+                                    name="owner",
+                                    value=StringPrimitive(value="example"),
+                                ),
+                                Binding(
+                                    name="repo",
+                                    value=StringPrimitive(value="demo"),
+                                ),
+                            ]
+                        ),
+                    ),
+                ),
+                Binding(
+                    name="git",
+                    value=FunctionCall(
+                        name=Identifier(name="fetchgit"),
+                        argument=AttributeSet(
+                            values=[
+                                Binding(
+                                    name="url",
+                                    value=StringPrimitive(
+                                        value="https://example.test/demo.git"
+                                    ),
+                                )
+                            ]
+                        ),
+                    ),
+                ),
+                Binding(
+                    name="workspace",
+                    value=FunctionCall(
+                        name=Identifier(name="copyPathToStore"),
+                        argument=NixPath(path="./apps/desktop"),
+                    ),
+                ),
+            ]
+        ),
+    )
+    bun_nix.write_text(expression.rebuild() + "\n", encoding="utf-8")
+
+    assert module._workspace_paths_from_bun_nix(bun_nix) == (workspace,)
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "not-json",
+        "{}",
+        "[]",
+        '["/tmp/workspace", 1]',
+    ],
+)
+def test_workspace_paths_from_bun_nix_rejects_invalid_evaluation_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    output: str,
+) -> None:
+    """Reject malformed or empty evaluator output instead of skipping parity checks."""
+    module = _load_module()
+    monkeypatch.setattr(module, "_run", lambda *_args, **_kwargs: output)
+
+    with pytest.raises(
+        module.UpdateBunLockError,
+        match="could not resolve workspace paths from generated bun.nix",
+    ):
+        module._workspace_paths_from_bun_nix(tmp_path / "bun.nix")
+
+
+def test_validate_workspace_parity_accepts_nar_equivalent_trees(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Ignore copy-time write bits while preserving Nix path hashing semantics."""
+    module = _load_module()
+    upstream_root = tmp_path / "upstream"
+    prepared_root = tmp_path / "prepared"
+    relative = Path("apps/desktop")
+    for root in (upstream_root, prepared_root):
+        workspace = root / relative
+        workspace.mkdir(parents=True)
+        executable = workspace / "run.sh"
+        executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        executable.chmod(stat.S_IRUSR | stat.S_IXUSR)
+        (workspace / "run-link").symlink_to("run.sh")
+    (prepared_root / relative / "run.sh").chmod(
+        stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+    )
+    monkeypatch.setattr(
+        module,
+        "_workspace_paths_from_bun_nix",
+        lambda _bun_nix: (prepared_root / relative,),
+    )
+
+    module._validate_workspace_parity(
+        bun_nix=prepared_root / "bun.nix",
+        prepared_root=prepared_root,
+        upstream_root=upstream_root,
+    )
+
+
+def test_validate_workspace_parity_rejects_prepared_workspace_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Fail before promotion when preparation changes a bun.nix workspace subtree."""
+    module = _load_module()
+    upstream_root = tmp_path / "upstream"
+    prepared_root = tmp_path / "prepared"
+    relative = Path("apps/desktop")
+    for root, content in ((upstream_root, "raw\n"), (prepared_root, "prepared\n")):
+        workspace = root / relative
+        workspace.mkdir(parents=True)
+        (workspace / "package.json").write_text(content, encoding="utf-8")
+    monkeypatch.setattr(
+        module,
+        "_workspace_paths_from_bun_nix",
+        lambda _bun_nix: (prepared_root / relative,),
+    )
+
+    with pytest.raises(
+        module.UpdateBunLockError,
+        match=r"prepared workspace differs from locked upstream source: apps/desktop",
+    ):
+        module._validate_workspace_parity(
+            bun_nix=prepared_root / "bun.nix",
+            prepared_root=prepared_root,
+            upstream_root=upstream_root,
+        )
+
+
+def test_validate_workspace_parity_rejects_paths_outside_prepared_source(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Do not let a generated local package escape the source tree being checked."""
+    module = _load_module()
+    prepared_root = tmp_path / "prepared"
+    prepared_root.mkdir()
+    monkeypatch.setattr(
+        module,
+        "_workspace_paths_from_bun_nix",
+        lambda _bun_nix: (tmp_path / "outside",),
+    )
+
+    with pytest.raises(
+        module.UpdateBunLockError,
+        match="bun.nix referenced a workspace outside the prepared source",
+    ):
+        module._validate_workspace_parity(
+            bun_nix=prepared_root / "bun.nix",
+            prepared_root=prepared_root,
+            upstream_root=tmp_path / "upstream",
+        )
+
+
+def test_validate_workspace_parity_rejects_symlink_escape(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Reject lexical children whose resolved path escapes through a symlink."""
+    module = _load_module()
+    prepared_root = tmp_path / "prepared"
+    prepared_root.mkdir()
+    outside = tmp_path / "outside"
+    (outside / "desktop").mkdir(parents=True)
+    (prepared_root / "apps").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(
+        module,
+        "_workspace_paths_from_bun_nix",
+        lambda _bun_nix: (prepared_root / "apps/desktop",),
+    )
+
+    with pytest.raises(
+        module.UpdateBunLockError,
+        match="bun.nix referenced a workspace outside the prepared source",
+    ):
+        module._validate_workspace_parity(
+            bun_nix=prepared_root / "bun.nix",
+            prepared_root=prepared_root,
+            upstream_root=tmp_path / "upstream",
+        )
+
+
+def test_validate_workspace_parity_rejects_incomplete_hash_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Require one NAR hash for each prepared and locked workspace path."""
+    module = _load_module()
+    prepared_root = tmp_path / "prepared"
+    relative = Path("apps/desktop")
+    monkeypatch.setattr(
+        module,
+        "_workspace_paths_from_bun_nix",
+        lambda _bun_nix: (prepared_root / relative,),
+    )
+    monkeypatch.setattr(module, "_run", lambda *_args, **_kwargs: "one-hash\n")
+
+    with pytest.raises(
+        module.UpdateBunLockError,
+        match="nix hash path returned an unexpected number of workspace hashes",
+    ):
+        module._validate_workspace_parity(
+            bun_nix=prepared_root / "bun.nix",
+            prepared_root=prepared_root,
+            upstream_root=tmp_path / "upstream",
+        )
+
+
 def test_main_happy_path_runs_prepare_and_copies_outputs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -127,6 +383,7 @@ def test_main_happy_path_runs_prepare_and_copies_outputs(
     copied_trees: list[tuple[Path, Path, bool, bool]] = []
     copied_files: list[tuple[Path, Path]] = []
     run_calls: list[tuple[list[str], Path | None]] = []
+    parity_calls: list[tuple[Path, Path, Path]] = []
     writable_roots: list[Path] = []
 
     def _copytree(src: Path, dst: Path, *, dirs_exist_ok: bool, symlinks: bool) -> None:
@@ -137,8 +394,14 @@ def test_main_happy_path_runs_prepare_and_copies_outputs(
     def _copy2(src: Path, dst: Path) -> None:
         copied_files.append((src, dst))
 
-    def _run(command: list[str], *, cwd: Path | None = None) -> None:
+    def _run(command: list[str], *, cwd: Path | None = None, **_kwargs: object) -> str:
         run_calls.append((command, cwd))
+        return ""
+
+    def _validate_workspace_parity(
+        *, bun_nix: Path, prepared_root: Path, upstream_root: Path
+    ) -> None:
+        parity_calls.append((bun_nix, prepared_root, upstream_root))
 
     monkeypatch.setattr(module.Path, "cwd", classmethod(lambda cls: repo_root))
     monkeypatch.setattr(module.tempfile, "TemporaryDirectory", _TemporaryDirectory)
@@ -146,6 +409,9 @@ def test_main_happy_path_runs_prepare_and_copies_outputs(
     monkeypatch.setattr(module.shutil, "copy2", _copy2)
     monkeypatch.setattr(module, "_make_user_writable", writable_roots.append)
     monkeypatch.setattr(module, "_run", _run)
+    monkeypatch.setattr(
+        module, "_validate_workspace_parity", _validate_workspace_parity
+    )
 
     assert module.main() == 0
 
@@ -190,6 +456,9 @@ def test_main_happy_path_runs_prepare_and_copies_outputs(
     assert copied_files == [
         (temp_root / "bun.lock", output_dir / "bun.lock"),
         (temp_root / "bun.nix", output_dir / "bun.nix"),
+    ]
+    assert parity_calls == [
+        (temp_root / "bun.nix", temp_root, module.UPSTREAM_SRC),
     ]
 
 
@@ -272,7 +541,19 @@ def test_script_main_guard_exits_with_main_status(
     monkeypatch.setattr("tempfile.TemporaryDirectory", _TemporaryDirectory)
     monkeypatch.setattr("shutil.copytree", _copytree)
     monkeypatch.setattr("shutil.copy2", _copy2)
-    monkeypatch.setattr("subprocess.run", lambda *_args, **_kwargs: None)
+
+    def _subprocess_run(
+        command: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if command[:2] == ["nix", "eval"]:
+            stdout = json.dumps([str(temp_root / "apps/desktop")])
+        elif command[:3] == ["nix", "hash", "path"]:
+            stdout = "sha256-workspace\nsha256-workspace\n"
+        else:
+            stdout = ""
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr("subprocess.run", _subprocess_run)
 
     with pytest.raises(SystemExit, match="0") as excinfo:
         runpy.run_path(

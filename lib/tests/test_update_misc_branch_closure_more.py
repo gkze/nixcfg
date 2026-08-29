@@ -1,7 +1,5 @@
 """Focused branch-closure tests for high-coverage update helpers."""
 
-from __future__ import annotations
-
 import ast
 import asyncio
 import json

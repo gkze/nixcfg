@@ -1,15 +1,15 @@
 {
-  "drvHash": "ac5xshcgwsmwwp3isrmdpi3kpmfavi60",
+  "drvHash": "h0p6cdj50vrighgv650v3yl6vkrmz94p",
   "hashes": [
     {
-      "hash": "sha256-zX4V9mg7ljQ1AKl1fgATPVrFpx1a6jsyiLzN2VixpFE=",
+      "hash": "sha256-cKJm9zIHBacmQ/iyNUhCBYp5vGsUakck/J4qdUFbQ7U=",
       "hashType": "yarnAppHash"
     },
     {
-      "hash": "sha256-2LV8hZCuX96h1KYYcL6b6XGC3uGcH5IQM4D61R7Em/U=",
+      "hash": "sha256-0NUihkzc4oO9qDpg3IXkltihk6YgYQT8Vfl53iEypQI=",
       "hashType": "yarnRootHash"
     }
   ],
   "input": "github-desktop",
-  "version": "3.6.3"
+  "version": "3.6.4"
 }

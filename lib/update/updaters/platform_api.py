@@ -1,7 +1,5 @@
 """Reusable base updater for APIs that expose per-platform version/checksum fields."""
 
-from __future__ import annotations
-
 import asyncio
 from typing import TYPE_CHECKING
 

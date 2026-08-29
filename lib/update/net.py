@@ -34,7 +34,6 @@ def _expect_json_list(payload: JSONValue, *, context: str) -> JSONList:
 HTTP_BAD_REQUEST = 400
 RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 logger = logging.getLogger(__name__)
-_GITHUB_API_VERSION = "2022-11-28"
 
 
 class _RetryableStatusError(RuntimeError):
@@ -90,9 +89,7 @@ async def _fetch_github_repo(owner: str, repo: str, *, config: UpdateConfig) -> 
     """Fetch one GitHub repository model through GitHubKit."""
     client = _build_githubkit_client(config)
     try:
-        return (
-            await client.rest(_GITHUB_API_VERSION).repos.async_get(owner, repo)
-        ).parsed_data
+        return (await client.rest().repos.async_get(owner, repo)).parsed_data
     except GitHubException as exc:
         msg = f"GitHub repo metadata request failed for {owner}/{repo}: {exc}"
         raise RuntimeError(msg) from exc
@@ -110,7 +107,7 @@ async def _fetch_github_commits(
     client = _build_githubkit_client(config)
     try:
         commits = (
-            await client.rest(_GITHUB_API_VERSION).repos.async_list_commits(
+            await client.rest().repos.async_list_commits(
                 owner,
                 repo,
                 path=file_path,

@@ -1,7 +1,5 @@
 """Tests for GitHub Desktop's packaged Info.plist validator."""
 
-from __future__ import annotations
-
 import plistlib
 from pathlib import Path
 from types import ModuleType

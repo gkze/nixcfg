@@ -4,8 +4,6 @@ Defines the schema for package source entries, hashes, and the
 top-level sources file used by the update machinery.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import re
@@ -325,6 +323,11 @@ class SourceEntry(BaseModel):
     input: str | None = None
     urls: dict[str, str] | None = None
     commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
+    electron_version: str | None = Field(
+        default=None,
+        alias="electronVersion",
+        min_length=1,
+    )
     drv_hash: str | None = Field(default=None, alias="drvHash")
 
     def to_dict(self) -> JsonObject:
@@ -336,6 +339,8 @@ class SourceEntry(BaseModel):
             result["drvHash"] = self.drv_hash
         if self.commit is not None:
             result["commit"] = self.commit
+        if self.electron_version is not None:
+            result["electronVersion"] = self.electron_version
         if self.input is not None:
             result["input"] = self.input
         if self.urls is not None:
@@ -361,6 +366,7 @@ class SourceEntry(BaseModel):
                 "input": other.input or self.input,
                 "urls": merged_urls,
                 "commit": other.commit or self.commit,
+                "electronVersion": other.electron_version or self.electron_version,
                 "drvHash": other.drv_hash or self.drv_hash,
             },
         )

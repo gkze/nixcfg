@@ -1,7 +1,5 @@
 """Additional tests for core update helper modules."""
 
-from __future__ import annotations
-
 import json
 import os
 from pathlib import Path

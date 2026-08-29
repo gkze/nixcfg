@@ -1,7 +1,5 @@
 """Updater for Wispr Flow Darwin DMG releases."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.update.updaters import register_updater

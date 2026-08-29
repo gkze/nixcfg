@@ -1,7 +1,5 @@
 """Tests for update UI state, rendering, and event consumption."""
 
-from __future__ import annotations
-
 import asyncio
 import io
 import time

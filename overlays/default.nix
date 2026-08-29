@@ -63,6 +63,7 @@
               broken = false;
             };
         })) "Spacedrive.app";
+        utm = withManagedMacApp prev.utm "UTM.app";
         zed-editor-nightly =
           if prev.stdenv.hostPlatform.isDarwin then
             withManagedMacApp (final.callPackage ../packages/zed-editor-nightly { }) "Zed Nightly.app"

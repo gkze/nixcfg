@@ -1,7 +1,5 @@
 """Focused pure-Python tests for the zentool CLI surface."""
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from types import SimpleNamespace

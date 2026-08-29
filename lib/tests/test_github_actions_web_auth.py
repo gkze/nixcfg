@@ -1,7 +1,5 @@
 """Tests for browser-assisted GitHub web cookie discovery."""
 
-from __future__ import annotations
-
 import asyncio
 import io
 

@@ -1,7 +1,5 @@
 """Rewrite packageManager fields to match the Bun used in the build."""
 
-from __future__ import annotations
-
 import json
 import sys
 from pathlib import Path

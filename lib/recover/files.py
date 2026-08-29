@@ -1,7 +1,5 @@
 """Recover arbitrary repo files from realised generation source snapshots."""
 
-from __future__ import annotations
-
 import asyncio
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath

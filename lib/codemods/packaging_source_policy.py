@@ -1,7 +1,5 @@
 """Policy audits for package and overlay source modifications."""
 
-from __future__ import annotations
-
 import ast
 import re
 from dataclasses import dataclass
@@ -159,8 +157,18 @@ class PythonRewriteAudit:
         return tuple(
             site
             for path in sorted(iter_target_paths(self.target_patterns, root=REPO_ROOT))
+            if not self._is_sibling_updater_test(path)
             for site in self._sites_for(path)
         )
+
+    @staticmethod
+    def _is_sibling_updater_test(path: Path) -> bool:
+        relative_path = path.resolve().relative_to(REPO_ROOT.resolve())
+        match relative_path.parts:
+            case ("packages" | "overlays", _, "updater_test.py"):
+                return True
+            case _:
+                return False
 
     def _sites_for(self, path: Path) -> tuple[PythonRewriteSite, ...]:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

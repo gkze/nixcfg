@@ -37,9 +37,30 @@ let
     bashNonInteractive = bashWithDynamicPipeHeredocFix;
     makeWrapper = makeWrapperWithDynamicPipeHeredocFix;
   };
+  gnutarBuilderBash = final.buildPackages.bash-dynamic-pipe-heredoc;
+  gnutarWithDynamicPipeHeredocFix =
+    if prev.stdenv.buildPlatform.isDarwin then
+      prev.gnutar.overrideAttrs (old: {
+        # The generic setup script resets CONFIG_SHELL from its own SHELL, while
+        # Autoconf may re-exec generated configure scripts through that value.
+        # Use the patched interpreter as GNU tar's real derivation builder and
+        # re-establish it before any source phase, without replacing stdenv for
+        # unrelated packages or creating a new Darwin bootstrap fixed point.
+        realBuilder = "${gnutarBuilderBash}/bin/bash";
+        preUnpack = (old.preUnpack or "") + ''
+          export SHELL=${gnutarBuilderBash}/bin/bash
+          export CONFIG_SHELL="$SHELL"
+        '';
+        passthru = (old.passthru or { }) // {
+          dynamicPipeHeredocBuilder = "${gnutarBuilderBash}/bin/bash";
+        };
+      })
+    else
+      prev.gnutar;
 in
 {
   bash-dynamic-pipe-heredoc = bashWithDynamicPipeHeredocFix;
+  gnutar-dynamic-pipe-heredoc = gnutarWithDynamicPipeHeredocFix;
   nix-prefetch-git =
     if prev.stdenv.hostPlatform.isDarwin then
       nixPrefetchGitWithDynamicPipeHeredocFix

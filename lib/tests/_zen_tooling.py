@@ -1,7 +1,5 @@
 """Shared helpers for repo-managed Zen script tests."""
 
-from __future__ import annotations
-
 import getpass
 from functools import cache
 from pathlib import Path

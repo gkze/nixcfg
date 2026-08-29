@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-fh4y7h493Bvj3KpJv2GrMtQ3TccPGXeI6b22KwLd/is=",
-    "x86_64-darwin": "sha256-fh4y7h493Bvj3KpJv2GrMtQ3TccPGXeI6b22KwLd/is="
+    "aarch64-darwin": "sha256-Je34DT/cSmFdfwm7PCfPY4FVIKdTMIMYV226No76VYE=",
+    "x86_64-darwin": "sha256-Je34DT/cSmFdfwm7PCfPY4FVIKdTMIMYV226No76VYE="
   },
   "urls": {
-    "aarch64-darwin": "https://releases.linear.app/Linear-1.32.1-universal.dmg",
-    "x86_64-darwin": "https://releases.linear.app/Linear-1.32.1-universal.dmg"
+    "aarch64-darwin": "https://releases.linear.app/Linear-1.32.2-universal.dmg",
+    "x86_64-darwin": "https://releases.linear.app/Linear-1.32.2-universal.dmg"
   },
-  "version": "1.32.1"
+  "version": "1.32.2"
 }

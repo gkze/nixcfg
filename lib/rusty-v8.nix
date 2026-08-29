@@ -14,7 +14,36 @@
 #
 # Returns: { nativeDrv, patchedSrc, chromiumToolchainBundle, mkCrateOverride }
 { lib }:
+let
+  mkRustyV8CrateOverride =
+    {
+      pkgs,
+      patchedSrc,
+      nativeDrv,
+      prebuiltCrateOverride ? { },
+    }:
+    attrs:
+    {
+      src = patchedSrc;
+    }
+    // lib.optionalAttrs (nativeDrv != null) {
+      nativeBuildInputs =
+        (attrs.nativeBuildInputs or [ ])
+        ++ [
+          pkgs.python3
+        ]
+        ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.xcodebuild ];
+
+      LIBCLANG_PATH = "${lib.getLib pkgs.llvmPackages.libclang}/lib";
+      PYTHON = "${pkgs.python3}/bin/python3";
+      RUSTY_V8_ARCHIVE = "${nativeDrv}/lib/librusty_v8.a";
+      RUSTY_V8_PREBUILT_GN_OUT = "${nativeDrv}/share/gn_out";
+    }
+    // prebuiltCrateOverride;
+in
 {
+  inherit mkRustyV8CrateOverride;
+
   mkRustyV8PrebuiltArtifacts =
     {
       pkgs,
@@ -250,25 +279,14 @@
             RUSTY_V8_SRC_BINDING_PATH = "${prebuiltArtifacts.binding}";
           };
 
-      mkCrateOverride =
-        attrs:
-        {
-          src = patchedSrc;
-        }
-        // lib.optionalAttrs (nativeDrv != null) {
-          nativeBuildInputs =
-            (attrs.nativeBuildInputs or [ ])
-            ++ [
-              pkgs.python3
-            ]
-            ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.xcodebuild ];
-
-          LIBCLANG_PATH = "${lib.getLib pkgs.llvmPackages.libclang}/lib";
-          PYTHON = "${pkgs.python3}/bin/python3";
-          RUSTY_V8_ARCHIVE = "${nativeDrv}/lib/librusty_v8.a";
-          RUSTY_V8_PREBUILT_GN_OUT = "${nativeDrv}/share/gn_out";
-        }
-        // prebuiltCrateOverride;
+      mkCrateOverride = mkRustyV8CrateOverride {
+        inherit
+          nativeDrv
+          patchedSrc
+          pkgs
+          prebuiltCrateOverride
+          ;
+      };
     in
     {
       inherit

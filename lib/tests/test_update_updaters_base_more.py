@@ -1,7 +1,5 @@
 """Additional coverage for updater base classes and helpers."""
 
-from __future__ import annotations
-
 import asyncio
 import sys
 from pathlib import Path
@@ -387,7 +385,6 @@ def test_register_updater_does_not_auto_wrap_crate2nix_targets(
         ),
     )
 
-    @register_updater
     class _ImplicitCrate2NixUpdater(FlakeInputMetadataUpdater):
         name = updater_name
         input_name = "demo-input"

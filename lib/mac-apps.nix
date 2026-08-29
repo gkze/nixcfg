@@ -45,21 +45,85 @@ let
   packageBundleName =
     package: tryPackageValue (attrByPath [ "passthru" "macApp" "bundleName" ] null package);
 
-  entryConflictsWithPackage =
-    entry: candidate:
+  packageIndexKey =
+    value: if builtins.isString value then builtins.unsafeDiscardStringContext value else null;
+
+  normalizedCandidate =
+    package:
     let
-      entryOutPath = packageOutPath entry.package;
-      candidateOutPath = packageOutPath candidate;
-      candidateBundleName = packageBundleName candidate;
+      bundleName = packageBundleName package;
+      outPath = packageOutPath package;
     in
-    (entryOutPath != null && candidateOutPath != null && entryOutPath == candidateOutPath)
-    || (candidateBundleName != null && entry.bundleName == candidateBundleName);
+    {
+      inherit
+        bundleName
+        outPath
+        package
+        ;
+      bundleNameKey = packageIndexKey bundleName;
+      label = packageLabel package;
+      outPathKey = packageIndexKey outPath;
+    };
+
+  indexedValues =
+    values:
+    let
+      go =
+        index: remaining:
+        if remaining == [ ] then
+          [ ]
+        else
+          [
+            {
+              inherit index;
+              value = builtins.head remaining;
+            }
+          ]
+          ++ go (index + 1) (builtins.tail remaining);
+    in
+    go 0 values;
+
+  indexPackagesBy =
+    keyFor: packages:
+    let
+      values = builtins.groupBy keyFor (filter (package: keyFor package != null) packages);
+    in
+    {
+      inherit values;
+      nonEmpty = builtins.attrNames values != [ ];
+    };
+
+  packagesAt =
+    index: key:
+    if !index.nonEmpty then
+      [ ]
+    else if key != null then
+      index.values.${key} or [ ]
+    else
+      [ ];
+
+  mergeIndexedPackages =
+    left: right:
+    if left == [ ] then
+      right
+    else if right == [ ] then
+      left
+    else
+      let
+        leftHead = builtins.head left;
+        rightHead = builtins.head right;
+      in
+      if leftHead.index < rightHead.index then
+        [ leftHead ] ++ mergeIndexedPackages (builtins.tail left) right
+      else if rightHead.index < leftHead.index then
+        [ rightHead ] ++ mergeIndexedPackages left (builtins.tail right)
+      else
+        [ leftHead ] ++ mergeIndexedPackages (builtins.tail left) (builtins.tail right);
 
   formatPackageListConflict =
     conflict:
     let
-      managedLabel = packageLabel conflict.entry.package;
-      candidateLabel = packageLabel conflict.candidate;
+      inherit (conflict) candidateLabel managedLabel;
     in
     "- ${conflict.entry.bundleName} (${managedLabel}) also appears in ${conflict.label}"
     + optionalString (candidateLabel != managedLabel) " as ${candidateLabel}"
@@ -67,19 +131,57 @@ let
 
   managedAppsPackageListConflicts =
     entries: packageLists:
+    let
+      normalizedEntries = map (
+        indexed:
+        let
+          package = indexed.value.package;
+          outPath = packageOutPath package;
+        in
+        {
+          bundleNameKey = packageIndexKey indexed.value.bundleName;
+          entry = indexed.value;
+          inherit (indexed) index;
+          label = packageLabel package;
+          outPathKey = packageIndexKey outPath;
+        }
+      ) (indexedValues entries);
+      normalizedPackageLists = map (
+        packageList:
+        let
+          packages = map (
+            indexed:
+            normalizedCandidate indexed.value
+            // {
+              inherit (indexed) index;
+            }
+          ) (indexedValues packageList.packages);
+        in
+        {
+          inherit (packageList) label;
+          byBundleName = indexPackagesBy (package: package.bundleNameKey) packages;
+          byOutPath = indexPackagesBy (package: package.outPathKey) packages;
+        }
+      ) packageLists;
+      conflictsFor =
+        entry: packageList:
+        let
+          candidates = mergeIndexedPackages (packagesAt packageList.byOutPath entry.outPathKey) (
+            packagesAt packageList.byBundleName entry.bundleNameKey
+          );
+        in
+        map (candidate: {
+          candidate = candidate.package;
+          candidateLabel = candidate.label;
+          inherit (entry) entry;
+          inherit (packageList) label;
+          managedLabel = entry.label;
+        }) candidates;
+    in
     concatLists (
       map (
-        entry:
-        concatLists (
-          map (
-            packageList:
-            map (candidate: {
-              inherit entry candidate;
-              inherit (packageList) label;
-            }) (filter (candidate: entryConflictsWithPackage entry candidate) packageList.packages)
-          ) packageLists
-        )
-      ) entries
+        entry: concatLists (map (packageList: conflictsFor entry packageList) normalizedPackageLists)
+      ) normalizedEntries
     );
 
   requiredMacAppAttr =
@@ -148,6 +250,15 @@ let
         description = ''
           Whether to copy the app bundle out of the store or symlink it into
           the scoped application directory.
+        '';
+      };
+
+      preventDowngrade = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Whether activation must refuse to replace a newer installed bundle
+          with an older version from the declared package.
         '';
       };
     };
@@ -260,6 +371,7 @@ let
           bundleName
           mode
           package
+          preventDowngrade
           scope
           ;
         inherit
@@ -278,8 +390,10 @@ let
   pythonExe =
     let
       python = attrByPath [ "python3" ] null pkgs;
+      pythonWithPackages =
+        if python != null then python.withPackages (pythonPackages: [ pythonPackages.packaging ]) else null;
     in
-    if python != null then getExe python else "python3";
+    if pythonWithPackages != null then getExe pythonWithPackages else "python3";
 
   writeText =
     name: text:
@@ -397,6 +511,7 @@ rec {
         entry: entry.sourcePath or "${entry.package}/${requiredMacAppAttr entry.package "bundleRelPath"}";
       helperEntries = map (entry: {
         inherit (entry) bundleName mode;
+        preventDowngrade = entry.preventDowngrade or false;
         sourcePath = bundleSourcePath entry;
       }) entries;
     in

@@ -1,7 +1,5 @@
 """Declarative config models for JSON Schema code generation."""
 
-from __future__ import annotations
-
 import pathlib  # noqa: TC003
 from dataclasses import dataclass
 from enum import StrEnum

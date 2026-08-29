@@ -1,7 +1,5 @@
 """Focused pure-Python tests for zentool authored workspace handling."""
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import TYPE_CHECKING
 

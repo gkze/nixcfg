@@ -1,0 +1,23 @@
+diff --git a/studio/src-tauri/Cargo.toml b/studio/src-tauri/Cargo.toml
+--- a/studio/src-tauri/Cargo.toml
++++ b/studio/src-tauri/Cargo.toml
+@@ -7,6 +7,6 @@
+ # app version comes from this field rather than from there. The stale CalVer
+ # below is also the wrong shape: release builds always write SemVer, e.g. 0.1.52-beta.
+-version = "2026.4.8"
++version = "0.1.804-beta"
+ description = "Unsloth Desktop App"
+ authors = ["Unsloth AI"]
+ edition = "2021"
+diff --git a/studio/src-tauri/Cargo.lock b/studio/src-tauri/Cargo.lock
+--- a/studio/src-tauri/Cargo.lock
++++ b/studio/src-tauri/Cargo.lock
+@@ -5720,7 +5720,7 @@
+ [[package]]
+ name = "unsloth-studio"
+-version = "2026.4.8"
++version = "0.1.804-beta"
+ dependencies = [
+  "arboard",
+  "base64 0.23.1",
+  "dirs 6.0.0",

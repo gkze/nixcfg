@@ -1,7 +1,5 @@
 """Recover ``flake.lock`` and ``sources.json`` from generation build inputs."""
 
-from __future__ import annotations
-
 import asyncio
 from dataclasses import asdict, dataclass
 from pathlib import Path

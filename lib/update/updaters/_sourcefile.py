@@ -1,6 +1,5 @@
 """Shared source-file resolution helpers for updater classes."""
 
-from __future__ import annotations
 
 from typing import Protocol, cast
 

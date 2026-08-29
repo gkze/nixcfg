@@ -1,11 +1,11 @@
 {
-  "drvHash": "dzg213gipwqv90b9y5r6y0nsgxwc5if5",
+  "drvHash": "rddy9k4lvfgji7zgff3g007aac032asa",
   "hashes": [
     {
-      "hash": "sha256-F1D3ax+xiTlhsYLgoe/K8x2VQKG9iHZ5FNJJ9YDkEV0=",
+      "hash": "sha256-+Nbuwok3dY/82gUDKeGgrC0F1ZqXSW8IpV6Q1yzIPvo=",
       "hashType": "vendorHash"
     }
   ],
   "input": "gogcli",
-  "version": "v0.35.0"
+  "version": "v0.38.1"
 }

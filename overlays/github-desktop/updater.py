@@ -1,7 +1,5 @@
 """Updater for the GitHub Desktop beta overlay."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes

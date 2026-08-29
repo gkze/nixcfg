@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-79JM4YYzTSCdfXeSIzItva+kffynOfpawClzJ5a1oEw="
+  },
+  "urls": {
+    "aarch64-darwin": "https://dl.google.com/release2/j33ro/release/Gemini.dmg"
+  },
+  "version": "1.99.2.791"
+}

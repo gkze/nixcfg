@@ -1,0 +1,14 @@
+{
+  "commit": "2ebe6ed06f8e7e1ed911c0adf31ec91ad2e94274",
+  "hashes": [
+    {
+      "hash": "sha256-otcDBttyGnDoUNUZQzM3g5TMz0m1x9ZjHkYs5TFK/Zc=",
+      "hashType": "cargoHash"
+    },
+    {
+      "hash": "sha256-ym602jIhIGQZyggwPqXvHrvqDRmlzcbUwdrWqH8iGbA=",
+      "hashType": "srcHash"
+    }
+  ],
+  "version": "0.2.29"
+}

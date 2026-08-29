@@ -1,7 +1,5 @@
 """Shared helpers for normalizing checked-in crate2nix Cargo.nix files."""
 
-from __future__ import annotations
-
 import re
 from dataclasses import fields, is_dataclass
 

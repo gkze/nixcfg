@@ -1,7 +1,5 @@
 """Updater for crush source and Go vendor hashes."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from lib.nix.commands.base import run_nix

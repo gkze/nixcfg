@@ -1,11 +1,11 @@
 {
-  "drvHash": "j03ym04h4nxgil005g11wlsgfg05vzg9",
+  "drvHash": "n8818ifmiiqzn9jwxkm08hlqrgk9rhcv",
   "hashes": [
     {
-      "hash": "sha256-BRvnoyojLcjUVppUaC7zVJasrd50X1gyufCw3hdgEMQ=",
+      "hash": "sha256-JpslIB8X/W4u7UYXkJR++GvmFMoeHt4iOMu3+ZGj8gQ=",
       "hashType": "vendorHash"
     }
   ],
   "input": "axiom-cli",
-  "version": "v0.16.0"
+  "version": "v0.19.1"
 }

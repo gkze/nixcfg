@@ -1,0 +1,3 @@
+# Unified-diff payload whitespace is semantic, including context markers and
+# upstream indentation. Do not apply Git's source-file whitespace rules to it.
+*.patch -whitespace

@@ -10,8 +10,6 @@ This patch teaches the link-wrapper helper to additionally whole-archive any
 line.
 """
 
-from __future__ import annotations
-
 import sys
 from pathlib import Path
 

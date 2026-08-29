@@ -1,0 +1,14 @@
+diff --git a/cmake/libonnxruntime.pc.cmake.in b/cmake/libonnxruntime.pc.cmake.in
+--- a/cmake/libonnxruntime.pc.cmake.in
++++ b/cmake/libonnxruntime.pc.cmake.in
+@@ -2,5 +2,5 @@
+-bindir=${prefix}/@CMAKE_INSTALL_BINDIR@
+-mandir=${prefix}/@CMAKE_INSTALL_MANDIR@
+-docdir=${prefix}/@CMAKE_INSTALL_DOCDIR@
+-libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+-includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@/@CMAKE_PROJECT_NAME@
++bindir=@CMAKE_INSTALL_BINDIR@
++mandir=@CMAKE_INSTALL_MANDIR@
++docdir=@CMAKE_INSTALL_DOCDIR@
++libdir=@CMAKE_INSTALL_LIBDIR@
++includedir=@CMAKE_INSTALL_INCLUDEDIR@/@CMAKE_PROJECT_NAME@

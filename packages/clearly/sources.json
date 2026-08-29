@@ -1,0 +1,18 @@
+{
+  "commit": "545713a91e16af27f1281df91a8a9d03eccd4f2c",
+  "hashes": [
+    {
+      "hash": "sha256-OpOFdDXl5pUhjVB2LFZPknt3HfLdfsQS2zMn0I+/fLs=",
+      "hashType": "srcHash"
+    },
+    {
+      "hash": "sha256-uNth4PdJBMFMWk9IdkwRcn9kDwQDbPrawqjcMTUDVoE=",
+      "hashType": "vendorHash"
+    }
+  ],
+  "urls": {
+    "KeyboardShortcuts": "https://github.com/sindresorhus/KeyboardShortcuts/archive/1aef85578fdd4f9eaeeb8d53b7b4fc31bf08fe27.tar.gz",
+    "cmark-gfm": "https://github.com/brokenhandsio/cmark-gfm/archive/e97450a77a40f12b4f88f95891621c3b5d8669de.tar.gz"
+  },
+  "version": "3.3.0"
+}

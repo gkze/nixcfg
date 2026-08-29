@@ -1,25 +1,20 @@
 {
   apple-sdk_15 ? null,
   autoPatchelfHook ? null,
-  cmake,
   curl,
   fetchPnpmDeps ? null,
   inputs,
   libayatana-appindicator,
   lib,
   libiconv ? null,
-  libssh2,
   librsvg,
   nodejs_22,
-  openssl,
   outputs,
-  perl,
   pkgs,
   pkg-config,
   pnpmConfigHook,
   pnpm_10,
   python3,
-  rustPlatform,
   runCommand,
   stdenv,
   webkitgtk_4_1,
@@ -35,6 +30,7 @@ let
   slib = outputs.lib;
   version = lib.removePrefix "release/" (slib.getFlakeVersion pname);
   src = inputs.gitbutler;
+  crateCachePolicy = import ./crate-cache-policy.nix { inherit lib; };
   nodejs = nodejs_22;
   pnpm = pnpm_10.override { nodejs-slim = nodejs; };
 
@@ -108,113 +104,94 @@ let
     '';
   };
 
-  patchedSource =
+  crate2nixSrc =
+    runCommand "${pname}-${version}-crate2nix-src" { nativeBuildInputs = [ python3 ]; }
+      ''
+        cp -r ${src} "$out"
+        chmod -R u+w "$out"
+
+        PYTHONPATH=${
+          import ../../lib/codemods-pythonpath.nix { inherit lib; }
+        } ${python3}/bin/python3 ${./patch_sources.py} "$out"
+
+        rm -rf "$out/crates/gitbutler-tauri/frontend-dist"
+        mkdir -p "$out/crates/gitbutler-tauri/frontend-dist"
+        touch "$out/crates/gitbutler-tauri/frontend-dist/index.html"
+      '';
+
+  crateSource = (import ../../lib/crate2nix-source-slice.nix).sourceFor {
+    rootSrc = src;
+    source = {
+      cargoNixSha256 = builtins.hashFile "sha256" ./Cargo.nix;
+      input = "gitbutler";
+      narHash = inputs.gitbutler.narHash;
+      subdir = ".";
+    };
+    sourceInfo = builtins.fromJSON (builtins.readFile ./crate-sources.json);
+  };
+
+  cargoNix = import ./Cargo.nix {
+    inherit pkgs crateSource;
+    rootSrc = src;
+  };
+
+  patchedCrateSource =
     {
-      includeFrontend,
-      nameSuffix,
+      crateName,
+      includeFrontend ? false,
     }:
-    runCommand "${pname}-${version}-${nameSuffix}" { nativeBuildInputs = [ python3 ]; } ''
-      cp -r ${src} "$out"
+    runCommand (crateCachePolicy.patchedSourceName crateName) { nativeBuildInputs = [ python3 ]; } ''
+      cp -r ${cargoNix.internal.crates.${crateName}.src} "$out"
       chmod -R u+w "$out"
 
       PYTHONPATH=${
         import ../../lib/codemods-pythonpath.nix { inherit lib; }
-      } ${python3}/bin/python3 ${./patch_sources.py} "$out"
+      } ${python3}/bin/python3 ${./patch_sources.py} "$out" ${lib.escapeShellArg crateName}
 
-      rm -rf "$out/crates/gitbutler-tauri/frontend-dist"
-      mkdir -p "$out/crates/gitbutler-tauri/frontend-dist"
-      ${
-        if includeFrontend then
-          ''
-            cp -R ${frontend}/. "$out/crates/gitbutler-tauri/frontend-dist/"
-          ''
-        else
-          ''
-            touch "$out/crates/gitbutler-tauri/frontend-dist/index.html"
-          ''
-      }
+      ${lib.optionalString (crateName == "gitbutler-tauri") ''
+        rm -rf "$out/frontend-dist"
+        mkdir -p "$out/frontend-dist"
+        ${
+          if includeFrontend then
+            ''
+              cp -R ${frontend}/. "$out/frontend-dist/"
+            ''
+          else
+            ''
+              touch "$out/frontend-dist/index.html"
+            ''
+        }
+      ''}
     '';
 
-  crate2nixSrc = patchedSource {
-    includeFrontend = false;
-    nameSuffix = "crate2nix-src";
+  butSrc = patchedCrateSource { crateName = "but"; };
+  gitbutlerTauriSrc = patchedCrateSource {
+    crateName = "gitbutler-tauri";
+    includeFrontend = true;
   };
 
-  patchedSrc =
-    if crate2nixSourceOnly then
-      crate2nixSrc
-    else
-      patchedSource {
-        includeFrontend = true;
-        nameSuffix = "src";
-      };
+  appendCrateInputs =
+    {
+      buildInputs ? [ ],
+      nativeBuildInputs ? [ ],
+    }:
+    attrs: {
+      buildInputs = (attrs.buildInputs or [ ]) ++ buildInputs;
+      nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ nativeBuildInputs;
+    };
 
-  cargoNix = import ./Cargo.nix {
-    inherit pkgs;
-    rootSrc = crate2nixSrc;
-  };
-
-  commonNativeBuildInputs = [
-    cmake
-    perl
-    pkg-config
-    rustPlatform.bindgenHook
-  ]
-  ++ lib.optionals stdenv.hostPlatform.isLinux [ wrapGAppsHook4 ];
-
-  commonBuildInputs = [
-    libssh2
-    openssl
-    zlib
-  ]
-  ++ lib.optionals stdenv.hostPlatform.isDarwin [
-    apple-sdk_15
-    libiconv
-  ]
-  ++ lib.optionals stdenv.hostPlatform.isLinux [
-    libayatana-appindicator
-    librsvg
-    webkitgtk_4_1
-  ];
-
-  commonOverride = attrs: {
-    nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ commonNativeBuildInputs;
-    buildInputs = (attrs.buildInputs or [ ]) ++ commonBuildInputs;
-    CHANNEL = "release";
-    VERSION = version;
-  };
-
-  opensslSysOverride =
+  cacheMetadataOverride =
     attrs:
-    (commonOverride attrs)
-    // {
-      # crate2nix builds openssl-src separately, so its vendored source path is
-      # gone by the time openssl-sys' build script runs.
-      OPENSSL_NO_VENDOR = "1";
+    crateCachePolicy.forCrate {
+      channel = "release";
+      inherit (attrs) crateName;
+      inherit version;
     };
 
   rmcpOverride = attrs: {
     CARGO_CRATE_NAME = attrs.crateName;
     CARGO_PKG_VERSION = attrs.version;
   };
-
-  butInstallerOverride =
-    attrs:
-    let
-      base = commonOverride attrs;
-    in
-    base
-    // {
-      buildInputs = base.buildInputs ++ [ curl.out ];
-    };
-
-  gitbutlerTauriOverride =
-    attrs:
-    (commonOverride attrs)
-    // {
-      src = patchedSrc;
-      workspace_member = "crates/gitbutler-tauri";
-    };
 
   tauriOverrides = slib.mkCrate2nixTauriOverrides {
     inherit pkgs;
@@ -224,17 +201,88 @@ let
     ];
   };
 
-  crateOverrides =
-    pkgs.defaultCrateOverrides
-    // lib.genAttrs (builtins.attrNames cargoNix.internal.crates) (_: commonOverride)
-    // tauriOverrides
-    // {
-      but = butInstallerOverride;
-      but-installer = butInstallerOverride;
-      gitbutler-tauri = gitbutlerTauriOverride;
-      openssl-sys = opensslSysOverride;
-      rmcp = attrs: (commonOverride attrs) // (rmcpOverride attrs);
+  composeCrateOverrides =
+    overrides: attrs: lib.foldl' (acc: override: acc // override (attrs // acc)) { } overrides;
+
+  mergeCrateOverrideSets =
+    overrideSets: lib.zipAttrsWith (_crateName: composeCrateOverrides) overrideSets;
+
+  cacheMetadataOverrides = lib.genAttrs (lib.unique (
+    crateCachePolicy.channelConsumers ++ crateCachePolicy.versionConsumers
+  )) (_: cacheMetadataOverride);
+
+  # Keep the existing deployment-target and iconv environment intact while the
+  # lower-risk tool and library inputs move back to nixpkgs' scoped defaults.
+  darwinPlatformOverrides = lib.optionalAttrs stdenv.hostPlatform.isDarwin (
+    lib.genAttrs
+      (lib.subtractLists (builtins.attrNames tauriOverrides) (
+        builtins.attrNames cargoNix.internal.crates
+      ))
+      (
+        _:
+        appendCrateInputs {
+          buildInputs = [
+            apple-sdk_15
+            libiconv
+          ];
+        }
+      )
+  );
+
+  linuxProbeOverrides = lib.optionalAttrs stdenv.hostPlatform.isLinux {
+    gtk = appendCrateInputs {
+      nativeBuildInputs = [ pkg-config ];
+      buildInputs = [ pkgs.gtk3 ];
     };
+    x11-dl = appendCrateInputs {
+      nativeBuildInputs = [ pkg-config ];
+      buildInputs = [
+        pkgs.libx11
+        pkgs.libxcursor
+        pkgs.libxi
+        pkgs.libxrandr
+        pkgs.libxrender
+      ];
+    };
+  };
+
+  nativeCrateOverrides = {
+    but = appendCrateInputs { buildInputs = [ curl.out ]; };
+    but-installer = appendCrateInputs { buildInputs = [ curl.out ]; };
+    libgit2-sys = appendCrateInputs { buildInputs = [ zlib ]; };
+    gitbutler-tauri = appendCrateInputs {
+      nativeBuildInputs = lib.optionals stdenv.hostPlatform.isLinux [ wrapGAppsHook4 ];
+      buildInputs = lib.optionals stdenv.hostPlatform.isLinux [
+        libayatana-appindicator
+        librsvg
+        webkitgtk_4_1
+      ];
+    };
+  };
+
+  specialCrateOverrides = {
+    but = _attrs: { src = butSrc; };
+    gitbutler-tauri = _attrs: { src = gitbutlerTauriSrc; };
+    openssl-sys = _attrs: {
+      # crate2nix builds openssl-src separately, so its vendored source path is
+      # gone by the time openssl-sys' build script runs.
+      OPENSSL_NO_VENDOR = "1";
+    };
+    rmcp = rmcpOverride;
+  };
+
+  crateOverrides = mergeCrateOverrideSets [
+    (builtins.removeAttrs pkgs.defaultCrateOverrides [
+      "libgit2-sys"
+      "libsqlite3-sys"
+    ])
+    cacheMetadataOverrides
+    darwinPlatformOverrides
+    linuxProbeOverrides
+    nativeCrateOverrides
+    tauriOverrides
+    specialCrateOverrides
+  ];
 
   askpassDrv = cargoNix.workspaceMembers.gitbutler-git.build.override {
     inherit crateOverrides;
@@ -271,7 +319,7 @@ let
       cp "$PWD/target/bin/gitbutler-tauri" "$app/Contents/MacOS/${appName}"
       cp "${butDrv}/bin/but" "$out/bin/but"
       cp "${askpassDrv}/bin/gitbutler-git-askpass" "$app/Contents/MacOS/gitbutler-git-askpass"
-      cp "${patchedSrc}/crates/gitbutler-tauri/icons/release/icon.icns" \
+      cp "${gitbutlerTauriSrc}/icons/release/icon.icns" \
         "$app/Contents/Resources/${appName}.icns"
       ln -s "$app/Contents/MacOS/${appName}" "$out/bin/${pname}"
 
@@ -325,12 +373,12 @@ let
   );
 in
 if crate2nixSourceOnly then
-  patchedSrc
+  crate2nixSrc
 else
   gitbutlerApp.overrideAttrs (_old: {
     inherit pname version;
     name = "${pname}-${version}";
-    src = patchedSrc;
+    src = gitbutlerTauriSrc;
 
     passthru = {
       inherit
@@ -340,7 +388,7 @@ else
         crateOverrides
         crate2nixSrc
         frontend
-        patchedSrc
+        gitbutlerTauriSrc
         ;
 
     }

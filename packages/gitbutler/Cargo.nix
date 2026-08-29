@@ -32,6 +32,7 @@
     then pkgs.callPackage ./crate-config.nix {}
     else {}
 , rootSrc ? ./.
+, crateSource ? relativePath: throw "Cargo.nix requires crateSource when a local crate source is evaluated"
 }:
 
 rec {
@@ -514,16 +515,6 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "but-worktrees" = rec {
-      packageId = "but-worktrees";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "but-worktrees";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
     "gitbutler-branch" = rec {
       packageId = "gitbutler-branch";
       build = internal.buildRustCrateWithFeatures {
@@ -538,16 +529,6 @@ rec {
       packageId = "gitbutler-branch-actions";
       build = internal.buildRustCrateWithFeatures {
         packageId = "gitbutler-branch-actions";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "gitbutler-cherry-pick" = rec {
-      packageId = "gitbutler-cherry-pick";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "gitbutler-cherry-pick";
       };
 
       # Debug support which might change between releases.
@@ -648,16 +629,6 @@ rec {
       packageId = "gitbutler-repo";
       build = internal.buildRustCrateWithFeatures {
         packageId = "gitbutler-repo";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "gitbutler-stack" = rec {
-      packageId = "gitbutler-stack";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "gitbutler-stack";
       };
 
       # Debug support which might change between releases.
@@ -947,6 +918,46 @@ rec {
         ];
 
       };
+      "ansi-to-tui" = rec {
+        crateName = "ansi-to-tui";
+        version = "8.0.1";
+        edition = "2024";
+        sha256 = "1zb5vjm2fj3yvnylkjjp29y9k4fhnbhqa2lgylmh93wmknxnc8z4";
+        libName = "ansi_to_tui";
+        authors = [
+          "Uttarayan Mondal <email@uttarayan.me>"
+        ];
+        dependencies = [
+          {
+            name = "nom";
+            packageId = "nom 8.0.0";
+          }
+          {
+            name = "ratatui-core";
+            packageId = "ratatui-core";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "simdutf8";
+            packageId = "simdutf8";
+            optional = true;
+          }
+          {
+            name = "smallvec";
+            packageId = "smallvec";
+            features = [ "const_generics" ];
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.18";
+          }
+        ];
+        features = {
+          "default" = [ "zero-copy" "simd" ];
+          "simd" = [ "dep:simdutf8" ];
+        };
+        resolvedDefaultFeatures = [ "default" "simd" "zero-copy" ];
+      };
       "anstream 0.6.21" = rec {
         crateName = "anstream";
         version = "0.6.21";
@@ -1110,7 +1121,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_System_Console" "Win32_Foundation" ];
           }
@@ -1165,7 +1176,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_System_Console" "Win32_Foundation" ];
           }
@@ -1325,7 +1336,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_DataExchange" "Win32_System_Memory" "Win32_System_Ole" "Win32_UI_Shell" ];
           }
@@ -3215,11 +3226,15 @@ rec {
             requiredFeatures = [ ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but"; };
+        src = crateSource sourceFilter "crates/but";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
         ];
         dependencies = [
+          {
+            name = "ansi-to-tui";
+            packageId = "ansi-to-tui";
+          }
           {
             name = "anyhow";
             packageId = "anyhow";
@@ -3331,16 +3346,16 @@ rec {
             packageId = "but-path";
           }
           {
+            name = "but-project-handle";
+            packageId = "but-project-handle";
+          }
+          {
             name = "but-rebase";
             packageId = "but-rebase";
           }
           {
             name = "but-secret";
             packageId = "but-secret";
-          }
-          {
-            name = "but-serde";
-            packageId = "but-serde";
           }
           {
             name = "but-settings";
@@ -3357,11 +3372,6 @@ rec {
           {
             name = "but-workspace";
             packageId = "but-workspace";
-          }
-          {
-            name = "but-worktrees";
-            packageId = "but-worktrees";
-            optional = true;
           }
           {
             name = "cfg-if";
@@ -3485,6 +3495,8 @@ rec {
           {
             name = "posthog-rs";
             packageId = "posthog-rs";
+            usesDefaultFeatures = false;
+            features = [ "async-client" ];
           }
           {
             name = "rand";
@@ -3548,6 +3560,10 @@ rec {
             packageId = "tempfile";
           }
           {
+            name = "terminal-colorsaurus";
+            packageId = "terminal-colorsaurus";
+          }
+          {
             name = "terminal_size";
             packageId = "terminal_size";
           }
@@ -3585,11 +3601,6 @@ rec {
           {
             name = "url";
             packageId = "url";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "serde" ];
           }
         ];
         devDependencies = [
@@ -3637,7 +3648,7 @@ rec {
         features = {
           "default" = [ "legacy" ];
           "graph-workspace" = [ "but-api/graph-workspace" ];
-          "legacy" = [ "but-workspace/legacy" "but-api/legacy" "but-ctx/legacy" "dep:but-action" "dep:but-hunk-dependency" "dep:but-gerrit" "dep:but-worktrees" "dep:gitbutler-project" "dep:gitbutler-commit" "dep:gitbutler-branch" "dep:gitbutler-branch-actions" "dep:gitbutler-oplog" "dep:gitbutler-edit-mode" "dep:gitbutler-operating-modes" "dep:gitbutler-repo" "dep:gitbutler-git" "dep:gitbutler-watcher" ];
+          "legacy" = [ "but-workspace/legacy" "but-api/legacy" "but-ctx/legacy" "dep:but-action" "dep:but-hunk-dependency" "dep:but-gerrit" "dep:gitbutler-project" "dep:gitbutler-commit" "dep:gitbutler-branch" "dep:gitbutler-branch-actions" "dep:gitbutler-oplog" "dep:gitbutler-edit-mode" "dep:gitbutler-operating-modes" "dep:gitbutler-repo" "dep:gitbutler-git" "dep:gitbutler-watcher" ];
           "tui-profiling" = [ "dep:allocation-counter" ];
         };
         resolvedDefaultFeatures = [ "default" "legacy" ];
@@ -3646,7 +3657,7 @@ rec {
         crateName = "but-action";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-action"; };
+        src = crateSource sourceFilter "crates/but-action";
         libName = "but_action";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -3777,7 +3788,7 @@ rec {
         crateName = "but-agentlog";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-agentlog"; };
+        src = crateSource sourceFilter "crates/but-agentlog";
         libName = "but_agentlog";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -3868,7 +3879,7 @@ rec {
         crateName = "but-api";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-api"; };
+        src = crateSource sourceFilter "crates/but-api";
         libName = "but_api";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -4002,11 +4013,6 @@ rec {
           {
             name = "but-workspace";
             packageId = "but-workspace";
-          }
-          {
-            name = "but-worktrees";
-            packageId = "but-worktrees";
-            optional = true;
           }
           {
             name = "chrono";
@@ -4201,8 +4207,8 @@ rec {
           }
         ];
         features = {
-          "export-schema" = [ "but-error/export-schema" "but-workspace/export-schema" "but-hunk-assignment/export-schema" "but-comments/export-schema" "gitbutler-project/export-schema" "but-rebase/export-schema" "gitbutler-operating-modes/export-schema" "gitbutler-branch/export-schema" "gitbutler-branch-actions/export-schema" "gitbutler-edit-mode/export-schema" "gitbutler-oplog/export-schema" "but-gerrit/export-schema" ];
-          "legacy" = [ "but-ctx/legacy" "but-workspace/legacy" "dep:but-askpass" "dep:gitbutler-user" "dep:gitbutler-project" "dep:gitbutler-branch" "dep:gitbutler-branch-actions" "dep:gitbutler-commit" "dep:gitbutler-reference" "dep:gitbutler-repo" "dep:gitbutler-edit-mode" "dep:gitbutler-operating-modes" "dep:gitbutler-oplog" "dep:but-action" "dep:but-gerrit" "dep:but-worktrees" ];
+          "export-schema" = [ "but-error/export-schema" "but-project-handle/export-schema" "gitbutler-user/export-schema" "but-workspace/export-schema" "but-hunk-assignment/export-schema" "but-comments/export-schema" "gitbutler-project/export-schema" "but-rebase/export-schema" "gitbutler-operating-modes/export-schema" "gitbutler-branch/export-schema" "gitbutler-branch-actions/export-schema" "gitbutler-edit-mode/export-schema" "gitbutler-oplog/export-schema" "but-gerrit/export-schema" ];
+          "legacy" = [ "but-ctx/legacy" "but-workspace/legacy" "dep:but-askpass" "dep:gitbutler-user" "dep:gitbutler-project" "dep:gitbutler-branch" "dep:gitbutler-branch-actions" "dep:gitbutler-commit" "dep:gitbutler-reference" "dep:gitbutler-repo" "dep:gitbutler-edit-mode" "dep:gitbutler-operating-modes" "dep:gitbutler-oplog" "dep:but-action" "dep:but-gerrit" ];
           "napi" = [ "dep:napi" "dep:napi-derive" "legacy" "export-schema" ];
           "tauri" = [ "dep:tauri" "legacy" ];
         };
@@ -4212,7 +4218,7 @@ rec {
         crateName = "but-api-macros";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-api-macros"; };
+        src = crateSource sourceFilter "crates/but-api-macros";
         procMacro = true;
         libName = "but_api_macros";
         authors = [
@@ -4243,7 +4249,7 @@ rec {
         crateName = "but-api-macros-tests";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-api-macros/tests"; };
+        src = crateSource sourceFilter "crates/but-api-macros/tests";
         libName = "but_api_macros_tests";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -4269,6 +4275,10 @@ rec {
           {
             name = "but-error";
             packageId = "but-error";
+          }
+          {
+            name = "but-schemars";
+            packageId = "but-schemars";
           }
           {
             name = "futures";
@@ -4307,7 +4317,7 @@ rec {
         crateName = "but-askpass";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-askpass"; };
+        src = crateSource sourceFilter "crates/but-askpass";
         libName = "but_askpass";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -4339,7 +4349,7 @@ rec {
         crateName = "but-bitbucket";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-bitbucket"; };
+        src = crateSource sourceFilter "crates/but-bitbucket";
         libName = "but_bitbucket";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -4428,7 +4438,7 @@ rec {
         crateName = "but-branches";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-branches"; };
+        src = crateSource sourceFilter "crates/but-branches";
         libName = "but_branches";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -4445,6 +4455,10 @@ rec {
           {
             name = "but-core";
             packageId = "but-core";
+          }
+          {
+            name = "but-db";
+            packageId = "but-db";
           }
           {
             name = "but-graph";
@@ -4490,7 +4504,7 @@ rec {
             requiredFeatures = [ ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-clap"; };
+        src = crateSource sourceFilter "crates/but-clap";
         libName = "but_clap";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -4519,7 +4533,7 @@ rec {
         crateName = "but-comments";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-comments"; };
+        src = crateSource sourceFilter "crates/but-comments";
         libName = "but_comments";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -4593,7 +4607,7 @@ rec {
         crateName = "but-core";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-core"; };
+        src = crateSource sourceFilter "crates/but-core";
         libName = "but_core";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -4733,7 +4747,7 @@ rec {
         crateName = "but-ctx";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-ctx"; };
+        src = crateSource sourceFilter "crates/but-ctx";
         libName = "but_ctx";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -4826,7 +4840,7 @@ rec {
         crateName = "but-db";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-db"; };
+        src = crateSource sourceFilter "crates/but-db";
         libName = "but_db";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -4849,6 +4863,12 @@ rec {
             packageId = "chrono";
             usesDefaultFeatures = false;
             features = [ "std" "serde" ];
+          }
+          {
+            name = "gix";
+            packageId = "gix";
+            usesDefaultFeatures = false;
+            features = [ "sha1" "sha256" ];
           }
           {
             name = "rusqlite";
@@ -4894,7 +4914,7 @@ rec {
             requiredFeatures = [ ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-debug"; };
+        src = crateSource sourceFilter "crates/but-debug";
         libName = "but_debug";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -4916,6 +4936,10 @@ rec {
           {
             name = "but-ctx";
             packageId = "but-ctx";
+          }
+          {
+            name = "but-db";
+            packageId = "but-db";
           }
           {
             name = "but-graph";
@@ -4992,7 +5016,7 @@ rec {
         crateName = "but-debugging";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-debugging"; };
+        src = crateSource sourceFilter "crates/but-debugging";
         libName = "but_debugging";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -5003,7 +5027,7 @@ rec {
         crateName = "but-error";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-error"; };
+        src = crateSource sourceFilter "crates/but-error";
         libName = "but_error";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -5035,7 +5059,7 @@ rec {
         crateName = "but-feedback";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-feedback"; };
+        src = crateSource sourceFilter "crates/but-feedback";
         libName = "but_feedback";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -5083,7 +5107,7 @@ rec {
         crateName = "but-forge";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-forge"; };
+        src = crateSource sourceFilter "crates/but-forge";
         libName = "but_forge";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -5179,7 +5203,7 @@ rec {
         crateName = "but-forge-storage";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-forge-storage"; };
+        src = crateSource sourceFilter "crates/but-forge-storage";
         libName = "but_forge_storage";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -5220,7 +5244,7 @@ rec {
         crateName = "but-gerrit";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-gerrit"; };
+        src = crateSource sourceFilter "crates/but-gerrit";
         libName = "but_gerrit";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -5300,7 +5324,7 @@ rec {
         crateName = "but-github";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-github"; };
+        src = crateSource sourceFilter "crates/but-github";
         libName = "but_github";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -5369,6 +5393,12 @@ rec {
             usesDefaultFeatures = false;
             features = [ "rustls" "json" "multipart" "query" "stream" "blocking" ];
           }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "macros" "rt" ];
+          }
         ];
         features = {
           "export-schema" = [ "dep:schemars" "dep:but-schemars" ];
@@ -5379,7 +5409,7 @@ rec {
         crateName = "but-gitlab";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-gitlab"; };
+        src = crateSource sourceFilter "crates/but-gitlab";
         libName = "but_gitlab";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -5444,6 +5474,12 @@ rec {
             usesDefaultFeatures = false;
             features = [ "rustls" "json" "multipart" "query" "stream" "blocking" ];
           }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "rt" ];
+          }
         ];
         features = {
           "export-schema" = [ "dep:schemars" "dep:but-schemars" ];
@@ -5454,7 +5490,7 @@ rec {
         crateName = "but-graph";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-graph"; };
+        src = crateSource sourceFilter "crates/but-graph";
         libName = "but_graph";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -5480,6 +5516,10 @@ rec {
           {
             name = "but-core";
             packageId = "but-core";
+          }
+          {
+            name = "but-db";
+            packageId = "but-db";
           }
           {
             name = "gix";
@@ -5522,6 +5562,10 @@ rec {
             packageId = "gitbutler-reference";
           }
           {
+            name = "sapling-renderdag";
+            packageId = "sapling-renderdag";
+          }
+          {
             name = "snapbox";
             packageId = "snapbox";
             features = [ "json" ];
@@ -5535,7 +5579,7 @@ rec {
         crateName = "but-hunk-assignment";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-hunk-assignment"; };
+        src = crateSource sourceFilter "crates/but-hunk-assignment";
         libName = "but_hunk_assignment";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -5630,7 +5674,7 @@ rec {
         crateName = "but-hunk-dependency";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-hunk-dependency"; };
+        src = crateSource sourceFilter "crates/but-hunk-dependency";
         libName = "but_hunk_dependency";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -5719,7 +5763,7 @@ rec {
             requiredFeatures = [ ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-installer"; };
+        src = crateSource sourceFilter "crates/but-installer";
         libName = "but_installer";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -5795,7 +5839,7 @@ rec {
         crateName = "but-llm";
         version = "0.1.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-llm"; };
+        src = crateSource sourceFilter "crates/but-llm";
         libName = "but_llm";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -5810,6 +5854,10 @@ rec {
             packageId = "async-openai";
             usesDefaultFeatures = false;
             features = [ "rustls" "chat-completion" ];
+          }
+          {
+            name = "but-core";
+            packageId = "but-core";
           }
           {
             name = "but-secret";
@@ -5865,6 +5913,10 @@ rec {
             name = "tracing";
             packageId = "tracing";
           }
+          {
+            name = "url";
+            packageId = "url";
+          }
         ];
 
       };
@@ -5872,7 +5924,7 @@ rec {
         crateName = "but-meta";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-meta"; };
+        src = crateSource sourceFilter "crates/but-meta";
         libName = "but_meta";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -5989,7 +6041,7 @@ rec {
         crateName = "but-napi";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-napi"; };
+        src = crateSource sourceFilter "crates/but-napi";
         libName = "but_napi";type = [ "cdylib" ];
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6008,8 +6060,16 @@ rec {
             packageId = "but-askpass";
           }
           {
+            name = "but-core";
+            packageId = "but-core";
+          }
+          {
             name = "but-ctx";
             packageId = "but-ctx";
+          }
+          {
+            name = "but-llm";
+            packageId = "but-llm";
           }
           {
             name = "but-path";
@@ -6022,6 +6082,12 @@ rec {
           {
             name = "gitbutler-watcher";
             packageId = "gitbutler-watcher";
+          }
+          {
+            name = "gix";
+            packageId = "gix";
+            usesDefaultFeatures = false;
+            features = [ "sha1" "sha256" ];
           }
           {
             name = "napi";
@@ -6042,8 +6108,21 @@ rec {
             packageId = "serde_json";
           }
           {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+          }
+          {
             name = "tracing";
             packageId = "tracing";
+          }
+          {
+            name = "tracing-appender";
+            packageId = "tracing-appender";
+          }
+          {
+            name = "tracing-subscriber";
+            packageId = "tracing-subscriber";
           }
         ];
         buildDependencies = [
@@ -6064,7 +6143,7 @@ rec {
         crateName = "but-oplog";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-oplog"; };
+        src = crateSource sourceFilter "crates/but-oplog";
         libName = "but_oplog";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6107,7 +6186,7 @@ rec {
         crateName = "but-oxidize";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-oxidize"; };
+        src = crateSource sourceFilter "crates/but-oxidize";
         libName = "but_oxidize";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6135,7 +6214,7 @@ rec {
         crateName = "but-path";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-path"; };
+        src = crateSource sourceFilter "crates/but-path";
         libName = "but_path";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6164,7 +6243,7 @@ rec {
         crateName = "but-project-handle";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-project-handle"; };
+        src = crateSource sourceFilter "crates/but-project-handle";
         libName = "but_project_handle";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6183,10 +6262,22 @@ rec {
             packageId = "but-path";
           }
           {
+            name = "but-schemars";
+            packageId = "but-schemars";
+            optional = true;
+          }
+          {
             name = "gix";
             packageId = "gix";
             usesDefaultFeatures = false;
             features = [ "sha1" "sha256" ];
+          }
+          {
+            name = "schemars";
+            packageId = "schemars 1.2.1";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" "derive" "uuid1" "preserve_order" ];
           }
           {
             name = "serde";
@@ -6214,14 +6305,15 @@ rec {
           }
         ];
         features = {
+          "export-schema" = [ "dep:schemars" "dep:but-schemars" ];
         };
-        resolvedDefaultFeatures = [ "legacy" ];
+        resolvedDefaultFeatures = [ "export-schema" "legacy" ];
       };
       "but-rebase" = rec {
         crateName = "but-rebase";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-rebase"; };
+        src = crateSource sourceFilter "crates/but-rebase";
         libName = "but_rebase";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6238,6 +6330,10 @@ rec {
           {
             name = "but-core";
             packageId = "but-core";
+          }
+          {
+            name = "but-db";
+            packageId = "but-db";
           }
           {
             name = "but-error";
@@ -6326,7 +6422,7 @@ rec {
         crateName = "but-schemars";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-schemars"; };
+        src = crateSource sourceFilter "crates/but-schemars";
         libName = "but_schemars";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6350,7 +6446,7 @@ rec {
         crateName = "but-secret";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-secret"; };
+        src = crateSource sourceFilter "crates/but-secret";
         libName = "but_secret";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6391,7 +6487,7 @@ rec {
         crateName = "but-serde";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-serde"; };
+        src = crateSource sourceFilter "crates/but-serde";
         libName = "but_serde";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6435,7 +6531,7 @@ rec {
             requiredFeatures = [ ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-server"; };
+        src = crateSource sourceFilter "crates/but-server";
         libName = "but_server";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6549,7 +6645,7 @@ rec {
         crateName = "but-settings";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-settings"; };
+        src = crateSource sourceFilter "crates/but-settings";
         libName = "but_settings";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6618,7 +6714,7 @@ rec {
         crateName = "but-testsupport";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-testsupport"; };
+        src = crateSource sourceFilter "crates/but-testsupport";
         libName = "but_testsupport";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6636,6 +6732,10 @@ rec {
             name = "but-ctx";
             packageId = "but-ctx";
             optional = true;
+          }
+          {
+            name = "but-db";
+            packageId = "but-db";
           }
           {
             name = "but-graph";
@@ -6699,7 +6799,7 @@ rec {
         crateName = "but-tools";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-tools"; };
+        src = crateSource sourceFilter "crates/but-tools";
         libName = "but_tools";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6751,7 +6851,7 @@ rec {
         crateName = "but-transaction";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-transaction"; };
+        src = crateSource sourceFilter "crates/but-transaction";
         libName = "but_transaction";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6778,8 +6878,8 @@ rec {
             packageId = "but-ctx";
           }
           {
-            name = "but-db";
-            packageId = "but-db";
+            name = "but-graph";
+            packageId = "but-graph";
           }
           {
             name = "but-oplog";
@@ -6830,7 +6930,7 @@ rec {
             requiredFeatures = [ ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-ts"; };
+        src = crateSource sourceFilter "crates/but-ts";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
         ];
@@ -6893,7 +6993,7 @@ rec {
         crateName = "but-update";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-update"; };
+        src = crateSource sourceFilter "crates/but-update";
         libName = "but_update";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6957,7 +7057,7 @@ rec {
         crateName = "but-utils";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-utils"; };
+        src = crateSource sourceFilter "crates/but-utils";
         libName = "but_utils";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -6995,7 +7095,7 @@ rec {
         crateName = "but-workspace";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-workspace"; };
+        src = crateSource sourceFilter "crates/but-workspace";
         libName = "but_workspace";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -7041,12 +7141,6 @@ rec {
             packageId = "but-graph";
           }
           {
-            name = "but-meta";
-            packageId = "but-meta";
-            optional = true;
-            features = [ "legacy" ];
-          }
-          {
             name = "but-rebase";
             packageId = "but-rebase";
           }
@@ -7066,11 +7160,6 @@ rec {
             features = [ "unstable-sha256" "vendored-openssl" "vendored-libgit2" ];
           }
           {
-            name = "gitbutler-cherry-pick";
-            packageId = "gitbutler-cherry-pick";
-            optional = true;
-          }
-          {
             name = "gitbutler-git";
             packageId = "gitbutler-git";
             optional = true;
@@ -7083,11 +7172,6 @@ rec {
           {
             name = "gitbutler-repo";
             packageId = "gitbutler-repo";
-            optional = true;
-          }
-          {
-            name = "gitbutler-stack";
-            packageId = "gitbutler-stack";
             optional = true;
           }
           {
@@ -7184,81 +7268,9 @@ rec {
         ];
         features = {
           "export-schema" = [ "dep:schemars" "dep:but-schemars" "but-core/export-schema" ];
-          "legacy" = [ "dep:but-meta" "dep:gitbutler-stack" "dep:but-ctx" "dep:git2" "dep:gitbutler-cherry-pick" "dep:gitbutler-repo" "dep:gitbutler-git" "dep:gitbutler-reference" "dep:bitflags" "dep:but-gerrit" ];
+          "legacy" = [ "dep:but-ctx" "dep:git2" "dep:gitbutler-repo" "dep:gitbutler-git" "dep:gitbutler-reference" "dep:bitflags" "dep:but-gerrit" ];
         };
         resolvedDefaultFeatures = [ "export-schema" "legacy" ];
-      };
-      "but-worktrees" = rec {
-        crateName = "but-worktrees";
-        version = "0.0.0";
-        edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/but-worktrees"; };
-        libName = "but_worktrees";
-        authors = [
-          "GitButler <gitbutler@gitbutler.com>"
-        ];
-        dependencies = [
-          {
-            name = "anyhow";
-            packageId = "anyhow";
-          }
-          {
-            name = "bstr";
-            packageId = "bstr";
-          }
-          {
-            name = "but-core";
-            packageId = "but-core";
-          }
-          {
-            name = "but-graph";
-            packageId = "but-graph";
-          }
-          {
-            name = "but-rebase";
-            packageId = "but-rebase";
-          }
-          {
-            name = "but-serde";
-            packageId = "but-serde";
-          }
-          {
-            name = "gix";
-            packageId = "gix";
-            usesDefaultFeatures = false;
-            features = [ "sha1" "sha256" ];
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "std" ];
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "serde" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "but-ctx";
-            packageId = "but-ctx";
-          }
-          {
-            name = "but-testsupport";
-            packageId = "but-testsupport";
-          }
-          {
-            name = "snapbox";
-            packageId = "snapbox";
-            features = [ "json" ];
-          }
-        ];
-
       };
       "by_address" = rec {
         crateName = "by_address";
@@ -8308,7 +8320,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" ];
           }
@@ -9745,7 +9757,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: ("msvc" == target."env" or null);
             features = [ "Win32_Foundation" "Win32_System_LibraryLoader" "Win32_Security_Cryptography" ];
           }
@@ -9801,7 +9813,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Networking_WinSock" ];
           }
@@ -10660,7 +10672,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_UI_Shell" "Win32_Foundation" "Win32_Globalization" "Win32_System_Com" ];
           }
@@ -11322,7 +11334,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Diagnostics_Debug" ];
           }
@@ -13174,8 +13186,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/git-meta/git-meta";
-          rev = "61cabd2840197cda3caf1852a925b101ea0c244f";
-          sha256 = "1w99d396b7ba1iakv8vsrbngp8clg7sdlzqa3vh04v26iafigsv6";
+          rev = "d5ad47dcd2935f0ca1836cef0cbab03ca1431190";
+          sha256 = "0gs15pqqjsdyci59n8h5p5lrphy9m4fvq5imgp6a5cv4w38cy7mm";
         };
         libName = "git_meta_lib";
         dependencies = [
@@ -13183,7 +13195,7 @@ rec {
             name = "gix";
             packageId = "gix";
             usesDefaultFeatures = false;
-            features = [ "sha1" "revision" "merge" "tree-editor" "blob-diff" ];
+            features = [ "sha1" "revision" "merge" "blob-diff" ];
           }
           {
             name = "rusqlite";
@@ -13218,7 +13230,7 @@ rec {
             name = "gix";
             packageId = "gix";
             usesDefaultFeatures = false;
-            features = [ "sha1" "revision" "merge" "tree-editor" "blob-diff" ];
+            features = [ "sha1" "revision" "merge" "blob-diff" ];
           }
         ];
         features = {
@@ -13267,8 +13279,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/gitbutlerapp/git2-rs";
-          rev = "efce108bf14cb1708cfc4c80f2ddf3244a2635ff";
-          sha256 = "052w60jh7jy0mwy9jfn42v52prsjs1xrpb5njpkzv7vpydkm3jcy";
+          rev = "a87a7bb3f6843504339fe7434ee0732a3e968f3e";
+          sha256 = "10ag9gzq9l4jflcbb1zxgqs928gkz347l0a4jinklivnaw6xr14p";
         };
         authors = [
           "Josh Triplett <josh@joshtriplett.org>"
@@ -13348,7 +13360,7 @@ rec {
         crateName = "gitbutler-branch";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-branch"; };
+        src = crateSource sourceFilter "crates/gitbutler-branch";
         libName = "gitbutler_branch";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -13407,7 +13419,7 @@ rec {
         crateName = "gitbutler-branch-actions";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-branch-actions"; };
+        src = crateSource sourceFilter "crates/gitbutler-branch-actions";
         libName = "gitbutler_branch_actions";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -13469,11 +13481,6 @@ rec {
             features = [ "legacy" ];
           }
           {
-            name = "git2";
-            packageId = "git2";
-            features = [ "unstable-sha256" "vendored-openssl" "vendored-libgit2" ];
-          }
-          {
             name = "gitbutler-branch";
             packageId = "gitbutler-branch";
           }
@@ -13500,10 +13507,6 @@ rec {
           {
             name = "gitbutler-repo";
             packageId = "gitbutler-repo";
-          }
-          {
-            name = "gitbutler-stack";
-            packageId = "gitbutler-stack";
           }
           {
             name = "gix";
@@ -13567,11 +13570,6 @@ rec {
             packageId = "ctor 0.6.3";
           }
           {
-            name = "git2";
-            packageId = "git2";
-            features = [ "unstable-sha256" "vendored-openssl" "vendored-libgit2" ];
-          }
-          {
             name = "gitbutler-workspace";
             packageId = "gitbutler-workspace";
           }
@@ -13580,14 +13578,6 @@ rec {
             packageId = "gix";
             usesDefaultFeatures = false;
             features = [ "sha1" "sha256" ];
-          }
-          {
-            name = "glob";
-            packageId = "glob";
-          }
-          {
-            name = "itertools";
-            packageId = "itertools";
           }
           {
             name = "pretty_assertions";
@@ -13608,38 +13598,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "export-schema" ];
       };
-      "gitbutler-cherry-pick" = rec {
-        crateName = "gitbutler-cherry-pick";
-        version = "0.0.0";
-        edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-cherry-pick"; };
-        libName = "gitbutler_cherry_pick";
-        authors = [
-          "GitButler <gitbutler@gitbutler.com>"
-        ];
-        dependencies = [
-          {
-            name = "anyhow";
-            packageId = "anyhow";
-          }
-          {
-            name = "gitbutler-commit";
-            packageId = "gitbutler-commit";
-          }
-          {
-            name = "gix";
-            packageId = "gix";
-            usesDefaultFeatures = false;
-            features = [ "sha1" "sha256" ];
-          }
-        ];
-
-      };
       "gitbutler-commit" = rec {
         crateName = "gitbutler-commit";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-commit"; };
+        src = crateSource sourceFilter "crates/gitbutler-commit";
         libName = "gitbutler_commit";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -13668,7 +13631,7 @@ rec {
         crateName = "gitbutler-edit-mode";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-edit-mode"; };
+        src = crateSource sourceFilter "crates/gitbutler-edit-mode";
         libName = "gitbutler_edit_mode";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -13716,10 +13679,6 @@ rec {
             name = "git2";
             packageId = "git2";
             features = [ "unstable-sha256" "vendored-openssl" "vendored-libgit2" ];
-          }
-          {
-            name = "gitbutler-cherry-pick";
-            packageId = "gitbutler-cherry-pick";
           }
           {
             name = "gitbutler-commit";
@@ -13789,7 +13748,7 @@ rec {
         crateName = "gitbutler-filemonitor";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-filemonitor"; };
+        src = crateSource sourceFilter "crates/gitbutler-filemonitor";
         libName = "gitbutler_filemonitor";
         dependencies = [
           {
@@ -13854,7 +13813,7 @@ rec {
             requiredFeatures = [ ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-git"; };
+        src = crateSource sourceFilter "crates/gitbutler-git";
         libName = "gitbutler_git";
         dependencies = [
           {
@@ -13970,7 +13929,7 @@ rec {
         crateName = "gitbutler-notify-debouncer";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-filemonitor/vendor/debouncer"; };
+        src = crateSource sourceFilter "crates/gitbutler-filemonitor/vendor/debouncer";
         libName = "gitbutler_notify_debouncer";
         dependencies = [
           {
@@ -14032,7 +13991,7 @@ rec {
         crateName = "gitbutler-operating-modes";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-operating-modes"; };
+        src = crateSource sourceFilter "crates/gitbutler-operating-modes";
         libName = "gitbutler_operating_modes";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -14120,7 +14079,7 @@ rec {
         crateName = "gitbutler-oplog";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-oplog"; };
+        src = crateSource sourceFilter "crates/gitbutler-oplog";
         libName = "gitbutler_oplog";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -14156,10 +14115,6 @@ rec {
           {
             name = "but-utils";
             packageId = "but-utils";
-          }
-          {
-            name = "gitbutler-cherry-pick";
-            packageId = "gitbutler-cherry-pick";
           }
           {
             name = "gitbutler-repo";
@@ -14205,6 +14160,12 @@ rec {
           {
             name = "but-testsupport";
             packageId = "but-testsupport";
+            features = [ "sandbox" ];
+          }
+          {
+            name = "git2";
+            packageId = "git2";
+            features = [ "unstable-sha256" "vendored-openssl" "vendored-libgit2" ];
           }
           {
             name = "pretty_assertions";
@@ -14224,7 +14185,7 @@ rec {
         crateName = "gitbutler-project";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-project"; };
+        src = crateSource sourceFilter "crates/gitbutler-project";
         libName = "gitbutler_project";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -14326,7 +14287,7 @@ rec {
         crateName = "gitbutler-reference";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-reference"; };
+        src = crateSource sourceFilter "crates/gitbutler-reference";
         libName = "gitbutler_reference";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -14362,7 +14323,7 @@ rec {
         crateName = "gitbutler-repo";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-repo"; };
+        src = crateSource sourceFilter "crates/gitbutler-repo";
         libName = "gitbutler_repo";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -14423,7 +14384,7 @@ rec {
             name = "gix";
             packageId = "gix";
             usesDefaultFeatures = false;
-            features = [ "sha1" "sha256" "merge" "status" "tree-editor" ];
+            features = [ "sha1" "sha256" "merge" "status" ];
           }
           {
             name = "ignore";
@@ -14472,91 +14433,6 @@ rec {
         ];
 
       };
-      "gitbutler-stack" = rec {
-        crateName = "gitbutler-stack";
-        version = "0.0.0";
-        edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-stack"; };
-        libName = "gitbutler_stack";
-        authors = [
-          "GitButler <gitbutler@gitbutler.com>"
-        ];
-        dependencies = [
-          {
-            name = "anyhow";
-            packageId = "anyhow";
-          }
-          {
-            name = "bstr";
-            packageId = "bstr";
-          }
-          {
-            name = "but-core";
-            packageId = "but-core";
-          }
-          {
-            name = "but-ctx";
-            packageId = "but-ctx";
-          }
-          {
-            name = "but-error";
-            packageId = "but-error";
-          }
-          {
-            name = "but-meta";
-            packageId = "but-meta";
-          }
-          {
-            name = "gitbutler-reference";
-            packageId = "gitbutler-reference";
-          }
-          {
-            name = "gix";
-            packageId = "gix";
-            usesDefaultFeatures = false;
-            features = [ "sha1" "sha256" ];
-          }
-          {
-            name = "itertools";
-            packageId = "itertools";
-          }
-        ];
-        devDependencies = [
-          {
-            name = "but-askpass";
-            packageId = "but-askpass";
-          }
-          {
-            name = "but-db";
-            packageId = "but-db";
-          }
-          {
-            name = "but-testsupport";
-            packageId = "but-testsupport";
-          }
-          {
-            name = "ctor";
-            packageId = "ctor 0.6.3";
-          }
-          {
-            name = "filetime";
-            packageId = "filetime";
-          }
-          {
-            name = "gitbutler-git";
-            packageId = "gitbutler-git";
-          }
-          {
-            name = "tempfile";
-            packageId = "tempfile";
-          }
-          {
-            name = "toml";
-            packageId = "toml 0.9.12+spec-1.1.0";
-          }
-        ];
-
-      };
       "gitbutler-tauri" = rec {
         crateName = "gitbutler-tauri";
         version = "0.0.0";
@@ -14568,7 +14444,7 @@ rec {
             requiredFeatures = [ ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-tauri"; };
+        src = crateSource sourceFilter "crates/gitbutler-tauri";
         libName = "gitbutler_tauri";type = [ "lib" "staticlib" "cdylib" ];
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -14789,7 +14665,7 @@ rec {
         crateName = "gitbutler-user";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-user"; };
+        src = crateSource sourceFilter "crates/gitbutler-user";
         libName = "gitbutler_user";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -14808,6 +14684,11 @@ rec {
             packageId = "but-path";
           }
           {
+            name = "but-schemars";
+            packageId = "but-schemars";
+            optional = true;
+          }
+          {
             name = "but-secret";
             packageId = "but-secret";
           }
@@ -14821,6 +14702,13 @@ rec {
             packageId = "reqwest";
             usesDefaultFeatures = false;
             features = [ "rustls" "json" "multipart" "query" "stream" ];
+          }
+          {
+            name = "schemars";
+            packageId = "schemars 1.2.1";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" "derive" "uuid1" "preserve_order" ];
           }
           {
             name = "serde";
@@ -14845,6 +14733,10 @@ rec {
         ];
         devDependencies = [
           {
+            name = "but-testsupport";
+            packageId = "but-testsupport";
+          }
+          {
             name = "keyring";
             packageId = "keyring";
             features = [ "apple-native" "windows-native" "linux-native-sync-persistent" "crypto-rust" ];
@@ -14858,13 +14750,16 @@ rec {
             packageId = "tempfile";
           }
         ];
-
+        features = {
+          "export-schema" = [ "dep:schemars" "dep:but-schemars" ];
+        };
+        resolvedDefaultFeatures = [ "export-schema" ];
       };
       "gitbutler-watcher" = rec {
         crateName = "gitbutler-watcher";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-watcher"; };
+        src = crateSource sourceFilter "crates/gitbutler-watcher";
         libName = "gitbutler_watcher";
         dependencies = [
           {
@@ -14943,7 +14838,7 @@ rec {
         crateName = "gitbutler-workspace";
         version = "0.0.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = "${rootSrc}/crates/gitbutler-workspace"; };
+        src = crateSource sourceFilter "crates/gitbutler-workspace";
         libName = "gitbutler_workspace";
         authors = [
           "GitButler <gitbutler@gitbutler.com>"
@@ -14963,11 +14858,6 @@ rec {
             features = [ "legacy" ];
           }
           {
-            name = "but-meta";
-            packageId = "but-meta";
-            features = [ "legacy" ];
-          }
-          {
             name = "but-oxidize";
             packageId = "but-oxidize";
           }
@@ -14977,27 +14867,29 @@ rec {
             features = [ "unstable-sha256" "vendored-openssl" "vendored-libgit2" ];
           }
           {
-            name = "gitbutler-cherry-pick";
-            packageId = "gitbutler-cherry-pick";
-          }
-          {
             name = "gix";
             packageId = "gix";
             usesDefaultFeatures = false;
             features = [ "sha1" "sha256" ];
           }
         ];
+        devDependencies = [
+          {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+        ];
 
       };
       "gix" = rec {
         crateName = "gix";
-        version = "0.86.0";
+        version = "0.87.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         authors = [
           "Sebastian Thiel <sebastian.thiel@icloud.com>"
@@ -15109,6 +15001,11 @@ rec {
             optional = true;
           }
           {
+            name = "gix-note";
+            packageId = "gix-note";
+            optional = true;
+          }
+          {
             name = "gix-object";
             packageId = "gix-object";
           }
@@ -15124,7 +15021,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-pathspec";
@@ -15139,6 +15036,10 @@ rec {
           {
             name = "gix-protocol";
             packageId = "gix-protocol";
+          }
+          {
+            name = "gix-quote";
+            packageId = "gix-quote";
           }
           {
             name = "gix-ref";
@@ -15205,7 +15106,7 @@ rec {
           }
           {
             name = "gix-validate";
-            packageId = "gix-validate 0.11.3";
+            packageId = "gix-validate 0.11.4";
           }
           {
             name = "gix-worktree";
@@ -15283,13 +15184,13 @@ rec {
           "blocking-network-client" = [ "gix-protocol/blocking-client" "gix-pack/streaming-input" "dep:gix-transport" "attributes" "credentials" ];
           "cache-efficiency-debug" = [ "gix-features/cache-efficiency-debug" ];
           "comfort" = [ "gix-features/progress-unit-bytes" "gix-features/progress-unit-human-numbers" ];
-          "command" = [ "dep:gix-command" ];
+          "command" = [ "dep:gix-command" "gix-object/signature" ];
           "credentials" = [ "dep:gix-credentials" "dep:gix-prompt" "dep:gix-negotiate" ];
           "default" = [ "max-performance-safe" "comfort" "basic" "extras" "auto-chain-error" "sha1" ];
           "dirwalk" = [ "dep:gix-dir" "attributes" "excludes" ];
           "document-features" = [ "dep:document-features" ];
           "excludes" = [ "dep:gix-ignore" "dep:gix-worktree" "index" ];
-          "extras" = [ "worktree-stream" "worktree-archive" "revparse-regex" "mailmap" "excludes" "attributes" "worktree-mutation" "credentials" "interrupt" "status" "dirwalk" "blame" ];
+          "extras" = [ "worktree-stream" "worktree-archive" "revparse-regex" "mailmap" "excludes" "attributes" "worktree-mutation" "credentials" "interrupt" "status" "dirwalk" "blame" "merge" "notes" ];
           "gix-archive" = [ "dep:gix-archive" ];
           "gix-status" = [ "dep:gix-status" ];
           "gix-worktree-stream" = [ "dep:gix-worktree-stream" ];
@@ -15300,19 +15201,19 @@ rec {
           "max-control" = [ "parallel" "pack-cache-lru-static" "pack-cache-lru-dynamic" ];
           "max-performance" = [ "max-performance-safe" ];
           "max-performance-safe" = [ "max-control" ];
-          "merge" = [ "tree-editor" "blob-diff" "dep:gix-merge" "attributes" ];
-          "need-more-recent-msrv" = [ "merge" "tree-editor" ];
+          "merge" = [ "blob-diff" "dep:gix-merge" "attributes" ];
+          "notes" = [ "dep:gix-note" ];
           "pack-cache-lru-dynamic" = [ "gix-pack/pack-cache-lru-dynamic" ];
           "pack-cache-lru-static" = [ "gix-pack/pack-cache-lru-static" ];
-          "parallel" = [ "gix-features/parallel" "gix-attributes?/parallel" "gix-filter?/parallel" "gix-pathspec?/parallel" "gix-worktree?/parallel" ];
+          "parallel" = [ "gix-features/parallel" "gix-pack/parallel" "gix-attributes?/parallel" "gix-filter?/parallel" "gix-pathspec?/parallel" "gix-worktree?/parallel" ];
           "prodash" = [ "dep:prodash" ];
           "progress-tree" = [ "prodash/progress-tree" ];
           "regex" = [ "dep:regex" ];
           "revision" = [ "gix-revision/describe" "gix-revision/merge_base" "index" ];
           "revparse-regex" = [ "regex" "revision" ];
           "serde" = [ "dep:serde" "gix-pack/serde" "gix-object/serde" "gix-protocol/serde" "gix-transport?/serde" "gix-ref/serde" "gix-odb/serde" "gix-index?/serde" "gix-mailmap?/serde" "gix-url/serde" "gix-attributes?/serde" "gix-ignore?/serde" "gix-revision/serde" "gix-worktree?/serde" "gix-commitgraph/serde" "gix-credentials?/serde" ];
-          "sha1" = [ "gix-hash/sha1" "gix-pack/sha1" "gix-worktree-stream?/sha1" ];
-          "sha256" = [ "gix-hash/sha256" "gix-pack/sha256" "gix-worktree-stream?/sha256" ];
+          "sha1" = [ "gix-hash/sha1" "gix-pack/sha1" "gix-note?/sha1" "gix-worktree-stream?/sha1" ];
+          "sha256" = [ "gix-hash/sha256" "gix-object/sha256" "gix-pack/sha256" "gix-note?/sha256" "gix-worktree-stream?/sha256" ];
           "status" = [ "gix-status" "dirwalk" "index" "blob-diff" "gix-diff/index" ];
           "tracing" = [ "gix-features/tracing" ];
           "tracing-detail" = [ "gix-features/tracing-detail" "tracing" ];
@@ -15321,17 +15222,17 @@ rec {
           "worktree-mutation" = [ "attributes" "dep:gix-worktree-state" ];
           "worktree-stream" = [ "gix-worktree-stream" "attributes" ];
         };
-        resolvedDefaultFeatures = [ "attributes" "blob-diff" "blocking-http-transport-reqwest" "blocking-http-transport-reqwest-rust-tls" "blocking-network-client" "command" "credentials" "dirwalk" "excludes" "gix-status" "index" "interrupt" "max-control" "max-performance" "max-performance-safe" "merge" "pack-cache-lru-dynamic" "pack-cache-lru-static" "parallel" "revision" "serde" "sha1" "sha256" "status" "tracing" "tracing-detail" "tree-editor" "worktree-mutation" ];
+        resolvedDefaultFeatures = [ "attributes" "blob-diff" "blocking-http-transport-reqwest" "blocking-http-transport-reqwest-rust-tls" "blocking-network-client" "command" "credentials" "dirwalk" "excludes" "gix-status" "index" "interrupt" "max-control" "max-performance" "max-performance-safe" "merge" "pack-cache-lru-dynamic" "pack-cache-lru-static" "parallel" "revision" "serde" "sha1" "sha256" "status" "tracing" "tracing-detail" "worktree-mutation" ];
       };
       "gix-actor" = rec {
         crateName = "gix-actor";
-        version = "0.41.2";
+        version = "0.42.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_actor";
         authors = [
@@ -15368,13 +15269,13 @@ rec {
       };
       "gix-attributes" = rec {
         crateName = "gix-attributes";
-        version = "0.34.0";
+        version = "0.35.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_attributes";
         authors = [
@@ -15397,7 +15298,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-quote";
@@ -15436,13 +15337,13 @@ rec {
       };
       "gix-bitmap" = rec {
         crateName = "gix-bitmap";
-        version = "0.3.3";
+        version = "0.4.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_bitmap";
         authors = [
@@ -15458,13 +15359,13 @@ rec {
       };
       "gix-chunk" = rec {
         crateName = "gix-chunk";
-        version = "0.7.3";
+        version = "0.8.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_chunk";
         authors = [
@@ -15480,13 +15381,13 @@ rec {
       };
       "gix-command" = rec {
         crateName = "gix-command";
-        version = "0.9.1";
+        version = "0.10.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_command";
         authors = [
@@ -15501,7 +15402,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-quote";
@@ -15520,13 +15421,13 @@ rec {
       };
       "gix-commitgraph" = rec {
         crateName = "gix-commitgraph";
-        version = "0.38.0";
+        version = "0.39.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_commitgraph";
         authors = [
@@ -15585,13 +15486,13 @@ rec {
       };
       "gix-config" = rec {
         crateName = "gix-config";
-        version = "0.59.0";
+        version = "0.60.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_config";
         authors = [
@@ -15618,7 +15519,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-ref";
@@ -15655,13 +15556,13 @@ rec {
       };
       "gix-config-value" = rec {
         crateName = "gix-config-value";
-        version = "0.19.0";
+        version = "0.19.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_config_value";
         authors = [
@@ -15680,7 +15581,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "libc";
@@ -15699,13 +15600,13 @@ rec {
       };
       "gix-credentials" = rec {
         crateName = "gix-credentials";
-        version = "0.39.0";
+        version = "0.40.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_credentials";
         authors = [
@@ -15732,11 +15633,15 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-prompt";
             packageId = "gix-prompt";
+          }
+          {
+            name = "gix-quote";
+            packageId = "gix-quote";
           }
           {
             name = "gix-sec";
@@ -15776,13 +15681,13 @@ rec {
       };
       "gix-date" = rec {
         crateName = "gix-date";
-        version = "0.15.6";
+        version = "0.16.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_date";
         authors = [
@@ -15823,13 +15728,13 @@ rec {
       };
       "gix-diff" = rec {
         crateName = "gix-diff";
-        version = "0.66.0";
+        version = "0.67.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_diff";
         authors = [
@@ -15882,7 +15787,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
             optional = true;
           }
           {
@@ -15966,13 +15871,13 @@ rec {
       };
       "gix-dir" = rec {
         crateName = "gix-dir";
-        version = "0.28.0";
+        version = "0.29.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_dir";
         authors = [
@@ -16006,7 +15911,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-pathspec";
@@ -16038,19 +15943,19 @@ rec {
           }
         ];
         features = {
-          "sha1" = [ "gix-index/sha1" ];
-          "sha256" = [ "gix-index/sha256" ];
+          "sha1" = [ "gix-index/sha1" "gix-worktree/sha1" ];
+          "sha256" = [ "gix-index/sha256" "gix-worktree/sha256" ];
         };
       };
       "gix-discover" = rec {
         crateName = "gix-discover";
-        version = "0.54.0";
+        version = "0.55.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_discover";
         authors = [
@@ -16074,7 +15979,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-ref";
@@ -16096,13 +16001,13 @@ rec {
       };
       "gix-error" = rec {
         crateName = "gix-error";
-        version = "0.2.5";
+        version = "0.3.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_error";
         authors = [
@@ -16123,13 +16028,13 @@ rec {
       };
       "gix-features" = rec {
         crateName = "gix-features";
-        version = "0.49.0";
+        version = "0.49.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_features";
         authors = [
@@ -16153,7 +16058,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
             optional = true;
           }
           {
@@ -16211,14 +16116,14 @@ rec {
       };
       "gix-filter" = rec {
         crateName = "gix-filter";
-        version = "0.33.0";
+        version = "0.34.0";
         edition = "2024";
         crateBin = [];
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_filter";
         authors = [
@@ -16258,7 +16163,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-quote";
@@ -16301,13 +16206,13 @@ rec {
       };
       "gix-fs" = rec {
         crateName = "gix-fs";
-        version = "0.22.0";
+        version = "0.22.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_fs";
         authors = [
@@ -16325,7 +16230,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-utils";
@@ -16342,13 +16247,13 @@ rec {
       };
       "gix-glob" = rec {
         crateName = "gix-glob";
-        version = "0.27.0";
+        version = "0.27.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_glob";
         authors = [
@@ -16371,7 +16276,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "serde";
@@ -16389,13 +16294,13 @@ rec {
       };
       "gix-hash" = rec {
         crateName = "gix-hash";
-        version = "0.26.0";
+        version = "0.26.2";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_hash";
         authors = [
@@ -16438,6 +16343,7 @@ rec {
           }
         ];
         features = {
+          "bstr" = [ "dep:bstr" ];
           "document-features" = [ "dep:document-features" ];
           "serde" = [ "dep:serde" "faster-hex/serde" ];
           "sha1" = [ "dep:sha1-checked" ];
@@ -16452,8 +16358,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_hashtable";
         authors = [
@@ -16486,16 +16392,17 @@ rec {
           "sha1" = [ "gix-hash/sha1" ];
           "sha256" = [ "gix-hash/sha256" ];
         };
+        resolvedDefaultFeatures = [ "sha1" "sha256" ];
       };
       "gix-ignore" = rec {
         crateName = "gix-ignore";
-        version = "0.22.0";
+        version = "0.22.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_ignore";
         authors = [
@@ -16514,7 +16421,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-trace";
@@ -16540,13 +16447,13 @@ rec {
       };
       "gix-imara-diff" = rec {
         crateName = "gix-imara-diff";
-        version = "0.2.4";
+        version = "0.2.5";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_imara_diff";
         authors = [
@@ -16572,13 +16479,13 @@ rec {
       };
       "gix-index" = rec {
         crateName = "gix-index";
-        version = "0.54.0";
+        version = "0.55.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_index";
         authors = [
@@ -16637,7 +16544,7 @@ rec {
           }
           {
             name = "gix-validate";
-            packageId = "gix-validate 0.11.3";
+            packageId = "gix-validate 0.11.4";
           }
           {
             name = "hashbrown";
@@ -16710,8 +16617,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_lock";
         authors = [
@@ -16737,13 +16644,13 @@ rec {
       };
       "gix-mailmap" = rec {
         crateName = "gix-mailmap";
-        version = "0.33.2";
+        version = "0.34.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_mailmap";
         authors = [
@@ -16784,13 +16691,13 @@ rec {
       };
       "gix-merge" = rec {
         crateName = "gix-merge";
-        version = "0.19.0";
+        version = "0.20.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_merge";
         authors = [
@@ -16839,7 +16746,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-quote";
@@ -16887,13 +16794,13 @@ rec {
       };
       "gix-negotiate" = rec {
         crateName = "gix-negotiate";
-        version = "0.34.0";
+        version = "0.35.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_negotiate";
         authors = [
@@ -16937,15 +16844,53 @@ rec {
           "sha256" = [ "gix-hash/sha256" ];
         };
       };
-      "gix-object" = rec {
-        crateName = "gix-object";
-        version = "0.63.0";
+      "gix-note" = rec {
+        crateName = "gix-note";
+        version = "0.1.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+        };
+        libName = "gix_note";
+        authors = [
+          "Sebastian Thiel <sebastian.thiel@icloud.com>"
+        ];
+        dependencies = [
+          {
+            name = "gix-error";
+            packageId = "gix-error";
+          }
+          {
+            name = "gix-hash";
+            packageId = "gix-hash";
+          }
+          {
+            name = "gix-hashtable";
+            packageId = "gix-hashtable";
+          }
+          {
+            name = "gix-object";
+            packageId = "gix-object";
+          }
+        ];
+        features = {
+          "sha1" = [ "gix-hash/sha1" "gix-object/sha1" "gix-hashtable/sha1" ];
+          "sha256" = [ "gix-hash/sha256" "gix-object/sha256" "gix-hashtable/sha256" ];
+        };
+        resolvedDefaultFeatures = [ "sha1" "sha256" ];
+      };
+      "gix-object" = rec {
+        crateName = "gix-object";
+        version = "0.64.1";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/GitoxideLabs/gitoxide";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_object";
         authors = [
@@ -16961,6 +16906,11 @@ rec {
           {
             name = "gix-actor";
             packageId = "gix-actor";
+          }
+          {
+            name = "gix-command";
+            packageId = "gix-command";
+            optional = true;
           }
           {
             name = "gix-date";
@@ -16980,12 +16930,17 @@ rec {
             packageId = "gix-hashtable";
           }
           {
+            name = "gix-tempfile";
+            packageId = "gix-tempfile";
+            optional = true;
+          }
+          {
             name = "gix-utils";
             packageId = "gix-utils";
           }
           {
             name = "gix-validate";
-            packageId = "gix-validate 0.11.3";
+            packageId = "gix-validate 0.11.4";
           }
           {
             name = "itoa";
@@ -17012,7 +16967,7 @@ rec {
           {
             name = "gix-hash";
             packageId = "gix-hash";
-            features = [ "sha1" "sha256" ];
+            features = [ "bstr" ];
           }
         ];
         features = {
@@ -17020,18 +16975,19 @@ rec {
           "serde" = [ "dep:serde" "bstr/serde" "smallvec/serde" "gix-hash/serde" "gix-actor/serde" ];
           "sha1" = [ "gix-hash/sha1" ];
           "sha256" = [ "gix-hash/sha256" ];
+          "signature" = [ "dep:gix-command" "dep:gix-tempfile" ];
         };
-        resolvedDefaultFeatures = [ "serde" ];
+        resolvedDefaultFeatures = [ "serde" "sha1" "sha256" "signature" ];
       };
       "gix-odb" = rec {
         crateName = "gix-odb";
-        version = "0.83.0";
+        version = "0.84.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_odb";
         authors = [
@@ -17070,7 +17026,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-quote";
@@ -17126,13 +17082,13 @@ rec {
       };
       "gix-pack" = rec {
         crateName = "gix-pack";
-        version = "0.73.0";
+        version = "0.74.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_pack";
         authors = [
@@ -17142,6 +17098,11 @@ rec {
           {
             name = "clru";
             packageId = "clru";
+            optional = true;
+          }
+          {
+            name = "crossbeam-deque";
+            packageId = "crossbeam-deque";
             optional = true;
           }
           {
@@ -17172,7 +17133,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-tempfile";
@@ -17229,24 +17190,24 @@ rec {
           "object-cache-dynamic" = [ "dep:clru" "dep:gix-hashtable" ];
           "pack-cache-lru-dynamic" = [ "dep:clru" ];
           "pack-cache-lru-static" = [ "dep:uluru" ];
-          "parallel" = [ "gix-features/parallel" ];
+          "parallel" = [ "gix-features/parallel" "dep:crossbeam-deque" ];
           "serde" = [ "dep:serde" "gix-object/serde" "gix-zlib/serde" ];
           "sha1" = [ "gix-hash/sha1" ];
           "sha256" = [ "gix-hash/sha256" ];
           "streaming-input" = [ "dep:parking_lot" "dep:gix-tempfile" ];
           "wasm" = [ "gix-diff?/wasm" ];
         };
-        resolvedDefaultFeatures = [ "object-cache-dynamic" "pack-cache-lru-dynamic" "pack-cache-lru-static" "serde" "sha1" "sha256" "streaming-input" ];
+        resolvedDefaultFeatures = [ "object-cache-dynamic" "pack-cache-lru-dynamic" "pack-cache-lru-static" "parallel" "serde" "sha1" "sha256" "streaming-input" ];
       };
       "gix-packetline" = rec {
         crateName = "gix-packetline";
-        version = "0.22.0";
+        version = "0.22.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_packetline";
         authors = [
@@ -17313,15 +17274,15 @@ rec {
         ];
 
       };
-      "gix-path 0.12.3" = rec {
+      "gix-path 0.12.5" = rec {
         crateName = "gix-path";
-        version = "0.12.3";
+        version = "0.12.5";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_path";
         authors = [
@@ -17340,7 +17301,7 @@ rec {
           }
           {
             name = "gix-validate";
-            packageId = "gix-validate 0.11.3";
+            packageId = "gix-validate 0.11.4";
           }
           {
             name = "thiserror";
@@ -17351,13 +17312,13 @@ rec {
       };
       "gix-pathspec" = rec {
         crateName = "gix-pathspec";
-        version = "0.19.0";
+        version = "0.20.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_pathspec";
         authors = [
@@ -17388,7 +17349,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "thiserror";
@@ -17402,13 +17363,13 @@ rec {
       };
       "gix-prompt" = rec {
         crateName = "gix-prompt";
-        version = "0.16.0";
+        version = "0.17.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_prompt";
         authors = [
@@ -17443,13 +17404,13 @@ rec {
       };
       "gix-protocol" = rec {
         crateName = "gix-protocol";
-        version = "0.64.0";
+        version = "0.65.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_protocol";
         authors = [
@@ -17561,13 +17522,13 @@ rec {
       };
       "gix-quote" = rec {
         crateName = "gix-quote";
-        version = "0.7.2";
+        version = "0.8.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_quote";
         authors = [
@@ -17593,13 +17554,13 @@ rec {
       };
       "gix-ref" = rec {
         crateName = "gix-ref";
-        version = "0.66.0";
+        version = "0.67.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_ref";
         authors = [
@@ -17633,7 +17594,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-tempfile";
@@ -17646,7 +17607,7 @@ rec {
           }
           {
             name = "gix-validate";
-            packageId = "gix-validate 0.11.3";
+            packageId = "gix-validate 0.11.4";
           }
           {
             name = "memmap2";
@@ -17682,13 +17643,13 @@ rec {
       };
       "gix-refspec" = rec {
         crateName = "gix-refspec";
-        version = "0.44.0";
+        version = "0.45.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_refspec";
         authors = [
@@ -17702,25 +17663,12 @@ rec {
             features = [ "std" ];
           }
           {
-            name = "gix-error";
-            packageId = "gix-error";
-          }
-          {
-            name = "gix-glob";
-            packageId = "gix-glob";
-          }
-          {
             name = "gix-hash";
             packageId = "gix-hash";
           }
           {
-            name = "gix-revision";
-            packageId = "gix-revision";
-            usesDefaultFeatures = false;
-          }
-          {
             name = "gix-validate";
-            packageId = "gix-validate 0.11.3";
+            packageId = "gix-validate 0.11.4";
           }
           {
             name = "smallvec";
@@ -17745,13 +17693,13 @@ rec {
       };
       "gix-revision" = rec {
         crateName = "gix-revision";
-        version = "0.48.0";
+        version = "0.49.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_revision";
         authors = [
@@ -17828,13 +17776,13 @@ rec {
       };
       "gix-revwalk" = rec {
         crateName = "gix-revwalk";
-        version = "0.34.0";
+        version = "0.35.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_revwalk";
         authors = [
@@ -17893,8 +17841,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_sec";
         authors = [
@@ -17907,7 +17855,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
             target = { target, features }: (target."windows" or false);
           }
           {
@@ -17942,8 +17890,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_shallow";
         authors = [
@@ -17988,13 +17936,13 @@ rec {
       };
       "gix-status" = rec {
         crateName = "gix-status";
-        version = "0.33.0";
+        version = "0.34.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_status";
         authors = [
@@ -18050,7 +17998,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-pathspec";
@@ -18101,11 +18049,6 @@ rec {
             packageId = "gix-fs";
           }
           {
-            name = "gix-hash";
-            packageId = "gix-hash";
-            features = [ "sha1" ];
-          }
-          {
             name = "gix-index";
             packageId = "gix-index";
           }
@@ -18133,13 +18076,13 @@ rec {
       };
       "gix-submodule" = rec {
         crateName = "gix-submodule";
-        version = "0.33.0";
+        version = "0.34.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_submodule";
         authors = [
@@ -18157,7 +18100,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-pathspec";
@@ -18188,8 +18131,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_tempfile";
         authors = [
@@ -18247,8 +18190,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_testtools";
         authors = [
@@ -18273,6 +18216,12 @@ rec {
             packageId = "fs_extra";
           }
           {
+            name = "gix-config";
+            packageId = "gix-config";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
             name = "gix-discover";
             packageId = "gix-discover";
             optional = true;
@@ -18285,11 +18234,43 @@ rec {
           {
             name = "gix-hash";
             packageId = "gix-hash";
-            features = [ "sha1" "sha256" ];
+          }
+          {
+            name = "gix-index";
+            packageId = "gix-index";
+            optional = true;
+            usesDefaultFeatures = false;
           }
           {
             name = "gix-lock";
             packageId = "gix-lock";
+          }
+          {
+            name = "gix-object";
+            packageId = "gix-object";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "gix-odb";
+            packageId = "gix-odb";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "gix-path";
+            packageId = "gix-path 0.12.5";
+          }
+          {
+            name = "gix-ref";
+            packageId = "gix-ref";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "gix-shallow";
+            packageId = "gix-shallow";
+            optional = true;
           }
           {
             name = "gix-tempfile";
@@ -18326,12 +18307,15 @@ rec {
           }
         ];
         features = {
-          "default" = [ "worktree-exclusions" ];
+          "default" = [ "worktree-exclusions" "repo-snapshot" ];
           "document-features" = [ "dep:document-features" ];
+          "repo-snapshot" = [ "dep:gix-config" "dep:gix-discover" "dep:gix-index" "dep:gix-object" "dep:gix-odb" "dep:gix-ref" "dep:gix-shallow" ];
+          "sha1" = [ "gix-hash/sha1" "gix-config?/sha1" "gix-index?/sha1" "gix-object?/sha1" "gix-odb?/sha1" "gix-ref?/sha1" "gix-shallow?/sha1" ];
+          "sha256" = [ "gix-hash/sha256" "gix-config?/sha256" "gix-index?/sha256" "gix-object?/sha256" "gix-odb?/sha256" "gix-ref?/sha256" "gix-shallow?/sha256" ];
           "worktree-exclusions" = [ "dep:gix-discover" "dep:gix-worktree" "dep:gix-fs" ];
           "xz" = [ "dep:xz2" ];
         };
-        resolvedDefaultFeatures = [ "default" "worktree-exclusions" ];
+        resolvedDefaultFeatures = [ "default" "repo-snapshot" "worktree-exclusions" ];
       };
       "gix-trace 0.1.20" = rec {
         crateName = "gix-trace";
@@ -18355,8 +18339,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_trace";
         authors = [
@@ -18379,13 +18363,13 @@ rec {
       };
       "gix-transport" = rec {
         crateName = "gix-transport";
-        version = "0.58.0";
+        version = "0.59.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_transport";
         authors = [
@@ -18422,7 +18406,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-quote";
@@ -18488,13 +18472,13 @@ rec {
       };
       "gix-traverse" = rec {
         crateName = "gix-traverse";
-        version = "0.60.0";
+        version = "0.61.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_traverse";
         authors = [
@@ -18544,11 +18528,6 @@ rec {
             packageId = "gix-commitgraph";
           }
           {
-            name = "gix-hash";
-            packageId = "gix-hash";
-            features = [ "sha1" ];
-          }
-          {
             name = "gix-object";
             packageId = "gix-object";
           }
@@ -18560,13 +18539,13 @@ rec {
       };
       "gix-url" = rec {
         crateName = "gix-url";
-        version = "0.37.0";
+        version = "0.38.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_url";
         authors = [
@@ -18581,7 +18560,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-utils";
@@ -18612,13 +18591,13 @@ rec {
       };
       "gix-utils" = rec {
         crateName = "gix-utils";
-        version = "0.3.5";
+        version = "0.3.6";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_utils";
         authors = [
@@ -18672,15 +18651,15 @@ rec {
         ];
 
       };
-      "gix-validate 0.11.3" = rec {
+      "gix-validate 0.11.4" = rec {
         crateName = "gix-validate";
-        version = "0.11.3";
+        version = "0.11.4";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_validate";
         authors = [
@@ -18698,13 +18677,13 @@ rec {
       };
       "gix-worktree" = rec {
         crateName = "gix-worktree";
-        version = "0.55.0";
+        version = "0.56.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_worktree";
         authors = [
@@ -18752,11 +18731,11 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-validate";
-            packageId = "gix-validate 0.11.3";
+            packageId = "gix-validate 0.11.4";
             optional = true;
           }
           {
@@ -18771,7 +18750,7 @@ rec {
           {
             name = "gix-hash";
             packageId = "gix-hash";
-            features = [ "sha1" ];
+            features = [ "sha1" "sha256" ];
           }
         ];
         features = {
@@ -18788,13 +18767,13 @@ rec {
       };
       "gix-worktree-state" = rec {
         crateName = "gix-worktree-state";
-        version = "0.33.0";
+        version = "0.34.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_worktree_state";
         authors = [
@@ -18828,7 +18807,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-worktree";
@@ -18857,6 +18836,7 @@ rec {
           {
             name = "gix-index";
             packageId = "gix-index";
+            features = [ "sha1" "sha256" ];
           }
           {
             name = "gix-object";
@@ -18871,13 +18851,13 @@ rec {
       };
       "gix-worktree-stream" = rec {
         crateName = "gix-worktree-stream";
-        version = "0.35.0";
+        version = "0.36.0";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_worktree_stream";
         authors = [
@@ -18916,7 +18896,7 @@ rec {
           }
           {
             name = "gix-path";
-            packageId = "gix-path 0.12.3";
+            packageId = "gix-path 0.12.5";
           }
           {
             name = "gix-traverse";
@@ -18946,8 +18926,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "83e074c1e2d070059febaaab1022058948855101";
-          sha256 = "11gbjzmqznr1ya9gzcd7p0j4lpqmixxrb8j45z0mqvfg1y675jzv";
+          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
+          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
         };
         libName = "gix_zlib";
         authors = [
@@ -21376,7 +21356,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" ];
           }
@@ -22370,8 +22350,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/gitbutlerapp/git2-rs";
-          rev = "efce108bf14cb1708cfc4c80f2ddf3244a2635ff";
-          sha256 = "052w60jh7jy0mwy9jfn42v52prsjs1xrpb5njpkzv7vpydkm3jcy";
+          rev = "a87a7bb3f6843504339fe7434ee0732a3e968f3e";
+          sha256 = "10ag9gzq9l4jflcbb1zxgqs928gkz347l0a4jinklivnaw6xr14p";
         };
         libName = "libgit2_sys";
         libPath = "lib.rs";
@@ -23368,7 +23348,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: ("windows" == target."os" or null);
             features = [ "Win32_UI_WindowsAndMessaging" "Win32_Foundation" "Win32_Graphics_Gdi" "Win32_UI_Shell" "Win32_Globalization" "Win32_UI_Input_KeyboardAndMouse" "Win32_System_SystemServices" "Win32_UI_Accessibility" "Win32_UI_HiDpi" "Win32_System_LibraryLoader" "Win32_UI_Controls" ];
           }
@@ -24282,7 +24262,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             rename = "windows";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" "Win32_Storage_FileSystem" "Win32_Security" ];
@@ -28204,18 +28184,12 @@ rec {
       };
       "posthog-rs" = rec {
         crateName = "posthog-rs";
-        version = "0.4.1";
+        version = "0.23.3";
         edition = "2018";
-        workspace_member = null;
-        src = pkgs.fetchgit {
-          url = "https://github.com/gitbutlerapp/posthog-rs";
-          rev = "664c9245f79aaedcdd025b9f3c141b62bb866b8e";
-          sha256 = "085lpl9vxkw1nriin2h8azf70fnhgard6pi7d80izk71bicfz13j";
-        };
+        sha256 = "0l8y5pk5i4f93y2i6vwbbmbz1lw6gaplww1iajs3106vyykck2l9";
         libName = "posthog_rs";
         authors = [
-          "christos <christos@openquery.io>"
-          "olly <oliver@posthog.com>"
+          "PostHog <engineering@posthog.com>"
         ];
         dependencies = [
           {
@@ -28226,6 +28200,14 @@ rec {
           {
             name = "derive_builder";
             packageId = "derive_builder";
+          }
+          {
+            name = "flate2";
+            packageId = "flate2";
+          }
+          {
+            name = "os_info";
+            packageId = "os_info";
           }
           {
             name = "regex";
@@ -28283,10 +28265,14 @@ rec {
         ];
         features = {
           "async-client" = [ "tokio" ];
-          "default" = [ "async-client" ];
+          "brotli" = [ "dep:brotli" ];
+          "capture-v1" = [ "brotli" "zstd" ];
+          "default" = [ "async-client" "error-tracking" ];
+          "error-tracking" = [ "dep:backtrace" "dep:findshlibs" ];
           "tokio" = [ "dep:tokio" ];
+          "zstd" = [ "dep:zstd" ];
         };
-        resolvedDefaultFeatures = [ "async-client" "default" "tokio" ];
+        resolvedDefaultFeatures = [ "async-client" "tokio" ];
       };
       "potential_utf" = rec {
         crateName = "potential_utf";
@@ -29167,7 +29153,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_IO" "Win32_Networking_WinSock" ];
           }
@@ -31542,7 +31528,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" ];
           }
@@ -31803,7 +31789,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Security_Cryptography" ];
@@ -33820,7 +33806,7 @@ rec {
         features = {
           "default" = [ "std" ];
         };
-        resolvedDefaultFeatures = [ "std" ];
+        resolvedDefaultFeatures = [ "default" "std" ];
       };
       "similar" = rec {
         crateName = "similar";
@@ -34023,7 +34009,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" "Win32_System_IO" "Win32_System_Threading" "Win32_System_WindowsProgramming" ];
           }
@@ -37295,7 +37281,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Storage_FileSystem" "Win32_Foundation" ];
           }
@@ -37378,7 +37364,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.61.2";
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_System_Console" "Win32_Storage_FileSystem" "Win32_System_IO" "Win32_System_Threading" "Win32_Security" ];
@@ -37389,6 +37375,80 @@ rec {
           "windows-legacy" = [ "windows-sys/Win32_UI_Input_KeyboardAndMouse" "windows-sys/Win32_UI_WindowsAndMessaging" ];
         };
         resolvedDefaultFeatures = [ "default" ];
+      };
+      "terminal-colorsaurus" = rec {
+        crateName = "terminal-colorsaurus";
+        version = "1.0.3";
+        edition = "2021";
+        sha256 = "141yf3ijccd014266ff0xw9abyfvjn53qmwc550a0za6ci9vniks";
+        libName = "terminal_colorsaurus";
+        dependencies = [
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+            target = { target, features }: ("macos" == target."os" or null);
+          }
+          {
+            name = "memchr";
+            packageId = "memchr";
+            target = { target, features }: ((target."unix" or false) || (target."windows" or false));
+          }
+          {
+            name = "mio";
+            packageId = "mio";
+            usesDefaultFeatures = false;
+            target = { target, features }: (target."unix" or false);
+            features = [ "os-ext" ];
+          }
+          {
+            name = "terminal-trx";
+            packageId = "terminal-trx";
+            target = { target, features }: ((target."unix" or false) || (target."windows" or false));
+          }
+          {
+            name = "windows-sys";
+            packageId = "windows-sys 0.61.2";
+            target = { target, features }: (target."windows" or false);
+            features = [ "Win32_System_Threading" ];
+          }
+          {
+            name = "xterm-color";
+            packageId = "xterm-color";
+          }
+        ];
+        features = {
+          "anstyle" = [ "dep:anstyle" ];
+          "rgb" = [ "dep:rgb" ];
+        };
+      };
+      "terminal-trx" = rec {
+        crateName = "terminal-trx";
+        version = "0.2.6";
+        edition = "2021";
+        sha256 = "1v9qdw86q65db0v5l7pdaklccifbgb4aw7s88msyaxx1m3cjfgrv";
+        libName = "terminal_trx";
+        dependencies = [
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+            target = { target, features }: (target."unix" or false);
+          }
+          {
+            name = "windows-sys";
+            packageId = "windows-sys 0.61.2";
+            target = { target, features }: (target."windows" or false);
+            features = [ "Win32_System_Console" "Win32_Storage_FileSystem" "Win32_Foundation" ];
+          }
+        ];
+
       };
       "terminal_size" = rec {
         crateName = "terminal_size";
@@ -37407,7 +37467,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" ];
           }
@@ -39672,7 +39732,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: ("windows" == target."os" or null);
             features = [ "Win32_UI_WindowsAndMessaging" "Win32_Foundation" "Win32_System_SystemServices" "Win32_Graphics_Gdi" "Win32_UI_Shell" ];
           }
@@ -39897,7 +39957,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Networking_WinSock" "Win32_Foundation" "Win32_System_Threading" "Win32_System_IO" ];
           }
@@ -42110,7 +42170,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.60.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" "Win32_System_SystemInformation" ];
           }
@@ -44839,7 +44899,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_LibraryLoader" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_Time" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_DataExchange" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Ole" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_Time" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-sys 0.60.2" = rec {
         crateName = "windows-sys";
@@ -45104,7 +45164,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_DataExchange" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Ole" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_Security" "Win32_Security_Credentials" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_DataExchange" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Controls" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-sys 0.61.2" = rec {
         crateName = "windows-sys";
@@ -45366,7 +45426,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-targets 0.42.2" = rec {
         crateName = "windows-targets";
@@ -46474,6 +46534,14 @@ rec {
             features = [ "Win32_Foundation" "Win32_UI_Shell" "Win32_System_Com" ];
           }
         ];
+
+      };
+      "xterm-color" = rec {
+        crateName = "xterm-color";
+        version = "1.0.2";
+        edition = "2021";
+        sha256 = "0wx6xfk4v7a6y9dwv9y520q31pnsp36kzxidkdyy99wppbcaj23h";
+        libName = "xterm_color";
 
       };
       "yansi" = rec {

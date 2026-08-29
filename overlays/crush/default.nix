@@ -5,7 +5,7 @@
   ...
 }:
 let
-  buildGoModule = prev.buildGoModule.override { go = prev.go_latest or prev.go; };
+  go = prev.go_latest or prev.go;
   crushOverrideArgs =
     if prev.crush ? override && prev.crush.override ? __functionArgs then
       prev.crush.override.__functionArgs
@@ -13,7 +13,13 @@ let
       { };
   crushBase =
     if crushOverrideArgs ? buildGoModule then
-      prev.crush.override { inherit buildGoModule; }
+      prev.crush.override {
+        buildGoModule = prev.buildGoModule.override { inherit go; };
+      }
+    else if crushOverrideArgs ? buildGo126Module then
+      prev.crush.override {
+        buildGo126Module = prev.buildGo126Module.override { inherit go; };
+      }
     else
       prev.crush;
   inherit (selfSource) version;

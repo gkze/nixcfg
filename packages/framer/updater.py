@@ -1,7 +1,5 @@
 """Updater for Framer desktop macOS releases."""
 
-from __future__ import annotations
-
 from typing import ClassVar
 
 from lib.update.updaters import VersionEndpointDownloadUpdater, register_updater

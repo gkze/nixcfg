@@ -1,7 +1,5 @@
 """Updater for Spotify."""
 
-from __future__ import annotations
-
 from typing import ClassVar
 
 from lib.update.updaters import HeadArtifactDownloadUpdater, register_updater

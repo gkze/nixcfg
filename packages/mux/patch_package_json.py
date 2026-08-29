@@ -1,7 +1,5 @@
 """Patch mux package.json for hermetic Darwin packaging."""
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 
@@ -16,6 +14,7 @@ def patch_package_json(path: Path, electron_dist: str) -> None:
 
     mac = build.setdefault("mac", {})
     mac["target"] = "dir"
+    mac["icon"] = "build/icon.png"
     mac["hardenedRuntime"] = False
     mac["notarize"] = False
 

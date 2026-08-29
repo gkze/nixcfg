@@ -1,0 +1,11 @@
+{
+  "commit": "0ae7959fe03e8fb98d0b8a961438ad88e49fbd4b",
+  "electronVersion": "41.2.1",
+  "hashes": [
+    {
+      "hash": "sha256-NYydsI91ijZldG2GjsaZMyuvUhQrSbxuQDJKS9PdJ4g=",
+      "hashType": "srcHash"
+    }
+  ],
+  "version": "1.6.0"
+}

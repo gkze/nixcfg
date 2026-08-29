@@ -1,7 +1,5 @@
 """Subprocess execution and hash conversion helpers for updates."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import posixpath

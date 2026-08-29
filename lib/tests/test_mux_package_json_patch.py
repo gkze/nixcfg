@@ -1,7 +1,5 @@
 """Tests for the extracted mux package.json patch helper."""
 
-from __future__ import annotations
-
 import json
 import runpy
 from pathlib import Path
@@ -31,6 +29,7 @@ def test_patch_package_json_sets_hermetic_darwin_build_options(tmp_path: Path) -
 
     assert payload["build"]["electronDist"] == "/nix/store/demo-electron-dist"
     assert payload["build"]["mac"]["target"] == "dir"
+    assert payload["build"]["mac"]["icon"] == "build/icon.png"
     assert payload["build"]["mac"]["hardenedRuntime"] is False
     assert payload["build"]["mac"]["notarize"] is False
 

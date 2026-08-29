@@ -1,7 +1,5 @@
 """Updater for Goose desktop's pinned pnpm dependency cache."""
 
-from __future__ import annotations
-
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -12,6 +10,7 @@ from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.path import NixPath
+from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
@@ -43,6 +42,7 @@ class GooseDesktopUpdater(HashEntryUpdater):
 
     DARWIN_PLATFORM: ClassVar[str] = "aarch64-darwin"
     _GOOSE_CARGO_NIX_PATH = Path("overlays/goose-cli/Cargo.nix")
+    _GOOSE_CRATE_SOURCES_PATH = Path("overlays/goose-cli/crate-sources.json")
 
     name = "goose-desktop"
     companion_of = "goose-cli"
@@ -114,7 +114,32 @@ class GooseDesktopUpdater(HashEntryUpdater):
             yield path
 
     @classmethod
-    def _goose_cli_override_expr(cls, cargo_nix_path: Path) -> Select:
+    @contextmanager
+    def _crate_sources_path(
+        cls,
+        context: UpdateContext | SourceEntry | None,
+    ) -> Iterator[Path]:
+        resolved_context = _coerce_context(context)
+        generated = resolved_context.generated_artifacts.get(
+            cls._GOOSE_CRATE_SOURCES_PATH
+        )
+        if generated is None:
+            yield REPO_ROOT / cls._GOOSE_CRATE_SOURCES_PATH
+            return
+
+        with tempfile.TemporaryDirectory(
+            prefix="goose-desktop-crate-sources-"
+        ) as tmpdir:
+            path = Path(tmpdir) / "crate-sources.json"
+            path.write_text(generated, encoding="utf-8")
+            yield path
+
+    @classmethod
+    def _goose_cli_override_expr(
+        cls,
+        cargo_nix_path: Path,
+        crate_sources_path: Path,
+    ) -> Select:
         flake_lib = select_attrs(Identifier(name="flake"), "lib")
         flake_sources = select_attrs(flake_lib, "sources")
         fragment = FunctionCall(
@@ -126,6 +151,13 @@ class GooseDesktopUpdater(HashEntryUpdater):
             ),
             argument=AttributeSet(
                 values=[
+                    Binding(
+                        name="inputs",
+                        value=select_attrs(
+                            Identifier(name="rootFlake"),
+                            "inputs",
+                        ),
+                    ),
                     Binding(name="prev", value=Identifier(name="pkgs")),
                     Binding(name="slib", value=flake_lib),
                     Binding(name="sources", value=flake_sources),
@@ -140,6 +172,37 @@ class GooseDesktopUpdater(HashEntryUpdater):
                             argument=NixPath(path=str(cargo_nix_path)),
                         ),
                     ),
+                    Binding(
+                        name="cargoNixSha256",
+                        value=FunctionCall(
+                            name=FunctionCall(
+                                name=select_attrs(
+                                    Identifier(name="builtins"),
+                                    "hashFile",
+                                ),
+                                argument=StringPrimitive(value="sha256"),
+                            ),
+                            argument=NixPath(path=str(cargo_nix_path)),
+                        ),
+                    ),
+                    Binding(
+                        name="crateSourceInfo",
+                        value=FunctionCall(
+                            name=select_attrs(
+                                Identifier(name="builtins"),
+                                "fromJSON",
+                            ),
+                            argument=Parenthesis(
+                                value=FunctionCall(
+                                    name=select_attrs(
+                                        Identifier(name="builtins"),
+                                        "readFile",
+                                    ),
+                                    argument=NixPath(path=str(crate_sources_path)),
+                                )
+                            ),
+                        ),
+                    ),
                 ]
             ),
         )
@@ -152,6 +215,7 @@ class GooseDesktopUpdater(HashEntryUpdater):
     def _pnpm_deps_expr(
         cls,
         cargo_nix_path: Path,
+        crate_sources_path: Path,
         source_overrides: dict[str, SourceEntry],
     ) -> str:
         return _build_package_path_attr_expr(
@@ -159,7 +223,10 @@ class GooseDesktopUpdater(HashEntryUpdater):
             ".pnpmDeps",
             system=cls.DARWIN_PLATFORM,
             package_args={
-                "goose-cli": cls._goose_cli_override_expr(cargo_nix_path),
+                "goose-cli": cls._goose_cli_override_expr(
+                    cargo_nix_path,
+                    crate_sources_path,
+                ),
             },
             source_overrides=source_overrides,
         )
@@ -181,14 +248,21 @@ class GooseDesktopUpdater(HashEntryUpdater):
             )
             raise RuntimeError(msg)
 
-        with self._cargo_nix_path(context) as cargo_nix_path:
+        with (
+            self._cargo_nix_path(context) as cargo_nix_path,
+            self._crate_sources_path(context) as crate_sources_path,
+        ):
             source_overrides = self._dependency_hash_overrides(
                 info.version,
                 goose_cli_source,
             )
             hash_stream = update_nix.compute_fixed_output_hash(
                 self.name,
-                self._pnpm_deps_expr(cargo_nix_path, source_overrides),
+                self._pnpm_deps_expr(
+                    cargo_nix_path,
+                    crate_sources_path,
+                    source_overrides,
+                ),
                 config=self.config,
             )
             async for event in self._emit_single_hash_entry(
