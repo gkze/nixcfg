@@ -1,5 +1,7 @@
 """Updater registration for T3 Code Desktop's staged runtime Bun cache."""
 
+from typing import ClassVar
+
 from lib.update.updaters import register_updater
 from lib.update.updaters.t3_runtime import T3RuntimeUpdater
 
@@ -9,4 +11,5 @@ class T3CodeDesktopUpdater(T3RuntimeUpdater):
     """Compute only the desktop runtime ``node_modules`` hash."""
 
     name = "t3code-desktop"
+    source_pins: ClassVar[dict[str, str]] = {"electronBuilderVersion": "26.15.7"}
     generated_artifact_files = ("../t3code/bun.lock", "bun.lock")

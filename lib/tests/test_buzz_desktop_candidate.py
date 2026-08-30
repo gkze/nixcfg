@@ -24,6 +24,10 @@ from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
+from lib.tests._buzz_native_lock import (
+    buzz_native_lock_string,
+    render_buzz_native_lock_interpolations,
+)
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     expect_binding,
@@ -49,6 +53,9 @@ _APP_EXECUTABLES = (
 )
 _SIDECARS = _APP_EXECUTABLES[2:]
 _RUNTIME_ID = "meshllm-native-runtime-darwin-aarch64-metal"
+_BUZZ_VERSION = buzz_native_lock_string("buzz", "version")
+_MESH_VERSION = buzz_native_lock_string("meshLlm", "version")
+_SKIPPY_ABI = buzz_native_lock_string("meshLlm", "skippyAbi")
 _REQUIRED_ENTITLEMENTS = {
     "com.apple.security.cs.disable-library-validation": True,
     "com.apple.security.device.audio-input": True,
@@ -88,7 +95,9 @@ def _scope_string(name: str) -> str:
         expect_binding(_candidate_scope(), name).value,
         IndentedString,
     )
-    return dedent(indented_string_body(value.rebuild()))
+    return render_buzz_native_lock_interpolations(
+        dedent(indented_string_body(value.rebuild()))
+    )
 
 
 def _candidate_scope() -> Scope:
@@ -144,6 +153,21 @@ def _expand_embedded_validators(script: str) -> str:
     return script
 
 
+def test_updater_lock_interpolation_preserves_attested_validator_text() -> None:
+    """Externalized identities must not perturb the validated candidate derivation."""
+    runtime_validator = _scope_string("runtimeValidator")
+    assert "EXPECTED_MESH_VERSION" not in runtime_validator
+    assert "EXPECTED_SKIPPY_ABI" not in runtime_validator
+    assert f'if runtime.get("mesh_version") != "{_MESH_VERSION}":' in runtime_validator
+    assert f'if runtime.get("skippy_abi") != "{_SKIPPY_ABI}":' in runtime_validator
+
+    runtime_load_validator = _scope_string("runtimeLoadValidator")
+    expected_abi = ", ".join(_SKIPPY_ABI.split("."))
+    assert "EXPECTED_ABI_TEXT" not in runtime_load_validator
+    assert f"EXPECTED_ABI = ({expected_abi})" in runtime_load_validator
+    assert f'"Skippy ABI differs from {_SKIPPY_ABI}: "' in runtime_load_validator
+
+
 def _write_executable(path: Path, body: bytes = b"fixture\n") -> None:
     path.write_bytes(body)
     path.chmod(0o755)
@@ -169,8 +193,8 @@ def _desktop_fixture(root: Path) -> Path:
                 "CFBundleExecutable": "buzz-desktop",
                 "CFBundleIdentifier": "xyz.block.buzz.app",
                 "CFBundleName": "Buzz",
-                "CFBundleShortVersionString": "0.5.20",
-                "CFBundleVersion": "0.5.20",
+                "CFBundleShortVersionString": _BUZZ_VERSION,
+                "CFBundleVersion": _BUZZ_VERSION,
                 "LSMinimumSystemVersion": "10.13",
             },
             plist_file,
@@ -195,8 +219,8 @@ def _runtime_fixture(root: Path) -> Path:
             {
                 "runtime": {
                     "id": _RUNTIME_ID,
-                    "mesh_version": "0.75.1",
-                    "skippy_abi": "0.1.35",
+                    "mesh_version": _MESH_VERSION,
+                    "skippy_abi": _SKIPPY_ABI,
                     "platform": {
                         "os": "macos",
                         "arch": "aarch64",
@@ -568,18 +592,26 @@ def test_candidate_has_narrow_provenance_checked_interface() -> None:
         "desktopUnsigned",
         "lib",
         "meshRuntimeBundle",
+        "nativeLock",
         "patchedBuzzSource",
         "python3",
         "stdenv",
         "version",
     }
     assert_nix_ast_equal(derivation.name, "stdenv.mkDerivation")
-    assert len(_assertion_conditions()) == 7
+    assert len(_assertion_conditions()) == 14
     for actual, expected in zip(
         _assertion_conditions(),
         (
             'stdenv.hostPlatform.system == "aarch64-darwin"',
-            'version == "0.5.20"',
+            "builtins.isString buzzVersion",
+            'builtins.isString buzzCommit && builtins.match "[0-9a-f]{40}" buzzCommit != null',
+            "builtins.isString rustVersion",
+            "builtins.isString pnpmVersion",
+            "builtins.isString sherpaVersion",
+            "builtins.isString meshLlmVersion",
+            'builtins.isString skippyAbi && builtins.match "[0-9]+\\\\.[0-9]+\\\\.[0-9]+" skippyAbi != null',
+            "version == buzzVersion",
             "(desktopUnsigned.passthru.buzzNativeContract or null) == expectedDesktopContract",
             "(meshRuntimeBundle.passthru.buzzNativeContract or null) == expectedRuntimeContract",
             '(meshRuntimeBundle.passthru.manifestSubpath or null) == "manifest.json"',
@@ -652,8 +684,8 @@ def test_candidate_contract_records_finder_runtime_and_signing_policy() -> None:
         expect_binding(_candidate_scope(), "implementedContract").value,
         """{
           kind = "buzz-desktop-candidate";
-          commit = "95154bee4034ca7a40b33095c2ddbde8c9aa1614";
-          version = "0.5.20";
+          commit = buzzCommit;
+          version = buzzVersion;
           target = "aarch64-apple-darwin";
           minimumMacosVersion = "14.0";
           app = {
@@ -967,7 +999,7 @@ struct AbiVersion skippy_abi_version(void) {{
     )
     assert (result.returncode == 0) is accepted, result.stderr
     if not accepted:
-        assert "Skippy ABI differs from 0.1.35" in result.stderr
+        assert f"Skippy ABI differs from {_SKIPPY_ABI}" in result.stderr
 
     assert '${runtimeLoadValidationCommand} "$runtime"' in _scope_string(
         "installCheckPhase"
@@ -1001,7 +1033,7 @@ def test_install_check_rejects_non_file_macos_entry(tmp_path: Path) -> None:
     ("key", "value"),
     [
         ("CFBundleName", "Unreviewed Buzz"),
-        ("CFBundleVersion", "0.5.20-unreviewed"),
+        ("CFBundleVersion", f"{_BUZZ_VERSION}-unreviewed"),
     ],
 )
 def test_install_check_rejects_app_identity_drift(

@@ -8,5 +8,8 @@
     }
   ],
   "input": "t3code",
+  "pins": {
+    "electronBuilderVersion": "26.15.7"
+  },
   "version": "main"
 }

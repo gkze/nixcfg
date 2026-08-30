@@ -1,0 +1,178 @@
+{
+  "onnxruntime": {
+    "commit": "a83fc4d58cb48eb68890dd689f94f28288cf2278",
+    "dependencies": {
+      "abseilCpp": {
+        "hash": "sha256-PuS7MLwi824c4z4Cubh029DEUVYSNPD3MwCDsgzsp3Y=",
+        "owner": "abseil",
+        "repo": "abseil-cpp",
+        "tag": "20240722.2",
+        "version": "20240722.2"
+      },
+      "dlpack": {
+        "commit": "5c210da409e7f1e51ddf445134a4376fdbd70d7d",
+        "hash": "sha256-YqgzCyNywixebpHGx16tUuczmFS5pjCz5WjR89mv9eI=",
+        "owner": "dmlc",
+        "repo": "dlpack",
+        "rev": "5c210da409e7f1e51ddf445134a4376fdbd70d7d"
+      },
+      "flatbuffers": {
+        "hash": "sha256-e+dNPNbCHYDXUS/W+hMqf/37fhVgEGzId6rhP3cToTE=",
+        "owner": "google",
+        "repo": "flatbuffers",
+        "rev": "v23.5.26",
+        "version": "23.5.26"
+      },
+      "mp11": {
+        "hash": "sha256-cLPvjkf2Au+B19PJNrUkTW/VPxybi1MpPxnIl4oo4/o=",
+        "owner": "boostorg",
+        "repo": "mp11",
+        "tag": "boost-1.82.0",
+        "version": "boost-1.82.0"
+      },
+      "onnx": {
+        "hash": "sha256-UhtF+CWuyv5/Pq/5agLL4Y95YNP63W2BraprhRqJOag=",
+        "owner": "onnx",
+        "repo": "onnx",
+        "tag": "v1.18.0",
+        "version": "v1.18.0"
+      },
+      "protobuf": {
+        "hash": "sha256-wfu1MyCycGpxFB++eicA0F41j886/Y52I/4+ciRUg2o=",
+        "nixpkgsAttribute": "protobuf_32",
+        "owner": "protocolbuffers",
+        "repo": "protobuf",
+        "tag": "v32.1",
+        "version": "32.1"
+      },
+      "re2": {
+        "hash": "sha256-IeANwJlJl45yf8iu/AZNDoiyIvTCZIeK1b74sdCfAIc=",
+        "owner": "google",
+        "repo": "re2",
+        "rev": "2024-07-02",
+        "version": "2024-07-02"
+      },
+      "safeint": {
+        "hash": "sha256-pjwjrqq6dfiVsXIhbBtbolhiysiFlFTnx5XcX77f+C0=",
+        "owner": "dcleblanc",
+        "repo": "safeint",
+        "tag": "3.0.28",
+        "version": "3.0.28"
+      }
+    },
+    "nixpkgsRecipe": {
+      "commit": "e1e423f183cde97926ac113d8a4de5a5042a7264",
+      "path": "pkgs/by-name/on/onnxruntime/package.nix"
+    },
+    "patches": [
+      {
+        "hash": "sha256-FFAJuJse4nmNT3ixvEdlqzbr3edY46SqEFv7z/oo6m0=",
+        "includes": ["onnx/defs/schema.h"],
+        "target": "onnx",
+        "url": "https://github.com/onnx/onnx/commit/595a069aaac07586f111681245bc808ee63551f8.patch"
+      },
+      {
+        "hash": "sha256-VlTHs0om20kTNvSVQaasSsa5JROliQy4k9BECTsBtbU=",
+        "target": "onnx",
+        "url": "https://github.com/onnx/onnx/commit/6769c41ad64ebca0358da8c7211d2c6d0e627b2b.patch"
+      },
+      {
+        "hash": "sha256-FSuPybX8f2VoxvLhcYx4rdChaiK8bSUDR32sN3Efwfc=",
+        "target": "onnxruntime",
+        "url": "https://github.com/microsoft/onnxruntime/commit/d6e712c5b7b6260a61e54d1fe40107cf5366ee77.patch"
+      },
+      {
+        "hash": "sha256-vX+kaFiNdmqWI91JELcLpoaVIHBb5EPbI7rCAMYAx04=",
+        "target": "onnxruntime",
+        "url": "https://github.com/microsoft/onnxruntime/commit/8ebd0bf1cf02414584d15d7244b07fa97d65ba02.patch"
+      }
+    ],
+    "sourceClosureComplete": true,
+    "version": "1.23.2"
+  },
+  "paseo": {
+    "appBuilderLibBackportCommit": "2ff9190aadc791503a6e62cdcbfa975448bc49bf",
+    "appBuilderLibVersion": "26.8.1",
+    "claudeAgentSdkVersion": "0.3.220",
+    "commit": "20d7efc46a316f5a274b9943a5c43b0322269825",
+    "electronVersion": "41.2.0",
+    "esbuildVersion": "0.25.12",
+    "nodeAddonApiVersion": "8.3.0",
+    "npmFetcherVersion": 2,
+    "version": "0.6.1"
+  },
+  "schemaVersion": 1,
+  "sherpaOnnx": {
+    "commit": "86d3d00e28c22c102fb7d01c7b62fdc4e7a69f1b",
+    "dependencies": {
+      "eigen": {
+        "file": "eigen-3.4.1.tar.gz",
+        "hash": "sha256-uTxmfRtpJlzbTZ8w7CH4+su+izB880wLmUKDTG1P2+I=",
+        "url": "https://gitlab.com/libeigen/eigen/-/archive/3.4.1/eigen-3.4.1.tar.gz"
+      },
+      "espeakNg": {
+        "file": "espeak-ng-f6fed6c58b5e0998b8e68c6610125e2d07d595a7.zip",
+        "hash": "sha256-cMv0BQ56AUquGRQLBeVySdpHIPVhKEWfvjqTvq+XGuY=",
+        "url": "https://github.com/csukuangfj/espeak-ng/archive/f6fed6c58b5e0998b8e68c6610125e2d07d595a7.zip"
+      },
+      "hclustCpp": {
+        "file": "hclust-cpp-2026-02-25.tar.gz",
+        "hash": "sha256-jxTgJMcJ1zr7QK5pyyLeS3Pbpny85A8uUYgT2oE5q1Y=",
+        "url": "https://github.com/csukuangfj/hclust-cpp/archive/refs/tags/2026-02-25.tar.gz"
+      },
+      "json": {
+        "file": "json-3.12.0.tar.gz",
+        "hash": "sha256-S5LrDAbRBoP3RHzpQGy5fNS0U74Y1yeTIPey8CXBAYc=",
+        "url": "https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.tar.gz"
+      },
+      "kaldiDecoder": {
+        "file": "kaldi-decoder-0.2.11.tar.gz",
+        "hash": "sha256-hcpGJTVZJUHrW6bSGEMAnPNHOPUbKLcfhIgqNpS1KL8=",
+        "url": "https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.2.11.tar.gz"
+      },
+      "kaldiNativeFbank": {
+        "file": "kaldi-native-fbank-1.22.3.tar.gz",
+        "hash": "sha256-kXbMZvx84e34XPNVsG4yDFfbYpffdCd/V1GDRoiTz2E=",
+        "url": "https://github.com/csukuangfj/kaldi-native-fbank/archive/refs/tags/v1.22.3.tar.gz"
+      },
+      "kaldifst": {
+        "file": "kaldifst-1.7.17.tar.gz",
+        "hash": "sha256-xLcBojpAC9qAMlhrAsfg1egTp2WDLfYMI+bfnmKwEPQ=",
+        "url": "https://github.com/k2-fsa/kaldifst/archive/refs/tags/v1.7.17.tar.gz"
+      },
+      "kissfft": {
+        "file": "kissfft-febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip",
+        "hash": "sha256-SXED5mQWjr45WAt1etvmFvbPhaFlcq9YHKe8QtCrE/0=",
+        "url": "https://github.com/mborgerding/kissfft/archive/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip"
+      },
+      "openfst": {
+        "file": "openfst-sherpa-onnx-2024-06-19.tar.gz",
+        "hash": "sha256-XJjoLMUJxWGFAt3khguOoE2EOFDtV+bWtZC2RLJohT0=",
+        "url": "https://github.com/csukuangfj/openfst/archive/refs/tags/sherpa-onnx-2024-06-19.tar.gz"
+      },
+      "piperPhonemize": {
+        "file": "piper-phonemize-78a788e0b719013401572d70fef372e77bff8e43.zip",
+        "hash": "sha256-iWQaRkiaSJh1RkPOV72pybVLTKRkhf3AK/DchLhmZF0=",
+        "url": "https://github.com/csukuangfj/piper-phonemize/archive/78a788e0b719013401572d70fef372e77bff8e43.zip"
+      },
+      "simpleSentencepiece": {
+        "file": "simple-sentencepiece-0.7.tar.gz",
+        "hash": "sha256-F0ioIgYKNbqp9mCfhO/I61TcDnS57OPYI2e3EZ/cda8=",
+        "url": "https://github.com/pkufool/simple-sentencepiece/archive/refs/tags/v0.7.tar.gz"
+      }
+    },
+    "npmAddonBuild": {
+      "portaudio": false,
+      "speakerDiarization": true,
+      "tts": true,
+      "websocket": false,
+      "workflow": ".github/workflows/npm-addon-macos.yaml"
+    },
+    "onnxruntime": {
+      "source": "paseo-exact-source-build",
+      "version": "1.23.2"
+    },
+    "sourceClosureComplete": true,
+    "version": "1.12.28"
+  }
+}

@@ -5,6 +5,7 @@ import subprocess
 from functools import cache
 from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 from nix_manipulator.expressions.assertion import Assertion
@@ -19,6 +20,9 @@ from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
 from lib.update.paths import REPO_ROOT
+
+if TYPE_CHECKING:
+    from nix_manipulator.expressions.scope import Scope
 
 _SIDECARS_PATH = REPO_ROOT / "packages/buzz/native/sidecars.nix"
 _BUZZ_PACKAGE_PATH = REPO_ROOT / "packages/buzz/package.nix"
@@ -51,6 +55,16 @@ def _buzz_package() -> tuple[FunctionDefinition, IfExpression]:
 def _derivation_arguments() -> AttributeSet:
     _package, derivation = _sidecars_package()
     return expect_instance(derivation.argument, AttributeSet)
+
+
+def _package_scope() -> Scope:
+    package, _derivation = _sidecars_package()
+    output = package.output
+    while isinstance(output, Assertion):
+        if output.scope:
+            return output.scope
+        output = output.body
+    raise AssertionError("expected sidecar package let-bindings")
 
 
 def _assertion_conditions() -> list[object]:
@@ -157,8 +171,8 @@ def _run_validator(
     )
 
 
-def test_sidecar_contract_is_an_independent_literal() -> None:
-    """The module, rather than its caller, must attest the exact six outputs."""
+def test_sidecar_contract_is_derived_from_updater_owned_identity() -> None:
+    """The module must combine updater-owned identity with its exact outputs."""
     package, _derivation = _sidecars_package()
     assert {
         expect_instance(argument, Identifier).name for argument in package.argument_set
@@ -166,6 +180,7 @@ def test_sidecar_contract_is_an_independent_literal() -> None:
         "cctools",
         "lib",
         "makeRustPlatform",
+        "nativeLock",
         "patchedBuzzSource",
         "rootCargoDeps",
         "rustToolchain",
@@ -183,10 +198,18 @@ def test_sidecar_contract_is_an_independent_literal() -> None:
 
     _package, derivation = _sidecars_package()
     assert_nix_ast_equal(
+        expect_binding(_package_scope(), "buzzCommit").value,
+        "nativeLock.buzz.commit or null",
+    )
+    assert_nix_ast_equal(
+        expect_binding(_package_scope(), "rustVersion").value,
+        "nativeLock.buzz.rustVersion or null",
+    )
+    assert_nix_ast_equal(
         expect_binding(derivation.scope, "implementedContract").value,
         """{
           kind = "buzz-sidecars";
-          commit = "95154bee4034ca7a40b33095c2ddbde8c9aa1614";
+          commit = buzzCommit;
           target = "aarch64-apple-darwin";
           profile = "release";
           cargoOffline = true;
@@ -249,16 +272,28 @@ def test_sidecars_use_the_patched_source_root_vendor_and_rust_1_95() -> None:
     )
 
     conditions = _assertion_conditions()
-    assert len(conditions) == 3
-    assert_nix_ast_equal(
-        conditions[-1],
+    expected_conditions = (
+        'stdenv.hostPlatform.system == "aarch64-darwin"',
+        'builtins.isString buzzCommit && builtins.match "[0-9a-f]{40}" buzzCommit != null',
+        "builtins.isString rustVersion",
+        """sidecarSpecs == [
+          { package = "buzz-acp"; binary = "buzz-acp"; }
+          { package = "buzz-agent"; binary = "buzz-agent"; }
+          { package = "buzz-backend-kubernetes"; binary = "buzz-backend-kubernetes"; }
+          { package = "buzz-dev-mcp"; binary = "buzz-dev-mcp"; }
+          { package = "git-credential-nostr"; binary = "git-credential-nostr"; }
+          { package = "buzz-cli"; binary = "buzz"; }
+        ]""",
         """(rustToolchain.passthru.buzzNativeContract or null) == {
           kind = "rust-toolchain";
-          channel = "1.95.0";
+          channel = rustVersion;
           profile = "default";
           target = "aarch64-apple-darwin";
         }""",
     )
+    assert len(conditions) == len(expected_conditions)
+    for actual, expected in zip(conditions, expected_conditions, strict=True):
+        assert_nix_ast_equal(actual, expected)
 
 
 def test_sidecars_install_only_the_target_qualified_binary_inventory() -> None:
@@ -463,14 +498,14 @@ def test_buzz_package_owns_and_gates_the_sidecar_derivation() -> None:
     )
 
     bindings = (
-        "buzzRuntimePolicySource: cctools: lib: pkgs: rootCargoDeps: "
+        "buzzRuntimePolicySource: cctools: lib: nativeLock: pkgs: rootCargoDeps: "
         "rustToolchainNative: sidecarSpecs: stdenv: version:"
     )
     sidecars_native = expect_binding(scope, "sidecarsNative").value
     assert_nix_ast_equal(
         f"{bindings} {sidecars_native.rebuild()}",
         f"""{bindings} import ./native/sidecars.nix {{
-          inherit cctools lib rootCargoDeps sidecarSpecs stdenv version;
+          inherit cctools lib nativeLock rootCargoDeps sidecarSpecs stdenv version;
           inherit (pkgs) makeRustPlatform;
           patchedBuzzSource = buzzRuntimePolicySource;
           rustToolchain = rustToolchainNative;

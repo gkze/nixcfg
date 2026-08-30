@@ -1970,6 +1970,19 @@ def test_unsloth_runtime_cli_prints_json_and_surfaces_validation_errors(
 
 def test_unsloth_frontend_manifest_matches_audited_release() -> None:
     """The built frontend must remain byte-identical to the reviewed release."""
+    source = _json("sources.json")
+    assert isinstance(source, dict)
+    pins = source["pins"]
+    assert isinstance(pins, dict)
+    assert {
+        "frontendDistFileCount": pins["frontendDistFileCount"],
+        "frontendDistSha256": pins["frontendDistSha256"],
+    } == {
+        "frontendDistFileCount": "704",
+        "frontendDistSha256": (
+            "03acd2b8ef28d7135bd74a5b7ed82e6eaecea5289cfa4883ece0ef34597b6125"
+        ),
+    }
     frontend = _derivation_arguments("frontend.nix")
     install_check = expect_instance(
         expect_binding(frontend.values, "installCheckPhase").value,
@@ -1977,11 +1990,20 @@ def test_unsloth_frontend_manifest_matches_audited_release() -> None:
     )
     commands = command_texts(parse_shell(indented_string_body(install_check.rebuild())))
 
-    assert 'test "$(wc -l < "$manifest" | tr -d \' \')" = 704' in commands
+    assert 'test "$(wc -l < "$manifest" | tr -d \' \')" = __NIX_INTERP__' in commands
     assert (
         'test "$(sha256sum "$manifest" | cut -d \' \' -f 1)" = \\\n'
-        "      03acd2b8ef28d7135bd74a5b7ed82e6eaecea5289cfa4883ece0ef34597b6125"
-        in commands
+        "      __NIX_INTERP__" in commands
+    )
+    interpolations = _indented_string_interpolations(install_check)
+    assert len(interpolations) == 2
+    assert_nix_ast_equal(
+        interpolations[0],
+        "toString frontendManifest.fileCount",
+    )
+    assert_nix_ast_equal(
+        interpolations[1],
+        "frontendManifest.sha256",
     )
 
 

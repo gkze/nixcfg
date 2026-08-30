@@ -10,6 +10,7 @@
   gnumake,
   git,
   python3,
+  selfSource,
   cacert,
   lib,
   nixcfgElectron,
@@ -19,10 +20,9 @@ let
   pname = "mux";
   version = outputs.lib.getFlakeVersion pname;
   src = inputs.mux;
-  # Keep this in sync with the exact Electron version resolved in mux's bun.lock.
-  # We validate it against node_modules/electron/package.json during configurePhase
-  # so lockfile bumps fail loudly until the matching headers hash is updated.
-  electronVersion = "40.9.3";
+  # The updater owns the exact lock and validates it against the realized
+  # node_modules tree during configurePhase.
+  electronVersion = selfSource.pins.electronVersion;
   electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
   electronRuntime = electronBuild.runtime;
   electronRuntimeVersion = electronBuild.runtimeVersion;

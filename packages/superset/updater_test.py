@@ -403,6 +403,8 @@ def test_asset_name_and_fallback_url_match_release_convention() -> None:
     module = _load_module()
     updater = module.SupersetUpdater()
 
+    assert updater.source_pins == {"electronVersion": "40.8.5"}
+
     assert updater._asset_name("1.2.3", "x86_64") == ("superset-1.2.3-x86_64.AppImage")
     assert updater._fallback_url("1.2.3", "x86_64") == (
         "https://github.com/superset-sh/superset/releases/download/"

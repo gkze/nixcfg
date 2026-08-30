@@ -3,6 +3,7 @@
   cmake,
   lib,
   makeRustPlatform,
+  nativeLock ? builtins.fromJSON (builtins.readFile ../native-lock.json),
   nodejs_24,
   patchedBuzzSource,
   patchedDesktopCargoDeps,
@@ -18,15 +19,24 @@
 }:
 assert stdenv.hostPlatform.system == "aarch64-darwin";
 let
+  buzzLock = nativeLock.buzz or { };
+  pnpmLock = nativeLock.pnpm or { };
+  sherpaLock = nativeLock.sherpaOnnx or { };
+  buzzCommit = buzzLock.commit or null;
+  buzzVersion = buzzLock.version or null;
+  rustVersion = buzzLock.rustVersion or null;
+  pnpmVersion = pnpmLock.version or null;
+  sherpaCommit = sherpaLock.commit or null;
+  sherpaVersion = sherpaLock.version or null;
   expectedRustContract = {
     kind = "rust-toolchain";
-    channel = "1.95.0";
+    channel = rustVersion;
     profile = "default";
     target = "aarch64-apple-darwin";
   };
   expectedSourceContract = {
     kind = "buzz-runtime-policy-source";
-    commit = "95154bee4034ca7a40b33095c2ddbde8c9aa1614";
+    commit = buzzCommit;
     meshFeature = "dynamic-native-runtime";
     runtimeBundleEnvironment = "MESH_LLM_NATIVE_RUNTIME_BUNDLE_DIR";
     runtimeCacheEnvironment = "MESH_LLM_NATIVE_RUNTIME_CACHE_DIR";
@@ -68,8 +78,8 @@ let
   };
   expectedSherpaContract = {
     kind = "sherpa-onnx";
-    version = "1.13.4";
-    commit = "142807252687d81b40d6315f23470a1512a00de3";
+    version = sherpaVersion;
+    commit = sherpaCommit;
     target = "aarch64-apple-darwin";
     linkMode = "static";
     usePreinstalledOnnxRuntime = true;
@@ -85,7 +95,7 @@ let
   };
   expectedSidecarsContract = {
     kind = "buzz-sidecars";
-    commit = "95154bee4034ca7a40b33095c2ddbde8c9aa1614";
+    commit = buzzCommit;
     target = "aarch64-apple-darwin";
     profile = "release";
     cargoOffline = true;
@@ -130,11 +140,10 @@ let
   };
   implementedContract = {
     kind = "buzz-desktop-unsigned";
-    commit = "95154bee4034ca7a40b33095c2ddbde8c9aa1614";
-    version = "0.5.20";
+    commit = buzzCommit;
+    version = buzzVersion;
     target = "aarch64-apple-darwin";
-    rustVersion = "1.95.0";
-    pnpmVersion = "11.4.0";
+    inherit rustVersion pnpmVersion;
     cargoRoot = "desktop/src-tauri";
     buildAndTestSubdir = "desktop";
     cargoOffline = true;
@@ -150,7 +159,7 @@ let
       "buzz-aarch64-apple-darwin"
     ];
     updaterEnabled = false;
-    sherpaOnnxVersion = "1.13.4";
+    sherpaOnnxVersion = sherpaVersion;
     minimumMacosVersion = "14.0";
     appSigned = false;
     runtimeBundleEmbedded = false;
@@ -222,8 +231,14 @@ let
     done < "$expectedInventory"
   '';
 in
-assert version == "0.5.20";
-assert pnpm.version == "11.4.0";
+assert builtins.isString buzzVersion;
+assert builtins.isString buzzCommit && builtins.match "[0-9a-f]{40}" buzzCommit != null;
+assert builtins.isString rustVersion;
+assert builtins.isString pnpmVersion;
+assert builtins.isString sherpaVersion;
+assert builtins.isString sherpaCommit && builtins.match "[0-9a-f]{40}" sherpaCommit != null;
+assert version == buzzVersion;
+assert pnpm.version == pnpmVersion;
 assert lib.isDerivation pnpmDeps;
 assert (rustToolchain.passthru.buzzNativeContract or null) == expectedRustContract;
 assert (patchedBuzzSource.passthru.buzzNativeContract or null) == expectedSourceContract;
@@ -271,7 +286,7 @@ desktopRustPlatform.buildRustPackage {
   doCheck = false;
 
   # cargo-tauri.hook propagates the Cargo used to build its CLI. Keep Buzz's
-  # audited Rust 1.95 toolchain first for the hook's later `cargo tauri` call.
+  # audited Rust toolchain first for the hook's later `cargo tauri` call.
   preBuild = ''
     export PATH="${rustToolchain}/bin:$PWD/node_modules/.bin:$PATH"
     ${stagingScript}

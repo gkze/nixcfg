@@ -12,6 +12,7 @@
   lib,
   libiconv,
   makeWrapper,
+  nativeLock ? builtins.fromJSON (builtins.readFile ./native-lock.json),
   nixcfgElectron,
   nodejs_24,
   npmHooks,
@@ -29,17 +30,22 @@ let
   appExecutableName = appName;
   appId = "sh.paseo.desktop";
 
-  expectedVersion = "0.6.1";
-  expectedCommit = "20d7efc46a316f5a274b9943a5c43b0322269825";
-  electronVersion = "41.2.0";
-  sherpaVersion = "1.12.28";
-  sherpaCommit = "86d3d00e28c22c102fb7d01c7b62fdc4e7a69f1b";
-  onnxruntimeVersion = "1.23.2";
-  onnxruntimeCommit = "a83fc4d58cb48eb68890dd689f94f28288cf2278";
-  expectedOnnxruntimeSourceHash = "sha256-hZ2L5+0Enkw4rGDKVpRECnKXP87w6Kbiyp6Fdxwt6hk=";
-  nodeAddonApiVersion = "8.3.0";
-  esbuildVersion = "0.25.12";
-  claudeAgentSdkVersion = "0.3.220";
+  paseoLock = nativeLock.paseo or { };
+  sherpaClosure = nativeLock.sherpaOnnx or { };
+  onnxruntimeClosure = nativeLock.onnxruntime or { };
+  expectedVersion = paseoLock.version or "";
+  expectedCommit = paseoLock.commit or "";
+  electronVersion = paseoLock.electronVersion or "";
+  sherpaVersion = sherpaClosure.version or "";
+  sherpaCommit = sherpaClosure.commit or "";
+  onnxruntimeVersion = onnxruntimeClosure.version or "";
+  onnxruntimeCommit = onnxruntimeClosure.commit or "";
+  nodeAddonApiVersion = paseoLock.nodeAddonApiVersion or "";
+  npmFetcherVersion = paseoLock.npmFetcherVersion or null;
+  esbuildVersion = paseoLock.esbuildVersion or "";
+  claudeAgentSdkVersion = paseoLock.claudeAgentSdkVersion or "";
+  appBuilderLibVersion = paseoLock.appBuilderLibVersion or "";
+  appBuilderLibPatch = ./. + "/app-builder-lib-${appBuilderLibVersion}-cycle-guard.patch";
   claudeCodeExecutable = lib.getExe claude-code;
   paseoEntitlements = ./Entitlements.plist;
   paseoSignatureValidator = ./validate_signatures.py;
@@ -68,14 +74,65 @@ let
   nodeAddonApiHash = hashEntryFor "sha256" nodeAddonApiUrl;
   npmDepsHash = hashEntryFor "npmDepsHash" paseoUrl;
 
+  nonEmptyString = value: builtins.isString value && value != "";
+  commitString = value: nonEmptyString value && builtins.match "[0-9a-f]{40}" value != null;
+  completeFetch =
+    dependency:
+    nonEmptyString (dependency.file or null)
+    && nonEmptyString (dependency.url or null)
+    && builtins.isString (dependency.hash or null)
+    && lib.hasPrefix "sha256-" dependency.hash;
+  completeGitHubDependency =
+    dependency:
+    nonEmptyString (dependency.owner or null)
+    && nonEmptyString (dependency.repo or null)
+    && builtins.isString (dependency.hash or null)
+    && lib.hasPrefix "sha256-" dependency.hash
+    && (nonEmptyString (dependency.rev or null) || nonEmptyString (dependency.tag or null));
+  completePatch =
+    patch:
+    nonEmptyString (patch.target or null)
+    && nonEmptyString (patch.url or null)
+    && builtins.isString (patch.hash or null)
+    && lib.hasPrefix "sha256-" patch.hash;
+  sherpaDependencies = sherpaClosure.dependencies or { };
+  onnxruntimeDependencies = onnxruntimeClosure.dependencies or { };
+  onnxruntimePatches = onnxruntimeClosure.patches or [ ];
+  nativeLockComplete =
+    (nativeLock.schemaVersion or null) == 1
+    && nonEmptyString (paseoLock.version or null)
+    && commitString (paseoLock.commit or null)
+    && builtins.isInt npmFetcherVersion
+    && npmFetcherVersion > 0
+    && nonEmptyString (paseoLock.electronVersion or null)
+    && nonEmptyString (paseoLock.nodeAddonApiVersion or null)
+    && nonEmptyString (paseoLock.esbuildVersion or null)
+    && nonEmptyString (paseoLock.claudeAgentSdkVersion or null)
+    && nonEmptyString (paseoLock.appBuilderLibVersion or null)
+    && commitString (paseoLock.appBuilderLibBackportCommit or null)
+    && nonEmptyString (sherpaClosure.version or null)
+    && commitString (sherpaClosure.commit or null)
+    && builtins.length (builtins.attrValues sherpaDependencies) == 11
+    && builtins.all completeFetch (builtins.attrValues sherpaDependencies)
+    && nonEmptyString (onnxruntimeClosure.version or null)
+    && commitString (onnxruntimeClosure.commit or null)
+    && builtins.length (builtins.attrValues onnxruntimeDependencies) == 8
+    && builtins.all completeGitHubDependency (
+      builtins.filter (dependency: dependency ? owner) (builtins.attrValues onnxruntimeDependencies)
+    )
+    && builtins.length onnxruntimePatches == 4
+    && builtins.all completePatch onnxruntimePatches;
+
   electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
 
   nativeSourceClosureComplete =
-    (onnxruntimeExact.passthru.paseoExactSource.sourceClosureComplete or false)
+    nativeLockComplete
+    && (onnxruntimeExact.passthru.paseoExactSource.sourceClosureComplete or false)
     && (sherpaExact.passthru.paseoExactSource.sourceClosureComplete or false);
 
   unresolvedBuildGates =
-    lib.optional (version != expectedVersion) "Paseo source version must be ${expectedVersion}"
+    lib.optional (!nativeLockComplete) "Paseo updater-owned native lock is incomplete"
+    ++ lib.optional (version != expectedVersion) "Paseo source version must be ${expectedVersion}"
     ++ lib.optional (
       (source.commit or "") != expectedCommit
     ) "Paseo source commit must be ${expectedCommit}"
@@ -90,9 +147,6 @@ let
     ++ lib.optional (
       onnxruntimeSourceHash == null
     ) "ONNX Runtime ${onnxruntimeVersion} srcHash is missing"
-    ++ lib.optional (
-      onnxruntimeSourceHash != null && onnxruntimeSourceHash.hash != expectedOnnxruntimeSourceHash
-    ) "ONNX Runtime source closure hash must be ${expectedOnnxruntimeSourceHash}"
     ++ lib.optional (
       sherpaWrapperUrl != expectedSherpaWrapperUrl
     ) "sherpa-onnx-node wrapper URL must be exactly ${expectedSherpaWrapperUrl}"
@@ -164,19 +218,19 @@ let
   paseoSrc = fetchFromGitHub {
     owner = "getpaseo";
     repo = "paseo";
-    rev = expectedCommit;
+    rev = source.commit;
     inherit (paseoSourceHash) hash;
   };
   sherpaSrc = fetchFromGitHub {
     owner = "k2-fsa";
     repo = "sherpa-onnx";
-    rev = sherpaCommit;
+    rev = sherpaClosure.commit;
     inherit (sherpaSourceHash) hash;
   };
   onnxruntimeSrc = fetchFromGitHub {
     owner = "microsoft";
     repo = "onnxruntime";
-    rev = onnxruntimeCommit;
+    rev = onnxruntimeClosure.commit;
     fetchSubmodules = true;
     inherit (onnxruntimeSourceHash) hash;
   };
@@ -192,17 +246,21 @@ let
     name = "${pname}-${version}-npm-deps";
     src = paseoSrc;
     inherit (npmDepsHash) hash;
-    fetcherVersion = 2;
+    fetcherVersion = npmFetcherVersion;
   };
 
   onnxruntimeExact = callPackage ./onnxruntime-source.nix {
+    closureContract = onnxruntimeClosure;
+    sourceHash = onnxruntimeSourceHash.hash;
     src = onnxruntimeSrc;
   };
   sherpaExact = callPackage ./sherpa-source.nix {
+    closureContract = sherpaClosure;
     inherit onnxruntimeExact;
     src = sherpaSrc;
   };
   sherpaNodeAddon = callPackage ./sherpa-node-addon.nix {
+    closureContract = sherpaClosure;
     inherit
       nodeAddonApiSrc
       onnxruntimeExact
@@ -245,7 +303,7 @@ let
       CI = "1";
       CLAUDE_CODE_EXECUTABLE = claudeCodeExecutable;
       CSC_IDENTITY_AUTO_DISCOVERY = "false";
-      NIX_NPM_FETCHER_VERSION = "2";
+      NIX_NPM_FETCHER_VERSION = toString npmFetcherVersion;
       NODE_OPTIONS = "--max-old-space-size=6144";
       npm_config_arch = "arm64";
       npm_config_build_from_source = "true";
@@ -264,13 +322,13 @@ let
         --claude-code-executable "$CLAUDE_CODE_EXECUTABLE"
     '';
 
-    # Backport electron-builder 2ff9190aadc791503a6e62cdcbfa975448bc49bf
-    # until app-builder-lib ships the path-local node-collector cycle guard.
+    # Backport the updater-reviewed electron-builder cycle guard until
+    # app-builder-lib ships the path-local node-collector fix.
     postConfigure = ''
       appBuilderLibPackage="$PWD/node_modules/app-builder-lib"
       appBuilderLibManifest="$appBuilderLibPackage/package.json"
       appBuilderLibCollector="$appBuilderLibPackage/out/node-module-collector/nodeModulesCollector.js"
-      appBuilderLibPatch=${./app-builder-lib-26.8.1-cycle-guard.patch}
+      appBuilderLibPatch=${appBuilderLibPatch}
 
       for required in \
         "$appBuilderLibManifest" \
@@ -288,9 +346,9 @@ let
         const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
         process.stdout.write(String(manifest.version ?? ""));
       ' "$appBuilderLibManifest")"
-      if [ "$installedAppBuilderLibVersion" != 26.8.1 ]; then
+      if [ "$installedAppBuilderLibVersion" != ${lib.escapeShellArg appBuilderLibVersion} ]; then
         echo \
-          "app-builder-lib cycle guard expected 26.8.1, found $installedAppBuilderLibVersion" \
+          "app-builder-lib cycle guard expected ${appBuilderLibVersion}, found $installedAppBuilderLibVersion" \
           >&2
         exit 1
       fi
@@ -671,7 +729,7 @@ let
       ${lib.getExe python3} ${paseoSignatureValidator} "$app"
 
       # Run the native addons inside the exact packaged Electron runtime without
-      # starting the GUI. This checks the Electron 41.2.0 ABI, not just lipo output.
+      # starting the GUI. This checks the locked Electron ABI, not just lipo output.
       env \
         -u DYLD_LIBRARY_PATH \
         -u DYLD_FRAMEWORK_PATH \

@@ -1564,9 +1564,20 @@ def test_load_sources_and_persist_updates(monkeypatch: pytest.MonkeyPatch) -> No
         )
         == ()
     )
+    native_save_options: list[tuple[bool, bool]] = []
+
+    def _save_source_updates(
+        source_updates: dict[str, SourceEntry],
+        *,
+        merge_existing: bool,
+        replace_pins: bool,
+    ) -> dict[str, SourceEntry]:
+        native_save_options.append((merge_existing, replace_pins))
+        return source_updates
+
     monkeypatch.setattr(
         "lib.update.sources.save_source_updates",
-        lambda updates, *, merge_existing: updates,
+        _save_source_updates,
     )
     persist_source_updates(
         do_sources=True,
@@ -1577,6 +1588,7 @@ def test_load_sources_and_persist_updates(monkeypatch: pytest.MonkeyPatch) -> No
         source_updates=updates,
         details={"a": "updated"},
     )
+    assert native_save_options == [(True, True)]
 
     assert (
         persist_source_updates(

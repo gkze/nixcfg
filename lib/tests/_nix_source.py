@@ -3,11 +3,14 @@
 import textwrap
 from typing import TYPE_CHECKING
 
+from nix_manipulator import parse
+
 from lib.tests._nix_ast import parse_nix_expr
 from lib.update.paths import REPO_ROOT
 
 if TYPE_CHECKING:
     from nix_manipulator.expressions.expression import NixExpression
+    from tree_sitter import Node
 
 
 def nix_source_fragment(
@@ -52,3 +55,37 @@ def nix_source_fragment_expr(
 def nix_file_expr(relative_path: str) -> NixExpression:
     """Parse a whole Nix file under the repository root."""
     return parse_nix_expr((REPO_ROOT / relative_path).read_text(encoding="utf-8"))
+
+
+def nix_file_binding_expr(
+    relative_path: str,
+    binding_name: str,
+    *,
+    occurrence: int = 0,
+) -> NixExpression:
+    """Parse one named binding value from a file's Nix concrete syntax tree."""
+    source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+    encoded = source.encode()
+    root = parse(source).node
+    matches: list[Node] = []
+
+    def node_text(node: Node) -> str:
+        return encoded[node.start_byte : node.end_byte].decode()
+
+    def visit(node: Node) -> None:
+        if node.type == "binding":
+            children = node.named_children
+            if (
+                len(children) >= 2
+                and children[0].type == "attrpath"
+                and node_text(children[0]) == binding_name
+            ):
+                matches.append(children[1])
+        for child in node.named_children:
+            visit(child)
+
+    visit(root)
+    assert occurrence < len(matches), (
+        f"expected binding {binding_name!r} occurrence {occurrence} in {relative_path}"
+    )
+    return parse_nix_expr(node_text(matches[occurrence]))

@@ -9,4 +9,5 @@ class T3CodeUpdater(T3RuntimeUpdater):
     """Compute only the standalone T3 Code runtime ``node_modules`` hash."""
 
     name = "t3code"
+    companion_of = "t3code-desktop"
     generated_artifact_files = ("bun.lock", "../t3code-desktop/bun.lock")

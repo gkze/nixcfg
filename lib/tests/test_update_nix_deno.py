@@ -334,3 +334,61 @@ def test_compute_deno_deps_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     native_payload = native_events[-1].payload
     assert isinstance(native_payload, dict)
     assert "x86_64-linux" in native_payload
+
+
+def test_compute_deno_deps_hash_uses_candidate_override_without_disk_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Candidate metadata must replace the checked-in source during every probe."""
+    candidate = SourceEntry(
+        version="2.0.0",
+        input="candidate-input",
+        hashes={"x86_64-linux": "sha256-existing"},
+        pins={"runtimeVersion": "2.0.0"},
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "lib.update.nix_deno.get_current_nix_platform",
+        lambda: "x86_64-linux",
+    )
+    monkeypatch.setattr(
+        "lib.update.nix_deno.resolve_active_config",
+        lambda _config: type(
+            "_Cfg",
+            (),
+            {
+                "hash_build_platforms": ("x86_64-linux",),
+                "fake_hash": "sha256-fake",
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "lib.update.nix_deno.sources_file_for",
+        lambda _source: pytest.fail("candidate probe read checked-in sources.json"),
+    )
+
+    async def _process(
+        platform_name: str,
+        *,
+        context: _PlatformHashContext,
+    ) -> AsyncIterator[UpdateEvent]:
+        captured["original_entry"] = context.original_entry
+        captured["existing_hashes"] = context.existing_hashes
+        context.platform_hashes[platform_name] = "sha256-updated"
+        yield UpdateEvent.status(context.source, "processed candidate")
+
+    monkeypatch.setattr("lib.update.nix_deno._process_platform_hash", _process)
+
+    events = _collect(
+        compute_deno_deps_hash(
+            "demo",
+            "candidate-input",
+            source_override=candidate,
+        )
+    )
+
+    assert captured == {
+        "existing_hashes": {"x86_64-linux": "sha256-existing"},
+        "original_entry": candidate,
+    }
+    assert events[-1].payload == {"x86_64-linux": "sha256-updated"}

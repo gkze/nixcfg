@@ -58,7 +58,7 @@ let
   # Keep this in sync with apps/desktop/package.json and bun.lock. Reuse the
   # centrally-packaged runtime and headers so Electron builder/rebuild stays
   # offline and shares cache entries with other Electron apps.
-  electronVersion = "40.8.5";
+  electronVersion = selfSource.pins.electronVersion;
   electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
   electronRuntime = electronBuild.runtime;
   electronRuntimeVersion = electronBuild.runtimeVersion;

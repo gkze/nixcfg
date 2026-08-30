@@ -153,7 +153,7 @@ def test_mesh_and_llama_native_builders_are_hash_gated_and_repo_owned() -> None:
           null
         else
           import ./native/mesh-llm.nix {
-            inherit fetchFromGitHub lib python3 stdenvNoCC;
+            inherit fetchFromGitHub lib nativeLock python3 stdenvNoCC;
             srcHash = meshLlmSrcHashEntry.hash;
           }""",
     )
@@ -163,7 +163,7 @@ def test_mesh_and_llama_native_builders_are_hash_gated_and_repo_owned() -> None:
           null
         else
           import ./native/llama-cpp.nix {
-            inherit cctools fetchFromGitHub lib stdenv;
+            inherit cctools fetchFromGitHub lib nativeLock stdenv;
             inherit (pkgs) cmake gitMinimal ninja;
             meshSrcHash = meshLlmSrcHashEntry.hash;
             srcHash = llamaCppSrcHashEntry.hash;
@@ -175,7 +175,7 @@ def test_mesh_and_llama_native_builders_are_hash_gated_and_repo_owned() -> None:
           null
         else
           import ./native/mesh-runtime-bundle.nix {
-            inherit cctools fetchFromGitHub lib python3 stdenv stdenvNoCC;
+            inherit cctools fetchFromGitHub lib nativeLock python3 stdenv stdenvNoCC;
             inherit (pkgs) cmake gitMinimal ninja;
             meshLlmSrcHash = meshLlmSrcHashEntry.hash;
             llamaCppSrcHash = llamaCppSrcHashEntry.hash;

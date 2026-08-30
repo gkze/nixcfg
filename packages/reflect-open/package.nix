@@ -25,9 +25,15 @@ let
   appExecutable = "reflect-open";
   appId = "app.reflect.desktop";
   minimumMacosVersion = "14.0";
-  expectedPnpmVersion = "11.18.0";
   source = outputs.lib.sourceEntry pname;
   inherit (source) version;
+  pnpmSource = outputs.lib.sourceHashEntry pname "sha256";
+  pnpmVersionMatch = builtins.match ".*/pnpm-([^/]+)\\.tgz" pnpmSource.url;
+  pnpmVersion =
+    if pnpmVersionMatch == null then
+      throw "Reflect updater produced an invalid pnpm source URL: ${pnpmSource.url}"
+    else
+      builtins.head pnpmVersionMatch;
 
   src = fetchFromGitHub {
     owner = "team-reflect";
@@ -38,14 +44,13 @@ let
   };
 
   nodejs = nodejs_22;
-  # Reflect pins pnpm 11.18.0. Keep the explicit project Node toolchain at 22,
+  # Keep the explicit project Node toolchain at 22,
   # while pnpm and its Nixpkgs helper use Node 24; specializing that helper to
   # Node 22 deadlocks in Nixpkgs' generic npm install hook on Darwin.
   pnpm = (pnpm_11.override { nodejs-slim = nodejs_24; }).overrideAttrs (_: {
-    version = expectedPnpmVersion;
+    version = pnpmVersion;
     src = fetchurl {
-      url = "https://registry.npmjs.org/pnpm/-/pnpm-${expectedPnpmVersion}.tgz";
-      hash = "sha256-KcNcqNKih5iP3uPg824H2bk3g/VntXm3/Vt5ikVj3YE=";
+      inherit (pnpmSource) hash url;
     };
   });
   pnpmDeps =

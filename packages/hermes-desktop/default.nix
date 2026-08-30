@@ -39,12 +39,12 @@ let
       '';
 
   electronVersionCheck =
-    if electronVersion == "40.10.2" && electronRuntimeVersion == electronVersion then
+    if electronRuntimeVersion == electronVersion then
       true
     else
       throw ''
-        packages/hermes-desktop/default.nix needs exact Electron 40.10.2,
-        but the selected source/runtime pair is ${electronVersion}/${electronRuntimeVersion}
+        packages/hermes-desktop/default.nix needs an exact Electron runtime
+        matching the selected source, but got ${electronVersion}/${electronRuntimeVersion}
       '';
 in
 assert stdenv.hostPlatform.system == "aarch64-darwin";

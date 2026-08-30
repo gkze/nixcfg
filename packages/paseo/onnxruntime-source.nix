@@ -1,6 +1,7 @@
 {
   applyPatches,
   cmake,
+  closureContract ? (builtins.fromJSON (builtins.readFile ./native-lock.json)).onnxruntime,
   cpuinfo,
   darwinMinVersionHook,
   eigen,
@@ -15,117 +16,50 @@
   pkg-config,
   protobuf_32,
   python3,
+  sourceHash ? null,
   src,
   stdenv,
   zlib,
 }:
 let
-  closureContract = {
-    version = "1.23.2";
-    commit = "a83fc4d58cb48eb68890dd689f94f28288cf2278";
-    sourceHash = "sha256-hZ2L5+0Enkw4rGDKVpRECnKXP87w6Kbiyp6Fdxwt6hk=";
-    nixpkgsRecipe = {
-      commit = "e1e423f183cde97926ac113d8a4de5a5042a7264";
-      path = "pkgs/by-name/on/onnxruntime/package.nix";
-    };
-    dependencies = {
-      abseilCpp = {
-        version = "20240722.2";
-        hash = "sha256-PuS7MLwi824c4z4Cubh029DEUVYSNPD3MwCDsgzsp3Y=";
-      };
-      dlpack = {
-        commit = "5c210da409e7f1e51ddf445134a4376fdbd70d7d";
-        hash = "sha256-YqgzCyNywixebpHGx16tUuczmFS5pjCz5WjR89mv9eI=";
-      };
-      flatbuffers = {
-        version = "23.5.26";
-        hash = "sha256-e+dNPNbCHYDXUS/W+hMqf/37fhVgEGzId6rhP3cToTE=";
-      };
-      mp11 = {
-        version = "boost-1.82.0";
-        hash = "sha256-cLPvjkf2Au+B19PJNrUkTW/VPxybi1MpPxnIl4oo4/o=";
-      };
-      onnx = {
-        version = "v1.18.0";
-        hash = "sha256-UhtF+CWuyv5/Pq/5agLL4Y95YNP63W2BraprhRqJOag=";
-      };
-      protobuf = {
-        version = "32.1";
-        hash = "sha256-wfu1MyCycGpxFB++eicA0F41j886/Y52I/4+ciRUg2o=";
-        nixpkgsAttribute = "protobuf_32";
-      };
-      re2 = {
-        version = "2024-07-02";
-        hash = "sha256-IeANwJlJl45yf8iu/AZNDoiyIvTCZIeK1b74sdCfAIc=";
-      };
-      safeint = {
-        version = "3.0.28";
-        hash = "sha256-pjwjrqq6dfiVsXIhbBtbolhiysiFlFTnx5XcX77f+C0=";
-      };
-    };
-    sourceClosureComplete = true;
+  effectiveClosureContract = closureContract // {
+    inherit sourceHash;
   };
+  fetchGitHubDependency =
+    dependency:
+    fetchFromGitHub (
+      {
+        inherit (dependency) owner repo hash;
+      }
+      // lib.optionalAttrs (dependency ? rev) { inherit (dependency) rev; }
+      // lib.optionalAttrs (dependency ? tag) { inherit (dependency) tag; }
+    );
+  fetchReviewedPatch =
+    patch:
+    fetchpatch (
+      {
+        inherit (patch) url hash;
+      }
+      // lib.optionalAttrs (patch ? includes) { inherit (patch) includes; }
+    );
+  onnxPatches = builtins.filter (patch: patch.target == "onnx") closureContract.patches;
+  onnxruntimePatches = builtins.filter (patch: patch.target == "onnxruntime") closureContract.patches;
 
-  abseilCppSrc = fetchFromGitHub {
-    owner = "abseil";
-    repo = "abseil-cpp";
-    tag = closureContract.dependencies.abseilCpp.version;
-    hash = closureContract.dependencies.abseilCpp.hash;
-  };
-  dlpackSrc = fetchFromGitHub {
-    owner = "dmlc";
-    repo = "dlpack";
-    rev = closureContract.dependencies.dlpack.commit;
-    hash = closureContract.dependencies.dlpack.hash;
-  };
-  flatbuffersSrc = fetchFromGitHub {
-    owner = "google";
-    repo = "flatbuffers";
-    rev = "v${closureContract.dependencies.flatbuffers.version}";
-    hash = closureContract.dependencies.flatbuffers.hash;
-  };
-  mp11Src = fetchFromGitHub {
-    owner = "boostorg";
-    repo = "mp11";
-    tag = closureContract.dependencies.mp11.version;
-    hash = closureContract.dependencies.mp11.hash;
-  };
+  abseilCppSrc = fetchGitHubDependency closureContract.dependencies.abseilCpp;
+  dlpackSrc = fetchGitHubDependency closureContract.dependencies.dlpack;
+  flatbuffersSrc = fetchGitHubDependency closureContract.dependencies.flatbuffers;
+  mp11Src = fetchGitHubDependency closureContract.dependencies.mp11;
   onnxSrc = applyPatches {
     name = "paseo-onnx-source-${closureContract.dependencies.onnx.version}";
-    src = fetchFromGitHub {
-      owner = "onnx";
-      repo = "onnx";
-      tag = closureContract.dependencies.onnx.version;
-      hash = closureContract.dependencies.onnx.hash;
-    };
-    patches = [
-      (fetchpatch {
-        url = "https://github.com/onnx/onnx/commit/595a069aaac07586f111681245bc808ee63551f8.patch";
-        includes = [ "onnx/defs/schema.h" ];
-        hash = "sha256-FFAJuJse4nmNT3ixvEdlqzbr3edY46SqEFv7z/oo6m0=";
-      })
-      (fetchpatch {
-        url = "https://github.com/onnx/onnx/commit/6769c41ad64ebca0358da8c7211d2c6d0e627b2b.patch";
-        hash = "sha256-VlTHs0om20kTNvSVQaasSsa5JROliQy4k9BECTsBtbU=";
-      })
-    ];
+    src = fetchGitHubDependency closureContract.dependencies.onnx;
+    patches = map fetchReviewedPatch onnxPatches;
   };
-  re2Src = fetchFromGitHub {
-    owner = "google";
-    repo = "re2";
-    rev = closureContract.dependencies.re2.version;
-    hash = closureContract.dependencies.re2.hash;
-  };
-  safeintSrc = fetchFromGitHub {
-    owner = "dcleblanc";
-    repo = "safeint";
-    tag = closureContract.dependencies.safeint.version;
-    hash = closureContract.dependencies.safeint.hash;
-  };
+  re2Src = fetchGitHubDependency closureContract.dependencies.re2;
+  safeintSrc = fetchGitHubDependency closureContract.dependencies.safeint;
   protobufExact =
     assert lib.assertMsg (
       lib.getVersion protobuf_32 == closureContract.dependencies.protobuf.version
-    ) "Paseo ONNX Runtime requires protobuf 32.1";
+    ) "Paseo ONNX Runtime requires protobuf ${closureContract.dependencies.protobuf.version}";
     protobuf_32;
 in
 stdenv.mkDerivation (_finalAttrs: {
@@ -133,15 +67,7 @@ stdenv.mkDerivation (_finalAttrs: {
   inherit (closureContract) version;
   inherit src;
 
-  patches = [
-    (fetchpatch {
-      url = "https://github.com/microsoft/onnxruntime/commit/d6e712c5b7b6260a61e54d1fe40107cf5366ee77.patch";
-      hash = "sha256-FSuPybX8f2VoxvLhcYx4rdChaiK8bSUDR32sN3Efwfc=";
-    })
-    (fetchpatch {
-      url = "https://github.com/microsoft/onnxruntime/commit/8ebd0bf1cf02414584d15d7244b07fa97d65ba02.patch";
-      hash = "sha256-vX+kaFiNdmqWI91JELcLpoaVIHBb5EPbI7rCAMYAx04=";
-    })
+  patches = (map fetchReviewedPatch onnxruntimePatches) ++ [
     ./protobuf34-nodiscard.patch
     ./onnxruntime-pkgconfig-prefix.patch
   ];
@@ -224,7 +150,7 @@ stdenv.mkDerivation (_finalAttrs: {
   '';
 
   passthru = {
-    paseoExactSource = closureContract;
+    paseoExactSource = effectiveClosureContract;
     protobuf = protobufExact;
   };
 

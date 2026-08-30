@@ -27,10 +27,15 @@ def test_goose_cli_restores_bitcoin_internals_rust_version_metadata() -> None:
     assert_nix_ast_equal(
         rust_versions,
         """
-        {
-          "0.5.0" = "1.74.0";
-          "0.6.0" = "1.74.0";
-        }
+        prev.lib.mapAttrs'
+          (pinName: rustVersion:
+            prev.lib.nameValuePair
+              (prev.lib.removePrefix bitcoinInternalsRustVersionPinPrefix pinName)
+              rustVersion)
+          (prev.lib.filterAttrs
+            (pinName: _value:
+              prev.lib.hasPrefix bitcoinInternalsRustVersionPinPrefix pinName)
+            selfSource.pins)
         """,
     )
     assert_nix_ast_equal(

@@ -150,14 +150,14 @@ let
         slack
         spacedrive
       ]
-      ++ lib.optionals (stdenv.isDarwin || stdenv.hostPlatform.system == "x86_64-linux") [
+      ++ lib.optionals (stdenv.hostPlatform.isDarwin || stdenv.hostPlatform.system == "x86_64-linux") [
         superset
       ]
-      ++ lib.optionals stdenv.isLinux [
+      ++ lib.optionals stdenv.hostPlatform.isLinux [
         spotify
         wl-clipboard
       ]
-      ++ lib.optionals stdenv.isDarwin [
+      ++ lib.optionals stdenv.hostPlatform.isDarwin [
         appcleaner
         commander
         codex-desktop
@@ -190,7 +190,7 @@ let
       name = "heavyOptional";
       description = "large optional apps/tools that are expensive to keep in every host closure";
       packages =
-        lib.optionals (stdenv.isDarwin && stdenv.hostPlatform.isAarch64) [
+        lib.optionals (stdenv.hostPlatform.isDarwin && stdenv.hostPlatform.isAarch64) [
           goose-cli
         ]
         ++ [

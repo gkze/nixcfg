@@ -6,8 +6,10 @@ import sys
 from functools import cache
 from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
+from nix_manipulator.expressions.assertion import Assertion
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
@@ -16,6 +18,7 @@ from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
+from lib.tests._buzz_native_lock import buzz_native_lock_string
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     expect_binding,
@@ -26,6 +29,12 @@ from lib.tests._shell_ast import command_texts, indented_string_body, parse_shel
 from lib.update.paths import REPO_ROOT
 
 _MESH_SOURCE_PATH = REPO_ROOT / "packages/buzz/native/mesh-llm.nix"
+_MESH_VERSION = buzz_native_lock_string("meshLlm", "version")
+_MESH_COMMIT = buzz_native_lock_string("meshLlm", "commit")
+_LLAMA_COMMIT = buzz_native_lock_string("llamaCpp", "commit")
+
+if TYPE_CHECKING:
+    from nix_manipulator.expressions.scope import Scope
 
 
 @cache
@@ -34,7 +43,10 @@ def _mesh_source_package() -> tuple[FunctionDefinition, FunctionCall]:
         parse_nix_expr(_MESH_SOURCE_PATH.read_text(encoding="utf-8")),
         FunctionDefinition,
     )
-    return package, expect_instance(package.output, FunctionCall)
+    output = package.output
+    while isinstance(output, Assertion):
+        output = output.body
+    return package, expect_instance(output, FunctionCall)
 
 
 def _derivation_arguments() -> AttributeSet:
@@ -42,10 +54,19 @@ def _derivation_arguments() -> AttributeSet:
     return expect_instance(derivation.argument, AttributeSet)
 
 
+def _package_scope() -> Scope:
+    package, _derivation = _mesh_source_package()
+    output = package.output
+    while isinstance(output, Assertion):
+        if output.scope:
+            return output.scope
+        output = output.body
+    raise AssertionError("expected Mesh source let-bindings")
+
+
 def _inventory_script() -> str:
-    _package, derivation = _mesh_source_package()
     script = expect_instance(
-        expect_binding(derivation.scope, "inventoryScript").value,
+        expect_binding(_package_scope(), "inventoryScript").value,
         IndentedString,
     )
     return dedent(indented_string_body(script.rebuild()))
@@ -70,8 +91,8 @@ def _run_inventory(
             str(script),
             str(source),
             str(output),
-            "0.75.1",
-            "3295c902d4c4f859aaadf9240042ffdaf06dd07e",
+            _MESH_VERSION,
+            _MESH_COMMIT,
         ],
     )
     runpy.run_path(str(script), run_name="__main__")
@@ -97,14 +118,18 @@ def test_mesh_source_fetch_is_exact_and_does_not_fetch_submodules() -> None:
         "python3",
         "srcHash",
         "stdenvNoCC",
+        "nativeLock",
     }
-    assert_nix_ast_equal(expect_binding(derivation.scope, "version").value, '"0.75.1"')
     assert_nix_ast_equal(
-        expect_binding(derivation.scope, "commit").value,
-        '"3295c902d4c4f859aaadf9240042ffdaf06dd07e"',
+        expect_binding(_package_scope(), "version").value,
+        "nativeLock.meshLlm.version or null",
     )
     assert_nix_ast_equal(
-        expect_binding(derivation.scope, "src").value,
+        expect_binding(_package_scope(), "commit").value,
+        "nativeLock.meshLlm.commit or null",
+    )
+    assert_nix_ast_equal(
+        expect_binding(_package_scope(), "src").value,
         nix_attrset_call(
             Identifier(name="fetchFromGitHub"),
             owner="Mesh-LLM",
@@ -149,9 +174,7 @@ def test_inventory_is_sorted_complete_and_deterministic(
         "scripts/build-llama.sh": "build script\n",
         "scripts/package-native-runtime.sh": "package script\n",
         "scripts/prepare-llama.sh": "prepare script\n",
-        "third_party/llama.cpp/upstream.txt": (
-            "8190848bb36c7df4251db4352bd81bc07d0a4385\n"
-        ),
+        "third_party/llama.cpp/upstream.txt": f"{_LLAMA_COMMIT}\n",
     }.items():
         _write_fixture(source, relative_path, content)
 
@@ -173,11 +196,11 @@ def test_inventory_is_sorted_complete_and_deterministic(
                     ),
                 },
             ],
-            "upstreamPin": "8190848bb36c7df4251db4352bd81bc07d0a4385",
+            "upstreamPin": _LLAMA_COMMIT,
         },
         "meshLlm": {
-            "commit": "3295c902d4c4f859aaadf9240042ffdaf06dd07e",
-            "version": "0.75.1",
+            "commit": _MESH_COMMIT,
+            "version": _MESH_VERSION,
         },
         "packagingInputs": [
             {
@@ -237,7 +260,7 @@ def test_inventory_fails_closed_when_mesh_has_no_llama_patches(
 
 def test_install_phase_only_copies_pristine_source_and_writes_provenance() -> None:
     """The source foundation must not patch or compile the Mesh workspace."""
-    _package, derivation = _mesh_source_package()
+    _package, _derivation = _mesh_source_package()
     arguments = _derivation_arguments()
     for name in (
         "dontUnpack",
@@ -278,11 +301,11 @@ def test_install_phase_only_copies_pristine_source_and_writes_provenance() -> No
         AttributeSet,
     )
     assert_nix_ast_equal(
-        expect_binding(derivation.scope, "sourceSubdir").value,
+        expect_binding(_package_scope(), "sourceSubdir").value,
         '"share/mesh-llm/source"',
     )
     assert_nix_ast_equal(
-        expect_binding(derivation.scope, "provenanceSubpath").value,
+        expect_binding(_package_scope(), "provenanceSubpath").value,
         '"share/mesh-llm/provenance.json"',
     )
     assert_nix_ast_equal(

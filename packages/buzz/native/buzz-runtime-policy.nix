@@ -1,6 +1,7 @@
 {
   desktopCargoDeps,
   expectedContract,
+  nativeLock ? builtins.fromJSON (builtins.readFile ../native-lock.json),
   python3,
   src,
   stdenvNoCC,
@@ -8,9 +9,10 @@
 }:
 let
   patcher = ./patch_runtime_policy.py;
+  buzzCommit = nativeLock.buzz.commit or null;
   implementedContract = {
     kind = "buzz-runtime-policy-source";
-    commit = "95154bee4034ca7a40b33095c2ddbde8c9aa1614";
+    commit = buzzCommit;
     meshFeature = "dynamic-native-runtime";
     runtimeBundleEnvironment = "MESH_LLM_NATIVE_RUNTIME_BUNDLE_DIR";
     runtimeCacheEnvironment = "MESH_LLM_NATIVE_RUNTIME_CACHE_DIR";
@@ -65,6 +67,7 @@ let
     '';
   };
 in
+assert builtins.isString buzzCommit && builtins.match "[0-9a-f]{40}" buzzCommit != null;
 assert expectedContract == implementedContract;
 stdenvNoCC.mkDerivation {
   pname = "buzz-runtime-policy-source";

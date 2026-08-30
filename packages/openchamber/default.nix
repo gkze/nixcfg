@@ -32,14 +32,13 @@ let
   appId = "dev.openchamber.desktop";
   inherit (selfSource) electronVersion version;
 
-  expectedVersion = "1.21.0";
-  expectedCommit = "ad7fd356339ccc5c9af5af1a6786662572d53ed0";
-  expectedBunVersion = "1.3.14";
-  expectedBunUrl = "https://github.com/oven-sh/bun/releases/download/bun-v${expectedBunVersion}/bun-darwin-aarch64.zip";
-  openCodeVersion = "1.18.23";
-  openCodeCommit = "ef2880f379129aa048be9e9353e30aa168d42c17";
-  sherpaVersion = "1.13.3";
-  sherpaCommit = "330609dab49be6ee8b30702918ca7abbbad1286a";
+  bunVersion = selfSource.pins.bunVersion;
+  openCodeCommit = selfSource.pins.opencodeCommit;
+  openCodeVersion = selfSource.pins.opencodeVersion;
+  sherpaCommit = selfSource.pins.sherpaCommit;
+  sherpaVersion = selfSource.pins.sherpaVersion;
+  sherpaWrapperVersion = selfSource.pins.sherpaWrapperVersion;
+  expectedBunUrl = "https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/bun-darwin-aarch64.zip";
   electronBuilderExecutable = "./node_modules/.bin/electron-builder";
   asarExecutable = "node_modules/.bun/node_modules/@electron/asar/bin/asar.js";
   electronExcludedRuntimePackages = [ "bun-pty" ];
@@ -105,12 +104,7 @@ let
   ];
 
   unresolvedBuildGates =
-    lib.optional (version != expectedVersion) "OpenChamber source version must be ${expectedVersion}"
-    ++ lib.optional (
-      selfSource.commit != expectedCommit
-    ) "OpenChamber source commit must be ${expectedCommit}"
-    ++ lib.optional (electronVersion != "43.3.0") "Electron must be exactly 43.3.0"
-    ++ lib.optional (
+    lib.optional (
       electronBuild.runtimeVersion != electronVersion
     ) "Electron runtime and headers must match"
     ++ lib.optional (bunUrl != expectedBunUrl) "Bun asset URL must be ${expectedBunUrl}"
@@ -120,7 +114,7 @@ let
     ++ lib.optional (openChamberSourceHash == null) "OpenChamber srcHash is missing"
     ++ lib.optional (openCodeSourceHash == null) "OpenCode srcHash is missing"
     ++ lib.optional (sherpaSourceHash == null) "sherpa-onnx srcHash is missing"
-    ++ lib.optional (bunHash == null) "Bun ${expectedBunVersion} asset hash is missing"
+    ++ lib.optional (bunHash == null) "Bun ${bunVersion} asset hash is missing"
     ++ lib.optional (
       openCodeNodeModulesHash == null
     ) "OpenCode aarch64-darwin nodeModulesHash is missing"
@@ -174,7 +168,7 @@ let
   openChamberSrc = fetchFromGitHub {
     owner = "openchamber";
     repo = "openchamber";
-    rev = expectedCommit;
+    rev = selfSource.commit;
     inherit (openChamberSourceHash) hash;
   };
 
@@ -209,16 +203,18 @@ let
 
   bunExact = callPackage ./bun.nix {
     inherit bunSource;
+    version = bunVersion;
   };
 
   openChamberNodeModules = callPackage ./node-modules.nix {
-    inherit cacert version;
+    inherit bunVersion cacert version;
     bun = bunExact;
     src = openChamberSrc;
     inherit (openChamberNodeModulesHash) hash;
   };
 
   openCodeNodeModules = callPackage ./opencode-node-modules.nix {
+    inherit bunVersion;
     bun = bunExact;
     src = openCodeSrc;
     version = openCodeVersion;
@@ -241,6 +237,8 @@ let
   sherpaNodeAddon = callPackage ./sherpa-node-addon.nix {
     inherit nodeAddonApiSrc;
     src = sherpaSrc;
+    version = sherpaVersion;
+    wrapperVersion = sherpaWrapperVersion;
     wrapperSrc = sherpaWrapperSrc;
     electronHeaders = electronBuild.headers;
   };
@@ -311,7 +309,7 @@ let
 
       export HOME="$TMPDIR/openchamber-build-home"
       mkdir -p "$HOME"
-      test "$(bun --version)" = "${expectedBunVersion}"
+      test "$(bun --version)" = "${bunVersion}"
 
       bun run --cwd packages/electron build:web-assets
 
@@ -717,7 +715,8 @@ let
               -e '
                 const assert = require("node:assert/strict");
                 const app = process.argv[1];
-                assert.equal(process.versions.electron, "43.3.0");
+                const expectedElectronVersion = process.argv[2];
+                assert.equal(process.versions.electron, expectedElectronVersion);
                 assert.equal(process.arch, "arm64");
                 const pty = require(app + "/Contents/Resources/app.asar/node_modules/node-pty");
                 assert.equal(typeof pty.spawn, "function");
@@ -725,7 +724,7 @@ let
                 assert.equal(typeof sherpa, "object");
                 assert.ok(Object.keys(sherpa).length > 0);
               ' \
-              "$app"
+              "$app" "${electronVersion}"
 
             rm -rf "$TMPDIR/openchamber-asar"
             ${lib.getExe nodejs_24} ${asarExecutable} extract "$resources/app.asar" "$TMPDIR/openchamber-asar"

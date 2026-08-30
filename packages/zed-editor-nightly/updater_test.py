@@ -134,7 +134,7 @@ def test_zed_editor_nightly_updater_tracks_manifest_version(
     monkeypatch.setattr(
         module.ZedEditorNightlyUpdater,
         "stream_materialized_artifacts",
-        lambda _self: _empty_stream("zed-editor-nightly"),
+        lambda _self, **_kwargs: _empty_stream("zed-editor-nightly"),
     )
 
     info = _run(updater.fetch_latest(object()))
@@ -252,7 +252,7 @@ def test_zed_editor_nightly_updater_refreshes_crate2nix_artifacts(
     monkeypatch.setattr(
         module.ZedEditorNightlyUpdater,
         "stream_materialized_artifacts",
-        lambda _self: _fake_stream("zed-editor-nightly"),
+        lambda _self, **_kwargs: _fake_stream("zed-editor-nightly"),
     )
 
     info = VersionInfo(

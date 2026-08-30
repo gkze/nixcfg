@@ -4,6 +4,7 @@
   fetchFromGitHub,
   ld64,
   lib,
+  nativeLock ? builtins.fromJSON (builtins.readFile ../native-lock.json),
   onnxruntime,
   protobuf,
   python3,
@@ -12,8 +13,8 @@
 }:
 assert stdenv.hostPlatform.system == "aarch64-darwin";
 let
-  version = "1.27.0";
-  commit = "8f0278c77bf44b0cc83c098c6c722b92a36ac4b5";
+  version = nativeLock.onnxruntime.version or null;
+  commit = nativeLock.onnxruntime.commit or null;
 
   # The upstream Apple static-framework assembler deliberately skips shared
   # external targets. Keep protobuf and its Abseil closure static so they are
@@ -267,8 +268,7 @@ base.overrideAttrs (old: {
   passthru = (old.passthru or { }) // {
     buzzNativeContract = {
       kind = "onnxruntime";
-      version = "1.27.0";
-      commit = "8f0278c77bf44b0cc83c098c6c722b92a36ac4b5";
+      inherit version commit;
       target = "aarch64-apple-darwin";
       configuration = "Release";
       assemblyBuildSharedLib = true;

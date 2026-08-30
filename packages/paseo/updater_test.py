@@ -15,11 +15,13 @@ from typing import cast
 
 import pytest
 from nix_manipulator.expressions.binary import BinaryExpression
+from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.if_expression import IfExpression
 from nix_manipulator.expressions.indented_string import IndentedString
+from nix_manipulator.expressions.inherit import Inherit
 from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.path import NixPath
@@ -32,7 +34,6 @@ from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
     expect_binding,
-    nix_attrset_call,
     parse_nix_expr,
 )
 from lib.tests._package_registry import registry_override_metadata
@@ -49,7 +50,12 @@ from lib.tests._updater_helpers import (
     load_repo_module,
     run_async,
 )
-from lib.update.events import UpdateEventKind, expect_source_hashes
+from lib.update.artifacts import GeneratedArtifact
+from lib.update.events import (
+    UpdateEventKind,
+    expect_artifact_updates,
+    expect_source_hashes,
+)
 from lib.update.net import github_raw_url
 from lib.update.nix import _build_fetch_from_github_call
 from lib.update.nix_expr import identifier_attr_path
@@ -60,11 +66,18 @@ _PACKAGE_DIR = REPO_ROOT / "packages/paseo"
 _VERSION = "0.6.1"
 _TAG = f"v{_VERSION}"
 _COMMIT = "20d7efc46a316f5a274b9943a5c43b0322269825"
+_ELECTRON_VERSION = "41.2.0"
+_SHERPA_VERSION = "1.12.28"
 _SHERPA_COMMIT = "86d3d00e28c22c102fb7d01c7b62fdc4e7a69f1b"
+_ONNXRUNTIME_VERSION = "1.23.2"
 _ONNXRUNTIME_COMMIT = "a83fc4d58cb48eb68890dd689f94f28288cf2278"
+_NODE_ADDON_API_VERSION = "8.3.0"
+_NPM_FETCHER_VERSION = 2
 _NODE_ADDON_API_HASH = "sha256-oM5nZTolH1bqQNLqsIeXk0ts/J201IdmeV2Xu5tNlg0="
 _ESBUILD_VERSION = "0.25.12"
 _CLAUDE_AGENT_SDK_VERSION = "0.3.220"
+_APP_BUILDER_LIB_VERSION = "26.8.1"
+_APP_BUILDER_LIB_BACKPORT_COMMIT = "2ff9190aadc791503a6e62cdcbfa975448bc49bf"
 _CLAUDE_AGENT_SDK_URL = (
     "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/"
     f"claude-agent-sdk-{_CLAUDE_AGENT_SDK_VERSION}.tgz"
@@ -849,16 +862,27 @@ def test_paseo_hashes_sources_then_npm_closure(
     """Hashing must include three source trees, two tarballs, and npm closure."""
     module = _load_updater_module()
     updater = module.PaseoUpdater()
+    native_lock = json.loads(
+        (_PACKAGE_DIR / "native-lock.json").read_text(encoding="utf-8")
+    )
+    native_hashes = [
+        *(item["hash"] for item in native_lock["sherpaOnnx"]["dependencies"].values()),
+        *(item["hash"] for item in native_lock["onnxruntime"]["dependencies"].values()),
+        *(item["hash"] for item in native_lock["onnxruntime"]["patches"]),
+    ]
     calls = install_fixed_hash_stream(
         monkeypatch,
-        tuple((f"hash-step-{index}", value) for index, value in enumerate(_HASHES)),
+        tuple(
+            (f"hash-step-{index}", value)
+            for index, value in enumerate((*_HASHES, *native_hashes))
+        ),
     )
 
     events = run_async(collect_events(updater.fetch_hashes(_version_info(), object())))
     value_events = [event for event in events if event.kind is UpdateEventKind.VALUE]
     entries = cast("list[HashEntry]", expect_source_hashes(value_events[-1].payload))
 
-    assert len(calls) == 6
+    assert len(calls) == 29
     assert_nix_ast_equal(
         str(calls[0]["expr"]),
         _build_fetch_from_github_call(
@@ -878,7 +902,7 @@ def test_paseo_hashes_sources_then_npm_closure(
         ),
     )
     assert_nix_ast_equal(
-        str(calls[-1]["expr"]),
+        str(calls[5]["expr"]),
         updater._npm_deps_expr(src_hash=_HASHES[0]),
     )
     npm_expression = expect_instance(
@@ -891,7 +915,7 @@ def test_paseo_hashes_sources_then_npm_closure(
             expect_binding(npm_arguments.values, "fetcherVersion").value,
             Primitive,
         ).value
-        == 2
+        == _NPM_FETCHER_VERSION
     )
     assert (
         HashEntry.create(
@@ -901,6 +925,199 @@ def test_paseo_hashes_sources_then_npm_closure(
         )
         in entries
     )
+    artifact_event = next(
+        event for event in events if event.kind is UpdateEventKind.ARTIFACT
+    )
+    assert expect_artifact_updates(artifact_event.payload) == [
+        GeneratedArtifact.json(_PACKAGE_DIR / "native-lock.json", native_lock)
+    ]
+
+
+def test_paseo_hashing_requires_a_discovered_artifact_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A generated native lock cannot be promoted without package discovery."""
+    module = _load_updater_module()
+
+    class MissingArtifactDirectoryUpdater(module.PaseoUpdater):
+        name = "missing-paseo-artifact-owner"
+
+    updater = MissingArtifactDirectoryUpdater()
+    install_fixed_hash_stream(
+        monkeypatch,
+        ((None, _HASHES[0]),) * 29,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Package directory not found for missing-paseo-artifact-owner",
+    ):
+        run_async(collect_events(updater.fetch_hashes(_version_info(), object())))
+
+
+def test_paseo_updater_owns_the_complete_native_lock() -> None:
+    """The updater artifact is the sole authority for native dependency FODs."""
+    updater = _load_updater_module().PaseoUpdater()
+
+    assert updater.get_generated_artifact_files() == ("native-lock.json",)
+
+    native_lock = json.loads(
+        (_PACKAGE_DIR / "native-lock.json").read_text(encoding="utf-8")
+    )
+    assert native_lock["schemaVersion"] == 1
+    assert native_lock["paseo"] == {
+        "appBuilderLibBackportCommit": _APP_BUILDER_LIB_BACKPORT_COMMIT,
+        "appBuilderLibVersion": _APP_BUILDER_LIB_VERSION,
+        "claudeAgentSdkVersion": _CLAUDE_AGENT_SDK_VERSION,
+        "commit": _COMMIT,
+        "electronVersion": _ELECTRON_VERSION,
+        "esbuildVersion": _ESBUILD_VERSION,
+        "nodeAddonApiVersion": _NODE_ADDON_API_VERSION,
+        "npmFetcherVersion": _NPM_FETCHER_VERSION,
+        "version": _VERSION,
+    }
+    assert native_lock["sherpaOnnx"]["version"] == _SHERPA_VERSION
+    assert native_lock["sherpaOnnx"]["commit"] == _SHERPA_COMMIT
+    assert native_lock["onnxruntime"]["version"] == _ONNXRUNTIME_VERSION
+    assert native_lock["onnxruntime"]["commit"] == _ONNXRUNTIME_COMMIT
+    assert set(native_lock["sherpaOnnx"]["dependencies"]) == {
+        "eigen",
+        "espeakNg",
+        "hclustCpp",
+        "json",
+        "kaldiDecoder",
+        "kaldiNativeFbank",
+        "kaldifst",
+        "kissfft",
+        "openfst",
+        "piperPhonemize",
+        "simpleSentencepiece",
+    }
+    assert set(native_lock["onnxruntime"]["dependencies"]) == {
+        "abseilCpp",
+        "dlpack",
+        "flatbuffers",
+        "mp11",
+        "onnx",
+        "protobuf",
+        "re2",
+        "safeint",
+    }
+    assert len(native_lock["onnxruntime"]["patches"]) == 4
+
+    hashes = {
+        dependency["hash"]
+        for closure in (native_lock["sherpaOnnx"], native_lock["onnxruntime"])
+        for dependency in closure["dependencies"].values()
+    }
+    hashes.update(patch["hash"] for patch in native_lock["onnxruntime"]["patches"])
+    assert hashes == {
+        "sha256-uTxmfRtpJlzbTZ8w7CH4+su+izB880wLmUKDTG1P2+I=",
+        "sha256-cMv0BQ56AUquGRQLBeVySdpHIPVhKEWfvjqTvq+XGuY=",
+        "sha256-jxTgJMcJ1zr7QK5pyyLeS3Pbpny85A8uUYgT2oE5q1Y=",
+        "sha256-S5LrDAbRBoP3RHzpQGy5fNS0U74Y1yeTIPey8CXBAYc=",
+        "sha256-hcpGJTVZJUHrW6bSGEMAnPNHOPUbKLcfhIgqNpS1KL8=",
+        "sha256-kXbMZvx84e34XPNVsG4yDFfbYpffdCd/V1GDRoiTz2E=",
+        "sha256-xLcBojpAC9qAMlhrAsfg1egTp2WDLfYMI+bfnmKwEPQ=",
+        "sha256-SXED5mQWjr45WAt1etvmFvbPhaFlcq9YHKe8QtCrE/0=",
+        "sha256-XJjoLMUJxWGFAt3khguOoE2EOFDtV+bWtZC2RLJohT0=",
+        "sha256-iWQaRkiaSJh1RkPOV72pybVLTKRkhf3AK/DchLhmZF0=",
+        "sha256-F0ioIgYKNbqp9mCfhO/I61TcDnS57OPYI2e3EZ/cda8=",
+        "sha256-PuS7MLwi824c4z4Cubh029DEUVYSNPD3MwCDsgzsp3Y=",
+        "sha256-YqgzCyNywixebpHGx16tUuczmFS5pjCz5WjR89mv9eI=",
+        "sha256-e+dNPNbCHYDXUS/W+hMqf/37fhVgEGzId6rhP3cToTE=",
+        "sha256-cLPvjkf2Au+B19PJNrUkTW/VPxybi1MpPxnIl4oo4/o=",
+        "sha256-UhtF+CWuyv5/Pq/5agLL4Y95YNP63W2BraprhRqJOag=",
+        "sha256-wfu1MyCycGpxFB++eicA0F41j886/Y52I/4+ciRUg2o=",
+        "sha256-IeANwJlJl45yf8iu/AZNDoiyIvTCZIeK1b74sdCfAIc=",
+        "sha256-pjwjrqq6dfiVsXIhbBtbolhiysiFlFTnx5XcX77f+C0=",
+        "sha256-FFAJuJse4nmNT3ixvEdlqzbr3edY46SqEFv7z/oo6m0=",
+        "sha256-VlTHs0om20kTNvSVQaasSsa5JROliQy4k9BECTsBtbU=",
+        "sha256-FSuPybX8f2VoxvLhcYx4rdChaiK8bSUDR32sN3Efwfc=",
+        "sha256-vX+kaFiNdmqWI91JELcLpoaVIHBb5EPbI7rCAMYAx04=",
+    }
+    assert "sourceHash" not in native_lock["onnxruntime"]
+
+
+def test_paseo_derivations_consume_only_the_updater_owned_native_lock() -> None:
+    """The package and both native helpers read the generated closure seam."""
+    package = expect_instance(
+        parse_nix_expr((_PACKAGE_DIR / "package.nix").read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+    native_lock_formal = next(
+        argument
+        for argument in package.argument_set
+        if isinstance(argument, Identifier) and argument.name == "nativeLock"
+    )
+    assert_nix_ast_equal(
+        native_lock_formal.default_value,
+        "builtins.fromJSON (builtins.readFile ./native-lock.json)",
+    )
+    package_scope = expect_instance(package.output, IfExpression).scope
+    assert_nix_ast_equal(
+        expect_binding(package_scope, "paseoLock").value,
+        "nativeLock.paseo or { }",
+    )
+    assert_nix_ast_equal(
+        expect_binding(package_scope, "npmFetcherVersion").value,
+        "paseoLock.npmFetcherVersion or null",
+    )
+    completeness_terms = []
+    pending = [expect_binding(package_scope, "nativeLockComplete").value]
+    while pending:
+        term = pending.pop(0)
+        if isinstance(term, BinaryExpression) and term.operator.name == "&&":
+            pending[0:0] = [term.left, term.right]
+        else:
+            completeness_terms.append(term)
+    assert_nix_ast_equal(
+        completeness_terms[3],
+        "builtins.isInt npmFetcherVersion",
+    )
+    assert_nix_ast_equal(
+        completeness_terms[4],
+        "npmFetcherVersion > 0",
+    )
+    assert_nix_ast_equal(
+        expect_binding(package_scope, "sherpaClosure").value,
+        "nativeLock.sherpaOnnx or { }",
+    )
+    assert_nix_ast_equal(
+        expect_binding(package_scope, "onnxruntimeClosure").value,
+        "nativeLock.onnxruntime or { }",
+    )
+    sherpa_node_addon = expect_instance(
+        expect_binding(package_scope, "sherpaNodeAddon").value,
+        FunctionCall,
+    )
+    sherpa_node_addon_arguments = expect_instance(
+        sherpa_node_addon.argument,
+        AttributeSet,
+    )
+    assert_nix_ast_equal(
+        expect_binding(sherpa_node_addon_arguments.values, "closureContract").value,
+        "sherpaClosure",
+    )
+
+    for filename, field in (
+        ("sherpa-source.nix", "sherpaOnnx"),
+        ("sherpa-node-addon.nix", "sherpaOnnx"),
+        ("onnxruntime-source.nix", "onnxruntime"),
+    ):
+        helper = expect_instance(
+            parse_nix_expr((_PACKAGE_DIR / filename).read_text(encoding="utf-8")),
+            FunctionDefinition,
+        )
+        closure_contract_formal = next(
+            argument
+            for argument in helper.argument_set
+            if isinstance(argument, Identifier) and argument.name == "closureContract"
+        )
+        assert_nix_ast_equal(
+            closure_contract_formal.default_value,
+            f"(builtins.fromJSON (builtins.readFile ./native-lock.json)).{field}",
+        )
 
 
 def test_paseo_build_result_requires_complete_exact_closure() -> None:
@@ -1730,13 +1947,23 @@ def test_paseo_fetches_the_onnxruntime_submodule_closure() -> None:
 
     assert_nix_ast_equal(
         expect_binding(final.scope, "onnxruntimeSrc").value,
-        nix_attrset_call(
-            Identifier(name="fetchFromGitHub"),
-            owner="microsoft",
-            repo="onnxruntime",
-            rev=Identifier(name="onnxruntimeCommit"),
-            fetchSubmodules=True,
-            hash=identifier_attr_path("onnxruntimeSourceHash", "hash"),
+        FunctionCall(
+            name=Identifier(name="fetchFromGitHub"),
+            argument=AttributeSet(
+                values=[
+                    Binding(name="owner", value=StringPrimitive(value="microsoft")),
+                    Binding(name="repo", value=StringPrimitive(value="onnxruntime")),
+                    Binding(
+                        name="rev",
+                        value=identifier_attr_path("onnxruntimeClosure", "commit"),
+                    ),
+                    Binding(name="fetchSubmodules", value=Primitive(value=True)),
+                    Inherit(
+                        from_expression=Identifier(name="onnxruntimeSourceHash"),
+                        names=[Identifier(name="hash")],
+                    ),
+                ]
+            ),
         ),
     )
 
@@ -1750,56 +1977,17 @@ def test_paseo_onnxruntime_helper_declares_the_reviewed_source_closure() -> None
         FunctionDefinition,
     )
     derivation = expect_instance(helper.output, FunctionCall)
-    contract = expect_binding(derivation.scope, "closureContract").value
     assert_nix_ast_equal(
-        contract,
-        """
-        {
-          version = "1.23.2";
-          commit = "a83fc4d58cb48eb68890dd689f94f28288cf2278";
-          sourceHash = "sha256-hZ2L5+0Enkw4rGDKVpRECnKXP87w6Kbiyp6Fdxwt6hk=";
-          nixpkgsRecipe = {
-            commit = "e1e423f183cde97926ac113d8a4de5a5042a7264";
-            path = "pkgs/by-name/on/onnxruntime/package.nix";
-          };
-          dependencies = {
-            abseilCpp = {
-              version = "20240722.2";
-              hash = "sha256-PuS7MLwi824c4z4Cubh029DEUVYSNPD3MwCDsgzsp3Y=";
-            };
-            dlpack = {
-              commit = "5c210da409e7f1e51ddf445134a4376fdbd70d7d";
-              hash = "sha256-YqgzCyNywixebpHGx16tUuczmFS5pjCz5WjR89mv9eI=";
-            };
-            flatbuffers = {
-              version = "23.5.26";
-              hash = "sha256-e+dNPNbCHYDXUS/W+hMqf/37fhVgEGzId6rhP3cToTE=";
-            };
-            mp11 = {
-              version = "boost-1.82.0";
-              hash = "sha256-cLPvjkf2Au+B19PJNrUkTW/VPxybi1MpPxnIl4oo4/o=";
-            };
-            onnx = {
-              version = "v1.18.0";
-              hash = "sha256-UhtF+CWuyv5/Pq/5agLL4Y95YNP63W2BraprhRqJOag=";
-            };
-            protobuf = {
-              version = "32.1";
-              hash = "sha256-wfu1MyCycGpxFB++eicA0F41j886/Y52I/4+ciRUg2o=";
-              nixpkgsAttribute = "protobuf_32";
-            };
-            re2 = {
-              version = "2024-07-02";
-              hash = "sha256-IeANwJlJl45yf8iu/AZNDoiyIvTCZIeK1b74sdCfAIc=";
-            };
-            safeint = {
-              version = "3.0.28";
-              hash = "sha256-pjwjrqq6dfiVsXIhbBtbolhiysiFlFTnx5XcX77f+C0=";
-            };
-          };
-          sourceClosureComplete = true;
-        }
-        """,
+        expect_binding(derivation.scope, "effectiveClosureContract").value,
+        "closureContract // { inherit sourceHash; }",
+    )
+    assert_nix_ast_equal(
+        expect_binding(derivation.scope, "abseilCppSrc").value,
+        "fetchGitHubDependency closureContract.dependencies.abseilCpp",
+    )
+    assert_nix_ast_equal(
+        expect_binding(derivation.scope, "onnxPatches").value,
+        'builtins.filter (patch: patch.target == "onnx") closureContract.patches',
     )
 
     parenthesized = expect_instance(derivation.argument, Parenthesis)
@@ -1811,7 +1999,7 @@ def test_paseo_onnxruntime_helper_declares_the_reviewed_source_closure() -> None
     )
     assert_nix_ast_equal(
         expect_binding(passthru.values, "paseoExactSource").value,
-        "closureContract",
+        "effectiveClosureContract",
     )
     formal_names = {
         formal.name for formal in helper.argument_set if isinstance(formal, Identifier)
@@ -1823,7 +2011,7 @@ def test_paseo_onnxruntime_helper_declares_the_reviewed_source_closure() -> None
         """
         assert lib.assertMsg
           (lib.getVersion protobuf_32 == closureContract.dependencies.protobuf.version)
-          "Paseo ONNX Runtime requires protobuf 32.1";
+          "Paseo ONNX Runtime requires protobuf ${closureContract.dependencies.protobuf.version}";
         protobuf_32
         """,
     )
@@ -1860,7 +2048,7 @@ def test_paseo_onnxruntime_helper_declares_the_reviewed_source_closure() -> None
         expect_binding(attributes.values, "passthru").value,
         """
         {
-          paseoExactSource = closureContract;
+          paseoExactSource = effectiveClosureContract;
           protobuf = protobufExact;
         }
         """,
@@ -1877,6 +2065,14 @@ def test_paseo_onnxruntime_helper_declares_the_reviewed_source_closure() -> None
     )
     helper_arguments = expect_instance(helper_call.argument, AttributeSet)
     assert "sourceClosureComplete" not in binding_map(helper_arguments.values)
+    assert_nix_ast_equal(
+        expect_binding(helper_arguments.values, "closureContract").value,
+        "onnxruntimeClosure",
+    )
+    assert_nix_ast_equal(
+        expect_binding(helper_arguments.values, "sourceHash").value,
+        "onnxruntimeSourceHash.hash",
+    )
 
 
 def test_paseo_onnxruntime_pkgconfig_relocation_is_a_reviewed_patch(
@@ -1893,18 +2089,13 @@ def test_paseo_onnxruntime_pkgconfig_relocation_is_a_reviewed_patch(
     parenthesized = expect_instance(derivation.argument, Parenthesis)
     final_attrs = expect_instance(parenthesized.value, FunctionDefinition)
     attributes = expect_instance(final_attrs.output, AttributeSet)
-    patches = expect_instance(
+    assert_nix_ast_equal(
         expect_binding(attributes.values, "patches").value,
-        NixList,
+        """(map fetchReviewedPatch onnxruntimePatches) ++ [
+          ./protobuf34-nodiscard.patch
+          ./onnxruntime-pkgconfig-prefix.patch
+        ]""",
     )
-    assert [
-        expect_instance(patch, NixPath).path
-        for patch in patches.value
-        if isinstance(patch, NixPath)
-    ] == [
-        "./protobuf34-nodiscard.patch",
-        "./onnxruntime-pkgconfig-prefix.patch",
-    ]
     post_patch = expect_instance(
         expect_binding(attributes.values, "postPatch").value,
         IndentedString,
@@ -1984,85 +2175,6 @@ def test_paseo_sherpa_helper_declares_the_reviewed_fetchcontent_closure(
         FunctionDefinition,
     )
     derivation = expect_instance(helper.output, FunctionCall)
-    contract = expect_binding(derivation.scope, "closureContract").value
-    assert_nix_ast_equal(
-        contract,
-        """
-        {
-          version = "1.12.28";
-          commit = "86d3d00e28c22c102fb7d01c7b62fdc4e7a69f1b";
-          onnxruntime = {
-            version = "1.23.2";
-            source = "paseo-exact-source-build";
-          };
-          npmAddonBuild = {
-            workflow = ".github/workflows/npm-addon-macos.yaml";
-            portaudio = false;
-            websocket = false;
-            tts = true;
-            speakerDiarization = true;
-          };
-          dependencies = {
-            eigen = {
-              file = "eigen-3.4.1.tar.gz";
-              url = "https://gitlab.com/libeigen/eigen/-/archive/3.4.1/eigen-3.4.1.tar.gz";
-              hash = "sha256-uTxmfRtpJlzbTZ8w7CH4+su+izB880wLmUKDTG1P2+I=";
-            };
-            espeakNg = {
-              file = "espeak-ng-f6fed6c58b5e0998b8e68c6610125e2d07d595a7.zip";
-              url = "https://github.com/csukuangfj/espeak-ng/archive/f6fed6c58b5e0998b8e68c6610125e2d07d595a7.zip";
-              hash = "sha256-cMv0BQ56AUquGRQLBeVySdpHIPVhKEWfvjqTvq+XGuY=";
-            };
-            hclustCpp = {
-              file = "hclust-cpp-2026-02-25.tar.gz";
-              url = "https://github.com/csukuangfj/hclust-cpp/archive/refs/tags/2026-02-25.tar.gz";
-              hash = "sha256-jxTgJMcJ1zr7QK5pyyLeS3Pbpny85A8uUYgT2oE5q1Y=";
-            };
-            json = {
-              file = "json-3.12.0.tar.gz";
-              url = "https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.tar.gz";
-              hash = "sha256-S5LrDAbRBoP3RHzpQGy5fNS0U74Y1yeTIPey8CXBAYc=";
-            };
-            kaldiDecoder = {
-              file = "kaldi-decoder-0.2.11.tar.gz";
-              url = "https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.2.11.tar.gz";
-              hash = "sha256-hcpGJTVZJUHrW6bSGEMAnPNHOPUbKLcfhIgqNpS1KL8=";
-            };
-            kaldiNativeFbank = {
-              file = "kaldi-native-fbank-1.22.3.tar.gz";
-              url = "https://github.com/csukuangfj/kaldi-native-fbank/archive/refs/tags/v1.22.3.tar.gz";
-              hash = "sha256-kXbMZvx84e34XPNVsG4yDFfbYpffdCd/V1GDRoiTz2E=";
-            };
-            kaldifst = {
-              file = "kaldifst-1.7.17.tar.gz";
-              url = "https://github.com/k2-fsa/kaldifst/archive/refs/tags/v1.7.17.tar.gz";
-              hash = "sha256-xLcBojpAC9qAMlhrAsfg1egTp2WDLfYMI+bfnmKwEPQ=";
-            };
-            kissfft = {
-              file = "kissfft-febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip";
-              url = "https://github.com/mborgerding/kissfft/archive/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip";
-              hash = "sha256-SXED5mQWjr45WAt1etvmFvbPhaFlcq9YHKe8QtCrE/0=";
-            };
-            openfst = {
-              file = "openfst-sherpa-onnx-2024-06-19.tar.gz";
-              url = "https://github.com/csukuangfj/openfst/archive/refs/tags/sherpa-onnx-2024-06-19.tar.gz";
-              hash = "sha256-XJjoLMUJxWGFAt3khguOoE2EOFDtV+bWtZC2RLJohT0=";
-            };
-            piperPhonemize = {
-              file = "piper-phonemize-78a788e0b719013401572d70fef372e77bff8e43.zip";
-              url = "https://github.com/csukuangfj/piper-phonemize/archive/78a788e0b719013401572d70fef372e77bff8e43.zip";
-              hash = "sha256-iWQaRkiaSJh1RkPOV72pybVLTKRkhf3AK/DchLhmZF0=";
-            };
-            simpleSentencepiece = {
-              file = "simple-sentencepiece-0.7.tar.gz";
-              url = "https://github.com/pkufool/simple-sentencepiece/archive/refs/tags/v0.7.tar.gz";
-              hash = "sha256-F0ioIgYKNbqp9mCfhO/I61TcDnS57OPYI2e3EZ/cda8=";
-            };
-          };
-          sourceClosureComplete = true;
-        }
-        """,
-    )
     assert_nix_ast_equal(
         expect_binding(derivation.scope, "fetchContentCache").value,
         """
@@ -2175,21 +2287,18 @@ def test_paseo_sherpa_helper_declares_the_reviewed_fetchcontent_closure(
     )
 
 
-def test_paseo_gates_on_the_reviewed_onnxruntime_closure_hash() -> None:
-    """A tarball-only hash cannot masquerade as the recursive source closure."""
+def test_paseo_gates_on_the_updater_owned_onnxruntime_closure_hash() -> None:
+    """The promoted source hash is injected into the reviewed native contract."""
     package = expect_instance(
         parse_nix_expr((_PACKAGE_DIR / "package.nix").read_text(encoding="utf-8")),
         FunctionDefinition,
     )
     final = expect_instance(package.output, IfExpression)
     assert_nix_ast_equal(
-        expect_binding(final.scope, "expectedOnnxruntimeSourceHash").value,
-        '"sha256-hZ2L5+0Enkw4rGDKVpRECnKXP87w6Kbiyp6Fdxwt6hk="',
-    )
-    assert_nix_ast_equal(
         expect_binding(final.scope, "nativeSourceClosureComplete").value,
         """
-        (onnxruntimeExact.passthru.paseoExactSource.sourceClosureComplete or false)
+        nativeLockComplete
+        && (onnxruntimeExact.passthru.paseoExactSource.sourceClosureComplete or false)
         && (sherpaExact.passthru.paseoExactSource.sourceClosureComplete or false)
         """,
     )
@@ -2204,10 +2313,8 @@ def test_paseo_gates_on_the_reviewed_onnxruntime_closure_hash() -> None:
             gates.append(gate)
     assert_nix_ast_equal(
         gates[7],
-        "lib.optional "
-        "(onnxruntimeSourceHash != null && "
-        "onnxruntimeSourceHash.hash != expectedOnnxruntimeSourceHash) "
-        '"ONNX Runtime source closure hash must be ${expectedOnnxruntimeSourceHash}"',
+        "lib.optional (onnxruntimeSourceHash == null) "
+        '"ONNX Runtime ${onnxruntimeVersion} srcHash is missing"',
     )
 
 
@@ -2349,12 +2456,9 @@ def test_paseo_replays_the_locked_npm_peer_resolution_offline() -> None:
         FunctionCall,
     )
     npm_arguments = expect_instance(npm_deps.argument, AttributeSet)
-    assert (
-        expect_instance(
-            expect_binding(npm_arguments.values, "fetcherVersion").value,
-            Primitive,
-        ).value
-        == 2
+    assert_nix_ast_equal(
+        expect_binding(npm_arguments.values, "fetcherVersion").value,
+        "npmFetcherVersion",
     )
     assert_nix_ast_equal(
         expect_binding(arguments.values, "npmFlags").value,
@@ -2365,15 +2469,12 @@ def test_paseo_replays_the_locked_npm_peer_resolution_offline() -> None:
         BinaryExpression,
     )
     environment_owned = expect_instance(environment.right, AttributeSet)
-    assert (
-        expect_instance(
-            expect_binding(
-                environment_owned.values,
-                "NIX_NPM_FETCHER_VERSION",
-            ).value,
-            StringPrimitive,
-        ).value
-        == "2"
+    assert_nix_ast_equal(
+        expect_binding(
+            environment_owned.values,
+            "NIX_NPM_FETCHER_VERSION",
+        ).value,
+        "toString npmFetcherVersion",
     )
 
 
@@ -2667,7 +2768,7 @@ def test_paseo_applies_the_cycle_guard_after_npm_materialization() -> None:
         and '"$appBuilderLibManifest"' in assignment
         for assignment in assignments
     )
-    assert '[ "$installedAppBuilderLibVersion" != 26.8.1 ]' in command_texts(
+    assert '[ "$installedAppBuilderLibVersion" != __NIX_INTERP__ ]' in command_texts(
         post_configure_shell
     )
 
@@ -3088,6 +3189,10 @@ def test_sherpa_addon_rewrites_the_platform_manifest_as_structured_json(
     )
     derivation = expect_instance(package.output, FunctionCall)
     attributes = expect_instance(derivation.argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(attributes.values, "version").value,
+        "closureContract.version",
+    )
     environment = expect_instance(
         expect_binding(attributes.values, "env").value,
         AttributeSet,

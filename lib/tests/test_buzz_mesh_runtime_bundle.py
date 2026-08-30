@@ -20,6 +20,10 @@ from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
+from lib.tests._buzz_native_lock import (
+    buzz_native_lock_string,
+    render_buzz_native_lock_interpolations,
+)
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
 from lib.update.paths import REPO_ROOT
@@ -29,9 +33,10 @@ if TYPE_CHECKING:
 
 _BUNDLE_PATH = REPO_ROOT / "packages/buzz/native/mesh-runtime-bundle.nix"
 _BUZZ_PACKAGE_PATH = REPO_ROOT / "packages/buzz/package.nix"
-_MESH_VERSION = "0.75.1"
-_MESH_COMMIT = "3295c902d4c4f859aaadf9240042ffdaf06dd07e"
-_LLAMA_COMMIT = "8190848bb36c7df4251db4352bd81bc07d0a4385"
+_MESH_VERSION = buzz_native_lock_string("meshLlm", "version")
+_MESH_COMMIT = buzz_native_lock_string("meshLlm", "commit")
+_SKIPPY_ABI = buzz_native_lock_string("meshLlm", "skippyAbi")
+_LLAMA_COMMIT = buzz_native_lock_string("llamaCpp", "commit")
 _PACKAGING_PATHS = (
     "scripts/build-llama.sh",
     "scripts/package-native-runtime.sh",
@@ -82,7 +87,9 @@ def _bundle_script() -> str:
         expect_binding(_package_scope(), "bundleScript").value,
         IndentedString,
     )
-    return dedent(indented_string_body(script.rebuild()))
+    return render_buzz_native_lock_interpolations(
+        dedent(indented_string_body(script.rebuild()))
+    )
 
 
 @cache
@@ -338,13 +345,14 @@ def test_bundle_constructs_exact_sources_from_url_qualified_hashes() -> None:
         "lib",
         "llamaCppSrcHash",
         "meshLlmSrcHash",
+        "nativeLock",
         "ninja",
         "python3",
         "stdenv",
         "stdenvNoCC",
     }
     assert_nix_ast_equal(derivation.name, "stdenvNoCC.mkDerivation")
-    assert len(conditions) == 7
+    assert len(conditions) == 11
     assert_nix_ast_equal(
         conditions[0],
         'stdenvNoCC.hostPlatform.system == "aarch64-darwin"',
@@ -353,8 +361,8 @@ def test_bundle_constructs_exact_sources_from_url_qualified_hashes() -> None:
         expect_binding(scope, "expectedMeshContract").value,
         """{
           kind = "mesh-llm";
-          version = "0.75.1";
-          commit = "3295c902d4c4f859aaadf9240042ffdaf06dd07e";
+          version = meshLlmVersion;
+          commit = meshLlmCommit;
           sdkFeatures = [ "client" "serving" ];
           hostRuntimeFeatures = [ "dynamic-native-runtime" ];
         }""",
@@ -363,7 +371,7 @@ def test_bundle_constructs_exact_sources_from_url_qualified_hashes() -> None:
         expect_binding(scope, "expectedLlamaContract").value,
         """{
           kind = "llama.cpp";
-          commit = "8190848bb36c7df4251db4352bd81bc07d0a4385";
+          commit = llamaCppCommit;
           target = "aarch64-apple-darwin";
           backend = "metal";
           linkMode = "dynamic";
@@ -382,6 +390,10 @@ def test_bundle_constructs_exact_sources_from_url_qualified_hashes() -> None:
         }""",
     )
     expected_conditions = [
+        "builtins.isString meshLlmVersion",
+        'builtins.isString meshLlmCommit && builtins.match "[0-9a-f]{40}" meshLlmCommit != null',
+        'builtins.isString skippyAbi && builtins.match "[0-9]+\\\\.[0-9]+\\\\.[0-9]+" skippyAbi != null',
+        'builtins.isString llamaCppCommit && builtins.match "[0-9a-f]{40}" llamaCppCommit != null',
         "(meshLlm.passthru.buzzNativeContract or null) == expectedMeshContract",
         '(meshLlm.sourceSubdir or null) == "share/mesh-llm/source"',
         '(meshLlm.provenanceSubpath or null) == "share/mesh-llm/provenance.json"',
@@ -395,14 +407,14 @@ def test_bundle_constructs_exact_sources_from_url_qualified_hashes() -> None:
     assert_nix_ast_equal(
         expect_binding(scope, "meshLlm").value,
         """import ./mesh-llm.nix {
-          inherit fetchFromGitHub lib python3 stdenvNoCC;
+          inherit fetchFromGitHub lib nativeLock python3 stdenvNoCC;
           srcHash = meshLlmSrcHash;
         }""",
     )
     assert_nix_ast_equal(
         expect_binding(scope, "llamaCpp").value,
         """import ./llama-cpp.nix {
-          inherit cctools cmake fetchFromGitHub gitMinimal lib ninja stdenv;
+          inherit cctools cmake fetchFromGitHub gitMinimal lib nativeLock ninja stdenv;
           meshSrcHash = meshLlmSrcHash;
           srcHash = llamaCppSrcHash;
         }""",
@@ -422,8 +434,8 @@ def test_bundle_contract_independently_satisfies_the_package_gate() -> None:
         expect_binding(scope, "implementedBundleContract").value,
         """{
           kind = "mesh-native-runtime-bundle";
-          meshVersion = "0.75.1";
-          skippyAbi = "0.1.35";
+          meshVersion = meshLlmVersion;
+          inherit skippyAbi;
           target = "aarch64-apple-darwin";
           platform = {
             os = "macos";
@@ -482,7 +494,7 @@ def test_package_supplies_exact_source_hashes_to_the_internal_bundle_builders() 
           null
         else
           import ./native/mesh-runtime-bundle.nix {
-            inherit cctools fetchFromGitHub lib python3 stdenv stdenvNoCC;
+            inherit cctools fetchFromGitHub lib nativeLock python3 stdenv stdenvNoCC;
             inherit (pkgs) cmake gitMinimal ninja;
             meshLlmSrcHash = meshLlmSrcHashEntry.hash;
             llamaCppSrcHash = llamaCppSrcHashEntry.hash;
@@ -575,14 +587,14 @@ def test_bundle_is_complete_deterministic_and_dependency_first(
                 "lib/plugins/libplugin.dylib",
                 "lib/libengine.1.dylib",
             ],
-            "mesh_version": "0.75.1",
+            "mesh_version": _MESH_VERSION,
             "platform": {
                 "arch": "aarch64",
                 "os": "macos",
                 "target": "aarch64-apple-darwin",
             },
             "rank": 0,
-            "skippy_abi": "0.1.35",
+            "skippy_abi": _SKIPPY_ABI,
         }
     }
     assert (first_output / "lib/libdependency.dylib").readlink() == Path(

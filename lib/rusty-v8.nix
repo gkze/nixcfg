@@ -9,6 +9,7 @@
 #     name = "goose-cli-v8";
 #     version = "145.0.0";
 #     rustyV8Src = fetchgit { ... };
+#     clangResourceVersion = source.pins.clangResourceVersion;
 #     extraPatches = [ ./rusty-v8-goose-rename.patch ];
 #   };
 #
@@ -81,7 +82,7 @@ in
       extraPatches ? [ ],
       extraPatchCommands ? "",
       gnArgsOverrides ? { },
-      clangResourceVersion ? "22",
+      clangResourceVersion,
       prebuiltArtifacts ? null,
     }:
     let

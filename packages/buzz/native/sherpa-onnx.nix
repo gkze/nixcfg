@@ -1,5 +1,6 @@
 {
   cctools,
+  closureContract ? (builtins.fromJSON (builtins.readFile ../native-lock.json)).sherpaOnnx,
   eigen_5,
   fetchFromGitHub,
   fetchurl,
@@ -13,10 +14,9 @@
 }:
 assert stdenv.hostPlatform.system == "aarch64-darwin";
 let
-  version = "1.13.4";
-  commit = "142807252687d81b40d6315f23470a1512a00de3";
+  inherit (closureContract) version commit;
 
-  # Keep this in sherpa-onnx-sys 1.13.4's emitted static-link order. Besides
+  # Keep this in the locked sherpa-onnx-sys release's emitted static-link order. Besides
   # defining the delivered artifact contract, the order is exercised by the
   # link-only smoke check below.
   expectedArchiveNames = [
@@ -32,59 +32,22 @@ let
     "libssentencepiece_core.a"
   ];
 
-  activeCache = [
+  activeCache = builtins.map (
+    name:
+    let
+      dependency = closureContract.dependencies.${name};
+    in
     {
-      cmakeVariable = "KALDI_NATIVE_FBANK";
-      name = "kaldi-native-fbank-1.22.3.tar.gz";
+      inherit (dependency) cmakeVariable;
+      name = dependency.file;
       src = fetchurl {
-        url = "https://github.com/csukuangfj/kaldi-native-fbank/archive/refs/tags/v1.22.3.tar.gz";
-        hash = "sha256-kXbMZvx84e34XPNVsG4yDFfbYpffdCd/V1GDRoiTz2E=";
+        inherit (dependency) url hash;
       };
     }
-    {
-      cmakeVariable = "SIMPLE-SENTENCEPIECE";
-      name = "simple-sentencepiece-0.7.tar.gz";
-      src = fetchurl {
-        url = "https://github.com/pkufool/simple-sentencepiece/archive/refs/tags/v0.7.tar.gz";
-        hash = "sha256-F0ioIgYKNbqp9mCfhO/I61TcDnS57OPYI2e3EZ/cda8=";
-      };
-    }
-    {
-      cmakeVariable = "KALDIFST";
-      name = "kaldifst-1.8.0.tar.gz";
-      src = fetchurl {
-        url = "https://github.com/k2-fsa/kaldifst/archive/refs/tags/v1.8.0.tar.gz";
-        hash = "sha256-PyR7flokCQcSAvXivGIABg9mcowKNEPAOSOtJyPgQLM=";
-      };
-    }
-    {
-      cmakeVariable = "KALDI_DECODER";
-      name = "kaldi-decoder-0.3.0.tar.gz";
-      src = fetchurl {
-        url = "https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.3.0.tar.gz";
-        hash = "sha256-ufNM+0/TsTRBAO6tee9NN6oVliJ0ueMFbeNFAh92obA=";
-      };
-    }
-    {
-      cmakeVariable = "OPENFST";
-      name = "openfst-1.8.5-2026-04-11.tar.gz";
-      src = fetchurl {
-        url = "https://github.com/csukuangfj/openfst/archive/refs/tags/v1.8.5-2026-04-11.tar.gz";
-        hash = "sha256-V/vEuVCugbGg4eKYrxVlLalopnI6WSt4dOm0AnqApbQ=";
-      };
-    }
-    {
-      cmakeVariable = "KISSFFT";
-      name = "kissfft-febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip";
-      src = fetchurl {
-        url = "https://github.com/mborgerding/kissfft/archive/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip";
-        hash = "sha256-SXED5mQWjr45WAt1etvmFvbPhaFlcq9YHKe8QtCrE/0=";
-      };
-    }
-  ];
+  ) closureContract.dependencyOrder;
 
-  # Override the pinned nixpkgs package while replacing its 1.13.3 dependency
-  # cache with the active, source-reviewed 1.13.4 closure below.
+  # Override the pinned nixpkgs package while replacing its dependency cache
+  # with the active, updater-reviewed closure below.
   base = sherpa-onnx.override {
     cudaSupport = false;
     onnxruntime = onnxRuntime;
@@ -321,8 +284,7 @@ base.overrideAttrs (old: {
   passthru = (old.passthru or { }) // {
     buzzNativeContract = {
       kind = "sherpa-onnx";
-      version = "1.13.4";
-      commit = "142807252687d81b40d6315f23470a1512a00de3";
+      inherit version commit;
       target = "aarch64-apple-darwin";
       linkMode = "static";
       usePreinstalledOnnxRuntime = true;

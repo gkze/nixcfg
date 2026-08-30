@@ -3,10 +3,11 @@
   lib,
   stdenvNoCC,
   unzip,
+  version,
 }:
 stdenvNoCC.mkDerivation {
   pname = "openchamber-bun";
-  version = "1.3.14";
+  inherit version;
   src = bunSource;
 
   nativeBuildInputs = [ unzip ];

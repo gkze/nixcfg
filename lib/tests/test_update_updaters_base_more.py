@@ -434,7 +434,19 @@ def test_flake_metadata_latest_and_crate2nix_materialization_branches(
         is False
     )
 
-    async def _stream(name: str, *, operation: str = "materialize_artifacts"):
+    async def _stream(
+        name: str,
+        *,
+        operation: str = "materialize_artifacts",
+        source_overrides: dict[str, SourceEntry] | None = None,
+    ):
+        assert source_overrides == {
+            "crate2nix-materialization-test": SourceEntry(
+                version="1.0.0",
+                hashes=[],
+                input="crate2nix-input",
+            )
+        }
         yield UpdateEvent.status(name, f"{operation} started")
 
     monkeypatch.setattr(
@@ -461,6 +473,59 @@ def test_flake_metadata_latest_and_crate2nix_materialization_branches(
         UpdateEventKind.VALUE,
     ]
     assert events[-1].payload == []
+
+
+def test_crate2nix_metadata_materializes_the_complete_latest_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Candidate materialization must preserve hashes and apply updater-owned pins."""
+    commit = "a" * 40
+    current = SourceEntry(
+        version="1.0.0",
+        hashes=HashCollection(mapping={"x86_64-linux": HASH_A}),
+        input="crate2nix-candidate-input",
+        commit=commit,
+        pins={"clangResourceVersion": "23"},
+    )
+    captured: dict[str, object] = {}
+
+    async def _stream(
+        name: str,
+        *,
+        operation: str = "materialize_artifacts",
+        source_overrides: dict[str, SourceEntry] | None = None,
+    ) -> EventStream:
+        captured["name"] = name
+        captured["operation"] = operation
+        captured["source_overrides"] = source_overrides
+        yield UpdateEvent.status(name, "candidate materialized", operation=operation)
+
+    monkeypatch.setattr(
+        materialization_module,
+        "stream_crate2nix_artifact_updates",
+        _stream,
+    )
+
+    class _CandidateUpdater(Crate2NixMetadataUpdater):
+        name = "crate2nix-candidate-test"
+        input_name = "crate2nix-candidate-input"
+        source_pins: ClassVar[dict[str, str]] = {"clangResourceVersion": "23"}
+
+    updater = _CandidateUpdater()
+    info = VersionInfo(version="1.0.0", metadata={"commit": commit})
+
+    assert asyncio.run(updater._is_latest(None, info)) is False
+    assert asyncio.run(updater._is_latest(current, info)) is True
+    events = asyncio.run(
+        _collect_events(updater.fetch_hashes(info, object(), context=current))
+    )
+
+    assert events[-1].payload == {"x86_64-linux": HASH_A}
+    assert captured == {
+        "name": updater.name,
+        "operation": "materialize_artifacts",
+        "source_overrides": {updater.name: current},
+    }
 
 
 async def _with_session[T](
@@ -583,7 +648,7 @@ def test_default_updater_is_latest_uses_version_and_optional_commit_witness() ->
 
 
 def test_results_equivalent_merges_native_only_partial_updates() -> None:
-    """Native-only comparison should use the effective merged source state."""
+    """Native comparison preserves foreign hashes but replaces source pins."""
     updater = _DummyDenoDeps()
     updater.native_only = True
     native_hash = "sha256-CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
@@ -591,6 +656,7 @@ def test_results_equivalent_merges_native_only_partial_updates() -> None:
     current = SourceEntry.model_validate({
         "version": "1.0.0",
         "input": "deno-input",
+        "pins": {"removed": "obsolete", "runtimeVersion": "2.0.0"},
         "hashes": [
             {
                 "hashType": "denoDepsHash",
@@ -607,6 +673,7 @@ def test_results_equivalent_merges_native_only_partial_updates() -> None:
     partial = SourceEntry.model_validate({
         "version": "1.0.0",
         "input": "deno-input",
+        "pins": {"runtimeVersion": "2.0.0"},
         "hashes": [
             {
                 "hashType": "denoDepsHash",
@@ -616,7 +683,11 @@ def test_results_equivalent_merges_native_only_partial_updates() -> None:
         ],
     })
 
-    assert updater.results_equivalent(current, partial, context=current)
+    effective = updater._comparison_result(partial, context=current)
+
+    assert effective.pins == {"runtimeVersion": "2.0.0"}
+    assert effective.hashes.equivalent_to(current.hashes)
+    assert not updater.results_equivalent(current, partial, context=current)
 
 
 def test_stream_fixed_output_hashes_emits_entries_in_sequence(
@@ -1269,7 +1340,10 @@ def test_platform_specific_update_keeps_drv_hash_when_hashes_are_preserved(
             return VersionInfo(version="1.0.0", metadata={})
 
     preserved_hash = "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M="
-    current = _platform_entry(drv_hash="old-drv", hash_value=preserved_hash)
+    current = _platform_entry(
+        drv_hash="old-drv",
+        hash_value=preserved_hash,
+    ).model_copy(update={"input": "dummy-input"})
 
     async def _compute_drv_fingerprint(*_args: object, **_kwargs: object) -> str:
         return "new-drv"
@@ -1318,6 +1392,63 @@ def test_platform_specific_update_keeps_drv_hash_when_hashes_are_preserved(
         ("aarch64-darwin", HASH_A),
         ("x86_64-linux", preserved_hash),
     }
+
+
+def test_platform_specific_update_rejects_identity_change_with_preserved_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A full run must not combine new identity with a preserved foreign hash."""
+
+    class _PlatformFlake(_DummyFlakeInput):
+        platform_specific = True
+
+        async def fetch_latest(self, session: object) -> VersionInfo:
+            _ = session
+            return VersionInfo(version="2.0.0", metadata={})
+
+    current = _platform_entry(drv_hash="old-drv").model_copy(
+        update={"input": "dummy-input"}
+    )
+
+    async def _compute_overlay_hash(
+        source_name: str,
+        *,
+        system: str | None,
+        config: object,
+    ) -> EventStream:
+        _ = config
+        if system == "x86_64-linux":
+            raise RuntimeError("no builder")
+        yield UpdateEvent.value(source_name, HASH_A)
+
+    monkeypatch.setattr(
+        "lib.update.nix.compute_overlay_hash",
+        _compute_overlay_hash,
+    )
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    updater = _PlatformFlake(
+        config=resolve_config(
+            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
+        )
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            r"Cannot apply partial update for dummy-flake: updater-owned source "
+            r"identity changed \(version\) while foreign-platform hashes would be "
+            r"preserved; rerun with working builders for all configured hash platforms"
+        ),
+    ):
+        asyncio.run(
+            _with_session(
+                lambda session: _collect_events(updater.update_stream(current, session))
+            )
+        )
 
 
 def test_platform_specific_update_rejects_partial_hashes_without_drv_hash(
@@ -1379,7 +1510,9 @@ def test_platform_specific_native_only_update_keeps_drv_hash(
             _ = session
             return VersionInfo(version="1.0.0", metadata={})
 
-    current = _platform_entry(drv_hash="old-drv")
+    current = _platform_entry(drv_hash="old-drv").model_copy(
+        update={"input": "dummy-input"}
+    )
 
     async def _compute_drv_fingerprint(*_args: object, **_kwargs: object) -> str:
         return "new-drv"
@@ -1392,7 +1525,7 @@ def test_platform_specific_native_only_update_keeps_drv_hash(
     ) -> EventStream:
         _ = config
         assert system == "aarch64-darwin"
-        yield UpdateEvent.value(source_name, HASH_A)
+        yield UpdateEvent.value(source_name, HASH_B)
 
     monkeypatch.setattr(
         "lib.update.nix.compute_drv_fingerprint",
@@ -1423,6 +1556,67 @@ def test_platform_specific_native_only_update_keeps_drv_hash(
     assert len(result_events) == 1
     result = expect_instance(result_events[0].payload, SourceEntry)
     assert result.drv_hash == "old-drv"
+
+
+def test_platform_specific_native_only_rejects_global_pin_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not pair new global pins with hashes preserved from another platform."""
+
+    class _PinnedPlatformFlake(_DummyFlakeInput):
+        platform_specific = True
+        source_pins: ClassVar[dict[str, str]] = {"runtimeVersion": "2.0.0"}
+
+        async def fetch_latest(self, session: object) -> VersionInfo:
+            _ = session
+            return VersionInfo(version="1.0.0", metadata={})
+
+        def _compute_hash_for_system(
+            self,
+            info: VersionInfo,
+            *,
+            system: str | None,
+        ) -> EventStream:
+            _ = info
+
+            async def _stream() -> EventStream:
+                assert system == "aarch64-darwin"
+                yield UpdateEvent.value(self.name, HASH_B)
+
+            return _stream()
+
+    current = _platform_entry(drv_hash="old-drv").model_copy(
+        update={
+            "input": "dummy-input",
+            "pins": {"removed": "obsolete", "runtimeVersion": "1.0.0"},
+        }
+    )
+
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    updater = _PinnedPlatformFlake(
+        config=resolve_config(
+            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
+        )
+    )
+    updater.native_only = True
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            r"Cannot apply native-only update for dummy-flake: updater-owned "
+            r"source identity changed \(pins\) while foreign-platform hashes "
+            r"would be preserved; rerun without --native-only"
+        ),
+    ):
+        asyncio.run(
+            _with_session(
+                lambda session: _collect_events(updater.update_stream(current, session))
+            )
+        )
 
 
 def test_platform_specific_native_only_single_platform_updates_drv_hash(
@@ -1789,7 +1983,7 @@ def test_deno_native_only_update_keeps_drv_hash_when_hashes_are_preserved(
         drv_hash="old-drv",
         hash_type="denoDepsHash",
         hash_value=foreign_hash,
-    )
+    ).model_copy(update={"input": "deno-input"})
 
     async def _compute_drv_fingerprint(*_args: object, **_kwargs: object) -> str:
         return "new-drv"
@@ -1808,7 +2002,7 @@ def test_deno_native_only_update_keeps_drv_hash_when_hashes_are_preserved(
         yield UpdateEvent.value(
             "deno-hash",
             {
-                "aarch64-darwin": HASH_A,
+                "aarch64-darwin": HASH_B,
                 "x86_64-linux": foreign_hash,
             },
         )
@@ -1862,7 +2056,7 @@ def test_deno_multi_platform_update_keeps_drv_hash_when_hashes_are_preserved(
         drv_hash="old-drv",
         hash_type="denoDepsHash",
         hash_value=foreign_hash,
-    )
+    ).model_copy(update={"input": "deno-input"})
     fingerprint_calls = 0
 
     async def _compute_drv_fingerprint(*_args: object, **_kwargs: object) -> str:
@@ -2755,6 +2949,9 @@ def test_emdash_uses_platform_specific_npm_hashes() -> None:
         "aarch64-linux",
         "x86_64-linux",
     )
+    assert getattr(updater, "source_pins", None) == {
+        "electronVersion": "40.7.0",
+    }
 
 
 def test_linearis_tracks_the_published_npm_tarball() -> None:

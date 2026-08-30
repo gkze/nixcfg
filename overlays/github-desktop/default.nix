@@ -7,8 +7,8 @@
   ...
 }:
 let
-  inherit (selfSource) version;
-  electronRuntime = final.nixcfgElectron.runtimeFor "40.1.0";
+  inherit (selfSource) version electronVersion;
+  electronRuntime = final.nixcfgElectron.runtimeFor electronVersion;
   electronZipName = "electron-v${electronRuntime.version}-${prev.stdenv.hostPlatform.node.platform}-${prev.stdenv.hostPlatform.node.arch}.zip";
   src = inputs.github-desktop;
   srcRev = inputs.github-desktop.rev;

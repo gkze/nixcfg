@@ -43,19 +43,19 @@ in
 
     enableLinuxDesktopTargets = lib.mkOption {
       type = lib.types.bool;
-      default = pkgs.stdenv.isLinux;
+      default = pkgs.stdenv.hostPlatform.isLinux;
       description = "Enable Linux desktop-related Stylix targets (gnome, gtk, gnome-text-editor).";
     };
 
     enableGhosttyTarget = lib.mkOption {
       type = lib.types.bool;
-      default = !pkgs.stdenv.isDarwin;
+      default = !pkgs.stdenv.hostPlatform.isDarwin;
       description = "Enable Stylix's Ghostty target.";
     };
 
     enableIcons = lib.mkOption {
       type = lib.types.bool;
-      default = !pkgs.stdenv.isDarwin;
+      default = !pkgs.stdenv.hostPlatform.isDarwin;
       description = "Enable Stylix icon theme configuration.";
     };
   };

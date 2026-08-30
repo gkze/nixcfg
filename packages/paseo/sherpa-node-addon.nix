@@ -1,5 +1,6 @@
 {
   cmake,
+  closureContract ? (builtins.fromJSON (builtins.readFile ./native-lock.json)).sherpaOnnx,
   electronHeaders,
   lib,
   nodeAddonApiSrc,
@@ -12,7 +13,7 @@
 }:
 stdenv.mkDerivation {
   pname = "paseo-sherpa-onnx-node";
-  version = "1.12.28";
+  inherit (closureContract) version;
   inherit src;
 
   sourceRoot = "source/scripts/node-addon-api";

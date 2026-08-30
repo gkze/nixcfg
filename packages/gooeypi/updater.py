@@ -367,5 +367,6 @@ class GooeyPiUpdater(GitHubReleaseUpdater):
             "version": info.version,
             "commit": commit,
             "electronVersion": electron_version,
+            "pins": {"npmVersion": npm_version},
             "hashes": annotated_hashes,
         })

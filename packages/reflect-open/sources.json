@@ -10,6 +10,11 @@
       "hashType": "npmDepsHash"
     },
     {
+      "hash": "sha256-KcNcqNKih5iP3uPg824H2bk3g/VntXm3/Vt5ikVj3YE=",
+      "hashType": "sha256",
+      "url": "https://registry.npmjs.org/pnpm/-/pnpm-11.18.0.tgz"
+    },
+    {
       "hash": "sha256-NlOjgmUGu0AKiUdHQga1+gTvizlKtcHpeaFE8OKC79A=",
       "hashType": "srcHash"
     }

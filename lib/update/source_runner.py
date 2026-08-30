@@ -385,7 +385,7 @@ async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
                 if result.source_update is not None:
                     current = effective_sources.get(name)
                     effective_sources[name] = (
-                        current.merge(result.source_update)
+                        current.merge_native_update(result.source_update)
                         if context.native_only and current is not None
                         else result.source_update
                     )

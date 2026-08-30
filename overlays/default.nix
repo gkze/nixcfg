@@ -47,7 +47,20 @@
         google-chrome = withManagedMacApp (final.mkSourceOverride "google-chrome" prev.google-chrome) "Google Chrome.app";
         hoppscotch = withManagedMacApp prev.hoppscotch "Hoppscotch.app";
         iina = withManagedMacApp prev.iina "IINA.app";
-        inherit (inputs.googleworkspace-cli.packages.${system}) gws;
+        gws = inputs.googleworkspace-cli.packages.${system}.gws.overrideAttrs (
+          _:
+          let
+            gwsPkgs = inputs.googleworkspace-cli.inputs.nixpkgs.legacyPackages.${system};
+          in
+          {
+            buildInputs =
+              prev.lib.optionals prev.stdenv.hostPlatform.isLinux [ gwsPkgs.libsecret ]
+              ++ prev.lib.optionals prev.stdenv.hostPlatform.isDarwin [
+                gwsPkgs.libiconv
+                gwsPkgs.apple-sdk
+              ];
+          }
+        );
         notion-app = withManagedMacApp prev.notion-app "Notion.app";
         orbstack = withManagedMacApp (final.mkSourceOverride "orbstack" prev.orbstack) "OrbStack.app";
         postman = withManagedMacApp prev.postman "Postman.app";

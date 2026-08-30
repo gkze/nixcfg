@@ -31,12 +31,6 @@ in
       };
       agent = {
         button = true;
-        default_model = {
-          effort = "medium";
-          enable_thinking = true;
-          model = "gpt-5.5";
-          provider = "zed.dev";
-        };
         dock = "left";
         expand_edit_card = false;
         expand_terminal_card = false;

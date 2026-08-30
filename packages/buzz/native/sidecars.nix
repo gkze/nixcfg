@@ -2,6 +2,7 @@
   cctools,
   lib,
   makeRustPlatform,
+  nativeLock ? builtins.fromJSON (builtins.readFile ../native-lock.json),
   patchedBuzzSource,
   rootCargoDeps,
   rustToolchain,
@@ -9,7 +10,13 @@
   stdenv,
   version,
 }:
+let
+  buzzCommit = nativeLock.buzz.commit or null;
+  rustVersion = nativeLock.buzz.rustVersion or null;
+in
 assert stdenv.hostPlatform.system == "aarch64-darwin";
+assert builtins.isString buzzCommit && builtins.match "[0-9a-f]{40}" buzzCommit != null;
+assert builtins.isString rustVersion;
 assert
   sidecarSpecs == [
     {
@@ -40,7 +47,7 @@ assert
 assert
   (rustToolchain.passthru.buzzNativeContract or null) == {
     kind = "rust-toolchain";
-    channel = "1.95.0";
+    channel = rustVersion;
     profile = "default";
     target = "aarch64-apple-darwin";
   };
@@ -48,7 +55,7 @@ let
   target = "aarch64-apple-darwin";
   implementedContract = {
     kind = "buzz-sidecars";
-    commit = "95154bee4034ca7a40b33095c2ddbde8c9aa1614";
+    commit = buzzCommit;
     target = "aarch64-apple-darwin";
     profile = "release";
     cargoOffline = true;

@@ -132,6 +132,7 @@ class FlakeInputMetadataUpdater(FlakeInputUpdater):
             hashes=HashCollection.from_value(hashes),
             input=self._input,
             commit=info.commit,
+            pins=self.source_pins,
         )
 
     async def _is_latest(
@@ -185,6 +186,7 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
             version=info.version,
             hashes=HashCollection.from_value(hashes),
             input=self._input,
+            pins=self.source_pins,
         )
 
     async def _is_latest(
@@ -198,10 +200,11 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
             current is None
             or current.version != info.version
             or current.drv_hash is None
+            or current.pins != self.source_pins
         ):
             return False
         try:
-            new_fingerprint = await self._compute_drv_fingerprint()
+            new_fingerprint = await self._compute_drv_fingerprint(current)
         except RuntimeError:
             return False
         context.drv_fingerprint = new_fingerprint
@@ -250,7 +253,7 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         try:
             drv_hash = context.drv_fingerprint
             if drv_hash is None:
-                drv_hash = await self._compute_drv_fingerprint()
+                drv_hash = await self._compute_drv_fingerprint(result)
             result = result.model_copy(update={"drv_hash": drv_hash})
         except RuntimeError as exc:
             yield UpdateEvent.status(
@@ -306,19 +309,39 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         *,
         system: str | None,
     ) -> EventStream:
-        _ = info
-        package_expr = self._package_hash_expr(system=system)
+        source_override = (
+            self.build_result(info, []) if self.source_pins is not None else None
+        )
+        package_expr = self._package_hash_expr(
+            system=system,
+            source_override=source_override,
+        )
         if package_expr is not None:
             return update_nix.compute_fixed_output_hash(
                 self.name,
                 package_expr,
                 config=self.config,
             )
+        if source_override is None:
+            return update_nix.compute_overlay_hash(
+                self.name,
+                system=system,
+                config=self.config,
+            )
         return update_nix.compute_overlay_hash(
-            self.name, system=system, config=self.config
+            self.name,
+            system=system,
+            config=self.config,
+            source_overrides={self.name: source_override},
+            fake_hashes=True,
         )
 
-    def _package_hash_expr(self, *, system: str | None) -> str | None:
+    def _package_hash_expr(
+        self,
+        *,
+        system: str | None,
+        source_override: SourceEntry | None = None,
+    ) -> str | None:
         updater_path = update_paths.package_file_for(
             self.name,
             update_paths.UPDATER_FILE_NAME,
@@ -331,14 +354,42 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
             self.name,
             self.hash_attr_path,
             system=system,
+            source_overrides=(
+                {self.name: source_override} if source_override is not None else None
+            ),
+            fake_hashes=True if source_override is not None else None,
         )
 
-    async def _compute_drv_fingerprint(self) -> str:
-        package_expr = self._package_hash_expr(system=None)
+    async def _compute_drv_fingerprint(
+        self,
+        source_override: SourceEntry | None = None,
+    ) -> str:
+        if self.source_pins is None:
+            source_override = None
+        fingerprint_override = (
+            source_override.model_copy(
+                update={
+                    "drv_hash": None,
+                    "hashes": HashCollection(entries=[]),
+                }
+            )
+            if source_override is not None
+            else None
+        )
+        package_expr = self._package_hash_expr(
+            system=None,
+            source_override=fingerprint_override,
+        )
         if package_expr is None:
             return await update_nix.compute_drv_fingerprint(
                 self.name,
                 config=self.config,
+                source_overrides=(
+                    {self.name: fingerprint_override}
+                    if fingerprint_override is not None
+                    else None
+                ),
+                fake_hashes=True if fingerprint_override is not None else None,
             )
         return await update_nix.compute_expr_drv_fingerprint(
             self.name,
@@ -445,14 +496,43 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
     hash_type: HashType = "denoDepsHash"
     native_only: bool = False
 
-    def _compute_hash(self, info: VersionInfo) -> EventStream:
+    def _compute_hash(
+        self,
+        info: VersionInfo,
+        *,
+        source_override: SourceEntry | None = None,
+    ) -> EventStream:
         _ = info
+        if source_override is None:
+            return update_nix_deno.compute_deno_deps_hash(
+                self.name,
+                self._input,
+                native_only=self.native_only,
+                config=self.config,
+            )
         return update_nix_deno.compute_deno_deps_hash(
             self.name,
             self._input,
             native_only=self.native_only,
             config=self.config,
+            source_override=source_override,
         )
+
+    def _candidate_source_override(
+        self,
+        info: VersionInfo,
+        current: SourceEntry | None,
+    ) -> SourceEntry | None:
+        if self.source_pins is None:
+            return None
+        hashes: SourceHashes
+        if current is None:
+            hashes = []
+        elif current.hashes.entries is not None:
+            hashes = list(current.hashes.entries)
+        else:
+            hashes = dict(current.hashes.mapping or {})
+        return self.build_result(info, hashes)
 
     async def fetch_hashes(
         self,
@@ -464,6 +544,7 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
         """Compute structured Deno dependency hashes for all target platforms."""
         _ = session
         context = _coerce_context(context)
+        source_override = self._candidate_source_override(info, context.current)
         if self.native_only:
             current_platform = update_nix.get_current_nix_platform()
             if set(self.config.hash_build_platforms) != {current_platform}:
@@ -477,8 +558,13 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
 
         error = f"Missing {self.hash_type} output"
         hash_drain = ValueDrain[HashMapping]()
+        hash_stream = (
+            self._compute_hash(info, source_override=source_override)
+            if source_override is not None
+            else self._compute_hash(info)
+        )
         async for event in drain_value_events(
-            self._compute_hash(info),
+            hash_stream,
             hash_drain,
             parse=_expect_platform_hashes,
         ):
@@ -523,6 +609,7 @@ class DenoManifestUpdater(FlakeInputUpdater):
             hashes=HashCollection.from_value(hashes),
             input=self._input,
             commit=info.commit,
+            pins=self.source_pins,
         )
 
     async def fetch_hashes(
@@ -615,6 +702,7 @@ class UvLockUpdater(FlakeInputUpdater):
             hashes=HashCollection.from_value(hashes),
             input=self._input,
             commit=info.commit,
+            pins=self.source_pins,
         )
 
     def _render_lock_env(self, info: VersionInfo) -> dict[str, str]:

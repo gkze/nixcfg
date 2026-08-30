@@ -315,12 +315,14 @@ def _build_overlay_attr_expr(
     *,
     system: str | None = None,
     source_overrides: Mapping[str, SourceEntry] | None = None,
+    fake_hashes: bool | None = None,
 ) -> str:
     expression: NixExpression = Parenthesis(
         value=_build_overlay_expression(
             source,
             system=system,
             source_overrides=source_overrides,
+            fake_hashes=fake_hashes,
         ),
     )
     for attribute in attr_path.removeprefix(".").split("."):
@@ -338,6 +340,7 @@ def _build_package_path_attr_expr(
     repo_root: str | None = None,
     package_args: Mapping[str, NixExpression] | None = None,
     source_overrides: Mapping[str, SourceEntry] | None = None,
+    fake_hashes: bool | None = None,
 ) -> str:
     package_materialization = FunctionCall(
         name=FunctionCall(
@@ -402,6 +405,7 @@ def _build_package_path_attr_expr(
                 system=system,
                 repo_root=repo_root,
                 source_overrides=source_overrides,
+                fake_hashes=fake_hashes,
             ),
             Binding(name="packageMaterialization", value=package_materialization),
         ],
@@ -418,6 +422,7 @@ def _build_repo_package_attr_expr(
     repo_root: str | None = None,
     package_args: Mapping[str, NixExpression] | None = None,
     source_overrides: Mapping[str, SourceEntry] | None = None,
+    fake_hashes: bool | None = None,
 ) -> str:
     """Evaluate an internal package file that is intentionally not exported."""
     package_path = Parenthesis(
@@ -434,6 +439,7 @@ def _build_repo_package_attr_expr(
         repo_root=repo_root,
         package_args=package_args,
         source_overrides=source_overrides,
+        fake_hashes=fake_hashes,
     )
 
 
@@ -445,6 +451,7 @@ def _build_call_package_attr_expr(
     repo_root: str | None,
     package_args: Mapping[str, NixExpression] | None,
     source_overrides: Mapping[str, SourceEntry] | None,
+    fake_hashes: bool | None,
 ) -> str:
     package_expr: NixExpression = FunctionCall(
         name=FunctionCall(
@@ -480,6 +487,7 @@ def _build_call_package_attr_expr(
             system=system,
             repo_root=repo_root,
             source_overrides=source_overrides,
+            fake_hashes=fake_hashes,
         ),
         value=expression,
     )
@@ -749,6 +757,7 @@ def _build_overlay_expression(
     system: str | None = None,
     repo_root: str | None = None,
     source_overrides: Mapping[str, SourceEntry] | None = None,
+    fake_hashes: bool | None = None,
 ) -> NixExpression:
     """Build a Nix expression that evaluates an overlay package.
 
@@ -769,6 +778,7 @@ def _build_overlay_expression(
             system=system,
             repo_root=repo_root,
             source_overrides=source_overrides,
+            fake_hashes=fake_hashes,
         ),
         value=Select(
             expression=Identifier(name="applied"),
@@ -782,6 +792,7 @@ def _contextual_overlay_bindings(
     system: str | None,
     repo_root: str | None,
     source_overrides: Mapping[str, SourceEntry] | None,
+    fake_hashes: bool | None = None,
 ) -> list[Binding | Inherit]:
     """Build one explicit update-evaluation scope shared by package probes."""
     repo_path = get_repo_file(".") if repo_root is None else Path(repo_root).resolve()
@@ -832,7 +843,11 @@ def _contextual_overlay_bindings(
                 ),
             ),
             "evaluationContext": AttributeSet.from_dict({
-                "fakeHashes": Primitive(value=source_overrides is None),
+                "fakeHashes": Primitive(
+                    value=source_overrides is None
+                    if fake_hashes is None
+                    else fake_hashes
+                ),
                 "sourceOverrides": source_overrides_expr,
             }),
         }),
@@ -897,6 +912,7 @@ def _build_overlay_expr(
     system: str | None = None,
     repo_root: str | None = None,
     source_overrides: Mapping[str, SourceEntry] | None = None,
+    fake_hashes: bool | None = None,
 ) -> str:
     return compact_nix_expr(
         _build_overlay_expression(
@@ -904,6 +920,7 @@ def _build_overlay_expr(
             system=system,
             repo_root=repo_root,
             source_overrides=source_overrides,
+            fake_hashes=fake_hashes,
         ).rebuild()
     )
 
@@ -914,6 +931,8 @@ async def compute_overlay_hash(
     system: str | None = None,
     config: UpdateConfig | None = None,
     repo_root: str | None = None,
+    source_overrides: Mapping[str, SourceEntry] | None = None,
+    fake_hashes: bool | None = None,
 ) -> EventStream:
     """Compute a hash by building the overlay with explicit fake-hash context.
 
@@ -923,7 +942,13 @@ async def compute_overlay_hash(
 
     The overlay definition in ``overlays/default.nix`` is the single source of truth.
     """
-    expr = _build_overlay_expr(source, system=system, repo_root=repo_root)
+    expr = _build_overlay_expr(
+        source,
+        system=system,
+        repo_root=repo_root,
+        source_overrides=source_overrides,
+        fake_hashes=fake_hashes,
+    )
     async for event in compute_fixed_output_hash(
         source,
         expr,
@@ -938,6 +963,8 @@ async def compute_drv_fingerprint(
     system: str | None = None,
     config: UpdateConfig | None = None,
     repo_root: str | None = None,
+    source_overrides: Mapping[str, SourceEntry] | None = None,
+    fake_hashes: bool | None = None,
 ) -> str:
     """Compute a stable derivation fingerprint for staleness detection.
 
@@ -951,7 +978,13 @@ async def compute_drv_fingerprint(
     hash.  This gives us maximally precise staleness detection: zero false
     negatives and zero false positives.
     """
-    expr = _build_overlay_expr(source, system=system, repo_root=repo_root)
+    expr = _build_overlay_expr(
+        source,
+        system=system,
+        repo_root=repo_root,
+        source_overrides=source_overrides,
+        fake_hashes=fake_hashes,
+    )
     return await compute_expr_drv_fingerprint(source, expr, config=config)
 
 

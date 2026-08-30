@@ -198,6 +198,7 @@ def test_gooeypi_update_pins_source_and_hashes_build_closure_without_derivation(
         version=_VERSION,
         commit=_COMMIT,
         electron_version=_ELECTRON_VERSION,
+        pins={"npmVersion": _NPM_VERSION},
         hashes=[
             HashEntry.create("srcHash", _SRC_HASH),
             HashEntry.create("npmDepsHash", _NPM_DEPS_HASH),
@@ -215,6 +216,7 @@ def test_gooeypi_metadata_has_complete_source_closures() -> None:
     assert source.version == _VERSION
     assert source.commit == _COMMIT
     assert source.electron_version == _ELECTRON_VERSION
+    assert source.pins == {"npmVersion": _NPM_VERSION}
     assert source.hashes.entries is not None
     assert {entry.hash_type for entry in source.hashes.entries} == {
         "npmDepsHash",

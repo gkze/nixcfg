@@ -2,6 +2,9 @@
   "hashes": {
     "x86_64-linux": "sha256-N7MrrQ4zzooOvjgWq0Bc4BC72fT/0yNCIGIypXQmzhU="
   },
+  "pins": {
+    "electronVersion": "40.8.5"
+  },
   "urls": {
     "x86_64-linux": "https://github.com/superset-sh/superset/releases/download/desktop-v1.25.0/superset-1.25.0-x86_64.AppImage"
   },

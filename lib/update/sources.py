@@ -154,12 +154,15 @@ def save_source_updates(
     source_updates: dict[str, SourceEntry],
     *,
     merge_existing: bool = False,
+    replace_pins: bool = False,
 ) -> dict[str, SourceEntry]:
     """Write only the supplied entries to their per-package ``sources.json``.
 
     Per-package files store a bare entry (not wrapped in ``{name: entry}``).
     When ``merge_existing`` is true, read and merge the current entry while
-    holding the same per-source lock used for the atomic write.
+    holding the same per-source lock used for the atomic write. Native-only
+    callers set ``replace_pins`` because updater-produced pins are a complete
+    mapping even when hashes are only partial for the current platform.
     """
     path_map = _source_file_map()
 
@@ -189,11 +192,15 @@ def save_source_updates(
             continue
         lock_path = path.with_suffix(".json.lock")
         with FileLock(lock_path):
-            persisted_entry = (
-                _load_entry(path).merge(entry)
-                if merge_existing and path.exists()
-                else entry
-            )
+            if merge_existing and path.exists():
+                existing = _load_entry(path)
+                persisted_entry = (
+                    existing.merge_native_update(entry)
+                    if replace_pins
+                    else existing.merge(entry)
+                )
+            else:
+                persisted_entry = entry
             atomic_write_json(path, persisted_entry.to_dict())
         persisted_updates[name] = persisted_entry
     return persisted_updates

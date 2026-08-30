@@ -30,7 +30,6 @@ from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import (
     BooleanPrimitive,
-    IntegerPrimitive,
     StringPrimitive,
 )
 from nix_manipulator.expressions.set import AttributeSet
@@ -1884,7 +1883,7 @@ def _assert_traycer_font_list_materialization_contract(
     assert {
         'fontListModule="clients/desktop/node_modules/font-list"',
         'fontListIsolatedTarget="../../../node_modules/.bun/'
-        'font-list@2.1.0/node_modules/font-list"',
+        'font-list@__NIX_INTERP__/node_modules/font-list"',
         'fontListInstalled="$(realpath "$fontListModule")"',
         'fontListBuildHelper="$fontListModule/libs/darwin/fontlist"',
         'entitlements="__NIX_INTERP__/__NIX_INTERP__"',
@@ -1900,7 +1899,7 @@ def _assert_traycer_font_list_materialization_contract(
         for command in command_texts(build_shell, "cp")
     )
     package_identity_commands = [
-        command for command in test_commands if "font-list@2.1.0" in command
+        command for command in test_commands if "font-list@__NIX_INTERP__" in command
     ]
     assert len(package_identity_commands) == 2
     assert any(
@@ -2011,13 +2010,13 @@ def _assert_traycer_build_phase_contract(real_arguments: AttributeSet) -> None:
             "@sentry/browser": "catalog:",
             "@sentry/electron": "catalog:",
             "electron-log": "catalog:",
-            "electron-updater": "^6.8.9",
+            "electron-updater": "^__NIX_INTERP__",
             "encrypt-storage": "catalog:",
-            "font-list": "^2.1.0",
+            "font-list": "^__NIX_INTERP__",
             "react": "catalog:",
             "react-dom": "catalog:",
         },
-        "packaged_dependencies": {"font-list": "^2.1.0"},
+        "packaged_dependencies": {"font-list": "^__NIX_INTERP__"},
     }
     dependency_script_positions = [
         node.start_byte
@@ -2065,13 +2064,18 @@ def test_traycer_desktop_build_and_bundle_audit_contract_is_explicit() -> None:
         FunctionDefinition,
     )
     final = expect_instance(package.output, IfExpression)
-    desktop_storage_key = expect_instance(
+    assert_nix_ast_equal(
         expect_binding(final.scope, "desktopLocalStorageKey").value,
-        StringPrimitive,
+        "releaseContract.desktopLocalStorageKey",
     )
-    assert len(desktop_storage_key.value) == 64
+    release_contract = json.loads(
+        (_PACKAGE_DIR / "release-contract.json").read_text(encoding="utf-8"),
+    )
+    desktop_storage_key = release_contract["desktopLocalStorageKey"]
+    assert isinstance(desktop_storage_key, str)
+    assert len(desktop_storage_key) == 64
     assert (
-        hashlib.sha256(desktop_storage_key.value.encode()).hexdigest()
+        hashlib.sha256(desktop_storage_key.encode()).hexdigest()
         == "f7ed5773a12228344502090c3740481a09edab5a5a698700d763e9b7a73ed065"
     )
     real_package = expect_instance(
@@ -2290,8 +2294,8 @@ def test_traycer_final_sea_policy_probes_are_isolated_and_exhaustive() -> None:
     assert 'test ! -e "$TRAYCER_LAUNCHCTL_LOG"' in command_texts(shell, "test")
 
 
-def test_traycer_package_is_exported_only_after_literal_evidence_is_complete() -> None:
-    """Promoted evidence and the app-free CLI must stay literal and fail-closed."""
+def test_traycer_package_is_exported_only_after_reviewed_evidence_is_complete() -> None:
+    """Promoted evidence and the app-free CLI stay reviewed and fail-closed."""
     assert_nix_ast_equal(
         parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),
         "import ./package.nix",
@@ -2312,12 +2316,7 @@ def test_traycer_package_is_exported_only_after_literal_evidence_is_complete() -
     final = expect_instance(package.output, IfExpression)
     assert_nix_ast_equal(
         expect_binding(final.scope, "verifiedHostCodesignIdentity").value,
-        """{
-          teamIdentifier = "7YVZ56DZ74";
-          identifier = "traycer-host";
-          designatedRequirement = ''identifier "traycer-host" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = "7YVZ56DZ74"'';
-          executableSha256 = "4977de1ec618e272c4701e004de9aee0efea32b3b72fe42012ef0016fe6bf48c";
-        }""",
+        "releaseContract.verifiedHostCodesignIdentity",
     )
     assert (
         expect_instance(
@@ -2393,64 +2392,89 @@ def test_traycer_package_is_exported_only_after_literal_evidence_is_complete() -
         """,
     )
 
-    literal_strings = {
-        "expectedHostArchiveSha256": (
-            "66cf81e799d8251466e34ec13b6159007cbb1069dc091d6dc75e10a28d546939"
+    reviewed_bindings = {
+        "expectedHostArchiveSha256": "releaseContract.host.archive.sha256",
+        "expectedHostSignatureSha256": "releaseContract.host.signature.sha256",
+        "expectedHostMinisignPublicKey": "releaseContract.host.minisign.publicKey",
+        "expectedHostMinisignKeyId": "releaseContract.host.minisign.keyId",
+        "expectedHostMinisignTrustedComment": (
+            "releaseContract.host.minisign.trustedComment"
         ),
-        "expectedHostSignatureSha256": (
-            "556fafe5c3bc5f6a2a7bce55f6cb2c6c61b139a947a72e44f65dbd9dca23439d"
+        "expectedBunSha256": "releaseContract.bun.sha256",
+        "unverifiedPrivateBuildCommit": (
+            "releaseContract.unverifiedPrivateBuildCommit"
         ),
-        "expectedHostMinisignPublicKey": _HOST_MINISIGN_PUBLIC_KEY,
-        "expectedHostMinisignKeyId": _HOST_MINISIGN_KEY_ID,
-        "expectedHostMinisignTrustedComment": _HOST_MINISIGN_TRUSTED_COMMENT,
-        "expectedBunSha256": (
-            "6c4bb87dd013ed1a8d6a16e357a3d094959fd5530b4d7061f7f3680c3c7cea1c"
-        ),
-        "unverifiedPrivateBuildCommit": _BUILD_COMMIT,
+        "expectedHostArchiveSize": "releaseContract.host.archive.size",
+        "expectedHostArchiveMemberCount": ("releaseContract.host.archive.memberCount"),
+        "expectedHostArchiveFileCount": "releaseContract.host.archive.fileCount",
+        "expectedHostSignatureSize": "releaseContract.host.signature.size",
+        "expectedBunSize": "releaseContract.bun.size",
     }
-    for binding_name, expected in literal_strings.items():
-        assert (
-            expect_instance(
-                expect_binding(final.scope, binding_name).value,
-                StringPrimitive,
-            ).value
-            == expected
-        )
-    assert (
-        expect_instance(
-            expect_binding(final.scope, "expectedHostArchiveSize").value,
-            IntegerPrimitive,
-        ).value
-        == 76_162_681
+    for binding_name, expected in reviewed_bindings.items():
+        assert_nix_ast_equal(expect_binding(final.scope, binding_name).value, expected)
+
+
+def test_traycer_release_contract_owns_reviewed_derivation_evidence() -> None:
+    """Reviewed identities live in one updater-consumed sidecar, not package Nix."""
+    contract = json.loads(
+        (_PACKAGE_DIR / "release-contract.json").read_text(encoding="utf-8"),
     )
-    assert (
-        expect_instance(
-            expect_binding(final.scope, "expectedHostArchiveMemberCount").value,
-            IntegerPrimitive,
-        ).value
-        == 2_954
+    assert contract["schemaVersion"] == 1
+    assert contract["version"] == _VERSION
+    assert contract["publicCommit"] == _PUBLIC_COMMIT
+    assert contract["unverifiedPrivateBuildCommit"] == _BUILD_COMMIT
+    assert contract["bun"] == {
+        "sha256": "6c4bb87dd013ed1a8d6a16e357a3d094959fd5530b4d7061f7f3680c3c7cea1c",
+        "size": _BUN_SIZE,
+        "url": _BUN_URL,
+        "version": "1.3.12",
+    }
+    assert contract["frontend"] == {
+        "electronUpdaterVersion": "6.8.9",
+        "fontListVersion": "2.1.0",
+    }
+    assert contract["host"]["archive"]["sha256"] == (
+        "66cf81e799d8251466e34ec13b6159007cbb1069dc091d6dc75e10a28d546939"
     )
-    assert (
-        expect_instance(
-            expect_binding(final.scope, "expectedHostArchiveFileCount").value,
-            IntegerPrimitive,
-        ).value
-        == 2_748
+    assert contract["host"]["signature"]["sha256"] == (
+        "556fafe5c3bc5f6a2a7bce55f6cb2c6c61b139a947a72e44f65dbd9dca23439d"
     )
-    assert (
-        expect_instance(
-            expect_binding(final.scope, "expectedHostSignatureSize").value,
-            IntegerPrimitive,
-        ).value
-        == 293
+    assert contract["verifiedHostCodesignIdentity"]["executableSha256"] == (
+        "4977de1ec618e272c4701e004de9aee0efea32b3b72fe42012ef0016fe6bf48c"
     )
-    assert (
-        expect_instance(
-            expect_binding(final.scope, "expectedBunSize").value,
-            IntegerPrimitive,
-        ).value
-        == _BUN_SIZE
+
+    package = expect_instance(
+        parse_nix_expr((_PACKAGE_DIR / "package.nix").read_text(encoding="utf-8")),
+        FunctionDefinition,
     )
+    final = expect_instance(package.output, IfExpression)
+    assert_nix_ast_equal(
+        expect_binding(final.scope, "releaseContract").value,
+        "builtins.fromJSON (builtins.readFile ./release-contract.json)",
+    )
+    expected_bindings = {
+        "expectedVersion": "releaseContract.version",
+        "expectedPublicCommit": "releaseContract.publicCommit",
+        "expectedElectronVersion": "releaseContract.electronVersion",
+        "expectedBunVersion": "releaseContract.bun.version",
+        "expectedBunUrl": "releaseContract.bun.url",
+        "expectedBunSize": "releaseContract.bun.size",
+        "expectedBunSha256": "releaseContract.bun.sha256",
+        "expectedHostArchiveUrl": "releaseContract.host.archive.url",
+        "expectedHostArchiveSha256": "releaseContract.host.archive.sha256",
+        "expectedHostSignatureSha256": "releaseContract.host.signature.sha256",
+        "electronUpdaterVersion": ("releaseContract.frontend.electronUpdaterVersion"),
+        "fontListVersion": "releaseContract.frontend.fontListVersion",
+        "verifiedHostCodesignIdentity": (
+            "releaseContract.verifiedHostCodesignIdentity"
+        ),
+    }
+    for name, expected in expected_bindings.items():
+        assert_nix_ast_equal(expect_binding(final.scope, name).value, expected)
+
+    updater = _load_updater_module().TraycerUpdater
+    assert updater.ELECTRON_UPDATER_VERSION == "6.8.9"
+    assert updater.FONT_LIST_VERSION == "2.1.0"
 
 
 def test_traycer_numeric_evidence_is_rendered_explicitly_for_shell() -> None:
@@ -2625,17 +2649,15 @@ def test_traycer_host_runtime_verifies_every_authenticated_macho() -> None:
     )
     final = expect_instance(package.output, IfExpression)
     for binding_name, expected in {
-        "expectedHostMachOCount": 14,
-        "expectedHostUniversalMachOCount": 0,
-        "expectedHostThinX8664MachOCount": 0,
+        "expectedHostMachOCount": "releaseContract.host.archive.machOCount",
+        "expectedHostUniversalMachOCount": (
+            "releaseContract.host.archive.universalMachOCount"
+        ),
+        "expectedHostThinX8664MachOCount": (
+            "releaseContract.host.archive.thinX8664MachOCount"
+        ),
     }.items():
-        assert (
-            expect_instance(
-                expect_binding(final.scope, binding_name).value,
-                IntegerPrimitive,
-            ).value
-            == expected
-        )
+        assert_nix_ast_equal(expect_binding(final.scope, binding_name).value, expected)
 
     host_runtime = expect_instance(
         expect_binding(final.scope, "hostRuntime").value,
@@ -2680,18 +2702,14 @@ def test_traycer_host_bundled_ripgrep_runs_pcre2_in_an_empty_environment() -> No
     final = expect_instance(package.output, IfExpression)
     for binding_name, expected in {
         "hostRipgrepRelativeExecutable": (
-            "host-runtime/resources/providers/ripgrep/darwin-arm64/rg"
+            "releaseContract.host.ripgrep.relativeExecutable"
         ),
-        "expectedHostRipgrepVersion": "15.2.0",
-        "expectedHostRipgrepPcre2Feature": "features:+pcre2",
+        "expectedHostRipgrepVersion": "releaseContract.host.ripgrep.version",
+        "expectedHostRipgrepPcre2Feature": (
+            "releaseContract.host.ripgrep.pcre2Feature"
+        ),
     }.items():
-        assert (
-            expect_instance(
-                expect_binding(final.scope, binding_name).value,
-                StringPrimitive,
-            ).value
-            == expected
-        )
+        assert_nix_ast_equal(expect_binding(final.scope, binding_name).value, expected)
 
     host_runtime = expect_instance(
         expect_binding(final.scope, "hostRuntime").value,
@@ -2764,16 +2782,12 @@ def test_traycer_host_install_record_uses_the_production_runtime_root() -> None:
     )
     final = expect_instance(package.output, IfExpression)
     for binding_name, expected in {
-        "expectedHostInstallId": _HOST_INSTALL_ID,
-        "expectedHostInstallSentinelTimestamp": _HOST_INSTALL_SENTINEL_TIMESTAMP,
+        "expectedHostInstallId": "releaseContract.host.installId",
+        "expectedHostInstallSentinelTimestamp": (
+            "releaseContract.host.installSentinelTimestamp"
+        ),
     }.items():
-        assert (
-            expect_instance(
-                expect_binding(final.scope, binding_name).value,
-                StringPrimitive,
-            ).value
-            == expected
-        )
+        assert_nix_ast_equal(expect_binding(final.scope, binding_name).value, expected)
 
     host_runtime = expect_instance(
         expect_binding(final.scope, "hostRuntime").value,

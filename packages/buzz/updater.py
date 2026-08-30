@@ -10,6 +10,11 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, cast
 
+from nix_manipulator.expressions.binding import Binding
+from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.primitive import StringPrimitive
+from nix_manipulator.expressions.set import AttributeSet
+
 from lib.nix.models.sources import (
     HashCollection,
     HashEntry,
@@ -18,6 +23,7 @@ from lib.nix.models.sources import (
     SourceHashes,
 )
 from lib.update import nix as update_nix
+from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import (
     UpdateEvent,
     ValueDrain,
@@ -30,6 +36,8 @@ from lib.update.nix import (
     _build_fetch_from_github_expr,
     _build_repo_package_attr_expr,
 )
+from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
+from lib.update.paths import updater_dir_for
 from lib.update.updaters import (
     GitHubReleaseUpdater,
     UpdateContext,
@@ -68,9 +76,90 @@ _MESH_LLM_COMMIT = "3295c902d4c4f859aaadf9240042ffdaf06dd07e"
 # the URL-scoped fixed-output probe; a real native build must prove the patches.
 _LLAMA_CPP_COMMIT = "8190848bb36c7df4251db4352bd81bc07d0a4385"
 _APP_ID = "xyz.block.buzz.app"
+_DESKTOP_BUNDLE_VALIDATION = {
+    "schemaVersion": 1,
+    "status": "passed",
+    "candidate": {
+        "derivationPath": (
+            "/nix/store/3b5gv1l2iriy0fw48dnhg1zd770knrfw-"
+            f"buzz-desktop-candidate-{_VERSION}.drv"
+        ),
+        "outputPath": (
+            "/nix/store/55pw5giij3bb8cqn2dzw4djc54vkzzw2-"
+            f"buzz-desktop-candidate-{_VERSION}"
+        ),
+    },
+    "checks": [
+        "realized-candidate",
+        "isolated-launcher-startup",
+        "offline-runtime-loading",
+        "signatures",
+        "exact-app-metadata",
+        "reference-free-final-bundle",
+    ],
+}
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _RUST_INNER_ATTRIBUTE_MARKER = re.compile(r"#\s*!\s*\[")
 type _HashIdentity = tuple[HashType, str]
+
+_PNPM_LOCK = {
+    "version": _PNPM_VERSION,
+    "url": f"https://registry.npmjs.org/pnpm/-/pnpm-{_PNPM_VERSION}.tgz",
+}
+_SHERPA_FETCHCONTENT_LOCK = {
+    "kaldiDecoder": {
+        "cmakeVariable": "KALDI_DECODER",
+        "file": "kaldi-decoder-0.3.0.tar.gz",
+        "url": (
+            "https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.3.0.tar.gz"
+        ),
+    },
+    "kaldiNativeFbank": {
+        "cmakeVariable": "KALDI_NATIVE_FBANK",
+        "file": "kaldi-native-fbank-1.22.3.tar.gz",
+        "url": (
+            "https://github.com/csukuangfj/kaldi-native-fbank/archive/refs/tags/"
+            "v1.22.3.tar.gz"
+        ),
+    },
+    "kaldifst": {
+        "cmakeVariable": "KALDIFST",
+        "file": "kaldifst-1.8.0.tar.gz",
+        "url": ("https://github.com/k2-fsa/kaldifst/archive/refs/tags/v1.8.0.tar.gz"),
+    },
+    "kissfft": {
+        "cmakeVariable": "KISSFFT",
+        "file": "kissfft-febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip",
+        "url": (
+            "https://github.com/mborgerding/kissfft/archive/"
+            "febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip"
+        ),
+    },
+    "openfst": {
+        "cmakeVariable": "OPENFST",
+        "file": "openfst-1.8.5-2026-04-11.tar.gz",
+        "url": (
+            "https://github.com/csukuangfj/openfst/archive/refs/tags/"
+            "v1.8.5-2026-04-11.tar.gz"
+        ),
+    },
+    "simpleSentencepiece": {
+        "cmakeVariable": "SIMPLE-SENTENCEPIECE",
+        "file": "simple-sentencepiece-0.7.tar.gz",
+        "url": (
+            "https://github.com/pkufool/simple-sentencepiece/archive/refs/tags/"
+            "v0.7.tar.gz"
+        ),
+    },
+}
+_SHERPA_FETCHCONTENT_ORDER = (
+    "kaldiNativeFbank",
+    "simpleSentencepiece",
+    "kaldifst",
+    "kaldiDecoder",
+    "openfst",
+    "kissfft",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1267,10 +1356,64 @@ class BuzzUpdater(GitHubReleaseUpdater):
     TAG_PREFIX = "desktop-v"
     DARWIN_PLATFORM: ClassVar[str] = "aarch64-darwin"
     supported_platforms = (DARWIN_PLATFORM,)
+    generated_artifact_files = ("native-lock.json",)
 
     @staticmethod
     def _archive_url(owner: str, repo: str, commit: str) -> str:
         return f"https://github.com/{owner}/{repo}/archive/{commit}.tar.gz"
+
+    @staticmethod
+    def _fetchurl_expr(url: str) -> str:
+        expression = FunctionCall(
+            name=identifier_attr_path("pkgs", "fetchurl"),
+            argument=AttributeSet(
+                values=[
+                    Binding(name="url", value=StringPrimitive(value=url)),
+                    Binding(
+                        name="hash",
+                        value=identifier_attr_path("pkgs", "lib", "fakeHash"),
+                    ),
+                ]
+            ),
+        )
+        return compact_nix_expr(expression.rebuild())
+
+    @staticmethod
+    def _native_lock_payload(hashes: dict[str, str]) -> dict[str, object]:
+        return {
+            "schemaVersion": 1,
+            "buzz": {
+                "version": _VERSION,
+                "commit": _COMMIT,
+                "rustVersion": _RUST_VERSION,
+            },
+            "desktopBundleValidation": _DESKTOP_BUNDLE_VALIDATION,
+            "onnxruntime": {
+                "version": _ONNX_RUNTIME_VERSION,
+                "commit": _ONNX_RUNTIME_COMMIT,
+            },
+            "meshLlm": {
+                "version": _MESH_LLM_VERSION,
+                "commit": _MESH_LLM_COMMIT,
+                "skippyAbi": "0.1.35",
+            },
+            "llamaCpp": {
+                "commit": _LLAMA_CPP_COMMIT,
+            },
+            "pnpm": {
+                **_PNPM_LOCK,
+                "hash": hashes[_PNPM_LOCK["url"]],
+            },
+            "sherpaOnnx": {
+                "version": _SHERPA_ONNX_VERSION,
+                "commit": _SHERPA_ONNX_COMMIT,
+                "dependencyOrder": list(_SHERPA_FETCHCONTENT_ORDER),
+                "dependencies": {
+                    name: {**dependency, "hash": hashes[dependency["url"]]}
+                    for name, dependency in _SHERPA_FETCHCONTENT_LOCK.items()
+                },
+            },
+        }
 
     @staticmethod
     def _require_pinned_release(info: VersionInfo) -> str:
@@ -1676,6 +1819,38 @@ class BuzzUpdater(GitHubReleaseUpdater):
             entries.append(
                 HashEntry.create(request.hash_type, value, url=request.url),
             )
+
+        native_hashes: dict[str, str] = {}
+        native_sources = (_PNPM_LOCK, *_SHERPA_FETCHCONTENT_LOCK.values())
+        for native_source in native_sources:
+            url = native_source["url"]
+            drain = ValueDrain[str]()
+            async for event in drain_value_events(
+                update_nix.compute_fixed_output_hash(
+                    self.name,
+                    self._fetchurl_expr(url),
+                    config=self.config,
+                ),
+                drain,
+                parse=expect_str,
+            ):
+                yield event
+            native_hashes[url] = require_value(
+                drain,
+                f"Missing native lock hash output for {url}",
+            )
+
+        package_dir = updater_dir_for(self.name)
+        if package_dir is None:
+            msg = f"Package directory not found for {self.name}"
+            raise RuntimeError(msg)
+        yield UpdateEvent.artifact(
+            self.name,
+            GeneratedArtifact.json(
+                package_dir / self.generated_artifact_files[0],
+                self._native_lock_payload(native_hashes),
+            ),
+        )
         yield UpdateEvent.value(self.name, entries)
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:

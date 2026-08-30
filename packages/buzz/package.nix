@@ -7,6 +7,7 @@
   inputs,
   ld64,
   lib,
+  nativeLock ? builtins.fromJSON (builtins.readFile ./native-lock.json),
   nodejs_24,
   onnxruntime,
   outputs,
@@ -30,18 +31,59 @@ let
     installMode = "copy";
   };
 
-  expectedVersion = "0.5.20";
-  expectedCommit = "95154bee4034ca7a40b33095c2ddbde8c9aa1614";
-  expectedPnpmVersion = "11.4.0";
-  expectedRustVersion = "1.95.0";
-  expectedSherpaOnnxVersion = "1.13.4";
-  expectedSherpaOnnxCommit = "142807252687d81b40d6315f23470a1512a00de3";
-  expectedOnnxRuntimeVersion = "1.27.0";
-  expectedOnnxRuntimeCommit = "8f0278c77bf44b0cc83c098c6c722b92a36ac4b5";
-  expectedMeshLlmVersion = "0.75.1";
-  expectedMeshLlmCommit = "3295c902d4c4f859aaadf9240042ffdaf06dd07e";
-  expectedSkippyAbi = "0.1.35";
-  expectedLlamaCppCommit = "8190848bb36c7df4251db4352bd81bc07d0a4385";
+  buzzLock = nativeLock.buzz or { };
+  pnpmLock = nativeLock.pnpm or { };
+  sherpaOnnxClosure = nativeLock.sherpaOnnx or { };
+  onnxRuntimeClosure = nativeLock.onnxruntime or { };
+  meshLlmClosure = nativeLock.meshLlm or { };
+  llamaCppClosure = nativeLock.llamaCpp or { };
+  expectedVersion = buzzLock.version or "";
+  expectedCommit = buzzLock.commit or "";
+  expectedPnpmVersion = pnpmLock.version or "";
+  expectedRustVersion = buzzLock.rustVersion or "";
+  expectedSherpaOnnxVersion = sherpaOnnxClosure.version or "";
+  expectedSherpaOnnxCommit = sherpaOnnxClosure.commit or "";
+  expectedOnnxRuntimeVersion = onnxRuntimeClosure.version or "";
+  expectedOnnxRuntimeCommit = onnxRuntimeClosure.commit or "";
+  expectedMeshLlmVersion = meshLlmClosure.version or "";
+  expectedMeshLlmCommit = meshLlmClosure.commit or "";
+  expectedSkippyAbi = meshLlmClosure.skippyAbi or "";
+  expectedLlamaCppCommit = llamaCppClosure.commit or "";
+
+  nonEmptyString = value: builtins.isString value && value != "";
+  commitString = value: nonEmptyString value && builtins.match "[0-9a-f]{40}" value != null;
+  completeNativeFetch =
+    dependency:
+    nonEmptyString (dependency.cmakeVariable or null)
+    && nonEmptyString (dependency.file or null)
+    && nonEmptyString (dependency.url or null)
+    && builtins.isString (dependency.hash or null)
+    && lib.hasPrefix "sha256-" dependency.hash;
+  sherpaDependencies = sherpaOnnxClosure.dependencies or { };
+  sherpaDependencyOrder = sherpaOnnxClosure.dependencyOrder or [ ];
+  nativeLockComplete =
+    (nativeLock.schemaVersion or null) == 1
+    && nonEmptyString (buzzLock.version or null)
+    && commitString (buzzLock.commit or null)
+    && nonEmptyString (buzzLock.rustVersion or null)
+    && nonEmptyString (pnpmLock.version or null)
+    && nonEmptyString (pnpmLock.url or null)
+    && builtins.isString (pnpmLock.hash or null)
+    && lib.hasPrefix "sha256-" pnpmLock.hash
+    && nonEmptyString (sherpaOnnxClosure.version or null)
+    && commitString (sherpaOnnxClosure.commit or null)
+    && builtins.length (builtins.attrValues sherpaDependencies) == 6
+    && builtins.all completeNativeFetch (builtins.attrValues sherpaDependencies)
+    && builtins.isList sherpaDependencyOrder
+    && builtins.length sherpaDependencyOrder == 6
+    && builtins.all nonEmptyString sherpaDependencyOrder
+    && builtins.sort builtins.lessThan sherpaDependencyOrder == builtins.attrNames sherpaDependencies
+    && nonEmptyString (onnxRuntimeClosure.version or null)
+    && commitString (onnxRuntimeClosure.commit or null)
+    && nonEmptyString (meshLlmClosure.version or null)
+    && commitString (meshLlmClosure.commit or null)
+    && nonEmptyString (meshLlmClosure.skippyAbi or null)
+    && commitString (llamaCppClosure.commit or null);
 
   source = outputs.lib.sourceEntry pname;
   inherit (source) version;
@@ -79,8 +121,7 @@ let
   pnpm = (pnpm_11.override { nodejs-slim = nodejs_24; }).overrideAttrs (_: {
     version = expectedPnpmVersion;
     src = fetchurl {
-      url = "https://registry.npmjs.org/pnpm/-/pnpm-${expectedPnpmVersion}.tgz";
-      hash = "sha256-50EGpaDrJWn0WDUEQg6tX8HCY+QXoyFsqxy+DM3LTq4=";
+      inherit (pnpmLock) url hash;
     };
   });
   pnpmDeps =
@@ -320,7 +361,12 @@ let
   # derivation in this file (or a package-local import), plus exact
   # passthru.buzzNativeContract metadata.
   rustToolchainNative = import ./native/rust-toolchain.nix {
-    inherit lib rustBin stdenv;
+    inherit
+      lib
+      nativeLock
+      rustBin
+      stdenv
+      ;
   };
   onnxRuntimeNative =
     if onnxRuntimeSrcHashEntry == null then
@@ -333,6 +379,7 @@ let
           fetchFromGitHub
           ld64
           lib
+          nativeLock
           onnxruntime
           protobuf
           python3
@@ -341,7 +388,7 @@ let
         srcHash = onnxRuntimeSrcHashEntry.hash;
       };
   sherpaOnnxNative =
-    if sherpaOnnxSrcHashEntry == null || onnxRuntimeNative == null then
+    if sherpaOnnxSrcHashEntry == null || onnxRuntimeNative == null || !nativeLockComplete then
       null
     else
       import ./native/sherpa-onnx.nix {
@@ -359,6 +406,7 @@ let
           nlohmann_json
           ;
         onnxRuntime = onnxRuntimeNative;
+        closureContract = sherpaOnnxClosure;
         srcHash = sherpaOnnxSrcHashEntry.hash;
       };
   meshLlmNative =
@@ -369,6 +417,7 @@ let
         inherit
           fetchFromGitHub
           lib
+          nativeLock
           python3
           stdenvNoCC
           ;
@@ -383,6 +432,7 @@ let
           cctools
           fetchFromGitHub
           lib
+          nativeLock
           stdenv
           ;
         inherit (pkgs) cmake gitMinimal ninja;
@@ -398,6 +448,7 @@ let
           cctools
           fetchFromGitHub
           lib
+          nativeLock
           python3
           stdenv
           stdenvNoCC
@@ -409,6 +460,7 @@ let
   buzzRuntimePolicySource = import ./native/buzz-runtime-policy.nix {
     inherit
       desktopCargoDeps
+      nativeLock
       python3
       src
       stdenvNoCC
@@ -420,6 +472,7 @@ let
     inherit
       cctools
       lib
+      nativeLock
       rootCargoDeps
       sidecarSpecs
       stdenv
@@ -436,6 +489,7 @@ let
       import ./native/desktop.nix {
         inherit
           lib
+          nativeLock
           nodejs_24
           pnpm
           pnpmDeps
@@ -463,6 +517,7 @@ let
         inherit
           cctools
           lib
+          nativeLock
           python3
           stdenv
           version
@@ -474,24 +529,10 @@ let
   desktopCandidateWired = lib.isDerivation desktopCandidateNative;
   # This evidence records the exact candidate whose real artifact, isolated
   # launcher, offline runtime, signatures, app metadata, and reference closure
-  # were validated. Keep it literal: deriving these paths from the candidate
-  # would make the gate tautological and let an unvalidated rebuild through.
-  desktopBundleValidationEvidence = {
-    schemaVersion = 1;
-    status = "passed";
-    candidate = {
-      derivationPath = "/nix/store/3b5gv1l2iriy0fw48dnhg1zd770knrfw-buzz-desktop-candidate-0.5.20.drv";
-      outputPath = "/nix/store/55pw5giij3bb8cqn2dzw4djc54vkzzw2-buzz-desktop-candidate-0.5.20";
-    };
-    checks = [
-      "realized-candidate"
-      "isolated-launcher-startup"
-      "offline-runtime-loading"
-      "signatures"
-      "exact-app-metadata"
-      "reference-free-final-bundle"
-    ];
-  };
+  # were validated. Its store identities remain independent of the candidate
+  # being evaluated, but the updater owns them alongside every other native
+  # lock so this derivation never embeds an immutable identity directly.
+  desktopBundleValidationEvidence = nativeLock.desktopBundleValidation or { };
   desktopCandidateIdentity =
     if desktopCandidateWired then
       {
@@ -547,7 +588,8 @@ let
   missingNativeFoundation = builtins.filter (name: !(slotMatches name)) nativeFoundationNames;
 
   unresolvedBuildGates =
-    lib.optional (version != expectedVersion) "Buzz source version must be ${expectedVersion}"
+    lib.optional (!nativeLockComplete) "Buzz updater-owned native lock is incomplete"
+    ++ lib.optional (version != expectedVersion) "Buzz source version must be ${expectedVersion}"
     ++ lib.optional (source.commit != expectedCommit) "Buzz source commit must be ${expectedCommit}"
     ++ lib.optional (pnpm.version != expectedPnpmVersion) "pnpm must be exactly ${expectedPnpmVersion}"
     ++ lib.optional (srcHashEntry == null) "Buzz srcHash is missing"

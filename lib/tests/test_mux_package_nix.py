@@ -12,7 +12,7 @@ from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
-from lib.tests._nix_ast import expect_binding
+from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding
 from lib.tests._nix_source import nix_file_expr
 from lib.tests._shell_ast import indented_string_body
 
@@ -37,6 +37,19 @@ def _lock_files_install_phase() -> str:
         IndentedString,
     )
     return indented_string_body(install_phase.rebuild())
+
+
+def test_mux_electron_lock_comes_from_updater_metadata() -> None:
+    """The derivation consumes the updater-owned lock instead of embedding it."""
+    package = expect_instance(
+        nix_file_expr("packages/mux/default.nix"),
+        FunctionDefinition,
+    )
+
+    assert_nix_ast_equal(
+        expect_binding(package.output.scope, "electronVersion").value,
+        "selfSource.pins.electronVersion",
+    )
 
 
 @pytest.mark.parametrize("has_patches", [False, True])

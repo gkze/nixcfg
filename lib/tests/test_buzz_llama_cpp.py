@@ -53,7 +53,12 @@ def _derivation_arguments() -> AttributeSet:
 
 
 def _package_scope() -> Scope:
-    _package, derivation = _llama_cpp_package()
+    package, derivation = _llama_cpp_package()
+    output = package.output
+    while isinstance(output, Assertion):
+        if output.scope:
+            return output.scope
+        output = output.body
     return derivation.scope
 
 
@@ -89,13 +94,18 @@ def test_llama_cpp_fetch_is_exact_and_does_not_fetch_submodules() -> None:
         "gitMinimal",
         "lib",
         "meshSrcHash",
+        "nativeLock",
         "ninja",
         "srcHash",
         "stdenv",
     }
     assert_nix_ast_equal(
         expect_binding(scope, "commit").value,
-        '"8190848bb36c7df4251db4352bd81bc07d0a4385"',
+        "nativeLock.llamaCpp.commit or null",
+    )
+    assert_nix_ast_equal(
+        expect_binding(scope, "meshCommit").value,
+        "nativeLock.meshLlm.commit or null",
     )
     assert_nix_ast_equal(
         expect_binding(scope, "src").value,
@@ -114,7 +124,7 @@ def test_llama_cpp_fetch_is_exact_and_does_not_fetch_submodules() -> None:
             Identifier(name="fetchFromGitHub"),
             owner="Mesh-LLM",
             repo="mesh-llm",
-            rev="3295c902d4c4f859aaadf9240042ffdaf06dd07e",
+            rev=Identifier(name="meshCommit"),
             hash=Identifier(name="meshSrcHash"),
             fetchSubmodules=False,
         ),
@@ -127,10 +137,18 @@ def test_llama_cpp_requires_darwin_without_caller_attested_source_bytes() -> Non
     _package, _derivation = _llama_cpp_package()
     conditions = _assertion_conditions()
 
-    assert len(conditions) == 1
+    assert len(conditions) == 3
     assert_nix_ast_equal(
         conditions[0],
         'stdenv.hostPlatform.system == "aarch64-darwin"',
+    )
+    assert_nix_ast_equal(
+        conditions[1],
+        'builtins.isString commit && builtins.match "[0-9a-f]{40}" commit != null',
+    )
+    assert_nix_ast_equal(
+        conditions[2],
+        'builtins.isString meshCommit && builtins.match "[0-9a-f]{40}" meshCommit != null',
     )
 
 
@@ -442,7 +460,7 @@ def test_llama_cpp_passthru_exactly_matches_the_package_and_bundle_seams() -> No
         expect_binding(passthru.values, "buzzNativeContract").value,
         """{
           kind = "llama.cpp";
-          commit = "8190848bb36c7df4251db4352bd81bc07d0a4385";
+          inherit commit;
           target = "aarch64-apple-darwin";
           backend = "metal";
           linkMode = "dynamic";

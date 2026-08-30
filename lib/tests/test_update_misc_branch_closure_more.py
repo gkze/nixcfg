@@ -182,9 +182,9 @@ def test_packaging_source_policy_parser_and_python_audit_edges() -> None:
     assert policy._rewrite_function_formals_for_parser("{\n}:\nnull\n") == (
         "{\n}:\nnull\n"
     )
-    malformed_header = "{\n    lib,\n}:\nnull\n"
-    assert policy._rewrite_function_formals_for_parser(malformed_header) == (
-        malformed_header
+    indented_header = "{\n    lib,\n}:\nnull\n"
+    assert policy._rewrite_function_formals_for_parser(indented_header) == (
+        "{\n    lib\n}:\nnull\n"
     )
 
     multiline_formals = (
@@ -196,7 +196,14 @@ def test_packaging_source_policy_parser_and_python_audit_edges() -> None:
         'stdenv.mkDerivation { pname = "demo"; }\n'
     )
     rewritten = policy._rewrite_function_formals_for_parser(multiline_formals)
-    assert rewritten.startswith("{ lib\n    # attached to lib\n, stdenv\n}:")
+    assert rewritten == (
+        "{\n"
+        "  lib,\n"
+        "    # attached to lib\n"
+        "  stdenv\n"
+        "}:\n"
+        'stdenv.mkDerivation { pname = "demo"; }\n'
+    )
     assert policy.parse_nix_expr_for_policy(
         '{\n  lib,\n  stdenv,\n}:\nstdenv.mkDerivation { pname = "demo"; }\n',
         context="demo.nix",

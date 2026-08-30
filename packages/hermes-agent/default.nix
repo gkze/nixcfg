@@ -20,6 +20,15 @@ let
     ;
 
   inherit (stdenv.hostPlatform) system;
+  platformCompat = import ../../lib/pinned-input-platform-compat;
+  pyprojectBuildSystemsCompat = inputs.pyproject-build-systems // {
+    overlays = inputs.pyproject-build-systems.overlays // {
+      default = lib.composeManyExtensions [
+        platformCompat.overlay
+        inputs.pyproject-build-systems.overlays.default
+      ];
+    };
+  };
   upstreamPackage = inputs.hermes-agent.packages.${system}.default;
 in
 if !stdenv.hostPlatform.isDarwin then
@@ -61,10 +70,10 @@ else
     hermesVenvBase =
       (callPackage (hermesSource + "/nix/python.nix") {
         inherit (inputs)
-          pyproject-build-systems
           pyproject-nix
           uv2nix
           ;
+        pyproject-build-systems = pyprojectBuildSystemsCompat;
         python312 = python312ForHermes;
         dependency-groups = darwinExtras;
         inherit (hermesNpmLib) pythonSrc;

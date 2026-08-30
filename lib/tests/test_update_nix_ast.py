@@ -48,6 +48,45 @@ from lib.update.paths import REPO_ROOT
 from lib.update.sources import nix_source_names
 
 
+@pytest.mark.parametrize(
+    ("package_path", "binding", "expected"),
+    [
+        (
+            "packages/emdash/default.nix",
+            "electronVersion",
+            "selfSource.pins.electronVersion",
+        ),
+        (
+            "packages/gooeypi/default.nix",
+            "npmCliVersion",
+            "selfSource.pins.npmVersion",
+        ),
+        (
+            "packages/superset/default.nix",
+            "electronVersion",
+            "selfSource.pins.electronVersion",
+        ),
+        (
+            "packages/t3code-desktop/default.nix",
+            "electronBuilderVersion",
+            "selfSource.pins.electronBuilderVersion",
+        ),
+    ],
+)
+def test_simple_derivation_locks_come_from_updater_metadata(
+    package_path: str,
+    binding: str,
+    expected: str,
+) -> None:
+    """Simple build-tool locks are updater metadata, never Nix literals."""
+    package = expect_instance(
+        parse_nix_expr((REPO_ROOT / package_path).read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+
+    assert_nix_ast_equal(expect_binding(package.output.scope, binding).value, expected)
+
+
 def test_flake_fetch_expr_builds_parseable_fetch_tree() -> None:
     """flake_fetch_expr should emit valid fetchTree Nix."""
     node = FlakeLockNode(
@@ -291,6 +330,30 @@ def test_build_overlay_expr_imports_contextual_library_explicitly() -> None:
     payload = overrides.argument
     assert isinstance(payload, StringPrimitive)
     assert json.loads(payload.value) == {"demo": override.to_dict()}
+
+    candidate_fake_hash_expression = _build_overlay_expression(
+        "demo",
+        system="x86_64-linux",
+        source_overrides={"demo": override},
+        fake_hashes=True,
+    )
+    assert isinstance(candidate_fake_hash_expression, LetExpression)
+    candidate_import = expect_binding(
+        candidate_fake_hash_expression.local_variables,
+        "flake",
+    ).value
+    assert isinstance(candidate_import, FunctionCall)
+    candidate_arguments = candidate_import.argument
+    assert isinstance(candidate_arguments, AttributeSet)
+    candidate_context = expect_binding(
+        candidate_arguments.values,
+        "evaluationContext",
+    ).value
+    assert isinstance(candidate_context, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(candidate_context.values, "fakeHashes").value,
+        Primitive(value=True),
+    )
 
     fake_hash_expression = _build_overlay_expression(
         "demo",

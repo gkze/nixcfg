@@ -26,7 +26,7 @@ let
   appBundleName = "${appName}.app";
   appExecutableName = appName;
   appId = "app.gooeypi.desktop";
-  npmCliVersion = "12.0.2";
+  npmCliVersion = selfSource.pins.npmVersion;
   npmCliUrl = "https://registry.npmjs.org/npm/-/npm-${npmCliVersion}.tgz";
   inherit (selfSource) electronVersion version;
 

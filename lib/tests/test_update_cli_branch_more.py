@@ -1,7 +1,7 @@
 """Additional branch coverage tests for update CLI internals."""
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import aiohttp
 import pytest
@@ -29,7 +29,7 @@ from lib.update.cli_inventory import (
 )
 from lib.update.cli_validation import handle_validate_request
 from lib.update.config import resolve_config
-from lib.update.events import UpdateEvent
+from lib.update.events import UpdateEvent, UpdateEventKind
 from lib.update.persistence import persist_source_updates
 from lib.update.planner import (
     add_companion_source_children,
@@ -47,7 +47,7 @@ from lib.update.source_runner import (
     run_sources_phase,
     update_source_task,
 )
-from lib.update.updaters import DenoDepsHashUpdater, UpdateContext
+from lib.update.updaters import DenoDepsHashUpdater, UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -777,11 +777,13 @@ def test_run_sources_phase_passes_companion_state_between_waves(
     baseline_entry = SourceEntry(
         version="1.0.0",
         hashes={},
+        pins={"removed": "obsolete", "runtimeVersion": "1.0.0"},
         urls={"existing": "https://example.com/existing"},
     )
     source_update = SourceEntry(
         version="2.0.0",
         hashes={},
+        pins={"runtimeVersion": "2.0.0"},
         urls={"added": "https://example.com/added"},
     )
 
@@ -833,10 +835,14 @@ def test_run_sources_phase_passes_companion_state_between_waves(
     assert seen_overrides == [
         {"packages/codex/Cargo.nix": '{ "v8" = rec { version = "147.4.0"; }; }\n'}
     ]
-    expected_source = (
-        baseline_entry.merge(source_update) if native_only else source_update
-    )
-    assert seen_sources == [expected_source]
+    assert seen_sources[0].pins == {"runtimeVersion": "2.0.0"}
+    if native_only:
+        assert seen_sources[0].urls == {
+            "added": "https://example.com/added",
+            "existing": "https://example.com/existing",
+        }
+    else:
+        assert seen_sources == [source_update]
 
 
 def test_run_sources_phase_skips_companions_after_failed_parent(
@@ -1128,6 +1134,101 @@ def test_update_source_task_sets_native_only_for_deno_updater(
     assert called["count"] == 1
     assert called["input_name"] == "demo"
     assert called["source"] == "demo"
+
+
+def test_update_source_task_reports_incoherent_native_identity_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Translate native partial identity rejection into one source error event."""
+
+    class _DenoUpdater(DenoDepsHashUpdater):
+        name = "demo"
+        input_name = None
+        source_pins: ClassVar[dict[str, str]] = {"runtimeVersion": "2.0.0"}
+
+        async def fetch_latest(self, session: object) -> VersionInfo:
+            _ = session
+            return VersionInfo(version="1.0.0", metadata={})
+
+    async def _compute_deno_deps_hash(
+        source: str,
+        input_name: str,
+        *,
+        native_only: bool = False,
+        config: object | None = None,
+        source_override: SourceEntry | None = None,
+    ) -> AsyncIterator[UpdateEvent]:
+        _ = (config, source_override)
+        assert source == "demo"
+        assert input_name == "demo"
+        assert native_only is True
+        yield UpdateEvent.value(
+            source,
+            {"aarch64-darwin": "sha256-newDarwin"},
+        )
+
+    monkeypatch.setattr("lib.update.source_runner.UPDATERS", {"demo": _DenoUpdater})
+    monkeypatch.setattr(
+        "lib.update.nix_deno.compute_deno_deps_hash",
+        _compute_deno_deps_hash,
+    )
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+    current = SourceEntry.model_validate({
+        "drvHash": "old-drv",
+        "hashes": [
+            {
+                "hashType": "denoDepsHash",
+                "hash": "sha256-oldDarwin",
+                "platform": "aarch64-darwin",
+            },
+            {
+                "hashType": "denoDepsHash",
+                "hash": "sha256-oldLinux",
+                "platform": "x86_64-linux",
+            },
+        ],
+        "input": "demo",
+        "pins": {"removed": "obsolete", "runtimeVersion": "1.0.0"},
+        "version": "1.0.0",
+    })
+
+    async def _run_case() -> tuple[SourceTaskResult, list[UpdateEvent]]:
+        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+        async with aiohttp.ClientSession() as session:
+            result = await update_source_task(
+                "demo",
+                context=SourceTaskContext(
+                    sources=SourcesFile(entries={"demo": current}),
+                    update_input=False,
+                    native_only=True,
+                    session=session,
+                    update_input_lock=asyncio.Lock(),
+                    update_input_tasks={},
+                    queue=queue,
+                    generated_artifacts={},
+                    config=resolve_config(
+                        hash_build_platforms=(
+                            "aarch64-darwin",
+                            "x86_64-linux",
+                        )
+                    ),
+                ),
+            )
+        return result, [queue.get_nowait() for _ in range(queue.qsize())]
+
+    result, events = _run(_run_case())
+    error_events = [event for event in events if event.kind is UpdateEventKind.ERROR]
+
+    assert result.completed is False
+    assert result.source_update is None
+    assert [event.message for event in error_events] == [
+        "Cannot apply native-only update for demo: updater-owned source identity "
+        "changed (pins) while foreign-platform hashes would be preserved; rerun "
+        "without --native-only"
+    ]
 
 
 def test_update_source_task_skips_input_update_when_disabled(

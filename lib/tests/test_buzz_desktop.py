@@ -156,6 +156,7 @@ def test_desktop_leaf_has_a_narrow_repo_owned_interface_and_contract() -> None:
         "cmake",
         "lib",
         "makeRustPlatform",
+        "nativeLock",
         "nodejs_24",
         "patchedBuzzSource",
         "patchedDesktopCargoDeps",
@@ -177,8 +178,14 @@ def test_desktop_leaf_has_a_narrow_repo_owned_interface_and_contract() -> None:
     conditions = _assertion_conditions()
     expected_conditions = (
         'stdenv.hostPlatform.system == "aarch64-darwin"',
-        'version == "0.5.20"',
-        'pnpm.version == "11.4.0"',
+        "builtins.isString buzzVersion",
+        'builtins.isString buzzCommit && builtins.match "[0-9a-f]{40}" buzzCommit != null',
+        "builtins.isString rustVersion",
+        "builtins.isString pnpmVersion",
+        "builtins.isString sherpaVersion",
+        'builtins.isString sherpaCommit && builtins.match "[0-9a-f]{40}" sherpaCommit != null',
+        "version == buzzVersion",
+        "pnpm.version == pnpmVersion",
         "lib.isDerivation pnpmDeps",
         "(rustToolchain.passthru.buzzNativeContract or null) == expectedRustContract",
         "(patchedBuzzSource.passthru.buzzNativeContract or null) == expectedSourceContract",
@@ -202,15 +209,27 @@ def test_desktop_leaf_has_a_narrow_repo_owned_interface_and_contract() -> None:
         "implementedContract",
     )
     assert "macApp" not in binding_map(passthru.values)
+    scope = _package_scope()
+    for name, expected in {
+        "buzzLock": "nativeLock.buzz or { }",
+        "pnpmLock": "nativeLock.pnpm or { }",
+        "sherpaLock": "nativeLock.sherpaOnnx or { }",
+        "buzzCommit": "buzzLock.commit or null",
+        "buzzVersion": "buzzLock.version or null",
+        "rustVersion": "buzzLock.rustVersion or null",
+        "pnpmVersion": "pnpmLock.version or null",
+        "sherpaCommit": "sherpaLock.commit or null",
+        "sherpaVersion": "sherpaLock.version or null",
+    }.items():
+        assert_nix_ast_equal(expect_binding(scope, name).value, expected)
     assert_nix_ast_equal(
-        expect_binding(_package_scope(), "implementedContract").value,
+        expect_binding(scope, "implementedContract").value,
         """{
           kind = "buzz-desktop-unsigned";
-          commit = "95154bee4034ca7a40b33095c2ddbde8c9aa1614";
-          version = "0.5.20";
+          commit = buzzCommit;
+          version = buzzVersion;
           target = "aarch64-apple-darwin";
-          rustVersion = "1.95.0";
-          pnpmVersion = "11.4.0";
+          inherit rustVersion pnpmVersion;
           cargoRoot = "desktop/src-tauri";
           buildAndTestSubdir = "desktop";
           cargoOffline = true;
@@ -226,7 +245,7 @@ def test_desktop_leaf_has_a_narrow_repo_owned_interface_and_contract() -> None:
             "buzz-aarch64-apple-darwin"
           ];
           updaterEnabled = false;
-          sherpaOnnxVersion = "1.13.4";
+          sherpaOnnxVersion = sherpaVersion;
           minimumMacosVersion = "14.0";
           appSigned = false;
           runtimeBundleEmbedded = false;
@@ -310,7 +329,7 @@ def test_desktop_leaf_independently_attests_native_input_contracts() -> None:
         expect_binding(scope, "expectedRustContract").value,
         """{
           kind = "rust-toolchain";
-          channel = "1.95.0";
+          channel = rustVersion;
           profile = "default";
           target = "aarch64-apple-darwin";
         }""",
@@ -319,7 +338,7 @@ def test_desktop_leaf_independently_attests_native_input_contracts() -> None:
         expect_binding(scope, "expectedSourceContract").value,
         """{
           kind = "buzz-runtime-policy-source";
-          commit = "95154bee4034ca7a40b33095c2ddbde8c9aa1614";
+          commit = buzzCommit;
           meshFeature = "dynamic-native-runtime";
           runtimeBundleEnvironment = "MESH_LLM_NATIVE_RUNTIME_BUNDLE_DIR";
           runtimeCacheEnvironment = "MESH_LLM_NATIVE_RUNTIME_CACHE_DIR";
@@ -364,8 +383,8 @@ def test_desktop_leaf_independently_attests_native_input_contracts() -> None:
         expect_binding(scope, "expectedSherpaContract").value,
         """{
           kind = "sherpa-onnx";
-          version = "1.13.4";
-          commit = "142807252687d81b40d6315f23470a1512a00de3";
+          version = sherpaVersion;
+          commit = sherpaCommit;
           target = "aarch64-apple-darwin";
           linkMode = "static";
           usePreinstalledOnnxRuntime = true;
@@ -384,7 +403,7 @@ def test_desktop_leaf_independently_attests_native_input_contracts() -> None:
         expect_binding(scope, "expectedSidecarsContract").value,
         """{
           kind = "buzz-sidecars";
-          commit = "95154bee4034ca7a40b33095c2ddbde8c9aa1614";
+          commit = buzzCommit;
           target = "aarch64-apple-darwin";
           profile = "release";
           cargoOffline = true;
@@ -471,7 +490,7 @@ def test_buzz_package_exposes_unsigned_desktop_only_as_an_audit_leaf() -> None:
           null
         else
           import ./native/desktop.nix {
-            inherit lib nodejs_24 pnpm pnpmDeps stdenv version;
+            inherit lib nativeLock nodejs_24 pnpm pnpmDeps stdenv version;
             inherit (pkgs) cargo-tauri cmake makeRustPlatform pkg-config pnpmConfigHook;
             patchedBuzzSource = buzzRuntimePolicySource;
             patchedDesktopCargoDeps =
@@ -507,7 +526,7 @@ def test_buzz_package_exposes_signed_candidate_only_as_an_audit_leaf() -> None:
           null
         else
           import ./native/desktop-candidate.nix {
-            inherit cctools lib python3 stdenv version;
+            inherit cctools lib nativeLock python3 stdenv version;
             desktopUnsigned = desktopUnsignedNative;
             meshRuntimeBundle = meshRuntimeBundleNative;
             patchedBuzzSource = buzzRuntimePolicySource;
@@ -531,7 +550,7 @@ def test_buzz_package_exposes_signed_candidate_only_as_an_audit_leaf() -> None:
 
 
 def test_buzz_candidate_identity_drift_is_structurally_blocked() -> None:
-    """A candidate differing from the literal evidence cannot open the gate."""
+    """A candidate differing from updater-owned evidence cannot open the gate."""
     scope = _buzz_package_scope()
     assert_nix_ast_equal(
         expect_binding(scope, "expectedMacApp").value,
@@ -550,24 +569,7 @@ def test_buzz_candidate_identity_drift_is_structurally_blocked() -> None:
     )
     assert_nix_ast_equal(
         expect_binding(scope, "desktopBundleValidationEvidence").value,
-        """
-        {
-          schemaVersion = 1;
-          status = "passed";
-          candidate = {
-            derivationPath = "/nix/store/3b5gv1l2iriy0fw48dnhg1zd770knrfw-buzz-desktop-candidate-0.5.20.drv";
-            outputPath = "/nix/store/55pw5giij3bb8cqn2dzw4djc54vkzzw2-buzz-desktop-candidate-0.5.20";
-          };
-          checks = [
-            "realized-candidate"
-            "isolated-launcher-startup"
-            "offline-runtime-loading"
-            "signatures"
-            "exact-app-metadata"
-            "reference-free-final-bundle"
-          ];
-        }
-        """,
+        "nativeLock.desktopBundleValidation or { }",
     )
     assert_nix_ast_equal(
         expect_binding(scope, "desktopCandidateIdentity").value,

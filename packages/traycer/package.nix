@@ -29,39 +29,44 @@ let
   desktopEntitlementsRelativePath = "clients/desktop/resources/bundle/entitlements.mac.plist";
 
   sourceData = builtins.fromJSON (builtins.readFile ./sources.json);
-  expectedVersion = "1.2.0";
-  expectedPublicCommit = "85ee596fffab4c9aa72b6bddc73a0020839ed5ae";
-  expectedElectronVersion = "42.9.1";
-  expectedBunVersion = "1.3.12";
-  expectedBunUrl = "https://github.com/oven-sh/bun/releases/download/bun-v1.3.12/bun-darwin-aarch64.zip";
-  expectedBunSize = 22264502;
-  expectedBunSha256 = "6c4bb87dd013ed1a8d6a16e357a3d094959fd5530b4d7061f7f3680c3c7cea1c";
-  expectedHostArchiveUrl = "https://github.com/traycerai/traycer/releases/download/host-v1.2.0/traycer-host-macos-arm64.tar.gz";
-  expectedHostArchiveSize = 76162681;
-  expectedHostArchiveSha256 = "66cf81e799d8251466e34ec13b6159007cbb1069dc091d6dc75e10a28d546939";
+  # Reviewed trust evidence is a static updater input. The updater validates
+  # releases against it but does not rotate it without an explicit review.
+  releaseContract = builtins.fromJSON (builtins.readFile ./release-contract.json);
+  expectedVersion = releaseContract.version;
+  expectedPublicCommit = releaseContract.publicCommit;
+  expectedElectronVersion = releaseContract.electronVersion;
+  expectedBunVersion = releaseContract.bun.version;
+  expectedBunUrl = releaseContract.bun.url;
+  expectedBunSize = releaseContract.bun.size;
+  expectedBunSha256 = releaseContract.bun.sha256;
+  electronUpdaterVersion = releaseContract.frontend.electronUpdaterVersion;
+  fontListVersion = releaseContract.frontend.fontListVersion;
+  expectedHostArchiveUrl = releaseContract.host.archive.url;
+  expectedHostArchiveSize = releaseContract.host.archive.size;
+  expectedHostArchiveSha256 = releaseContract.host.archive.sha256;
   # This value is bundled into the renderer and is therefore not a credential.
   # Preserve the official pre-cutover value so existing encrypted local state
   # remains readable, and keep it stable across upgrades.
-  desktopLocalStorageKey = "wlsH9H7PTa51Kk7FENFF/WBJDWiwCZqvIM4KzTUvHOBF/BmZMSEmi7wyjur8FIjJ";
-  expectedHostArchiveMemberCount = 2954;
-  expectedHostArchiveFileCount = 2748;
-  expectedHostMachOCount = 14;
-  expectedHostUniversalMachOCount = 0;
-  expectedHostThinX8664MachOCount = 0;
-  hostRipgrepRelativeExecutable = "host-runtime/resources/providers/ripgrep/darwin-arm64/rg";
-  expectedHostRipgrepVersion = "15.2.0";
-  expectedHostRipgrepPcre2Feature = "features:+pcre2";
-  expectedHostSignatureUrl = "${expectedHostArchiveUrl}.minisig";
-  expectedHostSignatureSize = 293;
-  expectedHostSignatureSha256 = "556fafe5c3bc5f6a2a7bce55f6cb2c6c61b139a947a72e44f65dbd9dca23439d";
-  expectedHostMinisignPublicKey = "RWSEfvU5EZoZYQTQUOVHeQFv3poThl1VM7FZLkNQr0Zu0FyL2x+u2O2l";
-  expectedHostMinisignKeyId = "847ef539119a1961";
-  expectedHostMinisignTrustedComment = "traycer-host 1.2.0 darwin-arm64";
-  expectedHostInstallId = "608ac4aa-4c3c-558e-94a9-679ab22baccc";
+  inherit (releaseContract) desktopLocalStorageKey;
+  expectedHostArchiveMemberCount = releaseContract.host.archive.memberCount;
+  expectedHostArchiveFileCount = releaseContract.host.archive.fileCount;
+  expectedHostMachOCount = releaseContract.host.archive.machOCount;
+  expectedHostUniversalMachOCount = releaseContract.host.archive.universalMachOCount;
+  expectedHostThinX8664MachOCount = releaseContract.host.archive.thinX8664MachOCount;
+  hostRipgrepRelativeExecutable = releaseContract.host.ripgrep.relativeExecutable;
+  expectedHostRipgrepVersion = releaseContract.host.ripgrep.version;
+  expectedHostRipgrepPcre2Feature = releaseContract.host.ripgrep.pcre2Feature;
+  expectedHostSignatureUrl = releaseContract.host.signature.url;
+  expectedHostSignatureSize = releaseContract.host.signature.size;
+  expectedHostSignatureSha256 = releaseContract.host.signature.sha256;
+  expectedHostMinisignPublicKey = releaseContract.host.minisign.publicKey;
+  expectedHostMinisignKeyId = releaseContract.host.minisign.keyId;
+  expectedHostMinisignTrustedComment = releaseContract.host.minisign.trustedComment;
+  expectedHostInstallId = releaseContract.host.installId;
   # Deterministic epoch sentinels mean "verified before store materialization";
   # they deliberately do not claim a wall-clock install or verification time.
-  expectedHostInstallSentinelTimestamp = "1970-01-01T00:00:00.000Z";
-  unverifiedPrivateBuildCommit = "5198516d395fedc25c5f702263a3e4a72b05a655";
+  expectedHostInstallSentinelTimestamp = releaseContract.host.installSentinelTimestamp;
+  inherit (releaseContract) unverifiedPrivateBuildCommit;
 
   version = sourceData.version or "unknown";
   urls = sourceData.urls or { };
@@ -83,15 +88,9 @@ let
 
   electronBuild = nixcfgElectron.sourceBuildFor expectedElectronVersion;
 
-  # Empirical claims are promoted only by editing this file after an authorized
-  # acquisition audit. They are intentionally not function arguments and
-  # cannot be attested by a caller.
-  verifiedHostCodesignIdentity = {
-    teamIdentifier = "7YVZ56DZ74";
-    identifier = "traycer-host";
-    designatedRequirement = ''identifier "traycer-host" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = "7YVZ56DZ74"'';
-    executableSha256 = "4977de1ec618e272c4701e004de9aee0efea32b3b72fe42012ef0016fe6bf48c";
-  };
+  # Empirical claims are promoted only by reviewing the release contract after
+  # an authorized acquisition audit. They remain non-overridable by callers.
+  inherit (releaseContract) verifiedHostCodesignIdentity;
   desktopBundleValidationComplete = true;
 
   unresolvedBuildGates =
@@ -824,20 +823,20 @@ let
       bun clients/desktop/scripts/prepack/check-tray-assets.cjs
 
       fontListModule="clients/desktop/node_modules/font-list"
-      fontListIsolatedTarget="../../../node_modules/.bun/font-list@2.1.0/node_modules/font-list"
+      fontListIsolatedTarget="../../../node_modules/.bun/font-list@${fontListVersion}/node_modules/font-list"
       fontListInstalled="$(realpath "$fontListModule")"
       fontListBuildHelper="$fontListModule/libs/darwin/fontlist"
       entitlements="${traycerSource}/${desktopEntitlementsRelativePath}"
       test -L "$fontListModule"
       test "$(readlink "$fontListModule")" = "$fontListIsolatedTarget"
       test -d "$fontListInstalled"
-      test "$(${lib.getExe python3} -c 'import json, sys; data = json.load(open(sys.argv[1])); print(data.get("name", "") + "@" + data.get("version", ""))' "$fontListInstalled/package.json")" = "font-list@2.1.0"
+      test "$(${lib.getExe python3} -c 'import json, sys; data = json.load(open(sys.argv[1])); print(data.get("name", "") + "@" + data.get("version", ""))' "$fontListInstalled/package.json")" = "font-list@${fontListVersion}"
       fontListWritable="$TMPDIR/traycer-font-list-packaging"
       test ! -e "$fontListWritable"
       mkdir "$fontListWritable"
       cp -R "$fontListInstalled"/. "$fontListWritable"/
       chmod -R u+w "$fontListWritable"
-      test "$(${lib.getExe python3} -c 'import json, sys; data = json.load(open(sys.argv[1])); print(data.get("name", "") + "@" + data.get("version", ""))' "$fontListWritable/package.json")" = "font-list@2.1.0"
+      test "$(${lib.getExe python3} -c 'import json, sys; data = json.load(open(sys.argv[1])); print(data.get("name", "") + "@" + data.get("version", ""))' "$fontListWritable/package.json")" = "font-list@${fontListVersion}"
       rm "$fontListModule"
       mv "$fontListWritable" "$fontListModule"
       test -d "$fontListModule"
@@ -857,9 +856,9 @@ let
           "@sentry/browser": "catalog:",
           "@sentry/electron": "catalog:",
           "electron-log": "catalog:",
-          "electron-updater": "^6.8.9",
+          "electron-updater": "^${electronUpdaterVersion}",
           "encrypt-storage": "catalog:",
-          "font-list": "^2.1.0",
+          "font-list": "^${fontListVersion}",
           "react": "catalog:",
           "react-dom": "catalog:",
       }
@@ -868,7 +867,7 @@ let
               "Traycer desktop dependency manifest drifted before packaging: "
               f"{manifest.get('dependencies')!r}"
           )
-      packaged_dependencies = {"font-list": "^2.1.0"}
+      packaged_dependencies = {"font-list": "^${fontListVersion}"}
       manifest["dependencies"] = packaged_dependencies
       manifest_path.write_text(
           json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",

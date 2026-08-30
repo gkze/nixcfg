@@ -593,7 +593,7 @@ in
               installCargo = true;
               installRustc = true;
             };
-            scheme_langserver.enable = !pkgs.stdenv.isDarwin;
+            scheme_langserver.enable = !pkgs.stdenv.hostPlatform.isDarwin;
             taplo = {
               enable = true;
               settings.formatting = {
@@ -877,7 +877,7 @@ in
           vim-jinja
           vim-nickel
         ]
-        ++ lib.lists.optionals (!pkgs.stdenv.isDarwin) [ nvim-dbee ];
+        ++ lib.lists.optionals (!pkgs.stdenv.hostPlatform.isDarwin) [ nvim-dbee ];
       extraConfigLuaPost =
         let
           helpers = config.lib.nixvim;
@@ -886,7 +886,7 @@ in
             overseer = { };
             # nvim-treesitter-textsubjects disabled: incompatible with newer nvim-treesitter API
           }
-          // (lib.attrsets.optionalAttrs (!pkgs.stdenv.isDarwin) { dbee = { }; });
+          // (lib.attrsets.optionalAttrs (!pkgs.stdenv.hostPlatform.isDarwin) { dbee = { }; });
         in
         concatStringsSep "\n" (
           (mapAttrsToList (n: v: ''require("${n}").setup(${helpers.toLuaObject v})'') extraPluginsConfig)

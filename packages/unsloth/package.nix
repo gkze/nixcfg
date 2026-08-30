@@ -135,7 +135,12 @@ let
         test -f "$out/thirdparty/libwebp/CMakeLists.txt"
       '';
 
+  frontendManifest = {
+    fileCount = builtins.fromJSON source.pins.frontendDistFileCount;
+    sha256 = source.pins.frontendDistSha256;
+  };
   frontend = callPackage ./frontend.nix {
+    inherit frontendManifest;
     src = desktopSource;
     inherit nodejs version;
     npmDepsHash = hashOrFake closureHashes.frontendNpmDepsHash;
@@ -171,7 +176,8 @@ let
       ;
   };
 
-  rustToolchain = (inputs.rust-overlay.lib.mkRustBin { } pkgs).stable."1.89.0".default;
+  rustToolchain =
+    (inputs.rust-overlay.lib.mkRustBin { } pkgs).stable.${source.pins.rustToolchainVersion}.default;
   exactRustPlatform = makeRustPlatform {
     cargo = rustToolchain;
     rustc = rustToolchain;

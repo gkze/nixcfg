@@ -18,5 +18,8 @@
     }
   ],
   "input": "mux",
+  "pins": {
+    "electronVersion": "40.9.3"
+  },
   "version": "v0.28.2"
 }

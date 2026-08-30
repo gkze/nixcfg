@@ -16,6 +16,11 @@
       "hashType": "srcHash"
     }
   ],
+  "pins": {
+    "frontendDistFileCount": "704",
+    "frontendDistSha256": "03acd2b8ef28d7135bd74a5b7ed82e6eaecea5289cfa4883ece0ef34597b6125",
+    "rustToolchainVersion": "1.89.0"
+  },
   "urls": {
     "backendSdist": "https://files.pythonhosted.org/packages/1b/5c/7645fb279567ab0f81751c284b8c916673e7721aee87acd841478cfab8b7/unsloth-2026.8.22.tar.gz",
     "releaseManifest": "https://github.com/unslothai/unsloth/releases/download/v0.1.804-beta/latest.json"

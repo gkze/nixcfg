@@ -8,6 +8,8 @@
   sherpa-onnx,
   src,
   stdenv,
+  version,
+  wrapperVersion,
   wrapperSrc,
 }:
 let
@@ -24,8 +26,7 @@ let
 in
 stdenv.mkDerivation {
   pname = "openchamber-sherpa-onnx-node";
-  version = "1.13.3";
-  inherit src;
+  inherit src version;
 
   sourceRoot = "source/scripts/node-addon-api";
   nativeBuildInputs = [
@@ -81,13 +82,17 @@ stdenv.mkDerivation {
     '') runtimeLibraries}
 
     cp "$wrapper/package.json" "$platform/package.json"
-    node - "$platform/package.json" <<'JS'
+    node - "$platform/package.json" \
+      ${lib.escapeShellArg wrapperVersion} \
+      ${lib.escapeShellArg version} <<'JS'
     const fs = require("fs")
     const path = process.argv[2]
+    const wrapperVersion = process.argv[3]
+    const addonVersion = process.argv[4]
     const manifest = JSON.parse(fs.readFileSync(path, "utf8"))
     const expected = {
       name: "sherpa-onnx-node",
-      version: "1.12.28",
+      version: wrapperVersion,
       main: "sherpa-onnx.js",
     }
     for (const [field, value] of Object.entries(expected)) {
@@ -98,7 +103,7 @@ stdenv.mkDerivation {
       }
     }
     manifest.name = "sherpa-onnx-darwin-arm64"
-    manifest.version = "1.13.3"
+    manifest.version = addonVersion
     manifest.main = "sherpa-onnx.node"
     fs.writeFileSync(path, JSON.stringify(manifest, null, 2) + "\n")
     JS
@@ -230,7 +235,8 @@ stdenv.mkDerivation {
   passthru = {
     nativeRuntimeFiles = [ "sherpa-onnx.node" ] ++ map (library: library.name) runtimeLibraries;
     runtimeProvenance = {
-      addonSourceVersion = "1.13.3";
+      addonSourceVersion = version;
+      wrapperSourceVersion = wrapperVersion;
       sherpaNixpkgsVersion = sherpa-onnx.version;
       onnxruntimeNixpkgsVersion = onnxruntime.version;
       managedNixStoreDependencies = true;
@@ -242,7 +248,7 @@ stdenv.mkDerivation {
   meta = {
     description = "Source-built sherpa-onnx Node-API runtime for OpenChamber";
     longDescription = ''
-      Builds the v1.13.3 Node-API source against the sherpa-onnx and
+      Builds the v${version} Node-API source against the sherpa-onnx and
       onnxruntime packages selected by nixpkgs. Those linked packages and any
       nixpkgs patches determine the resulting bytes; this derivation neither
       uses nor claims byte identity with the upstream npm prebuilt runtime.

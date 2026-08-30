@@ -79,6 +79,28 @@ def _ensure_str_mapping(values: object) -> dict[str, str]:
     return result
 
 
+_SOURCE_IDENTITY_FIELDS = (
+    ("version", "version"),
+    ("input", "input"),
+    ("urls", "urls"),
+    ("pins", "pins"),
+    ("commit", "commit"),
+    ("electron_version", "electronVersion"),
+)
+
+
+def _changed_source_identity_fields(
+    current: SourceEntry,
+    candidate: SourceEntry,
+) -> tuple[str, ...]:
+    """Return updater-owned identity fields changed by *candidate*."""
+    return tuple(
+        label
+        for attribute, label in _SOURCE_IDENTITY_FIELDS
+        if getattr(current, attribute) != getattr(candidate, attribute)
+    )
+
+
 @dataclass(slots=True)
 class UpdateContext:
     """Explicit per-run state shared across updater phases."""
@@ -192,6 +214,7 @@ def _source_override(
     src_hash: str,
     dependency_hash_type: HashType,
     dependency_hash: str,
+    source_pins: dict[str, str] | None = None,
 ) -> SourceEntry:
     """Build the temporary source used by a second-pass dependency probe."""
     _ = source_name
@@ -201,6 +224,7 @@ def _source_override(
             HashEntry.create("srcHash", src_hash),
             HashEntry.create(dependency_hash_type, dependency_hash),
         ]),
+        pins=source_pins,
     )
 
 
@@ -210,6 +234,7 @@ async def stream_source_then_overlay_hashes(
     version: str,
     src_expr: str,
     dependency_hash_type: HashType,
+    source_pins: dict[str, str] | None = None,
     config: UpdateConfig | None = None,
 ) -> EventStream:
     """Compute srcHash, then an overlay dependency hash using source overrides."""
@@ -234,6 +259,7 @@ async def stream_source_then_overlay_hashes(
                             src_hash=resolved["srcHash"],
                             dependency_hash_type=dependency_hash_type,
                             dependency_hash=config.fake_hash,
+                            source_pins=source_pins,
                         )
                     },
                 ),
@@ -250,6 +276,7 @@ class SourceThenOverlayHashMixin:
     name: str
     config: UpdateConfig
     dependency_hash_type: ClassVar[HashType]
+    source_pins: ClassVar[dict[str, str] | None] = None
 
     @staticmethod
     @abstractmethod
@@ -272,6 +299,7 @@ class SourceThenOverlayHashMixin:
             version=info.version,
             src_expr=self._src_expr(info.version),
             dependency_hash_type=self.dependency_hash_type,
+            source_pins=self.source_pins,
             config=self.config,
         ):
             yield event
@@ -289,6 +317,7 @@ class Updater(ABC):
     derivation_validations: ClassVar[tuple[DerivationValidation, ...]] = ()
     companion_of: ClassVar[str | None] = None
     additional_input_names: ClassVar[tuple[str, ...]] = ()
+    source_pins: ClassVar[dict[str, str] | None] = None
     # Optional tuple of Nix system strings (for example ``"aarch64-darwin"``)
     # this updater may run on. ``None`` means "all platforms" (the default).
     # When set, ``update_stream`` short-circuits on other platforms before
@@ -331,6 +360,7 @@ class Updater(ABC):
         return SourceEntry(
             version=info.version,
             hashes=HashCollection.from_value(hashes),
+            pins=self.source_pins,
         )
 
     def _build_result_with_urls(
@@ -346,6 +376,7 @@ class Updater(ABC):
             hashes=HashCollection.from_value(hashes),
             urls=urls,
             commit=commit,
+            pins=self.source_pins,
         )
 
     async def _is_latest(
@@ -357,6 +388,8 @@ class Updater(ABC):
         context = _coerce_context(context)
         current = context.current
         if current is None:
+            return False
+        if current.pins != self.source_pins:
             return False
         if current.version != info.version:
             return False
@@ -375,7 +408,7 @@ class Updater(ABC):
         context = _coerce_context(context)
         current = context.current
         if current is not None and getattr(self, "native_only", False):
-            return current.merge(result)
+            return current.merge_native_update(result)
         return result
 
     def results_equivalent(
@@ -400,6 +433,86 @@ class Updater(ABC):
         """Attach additional metadata to *result* before the equality check."""
         _ = (info, context)
         yield UpdateEvent.value(self.name, result)
+
+    async def _candidate_update_stream(
+        self,
+        info: VersionInfo,
+        session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext,
+    ) -> EventStream:
+        """Hash and finalize one resolved candidate source."""
+        hashes_drain = ValueDrain[SourceHashes]()
+        async for event in drain_value_events(
+            _call_with_optional_context(
+                self.fetch_hashes,
+                info,
+                session,
+                context=context,
+            ),
+            hashes_drain,
+            parse=expect_source_hashes,
+        ):
+            yield event
+        hashes = require_value(hashes_drain, "Missing hash output")
+        result = self.build_result(info, hashes)
+
+        result_drain = ValueDrain[SourceEntry]()
+        async for event in drain_value_events(
+            _call_with_optional_context(
+                self._finalize_result,
+                result,
+                info=info,
+                context=context,
+            ),
+            result_drain,
+            parse=expect_source_entry,
+        ):
+            yield event
+        result = require_value(result_drain, "Missing finalized result")
+
+        current = context.current
+        if current is not None and not context.hashes_fully_computed:
+            native_only = getattr(self, "native_only", False)
+            effective_result = self._comparison_result(result, context=context)
+            changed_fields = _changed_source_identity_fields(current, effective_result)
+            if changed_fields:
+                fields = ", ".join(changed_fields)
+                if native_only:
+                    msg = (
+                        f"Cannot apply native-only update for {self.name}: "
+                        f"updater-owned source identity changed ({fields}) while "
+                        "foreign-platform hashes would be preserved; rerun without "
+                        "--native-only"
+                    )
+                else:
+                    msg = (
+                        f"Cannot apply partial update for {self.name}: updater-owned "
+                        f"source identity changed ({fields}) while foreign-platform "
+                        "hashes would be preserved; rerun with working builders for "
+                        "all configured hash platforms"
+                    )
+                raise RuntimeError(msg)
+
+        if context.current is not None and self.results_equivalent(
+            context.current,
+            result,
+            context=context,
+        ):
+            unchanged_message = (
+                "Source metadata unchanged"
+                if self.materialize_when_current
+                else "Up to date"
+            )
+            yield UpdateEvent.status(
+                self.name,
+                unchanged_message,
+                operation="compute_hash",
+                status=StatusInfo(kind=StatusKind.UP_TO_DATE, scope="hash"),
+            )
+            yield UpdateEvent.result(self.name)
+            return
+        yield UpdateEvent.result(self.name, result)
 
     async def update_stream(
         self,
@@ -472,54 +585,12 @@ class Updater(ABC):
             operation="compute_hash",
             status=StatusInfo(kind=StatusKind.FETCHING_HASHES),
         )
-        hashes_drain = ValueDrain[SourceHashes]()
-        async for event in drain_value_events(
-            _call_with_optional_context(
-                self.fetch_hashes,
-                info,
-                session,
-                context=context,
-            ),
-            hashes_drain,
-            parse=expect_source_hashes,
-        ):
-            yield event
-        hashes = require_value(hashes_drain, "Missing hash output")
-        result = self.build_result(info, hashes)
-
-        result_drain = ValueDrain[SourceEntry]()
-        async for event in drain_value_events(
-            _call_with_optional_context(
-                self._finalize_result,
-                result,
-                info=info,
-                context=context,
-            ),
-            result_drain,
-            parse=expect_source_entry,
-        ):
-            yield event
-        result = require_value(result_drain, "Missing finalized result")
-
-        if context.current is not None and self.results_equivalent(
-            context.current,
-            result,
+        async for event in self._candidate_update_stream(
+            info,
+            session,
             context=context,
         ):
-            unchanged_message = (
-                "Source metadata unchanged"
-                if self.materialize_when_current
-                else "Up to date"
-            )
-            yield UpdateEvent.status(
-                self.name,
-                unchanged_message,
-                operation="compute_hash",
-                status=StatusInfo(kind=StatusKind.UP_TO_DATE, scope="hash"),
-            )
-            yield UpdateEvent.result(self.name)
-            return
-        yield UpdateEvent.result(self.name, result)
+            yield event
 
 
 class ChecksumProvidedUpdater(Updater):
@@ -703,6 +774,7 @@ class HashEntryUpdater(Updater):
             version=info.version,
             hashes=HashCollection.from_value(hashes),
             input=self.input_name,
+            pins=self.source_pins,
         )
 
     async def _is_latest(

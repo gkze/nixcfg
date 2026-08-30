@@ -3860,7 +3860,10 @@ def test_darwin_gui_package_set_retains_only_unified_chatgpt_app() -> None:
     )
     package_terms = _concat_terms(expect_binding(gui_apps.values, "packages").value)
     darwin_optionals = expect_instance(package_terms[-1], FunctionCall)
-    assert_nix_ast_equal(darwin_optionals.name, "lib.optionals stdenv.isDarwin")
+    assert_nix_ast_equal(
+        darwin_optionals.name,
+        "lib.optionals stdenv.hostPlatform.isDarwin",
+    )
     darwin_packages = expect_instance(darwin_optionals.argument, NixList)
     packages_by_name = {
         expect_instance(package, Identifier).name: package

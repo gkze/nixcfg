@@ -18,5 +18,8 @@
     }
   ],
   "input": "emdash",
+  "pins": {
+    "electronVersion": "40.7.0"
+  },
   "version": "v1.1.40"
 }

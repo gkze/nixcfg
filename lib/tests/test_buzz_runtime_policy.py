@@ -11,6 +11,7 @@ from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
+from lib.tests._buzz_native_lock import buzz_native_lock_string
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.tests._updater_helpers import load_repo_module
 from lib.update.paths import REPO_ROOT
@@ -35,8 +36,10 @@ _BUZZ_KEYRING_LOCKED_SCREEN = Path(
 )
 _BUZZ_E2E_BRIDGE = Path("desktop/src/testing/e2eBridge.ts")
 _BUZZ_IDENTITY_E2E = Path("desktop/tests/e2e/identity-lost.spec.ts")
-_MESH_RUNTIME_INSTALL = Path("mesh-llm-runtime-install-0.75.1/src/lib.rs")
-_SHERPA_ONNX_SYS_BUILD = Path("sherpa-onnx-sys-1.13.4/build.rs")
+_MESH_VERSION = buzz_native_lock_string("meshLlm", "version")
+_SHERPA_VERSION = buzz_native_lock_string("sherpaOnnx", "version")
+_MESH_RUNTIME_INSTALL = Path(f"mesh-llm-runtime-install-{_MESH_VERSION}/src/lib.rs")
+_SHERPA_ONNX_SYS_BUILD = Path(f"sherpa-onnx-sys-{_SHERPA_VERSION}/build.rs")
 
 _BUZZ_UPSTREAM = """use std::sync::Arc;
 
@@ -1455,7 +1458,7 @@ def test_desktop_vendor_patch_disables_mesh_network_and_sherpa_tts_links(
 def test_desktop_vendor_patch_requires_exactly_one_mesh_runtime_crate(
     tmp_path: Path,
 ) -> None:
-    """A missing or duplicated Mesh 0.75.1 crate must fail closed."""
+    """A missing or duplicated updater-pinned Mesh crate must fail closed."""
     with pytest.raises(
         _patcher().RuntimePolicyPatchError,
         match="found 0",
@@ -1475,11 +1478,11 @@ def test_desktop_vendor_patch_requires_exactly_one_mesh_runtime_crate(
 def test_desktop_vendor_patch_requires_exactly_one_sherpa_sys_crate(
     tmp_path: Path,
 ) -> None:
-    """A missing or duplicated sherpa-onnx-sys 1.13.4 crate must fail closed."""
+    """A missing or duplicated updater-pinned Sherpa crate must fail closed."""
     mesh_path = _write_mesh_vendor(tmp_path)
     with pytest.raises(
         _patcher().RuntimePolicyPatchError,
-        match="sherpa-onnx-sys-1.13.4/build.rs.*found 0",
+        match=rf"sherpa-onnx-sys-{_SHERPA_VERSION}/build\.rs.*found 0",
     ):
         _patcher().patch_desktop_cargo_deps(tmp_path)
     assert mesh_path.read_text(encoding="utf-8") == _MESH_UPSTREAM
@@ -1488,7 +1491,7 @@ def test_desktop_vendor_patch_requires_exactly_one_sherpa_sys_crate(
     _write_sherpa_vendor(tmp_path, prefix="second")
     with pytest.raises(
         _patcher().RuntimePolicyPatchError,
-        match="sherpa-onnx-sys-1.13.4/build.rs.*found 2",
+        match=rf"sherpa-onnx-sys-{_SHERPA_VERSION}/build\.rs.*found 2",
     ):
         _patcher().patch_desktop_cargo_deps(tmp_path)
     assert mesh_path.read_text(encoding="utf-8") == _MESH_UPSTREAM
@@ -1811,7 +1814,7 @@ def test_package_wires_the_runtime_policy_source_and_patched_vendor() -> None:
     assert_nix_ast_equal(
         expect_binding(scope, "buzzRuntimePolicySource").value,
         """import ./native/buzz-runtime-policy.nix {
-          inherit desktopCargoDeps python3 src stdenvNoCC version;
+          inherit desktopCargoDeps nativeLock python3 src stdenvNoCC version;
           expectedContract = expectedNativeContracts.patchedBuzzSource;
         }""",
     )
@@ -1843,6 +1846,7 @@ def test_runtime_policy_derivations_copy_then_patch_normal_outputs() -> None:
         {
           desktopCargoDeps,
           expectedContract,
+          nativeLock ? builtins.fromJSON (builtins.readFile ../native-lock.json),
           python3,
           src,
           stdenvNoCC,
@@ -1850,9 +1854,10 @@ def test_runtime_policy_derivations_copy_then_patch_normal_outputs() -> None:
         }:
         let
           patcher = ./patch_runtime_policy.py;
+          buzzCommit = nativeLock.buzz.commit or null;
           implementedContract = {
             kind = "buzz-runtime-policy-source";
-            commit = "95154bee4034ca7a40b33095c2ddbde8c9aa1614";
+            commit = buzzCommit;
             meshFeature = "dynamic-native-runtime";
             runtimeBundleEnvironment = "MESH_LLM_NATIVE_RUNTIME_BUNDLE_DIR";
             runtimeCacheEnvironment = "MESH_LLM_NATIVE_RUNTIME_CACHE_DIR";
@@ -1907,6 +1912,7 @@ def test_runtime_policy_derivations_copy_then_patch_normal_outputs() -> None:
             '';
           };
         in
+        assert builtins.isString buzzCommit && builtins.match "[0-9a-f]{40}" buzzCommit != null;
         assert expectedContract == implementedContract;
         stdenvNoCC.mkDerivation {
           pname = "buzz-runtime-policy-source";

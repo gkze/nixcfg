@@ -8,8 +8,7 @@
   ...
 }:
 let
-  inherit (stdenv.hostPlatform) system;
-  inherit (stdenv) isDarwin;
+  inherit (stdenv.hostPlatform) isDarwin system;
   meta = with lib; {
     description = "UI for running parallel coding agents in safe, isolated sandboxes";
     homepage = "https://imbue.com/sculptor/";

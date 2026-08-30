@@ -1,12 +1,13 @@
 {
   bun,
+  bunVersion,
   cacert,
   src,
   stdenvNoCC,
   version,
   hash,
 }:
-assert bun.version == "1.3.14";
+assert bun.version == bunVersion;
 stdenvNoCC.mkDerivation {
   pname = "openchamber-node-modules";
   inherit src version;
@@ -37,8 +38,8 @@ stdenvNoCC.mkDerivation {
       --ignore-scripts \
       --no-progress
 
-    # Never let the npm prebuilt become a runtime input.  The wrapper and the
-    # v1.13.3 Darwin addon are installed from audited package-local sources.
+    # Never let the npm prebuilt become a runtime input. The wrapper and Darwin
+    # addon are installed from audited package-local sources.
     rm -rf \
       node_modules/sherpa-onnx-node \
       node_modules/sherpa-onnx-darwin-arm64 \

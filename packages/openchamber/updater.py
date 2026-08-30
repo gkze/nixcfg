@@ -122,6 +122,14 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
     SHERPA_COMMIT = "330609dab49be6ee8b30702918ca7abbbad1286a"
     SHERPA_WRAPPER_VERSION = "1.12.28"
     NODE_ADDON_API_VERSION = "8.3.0"
+    source_pins: ClassVar[dict[str, str]] = {
+        "bunVersion": BUN_VERSION,
+        "opencodeCommit": OPENCODE_COMMIT,
+        "opencodeVersion": OPENCODE_VERSION,
+        "sherpaCommit": SHERPA_COMMIT,
+        "sherpaVersion": SHERPA_VERSION,
+        "sherpaWrapperVersion": SHERPA_WRAPPER_VERSION,
+    }
 
     @classmethod
     def _bun_url(cls) -> str:
@@ -469,7 +477,13 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
                 argument=NixPath(path=str(REPO_ROOT / "packages/openchamber/bun.nix")),
             ),
             argument=AttributeSet(
-                values=[Binding(name="bunSource", value=bun_source)],
+                values=[
+                    Binding(name="bunSource", value=bun_source),
+                    Binding(
+                        name="version",
+                        value=StringPrimitive(value=cls.BUN_VERSION),
+                    ),
+                ],
             ),
         )
 
@@ -496,6 +510,10 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
                             url=bun_url,
                             hash_value=bun_hash,
                         ),
+                    ),
+                    Binding(
+                        name="bunVersion",
+                        value=StringPrimitive(value=cls.BUN_VERSION),
                     ),
                     Binding(
                         name="src",
@@ -695,6 +713,7 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             "version": info.version,
             "commit": metadata["commit"],
             "electronVersion": metadata["electronVersion"],
+            "pins": self.source_pins,
             "urls": {
                 "bun": metadata["bunUrl"],
                 "nodeAddonApi": metadata["nodeAddonApiUrl"],

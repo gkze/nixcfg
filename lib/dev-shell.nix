@@ -186,7 +186,7 @@ pkgs.devshell.mkShell {
       yamlfmt
     ]
     ++ [ nixcfgPkg ]
-    ++ lib.optional pkgs.stdenv.isLinux dconf2nix
+    ++ lib.optional pkgs.stdenv.hostPlatform.isLinux dconf2nix
     ++ pre-commit-check.enabledPackages;
 
   devshell.startup.pre-commit.text = pre-commit-check.shellHook;

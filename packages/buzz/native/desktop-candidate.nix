@@ -3,6 +3,7 @@
   desktopUnsigned,
   lib,
   meshRuntimeBundle,
+  nativeLock ? builtins.fromJSON (builtins.readFile ../native-lock.json),
   patchedBuzzSource,
   python3,
   stdenv,
@@ -10,13 +11,24 @@
 }:
 assert stdenv.hostPlatform.system == "aarch64-darwin";
 let
+  buzzLock = nativeLock.buzz or { };
+  pnpmLock = nativeLock.pnpm or { };
+  sherpaLock = nativeLock.sherpaOnnx or { };
+  meshLlmLock = nativeLock.meshLlm or { };
+  buzzCommit = buzzLock.commit or null;
+  buzzVersion = buzzLock.version or null;
+  rustVersion = buzzLock.rustVersion or null;
+  pnpmVersion = pnpmLock.version or null;
+  sherpaVersion = sherpaLock.version or null;
+  meshLlmVersion = meshLlmLock.version or null;
+  skippyAbi = meshLlmLock.skippyAbi or null;
+  skippyAbiTuple = builtins.concatStringsSep ", " (lib.splitString "." skippyAbi);
   expectedDesktopContract = {
     kind = "buzz-desktop-unsigned";
-    commit = "95154bee4034ca7a40b33095c2ddbde8c9aa1614";
-    version = "0.5.20";
+    commit = buzzCommit;
+    version = buzzVersion;
     target = "aarch64-apple-darwin";
-    rustVersion = "1.95.0";
-    pnpmVersion = "11.4.0";
+    inherit rustVersion pnpmVersion;
     cargoRoot = "desktop/src-tauri";
     buildAndTestSubdir = "desktop";
     cargoOffline = true;
@@ -32,15 +44,15 @@ let
       "buzz-aarch64-apple-darwin"
     ];
     updaterEnabled = false;
-    sherpaOnnxVersion = "1.13.4";
+    sherpaOnnxVersion = sherpaVersion;
     minimumMacosVersion = "14.0";
     appSigned = false;
     runtimeBundleEmbedded = false;
   };
   expectedRuntimeContract = {
     kind = "mesh-native-runtime-bundle";
-    meshVersion = "0.75.1";
-    skippyAbi = "0.1.35";
+    meshVersion = meshLlmVersion;
+    inherit skippyAbi;
     target = "aarch64-apple-darwin";
     platform = {
       os = "macos";
@@ -56,7 +68,7 @@ let
   };
   expectedSourceContract = {
     kind = "buzz-runtime-policy-source";
-    commit = "95154bee4034ca7a40b33095c2ddbde8c9aa1614";
+    commit = buzzCommit;
     meshFeature = "dynamic-native-runtime";
     runtimeBundleEnvironment = "MESH_LLM_NATIVE_RUNTIME_BUNDLE_DIR";
     runtimeCacheEnvironment = "MESH_LLM_NATIVE_RUNTIME_CACHE_DIR";
@@ -98,8 +110,8 @@ let
   };
   implementedContract = {
     kind = "buzz-desktop-candidate";
-    commit = "95154bee4034ca7a40b33095c2ddbde8c9aa1614";
-    version = "0.5.20";
+    commit = buzzCommit;
+    version = buzzVersion;
     target = "aarch64-apple-darwin";
     minimumMacosVersion = "14.0";
     app = {
@@ -181,9 +193,9 @@ let
         fail("runtime schema differs from the reviewed runtime")
     if runtime.get("id") != "meshllm-native-runtime-darwin-aarch64-metal":
         fail("runtime.id differs from the reviewed runtime")
-    if runtime.get("mesh_version") != "0.75.1":
+    if runtime.get("mesh_version") != ${builtins.toJSON meshLlmVersion}:
         fail("runtime.mesh_version differs from the reviewed Mesh version")
-    if runtime.get("skippy_abi") != "0.1.35":
+    if runtime.get("skippy_abi") != ${builtins.toJSON skippyAbi}:
         fail("runtime.skippy_abi differs from the reviewed ABI")
     if runtime.get("platform") != {
         "os": "macos",
@@ -249,7 +261,7 @@ let
     import sys
     from pathlib import Path, PurePosixPath
 
-    EXPECTED_ABI = (0, 1, 35)
+    EXPECTED_ABI = (${skippyAbiTuple})
 
 
     class AbiVersion(ctypes.Structure):
@@ -316,7 +328,7 @@ let
     actual_abi = (version.major, version.minor, version.patch)
     if actual_abi != EXPECTED_ABI:
         fail(
-            "Skippy ABI differs from 0.1.35: "
+            "Skippy ABI differs from ${skippyAbi}: "
             f"{actual_abi[0]}.{actual_abi[1]}.{actual_abi[2]}"
         )
   '';
@@ -719,9 +731,9 @@ let
     test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$infoPlist")" = \
       Buzz
     test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$infoPlist")" = \
-      0.5.20
+      ${lib.escapeShellArg buzzVersion}
     test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$infoPlist")" = \
-      0.5.20
+      ${lib.escapeShellArg buzzVersion}
     test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$infoPlist")" = \
       14.0
 
@@ -818,7 +830,14 @@ let
     runHook postInstallCheck
   '';
 in
-assert version == "0.5.20";
+assert builtins.isString buzzVersion;
+assert builtins.isString buzzCommit && builtins.match "[0-9a-f]{40}" buzzCommit != null;
+assert builtins.isString rustVersion;
+assert builtins.isString pnpmVersion;
+assert builtins.isString sherpaVersion;
+assert builtins.isString meshLlmVersion;
+assert builtins.isString skippyAbi && builtins.match "[0-9]+\\.[0-9]+\\.[0-9]+" skippyAbi != null;
+assert version == buzzVersion;
 assert (desktopUnsigned.passthru.buzzNativeContract or null) == expectedDesktopContract;
 assert (meshRuntimeBundle.passthru.buzzNativeContract or null) == expectedRuntimeContract;
 assert (meshRuntimeBundle.passthru.manifestSubpath or null) == "manifest.json";

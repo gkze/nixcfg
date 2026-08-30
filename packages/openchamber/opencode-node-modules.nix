@@ -1,12 +1,13 @@
 {
   bun,
+  bunVersion,
   lib,
   src,
   stdenvNoCC,
   version,
   hash,
 }:
-assert bun.version == "1.3.14";
+assert bun.version == bunVersion;
 let
   platform = stdenvNoCC.hostPlatform;
   bunCpu = if platform.isAarch64 then "arm64" else "x64";

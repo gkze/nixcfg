@@ -70,7 +70,7 @@ let
     name = "codex-v8";
     inherit (v8Source) version;
     inherit rustyV8Src;
-    clangResourceVersion = "23";
+    clangResourceVersion = slib.sources.codex.pins.clangResourceVersion;
     gnArgsOverrides = {
       # Our Nix-provided rustc + RUSTC_BOOTSTRAP=1 is nightly-capable, but GN
       # can't detect this since we supply rust_sysroot_absolute.
@@ -201,18 +201,10 @@ let
   # Prebuilt WebRTC libraries for the webrtc-sys crate. The crate's build.rs
   # tries to download these at build time via scratch::path(), which fails in
   # the Nix sandbox. Setting LK_CUSTOM_WEBRTC skips the download.
-  webrtcPrebuilt = pkgs.fetchzip (
-    if pkgs.stdenv.hostPlatform.isLinux then
-      {
-        url = "https://github.com/livekit/rust-sdks/releases/download/webrtc-24f6822-2/webrtc-linux-x64-release.zip";
-        hash = "sha256-aR76GGfK2UJheN5nI10e2f8CZPgxMxqlEPxyWc95AQ0=";
-      }
-    else
-      {
-        url = "https://github.com/livekit/rust-sdks/releases/download/webrtc-24f6822-2/webrtc-mac-arm64-release.zip";
-        hash = "sha256-4IwJM6EzTFgQd2AdX+Hj9NWzmyqXrSioRax2L6GKL1U=";
-      }
-  );
+  webrtcSource = slib.sourceHashEntryForPlatform "codex" "sha256" pkgs.stdenv.hostPlatform.system;
+  webrtcPrebuilt = pkgs.fetchzip {
+    inherit (webrtcSource) hash url;
+  };
   webrtcSysOverride = _attrs: {
     LK_CUSTOM_WEBRTC = "${webrtcPrebuilt}";
     # cxx-build creates a symlink to cxx.h that lands outside $lib, triggering

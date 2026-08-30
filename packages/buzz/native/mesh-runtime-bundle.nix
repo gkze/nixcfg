@@ -6,6 +6,7 @@
   lib,
   llamaCppSrcHash,
   meshLlmSrcHash,
+  nativeLock ? builtins.fromJSON (builtins.readFile ../native-lock.json),
   ninja,
   python3,
   stdenv,
@@ -13,10 +14,17 @@
 }:
 assert stdenvNoCC.hostPlatform.system == "aarch64-darwin";
 let
+  meshLlmLock = nativeLock.meshLlm or { };
+  llamaCppLock = nativeLock.llamaCpp or { };
+  meshLlmVersion = meshLlmLock.version or null;
+  meshLlmCommit = meshLlmLock.commit or null;
+  skippyAbi = meshLlmLock.skippyAbi or null;
+  llamaCppCommit = llamaCppLock.commit or null;
   meshLlm = import ./mesh-llm.nix {
     inherit
       fetchFromGitHub
       lib
+      nativeLock
       python3
       stdenvNoCC
       ;
@@ -29,6 +37,7 @@ let
       fetchFromGitHub
       gitMinimal
       lib
+      nativeLock
       ninja
       stdenv
       ;
@@ -37,8 +46,8 @@ let
   };
   expectedMeshContract = {
     kind = "mesh-llm";
-    version = "0.75.1";
-    commit = "3295c902d4c4f859aaadf9240042ffdaf06dd07e";
+    version = meshLlmVersion;
+    commit = meshLlmCommit;
     sdkFeatures = [
       "client"
       "serving"
@@ -47,7 +56,7 @@ let
   };
   expectedLlamaContract = {
     kind = "llama.cpp";
-    commit = "8190848bb36c7df4251db4352bd81bc07d0a4385";
+    commit = llamaCppCommit;
     target = "aarch64-apple-darwin";
     backend = "metal";
     linkMode = "dynamic";
@@ -66,8 +75,8 @@ let
   };
   implementedBundleContract = {
     kind = "mesh-native-runtime-bundle";
-    meshVersion = "0.75.1";
-    skippyAbi = "0.1.35";
+    meshVersion = meshLlmVersion;
+    inherit skippyAbi;
     target = "aarch64-apple-darwin";
     platform = {
       os = "macos";
@@ -92,10 +101,10 @@ let
     import sys
     from pathlib import Path, PurePosixPath
 
-    MESH_VERSION = "0.75.1"
-    MESH_COMMIT = "3295c902d4c4f859aaadf9240042ffdaf06dd07e"
-    LLAMA_COMMIT = "8190848bb36c7df4251db4352bd81bc07d0a4385"
-    SKIPPY_ABI = "0.1.35"
+    MESH_VERSION = ${builtins.toJSON meshLlmVersion}
+    MESH_COMMIT = ${builtins.toJSON meshLlmCommit}
+    LLAMA_COMMIT = ${builtins.toJSON llamaCppCommit}
+    SKIPPY_ABI = ${builtins.toJSON skippyAbi}
     RUNTIME_ID = "meshllm-native-runtime-darwin-aarch64-metal"
     PACKAGING_PATHS = (
         "scripts/build-llama.sh",
@@ -538,6 +547,10 @@ let
         main(sys.argv[1:])
   '';
 in
+assert builtins.isString meshLlmVersion;
+assert builtins.isString meshLlmCommit && builtins.match "[0-9a-f]{40}" meshLlmCommit != null;
+assert builtins.isString skippyAbi && builtins.match "[0-9]+\\.[0-9]+\\.[0-9]+" skippyAbi != null;
+assert builtins.isString llamaCppCommit && builtins.match "[0-9a-f]{40}" llamaCppCommit != null;
 assert (meshLlm.passthru.buzzNativeContract or null) == expectedMeshContract;
 assert (meshLlm.sourceSubdir or null) == "share/mesh-llm/source";
 assert (meshLlm.provenanceSubpath or null) == "share/mesh-llm/provenance.json";
@@ -546,7 +559,7 @@ assert (llamaCpp.libSubdir or null) == "lib";
 assert builtins.isList (llamaCpp.resourceSubpaths or null);
 stdenvNoCC.mkDerivation {
   pname = "buzz-mesh-native-runtime";
-  version = "0.75.1";
+  version = meshLlmVersion;
   strictDeps = true;
   dontUnpack = true;
   dontConfigure = true;
@@ -567,7 +580,7 @@ stdenvNoCC.mkDerivation {
     inherit runtimeId;
   };
   meta = {
-    description = "Repo-owned Mesh 0.75.1 Metal native runtime for Buzz";
+    description = "Repo-owned Mesh ${meshLlmVersion} Metal native runtime for Buzz";
     license = lib.licenses.asl20;
     platforms = [ "aarch64-darwin" ];
   };

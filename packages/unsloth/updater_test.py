@@ -17,9 +17,12 @@ from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from nix_manipulator.expressions.assertion import Assertion
+from nix_manipulator.expressions.function.definition import FunctionDefinition
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
-from lib.tests._nix_ast import assert_nix_ast_equal
+from lib.tests._assertions import expect_instance
+from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.tests._updater_helpers import collect_events, load_repo_module, run_async
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import UpdateEvent, UpdateEventKind
@@ -34,6 +37,11 @@ _PACKAGE_DIR = REPO_ROOT / "packages/unsloth"
 _VERSION = "0.1.804-beta"
 _TAG = f"v{_VERSION}"
 _COMMIT = "8c43aed2038721050ca0620f02967e03a9d5aa23"
+_RUST_TOOLCHAIN_VERSION = "1.89.0"
+_FRONTEND_DIST_FILE_COUNT = "704"
+_FRONTEND_DIST_SHA256 = (
+    "03acd2b8ef28d7135bd74a5b7ed82e6eaecea5289cfa4883ece0ef34597b6125"
+)
 _SOURCE_PYTHON_VERSION = "2026.8.22"
 _BACKEND_VERSION = "2026.8.22"
 _MANIFEST_URL = (
@@ -666,6 +674,11 @@ def test_unsloth_static_closures_and_export_truth_are_current() -> None:
                 "releaseManifest": _MANIFEST_URL,
             },
             hashes=HashCollection.from_value(_foundation_hashes()),
+            pins={
+                "frontendDistFileCount": _FRONTEND_DIST_FILE_COUNT,
+                "frontendDistSha256": _FRONTEND_DIST_SHA256,
+                "rustToolchainVersion": _RUST_TOOLCHAIN_VERSION,
+            },
         )
     )
     assert plan["status"] == "exported-and-validated"
@@ -2230,6 +2243,40 @@ def test_unsloth_build_result_matches_checked_in_foundation() -> None:
         json.loads((_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8"))
     )
     assert result.equivalent_to(checked_in)
+
+
+def test_unsloth_release_contract_pins_are_updater_owned() -> None:
+    """Rust and reviewed frontend identities consume updater-produced pins."""
+    updater = _load_updater_module().UnslothUpdater()
+
+    assert updater.source_pins == {
+        "frontendDistFileCount": _FRONTEND_DIST_FILE_COUNT,
+        "frontendDistSha256": _FRONTEND_DIST_SHA256,
+        "rustToolchainVersion": _RUST_TOOLCHAIN_VERSION,
+    }
+    result = updater.build_result(
+        VersionInfo(_VERSION, _metadata()),
+        _foundation_hashes(),
+    )
+    assert result.pins == updater.source_pins
+
+    package = expect_instance(
+        parse_nix_expr((_PACKAGE_DIR / "package.nix").read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+    output = expect_instance(package.output, Assertion).body
+    assert_nix_ast_equal(
+        expect_binding(output.scope, "rustToolchain").value,
+        """(inputs.rust-overlay.lib.mkRustBin { } pkgs)
+          .stable.${source.pins.rustToolchainVersion}.default""",
+    )
+    assert_nix_ast_equal(
+        expect_binding(output.scope, "frontendManifest").value,
+        """{
+          fileCount = builtins.fromJSON source.pins.frontendDistFileCount;
+          sha256 = source.pins.frontendDistSha256;
+        }""",
+    )
 
 
 @pytest.mark.parametrize(

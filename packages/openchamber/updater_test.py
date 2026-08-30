@@ -39,14 +39,26 @@ _PACKAGE_DIR = REPO_ROOT / "packages/openchamber"
 _VERSION = "1.21.0"
 _TAG = f"v{_VERSION}"
 _COMMIT = "ad7fd356339ccc5c9af5af1a6786662572d53ed0"
+_BUN_VERSION = "1.3.14"
+_ELECTRON_VERSION = "43.3.0"
 _OPENCODE_VERSION = "1.18.23"
 _OPENCODE_COMMIT = "ef2880f379129aa048be9e9353e30aa168d42c17"
+_SHERPA_VERSION = "1.13.3"
 _SHERPA_COMMIT = "330609dab49be6ee8b30702918ca7abbbad1286a"
+_SHERPA_WRAPPER_VERSION = "1.12.28"
+_SOURCE_PINS = {
+    "bunVersion": _BUN_VERSION,
+    "opencodeCommit": _OPENCODE_COMMIT,
+    "opencodeVersion": _OPENCODE_VERSION,
+    "sherpaCommit": _SHERPA_COMMIT,
+    "sherpaVersion": _SHERPA_VERSION,
+    "sherpaWrapperVersion": _SHERPA_WRAPPER_VERSION,
+}
 _OPENCODE_NODE_MODULES_HASH = "sha256-ObS50y/oy6fM9wSGUL/wx6O0+fTWHC04mXJNd7w/2Z0="
 _BUN_HASH = "sha256-2LliIYKK1vl6x6wKt+lYcjQa92MAHogD6CZ2UsJlJiA="
 _BUN_URL = (
     "https://github.com/oven-sh/bun/releases/download/"
-    "bun-v1.3.14/bun-darwin-aarch64.zip"
+    f"bun-v{_BUN_VERSION}/bun-darwin-aarch64.zip"
 )
 _SOURCE_HASHES = (
     "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
@@ -251,7 +263,8 @@ def _urls() -> dict[str, str]:
             f"https://github.com/k2-fsa/sherpa-onnx/archive/{_SHERPA_COMMIT}.tar.gz"
         ),
         "sherpaOnnxNodeUrl": (
-            "https://registry.npmjs.org/sherpa-onnx-node/-/sherpa-onnx-node-1.12.28.tgz"
+            "https://registry.npmjs.org/sherpa-onnx-node/-/"
+            f"sherpa-onnx-node-{_SHERPA_WRAPPER_VERSION}.tgz"
         ),
     }
 
@@ -261,7 +274,7 @@ def _version_info() -> VersionInfo:
         version=_VERSION,
         metadata={
             "commit": _COMMIT,
-            "electronVersion": "43.3.0",
+            "electronVersion": _ELECTRON_VERSION,
             "opencodeNodeModulesHash": _OPENCODE_NODE_MODULES_HASH,
             "tag": _TAG,
             **_urls(),
@@ -286,7 +299,10 @@ def _expected_node_modules_fake_hash_expr() -> str:
             argument=NixPath(path=str(_PACKAGE_DIR / "bun.nix")),
         ),
         argument=AttributeSet(
-            values=[Binding(name="bunSource", value=bun_source)],
+            values=[
+                Binding(name="bunSource", value=bun_source),
+                Binding(name="version", value=StringPrimitive(value=_BUN_VERSION)),
+            ],
         ),
     )
     package_call = FunctionCall(
@@ -297,6 +313,10 @@ def _expected_node_modules_fake_hash_expr() -> str:
         argument=AttributeSet(
             values=[
                 Binding(name="bun", value=bun),
+                Binding(
+                    name="bunVersion",
+                    value=StringPrimitive(value=_BUN_VERSION),
+                ),
                 Binding(
                     name="src",
                     value=_build_fetch_from_github_call(
@@ -321,9 +341,12 @@ def _expected_node_modules_fake_hash_expr() -> str:
 def _lock_text() -> str:
     return "\n".join((
         f'"@opencode-ai/sdk": ["@opencode-ai/sdk@{_OPENCODE_VERSION}", ""]',
-        '"electron": ["electron@43.3.0", ""]',
-        '"sherpa-onnx-node": ["sherpa-onnx-node@1.12.28", ""]',
-        ('"sherpa-onnx-darwin-arm64": ["sherpa-onnx-darwin-arm64@1.13.3", ""]'),
+        f'"electron": ["electron@{_ELECTRON_VERSION}", ""]',
+        (f'"sherpa-onnx-node": ["sherpa-onnx-node@{_SHERPA_WRAPPER_VERSION}", ""]'),
+        (
+            '"sherpa-onnx-darwin-arm64": '
+            f'["sherpa-onnx-darwin-arm64@{_SHERPA_VERSION}", ""]'
+        ),
     ))
 
 
@@ -577,7 +600,8 @@ def test_openchamber_build_result_requires_and_persists_complete_closure() -> No
     assert result == SourceEntry.model_validate({
         "version": _VERSION,
         "commit": _COMMIT,
-        "electronVersion": "43.3.0",
+        "electronVersion": _ELECTRON_VERSION,
+        "pins": _SOURCE_PINS,
         "urls": {
             "bun": urls["bunUrl"],
             "nodeAddonApi": urls["nodeAddonApiUrl"],
@@ -762,7 +786,8 @@ def test_openchamber_source_metadata_contains_promoted_exact_hashes() -> None:
     ])
     assert source.version == _VERSION
     assert source.commit == _COMMIT
-    assert source.electron_version == "43.3.0"
+    assert source.electron_version == _ELECTRON_VERSION
+    assert source.pins == _SOURCE_PINS
     assert source.hashes.equivalent_to(expected_hashes)
 
     package = expect_instance(
@@ -776,6 +801,113 @@ def test_openchamber_source_metadata_contains_promoted_exact_hashes() -> None:
     assert expect_instance(condition.right, NixList).value == []
     assert expect_instance(final.consequence, Identifier).name == "realPackage"
     assert expect_instance(final.alternative, Identifier).name == "blockedPackage"
+
+
+def test_openchamber_derivations_consume_updater_owned_source_pins() -> None:
+    """Every source identity in handwritten Nix must come from source metadata."""
+    package = expect_instance(
+        parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+    final = expect_instance(package.output, IfExpression)
+    for name, expression in {
+        "bunVersion": "selfSource.pins.bunVersion",
+        "openCodeCommit": "selfSource.pins.opencodeCommit",
+        "openCodeVersion": "selfSource.pins.opencodeVersion",
+        "sherpaCommit": "selfSource.pins.sherpaCommit",
+        "sherpaVersion": "selfSource.pins.sherpaVersion",
+        "sherpaWrapperVersion": "selfSource.pins.sherpaWrapperVersion",
+    }.items():
+        assert_nix_ast_equal(expect_binding(final.scope, name).value, expression)
+
+    for source_name, revision in {
+        "openChamberSrc": "selfSource.commit",
+        "openCodeSrc": "openCodeCommit",
+        "sherpaSrc": "sherpaCommit",
+    }.items():
+        source = expect_instance(
+            expect_binding(final.scope, source_name).value,
+            FunctionCall,
+        )
+        source_arguments = expect_instance(source.argument, AttributeSet)
+        assert_nix_ast_equal(
+            expect_binding(source_arguments.values, "rev").value,
+            revision,
+        )
+
+    helper_contracts = {
+        "bunExact": {"version": "bunVersion"},
+        "openChamberNodeModules": {"bunVersion": "bunVersion"},
+        "openCodeNodeModules": {
+            "bunVersion": "bunVersion",
+            "version": "openCodeVersion",
+        },
+        "sherpaNodeAddon": {
+            "version": "sherpaVersion",
+            "wrapperVersion": "sherpaWrapperVersion",
+        },
+    }
+    for helper_name, expected_arguments in helper_contracts.items():
+        helper = expect_instance(
+            expect_binding(final.scope, helper_name).value,
+            FunctionCall,
+        )
+        arguments = expect_instance(helper.argument, AttributeSet)
+        for name, expression in expected_arguments.items():
+            assert_nix_ast_equal(
+                expect_binding(arguments.values, name).value,
+                expression,
+            )
+
+    bun = expect_instance(
+        parse_nix_expr((_PACKAGE_DIR / "bun.nix").read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+    bun_derivation = expect_instance(bun.output, FunctionCall)
+    assert_nix_ast_equal(
+        expect_binding(
+            expect_instance(bun_derivation.argument, AttributeSet).values,
+            "version",
+        ).value,
+        "version",
+    )
+
+    for name in ("node-modules.nix", "opencode-node-modules.nix"):
+        node_modules = expect_instance(
+            parse_nix_expr((_PACKAGE_DIR / name).read_text(encoding="utf-8")),
+            FunctionDefinition,
+        )
+        assertion = expect_instance(node_modules.output, Assertion)
+        assert_nix_ast_equal(assertion.expression, "bun.version == bunVersion")
+
+    sherpa = expect_instance(
+        parse_nix_expr(
+            (_PACKAGE_DIR / "sherpa-node-addon.nix").read_text(encoding="utf-8")
+        ),
+        FunctionDefinition,
+    )
+    sherpa_derivation = expect_instance(sherpa.output, FunctionCall)
+    sherpa_attributes = expect_instance(sherpa_derivation.argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(sherpa_attributes.values, "version").value,
+        "version",
+    )
+    passthru = expect_instance(
+        expect_binding(sherpa_attributes.values, "passthru").value,
+        AttributeSet,
+    )
+    provenance = expect_instance(
+        expect_binding(passthru.values, "runtimeProvenance").value,
+        AttributeSet,
+    )
+    assert_nix_ast_equal(
+        expect_binding(provenance.values, "addonSourceVersion").value,
+        "version",
+    )
+    assert_nix_ast_equal(
+        expect_binding(provenance.values, "wrapperSourceVersion").value,
+        "wrapperVersion",
+    )
 
 
 def test_openchamber_nix_files_are_structurally_parseable() -> None:

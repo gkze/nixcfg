@@ -6,6 +6,11 @@
 let
   opencode = import ../../lib/opencode-mcp.nix { inherit lib; };
   remoteWrapper = import ../../lib/mcp-remote-wrapper.nix { inherit lib pkgs; };
+  mcpRuntimeSource = builtins.fromJSON (
+    builtins.readFile ../../packages/mcp-runtime-tools/sources.json
+  );
+  mcpRuntimePins = mcpRuntimeSource.pins;
+  runtimeSpec = name: mcpRuntimePins.${name};
   inherit (opencode) mkLocalServer mkRemoteServer;
 
   local = command: {
@@ -60,7 +65,7 @@ let
     fi
     export SLACK_MCP_XOXP_TOKEN="$token"
     export SLACK_MCP_ADD_MESSAGE_TOOL=true
-    exec ${remoteWrapper.bunxExe} --bun slack-mcp-server@1.3.0 --transport stdio
+    exec ${remoteWrapper.bunxExe} --bun ${runtimeSpec "slack-mcp-server"} --transport stdio
   '';
   twilight = lib.attrByPath [
     "nixcfg"
@@ -74,35 +79,35 @@ let
     aws-knowledge = remote "https://knowledge-mcp.global.api.aws";
     aws-mcp = local [
       "uvx"
-      "mcp-proxy-for-aws==1.6.4"
+      (runtimeSpec "mcp-proxy-for-aws")
       "https://aws-mcp.us-east-1.api.aws/mcp"
     ];
     chrome-devtools = local [
       "npx"
       "-y"
-      "chrome-devtools-mcp@1.7.0"
+      (runtimeSpec "chrome-devtools-mcp")
       "--autoConnect"
       "--channel=stable"
     ];
     firefox-devtools = local [
       "npx"
       "-y"
-      "@padenot/firefox-devtools-mcp@0.7.5"
+      (runtimeSpec "@padenot/firefox-devtools-mcp")
       "--firefoxPath=${twilight}/Contents/MacOS/zen"
     ];
     macos-automator = local [
       "bunx"
       "--bun"
-      "@steipete/macos-automator-mcp@0.4.6"
+      (runtimeSpec "@steipete/macos-automator-mcp")
     ];
     markitdown = local [
       "uvx"
-      "markitdown-mcp@0.0.1a4"
+      (runtimeSpec "markitdown-mcp")
     ];
     next-devtools = local [
       "bunx"
       "--bun"
-      "next-devtools-mcp@0.4.0"
+      (runtimeSpec "next-devtools-mcp")
     ];
   };
 
@@ -111,7 +116,7 @@ let
     convex = local [
       "bunx"
       "--bun"
-      "convex@1.43.0"
+      (runtimeSpec "convex")
       "mcp"
       "start"
     ];
@@ -136,7 +141,7 @@ let
         (local [
           "bunx"
           "--bun"
-          "@vantasdk/vanta-mcp-server@1.2.0"
+          (runtimeSpec "@vantasdk/vanta-mcp-server")
         ]);
     vercel = remote "https://mcp.vercel.com";
   };

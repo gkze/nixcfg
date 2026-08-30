@@ -45,6 +45,14 @@
       "url": "https://github.com/openchamber/openchamber/archive/ad7fd356339ccc5c9af5af1a6786662572d53ed0.tar.gz"
     }
   ],
+  "pins": {
+    "bunVersion": "1.3.14",
+    "opencodeCommit": "ef2880f379129aa048be9e9353e30aa168d42c17",
+    "opencodeVersion": "1.18.23",
+    "sherpaCommit": "330609dab49be6ee8b30702918ca7abbbad1286a",
+    "sherpaVersion": "1.13.3",
+    "sherpaWrapperVersion": "1.12.28"
+  },
   "urls": {
     "bun": "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-darwin-aarch64.zip",
     "nodeAddonApi": "https://registry.npmjs.org/node-addon-api/-/node-addon-api-8.3.0.tgz",

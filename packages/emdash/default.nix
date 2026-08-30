@@ -21,6 +21,7 @@
   nixcfgElectron,
   python3,
   rpm,
+  selfSource,
   sqlite,
   stdenv,
   zlib,
@@ -41,7 +42,7 @@ let
     in
     if perPlatformHash.success then perPlatformHash.value else slib.sourceHash pname "npmDepsHash";
 
-  electronVersion = "40.7.0";
+  electronVersion = selfSource.pins.electronVersion;
   electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
   electronRuntime = electronBuild.runtime;
   electronRuntimeVersion = electronBuild.runtimeVersion;

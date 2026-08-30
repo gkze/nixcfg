@@ -115,12 +115,18 @@ let
     }
   ];
 
+  bunSourceMetadata = outputs.lib.sourceHashEntry pname "sha256";
+  bunVersionMatch = builtins.match ".*/bun-v([^/]+)/.*" bunSourceMetadata.url;
+  bunVersion =
+    if bunVersionMatch == null then
+      throw "Executor updater produced an invalid Bun source URL: ${bunSourceMetadata.url}"
+    else
+      builtins.head bunVersionMatch;
   bunSource = fetchurl {
-    url = "https://github.com/oven-sh/bun/releases/download/bun-v1.3.11/bun-darwin-aarch64.zip";
-    hash = "sha256-b1o0Z+2crsR5W/eM1HZQfZ+HDH1XuGyUX8szgSZ3L/w=";
+    inherit (bunSourceMetadata) hash url;
   };
   bunExact = bun.overrideAttrs (previousAttrs: {
-    version = "1.3.11";
+    version = bunVersion;
     src = bunSource;
     passthru = (previousAttrs.passthru or { }) // {
       sources = {
@@ -218,14 +224,23 @@ let
   bunPackageShards = lib.groupBy (
     entry: builtins.substring 0 2 (builtins.hashString "sha256" entry.name)
   ) bunPackageEntries;
-  patchedBunDependencies = {
-    "@1password/sdk-core@0.4.1-beta.1" = src + "/patches/@1password%2Fsdk-core@0.4.1-beta.1.patch";
-    "@electric-sql/pglite-socket@0.1.4" = src + "/patches/@electric-sql%2Fpglite-socket@0.1.4.patch";
-    "agents@0.17.3" = src + "/patches/agents@0.17.3.patch";
-    "libsql@0.3.19" = ./libsql-0.3.19-remove-self-dependency.patch;
-    "libsql@0.5.29" = src + "/patches/libsql@0.5.29.patch";
-    "postgres@3.4.9" = src + "/patches/postgres@3.4.9.patch";
-  };
+  resolvePinnedPatch =
+    _: patch:
+    if lib.hasPrefix "source:" patch then
+      src + "/${lib.removePrefix "source:" patch}"
+    else if lib.hasPrefix "local:" patch then
+      ./. + "/${lib.removePrefix "local:" patch}"
+    else
+      throw "Executor updater emitted an unsupported patch source";
+  patchMetadataPinNames = [
+    "bunLockPatch"
+    "effectLspPatchVersion"
+  ];
+  bunLockPatch = resolvePinnedPatch "bunLockPatch" selfSource.pins.bunLockPatch;
+  effectLspPatchVersion = selfSource.pins.effectLspPatchVersion;
+  patchedBunDependencies = lib.mapAttrs resolvePinnedPatch (
+    builtins.removeAttrs selfSource.pins patchMetadataPinNames
+  );
   extractHost =
     url:
     let
@@ -392,7 +407,7 @@ let
     '';
 
     postPatch = ''
-      patch -p1 < ${./bun-lock-libsql-0.3.19-remove-self-dependency.patch}
+      patch -p1 < ${bunLockPatch}
       PYTHONPATH=${
         lib.fileset.toSource {
           root = ../..;
@@ -412,11 +427,11 @@ let
       export EXECUTOR_VERSION=${lib.escapeShellArg version}
       mkdir -p "$HOME"
 
-      test "$(bun --version)" = "1.3.11"
+      test "$(bun --version)" = "${bunVersion}"
       bun run prepare
-      grep -Fq '"use effect-lsp-patch-version 0.85.1";' \
+      grep -Fq '"use effect-lsp-patch-version ${effectLspPatchVersion}";' \
         node_modules/typescript/lib/typescript.js
-      grep -Fq '"use effect-lsp-patch-version 0.85.1";' \
+      grep -Fq '"use effect-lsp-patch-version ${effectLspPatchVersion}";' \
         node_modules/typescript/lib/_tsc.js
       bun run --filter @executor-js/local build
 

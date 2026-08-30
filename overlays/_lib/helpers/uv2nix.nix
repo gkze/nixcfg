@@ -12,6 +12,7 @@
       extraOverlays ? [ ],
     }:
     let
+      platformCompat = import ../../../lib/pinned-input-platform-compat;
       uv2nixLib = inputs.uv2nix.lib;
       pyproject = prev.lib.importTOML (src + "/pyproject.toml");
       uvLock = uv2nixLib.lock1.parseLock (prev.lib.importTOML uvLockFile);
@@ -52,6 +53,7 @@
           (
             prev.lib.composeManyExtensions (
               [
+                platformCompat.overlay
                 inputs.pyproject-build-systems.overlays.default
                 (uv2nixLib.overlays.mkOverlay {
                   sourcePreference = "wheel";

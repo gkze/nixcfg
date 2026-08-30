@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, cast
 
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
@@ -19,6 +20,7 @@ from lib.nix.models.sources import (
     SourceHashes,
 )
 from lib.update import nix as update_nix
+from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import (
     UpdateEvent,
     ValueDrain,
@@ -29,6 +31,7 @@ from lib.update.events import (
 from lib.update.net import fetch_github_api, fetch_json, fetch_url, github_raw_url
 from lib.update.nix import _build_fetch_from_github_call, _build_fetch_from_github_expr
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
+from lib.update.paths import updater_dir_for
 from lib.update.updaters import (
     GitHubReleaseUpdater,
     UpdateContext,
@@ -39,11 +42,166 @@ from lib.update.updaters.metadata import metadata_as_mapping
 
 if TYPE_CHECKING:
     import aiohttp
+    from nix_manipulator.expressions.inherit import Inherit
 
     from lib.update.config import UpdateConfig
     from lib.update.events import EventStream
 
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+
+_SHERPA_NATIVE_DEPENDENCIES = {
+    "eigen": {
+        "file": "eigen-3.4.1.tar.gz",
+        "url": "https://gitlab.com/libeigen/eigen/-/archive/3.4.1/eigen-3.4.1.tar.gz",
+    },
+    "espeakNg": {
+        "file": "espeak-ng-f6fed6c58b5e0998b8e68c6610125e2d07d595a7.zip",
+        "url": (
+            "https://github.com/csukuangfj/espeak-ng/archive/"
+            "f6fed6c58b5e0998b8e68c6610125e2d07d595a7.zip"
+        ),
+    },
+    "hclustCpp": {
+        "file": "hclust-cpp-2026-02-25.tar.gz",
+        "url": (
+            "https://github.com/csukuangfj/hclust-cpp/archive/refs/tags/"
+            "2026-02-25.tar.gz"
+        ),
+    },
+    "json": {
+        "file": "json-3.12.0.tar.gz",
+        "url": ("https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.tar.gz"),
+    },
+    "kaldiDecoder": {
+        "file": "kaldi-decoder-0.2.11.tar.gz",
+        "url": (
+            "https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.2.11.tar.gz"
+        ),
+    },
+    "kaldiNativeFbank": {
+        "file": "kaldi-native-fbank-1.22.3.tar.gz",
+        "url": (
+            "https://github.com/csukuangfj/kaldi-native-fbank/archive/refs/tags/"
+            "v1.22.3.tar.gz"
+        ),
+    },
+    "kaldifst": {
+        "file": "kaldifst-1.7.17.tar.gz",
+        "url": ("https://github.com/k2-fsa/kaldifst/archive/refs/tags/v1.7.17.tar.gz"),
+    },
+    "kissfft": {
+        "file": "kissfft-febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip",
+        "url": (
+            "https://github.com/mborgerding/kissfft/archive/"
+            "febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip"
+        ),
+    },
+    "openfst": {
+        "file": "openfst-sherpa-onnx-2024-06-19.tar.gz",
+        "url": (
+            "https://github.com/csukuangfj/openfst/archive/refs/tags/"
+            "sherpa-onnx-2024-06-19.tar.gz"
+        ),
+    },
+    "piperPhonemize": {
+        "file": "piper-phonemize-78a788e0b719013401572d70fef372e77bff8e43.zip",
+        "url": (
+            "https://github.com/csukuangfj/piper-phonemize/archive/"
+            "78a788e0b719013401572d70fef372e77bff8e43.zip"
+        ),
+    },
+    "simpleSentencepiece": {
+        "file": "simple-sentencepiece-0.7.tar.gz",
+        "url": (
+            "https://github.com/pkufool/simple-sentencepiece/archive/refs/tags/"
+            "v0.7.tar.gz"
+        ),
+    },
+}
+
+_ONNX_NATIVE_DEPENDENCIES: dict[str, dict[str, str]] = {
+    "abseilCpp": {
+        "owner": "abseil",
+        "repo": "abseil-cpp",
+        "tag": "20240722.2",
+        "version": "20240722.2",
+    },
+    "dlpack": {
+        "owner": "dmlc",
+        "repo": "dlpack",
+        "rev": "5c210da409e7f1e51ddf445134a4376fdbd70d7d",
+        "commit": "5c210da409e7f1e51ddf445134a4376fdbd70d7d",
+    },
+    "flatbuffers": {
+        "owner": "google",
+        "repo": "flatbuffers",
+        "rev": "v23.5.26",
+        "version": "23.5.26",
+    },
+    "mp11": {
+        "owner": "boostorg",
+        "repo": "mp11",
+        "tag": "boost-1.82.0",
+        "version": "boost-1.82.0",
+    },
+    "onnx": {
+        "owner": "onnx",
+        "repo": "onnx",
+        "tag": "v1.18.0",
+        "version": "v1.18.0",
+    },
+    "protobuf": {
+        "owner": "protocolbuffers",
+        "repo": "protobuf",
+        "tag": "v32.1",
+        "version": "32.1",
+        "nixpkgsAttribute": "protobuf_32",
+    },
+    "re2": {
+        "owner": "google",
+        "repo": "re2",
+        "rev": "2024-07-02",
+        "version": "2024-07-02",
+    },
+    "safeint": {
+        "owner": "dcleblanc",
+        "repo": "safeint",
+        "tag": "3.0.28",
+        "version": "3.0.28",
+    },
+}
+
+_ONNX_NATIVE_PATCHES: tuple[dict[str, object], ...] = (
+    {
+        "url": (
+            "https://github.com/onnx/onnx/commit/"
+            "595a069aaac07586f111681245bc808ee63551f8.patch"
+        ),
+        "includes": ["onnx/defs/schema.h"],
+        "target": "onnx",
+    },
+    {
+        "url": (
+            "https://github.com/onnx/onnx/commit/"
+            "6769c41ad64ebca0358da8c7211d2c6d0e627b2b.patch"
+        ),
+        "target": "onnx",
+    },
+    {
+        "url": (
+            "https://github.com/microsoft/onnxruntime/commit/"
+            "d6e712c5b7b6260a61e54d1fe40107cf5366ee77.patch"
+        ),
+        "target": "onnxruntime",
+    },
+    {
+        "url": (
+            "https://github.com/microsoft/onnxruntime/commit/"
+            "8ebd0bf1cf02414584d15d7244b07fa97d65ba02.patch"
+        ),
+        "target": "onnxruntime",
+    },
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +270,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
     GITHUB_REPO = "paseo"
     DARWIN_PLATFORM: ClassVar[str] = "aarch64-darwin"
     supported_platforms = (DARWIN_PLATFORM,)
+    generated_artifact_files = ("native-lock.json",)
 
     VERSION = "0.6.1"
     COMMIT = "20d7efc46a316f5a274b9943a5c43b0322269825"
@@ -122,8 +281,11 @@ class PaseoUpdater(GitHubReleaseUpdater):
     ONNXRUNTIME_VERSION = "1.23.2"
     ONNXRUNTIME_COMMIT = "a83fc4d58cb48eb68890dd689f94f28288cf2278"
     NODE_ADDON_API_VERSION = "8.3.0"
+    NPM_FETCHER_VERSION = 2
     ESBUILD_VERSION = "0.25.12"
     CLAUDE_AGENT_SDK_VERSION = "0.3.220"
+    APP_BUILDER_LIB_VERSION = "26.8.1"
+    APP_BUILDER_LIB_BACKPORT_COMMIT = "2ff9190aadc791503a6e62cdcbfa975448bc49bf"
     CLAUDE_AGENT_SDK_URL = (
         "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/"
         f"claude-agent-sdk-{CLAUDE_AGENT_SDK_VERSION}.tgz"
@@ -506,6 +668,114 @@ class PaseoUpdater(GitHubReleaseUpdater):
         )
         return compact_nix_expr(expression.rebuild())
 
+    @staticmethod
+    def _fetchpatch_expr(url: str, *, includes: list[str] | None = None) -> str:
+        values: list[Binding | Inherit] = [
+            Binding(name="url", value=StringPrimitive(value=url)),
+            Binding(
+                name="hash",
+                value=identifier_attr_path("pkgs", "lib", "fakeHash"),
+            ),
+        ]
+        if includes is not None:
+            values.append(
+                Binding(
+                    name="includes",
+                    value=NixList(
+                        value=[StringPrimitive(value=value) for value in includes]
+                    ),
+                )
+            )
+        expression = FunctionCall(
+            name=identifier_attr_path("pkgs", "fetchpatch"),
+            argument=AttributeSet(values=values),
+        )
+        return compact_nix_expr(expression.rebuild())
+
+    @classmethod
+    def _native_lock_payload(cls, hashes: dict[str, str]) -> dict[str, object]:
+        return {
+            "schemaVersion": 1,
+            "paseo": {
+                "version": cls.VERSION,
+                "commit": cls.COMMIT,
+                "electronVersion": cls.ELECTRON_VERSION,
+                "nodeAddonApiVersion": cls.NODE_ADDON_API_VERSION,
+                "npmFetcherVersion": cls.NPM_FETCHER_VERSION,
+                "esbuildVersion": cls.ESBUILD_VERSION,
+                "claudeAgentSdkVersion": cls.CLAUDE_AGENT_SDK_VERSION,
+                "appBuilderLibVersion": cls.APP_BUILDER_LIB_VERSION,
+                "appBuilderLibBackportCommit": cls.APP_BUILDER_LIB_BACKPORT_COMMIT,
+            },
+            "sherpaOnnx": {
+                "version": cls.SHERPA_VERSION,
+                "commit": cls.SHERPA_COMMIT,
+                "onnxruntime": {
+                    "version": cls.ONNXRUNTIME_VERSION,
+                    "source": "paseo-exact-source-build",
+                },
+                "npmAddonBuild": {
+                    "workflow": ".github/workflows/npm-addon-macos.yaml",
+                    "portaudio": False,
+                    "websocket": False,
+                    "tts": True,
+                    "speakerDiarization": True,
+                },
+                "dependencies": {
+                    name: {**dependency, "hash": hashes[f"sherpa:{name}"]}
+                    for name, dependency in _SHERPA_NATIVE_DEPENDENCIES.items()
+                },
+                "sourceClosureComplete": True,
+            },
+            "onnxruntime": {
+                "version": cls.ONNXRUNTIME_VERSION,
+                "commit": cls.ONNXRUNTIME_COMMIT,
+                "nixpkgsRecipe": {
+                    "commit": "e1e423f183cde97926ac113d8a4de5a5042a7264",
+                    "path": "pkgs/by-name/on/onnxruntime/package.nix",
+                },
+                "dependencies": {
+                    name: {**dependency, "hash": hashes[f"onnx:{name}"]}
+                    for name, dependency in _ONNX_NATIVE_DEPENDENCIES.items()
+                },
+                "patches": [
+                    {**patch, "hash": hashes[f"patch:{index}"]}
+                    for index, patch in enumerate(_ONNX_NATIVE_PATCHES)
+                ],
+                "sourceClosureComplete": True,
+            },
+        }
+
+    @classmethod
+    def _native_hash_requests(cls) -> tuple[tuple[str, str], ...]:
+        requests = [
+            (f"sherpa:{name}", cls._fetchurl_expr(dependency["url"]))
+            for name, dependency in _SHERPA_NATIVE_DEPENDENCIES.items()
+        ]
+        requests.extend(
+            (
+                f"onnx:{name}",
+                _build_fetch_from_github_expr(
+                    dependency["owner"],
+                    dependency["repo"],
+                    rev=dependency.get("rev", dependency.get("tag", "")),
+                    fetch_submodules=False,
+                ),
+            )
+            for name, dependency in _ONNX_NATIVE_DEPENDENCIES.items()
+        )
+        requests.extend(
+            (
+                f"patch:{index}",
+                cls._fetchpatch_expr(
+                    cast("str", patch["url"]),
+                    includes=cast("list[str] | None", patch.get("includes")),
+                ),
+            )
+            for index, patch in enumerate(_ONNX_NATIVE_PATCHES)
+        )
+        return tuple(requests)
+
     @classmethod
     def _npm_deps_expr(cls, *, src_hash: str) -> str:
         expression = FunctionCall(
@@ -532,7 +802,10 @@ class PaseoUpdater(GitHubReleaseUpdater):
                         name="hash",
                         value=identifier_attr_path("pkgs", "lib", "fakeHash"),
                     ),
-                    Binding(name="fetcherVersion", value=Primitive(value=2)),
+                    Binding(
+                        name="fetcherVersion",
+                        value=Primitive(value=cls.NPM_FETCHER_VERSION),
+                    ),
                 ]
             ),
         )
@@ -674,6 +947,36 @@ class PaseoUpdater(GitHubReleaseUpdater):
             yield event
         npm_hash = require_value(npm_drain, "Missing Paseo npmDepsHash output")
         entries.append(HashEntry.create("npmDepsHash", npm_hash, url=paseo_url))
+
+        native_hashes: dict[str, str] = {}
+        for identity, expression in self._native_hash_requests():
+            drain = ValueDrain[str]()
+            async for event in drain_value_events(
+                update_nix.compute_fixed_output_hash(
+                    self.name,
+                    expression,
+                    config=self.config,
+                ),
+                drain,
+                parse=expect_str,
+            ):
+                yield event
+            native_hashes[identity] = require_value(
+                drain,
+                f"Missing native lock hash output for {identity}",
+            )
+
+        package_dir = updater_dir_for(self.name)
+        if package_dir is None:
+            msg = f"Package directory not found for {self.name}"
+            raise RuntimeError(msg)
+        yield UpdateEvent.artifact(
+            self.name,
+            GeneratedArtifact.json(
+                package_dir / self.generated_artifact_files[0],
+                self._native_lock_payload(native_hashes),
+            ),
+        )
         yield UpdateEvent.value(self.name, entries)
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:

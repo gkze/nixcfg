@@ -32,7 +32,12 @@ from lib.tests._updater_helpers import (
     load_repo_module,
     run_async,
 )
-from lib.update.events import UpdateEventKind, expect_source_hashes
+from lib.update.artifacts import GeneratedArtifact
+from lib.update.events import (
+    UpdateEventKind,
+    expect_artifact_updates,
+    expect_source_hashes,
+)
 from lib.update.net import github_raw_url
 from lib.update.nix import (
     _build_fetch_from_github_call,
@@ -57,8 +62,10 @@ _ONNX_RUNTIME_VERSION = "1.27.0"
 _ONNX_RUNTIME_COMMIT = "8f0278c77bf44b0cc83c098c6c722b92a36ac4b5"
 _SHERPA_ONNX_VERSION = "1.13.4"
 _SHERPA_ONNX_COMMIT = "142807252687d81b40d6315f23470a1512a00de3"
+_MESH_VERSION = "0.75.1"
 _MESH_COMMIT = "3295c902d4c4f859aaadf9240042ffdaf06dd07e"
 _LLAMA_COMMIT = "8190848bb36c7df4251db4352bd81bc07d0a4385"
+_SKIPPY_ABI = "0.1.35"
 _MESH_URL = (
     "https://github.com/Mesh-LLM/mesh-llm/archive/"
     "3295c902d4c4f859aaadf9240042ffdaf06dd07e.tar.gz"
@@ -2012,6 +2019,16 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
             (None, _NPM_DEPS_HASH),
             (None, _ROOT_CARGO_HASH),
             (None, _DESKTOP_CARGO_HASH),
+            (
+                "hashing updater-owned pnpm archive",
+                "sha256-50EGpaDrJWn0WDUEQg6tX8HCY+QXoyFsqxy+DM3LTq4=",
+            ),
+            (None, "sha256-ufNM+0/TsTRBAO6tee9NN6oVliJ0ueMFbeNFAh92obA="),
+            (None, "sha256-kXbMZvx84e34XPNVsG4yDFfbYpffdCd/V1GDRoiTz2E="),
+            (None, "sha256-PyR7flokCQcSAvXivGIABg9mcowKNEPAOSOtJyPgQLM="),
+            (None, "sha256-SXED5mQWjr45WAt1etvmFvbPhaFlcq9YHKe8QtCrE/0="),
+            (None, "sha256-V/vEuVCugbGg4eKYrxVlLalopnI6WSt4dOm0AnqApbQ="),
+            (None, "sha256-F0ioIgYKNbqp9mCfhO/I61TcDnS57OPYI2e3EZ/cda8="),
         ),
     )
 
@@ -2021,7 +2038,12 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
     assert events[0].kind is UpdateEventKind.STATUS
     assert events[0].source == "buzz"
     assert events[0].message == "hashing Buzz source"
-    assert {call["isolate_by_drv_hash"] for call in calls} == {True}
+    assert any(
+        event.kind is UpdateEventKind.STATUS
+        and event.message == "hashing updater-owned pnpm archive"
+        for event in events
+    )
+    assert {call["isolate_by_drv_hash"] for call in calls[:8]} == {True}
     assert_nix_ast_equal(
         str(calls[0]["expr"]),
         _build_fetch_from_github_call(
@@ -2113,7 +2135,7 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
         ),
     )
     for call, (attribute, source_override) in zip(
-        calls[5:], expected_steps, strict=True
+        calls[5:8], expected_steps, strict=True
     ):
         assert_nix_ast_equal(
             str(call["expr"]),
@@ -2124,6 +2146,30 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
                 source_overrides={"buzz": source_override},
             ),
         )
+
+    native_lock = json.loads(
+        (_PACKAGE_DIR / "native-lock.json").read_text(encoding="utf-8")
+    )
+    native_urls = [
+        native_lock["pnpm"]["url"],
+        *(
+            dependency["url"]
+            for dependency in native_lock["sherpaOnnx"]["dependencies"].values()
+        ),
+    ]
+    assert len(calls) == 15
+    for call, url in zip(calls[8:], native_urls, strict=True):
+        assert_nix_ast_equal(
+            str(call["expr"]),
+            f'pkgs.fetchurl {{ url = "{url}"; hash = pkgs.lib.fakeHash; }}',
+        )
+
+    artifact_event = next(
+        event for event in events if event.kind is UpdateEventKind.ARTIFACT
+    )
+    assert expect_artifact_updates(artifact_event.payload) == [
+        GeneratedArtifact.json(_PACKAGE_DIR / "native-lock.json", native_lock)
+    ]
 
     hashes = [
         HashEntry.create("srcHash", _SOURCE_NAR_HASH, url=_urls()["buzzUrl"]),
@@ -2182,6 +2228,209 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
     )
     assert updater.build_result(info, hashes) == expected_result
     assert run_async(updater._is_latest(None, info)) is False
+
+
+def test_buzz_hashing_requires_a_discovered_artifact_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A generated native lock cannot be promoted without package discovery."""
+    module = _load_updater_module()
+
+    class MissingArtifactDirectoryUpdater(module.BuzzUpdater):
+        name = "missing-buzz-artifact-owner"
+
+    updater = MissingArtifactDirectoryUpdater()
+    install_fixed_hash_stream(
+        monkeypatch,
+        ((None, _SOURCE_NAR_HASH),) * 15,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Package directory not found for missing-buzz-artifact-owner",
+    ):
+        run_async(collect_events(updater.fetch_hashes(_version_info(), object())))
+
+
+def test_buzz_updater_owns_the_complete_native_lock() -> None:
+    """The updater artifact is the sole authority for direct native FODs."""
+    updater = _load_updater_module().BuzzUpdater()
+
+    assert updater.get_generated_artifact_files() == ("native-lock.json",)
+
+    native_lock = json.loads(
+        (_PACKAGE_DIR / "native-lock.json").read_text(encoding="utf-8")
+    )
+    assert native_lock["schemaVersion"] == 1
+    assert native_lock["buzz"] == {
+        "commit": _COMMIT,
+        "rustVersion": _RUST_VERSION,
+        "version": _VERSION,
+    }
+    assert native_lock["desktopBundleValidation"] == {
+        "candidate": {
+            "derivationPath": (
+                "/nix/store/3b5gv1l2iriy0fw48dnhg1zd770knrfw-"
+                f"buzz-desktop-candidate-{_VERSION}.drv"
+            ),
+            "outputPath": (
+                "/nix/store/55pw5giij3bb8cqn2dzw4djc54vkzzw2-"
+                f"buzz-desktop-candidate-{_VERSION}"
+            ),
+        },
+        "checks": [
+            "realized-candidate",
+            "isolated-launcher-startup",
+            "offline-runtime-loading",
+            "signatures",
+            "exact-app-metadata",
+            "reference-free-final-bundle",
+        ],
+        "schemaVersion": 1,
+        "status": "passed",
+    }
+    assert native_lock["onnxruntime"] == {
+        "commit": _ONNX_RUNTIME_COMMIT,
+        "version": _ONNX_RUNTIME_VERSION,
+    }
+    assert native_lock["meshLlm"] == {
+        "commit": _MESH_COMMIT,
+        "skippyAbi": _SKIPPY_ABI,
+        "version": _MESH_VERSION,
+    }
+    assert native_lock["llamaCpp"] == {"commit": _LLAMA_COMMIT}
+    assert native_lock["pnpm"] == {
+        "hash": "sha256-50EGpaDrJWn0WDUEQg6tX8HCY+QXoyFsqxy+DM3LTq4=",
+        "url": "https://registry.npmjs.org/pnpm/-/pnpm-11.4.0.tgz",
+        "version": "11.4.0",
+    }
+    sherpa = native_lock["sherpaOnnx"]
+    assert sherpa["version"] == _SHERPA_ONNX_VERSION
+    assert sherpa["commit"] == _SHERPA_ONNX_COMMIT
+    assert sherpa["dependencyOrder"] == [
+        "kaldiNativeFbank",
+        "simpleSentencepiece",
+        "kaldifst",
+        "kaldiDecoder",
+        "openfst",
+        "kissfft",
+    ]
+    assert {
+        (dependency["file"], dependency["url"], dependency["hash"])
+        for dependency in sherpa["dependencies"].values()
+    } == {
+        (
+            "kaldi-native-fbank-1.22.3.tar.gz",
+            "https://github.com/csukuangfj/kaldi-native-fbank/archive/refs/tags/v1.22.3.tar.gz",
+            "sha256-kXbMZvx84e34XPNVsG4yDFfbYpffdCd/V1GDRoiTz2E=",
+        ),
+        (
+            "simple-sentencepiece-0.7.tar.gz",
+            "https://github.com/pkufool/simple-sentencepiece/archive/refs/tags/v0.7.tar.gz",
+            "sha256-F0ioIgYKNbqp9mCfhO/I61TcDnS57OPYI2e3EZ/cda8=",
+        ),
+        (
+            "kaldifst-1.8.0.tar.gz",
+            "https://github.com/k2-fsa/kaldifst/archive/refs/tags/v1.8.0.tar.gz",
+            "sha256-PyR7flokCQcSAvXivGIABg9mcowKNEPAOSOtJyPgQLM=",
+        ),
+        (
+            "kaldi-decoder-0.3.0.tar.gz",
+            "https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.3.0.tar.gz",
+            "sha256-ufNM+0/TsTRBAO6tee9NN6oVliJ0ueMFbeNFAh92obA=",
+        ),
+        (
+            "openfst-1.8.5-2026-04-11.tar.gz",
+            "https://github.com/csukuangfj/openfst/archive/refs/tags/v1.8.5-2026-04-11.tar.gz",
+            "sha256-V/vEuVCugbGg4eKYrxVlLalopnI6WSt4dOm0AnqApbQ=",
+        ),
+        (
+            "kissfft-febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip",
+            "https://github.com/mborgerding/kissfft/archive/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip",
+            "sha256-SXED5mQWjr45WAt1etvmFvbPhaFlcq9YHKe8QtCrE/0=",
+        ),
+    }
+
+
+def test_buzz_derivations_consume_only_the_updater_owned_direct_fod_lock() -> None:
+    """Nix receives pnpm and Sherpa fetch identities through one JSON seam."""
+    package = expect_instance(
+        parse_nix_expr((_PACKAGE_DIR / "package.nix").read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+    native_lock_formal = next(
+        argument
+        for argument in package.argument_set
+        if isinstance(argument, Identifier) and argument.name == "nativeLock"
+    )
+    assert_nix_ast_equal(
+        native_lock_formal.default_value,
+        "builtins.fromJSON (builtins.readFile ./native-lock.json)",
+    )
+    package_scope = expect_instance(
+        expect_instance(package.output, Assertion).body,
+        IfExpression,
+    ).scope
+    assert_nix_ast_equal(
+        expect_binding(package_scope, "pnpmLock").value,
+        "nativeLock.pnpm or { }",
+    )
+    assert_nix_ast_equal(
+        expect_binding(package_scope, "sherpaOnnxClosure").value,
+        "nativeLock.sherpaOnnx or { }",
+    )
+    assert_nix_ast_equal(
+        expect_binding(package_scope, "desktopBundleValidationEvidence").value,
+        "nativeLock.desktopBundleValidation or { }",
+    )
+    for binding, field in (
+        ("buzzLock", "buzz"),
+        ("onnxRuntimeClosure", "onnxruntime"),
+        ("meshLlmClosure", "meshLlm"),
+        ("llamaCppClosure", "llamaCpp"),
+    ):
+        assert_nix_ast_equal(
+            expect_binding(package_scope, binding).value,
+            f"nativeLock.{field} or {{ }}",
+        )
+
+    helper = expect_instance(
+        parse_nix_expr(
+            (_PACKAGE_DIR / "native/sherpa-onnx.nix").read_text(encoding="utf-8")
+        ),
+        FunctionDefinition,
+    )
+    closure_contract_formal = next(
+        argument
+        for argument in helper.argument_set
+        if isinstance(argument, Identifier) and argument.name == "closureContract"
+    )
+    assert_nix_ast_equal(
+        closure_contract_formal.default_value,
+        "(builtins.fromJSON (builtins.readFile ../native-lock.json)).sherpaOnnx",
+    )
+    helper_scope = expect_instance(
+        expect_instance(helper.output, Assertion).body,
+        FunctionCall,
+    ).scope
+    assert_nix_ast_equal(
+        expect_binding(helper_scope, "activeCache").value,
+        """
+        builtins.map (
+          name:
+          let
+            dependency = closureContract.dependencies.${name};
+          in
+          {
+            inherit (dependency) cmakeVariable;
+            name = dependency.file;
+            src = fetchurl {
+              inherit (dependency) url hash;
+            };
+          }
+        ) closureContract.dependencyOrder
+        """,
+    )
 
 
 def test_buzz_rejects_partial_or_unpinned_hash_results() -> None:
@@ -2343,7 +2592,7 @@ def test_buzz_onnxruntime_slot_uses_the_url_scoped_promoted_hash() -> None:
         else:
             gates.append(gate)
     assert_nix_ast_equal(
-        gates[4],
+        gates[5],
         "lib.optional (onnxRuntimeSrcHashEntry == null) "
         '"ONNX Runtime ${expectedOnnxRuntimeVersion} srcHash is missing"',
     )
@@ -2358,7 +2607,7 @@ def test_buzz_onnxruntime_slot_uses_the_url_scoped_promoted_hash() -> None:
           null
         else
           import ./native/onnxruntime.nix {
-            inherit abseil-cpp_202601 cctools fetchFromGitHub ld64 lib onnxruntime protobuf python3 stdenv;
+            inherit abseil-cpp_202601 cctools fetchFromGitHub ld64 lib nativeLock onnxruntime protobuf python3 stdenv;
             srcHash = onnxRuntimeSrcHashEntry.hash;
           }""",
     )
@@ -2417,7 +2666,7 @@ def test_buzz_sherpa_slot_selects_only_its_url_scoped_promoted_hash() -> None:
         else:
             gates.append(gate)
     assert_nix_ast_equal(
-        gates[5],
+        gates[6],
         "lib.optional (sherpaOnnxSrcHashEntry == null) "
         '"sherpa-onnx ${expectedSherpaOnnxVersion} srcHash is missing"',
     )
@@ -2428,7 +2677,7 @@ def test_buzz_sherpa_slot_selects_only_its_url_scoped_promoted_hash() -> None:
           null
         else
           import ./native/onnxruntime.nix {
-            inherit abseil-cpp_202601 cctools fetchFromGitHub ld64 lib onnxruntime protobuf python3 stdenv;
+            inherit abseil-cpp_202601 cctools fetchFromGitHub ld64 lib nativeLock onnxruntime protobuf python3 stdenv;
             srcHash = onnxRuntimeSrcHashEntry.hash;
           }""",
     )
@@ -2442,13 +2691,14 @@ def test_buzz_sherpa_slot_selects_only_its_url_scoped_promoted_hash() -> None:
     )
     assert_nix_ast_equal(
         expect_binding(scope, "sherpaOnnxNative").value,
-        """if sherpaOnnxSrcHashEntry == null || onnxRuntimeNative == null then
+        """if sherpaOnnxSrcHashEntry == null || onnxRuntimeNative == null || !nativeLockComplete then
           null
         else
           import ./native/sherpa-onnx.nix {
             inherit cctools fetchFromGitHub fetchurl lib sherpa-onnx stdenv;
             inherit (pkgs) eigen_5 libarchive nlohmann_json;
             onnxRuntime = onnxRuntimeNative;
+            closureContract = sherpaOnnxClosure;
             srcHash = sherpaOnnxSrcHashEntry.hash;
           }""",
     )
@@ -2495,6 +2745,7 @@ def test_buzz_onnxruntime_native_slot_is_static_cpu_only_darwin() -> None:
         "fetchFromGitHub",
         "ld64",
         "lib",
+        "nativeLock",
         "onnxruntime",
         "protobuf",
         "python3",
@@ -2514,10 +2765,13 @@ def test_buzz_onnxruntime_native_slot_is_static_cpu_only_darwin() -> None:
     override_call = expect_instance(platform_assertion.body, FunctionCall)
     assert_nix_ast_equal(override_call.name, "base.overrideAttrs")
     scope = override_call.scope
-    assert_nix_ast_equal(expect_binding(scope, "version").value, '"1.27.0"')
+    assert_nix_ast_equal(
+        expect_binding(scope, "version").value,
+        "nativeLock.onnxruntime.version or null",
+    )
     assert_nix_ast_equal(
         expect_binding(scope, "commit").value,
-        '"8f0278c77bf44b0cc83c098c6c722b92a36ac4b5"',
+        "nativeLock.onnxruntime.commit or null",
     )
     assert_nix_ast_equal(
         expect_binding(scope, "normalizeStaticDependency").value,
@@ -2799,10 +3053,9 @@ def test_buzz_onnxruntime_native_slot_is_static_cpu_only_darwin() -> None:
     assert_old_expression_equal(
         "passthru",
         """(old.passthru or { }) // {
-          buzzNativeContract = {
-            kind = "onnxruntime";
-            version = "1.27.0";
-            commit = "8f0278c77bf44b0cc83c098c6c722b92a36ac4b5";
+            buzzNativeContract = {
+              kind = "onnxruntime";
+              inherit version commit;
             target = "aarch64-apple-darwin";
             configuration = "Release";
             assemblyBuildSharedLib = true;
@@ -2834,6 +3087,7 @@ def test_buzz_sherpa_native_slot_matches_the_rust_static_link_contract() -> None
     )
     assert {
         "cctools",
+        "closureContract",
         "eigen_5",
         "fetchFromGitHub",
         "fetchurl",
@@ -2858,10 +3112,13 @@ def test_buzz_sherpa_native_slot_matches_the_rust_static_link_contract() -> None
     override_call = expect_instance(platform_assertion.body, FunctionCall)
     assert_nix_ast_equal(override_call.name, "base.overrideAttrs")
     scope = override_call.scope
-    assert_nix_ast_equal(expect_binding(scope, "version").value, '"1.13.4"')
+    assert_nix_ast_equal(
+        expect_binding(scope, "version").value,
+        "closureContract.version",
+    )
     assert_nix_ast_equal(
         expect_binding(scope, "commit").value,
-        '"142807252687d81b40d6315f23470a1512a00de3"',
+        "closureContract.commit",
     )
     assert_nix_ast_equal(
         expect_binding(scope, "expectedArchiveNames").value,
@@ -2880,56 +3137,19 @@ def test_buzz_sherpa_native_slot_matches_the_rust_static_link_contract() -> None
     )
     assert_nix_ast_equal(
         expect_binding(scope, "activeCache").value,
-        """[
+        """builtins.map (
+          name:
+          let
+            dependency = closureContract.dependencies.${name};
+          in
           {
-            cmakeVariable = "KALDI_NATIVE_FBANK";
-            name = "kaldi-native-fbank-1.22.3.tar.gz";
+            inherit (dependency) cmakeVariable;
+            name = dependency.file;
             src = fetchurl {
-              url = "https://github.com/csukuangfj/kaldi-native-fbank/archive/refs/tags/v1.22.3.tar.gz";
-              hash = "sha256-kXbMZvx84e34XPNVsG4yDFfbYpffdCd/V1GDRoiTz2E=";
+              inherit (dependency) url hash;
             };
           }
-          {
-            cmakeVariable = "SIMPLE-SENTENCEPIECE";
-            name = "simple-sentencepiece-0.7.tar.gz";
-            src = fetchurl {
-              url = "https://github.com/pkufool/simple-sentencepiece/archive/refs/tags/v0.7.tar.gz";
-              hash = "sha256-F0ioIgYKNbqp9mCfhO/I61TcDnS57OPYI2e3EZ/cda8=";
-            };
-          }
-          {
-            cmakeVariable = "KALDIFST";
-            name = "kaldifst-1.8.0.tar.gz";
-            src = fetchurl {
-              url = "https://github.com/k2-fsa/kaldifst/archive/refs/tags/v1.8.0.tar.gz";
-              hash = "sha256-PyR7flokCQcSAvXivGIABg9mcowKNEPAOSOtJyPgQLM=";
-            };
-          }
-          {
-            cmakeVariable = "KALDI_DECODER";
-            name = "kaldi-decoder-0.3.0.tar.gz";
-            src = fetchurl {
-              url = "https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.3.0.tar.gz";
-              hash = "sha256-ufNM+0/TsTRBAO6tee9NN6oVliJ0ueMFbeNFAh92obA=";
-            };
-          }
-          {
-            cmakeVariable = "OPENFST";
-            name = "openfst-1.8.5-2026-04-11.tar.gz";
-            src = fetchurl {
-              url = "https://github.com/csukuangfj/openfst/archive/refs/tags/v1.8.5-2026-04-11.tar.gz";
-              hash = "sha256-V/vEuVCugbGg4eKYrxVlLalopnI6WSt4dOm0AnqApbQ=";
-            };
-          }
-          {
-            cmakeVariable = "KISSFFT";
-            name = "kissfft-febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip";
-            src = fetchurl {
-              url = "https://github.com/mborgerding/kissfft/archive/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip";
-              hash = "sha256-SXED5mQWjr45WAt1etvmFvbPhaFlcq9YHKe8QtCrE/0=";
-            };
-          }
-        ]""",
+        ) closureContract.dependencyOrder""",
     )
     assert_nix_ast_equal(
         expect_binding(scope, "base").value,
@@ -3211,8 +3431,7 @@ def test_buzz_sherpa_native_slot_matches_the_rust_static_link_contract() -> None
         """(old.passthru or { }) // {
           buzzNativeContract = {
             kind = "sherpa-onnx";
-            version = "1.13.4";
-            commit = "142807252687d81b40d6315f23470a1512a00de3";
+            inherit version commit;
             target = "aarch64-apple-darwin";
             linkMode = "static";
             usePreinstalledOnnxRuntime = true;
@@ -3251,7 +3470,7 @@ def test_buzz_rust_toolchain_slot_reuses_the_exact_pinned_input_derivation() -> 
     )
     assert_nix_ast_equal(
         expect_binding(output.scope, "rustToolchainNative").value,
-        "import ./native/rust-toolchain.nix { inherit lib rustBin stdenv; }",
+        "import ./native/rust-toolchain.nix { inherit lib nativeLock rustBin stdenv; }",
     )
     assert_nix_ast_equal(
         expect_binding(native_slots.values, "rustToolchain").value,
@@ -3261,16 +3480,23 @@ def test_buzz_rust_toolchain_slot_reuses_the_exact_pinned_input_derivation() -> 
     assert_nix_ast_equal(
         (_PACKAGE_DIR / "native/rust-toolchain.nix").read_text(encoding="utf-8"),
         """
-        { lib, rustBin, stdenv }:
+        {
+          lib,
+          nativeLock ? builtins.fromJSON (builtins.readFile ../native-lock.json),
+          rustBin,
+          stdenv,
+        }:
         assert stdenv.hostPlatform.system == "aarch64-darwin";
         let
-          toolchain = rustBin.stable."1.95.0".default;
+          rustVersion = nativeLock.buzz.rustVersion or null;
+          toolchain = rustBin.stable.${rustVersion}.default;
         in
+        assert builtins.isString rustVersion;
         lib.extendDerivation true {
           passthru = (toolchain.passthru or { }) // {
             buzzNativeContract = {
               kind = "rust-toolchain";
-              channel = "1.95.0";
+              channel = rustVersion;
               profile = "default";
               target = "aarch64-apple-darwin";
             };
@@ -3303,25 +3529,29 @@ def test_buzz_internal_nix_foundation_promotes_only_the_validated_candidate() ->
     assert Identifier(name="fetchPnpmDeps") in package.argument_set
     assert Identifier(name="sherpa-onnx") in package.argument_set
     assert_nix_ast_equal(
-        expect_binding(scope, "expectedVersion").value, f'"{_VERSION}"'
+        expect_binding(scope, "expectedVersion").value, 'buzzLock.version or ""'
     )
-    assert_nix_ast_equal(expect_binding(scope, "expectedCommit").value, f'"{_COMMIT}"')
-    assert_nix_ast_equal(expect_binding(scope, "expectedRustVersion").value, '"1.95.0"')
+    assert_nix_ast_equal(
+        expect_binding(scope, "expectedCommit").value, 'buzzLock.commit or ""'
+    )
+    assert_nix_ast_equal(
+        expect_binding(scope, "expectedRustVersion").value,
+        'buzzLock.rustVersion or ""',
+    )
     assert_nix_ast_equal(
         expect_binding(scope, "expectedSherpaOnnxCommit").value,
-        '"142807252687d81b40d6315f23470a1512a00de3"',
+        'sherpaOnnxClosure.commit or ""',
     )
     assert_nix_ast_equal(
         expect_binding(scope, "expectedOnnxRuntimeCommit").value,
-        '"8f0278c77bf44b0cc83c098c6c722b92a36ac4b5"',
+        'onnxRuntimeClosure.commit or ""',
     )
     assert_nix_ast_equal(
         expect_binding(scope, "pnpm").value,
         """(pnpm_11.override { nodejs-slim = nodejs_24; }).overrideAttrs (_: {
           version = expectedPnpmVersion;
           src = fetchurl {
-            url = "https://registry.npmjs.org/pnpm/-/pnpm-${expectedPnpmVersion}.tgz";
-            hash = "sha256-50EGpaDrJWn0WDUEQg6tX8HCY+QXoyFsqxy+DM3LTq4=";
+            inherit (pnpmLock) url hash;
           };
         })""",
     )

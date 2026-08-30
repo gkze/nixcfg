@@ -7,6 +7,7 @@ from types import ModuleType
 import pytest
 
 from lib.nix.models.flake_lock import FlakeLockNode
+from lib.nix.models.sources import HashEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module_for_test as _load_module
@@ -75,6 +76,7 @@ def test_mux_uses_platform_specific_node_modules_hashes(
     updater_cls = mux_module.MuxUpdater
     assert updater_cls.platform_specific is True
     assert updater_cls.hash_type == "nodeModulesHash"
+    assert updater_cls.source_pins == {"electronVersion": "40.9.3"}
 
 
 def test_codex_updater_refreshes_crate2nix_artifacts(
@@ -106,17 +108,49 @@ def test_codex_updater_refreshes_crate2nix_artifacts(
     monkeypatch.setattr(
         codex_module.CodexUpdater,
         "stream_materialized_artifacts",
-        lambda _self: _stream("codex"),
+        lambda _self, **_kwargs: _stream("codex"),
     )
+
+    urls = updater._webrtc_urls()
+    hashes = {
+        "aarch64-darwin": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "x86_64-linux": "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+    }
+
+    async def _hash_webrtc(
+        name: str,
+        requested_urls: object,
+        *,
+        config: object,
+    ) -> EventStream:
+        assert name == "codex"
+        assert config is updater.config
+        assert list(requested_urls) == [urls[platform] for platform in sorted(urls)]
+        yield UpdateEvent.status(name, "Hashing WebRTC artifacts...")
+        yield UpdateEvent.value(
+            name,
+            {url: hashes[platform] for platform, url in urls.items()},
+        )
+
+    monkeypatch.setattr(codex_module.update_process, "compute_url_hashes", _hash_webrtc)
 
     events = _run(_collect(updater.fetch_hashes(VersionInfo("main", {}), object())))
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
         UpdateEventKind.ARTIFACT,
         UpdateEventKind.STATUS,
+        UpdateEventKind.STATUS,
         UpdateEventKind.VALUE,
     ]
-    assert events[-1].payload == []
+    assert events[-1].payload == [
+        HashEntry.create(
+            "sha256",
+            hashes[platform],
+            platform=platform,
+            url=urls[platform],
+        )
+        for platform in sorted(urls)
+    ]
 
 
 def test_goose_cli_updater_materializes_crate2nix_from_locked_input(
@@ -138,7 +172,7 @@ def test_goose_cli_updater_materializes_crate2nix_from_locked_input(
             ),
         )
 
-    def _materialize(_self: object):
+    def _materialize(_self: object, **_kwargs: object):
         return _stream("goose-cli")
 
     monkeypatch.setattr(

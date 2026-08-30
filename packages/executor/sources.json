@@ -3,9 +3,24 @@
   "electronVersion": "41.2.1",
   "hashes": [
     {
+      "hash": "sha256-b1o0Z+2crsR5W/eM1HZQfZ+HDH1XuGyUX8szgSZ3L/w=",
+      "hashType": "sha256",
+      "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.3.11/bun-darwin-aarch64.zip"
+    },
+    {
       "hash": "sha256-NYydsI91ijZldG2GjsaZMyuvUhQrSbxuQDJKS9PdJ4g=",
       "hashType": "srcHash"
     }
   ],
+  "pins": {
+    "@1password/sdk-core@0.4.1-beta.1": "source:patches/@1password%2Fsdk-core@0.4.1-beta.1.patch",
+    "@electric-sql/pglite-socket@0.1.4": "source:patches/@electric-sql%2Fpglite-socket@0.1.4.patch",
+    "agents@0.17.3": "source:patches/agents@0.17.3.patch",
+    "bunLockPatch": "local:bun-lock-libsql-0.3.19-remove-self-dependency.patch",
+    "effectLspPatchVersion": "0.85.1",
+    "libsql@0.3.19": "local:libsql-0.3.19-remove-self-dependency.patch",
+    "libsql@0.5.29": "source:patches/libsql@0.5.29.patch",
+    "postgres@3.4.9": "source:patches/postgres@3.4.9.patch"
+  },
   "version": "1.6.0"
 }

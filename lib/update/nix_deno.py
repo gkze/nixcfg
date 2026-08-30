@@ -232,6 +232,7 @@ async def compute_deno_deps_hash(
     *,
     native_only: bool = False,
     config: UpdateConfig | None = None,
+    source_override: SourceEntry | None = None,
 ) -> EventStream:
     """Compute Deno dependency hashes across configured platforms.
 
@@ -246,12 +247,14 @@ async def compute_deno_deps_hash(
         msg = f"Current platform {current_platform} not in supported platforms: {platforms}"
         raise RuntimeError(msg)
 
-    pkg_sources_path = sources_file_for(source)
-    if pkg_sources_path is None:
-        msg = f"No sources.json found for '{source}'"
-        raise RuntimeError(msg)
-
-    original_entry = load_source_entry(pkg_sources_path)
+    if source_override is None:
+        pkg_sources_path = sources_file_for(source)
+        if pkg_sources_path is None:
+            msg = f"No sources.json found for '{source}'"
+            raise RuntimeError(msg)
+        original_entry = load_source_entry(pkg_sources_path)
+    else:
+        original_entry = source_override
 
     existing_hashes = _existing_platform_hashes(original_entry)
 

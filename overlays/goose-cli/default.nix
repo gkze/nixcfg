@@ -76,6 +76,7 @@ let
     name = "goose-cli-v8";
     inherit (v8Source) version;
     inherit rustyV8Src;
+    clangResourceVersion = selfSource.pins.clangResourceVersion;
     extraPatches = [ ./rusty-v8-goose-rename.patch ];
     prebuiltArtifacts = prebuiltV8;
   };
@@ -217,10 +218,18 @@ let
   # bitcoin-internals releases so buildRustCrate exports the same
   # CARGO_PKG_RUST_VERSION as Cargo. Keep this fail-closed: later releases must
   # be reviewed against their own manifest before entering the build graph.
-  bitcoinInternalsRustVersions = {
-    "0.5.0" = "1.74.0";
-    "0.6.0" = "1.74.0";
-  };
+  bitcoinInternalsRustVersionPinPrefix = "bitcoinInternals.";
+  bitcoinInternalsRustVersions =
+    prev.lib.mapAttrs'
+      (
+        pinName: rustVersion:
+        prev.lib.nameValuePair (prev.lib.removePrefix bitcoinInternalsRustVersionPinPrefix pinName) rustVersion
+      )
+      (
+        prev.lib.filterAttrs (
+          pinName: _value: prev.lib.hasPrefix bitcoinInternalsRustVersionPinPrefix pinName
+        ) selfSource.pins
+      );
 
   bitcoinInternalsOverride = attrs: {
     "rust-version" =

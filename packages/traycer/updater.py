@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import json
 import re
 import tempfile
 from pathlib import Path
@@ -43,6 +44,24 @@ if TYPE_CHECKING:
 
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _DIGEST_PATTERN = re.compile(r"^sha256:(?P<hex>[0-9a-f]{64})$")
+_RELEASE_CONTRACT = cast(
+    "dict[str, object]",
+    json.loads(
+        Path(__file__).with_name("release-contract.json").read_text(encoding="utf-8"),
+    ),
+)
+_RELEASE_BUN = cast("dict[str, object]", _RELEASE_CONTRACT["bun"])
+_RELEASE_FRONTEND = cast("dict[str, object]", _RELEASE_CONTRACT["frontend"])
+_RELEASE_HOST = cast("dict[str, object]", _RELEASE_CONTRACT["host"])
+_RELEASE_HOST_ARCHIVE = cast("dict[str, object]", _RELEASE_HOST["archive"])
+_RELEASE_HOST_SIGNATURE = cast("dict[str, object]", _RELEASE_HOST["signature"])
+_RELEASE_HOST_MINISIGN = cast("dict[str, object]", _RELEASE_HOST["minisign"])
+
+
+def _sri_sha256(hex_digest: object) -> str:
+    """Render a reviewed hexadecimal SHA-256 identity for Nix."""
+    encoded = base64.b64encode(bytes.fromhex(cast("str", hex_digest))).decode("ascii")
+    return f"sha256-{encoded}"
 
 
 def _validate_generated_bun_graph(lock_path: Path, nix_path: Path) -> None:
@@ -75,27 +94,45 @@ class TraycerUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         ),
     )
 
-    PINNED_VERSION = "1.2.0"
-    PINNED_PUBLIC_COMMIT = "85ee596fffab4c9aa72b6bddc73a0020839ed5ae"
-    UNVERIFIED_PRIVATE_BUILD_COMMIT = "5198516d395fedc25c5f702263a3e4a72b05a655"
-    PINNED_BUN_VERSION = "1.3.12"
-    PINNED_ELECTRON_VERSION = "42.9.1"
+    PINNED_VERSION = cast("str", _RELEASE_CONTRACT["version"])
+    PINNED_PUBLIC_COMMIT = cast("str", _RELEASE_CONTRACT["publicCommit"])
+    UNVERIFIED_PRIVATE_BUILD_COMMIT = cast(
+        "str",
+        _RELEASE_CONTRACT["unverifiedPrivateBuildCommit"],
+    )
+    PINNED_BUN_VERSION = cast("str", _RELEASE_BUN["version"])
+    PINNED_ELECTRON_VERSION = cast("str", _RELEASE_CONTRACT["electronVersion"])
+    ELECTRON_UPDATER_VERSION = cast(
+        "str",
+        _RELEASE_FRONTEND["electronUpdaterVersion"],
+    )
+    FONT_LIST_VERSION = cast("str", _RELEASE_FRONTEND["fontListVersion"])
     BUN_OWNER = "oven-sh"
     BUN_REPO = "bun"
-    BUN_ASSET_NAME = "bun-darwin-aarch64.zip"
-    BUN_ASSET_SIZE = 22_264_502
-    BUN_ASSET_HASH = "sha256-bEu4fdAT7RqNahbjV6PQlJWf1VMLTXBh9/NoDDx86hw="
-    HOST_ARCHIVE_NAME = "traycer-host-macos-arm64.tar.gz"
-    HOST_ARCHIVE_SIZE = 76_162_681
-    HOST_ARCHIVE_HASH = "sha256-Zs+B55nYJRRm407BO2FZAHy7EGncCR1tx14Qoo1UaTk="
-    HOST_SIGNATURE_NAME = f"{HOST_ARCHIVE_NAME}.minisig"
-    HOST_SIGNATURE_SIZE = 293
-    HOST_SIGNATURE_HASH = "sha256-VW+v5cO8X2oqe85V9sssbGGxOalHpy5E9l29ncojQ50="
-    HOST_MINISIGN_PUBLIC_KEY = (
-        "RWSEfvU5EZoZYQTQUOVHeQFv3poThl1VM7FZLkNQr0Zu0FyL2x+u2O2l"
+    BUN_ASSET_NAME = cast("str", _RELEASE_BUN["url"]).rsplit("/", maxsplit=1)[-1]
+    BUN_ASSET_SIZE = cast("int", _RELEASE_BUN["size"])
+    BUN_ASSET_HASH = _sri_sha256(_RELEASE_BUN["sha256"])
+    HOST_ARCHIVE_NAME = cast("str", _RELEASE_HOST_ARCHIVE["url"]).rsplit(
+        "/",
+        maxsplit=1,
+    )[-1]
+    HOST_ARCHIVE_SIZE = cast("int", _RELEASE_HOST_ARCHIVE["size"])
+    HOST_ARCHIVE_HASH = _sri_sha256(_RELEASE_HOST_ARCHIVE["sha256"])
+    HOST_SIGNATURE_NAME = cast("str", _RELEASE_HOST_SIGNATURE["url"]).rsplit(
+        "/",
+        maxsplit=1,
+    )[-1]
+    HOST_SIGNATURE_SIZE = cast("int", _RELEASE_HOST_SIGNATURE["size"])
+    HOST_SIGNATURE_HASH = _sri_sha256(_RELEASE_HOST_SIGNATURE["sha256"])
+    HOST_MINISIGN_PUBLIC_KEY = cast(
+        "str",
+        _RELEASE_HOST_MINISIGN["publicKey"],
     )
-    HOST_MINISIGN_KEY_ID = "847ef539119a1961"
-    HOST_MINISIGN_TRUSTED_COMMENT = "traycer-host 1.2.0 darwin-arm64"
+    HOST_MINISIGN_KEY_ID = cast("str", _RELEASE_HOST_MINISIGN["keyId"])
+    HOST_MINISIGN_TRUSTED_COMMENT = cast(
+        "str",
+        _RELEASE_HOST_MINISIGN["trustedComment"],
+    )
 
     @staticmethod
     def _require_object(payload: object, *, context: str) -> dict[str, object]:

@@ -18,6 +18,7 @@
 }:
 assert stdenv.hostPlatform.system == "aarch64-darwin";
 let
+  platformCompat = import ../../lib/pinned-input-platform-compat;
   workspace = inputs.uv2nix.lib.workspace.loadWorkspace {
     workspaceRoot = lib.fileset.toSource {
       root = ./.;
@@ -33,6 +34,7 @@ let
     }).overrideScope
       (
         lib.composeManyExtensions [
+          platformCompat.overlay
           inputs.pyproject-build-systems.overlays.default
           (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
           (mkResolvedBuildSystemsOverlay {

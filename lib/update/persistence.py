@@ -1302,7 +1302,9 @@ def merge_source_updates(
     if not native_only:
         return source_updates
     return {
-        name: existing_entries[name].merge(entry) if name in existing_entries else entry
+        name: existing_entries[name].merge_native_update(entry)
+        if name in existing_entries
+        else entry
         for name, entry in source_updates.items()
     }
 
@@ -1383,6 +1385,7 @@ def persist_source_updates(
         merged_updates = update_sources.save_source_updates(
             successful_updates,
             merge_existing=True,
+            replace_pins=True,
         )
     else:
         merged_updates = merge_source_updates(

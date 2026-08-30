@@ -1,0 +1,91 @@
+{
+  "buzz": {
+    "commit": "95154bee4034ca7a40b33095c2ddbde8c9aa1614",
+    "rustVersion": "1.95.0",
+    "version": "0.5.20"
+  },
+  "desktopBundleValidation": {
+    "candidate": {
+      "derivationPath": "/nix/store/3b5gv1l2iriy0fw48dnhg1zd770knrfw-buzz-desktop-candidate-0.5.20.drv",
+      "outputPath": "/nix/store/55pw5giij3bb8cqn2dzw4djc54vkzzw2-buzz-desktop-candidate-0.5.20"
+    },
+    "checks": [
+      "realized-candidate",
+      "isolated-launcher-startup",
+      "offline-runtime-loading",
+      "signatures",
+      "exact-app-metadata",
+      "reference-free-final-bundle"
+    ],
+    "schemaVersion": 1,
+    "status": "passed"
+  },
+  "llamaCpp": {
+    "commit": "8190848bb36c7df4251db4352bd81bc07d0a4385"
+  },
+  "meshLlm": {
+    "commit": "3295c902d4c4f859aaadf9240042ffdaf06dd07e",
+    "skippyAbi": "0.1.35",
+    "version": "0.75.1"
+  },
+  "onnxruntime": {
+    "commit": "8f0278c77bf44b0cc83c098c6c722b92a36ac4b5",
+    "version": "1.27.0"
+  },
+  "pnpm": {
+    "hash": "sha256-50EGpaDrJWn0WDUEQg6tX8HCY+QXoyFsqxy+DM3LTq4=",
+    "url": "https://registry.npmjs.org/pnpm/-/pnpm-11.4.0.tgz",
+    "version": "11.4.0"
+  },
+  "schemaVersion": 1,
+  "sherpaOnnx": {
+    "commit": "142807252687d81b40d6315f23470a1512a00de3",
+    "dependencyOrder": [
+      "kaldiNativeFbank",
+      "simpleSentencepiece",
+      "kaldifst",
+      "kaldiDecoder",
+      "openfst",
+      "kissfft"
+    ],
+    "dependencies": {
+      "kaldiDecoder": {
+        "cmakeVariable": "KALDI_DECODER",
+        "file": "kaldi-decoder-0.3.0.tar.gz",
+        "hash": "sha256-ufNM+0/TsTRBAO6tee9NN6oVliJ0ueMFbeNFAh92obA=",
+        "url": "https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.3.0.tar.gz"
+      },
+      "kaldiNativeFbank": {
+        "cmakeVariable": "KALDI_NATIVE_FBANK",
+        "file": "kaldi-native-fbank-1.22.3.tar.gz",
+        "hash": "sha256-kXbMZvx84e34XPNVsG4yDFfbYpffdCd/V1GDRoiTz2E=",
+        "url": "https://github.com/csukuangfj/kaldi-native-fbank/archive/refs/tags/v1.22.3.tar.gz"
+      },
+      "kaldifst": {
+        "cmakeVariable": "KALDIFST",
+        "file": "kaldifst-1.8.0.tar.gz",
+        "hash": "sha256-PyR7flokCQcSAvXivGIABg9mcowKNEPAOSOtJyPgQLM=",
+        "url": "https://github.com/k2-fsa/kaldifst/archive/refs/tags/v1.8.0.tar.gz"
+      },
+      "kissfft": {
+        "cmakeVariable": "KISSFFT",
+        "file": "kissfft-febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip",
+        "hash": "sha256-SXED5mQWjr45WAt1etvmFvbPhaFlcq9YHKe8QtCrE/0=",
+        "url": "https://github.com/mborgerding/kissfft/archive/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip"
+      },
+      "openfst": {
+        "cmakeVariable": "OPENFST",
+        "file": "openfst-1.8.5-2026-04-11.tar.gz",
+        "hash": "sha256-V/vEuVCugbGg4eKYrxVlLalopnI6WSt4dOm0AnqApbQ=",
+        "url": "https://github.com/csukuangfj/openfst/archive/refs/tags/v1.8.5-2026-04-11.tar.gz"
+      },
+      "simpleSentencepiece": {
+        "cmakeVariable": "SIMPLE-SENTENCEPIECE",
+        "file": "simple-sentencepiece-0.7.tar.gz",
+        "hash": "sha256-F0ioIgYKNbqp9mCfhO/I61TcDnS57OPYI2e3EZ/cda8=",
+        "url": "https://github.com/pkufool/simple-sentencepiece/archive/refs/tags/v0.7.tar.gz"
+      }
+    },
+    "version": "1.13.4"
+  }
+}

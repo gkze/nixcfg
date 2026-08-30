@@ -1,12 +1,11 @@
 {
   prev,
   slib,
-  selfSource ? null,
-  sources,
+  selfSource,
   ...
 }:
 let
-  info = if selfSource != null then selfSource else sources.mdformat;
+  info = selfSource;
 in
 {
   mdformat = prev.mdformat.override {

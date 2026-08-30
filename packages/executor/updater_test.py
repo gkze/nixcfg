@@ -21,7 +21,7 @@ from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
-from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
+from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
@@ -69,6 +69,10 @@ _VERSION = "1.6.0"
 _COMMIT = "0ae7959fe03e8fb98d0b8a961438ad88e49fbd4b"
 _SRC_HASH = "sha256-NYydsI91ijZldG2GjsaZMyuvUhQrSbxuQDJKS9PdJ4g="
 _BUN_VERSION = "1.3.11"
+_BUN_SOURCE_URL = (
+    "https://github.com/oven-sh/bun/releases/download/"
+    f"bun-v{_BUN_VERSION}/bun-darwin-aarch64.zip"
+)
 _BUN_SOURCE_HASH = "sha256-b1o0Z+2crsR5W/eM1HZQfZ+HDH1XuGyUX8szgSZ3L/w="
 _EXECUTOR_ENTITLEMENT_KEYS = (
     "com.apple.security.cs.allow-dyld-environment-variables",
@@ -126,18 +130,21 @@ _EXECUTOR_MANAGED_POLICY_PROBES = (
 _PACKAGE_DIR = REPO_ROOT / "packages/executor"
 _BUN_LOCK_SHA256 = "0cc194b2f757a10a09c8aaad333bbbbcc3f670881225889defd9ee40eea7f940"
 _BUN_NIX_SHA256 = "afd386ec099c028c0eb6aaa10def26b3b1cd857bec0850bf7088b10a5f78d8b5"
-_PATCHED_BUN_DEPENDENCIES = {
-    '"@1password/sdk-core@0.4.1-beta.1"': (
-        'src + "/patches/@1password%2Fsdk-core@0.4.1-beta.1.patch"'
+_UPDATER_PATCH_PINS = {
+    "@1password/sdk-core@0.4.1-beta.1": (
+        "source:patches/@1password%2Fsdk-core@0.4.1-beta.1.patch"
     ),
-    '"@electric-sql/pglite-socket@0.1.4"': (
-        'src + "/patches/@electric-sql%2Fpglite-socket@0.1.4.patch"'
+    "@electric-sql/pglite-socket@0.1.4": (
+        "source:patches/@electric-sql%2Fpglite-socket@0.1.4.patch"
     ),
-    '"agents@0.17.3"': 'src + "/patches/agents@0.17.3.patch"',
-    '"libsql@0.3.19"': "./libsql-0.3.19-remove-self-dependency.patch",
-    '"libsql@0.5.29"': 'src + "/patches/libsql@0.5.29.patch"',
-    '"postgres@3.4.9"': 'src + "/patches/postgres@3.4.9.patch"',
+    "agents@0.17.3": "source:patches/agents@0.17.3.patch",
+    "bunLockPatch": "local:bun-lock-libsql-0.3.19-remove-self-dependency.patch",
+    "effectLspPatchVersion": "0.85.1",
+    "libsql@0.3.19": "local:libsql-0.3.19-remove-self-dependency.patch",
+    "libsql@0.5.29": "source:patches/libsql@0.5.29.patch",
+    "postgres@3.4.9": "source:patches/postgres@3.4.9.patch",
 }
+_PATCH_METADATA_PIN_NAMES = ("bunLockPatch", "effectLspPatchVersion")
 
 # Byte-for-byte service-management excerpts from Executor commit
 # 0ae7959fe03e8fb98d0b8a961438ad88e49fbd4b. Keep this fixture independent of
@@ -501,6 +508,8 @@ def test_executor_materializes_bun_closure_then_hashes_exact_commit(
             CommandResult(args=args, returncode=0, stdout="", stderr=""),
         )
 
+    computed_hashes = iter((_SRC_HASH, _BUN_SOURCE_HASH))
+
     async def compute_hash(
         source: str,
         expr: str,
@@ -510,8 +519,8 @@ def test_executor_materializes_bun_closure_then_hashes_exact_commit(
         assert source == "executor"
         assert config == updater.config
         hash_calls.append(expr)
-        yield UpdateEvent.status(source, "source hash running")
-        yield UpdateEvent.value(source, _SRC_HASH)
+        yield UpdateEvent.status(source, "fixed-output hash running")
+        yield UpdateEvent.value(source, next(computed_hashes))
 
     def normalize_bun_nix_path(path: Path) -> None:
         normalized_inputs.append(path.read_text(encoding="utf-8"))
@@ -559,7 +568,7 @@ def test_executor_materializes_bun_closure_then_hashes_exact_commit(
         ),
     ]
     assert normalized_inputs == ["{ generated = true; }\n"]
-    assert len(hash_calls) == 1
+    assert len(hash_calls) == 2
     assert_nix_ast_equal(
         hash_calls[0],
         _build_fetch_from_github_call(
@@ -569,16 +578,27 @@ def test_executor_materializes_bun_closure_then_hashes_exact_commit(
             fetch_submodules=False,
         ),
     )
+    assert_nix_ast_equal(
+        hash_calls[1],
+        f"""
+        pkgs.fetchurl {{
+          url = "{_BUN_SOURCE_URL}";
+          hash = pkgs.lib.fakeHash;
+        }}
+        """,
+    )
     value_event = events[-1]
     assert value_event.kind is UpdateEventKind.VALUE
     assert expect_source_hashes(value_event.payload) == [
-        HashEntry.create("srcHash", _SRC_HASH)
+        HashEntry.create("srcHash", _SRC_HASH),
+        HashEntry.create("sha256", _BUN_SOURCE_HASH),
     ]
     assert [
         event.message for event in events if event.kind is UpdateEventKind.STATUS
     ] == [
         "bun2nix running",
-        "source hash running",
+        "fixed-output hash running",
+        "fixed-output hash running",
     ]
 
 
@@ -592,6 +612,8 @@ def test_executor_dry_run_skips_generated_artifact_work(
     async def forbidden(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("artifact materialization ran during dry-run")
 
+    computed_hashes = iter((_SRC_HASH, _BUN_SOURCE_HASH))
+
     async def compute_hash(
         source: str,
         _expr: str,
@@ -599,7 +621,7 @@ def test_executor_dry_run_skips_generated_artifact_work(
         config: object,
     ) -> AsyncIterator[UpdateEvent]:
         assert config == updater.config
-        yield UpdateEvent.value(source, _SRC_HASH)
+        yield UpdateEvent.value(source, next(computed_hashes))
 
     monkeypatch.setattr(module.update_net, "fetch_url", forbidden)
     monkeypatch.setattr(module, "run_command", forbidden)
@@ -625,7 +647,8 @@ def test_executor_dry_run_skips_generated_artifact_work(
 
     assert all(event.kind is not UpdateEventKind.ARTIFACT for event in events)
     assert expect_source_hashes(events[-1].payload) == [
-        HashEntry.create("srcHash", _SRC_HASH)
+        HashEntry.create("srcHash", _SRC_HASH),
+        HashEntry.create("sha256", _BUN_SOURCE_HASH),
     ]
 
 
@@ -760,12 +783,19 @@ def test_executor_persists_exact_source_and_toolchain_metadata() -> None:
 
     assert module.ExecutorUpdater().build_result(
         info,
-        [HashEntry.create("srcHash", _SRC_HASH)],
+        [
+            HashEntry.create("srcHash", _SRC_HASH),
+            HashEntry.create("sha256", _BUN_SOURCE_HASH),
+        ],
     ) == SourceEntry.model_validate({
         "version": _VERSION,
         "commit": _COMMIT,
         "electronVersion": "41.2.1",
-        "hashes": HashCollection.from_value([HashEntry.create("srcHash", _SRC_HASH)]),
+        "pins": _UPDATER_PATCH_PINS,
+        "hashes": HashCollection.from_value([
+            HashEntry.create("srcHash", _SRC_HASH),
+            HashEntry.create("sha256", _BUN_SOURCE_HASH, url=_BUN_SOURCE_URL),
+        ]),
     })
 
 
@@ -814,6 +844,51 @@ def test_executor_result_requires_complete_toolchain_metadata(
         )
 
 
+@pytest.mark.parametrize(
+    ("hashes", "error_type", "match"),
+    [
+        (
+            {"aarch64-darwin": _BUN_SOURCE_HASH},
+            TypeError,
+            "structured source hash entries",
+        ),
+        (
+            [HashEntry.create("srcHash", _SRC_HASH)],
+            RuntimeError,
+            "one Bun source hash, found 0",
+        ),
+        (
+            [
+                HashEntry.create("srcHash", _SRC_HASH),
+                HashEntry.create("sha256", _BUN_SOURCE_HASH),
+                HashEntry.create(
+                    "sha256", _SRC_HASH, url="https://example.invalid/bun.zip"
+                ),
+            ],
+            RuntimeError,
+            "one Bun source hash, found 2",
+        ),
+    ],
+)
+def test_executor_result_requires_one_structured_bun_source(
+    hashes: SourceHashes,
+    error_type: type[Exception],
+    match: str,
+) -> None:
+    """Promotion must reject ambiguous or non-structured Bun source metadata."""
+    info = VersionInfo(
+        _VERSION,
+        {
+            "bunVersion": _BUN_VERSION,
+            "commit": _COMMIT,
+            "electronVersion": "41.2.1",
+        },
+    )
+
+    with pytest.raises(error_type, match=match):
+        _load_updater_module().ExecutorUpdater().build_result(info, hashes)
+
+
 def test_executor_sources_pin_the_acquired_public_release() -> None:
     """The package source entry must match the verified immutable release."""
     source = SourceEntry.model_validate_json(
@@ -824,7 +899,9 @@ def test_executor_sources_pin_the_acquired_public_release() -> None:
         "version": _VERSION,
         "commit": _COMMIT,
         "electronVersion": "41.2.1",
+        "pins": _UPDATER_PATCH_PINS,
         "hashes": HashCollection.from_value([
+            HashEntry.create("sha256", _BUN_SOURCE_HASH, url=_BUN_SOURCE_URL),
             HashEntry.create("srcHash", _SRC_HASH),
         ]),
     })
@@ -862,8 +939,13 @@ def test_executor_bun_closure_is_exact_and_semantically_parseable() -> None:
         package_bindings['"@executor-js/local"'].value,
         "copyPathToStore ./apps/local",
     )
-    for package_name in _PATCHED_BUN_DEPENDENCIES:
-        package = expect_instance(package_bindings[package_name].value, FunctionCall)
+    for package_name in _UPDATER_PATCH_PINS:
+        if package_name in _PATCH_METADATA_PIN_NAMES:
+            continue
+        package = expect_instance(
+            package_bindings[f'"{package_name}"'].value,
+            FunctionCall,
+        )
         assert package.name == Identifier(name="fetchurl")
 
 
@@ -978,23 +1060,39 @@ def test_executor_package_pins_exact_source_and_toolchains() -> None:
         + "\n]",
     )
     assert_nix_ast_equal(
+        expect_binding(platform_assertion.scope, "bunSourceMetadata").value,
+        'outputs.lib.sourceHashEntry pname "sha256"',
+    )
+    assert_nix_ast_equal(
+        expect_binding(platform_assertion.scope, "bunVersionMatch").value,
+        'builtins.match ".*/bun-v([^/]+)/.*" bunSourceMetadata.url',
+    )
+    assert_nix_ast_equal(
+        expect_binding(platform_assertion.scope, "bunVersion").value,
+        """
+        if bunVersionMatch == null then
+          throw "Executor updater produced an invalid Bun source URL: ${bunSourceMetadata.url}"
+        else
+          builtins.head bunVersionMatch
+        """,
+    )
+    assert_nix_ast_equal(
         expect_binding(platform_assertion.scope, "bunSource").value,
-        f"""fetchurl {{
-          url = "https://github.com/oven-sh/bun/releases/download/bun-v{_BUN_VERSION}/bun-darwin-aarch64.zip";
-          hash = "{_BUN_SOURCE_HASH}";
-        }}""",
+        """fetchurl {
+          inherit (bunSourceMetadata) hash url;
+        }""",
     )
     assert_nix_ast_equal(
         expect_binding(platform_assertion.scope, "bunExact").value,
-        f"""bun.overrideAttrs (previousAttrs: {{
-          version = "{_BUN_VERSION}";
+        """bun.overrideAttrs (previousAttrs: {
+          version = bunVersion;
           src = bunSource;
-          passthru = (previousAttrs.passthru or {{ }}) // {{
-            sources = {{
+          passthru = (previousAttrs.passthru or { }) // {
+            sources = {
               aarch64-darwin = bunSource;
-            }};
-          }};
-        }})""",
+            };
+          };
+        })""",
     )
     fake_node_derivation = expect_instance(
         expect_binding(platform_assertion.scope, "bunWithFakeNode").value,
@@ -1105,7 +1203,7 @@ def test_executor_package_builds_the_owned_desktop_and_sidecar() -> None:
         f"{{ lib, python3 }}: {{ postPatch = {post_patch.rebuild()}; }}",
         """{ lib, python3 }: {
           postPatch = ''
-            patch -p1 < ${./bun-lock-libsql-0.3.19-remove-self-dependency.patch}
+            patch -p1 < ${bunLockPatch}
             PYTHONPATH=${
               lib.fileset.toSource {
                 root = ../..;
@@ -1145,7 +1243,7 @@ def test_executor_package_builds_the_owned_desktop_and_sidecar() -> None:
     ordered_build_commands = [
         _normalized_shell_command(command) for command in command_texts(build_commands)
     ]
-    assert 'test "$(bun --version)" = "1.3.11"' in ordered_build_commands
+    assert 'test "$(bun --version)" = "__NIX_INTERP__"' in ordered_build_commands
     assert (
         ordered_build_commands.index("bun ./scripts/build-sidecar.ts")
         < (ordered_build_commands.index("bun run test:smoke"))
@@ -1155,9 +1253,9 @@ def test_executor_package_builds_the_owned_desktop_and_sidecar() -> None:
         _normalized_shell_command(command)
         for command in command_texts(build_commands, "grep")
     ] == [
-        "grep -Fq '\"use effect-lsp-patch-version 0.85.1\";' "
+        "grep -Fq '\"use effect-lsp-patch-version __NIX_INTERP__\";' "
         "node_modules/typescript/lib/typescript.js",
-        "grep -Fq '\"use effect-lsp-patch-version 0.85.1\";' "
+        "grep -Fq '\"use effect-lsp-patch-version __NIX_INTERP__\";' "
         "node_modules/typescript/lib/_tsc.js",
     ]
 
@@ -1369,23 +1467,54 @@ def test_executor_bun_cache_shards_apply_the_exact_lock_patches() -> None:
     platform_assertion = expect_instance(package.output, Assertion)
     expect_instance(platform_assertion.body, Assertion)
 
-    patch_set = expect_instance(
-        expect_binding(platform_assertion.scope, "patchedBunDependencies").value,
-        AttributeSet,
-    )
-    patches = binding_map(patch_set.values)
-    assert set(patches) == set(_PATCHED_BUN_DEPENDENCIES)
-    for package_name, patch_expression in _PATCHED_BUN_DEPENDENCIES.items():
-        assert_nix_ast_equal(
-            patches[package_name].value,
-            patch_expression,
-        )
-
     assert_nix_ast_equal(
         expect_binding(platform_assertion.scope, "bunPackageShards").value,
         """lib.groupBy (
           entry: builtins.substring 0 2 (builtins.hashString "sha256" entry.name)
         ) bunPackageEntries""",
+    )
+
+
+def test_executor_patch_locks_come_from_updater_metadata() -> None:
+    """The updater owns exact patched package specs and their patch sources."""
+    module = _load_updater_module()
+    assert module.ExecutorUpdater.source_pins == _UPDATER_PATCH_PINS
+
+    package = expect_instance(
+        parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+    platform_assertion = expect_instance(package.output, Assertion)
+    assert_nix_ast_equal(
+        expect_binding(platform_assertion.scope, "patchedBunDependencies").value,
+        """
+        lib.mapAttrs resolvePinnedPatch (
+          builtins.removeAttrs selfSource.pins patchMetadataPinNames
+        )
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_binding(platform_assertion.scope, "patchMetadataPinNames").value,
+        '[ "bunLockPatch" "effectLspPatchVersion" ]',
+    )
+    assert_nix_ast_equal(
+        expect_binding(platform_assertion.scope, "bunLockPatch").value,
+        'resolvePinnedPatch "bunLockPatch" selfSource.pins.bunLockPatch',
+    )
+    assert_nix_ast_equal(
+        expect_binding(platform_assertion.scope, "effectLspPatchVersion").value,
+        "selfSource.pins.effectLspPatchVersion",
+    )
+    assert_nix_ast_equal(
+        expect_binding(platform_assertion.scope, "resolvePinnedPatch").value,
+        """_: patch:
+        if lib.hasPrefix "source:" patch then
+          src + "/${lib.removePrefix "source:" patch}"
+        else if lib.hasPrefix "local:" patch then
+          ./. + "/${lib.removePrefix "local:" patch}"
+        else
+          throw "Executor updater emitted an unsupported patch source"
+        """,
     )
     assert_nix_ast_equal(
         expect_binding(platform_assertion.scope, "bunDeps").value,

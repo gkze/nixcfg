@@ -86,6 +86,42 @@ def test_source_entry_preserves_and_updates_electron_version() -> None:
     )
 
 
+def test_save_source_updates_generic_merge_preserves_pin_union(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the legacy pin-union behavior for non-native merge callers."""
+    source_path = tmp_path / "sources.json"
+    source_path.write_text(
+        json.dumps({
+            "hashes": {},
+            "pins": {"existing": "kept", "updated": "old"},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "lib.update.sources._source_file_map",
+        lambda: {"demo": source_path},
+    )
+
+    persisted = save_source_updates(
+        {
+            "demo": SourceEntry(
+                hashes={},
+                pins={"added": "new", "updated": "new"},
+            )
+        },
+        merge_existing=True,
+    )
+
+    assert persisted["demo"].pins == {
+        "added": "new",
+        "existing": "kept",
+        "updated": "new",
+    }
+    assert load_source_entry(source_path).pins == persisted["demo"].pins
+
+
 def test_source_reads_and_new_writes_follow_authoritative_sidecars(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -250,7 +286,8 @@ def test_persist_source_updates_preserves_concurrent_native_platform_updates(
                 "aarch64-darwin": "sha256-oldDarwin",
                 "x86_64-linux": "sha256-oldLinux",
             },
-            "version": "1.0.0",
+            "pins": {"runtimeVersion": "1.1.0"},
+            "version": "1.1.0",
         }),
         encoding="utf-8",
     )
@@ -271,6 +308,7 @@ def test_persist_source_updates_preserves_concurrent_native_platform_updates(
         source_updates={
             "demo": SourceEntry(
                 hashes={"aarch64-darwin": "sha256-newDarwin"},
+                pins={"runtimeVersion": "1.1.0"},
                 version="1.1.0",
             )
         },
@@ -285,6 +323,7 @@ def test_persist_source_updates_preserves_concurrent_native_platform_updates(
         source_updates={
             "demo": SourceEntry(
                 hashes={"x86_64-linux": "sha256-newLinux"},
+                pins={"runtimeVersion": "1.1.0"},
                 version="1.1.0",
             )
         },
@@ -296,3 +335,44 @@ def test_persist_source_updates_preserves_concurrent_native_platform_updates(
         "aarch64-darwin": "sha256-newDarwin",
         "x86_64-linux": "sha256-newLinux",
     }
+    assert persisted.pins == {"runtimeVersion": "1.1.0"}
+
+
+def test_persist_source_updates_replaces_single_platform_pins(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Locked native persistence deletes pins after a complete hash refresh."""
+    source_path = tmp_path / "packages" / "demo" / "sources.json"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_text(
+        json.dumps({
+            "hashes": {"aarch64-darwin": "sha256-oldDarwin"},
+            "pins": {"removed": "obsolete", "runtimeVersion": "1.0.0"},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "lib.update.sources._source_file_map",
+        lambda: {"demo": source_path},
+    )
+    sources = load_all_sources()
+
+    persist_source_updates(
+        do_sources=True,
+        source_names=["demo"],
+        dry_run=False,
+        native_only=True,
+        sources=sources,
+        source_updates={
+            "demo": SourceEntry(
+                hashes={"aarch64-darwin": "sha256-newDarwin"},
+                pins={"runtimeVersion": "2.0.0"},
+            )
+        },
+        details={"demo": "updated"},
+    )
+
+    persisted = load_source_entry(source_path)
+    assert persisted.hashes.mapping == {"aarch64-darwin": "sha256-newDarwin"}
+    assert persisted.pins == {"runtimeVersion": "2.0.0"}

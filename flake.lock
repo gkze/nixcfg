@@ -372,7 +372,9 @@
           "nixpkgs"
         ],
         "oas-kit": "oas-kit",
-        "rust-overlay": "rust-overlay",
+        "rust-overlay": [
+          "curator-rust-overlay-compat"
+        ],
         "treefmt-nix": "treefmt-nix_2"
       },
       "locked": {
@@ -389,6 +391,23 @@
         "repo": "curator",
         "type": "github"
       }
+    },
+    "curator-rust-overlay-compat": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "rust-overlay": "rust-overlay"
+      },
+      "locked": {
+        "path": "./lib/pinned-input-platform-compat",
+        "type": "path"
+      },
+      "original": {
+        "path": "./lib/pinned-input-platform-compat",
+        "type": "path"
+      },
+      "parent": []
     },
     "devshell": {
       "inputs": {
@@ -1814,11 +1833,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1787640132,
-        "narHash": "sha256-L9UC1AS3jzD2vHShmE36LmoImfBAJZh7bi8kGIqYWqY=",
+        "lastModified": 1788030293,
+        "narHash": "sha256-MHqZ3vJO1/YotyPdSkJt6FViwT4E9JAoHoH3Ujs0jjg=",
         "owner": "gkze",
         "repo": "opencode",
-        "rev": "4df80b17cef1e348be67333e169c77a663712ecd",
+        "rev": "4fa4a2447e924f071331b7409d6ef0f60da09e02",
         "type": "github"
       },
       "original": {
@@ -2006,6 +2025,7 @@
         "codex": "codex",
         "crane": "crane",
         "curator": "curator",
+        "curator-rust-overlay-compat": "curator-rust-overlay-compat",
         "devshell": "devshell_2",
         "emdash": "emdash",
         "flakelight": "flakelight_2",
@@ -2061,7 +2081,7 @@
     "rust-overlay": {
       "inputs": {
         "nixpkgs": [
-          "curator",
+          "curator-rust-overlay-compat",
           "nixpkgs"
         ]
       },
@@ -2076,6 +2096,7 @@
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
+        "rev": "07d7dc6fcc5eae76b4fb0e19d4afd939437bec97",
         "type": "github"
       }
     },

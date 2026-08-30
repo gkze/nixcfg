@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -30,8 +30,8 @@ class LockedRef(BaseModel):
     type: str
     """Source type: ``github``, ``gitlab``, ``git``, ``path``, ``tarball``, etc."""
 
-    nar_hash: str = Field(alias="narHash")
-    """SRI content hash of the fetched source (e.g. ``sha256-...``)."""
+    nar_hash: str | None = Field(default=None, alias="narHash")
+    """SRI content hash of a fetched source; local path locks may omit it."""
 
     rev: str | None = None
     """Git revision (full SHA-1 hex digest)."""
@@ -56,6 +56,14 @@ class LockedRef(BaseModel):
 
     rev_count: int | None = Field(default=None, alias="revCount")
     """Number of ancestor commits (set by some fetchers)."""
+
+    @model_validator(mode="after")
+    def require_nar_hash_for_fetched_source(self) -> LockedRef:
+        """Require content addressing for every non-local locked source."""
+        if self.type != "path" and self.nar_hash is None:
+            msg = f"narHash is required for locked source type {self.type!r}"
+            raise ValueError(msg)
+        return self
 
 
 class OriginalRef(BaseModel):

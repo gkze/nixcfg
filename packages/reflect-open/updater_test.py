@@ -17,7 +17,7 @@ from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.set import AttributeSet
 
-from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
+from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
@@ -47,9 +47,13 @@ _COMMIT = "265eaea2c5b80131da362eccbd38694adf6635cf"
 _SRC_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 _NPM_DEPS_HASH = "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
 _CARGO_HASH = "sha256-DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="
+_PNPM_VERSION = "11.18.0"
+_PNPM_URL = f"https://registry.npmjs.org/pnpm/-/pnpm-{_PNPM_VERSION}.tgz"
+_PNPM_HASH = "sha256-EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE="
 _REAL_SRC_HASH = "sha256-NlOjgmUGu0AKiUdHQga1+gTvizlKtcHpeaFE8OKC79A="
 _REAL_NPM_DEPS_HASH = "sha256-GPn26R1gN43QJHqF+iKZJCx79BJOFn0tCea4xgUjNWs="
 _REAL_CARGO_HASH = "sha256-Fsbe0Do9w0ijkWj5gc6eyWaZmVT8mS0U9Reo7Udg14A="
+_REAL_PNPM_HASH = "sha256-KcNcqNKih5iP3uPg824H2bk3g/VntXm3/Vt5ikVj3YE="
 _MINIMUM_MACOS_VERSION = "14.0"
 _ARCHIVE_ROOT = f"reflect-open-{_COMMIT}"
 
@@ -221,6 +225,7 @@ def test_reflect_resolves_the_release_to_its_immutable_public_commit(
     module = _load_updater_module()
     updater = module.ReflectOpenUpdater()
     api_paths: list[str] = []
+    manifest_urls: list[str] = []
 
     async def github_payload(
         _session: object,
@@ -239,13 +244,32 @@ def test_reflect_resolves_the_release_to_its_immutable_public_commit(
         github_payload,
     )
 
+    async def manifest_payload(
+        _session: object,
+        url: str,
+        *,
+        config: object,
+    ) -> dict[str, str]:
+        assert config == updater.config
+        manifest_urls.append(url)
+        return {"packageManager": f"pnpm@{_PNPM_VERSION}"}
+
+    monkeypatch.setattr(module, "fetch_json", manifest_payload)
+
     assert run_async(updater.fetch_latest(object())) == VersionInfo(
         version=_VERSION,
-        metadata={"commit": _COMMIT, "tag": _TAG},
+        metadata={
+            "commit": _COMMIT,
+            "pnpmVersion": _PNPM_VERSION,
+            "tag": _TAG,
+        },
     )
     assert api_paths == [
         "repos/team-reflect/reflect-open/releases/latest",
         f"repos/team-reflect/reflect-open/commits/{_TAG}",
+    ]
+    assert manifest_urls == [
+        f"https://raw.githubusercontent.com/team-reflect/reflect-open/{_COMMIT}/package.json"
     ]
 
 
@@ -274,17 +298,68 @@ def test_reflect_rejects_release_without_an_immutable_commit(
         run_async(module.ReflectOpenUpdater().fetch_latest(object()))
 
 
+@pytest.mark.parametrize(
+    ("manifest", "error_type", "match"),
+    [
+        ([], TypeError, "manifest is not a JSON object"),
+        ({}, TypeError, "packageManager is missing"),
+        ({"packageManager": ""}, TypeError, "packageManager is missing"),
+        (
+            {"packageManager": "pnpm@^11"},
+            RuntimeError,
+            "requires an exact pnpm packageManager",
+        ),
+    ],
+)
+def test_reflect_rejects_release_without_an_exact_pnpm_toolchain(
+    monkeypatch: pytest.MonkeyPatch,
+    manifest: object,
+    error_type: type[Exception],
+    match: str,
+) -> None:
+    """Release discovery must reject absent, ranged, or foreign package managers."""
+    module = _load_updater_module()
+
+    async def github_payload(
+        _session: object,
+        path: str,
+        **_kwargs: object,
+    ) -> object:
+        return (
+            {"tag_name": _TAG}
+            if path.endswith("/releases/latest")
+            else {"sha": _COMMIT}
+        )
+
+    monkeypatch.setattr(
+        "lib.update.updaters.github_release.fetch_github_api",
+        github_payload,
+    )
+    monkeypatch.setattr(
+        module,
+        "fetch_json",
+        lambda *_args, **_kwargs: asyncio.sleep(0, result=manifest),
+    )
+
+    with pytest.raises(error_type, match=match):
+        run_async(module.ReflectOpenUpdater().fetch_latest(object()))
+
+
 def test_reflect_hashes_source_pnpm_and_cargo_without_exporting_the_package(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The updater should probe the internal foundation in dependency order."""
     module = _load_updater_module()
     updater = module.ReflectOpenUpdater()
-    info = VersionInfo(_VERSION, {"commit": _COMMIT, "tag": _TAG})
+    info = VersionInfo(
+        _VERSION,
+        {"commit": _COMMIT, "pnpmVersion": _PNPM_VERSION, "tag": _TAG},
+    )
     calls = install_fixed_hash_stream(
         monkeypatch,
         (
             (None, _SRC_HASH),
+            (None, _PNPM_HASH),
             (None, _NPM_DEPS_HASH),
             (None, _CARGO_HASH),
         ),
@@ -303,17 +378,27 @@ def test_reflect_hashes_source_pnpm_and_cargo_without_exporting_the_package(
         ),
     )
     fake_hash = updater.config.fake_hash
+    assert_nix_ast_equal(
+        str(calls[1]["expr"]),
+        f"""
+        pkgs.fetchurl {{
+          url = "{_PNPM_URL}";
+          hash = pkgs.lib.fakeHash;
+        }}
+        """,
+    )
     pnpm_override = SourceEntry(
         version=_VERSION,
         commit=_COMMIT,
         hashes=HashCollection.from_value([
             HashEntry.create("srcHash", _SRC_HASH),
+            HashEntry.create("sha256", _PNPM_HASH, url=_PNPM_URL),
             HashEntry.create("npmDepsHash", fake_hash),
             HashEntry.create("cargoHash", fake_hash),
         ]),
     )
     assert_nix_ast_equal(
-        str(calls[1]["expr"]),
+        str(calls[2]["expr"]),
         _build_repo_package_attr_expr(
             "packages/reflect-open/package.nix",
             ".pnpmDeps",
@@ -326,12 +411,13 @@ def test_reflect_hashes_source_pnpm_and_cargo_without_exporting_the_package(
         commit=_COMMIT,
         hashes=HashCollection.from_value([
             HashEntry.create("srcHash", _SRC_HASH),
+            HashEntry.create("sha256", _PNPM_HASH, url=_PNPM_URL),
             HashEntry.create("npmDepsHash", _NPM_DEPS_HASH),
             HashEntry.create("cargoHash", fake_hash),
         ]),
     )
     assert_nix_ast_equal(
-        str(calls[2]["expr"]),
+        str(calls[3]["expr"]),
         _build_repo_package_attr_expr(
             "packages/reflect-open/package.nix",
             ".cargoDeps",
@@ -344,6 +430,7 @@ def test_reflect_hashes_source_pnpm_and_cargo_without_exporting_the_package(
         info,
         [
             HashEntry.create("srcHash", _SRC_HASH),
+            HashEntry.create("sha256", _PNPM_HASH),
             HashEntry.create("npmDepsHash", _NPM_DEPS_HASH),
             HashEntry.create("cargoHash", _CARGO_HASH),
         ],
@@ -353,6 +440,7 @@ def test_reflect_hashes_source_pnpm_and_cargo_without_exporting_the_package(
         commit=_COMMIT,
         hashes=HashCollection.from_value([
             HashEntry.create("srcHash", _SRC_HASH),
+            HashEntry.create("sha256", _PNPM_HASH, url=_PNPM_URL),
             HashEntry.create("npmDepsHash", _NPM_DEPS_HASH),
             HashEntry.create("cargoHash", _CARGO_HASH),
         ]),
@@ -374,6 +462,62 @@ def test_reflect_hashing_rejects_mutable_or_missing_source_commits(
         run_async(
             collect_events(module.ReflectOpenUpdater().fetch_hashes(info, object()))
         )
+
+
+def test_reflect_hashing_requires_pnpm_release_metadata() -> None:
+    """A valid source commit is insufficient without its exact pnpm toolchain."""
+    with pytest.raises(RuntimeError, match="missing a pnpm version"):
+        run_async(
+            collect_events(
+                _load_updater_module()
+                .ReflectOpenUpdater()
+                .fetch_hashes(
+                    VersionInfo(_VERSION, {"commit": _COMMIT}),
+                    object(),
+                )
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("hashes", "error_type", "match"),
+    [
+        (
+            {"aarch64-darwin": _PNPM_HASH},
+            TypeError,
+            "structured source hash entries",
+        ),
+        (
+            [HashEntry.create("srcHash", _SRC_HASH)],
+            RuntimeError,
+            "one pnpm source hash, found 0",
+        ),
+        (
+            [
+                HashEntry.create("srcHash", _SRC_HASH),
+                HashEntry.create("sha256", _PNPM_HASH),
+                HashEntry.create(
+                    "sha256", _SRC_HASH, url="https://example.invalid/pnpm.tgz"
+                ),
+            ],
+            RuntimeError,
+            "one pnpm source hash, found 2",
+        ),
+    ],
+)
+def test_reflect_result_requires_one_structured_pnpm_source(
+    hashes: SourceHashes,
+    error_type: type[Exception],
+    match: str,
+) -> None:
+    """Promotion must reject ambiguous or non-structured pnpm source metadata."""
+    info = VersionInfo(
+        _VERSION,
+        {"commit": _COMMIT, "pnpmVersion": _PNPM_VERSION, "tag": _TAG},
+    )
+
+    with pytest.raises(error_type, match=match):
+        _load_updater_module().ReflectOpenUpdater().build_result(info, hashes)
 
 
 def test_reflect_never_skips_dependency_closure_recomputation() -> None:
@@ -405,6 +549,7 @@ def test_reflect_source_pin_contains_promoted_authoritative_hashes() -> None:
         hashes=HashCollection.from_value([
             HashEntry.create("cargoHash", _REAL_CARGO_HASH),
             HashEntry.create("npmDepsHash", _REAL_NPM_DEPS_HASH),
+            HashEntry.create("sha256", _REAL_PNPM_HASH, url=_PNPM_URL),
             HashEntry.create("srcHash", _REAL_SRC_HASH),
         ]),
     )
@@ -587,8 +732,21 @@ def test_reflect_package_pins_upstream_pnpm_with_the_non_hanging_helper() -> Non
     assert Identifier(name="fetchurl") in package.argument_set
     assert Identifier(name="nodejs_24") in package.argument_set
     assert_nix_ast_equal(
-        expect_binding(package_call.scope, "expectedPnpmVersion").value,
-        '"11.18.0"',
+        expect_binding(package_call.scope, "pnpmSource").value,
+        'outputs.lib.sourceHashEntry pname "sha256"',
+    )
+    assert_nix_ast_equal(
+        expect_binding(package_call.scope, "pnpmVersionMatch").value,
+        'builtins.match ".*/pnpm-([^/]+)\\\\.tgz" pnpmSource.url',
+    )
+    assert_nix_ast_equal(
+        expect_binding(package_call.scope, "pnpmVersion").value,
+        """
+        if pnpmVersionMatch == null then
+          throw "Reflect updater produced an invalid pnpm source URL: ${pnpmSource.url}"
+        else
+          builtins.head pnpmVersionMatch
+        """,
     )
     assert_nix_ast_equal(
         expect_binding(package_call.scope, "nodejs").value,
@@ -597,10 +755,9 @@ def test_reflect_package_pins_upstream_pnpm_with_the_non_hanging_helper() -> Non
     assert_nix_ast_equal(
         expect_binding(package_call.scope, "pnpm").value,
         """(pnpm_11.override { nodejs-slim = nodejs_24; }).overrideAttrs (_: {
-          version = expectedPnpmVersion;
+          version = pnpmVersion;
           src = fetchurl {
-            url = "https://registry.npmjs.org/pnpm/-/pnpm-${expectedPnpmVersion}.tgz";
-            hash = "sha256-KcNcqNKih5iP3uPg824H2bk3g/VntXm3/Vt5ikVj3YE=";
+            inherit (pnpmSource) hash url;
           };
         })""",
     )

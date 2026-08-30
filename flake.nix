@@ -179,6 +179,13 @@
     };
     curator = {
       url = "github:gkze/curator/v0.7.3";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        rust-overlay.follows = "curator-rust-overlay-compat";
+      };
+    };
+    curator-rust-overlay-compat = {
+      url = "path:./lib/pinned-input-platform-compat";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
@@ -300,6 +307,13 @@
         "x86_64-linux"
       ];
 
+      electronRuntimePolicy = builtins.fromJSON (
+        builtins.readFile ./packages/electron-runtimes/versions.json
+      );
+      electronRuntimeVersions =
+        assert electronRuntimePolicy.schemaVersion == 1;
+        electronRuntimePolicy.versions;
+
       nixpkgsConfig = {
         allowUnfree = true;
         # Allow selected pinned binary runtimes regardless of insecure status.
@@ -312,18 +326,7 @@
             pname = pkg.pname or "";
             version = pkg.version or "";
           in
-          pname == "google-chrome"
-          || (
-            pname == "electron"
-            && builtins.elem version [
-              "38.7.2"
-              "40.1.0"
-              "40.7.0"
-              "40.8.5"
-              "40.9.3"
-              "40.10.2"
-            ]
-          );
+          pname == "google-chrome" || (pname == "electron" && builtins.elem version electronRuntimeVersions);
       };
 
       overlayList = [
@@ -331,20 +334,9 @@
         inputs.bun2nix.overlays.default
         inputs.curator.overlays.default
         inputs.lumen.overlays.default
-        inputs.neovim-nightly-overlay.overlays.default
+        (import ./overlays/_lib/neovim-nightly-overlay.nix { inherit inputs; })
         inputs.rust-overlay.overlays.default
         inputs.nh.overlays.default
-        (
-          final: prev:
-          let
-            hostSystemEval = builtins.tryEval prev.stdenv.hostPlatform.system;
-            hostSystem =
-              if hostSystemEval.success then hostSystemEval.value else prev.system or (final.system or null);
-          in
-          prev.lib.optionalAttrs (hostSystem != null && builtins.hasAttr hostSystem inputs.red.packages) {
-            red-reddit-cli = inputs.red.packages.${hostSystem}.default;
-          }
-        )
         self.overlays.default
       ];
       baseOutputs = flakelight ./. (
@@ -1001,6 +993,17 @@
               _: import ./tests/nix/default-api/default-api.nix { src = ./.; }
             );
 
+            "test-nix-buzz-export-readiness" = mkEvalOnlyCheck "test-nix-buzz-export-readiness" (
+              { pkgs, ... }:
+              if pkgs.stdenv.hostPlatform.system == "aarch64-darwin" then
+                import ./tests/nix/buzz-export-readiness.nix {
+                  inherit pkgs;
+                  src = ./.;
+                }
+              else
+                true
+            );
+
             "test-nix-crate2nix-source-slice" =
               { pkgs, ... }:
               import ./tests/nix/crate2nix-source-slice.nix {
@@ -1171,7 +1174,9 @@
               )
             ]
             ++ (cfg.modules or [ ]);
-            pkgs = baseOutputs.legacyPackages.${cfg.system};
+            pkgs =
+              (import ./lib/pinned-input-platform-compat).withLegacyPlatformAttrs
+                baseOutputs.legacyPackages.${cfg.system};
           }
         );
     in

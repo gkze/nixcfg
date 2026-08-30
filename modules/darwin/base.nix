@@ -200,7 +200,7 @@ in
     launchd.user.envVariables.GNUPGHOME = gpgHome;
 
     homebrew = {
-      enable = pkgs.stdenv.isDarwin;
+      enable = pkgs.stdenv.hostPlatform.isDarwin;
       global.autoUpdate = cfg.homebrew.autoUpdate;
       onActivation = {
         inherit (cfg.homebrew) autoUpdate cleanup;

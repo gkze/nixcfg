@@ -40,7 +40,7 @@ let
     buildInputs = [
       tree-sitter
     ]
-    ++ lib.optionals stdenv.isDarwin [
+    ++ lib.optionals stdenv.hostPlatform.isDarwin [
       libiconv
     ];
 

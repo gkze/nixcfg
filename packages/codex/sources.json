@@ -1,6 +1,22 @@
 {
   "commit": "90854393966b21e9ebfd21b122334eb09a20c93d",
-  "hashes": [],
+  "hashes": [
+    {
+      "hash": "sha256-4IwJM6EzTFgQd2AdX+Hj9NWzmyqXrSioRax2L6GKL1U=",
+      "hashType": "sha256",
+      "platform": "aarch64-darwin",
+      "url": "https://github.com/livekit/rust-sdks/releases/download/webrtc-24f6822-2/webrtc-mac-arm64-release.zip"
+    },
+    {
+      "hash": "sha256-aR76GGfK2UJheN5nI10e2f8CZPgxMxqlEPxyWc95AQ0=",
+      "hashType": "sha256",
+      "platform": "x86_64-linux",
+      "url": "https://github.com/livekit/rust-sdks/releases/download/webrtc-24f6822-2/webrtc-linux-x64-release.zip"
+    }
+  ],
   "input": "codex",
+  "pins": {
+    "clangResourceVersion": "23"
+  },
   "version": "rust-v0.150.1"
 }

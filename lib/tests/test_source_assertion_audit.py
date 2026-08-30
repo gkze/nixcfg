@@ -11,6 +11,12 @@ _SELF_PATH = Path(__file__).resolve()
 _EXCLUDED_PARTS = {".venv", "__pycache__", "mutants", "node_modules"}
 _NIX_EVAL_HELPER_PATH = _REPO_ROOT / "lib/tests/_nix_eval.py"
 _NIX_EVAL_TEST_ALLOWLIST = {
+    "lib/tests/test_electron_runtime_nix.py::test_electron_overlay_reconstructs_the_updater_inventory": (
+        "Only evaluation resolves dynamic runtime-version attribute grouping."
+    ),
+    "lib/tests/test_electron_runtime_nix.py::test_electron_overlay_rejects_an_incomplete_runtime": (
+        "Only evaluation proves the fail-closed inventory branch is forced."
+    ),
     "lib/tests/test_goose_cli_package_nix.py::test_goose_cli_reviews_every_bitcoin_internals_version": (
         "Only evaluation resolves the locked crate graph across generated artifacts."
     ),

@@ -38,6 +38,7 @@ let
   modulesPath = "${src}/modules";
   crate2nixTauri = import ./crate2nix-tauri.nix { inherit lib; };
   rustyV8 = import ./rusty-v8.nix { inherit lib; };
+  platformCompat = import ./pinned-input-platform-compat;
 
   scanSourcesIn =
     dir:
@@ -310,7 +311,7 @@ rec {
       extraSpecialArgs =
         mkHomeModuleArgs { inherit system username; }
         // {
-          pkgs = pkgsFor.${system};
+          pkgs = platformCompat.withLegacyPlatformAttrs pkgsFor.${system};
         }
         // extraSpecialArgs;
       modules = mkHomeModules {
@@ -393,7 +394,7 @@ rec {
                 system
                 ;
               slib = outputs.lib;
-              pkgs = pkgsFor.${system};
+              pkgs = platformCompat.withLegacyPlatformAttrs pkgsFor.${system};
             }
             // homeManagerExtraSpecialArgs;
             users = listToAttrs (

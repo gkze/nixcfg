@@ -154,6 +154,7 @@ let
         "goose-cli"
         "goose-cli-crate2nix-src"
         "goose-cli-v8-native"
+        "red-reddit-cli"
         "superset"
         "zed-editor-nightly"
         "zed-editor-nightly-crate2nix-src"

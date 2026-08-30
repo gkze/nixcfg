@@ -5,17 +5,19 @@
   gitMinimal,
   lib,
   meshSrcHash,
+  nativeLock ? builtins.fromJSON (builtins.readFile ../native-lock.json),
   ninja,
   srcHash,
   stdenv,
 }:
 assert stdenv.hostPlatform.system == "aarch64-darwin";
 let
-  commit = "8190848bb36c7df4251db4352bd81bc07d0a4385";
+  commit = nativeLock.llamaCpp.commit or null;
+  meshCommit = nativeLock.meshLlm.commit or null;
   meshSource = fetchFromGitHub {
     owner = "Mesh-LLM";
     repo = "mesh-llm";
-    rev = "3295c902d4c4f859aaadf9240042ffdaf06dd07e";
+    rev = meshCommit;
     hash = meshSrcHash;
     fetchSubmodules = false;
   };
@@ -27,6 +29,8 @@ let
     fetchSubmodules = false;
   };
 in
+assert builtins.isString commit && builtins.match "[0-9a-f]{40}" commit != null;
+assert builtins.isString meshCommit && builtins.match "[0-9a-f]{40}" meshCommit != null;
 stdenv.mkDerivation {
   pname = "buzz-llama-cpp";
   version = builtins.substring 0 12 commit;
@@ -374,7 +378,7 @@ stdenv.mkDerivation {
     resourceSubpaths = [ ];
     buzzNativeContract = {
       kind = "llama.cpp";
-      commit = "8190848bb36c7df4251db4352bd81bc07d0a4385";
+      inherit commit;
       target = "aarch64-apple-darwin";
       backend = "metal";
       linkMode = "dynamic";

@@ -1,29 +1,31 @@
 {
   fetchurl,
   lib,
+  outputs,
   selfSource,
   stdenvNoCC,
   system,
   ...
 }:
 let
+  pname = "mole-app";
   releaseAsset =
     {
       aarch64-darwin = "darwin-arm64";
       x86_64-darwin = "darwin-amd64";
     }
     .${system};
+  sourceTarballMetadata = outputs.lib.sourceHashEntry pname "srcHash";
   sourceTarball = fetchurl {
-    url = "https://github.com/tw93/Mole/archive/refs/tags/V${selfSource.version}.tar.gz";
-    hash = "sha256-g+FH9DohdbTbJ2JBHjh5g2TBPpvV8jhohRhmLTAD/3I=";
+    inherit (sourceTarballMetadata) hash url;
   };
   binaryArchive = fetchurl {
     url = selfSource.urls.${system};
-    hash = selfSource.hashes.${system};
+    hash = outputs.lib.sourceHashForPlatform pname "sha256" system;
   };
 in
 stdenvNoCC.mkDerivation {
-  pname = "mole-app";
+  inherit pname;
   inherit (selfSource) version;
 
   src = sourceTarball;

@@ -6,6 +6,9 @@
   sources,
   ...
 }:
+let
+  treesitterTextobjectsSource = sources.treesitter-textobjects;
+in
 {
   vimPlugins = prev.vimPlugins.extend (
     _: vprev: {
@@ -17,7 +20,7 @@
         src = prev.fetchFromGitHub {
           owner = "gkze";
           repo = "nvim-treesitter-textobjects";
-          inherit (sources.treesitter-textobjects) rev;
+          rev = treesitterTextobjectsSource.commit;
           hash = slib.sourceHash "treesitter-textobjects" "srcHash";
         };
       };

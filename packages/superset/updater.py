@@ -34,6 +34,7 @@ class SupersetUpdater(MaterializesArtifactsMixin, GitHubReleaseAssetURLsUpdater)
     GITHUB_OWNER = "superset-sh"
     GITHUB_REPO = "superset"
     TAG_PREFIX = "desktop-v"
+    source_pins: ClassVar[dict[str, str]] = {"electronVersion": "40.8.5"}
     derivation_validations = (
         DerivationValidation(
             installable=".#pkgs.{system}.{name}.drvPath",

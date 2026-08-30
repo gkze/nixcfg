@@ -12,6 +12,7 @@
   pnpm_11,
   pnpmConfigHook,
   python3,
+  selfSource,
   stdenv,
   ...
 }:
@@ -25,7 +26,7 @@ let
   # platform, which can leave electron-builder waiting forever on Darwin.
   # 26.15.x executes them directly off Windows and uses a dedicated safe
   # PowerShell path for Windows .cmd shims.
-  electronBuilderVersion = "26.15.7";
+  electronBuilderVersion = selfSource.pins.electronBuilderVersion;
   updateRuntimeLocksTemplate = ./update_runtime_locks.py;
 
   shared = import ../t3code/_shared.nix {

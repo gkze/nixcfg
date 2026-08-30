@@ -1,15 +1,19 @@
 """Tests for the T3 Code updater registrations."""
 
 import asyncio
+import json
 import shlex
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.primitive import StringPrimitive
+from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import SourceEntry, SourcesFile
-from lib.tests._nix_ast import assert_nix_ast_equal
+from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
@@ -23,7 +27,6 @@ from lib.update.events import (
 )
 from lib.update.generated_artifact_commands import stream_command_materialized_artifacts
 from lib.update.nix import _build_package_path_attr_expr
-from lib.update.paths import REPO_ROOT
 from lib.update.persistence import persist_generated_artifacts
 from lib.update.source_runner import (
     SourcesPhaseContext,
@@ -35,6 +38,7 @@ from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
     from lib.update.process import RunCommandOptions
+    from lib.update.updaters.t3_runtime import T3RuntimeUpdater
 
 HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 NEW_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
@@ -58,6 +62,32 @@ def _current_entry() -> SourceEntry:
             }
         ],
     })
+
+
+def _source_overrides_from_package_expr(expr: str) -> dict[str, object]:
+    parsed = parse_nix_expr(expr)
+    contextual_import = expect_binding(parsed.scope, "flake").value
+    assert isinstance(contextual_import, FunctionCall)
+    import_arguments = contextual_import.argument
+    assert isinstance(import_arguments, AttributeSet)
+    evaluation_context = expect_binding(
+        import_arguments.values,
+        "evaluationContext",
+    ).value
+    assert isinstance(evaluation_context, AttributeSet)
+    source_overrides = expect_binding(
+        evaluation_context.values,
+        "sourceOverrides",
+    ).value
+    if isinstance(source_overrides, AttributeSet):
+        assert source_overrides.values == []
+        return {}
+    assert isinstance(source_overrides, FunctionCall)
+    payload = source_overrides.argument
+    assert isinstance(payload, StringPrimitive)
+    decoded = json.loads(json.loads(f'"{payload.value}"'))
+    assert isinstance(decoded, dict)
+    return decoded
 
 
 def test_t3code_updater_tracks_platform_specific_runtime_hashes() -> None:
@@ -94,6 +124,151 @@ def test_t3code_desktop_updater_targets_the_main_t3code_input() -> None:
     assert module.T3CodeDesktopUpdater.supported_platforms == ("aarch64-darwin",)
     assert module.T3CodeDesktopUpdater.input_name == "t3code"
     assert module.T3CodeDesktopUpdater.hash_attr_path == ".node_modules"
+    assert module.T3CodeDesktopUpdater.source_pins == {
+        "electronBuilderVersion": "26.15.7",
+    }
+
+
+def test_shared_runtime_locks_use_one_candidate_view_during_desktop_pin_bump(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both shared-lock producers must materialize the new desktop pin."""
+    t3code_module = load_repo_module(
+        "packages/t3code/updater.py",
+        "t3code_shared_candidate_test",
+    )
+    desktop_module = load_repo_module(
+        "packages/t3code-desktop/updater.py",
+        "t3code_desktop_shared_candidate_test",
+    )
+    updater_classes = {
+        "t3code": t3code_module.T3CodeUpdater,
+        "t3code-desktop": desktop_module.T3CodeDesktopUpdater,
+    }
+    old_desktop = SourceEntry.model_validate({
+        **_current_entry().to_dict(),
+        "pins": {"electronBuilderVersion": "26.8.1"},
+    })
+    materialized: list[tuple[str, str | None, tuple[GeneratedArtifact, ...]]] = []
+
+    async def _fetch_latest(_self: object, _session: object) -> VersionInfo:
+        return VersionInfo(version="main")
+
+    async def _not_latest(
+        _self: object,
+        _context: object,
+        _info: VersionInfo,
+    ) -> bool:
+        return False
+
+    async def _fingerprint(
+        self: T3RuntimeUpdater,
+        _source_override: SourceEntry | None = None,
+    ) -> str:
+        return f"{self.name}-candidate-drv"
+
+    async def _hash(
+        source: str,
+        _expr: str,
+        *,
+        env: dict[str, str] | None = None,
+        config: object | None = None,
+    ) -> AsyncIterator[UpdateEvent]:
+        _ = (env, config)
+        yield UpdateEvent.value(source, NEW_HASH)
+
+    async def _materialize(
+        source: str,
+        *,
+        args: list[str],
+        artifact_paths: tuple[str, ...],
+        inner: AsyncIterator[UpdateEvent],
+        dry_run: bool,
+        config: object | None = None,
+        detail: str,
+    ) -> AsyncIterator[UpdateEvent]:
+        _ = (dry_run, config, detail)
+        overrides = _source_overrides_from_package_expr(args[4])
+        desktop = overrides.get("t3code-desktop")
+        pins = desktop.get("pins") if isinstance(desktop, dict) else None
+        electron_builder_version = (
+            pins.get("electronBuilderVersion") if isinstance(pins, dict) else None
+        )
+        assert electron_builder_version is None or isinstance(
+            electron_builder_version,
+            str,
+        )
+        content = json.dumps(
+            {"electronBuilderVersion": electron_builder_version},
+            sort_keys=True,
+        )
+        artifacts = tuple(
+            GeneratedArtifact.text(path, content, changed_from_snapshot=True)
+            for path in artifact_paths
+        )
+        materialized.append((source, electron_builder_version, artifacts))
+        yield UpdateEvent.artifact(source, list(artifacts))
+        async for event in inner:
+            yield event
+
+    async def _run_queue_task(
+        *,
+        source: str,
+        queue: asyncio.Queue[UpdateEvent | None],
+        task: Callable[[], Awaitable[None]],
+    ) -> None:
+        _ = (source, queue)
+        await task()
+
+    for updater_class in updater_classes.values():
+        monkeypatch.setattr(updater_class, "fetch_latest", _fetch_latest)
+        monkeypatch.setattr(updater_class, "_is_latest", _not_latest)
+        monkeypatch.setattr(updater_class, "_compute_drv_fingerprint", _fingerprint)
+    monkeypatch.setattr(
+        "lib.update.source_runner._get_updaters", lambda: updater_classes
+    )
+    monkeypatch.setattr(
+        "lib.update.source_runner.update_process.run_queue_task",
+        _run_queue_task,
+    )
+    monkeypatch.setattr(
+        "lib.update.updaters.t3_runtime.stream_command_materialized_artifacts",
+        _materialize,
+    )
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _hash)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    result = _run(
+        run_sources_phase(
+            SourcesPhaseContext(
+                source_names=["t3code", "t3code-desktop"],
+                sources=SourcesFile(
+                    entries={
+                        "t3code": _current_entry(),
+                        "t3code-desktop": old_desktop,
+                    }
+                ),
+                queue=asyncio.Queue(),
+                update_input=False,
+                native_only=False,
+                config=resolve_config(),
+            )
+        )
+    )
+
+    assert {pin for _source, pin, _artifacts in materialized} == {"26.15.7"}
+    assert [source for source, _pin, _artifacts in materialized] == [
+        "t3code-desktop",
+        "t3code",
+    ]
+    assert {
+        artifact.content
+        for artifacts in result.artifact_updates.values()
+        for artifact in artifacts
+    } == {'{"electronBuilderVersion": "26.15.7"}'}
 
 
 @pytest.mark.parametrize(
@@ -140,12 +315,12 @@ def test_t3code_updaters_hash_only_their_node_modules_attr(
         _fake_compute_fixed_output_hash,
     )
 
+    info = VersionInfo(version="main")
+    source_override = (
+        updater.build_result(info, []) if updater.source_pins is not None else None
+    )
     events = _run(
-        _collect(
-            updater._compute_hash_for_system(
-                VersionInfo(version="main"), system="aarch64-darwin"
-            )
-        )
+        _collect(updater._compute_hash_for_system(info, system="aarch64-darwin"))
     )
 
     assert captured["source"] == package_name
@@ -153,7 +328,13 @@ def test_t3code_updaters_hash_only_their_node_modules_attr(
     assert_nix_ast_equal(
         str(captured["expr"]),
         _build_package_path_attr_expr(
-            package_name, ".node_modules", system="aarch64-darwin"
+            package_name,
+            ".node_modules",
+            system="aarch64-darwin",
+            source_overrides=(
+                {package_name: source_override} if source_override is not None else None
+            ),
+            fake_hashes=True if source_override is not None else None,
         ),
     )
     assert events == [UpdateEvent.value(package_name, HASH)]
@@ -274,9 +455,23 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
     assert result.drv_hash == "drv"
     assert result.hashes.entries[0].hash == NEW_HASH
     assert captured["fingerprint_source"] == package_name
+    fingerprint_override = (
+        updater.build_result(VersionInfo(version="main"), [])
+        if updater.source_pins is not None
+        else None
+    )
     assert_nix_ast_equal(
         str(captured["fingerprint_expr"]),
-        _build_package_path_attr_expr(package_name, ".node_modules"),
+        _build_package_path_attr_expr(
+            package_name,
+            ".node_modules",
+            source_overrides=(
+                {package_name: fingerprint_override}
+                if fingerprint_override is not None
+                else None
+            ),
+            fake_hashes=True if fingerprint_override is not None else None,
+        ),
     )
     assert captured["materialize_source"] == package_name
     assert captured["materialize_artifact_paths"] == (
@@ -289,8 +484,149 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
     assert_nix_ast_equal(
         str(captured["expr"]),
         _build_package_path_attr_expr(
-            package_name, ".node_modules", system="aarch64-darwin"
+            package_name,
+            ".node_modules",
+            system="aarch64-darwin",
+            source_overrides=(
+                {package_name: fingerprint_override}
+                if fingerprint_override is not None
+                else None
+            ),
+            fake_hashes=True if fingerprint_override is not None else None,
         ),
+    )
+
+
+def test_t3code_fingerprints_materialized_locks_and_is_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fingerprint the generated lock candidate before restoring checked-in files."""
+    module = load_repo_module(
+        "packages/t3code-desktop/updater.py",
+        "t3code_desktop_fingerprint_lifecycle_test",
+    )
+    updater = module.T3CodeDesktopUpdater()
+    checked_in_lock = "stale lock"
+    candidate_lock = "candidate lock"
+    fingerprint_states: list[str] = []
+
+    async def _fetch_latest(_session: object) -> VersionInfo:
+        return VersionInfo(version="main")
+
+    async def _fingerprint(_source_override: SourceEntry | None = None) -> str:
+        fingerprint_states.append(checked_in_lock)
+        return f"drv-{checked_in_lock}"
+
+    async def _hash(
+        source: str,
+        _expr: str,
+        *,
+        env: dict[str, str] | None = None,
+        config: object | None = None,
+    ) -> AsyncIterator[UpdateEvent]:
+        _ = (env, config)
+        yield UpdateEvent.value(source, NEW_HASH)
+
+    async def _materialize(
+        source: str,
+        *,
+        args: list[str],
+        artifact_paths: tuple[str, ...],
+        inner: AsyncIterator[UpdateEvent],
+        dry_run: bool,
+        config: object | None = None,
+        detail: str,
+    ) -> AsyncIterator[UpdateEvent]:
+        nonlocal checked_in_lock
+        _ = (args, dry_run, config, detail)
+        previous = checked_in_lock
+        checked_in_lock = candidate_lock
+        try:
+            yield UpdateEvent.artifact(
+                source,
+                [
+                    GeneratedArtifact.text(
+                        path,
+                        candidate_lock,
+                        changed_from_snapshot=previous != candidate_lock,
+                    )
+                    for path in artifact_paths
+                ],
+            )
+            async for event in inner:
+                yield event
+        finally:
+            checked_in_lock = previous
+
+    monkeypatch.setattr(updater, "fetch_latest", _fetch_latest)
+    monkeypatch.setattr(updater, "_compute_drv_fingerprint", _fingerprint)
+    monkeypatch.setattr(
+        "lib.update.updaters.t3_runtime.stream_command_materialized_artifacts",
+        _materialize,
+    )
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _hash)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-darwin",
+    )
+
+    old_desktop = SourceEntry.model_validate({
+        **_current_entry().to_dict(),
+        "pins": {"electronBuilderVersion": "26.8.1"},
+    })
+    first_events = _run(
+        _collect(
+            updater.update_stream(
+                old_desktop,
+                object(),
+                context=UpdateContext(
+                    current=old_desktop,
+                    effective_sources={
+                        "t3code": _current_entry(),
+                        "t3code-desktop": old_desktop,
+                    },
+                ),
+            )
+        )
+    )
+    first_results = [
+        event.payload
+        for event in first_events
+        if event.kind is UpdateEventKind.RESULT and event.payload is not None
+    ]
+    assert len(first_results) == 1
+    first_result = first_results[0]
+    assert isinstance(first_result, SourceEntry)
+
+    checked_in_lock = candidate_lock
+    second_events = _run(
+        _collect(
+            updater.update_stream(
+                first_result,
+                object(),
+                context=UpdateContext(
+                    current=first_result,
+                    effective_sources={
+                        "t3code": _current_entry(),
+                        "t3code-desktop": first_result,
+                    },
+                ),
+            )
+        )
+    )
+
+    assert first_result.drv_hash == "drv-candidate lock"
+    assert fingerprint_states
+    assert set(fingerprint_states) == {candidate_lock}
+    assert not any(
+        event.kind is UpdateEventKind.RESULT and event.payload is not None
+        for event in second_events
+    )
+    assert not any(
+        artifact.changed_from_snapshot
+        for event in second_events
+        if event.kind is UpdateEventKind.ARTIFACT
+        for artifact in expect_artifact_updates(event.payload)
     )
 
 
@@ -318,7 +654,7 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
     class_name: str,
     package_name: str,
 ) -> None:
-    """The runtime lock refresher should wrap the platform hash stream."""
+    """The runtime lock refresher should wrap hashing and finalization."""
     module = load_repo_module(module_path, module_name)
     updater = getattr(module, class_name)()
     captured: dict[str, object] = {}
@@ -355,6 +691,12 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
         captured.update({"hash_source": source, "expr": expr, "env": env})
         yield UpdateEvent.value(source, NEW_HASH)
 
+    async def _fetch_latest(_session: object) -> VersionInfo:
+        return info
+
+    async def _fingerprint(_source_override: SourceEntry | None = None) -> str:
+        return "candidate-drv"
+
     monkeypatch.setattr(
         "lib.update.updaters.t3_runtime.stream_command_materialized_artifacts",
         _fake_materialize_runtime_locks,
@@ -368,10 +710,13 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
         lambda: "aarch64-darwin",
     )
 
+    info = VersionInfo(version="main")
+    monkeypatch.setattr(updater, "fetch_latest", _fetch_latest)
+    monkeypatch.setattr(updater, "_compute_drv_fingerprint", _fingerprint)
     events = _run(
         _collect(
-            updater.fetch_hashes(
-                VersionInfo(version="main"),
+            updater.update_stream(
+                None,
                 object(),
                 context=UpdateContext(current=None, dry_run=True),
             )
@@ -379,10 +724,20 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
     )
 
     assert captured["source"] == package_name
-    assert captured["args"][:2] == ["sh", "-c"]
-    assert captured["args"][2] == (
-        f"cd {shlex.quote(str(REPO_ROOT))} && "
-        "nix run .#t3code-desktop.passthru.updateRuntimeLocks"
+    assert captured["args"][:4] == ["nix", "run", "--impure", "--expr"]
+    source_override = (
+        updater.build_result(info, []) if updater.source_pins is not None else None
+    )
+    assert_nix_ast_equal(
+        captured["args"][4],
+        _build_package_path_attr_expr(
+            "t3code-desktop",
+            ".passthru.updateRuntimeLocks",
+            source_overrides=(
+                {package_name: source_override} if source_override is not None else None
+            ),
+            fake_hashes=True if source_override is not None else None,
+        ),
     )
     assert captured["artifact_paths"] == (
         "packages/t3code/bun.lock",
@@ -392,8 +747,12 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
     assert captured["detail"] == "T3 runtime Bun locks"
     assert captured["hash_source"] == package_name
     assert captured["env"] is None
-    assert events[0] == UpdateEvent.status(package_name, "materialized")
-    assert events[-1].kind is UpdateEventKind.VALUE
+    assert UpdateEvent.status(package_name, "materialized") in events
+    result = events[-1]
+    assert result.kind is UpdateEventKind.RESULT
+    assert isinstance(result.payload, SourceEntry)
+    assert result.payload.hashes.entries[0].hash == NEW_HASH
+    assert result.payload.drv_hash == "candidate-drv"
 
 
 def test_command_materialized_artifacts_dry_run_skips_live_refresh(

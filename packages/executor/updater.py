@@ -6,6 +6,11 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, cast
 
+from nix_manipulator.expressions.binding import Binding
+from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.primitive import StringPrimitive
+from nix_manipulator.expressions.set import AttributeSet
+
 from lib.bun_nix_normalizer import normalize_bun_nix_path
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update import net as update_net
@@ -24,6 +29,7 @@ from lib.update.events import (
 )
 from lib.update.net import fetch_json, github_raw_url
 from lib.update.nix import _build_fetch_from_github_expr
+from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.paths import updater_dir_for
 from lib.update.process import RunCommandOptions, run_command
 from lib.update.updaters import (
@@ -53,6 +59,20 @@ class ExecutorUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
     RELEASE_DISPLAY_NAME = "Executor"
     DARWIN_PLATFORM: ClassVar[str] = "aarch64-darwin"
     supported_platforms = (DARWIN_PLATFORM,)
+    source_pins: ClassVar[dict[str, str]] = {
+        "@1password/sdk-core@0.4.1-beta.1": (
+            "source:patches/@1password%2Fsdk-core@0.4.1-beta.1.patch"
+        ),
+        "@electric-sql/pglite-socket@0.1.4": (
+            "source:patches/@electric-sql%2Fpglite-socket@0.1.4.patch"
+        ),
+        "agents@0.17.3": "source:patches/agents@0.17.3.patch",
+        "bunLockPatch": ("local:bun-lock-libsql-0.3.19-remove-self-dependency.patch"),
+        "effectLspPatchVersion": "0.85.1",
+        "libsql@0.3.19": "local:libsql-0.3.19-remove-self-dependency.patch",
+        "libsql@0.5.29": "source:patches/libsql@0.5.29.patch",
+        "postgres@3.4.9": "source:patches/postgres@3.4.9.patch",
+    }
     generated_artifact_files = ("bun.lock", "bun.nix")
     derivation_validations = (
         DerivationValidation(
@@ -186,6 +206,32 @@ class ExecutorUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             "bun.lock",
         )
 
+    @staticmethod
+    def _bun_source_url(bun_version: str) -> str:
+        return (
+            "https://github.com/oven-sh/bun/releases/download/"
+            f"bun-v{bun_version}/bun-darwin-aarch64.zip"
+        )
+
+    @classmethod
+    def _bun_source_expr(cls, bun_version: str) -> str:
+        expression = FunctionCall(
+            name=identifier_attr_path("pkgs", "fetchurl"),
+            argument=AttributeSet(
+                values=[
+                    Binding(
+                        name="url",
+                        value=StringPrimitive(value=cls._bun_source_url(bun_version)),
+                    ),
+                    Binding(
+                        name="hash",
+                        value=identifier_attr_path("pkgs", "lib", "fakeHash"),
+                    ),
+                ]
+            ),
+        )
+        return compact_nix_expr(expression.rebuild())
+
     async def fetch_hashes(
         self,
         info: VersionInfo,
@@ -196,7 +242,7 @@ class ExecutorUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         """Materialize the exact Bun graph, then hash the immutable source."""
         commit = self._require_commit(info)
         self._require_electron_version(info)
-        self._require_bun_version(info)
+        bun_version = self._require_bun_version(info)
         resolved_context = _coerce_context(context)
 
         if not resolved_context.dry_run:
@@ -262,31 +308,61 @@ class ExecutorUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
                 ],
             )
 
-        hash_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            update_nix.compute_fixed_output_hash(
-                self.name,
-                self._src_expr(commit),
-                config=self.config,
+        entries: list[HashEntry] = []
+        for hash_type, expr, error in (
+            ("srcHash", self._src_expr(commit), "Missing srcHash output"),
+            (
+                "sha256",
+                self._bun_source_expr(bun_version),
+                "Missing Bun source hash output",
             ),
-            hash_drain,
-            parse=expect_str,
         ):
-            yield event
-        src_hash = require_value(hash_drain, "Missing srcHash output")
-        yield UpdateEvent.value(
-            self.name,
-            [HashEntry.create("srcHash", src_hash)],
-        )
+            hash_drain = ValueDrain[str]()
+            async for event in drain_value_events(
+                update_nix.compute_fixed_output_hash(
+                    self.name,
+                    expr,
+                    config=self.config,
+                ),
+                hash_drain,
+                parse=expect_str,
+            ):
+                yield event
+            hash_value = require_value(hash_drain, error)
+            entries.append(HashEntry.create(hash_type, hash_value))
+        yield UpdateEvent.value(self.name, entries)
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist the immutable source and shared Electron runtime version."""
         commit = self._require_commit(info)
         electron_version = self._require_electron_version(info)
-        self._require_bun_version(info)
+        bun_version = self._require_bun_version(info)
+        collection = HashCollection.from_value(hashes)
+        if collection.entries is None:
+            msg = "Executor updater expected structured source hash entries"
+            raise TypeError(msg)
+        bun_hashes = [
+            entry for entry in collection.entries if entry.hash_type == "sha256"
+        ]
+        if len(bun_hashes) != 1:
+            msg = f"Executor updater expected one Bun source hash, found {len(bun_hashes)}"
+            raise RuntimeError(msg)
+        bun_url = self._bun_source_url(bun_version)
+        annotated_hashes = [
+            HashEntry.create(
+                entry.hash_type,
+                entry.hash,
+                git_dep=entry.git_dep,
+                platform=entry.platform,
+                url=bun_url if entry.hash_type == "sha256" else entry.url,
+                urls=entry.urls,
+            )
+            for entry in collection.entries
+        ]
         return SourceEntry.model_validate({
             "version": info.version,
             "commit": commit,
             "electronVersion": electron_version,
-            "hashes": HashCollection.from_value(hashes),
+            "hashes": HashCollection.from_value(annotated_hashes),
+            "pins": self.source_pins,
         })

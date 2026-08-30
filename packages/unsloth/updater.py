@@ -620,6 +620,13 @@ class UnslothUpdater(GitHubReleaseUpdater):
     GITHUB_OWNER = "unslothai"
     GITHUB_REPO = "unsloth"
     DARWIN_PLATFORM: ClassVar[str] = "aarch64-darwin"
+    source_pins: ClassVar[dict[str, str]] = {
+        "frontendDistFileCount": "704",
+        "frontendDistSha256": (
+            "03acd2b8ef28d7135bd74a5b7ed82e6eaecea5289cfa4883ece0ef34597b6125"
+        ),
+        "rustToolchainVersion": "1.89.0",
+    }
     supported_platforms = (DARWIN_PLATFORM,)
     derivation_validations = (
         DerivationValidation(
@@ -1074,6 +1081,7 @@ class UnslothUpdater(GitHubReleaseUpdater):
                 "releaseManifest": manifest_url,
             },
             hashes=collection,
+            pins=self.source_pins,
         )
 
 

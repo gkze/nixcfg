@@ -73,28 +73,41 @@ def _entry_with_hashes(*entries: HashEntry) -> SourceEntry:
 
 
 def test_merge_source_updates_native_only_preserves_other_platform_hashes() -> None:
-    """Merge native updates while preserving non-native existing hashes."""
+    """Merge native hashes when updater-owned source identity is unchanged."""
     existing = {
-        "opencode": _entry_with_hashes(
-            HashEntry.create(
-                hash_type="nodeModulesHash",
-                hash_value="sha256-JnkqDwuC7lNsjafV+jOGfvs8K1xC8rk5CTOW+spjiCA=",
-                platform="aarch64-darwin",
+        "opencode": SourceEntry(
+            commit="a" * 40,
+            hashes=HashCollection(
+                entries=[
+                    HashEntry.create(
+                        hash_type="nodeModulesHash",
+                        hash_value="sha256-JnkqDwuC7lNsjafV+jOGfvs8K1xC8rk5CTOW+spjiCA=",
+                        platform="aarch64-darwin",
+                    ),
+                    HashEntry.create(
+                        hash_type="nodeModulesHash",
+                        hash_value="sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M=",
+                        platform="x86_64-linux",
+                    ),
+                ]
             ),
-            HashEntry.create(
-                hash_type="nodeModulesHash",
-                hash_value="sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M=",
-                platform="x86_64-linux",
-            ),
+            input="opencode",
+            pins={"runtimeVersion": "1.0.0"},
+            urls={"x86_64-linux": "https://example.invalid/linux.tar.gz"},
         ),
     }
     updates = {
-        "opencode": _entry_with_hashes(
-            HashEntry.create(
-                hash_type="nodeModulesHash",
-                hash_value="sha256-DJUI4pMZ7wQTnyOiuDHALmZz7FZtrTbzRzCuNOShmWE=",
-                platform="aarch64-darwin",
+        "opencode": SourceEntry(
+            hashes=HashCollection(
+                entries=[
+                    HashEntry.create(
+                        hash_type="nodeModulesHash",
+                        hash_value="sha256-DJUI4pMZ7wQTnyOiuDHALmZz7FZtrTbzRzCuNOShmWE=",
+                        platform="aarch64-darwin",
+                    ),
+                ]
             ),
+            pins={"runtimeVersion": "1.0.0"},
         ),
     }
 
@@ -108,6 +121,33 @@ def test_merge_source_updates_native_only_preserves_other_platform_hashes() -> N
         "aarch64-darwin": "sha256-DJUI4pMZ7wQTnyOiuDHALmZz7FZtrTbzRzCuNOShmWE=",
         "x86_64-linux": "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M=",
     }
+    assert merged["opencode"].commit == "a" * 40
+    assert merged["opencode"].input == "opencode"
+    assert merged["opencode"].pins == {"runtimeVersion": "1.0.0"}
+    assert merged["opencode"].urls == {
+        "x86_64-linux": "https://example.invalid/linux.tar.gz",
+    }
+
+
+def test_merge_source_updates_native_only_replaces_single_platform_pins() -> None:
+    """Delete stale pins when a native update replaces the complete hash set."""
+    existing = {
+        "demo": SourceEntry(
+            hashes={"aarch64-darwin": "sha256-oldDarwin"},
+            pins={"removed": "obsolete", "runtimeVersion": "1.0.0"},
+        )
+    }
+    updates = {
+        "demo": SourceEntry(
+            hashes={"aarch64-darwin": "sha256-newDarwin"},
+            pins={"runtimeVersion": "2.0.0"},
+        )
+    }
+
+    merged = merge_source_updates(existing, updates, native_only=True)
+
+    assert merged["demo"].hashes.mapping == {"aarch64-darwin": "sha256-newDarwin"}
+    assert merged["demo"].pins == {"runtimeVersion": "2.0.0"}
 
 
 def test_merge_source_updates_non_native_returns_updates_unchanged() -> None:

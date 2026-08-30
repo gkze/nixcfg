@@ -1,143 +1,89 @@
-{ inputs, final, ... }:
+{
+  inputs,
+  final,
+  slib,
+  ...
+}:
 let
   mkElectron = final.callPackage (
     inputs.nixpkgs + "/pkgs/development/tools/electron/binary/generic.nix"
   ) { };
 
-  allVersions = [
-    "38.7.2"
-    "40.1.0"
-    "40.7.0"
-    "40.8.5"
-    "40.9.3"
-    "40.10.2"
-    "41.0.0"
-    "41.2.0"
-    "41.2.1"
-    "41.5.0"
-    "41.7.0"
-    "42.3.3"
-    "42.7.1"
-    "42.9.1"
-    "43.3.0"
-    "43.4.0"
+  inventory = slib.sourceEntry "electron-runtimes";
+  expectedInventoryVersion = "inventory-v1";
+  requiredArtifacts = [
+    "headers"
+    "aarch64-darwin"
+    "aarch64-linux"
+    "x86_64-darwin"
+    "x86_64-linux"
   ];
 
-  hashes = {
-    "38.7.2" = {
-      headers = "sha256-lQQPQhKzpjjinmHBlTfm86LKjSsP1KVB2a6Aw3BAI7g=";
-      aarch64-darwin = "sha256-uR4S7GaV+WnM95LZXcfqXaNfOZzsK+1NeyXYofVFtd4=";
-      aarch64-linux = "sha256-c+h8Qy+lK5AF4S4jofz/z62oU94ZSS+QXFDbtG/XeN8=";
-      x86_64-darwin = "sha256-RZ3QXwDCnUNREllvh7xb0K6xZ5bf8HROVCEIZBeHfSQ=";
-      x86_64-linux = "sha256-/kKM0hJoDh1t9h+mfvwmC5Ih0InHoUyYY/GLy+rOVig=";
-    };
-    "40.1.0" = {
-      headers = "sha256-9hXTUMbgcX99JHRovCzBeD4q/oXCQdLJkhXi3hgkEDE=";
-      aarch64-darwin = "sha256-8oZvO4TgvbejMz9UAfgkSuFLNPXOZ+1F8lmjrDk7Ooc=";
-      aarch64-linux = "sha256-Twf/AERacHKJ1G9S3/1vqlBKS2A1Xdsg3zb/japc/HA=";
-      x86_64-darwin = "sha256-hCVMai3Bv/hcjE3jVyIYEB1oMUwVwokmk6GZKxk66Gs=";
-      x86_64-linux = "sha256-JvdnXMED9soKESLYLzC+11RMGl1VB6aYCZKuB+yHahI=";
-    };
-    "40.7.0" = {
-      headers = "sha256-eNxMR7UthxvYyDurji/AH3PLdxJ95gsUhbiGsrEM+MM=";
-      aarch64-darwin = "sha256-zPbPigk/IAwO2viH++f1u4hl6+f6SL7WEWUpP01rdlU=";
-      aarch64-linux = "sha256-/dUAOLRDa5d1hdo94KTxGK79h/Ex7jQqZR1h6R6qFQs=";
-      x86_64-darwin = "sha256-BfpYmYm1mfrI1voXCVpXktK0vMSqdFpjiRbqWmwK/bk=";
-      x86_64-linux = "sha256-D3utkbADhMTStZ6++QRBW+lb8G7b/llfD8tX9R/RR+Q=";
-    };
-    "40.8.5" = {
-      headers = "sha256-O5ZK+FTxrI25WmtG3EQ+jVwhd1/YKngm7f3EhT14LMs=";
-      aarch64-darwin = "sha256-ekAMKK66e99pH/A9KmILdsf4x1/frB9FQ6jcE7A5+iQ=";
-      aarch64-linux = "sha256-WvAHPFKo3HKeEYNAtfUMSykyvZS6mS4cU4D+FUUzA3M=";
-      x86_64-darwin = "sha256-JgDYmy/6RSu13C/hHw93Ga4AEnP29saJiBQJhuX5VQg=";
-      x86_64-linux = "sha256-O85u5OTkgffObQvjhPbFOc4W4Lm39GEVrsZRZ3D2wm0=";
-    };
-    "40.9.3" = {
-      headers = "sha256-JCJhlN2Y8nh/ItEtcO5c21PRt5dxZNKHBuTdNJSXYwQ=";
-      aarch64-darwin = "sha256-6DqXt8cBfsNunhn1sgQwdp6J5wHCszfaJoXBOFT+cPM=";
-      aarch64-linux = "sha256-W3MnMXfpbr1gBbcCD4TAhcSlMbFwHbA8GWOyrCwepVE=";
-      x86_64-darwin = "sha256-t1MZR37bo85RYfGMxSg7woCWwjWbxHvIetXTZeoJf9U=";
-      x86_64-linux = "sha256-K14zMnvV4YCzwcDsQp+gZ2nulsD5VqNUcblAm1H0Wto=";
-    };
-    "40.10.2" = {
-      headers = "sha256-wt18c5wqOeYbHvkMLd7gDzkVw0S1DQ7vYcPONHcCLDk=";
-      aarch64-darwin = "sha256-6ImzXjmfN09dypMhlSh7NzxLQ/i/JC5Qw1+Ip1FRGhM=";
-      aarch64-linux = "sha256-uXJd16OHlg53i2ZwCDbReFKLoiNcaxQTX7V85NOCYlc=";
-      x86_64-darwin = "sha256-XRcQFBh/tzfzTHCwnqiGIV49iKG3nLU3CggVw03RVmg=";
-      x86_64-linux = "sha256-AkYgFABgCsCJxRo28VqARbXbcjukK4ZPcyqbTkhzHpc=";
-    };
-    "41.0.0" = {
-      headers = "sha256-4F539t9Ljduj7tigHldnczPzvVMdytvJN0PRbCFgef0=";
-      aarch64-darwin = "sha256-9Q17q5jF5R6s4fNYrY0kyYTpZMw/X1gy0Lz4VpTTh/A=";
-      aarch64-linux = "sha256-2CXR9IJJOmbFN+MTtfEmxhw9+3hSMtM3FsdK/dGIM94=";
-      x86_64-darwin = "sha256-4QDDdb+TTZ2EoY+vhOdd5Ypv+9rgGNcyoj+/GeUSZfk=";
-      x86_64-linux = "sha256-oo1atjj6BlhTyA1fJ+qdfsf4Yh2SQiAPdHeYxe0xk9Q=";
-    };
-    "41.2.0" = {
-      headers = "sha256-5+fSd2fkH2hBVULp0rsr37R1Ej005evTmwnTZr3EQBg=";
-      aarch64-darwin = "sha256-4BhoT5bIc0FfvqRxP8fblrbR4r09tFE+K4wYh+yDpxk=";
-      aarch64-linux = "sha256-+Jg8h3348rk8dtNeRa+d+CyetfKUsYP4/lkw5RVf3E4=";
-      x86_64-darwin = "sha256-+zdQvPzMAUYGVwi/BlKIJS2gJInVFBSm1bd9BPlKPyo=";
-      x86_64-linux = "sha256-+wsx9bsrJI1XHAirV0N8CKabV/Y8zfnlXWaSthMoSNQ=";
-    };
-    "41.2.1" = {
-      headers = "sha256-/VjbK2RkGaBCeWhOJYgraUSlnd1v6+RZREtnWGiO3Lc=";
-      aarch64-darwin = "sha256-fiArnv8ADrP2DuB1nZOAhY980rVqp/Fh1ypLH4L/DxM=";
-      aarch64-linux = "sha256-wu7fL/Cf1P7fzk8kThYEI1/GMH3Z//6u1L52o+Dc5vM=";
-      x86_64-darwin = "sha256-/u/QIDn21AvMfb1vSy2ybj/JXO/6KltMJRLPYa1lNUk=";
-      x86_64-linux = "sha256-BMx/1UAMCM2Y4sxcXl9gzrtLcvplAgqK4qiNj0gyhxA=";
-    };
-    "41.5.0" = {
-      headers = "sha256-9sMU6WAr+N3BHRoLb5JUSeTeGzawCziGlLvhhKXcL0k=";
-      aarch64-darwin = "sha256-CRpYQQo1O39/xYmMy2zDHG5ep6zYyu30SIM3E1Y++uI=";
-      aarch64-linux = "sha256-HQyJaYvMMCnQwZeiFWecFMZatnCGxFKdXqkCgPPVvMI=";
-      x86_64-darwin = "sha256-MIW1L8kOgcDD7X9Zt1n3ELF2xaiYnO1kpRYY6P0+ii4=";
-      x86_64-linux = "sha256-HVNkeU3/4kk9dKl1XUm6N+zf09Gajio4NJzZN0rbGdQ=";
-    };
-    "41.7.0" = {
-      headers = "sha256-/8zpNnFpMBN83RDs94SOCW1i/Rht7huivDVOpyRMvQQ=";
-      aarch64-darwin = "sha256-PenF66HPeaUSBYE01l7P+JliM3X/FBnf8v4RNGpcRd0=";
-      aarch64-linux = "sha256-yNQpTgUryDuEBSMjdTiuEx2OOHJDwl52Pw0U+r/6N8I=";
-      x86_64-darwin = "sha256-Qfb3aftVU4AhRYhnWtByj6aa7JAWbOtR69DxoI1gjNI=";
-      x86_64-linux = "sha256-87843gXOj6/hA5JR6/qnX9CQsKE82GEyLM0vbbTWu4I=";
-    };
-    "42.3.3" = {
-      headers = "sha256-KFq3NzNYvHuBHehFAbRtrbiFPaqQi/G2+5y92T/1tbI=";
-      aarch64-darwin = "sha256-E4RNm1DHLR+K61MVOYEZeYvbW9P6ni2J9DBv1QHEjI0=";
-      aarch64-linux = "sha256-xetOrFgjapPJwHuz01Nvi8lorvd49hc0gLTzGmPBlOI=";
-      x86_64-darwin = "sha256-6vHhsvKs42nNxczZVqq/pRAI6cNEQpuqDju1KBBJQc8=";
-      x86_64-linux = "sha256-vMIhN3WGByFtdk3EU+L+pFTICHk8PWqC3fhqNvne+iw=";
-    };
-    "42.7.1" = {
-      headers = "sha256-bX7A+n4uauqBXjNoekq4/wv+2jlQoYqTKeA7eLBZLao=";
-      aarch64-darwin = "sha256-E7fDeCrHO6ZEEFQkEKLQbwIsUVcw6XxRSa/yGQpsjoA=";
-      aarch64-linux = "sha256-uh+AVaa2AenNdxp8dQ7Te5EsSGpR9R5YZU7ZQUvImLo=";
-      x86_64-darwin = "sha256-ovNhtmsktpRxWwV6nUuowwRXzplOGazZGFwTFTm8iQA=";
-      x86_64-linux = "sha256-6FsoJF3qp1w8Tyz12ghPTH++3VrxYwxZqCfEGsH14a8=";
-    };
-    "42.9.1" = {
-      headers = "sha256-w3uCtYSN3dHKftfTKNBBeMtI8xSSPUuhXcw7IRrn+9U=";
-      aarch64-darwin = "sha256-IZPD4LnlLoBR2ozDaaAcKJOhhb0vuLc8zMFFHWjHFbY=";
-      aarch64-linux = "sha256-YNdNSsIGXN9T7Ms1OdCpd1aQ1c1ejF0z/H5HbuyXULA=";
-      x86_64-darwin = "sha256-JRxZ7CAY3Z6zfp6YtnOK//OlnokBjYJHcG1vzACiGoI=";
-      x86_64-linux = "sha256-lFewpgghgXNFmoe0bWsI3DLIvTtRlUOa70TF43QljaA=";
-    };
-    "43.3.0" = {
-      headers = "sha256-DTBssOGJUDbkyCqktaESTOpZY1ALqUfTrpa1GeqSoo8=";
-      aarch64-darwin = "sha256-7pOdFWTYPWEDKzs8sjr05GAFpJAMkfBpX37Xk/DOboM=";
-      aarch64-linux = "sha256-PommLDRdgXG/VPd99bPYIWxJKEfu0ArlnK3XjW9VNfc=";
-      x86_64-darwin = "sha256-c0e71ftSnupk+cLRSLscGSItmJRv8jT/4nlTobvLna4=";
-      x86_64-linux = "sha256-9Jh+nwReRrEX8IBda6TcUk4quywuM2YPF1uzlWS9Pa4=";
-    };
-    "43.4.0" = {
-      headers = "sha256-VPjc6ixDtFrIhUpZNAeSGg1Vx9UYbAkGrUnWlImtJdY=";
-      aarch64-darwin = "sha256-gn+fGCVm9GhGN3V1tRxUe5kmsRFjcxOjc7b3F0Yq66w=";
-      aarch64-linux = "sha256-FwIdSHOYVxBqJt2Vv3Sflbia6SSVXDx+f/Wj8GJRrBQ=";
-      x86_64-darwin = "sha256-erOewbC89UY/LcAEAUL7wcMM17w/mQhgZvWIxxexHiQ=";
-      x86_64-linux = "sha256-fF95GLyudKBagUVDlA6yhGnAVe2qPPz0HQ/xeHsxTFI=";
-    };
-  };
+  parseRecord =
+    record:
+    let
+      key = record.platform or (throw "nixcfgElectron: runtime hash record missing inventory key");
+      match = builtins.match "^([0-9]+\\.[0-9]+\\.[0-9]+):(headers|aarch64-darwin|aarch64-linux|x86_64-darwin|x86_64-linux)$" key;
+      version =
+        if match == null then
+          throw "nixcfgElectron: malformed runtime inventory key ${key}"
+        else
+          builtins.elemAt match 0;
+      artifact = builtins.elemAt match 1;
+      hashType = record.hashType or (throw "nixcfgElectron: runtime record ${key} missing hashType");
+      hash = record.hash or (throw "nixcfgElectron: runtime record ${key} missing hash");
+    in
+    if hashType != "sha256" then
+      throw "nixcfgElectron: runtime record ${key} must use sha256"
+    else if builtins.match "^sha256-[A-Za-z0-9+/]+=*$" hash == null then
+      throw "nixcfgElectron: runtime record ${key} has a malformed SRI hash"
+    else
+      { inherit version artifact hash; };
 
+  insertRecord =
+    records: record:
+    let
+      versionHashes = records.${record.version} or { };
+    in
+    if builtins.hasAttr record.artifact versionHashes then
+      throw "nixcfgElectron: duplicate ${record.version}:${record.artifact} runtime record"
+    else
+      records
+      // {
+        "${record.version}" = versionHashes // {
+          "${record.artifact}" = record.hash;
+        };
+      };
+
+  validateVersion =
+    version: versionHashes:
+    let
+      present = builtins.attrNames versionHashes;
+      missing = final.lib.subtractLists present requiredArtifacts;
+      unexpected = final.lib.subtractLists requiredArtifacts present;
+    in
+    if missing != [ ] || unexpected != [ ] then
+      throw "nixcfgElectron: incomplete runtime ${version}; missing ${final.lib.concatStringsSep "," missing}; unexpected ${final.lib.concatStringsSep "," unexpected}"
+    else
+      versionHashes;
+
+  records =
+    if (inventory.version or null) != expectedInventoryVersion then
+      throw "nixcfgElectron: unsupported runtime inventory version ${
+        toString (inventory.version or null)
+      }"
+    else if !(builtins.isList (inventory.hashes or null)) then
+      throw "nixcfgElectron: runtime inventory hashes must be a list"
+    else
+      map parseRecord inventory.hashes;
+  rawHashes = builtins.foldl' insertRecord { } records;
+  validatedHashes =
+    if rawHashes == { } then
+      throw "nixcfgElectron: runtime inventory must not be empty"
+    else
+      builtins.mapAttrs validateVersion rawHashes;
+  hashes = builtins.deepSeq validatedHashes validatedHashes;
+  allVersions = builtins.sort final.lib.versionOlder (builtins.attrNames hashes);
   runtimes = builtins.mapAttrs mkElectron hashes;
 
   runtimeFor =

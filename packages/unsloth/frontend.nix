@@ -1,6 +1,7 @@
 {
   buildNpmPackage,
   fetchNpmDeps,
+  frontendManifest,
   lib,
   nodejs,
   npmDepsHash,
@@ -89,9 +90,9 @@ buildNpmPackage {
       printf '%s  %s\n' "$digest" "$relative" >> "$manifest"
     done < <(find "$out/dist" -type f -print0 | LC_ALL=C sort -z)
 
-    test "$(wc -l < "$manifest" | tr -d ' ')" = 704
+    test "$(wc -l < "$manifest" | tr -d ' ')" = ${toString frontendManifest.fileCount}
     test "$(sha256sum "$manifest" | cut -d ' ' -f 1)" = \
-      03acd2b8ef28d7135bd74a5b7ed82e6eaecea5289cfa4883ece0ef34597b6125
+      ${frontendManifest.sha256}
 
     runHook postInstallCheck
   '';

@@ -256,6 +256,44 @@ class TestFlakeLock:
         """get_locked returns None for a non-existent input."""
         assert lock.get_locked("__nonexistent_input__") is None
 
+    def test_flake_lock_accepts_local_path_without_nar_hash(self) -> None:
+        """Local path locks do not require a fetched-source NAR hash."""
+        lock = FlakeLock.from_dict(
+            {
+                "nodes": {
+                    "local": {
+                        "locked": {
+                            "path": "./lib/pinned-input-platform-compat",
+                            "type": "path",
+                        },
+                        "original": {
+                            "path": "./lib/pinned-input-platform-compat",
+                            "type": "path",
+                        },
+                    },
+                    "root": {"inputs": {"local": "local"}},
+                },
+                "root": "root",
+                "version": FLAKE_LOCK_VERSION,
+            },
+        )
+
+        locked = expect_not_none(lock.get_locked("local"))
+        assert locked.type == "path"
+        assert locked.nar_hash is None
+
+    def test_flake_lock_requires_nar_hash_for_fetched_sources(self) -> None:
+        """Fetched lock entries remain content-addressed."""
+        with pytest.raises(ValidationError, match="narHash"):
+            LockedRef.model_validate(
+                {
+                    "owner": "NixOS",
+                    "repo": "nixpkgs",
+                    "rev": "0" * 40,
+                    "type": "github",
+                },
+            )
+
     def test_flake_lock_from_dict_and_no_root_inputs(self) -> None:
         """from_dict parses lock data and handles a root without inputs."""
         lock = FlakeLock.from_dict(
@@ -596,6 +634,41 @@ class TestSourcesFile:
 
         assert left.equivalent_to(right)
         assert left.hashes.equivalent_to(right.hashes)
+
+    def test_source_entry_round_trips_and_merges_updater_owned_pins(self) -> None:
+        """Dependency locks belong to typed updater metadata, not derivation Nix."""
+        base = SourceEntry.model_validate({
+            "hashes": [],
+            "pins": {
+                "electronVersion": "40.9.3",
+                "packageManagerVersion": "1.0.0",
+            },
+        })
+        incoming = SourceEntry.model_validate({
+            "hashes": [],
+            "pins": {
+                "electronVersion": "41.0.0",
+                "runtimeVersion": "2.0.0",
+            },
+        })
+
+        assert base.to_dict()["pins"] == {
+            "electronVersion": "40.9.3",
+            "packageManagerVersion": "1.0.0",
+        }
+        assert base.merge(incoming).pins == {
+            "electronVersion": "41.0.0",
+            "packageManagerVersion": "1.0.0",
+            "runtimeVersion": "2.0.0",
+        }
+
+        native_update = base.merge_native_update(incoming)
+        assert native_update.pins == {
+            "electronVersion": "41.0.0",
+            "runtimeVersion": "2.0.0",
+        }
+        assert base.merge_native_update(SourceEntry(hashes=[], pins={})).pins == {}
+        assert base.merge_native_update(SourceEntry(hashes=[])).pins is None
 
     def test_source_entry_sources_file_merge_load_save(
         self,

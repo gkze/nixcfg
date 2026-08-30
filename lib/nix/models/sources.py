@@ -322,6 +322,7 @@ class SourceEntry(BaseModel):
     version: str | None = None
     input: str | None = None
     urls: dict[str, str] | None = None
+    pins: dict[str, str] | None = None
     commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
     electron_version: str | None = Field(
         default=None,
@@ -343,6 +344,8 @@ class SourceEntry(BaseModel):
             result["electronVersion"] = self.electron_version
         if self.input is not None:
             result["input"] = self.input
+        if self.pins is not None:
+            result["pins"] = dict(sorted(self.pins.items()))
         if self.urls is not None:
             result["urls"] = dict(sorted(self.urls.items()))
         if self.version is not None:
@@ -353,23 +356,35 @@ class SourceEntry(BaseModel):
         """Return whether *other* represents the same semantic source state."""
         return self.to_dict() == other.to_dict()
 
-    def merge(self, other: SourceEntry) -> SourceEntry:
-        """Merge *other* into this entry (other takes priority for scalars)."""
+    def _merge(self, other: SourceEntry, *, replace_pins: bool) -> SourceEntry:
+        """Merge *other*, optionally treating its pins as authoritative."""
         merged_hashes = self.hashes.merge(other.hashes)
         merged_urls: dict[str, str] | None = None
         if self.urls or other.urls:
             merged_urls = {**(self.urls or {}), **(other.urls or {})}
+        merged_pins = other.pins if replace_pins else None
+        if not replace_pins and (self.pins or other.pins):
+            merged_pins = {**(self.pins or {}), **(other.pins or {})}
         return SourceEntry.model_validate(
             {
                 "hashes": merged_hashes,
                 "version": other.version or self.version,
                 "input": other.input or self.input,
+                "pins": merged_pins,
                 "urls": merged_urls,
                 "commit": other.commit or self.commit,
                 "electronVersion": other.electron_version or self.electron_version,
                 "drvHash": other.drv_hash or self.drv_hash,
             },
         )
+
+    def merge(self, other: SourceEntry) -> SourceEntry:
+        """Merge *other* into this entry (other takes priority for scalars)."""
+        return self._merge(other, replace_pins=False)
+
+    def merge_native_update(self, other: SourceEntry) -> SourceEntry:
+        """Merge a partial native update whose pin mapping is authoritative."""
+        return self._merge(other, replace_pins=True)
 
 
 type HashEntryMergeKey = tuple[

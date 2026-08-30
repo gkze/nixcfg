@@ -14,6 +14,7 @@
   ...
 }:
 let
+  platformCompat = import ../lib/pinned-input-platform-compat;
   # Filter the workspace source to only the files that participate in the
   # Python build (see [tool.setuptools] in pyproject.toml). Handing uv2nix the
   # unfiltered repo tree couples this derivation to every file in the repo,
@@ -43,6 +44,7 @@ let
     }).overrideScope
       (
         lib.composeManyExtensions [
+          platformCompat.overlay
           inputs.pyproject-build-systems.overlays.default
           (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
           (mkResolvedBuildSystemsOverlay {

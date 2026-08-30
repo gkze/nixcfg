@@ -1,5 +1,7 @@
 { lib, pkgs }:
 let
+  mcpRuntimeSource = builtins.fromJSON (builtins.readFile ../packages/mcp-runtime-tools/sources.json);
+  mcpRuntimePins = mcpRuntimeSource.pins;
   inherit (lib)
     assertMsg
     concatMapStringsSep
@@ -53,7 +55,7 @@ let
         --header "Authorization: Bearer $token"
       )
       ${concatMapStringsSep "\n      " (header: "args+=(--header ${escapeShellArg header})") extraHeaders}
-      exec ${bunxExe} --bun mcp-remote@0.1.38 "''${args[@]}"
+      exec ${bunxExe} --bun ${mcpRuntimePins."mcp-remote"} "''${args[@]}"
     '';
 in
 {

@@ -1,7 +1,8 @@
 """Updater for Goose's locked source metadata and crate2nix artifacts."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
+from lib.nix.models.sources import HashCollection, SourceEntry, SourceHashes
 from lib.update.updaters import (
     Crate2NixMetadataUpdater,
     VersionInfo,
@@ -19,6 +20,21 @@ class GooseCliUpdater(Crate2NixMetadataUpdater):
 
     name = "goose-cli"
     input_name = "goose"
+    source_pins: ClassVar[dict[str, str]] = {
+        "bitcoinInternals.0.5.0": "1.74.0",
+        "bitcoinInternals.0.6.0": "1.74.0",
+        "clangResourceVersion": "22",
+    }
+
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
+        """Persist exact crate compatibility metadata with the flake source."""
+        return SourceEntry(
+            version=info.version,
+            hashes=HashCollection.from_value(hashes),
+            input=self._input,
+            commit=info.commit,
+            pins=self.source_pins,
+        )
 
     async def fetch_latest(
         self,

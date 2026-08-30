@@ -1,13 +1,14 @@
 {
   fetchFromGitHub,
   lib,
+  nativeLock ? builtins.fromJSON (builtins.readFile ../native-lock.json),
   python3,
   srcHash,
   stdenvNoCC,
 }:
 let
-  version = "0.75.1";
-  commit = "3295c902d4c4f859aaadf9240042ffdaf06dd07e";
+  version = nativeLock.meshLlm.version or null;
+  commit = nativeLock.meshLlm.commit or null;
   sourceSubdir = "share/mesh-llm/source";
   provenanceSubpath = "share/mesh-llm/provenance.json";
   inventoryScript = ''
@@ -66,6 +67,8 @@ let
     fetchSubmodules = false;
   };
 in
+assert builtins.isString version;
+assert builtins.isString commit && builtins.match "[0-9a-f]{40}" commit != null;
 stdenvNoCC.mkDerivation {
   pname = "mesh-llm-source";
   inherit version src;
