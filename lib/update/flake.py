@@ -8,9 +8,12 @@ from typing import TYPE_CHECKING
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.if_expression import IfExpression
+from nix_manipulator.expressions.let import LetExpression
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import Primitive
+from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.commands.flake import nix_flake_lock_update
@@ -159,6 +162,27 @@ def flake_fetch_expression(node: FlakeLockNode) -> NixExpression:
 def flake_fetch_expr(node: FlakeLockNode) -> str:
     """Build a ``builtins.fetchTree`` expression from a locked flake node."""
     return flake_fetch_expression(node).rebuild()
+
+
+def flake_source_path_expression(node: FlakeLockNode) -> NixExpression:
+    """Build an expression resolving any locked ``fetchTree`` result to a path."""
+    source = Identifier(name="src")
+    return LetExpression(
+        local_variables=[Binding(name="src", value=flake_fetch_expression(node))],
+        value=IfExpression(
+            condition=FunctionCall(
+                name=identifier_attr_path("builtins", "isAttrs"),
+                argument=source,
+            ),
+            consequence=Select(expression=source, attribute="outPath"),
+            alternative=source,
+        ),
+    )
+
+
+def flake_source_path_expr(node: FlakeLockNode) -> str:
+    """Render the canonical locked flake source-path expression."""
+    return flake_source_path_expression(node).rebuild()
 
 
 def _nixpkgs_source_expression() -> NixExpression:

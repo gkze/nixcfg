@@ -170,6 +170,36 @@ def test_render_runtime_package_json_reads_pnpm_workspace_metadata(
     }
 
 
+def test_render_runtime_manifest_does_not_promote_pnpm_patch_only_packages(
+    tmp_path: Path,
+) -> None:
+    """A workspace patch does not make its package a runtime dependency."""
+    module = _runtime_manifest_module()
+
+    source_root = _runtime_source(
+        tmp_path,
+        root_package={"packageManager": "pnpm@11.10.0"},
+        pnpm_workspace="\n".join((
+            "packages: []",
+            "catalog:",
+            "  '@pierre/diffs': 1.3.0-beta.10",
+            "  effect: 4.0.0-beta.103",
+            "patchedDependencies:",
+            "  '@pierre/diffs@1.3.0-beta.10': patch-hash",
+        ))
+        + "\n",
+        server_package={
+            "version": "0.0.38",
+            "dependencies": {"effect": "catalog:"},
+        },
+        desktop_package={"dependencies": {"electron": "43.4.1"}},
+    )
+
+    payload = module.build_runtime_manifest(source_root)
+
+    assert payload["dependencies"] == {"effect": "4.0.0-beta.103"}
+
+
 def test_render_runtime_package_json_accepts_package_json_workspace_arrays(
     tmp_path: Path,
 ) -> None:

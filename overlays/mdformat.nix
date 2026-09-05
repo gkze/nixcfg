@@ -16,7 +16,7 @@ in
           src = prev.fetchFromGitHub {
             owner = "hukkin";
             repo = "mdformat";
-            tag = version;
+            rev = info.commit;
             hash = slib.sourceHash "mdformat" "srcHash";
           };
         });

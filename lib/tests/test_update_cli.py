@@ -242,6 +242,7 @@ def test_run_updates_list_json_outputs_sources_and_inputs(
             },
             "classification": "sourceOnly",
             "backingInput": None,
+            "additionalInputs": [],
             "refTarget": None,
             "sourceTarget": {
                 "path": "packages/alpha/sources.json",
@@ -263,6 +264,7 @@ def test_run_updates_list_json_outputs_sources_and_inputs(
             },
             "classification": "refOnly",
             "backingInput": "tool",
+            "additionalInputs": [],
             "refTarget": {
                 "input": "tool",
                 "sourceType": "github",
@@ -341,7 +343,7 @@ def test_run_updates_persists_before_derivation_validation_failure(
     monkeypatch: _MonkeyPatchLike,
     capsys: _CaptureLike,
 ) -> None:
-    """Finish persistence, then fail even a no-op update on broken evaluation."""
+    """Report a same-source candidate as discarded after broken evaluation."""
     _use_passthrough_workspace(monkeypatch)
 
     class _ValidatingUpdater(Updater):
@@ -377,7 +379,7 @@ def test_run_updates_persists_before_derivation_validation_failure(
         "lib.update.source_runner.run_sources_phase",
         lambda _context: asyncio.sleep(
             0,
-            result=UpdatePhaseResult(details={"demo": "no_change"}),
+            result=UpdatePhaseResult(details={"demo": "updated"}),
         ),
     )
     monkeypatch.setattr(
@@ -395,6 +397,8 @@ def test_run_updates_persists_before_derivation_validation_failure(
     assert exit_code == 1
     assert events == ["persist", "validate"]
     captured = capsys.readouterr()
+    assert "Candidate updates discarded: demo" in captured.out
+    assert "Updated: demo" not in captured.out
     assert "Failed: demo" in captured.err
     assert "attribute 'missing-member' missing" in captured.err
 
@@ -556,7 +560,7 @@ def test_run_updates_json_validation_failure_is_machine_readable(
     monkeypatch: _MonkeyPatchLike,
     capsys: _CaptureLike,
 ) -> None:
-    """Return one valid failure payload without human diagnostics in JSON mode."""
+    """Keep same-source candidate identity in a machine-readable failure."""
     _use_passthrough_workspace(monkeypatch)
 
     class _ValidatingUpdater(Updater):
@@ -585,7 +589,7 @@ def test_run_updates_json_validation_failure_is_machine_readable(
         "lib.update.source_runner.run_sources_phase",
         lambda _context: asyncio.sleep(
             0,
-            result=UpdatePhaseResult(details={"demo": "no_change"}),
+            result=UpdatePhaseResult(details={"demo": "updated"}),
         ),
     )
     monkeypatch.setattr(
@@ -607,6 +611,7 @@ def test_run_updates_json_validation_failure_is_machine_readable(
         "errors": ["demo"],
         "noChange": [],
         "success": False,
+        "candidateUpdatesDiscarded": ["demo"],
     }
     assert captured.err == ""
 
@@ -630,3 +635,16 @@ def test_emit_summary_json_outputs_payload(capsys: _CaptureLike) -> None:
         "noChange": ["stable"],
         "success": True,
     }
+
+
+def test_emit_summary_json_uses_overall_failure_state(capsys: _CaptureLike) -> None:
+    """Do not report success when a non-source failure sets the exit status."""
+    exit_code = _emit_summary(
+        UpdateSummary(),
+        had_errors=True,
+        out=OutputOptions(json_output=True, quiet=True),
+        dry_run=False,
+    )
+
+    assert exit_code == 1
+    assert json.loads(capsys.readouterr().out)["success"] is False

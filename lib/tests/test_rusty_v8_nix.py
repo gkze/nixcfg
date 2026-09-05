@@ -17,8 +17,8 @@ def _nodes(root: Node) -> Iterator[Node]:
         yield from _nodes(child)
 
 
-def test_rusty_v8_requires_explicit_clang_resource_version() -> None:
-    """Concrete callers must provide an updater-owned Clang resource pin."""
+def test_rusty_v8_derives_clang_resource_version_from_immutable_source() -> None:
+    """Concrete callers provide source identity, not duplicated Clang metadata."""
     source = (REPO_ROOT / "lib/rusty-v8.nix").read_text(encoding="utf-8")
     encoded = source.encode()
     formals = [
@@ -30,8 +30,14 @@ def test_rusty_v8_requires_explicit_clang_resource_version() -> None:
         and encoded[
             node.named_children[0].start_byte : node.named_children[0].end_byte
         ].decode()
-        == "clangResourceVersion"
+        in {"clangResourceVersion", "rustyV8Src"}
     ]
 
-    assert len(formals) == 1
+    formal_names = [
+        encoded[
+            formal.named_children[0].start_byte : formal.named_children[0].end_byte
+        ].decode()
+        for formal in formals
+    ]
+    assert formal_names == ["rustyV8Src"]
     assert [child.type for child in formals[0].named_children] == ["identifier"]

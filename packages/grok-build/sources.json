@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-F8R+Za+ZoJbutWtkwDZTxB4C88/ece6lskSTL9hcjN0="
+    "aarch64-darwin": "sha256-8uLF7422G/RAGxSKuasuVbkOWEWG7M2fLRTcLOL7tVE="
   },
   "urls": {
-    "aarch64-darwin": "https://storage.googleapis.com/grok-build-public-artifacts/desktop/stable/Grok-0.1.1550-gc21c6ca-arm64-mac.zip"
+    "aarch64-darwin": "https://storage.googleapis.com/grok-build-public-artifacts/desktop/stable/Grok-0.1.1583-g658e41a9-arm64-mac.zip"
   },
-  "version": "0.1.1550-gc21c6ca"
+  "version": "0.1.1583-g658e41a9"
 }

@@ -24,6 +24,7 @@ from lib.nix.models.sources import (
 )
 from lib.update import nix as update_nix
 from lib.update.artifacts import GeneratedArtifact
+from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
     UpdateEvent,
     ValueDrain,
@@ -57,55 +58,24 @@ if TYPE_CHECKING:
 
     import aiohttp
 
+    from lib.update.config import UpdateConfig
     from lib.update.events import EventStream
 
-_VERSION = "0.5.20"
-_TAG = f"desktop-v{_VERSION}"
-_COMMIT = "95154bee4034ca7a40b33095c2ddbde8c9aa1614"
-_PNPM_VERSION = "11.4.0"
-_RUST_VERSION = "1.95.0"
-_SHERPA_ONNX_VERSION = "1.13.4"
-_SHERPA_ONNX_COMMIT = "142807252687d81b40d6315f23470a1512a00de3"
-_ONNX_RUNTIME_VERSION = "1.27.0"
-_ONNX_RUNTIME_COMMIT = "8f0278c77bf44b0cc83c098c6c722b92a36ac4b5"
-_MESH_LLM_VERSION = "0.75.1"
-_MESH_LLM_TAG = f"v{_MESH_LLM_VERSION}"
-_MESH_LLM_COMMIT = "3295c902d4c4f859aaadf9240042ffdaf06dd07e"
-# No independent direct llama.cpp raw-file digests are available. Its exact
-# source identity is anchored by Mesh's digest-pinned upstream.txt below and by
-# the URL-scoped fixed-output probe; a real native build must prove the patches.
-_LLAMA_CPP_COMMIT = "8190848bb36c7df4251db4352bd81bc07d0a4385"
 _APP_ID = "xyz.block.buzz.app"
-_DESKTOP_BUNDLE_VALIDATION = {
-    "schemaVersion": 1,
-    "status": "passed",
-    "candidate": {
-        "derivationPath": (
-            "/nix/store/3b5gv1l2iriy0fw48dnhg1zd770knrfw-"
-            f"buzz-desktop-candidate-{_VERSION}.drv"
-        ),
-        "outputPath": (
-            "/nix/store/55pw5giij3bb8cqn2dzw4djc54vkzzw2-"
-            f"buzz-desktop-candidate-{_VERSION}"
-        ),
-    },
-    "checks": [
-        "realized-candidate",
-        "isolated-launcher-startup",
-        "offline-runtime-loading",
-        "signatures",
-        "exact-app-metadata",
-        "reference-free-final-bundle",
-    ],
-}
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+_EXACT_VERSION_PATTERN = re.compile(
+    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
+_MESH_LOCK_SOURCE_PATTERN = re.compile(
+    r"^git\+https://github\.com/Mesh-LLM/mesh-llm\.git\?"
+    r"tag=(?P<tag>v[^#]+)#(?P<commit>[0-9a-f]{40})$"
+)
 _RUST_INNER_ATTRIBUTE_MARKER = re.compile(r"#\s*!\s*\[")
+_ABI_COMPONENTS = ("MAJOR", "MINOR", "PATCH")
 type _HashIdentity = tuple[HashType, str]
 
-_PNPM_LOCK = {
-    "version": _PNPM_VERSION,
-    "url": f"https://registry.npmjs.org/pnpm/-/pnpm-{_PNPM_VERSION}.tgz",
-}
 _SHERPA_FETCHCONTENT_LOCK = {
     "kaldiDecoder": {
         "cmakeVariable": "KALDI_DECODER",
@@ -170,6 +140,34 @@ class _HashRequest:
     expr: Callable[[dict[_HashIdentity, str]], str]
 
 
+@dataclass(frozen=True, slots=True)
+class _ReleaseMetadataContract:
+    pnpm_version: str
+    rust_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class _CargoContract:
+    mesh_commit: str
+    mesh_version: str
+    sherpa_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class _BuzzReleaseContract:
+    mesh_commit: str
+    mesh_version: str
+    pnpm_version: str
+    rust_version: str
+    sherpa_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class _MeshSourceContract:
+    llama_cpp_commit: str
+    skippy_abi: str
+
+
 # Each tuple is (workspace package, emitted binary). The final mapping is the
 # upstream buzz-cli package intentionally renamed to the `buzz` sidecar.
 _SIDECAR_SPECS: tuple[tuple[str, str], ...] = (
@@ -221,15 +219,9 @@ _BUZZ_SOURCE_PATHS = (
     *_SIDECAR_MANIFESTS,
 )
 
-# These digests are independent contracts over the behavior-bearing source
-# files in the exact pinned revisions. They make updater acceptance contingent
-# on reviewing changes to the Rust toolchain, Mesh feature propagation, the
-# dynamic loader, the first-use installer, and the source runtime packager.
-_BUZZ_SOURCE_DIGESTS: dict[str, str] = {
-    _RUST_TOOLCHAIN: "f93d36efbb7a45edf8197259661273bc5d22529eccd4ff6411a851bafa493398",
-    _DESKTOP_MANIFEST: "8643b75523a9a1c80f3bcec32a958a33740cd3805c0e160a05cec0c2ecb70eb2",
-    _MESH_RUNTIME_ENTRYPOINT: "7770a7598e60dc326c15fc14e5f019f7d4f675f4da9e2f006788284b78230740",
-}
+# These digests belong only to the explicitly supported native foundation.
+# Buzz release files are validated semantically so a routine desktop release
+# does not require copying new byte digests into the updater.
 _MESH_SOURCE_DIGESTS: dict[str, str] = {
     "crates/mesh-llm-sdk/Cargo.toml": (
         "b575570e2400cac09ca86197453826a94da143c104a93d6c30e3af33d3a92ed1"
@@ -292,7 +284,6 @@ _MESH_SOURCE_DIGESTS: dict[str, str] = {
         "bac5d6f06e193dff7866055e4c25daf800d33b46964870cf942659f478e2042f"
     ),
 }
-_MESH_SOURCE_PATHS = tuple(_MESH_SOURCE_DIGESTS)
 _ONNX_SOURCE_DIGESTS: dict[str, str] = {
     "VERSION_NUMBER": (
         "7ef1ea58fece676ff7345f6edac427e671daf20f0d7499ef2e42ada241d4fe24"
@@ -305,7 +296,6 @@ _ONNX_SOURCE_DIGESTS: dict[str, str] = {
         "4f73825c1782b0309cbad11d04c1a8ae5d7460b2464e08905064dcb11fdcd9c6"
     ),
 }
-_ONNX_SOURCE_PATHS = tuple(_ONNX_SOURCE_DIGESTS)
 _SHERPA_SOURCE_DIGESTS: dict[str, str] = {
     "CMakeLists.txt": (
         "9f75d36e8f19358b5d23368a5f59ecdfec507f5f2ff47c84ea9296f14399a8e3"
@@ -353,7 +343,6 @@ _SHERPA_SOURCE_DIGESTS: dict[str, str] = {
         "18e6dcbe08e4531419869a1f401ab59e80b4339e4472e8085fd441b3a84c6346"
     ),
 }
-_SHERPA_SOURCE_PATHS = tuple(_SHERPA_SOURCE_DIGESTS)
 _SHERPA_STATIC_LINK_LIBRARIES = (
     "sherpa-onnx-c-api",
     "sherpa-onnx-core",
@@ -397,6 +386,27 @@ def _require_exact(actual: object, expected: object, *, context: str) -> None:
     if actual != expected:
         msg = f"Buzz {context} drifted: expected {expected!r}, got {actual!r}"
         raise RuntimeError(msg)
+
+
+def _require_exact_version(value: str, *, context: str) -> str:
+    if _EXACT_VERSION_PATTERN.fullmatch(value) is None:
+        msg = f"Buzz {context} must be an exact semantic version, got {value!r}"
+        raise RuntimeError(msg)
+    return value
+
+
+def _require_prefixed_version(value: str, prefix: str, *, context: str) -> str:
+    if not value.startswith(prefix):
+        msg = f"Buzz {context} must start with {prefix!r}, got {value!r}"
+        raise RuntimeError(msg)
+    return _require_exact_version(value.removeprefix(prefix), context=context)
+
+
+def _require_commit(value: str, *, context: str) -> str:
+    if _COMMIT_PATTERN.fullmatch(value) is None:
+        msg = f"Buzz {context} must be an immutable commit, got {value!r}"
+        raise RuntimeError(msg)
+    return value
 
 
 def _decode_json(payload: bytes, *, context: str) -> dict[str, object]:
@@ -523,11 +533,13 @@ def _normalized_rust_method(
     return re.sub(r"\s+", "", source[method_match.start() : method_end + 1])
 
 
-def _validate_mesh_source_contract(payloads: dict[str, bytes]) -> None:
-    """Pin the exact transitive feature graph and first-use runtime behavior."""
+def _validate_mesh_source_contract(
+    payloads: dict[str, bytes],
+) -> _MeshSourceContract:
+    """Validate the supported Mesh graph and derive its nested native identity."""
     _validate_digest_contract(
         payloads,
-        _MESH_SOURCE_DIGESTS,
+        BuzzUpdater.get_compatibility_source_digest_contract("meshLlm"),
         context="Mesh source contract",
     )
     manifest_text = payloads["crates/mesh-llm-native-runtime/src/manifest.rs"].decode(
@@ -725,22 +737,21 @@ pub struct NativeRuntimeManifest {
                 context=f"Mesh {path} {feature} feature graph",
             )
 
-    _require_exact(
+    llama_cpp_commit = _require_commit(
         payloads["third_party/llama.cpp/upstream.txt"].decode("utf-8").strip(),
-        _LLAMA_CPP_COMMIT,
         context="mesh-llm llama.cpp source pin",
     )
-    abi_constants = dict(
-        re.findall(
-            r"(?m)^pub const ABI_VERSION_(MAJOR|MINOR|PATCH): u32 = ([0-9]+);$",
-            payloads["crates/skippy-ffi/src/lib.rs"].decode("utf-8"),
-        )
+    abi_entries = re.findall(
+        r"(?m)^pub const ABI_VERSION_(MAJOR|MINOR|PATCH): u32 = ([0-9]+);$",
+        payloads["crates/skippy-ffi/src/lib.rs"].decode("utf-8"),
     )
-    _require_exact(
-        abi_constants,
-        {"MAJOR": "0", "MINOR": "1", "PATCH": "35"},
-        context="Mesh Skippy ABI",
-    )
+    if len(abi_entries) != len(_ABI_COMPONENTS) or {
+        name for name, _value in abi_entries
+    } != set(_ABI_COMPONENTS):
+        msg = "Buzz Mesh Skippy ABI must declare one major, minor, and patch constant"
+        raise RuntimeError(msg)
+    abi_constants = dict(abi_entries)
+    skippy_abi = ".".join(abi_constants[component] for component in _ABI_COMPONENTS)
 
     skippy_build = payloads["crates/skippy-ffi/build.rs"].decode("utf-8")
     dynamic_return = re.search(
@@ -816,6 +827,10 @@ pub struct NativeRuntimeManifest {
         [],
         context="Mesh dynamic runtime installer behavior",
     )
+    return _MeshSourceContract(
+        llama_cpp_commit=llama_cpp_commit,
+        skippy_abi=skippy_abi,
+    )
 
 
 def _package_rows(
@@ -852,6 +867,22 @@ def _validate_locked_package(
         _require_exact(
             rows[0].get("source"), source, context=f"{context} {name} source"
         )
+
+
+def _locked_package_version(
+    lock: dict[str, object],
+    name: str,
+    *,
+    context: str,
+) -> str:
+    rows = _package_rows(lock, name, context=context)
+    if len(rows) != 1:
+        msg = f"Buzz {context} must lock exactly one {name} package"
+        raise RuntimeError(msg)
+    return _require_exact_version(
+        _require_string(rows[0], "version", context=f"{context} {name}"),
+        context=f"{context} {name} version",
+    )
 
 
 def _sidecars_for_target(script: str, target: str) -> tuple[str, ...]:
@@ -946,7 +977,11 @@ def _validate_sidecar_manifest(
         raise RuntimeError(msg)
 
 
-def _validate_release_metadata_contract(payloads: dict[str, bytes]) -> None:
+def _validate_release_metadata_contract(
+    payloads: dict[str, bytes],
+    *,
+    release_version: str,
+) -> _ReleaseMetadataContract:
     root_package = _decode_json(
         payloads[_ROOT_PACKAGE_JSON], context="root package.json"
     )
@@ -960,21 +995,35 @@ def _validate_release_metadata_contract(payloads: dict[str, bytes]) -> None:
         context="Rust toolchain",
     )
 
-    _require_exact(
-        root_package.get("packageManager"),
-        f"pnpm@{_PNPM_VERSION}",
-        context="pnpm version",
+    release_version = _require_exact_version(
+        release_version,
+        context="release version",
     )
-    _require_exact(
+    pnpm_version = _require_prefixed_version(
+        _require_string(root_package, "packageManager", context="root package.json"),
+        "pnpm@",
+        context="pnpm package manager",
+    )
+    toolchain = _require_object(
         rust_toolchain.get("toolchain"),
-        {"channel": _RUST_VERSION, "profile": "default"},
-        context="Rust 1.95.0 toolchain",
+        context="Rust toolchain table",
+    )
+    rust_version = _require_exact_version(
+        _require_string(toolchain, "channel", context="Rust toolchain table"),
+        context="Rust toolchain channel",
     )
     _require_exact(
-        desktop_package.get("version"), _VERSION, context="desktop npm version"
+        toolchain.get("profile"),
+        "default",
+        context="Rust toolchain profile",
+    )
+    _require_exact(
+        desktop_package.get("version"),
+        release_version,
+        context="desktop npm version",
     )
     _require_exact(tauri.get("productName"), "Buzz", context="Tauri product name")
-    _require_exact(tauri.get("version"), _VERSION, context="Tauri version")
+    _require_exact(tauri.get("version"), release_version, context="Tauri version")
     _require_exact(tauri.get("identifier"), _APP_ID, context="Tauri identifier")
     bundle = _require_object(tauri.get("bundle"), context="Tauri bundle")
     _require_exact(
@@ -985,9 +1034,17 @@ def _validate_release_metadata_contract(payloads: dict[str, bytes]) -> None:
     plugins = _require_object(tauri.get("plugins"), context="Tauri plugins")
     updater = _require_object(plugins.get("updater"), context="Tauri updater")
     _require_exact(updater.get("endpoints"), [], context="base updater endpoints")
+    return _ReleaseMetadataContract(
+        pnpm_version=pnpm_version,
+        rust_version=rust_version,
+    )
 
 
-def _validate_cargo_contract(payloads: dict[str, bytes]) -> None:
+def _validate_cargo_contract(
+    payloads: dict[str, bytes],
+    *,
+    release_version: str,
+) -> _CargoContract:
     root_manifest = _decode_toml(
         payloads[_ROOT_MANIFEST], context="root Cargo manifest"
     )
@@ -1015,18 +1072,16 @@ def _validate_cargo_contract(payloads: dict[str, bytes]) -> None:
     )
     _require_exact(
         desktop_package_table.get("version"),
-        _VERSION,
+        release_version,
         context="desktop Cargo version",
     )
     desktop_dependencies = _require_object(
         desktop_manifest.get("dependencies"),
         context="desktop Cargo dependencies",
     )
-    _require_exact(
-        desktop_dependencies.get("sherpa-onnx"),
-        "1.12",
-        context="desktop sherpa-onnx requirement",
-    )
+    if "sherpa-onnx" not in desktop_dependencies:
+        msg = "Buzz desktop Cargo dependencies are missing sherpa-onnx"
+        raise RuntimeError(msg)
     desktop_features = _require_object(
         desktop_manifest.get("features"),
         context="desktop Cargo features",
@@ -1049,9 +1104,23 @@ def _validate_cargo_contract(payloads: dict[str, bytes]) -> None:
         tuple(f"dep:{name}" for name in ("iroh", *mesh_dependency_names)),
         context="desktop mesh-llm feature graph",
     )
+    sdk_dependency = _require_object(
+        desktop_dependencies.get("mesh-llm-sdk"),
+        context="desktop mesh-llm-sdk dependency",
+    )
+    mesh_version = _require_prefixed_version(
+        _require_string(
+            sdk_dependency,
+            "tag",
+            context="desktop mesh-llm-sdk dependency",
+        ),
+        "v",
+        context="desktop Mesh tag",
+    )
+    mesh_tag = f"v{mesh_version}"
     common_mesh_dependency = {
         "git": "https://github.com/Mesh-LLM/mesh-llm.git",
-        "tag": _MESH_LLM_TAG,
+        "tag": mesh_tag,
         "optional": True,
     }
     expected_mesh_dependencies = {
@@ -1082,29 +1151,53 @@ def _validate_cargo_contract(payloads: dict[str, bytes]) -> None:
             context=f"desktop {dependency_name} dependency contract",
         )
 
-    for lock, context in ((root_lock, "root lock"), (desktop_lock, "desktop lock")):
-        _validate_locked_package(
-            lock,
-            "sherpa-onnx",
-            context=context,
-            version=_SHERPA_ONNX_VERSION,
+    sherpa_versions = {
+        _locked_package_version(lock, package, context=context)
+        for lock, context in (
+            (root_lock, "root lock"),
+            (desktop_lock, "desktop lock"),
         )
-        _validate_locked_package(
-            lock,
-            "sherpa-onnx-sys",
-            context=context,
-            version=_SHERPA_ONNX_VERSION,
-        )
-    expected_mesh_source = (
-        "git+https://github.com/Mesh-LLM/mesh-llm.git?"
-        f"tag={_MESH_LLM_TAG}#{_MESH_LLM_COMMIT}"
+        for package in ("sherpa-onnx", "sherpa-onnx-sys")
+    }
+    if len(sherpa_versions) != 1:
+        msg = f"Buzz Cargo locks disagree on sherpa-onnx: {sorted(sherpa_versions)!r}"
+        raise RuntimeError(msg)
+    sherpa_version = next(iter(sherpa_versions))
+
+    mesh_row = _package_rows(desktop_lock, "mesh-llm-sdk", context="desktop lock")
+    if len(mesh_row) != 1:
+        msg = "Buzz desktop lock must lock exactly one mesh-llm-sdk package"
+        raise RuntimeError(msg)
+    mesh_source = _require_string(
+        mesh_row[0],
+        "source",
+        context="desktop lock mesh-llm-sdk",
     )
-    _validate_locked_package(
-        desktop_lock,
-        "mesh-llm-sdk",
-        context="desktop lock",
-        version=_MESH_LLM_VERSION,
-        source=expected_mesh_source,
+    mesh_source_match = _MESH_LOCK_SOURCE_PATTERN.fullmatch(mesh_source)
+    if mesh_source_match is None:
+        msg = "Buzz desktop lock Mesh source is not one immutable tagged commit"
+        raise RuntimeError(msg)
+    mesh_commit = mesh_source_match.group("commit")
+    expected_mesh_source = (
+        f"git+https://github.com/Mesh-LLM/mesh-llm.git?tag={mesh_tag}#{mesh_commit}"
+    )
+    _require_exact(
+        mesh_source_match.group("tag"),
+        mesh_tag,
+        context="desktop lock Mesh tag",
+    )
+    for dependency_name in mesh_dependency_names:
+        _validate_locked_package(
+            desktop_lock,
+            dependency_name,
+            context="desktop lock",
+            version=mesh_version,
+            source=expected_mesh_source,
+        )
+    return _CargoContract(
+        mesh_commit=mesh_commit,
+        mesh_version=mesh_version,
+        sherpa_version=sherpa_version,
     )
 
 
@@ -1152,43 +1245,58 @@ def _validate_sidecar_and_runtime_contract(payloads: dict[str, bytes]) -> None:
 def _validate_source_contract(
     payloads: dict[str, bytes],
     *,
-    mesh_payloads: dict[str, bytes],
-) -> None:
-    """Validate the pinned release's build topology before hashing anything."""
+    release_version: str,
+) -> _BuzzReleaseContract:
+    """Validate one immutable release's build topology before hashing it."""
     missing = sorted(set(_BUZZ_SOURCE_PATHS).difference(payloads))
     if missing:
         msg = f"Buzz source audit is missing paths: {', '.join(missing)}"
         raise RuntimeError(msg)
-    _validate_digest_contract(
+    release_contract = _validate_release_metadata_contract(
         payloads,
-        _BUZZ_SOURCE_DIGESTS,
-        context="release source contract",
+        release_version=release_version,
     )
-    _validate_release_metadata_contract(payloads)
-    _validate_cargo_contract(payloads)
+    cargo_contract = _validate_cargo_contract(
+        payloads,
+        release_version=release_version,
+    )
     _validate_sidecar_and_runtime_contract(payloads)
-    _validate_mesh_source_contract(mesh_payloads)
+    return _BuzzReleaseContract(
+        mesh_commit=cargo_contract.mesh_commit,
+        mesh_version=cargo_contract.mesh_version,
+        pnpm_version=release_contract.pnpm_version,
+        rust_version=release_contract.rust_version,
+        sherpa_version=cargo_contract.sherpa_version,
+    )
 
 
-def _validate_onnx_source_contract(payloads: dict[str, bytes]) -> None:
+def _validate_onnx_source_contract(
+    payloads: dict[str, bytes],
+    *,
+    expected_version: str,
+) -> None:
     """Validate the exact ONNX Runtime tree used by the native foundation."""
     _validate_digest_contract(
         payloads,
-        _ONNX_SOURCE_DIGESTS,
+        BuzzUpdater.get_compatibility_source_digest_contract("onnxruntime"),
         context="ONNX Runtime source contract",
     )
     _require_exact(
         payloads["VERSION_NUMBER"].decode("utf-8").strip(),
-        _ONNX_RUNTIME_VERSION,
+        expected_version,
         context="ONNX Runtime version",
     )
 
 
-def _validate_sherpa_source_contract(payloads: dict[str, bytes]) -> None:
+def _validate_sherpa_source_contract(
+    payloads: dict[str, bytes],
+    *,
+    expected_version: str,
+) -> None:
     """Validate the exact sherpa-onnx tree selected by both Buzz Cargo locks."""
     _validate_digest_contract(
         payloads,
-        _SHERPA_SOURCE_DIGESTS,
+        BuzzUpdater.get_compatibility_source_digest_contract("sherpaOnnx"),
         context="sherpa-onnx source contract",
     )
     version_matches = re.findall(
@@ -1197,7 +1305,7 @@ def _validate_sherpa_source_contract(payloads: dict[str, bytes]) -> None:
     )
     _require_exact(
         version_matches,
-        [_SHERPA_ONNX_VERSION],
+        [expected_version],
         context="sherpa-onnx version",
     )
     sys_manifest = _decode_toml(
@@ -1262,7 +1370,7 @@ def _validate_sherpa_source_contract(payloads: dict[str, bytes]) -> None:
             == ("sherpa-onnx-sys/shared",)
         ),
         "wrapper disables implicit sys defaults": (
-            sys_dependency.get("version") == _SHERPA_ONNX_VERSION
+            sys_dependency.get("version") == expected_version
             and sys_dependency.get("default-features") is False
         ),
         "docs builds return before native setup": (
@@ -1348,7 +1456,7 @@ def _validate_sherpa_source_contract(payloads: dict[str, bytes]) -> None:
 
 @register_updater
 class BuzzUpdater(GitHubReleaseUpdater):
-    """Track only the audited Buzz foundation until native builders exist."""
+    """Resolve Buzz releases against the explicitly supported native foundation."""
 
     name = "buzz"
     GITHUB_OWNER = "block"
@@ -1357,6 +1465,48 @@ class BuzzUpdater(GitHubReleaseUpdater):
     DARWIN_PLATFORM: ClassVar[str] = "aarch64-darwin"
     supported_platforms = (DARWIN_PLATFORM,)
     generated_artifact_files = ("native-lock.json",)
+    compatibility_pin_rationale = (
+        "The package-local static ONNX Runtime recipe is deliberately reviewed "
+        "against one upstream release independently of Buzz's release manifests."
+    )
+    compatibility_pins: ClassVar[dict[str, str]] = {"onnxruntimeVersion": "1.27.0"}
+    compatibility_source_digest_rationale = (
+        "Buzz's source-built native foundation depends on reviewed build, loader, "
+        "and archive semantics that cannot be reduced to release-version metadata."
+    )
+    compatibility_source_digests: ClassVar[dict[str, dict[str, str]]] = {
+        "meshLlm": _MESH_SOURCE_DIGESTS,
+        "onnxruntime": _ONNX_SOURCE_DIGESTS,
+        "sherpaOnnx": _SHERPA_SOURCE_DIGESTS,
+    }
+    derivation_validations = (
+        DerivationValidation(
+            installable="path:.#pkgs.{system}.{name}",
+            systems=(DARWIN_PLATFORM,),
+            mode="build",
+        ),
+    )
+
+    @staticmethod
+    async def _resolve_tag_commit(
+        session: aiohttp.ClientSession,
+        *,
+        owner: str,
+        repo: str,
+        tag: str,
+        config: UpdateConfig,
+    ) -> str:
+        payload = await fetch_github_api(
+            session,
+            f"repos/{owner}/{repo}/commits/{urllib.parse.quote(tag, safe='')}",
+            config=config,
+        )
+        commit = _require_string(
+            _require_object(payload, context=f"{owner}/{repo} commit response"),
+            "sha",
+            context=f"{owner}/{repo} commit response",
+        )
+        return _require_commit(commit, context=f"{owner}/{repo} tag {tag}")
 
     @staticmethod
     def _archive_url(owner: str, repo: str, commit: str) -> str:
@@ -1379,34 +1529,57 @@ class BuzzUpdater(GitHubReleaseUpdater):
         return compact_nix_expr(expression.rebuild())
 
     @staticmethod
-    def _native_lock_payload(hashes: dict[str, str]) -> dict[str, object]:
+    def _pnpm_url(version: str) -> str:
+        return f"https://registry.npmjs.org/pnpm/-/pnpm-{version}.tgz"
+
+    @staticmethod
+    def _native_lock_expr(native_lock: dict[str, object]) -> FunctionCall:
+        """Embed one prospective lock without depending on the checked-in file."""
+        return FunctionCall(
+            name=identifier_attr_path("builtins", "fromJSON"),
+            argument=StringPrimitive(
+                value=json.dumps(
+                    native_lock,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            ),
+        )
+
+    @classmethod
+    def _native_lock_payload(
+        cls,
+        metadata: dict[str, str],
+        hashes: dict[str, str],
+    ) -> dict[str, object]:
+        pnpm_url = cls._pnpm_url(metadata["pnpmVersion"])
         return {
             "schemaVersion": 1,
             "buzz": {
-                "version": _VERSION,
-                "commit": _COMMIT,
-                "rustVersion": _RUST_VERSION,
+                "version": metadata["version"],
+                "commit": metadata["commit"],
+                "rustVersion": metadata["rustVersion"],
             },
-            "desktopBundleValidation": _DESKTOP_BUNDLE_VALIDATION,
             "onnxruntime": {
-                "version": _ONNX_RUNTIME_VERSION,
-                "commit": _ONNX_RUNTIME_COMMIT,
+                "version": metadata["onnxruntimeVersion"],
+                "commit": metadata["onnxruntimeCommit"],
             },
             "meshLlm": {
-                "version": _MESH_LLM_VERSION,
-                "commit": _MESH_LLM_COMMIT,
-                "skippyAbi": "0.1.35",
+                "version": metadata["meshLlmVersion"],
+                "commit": metadata["meshLlmCommit"],
+                "skippyAbi": metadata["skippyAbi"],
             },
             "llamaCpp": {
-                "commit": _LLAMA_CPP_COMMIT,
+                "commit": metadata["llamaCppCommit"],
             },
             "pnpm": {
-                **_PNPM_LOCK,
-                "hash": hashes[_PNPM_LOCK["url"]],
+                "version": metadata["pnpmVersion"],
+                "url": pnpm_url,
+                "hash": hashes[pnpm_url],
             },
             "sherpaOnnx": {
-                "version": _SHERPA_ONNX_VERSION,
-                "commit": _SHERPA_ONNX_COMMIT,
+                "version": metadata["sherpaOnnxVersion"],
+                "commit": metadata["sherpaOnnxCommit"],
                 "dependencyOrder": list(_SHERPA_FETCHCONTENT_ORDER),
                 "dependencies": {
                     name: {**dependency, "hash": hashes[dependency["url"]]}
@@ -1415,84 +1588,110 @@ class BuzzUpdater(GitHubReleaseUpdater):
             },
         }
 
-    @staticmethod
-    def _require_pinned_release(info: VersionInfo) -> str:
-        commit = info.commit
-        if (
-            info.version != _VERSION
-            or commit is None
-            or _COMMIT_PATTERN.fullmatch(commit) is None
-            or commit != _COMMIT
-        ):
-            msg = "Buzz updater only accepts the audited desktop-v0.5.20 source commit"
-            raise RuntimeError(msg)
-        return commit
-
     @classmethod
     def _required_metadata(cls, info: VersionInfo) -> dict[str, str]:
-        commit = cls._require_pinned_release(info)
         metadata = metadata_as_mapping(info.metadata, context="Buzz release metadata")
         result = {
             key: _require_string(metadata, key, context="release metadata")
             for key in (
                 "buzzUrl",
+                "commit",
+                "llamaCppCommit",
                 "llamaCppUrl",
+                "meshLlmCommit",
                 "meshLlmUrl",
+                "meshLlmVersion",
+                "onnxruntimeCommit",
                 "onnxruntimeUrl",
+                "onnxruntimeVersion",
+                "pnpmVersion",
+                "rustVersion",
+                "sherpaOnnxCommit",
                 "sherpaOnnxUrl",
+                "sherpaOnnxVersion",
+                "skippyAbi",
                 "tag",
             )
         }
-        result["commit"] = commit
-        _require_exact(result["tag"], _TAG, context="release tag")
+        version = _require_exact_version(info.version, context="release version")
+        result["version"] = version
+        for key in (
+            "meshLlmVersion",
+            "onnxruntimeVersion",
+            "pnpmVersion",
+            "rustVersion",
+            "sherpaOnnxVersion",
+            "skippyAbi",
+        ):
+            _require_exact_version(result[key], context=key)
+        for key in (
+            "commit",
+            "llamaCppCommit",
+            "meshLlmCommit",
+            "onnxruntimeCommit",
+            "sherpaOnnxCommit",
+        ):
+            _require_commit(result[key], context=key)
+        _require_exact(
+            result["tag"],
+            f"{cls.TAG_PREFIX}{version}",
+            context="release tag",
+        )
+        _require_exact(
+            result["onnxruntimeVersion"],
+            cls.get_compatibility_pin("onnxruntimeVersion"),
+            context="supported onnxruntimeVersion",
+        )
         _require_exact(
             result["buzzUrl"],
-            cls._archive_url(cls.GITHUB_OWNER, cls.GITHUB_REPO, commit),
+            cls._archive_url(cls.GITHUB_OWNER, cls.GITHUB_REPO, result["commit"]),
             context="Buzz source URL",
         )
         _require_exact(
             result["onnxruntimeUrl"],
-            cls._archive_url("microsoft", "onnxruntime", _ONNX_RUNTIME_COMMIT),
+            cls._archive_url(
+                "microsoft",
+                "onnxruntime",
+                result["onnxruntimeCommit"],
+            ),
             context="ONNX Runtime source URL",
         )
         _require_exact(
             result["sherpaOnnxUrl"],
-            cls._archive_url("k2-fsa", "sherpa-onnx", _SHERPA_ONNX_COMMIT),
+            cls._archive_url(
+                "k2-fsa",
+                "sherpa-onnx",
+                result["sherpaOnnxCommit"],
+            ),
             context="sherpa-onnx source URL",
         )
         _require_exact(
             result["meshLlmUrl"],
-            cls._archive_url("Mesh-LLM", "mesh-llm", _MESH_LLM_COMMIT),
+            cls._archive_url("Mesh-LLM", "mesh-llm", result["meshLlmCommit"]),
             context="Mesh source URL",
         )
         _require_exact(
             result["llamaCppUrl"],
-            cls._archive_url("ggml-org", "llama.cpp", _LLAMA_CPP_COMMIT),
+            cls._archive_url("ggml-org", "llama.cpp", result["llamaCppCommit"]),
             context="llama.cpp source URL",
         )
         return result
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        """Resolve and audit the one pinned desktop release without updating it."""
+        """Resolve the latest release against the supported native foundation."""
         release = await self._fetch_latest_release_payload(session)
         tag = self._release_tag_from_payload(release)
-        _require_exact(tag, _TAG, context="release tag")
-        version = self._normalize_release_version(tag)
-        commit_payload = await fetch_github_api(
+        version = _require_exact_version(
+            self._normalize_release_version(tag),
+            context="release version",
+        )
+        commit = await self._resolve_tag_commit(
             session,
-            (
-                f"repos/{self.GITHUB_OWNER}/{self.GITHUB_REPO}/commits/"
-                f"{urllib.parse.quote(tag, safe='')}"
-            ),
+            owner=self.GITHUB_OWNER,
+            repo=self.GITHUB_REPO,
+            tag=tag,
             config=self.config,
         )
-        commit_object = _require_object(
-            commit_payload, context="release commit response"
-        )
-        commit = _require_string(
-            commit_object, "sha", context="release commit response"
-        )
-        _require_exact(commit, _COMMIT, context="release commit")
 
         source_payloads = await asyncio.gather(
             *(
@@ -1509,6 +1708,49 @@ class BuzzUpdater(GitHubReleaseUpdater):
                 for path in _BUZZ_SOURCE_PATHS
             )
         )
+        release_contract = _validate_source_contract(
+            dict(zip(_BUZZ_SOURCE_PATHS, source_payloads, strict=True)),
+            release_version=version,
+        )
+        onnxruntime_version = self.get_compatibility_pin("onnxruntimeVersion")
+
+        mesh_commit, sherpa_commit, onnxruntime_commit = await asyncio.gather(
+            self._resolve_tag_commit(
+                session,
+                owner="Mesh-LLM",
+                repo="mesh-llm",
+                tag=f"v{release_contract.mesh_version}",
+                config=self.config,
+            ),
+            self._resolve_tag_commit(
+                session,
+                owner="k2-fsa",
+                repo="sherpa-onnx",
+                tag=f"v{release_contract.sherpa_version}",
+                config=self.config,
+            ),
+            self._resolve_tag_commit(
+                session,
+                owner="microsoft",
+                repo="onnxruntime",
+                tag=f"v{onnxruntime_version}",
+                config=self.config,
+            ),
+        )
+        _require_exact(
+            mesh_commit,
+            release_contract.mesh_commit,
+            context="Mesh tag commit",
+        )
+        mesh_source_paths = tuple(
+            self.get_compatibility_source_digest_contract("meshLlm")
+        )
+        onnx_source_paths = tuple(
+            self.get_compatibility_source_digest_contract("onnxruntime")
+        )
+        sherpa_source_paths = tuple(
+            self.get_compatibility_source_digest_contract("sherpaOnnx")
+        )
         mesh_source_payloads = await asyncio.gather(
             *(
                 fetch_url(
@@ -1516,12 +1758,12 @@ class BuzzUpdater(GitHubReleaseUpdater):
                     github_raw_url(
                         "Mesh-LLM",
                         "mesh-llm",
-                        _MESH_LLM_COMMIT,
+                        mesh_commit,
                         path,
                     ),
                     config=self.config,
                 )
-                for path in _MESH_SOURCE_PATHS
+                for path in mesh_source_paths
             )
         )
         onnx_source_payloads = await asyncio.gather(
@@ -1531,12 +1773,12 @@ class BuzzUpdater(GitHubReleaseUpdater):
                     github_raw_url(
                         "microsoft",
                         "onnxruntime",
-                        _ONNX_RUNTIME_COMMIT,
+                        onnxruntime_commit,
                         path,
                     ),
                     config=self.config,
                 )
-                for path in _ONNX_SOURCE_PATHS
+                for path in onnx_source_paths
             )
         )
         sherpa_source_payloads = await asyncio.gather(
@@ -1546,25 +1788,24 @@ class BuzzUpdater(GitHubReleaseUpdater):
                     github_raw_url(
                         "k2-fsa",
                         "sherpa-onnx",
-                        _SHERPA_ONNX_COMMIT,
+                        sherpa_commit,
                         path,
                     ),
                     config=self.config,
                 )
-                for path in _SHERPA_SOURCE_PATHS
+                for path in sherpa_source_paths
             )
         )
-        _validate_source_contract(
-            dict(zip(_BUZZ_SOURCE_PATHS, source_payloads, strict=True)),
-            mesh_payloads=dict(
-                zip(_MESH_SOURCE_PATHS, mesh_source_payloads, strict=True)
-            ),
+        mesh_contract = _validate_mesh_source_contract(
+            dict(zip(mesh_source_paths, mesh_source_payloads, strict=True)),
         )
         _validate_onnx_source_contract(
-            dict(zip(_ONNX_SOURCE_PATHS, onnx_source_payloads, strict=True)),
+            dict(zip(onnx_source_paths, onnx_source_payloads, strict=True)),
+            expected_version=onnxruntime_version,
         )
         _validate_sherpa_source_contract(
-            dict(zip(_SHERPA_SOURCE_PATHS, sherpa_source_payloads, strict=True)),
+            dict(zip(sherpa_source_paths, sherpa_source_payloads, strict=True)),
+            expected_version=release_contract.sherpa_version,
         )
         return VersionInfo(
             version=version,
@@ -1575,26 +1816,36 @@ class BuzzUpdater(GitHubReleaseUpdater):
                     commit,
                 ),
                 "commit": commit,
+                "llamaCppCommit": mesh_contract.llama_cpp_commit,
                 "llamaCppUrl": self._archive_url(
                     "ggml-org",
                     "llama.cpp",
-                    _LLAMA_CPP_COMMIT,
+                    mesh_contract.llama_cpp_commit,
                 ),
+                "meshLlmCommit": mesh_commit,
                 "meshLlmUrl": self._archive_url(
                     "Mesh-LLM",
                     "mesh-llm",
-                    _MESH_LLM_COMMIT,
+                    mesh_commit,
                 ),
+                "meshLlmVersion": release_contract.mesh_version,
+                "onnxruntimeCommit": onnxruntime_commit,
                 "onnxruntimeUrl": self._archive_url(
                     "microsoft",
                     "onnxruntime",
-                    _ONNX_RUNTIME_COMMIT,
+                    onnxruntime_commit,
                 ),
+                "onnxruntimeVersion": onnxruntime_version,
+                "pnpmVersion": release_contract.pnpm_version,
+                "rustVersion": release_contract.rust_version,
+                "sherpaOnnxCommit": sherpa_commit,
                 "sherpaOnnxUrl": self._archive_url(
                     "k2-fsa",
                     "sherpa-onnx",
-                    _SHERPA_ONNX_COMMIT,
+                    sherpa_commit,
                 ),
+                "sherpaOnnxVersion": release_contract.sherpa_version,
+                "skippyAbi": mesh_contract.skippy_abi,
                 "tag": tag,
             },
         )
@@ -1698,7 +1949,7 @@ class BuzzUpdater(GitHubReleaseUpdater):
                 )
             }
 
-        requests = (
+        source_requests = (
             _HashRequest(
                 hash_type="srcHash",
                 url=buzz_url,
@@ -1712,7 +1963,7 @@ class BuzzUpdater(GitHubReleaseUpdater):
                 expr=lambda _resolved: _build_fetch_from_github_expr(
                     "microsoft",
                     "onnxruntime",
-                    rev=_ONNX_RUNTIME_COMMIT,
+                    rev=metadata["onnxruntimeCommit"],
                     fetch_submodules=False,
                 ),
             ),
@@ -1723,7 +1974,7 @@ class BuzzUpdater(GitHubReleaseUpdater):
                 expr=lambda _resolved: _build_fetch_from_github_expr(
                     "k2-fsa",
                     "sherpa-onnx",
-                    rev=_SHERPA_ONNX_COMMIT,
+                    rev=metadata["sherpaOnnxCommit"],
                     fetch_submodules=False,
                 ),
             ),
@@ -1734,7 +1985,7 @@ class BuzzUpdater(GitHubReleaseUpdater):
                 expr=lambda _resolved: _build_fetch_from_github_expr(
                     "Mesh-LLM",
                     "mesh-llm",
-                    rev=_MESH_LLM_COMMIT,
+                    rev=metadata["meshLlmCommit"],
                     fetch_submodules=False,
                 ),
             ),
@@ -1745,83 +1996,45 @@ class BuzzUpdater(GitHubReleaseUpdater):
                 expr=lambda _resolved: _build_fetch_from_github_expr(
                     "ggml-org",
                     "llama.cpp",
-                    rev=_LLAMA_CPP_COMMIT,
+                    rev=metadata["llamaCppCommit"],
                     fetch_submodules=False,
-                ),
-            ),
-            _HashRequest(
-                hash_type="npmDepsHash",
-                url=buzz_url,
-                error="Missing Buzz npmDepsHash output",
-                expr=lambda resolved: _build_repo_package_attr_expr(
-                    package_file,
-                    ".pnpmDeps",
-                    system=self.DARWIN_PLATFORM,
-                    source_overrides=override(
-                        resolved,
-                        npm=fake_hash,
-                        root=fake_hash,
-                        desktop=fake_hash,
-                    ),
-                ),
-            ),
-            _HashRequest(
-                hash_type="vendorHash",
-                url=buzz_url,
-                error="Missing Buzz root vendorHash output",
-                expr=lambda resolved: _build_repo_package_attr_expr(
-                    package_file,
-                    ".rootCargoDeps",
-                    system=self.DARWIN_PLATFORM,
-                    source_overrides=override(
-                        resolved,
-                        npm=resolved[("npmDepsHash", buzz_url)],
-                        root=fake_hash,
-                        desktop=fake_hash,
-                    ),
-                ),
-            ),
-            _HashRequest(
-                hash_type="cargoHash",
-                url=buzz_url,
-                error="Missing Buzz desktop cargoHash output",
-                expr=lambda resolved: _build_repo_package_attr_expr(
-                    package_file,
-                    ".desktopCargoDeps",
-                    system=self.DARWIN_PLATFORM,
-                    source_overrides=override(
-                        resolved,
-                        npm=resolved[("npmDepsHash", buzz_url)],
-                        root=resolved[("vendorHash", buzz_url)],
-                        desktop=fake_hash,
-                    ),
                 ),
             ),
         )
         resolved: dict[_HashIdentity, str] = {}
         entries: list[HashEntry] = []
-        for request in requests:
-            drain = ValueDrain[str]()
-            async for event in drain_value_events(
-                update_nix.compute_fixed_output_hash(
-                    self.name,
-                    request.expr(resolved),
-                    isolate_by_drv_hash=True,
-                    config=self.config,
-                ),
-                drain,
-                parse=expect_str,
-            ):
-                yield event
-            value = require_value(drain, request.error)
-            identity = (request.hash_type, request.url)
-            resolved[identity] = value
-            entries.append(
-                HashEntry.create(request.hash_type, value, url=request.url),
-            )
+
+        async def hash_requests(requests: tuple[_HashRequest, ...]) -> EventStream:
+            for request in requests:
+                drain = ValueDrain[str]()
+                async for event in drain_value_events(
+                    update_nix.compute_fixed_output_hash(
+                        self.name,
+                        request.expr(resolved),
+                        isolate_by_drv_hash=True,
+                        config=self.config,
+                    ),
+                    drain,
+                    parse=expect_str,
+                ):
+                    yield event
+                value = require_value(drain, request.error)
+                identity = (request.hash_type, request.url)
+                resolved[identity] = value
+                entries.append(
+                    HashEntry.create(request.hash_type, value, url=request.url),
+                )
+
+        async for event in hash_requests(source_requests):
+            yield event
 
         native_hashes: dict[str, str] = {}
-        native_sources = (_PNPM_LOCK, *_SHERPA_FETCHCONTENT_LOCK.values())
+        native_sources = (
+            {
+                "url": self._pnpm_url(metadata["pnpmVersion"]),
+            },
+            *_SHERPA_FETCHCONTENT_LOCK.values(),
+        )
         for native_source in native_sources:
             url = native_source["url"]
             drain = ValueDrain[str]()
@@ -1840,6 +2053,66 @@ class BuzzUpdater(GitHubReleaseUpdater):
                 f"Missing native lock hash output for {url}",
             )
 
+        prospective_native_lock = self._native_lock_payload(metadata, native_hashes)
+        package_args = {
+            "nativeLock": self._native_lock_expr(prospective_native_lock),
+        }
+        dependency_requests = (
+            _HashRequest(
+                hash_type="npmDepsHash",
+                url=buzz_url,
+                error="Missing Buzz npmDepsHash output",
+                expr=lambda resolved: _build_repo_package_attr_expr(
+                    package_file,
+                    ".pnpmDeps",
+                    system=self.DARWIN_PLATFORM,
+                    package_args=package_args,
+                    source_overrides=override(
+                        resolved,
+                        npm=fake_hash,
+                        root=fake_hash,
+                        desktop=fake_hash,
+                    ),
+                ),
+            ),
+            _HashRequest(
+                hash_type="vendorHash",
+                url=buzz_url,
+                error="Missing Buzz root vendorHash output",
+                expr=lambda resolved: _build_repo_package_attr_expr(
+                    package_file,
+                    ".rootCargoDeps",
+                    system=self.DARWIN_PLATFORM,
+                    package_args=package_args,
+                    source_overrides=override(
+                        resolved,
+                        npm=resolved[("npmDepsHash", buzz_url)],
+                        root=fake_hash,
+                        desktop=fake_hash,
+                    ),
+                ),
+            ),
+            _HashRequest(
+                hash_type="cargoHash",
+                url=buzz_url,
+                error="Missing Buzz desktop cargoHash output",
+                expr=lambda resolved: _build_repo_package_attr_expr(
+                    package_file,
+                    ".desktopCargoDeps",
+                    system=self.DARWIN_PLATFORM,
+                    package_args=package_args,
+                    source_overrides=override(
+                        resolved,
+                        npm=resolved[("npmDepsHash", buzz_url)],
+                        root=resolved[("vendorHash", buzz_url)],
+                        desktop=fake_hash,
+                    ),
+                ),
+            ),
+        )
+        async for event in hash_requests(dependency_requests):
+            yield event
+
         package_dir = updater_dir_for(self.name)
         if package_dir is None:
             msg = f"Package directory not found for {self.name}"
@@ -1848,7 +2121,7 @@ class BuzzUpdater(GitHubReleaseUpdater):
             self.name,
             GeneratedArtifact.json(
                 package_dir / self.generated_artifact_files[0],
-                self._native_lock_payload(native_hashes),
+                prospective_native_lock,
             ),
         )
         yield UpdateEvent.value(self.name, entries)
@@ -1879,6 +2152,7 @@ class BuzzUpdater(GitHubReleaseUpdater):
             version=info.version,
             commit=metadata["commit"],
             hashes=collection,
+            pins=self.source_pins_for(info),
             urls={
                 "buzz": metadata["buzzUrl"],
                 "llamaCpp": metadata["llamaCppUrl"],

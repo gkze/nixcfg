@@ -20,9 +20,24 @@
 let
   slib = outputs.lib;
   info = selfSource;
-  version = slib.getFlakeVersion "superset";
+  inherit (selfSource) version;
   pname = "superset";
   upstreamSrc = inputs.superset;
+  packageManifest = builtins.fromJSON (builtins.readFile "${upstreamSrc}/package.json");
+  bunVersion =
+    (selfSource.pins or { }).bunVersion or (throw "superset sources.json is missing pins.bunVersion");
+  bunRuntime =
+    import ../../lib/exact-bun.nix
+      {
+        inherit bun fetchurl lib;
+      }
+      {
+        inherit packageManifest;
+        packageName = pname;
+        source = selfSource;
+        system = stdenv.hostPlatform.system;
+        version = bunVersion;
+      };
   updateBunLockTemplate = ./update_bun_lock.py;
   extractBunPackageHelper = ./extract_bun_package.py;
   patchBindingGypHelper = ./patch_node_addon_api_binding_gyp.py;
@@ -33,7 +48,7 @@ let
   linuxAppImage = fetchurl {
     name = "superset-${info.version}-x86_64.AppImage";
     url = info.urls."x86_64-linux";
-    hash = info.hashes."x86_64-linux";
+    hash = slib.sourceHashForPlatform pname "sha256" "x86_64-linux";
   };
   updateScript = pkgs.writeTextFile {
     name = "update-superset-bun-lock";
@@ -50,7 +65,7 @@ let
           ]
           [
             (toString upstreamSrc)
-            (lib.getExe bun)
+            (lib.getExe bunRuntime)
             (toString inputs.bun2nix)
           ]
           (builtins.readFile updateBunLockTemplate);
@@ -58,7 +73,7 @@ let
   # Keep this in sync with apps/desktop/package.json and bun.lock. Reuse the
   # centrally-packaged runtime and headers so Electron builder/rebuild stays
   # offline and shares cache entries with other Electron apps.
-  electronVersion = selfSource.pins.electronVersion;
+  inherit (selfSource) electronVersion;
   electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
   electronRuntime = electronBuild.runtime;
   electronRuntimeVersion = electronBuild.runtimeVersion;
@@ -67,10 +82,10 @@ let
   invalidBunNixErr = ''
     packages/superset/bun.nix failed to evaluate.
 
-    Regenerate it with:
+    Refresh the updater-owned lock and generated dependency graph with:
 
     ```sh
-    bun2nix -o bun.nix
+    nixcfg update superset
     ```
   '';
   extractHost =
@@ -99,7 +114,7 @@ let
     dontBuild = true;
 
     installPhase = ''
-      cp -r "${bun}/." "$out"
+      cp -r "${bunRuntime}/." "$out"
       chmod u+w "$out/bin"
 
       for node_binary in node npm bunx; do
@@ -142,7 +157,7 @@ let
     # rewrite executable files inside the workspace packages consumed below.
     dontFixup = true;
 
-    nativeBuildInputs = [ bun ];
+    nativeBuildInputs = [ bunRuntime ];
 
     installPhase = ''
       mkdir -p "$out"
@@ -291,7 +306,7 @@ else
     src = srcWithBun;
 
     nativeBuildInputs = [
-      bun
+      bunRuntime
       bun2nix.hook
       makeWrapper
       python3
@@ -411,6 +426,8 @@ else
         electronRuntime
         electronRuntimeVersion
         electronVersion
+        bunRuntime
+        bunVersion
         updateScript
         ;
       macApp = {

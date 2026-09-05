@@ -26,6 +26,12 @@ from lib.tests._nix_ast import (
 )
 from lib.tests._nix_source import nix_file_expr
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
+from lib.tests._source_metadata import (
+    assert_https_url,
+    assert_immutable_commit,
+    assert_release_version,
+    assert_structured_source_hashes,
+)
 from lib.tests._updater_helpers import (
     collect_events,
     install_fixed_hash_stream,
@@ -50,10 +56,6 @@ _CARGO_HASH = "sha256-DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="
 _PNPM_VERSION = "11.18.0"
 _PNPM_URL = f"https://registry.npmjs.org/pnpm/-/pnpm-{_PNPM_VERSION}.tgz"
 _PNPM_HASH = "sha256-EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE="
-_REAL_SRC_HASH = "sha256-NlOjgmUGu0AKiUdHQga1+gTvizlKtcHpeaFE8OKC79A="
-_REAL_NPM_DEPS_HASH = "sha256-GPn26R1gN43QJHqF+iKZJCx79BJOFn0tCea4xgUjNWs="
-_REAL_CARGO_HASH = "sha256-Fsbe0Do9w0ijkWj5gc6eyWaZmVT8mS0U9Reo7Udg14A="
-_REAL_PNPM_HASH = "sha256-KcNcqNKih5iP3uPg824H2bk3g/VntXm3/Vt5ikVj3YE="
 _MINIMUM_MACOS_VERSION = "14.0"
 _ARCHIVE_ROOT = f"reflect-open-{_COMMIT}"
 
@@ -538,21 +540,26 @@ def test_reflect_never_skips_dependency_closure_recomputation() -> None:
 
 
 def test_reflect_source_pin_contains_promoted_authoritative_hashes() -> None:
-    """Metadata should pin the exact source, pnpm, and Cargo closures."""
+    """Metadata must pin complete source, pnpm, npm, and Cargo closures."""
     source = SourceEntry.model_validate_json(
         (_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")
     )
 
-    assert source == SourceEntry(
-        version=_VERSION,
-        commit=_COMMIT,
-        hashes=HashCollection.from_value([
-            HashEntry.create("cargoHash", _REAL_CARGO_HASH),
-            HashEntry.create("npmDepsHash", _REAL_NPM_DEPS_HASH),
-            HashEntry.create("sha256", _REAL_PNPM_HASH, url=_PNPM_URL),
-            HashEntry.create("srcHash", _REAL_SRC_HASH),
-        ]),
+    assert_release_version(source.version)
+    assert_immutable_commit(source.commit)
+    assert_structured_source_hashes(
+        source,
+        hash_types={"cargoHash", "npmDepsHash", "sha256", "srcHash"},
     )
+    entries = source.hashes.entries
+    assert entries is not None
+    [pnpm] = [entry for entry in entries if entry.hash_type == "sha256"]
+    assert pnpm.url is not None
+    assert_https_url(pnpm.url, host="registry.npmjs.org")
+    prefix = "https://registry.npmjs.org/pnpm/-/pnpm-"
+    assert pnpm.url.startswith(prefix)
+    assert pnpm.url.endswith(".tgz")
+    assert_release_version(pnpm.url.removeprefix(prefix).removesuffix(".tgz"))
 
 
 def test_reflect_nix_policy_suppresses_updates_and_uses_dev_entitlements() -> None:

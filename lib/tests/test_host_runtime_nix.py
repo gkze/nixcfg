@@ -45,13 +45,18 @@ def _option_default(options: AttributeSet, name: str) -> NixExpression:
 
 
 def _host_extra_system_modules(relative_path: str) -> NixList:
-    host = expect_instance(nix_file_expr(relative_path), FunctionDefinition)
-    constructor = expect_instance(host.output, FunctionCall)
-    arguments = expect_instance(constructor.argument, AttributeSet)
+    arguments = _host_constructor_arguments(relative_path)
     return expect_instance(
         expect_binding(arguments.values, "extraSystemModules").value,
         NixList,
     )
+
+
+def _host_constructor_arguments(relative_path: str) -> AttributeSet:
+    host = expect_instance(nix_file_expr(relative_path), FunctionDefinition)
+    constructor = expect_instance(host.output, FunctionCall)
+    assert_nix_ast_equal(constructor.name, "lib.mkDarwinHost")
+    return expect_instance(constructor.argument, AttributeSet)
 
 
 def _host_defers_zsh_completion(relative_path: str) -> bool:
@@ -121,6 +126,7 @@ def test_zsh_completion_deferral_is_conservative_and_host_scoped() -> None:
     )
     assert _host_defers_zsh_completion("darwin/argus.nix")
     assert _host_defers_zsh_completion("darwin/rocinante.nix")
+    assert _host_defers_zsh_completion("darwin/zeus.nix")
 
     home_manager_module = _module_output("modules/home/zsh.nix")
     guarded_config = expect_instance(
@@ -145,6 +151,56 @@ def test_zsh_completion_deferral_is_conservative_and_host_scoped() -> None:
     ]
     assert commands.count("compinit") == 1
     assert commands.count("bashcompinit") == 1
+
+
+def test_zeus_preserves_the_town_workstation_contract() -> None:
+    """Zeus should keep the complete work policy and its user-facing identity."""
+    arguments = _host_constructor_arguments("darwin/zeus.nix")
+
+    assert_nix_ast_equal(expect_binding(arguments.values, "user").value, '"george"')
+    assert_nix_ast_equal(
+        expect_binding(arguments.values, "rosettaBuilderMemory").value,
+        '"16GiB"',
+    )
+    assert_nix_ast_equal(
+        expect_binding(arguments.values, "rosettaBuilderLingerMinutes").value,
+        "30",
+    )
+    assert_nix_ast_equal(
+        expect_binding(arguments.values, "brewAppsModule").value,
+        '"${lib.modulesPath}/darwin/george/brew-apps.nix"',
+    )
+    assert_nix_ast_equal(
+        expect_binding(arguments.values, "extraHomeModules").value,
+        """
+        [
+          ../home/george/work.nix
+          "${lib.modulesPath}/home/darwin-closure-priority.nix"
+          "${lib.modulesPath}/darwin/george/town-dock-apps.nix"
+          ({ pkgs, ... }: {
+            nixcfg.packageSets.extraPackages = [
+              pkgs.goose-cli
+              pkgs.gws
+            ];
+          })
+        ]
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_binding(arguments.values, "extraSystemModules").value,
+        """
+        [
+          "${lib.modulesPath}/darwin/george/caches.nix"
+          "${lib.modulesPath}/darwin/george/work.nix"
+          {
+            networking.computerName = "Zeus";
+            darwinDefaults.zsh.deferCompletionInitToHomeManager = true;
+            home-manager.backupFileExtension = "backup";
+          }
+          (lib.mkSetOpencodeEnvModule "work.json")
+        ]
+        """,
+    )
 
 
 def test_homebrew_activation_defaults_are_idempotent() -> None:

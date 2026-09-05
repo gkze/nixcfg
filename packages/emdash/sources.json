@@ -1,25 +1,32 @@
 {
-  "drvHash": "svlf6r0yyqzvggz7myn4m8glkw1fz24z",
+  "drvHash": "d3aizqg2af2024lj3h0ryqbplbgyfj8b",
+  "electronVersion": "40.10.2",
   "hashes": [
     {
-      "hash": "sha256-CI0rf9p3zOL/vcMpg+UvDi4BpXYGtSPHf0/AtIuBIWg=",
+      "hash": "sha256-QK1QD7Ph2bGU0wJ9MbSmAlQufBsNW8S6atn6+alO8Hw=",
       "hashType": "npmDepsHash",
       "platform": "aarch64-darwin"
     },
     {
-      "hash": "sha256-CI0rf9p3zOL/vcMpg+UvDi4BpXYGtSPHf0/AtIuBIWg=",
+      "hash": "sha256-x4zMf1wVexApj2u+ySASM0iSDxiGREh3iDrFi8wvVtc=",
       "hashType": "npmDepsHash",
       "platform": "aarch64-linux"
     },
     {
-      "hash": "sha256-CI0rf9p3zOL/vcMpg+UvDi4BpXYGtSPHf0/AtIuBIWg=",
+      "hash": "sha256-Qrv+dXlYDxYhBtJGnQiqjfKr/qFphtD+JIOLlIFkA6E=",
       "hashType": "npmDepsHash",
       "platform": "x86_64-linux"
     }
   ],
   "input": "emdash",
   "pins": {
-    "electronVersion": "40.7.0"
+    "nodeEngine": ">=24.0.0",
+    "nodejsAttr": "nodejs_24",
+    "nodejsVersion": "24.19.0",
+    "packageManager": "pnpm@10.28.2",
+    "pnpmAttr": "pnpm_10",
+    "pnpmEngine": ">=10.28.0",
+    "pnpmVersion": "10.34.5"
   },
-  "version": "v1.1.40"
+  "version": "v1.2.3"
 }

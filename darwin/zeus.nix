@@ -1,0 +1,42 @@
+{ outputs, ... }:
+let
+  inherit (outputs) lib;
+in
+lib.mkDarwinHost {
+  user = "george";
+  # The default 6 GiB Rosetta Linux builder VM is too small for some of
+  # the heavier x86_64-linux Rust builds we run from Town workstations.
+  rosettaBuilderMemory = "16GiB";
+  rosettaBuilderLingerMinutes = 30;
+  brewAppsModule = "${lib.modulesPath}/darwin/george/brew-apps.nix";
+  extraHomeModules = [
+    ../home/george/work.nix
+    "${lib.modulesPath}/home/darwin-closure-priority.nix"
+    "${lib.modulesPath}/darwin/george/town-dock-apps.nix"
+    (
+      { pkgs, ... }:
+      {
+        # Keep the Town workstation tools aligned with argus without opting
+        # this host into the full heavyOptional package set.
+        nixcfg.packageSets.extraPackages = [
+          pkgs.goose-cli
+          pkgs.gws
+        ];
+      }
+    )
+  ];
+  extraSystemModules = [
+    "${lib.modulesPath}/darwin/george/caches.nix"
+    "${lib.modulesPath}/darwin/george/work.nix"
+    {
+      networking.computerName = "Zeus";
+      # Home Manager initializes completion after adding plugin directories to fpath.
+      darwinDefaults.zsh.deferCompletionInitToHomeManager = true;
+      # Preserve any pre-existing app/editor settings the first time Home Manager
+      # takes over files like ~/.gemini/settings.json and VS Code Insiders
+      # settings.json.
+      home-manager.backupFileExtension = "backup";
+    }
+    (lib.mkSetOpencodeEnvModule "work.json")
+  ];
+}

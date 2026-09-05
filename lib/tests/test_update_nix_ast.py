@@ -8,6 +8,7 @@ from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.if_expression import IfExpression
 from nix_manipulator.expressions.inherit import Inherit
 from nix_manipulator.expressions.let import LetExpression
 from nix_manipulator.expressions.operator import Operator
@@ -21,10 +22,12 @@ from lib.nix.models.flake_lock import FlakeLockNode, LockedRef
 from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
-from lib.tests._nix_source import nix_source_fragment_expr
+from lib.tests._nix_source import nix_file_binding_expr, nix_source_fragment_expr
 from lib.update.flake import (
     flake_fetch_expr,
     flake_fetch_expression,
+    flake_source_path_expr,
+    flake_source_path_expression,
     nixpkgs_expression,
 )
 from lib.update.nix import (
@@ -39,7 +42,6 @@ from lib.update.nix import (
     _build_overlay_expr,
     _build_overlay_expression,
     _build_package_path_attr_expr,
-    _build_pnpm_10_nodejs_22_expr,
     _build_repo_package_attr_expr,
     _contextual_overlay_bindings,
 )
@@ -54,7 +56,7 @@ from lib.update.sources import nix_source_names
         (
             "packages/emdash/default.nix",
             "electronVersion",
-            "selfSource.pins.electronVersion",
+            "selfSource.electronVersion",
         ),
         (
             "packages/gooeypi/default.nix",
@@ -64,7 +66,7 @@ from lib.update.sources import nix_source_names
         (
             "packages/superset/default.nix",
             "electronVersion",
-            "selfSource.pins.electronVersion",
+            "selfSource.electronVersion",
         ),
         (
             "packages/t3code-desktop/default.nix",
@@ -102,6 +104,41 @@ def test_flake_fetch_expr_builds_parseable_fetch_tree() -> None:
     expr = flake_fetch_expr(node)
 
     assert_nix_ast_equal(expr, flake_fetch_expression(node))
+
+
+def test_flake_source_path_expr_normalizes_fetch_tree_results() -> None:
+    """One AST-backed expression owns fetchTree path normalization."""
+    node = FlakeLockNode(
+        locked=LockedRef(
+            type="github",
+            owner="NixOS",
+            repo="nixpkgs",
+            rev="abc123",
+            narHash="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        ),
+    )
+    source = Identifier(name="src")
+
+    assert_nix_ast_equal(
+        flake_source_path_expression(node),
+        LetExpression(
+            local_variables=[
+                Binding(name="src", value=flake_fetch_expression(node)),
+            ],
+            value=IfExpression(
+                condition=FunctionCall(
+                    name=identifier_attr_path("builtins", "isAttrs"),
+                    argument=source,
+                ),
+                consequence=Select(expression=source, attribute="outPath"),
+                alternative=source,
+            ),
+        ),
+    )
+    assert_nix_ast_equal(
+        flake_source_path_expr(node),
+        flake_source_path_expression(node),
+    )
 
 
 def test_flake_fetch_expr_builds_git_fetch_tree_with_submodules() -> None:
@@ -547,7 +584,17 @@ def test_build_fetch_pnpm_deps_expr_accepts_explicit_pnpm_toolchain() -> None:
         tag="v1.12.14",
         hash_value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     )
-    pnpm_expr = _build_pnpm_10_nodejs_22_expr()
+    pnpm_expr = FunctionCall(
+        name=identifier_attr_path("pkgs", "pnpm_10", "override"),
+        argument=AttributeSet(
+            values=[
+                Binding(
+                    name="nodejs-slim",
+                    value=identifier_attr_path("pkgs", "nodejs_22"),
+                ),
+            ]
+        ),
+    )
 
     expr = _build_fetch_pnpm_deps_expr(
         src_call,
@@ -586,17 +633,6 @@ def test_build_fetch_pnpm_deps_expr_accepts_explicit_pnpm_toolchain() -> None:
     )
 
 
-def test_pnpm_toolchain_builder_uses_supported_nodejs_override() -> None:
-    """Updater pnpm expressions should use nixpkgs' supported Node override."""
-    pnpm_override = _build_pnpm_10_nodejs_22_expr()
-    override_args = expect_instance(pnpm_override.argument, AttributeSet)
-
-    assert_nix_ast_equal(
-        expect_binding(override_args.values, "nodejs-slim").value,
-        identifier_attr_path("pkgs", "nodejs_22"),
-    )
-
-
 @pytest.mark.parametrize(
     "package_path",
     [
@@ -615,6 +651,110 @@ def test_pnpm_packages_use_supported_nodejs_override(package_path: str) -> None:
 
     nodejs = expect_binding(override_args.values, "nodejs-slim").value
     assert expect_instance(nodejs, Identifier).name == "nodejs"
+
+
+def test_gitbutler_pnpm_package_uses_manifest_derived_toolchain() -> None:
+    """GitButler should consume the updater-validated Node and pnpm attributes."""
+    assert_nix_ast_equal(
+        nix_file_binding_expr("packages/gitbutler/default.nix", "nodejs"),
+        "builtins.getAttr toolchain.nodejsAttr pkgs",
+    )
+    assert_nix_ast_equal(
+        nix_file_binding_expr("packages/gitbutler/default.nix", "pnpmPackage"),
+        "builtins.getAttr toolchain.pnpmAttr pkgs",
+    )
+
+
+@pytest.mark.parametrize(
+    ("package_path", "source_binding"),
+    [
+        ("packages/mux/default.nix", "src"),
+        ("packages/superset/default.nix", "upstreamSrc"),
+    ],
+)
+def test_exact_bun_packages_bind_persisted_version_to_locked_manifest(
+    package_path: str,
+    source_binding: str,
+) -> None:
+    """Bun runtime pins must be checked against evaluation-time input bytes."""
+    assert_nix_ast_equal(
+        nix_file_binding_expr(package_path, "packageManifest"),
+        f'builtins.fromJSON (builtins.readFile "${{{source_binding}}}/package.json")',
+    )
+
+    bun_runtime = expect_instance(
+        nix_file_binding_expr(package_path, "bunRuntime"),
+        FunctionCall,
+    )
+    runtime_args = expect_instance(bun_runtime.argument, AttributeSet)
+    inherited_names = {
+        name.name
+        for value in runtime_args.values
+        if isinstance(value, Inherit)
+        for name in value.names
+    }
+    assert "packageManifest" in inherited_names
+    assert_nix_ast_equal(
+        expect_binding(runtime_args.values, "version").value,
+        "bunVersion",
+    )
+
+
+def test_exact_bun_requires_an_exact_manifest_package_manager() -> None:
+    """The shared runtime helper must fail closed on missing or stale source policy."""
+    assert_nix_ast_equal(
+        nix_file_binding_expr("lib/exact-bun.nix", "packageManager"),
+        (
+            "if builtins.isAttrs packageManifest then "
+            "packageManifest.packageManager or null else null"
+        ),
+    )
+    assert_nix_ast_equal(
+        nix_file_binding_expr("lib/exact-bun.nix", "expectedPackageManager"),
+        '"bun@${version}"',
+    )
+    package_manager_check = expect_instance(
+        nix_file_binding_expr("lib/exact-bun.nix", "packageManagerCheck"),
+        IfExpression,
+    )
+    assert_nix_ast_equal(
+        package_manager_check.condition,
+        "packageManager == expectedPackageManager",
+    )
+    assert expect_instance(package_manager_check.consequence, Primitive).value is True
+    failure = expect_instance(package_manager_check.alternative, FunctionCall)
+    assert expect_instance(failure.name, Identifier).name == "throw"
+
+
+def test_gitbutler_exports_its_package_owned_pnpm_dependency_derivation() -> None:
+    """The updater's frontend.pnpmDeps path must exist in the package AST."""
+    frontend = expect_instance(
+        nix_file_binding_expr("packages/gitbutler/default.nix", "frontend"),
+        FunctionCall,
+    )
+    frontend_attrs = expect_instance(frontend.argument, AttributeSet)
+    frontend_inherits = {
+        name.name
+        for value in frontend_attrs.values
+        if isinstance(value, Inherit)
+        for name in value.names
+    }
+
+    passthru_merge = expect_instance(
+        nix_file_binding_expr("packages/gitbutler/default.nix", "passthru"),
+        BinaryExpression,
+    )
+    assert passthru_merge.operator.name == "//"
+    passthru = expect_instance(passthru_merge.left, AttributeSet)
+    passthru_inherits = {
+        name.name
+        for value in passthru.values
+        if isinstance(value, Inherit)
+        for name in value.names
+    }
+
+    assert "pnpmDeps" in frontend_inherits
+    assert "frontend" in passthru_inherits
 
 
 def test_build_fetchgit_expr_is_parseable() -> None:
@@ -795,7 +935,6 @@ def test_build_package_path_attr_expr_uses_shared_package_materialization() -> N
             ),
         ),
     )
-
     override_expr = _build_package_path_attr_expr(
         "anthropic-cli",
         "",
@@ -824,6 +963,75 @@ def test_build_package_path_attr_expr_uses_shared_package_materialization() -> N
                 ),
             ),
         ),
+    )
+
+
+def test_contextual_package_scope_uses_the_host_overlay_inventory() -> None:
+    """Update probes must expose input-provided dependencies such as bun2nix."""
+    bindings = _contextual_overlay_bindings(
+        system="aarch64-darwin",
+        repo_root=str(REPO_ROOT),
+        source_overrides=None,
+    )
+
+    assert_nix_ast_equal(
+        expect_binding(bindings, "applied").value,
+        FunctionCall(
+            name=identifier_attr_path("pkgs", "appendOverlays"),
+            argument=Parenthesis(
+                value=FunctionCall(
+                    name=FunctionCall(
+                        name=Identifier(name="import"),
+                        argument=Parenthesis(
+                            value=BinaryExpression(
+                                operator=Operator(name="+"),
+                                left=identifier_attr_path("rootFlake", "outPath"),
+                                right=StringPrimitive(
+                                    value="/lib/package-overlays.nix"
+                                ),
+                            ),
+                        ),
+                    ),
+                    argument=AttributeSet.from_dict({
+                        "inputs": identifier_attr_path("rootFlake", "inputs"),
+                        "outputs": Identifier(name="flake"),
+                    }),
+                ),
+            ),
+        ),
+    )
+
+    assert_nix_ast_equal(
+        nix_file_binding_expr("flake.nix", "overlayList"),
+        FunctionCall(
+            name=FunctionCall(
+                name=Identifier(name="import"),
+                argument=NixPath(path="./lib/package-overlays.nix"),
+            ),
+            argument=AttributeSet(
+                values=[
+                    Inherit(names=[Identifier(name="inputs")]),
+                    Binding(name="outputs", value=Identifier(name="self")),
+                ],
+            ),
+        ),
+    )
+
+
+def test_zed_overlay_forwards_flake_inputs_to_its_package() -> None:
+    """The overlay-owned Zed package must receive its declared flake inputs."""
+    package_args = expect_instance(
+        nix_source_fragment_expr(
+            "overlays/default.nix",
+            "final.callPackage ../packages/zed-editor-nightly ",
+            ') "Zed Nightly.app"',
+        ),
+        AttributeSet,
+    )
+
+    assert_nix_ast_equal(
+        package_args,
+        AttributeSet(values=[Inherit(names=[Identifier(name="inputs")])]),
     )
 
 

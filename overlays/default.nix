@@ -26,6 +26,8 @@
 
       helpers = import ./_lib/helpers.nix fragArgs;
 
+      mergeOverlayLayers = import ./_lib/merge-layers.nix;
+
       mkMacAppPassthru = import ./_lib/mk-mac-app-passthru.nix;
       withManagedMacApp =
         package: bundleName:
@@ -79,7 +81,9 @@
         utm = withManagedMacApp prev.utm "UTM.app";
         zed-editor-nightly =
           if prev.stdenv.hostPlatform.isDarwin then
-            withManagedMacApp (final.callPackage ../packages/zed-editor-nightly { }) "Zed Nightly.app"
+            withManagedMacApp (final.callPackage ../packages/zed-editor-nightly {
+              inherit inputs;
+            }) "Zed Nightly.app"
           else
             inputs.zed.packages.${system}.default;
         jetbrains = prev.jetbrains // {
@@ -87,5 +91,5 @@
         };
       };
     in
-    fragments // helpers // tinyOverlays;
+    mergeOverlayLayers { inherit fragments helpers tinyOverlays; };
 }

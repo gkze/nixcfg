@@ -186,6 +186,32 @@ def read_packed_file(asar_path: Path, relative_path: str) -> bytes:
         )
 
 
+def packed_file_paths(asar_path: Path) -> tuple[str, ...]:
+    """Return the sorted relative paths of files stored inside an ASAR."""
+    with asar_path.open("rb") as handle:
+        _header_bytes, header, _data_offset = _read_asar_layout(handle)
+
+    paths: list[str] = []
+
+    def collect(node: dict[str, Any], prefix: tuple[str, ...]) -> None:
+        files = node.get("files")
+        if not isinstance(files, dict):
+            msg = f"ASAR directory {'/'.join(prefix)!r} has malformed file inventory"
+            raise AsarIntegrityError(msg)
+        for name, raw_entry in files.items():
+            if not isinstance(raw_entry, dict):
+                msg = f"ASAR entry {'/'.join((*prefix, name))!r} is not an object"
+                raise AsarIntegrityError(msg)
+            components = (*prefix, name)
+            if "files" in raw_entry:
+                collect(cast("dict[str, Any]", raw_entry), components)
+            elif not raw_entry.get("unpacked") and "link" not in raw_entry:
+                paths.append("/".join(components))
+
+    collect(header, ())
+    return tuple(sorted(paths))
+
+
 def _replace_packed_file(
     asar_path: Path,
     relative_path: str,

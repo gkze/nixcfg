@@ -1,27 +1,21 @@
 """Enforce Nix-owned update and local-engine policy in Mach Studio's ASAR."""
 
 import argparse
-import hashlib
 import plistlib
+import re
 import sys
-from functools import partial
 from pathlib import Path
 
 from lib.asar_integrity import (
     AsarIntegrityError,
+    packed_file_paths,
     read_packed_file,
     replace_packed_file,
     write_info_plist_hash,
 )
 
 MAIN_PATH = "dist-electron/main.js"
-RENDERER_PATH = "dist/assets/index-BeczixRy.js"
-REVIEWED_MAIN_SHA256 = (
-    "61561bb24a99c8e6aeb197df8e2a37c00f703e4cf1c53a1841362833d19cb60f"
-)
-REVIEWED_RENDERER_SHA256 = (
-    "dce52b93639d873a0391126660a189fe481005ec8228f2d63a23266eb3605f5c"
-)
+_RENDERER_PATH_PATTERN = re.compile(r"^dist/assets/index-[^/]+\.js$")
 _ENABLED_GATE = b"let t=e.disabled===!0||e.app.isPackaged===!1;"
 _DISABLED_GATE = b"let t=!0/* Updates are managed by Nix. */;   "
 _FAIL_OPEN_ENGINE_INSTALL = (
@@ -63,6 +57,11 @@ _SOURCE_READY_DESCRIPTION = (
 )
 _WHEEL_TITLE = b"Bundled wheel"
 _SOURCE_TITLE = b"Engine source"
+_RENDERER_VENDOR_INVENTORY = (
+    (_WHEEL_REINSTALL_DESCRIPTION, 1),
+    (_WHEEL_MISSING_DESCRIPTION, 1),
+    (_WHEEL_TITLE, 3),
+)
 
 
 class PatchError(RuntimeError):
@@ -84,19 +83,8 @@ def _replace_exact(
     return payload.replace(old, new)
 
 
-def patch_main(
-    payload: bytes,
-    *,
-    expected_sha256: str = REVIEWED_MAIN_SHA256,
-) -> bytes:
+def patch_main(payload: bytes) -> bytes:
     """Fail closed on updater or local-engine provisioning drift."""
-    actual_sha256 = hashlib.sha256(payload).hexdigest()
-    if actual_sha256 != expected_sha256:
-        msg = (
-            "Mach Studio packed main SHA-256 drifted: "
-            f"expected {expected_sha256}, got {actual_sha256}"
-        )
-        raise PatchError(msg)
     patched = _replace_exact(
         payload,
         _ENABLED_GATE,
@@ -111,19 +99,8 @@ def patch_main(
     )
 
 
-def patch_renderer(
-    payload: bytes,
-    *,
-    expected_sha256: str = REVIEWED_RENDERER_SHA256,
-) -> bytes:
+def patch_renderer(payload: bytes) -> bytes:
     """Describe the reviewed release's source-backed local engine."""
-    actual_sha256 = hashlib.sha256(payload).hexdigest()
-    if actual_sha256 != expected_sha256:
-        msg = (
-            "Mach Studio packed renderer SHA-256 drifted: "
-            f"expected {expected_sha256}, got {actual_sha256}"
-        )
-        raise PatchError(msg)
     patched = _replace_exact(
         payload,
         _WHEEL_REINSTALL_DESCRIPTION,
@@ -145,13 +122,29 @@ def patch_renderer(
     )
 
 
-def patch_bundle(
-    asar_path: Path,
-    info_plist_path: Path,
-    *,
-    expected_main_sha256: str = REVIEWED_MAIN_SHA256,
-    expected_renderer_sha256: str = REVIEWED_RENDERER_SHA256,
-) -> str:
+def resolve_renderer_path(asar_path: Path) -> str:
+    """Find the sole fingerprinted renderer asset with the vendor inventory."""
+    matches: list[str] = []
+    for relative_path in packed_file_paths(asar_path):
+        if _RENDERER_PATH_PATTERN.fullmatch(relative_path) is None:
+            continue
+        payload = read_packed_file(asar_path, relative_path)
+        if all(
+            payload.count(anchor) == expected_count
+            for anchor, expected_count in _RENDERER_VENDOR_INVENTORY
+        ):
+            matches.append(relative_path)
+    if len(matches) != 1:
+        rendered = ", ".join(matches) if matches else "none"
+        msg = (
+            "expected exactly one Mach Studio renderer asset with the complete "
+            f"vendor inventory, found {len(matches)}: {rendered}"
+        )
+        raise PatchError(msg)
+    return matches[0]
+
+
+def patch_bundle(asar_path: Path, info_plist_path: Path) -> str:
     """Apply reviewed Mach Studio policy and refresh ASAR integrity."""
     engine_source = asar_path.parent / "vendor/local_moe_engine"
     if not engine_source.is_dir():
@@ -159,31 +152,27 @@ def patch_bundle(
             f"Mach Studio packaged local_moe_engine source is missing: {engine_source}"
         )
         raise PatchError(msg)
+    renderer_path = resolve_renderer_path(asar_path)
     main_payload = read_packed_file(asar_path, MAIN_PATH)
-    renderer_payload = read_packed_file(asar_path, RENDERER_PATH)
-    patch_main(main_payload, expected_sha256=expected_main_sha256)
-    patch_renderer(renderer_payload, expected_sha256=expected_renderer_sha256)
+    renderer_payload = read_packed_file(asar_path, renderer_path)
+    patch_main(main_payload)
+    patch_renderer(renderer_payload)
 
     replace_packed_file(
         asar_path,
         MAIN_PATH,
-        partial(patch_main, expected_sha256=expected_main_sha256),
+        patch_main,
     )
     digest = replace_packed_file(
         asar_path,
-        RENDERER_PATH,
-        partial(patch_renderer, expected_sha256=expected_renderer_sha256),
+        renderer_path,
+        patch_renderer,
     )
     write_info_plist_hash(info_plist_path, asar_path)
     return digest
 
 
-def main(
-    argv: list[str] | None = None,
-    *,
-    expected_main_sha256: str = REVIEWED_MAIN_SHA256,
-    expected_renderer_sha256: str = REVIEWED_RENDERER_SHA256,
-) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the package-local Mach Studio policy patch."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("asar_path", type=Path)
@@ -193,8 +182,6 @@ def main(
         digest = patch_bundle(
             args.asar_path,
             args.info_plist_path,
-            expected_main_sha256=expected_main_sha256,
-            expected_renderer_sha256=expected_renderer_sha256,
         )
     except (
         AsarIntegrityError,

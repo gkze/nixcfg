@@ -1,5 +1,7 @@
-"""Patch Chromium compiler GN defaults for Nix-built rusty_v8."""
+"""Adapt Chromium compiler metadata for Nix-built rusty_v8."""
 
+import ast
+import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -8,8 +10,17 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 _EXPECTED_ARGC = 2
-_USAGE = "usage: patch_compiler_gni.py <compiler.gni|compiler BUILD.gn|sanitizers.gni>"
+_PRINT_RELEASE_ARGC = 3
+_PRINT_RELEASE_FLAG = "--print-release-version"
+_USAGE = (
+    "usage: patch_compiler_gni.py "
+    "[--print-release-version] "
+    "<update.py|compiler.gni|compiler BUILD.gn|sanitizers.gni>"
+)
 _MISSING_ANCHOR = "compiler.gni use_lld anchor not found"
+
+_RELEASE_ASSIGNMENT = "RELEASE_VERSION"
+_RELEASE_VERSION = re.compile(r"[1-9][0-9]*")
 
 _USE_LLD_ASSIGNMENT = "use_lld"
 _USE_LLD_REPLACEMENT_VALUE = "false"
@@ -92,8 +103,44 @@ def _patch_sanitizers_gni(text: str) -> str:
     return _drop_lines_containing_flags(text, _UNSUPPORTED_SANITIZERS_GNI_FLAGS)
 
 
+def read_clang_release_version(update_script: Path) -> str:
+    """Return the one numeric ``RELEASE_VERSION`` assigned by Chromium."""
+    tree = ast.parse(
+        update_script.read_text(encoding="utf-8"),
+        filename=str(update_script),
+    )
+    assignments = [
+        statement.value
+        for statement in tree.body
+        if isinstance(statement, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == _RELEASE_ASSIGNMENT
+            for target in statement.targets
+        )
+    ]
+    if len(assignments) != 1:
+        msg = (
+            f"expected exactly one {_RELEASE_ASSIGNMENT} assignment in "
+            f"{update_script}, found {len(assignments)}"
+        )
+        raise SystemExit(msg)
+
+    value = assignments[0]
+    if not (
+        isinstance(value, ast.Constant)
+        and isinstance(value.value, str)
+        and _RELEASE_VERSION.fullmatch(value.value)
+    ):
+        msg = f"expected numeric {_RELEASE_ASSIGNMENT} string in {update_script}"
+        raise SystemExit(msg)
+    return value.value
+
+
 def main() -> int:
-    """Patch a compiler.gni file in place."""
+    """Print immutable compiler metadata or patch one GN file in place."""
+    if len(sys.argv) == _PRINT_RELEASE_ARGC and sys.argv[1] == _PRINT_RELEASE_FLAG:
+        sys.stdout.write(f"{read_clang_release_version(Path(sys.argv[2]))}\n")
+        return 0
     if len(sys.argv) != _EXPECTED_ARGC:
         raise SystemExit(_USAGE)
 

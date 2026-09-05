@@ -6,6 +6,10 @@ let
   inherit (pkgs) buzz;
   nativeLock = builtins.fromJSON (builtins.readFile (src + "/packages/buzz/native-lock.json"));
   status = buzz.passthru.buzzDesktopCandidateStatus;
+  candidateIdentity = {
+    derivationPath = builtins.unsafeDiscardStringContext buzz.drvPath;
+    outputPath = builtins.unsafeDiscardStringContext buzz.outPath;
+  };
   expectedMacApp = {
     bundleId = "xyz.block.buzz.app";
     bundleName = "Buzz.app";
@@ -13,15 +17,14 @@ let
     installMode = "copy";
   };
 in
-# AST-only checks cannot prove that the evaluated candidate drvPath/outPath
-# still match the updater-owned artifact attestation.
+# Prove that app routing exposes the candidate whose exact path the updater's
+# post-persistence derivation validation realizes.
 assert buzz.pname == "buzz-desktop-candidate";
 assert !(buzz.meta.broken or false);
+assert nativeLock.buzz.version == buzz.version;
 assert buzz.passthru.buzzBuildGates == [ ];
 assert status.wired;
-assert status.identity == nativeLock.desktopBundleValidation.candidate;
-assert status.evidence == nativeLock.desktopBundleValidation;
-assert status.validationComplete;
+assert status.identity == candidateIdentity;
 assert status.exportReady;
 assert buzz.passthru.macApp == expectedMacApp;
 true

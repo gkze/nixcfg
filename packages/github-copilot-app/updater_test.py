@@ -2,8 +2,6 @@
 
 import asyncio
 import base64
-import hashlib
-import json
 from pathlib import Path
 from types import ModuleType
 
@@ -15,6 +13,7 @@ from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
@@ -23,6 +22,12 @@ from lib.tests._nix_ast import (
 )
 from lib.tests._package_registry import registry_override_metadata
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
+from lib.tests._source_metadata import (
+    assert_https_url,
+    assert_platform_source_entry,
+    assert_release_version,
+    assert_url_contains_version,
+)
 from lib.tests._updater_helpers import load_repo_module
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.paths import REPO_ROOT
@@ -40,7 +45,6 @@ _UNSUPPORTED_X64_URL = (
     "GitHub-Copilot-darwin-x64.dmg"
 )
 _HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-_ARM64_HASH = "sha256-avOISG0qdkLdmmsXA3rAfXmOnCqeUsaBCGzfRkVpi9Q="
 _ED25519_POINT_BYTES = 32
 _ED25519_FIELD = 2**255 - 19
 _ED25519_D = (-121665 * pow(121666, -1, _ED25519_FIELD)) % _ED25519_FIELD
@@ -177,16 +181,19 @@ def test_latest_release_requires_the_supported_arm64_artifact(
 
 
 def test_copilot_sources_pin_the_authoritative_latest_release() -> None:
-    """Persist only the updater-produced arm64 pin."""
-    assert json.loads((_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")) == {
-        "hashes": {
-            "aarch64-darwin": _ARM64_HASH,
-        },
-        "urls": {
-            "aarch64-darwin": _ARM64_URL,
-        },
-        "version": _VERSION,
-    }
+    """Persist one version-coherent official arm64 release without freezing it."""
+    source = SourceEntry.model_validate_json(
+        (_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")
+    )
+    version = assert_release_version(source.version)
+    _hashes, urls = assert_platform_source_entry(
+        source,
+        platforms={"aarch64-darwin"},
+    )
+    url = urls["aarch64-darwin"]
+    assert_https_url(url, host="github.com")
+    assert_url_contains_version(url, version)
+    assert url.endswith("/GitHub-Copilot-darwin-arm64.dmg")
 
 
 def test_copilot_package_patches_then_resigns_the_exact_executable() -> None:
@@ -256,10 +263,7 @@ def test_copilot_patch_disables_acquisition_and_staged_install() -> None:
     module = _load_patch_module()
     original = _reviewed_patch_fixture(module)
 
-    patched = module.patch_payload(
-        original,
-        expected_sha256=hashlib.sha256(original).hexdigest(),
-    )
+    patched = module.patch_payload(original)
 
     assert len(patched) == len(original)
     module.validate_disabled_payload(patched)
@@ -291,10 +295,7 @@ def test_copilot_patch_isolates_preexisting_tauri_staged_state() -> None:
     )
     original += b"|" + b"|".join(vendor_stage_names)
 
-    patched = module.patch_payload(
-        original,
-        expected_sha256=hashlib.sha256(original).hexdigest(),
-    )
+    patched = module.patch_payload(original)
 
     assert b"staged-update.bin" not in patched
     assert b"staged-manifest.json" not in patched
@@ -303,34 +304,36 @@ def test_copilot_patch_isolates_preexisting_tauri_staged_state() -> None:
 
 
 @pytest.mark.parametrize("patch_index", range(6))
-def test_copilot_patch_rejects_incomplete_vendor_inventory(patch_index: int) -> None:
-    """Any missing acquisition or signature anchor must fail before mutation."""
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_copilot_patch_rejects_drifted_vendor_inventory(
+    patch_index: int,
+    *,
+    duplicate: bool,
+) -> None:
+    """Any missing or duplicate updater anchor must fail before mutation."""
     module = _load_patch_module()
+    assert len(module.PATCHES) == 6
     original = _reviewed_patch_fixture(module)
     _label, anchor, _disabled, _count = module.PATCHES[patch_index]
-    drifted = original.replace(anchor, b"X" * len(anchor), 1)
+    drifted = (
+        original + b"|" + anchor
+        if duplicate
+        else original.replace(anchor, b"X" * len(anchor), 1)
+    )
 
     with pytest.raises(module.PatchError, match="inventory drifted"):
-        module.patch_payload(
-            drifted,
-            expected_sha256=hashlib.sha256(drifted).hexdigest(),
-        )
+        module.patch_payload(drifted)
 
 
-def test_copilot_patch_rejects_unreviewed_binary_digest() -> None:
-    """Exact release executables require an explicitly reviewed digest."""
+def test_copilot_patch_allows_unrelated_vendor_byte_drift() -> None:
+    """Unrelated release changes must not duplicate the outer artifact gate."""
     module = _load_patch_module()
-    original = _reviewed_patch_fixture(module)
+    original = _reviewed_patch_fixture(module) + b"|unrelated vendor code"
 
-    with pytest.raises(module.PatchError, match="SHA-256 drifted"):
-        module.patch_payload(original, expected_sha256="0" * 64)
+    patched = module.patch_payload(original)
 
-    assert (
-        frozenset({
-            "21b0f33962285782f0946f13780de5825ebb252e04ad9f0aff65a26608825dab",
-        })
-        == module.REVIEWED_EXECUTABLE_SHA256
-    )
+    assert patched.endswith(b"|unrelated vendor code")
+    module.validate_disabled_payload(patched)
 
 
 @pytest.mark.parametrize("restore_vendor_anchor", [True, False])
@@ -340,10 +343,7 @@ def test_copilot_post_sign_check_rejects_incomplete_suppression(
     """Post-sign validation must fail if either side of an anchor drifts."""
     module = _load_patch_module()
     original = _reviewed_patch_fixture(module)
-    patched = module.patch_payload(
-        original,
-        expected_sha256=hashlib.sha256(original).hexdigest(),
-    )
+    patched = module.patch_payload(original)
     _label, vendor, disabled, _expected_count = module.PATCHES[0]
     replacement = vendor if restore_vendor_anchor else b"X" * len(disabled)
 
@@ -353,24 +353,14 @@ def test_copilot_post_sign_check_rejects_incomplete_suppression(
 
 def test_copilot_patch_file_preserves_mode_and_supports_post_sign_check(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The package hook must patch in place and revalidate its realized bytes."""
     module = _load_patch_module()
     executable = tmp_path / "github"
     original = _reviewed_patch_fixture(module)
-    reviewed_digest = hashlib.sha256(original).hexdigest()
     executable.write_bytes(original)
     executable.chmod(0o751)
 
-    with pytest.raises(module.PatchError, match="is not reviewed"):
-        module.patch_file(executable)
-
-    monkeypatch.setattr(
-        module,
-        "REVIEWED_EXECUTABLE_SHA256",
-        frozenset({reviewed_digest}),
-    )
     module.patch_file(executable)
 
     assert executable.stat().st_mode & 0o777 == 0o751

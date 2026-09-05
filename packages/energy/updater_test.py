@@ -96,10 +96,7 @@ def test_energy_policy_disables_packaged_checks_and_install_on_quit() -> None:
     install_on_quit = b"kn.autoUpdater.autoInstallOnAppQuit=!0"
     payload = b"|".join([packaged_gate, packaged_gate, packaged_gate, install_on_quit])
 
-    patched = _load_policy_module().disable_updates(
-        payload,
-        expected_sha256=hashlib.sha256(payload).hexdigest(),
-    )
+    patched = _load_policy_module().disable_updates(payload)
 
     assert len(patched) == len(payload)
     assert packaged_gate not in patched
@@ -114,44 +111,47 @@ def test_energy_policy_ignores_the_minified_auto_updater_binding_name() -> None:
     install_on_quit = b"Cn.autoUpdater.autoInstallOnAppQuit=!0"
     payload = b"|".join([packaged_gate, packaged_gate, packaged_gate, install_on_quit])
 
-    patched = _load_policy_module().disable_updates(
-        payload,
-        expected_sha256=hashlib.sha256(payload).hexdigest(),
-    )
+    patched = _load_policy_module().disable_updates(payload)
 
     assert install_on_quit not in patched
     assert b"Cn.autoUpdater.autoInstallOnAppQuit=!1" in patched
 
 
-def test_energy_policy_rejects_partial_vendor_contracts() -> None:
-    """A missing install-on-quit anchor must fail before archive mutation."""
+@pytest.mark.parametrize(
+    ("packaged_gate_count", "install_on_quit_count"),
+    [(2, 1), (4, 1), (3, 0), (3, 2)],
+)
+def test_energy_policy_rejects_drifted_vendor_contracts(
+    packaged_gate_count: int,
+    install_on_quit_count: int,
+) -> None:
+    """Every missing or duplicate policy anchor must fail closed."""
     module = _load_policy_module()
-    payload = b"!this.app.isPackaged" * 3
+    payload = b"|".join(
+        [module._PACKAGED_GATE] * packaged_gate_count
+        + [module._INSTALL_ON_QUIT] * install_on_quit_count
+    )
 
-    with pytest.raises(module.PatchError, match="found 0"):
-        module.disable_updates(
-            payload,
-            expected_sha256=hashlib.sha256(payload).hexdigest(),
-        )
+    with pytest.raises(module.PatchError, match="Energy updater policy anchors"):
+        module.disable_updates(payload)
 
 
-def test_energy_policy_rejects_an_unreviewed_packed_main_digest() -> None:
-    """Anchor-compatible vendor drift must fail before ASAR mutation."""
+def test_energy_policy_allows_release_drift_outside_owned_anchors() -> None:
+    """Unrelated bundle bytes must not become a second release-version pin."""
     module = _load_policy_module()
-    payload = b"|".join([
+    release_specific_prefix = b"release-specific-vendor-code|"
+    payload = release_specific_prefix + b"|".join([
         module._PACKAGED_GATE,
         module._PACKAGED_GATE,
         module._PACKAGED_GATE,
         module._INSTALL_ON_QUIT,
     ])
 
-    with pytest.raises(module.PatchError, match="SHA-256 drifted"):
-        module.disable_updates(payload)
+    patched = module.disable_updates(payload)
 
-    assert (
-        module.REVIEWED_MAIN_SHA256
-        == "86fd2972d98b1e90eea88c5829f6d8f5ed5579df966382b4864c574f8372ae31"
-    )
+    assert patched.startswith(release_specific_prefix)
+    assert module._PACKAGED_GATE not in patched
+    assert module._INSTALL_ON_QUIT not in patched
 
 
 def test_energy_patch_cli_updates_the_real_integrity_layers(
@@ -169,13 +169,7 @@ def test_energy_patch_cli_updates_the_real_integrity_layers(
     asar_path, plist_path = _write_policy_bundle(tmp_path, payload)
     original_size = asar_path.stat().st_size
 
-    assert (
-        module.main(
-            [str(asar_path), str(plist_path)],
-            expected_sha256=hashlib.sha256(payload).hexdigest(),
-        )
-        == 0
-    )
+    assert module.main([str(asar_path), str(plist_path)]) == 0
 
     patched = read_packed_file(asar_path, module.MAIN_PATH)
     digest = check_info_plist_hash(plist_path, asar_path)
@@ -184,13 +178,7 @@ def test_energy_patch_cli_updates_the_real_integrity_layers(
     assert module._INSTALL_ON_QUIT not in patched
     assert f"ASAR header SHA256 {digest}" in capsys.readouterr().out
 
-    assert (
-        module.main(
-            [str(asar_path), str(plist_path)],
-            expected_sha256=hashlib.sha256(patched).hexdigest(),
-        )
-        == 1
-    )
+    assert module.main([str(asar_path), str(plist_path)]) == 1
     assert "found 0" in capsys.readouterr().err
 
 

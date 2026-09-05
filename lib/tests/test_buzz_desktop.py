@@ -549,8 +549,8 @@ def test_buzz_package_exposes_signed_candidate_only_as_an_audit_leaf() -> None:
     )
 
 
-def test_buzz_candidate_identity_drift_is_structurally_blocked() -> None:
-    """A candidate differing from updater-owned evidence cannot open the gate."""
+def test_buzz_candidate_identity_is_derived_and_validation_is_executable() -> None:
+    """Candidate identity must not be copied into a self-staling lock record."""
     scope = _buzz_package_scope()
     assert_nix_ast_equal(
         expect_binding(scope, "expectedMacApp").value,
@@ -568,42 +568,19 @@ def test_buzz_candidate_identity_drift_is_structurally_blocked() -> None:
         "lib.isDerivation desktopCandidateNative",
     )
     assert_nix_ast_equal(
-        expect_binding(scope, "desktopBundleValidationEvidence").value,
-        "nativeLock.desktopBundleValidation or { }",
-    )
-    assert_nix_ast_equal(
         expect_binding(scope, "desktopCandidateIdentity").value,
         """if desktopCandidateWired then {
           derivationPath = builtins.unsafeDiscardStringContext desktopCandidateNative.drvPath;
           outputPath = builtins.unsafeDiscardStringContext desktopCandidateNative.outPath;
         } else null""",
     )
-    assert_nix_ast_equal(
-        expect_binding(scope, "expectedDesktopBundleValidation").value,
-        """
-        {
-          schemaVersion = 1;
-          status = "passed";
-          candidate = desktopCandidateIdentity;
-          checks = [
-            "realized-candidate"
-            "isolated-launcher-startup"
-            "offline-runtime-loading"
-            "signatures"
-            "exact-app-metadata"
-            "reference-free-final-bundle"
-          ];
-        }
-        """,
-    )
-    assert_nix_ast_equal(
-        expect_binding(scope, "desktopBundleValidationComplete").value,
-        "desktopCandidateWired && desktopBundleValidationEvidence == expectedDesktopBundleValidation",
-    )
+    scope_bindings = binding_map(scope)
+    assert "desktopBundleValidationEvidence" not in scope_bindings
+    assert "expectedDesktopBundleValidation" not in scope_bindings
+    assert "desktopBundleValidationComplete" not in scope_bindings
     assert_nix_ast_equal(
         expect_binding(scope, "desktopCandidateExportReady").value,
         """desktopCandidateWired
-          && desktopBundleValidationComplete
           && (desktopCandidateNative.passthru.buzzNativeContract.exportReady or false)
           && (desktopCandidateNative.passthru.macApp or null) == expectedMacApp""",
     )
@@ -619,9 +596,9 @@ def test_buzz_candidate_identity_drift_is_structurally_blocked() -> None:
     assert_nix_ast_equal(
         export_message,
         """''
-        Buzz desktop export is disabled. Realization, isolated launcher startup,
-        offline runtime loading, signatures, exact app metadata, and a
-        reference-free final bundle must pass before app routing can be enabled.
+        Buzz desktop export is disabled. The exact candidate derivation, its
+        install-check contract, and its macOS app metadata must be wired before app
+        routing can be enabled.
         ''""",
     )
     gates = expect_instance(
@@ -651,8 +628,6 @@ def test_buzz_candidate_identity_drift_is_structurally_blocked() -> None:
         """{
           wired = desktopCandidateWired;
           identity = desktopCandidateIdentity;
-          evidence = desktopBundleValidationEvidence;
-          validationComplete = desktopBundleValidationComplete;
           exportReady = desktopCandidateExportReady;
         }""",
     )

@@ -13,13 +13,15 @@ from lib.tests._updater_helpers import run_async as _run
 from lib.update.nix import _build_fetchgit_call
 from lib.update.updaters import VersionInfo
 
+_COMMIT = "a" * 40
+
 
 def _load_module(module_name: str):
     return load_repo_module("overlays/codex-v8/updater.py", module_name)
 
 
 def test_codex_v8_updater_computes_recursive_src_hash(monkeypatch) -> None:
-    """Compute source and Linux prebuilt hashes from the selected rusty_v8 tag."""
+    """Compute source and Linux prebuilt hashes from the resolved commit."""
     module = _load_module("codex_v8_updater_test")
     updater = module.CodexV8Updater()
 
@@ -55,7 +57,10 @@ def test_codex_v8_updater_computes_recursive_src_hash(monkeypatch) -> None:
     events = _run(
         _collect_events(
             updater.fetch_hashes(
-                VersionInfo(version="v999.0.0"),
+                VersionInfo(
+                    version="v999.0.0",
+                    metadata={"commit": _COMMIT, "tag": "v999.0.0"},
+                ),
                 object(),
             )
         )
@@ -65,7 +70,7 @@ def test_codex_v8_updater_computes_recursive_src_hash(monkeypatch) -> None:
         calls[0],
         _build_fetchgit_call(
             "https://github.com/denoland/rusty_v8.git",
-            "v999.0.0",
+            _COMMIT,
             fetch_submodules=True,
         ),
     )
@@ -105,12 +110,21 @@ def test_codex_v8_fetch_latest_reads_version_from_codex_cargo_nix(
     )
     monkeypatch.setattr(module, "REPO_ROOT", repo_root)
 
+    async def _resolve_commit(session: object, tag: str) -> str:
+        assert tag == "v147.4.0"
+        return _COMMIT
+
+    monkeypatch.setattr(updater, "_resolve_release_tag_commit", _resolve_commit)
+
     latest = _run(updater.fetch_latest(object()))
 
     assert latest.version == "v147.4.0"
+    assert latest.commit == _COMMIT
 
 
-def test_codex_v8_fetch_latest_prefers_generated_cargo_nix_artifact() -> None:
+def test_codex_v8_fetch_latest_prefers_generated_cargo_nix_artifact(
+    monkeypatch,
+) -> None:
     """Use earlier in-run Cargo.nix artifacts before falling back to the repo copy."""
     module = _load_module("codex_v8_updater_fetch_latest_artifact_test")
     updater = module.CodexV8Updater()
@@ -123,9 +137,16 @@ def test_codex_v8_fetch_latest_prefers_generated_cargo_nix_artifact() -> None:
         },
     )
 
+    async def _resolve_commit(session: object, tag: str) -> str:
+        assert tag == "v148.1.2"
+        return _COMMIT
+
+    monkeypatch.setattr(updater, "_resolve_release_tag_commit", _resolve_commit)
+
     latest = _run(updater.fetch_latest(object(), context=context))
 
     assert latest.version == "v148.1.2"
+    assert latest.commit == _COMMIT
 
 
 def test_codex_v8_version_requires_cargo_nix_v8_entry() -> None:
@@ -140,10 +161,14 @@ def test_codex_v8_is_latest_requires_all_expected_hash_entries() -> None:
     """The updater should only accept current entries with all required hashes present."""
     module = _load_module("codex_v8_updater_latest_test")
     updater = module.CodexV8Updater()
-    latest = VersionInfo(version="v999.0.0")
+    latest = VersionInfo(
+        version="v999.0.0",
+        metadata={"commit": _COMMIT, "tag": "v999.0.0"},
+    )
 
     incomplete = SimpleNamespace(
         version="v999.0.0",
+        commit=_COMMIT,
         hashes=SimpleNamespace(
             entries=[
                 HashEntry.create(
@@ -155,6 +180,7 @@ def test_codex_v8_is_latest_requires_all_expected_hash_entries() -> None:
     )
     complete = SimpleNamespace(
         version="v999.0.0",
+        commit=_COMMIT,
         hashes=SimpleNamespace(
             entries=[
                 HashEntry.create(
@@ -181,6 +207,7 @@ def test_codex_v8_is_latest_requires_all_expected_hash_entries() -> None:
             updater._is_latest(
                 SimpleNamespace(
                     version="v999.0.0",
+                    commit=_COMMIT,
                     hashes=SimpleNamespace(entries=None),
                 ),
                 latest,
@@ -189,7 +216,43 @@ def test_codex_v8_is_latest_requires_all_expected_hash_entries() -> None:
         is False
     )
     assert _run(updater._is_latest(incomplete, latest)) is False
+    assert (
+        _run(
+            updater._is_latest(
+                SimpleNamespace(
+                    version="v999.0.0",
+                    commit="b" * 40,
+                    hashes=complete.hashes,
+                ),
+                latest,
+            )
+        )
+        is False
+    )
     assert _run(updater._is_latest(complete, latest)) is True
+
+
+def test_codex_v8_result_persists_the_resolved_commit() -> None:
+    """Keep the release tag for assets while fetching source by immutable commit."""
+    module = _load_module("codex_v8_updater_result_commit_test")
+    updater = module.CodexV8Updater()
+    info = VersionInfo(
+        version="v999.0.0",
+        metadata={"commit": _COMMIT, "tag": "v999.0.0"},
+    )
+
+    result = updater.build_result(
+        info,
+        [
+            HashEntry.create(
+                "srcHash",
+                "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            )
+        ],
+    )
+
+    assert result.version == "v999.0.0"
+    assert result.commit == _COMMIT
 
 
 def test_codex_v8_fetch_hashes_forwards_non_value_events(monkeypatch) -> None:
@@ -223,7 +286,10 @@ def test_codex_v8_fetch_hashes_forwards_non_value_events(monkeypatch) -> None:
     events = _run(
         _collect_events(
             updater.fetch_hashes(
-                VersionInfo(version="v999.0.0"),
+                VersionInfo(
+                    version="v999.0.0",
+                    metadata={"commit": _COMMIT, "tag": "v999.0.0"},
+                ),
                 object(),
             )
         )

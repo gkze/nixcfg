@@ -131,6 +131,11 @@ def _install_check_script() -> str:
 
 
 def _expand_embedded_validators(script: str) -> str:
+    if "${launcherSmokeScript}" in script:
+        script = script.replace(
+            "${launcherSmokeScript}",
+            _scope_string("launcherSmokeScript"),
+        )
     validator = _scope_string("runtimeValidator")
     validation_command = f'"$PYTHON_TOOL" -c {shlex.quote(validator)}'
     script = script.replace("${runtimeValidationCommand}", validation_command)
@@ -526,12 +531,31 @@ def _run_install_check(
     tmp_path: Path,
     output: Path,
     *,
+    broken_launcher: bool = False,
     extra_dumped_entitlement: bool = False,
     fail_inventory_find: bool = False,
     fail_otool: bool = False,
     fail_runtime_find: bool = False,
     macho_case: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    launcher = output / "Applications/Buzz.app/Contents/MacOS/buzz-desktop"
+    launcher.write_text(
+        (
+            "#!/bin/sh\nexit 72\n"
+            if broken_launcher
+            else """#!/bin/sh
+set -eu
+macos=${0%/*}
+contents=${macos%/*}
+export MESH_LLM_NATIVE_RUNTIME_BUNDLE_DIR="$contents/Resources/mesh-runtime"
+export MESH_LLM_NATIVE_RUNTIME_CACHE_DIR="$HOME/Library/Caches/xyz.block.buzz.app/mesh-llm/native-runtimes"
+unset MESH_LLM_NATIVE_RUNTIME_MANIFEST_URL
+exec "$macos/buzz-desktop.real" "$@"
+"""
+        ),
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
     tools = _install_check_tools(
         tmp_path,
         extra_dumped_entitlement=extra_dumped_entitlement,
@@ -713,6 +737,7 @@ def test_candidate_contract_records_finder_runtime_and_signing_policy() -> None:
             manifestUrlEnvironment = "MESH_LLM_NATIVE_RUNTIME_MANIFEST_URL";
             manifestUrlUnset = true;
             createsCacheDirectory = false;
+            installCheckSmoke = true;
           };
           signing = {
             identity = "adhoc";
@@ -945,6 +970,26 @@ def test_install_check_accepts_exact_candidate(tmp_path: Path) -> None:
     assert assembly.returncode == 0, assembly.stderr
     result = _run_install_check(tmp_path, output)
     assert result.returncode == 0, result.stderr
+    smoke_root = tmp_path / "install-check-scratch/buzz-candidate-launcher-smoke"
+    assert (smoke_root / "record").read_text(encoding="utf-8").splitlines() == [
+        str(smoke_root / "Buzz Smoke.app/Contents/Resources/mesh-runtime"),
+        str(
+            smoke_root
+            / "home/Library/Caches/xyz.block.buzz.app/mesh-llm/native-runtimes"
+        ),
+        "probe argument",
+    ]
+    assert not (smoke_root / "home/Library").exists()
+
+
+def test_install_check_rejects_a_launcher_that_cannot_start(tmp_path: Path) -> None:
+    """The install audit must execute the exact packaged launcher."""
+    assembly, output, _runtime, _sign_log = _run_assembly(tmp_path)
+    assert assembly.returncode == 0, assembly.stderr
+
+    result = _run_install_check(tmp_path, output, broken_launcher=True)
+
+    assert result.returncode == 72
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Mach-O dlopen is Darwin-only")

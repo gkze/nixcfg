@@ -29,6 +29,21 @@ let
       throw "modules/common.nix: unsupported system '${system}'";
 
   flakeInputs = lib.filterAttrs (_: lib.isType "flake") inputs;
+
+  storeHeadroomSettings =
+    if cfg.nix.minFreeStoreBytes == null && cfg.nix.maxFreeStoreBytes == null then
+      { }
+    else if cfg.nix.minFreeStoreBytes == null || cfg.nix.maxFreeStoreBytes == null then
+      throw ''
+        nixcfg.common.nix.minFreeStoreBytes and maxFreeStoreBytes must be configured together
+      ''
+    else if cfg.nix.maxFreeStoreBytes <= cfg.nix.minFreeStoreBytes then
+      throw "nixcfg.common.nix.maxFreeStoreBytes must exceed minFreeStoreBytes"
+    else
+      {
+        min-free = cfg.nix.minFreeStoreBytes;
+        max-free = cfg.nix.maxFreeStoreBytes;
+      };
 in
 {
   options.nixcfg.common = {
@@ -39,6 +54,24 @@ in
     };
 
     nix = {
+      minFreeStoreBytes = mkOption {
+        type = types.nullOr types.ints.positive;
+        default = null;
+        description = ''
+          Optional free store capacity at which Nix starts automatic garbage collection.
+          Configure this together with maxFreeStoreBytes.
+        '';
+      };
+
+      maxFreeStoreBytes = mkOption {
+        type = types.nullOr types.ints.positive;
+        default = null;
+        description = ''
+          Optional free store capacity Nix targets after pressure-triggered garbage
+          collection. Configure this together with minFreeStoreBytes.
+        '';
+      };
+
       substituters = mkOption {
         type = types.listOf types.str;
         default = [ ];
@@ -89,6 +122,7 @@ in
         keep-derivations = true;
         keep-outputs = true;
       }
+      // storeHeadroomSettings
       // lib.optionalAttrs (cfg.nix.substituters != [ ]) {
         inherit (cfg.nix) substituters;
       }

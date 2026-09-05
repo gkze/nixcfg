@@ -5,11 +5,11 @@
   ...
 }:
 let
-  inherit (selfSource) version;
+  inherit (selfSource) commit version;
   src = prev.fetchFromGitHub {
     owner = "tursodatabase";
     repo = "turso";
-    tag = "v${version}";
+    rev = commit;
     fetchSubmodules = false;
     hash = slib.sourceHash "turso" "srcHash";
   };

@@ -17,8 +17,8 @@ from lib.update.cli import (
     _build_run_plan,
     _build_update_options,
     _emit_summary,
+    _handle_required_tool_check,
     _is_tty,
-    run_update_command,
 )
 from lib.update.cli_inventory import (
     _InventoryHandles,
@@ -32,10 +32,15 @@ from lib.update.config import resolve_config
 from lib.update.events import UpdateEvent, UpdateEventKind
 from lib.update.persistence import persist_source_updates
 from lib.update.planner import (
+    add_aggregate_sources,
     add_companion_source_children,
     add_companion_source_parents,
+    aggregate_destination_names,
+    aggregate_source_members,
     companion_source_depths,
     select_target_source_names,
+    source_additional_input_names,
+    source_prerequisites,
     source_update_waves,
 )
 from lib.update.refs import FlakeInputRef
@@ -47,6 +52,7 @@ from lib.update.source_runner import (
     run_sources_phase,
     update_source_task,
 )
+from lib.update.ui_state import OperationKind
 from lib.update.updaters import DenoDepsHashUpdater, UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
@@ -161,6 +167,73 @@ def test_source_selection_detects_companion_cycles_and_empty_waves() -> None:
     assert source_update_waves([], {}) == []
 
 
+def test_explicit_additional_input_selects_its_consumer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Treat an exact-pinned auxiliary input as a valid consumer target."""
+
+    class _Consumer:
+        additional_input_names = ("zon2nix",)
+
+    class _OtherConsumer:
+        additional_input_names = ("zon2nix",)
+
+    class _Unrelated:
+        pass
+
+    updaters = {
+        "neutils": _Consumer,
+        "other-consumer": _OtherConsumer,
+        "unrelated": _Unrelated,
+    }
+    monkeypatch.setattr("lib.update.cli.UPDATERS", updaters)
+    monkeypatch.setattr("lib.update.cli.get_flake_inputs_with_refs", list)
+
+    assert source_additional_input_names(_Consumer) == ("zon2nix",)
+    assert source_additional_input_names(None) == ()
+    assert select_target_source_names(("zon2nix",), updaters) == [
+        "neutils",
+        "other-consumer",
+    ]
+
+    resolved = ResolvedTargets.from_options(UpdateOptions(source="zon2nix"))
+    assert "zon2nix" in resolved.all_known_names
+    assert resolved.do_refs is False
+    assert resolved.do_sources is True
+    assert resolved.source_names == ["neutils", "other-consumer"]
+
+    item_meta, _order = _build_item_meta(resolved, SourcesFile(entries={}))
+    assert item_meta["neutils"].op_order == (
+        OperationKind.CHECK_VERSION,
+        OperationKind.REFRESH_LOCK,
+        OperationKind.COMPUTE_HASH,
+    )
+
+
+@pytest.mark.parametrize("input_names", ["zon2nix", ("",)])
+def test_additional_input_declarations_are_structurally_valid(
+    input_names: object,
+) -> None:
+    """Reject stringly or empty auxiliary input declarations."""
+
+    class _Consumer:
+        pass
+
+    _Consumer.additional_input_names = input_names
+    with pytest.raises(TypeError, match="tuple of non-empty input names"):
+        source_additional_input_names(_Consumer)
+
+
+def test_additional_input_declarations_reject_duplicates() -> None:
+    """Keep auxiliary input ownership unambiguous and auditable."""
+
+    class _Consumer:
+        additional_input_names = ("zon2nix", "zon2nix")
+
+    with pytest.raises(RuntimeError, match="must be unique"):
+        source_additional_input_names(_Consumer)
+
+
 def test_companion_source_graph_helpers_cover_cycles_and_revisits() -> None:
     """Exercise helper-only branches that protect companion source graph traversal."""
 
@@ -193,6 +266,89 @@ def test_companion_source_graph_helpers_cover_cycles_and_revisits() -> None:
         updaters={"child": _Child, "root": _Root},
     )
     assert children == {"child"}
+
+
+def test_aggregate_sources_follow_selected_consumers_without_refreshing_siblings() -> (
+    None
+):
+    """Schedule an aggregate after selected consumers but leave siblings persisted."""
+
+    class _Consumer:
+        aggregate_into = ("aggregate",)
+
+    class _OtherConsumer:
+        aggregate_into = ("aggregate",)
+
+    class _Aggregate:
+        pass
+
+    updaters = {
+        "consumer": _Consumer,
+        "other": _OtherConsumer,
+        "aggregate": _Aggregate,
+    }
+
+    assert aggregate_destination_names(_Consumer) == ("aggregate",)
+    assert aggregate_destination_names(None) == ()
+    assert aggregate_source_members(updaters, "aggregate") == (
+        "consumer",
+        "other",
+    )
+    assert select_target_source_names(("consumer",), updaters) == [
+        "consumer",
+        "aggregate",
+    ]
+    assert select_target_source_names(("aggregate",), updaters) == ["aggregate"]
+    assert source_update_waves(["consumer", "aggregate"], updaters) == [
+        ["consumer"],
+        ["aggregate"],
+    ]
+    assert source_prerequisites(
+        updaters,
+        "aggregate",
+        selected={"consumer", "aggregate"},
+    ) == ("consumer",)
+
+    selected = {"consumer"}
+    add_aggregate_sources(selected, updaters)
+    assert selected == {"consumer", "aggregate"}
+
+
+@pytest.mark.parametrize(
+    "aggregate_into",
+    ["consumer", ("",)],
+)
+def test_aggregate_source_declarations_are_structurally_valid(
+    aggregate_into: object,
+) -> None:
+    """Reject stringly or empty aggregate declarations before scheduling."""
+
+    class _Aggregate:
+        pass
+
+    _Aggregate.aggregate_into = aggregate_into
+    with pytest.raises(TypeError, match="tuple of non-empty source names"):
+        aggregate_destination_names(_Aggregate)
+
+
+def test_aggregate_source_declarations_reject_duplicate_consumers() -> None:
+    """Keep each aggregate dependency unambiguous and auditable."""
+
+    class _Consumer:
+        aggregate_into = ("aggregate", "aggregate")
+
+    with pytest.raises(RuntimeError, match="must be unique"):
+        aggregate_destination_names(_Consumer)
+
+
+def test_aggregate_source_declarations_require_registered_destinations() -> None:
+    """Reject declarations that point at an updater omitted from discovery."""
+
+    class _Consumer:
+        aggregate_into = ("missing",)
+
+    with pytest.raises(RuntimeError, match="not registered: missing"):
+        add_aggregate_sources({"consumer"}, {"consumer": _Consumer})
 
 
 def test_emit_summary_dry_run_updates_and_errors(
@@ -900,6 +1056,116 @@ def test_run_sources_phase_skips_companions_after_failed_parent(
     assert [event.message for event in events] == ["Prerequisite update failed: parent"]
 
 
+def test_run_sources_phase_skips_aggregate_after_failed_consumer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not reconcile an aggregate from a failed candidate dependency."""
+
+    class _ConsumerUpdater:
+        aggregate_into = ("aggregate",)
+
+    class _AggregateUpdater:
+        pass
+
+    async def _update_source(
+        name: str,
+        *,
+        context: SourceTaskContext,
+    ) -> SourceTaskResult:
+        _ = context
+        if name == "consumer":
+            return SourceTaskResult(completed=False)
+        msg = "aggregate updater should not run after consumer failure"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(
+        "lib.update.source_runner.UPDATERS",
+        {"consumer": _ConsumerUpdater, "aggregate": _AggregateUpdater},
+    )
+    monkeypatch.setattr("lib.update.source_runner.update_source_task", _update_source)
+
+    async def _run_case() -> list[UpdateEvent]:
+        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+        await run_sources_phase(
+            context=SourcesPhaseContext(
+                source_names=["consumer", "aggregate"],
+                sources=SourcesFile(
+                    entries={
+                        "consumer": SourceEntry(hashes={}),
+                        "aggregate": SourceEntry(hashes={}),
+                    }
+                ),
+                queue=queue,
+                update_input=False,
+                native_only=False,
+                config=resolve_config(),
+            )
+        )
+        events: list[UpdateEvent] = []
+        while not queue.empty():
+            event = queue.get_nowait()
+            if isinstance(event, UpdateEvent):
+                events.append(event)
+        return events
+
+    events = _run(_run_case())
+    assert [event.message for event in events] == [
+        "Prerequisite update failed: consumer"
+    ]
+
+
+def test_run_sources_phase_feeds_same_run_consumer_result_to_aggregate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Make the aggregate observe a candidate consumer before persistence."""
+
+    class _ConsumerUpdater:
+        aggregate_into = ("aggregate",)
+
+    class _AggregateUpdater:
+        pass
+
+    old_consumer = SourceEntry(hashes={}, electron_version="40.0.0")
+    new_consumer = SourceEntry(hashes={}, electron_version="41.0.0")
+    observed: list[SourceEntry] = []
+
+    async def _update_source(
+        name: str,
+        *,
+        context: SourceTaskContext,
+    ) -> SourceTaskResult:
+        if name == "consumer":
+            return SourceTaskResult(completed=True, source_update=new_consumer)
+        observed.append(context.effective_sources["consumer"])
+        return SourceTaskResult(completed=True)
+
+    monkeypatch.setattr(
+        "lib.update.source_runner.UPDATERS",
+        {"consumer": _ConsumerUpdater, "aggregate": _AggregateUpdater},
+    )
+    monkeypatch.setattr("lib.update.source_runner.update_source_task", _update_source)
+
+    _run(
+        run_sources_phase(
+            context=SourcesPhaseContext(
+                source_names=["consumer", "aggregate"],
+                sources=SourcesFile(
+                    entries={
+                        "consumer": old_consumer,
+                        "aggregate": SourceEntry(hashes={}),
+                    }
+                ),
+                queue=asyncio.Queue(),
+                update_input=False,
+                native_only=False,
+                config=resolve_config(),
+            )
+        )
+    )
+
+    assert observed == [new_consumer]
+
+
 def test_update_source_task_dedupes_shared_input_refreshes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1144,7 +1410,8 @@ def test_update_source_task_reports_incoherent_native_identity_change(
     class _DenoUpdater(DenoDepsHashUpdater):
         name = "demo"
         input_name = None
-        source_pins: ClassVar[dict[str, str]] = {"runtimeVersion": "2.0.0"}
+        compatibility_pin_rationale = "exercise source task compatibility drift"
+        compatibility_pins: ClassVar[dict[str, str]] = {"runtimeVersion": "2.0.0"}
 
         async def fetch_latest(self, session: object) -> VersionInfo:
             _ = session
@@ -1353,7 +1620,7 @@ def test_persist_updates_and_build_plan_edge_paths(
     assert _build_run_plan(UpdateOptions()) is None
 
 
-def test_run_update_command_source_ref_check(
+def test_required_tool_check_source_ref_selection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Require flake-edit only when the selected target needs ref updates."""
@@ -1372,12 +1639,9 @@ def test_run_update_command_source_ref_check(
             )
         ],
     )
-    monkeypatch.setattr(
-        "lib.update.cli.run_updates", lambda _opts: asyncio.sleep(0, result=0)
-    )
-    assert run_update_command(source="src") == 0
+    assert _handle_required_tool_check(UpdateOptions(source="src")) is None
     assert seen["include_flake_edit"] is False
 
     seen.clear()
-    assert run_update_command(check=True) == 0
+    assert _handle_required_tool_check(UpdateOptions(check=True)) is None
     assert seen["include_flake_edit"] is True

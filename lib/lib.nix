@@ -50,6 +50,7 @@ let
     in
     builtins.mapAttrs (_name: path: fromJSON (readFile path)) sourceFiles.entries;
   packageSources = scanSourcesIn (src + "/packages") // scanSourcesIn (src + "/overlays");
+  updateSourceOverrides = evaluationContext.sourceOverrides or { };
   selectSourceHashEntry =
     sourceEntry: fakeHashMode: name: hashType: platformArgs:
     let
@@ -89,7 +90,8 @@ rec {
   flakeLock = (fromJSON (readFile (src + "/flake.lock"))).nodes;
   # Update tooling may override selected sources entries during evaluation
   # without mutating tracked sources.json files.
-  sources = packageSources // (evaluationContext.sourceOverrides or { });
+  sourceOverrides = updateSourceOverrides;
+  sources = packageSources // sourceOverrides;
 
   # In fake-hash mode, all sourceHash* functions return lib.fakeHash instead
   # of reading from sources.json. This lets the update script evaluate the
@@ -123,8 +125,17 @@ rec {
 
   normalizeName = s: builtins.replaceStrings [ "." "_" ] [ "-" "-" ] s;
 
-  # Helper to strip version prefixes from flake refs
-  stripVersionPrefix = s: builtins.replaceStrings [ "rust-v" "v" ] [ "" "" ] s;
+  # Strip only recognized leading version prefixes from flake refs.
+  stripVersionPrefix =
+    s:
+    let
+      prefix = findFirst (candidate: lib.hasPrefix candidate s) null [
+        "rust-v"
+        "desktop-v"
+        "v"
+      ];
+    in
+    if prefix == null then s else lib.removePrefix prefix s;
 
   # Get version from flake lock ref, stripping common prefixes.
   # This expects the input to be pinned with an `original.ref` (tag/branch).

@@ -34,6 +34,7 @@ from lib.tests._nix_ast import (
     expect_scope_binding,
     parse_nix_expr,
 )
+from lib.tests._package_registry import registry_capability_constraints
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
 from lib.update import crate2nix
 from lib.update.events import (
@@ -109,21 +110,18 @@ def _registry_override_groups(
     overrides_expr: BinaryExpression,
 ) -> dict[str, dict[str, object]]:
     """Decode grouped registry override metadata from the let-bound lists."""
+    capability_constraints = registry_capability_constraints()
     groups = {
         "helperPackages": {"helper": True},
         "darwinPackages": {"constraint": "darwin"},
-        "aarch64DarwinPackages": {"constraint": ["aarch64-darwin"]},
-        "darwinLinuxPackages": {"constraint": ["aarch64-darwin", "x86_64-linux"]},
-        "nonX86DarwinLinuxPackages": {
-            "constraint": ["aarch64-darwin", "aarch64-linux", "x86_64-linux"]
+        "aarch64DarwinPackages": {
+            "constraint": capability_constraints["aarch64DarwinPackages"]
         },
-        "allLocalSystemsPackages": {
-            "constraint": [
-                "aarch64-darwin",
-                "x86_64-darwin",
-                "aarch64-linux",
-                "x86_64-linux",
-            ]
+        "darwinLinuxPackages": {
+            "constraint": capability_constraints["darwinLinuxPackages"]
+        },
+        "nonX86DarwinLinuxPackages": {
+            "constraint": capability_constraints["nonX86DarwinLinuxPackages"],
         },
     }
     decoded: dict[str, dict[str, object]] = {}
@@ -1101,6 +1099,35 @@ def test_registered_crate2nix_target_has_complete_current_artifacts(
         and isinstance(source["name"], str)
         and source["name"]
         for source in manifest["slices"].values()
+    )
+
+
+def test_codex_crate2nix_companion_forwards_flake_context() -> None:
+    """The source-only wrapper must preserve Codex's required flake arguments."""
+    assert_nix_ast_equal(
+        (crate2nix.REPO_ROOT / "packages/codex/crate2nix-src.nix").read_text(
+            encoding="utf-8"
+        ),
+        """
+        { callPackage, inputs, outputs, ... }:
+        callPackage ./default.nix {
+          inherit inputs outputs;
+          crate2nixSourceOnly = true;
+        }
+        """,
+    )
+
+
+def test_zed_crate2nix_companion_reuses_the_package_source() -> None:
+    """The source wrapper must inherit every dependency from the real package."""
+    assert_nix_ast_equal(
+        (
+            crate2nix.REPO_ROOT / "packages/zed-editor-nightly/crate2nix-src.nix"
+        ).read_text(encoding="utf-8"),
+        """
+        { zed-editor-nightly, ... }:
+        zed-editor-nightly.patchedSrc
+        """,
     )
 
 

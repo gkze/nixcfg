@@ -76,7 +76,6 @@ let
     name = "goose-cli-v8";
     inherit (v8Source) version;
     inherit rustyV8Src;
-    clangResourceVersion = selfSource.pins.clangResourceVersion;
     extraPatches = [ ./rusty-v8-goose-rename.patch ];
     prebuiltArtifacts = prebuiltV8;
   };

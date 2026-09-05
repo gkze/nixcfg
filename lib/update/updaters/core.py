@@ -3,8 +3,10 @@
 import annotationlib
 import asyncio
 import inspect
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.sources import (
@@ -87,6 +89,24 @@ _SOURCE_IDENTITY_FIELDS = (
     ("commit", "commit"),
     ("electron_version", "electronVersion"),
 )
+_IMMUTABLE_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+_HEX_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+type CompatibilitySourceDigests = dict[str, dict[str, str]]
+
+
+def _is_normalized_repo_path(path: str) -> bool:
+    """Return whether ``path`` is a normalized relative POSIX repository path."""
+    return (
+        bool(path)
+        and path == path.strip()
+        and "\\" not in path
+        and "?" not in path
+        and "#" not in path
+        and not PurePosixPath(path).is_absolute()
+        and PurePosixPath(path).as_posix() == path
+        and all(part not in {"", ".", ".."} for part in path.split("/"))
+    )
 
 
 def _changed_source_identity_fields(
@@ -211,6 +231,7 @@ def _source_override(
     source_name: str,
     *,
     version: str,
+    commit: str,
     src_hash: str,
     dependency_hash_type: HashType,
     dependency_hash: str,
@@ -220,6 +241,7 @@ def _source_override(
     _ = source_name
     return SourceEntry(
         version=version,
+        commit=commit,
         hashes=HashCollection.from_value([
             HashEntry.create("srcHash", src_hash),
             HashEntry.create(dependency_hash_type, dependency_hash),
@@ -232,6 +254,7 @@ async def stream_source_then_overlay_hashes(
     source_name: str,
     *,
     version: str,
+    commit: str,
     src_expr: str,
     dependency_hash_type: HashType,
     source_pins: dict[str, str] | None = None,
@@ -256,6 +279,7 @@ async def stream_source_then_overlay_hashes(
                         source_name: _source_override(
                             source_name,
                             version=version,
+                            commit=commit,
                             src_hash=resolved["srcHash"],
                             dependency_hash_type=dependency_hash_type,
                             dependency_hash=config.fake_hash,
@@ -270,19 +294,99 @@ async def stream_source_then_overlay_hashes(
         yield event
 
 
+def _validated_compatibility_pins(owner: object) -> dict[str, str] | None:
+    """Return reviewed static pins, rejecting unlabeled compatibility policy."""
+    pins = getattr(owner, "compatibility_pins", None)
+    if pins is None:
+        return None
+    if (
+        not isinstance(pins, dict)
+        or not pins
+        or not all(
+            isinstance(key, str)
+            and bool(key.strip())
+            and isinstance(value, str)
+            and bool(value.strip())
+            for key, value in pins.items()
+        )
+    ):
+        msg = "compatibility_pins must be a non-empty mapping of non-blank strings"
+        raise TypeError(msg)
+    rationale = getattr(owner, "compatibility_pin_rationale", None)
+    if not isinstance(rationale, str) or not rationale.strip():
+        msg = "compatibility_pins require compatibility_pin_rationale"
+        raise TypeError(msg)
+    return pins
+
+
+def _validated_compatibility_source_digests(
+    owner: object,
+) -> CompatibilitySourceDigests | None:
+    """Return reviewed byte contracts, rejecting unlabeled or malformed digests."""
+    contracts = getattr(owner, "compatibility_source_digests", None)
+    if contracts is None:
+        return None
+    if not isinstance(contracts, dict) or not contracts:
+        msg = "compatibility_source_digests must be a non-empty nested mapping"
+        raise TypeError(msg)
+    for contract_name, digests in contracts.items():
+        if not isinstance(contract_name, str) or not contract_name.strip():
+            msg = "compatibility_source_digests require non-empty contract names"
+            raise TypeError(msg)
+        if not isinstance(digests, dict) or not digests:
+            msg = (
+                "compatibility_source_digests require non-empty path mappings "
+                f"for {contract_name!r}"
+            )
+            raise TypeError(msg)
+        for path, digest in digests.items():
+            if (
+                not isinstance(path, str)
+                or not _is_normalized_repo_path(path)
+                or not isinstance(digest, str)
+                or _HEX_SHA256_PATTERN.fullmatch(digest) is None
+            ):
+                msg = (
+                    "compatibility_source_digests must map normalized relative "
+                    "POSIX repository paths to "
+                    f"lowercase SHA-256 digests for {contract_name!r}"
+                )
+                raise TypeError(msg)
+    rationale = getattr(owner, "compatibility_source_digest_rationale", None)
+    if not isinstance(rationale, str) or not rationale.strip():
+        msg = (
+            "compatibility_source_digests require compatibility_source_digest_rationale"
+        )
+        raise TypeError(msg)
+    return contracts
+
+
 class SourceThenOverlayHashMixin:
-    """Mixin for updaters that hash src first, then one overlay dependency output."""
+    """Hash one immutable GitHub source tree, then its overlay dependency output."""
 
     name: str
     config: UpdateConfig
     dependency_hash_type: ClassVar[HashType]
-    source_pins: ClassVar[dict[str, str] | None] = None
+    RESOLVE_TAG_COMMIT: ClassVar[bool] = True
 
     @staticmethod
     @abstractmethod
-    def _src_expr(version: str) -> str:
-        """Build the fixed-output source expression for version."""
+    def _src_expr(commit: str) -> str:
+        """Build the fixed-output source expression for an immutable commit."""
         raise NotImplementedError  # pragma: no cover -- abstract method body
+
+    def _source_commit(self, info: VersionInfo) -> str:
+        """Return the immutable commit required by source-backed updaters."""
+        commit = info.commit
+        if commit is None or _IMMUTABLE_COMMIT_PATTERN.fullmatch(commit) is None:
+            msg = f"{self.name} release metadata is missing an immutable source commit"
+            raise RuntimeError(msg)
+        return commit
+
+    def source_pins_for(self, info: VersionInfo) -> dict[str, str] | None:
+        """Return reviewed static compatibility metadata for the candidate."""
+        _ = info
+        return _validated_compatibility_pins(self)
 
     async def fetch_hashes(
         self,
@@ -293,16 +397,27 @@ class SourceThenOverlayHashMixin:
     ) -> EventStream:
         """Compute source and dependency fixed-output hashes."""
         _ = (session, context)
+        commit = self._source_commit(info)
 
         async for event in stream_source_then_overlay_hashes(
             self.name,
             version=info.version,
-            src_expr=self._src_expr(info.version),
+            commit=commit,
+            src_expr=self._src_expr(commit),
             dependency_hash_type=self.dependency_hash_type,
-            source_pins=self.source_pins,
+            source_pins=self.source_pins_for(info),
             config=self.config,
         ):
             yield event
+
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
+        """Persist the version and immutable source commit with both hashes."""
+        return SourceEntry(
+            version=info.version,
+            commit=self._source_commit(info),
+            hashes=HashCollection.from_value(hashes),
+            pins=self.source_pins_for(info),
+        )
 
 
 class Updater(ABC):
@@ -316,14 +431,30 @@ class Updater(ABC):
     generated_artifact_files: ClassVar[tuple[str, ...]] = ()
     derivation_validations: ClassVar[tuple[DerivationValidation, ...]] = ()
     companion_of: ClassVar[str | None] = None
+    aggregate_into: ClassVar[tuple[str, ...]] = ()
     additional_input_names: ClassVar[tuple[str, ...]] = ()
-    source_pins: ClassVar[dict[str, str] | None] = None
+    compatibility_pins: ClassVar[dict[str, str] | None] = None
+    compatibility_pin_rationale: ClassVar[str | None] = None
+    compatibility_source_digests: ClassVar[CompatibilitySourceDigests | None] = None
+    compatibility_source_digest_rationale: ClassVar[str | None] = None
     # Optional tuple of Nix system strings (for example ``"aarch64-darwin"``)
     # this updater may run on. ``None`` means "all platforms" (the default).
     # When set, ``update_stream`` short-circuits on other platforms before
     # hitting the network or the Nix store. Keep this aligned with the package
     # systems in ``packages/registry.nix`` and any upstream platform limits.
     supported_platforms: ClassVar[tuple[str, ...] | None] = None
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        """Reject ambiguous static pins and require compatibility rationale."""
+        super().__init_subclass__(**kwargs)
+        if "source_pins" in cls.__dict__:
+            msg = (
+                f"{cls.__name__} must declare static metadata as compatibility_pins "
+                "with compatibility_pin_rationale, or derive it in source_pins_for()"
+            )
+            raise TypeError(msg)
+        _validated_compatibility_pins(cls)
+        _validated_compatibility_source_digests(cls)
 
     def __init__(self, *, config: UpdateConfig | None = None) -> None:
         """Create an updater bound to active config values."""
@@ -339,10 +470,43 @@ class Updater(ABC):
         """Return checked-in artifact paths this updater may materialize."""
         return cls.generated_artifact_files
 
+    @classmethod
+    def get_compatibility_pin(cls, name: str) -> str:
+        """Return one reviewed scalar compatibility constraint by name."""
+        pins = _validated_compatibility_pins(cls)
+        if pins is None or name not in pins:
+            msg = f"{cls.__name__} is missing compatibility pin {name!r}"
+            raise RuntimeError(msg)
+        return pins[name]
+
+    @classmethod
+    def get_compatibility_source_digests(
+        cls,
+    ) -> CompatibilitySourceDigests | None:
+        """Return reviewed source-byte contracts owned by this updater."""
+        return _validated_compatibility_source_digests(cls)
+
+    @classmethod
+    def get_compatibility_source_digest_contract(
+        cls,
+        name: str,
+    ) -> dict[str, str]:
+        """Return one reviewed source-byte contract by name."""
+        contracts = _validated_compatibility_source_digests(cls)
+        if contracts is None or name not in contracts:
+            msg = f"{cls.__name__} is missing source digest contract {name!r}"
+            raise RuntimeError(msg)
+        return contracts[name]
+
     @abstractmethod
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Fetch latest upstream version details."""
         raise NotImplementedError
+
+    def source_pins_for(self, info: VersionInfo) -> dict[str, str] | None:
+        """Return reviewed static compatibility metadata for the candidate."""
+        _ = info
+        return _validated_compatibility_pins(self)
 
     @abstractmethod
     def fetch_hashes(
@@ -360,7 +524,7 @@ class Updater(ABC):
         return SourceEntry(
             version=info.version,
             hashes=HashCollection.from_value(hashes),
-            pins=self.source_pins,
+            pins=self.source_pins_for(info),
         )
 
     def _build_result_with_urls(
@@ -376,7 +540,7 @@ class Updater(ABC):
             hashes=HashCollection.from_value(hashes),
             urls=urls,
             commit=commit,
-            pins=self.source_pins,
+            pins=self.source_pins_for(info),
         )
 
     async def _is_latest(
@@ -389,12 +553,12 @@ class Updater(ABC):
         current = context.current
         if current is None:
             return False
-        if current.pins != self.source_pins:
+        if current.pins != self.source_pins_for(info):
             return False
         if current.version != info.version:
             return False
         upstream_commit = info.commit
-        if isinstance(upstream_commit, str) and current.commit:
+        if isinstance(upstream_commit, str):
             return current.commit == upstream_commit
         return True
 
@@ -703,6 +867,20 @@ class DownloadHashUpdater(Updater):
             for platform in self.PLATFORMS
         }
 
+    async def _is_latest(
+        self,
+        context: UpdateContext | SourceEntry | None,
+        info: VersionInfo,
+    ) -> bool:
+        """Require the persisted artifacts to match the candidate URL identity."""
+        context = _coerce_context(context)
+        current = context.current
+        if current is None:
+            return False
+        if not await super()._is_latest(context, info):
+            return False
+        return current.urls == self._platform_urls(info)
+
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build a result including generated platform URLs."""
         urls = self._platform_urls(info)
@@ -774,7 +952,7 @@ class HashEntryUpdater(Updater):
             version=info.version,
             hashes=HashCollection.from_value(hashes),
             input=self.input_name,
-            pins=self.source_pins,
+            pins=self.source_pins_for(info),
         )
 
     async def _is_latest(

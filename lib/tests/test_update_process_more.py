@@ -307,8 +307,18 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
     ]
 
 
+@pytest.mark.parametrize(
+    "transient_error",
+    [
+        "Failure when receiving data from the peer",
+        "HTTP protocol violation",
+        "HTTP/2 framing layer",
+        "HTTP/2 stream",
+    ],
+)
 def test_compute_sri_hash_retries_transient_prefetch_failure(
     monkeypatch: pytest.MonkeyPatch,
+    transient_error: str,
 ) -> None:
     """Retry transient nix-prefetch-url failures before surfacing an error."""
     calls = 0
@@ -330,7 +340,7 @@ def test_compute_sri_hash_retries_transient_prefetch_failure(
                     args=["nix-prefetch-url"],
                     returncode=1,
                     stdout="",
-                    stderr="Failure when receiving data from the peer",
+                    stderr=transient_error,
                 ),
                 "prefetch failed",
             )

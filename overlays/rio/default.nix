@@ -5,11 +5,11 @@
   ...
 }:
 let
-  inherit (selfSource) version;
+  inherit (selfSource) commit version;
   src = prev.fetchFromGitHub {
     owner = "raphamorim";
     repo = "rio";
-    tag = "v${version}";
+    rev = commit;
     hash = slib.sourceHash "rio" "srcHash";
   };
 in

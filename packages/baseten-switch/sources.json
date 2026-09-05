@@ -1,7 +1,8 @@
 {
+  "commit": "32343eb58b8bdbb816681a00859dc6d042451906",
   "hashes": [
     {
-      "hash": "sha256-ySXkhimry19qONgL0bADkYXGcgxSF2ZNWpUozpbonnY=",
+      "hash": "sha256-MyaLKuEt6WKkvWX10vEWQZb1HW+1XI+pq1bymO/s16o=",
       "hashType": "srcHash"
     },
     {
@@ -9,5 +10,5 @@
       "hashType": "vendorHash"
     }
   ],
-  "version": "0.4.0"
+  "version": "0.5.0"
 }

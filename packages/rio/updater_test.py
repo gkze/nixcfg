@@ -1,6 +1,5 @@
 """Tests for the Rio source updater."""
 
-import asyncio
 from typing import TYPE_CHECKING
 
 from lib.nix.models.sources import HashEntry, SourceEntry
@@ -20,6 +19,7 @@ if TYPE_CHECKING:
 
 SRC_HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 CARGO_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+COMMIT = "c" * 40
 
 
 def test_rio_update_uses_latest_source_when_release_has_no_rio_dmg(
@@ -46,11 +46,9 @@ def test_rio_update_uses_latest_source_when_release_has_no_rio_dmg(
         },
     )
 
-    monkeypatch.setattr(
-        "lib.update.updaters.github_release.fetch_github_api",
-        lambda *_args, **_kwargs: asyncio.sleep(
-            0,
-            result={
+    async def _fetch_github(_session: object, path: str, **_kwargs: object) -> object:
+        if path.endswith("/releases/latest"):
+            return {
                 "tag_name": "v0.5.0",
                 "assets": [
                     {
@@ -61,8 +59,12 @@ def test_rio_update_uses_latest_source_when_release_has_no_rio_dmg(
                         ),
                     },
                 ],
-            },
-        ),
+            }
+        return {"sha": COMMIT}
+
+    monkeypatch.setattr(
+        "lib.update.updaters.github_release.fetch_github_api",
+        _fetch_github,
     )
     monkeypatch.setattr(
         "lib.update.nix.get_current_nix_platform",
@@ -84,7 +86,7 @@ def test_rio_update_uses_latest_source_when_release_has_no_rio_dmg(
         _build_fetch_from_github_call(
             "raphamorim",
             "rio",
-            tag="v0.5.0",
+            rev=COMMIT,
             fetch_submodules=False,
         ),
     )
@@ -95,6 +97,7 @@ def test_rio_update_uses_latest_source_when_release_has_no_rio_dmg(
             source_overrides={
                 "rio": SourceEntry(
                     version="0.5.0",
+                    commit=COMMIT,
                     hashes=[
                         HashEntry.create("srcHash", SRC_HASH),
                         HashEntry.create("cargoHash", updater.config.fake_hash),
@@ -111,6 +114,7 @@ def test_rio_update_uses_latest_source_when_release_has_no_rio_dmg(
     assert isinstance(result, SourceEntry)
     assert result == SourceEntry(
         version="0.5.0",
+        commit=COMMIT,
         hashes=[
             HashEntry.create("srcHash", SRC_HASH),
             HashEntry.create("cargoHash", CARGO_HASH),

@@ -6,6 +6,7 @@ from types import ModuleType
 import pytest
 
 from lib.nix.models.sources import SourceEntry
+from lib.system_policy import supported_systems
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.paths import REPO_ROOT
@@ -65,7 +66,7 @@ def test_opencode_updater_tracks_all_supported_platform_hashes() -> None:
         (REPO_ROOT / "overlays/opencode/sources.json").read_text(encoding="utf-8")
     )
 
-    expected = ("aarch64-darwin", "aarch64-linux", "x86_64-linux")
+    expected = supported_systems()
     assert expected == updater_cls.SUPPORTED_PLATFORMS
     assert expected == updater_cls.supported_platforms
     assert {

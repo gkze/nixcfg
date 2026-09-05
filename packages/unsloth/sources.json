@@ -1,29 +1,24 @@
 {
-  "commit": "8c43aed2038721050ca0620f02967e03a9d5aa23",
+  "commit": "d90c0320664ef9812a1fb1d2a31f0977feaf7916",
   "hashes": [
     {
-      "hash": "sha256-K3wbtbqvMK9iX3qnLhAUCUU6vwYwMjAfHN+v3wV0yd4=",
+      "hash": "sha256-xRnvnxpc4/Ro6xlv85BtiPyXJmf0Fh+NJjC3qDgIF9E=",
       "hashType": "sha256",
-      "url": "https://files.pythonhosted.org/packages/1b/5c/7645fb279567ab0f81751c284b8c916673e7721aee87acd841478cfab8b7/unsloth-2026.8.22.tar.gz"
+      "url": "https://files.pythonhosted.org/packages/d0/57/ff53f570f7641218eb969137f5eea2dbf8c5b951893498881ebd9ab7942c/unsloth-2026.9.2.tar.gz"
     },
     {
-      "hash": "sha256-yohnJK7S7DEEy5oMYGk/PCz2JzSww08B+1hoRO4PJoY=",
+      "hash": "sha256-PnW3NMJbypnCMByRlILvi1eNVqm6OkrhPIWxAxUQKIQ=",
       "hashType": "sha256",
-      "url": "https://github.com/unslothai/unsloth/releases/download/v0.1.804-beta/latest.json"
+      "url": "https://github.com/unslothai/unsloth/releases/download/v0.1.806-beta/latest.json"
     },
     {
-      "hash": "sha256-HPQu2gdFx5AMPkejUf5zIZqtx8FTwU+ZG7cxmm6tcp8=",
+      "hash": "sha256-oREdZTK1qdkJGhgTwIrQqKpmP3CRjUDsCx13oq6HDpY=",
       "hashType": "srcHash"
     }
   ],
-  "pins": {
-    "frontendDistFileCount": "704",
-    "frontendDistSha256": "03acd2b8ef28d7135bd74a5b7ed82e6eaecea5289cfa4883ece0ef34597b6125",
-    "rustToolchainVersion": "1.89.0"
-  },
   "urls": {
-    "backendSdist": "https://files.pythonhosted.org/packages/1b/5c/7645fb279567ab0f81751c284b8c916673e7721aee87acd841478cfab8b7/unsloth-2026.8.22.tar.gz",
-    "releaseManifest": "https://github.com/unslothai/unsloth/releases/download/v0.1.804-beta/latest.json"
+    "backendSdist": "https://files.pythonhosted.org/packages/d0/57/ff53f570f7641218eb969137f5eea2dbf8c5b951893498881ebd9ab7942c/unsloth-2026.9.2.tar.gz",
+    "releaseManifest": "https://github.com/unslothai/unsloth/releases/download/v0.1.806-beta/latest.json"
   },
-  "version": "0.1.804-beta"
+  "version": "0.1.806-beta"
 }

@@ -1,14 +1,16 @@
 """Dedicated tests for the Superset updater's pure-Python edge cases."""
 
 import asyncio
-from collections.abc import AsyncIterator
+import json
+from collections.abc import AsyncIterator, Iterable
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.nix.models.sources import SourceEntry, SourcesFile
+from lib.nix.models.flake_lock import FlakeLockNode
+from lib.nix.models.sources import HashEntry, SourceEntry, SourcesFile
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
@@ -31,16 +33,202 @@ from lib.update.source_runner import (
     run_sources_phase,
 )
 from lib.update.updaters import VersionInfo
-from lib.update.updaters.metadata import AssetURLsMetadata
 
 if TYPE_CHECKING:
     from lib.update.process import RunCommandOptions
+
+_COMMIT = "a" * 40
+_ELECTRON_VERSION = "42.0.1"
+_BUN_VERSION = "1.3.14"
+_RELEASE_VERSION = "1.2.3"
+_TAG = f"desktop-v{_RELEASE_VERSION}"
+_ASSET_URL = "https://example.test/superset-1.2.3-x86_64.AppImage"
+_ASSET_HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+_BUN_HASHES = (
+    "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+    "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
+)
+
+
+def _release_payload() -> dict[str, object]:
+    return {
+        "tag_name": _TAG,
+        "assets": [
+            {
+                "name": "other-asset",
+                "browser_download_url": "https://example.test/other",
+            },
+            {
+                "name": f"superset-{_RELEASE_VERSION}-x86_64.AppImage",
+                "browser_download_url": _ASSET_URL,
+            },
+        ],
+    }
+
+
+def _desktop_manifest(
+    *,
+    version: str = _RELEASE_VERSION,
+    electron_spec: str = _ELECTRON_VERSION,
+) -> dict[str, object]:
+    return {
+        "version": version,
+        "devDependencies": {"electron": electron_spec},
+    }
+
+
+def _root_manifest(*, package_manager: str = f"bun@{_BUN_VERSION}") -> dict[str, str]:
+    return {"packageManager": package_manager}
+
+
+def _bun_lock_text(
+    *,
+    workspace_spec: str = _ELECTRON_VERSION,
+    resolution: str = f"electron@{_ELECTRON_VERSION}",
+) -> str:
+    return json.dumps({
+        "lockfileVersion": 1,
+        "workspaces": {
+            "apps/desktop": {"devDependencies": {"electron": workspace_spec}}
+        },
+        "packages": {"electron": [resolution, "", {}, "sha512-test"]},
+    })
+
+
+def _flake_node(
+    *,
+    tag: str = _TAG,
+    commit: str = _COMMIT,
+) -> FlakeLockNode:
+    return FlakeLockNode.model_validate({
+        "flake": False,
+        "original": {
+            "type": "github",
+            "owner": "superset-sh",
+            "repo": "superset",
+            "ref": tag,
+        },
+        "locked": {
+            "type": "github",
+            "owner": "superset-sh",
+            "repo": "superset",
+            "rev": commit,
+            "narHash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        },
+    })
+
+
+def _install_release_metadata(
+    module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    payload: object | None = None,
+    release_commit: str = _COMMIT,
+    node: FlakeLockNode | None = None,
+    manifest: object | None = None,
+    root_manifest: object | None = None,
+    bun_lock: bytes | None = None,
+) -> None:
+    release = _release_payload() if payload is None else payload
+
+    async def _fetch_github_api(
+        _session: object,
+        path: str,
+        **_kwargs: object,
+    ) -> object:
+        if path.endswith("/releases/latest"):
+            return release
+        if "/commits/" in path:
+            return {"sha": release_commit}
+        msg = f"unexpected GitHub API path: {path}"
+        raise AssertionError(msg)
+
+    async def _fetch_json(
+        _session: object,
+        url: str,
+        **_kwargs: object,
+    ) -> object:
+        if url.endswith(f"/{release_commit}/apps/desktop/package.json"):
+            return _desktop_manifest() if manifest is None else manifest
+        if url.endswith(f"/{release_commit}/package.json"):
+            return _root_manifest() if root_manifest is None else root_manifest
+        msg = f"unexpected raw JSON URL: {url}"
+        raise AssertionError(msg)
+
+    async def _fetch_url(
+        _session: object,
+        url: str,
+        **_kwargs: object,
+    ) -> bytes:
+        assert url.endswith(f"/{release_commit}/bun.lock")
+        return _bun_lock_text().encode() if bun_lock is None else bun_lock
+
+    monkeypatch.setattr(
+        "lib.update.updaters.github_release.fetch_github_api",
+        _fetch_github_api,
+    )
+    monkeypatch.setattr(module, "fetch_json", _fetch_json)
+    monkeypatch.setattr(module, "fetch_url", _fetch_url)
+    monkeypatch.setattr(
+        module.update_flake,
+        "get_flake_input_node",
+        lambda _name: _flake_node() if node is None else node,
+    )
+
+
+def _install_url_hashes(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    asset_url: str,
+    asset_hash: str,
+) -> None:
+    async def _compute_url_hashes(
+        source: str,
+        urls: Iterable[str],
+        **_kwargs: object,
+    ) -> AsyncIterator[UpdateEvent]:
+        url_list = list(urls)
+        hashes = (asset_hash,) if url_list == [asset_url] else _BUN_HASHES
+        yield UpdateEvent.value(
+            source,
+            dict(zip(url_list, hashes, strict=True)),
+        )
+
+    monkeypatch.setattr(
+        "lib.update.updaters.core.update_process.compute_url_hashes",
+        _compute_url_hashes,
+    )
 
 
 def _load_module() -> ModuleType:
     return load_repo_module(
         "packages/superset/updater.py", "superset_updater_dedicated_test"
     )
+
+
+@pytest.mark.parametrize("failure", ["asset", "runtime"])
+def test_missing_download_hashes_prevent_artifact_generation(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    """Do not run Bun generation until both artifact and runtime hashes exist."""
+    module = _load_module()
+    _install_release_metadata(module, monkeypatch)
+    updater = module.SupersetUpdater()
+    info = _run(updater.fetch_latest(object()))
+    seen_urls: list[list[str]] = []
+
+    async def _hashes(source, urls, **_kwargs):
+        requested = list(urls)
+        seen_urls.append(requested)
+        yield UpdateEvent.status(source, "downloading")
+        if failure == "runtime" and requested == [_ASSET_URL]:
+            yield UpdateEvent.value(source, {_ASSET_URL: _ASSET_HASH})
+
+    monkeypatch.setattr(module.update_process, "compute_url_hashes", _hashes)
+    with pytest.raises(RuntimeError, match="Missing.*hash"):
+        _run(_collect(updater.fetch_hashes(info, object())))
+    assert len(seen_urls) == (1 if failure == "asset" else 2)
 
 
 def test_superset_declares_no_ifd_evaluation_for_supported_systems() -> None:
@@ -52,6 +240,10 @@ def test_superset_declares_no_ifd_evaluation_for_supported_systems() -> None:
             installable=".#pkgs.{system}.{name}.drvPath",
             systems=("aarch64-darwin", "x86_64-linux"),
         ),
+    )
+    assert module.SupersetUpdater.supported_platforms == (
+        "aarch64-darwin",
+        "x86_64-linux",
     )
 
 
@@ -117,19 +309,8 @@ def test_current_superset_still_materializes_bun_artifacts_before_hashing(
     bun_nix.write_text("old nix\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     seen_commands: list[list[str]] = []
-    asset_url = "https://example.test/superset.AppImage"
-    asset_hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-
-    async def _fetch_github_api(*_args: object, **_kwargs: object) -> object:
-        return {
-            "tag_name": "desktop-v1.2.3",
-            "assets": [
-                {
-                    "name": "superset-1.2.3-x86_64.AppImage",
-                    "browser_download_url": asset_url,
-                }
-            ],
-        }
+    asset_url = _ASSET_URL
+    asset_hash = _ASSET_HASH
 
     async def _run_command(
         args: list[str],
@@ -144,29 +325,37 @@ def test_current_superset_still_materializes_bun_artifacts_before_hashing(
             CommandResult(args=args, returncode=0, stdout="", stderr=""),
         )
 
-    async def _compute_url_hashes(
-        source: str,
-        urls: object,
-        *,
-        config: object,
-    ) -> AsyncIterator[UpdateEvent]:
-        _ = config
-        assert list(urls) == [asset_url]  # type: ignore[arg-type]
-        assert bun_lock.read_text(encoding="utf-8") == "new lock\n"
-        assert bun_nix.read_text(encoding="utf-8") == "new nix\n"
-        yield UpdateEvent.value(source, {asset_url: asset_hash})
+    candidate_sources: list[SourceEntry] = []
 
-    monkeypatch.setattr(
-        "lib.update.updaters.github_release.fetch_github_api",
-        _fetch_github_api,
-    )
+    def _build_update_script_expr(
+        package: str,
+        attr_path: str,
+        **kwargs: object,
+    ) -> str:
+        assert package == "superset"
+        assert attr_path == ".passthru.updateScript"
+        overrides = kwargs["source_overrides"]
+        assert isinstance(overrides, dict)
+        candidate = overrides["superset"]
+        assert isinstance(candidate, SourceEntry)
+        candidate_sources.append(candidate)
+        assert kwargs["fake_hashes"] is False
+        return "candidate-update-script"
+
+    _install_release_metadata(module, monkeypatch)
     monkeypatch.setattr(
         "lib.update.generated_artifact_commands._run_command",
         _run_command,
     )
+    _install_url_hashes(
+        monkeypatch,
+        asset_url=asset_url,
+        asset_hash=asset_hash,
+    )
     monkeypatch.setattr(
-        "lib.update.updaters.core.update_process.compute_url_hashes",
-        _compute_url_hashes,
+        module,
+        "_build_package_path_attr_expr",
+        _build_update_script_expr,
     )
     monkeypatch.setattr(
         module,
@@ -174,14 +363,27 @@ def test_current_superset_still_materializes_bun_artifacts_before_hashing(
         lambda text: text.replace("new nix", "normalized nix"),
     )
     current = SourceEntry(
-        version="1.2.3",
+        version=_RELEASE_VERSION,
+        commit=_COMMIT,
         hashes={"x86_64-linux": asset_hash},
         urls={"x86_64-linux": asset_url},
+        pins={"electronVersion": _ELECTRON_VERSION},
     )
 
     events = _run(_collect(module.SupersetUpdater().update_stream(current, object())))
 
-    assert seen_commands == [["nix", "run", ".#superset.passthru.updateScript"]]
+    assert seen_commands == [
+        ["nix", "run", "--impure", "--expr", "candidate-update-script"]
+    ]
+    [candidate] = candidate_sources
+    assert candidate.pins == {"bunVersion": _BUN_VERSION}
+    assert candidate.electron_version == _ELECTRON_VERSION
+    assert candidate.hashes.entries is not None
+    assert [entry.hash_type for entry in candidate.hashes.entries] == [
+        "bunRuntimeHash",
+        "bunRuntimeHash",
+        "sha256",
+    ]
     artifact_event = next(
         event for event in events if event.kind is UpdateEventKind.ARTIFACT
     )
@@ -198,19 +400,8 @@ def test_superset_materialization_failure_remains_an_error(
 ) -> None:
     """A generated-artifact failure must survive source and phase aggregation."""
     module = _load_module()
-    asset_url = "https://example.test/superset.AppImage"
-    asset_hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-
-    async def _fetch_github_api(*_args: object, **_kwargs: object) -> object:
-        return {
-            "tag_name": "desktop-v1.2.3",
-            "assets": [
-                {
-                    "name": "superset-1.2.3-x86_64.AppImage",
-                    "browser_download_url": asset_url,
-                }
-            ],
-        }
+    asset_url = _ASSET_URL
+    asset_hash = _ASSET_HASH
 
     async def _failed_command(
         args: list[str],
@@ -227,13 +418,15 @@ def test_superset_materialization_failure_remains_an_error(
             ),
         )
 
-    monkeypatch.setattr(
-        "lib.update.updaters.github_release.fetch_github_api",
-        _fetch_github_api,
-    )
+    _install_release_metadata(module, monkeypatch)
     monkeypatch.setattr(
         "lib.update.generated_artifact_commands._run_command",
         _failed_command,
+    )
+    _install_url_hashes(
+        monkeypatch,
+        asset_url=asset_url,
+        asset_hash=asset_hash,
     )
     monkeypatch.setattr(
         "lib.update.source_runner.UPDATERS",
@@ -241,9 +434,11 @@ def test_superset_materialization_failure_remains_an_error(
     )
     queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
     current = SourceEntry(
-        version="1.2.3",
+        version=_RELEASE_VERSION,
+        commit=_COMMIT,
         hashes={"x86_64-linux": asset_hash},
         urls={"x86_64-linux": asset_url},
+        pins={"electronVersion": _ELECTRON_VERSION},
     )
 
     phase_result = _run(
@@ -367,43 +562,239 @@ def test_fetch_latest_rejects_non_desktop_tag(
 def test_fetch_latest_returns_version_info_with_asset_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Resolve the desktop version and matching AppImage asset URL."""
+    """Resolve one release's asset, source commit, and locked Electron runtime."""
     module = _load_module()
     updater = module.SupersetUpdater()
-    monkeypatch.setattr(
-        "lib.update.updaters.github_release.fetch_github_api",
-        lambda *_a, **_k: asyncio.sleep(
-            0,
-            result={
-                "tag_name": "desktop-v1.2.3",
-                "assets": [
-                    {
-                        "name": "other-asset",
-                        "browser_download_url": "https://example.test/other",
-                    },
-                    {
-                        "name": "superset-1.2.3-x86_64.AppImage",
-                        "browser_download_url": "https://example.test/superset-1.2.3-x86_64.AppImage",
-                    },
-                ],
-            },
-        ),
-    )
+    _install_release_metadata(module, monkeypatch)
 
     info = _run(updater.fetch_latest(object()))
 
-    assert info.version == "1.2.3"
-    assert info.metadata == AssetURLsMetadata({
-        "x86_64-linux": "https://example.test/superset-1.2.3-x86_64.AppImage"
-    })
+    assert info.version == _RELEASE_VERSION
+    assert info.metadata == {
+        "asset_urls": {"x86_64-linux": _ASSET_URL},
+        "bunVersion": _BUN_VERSION,
+        "commit": _COMMIT,
+        "electronVersion": _ELECTRON_VERSION,
+        "tag": _TAG,
+    }
+    result = updater.build_result(
+        info,
+        [
+            HashEntry.create(
+                "bunRuntimeHash",
+                _BUN_HASHES[0],
+                platform="aarch64-darwin",
+                url=(
+                    "https://github.com/oven-sh/bun/releases/download/"
+                    f"bun-v{_BUN_VERSION}/bun-darwin-aarch64.zip"
+                ),
+            ),
+            HashEntry.create(
+                "sha256",
+                _ASSET_HASH,
+                platform="x86_64-linux",
+            ),
+        ],
+    )
+    assert result.commit == _COMMIT
+    assert result.electron_version == _ELECTRON_VERSION
+    assert result.pins == {"bunVersion": _BUN_VERSION}
+    assert result.urls == {"x86_64-linux": _ASSET_URL}
+
+
+def test_fetch_latest_rejects_source_input_release_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Never combine one release's binary with another source revision."""
+    module = _load_module()
+    _install_release_metadata(
+        module,
+        monkeypatch,
+        release_commit="b" * 40,
+        node=_flake_node(commit=_COMMIT),
+    )
+
+    with pytest.raises(RuntimeError, match="does not match release tag commit"):
+        _run(module.SupersetUpdater().fetch_latest(object()))
+
+
+def test_fetch_latest_rejects_non_utf8_bun_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject an undecodable release lock before selecting a runtime."""
+    module = _load_module()
+    _install_release_metadata(module, monkeypatch, bun_lock=b"\xff")
+
+    with pytest.raises(ValueError, match="bun.lock is not UTF-8 text"):
+        _run(module.SupersetUpdater().fetch_latest(object()))
+
+
+def test_fetch_latest_requires_exact_root_bun_package_manager(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The immutable root manifest owns the exact Bun runtime version."""
+    module = _load_module()
+    _install_release_metadata(
+        module,
+        monkeypatch,
+        root_manifest=_root_manifest(package_manager="bun@latest"),
+    )
+
+    with pytest.raises(RuntimeError, match="exact semantic version"):
+        _run(module.SupersetUpdater().fetch_latest(object()))
+
+
+def test_locked_source_commit_requires_matching_release_tag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The source input itself must be a versioned desktop release."""
+    module = _load_module()
+    monkeypatch.setattr(
+        module.update_flake,
+        "get_flake_input_node",
+        lambda _name: _flake_node(tag="main"),
+    )
+
+    with pytest.raises(RuntimeError, match="same immutable desktop release tag"):
+        module.SupersetUpdater._locked_source_commit(_TAG)
+
+
+def test_locked_source_commit_requires_immutable_github_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject a mutable or malformed locked source witness."""
+    module = _load_module()
+    node = _flake_node()
+    assert node.locked is not None
+    node.locked.rev = "main"
+    monkeypatch.setattr(
+        module.update_flake,
+        "get_flake_input_node",
+        lambda _name: node,
+    )
+
+    with pytest.raises(RuntimeError, match="no immutable GitHub source commit"):
+        module.SupersetUpdater._locked_source_commit(_TAG)
+
+
+@pytest.mark.parametrize(
+    "electron_spec",
+    [_ELECTRON_VERSION, f"^{_ELECTRON_VERSION}", f"~{_ELECTRON_VERSION}"],
+)
+def test_release_metadata_accepts_equivalent_electron_specs(
+    electron_spec: str,
+) -> None:
+    """Let upstream choose normal exact-compatible spec spellings."""
+    module = _load_module()
+
+    assert (
+        module.SupersetUpdater._validate_release_metadata(
+            version=_RELEASE_VERSION,
+            desktop_manifest=_desktop_manifest(electron_spec=electron_spec),
+            bun_lock=json.loads(_bun_lock_text(workspace_spec=electron_spec)),
+        )
+        == _ELECTRON_VERSION
+    )
+
+
+def test_release_metadata_accepts_locked_electron_within_caret_range() -> None:
+    """Accept a lock resolution above the lower bound but below the next major."""
+    module = _load_module()
+    electron_spec = "^41.0.0"
+
+    assert (
+        module.SupersetUpdater._validate_release_metadata(
+            version=_RELEASE_VERSION,
+            desktop_manifest=_desktop_manifest(electron_spec=electron_spec),
+            bun_lock=json.loads(
+                _bun_lock_text(
+                    workspace_spec=electron_spec,
+                    resolution="electron@41.10.3",
+                )
+            ),
+        )
+        == "41.10.3"
+    )
+
+
+@pytest.mark.parametrize(
+    ("manifest", "lock", "message"),
+    [
+        (
+            _desktop_manifest(version="9.9.9"),
+            json.loads(_bun_lock_text()),
+            "does not match release version",
+        ),
+        (
+            _desktop_manifest(electron_spec="^42.0.1"),
+            json.loads(_bun_lock_text(workspace_spec="~42.0.1")),
+            "does not match bun.lock workspace spec",
+        ),
+        (
+            _desktop_manifest(electron_spec="^43.0.0"),
+            json.loads(_bun_lock_text(workspace_spec="^43.0.0")),
+            "does not satisfy",
+        ),
+    ],
+)
+def test_release_metadata_rejects_incoherent_identity(
+    manifest: object,
+    lock: object,
+    message: str,
+) -> None:
+    """Fail closed when release, manifest, workspace, and lock disagree."""
+    module = _load_module()
+
+    with pytest.raises(RuntimeError, match=message):
+        module.SupersetUpdater._validate_release_metadata(
+            version=_RELEASE_VERSION,
+            desktop_manifest=manifest,
+            bun_lock=lock,
+        )
+
+
+@pytest.mark.parametrize(
+    ("resolution", "error_type", "message"),
+    [
+        ("", TypeError, "no exact Electron package resolution"),
+        ("electron@not-semver", RuntimeError, "invalid Electron version"),
+    ],
+)
+def test_locked_electron_version_rejects_invalid_resolution(
+    resolution: str,
+    error_type: type[Exception],
+    message: str,
+) -> None:
+    """Require a conventional exact Electron resolution from Bun."""
+    module = _load_module()
+
+    with pytest.raises(error_type, match=message):
+        module.SupersetUpdater._locked_electron_version(
+            json.loads(_bun_lock_text(resolution=resolution))
+        )
+
+
+def test_source_identity_requires_release_derived_electron_version() -> None:
+    """A missing runtime witness cannot silently fall back to a class constant."""
+    module = _load_module()
+
+    with pytest.raises(TypeError, match="electronVersion"):
+        module.SupersetUpdater().build_result(
+            VersionInfo(
+                _RELEASE_VERSION,
+                {
+                    "asset_urls": {"x86_64-linux": _ASSET_URL},
+                    "commit": _COMMIT,
+                },
+            ),
+            {"x86_64-linux": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+        )
 
 
 def test_asset_name_and_fallback_url_match_release_convention() -> None:
     """Build asset names and fallback URLs from the desktop tag convention."""
     module = _load_module()
     updater = module.SupersetUpdater()
-
-    assert updater.source_pins == {"electronVersion": "40.8.5"}
 
     assert updater._asset_name("1.2.3", "x86_64") == ("superset-1.2.3-x86_64.AppImage")
     assert updater._fallback_url("1.2.3", "x86_64") == (
@@ -413,12 +804,16 @@ def test_asset_name_and_fallback_url_match_release_convention() -> None:
 
 
 def test_get_download_url_prefers_metadata_asset_urls() -> None:
-    """Return metadata-provided URLs before falling back to predictable release URLs."""
+    """Read asset URLs from metadata that also carries source-build identity."""
     module = _load_module()
     updater = module.SupersetUpdater()
     info = VersionInfo(
         "1.2.3",
-        AssetURLsMetadata({"x86_64-linux": "https://example.test/superset.AppImage"}),
+        {
+            "asset_urls": {"x86_64-linux": "https://example.test/superset.AppImage"},
+            "commit": _COMMIT,
+            "electronVersion": _ELECTRON_VERSION,
+        },
     )
 
     assert (
@@ -434,7 +829,7 @@ def test_get_download_url_falls_back_when_metadata_is_missing_or_empty() -> None
 
     empty_metadata = VersionInfo(
         "1.2.3",
-        AssetURLsMetadata({"x86_64-linux": ""}),
+        {"asset_urls": {"x86_64-linux": ""}},
     )
     foreign_metadata = VersionInfo("1.2.3", {"asset_urls": {}})
 

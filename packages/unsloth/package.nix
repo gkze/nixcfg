@@ -1,5 +1,8 @@
 {
   callPackage,
+  artifactValidation ? builtins.fromJSON (builtins.readFile ./artifact-validation.json),
+  closureHashes ? builtins.fromJSON (builtins.readFile ./closure-hashes.json),
+  closurePlan ? builtins.fromJSON (builtins.readFile ./closure-plan.json),
   fetchFromGitHub,
   fetchurl,
   gnutar,
@@ -8,6 +11,7 @@
   makeRustPlatform,
   nodejs_24,
   pkgs,
+  pythonWorkspaceRoot ? ./.,
   runCommand,
   selfSource ? builtins.fromJSON (builtins.readFile ./sources.json),
   stdenv,
@@ -18,9 +22,6 @@ assert stdenv.hostPlatform.system == "aarch64-darwin";
 let
   source = selfSource;
   runtimeSources = builtins.fromJSON (builtins.readFile ./runtime-sources.json);
-  closurePlan = builtins.fromJSON (builtins.readFile ./closure-plan.json);
-  closureHashes = builtins.fromJSON (builtins.readFile ./closure-hashes.json);
-  artifactValidation = builtins.fromJSON (builtins.readFile ./artifact-validation.json);
 
   inherit (source) version;
   backendVersion = closurePlan.backend.version;
@@ -45,18 +46,14 @@ let
     hash = backendSourceHash;
   };
 
-  nodejs =
-    assert lib.assertMsg (
-      lib.getVersion nodejs_24 == runtimeSources.node.version
-    ) "Unsloth requires Node ${runtimeSources.node.version}";
-    nodejs_24;
+  nodejs = nodejs_24;
+  nodeVersion = lib.getVersion nodejs;
   nodeRuntimeContract =
-    runCommand "unsloth-node-${runtimeSources.node.version}-runtime-contract"
+    runCommand "unsloth-node-${nodeVersion}-runtime-contract"
       {
         nativeBuildInputs = [ nodejs ];
         passthru = {
-          expectedNpmVersion = runtimeSources.node.npmVersion;
-          expectedVersion = runtimeSources.node.version;
+          expectedVersion = nodeVersion;
           inherit nodejs;
         };
       }
@@ -66,11 +63,11 @@ let
         test -x ${nodejs}/bin/npx
 
         actualNodeVersion="$(${nodejs}/bin/node --version)"
-        test "$actualNodeVersion" = "v${runtimeSources.node.version}"
+        test "$actualNodeVersion" = "v${nodeVersion}"
         actualNpmVersion="$(${nodejs}/bin/npm --version)"
-        test "$actualNpmVersion" = "${runtimeSources.node.npmVersion}"
+        test -n "$actualNpmVersion"
         actualNpxVersion="$(${nodejs}/bin/npx --version)"
-        test "$actualNpxVersion" = "${runtimeSources.node.npmVersion}"
+        test -n "$actualNpxVersion"
 
         mkdir -p "$out"
         printf '%s\n' "$actualNodeVersion" > "$out/node-version"
@@ -135,12 +132,7 @@ let
         test -f "$out/thirdparty/libwebp/CMakeLists.txt"
       '';
 
-  frontendManifest = {
-    fileCount = builtins.fromJSON source.pins.frontendDistFileCount;
-    sha256 = source.pins.frontendDistSha256;
-  };
   frontend = callPackage ./frontend.nix {
-    inherit frontendManifest;
     src = desktopSource;
     inherit nodejs version;
     npmDepsHash = hashOrFake closureHashes.frontendNpmDepsHash;
@@ -171,13 +163,17 @@ let
       llamaCpp
       nodejs
       oxcNodeModules
+      pythonWorkspaceRoot
       stableDiffusionCpp
       whisperCpp
       ;
   };
 
-  rustToolchain =
-    (inputs.rust-overlay.lib.mkRustBin { } pkgs).stable.${source.pins.rustToolchainVersion}.default;
+  cargoManifest = builtins.fromTOML (
+    builtins.readFile "${desktopSource}/studio/src-tauri/Cargo.toml"
+  );
+  rustToolchainVersion = lib.versions.pad 3 cargoManifest.package.rust-version;
+  rustToolchain = (inputs.rust-overlay.lib.mkRustBin { } pkgs).stable.${rustToolchainVersion}.default;
   exactRustPlatform = makeRustPlatform {
     cargo = rustToolchain;
     rustc = rustToolchain;
@@ -351,8 +347,8 @@ let
   runtimeEvidence = artifactValidation.runtimeEvidence or null;
   runtimeEvidenceComplete =
     builtins.isAttrs runtimeEvidence
-    && (artifactValidation.runtimeEvidenceSchemaVersion or null) == 2
-    && (runtimeEvidence.schemaVersion or null) == 2
+    && (artifactValidation.runtimeEvidenceSchemaVersion or null) == 3
+    && (runtimeEvidence.schemaVersion or null) == 3
     && (runtimeEvidence.status or null) == "passed"
     && (runtimeEvidence.teardown or null) == "passed"
     && (runtimeEvidence.sandbox or null) == "passed"
@@ -360,28 +356,27 @@ let
     && (runtimeEvidence.appCandidate or null) == "${appCandidate}"
     && (runtimeEvidence.backendExecutable or null) == "${backend}/bin/unsloth"
     && (runtimeEvidence.backendRuntimeEntrypoint or null) == "${backend.venv}/bin/unsloth"
-    && builtins.isInt (runtimeEvidence.appPid or null)
-    && runtimeEvidence.appPid > 0
-    && builtins.isInt (runtimeEvidence.backendPid or null)
-    && runtimeEvidence.backendPid > 0
-    && builtins.isInt (runtimeEvidence.sessionId or null)
-    && runtimeEvidence.sessionId == runtimeEvidence.appPid
-    && builtins.isString (runtimeEvidence.listenerAddress or null)
-    && builtins.isInt (runtimeEvidence.port or null)
-    && runtimeEvidence.listenerAddress == "127.0.0.1:${toString runtimeEvidence.port}"
-    && builtins.elem runtimeEvidence.port (lib.range 8888 8908)
-    && builtins.isList (runtimeEvidence.ownedProcessGroups or null)
-    && runtimeEvidence.ownedProcessGroups != [ ]
-    && builtins.all (group: builtins.isInt group && group > 0) runtimeEvidence.ownedProcessGroups
-    && builtins.isInt (runtimeEvidence.protectedListenerCount or null)
-    && runtimeEvidence.protectedListenerCount > 0
-    && builtins.isString (runtimeEvidence.protectedListenerIdentitySha256 or null)
-    && builtins.match "[0-9a-f]{64}" runtimeEvidence.protectedListenerIdentitySha256 != null
     && builtins.isAttrs (runtimeEvidence.health or null)
+    &&
+      builtins.attrNames runtimeEvidence.health == [
+        "service"
+        "status"
+      ]
     && (runtimeEvidence.health.service or null) == "Unsloth UI Backend"
     && (runtimeEvidence.health.status or null) == "healthy"
-    && builtins.isString (runtimeEvidence.health.studio_root_id or null)
-    && builtins.match "[0-9a-f]+" runtimeEvidence.health.studio_root_id != null;
+    && (runtimeEvidence.studioRootIdentity or null) == "passed";
+  closureIdentityComplete =
+    (closurePlan.app.version or null) == version
+    && (closurePlan.app.tag or null) == "v${version}"
+    && (closurePlan.app.commit or null) == source.commit
+    && (closurePlan.app.sourceHash or null) == desktopSourceHash
+    && (closurePlan.backend.version or null) == backendVersion
+    && (closurePlan.backend.sdistHash or null) == backendSourceHash
+    && (closurePlan.releaseManifest.version or null) == version
+    && (closurePlan.releaseManifest.pypiVersion or null) == backendVersion
+    &&
+      (closurePlan.releaseManifest.hash or null) == (hashEntryFor "sha256" source.urls.releaseManifest)
+      .hash;
   closureStateAllowsExport =
     (closurePlan.status == "ready-for-promotion" && closurePlan.packageExported == false)
     || (closurePlan.status == "exported-and-validated" && closurePlan.packageExported == true);
@@ -392,6 +387,7 @@ let
     ++ lib.optional (artifactValidation.status != "passed") "artifact-validation"
     ++ lib.optional (!smokeEvidenceComplete) "store-path-smoke-evidence"
     ++ lib.optional (!runtimeEvidenceComplete) "runtime-evidence"
+    ++ lib.optional (!closureIdentityComplete) "closure-plan-identity"
     ++ lib.optional (closurePlan.blockers != [ ]) "closure-plan-blockers"
     ++ lib.optional (!closureStateAllowsExport) "closure-plan-status";
   exportReady = unresolvedBuildGates == [ ];

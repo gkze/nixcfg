@@ -67,6 +67,40 @@ def test_load_source_entry_accepts_legacy_list_payload(tmp_path: Path) -> None:
     assert entries[0].platform == "x86_64-linux"
 
 
+def test_read_pinned_source_version_requires_source_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail clearly when no updater-managed sources file owns the package."""
+    monkeypatch.setattr("lib.update.sources.sources_file_for", lambda _name: None)
+
+    with pytest.raises(RuntimeError, match="sources.json not found for demo"):
+        read_pinned_source_version("demo")
+
+
+@pytest.mark.parametrize("version", [None, ""])
+def test_read_pinned_source_version_requires_nonempty_version(
+    version: str | None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject source sidecars that cannot identify the pinned release."""
+    source_path = tmp_path / "sources.json"
+    source_path.write_text(
+        json.dumps({"hashes": {}, "version": version}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "lib.update.sources.sources_file_for",
+        lambda _name: source_path,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="demo sources.json is missing a pinned version",
+    ):
+        read_pinned_source_version("demo")
+
+
 def test_source_entry_preserves_and_updates_electron_version() -> None:
     """Round-trip strict Electron metadata and merge newer values when supplied."""
     original = SourceEntry.model_validate({
@@ -163,6 +197,8 @@ def test_source_reads_and_new_writes_follow_authoritative_sidecars(
         ),
     )
     assert flat_created["version"] == "3.0.0"
+    assert not (updater_dir / "sources.json.lock").exists()
+    assert not (tmp_path / "overlays" / "flat-demo.sources.json.lock").exists()
 
 
 def test_save_sources_raises_for_unknown_source_name(

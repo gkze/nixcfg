@@ -1,5 +1,6 @@
 """Updater for the source-built Baseten CLI."""
 
+from lib.system_policy import supported_systems
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.updaters import (
@@ -17,11 +18,7 @@ class BasetenUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
     GITHUB_OWNER = "basetenlabs"
     GITHUB_REPO = "baseten-cli"
     dependency_hash_type = "vendorHash"
-    supported_platforms = (
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-linux",
-    )
+    supported_platforms = supported_systems()
     derivation_validations = (
         DerivationValidation(
             installable=".#pkgs.{system}.{name}",
@@ -30,10 +27,10 @@ class BasetenUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
     )
 
     @staticmethod
-    def _src_expr(version: str) -> str:
+    def _src_expr(commit: str) -> str:
         return _build_fetch_from_github_expr(
             "basetenlabs",
             "baseten-cli",
-            tag=f"v{version}",
+            rev=commit,
             fetch_submodules=False,
         )

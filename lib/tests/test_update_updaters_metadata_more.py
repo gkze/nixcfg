@@ -31,6 +31,7 @@ def test_mapping_metadata_helpers_and_version_info_commit_paths() -> None:
         "node": node,
         "commit": "abc123",
     }
+    assert FlakeInputMetadata(node=node).to_dict() == {"node": node}
     assert metadata_module.metadata_get(flake_metadata, "commit") == "abc123"
     assert metadata_module.metadata_get_str(flake_metadata, "commit") == "abc123"
 

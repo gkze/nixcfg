@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 SRC_HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 VENDOR_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+COMMIT = "e" * 40
 
 
 def _load_module() -> ModuleType:
@@ -47,7 +48,7 @@ def test_turso_cli_computes_source_then_vendor_hash(
     """Hash the release source before evaluating the overlaid Go package."""
     module = _load_module()
     updater = module.TursoCliUpdater()
-    info = VersionInfo(version="9.9.9")
+    info = VersionInfo(version="9.9.9", metadata={"commit": COMMIT})
     calls = install_fixed_hash_stream(
         monkeypatch,
         (
@@ -64,7 +65,7 @@ def test_turso_cli_computes_source_then_vendor_hash(
         _build_fetch_from_github_call(
             "tursodatabase",
             "turso-cli",
-            tag="v9.9.9",
+            rev=COMMIT,
             fetch_submodules=False,
         ),
     )
@@ -75,6 +76,7 @@ def test_turso_cli_computes_source_then_vendor_hash(
             source_overrides={
                 "turso-cli": SourceEntry(
                     version=info.version,
+                    commit=COMMIT,
                     hashes=[
                         HashEntry.create("srcHash", SRC_HASH),
                         HashEntry.create("vendorHash", updater.config.fake_hash),

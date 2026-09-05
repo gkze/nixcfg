@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from types import ModuleType
 
@@ -41,6 +42,7 @@ from lib.update.updaters import VersionInfo
 _VERSION = "1.1.15"
 _COMMIT = "9a562bb34c0accc7b1bd1396309d0c003b23f3e2"
 _ELECTRON_VERSION = "43.4.0"
+_NODE_VERSION = "24.19.0"
 _NODE_ENGINE = ">=24.15.0"
 _NPM_ENGINE = ">=12.0.2"
 _PACKAGE_MANAGER = "npm@12.0.2"
@@ -133,6 +135,28 @@ def test_gooeypi_update_pins_source_and_hashes_build_closure_without_derivation(
         _github_api,
     )
     monkeypatch.setattr(module, "fetch_json", _fetch_json)
+    node_resolution_calls: list[tuple[str, str, float, str]] = []
+
+    async def _resolve_package_passthru_version(
+        package_attr: str,
+        passthru_attr: str,
+        *,
+        command_timeout: float,
+        source_name: str,
+    ) -> str:
+        node_resolution_calls.append((
+            package_attr,
+            passthru_attr,
+            command_timeout,
+            source_name,
+        ))
+        return _NODE_VERSION
+
+    monkeypatch.setattr(
+        module,
+        "resolve_package_passthru_version",
+        _resolve_package_passthru_version,
+    )
     monkeypatch.setattr(
         "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
@@ -155,6 +179,14 @@ def test_gooeypi_update_pins_source_and_hashes_build_closure_without_derivation(
     assert manifest_urls == [
         github_raw_url("am-will", "gooey-pi", _COMMIT, "package.json"),
         github_raw_url("am-will", "gooey-pi", _COMMIT, "package-lock.json"),
+    ]
+    assert node_resolution_calls == [
+        (
+            "gooeypi",
+            "nodejsVersion",
+            updater.config.default_subprocess_timeout,
+            "GooeyPi",
+        )
     ]
     assert len(calls) == 3
     assert_nix_ast_equal(
@@ -213,16 +245,28 @@ def test_gooeypi_metadata_has_complete_source_closures() -> None:
         json.loads((_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8"))
     )
 
-    assert source.version == _VERSION
-    assert source.commit == _COMMIT
-    assert source.electron_version == _ELECTRON_VERSION
-    assert source.pins == {"npmVersion": _NPM_VERSION}
+    assert source.version is not None
+    assert source.commit is not None
+    assert source.electron_version is not None
+    assert source.pins is not None
+    npm_version = source.pins["npmVersion"]
+    assert re.fullmatch(
+        r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)",
+        npm_version,
+    )
     assert source.hashes.entries is not None
     assert {entry.hash_type for entry in source.hashes.entries} == {
         "npmDepsHash",
         "sha256",
         "srcHash",
     }
+    npm_cli_entries = [
+        entry for entry in source.hashes.entries if entry.hash_type == "sha256"
+    ]
+    assert len(npm_cli_entries) == 1
+    assert npm_cli_entries[0].url == (
+        f"https://registry.npmjs.org/npm/-/npm-{npm_version}.tgz"
+    )
     assert "gooeypi" in package_file_names_in(REPO_ROOT, "default.nix")
 
 
@@ -265,6 +309,10 @@ def test_gooeypi_package_is_a_source_built_managed_mac_app() -> None:
     assert_nix_ast_equal(
         expect_binding(scope, "electronBuild").value,
         "nixcfgElectron.sourceBuildFor electronVersion",
+    )
+    assert_nix_ast_equal(
+        expect_binding(scope, "nodejs").value,
+        "nodejs_24",
     )
     npm_cli = expect_instance(
         expect_binding(scope, "npmCli").value,
@@ -311,6 +359,13 @@ def test_gooeypi_package_is_a_source_built_managed_mac_app() -> None:
         )
         == 1
     )
+    assert (
+        sum(
+            isinstance(item, Identifier) and item.name == "nodejs"
+            for item in native_build_inputs.value
+        )
+        == 1
+    )
     assert_nix_ast_equal(
         expect_binding(arguments.values, "dontUseCmakeConfigure").value,
         "true",
@@ -353,6 +408,10 @@ def test_gooeypi_package_is_a_source_built_managed_mac_app() -> None:
     passthru = expect_instance(
         expect_binding(arguments.values, "passthru").value,
         AttributeSet,
+    )
+    assert_nix_ast_equal(
+        expect_binding(passthru.values, "nodejsVersion").value,
+        "nodejs.version",
     )
     mac_app = expect_instance(
         expect_binding(passthru.values, "macApp").value,
@@ -401,15 +460,26 @@ def test_gooeypi_makes_npm_cache_writable_for_pinned_npm() -> None:
     )
 
 
-@pytest.mark.parametrize("electron_spec", [_ELECTRON_VERSION, f"^{_ELECTRON_VERSION}"])
-def test_gooeypi_accepts_exact_locked_electron_contract(electron_spec: str) -> None:
-    """Only an exact or exact-caret manifest may select the locked runtime."""
+@pytest.mark.parametrize(
+    "electron_spec",
+    [
+        _ELECTRON_VERSION,
+        f"^{_ELECTRON_VERSION}",
+        "^43.3.0",
+        f"~{_ELECTRON_VERSION}",
+    ],
+)
+def test_gooeypi_accepts_compatible_locked_electron_contract(
+    electron_spec: str,
+) -> None:
+    """Accept exact, caret, and tilde specs containing the locked runtime."""
     module = _load_updater_module()
 
     assert module.GooeyPiUpdater._validate_release_manifests(
         version=_VERSION,
         package_manifest=_package_manifest(electron=electron_spec),
         lock_manifest=_lock_manifest(),
+        selected_node_version=_NODE_VERSION,
     ) == (
         _ELECTRON_VERSION,
         _NPM_VERSION,
@@ -501,10 +571,10 @@ def test_gooeypi_accepts_exact_locked_electron_contract(electron_spec: str) -> N
             "package lock has no exact Electron version",
         ),
         (
-            _package_manifest(electron="^43.3.0"),
+            _package_manifest(electron="^42.3.0"),
             _lock_manifest(),
             RuntimeError,
-            "does not resolve exactly",
+            "does not satisfy",
         ),
         (
             {
@@ -517,16 +587,16 @@ def test_gooeypi_accepts_exact_locked_electron_contract(electron_spec: str) -> N
             "build toolchain is missing",
         ),
         (
-            _package_manifest(node_engine=">=25.0.0"),
+            _package_manifest(node_engine=">=24.20.0"),
             _lock_manifest(),
             RuntimeError,
             "Node engine",
         ),
         (
-            _package_manifest(npm_engine=">=11.0.0"),
+            _package_manifest(npm_engine=">=13.0.0"),
             _lock_manifest(),
             RuntimeError,
-            "npm engine",
+            "does not satisfy",
         ),
         (
             _package_manifest(package_manager="pnpm@10.0.0"),
@@ -550,6 +620,77 @@ def test_gooeypi_rejects_incoherent_release_manifests(
             version=_VERSION,
             package_manifest=package,
             lock_manifest=lock,
+            selected_node_version=_NODE_VERSION,
+        )
+
+
+@pytest.mark.parametrize(
+    ("node_engine", "npm_engine", "package_manager", "expected"),
+    [
+        (">=23.9.0", ">=11.0.0", "npm@12.0.3", "12.0.3"),
+        (">=24.16.0", ">=12.0.2", "npm@12.1.0", "12.1.0"),
+    ],
+)
+def test_gooeypi_accepts_compatible_toolchain_range_drift(
+    node_engine: str,
+    npm_engine: str,
+    package_manager: str,
+    expected: str,
+) -> None:
+    """Treat manifest ranges as constraints instead of frozen release identity."""
+    module = _load_updater_module()
+
+    assert (
+        module.GooeyPiUpdater._validate_build_toolchain(
+            _package_manifest(
+                node_engine=node_engine,
+                npm_engine=npm_engine,
+                package_manager=package_manager,
+            ),
+            selected_node_version=_NODE_VERSION,
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize("version", ["12.0", "01.2.3", "v12.0.2"])
+def test_gooeypi_rejects_non_exact_semantic_versions(version: str) -> None:
+    """Require canonical exact versions before comparing toolchain bounds."""
+    module = _load_updater_module()
+
+    with pytest.raises(RuntimeError, match="exact semantic version"):
+        module._version_triplet(version, context="package manager version")
+
+
+@pytest.mark.parametrize(
+    ("engine", "error_type", "match"),
+    [
+        (None, TypeError, "engine is missing"),
+        ("", TypeError, "engine is missing"),
+        ("^12.0.2", RuntimeError, "simple >= minimum range"),
+    ],
+)
+def test_gooeypi_rejects_missing_or_complex_engine_ranges(
+    engine: object,
+    error_type: type[Exception],
+    match: str,
+) -> None:
+    """Keep engine minimum parsing explicit and fail closed on ambiguity."""
+    module = _load_updater_module()
+
+    with pytest.raises(error_type, match=match):
+        module._engine_minimum(engine, context="npm")
+
+
+@pytest.mark.parametrize("package_manager", [None, ""])
+def test_gooeypi_requires_a_package_manager(package_manager: object) -> None:
+    """Reject manifests that omit the npm CLI identity used by the build."""
+    module = _load_updater_module()
+
+    with pytest.raises(TypeError, match="package manager is missing"):
+        module.GooeyPiUpdater._validate_build_toolchain(
+            _package_manifest(package_manager=package_manager),
+            selected_node_version=_NODE_VERSION,
         )
 
 

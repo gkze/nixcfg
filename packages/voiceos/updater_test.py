@@ -1,6 +1,5 @@
 """Behavioral and package-shape tests for VoiceOS desktop."""
 
-import json
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING
@@ -11,12 +10,19 @@ from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
     expect_binding,
     parse_nix_expr,
+)
+from lib.tests._source_metadata import (
+    assert_https_url,
+    assert_platform_source_entry,
+    assert_release_version,
+    assert_url_contains_version,
 )
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
@@ -125,19 +131,18 @@ def test_voiceos_package_preserves_the_signed_universal_bundle() -> None:
 
 
 def test_voiceos_sources_pin_the_same_universal_zip_for_both_systems() -> None:
-    """Checked-in metadata should match the universal artifact selected by the updater."""
-    sources = json.loads(
+    """Checked-in metadata must route both systems to one official universal ZIP."""
+    source = SourceEntry.model_validate_json(
         (REPO_ROOT / "packages/voiceos/sources.json").read_text(encoding="utf-8")
     )
-
-    assert sources == {
-        "hashes": {
-            "aarch64-darwin": _HASH,
-            "x86_64-darwin": _HASH,
-        },
-        "urls": {
-            "aarch64-darwin": _ARTIFACT_URL,
-            "x86_64-darwin": _ARTIFACT_URL,
-        },
-        "version": _VERSION,
-    }
+    version = assert_release_version(source.version)
+    hashes, urls = assert_platform_source_entry(
+        source,
+        platforms={"aarch64-darwin", "x86_64-darwin"},
+    )
+    assert len(set(hashes.values())) == 1
+    assert len(set(urls.values())) == 1
+    url = urls["aarch64-darwin"]
+    assert_https_url(url, host="voiceos-staging-releases.s3.amazonaws.com")
+    assert_url_contains_version(url, version)
+    assert url.endswith("-universal-mac.zip")

@@ -70,7 +70,6 @@ let
     name = "codex-v8";
     inherit (v8Source) version;
     inherit rustyV8Src;
-    clangResourceVersion = slib.sources.codex.pins.clangResourceVersion;
     gnArgsOverrides = {
       # Our Nix-provided rustc + RUSTC_BOOTSTRAP=1 is nightly-capable, but GN
       # can't detect this since we supply rust_sysroot_absolute.
@@ -198,20 +197,6 @@ let
       codegenUnits = 16;
     };
 
-  # Prebuilt WebRTC libraries for the webrtc-sys crate. The crate's build.rs
-  # tries to download these at build time via scratch::path(), which fails in
-  # the Nix sandbox. Setting LK_CUSTOM_WEBRTC skips the download.
-  webrtcSource = slib.sourceHashEntryForPlatform "codex" "sha256" pkgs.stdenv.hostPlatform.system;
-  webrtcPrebuilt = pkgs.fetchzip {
-    inherit (webrtcSource) hash url;
-  };
-  webrtcSysOverride = _attrs: {
-    LK_CUSTOM_WEBRTC = "${webrtcPrebuilt}";
-    # cxx-build creates a symlink to cxx.h that lands outside $lib, triggering
-    # the noBrokenSymlinks fixup check. Disable it for this crate.
-    dontCheckForBrokenSymlinks = true;
-  };
-
   # Each platform crate compiles CARGO_MANIFEST_DIR into its path helpers.
   # crate2nix builds the library separately from its source, so the default
   # value points into a transient producer sandbox. Embed the final library
@@ -242,7 +227,6 @@ let
       rmcp = rmcpOverride;
       runfiles = runfilesOverride;
       v8 = v8Build.mkCrateOverride;
-      webrtc-sys = webrtcSysOverride;
     }
     // lib.optionalAttrs needsCoreNodeVersionPatch {
       codex-core = codexCoreOverride;

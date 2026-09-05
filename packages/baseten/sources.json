@@ -1,13 +1,14 @@
 {
+  "commit": "e9afc8d5dd34cc93f513a22820d2cfae463beb02",
   "hashes": [
     {
-      "hash": "sha256-tKu5yNwAuW4t2ryt7RNs7rAnYvG8zmXRvHRFk3OFXHA=",
+      "hash": "sha256-zbKKwBpeeeYgEWuicKlUG7nwuJ9z0miu2Llp0McchDU=",
       "hashType": "srcHash"
     },
     {
-      "hash": "sha256-53KmaYxJ+HZLKSnwnVL9jUXf0i4R8OXH9R5fRUx4TZk=",
+      "hash": "sha256-6VVVTmbxSikNY5w3V3WsSdh4h/jBqkZU81acRUtNfcc=",
       "hashType": "vendorHash"
     }
   ],
-  "version": "0.3.0"
+  "version": "0.4.0"
 }

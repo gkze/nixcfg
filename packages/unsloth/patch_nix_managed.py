@@ -1,6 +1,10 @@
 """Apply the fail-closed Nix ownership policy to Unsloth Desktop source."""
 
 import argparse
+import json
+import re
+import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,6 +12,20 @@ from lib.exact_text_patch import ExactTextPatch, plan_exact_text_patches
 
 _NIX_MODULE = Path("studio/src-tauri/src/nix_managed.rs")
 _PATCH_SENTINEL = 'option_env!("UNSLOTH_NIX_BACKEND")'
+_CARGO_MANIFEST = Path("studio/src-tauri/Cargo.toml")
+_CARGO_LOCK = Path("studio/src-tauri/Cargo.lock")
+_DESKTOP_PACKAGE = "unsloth-studio"
+_FIX_PATH_ENV_PACKAGE = "fix-path-env"
+_FIX_PATH_ENV_URL = "https://github.com/tauri-apps/fix-path-env-rs"
+_DESKTOP_VERSION = re.compile(
+    r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?",
+    re.ASCII,
+)
+_FIX_PATH_ENV_SOURCE = re.compile(
+    rf"git\+{re.escape(_FIX_PATH_ENV_URL)}"
+    r"(?:\?rev=(?P<revision>[0-9a-f]{40}))?#(?P<commit>[0-9a-f]{40})",
+    re.ASCII,
+)
 _NIX_MODULE_SOURCE = """// SPDX-License-Identifier: AGPL-3.0-only
 // Nix ownership policy injected from the nixcfg source package.
 
@@ -51,6 +69,233 @@ class _SourcePatch:
     old: str
     new: str
     expected_matches: int = 1
+
+
+def _table_span(source: str, header: str) -> tuple[int, int]:
+    """Return the unique textual span for one TOML table."""
+    header_pattern = re.compile(rf"(?m)^\[{re.escape(header)}\]\s*(?:#.*)?$")
+    matches = list(header_pattern.finditer(source))
+    if len(matches) != 1:
+        msg = f"expected one [{header}] table, found {len(matches)}"
+        raise RuntimeError(msg)
+    start = matches[0].end()
+    next_header = re.search(r"(?m)^\[", source[start:])
+    end = len(source) if next_header is None else start + next_header.start()
+    return start, end
+
+
+def _replace_table_assignment(
+    source: str,
+    *,
+    header: str,
+    key: str,
+    rendered_value: str,
+) -> str:
+    """Replace one assignment in a structurally selected TOML table."""
+    start, end = _table_span(source, header)
+    table = source[start:end]
+    assignment = re.compile(rf"(?m)^(?P<indent>\s*){re.escape(key)}\s*=.*$")
+    matches = list(assignment.finditer(table))
+    if len(matches) != 1:
+        msg = f"expected one {key} assignment in [{header}], found {len(matches)}"
+        raise RuntimeError(msg)
+    match = matches[0]
+    replacement = f"{match.group('indent')}{key} = {rendered_value}"
+    return (
+        source[:start]
+        + table[: match.start()]
+        + replacement
+        + table[match.end() :]
+        + source[end:]
+    )
+
+
+def _package_table_spans(source: str) -> tuple[tuple[int, int], ...]:
+    """Return every ``[[package]]`` span from a Cargo lock file."""
+    headers = tuple(re.finditer(r"(?m)^\[\[package\]\]\s*(?:#.*)?$", source))
+    return tuple(
+        (
+            match.start(),
+            headers[index + 1].start() if index + 1 < len(headers) else len(source),
+        )
+        for index, match in enumerate(headers)
+    )
+
+
+def _replace_lock_package_assignment(
+    source: str,
+    *,
+    package_name: str,
+    key: str,
+    rendered_value: str,
+) -> str:
+    """Replace one field in the uniquely named Cargo lock package."""
+    matches: list[tuple[int, int]] = []
+    for start, end in _package_table_spans(source):
+        payload = tomllib.loads(source[start:end])
+        packages = payload.get("package")
+        if (
+            isinstance(packages, list)
+            and len(packages) == 1
+            and isinstance(packages[0], Mapping)
+            and packages[0].get("name") == package_name
+        ):
+            matches.append((start, end))
+    if len(matches) != 1:
+        msg = (
+            f"expected one Cargo.lock package named {package_name}, "
+            f"found {len(matches)}"
+        )
+        raise RuntimeError(msg)
+    start, end = matches[0]
+    table = source[start:end]
+    assignment = re.compile(rf"(?m)^(?P<indent>\s*){re.escape(key)}\s*=.*$")
+    fields = list(assignment.finditer(table))
+    if len(fields) != 1:
+        msg = (
+            f"expected one {key} assignment for Cargo.lock package "
+            f"{package_name}, found {len(fields)}"
+        )
+        raise RuntimeError(msg)
+    field = fields[0]
+    replacement = f"{field.group('indent')}{key} = {rendered_value}"
+    return (
+        source[:start]
+        + table[: field.start()]
+        + replacement
+        + table[field.end() :]
+        + source[end:]
+    )
+
+
+def _lock_packages(lock: Mapping[str, object]) -> list[Mapping[str, object]]:
+    """Return typed Cargo lock packages."""
+    payload = lock.get("package")
+    if not isinstance(payload, list) or not all(
+        isinstance(entry, Mapping) for entry in payload
+    ):
+        msg = "Cargo.lock must contain object package entries"
+        raise TypeError(msg)
+    return list(payload)
+
+
+def _unique_lock_package(
+    packages: list[Mapping[str, object]],
+    name: str,
+) -> Mapping[str, object]:
+    """Return the uniquely named Cargo lock package."""
+    matches = [entry for entry in packages if entry.get("name") == name]
+    if len(matches) != 1:
+        msg = f"Cargo.lock must contain one {name} package, found {len(matches)}"
+        raise RuntimeError(msg)
+    return matches[0]
+
+
+def _fix_path_env_revision(
+    manifest: Mapping[str, object],
+    packages: list[Mapping[str, object]],
+) -> str:
+    """Derive and cross-check the locked fix-path-env commit."""
+    dependencies = manifest.get("dependencies")
+    if not isinstance(dependencies, Mapping):
+        msg = "Cargo.toml must contain object dependencies"
+        raise TypeError(msg)
+    fix_path_env = dependencies.get(_FIX_PATH_ENV_PACKAGE)
+    if not isinstance(fix_path_env, Mapping):
+        msg = "Cargo.toml fix-path-env dependency must be an inline table"
+        raise TypeError(msg)
+    if fix_path_env.get("git") != _FIX_PATH_ENV_URL:
+        msg = "Cargo.toml fix-path-env dependency uses an unexpected Git source"
+        raise RuntimeError(msg)
+    if set(fix_path_env) - {"git", "rev"}:
+        msg = "Cargo.toml fix-path-env dependency has unsupported source selectors"
+        raise RuntimeError(msg)
+
+    lock_source_id = _unique_lock_package(packages, _FIX_PATH_ENV_PACKAGE).get("source")
+    if not isinstance(lock_source_id, str):
+        msg = "Cargo.lock fix-path-env source must be a string"
+        raise TypeError(msg)
+    source_match = _FIX_PATH_ENV_SOURCE.fullmatch(lock_source_id)
+    if source_match is None:
+        msg = (
+            "Cargo.lock fix-path-env source is not an immutable supported Git identity"
+        )
+        raise RuntimeError(msg)
+    revision = source_match.group("commit")
+    pinned_revision = source_match.group("revision")
+    if pinned_revision is not None and pinned_revision != revision:
+        msg = "Cargo.lock fix-path-env rev selector disagrees with its locked commit"
+        raise RuntimeError(msg)
+    manifest_revision = fix_path_env.get("rev")
+    if manifest_revision is not None and manifest_revision != revision:
+        msg = "Cargo.toml fix-path-env rev selector disagrees with Cargo.lock"
+        raise RuntimeError(msg)
+    return revision
+
+
+def _cargo_consistency_replacements(
+    source_root: Path,
+    desktop_version: str,
+) -> dict[Path, str]:
+    """Derive Cargo release and Git identities from immutable candidate source."""
+    if _DESKTOP_VERSION.fullmatch(desktop_version) is None:
+        msg = f"invalid Unsloth desktop version: {desktop_version!r}"
+        raise RuntimeError(msg)
+
+    manifest_source = (source_root / _CARGO_MANIFEST).read_text(encoding="utf-8")
+    lock_source = (source_root / _CARGO_LOCK).read_text(encoding="utf-8")
+    manifest = tomllib.loads(manifest_source)
+    lock = tomllib.loads(lock_source)
+
+    package = manifest.get("package")
+    if not isinstance(package, Mapping) or package.get("name") != _DESKTOP_PACKAGE:
+        msg = f"Cargo.toml must define package {_DESKTOP_PACKAGE}"
+        raise RuntimeError(msg)
+    manifest_version = package.get("version")
+    if not isinstance(manifest_version, str):
+        msg = "Cargo.toml package version must be a string"
+        raise TypeError(msg)
+
+    packages = _lock_packages(lock)
+    desktop_package = _unique_lock_package(packages, _DESKTOP_PACKAGE)
+    if desktop_package.get("version") != manifest_version:
+        msg = "Cargo.toml and Cargo.lock desktop versions disagree before release stamping"
+        raise RuntimeError(msg)
+    revision = _fix_path_env_revision(manifest, packages)
+
+    manifest_source = _replace_table_assignment(
+        manifest_source,
+        header="package",
+        key="version",
+        rendered_value=json.dumps(desktop_version),
+    )
+    manifest_source = _replace_table_assignment(
+        manifest_source,
+        header="dependencies",
+        key=_FIX_PATH_ENV_PACKAGE,
+        rendered_value=(
+            f"{{ git = {json.dumps(_FIX_PATH_ENV_URL)}, rev = {json.dumps(revision)} }}"
+        ),
+    )
+    lock_source = _replace_lock_package_assignment(
+        lock_source,
+        package_name=_DESKTOP_PACKAGE,
+        key="version",
+        rendered_value=json.dumps(desktop_version),
+    )
+    lock_source = _replace_lock_package_assignment(
+        lock_source,
+        package_name=_FIX_PATH_ENV_PACKAGE,
+        key="source",
+        rendered_value=json.dumps(f"git+{_FIX_PATH_ENV_URL}?rev={revision}#{revision}"),
+    )
+    return {_CARGO_MANIFEST: manifest_source, _CARGO_LOCK: lock_source}
+
+
+def patch_cargo_tree(source_root: Path, desktop_version: str) -> None:
+    """Stamp release metadata and lock Git identity without release-specific patches."""
+    replacements = _cargo_consistency_replacements(source_root, desktop_version)
+    _write_replacements(source_root, replacements)
 
 
 RUNTIME_ENVIRONMENT = {
@@ -185,14 +430,10 @@ _PATCHES = (
     ),
     _SourcePatch(
         Path("studio/src-tauri/src/desktop_updater.rs"),
-        """pub(crate) async fn check_desktop_update(
-    webview: tauri::Webview,
-) -> Result<Option<DesktopUpdateMetadata>, String> {
+        """) -> Result<Option<DesktopUpdateMetadata>, String> {
     let app = webview.app_handle().clone();
 """,
-        """pub(crate) async fn check_desktop_update(
-    webview: tauri::Webview,
-) -> Result<Option<DesktopUpdateMetadata>, String> {
+        """) -> Result<Option<DesktopUpdateMetadata>, String> {
     if crate::nix_managed::enabled() {
         return Ok(None);
     }
@@ -245,26 +486,12 @@ _PATCHES = (
     ),
     _SourcePatch(
         Path("studio/src-tauri/src/commands.rs"),
-        """pub async fn start_managed_repair(
-    app: AppHandle,
-    backend_state: tauri::State<'_, BackendState>,
-    shutdown: tauri::State<'_, ShutdownFlag>,
-    update_state: tauri::State<'_, update::UpdateState>,
-    install_state: tauri::State<'_, install::InstallState>,
-    diagnostics: tauri::State<'_, DiagnosticsState>,
-) -> Result<(), String> {
-    info!("start_managed_repair command called");
+        """) -> Result<(), String> {
+    let force_installer = force_installer.unwrap_or(false);
 """,
-        """pub async fn start_managed_repair(
-    app: AppHandle,
-    backend_state: tauri::State<'_, BackendState>,
-    shutdown: tauri::State<'_, ShutdownFlag>,
-    update_state: tauri::State<'_, update::UpdateState>,
-    install_state: tauri::State<'_, install::InstallState>,
-    diagnostics: tauri::State<'_, DiagnosticsState>,
-) -> Result<(), String> {
+        """) -> Result<(), String> {
     crate::nix_managed::require_mutable("repair the backend")?;
-    info!("start_managed_repair command called");
+    let force_installer = force_installer.unwrap_or(false);
 """,
     ),
     _SourcePatch(
@@ -291,24 +518,12 @@ _PATCHES = (
     ),
     _SourcePatch(
         Path("studio/src-tauri/src/update.rs"),
-        """fn run_backend_update_with_terminal_events(
-    app: AppHandle,
-    state: UpdateState,
-    diagnostics: DiagnosticsState,
-    terminal_events: bool,
-    repair_group_id: Option<String>,
-) -> Result<(), String> {
-    let attempt = match repair_group_id.as_deref() {
+        """) -> Result<(), String> {
+    let attempt = match &kind {
 """,
-        """fn run_backend_update_with_terminal_events(
-    app: AppHandle,
-    state: UpdateState,
-    diagnostics: DiagnosticsState,
-    terminal_events: bool,
-    repair_group_id: Option<String>,
-) -> Result<(), String> {
-    crate::nix_managed::require_mutable("update or repair the backend")?;
-    let attempt = match repair_group_id.as_deref() {
+        """) -> Result<(), String> {
+    crate::nix_managed::require_mutable("update, repair, or stage the backend")?;
+    let attempt = match &kind {
 """,
     ),
     _SourcePatch(
@@ -437,6 +652,16 @@ _PATCHES = (
 
 
 _MANAGED_ERROR = "this Unsloth installation is managed by Nix"
+# Release discovery imports this exact patch contract instead of pinning whole files.
+OXC_VALIDATOR_PATH = Path("studio/backend/core/data_recipe/oxc-validator/validate.mjs")
+OXC_VALIDATOR_PATCH_SEAM = (
+    '    const oxlintBin = join(TOOL_DIR, "node_modules", ".bin", "oxlint");\n'
+    "    const oxlintArgs = [\n"
+)
+OXC_VALIDATOR_PATCH_REPLACEMENT = """    const oxlintBin = process.execPath;
+    const oxlintArgs = [
+      join(TOOL_DIR, "node_modules", "oxlint", "bin", "oxlint"),
+"""
 
 _BACKEND_PATCHES = (
     _SourcePatch(
@@ -450,14 +675,9 @@ _BACKEND_PATCHES = (
 """,
     ),
     _SourcePatch(
-        Path("studio/backend/core/data_recipe/oxc-validator/validate.mjs"),
-        """    const oxlintBin = join(TOOL_DIR, "node_modules", ".bin", "oxlint");
-    const oxlintArgs = [
-""",
-        """    const oxlintBin = process.execPath;
-    const oxlintArgs = [
-      join(TOOL_DIR, "node_modules", "oxlint", "bin", "oxlint"),
-""",
+        OXC_VALIDATOR_PATH,
+        OXC_VALIDATOR_PATCH_SEAM,
+        OXC_VALIDATOR_PATCH_REPLACEMENT,
     ),
     _SourcePatch(
         Path("unsloth/chat_templates.py"),
@@ -479,12 +699,10 @@ _BACKEND_PATCHES = (
     _SourcePatch(
         Path("unsloth/save.py"),
         """def install_llama_cpp_make_non_blocking():
-    # https://github.com/ggerganov/llama.cpp/issues/7062
 """,
         f"""def install_llama_cpp_make_non_blocking():
     if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
         raise RuntimeError("Cannot build llama.cpp at runtime: {_MANAGED_ERROR}.")
-    # https://github.com/ggerganov/llama.cpp/issues/7062
 """,
     ),
     _SourcePatch(
@@ -501,23 +719,19 @@ _BACKEND_PATCHES = (
     _SourcePatch(
         Path("unsloth/save.py"),
         """def install_llama_cpp_old(version = -10):
-    # Download the 10th latest release since the latest might be broken!
 """,
         f"""def install_llama_cpp_old(version = -10):
     if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
         raise RuntimeError("Cannot install llama.cpp at runtime: {_MANAGED_ERROR}.")
-    # Download the 10th latest release since the latest might be broken!
 """,
     ),
     _SourcePatch(
         Path("unsloth/save.py"),
         """def install_llama_cpp_blocking(use_cuda = False):
-    # https://github.com/ggerganov/llama.cpp/issues/7062
 """,
         f"""def install_llama_cpp_blocking(use_cuda = False):
     if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
         raise RuntimeError("Cannot install llama.cpp at runtime: {_MANAGED_ERROR}.")
-    # https://github.com/ggerganov/llama.cpp/issues/7062
 """,
     ),
     _SourcePatch(
@@ -659,21 +873,9 @@ _BACKEND_PATCHES = (
     ),
     _SourcePatch(
         Path("unsloth_cli/commands/studio.py"),
-        '''def _install_state() -> dict:
-    """verify_install() result for this install root.
-
-    STUDIO_HOME is an extra search root so a CLI installed outside the managed
-    venv still inspects the venv the desktop app launches.
-    """
-    return _studio_deps.install_state(extra_roots = (STUDIO_HOME / "unsloth_studio",))
-''',
-        '''def _install_state() -> dict:
-    """verify_install() result for this install root.
-
-    STUDIO_HOME is an extra search root so a CLI installed outside the managed
-    venv still inspects the venv the desktop app launches.
-    """
-    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+        """    return _studio_deps.install_state(
+""",
+        """    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
         return {
             "ok": True,
             "manifest_ok": True,
@@ -681,8 +883,8 @@ _BACKEND_PATCHES = (
             "missing": [],
             "reason": None,
         }
-    return _studio_deps.install_state(extra_roots = (STUDIO_HOME / "unsloth_studio",))
-''',
+    return _studio_deps.install_state(
+""",
     ),
     _SourcePatch(
         Path("unsloth_cli/commands/studio.py"),
@@ -1162,8 +1364,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source_root", type=Path)
     parser.add_argument("--backend-root", type=Path)
+    parser.add_argument("--cargo-only", action="store_true")
+    parser.add_argument("--desktop-version")
     args = parser.parse_args(argv)
-    if args.backend_root is None:
+    if args.cargo_only:
+        if args.backend_root is not None:
+            parser.error("--cargo-only cannot be combined with --backend-root")
+        if args.desktop_version is None:
+            parser.error("--cargo-only requires --desktop-version")
+        patch_cargo_tree(args.source_root, args.desktop_version)
+    elif args.desktop_version is not None:
+        parser.error("--desktop-version requires --cargo-only")
+    elif args.backend_root is None:
         patch_tree(args.source_root)
     else:
         patch_all(args.source_root, args.backend_root)

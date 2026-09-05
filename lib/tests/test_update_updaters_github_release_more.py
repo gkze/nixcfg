@@ -121,6 +121,15 @@ def test_fetch_latest_can_resolve_release_tag_to_immutable_commit(
         "repos/owner/repo/releases/latest",
         "repos/owner/repo/commits/v1.2.3%2Frc1",
     ]
+    updater = _DemoCommitReleaseUpdater()
+    result = updater.build_result(info, [])
+    assert result.commit == "a" * 40
+    assert (
+        asyncio.run(
+            updater._is_latest(result.model_copy(update={"commit": None}), info)
+        )
+        is False
+    )
 
 
 @pytest.mark.parametrize(
@@ -185,3 +194,14 @@ def test_github_release_asset_defaults() -> None:
     assert updater._missing_asset_message("demo.tar.gz", "v1.2.3") == (
         "Could not find demo-asset-release release asset 'demo.tar.gz' in tag v1.2.3"
     )
+    result = updater.build_result(
+        VersionInfo("1.2.3"),
+        {"x86_64-linux": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+    )
+    assert result.urls == {
+        "x86_64-linux": (
+            "https://github.com/owner/repo/releases/download/"
+            "v1.2.3/demo-1.2.3-linux-x64.tar.gz"
+        )
+    }
+    assert _DemoReleaseUpdater().build_result(VersionInfo("1.2.3"), []).commit is None

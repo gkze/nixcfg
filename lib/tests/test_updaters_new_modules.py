@@ -7,7 +7,6 @@ from types import ModuleType
 import pytest
 
 from lib.nix.models.flake_lock import FlakeLockNode
-from lib.nix.models.sources import HashEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module_for_test as _load_module
@@ -52,12 +51,6 @@ def goose_cli_module() -> ModuleType:
 
 
 @pytest.fixture(scope="module")
-def element_desktop_module() -> ModuleType:
-    """Load the element-desktop updater module."""
-    return _load_module("overlays/element-desktop/updater.py", prefix="element_desktop")
-
-
-@pytest.fixture(scope="module")
 def crush_module() -> ModuleType:
     """Load the crush updater module."""
     return _load_module("overlays/crush/updater.py", prefix="crush")
@@ -76,7 +69,7 @@ def test_mux_uses_platform_specific_node_modules_hashes(
     updater_cls = mux_module.MuxUpdater
     assert updater_cls.platform_specific is True
     assert updater_cls.hash_type == "nodeModulesHash"
-    assert updater_cls.source_pins == {"electronVersion": "40.9.3"}
+    assert updater_cls.compatibility_pins is None
 
 
 def test_codex_updater_refreshes_crate2nix_artifacts(
@@ -111,46 +104,14 @@ def test_codex_updater_refreshes_crate2nix_artifacts(
         lambda _self, **_kwargs: _stream("codex"),
     )
 
-    urls = updater._webrtc_urls()
-    hashes = {
-        "aarch64-darwin": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-        "x86_64-linux": "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
-    }
-
-    async def _hash_webrtc(
-        name: str,
-        requested_urls: object,
-        *,
-        config: object,
-    ) -> EventStream:
-        assert name == "codex"
-        assert config is updater.config
-        assert list(requested_urls) == [urls[platform] for platform in sorted(urls)]
-        yield UpdateEvent.status(name, "Hashing WebRTC artifacts...")
-        yield UpdateEvent.value(
-            name,
-            {url: hashes[platform] for platform, url in urls.items()},
-        )
-
-    monkeypatch.setattr(codex_module.update_process, "compute_url_hashes", _hash_webrtc)
-
     events = _run(_collect(updater.fetch_hashes(VersionInfo("main", {}), object())))
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
         UpdateEventKind.ARTIFACT,
         UpdateEventKind.STATUS,
-        UpdateEventKind.STATUS,
         UpdateEventKind.VALUE,
     ]
-    assert events[-1].payload == [
-        HashEntry.create(
-            "sha256",
-            hashes[platform],
-            platform=platform,
-            url=urls[platform],
-        )
-        for platform in sorted(urls)
-    ]
+    assert events[-1].payload == []
 
 
 def test_goose_cli_updater_materializes_crate2nix_from_locked_input(
@@ -606,25 +567,6 @@ def test_codex_desktop_rejects_invalid_asset_url_metadata(
         )
 
 
-def test_element_desktop_reads_pinned_version_from_sources(
-    element_desktop_module: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Load pinned version from per-package sources file."""
-    updater = element_desktop_module.ElementDesktopUpdater()
-    pinned_version = "fixture-version"
-    monkeypatch.setattr(
-        element_desktop_module,
-        "read_pinned_source_version",
-        lambda _n: pinned_version,
-    )
-    latest = _run(updater.fetch_latest(object()))
-    assert latest.version == pinned_version
-
-    is_latest = _run(updater._is_latest(None, latest))
-    assert is_latest is False
-
-
 def test_flake_input_metadata_updater_emits_empty_hash_entries() -> None:
     """Metadata-only flake inputs should still emit a typed empty value event."""
 
@@ -648,6 +590,8 @@ def test_crush_prefers_newest_release_compatible_with_repo_go_floor(
     updater = crush_module.CrushUpdater()
     compatible_tag = "v1.2.3"
     compatible_version = compatible_tag.removeprefix("v")
+    compatible_commit = "a" * 40
+    incompatible_commit = "b" * 40
     monkeypatch.setattr(
         updater,
         "_resolve_supported_go_version",
@@ -672,13 +616,23 @@ def test_crush_prefers_newest_release_compatible_with_repo_go_floor(
         crush_module, "fetch_github_api_paginated", _fake_fetch_releases
     )
     monkeypatch.setattr(
+        updater,
+        "_resolve_release_tag_commit",
+        lambda _session, tag: asyncio.sleep(
+            0,
+            result=(
+                compatible_commit if tag == compatible_tag else incompatible_commit
+            ),
+        ),
+    )
+    monkeypatch.setattr(
         crush_module,
         "fetch_url",
         lambda *_a, **_k: asyncio.sleep(
             0,
             result=(
                 b"module github.com/charmbracelet/crush\n\ngo 1.26.1\n"
-                if compatible_tag in _a[1]
+                if compatible_commit in _a[1]
                 else b"module github.com/charmbracelet/crush\n\ngo 1.27.0\n"
             ),
         ),
@@ -686,7 +640,8 @@ def test_crush_prefers_newest_release_compatible_with_repo_go_floor(
 
     latest = _run(updater.fetch_latest(object()))
     assert latest.version == compatible_version
-    assert latest.metadata.tag == compatible_tag
+    assert latest.metadata["tag"] == compatible_tag
+    assert latest.metadata["commit"] == compatible_commit
     assert captured_kwargs["per_page"] == 100
     assert "item_limit" not in captured_kwargs
 
@@ -698,6 +653,7 @@ def test_crush_falls_back_to_current_pin_when_no_release_is_compatible(
     """Preserve the current crush pin until nixpkgs can build newer releases."""
     updater = crush_module.CrushUpdater()
     pinned_version = "fixture-version"
+    pinned_commit = "c" * 40
     monkeypatch.setattr(
         updater,
         "_resolve_supported_go_version",
@@ -726,7 +682,16 @@ def test_crush_falls_back_to_current_pin_when_no_release_is_compatible(
         "read_pinned_source_version",
         lambda _n: pinned_version,
     )
+    monkeypatch.setattr(
+        updater,
+        "_resolve_release_tag_commit",
+        lambda _session, tag: asyncio.sleep(
+            0,
+            result=pinned_commit if tag == f"v{pinned_version}" else "b" * 40,
+        ),
+    )
 
     latest = _run(updater.fetch_latest(object()))
     assert latest.version == pinned_version
-    assert latest.metadata.tag == f"v{pinned_version}"
+    assert latest.metadata["tag"] == f"v{pinned_version}"
+    assert latest.metadata["commit"] == pinned_commit

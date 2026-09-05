@@ -1,14 +1,14 @@
 {
   "app": {
-    "commit": "8c43aed2038721050ca0620f02967e03a9d5aa23",
-    "sourceHash": "sha256-HPQu2gdFx5AMPkejUf5zIZqtx8FTwU+ZG7cxmm6tcp8=",
-    "tag": "v0.1.804-beta",
-    "version": "0.1.804-beta"
+    "commit": "d90c0320664ef9812a1fb1d2a31f0977feaf7916",
+    "sourceHash": "sha256-oREdZTK1qdkJGhgTwIrQqKpmP3CRjUDsCx13oq6HDpY=",
+    "tag": "v0.1.806-beta",
+    "version": "0.1.806-beta"
   },
   "backend": {
-    "sdistHash": "sha256-K3wbtbqvMK9iX3qnLhAUCUU6vwYwMjAfHN+v3wV0yd4=",
-    "sourceTagVersion": "2026.8.22",
-    "version": "2026.8.22"
+    "sdistHash": "sha256-xRnvnxpc4/Ro6xlv85BtiPyXJmf0Fh+NJjC3qDgIF9E=",
+    "sourceTagVersion": "2026.9.2",
+    "version": "2026.9.2"
   },
   "blockers": [],
   "closurePolicy": {
@@ -32,9 +32,9 @@
     "verificationStatus": "exact-source-replay-and-behavior-tests-passed"
   },
   "releaseManifest": {
-    "hash": "sha256-yohnJK7S7DEEy5oMYGk/PCz2JzSww08B+1hoRO4PJoY=",
-    "pypiVersion": "2026.8.22",
-    "version": "0.1.804-beta"
+    "hash": "sha256-PnW3NMJbypnCMByRlILvi1eNVqm6OkrhPIWxAxUQKIQ=",
+    "pypiVersion": "2026.9.2",
+    "version": "0.1.806-beta"
   },
   "status": "exported-and-validated"
 }

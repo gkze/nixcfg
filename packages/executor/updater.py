@@ -46,7 +46,18 @@ if TYPE_CHECKING:
     import aiohttp
 
 _PACKAGE_MANAGER_PATTERN = re.compile(r"^bun@(?P<version>[^\s]+)$")
-_REQUIRED_BUN_VERSION = "1.3.11"
+_EXACT_VERSION_PATTERN = re.compile(
+    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
+
+
+def _require_exact_bun_version(version: str) -> str:
+    if _EXACT_VERSION_PATTERN.fullmatch(version) is None:
+        msg = f"Executor requires an exact Bun version, got {version!r}"
+        raise RuntimeError(msg)
+    return version
 
 
 @register_updater
@@ -54,12 +65,17 @@ class ExecutorUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
     """Track immutable Executor releases and their exact source toolchain."""
 
     name = "executor"
+    aggregate_into = ("electron-runtimes",)
     GITHUB_OWNER = "UsefulSoftwareCo"
     GITHUB_REPO = "executor"
     RELEASE_DISPLAY_NAME = "Executor"
     DARWIN_PLATFORM: ClassVar[str] = "aarch64-darwin"
     supported_platforms = (DARWIN_PLATFORM,)
-    source_pins: ClassVar[dict[str, str]] = {
+    compatibility_pin_rationale = (
+        "Executor's patched dependency identities are build-compatibility seams; "
+        "the updater validates them against the immutable candidate lock and source."
+    )
+    compatibility_pins: ClassVar[dict[str, str]] = {
         "@1password/sdk-core@0.4.1-beta.1": (
             "source:patches/@1password%2Fsdk-core@0.4.1-beta.1.patch"
         ),
@@ -104,10 +120,7 @@ class ExecutorUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         except TypeError as exc:
             msg = "Executor release metadata is missing a Bun version"
             raise RuntimeError(msg) from exc
-        if version != _REQUIRED_BUN_VERSION:
-            msg = f"Executor requires Bun {_REQUIRED_BUN_VERSION}, got {version!r}"
-            raise RuntimeError(msg)
-        return version
+        return _require_exact_bun_version(version)
 
     @staticmethod
     def _root_bun_version(payload: object) -> str:
@@ -119,10 +132,13 @@ class ExecutorUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             msg = "Executor root manifest packageManager is missing"
             raise TypeError(msg)
         match = _PACKAGE_MANAGER_PATTERN.fullmatch(package_manager)
-        if match is None or match.group("version") != _REQUIRED_BUN_VERSION:
-            msg = f"Executor requires Bun {_REQUIRED_BUN_VERSION}, got {package_manager!r}"
+        if match is None:
+            msg = (
+                "Executor requires an exact bun@<version> packageManager, "
+                f"got {package_manager!r}"
+            )
             raise RuntimeError(msg)
-        return match.group("version")
+        return _require_exact_bun_version(match.group("version"))
 
     @staticmethod
     def _desktop_metadata(payload: object) -> tuple[str, str]:
@@ -364,5 +380,5 @@ class ExecutorUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             "commit": commit,
             "electronVersion": electron_version,
             "hashes": HashCollection.from_value(annotated_hashes),
-            "pins": self.source_pins,
+            "pins": self.compatibility_pins,
         })

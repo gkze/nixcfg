@@ -13,8 +13,11 @@ import pytest
 from lib.update import persistence as persistence_module
 from lib.update.persistence import (
     IsolatedUpdateWorkspace,
+    UpdatePromotionState,
     UpdateWorkspaceConflictError,
     UpdateWorkspaceError,
+    UpdateWorkspacePromotionError,
+    visible_source_snapshot,
 )
 
 
@@ -86,12 +89,201 @@ def _write_journal(
     *,
     committed: bool,
 ) -> Path:
-    journal = root / ".git" / persistence_module._TRANSACTION_JOURNAL
+    journal = (
+        persistence_module._git_dir(root) / persistence_module._TRANSACTION_JOURNAL
+    )
     persistence_module._write_transaction(
         journal,
         persistence_module._Transaction(root.resolve(), committed, tuple(records)),
     )
     return journal
+
+
+def _add_worktree(main: Path, linked: Path) -> None:
+    git = shutil.which("git")
+    assert git is not None
+    subprocess.run(  # noqa: S603
+        [git, "worktree", "add", "--quiet", "-b", linked.name, linked],
+        cwd=main,
+        check=True,
+    )
+
+
+def test_recovery_journals_are_scoped_to_each_linked_worktree(
+    tmp_path: Path,
+) -> None:
+    """A crashed transaction in one worktree must not block its siblings."""
+    live = tmp_path / "live"
+    linked = tmp_path / "linked"
+    _init_repo(live)
+    _add_worktree(live, linked)
+    record = _record("a.txt", original=b"a-original\n", produced=b"a-update\n")
+    journal = _write_journal(live, [record], committed=False)
+
+    assert journal.parent == persistence_module._git_common_dir(live)
+    assert persistence_module._git_dir(linked) != journal.parent
+    with IsolatedUpdateWorkspace(linked):
+        pass
+    assert journal.exists()
+
+    with IsolatedUpdateWorkspace(live):
+        pass
+    assert not journal.exists()
+
+
+@pytest.mark.parametrize("committed", [False, True])
+def test_linked_worktree_recovers_shared_journal_before_snapshot(
+    tmp_path: Path,
+    *,
+    committed: bool,
+) -> None:
+    """Old-layout recovery completes before partially promoted bytes become a baseline."""
+    main = tmp_path / "main"
+    linked = tmp_path / "linked"
+    _init_repo(main)
+    _add_worktree(main, linked)
+    record = _record("a.txt", original=b"a-original\n", produced=b"a-update\n")
+    journal = persistence_module._git_common_dir(linked) / (
+        persistence_module._TRANSACTION_JOURNAL
+    )
+    persistence_module._write_transaction(
+        journal,
+        persistence_module._Transaction(linked.resolve(), committed, (record,)),
+    )
+    _retained(linked, record).write_bytes(b"a-original\n")
+    (linked / "a.txt").write_bytes(b"a-update\n")
+    expected = b"a-update\n" if committed else b"a-original\n"
+
+    with IsolatedUpdateWorkspace(linked) as workspace:
+        assert (workspace.root / "a.txt").read_bytes() == expected
+        assert not (workspace.root / record.retained).exists()
+        assert workspace.changed_paths() == ()
+        assert not journal.exists()
+
+    assert (linked / "a.txt").read_bytes() == expected
+    assert not _retained(linked, record).exists()
+    assert (main / "a.txt").read_bytes() == b"a-original\n"
+
+
+def test_linked_worktree_preserves_shared_journal_owned_by_another_worktree(
+    tmp_path: Path,
+) -> None:
+    """A shared journal never authorizes recovery against a sibling's descriptor."""
+    main = tmp_path / "main"
+    linked = tmp_path / "linked"
+    sibling = tmp_path / "sibling"
+    _init_repo(main)
+    _add_worktree(main, linked)
+    _add_worktree(main, sibling)
+    record = _record("a.txt", original=b"a-original\n", produced=b"a-update\n")
+    journal = persistence_module._git_common_dir(linked) / (
+        persistence_module._TRANSACTION_JOURNAL
+    )
+    persistence_module._write_transaction(
+        journal,
+        persistence_module._Transaction(
+            root=sibling.resolve(), committed=False, paths=(record,)
+        ),
+    )
+    original_journal = journal.read_bytes()
+    _retained(sibling, record).write_bytes(b"a-original\n")
+    (sibling / "a.txt").write_bytes(b"a-update\n")
+
+    with IsolatedUpdateWorkspace(linked) as workspace:
+        assert (workspace.root / "a.txt").read_bytes() == b"a-original\n"
+
+    assert journal.read_bytes() == original_journal
+    assert (sibling / "a.txt").read_bytes() == b"a-update\n"
+    assert _retained(sibling, record).read_bytes() == b"a-original\n"
+    with IsolatedUpdateWorkspace(sibling):
+        pass
+    assert (sibling / "a.txt").read_bytes() == b"a-original\n"
+    assert not journal.exists()
+
+
+@pytest.mark.parametrize(
+    "invalid_case",
+    ["json", "relative_root", "parent_root", "foreign_record", "symlink"],
+)
+def test_linked_worktree_rejects_invalid_shared_journal(
+    tmp_path: Path,
+    invalid_case: str,
+) -> None:
+    """Malformed shared state cannot be ignored as an unrelated transaction."""
+    main = tmp_path / "main"
+    linked = tmp_path / "linked"
+    _init_repo(main)
+    _add_worktree(main, linked)
+    journal = persistence_module._git_common_dir(linked) / (
+        persistence_module._TRANSACTION_JOURNAL
+    )
+    envelope, record = _valid_journal_envelope(linked)
+    if invalid_case == "relative_root":
+        envelope["root"] = "linked"
+    elif invalid_case == "parent_root":
+        envelope["root"] = os.fspath(linked / ".." / "linked")
+    elif invalid_case == "foreign_record":
+        envelope["root"] = os.fspath(main)
+        record["path"] = "../escape"
+    payload = b"not-json" if invalid_case == "json" else json.dumps(envelope).encode()
+    if invalid_case == "symlink":
+        destination = tmp_path / "journal-target"
+        destination.write_bytes(payload)
+        journal.symlink_to(destination)
+    else:
+        journal.write_bytes(payload)
+
+    with (
+        pytest.raises(UpdateWorkspaceError, match="transaction journal"),
+        IsolatedUpdateWorkspace(linked),
+    ):
+        pytest.fail("invalid shared recovery authority must prevent startup")
+
+    assert journal.read_bytes() == payload
+    assert (linked / "a.txt").read_bytes() == b"a-original\n"
+    assert (main / "a.txt").read_bytes() == b"a-original\n"
+
+
+def test_linked_worktree_rejects_simultaneous_shared_and_local_journals(
+    tmp_path: Path,
+) -> None:
+    """Two authorities for the same worktree require explicit reconciliation."""
+    main = tmp_path / "main"
+    linked = tmp_path / "linked"
+    _init_repo(main)
+    _add_worktree(main, linked)
+    old_record = _record("a.txt", original=b"a-original\n", produced=b"a-update\n")
+    shared = persistence_module._git_common_dir(linked) / (
+        persistence_module._TRANSACTION_JOURNAL
+    )
+    persistence_module._write_transaction(
+        shared,
+        persistence_module._Transaction(
+            root=linked.resolve(), committed=False, paths=(old_record,)
+        ),
+    )
+    new_record = _record("b.txt", original=b"b-original\n", produced=b"b-update\n")
+    local = _write_journal(linked, [new_record], committed=False)
+    shared_payload, local_payload = shared.read_bytes(), local.read_bytes()
+    for record, original, produced in (
+        (old_record, b"a-original\n", b"a-update\n"),
+        (new_record, b"b-original\n", b"b-update\n"),
+    ):
+        _retained(linked, record).write_bytes(original)
+        (linked / record.path).write_bytes(produced)
+
+    with (
+        pytest.raises(UpdateWorkspaceError, match="Conflicting update transaction"),
+        IsolatedUpdateWorkspace(linked),
+    ):
+        pytest.fail("conflicting recovery authorities must prevent startup")
+
+    assert shared.read_bytes() == shared_payload
+    assert local.read_bytes() == local_payload
+    assert (linked / "a.txt").read_bytes() == b"a-update\n"
+    assert (linked / "b.txt").read_bytes() == b"b-update\n"
+    assert _retained(linked, old_record).read_bytes() == b"a-original\n"
+    assert _retained(linked, new_record).read_bytes() == b"b-original\n"
 
 
 def _retained(root: Path, record: persistence_module._TransactionPath) -> Path:
@@ -110,6 +302,51 @@ def _valid_journal_envelope(root: Path) -> tuple[dict[str, object], dict[str, ob
     )
     record = cast("dict[str, object]", cast("list[object]", envelope["paths"])[0])
     return envelope, record
+
+
+def test_visible_source_snapshot_is_exact_and_excludes_git_and_ignored_files(
+    tmp_path: Path,
+) -> None:
+    """Re-exec snapshots preserve visible bytes without Git clean-filter effects."""
+    live = tmp_path / "live"
+    _init_repo(live)
+    (live / ".gitattributes").write_text("*.txt text eol=lf\n", encoding="utf-8")
+    (live / "a.txt").write_bytes(b"a-working\r\n")
+    (live / "new-runtime.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (live / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+    (live / "ignored.txt").write_text("ignored\n", encoding="utf-8")
+
+    with visible_source_snapshot(live) as snapshot:
+        snapshot_path = snapshot
+        assert (snapshot / "a.txt").read_bytes() == b"a-working\r\n"
+        assert (snapshot / "new-runtime.py").is_file()
+        assert not (snapshot / "ignored.txt").exists()
+        assert not (snapshot / ".git").exists()
+
+    assert not snapshot_path.exists()
+
+
+def test_validation_snapshot_binds_the_bytes_allowed_for_promotion(
+    tmp_path: Path,
+) -> None:
+    """Never promote candidate bytes that were changed after root validation."""
+    live = tmp_path / "live"
+    _init_repo(live)
+
+    with IsolatedUpdateWorkspace(live) as workspace:
+        candidate = workspace.root / "a.txt"
+        candidate.write_text("validated update\n", encoding="utf-8")
+        with workspace.validation_snapshot() as snapshot:
+            assert snapshot.changed_paths == (Path("a.txt"),)
+            assert (snapshot.root / "a.txt").read_text(encoding="utf-8") == (
+                "validated update\n"
+            )
+        candidate.write_text("unvalidated update\n", encoding="utf-8")
+
+        with pytest.raises(UpdateWorkspaceError, match="changed after root closure"):
+            workspace.promote({"a.txt"})
+
+    assert (live / "a.txt").read_text(encoding="utf-8") == "a-original\n"
 
 
 def test_startup_rolls_back_precommit_replacement(
@@ -681,3 +918,171 @@ def test_partial_committed_cleanup_never_rolls_back_visible_outputs(
     assert (live / "b.txt").read_text(encoding="utf-8") == "b-update\n"
     assert not journal.exists()
     assert list(live.glob(".*.nixcfg-transaction-*")) == []
+
+
+def test_postcommit_canonical_drift_is_reported_as_indeterminate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Never report success after an external edit supersedes committed output."""
+    live = tmp_path / "live"
+    _init_repo(live)
+    original_write = persistence_module._write_transaction
+
+    with IsolatedUpdateWorkspace(live) as workspace:
+        (workspace.root / "a.txt").write_text("a-update\n", encoding="utf-8")
+
+        def _write_then_drift(
+            journal: Path,
+            transaction: persistence_module._Transaction,
+        ) -> None:
+            original_write(journal, transaction)
+            if transaction.committed:
+                (live / "a.txt").write_text("external edit\n", encoding="utf-8")
+
+        monkeypatch.setattr(
+            persistence_module,
+            "_write_transaction",
+            _write_then_drift,
+        )
+        with pytest.raises(UpdateWorkspaceConflictError) as exc_info:
+            workspace.promote({"a.txt"})
+
+    assert exc_info.value.paths == (Path("a.txt"),)
+    assert exc_info.value.promotion_state is UpdatePromotionState.UNKNOWN
+    assert (live / "a.txt").read_text(encoding="utf-8") == "external edit\n"
+    assert (
+        persistence_module._git_dir(live) / persistence_module._TRANSACTION_JOURNAL
+    ).exists()
+
+
+def test_postcommit_parent_move_is_reported_as_indeterminate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An open directory descriptor cannot prove output at a moved live path."""
+    live = tmp_path / "live"
+    _init_repo(live)
+    parent = live / "nested"
+    parent.mkdir()
+    (parent / "source.txt").write_text("original\n", encoding="utf-8")
+    moved = tmp_path / "moved"
+    original_write = persistence_module._write_transaction
+
+    with IsolatedUpdateWorkspace(live) as workspace:
+        (workspace.root / "nested/source.txt").write_text(
+            "candidate\n", encoding="utf-8"
+        )
+
+        def _write_then_move_parent(
+            journal: Path,
+            transaction: persistence_module._Transaction,
+        ) -> None:
+            original_write(journal, transaction)
+            if transaction.committed:
+                parent.rename(moved)
+
+        monkeypatch.setattr(
+            persistence_module, "_write_transaction", _write_then_move_parent
+        )
+        with pytest.raises(UpdateWorkspaceConflictError) as exc_info:
+            workspace.promote({"nested/source.txt"})
+
+    assert exc_info.value.paths == (Path("nested/source.txt"),)
+    assert exc_info.value.promotion_state is UpdatePromotionState.UNKNOWN
+    assert not parent.exists()
+    assert (moved / "source.txt").read_text(encoding="utf-8") == "candidate\n"
+    assert (
+        persistence_module._git_dir(live) / persistence_module._TRANSACTION_JOURNAL
+    ).exists()
+
+
+@pytest.mark.parametrize(
+    ("commit_marker_written", "expected_state", "expected_content"),
+    [
+        pytest.param(
+            False,
+            UpdatePromotionState.ROLLED_BACK,
+            "a-original\n",
+            id="failure-before-commit-marker",
+        ),
+        pytest.param(
+            True,
+            UpdatePromotionState.PROMOTED,
+            "a-update\n",
+            id="failure-after-commit-marker",
+        ),
+    ],
+)
+def test_promotion_io_failure_reports_recovered_commit_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    commit_marker_written: bool,
+    expected_state: UpdatePromotionState,
+    expected_content: str,
+) -> None:
+    """Derive the live outcome from the recovered durable transaction marker."""
+    live = tmp_path / "live"
+    _init_repo(live)
+    original_write = persistence_module._write_transaction
+
+    with IsolatedUpdateWorkspace(live) as workspace:
+        (workspace.root / "a.txt").write_text("a-update\n", encoding="utf-8")
+
+        def _fail_commit_write(
+            journal: Path,
+            transaction: persistence_module._Transaction,
+        ) -> None:
+            if not transaction.committed:
+                original_write(journal, transaction)
+                return
+            if commit_marker_written:
+                original_write(journal, transaction)
+            raise OSError("simulated commit journal I/O failure")
+
+        monkeypatch.setattr(
+            persistence_module,
+            "_write_transaction",
+            _fail_commit_write,
+        )
+        with pytest.raises(UpdateWorkspacePromotionError) as exc_info:
+            workspace.promote({"a.txt"})
+
+    assert exc_info.value.promotion_state is expected_state
+    assert (live / "a.txt").read_text(encoding="utf-8") == expected_content
+    assert not (live / ".git" / persistence_module._TRANSACTION_JOURNAL).exists()
+    assert not list(live.glob(".a.txt.nixcfg-transaction-*"))
+
+
+def test_promotion_conflict_reports_successful_rollback_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Attach a rolled-back state when final validation rejects the candidate."""
+    live = tmp_path / "live"
+    _init_repo(live)
+    original_conflicts = persistence_module._source_conflicts
+    calls = 0
+
+    with IsolatedUpdateWorkspace(live) as workspace:
+        (workspace.root / "a.txt").write_text("a-update\n", encoding="utf-8")
+
+        def _fail_final_validation(*args: object, **kwargs: object) -> tuple[Path, ...]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return original_conflicts(*args, **kwargs)
+            return (Path("external.txt"),)
+
+        monkeypatch.setattr(
+            persistence_module,
+            "_source_conflicts",
+            _fail_final_validation,
+        )
+        with pytest.raises(UpdateWorkspaceConflictError) as exc_info:
+            workspace.promote({"a.txt"})
+
+    assert exc_info.value.paths == (Path("external.txt"),)
+    assert exc_info.value.promotion_state is UpdatePromotionState.ROLLED_BACK
+    assert (live / "a.txt").read_text(encoding="utf-8") == "a-original\n"

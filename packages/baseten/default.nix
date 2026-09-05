@@ -8,7 +8,7 @@
 }:
 let
   pname = "baseten";
-  inherit (selfSource) version;
+  inherit (selfSource) commit version;
 in
 buildGoModule {
   inherit pname version;
@@ -16,7 +16,7 @@ buildGoModule {
   src = fetchFromGitHub {
     owner = "basetenlabs";
     repo = "baseten-cli";
-    tag = "v${version}";
+    rev = commit;
     hash = outputs.lib.sourceHash pname "srcHash";
   };
 

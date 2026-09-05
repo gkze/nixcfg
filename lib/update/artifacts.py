@@ -12,7 +12,7 @@ from lib.update import io as update_io
 from lib.update.paths import REPO_ROOT
 
 
-def _artifact_lock_path(path: Path) -> Path:
+def artifact_lock_path(path: Path) -> Path:
     """Return a stable cross-process lock path outside the repository tree."""
     lock_root = Path(tempfile.gettempdir()) / "nixcfg-generated-artifact-locks"
     lock_root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -92,7 +92,7 @@ class GeneratedArtifact:
     def write(self, *, repo_root: Path = REPO_ROOT) -> None:
         """Persist this artifact atomically under the repository root."""
         path = self.resolved_path(repo_root=repo_root)
-        lock_path = _artifact_lock_path(path)
+        lock_path = artifact_lock_path(path)
         with FileLock(lock_path):
             update_io.atomic_write_text(path, self.content, mkdir=True)
 
@@ -127,6 +127,7 @@ def save_generated_artifacts(
 
 __all__ = [
     "GeneratedArtifact",
+    "artifact_lock_path",
     "dedupe_generated_artifacts",
     "resolve_repo_path",
     "save_generated_artifacts",

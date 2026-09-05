@@ -33,6 +33,85 @@ def _main(namespace: dict[str, Any]) -> Callable[[], int]:
     return cast("Callable[[], int]", namespace["main"])
 
 
+def test_clang_release_version_reads_the_immutable_source_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Resolve Chromium's numeric resource directory without a duplicate pin."""
+    namespace = _load_script("patch_compiler_gni.py")
+    target = tmp_path / "update.py"
+    target.write_text(
+        "CLANG_REVISION = 'llvmorg-23-init-1-gabcdef'\nRELEASE_VERSION = '23'\n",
+        encoding="utf-8",
+    )
+
+    read_version = cast(
+        "Callable[[Path], str]", namespace["read_clang_release_version"]
+    )
+    assert read_version(target) == "23"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["patch_compiler_gni.py", "--print-release-version", str(target)],
+    )
+    assert _main(namespace)() == 0
+    assert capsys.readouterr().out == "23\n"
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        ("CLANG_REVISION = 'x'\n", "found 0"),
+        ("RELEASE_VERSION = '22'\nRELEASE_VERSION = '23'\n", "found 2"),
+        ("RELEASE_VERSION = 23\n", "expected numeric"),
+        ("RELEASE_VERSION = '23-dev'\n", "expected numeric"),
+        ("RELEASE_VERSION = '0'\n", "expected numeric"),
+    ],
+)
+def test_clang_release_version_rejects_ambiguous_or_unsafe_metadata(
+    tmp_path: Path,
+    source: str,
+    message: str,
+) -> None:
+    """Malformed upstream metadata must fail instead of creating an unsafe path."""
+    namespace = _load_script("patch_compiler_gni.py")
+    target = tmp_path / "update.py"
+    target.write_text(source, encoding="utf-8")
+    read_version = cast(
+        "Callable[[Path], str]", namespace["read_clang_release_version"]
+    )
+
+    with pytest.raises(SystemExit, match=message):
+        read_version(target)
+
+
+def test_clang_release_version_cli_guard_and_usage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The build helper's CLI accepts one source path and rejects missing input."""
+    script_path = _scripts_dir() / "patch_compiler_gni.py"
+    namespace = _load_script(script_path.name)
+    monkeypatch.setattr(sys, "argv", [str(script_path)])
+    with pytest.raises(SystemExit, match="usage: patch_compiler_gni.py"):
+        _main(namespace)()
+
+    target = tmp_path / "update.py"
+    target.write_text("RELEASE_VERSION = '24'\n", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [str(script_path), "--print-release-version", str(target)],
+    )
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_path(str(script_path), run_name="__main__")
+    assert exc.value.code == 0
+    assert capsys.readouterr().out == "24\n"
+
+
 def test_patch_allocator_build_script_success_and_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

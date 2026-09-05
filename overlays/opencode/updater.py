@@ -2,6 +2,7 @@
 
 from typing import TYPE_CHECKING
 
+from lib.system_policy import supported_systems
 from lib.update.updaters import (
     BunNodeModulesHashUpdater,
     UpdateContext,
@@ -17,11 +18,7 @@ if TYPE_CHECKING:
 class OpencodeUpdater(BunNodeModulesHashUpdater):
     """Bun node_modules hash updater for opencode."""
 
-    SUPPORTED_PLATFORMS = (
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-linux",
-    )
+    SUPPORTED_PLATFORMS = supported_systems()
 
     name = "opencode"
     supported_platforms = SUPPORTED_PLATFORMS

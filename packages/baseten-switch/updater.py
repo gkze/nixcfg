@@ -11,7 +11,6 @@ from lib.update.updaters import (
     register_updater,
 )
 from lib.update.updaters.github_release import GitHubReleaseUpdater
-from lib.update.updaters.metadata import GitHubReleaseMetadata
 
 if TYPE_CHECKING:
     import aiohttp
@@ -54,18 +53,19 @@ class BasetenSwitchUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
             if not isinstance(tag_name, str) or not tag_name:
                 msg = f"Missing tag_name in release payload: {release!r}"
                 raise RuntimeError(msg)
+            commit = await self._resolve_release_tag_commit(session, tag_name)
             return VersionInfo(
                 version=self._normalize_release_version(tag_name),
-                metadata=GitHubReleaseMetadata(tag=tag_name),
+                metadata={"commit": commit, "tag": tag_name},
             )
         msg = f"No published releases found for {self.GITHUB_OWNER}/{self.GITHUB_REPO}"
         raise RuntimeError(msg)
 
     @staticmethod
-    def _src_expr(version: str) -> str:
+    def _src_expr(commit: str) -> str:
         return _build_fetch_from_github_expr(
             "basetenlabs",
             "baseten-switch",
-            tag=f"v{version}",
+            rev=commit,
             fetch_submodules=False,
         )

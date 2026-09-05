@@ -13,6 +13,7 @@
   stdenv,
   pname ? "opencode-desktop",
   sourceHashPackageName ? "opencode-desktop",
+  selfSource ? outputs.lib.sourceEntry sourceHashPackageName,
   opencodeChannel ? "prod",
   appName ? if opencodeChannel == "prod" then "OpenCode" else "OpenCode Desktop Dev",
   appId ? if opencodeChannel == "prod" then "ai.opencode.desktop" else "ai.opencode.desktop.dev",
@@ -42,13 +43,19 @@ let
   };
 
   desktopPackagePath =
-    if pathExists (src + "/packages/desktop/package.json") then
-      "packages/desktop"
+    (selfSource.pins or { }).desktopWorkspace
+      or (throw "packages/opencode-desktop/default.nix is missing its updater-derived desktop workspace");
+  desktopPackagePathCheck =
+    if pathExists (src + "/${desktopPackagePath}/package.json") then
+      true
     else
-      "packages/desktop-electron";
+      throw ''
+        packages/opencode-desktop/default.nix cannot find the updater-derived desktop workspace
+        ${desktopPackagePath} in the selected source
+      '';
   desktopPackageJson = fromJSON (readFile (src + "/${desktopPackagePath}/package.json"));
   desktopPackageVersion = desktopPackageJson.version;
-  electronVersion = lib.removePrefix "^" desktopPackageJson.devDependencies.electron;
+  inherit (selfSource) electronVersion;
   electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
   electronRuntime = electronBuild.runtime;
   electronRuntimeVersion = electronBuild.runtimeVersion;
@@ -102,26 +109,21 @@ let
         but the selected runtime is ${electronRuntimeVersion}; add the exact runtime to nixcfgElectron
       '';
 
-  bunTarget =
-    {
-      aarch64-darwin = {
-        cpu = "arm64";
-        os = "darwin";
-      };
-      x86_64-darwin = {
-        cpu = "x64";
-        os = "darwin";
-      };
-      aarch64-linux = {
-        cpu = "arm64";
-        os = "linux";
-      };
-      x86_64-linux = {
-        cpu = "x64";
-        os = "linux";
-      };
-    }
-    .${system} or (throw "Unsupported system ${system} for ${pname}");
+  bunTargets = {
+    aarch64-darwin = {
+      cpu = "arm64";
+      os = "darwin";
+    };
+    aarch64-linux = {
+      cpu = "arm64";
+      os = "linux";
+    };
+    x86_64-linux = {
+      cpu = "x64";
+      os = "linux";
+    };
+  };
+  bunTarget = bunTargets.${system} or (throw "Unsupported system ${system} for ${pname}");
 
   electronDist = electronBuild.dist;
 
@@ -195,6 +197,7 @@ let
     mimeTypes = [ "x-scheme-handler/${appProtocolScheme}" ];
   };
 in
+assert desktopPackagePathCheck;
 assert desktopPackageVersionCheck;
 assert electronRuntimeVersionCheck;
 stdenv.mkDerivation {
@@ -512,11 +515,6 @@ stdenv.mkDerivation {
     homepage = "https://github.com/anomalyco/opencode";
     license = licenses.mit;
     mainProgram = pname;
-    platforms = [
-      "aarch64-darwin"
-      "x86_64-darwin"
-      "aarch64-linux"
-      "x86_64-linux"
-    ];
+    platforms = builtins.attrNames bunTargets;
   };
 }

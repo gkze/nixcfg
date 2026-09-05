@@ -19,6 +19,7 @@ class SculptorUpdater(DownloadHashUpdater):
 
     name = "sculptor"
     BASE_URL = "https://imbue-sculptor-releases.s3.us-west-2.amazonaws.com/sculptor"
+    DOWNLOAD_URL_TEMPLATE = f"{BASE_URL}/{{platform_value}}"
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "Sculptor.dmg",
         "x86_64-darwin": "Sculptor-x86_64.dmg",

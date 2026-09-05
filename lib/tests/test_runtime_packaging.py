@@ -39,9 +39,11 @@ def test_python_distribution_excludes_test_packages() -> None:
     )
 
     package_find = config["tool"]["setuptools"]["packages"]["find"]
+    package_data = config["tool"]["setuptools"]["package-data"]
     assert "include-package-data" not in config["tool"]["setuptools"]
     assert package_find["include"] == ["lib*"]
     assert package_find["exclude"] == ["lib.tests*"]
+    assert package_data["lib"] == ["system-policy.json"]
 
 
 def test_test_type_exceptions_are_rule_scoped() -> None:

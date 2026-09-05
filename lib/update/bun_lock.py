@@ -22,7 +22,6 @@ _as_object_dict = json_utils.as_object_dict
 _as_object_list = json_utils.as_object_list
 _get_required_str = json_utils.get_required_str
 
-_TRAILING_COMMA = re.compile(r",(?=\s*[}\]])")
 _EXACT_VERSION = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_-]*$")
 _GITHUB_RELEASE_ASSET_PARTS = 6
 _FETCH_RETRIES = 3
@@ -54,9 +53,154 @@ class SourcePackageExactVersionMismatch:
     package_url: str | None
 
 
+def _strip_textual_json_comments(text: str) -> str:
+    """Replace JSONC comments with whitespace while preserving string content."""
+    normalized: list[str] = []
+    index = 0
+    in_string = False
+    escaped = False
+
+    while index < len(text):
+        character = text[index]
+        if in_string:
+            normalized.append(character)
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            index += 1
+            continue
+
+        if character == '"':
+            in_string = True
+            normalized.append(character)
+            index += 1
+            continue
+
+        if character != "/" or index + 1 >= len(text):
+            normalized.append(character)
+            index += 1
+            continue
+
+        marker = text[index + 1]
+        if marker == "/":
+            comment_end = index + 2
+            while comment_end < len(text) and text[comment_end] not in "\r\n":
+                comment_end += 1
+        elif marker == "*":
+            closing_index = text.find("*/", index + 2)
+            if closing_index < 0:
+                normalized.extend(text[index:])
+                break
+            comment_end = closing_index + 2
+        else:
+            normalized.append(character)
+            index += 1
+            continue
+
+        normalized.extend(
+            character if character in "\r\n" else " "
+            for character in text[index:comment_end]
+        )
+        index = comment_end
+
+    return "".join(normalized)
+
+
+def _remove_trailing_commas(text: str) -> str:
+    """Remove object and array trailing commas without modifying JSON strings."""
+    normalized: list[str] = []
+    in_string = False
+    escaped = False
+
+    for index, character in enumerate(text):
+        if in_string:
+            normalized.append(character)
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+
+        if character == '"':
+            in_string = True
+            normalized.append(character)
+            continue
+
+        if character == ",":
+            previous_index = index - 1
+            while previous_index >= 0 and text[previous_index].isspace():
+                previous_index -= 1
+            next_index = index + 1
+            while next_index < len(text) and text[next_index].isspace():
+                next_index += 1
+            if (
+                previous_index >= 0
+                and text[previous_index] not in "[{,:"
+                and next_index < len(text)
+                and text[next_index] in "}]"
+            ):
+                continue
+
+        normalized.append(character)
+
+    return "".join(normalized)
+
+
 def _normalize_textual_json(text: str) -> str:
-    """Normalize Bun's textual JSON by removing trailing commas."""
-    return _TRAILING_COMMA.sub("", text)
+    """Normalize Bun's JSONC lock syntax for the standard-library parser."""
+    return _remove_trailing_commas(_strip_textual_json_comments(text))
+
+
+class _DuplicateObjectKeyError(ValueError):
+    """Raised when textual JSON repeats an object key."""
+
+
+class _InvalidJsonConstantError(ValueError):
+    """Raised when Python's JSON extension accepts a non-JSON number."""
+
+
+def _reject_non_json_constant(value: str) -> object:
+    """Reject non-finite constants that Bun's JSONC parser does not accept."""
+    msg = f"non-JSON numeric constant {value!r}"
+    raise _InvalidJsonConstantError(msg)
+
+
+def _object_without_duplicate_keys(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    """Build one JSON object while rejecting ambiguous duplicate keys."""
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            msg = f"duplicate object key {key!r}"
+            raise _DuplicateObjectKeyError(msg)
+        result[key] = value
+    return result
+
+
+def parse_bun_lock_text(text: str, *, context: str = "bun.lock") -> dict[str, object]:
+    """Parse Bun's textual JSON lock format into a validated object mapping."""
+    try:
+        return _as_object_dict(
+            json.loads(
+                _normalize_textual_json(text),
+                object_pairs_hook=_object_without_duplicate_keys,
+                parse_constant=_reject_non_json_constant,
+            ),
+            context=context,
+        )
+    except (
+        json.JSONDecodeError,
+        _DuplicateObjectKeyError,
+        _InvalidJsonConstantError,
+    ) as exc:
+        msg = f"Invalid textual bun.lock JSON: {context}: {exc}"
+        raise ValueError(msg) from exc
 
 
 def _load_bun_lock(lock_file: Path) -> dict[str, object]:
@@ -67,14 +211,7 @@ def _load_bun_lock(lock_file: Path) -> dict[str, object]:
         msg = f"Failed to read bun lockfile: {lock_file}"
         raise OSError(msg) from exc
 
-    try:
-        return _as_object_dict(
-            json.loads(_normalize_textual_json(raw_text)),
-            context=f"bun.lock {lock_file}",
-        )
-    except json.JSONDecodeError as exc:
-        msg = f"Invalid textual bun.lock JSON: {lock_file}"
-        raise ValueError(msg) from exc
+    return parse_bun_lock_text(raw_text, context=f"bun.lock {lock_file}")
 
 
 def _is_source_url(value: str) -> bool:
@@ -494,6 +631,7 @@ __all__ = [
     "BunSourcePackageValidationError",
     "SourcePackageExactVersionMismatch",
     "SourcePackageManifest",
+    "parse_bun_lock_text",
     "prepare_source_package_lock",
     "validate_source_package_exact_versions",
 ]

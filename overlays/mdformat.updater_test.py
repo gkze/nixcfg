@@ -2,7 +2,6 @@
 
 # ruff: noqa: N999, S101 -- flat sidecar name and pytest assertions are intentional.
 
-import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -14,6 +13,10 @@ from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding
 from lib.tests._nix_source import nix_file_expr
+from lib.tests._source_metadata import (
+    assert_release_version,
+    assert_structured_source_hashes,
+)
 from lib.tests._updater_helpers import (
     collect_events,
     load_repo_module,
@@ -30,6 +33,7 @@ if TYPE_CHECKING:
 
 _SOURCE_PATH = REPO_ROOT / "overlays" / "mdformat.sources.json"
 _UPDATED_HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+COMMIT = "d" * 40
 
 
 def _load_module() -> ModuleType:
@@ -66,18 +70,12 @@ def _install_source_hash(
 
 
 def test_mdformat_overlay_reads_its_updater_owned_source() -> None:
-    """Keep the exact tag and source hash in the flat metadata sidecar."""
-    source = SourceEntry.model_validate(
-        json.loads(_SOURCE_PATH.read_text(encoding="utf-8"))
-    )
-    assert source == SourceEntry(
-        version="1.0.0",
-        hashes=HashCollection.from_value([
-            HashEntry.create(
-                "srcHash",
-                "sha256-fo4xO4Y89qPAggEjwuf6dnTyu1JzhZVdJyUqGNpti7g=",
-            )
-        ]),
+    """Keep one versioned source closure in the flat metadata sidecar."""
+    source = SourceEntry.model_validate_json(_SOURCE_PATH.read_text(encoding="utf-8"))
+    assert_release_version(source.version)
+    assert_structured_source_hashes(
+        source,
+        hash_types={"srcHash"},
     )
 
     overlay = expect_instance(
@@ -97,6 +95,7 @@ def test_mdformat_update_resolves_pypi_version_and_hashes_matching_tag(
     module = _load_module()
     updater = module.MdformatUpdater()
     fetch_calls: list[tuple[object, str, dict[str, object]]] = []
+    commit_calls: list[tuple[object, str]] = []
 
     async def _fetch_json(
         session: object,
@@ -107,10 +106,17 @@ def test_mdformat_update_resolves_pypi_version_and_hashes_matching_tag(
         return {"info": {"version": "1.1.0"}}
 
     monkeypatch.setattr(module, "fetch_json", _fetch_json)
+
+    async def _resolve_commit(session: object, tag: str) -> str:
+        commit_calls.append((session, tag))
+        return COMMIT
+
+    monkeypatch.setattr(updater, "_resolve_release_tag_commit", _resolve_commit)
     hash_calls = _install_source_hash(monkeypatch)
     session = object()
     current = SourceEntry(
-        version="1.0.0",
+        version="1.1.0",
+        commit="c" * 40,
         hashes=HashCollection.from_value([
             HashEntry.create(
                 "srcHash",
@@ -137,13 +143,14 @@ def test_mdformat_update_resolves_pypi_version_and_hashes_matching_tag(
             },
         )
     ]
+    assert commit_calls == [(session, "1.1.0")]
     assert len(hash_calls) == 1
     assert_nix_ast_equal(
         str(hash_calls[0]["expr"]),
         _build_fetch_from_github_call(
             "hukkin",
             "mdformat",
-            tag="1.1.0",
+            rev=COMMIT,
             fetch_submodules=False,
         ),
     )
@@ -153,6 +160,7 @@ def test_mdformat_update_resolves_pypi_version_and_hashes_matching_tag(
             "mdformat",
             SourceEntry(
                 version="1.1.0",
+                commit=COMMIT,
                 hashes=HashCollection.from_value([
                     HashEntry.create("srcHash", _UPDATED_HASH)
                 ]),

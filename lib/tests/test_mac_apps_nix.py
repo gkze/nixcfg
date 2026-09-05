@@ -41,6 +41,7 @@ from lib.tests._nix_ast import (
 )
 from lib.tests._nix_eval import (
     nix_attrset,
+    nix_eval_json,
     nix_eval_raw,
     nix_eval_result,
     nix_import,
@@ -3439,16 +3440,15 @@ def test_work_mac_app_routes_preserve_system_and_user_scopes() -> None:
         "gemini": "pkgs.gemini",
         "github-copilot": "pkgs.github-copilot-app",
         "gooeypi": "pkgs.gooeypi",
+        "grok-bot": "pkgs.grok-bot",
         "hermes": "pkgs.hermes-desktop",
         "hq": "pkgs.hq",
-        "humanlayer": "pkgs.humanlayer",
         "mach-studio": "pkgs.mach-studio",
         "onepassword": "pkgs.onepassword",
         "openchamber": "pkgs.openchamber",
         "paseo": "pkgs.paseo",
         "reflect": "pkgs.reflect-open",
         "screen-studio": "pkgs.screen-studio",
-        "traycer": "pkgs.traycer",
         "unsloth": "pkgs.unsloth",
         "voiceos": "pkgs.voiceos",
         "waku": "pkgs.waku",
@@ -3614,6 +3614,73 @@ def test_george_config_enables_signal_beta_downgrade_protection_opt_in() -> None
     assert "preventDowngrade" not in binding_map(slack_entry.values)
 
 
+@pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
+def test_overlay_layer_merge_rejects_shadowed_fragment_outputs() -> None:
+    """Use Nix evaluation because an AST cannot prove collision failure semantics."""
+    overlay_root = _module_output("overlays/default.nix")
+    default_overlay = expect_instance(
+        expect_binding(overlay_root.values, "default").value,
+        FunctionDefinition,
+    )
+    overlay_fn = expect_instance(default_overlay.output, FunctionDefinition)
+    merged_output = expect_instance(overlay_fn.output, FunctionCall)
+    assert_nix_ast_equal(
+        expect_scope_binding(merged_output, "mergeOverlayLayers").value,
+        "import ./_lib/merge-layers.nix",
+    )
+    assert_nix_ast_equal(merged_output.name, Identifier(name="mergeOverlayLayers"))
+    assert_nix_ast_equal(
+        merged_output.argument,
+        "{ inherit fragments helpers tinyOverlays; }",
+    )
+
+    merge_layers = nix_import(REPO_ROOT / "overlays/_lib/merge-layers.nix")
+    accepted = FunctionCall(
+        name=merge_layers,
+        argument=nix_attrset({
+            "fragments": {"sourceBuilt": "fragment"},
+            "helpers": {"helper": "helper"},
+            "tinyOverlays": {"element-desktop": "managed-wrapper"},
+        }),
+    )
+    assert nix_eval_json(accepted) == {
+        "element-desktop": "managed-wrapper",
+        "helper": "helper",
+        "sourceBuilt": "fragment",
+    }
+
+    shadowed = FunctionCall(
+        name=merge_layers,
+        argument=nix_attrset({
+            "fragments": {"element-desktop": "obsolete-source-override"},
+            "helpers": {},
+            "tinyOverlays": {"element-desktop": "managed-wrapper"},
+        }),
+    )
+    attempted = FunctionCall(
+        name=identifier_attr_path("builtins", "tryEval"),
+        argument=Parenthesis(value=shadowed),
+    )
+    assert nix_eval_json(attempted) == {"success": False, "value": False}
+
+    shadowed_helper = FunctionCall(
+        name=merge_layers,
+        argument=nix_attrset({
+            "fragments": {},
+            "helpers": {"managed": "helper"},
+            "tinyOverlays": {"managed": "tiny-overlay"},
+        }),
+    )
+    attempted_helper_shadow = FunctionCall(
+        name=identifier_attr_path("builtins", "tryEval"),
+        argument=Parenthesis(value=shadowed_helper),
+    )
+    assert nix_eval_json(attempted_helper_shadow) == {
+        "success": False,
+        "value": False,
+    }
+
+
 def test_spacedrive_overlay_only_clears_broken_metadata_on_darwin() -> None:
     """The overlay should preserve Linux's broken flag while enabling the Darwin app."""
     overlay_root = _module_output("overlays/default.nix")
@@ -3657,6 +3724,14 @@ def test_managed_gui_app_tiny_overlays_keep_copy_mode_metadata_contracts() -> No
     )
 
     assert "chatgpt" not in binding_map(tiny_overlays.values)
+    assert_nix_ast_equal(
+        expect_binding(tiny_overlays.values, "element-desktop").value,
+        _curried_call(
+            Identifier(name="withManagedMacApp"),
+            identifier_attr_path("prev", "element-desktop"),
+            StringPrimitive(value="Element.app", raw_string=True),
+        ),
+    )
     assert_nix_ast_equal(
         expect_binding(tiny_overlays.values, "code-cursor").value,
         _curried_call(
@@ -3992,6 +4067,7 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
           (appPath "slack" "Slack.app")
           (appPath "zen-twilight" "Twilight.app")
           (appPath "google-chrome" "Google Chrome.app")
+          (appPath "grok-bot" "Grok Bot.app")
           (appPath "town-assistant" "Town Assistant.app")
           (appPath "codex" "ChatGPT.app")
           (appPath "claude" "Claude.app")

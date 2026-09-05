@@ -55,6 +55,7 @@ class GitHubDesktopUpdater(FlakeInputUpdater):
     """Track the GitHub Desktop beta flake input and its Yarn caches."""
 
     name = "github-desktop"
+    aggregate_into = ("electron-runtimes",)
     input_name = "github-desktop"
     _CACHE_ATTRS: ClassVar[tuple[tuple[GitHubDesktopHashType, str], ...]] = (
         ("yarnRootHash", ".cacheRoot"),

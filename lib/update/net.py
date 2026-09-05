@@ -6,16 +6,27 @@ import urllib.parse
 import warnings
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
+from typing import TYPE_CHECKING
 
 import aiohttp
 from githubkit import GitHub
 from githubkit.exception import GitHubException
-from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+)
 from tenacity.wait import wait_exponential
 
 from lib import http_utils, json_utils
 from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.constants import resolve_timeout_alias
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from tenacity import RetryCallState
 
 type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | dict[str, "JSONValue"] | list["JSONValue"]
@@ -32,12 +43,19 @@ def _expect_json_list(payload: JSONValue, *, context: str) -> JSONList:
 
 
 HTTP_BAD_REQUEST = 400
+HTTP_FORBIDDEN = 403
 RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
+# Bound server-directed sleeps so an untrusted response cannot stall an update forever.
+_MAX_RETRY_AFTER_SECONDS = 300.0
 logger = logging.getLogger(__name__)
 
 
 class _RetryableStatusError(RuntimeError):
     """HTTP status error that should be retried."""
+
+    def __init__(self, detail: str, *, retry_after: float | None = None) -> None:
+        self.retry_after = retry_after
+        super().__init__(detail)
 
 
 class _NonRetryableStatusError(RuntimeError):
@@ -127,6 +145,47 @@ def _format_http_error(response: aiohttp.ClientResponse, payload: bytes) -> str:
     if error_body:
         detail = f"{detail}\n{error_body}"
     return detail
+
+
+def _parse_retry_after(value: str | None, *, now: datetime) -> float | None:
+    """Return a bounded retry delay for an RFC 9110 ``Retry-After`` value."""
+    if value is None:
+        return None
+    candidate = value.strip()
+    if candidate.isdigit():
+        max_seconds = int(_MAX_RETRY_AFTER_SECONDS)
+        normalized = candidate.lstrip("0") or "0"
+        if len(normalized) > len(str(max_seconds)):
+            return _MAX_RETRY_AFTER_SECONDS
+        return float(min(int(normalized), max_seconds))
+    try:
+        retry_at = parsedate_to_datetime(candidate)
+    except TypeError, ValueError, OverflowError:
+        return None
+    if retry_at.tzinfo is None:
+        return None
+    delay = (retry_at - now).total_seconds()
+    if delay <= 0:
+        return None
+    return min(delay, _MAX_RETRY_AFTER_SECONDS)
+
+
+def _retry_wait(backoff: float) -> Callable[[RetryCallState], float]:
+    """Prefer a server retry delay and otherwise use exponential backoff."""
+    fallback = wait_exponential(multiplier=backoff, exp_base=2)
+
+    def _wait(retry_state: RetryCallState) -> float:
+        outcome = retry_state.outcome
+        if outcome is not None:
+            exception = outcome.exception()
+            if (
+                isinstance(exception, _RetryableStatusError)
+                and exception.retry_after is not None
+            ):
+                return exception.retry_after
+        return fallback(retry_state)
+
+    return _wait
 
 
 def _resolve_timeout_alias(
@@ -250,13 +309,22 @@ async def _request(
             if response.status < HTTP_BAD_REQUEST:
                 return payload, dict(response.headers)
             detail = _format_http_error(response, payload)
-            if response.status in RETRYABLE_STATUSES:
-                raise _RetryableStatusError(detail)
+            retry_after = _parse_retry_after(
+                response.headers.get("Retry-After"),
+                now=datetime.now(tz=UTC),
+            )
+            if response.status in RETRYABLE_STATUSES or (
+                response.status == HTTP_FORBIDDEN and retry_after is not None
+            ):
+                raise _RetryableStatusError(
+                    detail,
+                    retry_after=retry_after,
+                )
             raise _NonRetryableStatusError(detail)
 
     retryer = AsyncRetrying(
         stop=stop_after_attempt(options.attempts),
-        wait=wait_exponential(multiplier=options.backoff, exp_base=2),
+        wait=_retry_wait(options.backoff),
         retry=retry_if_exception_type((
             _RetryableStatusError,
             aiohttp.ClientError,

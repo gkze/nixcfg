@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING, ClassVar
 
-from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
+from lib.nix.models.sources import HashEntry, SourceEntry, SourceHashes
 from lib.update import process as update_process
 from lib.update.events import (
     EventStream,
@@ -13,9 +13,11 @@ from lib.update.events import (
     require_value,
 )
 from lib.update.updaters import (
+    GitHubReleaseUpdater,
     PinnedSourceDownloadUpdater,
     UpdateContext,
     VersionInfo,
+    read_pinned_source_version,
     register_updater,
 )
 
@@ -24,10 +26,14 @@ if TYPE_CHECKING:
 
 
 @register_updater
-class MoleAppUpdater(PinnedSourceDownloadUpdater):
+class MoleAppUpdater(GitHubReleaseUpdater, PinnedSourceDownloadUpdater):
     """Pinned updater for Mole's script source and helper binaries."""
 
     name = "mole-app"
+    GITHUB_OWNER = "tw93"
+    GITHUB_REPO = "Mole"
+    TAG_PREFIX = "V"
+    RESOLVE_TAG_COMMIT = True
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "darwin-arm64",
         "x86_64-darwin": "darwin-amd64",
@@ -37,9 +43,22 @@ class MoleAppUpdater(PinnedSourceDownloadUpdater):
         "V{version}/binaries-{platform_value}.tar.gz"
     )
 
-    @staticmethod
-    def _source_url(info: VersionInfo) -> str:
-        return f"https://github.com/tw93/Mole/archive/refs/tags/V{info.version}.tar.gz"
+    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        """Resolve the pinned release tag to its current immutable commit."""
+        version = read_pinned_source_version(self.name)
+        tag = f"{self.TAG_PREFIX}{version}"
+        commit = await self._resolve_release_tag_commit(session, tag)
+        return VersionInfo(
+            version=version,
+            metadata={"commit": commit, "tag": tag},
+        )
+
+    def _source_url(self, info: VersionInfo) -> str:
+        commit = self._require_commit(info)
+        return (
+            f"https://github.com/{self.GITHUB_OWNER}/{self.GITHUB_REPO}/"
+            f"archive/{commit}.tar.gz"
+        )
 
     async def fetch_hashes(
         self,
@@ -78,8 +97,9 @@ class MoleAppUpdater(PinnedSourceDownloadUpdater):
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist every URL and hash consumed by the Mole derivation."""
-        return SourceEntry(
-            version=info.version,
-            urls=self._platform_urls(info),
-            hashes=HashCollection.from_value(hashes),
+        return self._build_result_with_urls(
+            info,
+            hashes,
+            self._platform_urls(info),
+            commit=self._require_commit(info),
         )

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance, expect_not_none
 from lib.tests._nix_ast import assert_nix_ast_equal, parse_nix_expr
@@ -31,6 +32,21 @@ HASH_B = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 def _require_hash_entries(payload: object) -> list[HashEntry]:
     raw = expect_instance(payload, list)
     return [expect_instance(entry, HashEntry) for entry in raw]
+
+
+def _goose_metadata(
+    module: ModuleType,
+    *,
+    version: str,
+    commit: str = "a" * 40,
+) -> object:
+    return module.ElectronManifestMetadata(
+        node=FlakeLockNode(),
+        commit=commit,
+        electron_version="42.3.3",
+        manifest_path="ui/desktop/package.json",
+        manifest_version=version,
+    )
 
 
 def _module_fixture(path: str, fixture_name: str) -> object:
@@ -68,7 +84,33 @@ def test_goose_desktop_updater_uses_goose_cli_source_file(
     updater = goose_desktop_module.GooseDesktopUpdater()
     assert updater.companion_of == "goose-cli"
     source_file = tmp_path / "sources.json"
-    entry = SourceEntry.model_validate({"version": "1.37.0", "hashes": []})
+    commit = "a" * 40
+    entry = SourceEntry.model_validate({
+        "version": "1.37.0",
+        "hashes": [],
+        "input": "goose",
+        "commit": commit,
+    })
+
+    monkeypatch.setattr(
+        goose_desktop_module.update_flake,
+        "get_flake_input_node",
+        lambda _name: FlakeLockNode(),
+    )
+    manifest_versions = iter(("1.38.0", "1.37.0"))
+
+    async def _fetch_manifest(*_args: object, **_kwargs: object) -> object:
+        return _goose_metadata(
+            goose_desktop_module,
+            version=next(manifest_versions),
+            commit=commit,
+        )
+
+    monkeypatch.setattr(
+        goose_desktop_module,
+        "fetch_flake_electron_manifest",
+        _fetch_manifest,
+    )
 
     monkeypatch.setattr(
         goose_desktop_module,
@@ -84,6 +126,8 @@ def test_goose_desktop_updater_uses_goose_cli_source_file(
     effective_entry = SourceEntry.model_validate({
         "version": "1.38.0",
         "hashes": [],
+        "input": "goose",
+        "commit": commit,
     })
     context = UpdateContext(
         current=None,
@@ -109,6 +153,80 @@ def test_goose_desktop_updater_uses_goose_cli_source_file(
     )
     with pytest.raises(RuntimeError, match="missing a pinned version"):
         _run(updater.fetch_latest(object()))
+
+    missing_identity = SourceEntry.model_validate({"version": "1.37.0", "hashes": []})
+    monkeypatch.setattr(
+        goose_desktop_module.update_sources,
+        "load_source_entry",
+        lambda _path: missing_identity,
+    )
+    with pytest.raises(RuntimeError, match="immutable Goose input identity"):
+        _run(updater.fetch_latest(object()))
+
+
+@pytest.mark.parametrize(
+    ("metadata_commit", "manifest_version", "match"),
+    [
+        ("b" * 40, "1.37.0", "locked commit"),
+        ("a" * 40, "1.38.0", "manifest version"),
+    ],
+)
+def test_goose_desktop_rejects_manifest_identity_mismatches(
+    goose_desktop_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    metadata_commit: str,
+    manifest_version: str,
+    match: str,
+) -> None:
+    """Require the fetched desktop manifest to match the effective Goose source."""
+    updater = goose_desktop_module.GooseDesktopUpdater()
+    commit = "a" * 40
+    context = UpdateContext(
+        current=None,
+        effective_sources={
+            "goose-cli": SourceEntry(
+                version="1.37.0",
+                hashes={},
+                input="goose",
+                commit=commit,
+            )
+        },
+    )
+    monkeypatch.setattr(
+        goose_desktop_module.update_flake,
+        "get_flake_input_node",
+        lambda _name: FlakeLockNode(),
+    )
+
+    async def _fetch_manifest(*_args: object, **_kwargs: object) -> object:
+        return _goose_metadata(
+            goose_desktop_module,
+            version=manifest_version,
+            commit=metadata_commit,
+        )
+
+    monkeypatch.setattr(
+        goose_desktop_module,
+        "fetch_flake_electron_manifest",
+        _fetch_manifest,
+    )
+
+    with pytest.raises(RuntimeError, match=match):
+        _run(updater.fetch_latest(object(), context=context))
+
+
+def test_goose_desktop_requires_resolved_manifest_metadata(
+    goose_desktop_module: ModuleType,
+) -> None:
+    """Reject dependency projections and results without trusted manifest metadata."""
+    updater = goose_desktop_module.GooseDesktopUpdater()
+    info = VersionInfo(version="1.37.0", metadata={})
+    goose_cli_source = SourceEntry(version="1.37.0", hashes={})
+
+    with pytest.raises(TypeError, match="resolved Electron manifest"):
+        updater._dependency_hash_overrides(info, goose_cli_source)
+    with pytest.raises(TypeError, match="resolved Electron manifest"):
+        updater.build_result(info, [HashEntry.create("nodeModulesHash", HASH_A)])
 
 
 def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
@@ -140,6 +258,10 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
         },
         effective_sources={"goose-cli": goose_cli_source},
     )
+    info = VersionInfo(
+        "1.37.0",
+        _goose_metadata(goose_desktop_module, version="1.37.0"),
+    )
 
     async def _fake_compute_fixed_output_hash(
         source: str,
@@ -166,7 +288,7 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
     events = _run(
         _collect(
             updater.fetch_hashes(
-                VersionInfo("1.37.0"),
+                info,
                 object(),
                 context=context,
             )
@@ -189,6 +311,7 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
                     platform="aarch64-darwin",
                 )
             ],
+            electron_version="42.3.3",
         ),
     }
     expected_override = parse_nix_expr(
@@ -213,10 +336,11 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
             system="aarch64-darwin",
             package_args={"goose-cli": expected_override},
             source_overrides=source_overrides,
+            fake_hashes=True,
         ),
     )
 
-    result = updater.build_result(VersionInfo("1.37.0"), payload)
+    result = updater.build_result(info, payload)
     assert result.version == "1.37.0"
     assert result.hashes.entries == [
         HashEntry.create(
@@ -225,15 +349,19 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
             platform="aarch64-darwin",
         )
     ]
+    assert result.electron_version == "42.3.3"
 
     with pytest.raises(RuntimeError, match="expected structured hash entries"):
-        updater.build_result(VersionInfo("1.37.0"), {"aarch64-darwin": HASH_A})
+        updater.build_result(info, {"aarch64-darwin": HASH_A})
 
     with pytest.raises(RuntimeError, match="does not match goose-desktop version"):
         _run(
             _collect(
                 updater.fetch_hashes(
-                    VersionInfo("1.38.0"),
+                    VersionInfo(
+                        "1.38.0",
+                        _goose_metadata(goose_desktop_module, version="1.38.0"),
+                    ),
                     object(),
                     context=context,
                 )
@@ -530,18 +658,27 @@ def test_sentry_cli_updater_paths(
 ) -> None:
     """Exercise Sentry CLI release parsing and fixed-output hashing."""
     updater = sentry_cli_module.SentryCliUpdater()
+    commit = "d" * 40
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",
-        lambda *_a, **_k: asyncio.sleep(0, result={"tag_name": "v9.9.9"}),
+        lambda _session, path, **_kwargs: asyncio.sleep(
+            0,
+            result=(
+                {"tag_name": "v9.9.9"}
+                if path.endswith("/releases/latest")
+                else {"sha": commit}
+            ),
+        ),
     )
     latest = _run(updater.fetch_latest(object()))
     assert latest.version == "v9.9.9"
+    assert latest.commit == commit
 
-    src_expr = object.__getattribute__(updater, "_src_nix_expr")("v9.9.9")
-    cargo_expr = object.__getattribute__(updater, "_cargo_nix_expr")("v9.9.9", HASH_A)
+    src_expr = object.__getattribute__(updater, "_src_nix_expr")(commit)
+    cargo_expr = object.__getattribute__(updater, "_cargo_nix_expr")(commit, HASH_A)
     assert_nix_ast_equal(
         src_expr,
-        object.__getattribute__(updater, "_src_nix_expression")("v9.9.9"),
+        object.__getattribute__(updater, "_src_nix_expression")(commit),
     )
     cargo_call = expect_instance(
         parse_nix_expr(cargo_expr), sentry_cli_module.FunctionCall
@@ -569,6 +706,7 @@ def test_sentry_cli_updater_paths(
     payload = _require_hash_entries(values[-1].payload)
     assert payload[0].hash_type == "srcHash"
     assert payload[1].hash_type == "cargoHash"
+    assert updater.build_result(latest, payload).commit == commit
 
     async def _no_hash(_name: str, _expr: str, **_kwargs: object) -> EventStream:
         if False:
@@ -802,16 +940,26 @@ def test_tsgolint_updater_paths(
 ) -> None:
     """Exercise tsgolint release parsing and latest-version checks."""
     updater = tsgolint_module.TsgolintUpdater()
+    commit = "f" * 40
 
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",
-        lambda *_a, **_k: asyncio.sleep(0, result={"tag_name": "v0.21.0"}),
+        lambda _session, path, **_kwargs: asyncio.sleep(
+            0,
+            result=(
+                {"tag_name": "v0.21.0"}
+                if path.endswith("/releases/latest")
+                else {"sha": commit}
+            ),
+        ),
     )
     latest = _run(updater.fetch_latest(object()))
     assert latest.version == "0.21.0"
+    assert latest.commit == commit
 
     fake_current = SourceEntry(
         version=latest.version,
+        commit=commit,
         hashes=[
             HashEntry.create("srcHash", HASH_A),
             HashEntry.create("vendorHash", HASH_B),
@@ -819,6 +967,7 @@ def test_tsgolint_updater_paths(
     )
     real_current = SourceEntry(
         version=latest.version,
+        commit=commit,
         hashes=[
             HashEntry.create("srcHash", HASH_B),
             HashEntry.create("vendorHash", HASH_B),
@@ -849,7 +998,7 @@ def test_neutils_updater_emits_generated_artifact_and_src_hash(
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
-    latest = VersionInfo(version="0.7.2")
+    latest = VersionInfo(version="0.7.2", metadata={"commit": "a" * 40})
     events = _run(_collect(updater.fetch_hashes(latest, object())))
 
     artifact_event = next(

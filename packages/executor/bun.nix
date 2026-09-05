@@ -15,10 +15,6 @@
     url = "https://registry.npmjs.org/7zip-bin/-/7zip-bin-5.2.0.tgz";
     hash = "sha512-ukTPVhqG4jNzMro2qA9HSCSSVJN3aN7tlb+hfqYCt3ER0yWroeA2VR38MNrOHLQ/cVj+DaIMad0kFCtWWowh/A==";
   };
-  "@1password/op-js@0.1.13" = fetchurl {
-    url = "https://registry.npmjs.org/@1password/op-js/-/op-js-0.1.13.tgz";
-    hash = "sha512-ZZBLxVqywFdvIbLv2xWw2N1ImSi183rRKf90vV19KRMReNyLwuD0dv6IrKrIdrJU33IuV3Gz85Z4K2a1PJTBDg==";
-  };
   "@1password/sdk-core@0.4.1-beta.1" = fetchurl {
     url = "https://registry.npmjs.org/@1password/sdk-core/-/sdk-core-0.4.1-beta.1.tgz";
     hash = "sha512-/otbg1JVhsEn6oUIeReoT9TmFr8J7KBwr9UuRVfJFwwGG3bHPF8ewT+LhRimQeJtypqQ69ZVuOYkxknD4iQHxw==";
@@ -1537,9 +1533,9 @@
   "@executor-js/config" = copyPathToStore ./packages/core/config;
   "@executor-js/desktop" = copyPathToStore ./apps/desktop;
   "@executor-js/e2e" = copyPathToStore ./e2e;
-  "@executor-js/emulate@0.13.9" = fetchurl {
-    url = "https://registry.npmjs.org/@executor-js/emulate/-/emulate-0.13.9.tgz";
-    hash = "sha512-GXuooRKtJPrWp5AEdcE6w0DeIt+TF/bonV1bzuZHX0khx2bsUrE4z7gKK/5IMxYEr+ifgVk7HWnxLnhx8BHNGg==";
+  "@executor-js/emulate@0.14.1" = fetchurl {
+    url = "https://registry.npmjs.org/@executor-js/emulate/-/emulate-0.14.1.tgz";
+    hash = "sha512-MO72WgLgjyOJnWEiL8DrT6jAVs8C2VDz9oGUFkZ/x2GciEkiOkYG67u5/o+nqtPoxJTR06cqpkHjfrzCm1dqww==";
   };
   "@executor-js/example-all-plugins" = copyPathToStore ./examples/all-plugins;
   "@executor-js/example-docs-sdk-quickstart" = copyPathToStore ./examples/docs-sdk-quickstart;
@@ -1562,6 +1558,7 @@
     url = "https://registry.npmjs.org/@executor-js/motel/-/motel-0.2.5-executor.1.tgz";
     hash = "sha512-fLGJ5FIIBYd+4L2OurpYFjWzvcCbACvmdNofh6THXQJE1Gku93EKURtgn27/XddyM9SKGST6/znTRcmwKiYdXw==";
   };
+  "@executor-js/onboarding-demo" = copyPathToStore ./packages/onboarding-demo;
   "@executor-js/plugin-desktop-settings" = copyPathToStore ./packages/plugins/desktop-settings;
   "@executor-js/plugin-encrypted-secrets" = copyPathToStore ./packages/plugins/encrypted-secrets;
   "@executor-js/plugin-example" = copyPathToStore ./packages/plugins/example;
@@ -7872,10 +7869,6 @@
   "longest-streak@3.1.0" = fetchurl {
     url = "https://registry.npmjs.org/longest-streak/-/longest-streak-3.1.0.tgz";
     hash = "sha512-9Ri+o0JYgehTaVBBDoMqIl8GXtbWg711O3srftcHhZ0dqnETqLaoIK0x17fUw9rFSlK/0NlsKe0Ahhyl5pXE2g==";
-  };
-  "lookpath@1.2.3" = fetchurl {
-    url = "https://registry.npmjs.org/lookpath/-/lookpath-1.2.3.tgz";
-    hash = "sha512-kthRVhf4kH4+HW3anM4UBHxsw/XFESf13euCEldhXr6GpBdmBoa7rDd7WO5G0Mhd4G5XtKTcEy8OR0iRZXpS3Q==";
   };
   "loose-envify@1.4.0" = fetchurl {
     url = "https://registry.npmjs.org/loose-envify/-/loose-envify-1.4.0.tgz";

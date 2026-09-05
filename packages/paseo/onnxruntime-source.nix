@@ -27,13 +27,10 @@ let
   };
   fetchGitHubDependency =
     dependency:
-    fetchFromGitHub (
-      {
-        inherit (dependency) owner repo hash;
-      }
-      // lib.optionalAttrs (dependency ? rev) { inherit (dependency) rev; }
-      // lib.optionalAttrs (dependency ? tag) { inherit (dependency) tag; }
-    );
+    fetchFromGitHub {
+      inherit (dependency) owner repo hash;
+      rev = dependency.commit;
+    };
   fetchReviewedPatch =
     patch:
     fetchpatch (
@@ -56,10 +53,10 @@ let
   };
   re2Src = fetchGitHubDependency closureContract.dependencies.re2;
   safeintSrc = fetchGitHubDependency closureContract.dependencies.safeint;
-  protobufExact =
+  protobuf32 =
     assert lib.assertMsg (
-      lib.getVersion protobuf_32 == closureContract.dependencies.protobuf.version
-    ) "Paseo ONNX Runtime requires protobuf ${closureContract.dependencies.protobuf.version}";
+      lib.versions.major (lib.getVersion protobuf_32) == "32"
+    ) "Paseo ONNX Runtime requires the protobuf_32 major version lane";
     protobuf_32;
 in
 stdenv.mkDerivation (_finalAttrs: {
@@ -75,7 +72,7 @@ stdenv.mkDerivation (_finalAttrs: {
   nativeBuildInputs = [
     cmake
     pkg-config
-    protobufExact
+    protobuf32
     python3
   ];
   buildInputs = [
@@ -85,7 +82,7 @@ stdenv.mkDerivation (_finalAttrs: {
     libpng
     microsoft-gsl
     nlohmann_json
-    protobufExact
+    protobuf32
     zlib
   ]
   ++ lib.optional (lib.meta.availableOn stdenv.hostPlatform cpuinfo) cpuinfo
@@ -114,7 +111,7 @@ stdenv.mkDerivation (_finalAttrs: {
     (lib.cmakeFeature "FETCHCONTENT_SOURCE_DIR_RE2" "${re2Src}")
     (lib.cmakeFeature "FETCHCONTENT_SOURCE_DIR_SAFEINT" "${safeintSrc}")
     (lib.cmakeFeature "FETCHCONTENT_TRY_FIND_PACKAGE_MODE" "ALWAYS")
-    (lib.cmakeFeature "ONNX_CUSTOM_PROTOC_EXECUTABLE" (lib.getExe protobufExact))
+    (lib.cmakeFeature "ONNX_CUSTOM_PROTOC_EXECUTABLE" (lib.getExe protobuf32))
     (lib.cmakeBool "onnxruntime_BUILD_SHARED_LIB" true)
     (lib.cmakeBool "onnxruntime_BUILD_UNIT_TESTS" false)
     (lib.cmakeBool "onnxruntime_ENABLE_LTO" false)
@@ -151,7 +148,7 @@ stdenv.mkDerivation (_finalAttrs: {
 
   passthru = {
     paseoExactSource = effectiveClosureContract;
-    protobuf = protobufExact;
+    protobuf = protobuf32;
   };
 
   meta = {

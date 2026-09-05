@@ -1,11 +1,19 @@
 {
-  "drvHash": "8ml3ynwvi247gjcampl54wdb4ghvdz4d",
+  "drvHash": "x3rsv5kqxmqa27yrr6nlggxcmp0wkcmh",
   "hashes": [
     {
-      "hash": "sha256-3IpsBmaxpVJOljKSQXkecAPlZ/CcgYO6+0T7M8zI8MA=",
+      "hash": "sha256-CZZOZ+ox4kE5hq/W82UrpJ4I9al9TFBiN+K4XUhxnDE=",
       "hashType": "npmDepsHash"
     }
   ],
   "input": "gitbutler",
-  "version": "0.22.1"
+  "pins": {
+    "nodeEngine": ">=24",
+    "nodejsAttr": "nodejs_24",
+    "nodejsVersion": "24.19.0",
+    "packageManager": "pnpm@10.20.0",
+    "pnpmAttr": "pnpm_10",
+    "pnpmVersion": "10.34.5"
+  },
+  "version": "0.22.3"
 }

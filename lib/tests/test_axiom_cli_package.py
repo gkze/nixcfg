@@ -11,7 +11,7 @@ from lib.update.paths import REPO_ROOT
 
 
 def test_axiom_cli_selects_upstream_required_go_toolchain() -> None:
-    """Build Axiom with the newest Go toolchain available in the pinned nixpkgs."""
+    """Keep the intentional Go compatibility choice in the Nix package."""
     function = expect_instance(
         nix_file_expr(REPO_ROOT / "packages/axiom-cli/default.nix"),
         FunctionDefinition,
@@ -19,7 +19,10 @@ def test_axiom_cli_selects_upstream_required_go_toolchain() -> None:
     call = expect_instance(function.output, FunctionCall)
     arguments = expect_instance(call.argument, AttributeSet)
 
-    assert_nix_ast_equal(expect_binding(arguments.values, "go").value, "go_1_27")
+    assert_nix_ast_equal(
+        expect_binding(arguments.values, "go").value,
+        "go_1_27",
+    )
 
 
 def test_axiom_cli_excludes_release_tooling_from_runtime_vendoring() -> None:

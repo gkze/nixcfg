@@ -31,7 +31,6 @@ lib.mkDarwinHost {
   extraSystemModules = [
     "${lib.modulesPath}/darwin/george/caches.nix"
     "${lib.modulesPath}/darwin/george/work.nix"
-    "${lib.modulesPath}/darwin/george/traycer-host.nix"
     {
       # Home Manager initializes completion after adding plugin directories to fpath.
       darwinDefaults.zsh.deferCompletionInitToHomeManager = true;

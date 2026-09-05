@@ -2,7 +2,6 @@
 
 # ruff: noqa: N999, S101 -- flat sidecar name and pytest assertions are intentional.
 
-import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -18,6 +17,10 @@ from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, nix_apply
 from lib.tests._nix_source import nix_file_expr
+from lib.tests._source_metadata import (
+    assert_immutable_commit,
+    assert_structured_source_hashes,
+)
 from lib.tests._updater_helpers import (
     collect_events,
     load_repo_module,
@@ -102,14 +105,13 @@ def _treesitter_source_expression() -> FunctionCall:
 
 
 def test_treesitter_textobjects_overlay_reads_updater_owned_commit() -> None:
-    """Keep the branch commit and source hash in the flat metadata sidecar."""
-    source = SourceEntry.model_validate(
-        json.loads(_SOURCE_PATH.read_text(encoding="utf-8"))
-    )
-    assert source == SourceEntry(
-        version="main",
-        commit=_COMMIT,
-        hashes=HashCollection.from_value([HashEntry.create("srcHash", _SOURCE_HASH)]),
+    """Keep the moving branch behind one immutable source commit and closure."""
+    source = SourceEntry.model_validate_json(_SOURCE_PATH.read_text(encoding="utf-8"))
+    assert source.version == "main"
+    assert_immutable_commit(source.commit)
+    assert_structured_source_hashes(
+        source,
+        hash_types={"srcHash"},
     )
 
     assert_nix_ast_equal(

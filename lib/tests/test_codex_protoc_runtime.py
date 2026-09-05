@@ -65,7 +65,6 @@ def test_every_vendored_protoc_platform_uses_the_runtime_data_override() -> None
           rmcp = rmcpOverride;
           runfiles = runfilesOverride;
           v8 = v8Build.mkCrateOverride;
-          webrtc-sys = webrtcSysOverride;
         }
         // lib.optionalAttrs needsCoreNodeVersionPatch {
           codex-core = codexCoreOverride;

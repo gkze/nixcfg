@@ -10,9 +10,12 @@ import pytest
 from lib.update import crate2nix as update_crate2nix
 from lib.update import source_runner
 from lib.update.events import StatusKind
+from lib.update.flake import load_flake_lock
 from lib.update.paths import REPO_ROOT, package_file_map_in
 from lib.update.persistence import planned_update_paths
+from lib.update.planner import source_additional_input_names, source_backing_input_name
 from lib.update.refs import get_flake_inputs_with_refs
+from lib.update.sources import load_all_sources
 from lib.update.surfaces import (
     UPDATE_SURFACE_ALIASES,
     UPDATE_SURFACE_EXEMPTIONS,
@@ -112,6 +115,46 @@ def test_validate_update_surface_coverage_accepts_current_repo() -> None:
         updater_names=set(ensure_updaters_loaded()),
         ref_input_names={ref.name for ref in get_flake_inputs_with_refs()},
     )
+
+
+def test_every_source_backing_input_exists_in_the_root_flake() -> None:
+    """Reject stale updater metadata before update tries a nonexistent input."""
+    root_inputs = set(load_flake_lock().root_node.inputs or {})
+    entries = load_all_sources().entries
+    missing_declared: dict[str, tuple[str, ...]] = {}
+    missing_persisted: dict[str, str] = {}
+    mismatched: dict[str, tuple[str, str]] = {}
+
+    for name, updater in ensure_updaters_loaded().items():
+        declared_input = source_backing_input_name(name, updater, None)
+        persisted_input = entries[name].input
+        declared_inputs = tuple(
+            input_name
+            for input_name in (
+                declared_input,
+                *source_additional_input_names(updater),
+            )
+            if input_name is not None
+        )
+        unknown_inputs = tuple(
+            input_name
+            for input_name in declared_inputs
+            if input_name not in root_inputs
+        )
+        if unknown_inputs:
+            missing_declared[name] = unknown_inputs
+        if persisted_input is not None and persisted_input not in root_inputs:
+            missing_persisted[name] = persisted_input
+        if (
+            declared_input is not None
+            and persisted_input is not None
+            and declared_input != persisted_input
+        ):
+            mismatched[name] = (declared_input, persisted_input)
+
+    assert missing_declared == {}
+    assert missing_persisted == {}
+    assert mismatched == {}
 
 
 def test_every_repo_source_has_a_plannable_transaction_destination() -> None:

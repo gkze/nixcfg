@@ -20,10 +20,16 @@ class GooseCliUpdater(Crate2NixMetadataUpdater):
 
     name = "goose-cli"
     input_name = "goose"
-    source_pins: ClassVar[dict[str, str]] = {
+    # crate2nix omits package.rust-version. These are manifest-derived
+    # compatibility values for the exact crate releases, and the package
+    # override rejects any newly introduced version until it is reviewed.
+    compatibility_pin_rationale = (
+        "crate2nix omits package.rust-version, so these reviewed values restore "
+        "the MSRV metadata required by the package override."
+    )
+    compatibility_pins: ClassVar[dict[str, str]] = {
         "bitcoinInternals.0.5.0": "1.74.0",
         "bitcoinInternals.0.6.0": "1.74.0",
-        "clangResourceVersion": "22",
     }
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
@@ -33,7 +39,7 @@ class GooseCliUpdater(Crate2NixMetadataUpdater):
             hashes=HashCollection.from_value(hashes),
             input=self._input,
             commit=info.commit,
-            pins=self.source_pins,
+            pins=self.compatibility_pins,
         )
 
     async def fetch_latest(

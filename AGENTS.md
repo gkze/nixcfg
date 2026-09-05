@@ -59,6 +59,7 @@ Important entrypoints:
 - `lib/exports.nix`
 - `darwin/argus.nix`
 - `darwin/rocinante.nix`
+- `darwin/zeus.nix`
 - `home/george/default.nix`
 - `nixcfg.py`
 
@@ -112,6 +113,7 @@ machine-specific.
 - `home/george/work.nix`
 - `darwin/argus.nix`
 - `darwin/rocinante.nix`
+- `darwin/zeus.nix`
 
 ### Zen / Twilight browser work
 
@@ -310,12 +312,13 @@ Bad simplifications usually:
 
 ## Task-Specific Guidance
 
-### Fixing `argus` or `rocinante` build failures
+### Fixing Darwin host build failures
 
 Start with:
 
 - `nix build .#checks.aarch64-darwin.darwin-argus`
 - `nix build .#checks.aarch64-darwin.darwin-rocinante`
+- `nix build .#checks.aarch64-darwin.darwin-zeus`
 
 If the failure mentions a package, switch quickly into that package or overlay instead of staring
 only at the host module.
@@ -459,6 +462,7 @@ policy exists to prevent.
 - `nix flake check`
 - `nix build .#checks.aarch64-darwin.darwin-argus`
 - `nix build .#checks.aarch64-darwin.darwin-rocinante`
+- `nix build .#checks.aarch64-darwin.darwin-zeus`
 - `nix build .#homeConfigurations.george.activationPackage`
 - `nix build .#pkgs.<system>.<name>` for package-focused work
 

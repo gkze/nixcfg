@@ -15,8 +15,13 @@ from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
+from lib.update import flake as update_flake
 from lib.update import nix as update_nix
 from lib.update import sources as update_sources
+from lib.update.electron_manifest import (
+    ElectronManifestMetadata,
+    fetch_flake_electron_manifest,
+)
 from lib.update.nix import _build_package_path_attr_expr
 from lib.update.nix_expr import select_attrs
 from lib.update.paths import REPO_ROOT, sources_file_for
@@ -45,18 +50,22 @@ class GooseDesktopUpdater(HashEntryUpdater):
     _GOOSE_CRATE_SOURCES_PATH = Path("overlays/goose-cli/crate-sources.json")
 
     name = "goose-desktop"
+    aggregate_into = ("electron-runtimes",)
     companion_of = "goose-cli"
     supported_platforms = (DARWIN_PLATFORM,)
 
     def _dependency_hash_overrides(
         self,
-        version: str,
+        info: VersionInfo,
         goose_cli_source: SourceEntry,
     ) -> dict[str, SourceEntry]:
+        if not isinstance(info.metadata, ElectronManifestMetadata):
+            msg = "Goose desktop metadata is missing its resolved Electron manifest"
+            raise TypeError(msg)
         return {
             "goose-cli": goose_cli_source,
             self.name: SourceEntry(
-                version=version,
+                version=info.version,
                 hashes=HashCollection.from_value([
                     HashEntry.create(
                         "nodeModulesHash",
@@ -64,6 +73,7 @@ class GooseDesktopUpdater(HashEntryUpdater):
                         platform=self.DARWIN_PLATFORM,
                     )
                 ]),
+                electron_version=info.metadata.electron_version,
             ),
         }
 
@@ -88,13 +98,36 @@ class GooseDesktopUpdater(HashEntryUpdater):
         *,
         context: UpdateContext | SourceEntry | None = None,
     ) -> VersionInfo:
-        """Use the effective Goose CLI source version for this update wave."""
-        _ = session
+        """Resolve desktop metadata from the effective immutable Goose source."""
         entry = self._goose_cli_source(context)
         if not entry.version:
             msg = "goose-cli sources.json is missing a pinned version"
             raise RuntimeError(msg)
-        return VersionInfo(version=entry.version)
+        if entry.input != "goose" or entry.commit is None:
+            msg = "goose-cli source is missing its immutable Goose input identity"
+            raise RuntimeError(msg)
+        node = update_flake.get_flake_input_node(entry.input)
+        metadata = await fetch_flake_electron_manifest(
+            session,
+            node=node,
+            manifest_path="ui/desktop/package.json",
+            dependency_group="devDependencies",
+            context="Goose desktop flake input",
+            config=self.config,
+        )
+        if metadata.commit != entry.commit:
+            msg = (
+                f"Goose desktop locked commit {metadata.commit!r} does not match "
+                f"the effective goose-cli source {entry.commit!r}"
+            )
+            raise RuntimeError(msg)
+        if metadata.manifest_version != entry.version:
+            msg = (
+                f"Goose desktop manifest version {metadata.manifest_version!r} "
+                f"does not match goose-cli version {entry.version!r}"
+            )
+            raise RuntimeError(msg)
+        return VersionInfo(version=entry.version, metadata=metadata)
 
     @classmethod
     @contextmanager
@@ -229,6 +262,7 @@ class GooseDesktopUpdater(HashEntryUpdater):
                 ),
             },
             source_overrides=source_overrides,
+            fake_hashes=True,
         )
 
     async def fetch_hashes(
@@ -253,7 +287,7 @@ class GooseDesktopUpdater(HashEntryUpdater):
             self._crate_sources_path(context) as crate_sources_path,
         ):
             source_overrides = self._dependency_hash_overrides(
-                info.version,
+                info,
                 goose_cli_source,
             )
             hash_stream = update_nix.compute_fixed_output_hash(
@@ -274,6 +308,9 @@ class GooseDesktopUpdater(HashEntryUpdater):
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist the Goose source version with a platform-specific dependency hash."""
+        if not isinstance(info.metadata, ElectronManifestMetadata):
+            msg = "Goose desktop metadata is missing its resolved Electron manifest"
+            raise TypeError(msg)
         hash_collection = HashCollection.from_value(hashes)
         if hash_collection.entries is None:
             msg = "goose-desktop updater expected structured hash entries"
@@ -288,4 +325,5 @@ class GooseDesktopUpdater(HashEntryUpdater):
                 )
                 for hash_entry in hash_collection.entries
             ]),
+            electron_version=info.metadata.electron_version,
         )

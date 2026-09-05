@@ -5,11 +5,11 @@
   ...
 }:
 let
-  inherit (selfSource) version;
+  inherit (selfSource) commit version;
   src = prev.fetchFromGitHub {
     owner = "oxc-project";
     repo = "tsgolint";
-    tag = "v${version}";
+    rev = commit;
     fetchSubmodules = false;
     hash = slib.sourceHash "tsgolint" "srcHash";
   };

@@ -32,6 +32,7 @@ dock.mkDockModule {
     (appPath "slack" "Slack.app")
     (appPath "zen-twilight" "Twilight.app")
     (appPath "google-chrome" "Google Chrome.app")
+    (appPath "grok-bot" "Grok Bot.app")
     (appPath "town-assistant" "Town Assistant.app")
     (appPath "codex" "ChatGPT.app")
     (appPath "claude" "Claude.app")

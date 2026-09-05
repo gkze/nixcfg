@@ -3,6 +3,7 @@
 import ast
 import asyncio
 import json
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
@@ -527,30 +528,40 @@ def test_update_cli_reexec_and_entrypoint_short_circuit(
     monkeypatch.delenv(update_cli._REEXEC_ENV, raising=False)
     monkeypatch.setattr(update_cli.shutil, "which", lambda _name: "/bin/nix")
     monkeypatch.setattr(
-        update_cli.os, "chdir", lambda path: captured.setdefault("cwd", path)
+        update_cli.update_persistence,
+        "visible_source_snapshot",
+        lambda _root: nullcontext(Path("/snapshot")),
     )
 
-    def _execvpe(file: str, args: list[str], env: dict[str, str]) -> None:
-        captured["file"] = file
+    def _run(
+        args: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        check: bool,
+    ) -> SimpleNamespace:
         captured["args"] = args
+        captured["cwd"] = cwd
         captured["env"] = env
+        captured["check"] = check
+        return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(update_cli.os, "execvpe", _execvpe)
+    monkeypatch.setattr(update_cli.subprocess, "run", _run)
 
-    with pytest.raises(AssertionError, match="unreachable"):
-        update_cli._maybe_reexec_checkout_update()
+    assert update_cli._maybe_reexec_checkout_update() == 0
 
     assert captured["cwd"] == Path("/repo")
-    assert captured["file"] == "/bin/nix"
     assert captured["args"] == [
         "/bin/nix",
         "run",
-        ".#nixcfg",
+        "path:/snapshot#nixcfg",
         "--",
         "update",
         "demo",
     ]
+    assert captured["check"] is False
     assert cast("dict[str, str]", captured["env"])[update_cli._REEXEC_ENV] == "1"
+    assert cast("dict[str, str]", captured["env"])["REPO_ROOT"] == "/repo"
 
     monkeypatch.setattr(update_cli, "_maybe_reexec_checkout_update", lambda: 42)
     assert update_cli.run_update_command() == 42

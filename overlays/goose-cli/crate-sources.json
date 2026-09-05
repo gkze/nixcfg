@@ -1,7 +1,7 @@
 {
   "slices": {
     "crates/goose": {
-      "hash": "sha256-Oh8GIAuBD5GBbMkN5QF5Plaj3bNLCz1GKVvqZ6Rk6mA=",
+      "hash": "sha256-6ae0oEJM/+L5NBe9LKB/EPu4JQYzaCebBlChXU1zZX8=",
       "name": "goose"
     },
     "crates/goose-acp-macros": {
@@ -9,15 +9,15 @@
       "name": "goose-acp-macros"
     },
     "crates/goose-agent": {
-      "hash": "sha256-PWjzNM5y0blxhCk28+HFxl308QyuBOab3TmHmw9pw2M=",
+      "hash": "sha256-7Go4/N2NQjOpeoEPp7wfN/m7+vwPrmNm46aTEWdbn4M=",
       "name": "goose-agent"
     },
     "crates/goose-cli": {
-      "hash": "sha256-Vosi5NHRkK4rYPtwtK/9g6mUs70Qsw+yf4Iga5MjoHI=",
+      "hash": "sha256-SAKYTW8hHE+f5pBQyfw4OA83J80AI5oJSkYWeMswiMw=",
       "name": "goose-cli"
     },
     "crates/goose-context-management": {
-      "hash": "sha256-c8PPJFd2Xx+iSMKZRfmanCQH+NJYxA9DWsrMiIeyEug=",
+      "hash": "sha256-plQnUBWMhBnGYAw0ZoSAem1AOjYZIvq4XxStUOc22SQ=",
       "name": "goose-context-management"
     },
     "crates/goose-download-manager": {
@@ -25,7 +25,7 @@
       "name": "goose-download-manager"
     },
     "crates/goose-local-inference": {
-      "hash": "sha256-ut46uKm2PSFVxYS6AR/1xspDA22mFGzpyX/pBtXrPdg=",
+      "hash": "sha256-jaeJxyJZ7pWGnQcBO9AuaC/2zlKPnxKSrm5JBmgbXso=",
       "name": "goose-local-inference"
     },
     "crates/goose-mcp": {
@@ -33,11 +33,11 @@
       "name": "goose-mcp"
     },
     "crates/goose-provider-types": {
-      "hash": "sha256-v0breUajkmW6VwL3DVPgBjulxcaVM/5aeTIt/7K242I=",
+      "hash": "sha256-r3rN/NuI2WXCAgAdPf/7tAFFRUkeEeYEs709XChsAXg=",
       "name": "goose-provider-types"
     },
     "crates/goose-providers": {
-      "hash": "sha256-pTcaKLR7cVNFXsMb1TBIX4T+kDnkmEHt1/ZIZGjziAA=",
+      "hash": "sha256-u4CxGZcDBs2u2qQj9CjndtLECOaziuCCOBR6f2EfJkA=",
       "name": "goose-providers"
     },
     "crates/goose-roaming": {
@@ -45,11 +45,11 @@
       "name": "goose-roaming"
     },
     "crates/goose-sdk": {
-      "hash": "sha256-NfyUynq8LJAM9bx8qku3DZWpfDnHnoJxwT81AW6UsFU=",
+      "hash": "sha256-vvANOSS+Q5d78QBfKmUoaAzIRGpxEEZzJC1Z0Fgqkkc=",
       "name": "goose-sdk"
     },
     "crates/goose-sdk-types": {
-      "hash": "sha256-L3I5/ze54rTCLE5rPMX1+LDyBCxbbhCOit9JkV0cdHk=",
+      "hash": "sha256-QbZ+nLvp55PM/iek/2QkU1DKSNzvvQ7K9XHztbeGYmw=",
       "name": "goose-sdk-types"
     },
     "crates/goose-test": {
@@ -66,9 +66,9 @@
     }
   },
   "source": {
-    "cargoNixSha256": "50c1c42398d906d319ce91a87d19a3c8366c95dbc94f4261db0ff767ba075d81",
+    "cargoNixSha256": "d298b6284ba8465a3abfe9d2005db301f340cb93fd9a8f937da34887231c2b76",
     "input": "goose",
-    "narHash": "sha256-8tKAAQdP9Rx7X0hEuCmSQ9sQQSYiXVMhJc2EQqIjaOY=",
+    "narHash": "sha256-KTHfaPJ3Vf2b6efMr0k9/AAMykDaG0lgSVCUpL58fnk=",
     "subdir": "."
   }
 }

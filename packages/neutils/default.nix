@@ -10,7 +10,7 @@
 }:
 let
   pname = "neutils";
-  inherit (selfSource) version;
+  inherit (selfSource) commit version;
   buildFlags = [
     "--release=small"
     "-Dcpu=baseline"
@@ -19,7 +19,7 @@ let
   src = fetchFromGitHub {
     owner = "deevus";
     repo = pname;
-    tag = "v${version}";
+    rev = commit;
     hash = outputs.lib.sourceHash pname "srcHash";
   };
 

@@ -58,6 +58,7 @@ let
   sherpaUrl = urls.sherpaOnnx or "";
   sherpaWrapperUrl = urls.sherpaOnnxNode or "";
   nodeAddonApiUrl = urls.nodeAddonApi or "";
+  nodejs = nodejs_24;
 
   hashEntryFor =
     hashType: url: platform:
@@ -125,6 +126,7 @@ let
     ++ lib.optional (nodeAddonApiHash == null) "node-addon-api hash is missing";
 
   commonPassthru = {
+    nodejsVersion = nodejs.version;
     macApp = {
       bundleId = appId;
       bundleName = appBundleName;
@@ -255,7 +257,7 @@ let
       cmake
       libiconv
       makeWrapper
-      nodejs_24
+      nodejs
       pkg-config
       python3
     ];
@@ -337,7 +339,7 @@ let
 
       for packageName in ${lib.concatMapStringsSep " " lib.escapeShellArg electronExcludedRuntimePackages}
       do
-        ${lib.getExe nodejs_24} -e '
+        ${lib.getExe nodejs} -e '
           const fs = require("node:fs");
           const manifestPath = process.argv[1];
           const packageName = process.argv[2];
@@ -727,7 +729,7 @@ let
               "$app" "${electronVersion}"
 
             rm -rf "$TMPDIR/openchamber-asar"
-            ${lib.getExe nodejs_24} ${asarExecutable} extract "$resources/app.asar" "$TMPDIR/openchamber-asar"
+            ${lib.getExe nodejs} ${asarExecutable} extract "$resources/app.asar" "$TMPDIR/openchamber-asar"
             for packageName in ${
               lib.concatMapStringsSep " " lib.escapeShellArg electronExcludedRuntimePackages
             }
@@ -760,7 +762,7 @@ let
             done < <(find "$TMPDIR/openchamber-asar" -type f -print0)
             # This validates compatibility metadata, not byte identity with the npm
             # prebuilt. passthru.sherpaRuntimeProvenance records the linked inputs.
-            sherpaPackageVersion="$(${lib.getExe nodejs_24} -p 'require(process.argv[1]).version' "$TMPDIR/openchamber-asar/node_modules/sherpa-onnx-darwin-arm64/package.json")"
+            sherpaPackageVersion="$(${lib.getExe nodejs} -p 'require(process.argv[1]).version' "$TMPDIR/openchamber-asar/node_modules/sherpa-onnx-darwin-arm64/package.json")"
             test "$sherpaPackageVersion" = "${sherpaVersion}"
             grep -R -Fq 'Updates are managed by Nix.' "$TMPDIR/openchamber-asar"
             /usr/bin/codesign --verify --deep --strict "$app"

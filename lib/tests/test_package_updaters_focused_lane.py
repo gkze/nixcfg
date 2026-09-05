@@ -397,6 +397,21 @@ def test_sculptor_fetch_latest_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _run(updater.fetch_latest(object())).version == "invalid-da"
 
 
+def test_sculptor_resolves_absolute_platform_urls() -> None:
+    """Resolve every artifact path against the canonical object-store root."""
+    module = _load_updater(
+        "packages/sculptor/updater.py",
+        "sculptor_updater_test_platform_urls",
+    )
+    updater = module.SculptorUpdater()
+    info = VersionInfo(version="2024-02-20")
+
+    assert updater._platform_urls(info) == {
+        platform: f"{updater.BASE_URL}/{artifact}"
+        for platform, artifact in updater.PLATFORMS.items()
+    }
+
+
 def test_sculptor_accepts_naive_last_modified_timestamp(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

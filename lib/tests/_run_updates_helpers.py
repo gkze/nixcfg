@@ -83,6 +83,10 @@ def configure_isolated_run(
     monkeypatch.setattr("lib.update.cli._build_run_plan", lambda *_args: plan)
     monkeypatch.setattr("lib.update.cli._execute_run_plan_result", execute_result)
     monkeypatch.setattr(
+        "lib.update.derivation_validation.validate_root_closures",
+        lambda **_kwargs: (),
+    )
+    monkeypatch.setattr(
         "lib.update.persistence.planned_update_paths",
         lambda *_args: tuple(Path.cwd() / path for path in planned_paths),
     )

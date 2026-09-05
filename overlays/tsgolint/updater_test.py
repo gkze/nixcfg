@@ -1,6 +1,5 @@
 """Tests for the tsgolint updater."""
 
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
@@ -14,6 +13,9 @@ from lib.update.updaters import VersionInfo
 
 if TYPE_CHECKING:
     import pytest
+
+
+COMMIT = "f" * 40
 
 
 def _load_module(module_name: str):
@@ -48,6 +50,7 @@ def test_tsgolint_is_latest_rejects_fake_and_empty_hash_mappings() -> None:
         hashes={"x86_64-linux": "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="},
     )
 
+    assert _run(updater._is_latest(None, latest)) is False
     assert _run(updater._is_latest(empty, latest)) is False
     assert _run(updater._is_latest(fake, latest)) is False
     assert _run(updater._is_latest(real, latest)) is True
@@ -78,9 +81,9 @@ def test_tsgolint_is_latest_rejects_mismatched_empty_and_missing_entries() -> No
     assert (
         _run(
             updater._is_latest(
-                SimpleNamespace(
+                SourceEntry(
                     version="0.21.0",
-                    hashes=SimpleNamespace(entries=[]),
+                    hashes=[],
                 ),
                 latest,
             )
@@ -98,16 +101,14 @@ def test_tsgolint_is_latest_accepts_real_structured_entries() -> None:
     assert (
         _run(
             updater._is_latest(
-                SimpleNamespace(
+                SourceEntry(
                     version="0.21.0",
-                    hashes=SimpleNamespace(
-                        entries=[
-                            HashEntry.create(
-                                "srcHash",
-                                "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
-                            )
-                        ]
-                    ),
+                    hashes=[
+                        HashEntry.create(
+                            "srcHash",
+                            "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+                        )
+                    ],
                 ),
                 latest,
             )
@@ -117,9 +118,9 @@ def test_tsgolint_is_latest_accepts_real_structured_entries() -> None:
     assert (
         _run(
             updater._is_latest(
-                SimpleNamespace(
+                SourceEntry(
                     version="0.21.0",
-                    hashes=SimpleNamespace(entries=None, mapping=None),
+                    hashes=HashCollection(entries=None, mapping=None),
                 ),
                 latest,
             )
@@ -142,7 +143,8 @@ def test_tsgolint_fetch_hashes_computes_src_and_vendor_hashes(
         ),
     )
 
-    events = _run(_collect(updater.fetch_hashes(VersionInfo("0.21.0"), object())))
+    info = VersionInfo("0.21.0", metadata={"commit": COMMIT})
+    events = _run(_collect(updater.fetch_hashes(info, object())))
 
     assert len(calls) == 2
     assert_nix_ast_equal(
@@ -150,7 +152,7 @@ def test_tsgolint_fetch_hashes_computes_src_and_vendor_hashes(
         _build_fetch_from_github_call(
             "oxc-project",
             "tsgolint",
-            tag="v0.21.0",
+            rev=COMMIT,
             fetch_submodules=False,
         ),
     )
@@ -161,6 +163,7 @@ def test_tsgolint_fetch_hashes_computes_src_and_vendor_hashes(
             source_overrides={
                 "tsgolint": SourceEntry(
                     version="0.21.0",
+                    commit=COMMIT,
                     hashes=[
                         HashEntry.create(
                             "srcHash",

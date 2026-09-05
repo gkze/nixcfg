@@ -1,10 +1,12 @@
 """Focused tests for the overlay-only updater lane."""
 
 import asyncio
+import json
+from dataclasses import dataclass
 
 import pytest
 
-from lib.nix.models.sources import HashEntry
+from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import install_fixed_hash_stream
 from lib.tests._updater_helpers import load_repo_module as _load_module
@@ -19,6 +21,128 @@ from lib.update.updaters.metadata import (
 
 HASH_A = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 HASH_B = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+
+_CHROME_APP_ID = "com.google.Chrome"
+_CHROME_MAC_VERSION = "152.0.7977.83"
+_CHROME_LINUX_VERSION = "152.0.7977.82"
+_CHROME_DMG_CODEBASE = (
+    "https://dl.google.com/release2/chrome/g62gliie746ywu62ed7go3adam_152.0.7977.83/"
+)
+_CHROME_DMG_URL = f"{_CHROME_DMG_CODEBASE}GoogleChrome-{_CHROME_MAC_VERSION}.dmg"
+_CHROME_DEB_FILENAME = (
+    "pool/main/g/google-chrome-stable/"
+    f"google-chrome-stable_{_CHROME_LINUX_VERSION}-1_amd64.deb"
+)
+_CHROME_DEB_URL = f"https://dl.google.com/linux/chrome/deb/{_CHROME_DEB_FILENAME}"
+_CHROME_DMG_HEX_HASH = (
+    "51cd7a59e04f86efebef307f504f72b7e72091ba5162444cdf1b4434596daa9b"
+)
+_CHROME_DEB_HEX_HASH = (
+    "4d25e4a028c78a7ae910683551c2f234792cc5595e7e3e34939f599342ada446"
+)
+_CHROME_DMG_SRI_HASH = "sha256-Uc16WeBPhu/r7zB/UE9yt+cgkbpRYkRM3xtENFltqps="
+_CHROME_DEB_SRI_HASH = "sha256-TSXkoCjHinrpEGg1UcLyNHksxVlefj40k59Zk0KtpEY="
+_CHROME_OMAHA_PREFIX = b")]}'\n"
+
+
+def _chrome_omaha_json(payload: object) -> bytes:
+    return _CHROME_OMAHA_PREFIX + json.dumps(payload).encode()
+
+
+@dataclass(slots=True)
+class _ChromeHTTPResponse:
+    payload: bytes
+    status: int = 200
+    reason: str = "OK"
+
+    async def __aenter__(self) -> _ChromeHTTPResponse:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+    async def read(self) -> bytes:
+        return self.payload
+
+
+class _ChromeHTTPSession:
+    def __init__(self, response: _ChromeHTTPResponse) -> None:
+        self.response = response
+        self.calls: list[tuple[str, str, dict[str, object]]] = []
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        **kwargs: object,
+    ) -> _ChromeHTTPResponse:
+        self.calls.append((method, url, kwargs))
+        return self.response
+
+
+def _chrome_omaha_response(
+    *,
+    version: str = _CHROME_MAC_VERSION,
+    app_status: str = "ok",
+    update_status: str = "ok",
+    appids: tuple[str, ...] = (_CHROME_APP_ID,),
+    package_names: tuple[str, ...] | None = None,
+    package_hash: object = _CHROME_DMG_HEX_HASH,
+    codebases: tuple[object, ...] | None = None,
+) -> bytes:
+    resolved_packages = (
+        (f"GoogleChrome-{version}.dmg",) if package_names is None else package_names
+    )
+    resolved_codebases = (_CHROME_DMG_CODEBASE,) if codebases is None else codebases
+    payload = {
+        "response": {
+            "app": [
+                {
+                    "appid": appid,
+                    "status": app_status,
+                    "updatecheck": {
+                        "status": update_status,
+                        "urls": {
+                            "url": [
+                                ({"codebase": codebase} if codebase is not None else {})
+                                for codebase in resolved_codebases
+                            ]
+                        },
+                        "manifest": {
+                            "version": version,
+                            "packages": {
+                                "package": [
+                                    {
+                                        "name": package_name,
+                                        "hash_sha256": package_hash,
+                                    }
+                                    for package_name in resolved_packages
+                                ]
+                            },
+                        },
+                    },
+                }
+                for appid in appids
+            ]
+        }
+    }
+    return _chrome_omaha_json(payload)
+
+
+def _chrome_apt_packages(
+    *,
+    version: str = f"{_CHROME_LINUX_VERSION}-1",
+    filename: str = _CHROME_DEB_FILENAME,
+    sha256: str = _CHROME_DEB_HEX_HASH,
+) -> bytes:
+    return f"""Package: google-chrome-stable
+Version: {version}
+Architecture: amd64
+Filename: {filename}
+SHA256: {sha256}
+Description: Google Chrome
+ continuation
+""".encode()
 
 
 def test_code_cursor_fetch_checksums_and_download_url_validation(
@@ -253,83 +377,627 @@ def test_datagrip_fetch_latest_returns_typed_release_metadata(
     assert latest.metadata == ReleasePayloadMetadata(release=release)
 
 
-def test_google_chrome_fetch_latest_rejects_non_list_and_non_mapping_payloads(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("payload", "match"),
+    [
+        ([], "Unexpected Chrome VersionHistory payload"),
+        ({}, "Missing Chrome VersionHistory releases"),
+        ({"releases": ["bad"]}, "Unexpected Chrome VersionHistory release"),
+        (
+            {"releases": [{"fraction": 1, "serving": {}}]},
+            "Invalid Chrome version",
+        ),
+        (
+            {"releases": [{"version": "152.latest", "fraction": 1, "serving": {}}]},
+            "Invalid Chrome version",
+        ),
+        (
+            {"releases": [{"version": "152.0.0.1", "fraction": True, "serving": {}}]},
+            "Invalid Chrome rollout fraction",
+        ),
+        (
+            {"releases": [{"version": "152.0.0.1", "fraction": 1}]},
+            "Invalid Chrome serving interval",
+        ),
+        (
+            {
+                "releases": [
+                    {
+                        "version": "152.0.0.1",
+                        "fraction": 1,
+                        "serving": {"endTime": 42},
+                    }
+                ]
+            },
+            "Invalid Chrome rollout end time",
+        ),
+    ],
+)
+def test_google_chrome_rejects_malformed_version_history_results(
+    payload: object,
+    match: str,
 ) -> None:
-    """Chrome should fail clearly on malformed Chromium Dash responses."""
+    """Chrome should fail clearly when VersionHistory violates its schema."""
     module = _load_module(
-        "overlays/google-chrome/updater.py", "google_chrome_lane_test"
+        "overlays/google-chrome/updater.py",
+        "google_chrome_lane_malformed_releases",
     )
-    updater = module.GoogleChromeUpdater()
 
-    async def _fetch_json(_session: object, _url: str, *, config) -> object:
-        assert config == updater.config
-        return {"version": "133.0.6943.54"}
-
-    monkeypatch.setattr(module, "fetch_json", _fetch_json)
-    with pytest.raises(TypeError, match="Unexpected chromiumdash payload type: dict"):
-        _run(updater.fetch_latest(object()))
-
-    monkeypatch.setattr(
-        module,
-        "fetch_json",
-        lambda *_a, **_k: asyncio.sleep(0, result=["bad"]),
-    )
-    with pytest.raises(TypeError, match="Unexpected chromiumdash release payload"):
-        _run(updater.fetch_latest(object()))
+    with pytest.raises(TypeError, match=match):
+        module._full_rollout_version(payload, platform="mac")
 
 
-def test_google_chrome_fetch_latest_rejects_empty_and_versionless_results(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Chrome should reject empty release lists and releases without versions."""
+def test_google_chrome_requires_one_active_full_rollout() -> None:
+    """Chrome should reject missing or ambiguous fully rolled-out baselines."""
     module = _load_module(
         "overlays/google-chrome/updater.py",
         "google_chrome_lane_release_errors",
     )
-    updater = module.GoogleChromeUpdater()
+    no_baseline = {
+        "releases": [
+            {"version": "153.0.0.1", "fraction": 0.005, "serving": {}},
+            {
+                "version": "152.0.0.1",
+                "fraction": 1,
+                "serving": {"endTime": "2026-09-02T00:00:00Z"},
+            },
+        ]
+    }
+    with pytest.raises(RuntimeError, match="No active fully rolled-out"):
+        module._full_rollout_version(no_baseline, platform="mac")
 
-    monkeypatch.setattr(
-        module,
-        "fetch_json",
-        lambda *_a, **_k: asyncio.sleep(0, result=[]),
+    ambiguous = {
+        "releases": [
+            {"version": "152.0.0.2", "fraction": 1, "serving": {}},
+            {"version": "152.0.0.1", "fraction": 1.0, "serving": {}},
+        ]
+    }
+    with pytest.raises(RuntimeError, match="Ambiguous active fully rolled-out"):
+        module._full_rollout_version(ambiguous, platform="mac")
+
+    with pytest.raises(RuntimeError, match="divergent fully rolled-out Darwin"):
+        module._shared_darwin_version({
+            "mac_arm64": "152.0.7977.83",
+            "mac": "152.0.7977.82",
+            "linux": "152.0.7977.82",
+        })
+
+
+def test_google_chrome_omaha_request_separates_os_and_browser_versions() -> None:
+    """Omaha OS identity must never be populated with the target Chrome version."""
+    module = _load_module(
+        "overlays/google-chrome/updater.py",
+        "google_chrome_lane_omaha_request",
     )
-    with pytest.raises(
-        RuntimeError, match="No Chrome releases returned from chromiumdash"
-    ):
-        _run(updater.fetch_latest(object()))
 
-    monkeypatch.setattr(
-        module,
-        "fetch_json",
-        lambda *_a, **_k: asyncio.sleep(0, result=[{}]),
+    request = module._omaha_request(
+        target_version=_CHROME_MAC_VERSION,
+        os_version="26.6.2",
+        os_arch="arm64",
+    )["request"]
+
+    assert request["protocol"] == "3.1"
+    assert request["testsource"] == "prober"
+    assert request["os"] == {
+        "platform": "mac",
+        "version": "26.6.2",
+        "arch": "arm64",
+    }
+    assert request["os"]["version"] != _CHROME_MAC_VERSION
+    app = request["app"][0]
+    assert app["version"] == "0"
+    assert app["installsource"] == "ondemand"
+    assert app["updatecheck"] == {"targetversionprefix": f"{_CHROME_MAC_VERSION}$"}
+
+
+@pytest.mark.parametrize(
+    ("mac_version", "machine", "match"),
+    [
+        ("", "arm64", "Cannot determine the Darwin host OS version"),
+        ("Sonoma", "arm64", "Cannot determine the Darwin host OS version"),
+        ("26.6.2", "aarch64", "Unsupported Darwin host architecture"),
+    ],
+)
+def test_google_chrome_requires_truthful_supported_darwin_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    mac_version: str,
+    machine: str,
+    match: str,
+) -> None:
+    """Non-Darwin or malformed host identity must fail before querying Omaha."""
+    module = _load_module(
+        "overlays/google-chrome/updater.py",
+        "google_chrome_lane_darwin_identity_errors",
     )
-    with pytest.raises(RuntimeError, match="Missing version in chromiumdash response"):
-        _run(updater.fetch_latest(object()))
+    monkeypatch.setattr(
+        module.host_platform,
+        "mac_ver",
+        lambda: (mac_version, ("", "", ""), ""),
+    )
+    monkeypatch.setattr(module.host_platform, "machine", lambda: machine)
+
+    with pytest.raises(RuntimeError, match=match):
+        module._darwin_host_identity()
 
 
-def test_google_chrome_fetch_latest_returns_version_without_metadata(
+def test_google_chrome_fetch_latest_uses_platform_full_rollout_versions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Chrome should return the latest stable version with no extra metadata."""
+    """Chrome should pin full rollouts to immutable, platform-versioned artifacts."""
     module = _load_module(
         "overlays/google-chrome/updater.py",
         "google_chrome_lane_success",
     )
     updater = module.GoogleChromeUpdater()
+    session = _ChromeHTTPSession(_ChromeHTTPResponse(_chrome_omaha_response()))
+    requested_urls: list[str] = []
+    apt_calls: list[tuple[object, str, dict[str, object]]] = []
 
+    async def _fetch_json(_session: object, url: str, *, config) -> object:
+        assert config == updater.config
+        requested_urls.append(url)
+        if "/platforms/mac_arm64/" in url or "/platforms/mac/" in url:
+            return {
+                "releases": [
+                    {"version": "153.0.8010.12", "fraction": 0.005, "serving": {}},
+                    {"version": _CHROME_MAC_VERSION, "fraction": 1, "serving": {}},
+                    {
+                        "version": "154.0.9000.1",
+                        "fraction": 1,
+                        "serving": {"endTime": "2026-08-01T00:00:00Z"},
+                    },
+                ]
+            }
+        assert "/platforms/linux/" in url
+        return {
+            "releases": [
+                {"version": _CHROME_LINUX_VERSION, "fraction": 1, "serving": {}}
+            ]
+        }
+
+    async def _fetch_url(
+        passed_session: object,
+        url: str,
+        **kwargs: object,
+    ) -> bytes:
+        apt_calls.append((passed_session, url, kwargs))
+        return _chrome_apt_packages()
+
+    monkeypatch.setattr(module, "fetch_json", _fetch_json)
+    monkeypatch.setattr(module, "fetch_url", _fetch_url)
     monkeypatch.setattr(
-        module,
-        "fetch_json",
-        lambda *_a, **_k: asyncio.sleep(0, result=[{"version": "133.0.6943.54"}]),
+        module.host_platform,
+        "mac_ver",
+        lambda: ("26.6.2", ("", "", ""), ""),
+    )
+    monkeypatch.setattr(module.host_platform, "machine", lambda: "arm64")
+
+    latest = _run(updater.fetch_latest(session))
+    assert isinstance(latest.metadata, module._ChromeReleaseMetadata)
+    events = _run(_collect_events(updater.fetch_hashes(latest, session)))
+    result = updater.build_result(latest, latest.metadata.artifact_hashes)
+
+    assert latest.version == _CHROME_MAC_VERSION
+    assert latest.metadata.platform_versions == {
+        "aarch64-darwin": _CHROME_MAC_VERSION,
+        "x86_64-darwin": _CHROME_MAC_VERSION,
+        "x86_64-linux": _CHROME_LINUX_VERSION,
+    }
+    assert latest.metadata.asset_urls == {
+        "aarch64-darwin": _CHROME_DMG_URL,
+        "x86_64-darwin": _CHROME_DMG_URL,
+        "x86_64-linux": _CHROME_DEB_URL,
+    }
+    assert latest.metadata.artifact_hashes == {
+        "aarch64-darwin": _CHROME_DMG_SRI_HASH,
+        "x86_64-darwin": _CHROME_DMG_SRI_HASH,
+        "x86_64-linux": _CHROME_DEB_SRI_HASH,
+    }
+    assert result.pins == latest.metadata.platform_versions
+    assert result.urls == latest.metadata.asset_urls
+    assert result.hashes.to_json() == latest.metadata.artifact_hashes
+    assert events == [
+        UpdateEvent.value("google-chrome", latest.metadata.artifact_hashes)
+    ]
+    assert len(requested_urls) == 3
+    assert all("channels/stable" in url for url in requested_urls)
+    assert all("filter=endtime%3Dnone%2Cfraction%3D1" in url for url in requested_urls)
+    assert apt_calls == [
+        (
+            session,
+            module._LINUX_PACKAGES_URL,
+            {
+                "request_timeout": updater.config.default_timeout,
+                "config": updater.config,
+            },
+        )
+    ]
+    assert len(session.calls) == 1
+    method, url, kwargs = session.calls[0]
+    assert method == "POST"
+    assert url == module._OMAHA_URL
+    assert kwargs["headers"] == {
+        "User-Agent": updater.config.default_user_agent,
+        "Content-Type": "application/json",
+        "X-Goog-Update-Interactivity": "fg",
+        "X-Goog-Update-AppId": _CHROME_APP_ID,
+        "X-Goog-Update-Updater": "nixcfg-0",
+    }
+    assert kwargs["json"] == module._omaha_request(
+        target_version=_CHROME_MAC_VERSION,
+        os_version="26.6.2",
+        os_arch="arm64",
+    )
+    assert kwargs["allow_redirects"] is True
+    assert kwargs["timeout"].total == updater.config.default_timeout
+    assert updater.materialize_when_current is False
+    assert updater.supported_platforms == ("aarch64-darwin", "x86_64-darwin")
+    assert updater.PLATFORMS == {
+        "aarch64-darwin": "mac_arm64",
+        "x86_64-darwin": "mac",
+        "x86_64-linux": "linux",
+    }
+
+
+@pytest.mark.parametrize(
+    ("payload", "exception", "match"),
+    [
+        (b"not json", RuntimeError, "omitted its anti-XSSI prefix"),
+        (
+            _CHROME_OMAHA_PREFIX + b"not-json",
+            RuntimeError,
+            "was not valid JSON",
+        ),
+        (
+            _CHROME_OMAHA_PREFIX + b"\xff",
+            RuntimeError,
+            "was not valid JSON",
+        ),
+        (
+            _chrome_omaha_json([]),
+            TypeError,
+            "Expected JSON object for Google Chrome Omaha response",
+        ),
+        (
+            _chrome_omaha_json({}),
+            TypeError,
+            "Google Chrome Omaha response.response",
+        ),
+        (
+            _chrome_omaha_json({"response": {"app": "bad"}}),
+            TypeError,
+            "Expected JSON array",
+        ),
+        (
+            _chrome_omaha_json({"response": {"app": ["bad"]}}),
+            TypeError,
+            "Expected JSON object",
+        ),
+        (
+            _chrome_omaha_response(appids=()),
+            RuntimeError,
+            "contained 0 matching apps",
+        ),
+        (
+            _chrome_omaha_response(appids=(_CHROME_APP_ID, _CHROME_APP_ID)),
+            RuntimeError,
+            "contained 2 matching apps",
+        ),
+        (
+            _chrome_omaha_response(app_status="error"),
+            RuntimeError,
+            "app returned status",
+        ),
+        (
+            _chrome_omaha_json({
+                "response": {"app": [{"appid": _CHROME_APP_ID, "status": "ok"}]}
+            }),
+            TypeError,
+            "Google Chrome Omaha updatecheck",
+        ),
+        (
+            _chrome_omaha_response(update_status="noupdate"),
+            RuntimeError,
+            "updatecheck returned status 'noupdate'",
+        ),
+        (
+            _chrome_omaha_json({
+                "response": {
+                    "app": [
+                        {
+                            "appid": _CHROME_APP_ID,
+                            "status": "ok",
+                            "updatecheck": {"status": "ok"},
+                        }
+                    ]
+                }
+            }),
+            TypeError,
+            "Google Chrome Omaha manifest",
+        ),
+        (
+            _chrome_omaha_response(version="152.0.7977.82"),
+            RuntimeError,
+            "observed '152.0.7977.82'",
+        ),
+        (
+            _chrome_omaha_response(package_names=()),
+            RuntimeError,
+            "contained 0 matching DMG packages",
+        ),
+        (
+            _chrome_omaha_response(
+                package_names=(
+                    f"GoogleChrome-{_CHROME_MAC_VERSION}.dmg",
+                    f"GoogleChrome-{_CHROME_MAC_VERSION}.dmg",
+                )
+            ),
+            RuntimeError,
+            "contained 2 matching DMG packages",
+        ),
+        (
+            _chrome_omaha_response(package_hash=None),
+            TypeError,
+            "string field 'hash_sha256'",
+        ),
+        (
+            _chrome_omaha_response(package_hash="not-a-hash"),
+            RuntimeError,
+            "Invalid SHA-256",
+        ),
+        (
+            _chrome_omaha_response(codebases=()),
+            RuntimeError,
+            "contained 0 immutable Google DMG URLs",
+        ),
+        (
+            _chrome_omaha_response(codebases=(None,)),
+            TypeError,
+            "string field 'codebase'",
+        ),
+        (
+            _chrome_omaha_response(
+                codebases=(
+                    "http://dl.google.com/release2/chrome/"
+                    "g62gliie746ywu62ed7go3adam_152.0.7977.83/",
+                    "https://example.com/release2/chrome/"
+                    "g62gliie746ywu62ed7go3adam_152.0.7977.83/",
+                    "https://dl.google.com/release2/chrome/not-versioned/",
+                )
+            ),
+            RuntimeError,
+            "contained 0 immutable Google DMG URLs",
+        ),
+        (
+            _chrome_omaha_response(
+                codebases=(
+                    _CHROME_DMG_CODEBASE,
+                    "https://dl.google.com/release2/chrome/another_152.0.7977.83/",
+                )
+            ),
+            RuntimeError,
+            "contained 2 immutable Google DMG URLs",
+        ),
+    ],
+)
+def test_google_chrome_rejects_malformed_or_ambiguous_omaha_artifacts(
+    payload: bytes,
+    exception: type[Exception],
+    match: str,
+) -> None:
+    """Only one first-party immutable DMG matching VersionHistory may be pinned."""
+    module = _load_module(
+        "overlays/google-chrome/updater.py",
+        "google_chrome_lane_omaha_errors",
     )
 
-    latest = _run(updater.fetch_latest(object()))
+    with pytest.raises(exception, match=match):
+        module._parse_omaha_artifact(payload, expected_version=_CHROME_MAC_VERSION)
 
-    assert latest.version == "133.0.6943.54"
-    assert latest.metadata is module.NO_METADATA
-    assert updater.materialize_when_current is True
-    assert updater.PLATFORMS["aarch64-darwin"] == updater.PLATFORMS["x86_64-darwin"]
+
+@pytest.mark.parametrize(
+    ("payload", "match"),
+    [
+        (b"\xff", "Packages metadata is not UTF-8"),
+        (b"", "contained 0 stable amd64 packages"),
+        (
+            b"Package: google-chrome-beta\nArchitecture: amd64\n",
+            "contained 0 stable amd64 packages",
+        ),
+        (
+            _chrome_apt_packages() + b"Malformed line\n",
+            "Malformed Google Chrome apt metadata line",
+        ),
+        (
+            _chrome_apt_packages() + b"\n" + _chrome_apt_packages(),
+            "contained 2 stable amd64 packages",
+        ),
+        (
+            b"Package: google-chrome-stable\nArchitecture: amd64\n",
+            "invalid 'Version' field",
+        ),
+        (
+            _chrome_apt_packages().replace(
+                b"Version: ",
+                b"Version: duplicate\nVersion: ",
+                1,
+            ),
+            "invalid 'Version' field",
+        ),
+        (
+            _chrome_apt_packages(version=_CHROME_LINUX_VERSION),
+            "does not match the fully rolled-out Linux version",
+        ),
+        (
+            _chrome_apt_packages(version="152.0.7977.81-1"),
+            "observed '152.0.7977.81-1'",
+        ),
+        (
+            _chrome_apt_packages(version=f"{_CHROME_LINUX_VERSION}-?"),
+            "does not match the fully rolled-out Linux version",
+        ),
+        (
+            _chrome_apt_packages(filename=f"/{_CHROME_DEB_FILENAME}"),
+            "invalid Filename",
+        ),
+        (
+            _chrome_apt_packages(
+                filename=f"direct/google-chrome-stable_{_CHROME_LINUX_VERSION}-1_amd64.deb"
+            ),
+            "invalid Filename",
+        ),
+        (
+            _chrome_apt_packages(filename="pool/main/g/google-chrome-stable/wrong.deb"),
+            "invalid Filename",
+        ),
+        (
+            _chrome_apt_packages(filename=_CHROME_DEB_FILENAME.replace("/g/", "//")),
+            "invalid Filename",
+        ),
+        (
+            _chrome_apt_packages(filename=f"pool/../{_CHROME_DEB_FILENAME}"),
+            "invalid Filename",
+        ),
+        (
+            _chrome_apt_packages().replace(
+                f"SHA256: {_CHROME_DEB_HEX_HASH}\n".encode(),
+                b"",
+            ),
+            "invalid 'SHA256' field",
+        ),
+        (
+            _chrome_apt_packages(sha256="not-a-hash"),
+            "Invalid SHA-256",
+        ),
+    ],
+)
+def test_google_chrome_rejects_malformed_or_ambiguous_apt_artifacts(
+    payload: bytes,
+    match: str,
+) -> None:
+    """The apt index must identify one safe immutable DEB for the baseline."""
+    module = _load_module(
+        "overlays/google-chrome/updater.py",
+        "google_chrome_lane_apt_errors",
+    )
+
+    with pytest.raises(RuntimeError, match=match):
+        module._parse_linux_artifact(payload, expected_version=_CHROME_LINUX_VERSION)
+
+
+def test_google_chrome_reports_omaha_http_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HTTP failures must stop before a Chrome artifact can be persisted."""
+    module = _load_module(
+        "overlays/google-chrome/updater.py",
+        "google_chrome_lane_omaha_http_error",
+    )
+    updater = module.GoogleChromeUpdater()
+    session = _ChromeHTTPSession(
+        _ChromeHTTPResponse(b"unavailable", status=503, reason="Service Unavailable")
+    )
+    monkeypatch.setattr(
+        module.host_platform,
+        "mac_ver",
+        lambda: ("26.6.2", ("", "", ""), ""),
+    )
+    monkeypatch.setattr(module.host_platform, "machine", lambda: "arm64")
+
+    with pytest.raises(
+        RuntimeError,
+        match="Omaha request failed with HTTP 503 Service Unavailable",
+    ):
+        _run(
+            updater._fetch_darwin_artifact(
+                session,
+                expected_version=_CHROME_MAC_VERSION,
+            )
+        )
+
+
+def test_google_chrome_requires_complete_artifact_metadata() -> None:
+    """Hashing and package versions should fail closed on partial metadata."""
+    module = _load_module(
+        "overlays/google-chrome/updater.py",
+        "google_chrome_lane_metadata_errors",
+    )
+    updater = module.GoogleChromeUpdater()
+    missing = VersionInfo(version=_CHROME_MAC_VERSION)
+    incomplete = VersionInfo(
+        version=_CHROME_MAC_VERSION,
+        metadata=module._ChromeReleaseMetadata(
+            asset_urls={},
+            artifact_hashes={},
+            platform_versions={"aarch64-darwin": _CHROME_MAC_VERSION},
+        ),
+    )
+
+    with pytest.raises(TypeError, match="Missing Google Chrome artifact metadata"):
+        updater.source_pins_for(missing)
+    with pytest.raises(RuntimeError, match="Incomplete Google Chrome platform"):
+        updater.source_pins_for(incomplete)
+
+
+def test_google_chrome_latest_check_compares_complete_published_identity() -> None:
+    """Same-version URL or checksum changes must still produce an update."""
+    module = _load_module(
+        "overlays/google-chrome/updater.py",
+        "google_chrome_lane_complete_identity",
+    )
+    updater = module.GoogleChromeUpdater()
+    platform_versions = {
+        "aarch64-darwin": _CHROME_MAC_VERSION,
+        "x86_64-darwin": _CHROME_MAC_VERSION,
+        "x86_64-linux": _CHROME_LINUX_VERSION,
+    }
+    asset_urls = {
+        "aarch64-darwin": _CHROME_DMG_URL,
+        "x86_64-darwin": _CHROME_DMG_URL,
+        "x86_64-linux": _CHROME_DEB_URL,
+    }
+    artifact_hashes = {
+        "aarch64-darwin": _CHROME_DMG_SRI_HASH,
+        "x86_64-darwin": _CHROME_DMG_SRI_HASH,
+        "x86_64-linux": _CHROME_DEB_SRI_HASH,
+    }
+    info = VersionInfo(
+        version=_CHROME_MAC_VERSION,
+        metadata=module._ChromeReleaseMetadata(
+            asset_urls=asset_urls,
+            artifact_hashes=artifact_hashes,
+            platform_versions=platform_versions,
+        ),
+    )
+    matching = SourceEntry(
+        version=_CHROME_MAC_VERSION,
+        hashes=artifact_hashes,
+        urls=asset_urls,
+        pins=platform_versions,
+    )
+    changed_url = matching.model_copy(
+        update={"urls": {**asset_urls, "x86_64-linux": "https://example.com/old.deb"}}
+    )
+    changed_hash = matching.model_copy(
+        update={
+            "hashes": matching.hashes.model_copy(
+                update={
+                    "mapping": {
+                        **artifact_hashes,
+                        "x86_64-linux": HASH_A,
+                    }
+                }
+            )
+        }
+    )
+
+    assert _run(updater._is_latest(None, info)) is False
+    assert _run(updater._is_latest(matching, info)) is True
+    assert (
+        _run(updater._is_latest(module.UpdateContext(current=matching), info)) is True
+    )
+    assert _run(updater._is_latest(changed_url, info)) is False
+    assert _run(updater._is_latest(changed_hash, info)) is False
 
 
 def test_sentry_cli_fetch_hashes_handles_event_flow_and_type_errors(
@@ -338,7 +1006,8 @@ def test_sentry_cli_fetch_hashes_handles_event_flow_and_type_errors(
     """Sentry should forward build events and validate captured hash payload types."""
     module = _load_module("overlays/sentry-cli/updater.py", "sentry_cli_lane_test")
     updater = module.SentryCliUpdater()
-    info = VersionInfo(version="2.40.0")
+    commit = "d" * 40
+    info = VersionInfo(version="2.40.0", metadata={"commit": commit})
 
     monkeypatch.setattr(module, "_build_nix_expr", lambda expr: expr)
 
@@ -361,13 +1030,13 @@ def test_sentry_cli_fetch_hashes_handles_event_flow_and_type_errors(
     assert calls == [
         {
             "name": updater.name,
-            "expr": updater._src_nix_expr(info.version),
+            "expr": updater._src_nix_expr(commit),
             "env": None,
             "config": updater.config,
         },
         {
             "name": updater.name,
-            "expr": updater._cargo_nix_expr(info.version, HASH_A),
+            "expr": updater._cargo_nix_expr(commit, HASH_A),
             "env": None,
             "config": updater.config,
         },

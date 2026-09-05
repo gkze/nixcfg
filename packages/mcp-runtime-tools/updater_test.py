@@ -1,16 +1,17 @@
 """Contracts for updater-owned MCP runtime package pins."""
 
-import json
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.set import AttributeSet
+from packaging.version import Version
 
 from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
+from lib.tests._source_metadata import assert_release_version
 from lib.tests._updater_helpers import collect_events, load_repo_module, run_async
 from lib.update.events import UpdateEventKind
 from lib.update.paths import REPO_ROOT
@@ -39,14 +40,30 @@ def _load_module() -> ModuleType:
 
 
 def test_checked_in_pins_preserve_the_current_runtime_contract() -> None:
-    """Moving pins to updater metadata must not silently upgrade MCP tools."""
-    payload = json.loads((_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8"))
+    """Every declared runtime must have one exact registry-native package spec."""
+    module = _load_module()
+    source = SourceEntry.model_validate_json(
+        (_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")
+    )
 
-    assert payload == {
-        "hashes": {},
-        "pins": _CURRENT_PINS,
-        "version": "registry",
-    }
+    assert source.version == "registry"
+    assert source.hashes.mapping == {}
+    assert source.pins is not None
+    npm_packages = set(module.McpRuntimeToolsUpdater._NPM_PACKAGES)
+    pypi_packages = set(module.McpRuntimeToolsUpdater._PYPI_PACKAGES)
+    assert set(source.pins) == npm_packages | pypi_packages
+    for name in npm_packages:
+        version = source.pins[name].removeprefix(f"{name}@")
+        assert version != source.pins[name]
+        assert version
+        assert not any(character.isspace() for character in version)
+        assert_release_version(version)
+    for name in pypi_packages:
+        version = source.pins[name].removeprefix(f"{name}==")
+        assert version != source.pins[name]
+        assert version
+        assert not any(character.isspace() for character in version)
+        Version(version)
 
 
 def test_fetch_latest_resolves_all_npm_and_pypi_versions(

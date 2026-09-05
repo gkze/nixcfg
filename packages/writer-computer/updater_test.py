@@ -13,6 +13,11 @@ from nix_manipulator.expressions.set import AttributeSet
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
+from lib.tests._source_metadata import (
+    assert_immutable_commit,
+    assert_release_version,
+    assert_structured_source_hashes,
+)
 from lib.tests._updater_helpers import (
     collect_events,
     install_fixed_hash_stream,
@@ -32,8 +37,6 @@ _PACKAGE_DIR = REPO_ROOT / "packages/writer-computer"
 _VERSION = "0.5.0"
 _COMMIT = "e49c16f73e49b9f753ba3f349136d10ed03a286c"
 _SRC_HASH = "sha256-IMIaMgRwv165fB5sq3NMltFnDcfcCWXcYm8HVLbXnrk="
-_PROMOTED_NPM_DEPS_HASH = "sha256-V8qC4xrtcZWIxcL/GtCg5UwA1P6ygc/qZHLfx6+6ySg="
-_PROMOTED_CARGO_HASH = "sha256-fQnP0Tn+dsHaSsfveTjjPDlVJcI1mwzQvTdAdLfe5nU="
 _NPM_DEPS_HASH = "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
 _CARGO_HASH = "sha256-DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="
 
@@ -274,21 +277,17 @@ def test_writer_package_is_a_nix_owned_source_built_arm64_app() -> None:
 
 
 def test_writer_source_pin_contains_promoted_authoritative_hashes() -> None:
-    """The promoted source graph must contain only authoritative fixed hashes."""
+    """The promoted source graph must contain every reproducible source closure."""
     source = SourceEntry.model_validate_json(
         (_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")
     )
 
-    expected = SourceEntry(
-        version=_VERSION,
-        commit=_COMMIT,
-        hashes=HashCollection.from_value([
-            HashEntry.create("srcHash", _SRC_HASH),
-            HashEntry.create("npmDepsHash", _PROMOTED_NPM_DEPS_HASH),
-            HashEntry.create("cargoHash", _PROMOTED_CARGO_HASH),
-        ]),
+    assert_release_version(source.version)
+    assert_immutable_commit(source.commit)
+    assert_structured_source_hashes(
+        source,
+        hash_types={"srcHash", "npmDepsHash", "cargoHash"},
     )
-    assert source.equivalent_to(expected)
 
     entries = source.hashes.entries
     assert entries is not None

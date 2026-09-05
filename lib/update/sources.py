@@ -17,6 +17,7 @@ from nix_manipulator.expressions.primitive import StringPrimitive
 
 from lib.nix.commands.base import CommandResult, run_nix
 from lib.nix.models.sources import SourceEntry, SourcesFile
+from lib.update.artifacts import artifact_lock_path
 from lib.update.io import atomic_write_json
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import (
@@ -190,7 +191,7 @@ def save_source_updates(
         path = path_map.get(name)
         if path is None:
             continue
-        lock_path = path.with_suffix(".json.lock")
+        lock_path = artifact_lock_path(path)
         with FileLock(lock_path):
             if merge_existing and path.exists():
                 existing = _load_entry(path)

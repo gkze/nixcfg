@@ -9,7 +9,6 @@
 #     name = "goose-cli-v8";
 #     version = "145.0.0";
 #     rustyV8Src = fetchgit { ... };
-#     clangResourceVersion = source.pins.clangResourceVersion;
 #     extraPatches = [ ./rusty-v8-goose-rename.patch ];
 #   };
 #
@@ -82,13 +81,19 @@ in
       extraPatches ? [ ],
       extraPatchCommands ? "",
       gnArgsOverrides ? { },
-      clangResourceVersion,
       prebuiltArtifacts ? null,
     }:
     let
       patchScriptsDir = ./rusty-v8;
 
+      # Chromium records the resource-directory name beside the exact V8
+      # source. Derive it there so a V8 update cannot leave a duplicate pin
+      # behind in each consumer's updater metadata.
       chromiumToolchainBundle = pkgs.runCommand "${name}-toolchain-${version}" { } ''
+        clang_resource_version="$(${pkgs.python3}/bin/python3 \
+          ${patchScriptsDir}/patch_compiler_gni.py --print-release-version \
+          ${rustyV8Src}/tools/clang/scripts/update.py)"
+
         rust_toolchain=$out/third_party/rust-toolchain
         llvm_bundle=$out/third_party/llvm-build/Release+Asserts
         llvm_bin=$llvm_bundle/bin
@@ -124,7 +129,7 @@ in
 
         mkdir -p $llvm_bundle/lib/clang
         ln -sf ${pkgs.llvmPackages.clang}/resource-root \
-          $llvm_bundle/lib/clang/${clangResourceVersion}
+          "$llvm_bundle/lib/clang/$clang_resource_version"
       '';
 
       patchedSrc =

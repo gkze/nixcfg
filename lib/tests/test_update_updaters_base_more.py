@@ -10,6 +10,7 @@ import aiohttp
 import pytest
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
+from lib.system_policy import supported_systems
 from lib.tests._assertions import expect_instance, expect_not_none
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import empty_event_stream, install_fixed_hash_stream
@@ -509,7 +510,8 @@ def test_crate2nix_metadata_materializes_the_complete_latest_candidate(
     class _CandidateUpdater(Crate2NixMetadataUpdater):
         name = "crate2nix-candidate-test"
         input_name = "crate2nix-candidate-input"
-        source_pins: ClassVar[dict[str, str]] = {"clangResourceVersion": "23"}
+        compatibility_pin_rationale = "exercise crate2nix compatibility projection"
+        compatibility_pins: ClassVar[dict[str, str]] = {"clangResourceVersion": "23"}
 
     updater = _CandidateUpdater()
     info = VersionInfo(version="1.0.0", metadata={"commit": commit})
@@ -635,6 +637,16 @@ def test_default_updater_is_latest_uses_version_and_optional_commit_witness() ->
             updater._is_latest(
                 current,
                 VersionInfo(version="1.0.0", metadata={"commit": "b" * 40}),
+            )
+        )
+        is False
+    )
+    missing_commit = current.model_copy(update={"commit": None})
+    assert (
+        asyncio.run(
+            updater._is_latest(
+                missing_commit,
+                VersionInfo(version="1.0.0", metadata={"commit": "a" * 40}),
             )
         )
         is False
@@ -1565,7 +1577,8 @@ def test_platform_specific_native_only_rejects_global_pin_change(
 
     class _PinnedPlatformFlake(_DummyFlakeInput):
         platform_specific = True
-        source_pins: ClassVar[dict[str, str]] = {"runtimeVersion": "2.0.0"}
+        compatibility_pin_rationale = "exercise native-only compatibility drift"
+        compatibility_pins: ClassVar[dict[str, str]] = {"runtimeVersion": "2.0.0"}
 
         async def fetch_latest(self, session: object) -> VersionInfo:
             _ = session
@@ -2944,14 +2957,8 @@ def test_emdash_uses_platform_specific_npm_hashes() -> None:
     updater = _fresh_loaded_updaters()["emdash"]
     assert getattr(updater, "hash_type", None) == "npmDepsHash"
     assert getattr(updater, "platform_specific", False) is True
-    assert getattr(updater, "supported_platforms", None) == (
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-linux",
-    )
-    assert getattr(updater, "source_pins", None) == {
-        "electronVersion": "40.7.0",
-    }
+    assert getattr(updater, "supported_platforms", None) == supported_systems()
+    assert getattr(updater, "compatibility_pins", None) is None
 
 
 def test_linearis_tracks_the_published_npm_tarball() -> None:

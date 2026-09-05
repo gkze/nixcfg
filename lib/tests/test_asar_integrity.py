@@ -137,6 +137,39 @@ def test_replace_packed_file_preserves_size_and_refreshes_integrity(
     )
 
 
+def test_packed_file_paths_lists_only_archive_payloads(tmp_path: Path) -> None:
+    """Discovery should recurse through directories and omit links or unpacked files."""
+    asar_path = tmp_path / "app.asar"
+    payload = b"packed payload"
+    header = _write_packed_asar(asar_path, "dist/assets/index.js", payload)
+    files = cast("dict[str, object]", header["files"])
+    files["native.node"] = {"unpacked": True}
+    files["renderer-link.js"] = {"link": "dist/assets/index.js"}
+    _write_raw_asar(asar_path, header, payload)
+
+    assert asar_integrity.packed_file_paths(asar_path) == ("dist/assets/index.js",)
+
+
+@pytest.mark.parametrize(
+    ("header", "message"),
+    [
+        ({"files": []}, "malformed file inventory"),
+        ({"files": {"index.js": 1}}, "is not an object"),
+    ],
+)
+def test_packed_file_paths_rejects_malformed_inventories(
+    tmp_path: Path,
+    header: object,
+    message: str,
+) -> None:
+    """Malformed ASAR trees must not produce a partial candidate inventory."""
+    asar_path = tmp_path / "app.asar"
+    _write_raw_asar(asar_path, header, b"")
+
+    with pytest.raises(asar_integrity.AsarIntegrityError, match=message):
+        asar_integrity.packed_file_paths(asar_path)
+
+
 def test_replace_packed_file_preserving_header_keeps_vendor_serialization(
     tmp_path: Path,
 ) -> None:

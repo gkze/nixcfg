@@ -6,6 +6,7 @@ from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.primitive import Primitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.system_policy import supported_systems
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import expect_scope_binding
 
@@ -27,24 +28,45 @@ def _string_list(value: NixList) -> list[str]:
     return decoded
 
 
+def registry_capability_constraints() -> dict[str, list[str]]:
+    """Project the shared root systems through the registry's capabilities."""
+    root_systems = supported_systems()
+    return {
+        "aarch64DarwinPackages": [
+            system
+            for system in root_systems
+            if system.split("-", maxsplit=1) == ["aarch64", "darwin"]
+        ],
+        "darwinLinuxPackages": [
+            system
+            for system in root_systems
+            if system.split("-", maxsplit=1)
+            in (["aarch64", "darwin"], ["x86_64", "linux"])
+        ],
+        "nonX86DarwinLinuxPackages": [
+            system
+            for system in root_systems
+            if (parts := system.split("-", maxsplit=1))[1] == "linux"
+            or parts == ["aarch64", "darwin"]
+        ],
+    }
+
+
 def _grouped_override_metadata(
     overrides_expr: BinaryExpression,
 ) -> dict[str, dict[str, object]]:
+    capability_constraints = registry_capability_constraints()
     groups = {
         "helperPackages": {"helper": True},
         "darwinPackages": {"constraint": "darwin"},
-        "aarch64DarwinPackages": {"constraint": ["aarch64-darwin"]},
-        "darwinLinuxPackages": {"constraint": ["aarch64-darwin", "x86_64-linux"]},
-        "nonX86DarwinLinuxPackages": {
-            "constraint": ["aarch64-darwin", "aarch64-linux", "x86_64-linux"]
+        "aarch64DarwinPackages": {
+            "constraint": capability_constraints["aarch64DarwinPackages"]
         },
-        "allLocalSystemsPackages": {
-            "constraint": [
-                "aarch64-darwin",
-                "x86_64-darwin",
-                "aarch64-linux",
-                "x86_64-linux",
-            ]
+        "darwinLinuxPackages": {
+            "constraint": capability_constraints["darwinLinuxPackages"]
+        },
+        "nonX86DarwinLinuxPackages": {
+            "constraint": capability_constraints["nonX86DarwinLinuxPackages"],
         },
     }
     decoded: dict[str, dict[str, object]] = {}

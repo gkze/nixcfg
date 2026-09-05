@@ -29,6 +29,7 @@ from lib.tests._updater_helpers import (
     load_repo_module,
     run_async,
 )
+from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import UpdateEventKind, expect_source_hashes
 from lib.update.nix import _build_fetch_from_github_call
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
@@ -36,16 +37,18 @@ from lib.update.paths import REPO_ROOT
 from lib.update.updaters import VersionInfo
 
 _PACKAGE_DIR = REPO_ROOT / "packages/openchamber"
-_VERSION = "1.21.0"
+_VERSION = "9.8.7"
 _TAG = f"v{_VERSION}"
-_COMMIT = "ad7fd356339ccc5c9af5af1a6786662572d53ed0"
+_COMMIT = "b58158b5929f3139b7bd3078b0e92b3889a7f943"
 _BUN_VERSION = "1.3.14"
 _ELECTRON_VERSION = "43.3.0"
-_OPENCODE_VERSION = "1.18.23"
-_OPENCODE_COMMIT = "ef2880f379129aa048be9e9353e30aa168d42c17"
+_NODE_VERSION = "24.19.0"
+_OPENCODE_VERSION = "1.18.25"
+_OPENCODE_COMMIT = "cb7d8b2f5e44876ef98b661dc10590c915af3a9f"
 _SHERPA_VERSION = "1.13.3"
 _SHERPA_COMMIT = "330609dab49be6ee8b30702918ca7abbbad1286a"
 _SHERPA_WRAPPER_VERSION = "1.12.28"
+_NODE_ADDON_API_VERSION = "8.3.0"
 _SOURCE_PINS = {
     "bunVersion": _BUN_VERSION,
     "opencodeCommit": _OPENCODE_COMMIT,
@@ -54,7 +57,7 @@ _SOURCE_PINS = {
     "sherpaVersion": _SHERPA_VERSION,
     "sherpaWrapperVersion": _SHERPA_WRAPPER_VERSION,
 }
-_OPENCODE_NODE_MODULES_HASH = "sha256-ObS50y/oy6fM9wSGUL/wx6O0+fTWHC04mXJNd7w/2Z0="
+_OPENCODE_NODE_MODULES_HASH = "sha256-RmbrAlggOqxNFdhW+qj2tjRCpRf2NDLe68TikbGtCeA="
 _BUN_HASH = "sha256-2LliIYKK1vl6x6wKt+lYcjQa92MAHogD6CZ2UsJlJiA="
 _BUN_URL = (
     "https://github.com/oven-sh/bun/releases/download/"
@@ -71,15 +74,6 @@ _URL_HASHES = (
     "sha256-EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE=",
 )
 _OPENCHAMBER_NODE_MODULES_HASH = "sha256-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF="
-_PROMOTED_OPENCHAMBER_SRC_HASH = "sha256-q9/c9bbIKAsdkkJuxrH7b6r5/WIo1XgrOQausMbULmg="
-_PROMOTED_OPENCODE_SRC_HASH = "sha256-1iMdRFkZh6J82EDoPq3mFLXMGmdtbnLBgURtgrJRAlw="
-_PROMOTED_SHERPA_ONNX_SRC_HASH = "sha256-xwu45dJOT1yUdU0P6Vjr8XexSeGOOfQ/zt1lhcASm/8="
-_PROMOTED_OPENCHAMBER_NODE_MODULES_HASH = (
-    "sha256-bhjpFfKPhaBuAGJTnIiL5tYnp+UYc3HFTinxMzfVPDY="
-)
-_PROMOTED_NODE_ADDON_API_HASH = "sha256-oM5nZTolH1bqQNLqsIeXk0ts/J201IdmeV2Xu5tNlg0="
-_PROMOTED_SHERPA_ONNX_NODE_HASH = "sha256-YN10TB8kR8u1ekFfu6ZZTFo3RpT6j7fou/mLgveVlHE="
-
 _REQUIRED_SUPPRESSION_SURFACES = {
     "electron-auto-updater-setup": (
         "patch",
@@ -251,7 +245,8 @@ def _urls() -> dict[str, str]:
     return {
         "bunUrl": _BUN_URL,
         "nodeAddonApiUrl": (
-            "https://registry.npmjs.org/node-addon-api/-/node-addon-api-8.3.0.tgz"
+            "https://registry.npmjs.org/node-addon-api/-/"
+            f"node-addon-api-{_NODE_ADDON_API_VERSION}.tgz"
         ),
         "openchamberUrl": (
             f"https://github.com/openchamber/openchamber/archive/{_COMMIT}.tar.gz"
@@ -273,9 +268,16 @@ def _version_info() -> VersionInfo:
     return VersionInfo(
         version=_VERSION,
         metadata={
+            "bunVersion": _BUN_VERSION,
             "commit": _COMMIT,
             "electronVersion": _ELECTRON_VERSION,
+            "nodeAddonApiVersion": _NODE_ADDON_API_VERSION,
+            "opencodeCommit": _OPENCODE_COMMIT,
             "opencodeNodeModulesHash": _OPENCODE_NODE_MODULES_HASH,
+            "opencodeVersion": _OPENCODE_VERSION,
+            "sherpaCommit": _SHERPA_COMMIT,
+            "sherpaVersion": _SHERPA_VERSION,
+            "sherpaWrapperVersion": _SHERPA_WRAPPER_VERSION,
             "tag": _TAG,
             **_urls(),
         },
@@ -339,21 +341,38 @@ def _expected_node_modules_fake_hash_expr() -> str:
 
 
 def _lock_text() -> str:
-    return "\n".join((
-        f'"@opencode-ai/sdk": ["@opencode-ai/sdk@{_OPENCODE_VERSION}", ""]',
-        f'"electron": ["electron@{_ELECTRON_VERSION}", ""]',
-        (f'"sherpa-onnx-node": ["sherpa-onnx-node@{_SHERPA_WRAPPER_VERSION}", ""]'),
-        (
-            '"sherpa-onnx-darwin-arm64": '
-            f'["sherpa-onnx-darwin-arm64@{_SHERPA_VERSION}", ""]'
-        ),
-    ))
+    return f"""{{
+  "lockfileVersion": 1,
+  "packages": {{
+    "@opencode-ai/sdk": ["@opencode-ai/sdk@{_OPENCODE_VERSION}", ""],
+    "electron": ["electron@{_ELECTRON_VERSION}", ""],
+    "sherpa-onnx-node": ["sherpa-onnx-node@{_SHERPA_WRAPPER_VERSION}", ""],
+    "sherpa-onnx-darwin-arm64": ["sherpa-onnx-darwin-arm64@{_SHERPA_VERSION}", ""],
+  }},
+}}
+"""
+
+
+def _locked_version_from_text(
+    module: ModuleType,
+    lock_text: str,
+    package: str,
+) -> str:
+    lock = module.parse_bun_lock_text(
+        lock_text,
+        context="OpenChamber bun.lock",
+    )
+    packages = module._require_object(
+        lock.get("packages"),
+        context="bun.lock packages",
+    )
+    return module._locked_package_version(packages, package)
 
 
 def test_openchamber_resolves_one_exact_release_and_companion_graph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Discovery must prove every immutable source and locked runtime version."""
+    """A synthetic future release must resolve from immutable source evidence."""
     module = _load_updater_module()
     updater = module.OpenChamberUpdater()
     api_paths: list[str] = []
@@ -372,7 +391,7 @@ def test_openchamber_resolves_one_exact_release_and_companion_graph(
     commits = {
         f"repos/openchamber/openchamber/commits/{_TAG}": _COMMIT,
         f"repos/anomalyco/opencode/commits/v{_OPENCODE_VERSION}": _OPENCODE_COMMIT,
-        "repos/k2-fsa/sherpa-onnx/commits/v1.13.3": _SHERPA_COMMIT,
+        f"repos/k2-fsa/sherpa-onnx/commits/v{_SHERPA_VERSION}": _SHERPA_COMMIT,
     }
 
     async def commit_payload(
@@ -396,8 +415,9 @@ def test_openchamber_resolves_one_exact_release_and_companion_graph(
         if url.endswith(f"/{_COMMIT}/package.json"):
             return {
                 "version": _VERSION,
-                "packageManager": "bun@1.3.14",
+                "packageManager": f"bun@{_BUN_VERSION}",
                 "engines": {"node": ">=22.0.0"},
+                "dependencies": {"@opencode-ai/sdk": _OPENCODE_VERSION},
             }
         if url.endswith("/packages/electron/package.json"):
             return {
@@ -406,18 +426,18 @@ def test_openchamber_resolves_one_exact_release_and_companion_graph(
                     "appId": "dev.openchamber.desktop",
                     "productName": "OpenChamber",
                 },
-                "devDependencies": {"electron": "^43.3.0"},
+                "devDependencies": {"electron": f"^{_ELECTRON_VERSION}"},
             }
         if url.endswith("/packages/web/package.json"):
             return {
                 "version": _VERSION,
                 "dependencies": {
                     "@opencode-ai/sdk": _OPENCODE_VERSION,
-                    "sherpa-onnx-node": "1.12.28",
+                    "sherpa-onnx-node": _SHERPA_WRAPPER_VERSION,
                 },
             }
         if url.endswith(f"/{_OPENCODE_COMMIT}/package.json"):
-            return {"packageManager": "bun@1.3.14"}
+            return {"packageManager": f"bun@{_BUN_VERSION}"}
         if url.endswith("/nix/hashes.json"):
             return {
                 "nodeModules": {
@@ -425,7 +445,7 @@ def test_openchamber_resolves_one_exact_release_and_companion_graph(
                 }
             }
         if url.endswith("/scripts/node-addon-api/package.json"):
-            return {"dependencies": {"node-addon-api": "^8.3.0"}}
+            return {"dependencies": {"node-addon-api": f"^{_NODE_ADDON_API_VERSION}"}}
         msg = f"unexpected exact-source URL: {url}"
         raise AssertionError(msg)
 
@@ -446,38 +466,133 @@ def test_openchamber_resolves_one_exact_release_and_companion_graph(
     monkeypatch.setattr(module, "fetch_github_api", commit_payload)
     monkeypatch.setattr(module, "fetch_json", json_payload)
     monkeypatch.setattr(module, "fetch_url", bytes_payload)
+    node_resolution_calls: list[tuple[str, str, float, str]] = []
+
+    async def _resolve_package_passthru_version(
+        package_attr: str,
+        passthru_attr: str,
+        *,
+        command_timeout: float,
+        source_name: str,
+    ) -> str:
+        node_resolution_calls.append((
+            package_attr,
+            passthru_attr,
+            command_timeout,
+            source_name,
+        ))
+        return _NODE_VERSION
+
+    monkeypatch.setattr(
+        module,
+        "resolve_package_passthru_version",
+        _resolve_package_passthru_version,
+    )
 
     assert run_async(updater.fetch_latest(object())) == _version_info()
     assert api_paths == [
         "repos/openchamber/openchamber/releases/latest",
         f"repos/openchamber/openchamber/commits/{_TAG}",
         f"repos/anomalyco/opencode/commits/v{_OPENCODE_VERSION}",
-        "repos/k2-fsa/sherpa-onnx/commits/v1.13.3",
+        f"repos/k2-fsa/sherpa-onnx/commits/v{_SHERPA_VERSION}",
     ]
     assert len(fetched_urls) == 7
+    assert node_resolution_calls == [
+        (
+            "openchamber",
+            "nodejsVersion",
+            updater.config.default_subprocess_timeout,
+            "OpenChamber",
+        )
+    ]
+
+
+def test_openchamber_lock_resolution_is_independent_of_json_layout() -> None:
+    """Equivalent textual JSON layouts must produce the same package identity."""
+    module = _load_updater_module()
+    compact = '{"packages":{"electron":["electron@43.3.0",""]}}'
+    reformatted = """{
+      "packages": {
+        "electron": [
+          "electron@43.3.0",
+          "",
+        ],
+      },
+    }
+    """
+
+    versions: list[str] = []
+    for lock_text in (compact, reformatted):
+        versions.append(_locked_version_from_text(module, lock_text, "electron"))
+
+    assert versions == ["43.3.0", "43.3.0"]
 
 
 @pytest.mark.parametrize(
-    ("lock_text", "package"),
+    ("lock_text", "error_type", "message"),
     [
-        ("", "electron"),
+        ("not-json", ValueError, "Invalid textual bun.lock JSON"),
+        ('{"packages": {}}', RuntimeError, "must contain exactly one"),
+        ('{"packages": {"electron": []}}', TypeError, "non-empty array"),
         (
-            "\n".join((
-                '"electron": ["electron@43.3.0", ""]',
-                '"electron": ["electron@43.3.0", ""]',
-            )),
-            "electron",
+            '{"packages": {"electron": ["not-electron@43.3.0"]}}',
+            RuntimeError,
+            "must start with",
+        ),
+        (
+            '{"packages": {'
+            '"electron": ["electron@43.3.0"], '
+            '"electron": ["electron@43.3.1"]'
+            "}}",
+            ValueError,
+            "duplicate object key 'electron'",
         ),
     ],
 )
-def test_openchamber_lock_requires_one_exact_resolution(
+def test_openchamber_lock_rejects_malformed_or_ambiguous_resolutions(
     lock_text: str,
-    package: str,
+    error_type: type[Exception],
+    message: str,
 ) -> None:
-    """Missing or ambiguous lock entries must stop metadata promotion."""
+    """Malformed locks and duplicate package identities must fail closed."""
     module = _load_updater_module()
-    with pytest.raises(RuntimeError, match="must contain exactly one"):
-        module._locked_package_version(lock_text, package)
+
+    with pytest.raises(error_type, match=message):
+        _locked_version_from_text(module, lock_text, "electron")
+
+
+@pytest.mark.parametrize(
+    "engine",
+    [">=22", ">=22.0", ">=22.0.0", ">=24", "^24.0.0"],
+)
+def test_openchamber_accepts_node_ranges_supported_by_selected_node(
+    engine: str,
+) -> None:
+    """Standard ranges containing the selected runtime should remain updateable."""
+    module = _load_updater_module()
+
+    assert (
+        module.require_supported_node_engine(
+            engine,
+            selected_attr="openchamber.passthru.nodejsVersion",
+            selected_version=_NODE_VERSION,
+            source_name="OpenChamber",
+        )
+        == engine
+    )
+
+
+def test_openchamber_rejects_node_engine_range_above_selected_version() -> None:
+    """A valid range outside the selected runtime must fail before promotion."""
+    module = _load_updater_module()
+
+    with pytest.raises(RuntimeError, match="does not satisfy Node engine"):
+        module.require_supported_node_engine(
+            ">=24.20.0",
+            selected_attr="openchamber.passthru.nodejsVersion",
+            selected_version=_NODE_VERSION,
+            source_name="OpenChamber",
+        )
 
 
 def test_openchamber_hashes_every_source_and_closure_in_order(
@@ -633,6 +748,17 @@ def test_openchamber_json_helpers_fail_closed(
         getattr(module, helper)(*args, **kwargs)
 
 
+def test_openchamber_version_prefixes_fail_closed() -> None:
+    """Tool and dependency versions must retain their expected source syntax."""
+    module = _load_updater_module()
+    with pytest.raises(RuntimeError, match="must start with 'bun@'"):
+        module._require_prefixed_version(
+            "latest",
+            "bun@",
+            context="package manager",
+        )
+
+
 def test_openchamber_required_suppression_surface_manifest_is_complete() -> None:
     """A test-owned manifest must independently pin every mutation surface."""
     module = _load_patcher_module()
@@ -738,57 +864,89 @@ def test_openchamber_patcher_cli_validates_root_arity(tmp_path: Path) -> None:
     assert complete_error.value.code == 2
 
 
-def test_openchamber_source_metadata_contains_promoted_exact_hashes() -> None:
-    """Persist every promoted hash without weakening the package's gate boundary."""
+def test_openchamber_source_metadata_has_complete_provenance_graph() -> None:
+    """The generated source graph must be complete and internally consistent."""
+    module = _load_updater_module()
     source = SourceEntry.model_validate_json(
         (_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")
     )
-    urls = _urls()
-    expected_hashes = HashCollection.from_value([
-        HashEntry.create(
-            "srcHash",
-            _PROMOTED_OPENCHAMBER_SRC_HASH,
-            url=urls["openchamberUrl"],
-        ),
-        HashEntry.create(
-            "srcHash",
-            _PROMOTED_OPENCODE_SRC_HASH,
-            url=urls["opencodeUrl"],
-        ),
-        HashEntry.create(
-            "srcHash",
-            _PROMOTED_SHERPA_ONNX_SRC_HASH,
-            url=urls["sherpaOnnxUrl"],
-        ),
-        HashEntry.create("sha256", _BUN_HASH, url=urls["bunUrl"]),
-        HashEntry.create(
-            "nodeModulesHash",
-            _OPENCODE_NODE_MODULES_HASH,
-            platform="aarch64-darwin",
-            url=urls["opencodeUrl"],
-        ),
-        HashEntry.create(
-            "nodeModulesHash",
-            _PROMOTED_OPENCHAMBER_NODE_MODULES_HASH,
-            platform="aarch64-darwin",
-            url=urls["openchamberUrl"],
-        ),
-        HashEntry.create(
-            "sha256",
-            _PROMOTED_NODE_ADDON_API_HASH,
-            url=urls["nodeAddonApiUrl"],
-        ),
-        HashEntry.create(
-            "sha256",
-            _PROMOTED_SHERPA_ONNX_NODE_HASH,
-            url=urls["sherpaOnnxNodeUrl"],
-        ),
-    ])
-    assert source.version == _VERSION
-    assert source.commit == _COMMIT
-    assert source.electron_version == _ELECTRON_VERSION
-    assert source.pins == _SOURCE_PINS
-    assert source.hashes.equivalent_to(expected_hashes)
+    assert source.version is not None
+    assert source.commit is not None
+    assert source.electron_version is not None
+    assert source.pins is not None
+    assert source.urls is not None
+    assert source.hashes.entries is not None
+
+    pins = source.pins
+    urls = source.urls
+    entries = source.hashes.entries
+    assert set(pins) == {
+        "bunVersion",
+        "opencodeCommit",
+        "opencodeVersion",
+        "sherpaCommit",
+        "sherpaVersion",
+        "sherpaWrapperVersion",
+    }
+    assert set(urls) == {
+        "bun",
+        "nodeAddonApi",
+        "openchamber",
+        "opencode",
+        "sherpaOnnx",
+        "sherpaOnnxNode",
+    }
+    expected_hash_keys = {
+        ("srcHash", None, urls["openchamber"]),
+        ("srcHash", None, urls["opencode"]),
+        ("srcHash", None, urls["sherpaOnnx"]),
+        ("sha256", None, urls["bun"]),
+        ("sha256", None, urls["nodeAddonApi"]),
+        ("sha256", None, urls["sherpaOnnxNode"]),
+        ("nodeModulesHash", "aarch64-darwin", urls["opencode"]),
+        ("nodeModulesHash", "aarch64-darwin", urls["openchamber"]),
+    }
+    actual_hash_keys = {
+        (entry.hash_type, entry.platform, entry.url) for entry in entries
+    }
+    assert len(entries) == len(expected_hash_keys)
+    assert actual_hash_keys == expected_hash_keys
+
+    opencode_node_hashes = [
+        entry.hash
+        for entry in entries
+        if entry.hash_type == "nodeModulesHash" and entry.url == urls["opencode"]
+    ]
+    assert len(opencode_node_hashes) == 1
+    node_addon_prefix = "https://registry.npmjs.org/node-addon-api/-/node-addon-api-"
+    node_addon_url = urls["nodeAddonApi"]
+    assert node_addon_url.startswith(node_addon_prefix)
+    assert node_addon_url.endswith(".tgz")
+    node_addon_version = node_addon_url[len(node_addon_prefix) : -len(".tgz")]
+    module.OpenChamberUpdater._required_metadata(
+        VersionInfo(
+            version=source.version,
+            metadata={
+                "bunUrl": urls["bun"],
+                "bunVersion": pins["bunVersion"],
+                "commit": source.commit,
+                "electronVersion": source.electron_version,
+                "nodeAddonApiUrl": node_addon_url,
+                "nodeAddonApiVersion": node_addon_version,
+                "openchamberUrl": urls["openchamber"],
+                "opencodeCommit": pins["opencodeCommit"],
+                "opencodeNodeModulesHash": opencode_node_hashes[0],
+                "opencodeUrl": urls["opencode"],
+                "opencodeVersion": pins["opencodeVersion"],
+                "sherpaCommit": pins["sherpaCommit"],
+                "sherpaOnnxUrl": urls["sherpaOnnx"],
+                "sherpaOnnxNodeUrl": urls["sherpaOnnxNode"],
+                "sherpaVersion": pins["sherpaVersion"],
+                "sherpaWrapperVersion": pins["sherpaWrapperVersion"],
+                "tag": f"v{source.version}",
+            },
+        )
+    )
 
     package = expect_instance(
         parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),
@@ -908,6 +1066,58 @@ def test_openchamber_derivations_consume_updater_owned_source_pins() -> None:
         expect_binding(provenance.values, "wrapperSourceVersion").value,
         "wrapperVersion",
     )
+
+
+def test_openchamber_exposes_selected_node_version_on_both_package_paths() -> None:
+    """Blocked and buildable derivations share the actual selected Node contract."""
+    package = expect_instance(
+        parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+    final = expect_instance(package.output, IfExpression)
+    assert_nix_ast_equal(expect_binding(final.scope, "nodejs").value, "nodejs_24")
+
+    common_passthru = expect_instance(
+        expect_binding(final.scope, "commonPassthru").value,
+        AttributeSet,
+    )
+    assert_nix_ast_equal(
+        expect_binding(common_passthru.values, "nodejsVersion").value,
+        "nodejs.version",
+    )
+
+    blocked = expect_instance(
+        expect_binding(final.scope, "blockedPackage").value,
+        FunctionCall,
+    )
+    blocked_attributes = expect_instance(blocked.argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(blocked_attributes.values, "passthru").value,
+        "commonPassthru",
+    )
+
+    real = expect_instance(
+        expect_binding(final.scope, "realPackage").value,
+        FunctionCall,
+    )
+    real_attributes = expect_instance(real.argument, AttributeSet)
+    native_build_inputs = expect_instance(
+        expect_binding(real_attributes.values, "nativeBuildInputs").value,
+        NixList,
+    )
+    assert any(
+        isinstance(item, Identifier) and item.name == "nodejs"
+        for item in native_build_inputs.value
+    )
+    assert not any(
+        isinstance(item, Identifier) and item.name == "nodejs_24"
+        for item in native_build_inputs.value
+    )
+    real_passthru = expect_instance(
+        expect_binding(real_attributes.values, "passthru").value,
+        BinaryExpression,
+    )
+    assert_nix_ast_equal(real_passthru.left, "commonPassthru")
 
 
 def test_openchamber_nix_files_are_structurally_parseable() -> None:
@@ -1130,16 +1340,16 @@ def test_openchamber_revalidates_even_current_metadata() -> None:
 
 
 def test_openchamber_rejects_non_exact_release_metadata() -> None:
-    """The audited package must fail closed on a new, unaudited release."""
+    """Release tags must identify one exact semantic version."""
     module = _load_updater_module()
     monkeypatch_target = "lib.update.updaters.github_release.fetch_github_api"
 
     async def latest(*_args: object, **_kwargs: object) -> dict[str, str]:
-        return {"tag_name": "v1.20.0"}
+        return {"tag_name": "v1.23"}
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(monkeypatch_target, latest)
-        with pytest.raises(RuntimeError, match="release version must be '1.21.0'"):
+        with pytest.raises(RuntimeError, match="exact semantic version"):
             run_async(module.OpenChamberUpdater().fetch_latest(object()))
 
 
@@ -1164,20 +1374,21 @@ def test_openchamber_commit_metadata_must_be_immutable() -> None:
             )
 
 
-def test_openchamber_manifest_validation_rejects_prebuilt_drift() -> None:
-    """The lock must keep the audited sherpa wrapper/platform split exact."""
+def test_openchamber_manifest_validation_rejects_projection_drift() -> None:
+    """Manifest dependency ranges must agree with their exact lock resolution."""
     module = _load_updater_module()
     updater = module.OpenChamberUpdater
     drifted = _lock_text().replace(
-        "sherpa-onnx-darwin-arm64@1.13.3",
-        "sherpa-onnx-darwin-arm64@1.13.4",
+        f"electron@{_ELECTRON_VERSION}",
+        "electron@44.0.0",
     )
-    with pytest.raises(RuntimeError, match="locked sherpa-onnx-darwin-arm64"):
+    with pytest.raises(RuntimeError, match="Electron dependency"):
         updater._validate_openchamber_manifests(
             root_payload={
                 "version": _VERSION,
-                "packageManager": "bun@1.3.14",
+                "packageManager": f"bun@{_BUN_VERSION}",
                 "engines": {"node": ">=22.0.0"},
+                "dependencies": {"@opencode-ai/sdk": _OPENCODE_VERSION},
             },
             electron_payload={
                 "version": _VERSION,
@@ -1185,17 +1396,95 @@ def test_openchamber_manifest_validation_rejects_prebuilt_drift() -> None:
                     "appId": "dev.openchamber.desktop",
                     "productName": "OpenChamber",
                 },
-                "devDependencies": {"electron": "^43.3.0"},
+                "devDependencies": {"electron": f"^{_ELECTRON_VERSION}"},
             },
             web_payload={
                 "version": _VERSION,
                 "dependencies": {
                     "@opencode-ai/sdk": _OPENCODE_VERSION,
-                    "sherpa-onnx-node": "1.12.28",
+                    "sherpa-onnx-node": _SHERPA_WRAPPER_VERSION,
                 },
             },
             lock_text=drifted,
+            release_version=_VERSION,
+            selected_node_version=_NODE_VERSION,
         )
+
+
+@pytest.mark.parametrize(
+    "electron_spec",
+    [_ELECTRON_VERSION, "^43.0.0", "~43.3.0"],
+)
+def test_openchamber_accepts_semantically_equivalent_electron_ranges(
+    electron_spec: str,
+) -> None:
+    """Do not freeze an upstream dependency to one equivalent range spelling."""
+    module = _load_updater_module()
+    module.OpenChamberUpdater._validate_openchamber_manifests(
+        root_payload={
+            "version": _VERSION,
+            "packageManager": f"bun@{_BUN_VERSION}",
+            "engines": {"node": ">=22.0.0"},
+            "dependencies": {"@opencode-ai/sdk": _OPENCODE_VERSION},
+        },
+        electron_payload={
+            "version": _VERSION,
+            "build": {
+                "appId": "dev.openchamber.desktop",
+                "productName": "OpenChamber",
+            },
+            "devDependencies": {"electron": electron_spec},
+        },
+        web_payload={
+            "version": _VERSION,
+            "dependencies": {
+                "@opencode-ai/sdk": _OPENCODE_VERSION,
+                "sherpa-onnx-node": _SHERPA_WRAPPER_VERSION,
+            },
+        },
+        lock_text=_lock_text(),
+        release_version=_VERSION,
+        selected_node_version=_NODE_VERSION,
+    )
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "match"),
+    [
+        ("bunVersion", "latest", "exact semantic version"),
+        ("commit", "main", "immutable commit"),
+        ("tag", "v0.0.0", "release tag"),
+        ("openchamberUrl", "https://example.invalid/source.tgz", "provenance"),
+    ],
+)
+def test_openchamber_release_metadata_requires_dynamic_provenance(
+    key: str,
+    value: str,
+    match: str,
+) -> None:
+    """Hashing must reject identities detached from discovered release evidence."""
+    module = _load_updater_module()
+    info = _version_info()
+    metadata = dict(cast("dict[str, object]", info.metadata))
+    metadata[key] = value
+
+    with pytest.raises(RuntimeError, match=match):
+        module.OpenChamberUpdater._required_metadata(
+            VersionInfo(version=info.version, metadata=metadata)
+        )
+
+
+def test_openchamber_validates_the_materialized_darwin_package() -> None:
+    """Promotion must build the candidate so source patch anchors run first."""
+    module = _load_updater_module()
+
+    assert module.OpenChamberUpdater.get_derivation_validations() == (
+        DerivationValidation(
+            installable="path:.#pkgs.{system}.{name}",
+            systems=("aarch64-darwin",),
+            mode="build",
+        ),
+    )
 
 
 def test_openchamber_missing_hash_event_fails_closed(

@@ -1,4 +1,5 @@
 {
+  "commit": "5c15a6995c9bb4bacd3e341b59fff32c909c80bf",
   "hashes": [
     {
       "hash": "sha256-WGn9twcbHyHyAKl86X0gElh34PMc2ALtmd4sU/SIsGw=",
@@ -17,6 +18,5 @@
       "hashType": "srcHash"
     }
   ],
-  "input": "codex-v8",
   "version": "v150.4.0"
 }

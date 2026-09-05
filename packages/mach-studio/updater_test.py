@@ -16,6 +16,7 @@ from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.asar_integrity import check_info_plist_hash, read_packed_file
+from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
@@ -24,6 +25,12 @@ from lib.tests._nix_ast import (
     parse_nix_expr,
 )
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
+from lib.tests._source_metadata import (
+    assert_https_url,
+    assert_platform_source_entry,
+    assert_release_version,
+    assert_url_contains_version,
+)
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.derivation_validation import DerivationValidation
@@ -37,12 +44,7 @@ _ARTIFACT_URL = (
     "stable/mac-arm64/Mach-Studio-0.1.142-arm64.dmg"
 )
 _HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-_PINNED_VERSION = "0.1.147"
-_PINNED_URL = (
-    "https://api.maniac.ai/storage/v1/object/public/desktop-releases/"
-    "stable/mac-arm64/Mach-Studio-0.1.147-arm64.dmg"
-)
-_PINNED_HASH = "sha256-btsz4tcvQcBuegC6O/CYkPv8zFOiVbHhwq+4yJLoyXk="
+_RENDERER_NAME = "index-NextRelease42.js"
 
 
 def _load_module() -> ModuleType:
@@ -63,6 +65,9 @@ def _write_policy_bundle(
     tmp_path: Path,
     main_payload: bytes,
     renderer_payload: bytes,
+    *,
+    renderer_name: str = _RENDERER_NAME,
+    additional_assets: dict[str, bytes] | None = None,
 ) -> tuple[Path, Path]:
     block_size = 64
 
@@ -81,6 +86,15 @@ def _write_policy_bundle(
             },
         }
 
+    archive_payload = bytearray(main_payload)
+    asset_entries: dict[str, object] = {}
+    for name, payload in (
+        (renderer_name, renderer_payload),
+        *((additional_assets or {}).items()),
+    ):
+        asset_entries[name] = _entry(payload, offset=len(archive_payload))
+        archive_payload.extend(payload)
+
     header = json.dumps(
         {
             "files": {
@@ -92,12 +106,7 @@ def _write_policy_bundle(
                 "dist": {
                     "files": {
                         "assets": {
-                            "files": {
-                                "index-BeczixRy.js": _entry(
-                                    renderer_payload,
-                                    offset=len(main_payload),
-                                )
-                            }
+                            "files": asset_entries,
                         }
                     }
                 },
@@ -107,7 +116,7 @@ def _write_policy_bundle(
     ).encode()
     prefix = struct.pack("<IIII", 4, 8 + len(header), 4 + len(header), len(header))
     asar_path = tmp_path / "app.asar"
-    asar_path.write_bytes(prefix + header + main_payload + renderer_payload)
+    asar_path.write_bytes(prefix + header + archive_payload)
     plist_path = tmp_path / "Info.plist"
     with plist_path.open("wb") as handle:
         plistlib.dump({}, handle)
@@ -121,10 +130,7 @@ def test_mach_studio_policy_forces_the_existing_service_gate_disabled() -> None:
         b"before " + module._ENABLED_GATE + module._FAIL_OPEN_ENGINE_INSTALL + b" after"
     )
 
-    patched = module.patch_main(
-        payload,
-        expected_sha256=hashlib.sha256(payload).hexdigest(),
-    )
+    patched = module.patch_main(payload)
 
     assert len(patched) == len(payload)
     assert module._ENABLED_GATE not in patched
@@ -138,10 +144,7 @@ def test_mach_studio_policy_fails_closed_and_validates_the_engine_source() -> No
         b"before " + module._ENABLED_GATE + module._FAIL_OPEN_ENGINE_INSTALL + b" after"
     )
 
-    patched = module.patch_main(
-        payload,
-        expected_sha256=hashlib.sha256(payload).hexdigest(),
-    )
+    patched = module.patch_main(payload)
 
     assert len(patched) == len(payload)
     assert module._FAIL_OPEN_ENGINE_INSTALL not in patched
@@ -164,10 +167,7 @@ def test_mach_studio_policy_reports_the_packaged_engine_source() -> None:
         + b" after"
     )
 
-    patched = module.patch_renderer(
-        payload,
-        expected_sha256=hashlib.sha256(payload).hexdigest(),
-    )
+    patched = module.patch_renderer(payload)
 
     assert len(patched) == len(payload)
     assert module._WHEEL_REINSTALL_DESCRIPTION not in patched
@@ -178,8 +178,23 @@ def test_mach_studio_policy_reports_the_packaged_engine_source() -> None:
     assert patched.count(module._SOURCE_TITLE) == 3
 
 
-def test_mach_studio_policy_rejects_an_unreviewed_packed_main_digest() -> None:
-    """Only the inspected 0.1.147 ASAR payloads may cross the package seam."""
+def test_mach_studio_policy_rejects_incomplete_anchor_inventories() -> None:
+    """Release drift must fail before either partial transformation can run."""
+    module = _load_policy_module()
+
+    with pytest.raises(module.PatchError, match="updater policy anchor.*found 0"):
+        module.patch_main(b"unrelated main code")
+    with pytest.raises(
+        module.PatchError,
+        match="engine reinstall description anchor.*found 0",
+    ):
+        module.patch_renderer(b"unrelated renderer code")
+
+
+def test_mach_studio_resolves_the_renderer_by_semantic_inventory(
+    tmp_path: Path,
+) -> None:
+    """A release fingerprint may change without changing the patch contract."""
     module = _load_policy_module()
     main_payload = module._ENABLED_GATE + module._FAIL_OPEN_ENGINE_INSTALL
     renderer_payload = (
@@ -187,21 +202,46 @@ def test_mach_studio_policy_rejects_an_unreviewed_packed_main_digest() -> None:
         + module._WHEEL_MISSING_DESCRIPTION
         + module._WHEEL_TITLE * 3
     )
-
-    with pytest.raises(module.PatchError, match="SHA-256 drifted"):
-        module.patch_main(main_payload)
-    with pytest.raises(module.PatchError, match="SHA-256 drifted"):
-        module.patch_renderer(renderer_payload)
+    asar_path, _plist_path = _write_policy_bundle(
+        tmp_path,
+        main_payload,
+        renderer_payload,
+        renderer_name="index-New.Fingerprint+99.js",
+        additional_assets={"index-UnrelatedChunk.js": b"unrelated renderer code"},
+    )
 
     assert (
-        module.REVIEWED_MAIN_SHA256
-        == "61561bb24a99c8e6aeb197df8e2a37c00f703e4cf1c53a1841362833d19cb60f"
+        module.resolve_renderer_path(asar_path)
+        == "dist/assets/index-New.Fingerprint+99.js"
     )
-    assert (
-        module.REVIEWED_RENDERER_SHA256
-        == "dce52b93639d873a0391126660a189fe481005ec8228f2d63a23266eb3605f5c"
+
+
+@pytest.mark.parametrize("matching_assets", [0, 2])
+def test_mach_studio_renderer_resolution_fails_closed_on_ambiguity(
+    tmp_path: Path,
+    matching_assets: int,
+) -> None:
+    """The patch must reject a missing or ambiguous renderer policy owner."""
+    module = _load_policy_module()
+    main_payload = module._ENABLED_GATE + module._FAIL_OPEN_ENGINE_INSTALL
+    renderer_payload = (
+        module._WHEEL_REINSTALL_DESCRIPTION
+        + module._WHEEL_MISSING_DESCRIPTION
+        + module._WHEEL_TITLE * 3
     )
-    assert module.RENDERER_PATH == "dist/assets/index-BeczixRy.js"
+    primary_payload = renderer_payload if matching_assets else b"unrelated"
+    additional_assets = (
+        {"index-SecondMatch.js": renderer_payload} if matching_assets == 2 else None
+    )
+    asar_path, _plist_path = _write_policy_bundle(
+        tmp_path,
+        main_payload,
+        primary_payload,
+        additional_assets=additional_assets,
+    )
+
+    with pytest.raises(module.PatchError, match=rf"found {matching_assets}:"):
+        module.resolve_renderer_path(asar_path)
 
 
 def test_mach_studio_patch_cli_updates_integrity_and_fails_on_drift(
@@ -228,17 +268,13 @@ def test_mach_studio_patch_cli_updates_integrity_and_fails_on_drift(
     (tmp_path / "vendor/local_moe_engine").mkdir(parents=True)
     original_size = asar_path.stat().st_size
 
-    assert (
-        module.main(
-            [str(asar_path), str(plist_path)],
-            expected_main_sha256=hashlib.sha256(main_payload).hexdigest(),
-            expected_renderer_sha256=hashlib.sha256(renderer_payload).hexdigest(),
-        )
-        == 0
-    )
+    assert module.main([str(asar_path), str(plist_path)]) == 0
 
     patched_main = read_packed_file(asar_path, module.MAIN_PATH)
-    patched_renderer = read_packed_file(asar_path, module.RENDERER_PATH)
+    patched_renderer = read_packed_file(
+        asar_path,
+        f"dist/assets/{_RENDERER_NAME}",
+    )
     digest = check_info_plist_hash(plist_path, asar_path)
     assert asar_path.stat().st_size == original_size
     assert module._ENABLED_GATE not in patched_main
@@ -249,14 +285,7 @@ def test_mach_studio_patch_cli_updates_integrity_and_fails_on_drift(
     assert module._SOURCE_READY_DESCRIPTION in patched_renderer
     assert f"ASAR header SHA256 {digest}" in capsys.readouterr().out
 
-    assert (
-        module.main(
-            [str(asar_path), str(plist_path)],
-            expected_main_sha256=hashlib.sha256(patched_main).hexdigest(),
-            expected_renderer_sha256=hashlib.sha256(patched_renderer).hexdigest(),
-        )
-        == 1
-    )
+    assert module.main([str(asar_path), str(plist_path)]) == 1
     assert "found 0" in capsys.readouterr().err
 
 
@@ -279,14 +308,7 @@ def test_mach_studio_patch_rejects_a_missing_packaged_engine_source(
     )
     original_archive = asar_path.read_bytes()
 
-    assert (
-        module.main(
-            [str(asar_path), str(plist_path)],
-            expected_main_sha256=hashlib.sha256(main_payload).hexdigest(),
-            expected_renderer_sha256=hashlib.sha256(renderer_payload).hexdigest(),
-        )
-        == 1
-    )
+    assert module.main([str(asar_path), str(plist_path)]) == 1
 
     assert "packaged local_moe_engine source is missing" in capsys.readouterr().err
     assert asar_path.read_bytes() == original_archive
@@ -360,7 +382,7 @@ def test_mach_studio_updater_build_validates_the_materialized_package() -> None:
 
 def test_mach_studio_package_patches_updates_and_resigns_the_bundle() -> None:
     """The final app must patch policy without discarding runtime entitlements."""
-    sources = json.loads(
+    source = SourceEntry.model_validate_json(
         (REPO_ROOT / "packages/mach-studio/sources.json").read_text(encoding="utf-8")
     )
     package = expect_instance(
@@ -373,11 +395,16 @@ def test_mach_studio_package_patches_updates_and_resigns_the_bundle() -> None:
     arguments = expect_instance(derivation.argument, AttributeSet)
     bindings = binding_map(arguments.values)
 
-    assert sources == {
-        "hashes": {"aarch64-darwin": _PINNED_HASH},
-        "urls": {"aarch64-darwin": _PINNED_URL},
-        "version": _PINNED_VERSION,
-    }
+    version = assert_release_version(source.version)
+    _hashes, urls = assert_platform_source_entry(
+        source,
+        platforms={"aarch64-darwin"},
+    )
+    url = urls["aarch64-darwin"]
+    assert_https_url(url, host="api.maniac.ai")
+    assert_url_contains_version(url, version)
+    assert "/stable/mac-arm64/" in url
+    assert url.endswith("-arm64.dmg")
     assert_nix_ast_equal(derivation.name, Identifier(name="mkSimpleDarwinApp"))
     assert_nix_ast_equal(
         expect_binding(arguments.values, "builder").value,

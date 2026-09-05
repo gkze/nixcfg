@@ -20,7 +20,8 @@ from lib.tests._shell_ast import command_texts, indented_string_body, parse_shel
 from lib.tests._updater_helpers import load_repo_module
 from lib.update.nix import _build_fetch_from_github_call
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters.metadata import GitHubReleaseMetadata
+
+COMMIT = "b" * 40
 
 
 def _load_module() -> ModuleType:
@@ -34,16 +35,16 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def test_source_expression_tracks_the_versioned_upstream_tag() -> None:
-    """Hash the immutable source tag rather than a published binary asset."""
+def test_source_expression_tracks_the_immutable_upstream_commit() -> None:
+    """Hash the resolved source commit rather than a mutable release tag."""
     module = _load_module()
 
     assert_nix_ast_equal(
-        module.BasetenSwitchUpdater._src_expr("0.4.0"),
+        module.BasetenSwitchUpdater._src_expr(COMMIT),
         _build_fetch_from_github_call(
             "basetenlabs",
             "baseten-switch",
-            tag="v0.4.0",
+            rev=COMMIT,
             fetch_submodules=False,
         ),
     )
@@ -75,8 +76,8 @@ def test_package_serializes_go_packages_with_timing_sensitive_probe_tests() -> N
     assert command_texts(shell, "go") == ["go test -p 1 ./..."]
 
 
-def test_package_makes_trace_recovery_test_time_deterministic() -> None:
-    """Keep the release test independent of the wall clock and retention window."""
+def test_package_applies_the_reviewed_nix_integration_patch() -> None:
+    """Retain Nix integration without patches for fixes already shipped upstream."""
     package = expect_instance(
         parse_nix_expr(
             (REPO_ROOT / "packages/baseten-switch/default.nix").read_text(
@@ -93,7 +94,7 @@ def test_package_makes_trace_recovery_test_time_deterministic() -> None:
 
     assert_nix_ast_equal(
         expect_binding(arguments.values, "patches").value,
-        "[ ./nix-managed.patch ./deterministic-trace-recovery-test.patch ]",
+        "[ ./nix-managed.patch ]",
     )
 
 
@@ -158,11 +159,16 @@ def test_fetch_latest_skips_drafts_and_accepts_beta_release(
         ]
 
     monkeypatch.setattr(module, "fetch_github_api_paginated", _fetch)
+    monkeypatch.setattr(
+        updater,
+        "_resolve_release_tag_commit",
+        lambda _session, tag: asyncio.sleep(0, result=COMMIT),
+    )
 
     result = _run(updater.fetch_latest(object()))
 
     assert result.version == "0.3.0"
-    assert result.metadata == GitHubReleaseMetadata(tag="v0.3.0")
+    assert result.metadata == {"commit": COMMIT, "tag": "v0.3.0"}
     assert calls == [("repos/basetenlabs/baseten-switch/releases", 100)]
 
 

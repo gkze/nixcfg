@@ -36,6 +36,7 @@ def _validate_sri_hash(value: str) -> str:
 # ---------------------------------------------------------------------------
 
 HashType = Literal[
+    "bunRuntimeHash",  # Exact Bun release binary selected by packageManager
     "cargoHash",
     "denoDepsHash",
     "nodeModulesHash",  # For node_modules built via bun/custom builders

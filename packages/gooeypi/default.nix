@@ -274,6 +274,7 @@ stdenv.mkDerivation {
       npmCli
       npmDeps
       ;
+    nodejsVersion = nodejs.version;
     macApp = {
       bundleId = appId;
       bundleName = appBundleName;

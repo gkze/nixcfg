@@ -46,12 +46,12 @@ if TYPE_CHECKING:
 
 
 def test_default_max_nix_builds_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the default update fan-out independent of large CPU counts."""
+    """Keep implicit build fan-out disabled regardless of local CPU count."""
     monkeypatch.setattr("os.cpu_count", lambda: None)
-    assert default_max_nix_builds() == 2
+    assert default_max_nix_builds() == 1
 
     monkeypatch.setattr("os.cpu_count", lambda: 10)
-    assert default_max_nix_builds() == 2
+    assert default_max_nix_builds() == 1
 
     monkeypatch.setattr("os.cpu_count", lambda: 1)
     assert default_max_nix_builds() == 1

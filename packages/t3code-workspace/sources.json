@@ -1,8 +1,8 @@
 {
-  "drvHash": "hah138p6hmdzjcmirn1n66r62prrjq4b",
+  "drvHash": "2b2fbc10r980vbmbizvhi92jnnm5n727",
   "hashes": [
     {
-      "hash": "sha256-gjx2dkiQpxN+OUnOhQBEQSf/Jc8bOh++1eZz9wrEGAA=",
+      "hash": "sha256-ywR/bTVFQ6Er2xTye5oe2EGEB5Yrc6dPWzmCwHLj0eI=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin"
     }

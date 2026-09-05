@@ -86,9 +86,9 @@ let
     dependency:
     nonEmptyString (dependency.owner or null)
     && nonEmptyString (dependency.repo or null)
+    && commitString (dependency.commit or null)
     && builtins.isString (dependency.hash or null)
-    && lib.hasPrefix "sha256-" dependency.hash
-    && (nonEmptyString (dependency.rev or null) || nonEmptyString (dependency.tag or null));
+    && lib.hasPrefix "sha256-" dependency.hash;
   completePatch =
     patch:
     nonEmptyString (patch.target or null)
@@ -116,10 +116,8 @@ let
     && builtins.all completeFetch (builtins.attrValues sherpaDependencies)
     && nonEmptyString (onnxruntimeClosure.version or null)
     && commitString (onnxruntimeClosure.commit or null)
-    && builtins.length (builtins.attrValues onnxruntimeDependencies) == 8
-    && builtins.all completeGitHubDependency (
-      builtins.filter (dependency: dependency ? owner) (builtins.attrValues onnxruntimeDependencies)
-    )
+    && builtins.length (builtins.attrValues onnxruntimeDependencies) == 7
+    && builtins.all completeGitHubDependency (builtins.attrValues onnxruntimeDependencies)
     && builtins.length onnxruntimePatches == 4
     && builtins.all completePatch onnxruntimePatches;
 

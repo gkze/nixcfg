@@ -1,7 +1,7 @@
 {
   "slices": {
     "crates/but": {
-      "hash": "sha256-RK+INIb6mQxz+9of+8exwn8gl+5NLNVYyBLtzH/LkN4=",
+      "hash": "sha256-vgOaCODJduJ5Up/CpE9mwR2xvfNhnjzav84THjgQuQk=",
       "name": "but"
     },
     "crates/but-action": {
@@ -9,19 +9,19 @@
       "name": "but-action"
     },
     "crates/but-agentlog": {
-      "hash": "sha256-VESQouA19wQpg8npUuxvp4aZ7qDVhmsnJGa1rJcqniI=",
+      "hash": "sha256-nD2tXMXYD5z+aY/K8qrgHq56RLVMuwpwzTvLAro6p44=",
       "name": "but-agentlog"
     },
     "crates/but-api": {
-      "hash": "sha256-3/wO5XWIXqFf970CJsNrts4Vj15aEJWfyl34sCXsDK0=",
+      "hash": "sha256-rScnEV4k69httvc0nPHr1Q4/d+KlsTXKr4BQfy9EHz4=",
       "name": "but-api"
     },
     "crates/but-api-macros": {
-      "hash": "sha256-GHJv6xLNqSs999WjVpo03G980+Fcn+SxyoWVY5elU38=",
+      "hash": "sha256-f7qSfvXRKMkLdPnZGESVOlF+QDRGvCmPo6UD2z1rYmI=",
       "name": "but-api-macros"
     },
     "crates/but-api-macros/tests": {
-      "hash": "sha256-5tgCxowotEqopE4rr3RnmPcAlBea8rLD//1ImfH9QyY=",
+      "hash": "sha256-oaO9njXDzL0uTTw4U1Mx3pD6pL/VyD6Abb1r42Wy9z8=",
       "name": "tests"
     },
     "crates/but-askpass": {
@@ -29,7 +29,7 @@
       "name": "but-askpass"
     },
     "crates/but-bitbucket": {
-      "hash": "sha256-beALhABGfbYxw2Dpri7RF2i/d4V7B9IdBaH8SCSjXVg=",
+      "hash": "sha256-jv6KUKepoWJ2aypy6hxseYm0ds5cwinuU1XRKSxtOlk=",
       "name": "but-bitbucket"
     },
     "crates/but-branches": {
@@ -45,19 +45,19 @@
       "name": "but-comments"
     },
     "crates/but-core": {
-      "hash": "sha256-7ykLMV20+y7WN/FoggiZ4O+m/FDiF/6iETBugtjN63o=",
+      "hash": "sha256-CJSZO/lAOiBTk0aJ2avpozKphnkunnPvIf+ygGr017I=",
       "name": "but-core"
     },
     "crates/but-ctx": {
-      "hash": "sha256-7FjP2UMxhczPfNc8mUX6D8nAXH8Y9TA+/Mqz6YGGN4U=",
+      "hash": "sha256-uFAMhtXqxCdFbDo4XoiJtOguxrqlJ2MI0v+0lhEZvsw=",
       "name": "but-ctx"
     },
     "crates/but-db": {
-      "hash": "sha256-6ZORElc9c41ju9C89FqpAmYkShuo+aGSGrg4ivptEQY=",
+      "hash": "sha256-z4I46CPcVfqaEssaX+qV8KWZWxjdtu631Xq8jqszebA=",
       "name": "but-db"
     },
     "crates/but-debug": {
-      "hash": "sha256-AhbmMFj9EaEr98D4T0XdGOxA+1E9PqVg/7hcyIumNqc=",
+      "hash": "sha256-W0OFEaKg4WdFS9RhCU3XB5+K3c9jHP5LEiq5c9erWnU=",
       "name": "but-debug"
     },
     "crates/but-debugging": {
@@ -65,7 +65,7 @@
       "name": "but-debugging"
     },
     "crates/but-error": {
-      "hash": "sha256-ysxL7+fRpzPWZi65xMEn99ScNkx1YkpDkpcIbcE6EDo=",
+      "hash": "sha256-6qS46FuuMjEkhtRi61okaLs2ZXYAVOQUAIg0aOaCfMI=",
       "name": "but-error"
     },
     "crates/but-feedback": {
@@ -73,7 +73,7 @@
       "name": "but-feedback"
     },
     "crates/but-forge": {
-      "hash": "sha256-OlhLMKOWN4Lo52X6wWax7Y5sum79TcUsmk6paprcxLY=",
+      "hash": "sha256-d0UUaDHxFJIyj4SC65vnTYWkB3V68DU5E9ZCnd5F5Ac=",
       "name": "but-forge"
     },
     "crates/but-forge-storage": {
@@ -85,19 +85,19 @@
       "name": "but-gerrit"
     },
     "crates/but-github": {
-      "hash": "sha256-Fszpbdr9V0tXiyhH3WrvaUaL298JjeKs0fl6IoXXWRo=",
+      "hash": "sha256-b+V3hgI105VZmF3Dy/tqVHFnHGPz4Ya6+rgEWGjMHLQ=",
       "name": "but-github"
     },
     "crates/but-gitlab": {
-      "hash": "sha256-rod+c7SK15bghaN4JulIXWYSLp6JDfGCUR7NfCTyWMU=",
+      "hash": "sha256-xAcGvJ6ai5fOhdzDtJS/lOFyIOX77LmrGspYmeOLnIw=",
       "name": "but-gitlab"
     },
     "crates/but-graph": {
-      "hash": "sha256-rQQoWgzutZB9f5uj7hVTDOo/EL7hW1vnAyFrvzYId8k=",
+      "hash": "sha256-gD2ARKO1j/D6qDNx4/raV35EwbQ+/vMlrphH2AG9A3I=",
       "name": "but-graph"
     },
     "crates/but-hunk-assignment": {
-      "hash": "sha256-OlgUKBhwM5zs1ShQcx0jCQ1b8P+ECfunECK2DBHukq8=",
+      "hash": "sha256-L7BlxsigDVYuPMsMguq9vxgyZjXAFbyPr5eor0sKOkM=",
       "name": "but-hunk-assignment"
     },
     "crates/but-hunk-dependency": {
@@ -113,7 +113,7 @@
       "name": "but-llm"
     },
     "crates/but-meta": {
-      "hash": "sha256-aRaT9wM+25iLyuUJZMSU6feuP5Gvpp1OfPcMB7DOLCk=",
+      "hash": "sha256-9rg8LOZmDnQg4gVrZzjJAcia/62F7IHClUhxap3l9XI=",
       "name": "but-meta"
     },
     "crates/but-napi": {
@@ -121,7 +121,7 @@
       "name": "but-napi"
     },
     "crates/but-oplog": {
-      "hash": "sha256-XCIt4LKvM4u1JJr/EbwgvABzUuXj3xEMoC+fZST7r0o=",
+      "hash": "sha256-Ct9U1de9v9Lg3iAQSnWvm2Lq/Yb+LbTTeu7o2aaV7zA=",
       "name": "but-oplog"
     },
     "crates/but-oxidize": {
@@ -137,11 +137,11 @@
       "name": "but-project-handle"
     },
     "crates/but-rebase": {
-      "hash": "sha256-5kA77EuRTtGT1Tmp48q2p5kD3y+TyL/asYzOW2q1QNI=",
+      "hash": "sha256-b7fcleRM53acyNkG2ShHTJNfH3BLbSFujdLz+X5YrME=",
       "name": "but-rebase"
     },
     "crates/but-schemars": {
-      "hash": "sha256-CdfY6sD8gNAyVLQ+zJEMuLS28UeGcLjrvgo+9tl15gM=",
+      "hash": "sha256-yFeBlzrewihLGnpCRv/QLCuxRRecvFysJHcA3iKrmZo=",
       "name": "but-schemars"
     },
     "crates/but-secret": {
@@ -157,11 +157,11 @@
       "name": "but-server"
     },
     "crates/but-settings": {
-      "hash": "sha256-AD5iQy2PIaFnCMz7neheJ7PgSvCpdFN/lWALwIjyuZ8=",
+      "hash": "sha256-0uA7K1vzX7aR0ivXM5FJFuxiu04c0Kv6mmeM7m96slI=",
       "name": "but-settings"
     },
     "crates/but-testsupport": {
-      "hash": "sha256-Pndax64faIKSpU77O0tK5XPLZn9oKaqT2sGAriLtC8o=",
+      "hash": "sha256-BKWv9gokyhCKOYgKeuS+yYzMhMjJ1GiA36IwsFjIMSc=",
       "name": "but-testsupport"
     },
     "crates/but-tools": {
@@ -173,7 +173,7 @@
       "name": "but-transaction"
     },
     "crates/but-ts": {
-      "hash": "sha256-1yKFGZmSsToABZHvYD62Dcyzf+SnzykNf6ZQUbkEqRs=",
+      "hash": "sha256-83UvnVIh58Zu1Zn+Ilyk01lgPaFkWG0+D9qYXD/u7J0=",
       "name": "but-ts"
     },
     "crates/but-update": {
@@ -185,7 +185,7 @@
       "name": "but-utils"
     },
     "crates/but-workspace": {
-      "hash": "sha256-I+wUxhpM3obWaRqdlb9BH7QR1vcnQdsdmAgJShaz6mo=",
+      "hash": "sha256-X3l/KjQsGkcQUPHsBb7uBhaa2Za51RHSO9VmAPPfjDE=",
       "name": "but-workspace"
     },
     "crates/gitbutler-branch": {
@@ -193,7 +193,7 @@
       "name": "gitbutler-branch"
     },
     "crates/gitbutler-branch-actions": {
-      "hash": "sha256-TwZr5T5Cg8jvw9oH0Ocjn3nGWCIlaYzMPf1Hfif/MuM=",
+      "hash": "sha256-Xs8E1w8CljoR7ks4RgdQyzoD5zg/l9rSZW6RrITM3Hc=",
       "name": "gitbutler-branch-actions"
     },
     "crates/gitbutler-commit": {
@@ -213,7 +213,7 @@
       "name": "debouncer"
     },
     "crates/gitbutler-git": {
-      "hash": "sha256-cdgQE5O1bslNzAjub+fYOfOqqqhDoVDORK+xzVNXOck=",
+      "hash": "sha256-HS8PxWki303M+btwJcO5v8NXxd+GzZ+2pr2YL+G9Yoc=",
       "name": "gitbutler-git"
     },
     "crates/gitbutler-operating-modes": {
@@ -221,7 +221,7 @@
       "name": "gitbutler-operating-modes"
     },
     "crates/gitbutler-oplog": {
-      "hash": "sha256-kcO+DPqbA/T61hwSK8vKah7UXyKcS3kPHLeqJXBTATg=",
+      "hash": "sha256-QSHivsFfulgHb3uiU2Sf5B/PpRRDfDzOI6UsGnJcotU=",
       "name": "gitbutler-oplog"
     },
     "crates/gitbutler-project": {
@@ -237,7 +237,7 @@
       "name": "gitbutler-repo"
     },
     "crates/gitbutler-tauri": {
-      "hash": "sha256-Gzkkje9DXDnuvAWX9KkdFRlKV5KHc40wsRkIT0jYJsc=",
+      "hash": "sha256-UCsINrRnCS55YJViWgcnKV8eRFEVtV/Qi+40P8GWVCo=",
       "name": "gitbutler-tauri"
     },
     "crates/gitbutler-user": {
@@ -245,7 +245,7 @@
       "name": "gitbutler-user"
     },
     "crates/gitbutler-watcher": {
-      "hash": "sha256-1rrmYvVrtStYF2WSCmQgk40w3OuScahBaabV426gapg=",
+      "hash": "sha256-0gRIAsFAO34ApAz7dcw5/Hj6ALeg798bZZDhS/3RZXs=",
       "name": "gitbutler-watcher"
     },
     "crates/gitbutler-workspace": {
@@ -254,9 +254,9 @@
     }
   },
   "source": {
-    "cargoNixSha256": "1a7b646062c0462fe2740a92e08f51176d69ae12f55e5dbfd6cb78116e6e9354",
+    "cargoNixSha256": "9ab39943cc6936b9a86c7c94de3cc53c098d0f9a0ba28a56a94b6fe2f180ef54",
     "input": "gitbutler",
-    "narHash": "sha256-UmpSSunZUS6sXRbwj2pMFKmbMlnKvOJE9nySx1LBBvg=",
+    "narHash": "sha256-nW3yCbpbIhawLQVV+DptzGYiFBSKcyAP89NtDWHJM+0=",
     "subdir": "."
   }
 }

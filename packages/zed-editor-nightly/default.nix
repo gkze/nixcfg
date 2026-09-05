@@ -81,16 +81,35 @@ let
     ${generatedLicenses ''"$crateRoot/workspace-assets/licenses.md"''}
   '';
 
+  # Zed's asset embedding has existed in both a direct rust-embed form and the
+  # newer util::fs_embed! wrapper. Relocate the declared crate-relative source
+  # for either representation, and fail explicitly if upstream changes the
+  # contract again.
+  relocateWorkspaceAssets = sourceFile: legacyPreparation: ''
+    if grep -Fq 'crate_relative = "../../assets"' ${sourceFile}; then
+      substituteInPlace ${sourceFile} \
+        --replace-fail 'crate_relative = "../../assets"' 'crate_relative = "workspace-assets"'
+    elif grep -Fq '#[folder = "../../assets"]' ${sourceFile}; then
+      substituteInPlace ${sourceFile} \
+        --replace-fail '#[folder = "../../assets"]' '#[folder = "workspace-assets"]'
+      ${legacyPreparation}
+    else
+      echo "unsupported Zed asset embedding contract in ${sourceFile}" >&2
+      exit 1
+    fi
+  '';
+
   # crate2nix filters each workspace member independently. Keep that cache
   # boundary by preparing only the crates whose sources depend on files outside
   # their own directory, or which need a packaging patch. The same map also
   # drives the full prepared workspace used by update-time Cargo.nix generation.
   crateSourcePreparations = {
     assets = workspaceAssets + ''
-      substituteInPlace "$crateRoot/src/assets.rs" \
-        --replace-fail '#[folder = "../../assets"]' '#[folder = "workspace-assets"]' \
-        --replace-fail 'use rust_embed::RustEmbed;' 'use rust_embed::{Embed, RustEmbed};' \
-        --replace-fail ".filter_map(|p| {" ".filter_map(|p: std::borrow::Cow<'static, str>| {"
+      ${relocateWorkspaceAssets ''"$crateRoot/src/assets.rs"'' ''
+        substituteInPlace "$crateRoot/src/assets.rs" \
+          --replace-fail 'use rust_embed::RustEmbed;' 'use rust_embed::{Embed, RustEmbed};' \
+          --replace-fail ".filter_map(|p| {" ".filter_map(|p: std::borrow::Cow<'static, str>| {"
+      ''}
     '';
 
     cli = ''
@@ -160,15 +179,29 @@ let
 
     gpui_apple = ''
       cp -r ${src}/crates/gpui "$crateRoot/workspace-gpui"
-      (cd "$crateRoot" && patch -p3 < ${./crate2nix-gpui-manifest-dir.patch})
+      if grep -Fq 'gpui::GPUI_MANIFEST_DIR.into()' "$crateRoot/build.rs"; then
+        substituteInPlace "$crateRoot/build.rs" \
+          --replace-fail 'gpui::GPUI_MANIFEST_DIR.into()' \
+          'PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("workspace-gpui")'
+      elif grep -Fq '.join("../gpui")' "$crateRoot/build.rs"; then
+        substituteInPlace "$crateRoot/build.rs" \
+          --replace-fail '.join("../gpui")' '.join("workspace-gpui")'
+      else
+        echo "unsupported Zed gpui_apple source-location contract" >&2
+        exit 1
+      fi
     '';
 
     inspector_ui = ''
-      substituteInPlace "$crateRoot/build.rs" \
-        --replace-fail '    let mut path = std::path::PathBuf::from(&cargo_manifest_dir);' '    println!("cargo:rustc-env=ZED_REPO_DIR={}", cargo_manifest_dir);
-        return;
+      # Older revisions had an implicit Cargo build script that walked to the
+      # repository root. Newer revisions removed it entirely.
+      if [ -f "$crateRoot/build.rs" ]; then
+        substituteInPlace "$crateRoot/build.rs" \
+          --replace-fail '    let mut path = std::path::PathBuf::from(&cargo_manifest_dir);' '    println!("cargo:rustc-env=ZED_REPO_DIR={}", cargo_manifest_dir);
+          return;
 
-        let mut path = std::path::PathBuf::from(&cargo_manifest_dir);'
+          let mut path = std::path::PathBuf::from(&cargo_manifest_dir);'
+      fi
     '';
 
     prompt_store = ''
@@ -190,9 +223,10 @@ let
     '';
 
     settings = workspaceAssets + ''
-      substituteInPlace "$crateRoot/src/settings.rs" \
-        --replace-fail '#[folder = "../../assets"]' '#[folder = "workspace-assets"]' \
-        --replace-fail 'use rust_embed::RustEmbed;' 'use rust_embed::{Embed, RustEmbed};'
+      ${relocateWorkspaceAssets ''"$crateRoot/src/settings.rs"'' ''
+        substituteInPlace "$crateRoot/src/settings.rs" \
+          --replace-fail 'use rust_embed::RustEmbed;' 'use rust_embed::{Embed, RustEmbed};'
+      ''}
     '';
 
     zed = ''

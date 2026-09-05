@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-Mh3i8d5MKp6on8VfDMzrKc75iDJA7AMENaVtqYCd/Cg=",
-    "x86_64-darwin": "sha256-Mh3i8d5MKp6on8VfDMzrKc75iDJA7AMENaVtqYCd/Cg="
+    "aarch64-darwin": "sha256-FCBtwv2CBBQRVdbkqJ3f3lbfRnNW30mNEv03TIH1U3c=",
+    "x86_64-darwin": "sha256-FCBtwv2CBBQRVdbkqJ3f3lbfRnNW30mNEv03TIH1U3c="
   },
   "urls": {
-    "aarch64-darwin": "https://voiceos-staging-releases.s3.amazonaws.com/releases/VoiceOS-0.1.24-universal-mac.zip",
-    "x86_64-darwin": "https://voiceos-staging-releases.s3.amazonaws.com/releases/VoiceOS-0.1.24-universal-mac.zip"
+    "aarch64-darwin": "https://voiceos-staging-releases.s3.amazonaws.com/releases/VoiceOS-0.1.27-universal-mac.zip",
+    "x86_64-darwin": "https://voiceos-staging-releases.s3.amazonaws.com/releases/VoiceOS-0.1.27-universal-mac.zip"
   },
-  "version": "0.1.24"
+  "version": "0.1.27"
 }

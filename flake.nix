@@ -40,7 +40,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v1.1.40";
+      url = "github:generalaction/emdash/v1.2.3";
       flake = false;
     };
     git-hooks = {
@@ -48,7 +48,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gitbutler = {
-      url = "github:gitbutlerapp/gitbutler/release/0.22.1";
+      url = "github:gitbutlerapp/gitbutler/release/0.22.3";
       flake = false;
     };
     home-manager = {
@@ -84,7 +84,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v2026.8.27";
+      url = "github:NousResearch/hermes-agent/v2026.8.31";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         pyproject-build-systems.follows = "pyproject-build-systems";
@@ -134,7 +134,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.75.0";
+      url = "github:max-sixty/worktrunk/v0.76.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -142,7 +142,7 @@
       flake = false;
     };
     anthropic-cli = {
-      url = "github:anthropics/anthropic-cli/v1.28.0";
+      url = "github:anthropics/anthropic-cli/v1.31.0";
       flake = false;
     };
     base16-schemes-src = {
@@ -174,7 +174,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.150.1";
+      url = "github:openai/codex/rust-v0.153.4";
       flake = false;
     };
     curator = {
@@ -189,17 +189,17 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.38.1";
+      url = "github:steipete/gogcli/v0.39.0";
       flake = false;
     };
     openai-cli = {
-      url = "github:openai/openai-cli/v1.9.0";
+      url = "github:openai/openai-cli/v1.11.0";
       flake = false;
     };
     github-desktop = {
       type = "git";
       url = "https://github.com/desktop/desktop.git";
-      ref = "refs/tags/release-3.6.4";
+      ref = "refs/tags/release-3.6.5";
       submodules = true;
       flake = false;
     };
@@ -207,7 +207,7 @@
       type = "github";
       owner = "aaif-goose";
       repo = "goose";
-      ref = "v1.48.0";
+      ref = "v1.49.0";
       flake = false;
     };
     goose-v8 = {
@@ -241,7 +241,7 @@
       flake = false;
     };
     linear-cli = {
-      url = "github:schpet/linear-cli/v2.5.0";
+      url = "github:schpet/linear-cli/v2.6.0";
       flake = false;
     };
     macfuse = {
@@ -249,7 +249,7 @@
       flake = false;
     };
     mux = {
-      url = "github:coder/mux/v0.28.2";
+      url = "github:coder/mux/v0.28.4";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mountpoint-s3 = {
@@ -269,12 +269,21 @@
       flake = false;
     };
     superset = {
-      url = "github:superset-sh/superset/main";
+      # Keep the source-built Darwin package on the same immutable desktop
+      # release as the binary asset. `nixcfg update` advances version-like refs.
+      url = "github:superset-sh/superset/desktop-v1.26.0";
       flake = false;
     };
     nix-manipulator = {
       url = "github:hoh/nix-manipulator/0.1.3";
       flake = false;
+    };
+    zon2nix = {
+      # Keep Neutils generation on the exact revision already proven with its
+      # Zig 0.15 dependency graph. Review upstream's first post-v0.6.0 release,
+      # including the ZIP-fetch fixes, before deliberately advancing this pin.
+      # Tracking: https://github.com/jcollie/zon2nix/compare/v0.6.0...main
+      url = "github:jcollie/zon2nix/0ece5ed15107ecafbb121ad46aa85413dd40ff03";
     };
     toad = {
       url = "github:batrachianai/toad/v0.6.20";
@@ -295,17 +304,51 @@
       self,
       flakelight,
       flakelight-darwin,
-      devshell,
       git-hooks,
       treefmt-nix,
       ...
     }@inputs:
     let
-      systems = [
-        "aarch64-darwin"
-        "aarch64-linux"
-        "x86_64-linux"
-      ];
+      systemPolicy = builtins.fromJSON (builtins.readFile ./lib/system-policy.json);
+      systems =
+        assert systemPolicy.schemaVersion == 1;
+        builtins.attrNames systemPolicy.systems;
+
+      configurationNamesIn =
+        directory:
+        if !builtins.pathExists directory then
+          [ ]
+        else
+          map (inputs.nixpkgs.lib.removeSuffix ".nix") (
+            builtins.attrNames (
+              inputs.nixpkgs.lib.filterAttrs (
+                name: type: type == "regular" && inputs.nixpkgs.lib.hasSuffix ".nix" name
+              ) (builtins.readDir directory)
+            )
+          );
+      requiredRootSources =
+        map (name: {
+          kind = "darwin";
+          inherit name;
+        }) (configurationNamesIn (./. + "/darwin"))
+        ++ map (name: {
+          kind = "nixos";
+          inherit name;
+        }) (configurationNamesIn (./. + "/nixos"))
+        ++ map (name: {
+          kind = "home";
+          inherit name;
+        }) (builtins.attrNames standaloneHomeEntries);
+
+      rootClosureData = import ./lib/root-closures.nix {
+        inherit systems;
+        inherit (inputs.nixpkgs) lib;
+        darwinConfigurations = self.darwinConfigurations or { };
+        nixosConfigurations = self.nixosConfigurations or { };
+        homeConfigurations = self.homeConfigurations or { };
+        requiredKinds = systemPolicy.requiredRootKinds;
+        requiredRoots = requiredRootSources;
+      };
 
       electronRuntimePolicy = builtins.fromJSON (
         builtins.readFile ./packages/electron-runtimes/versions.json
@@ -329,16 +372,10 @@
           pname == "google-chrome" || (pname == "electron" && builtins.elem version electronRuntimeVersions);
       };
 
-      overlayList = [
-        devshell.overlays.default
-        inputs.bun2nix.overlays.default
-        inputs.curator.overlays.default
-        inputs.lumen.overlays.default
-        (import ./overlays/_lib/neovim-nightly-overlay.nix { inherit inputs; })
-        inputs.rust-overlay.overlays.default
-        inputs.nh.overlays.default
-        self.overlays.default
-      ];
+      overlayList = import ./lib/package-overlays.nix {
+        inherit inputs;
+        outputs = self;
+      };
       baseOutputs = flakelight ./. (
         { lib, ... }:
         let
@@ -426,6 +463,9 @@
             ./pyproject.toml
             ruffFormatFiles
           ];
+          # A path: flake can contain ignored workspace dependencies. Pytest
+          # receives its TypeScript dependency explicitly below.
+          pytestFiles = lib.fileset.difference ./. (lib.fileset.maybeMissing ./node_modules);
           schemaVerificationFiles = lib.fileset.unions [
             ./.root
             ./pyproject.toml
@@ -679,7 +719,7 @@
             "test-python-pytest" = {
               repoWritable = true;
               nixcfg = true;
-              source = mkCheckSource ./.;
+              source = mkCheckSource pytestFiles;
               runCommandAttrs =
                 { pkgs, ... }:
                 {
@@ -989,6 +1029,10 @@
               ''
             );
 
+            "root-closures" =
+              { pkgs, system, ... }:
+              pkgs.linkFarm "nixcfg-root-closures" (rootClosureData.forSystem system);
+
             "test-nix-default-api" = mkEvalOnlyCheck "test-nix-default-api" (
               _: import ./tests/nix/default-api/default-api.nix { src = ./.; }
             );
@@ -1080,12 +1124,25 @@
               _: import ./tests/nix/package-helpers.nix { src = ./.; }
             );
 
+            "test-nix-root-closures" = mkEvalOnlyCheck "test-nix-root-closures" (
+              _:
+              import ./tests/nix/root-closures.nix {
+                actualManifest = rootClosureData.manifest;
+                inherit lib;
+                src = ./.;
+              }
+            );
+
             "test-nix-source-hashes" = mkEvalOnlyCheck "test-nix-source-hashes" (
               { pkgs, ... }:
               import ./tests/nix/source-hashes.nix {
                 inherit (pkgs) lib;
                 src = ./.;
               }
+            );
+
+            "test-nix-version-prefixes" = mkEvalOnlyCheck "test-nix-version-prefixes" (
+              _: import ./tests/nix/version-prefixes.nix { inherit (self) lib; }
             );
 
             "test-nix-direnv-batched-gcroots" = { pkgs, ... }: pkgs.nix-direnv.tests.batchedFlakeInputGcRoots;
@@ -1179,20 +1236,31 @@
                 baseOutputs.legacyPackages.${cfg.system};
           }
         );
+      standaloneHomeEntries = inputs.nixpkgs.lib.filterAttrs (
+        name: type: type == "directory" && builtins.pathExists (./home + "/${name}/default.nix")
+      ) (builtins.readDir ./home);
+      standaloneHomeConfigurations = builtins.mapAttrs (
+        name: _: mkStandaloneHomeConfiguration name (import (./home + "/${name}") { outputs = self; })
+      ) standaloneHomeEntries;
     in
     (builtins.removeAttrs baseOutputs [
       "checks"
       "legacyPackages"
     ])
     // {
-      homeConfigurations.george = mkStandaloneHomeConfiguration "george" (
-        import ./home/george { outputs = self; }
-      );
+      lib = baseOutputs.lib // {
+        rootClosureManifest = rootClosureData.manifest;
+      };
+
+      homeConfigurations = standaloneHomeConfigurations;
 
       checks = builtins.mapAttrs (
-        _: systemChecks:
+        system: systemChecks:
         inputs.nixpkgs.lib.filterAttrs (
-          name: _: name != "formatting" && !(inputs.nixpkgs.lib.hasPrefix "home-" name)
+          name: _:
+          name != "formatting"
+          && !(inputs.nixpkgs.lib.hasPrefix "home-" name)
+          && (name != "root-closures" || builtins.elem system rootClosureData.rootSystems)
         ) systemChecks
       ) baseOutputs.checks;
       pkgs = baseOutputs.legacyPackages;

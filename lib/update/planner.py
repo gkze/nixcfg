@@ -48,6 +48,24 @@ def source_backing_input_name(
     return None
 
 
+def source_additional_input_names(
+    updater_cls: type[object] | None,
+) -> tuple[str, ...]:
+    """Return auxiliary flake inputs consumed by one source updater."""
+    if updater_cls is None:
+        return ()
+    input_names = getattr(updater_cls, "additional_input_names", ())
+    if not isinstance(input_names, tuple) or not all(
+        isinstance(name, str) and name for name in input_names
+    ):
+        msg = "additional_input_names must be a tuple of non-empty input names"
+        raise TypeError(msg)
+    if len(input_names) != len(set(input_names)):
+        msg = "additional_input_names must be unique"
+        raise RuntimeError(msg)
+    return input_names
+
+
 def companion_source_name(updater_cls: type[object] | None) -> str | None:
     """Return the parent source for one companion updater class."""
     if updater_cls is None:
@@ -62,6 +80,52 @@ def companion_source_parent(
 ) -> str | None:
     """Return the direct companion parent for one source name."""
     return companion_source_name(updaters.get(name))
+
+
+def aggregate_destination_names(updater_cls: type[object] | None) -> tuple[str, ...]:
+    """Return aggregate sources fed by one updater class."""
+    if updater_cls is None:
+        return ()
+    aggregate_into = getattr(updater_cls, "aggregate_into", ())
+    if not isinstance(aggregate_into, tuple) or not all(
+        isinstance(name, str) and name for name in aggregate_into
+    ):
+        msg = "aggregate_into must be a tuple of non-empty source names"
+        raise TypeError(msg)
+    if len(aggregate_into) != len(set(aggregate_into)):
+        msg = "aggregate_into source names must be unique"
+        raise RuntimeError(msg)
+    return aggregate_into
+
+
+def aggregate_source_members(
+    updaters: Mapping[str, type[object]],
+    aggregate_name: str,
+) -> tuple[str, ...]:
+    """Return registered sources that contribute to one aggregate."""
+    return tuple(
+        name
+        for name, updater_cls in updaters.items()
+        if aggregate_name in aggregate_destination_names(updater_cls)
+    )
+
+
+def source_prerequisites(
+    updaters: Mapping[str, type[object]],
+    name: str,
+    *,
+    selected: set[str] | None = None,
+) -> tuple[str, ...]:
+    """Return direct, selected prerequisites for one source update."""
+    prerequisites = [
+        prerequisite
+        for prerequisite in (
+            companion_source_parent(updaters, name),
+            *aggregate_source_members(updaters, name),
+        )
+        if prerequisite is not None and (selected is None or prerequisite in selected)
+    ]
+    return tuple(dict.fromkeys(prerequisites))
 
 
 def companion_source_depths(
@@ -81,8 +145,12 @@ def companion_source_depths(
             raise RuntimeError(msg)
 
         visiting.append(name)
-        parent = companion_source_parent(updaters, name)
-        value = 0 if parent is None or parent not in names else _depth(parent) + 1
+        prerequisites = source_prerequisites(updaters, name, selected=names)
+        value = (
+            0
+            if not prerequisites
+            else max(_depth(prerequisite) for prerequisite in prerequisites) + 1
+        )
         visiting.pop()
         memo[name] = value
         return value
@@ -141,11 +209,33 @@ def add_companion_source_children(
                 frontier.append(name)
 
 
+def add_aggregate_sources(
+    names: set[str],
+    updaters: Mapping[str, type[object]],
+) -> None:
+    """Select every aggregate fed by a selected source."""
+    while True:
+        destinations = {
+            destination
+            for name in names
+            for destination in aggregate_destination_names(updaters.get(name))
+        }
+        missing = sorted(destinations.difference(updaters))
+        if missing:
+            joined = ", ".join(missing)
+            msg = f"Aggregate source is not registered: {joined}"
+            raise RuntimeError(msg)
+        additions = destinations.difference(names)
+        if not additions:
+            return
+        names.update(additions)
+
+
 def select_target_source_names(
     target_names: tuple[str, ...],
     updaters: Mapping[str, type[object]],
 ) -> list[str]:
-    """Resolve source targets, expanding backing-input and companion sources."""
+    """Resolve targets, expanding input consumers and source dependencies."""
     if not target_names:
         selected = set(updaters)
         roots = set(selected)
@@ -159,6 +249,7 @@ def select_target_source_names(
                 name
                 for name, updater_cls in updaters.items()
                 if source_backing_input_name(name, updater_cls, None) == target
+                or target in source_additional_input_names(updater_cls)
             ]
             if not target_sources and target in updaters:
                 target_sources = [target]
@@ -171,6 +262,7 @@ def select_target_source_names(
 
     add_companion_source_parents(selected, updaters)
     add_companion_source_children(selected, roots=roots, updaters=updaters)
+    add_aggregate_sources(selected, updaters)
 
     depths = companion_source_depths(selected, updaters)
     return sorted(
@@ -209,7 +301,12 @@ def resolve_update_targets[ResolvedTargetsT](
     """Resolve target sets and operational flags from update options."""
     all_source_names = set(updaters.keys())
     all_ref_names = {i.name for i in ref_inputs}
-    all_known_names = all_source_names | all_ref_names
+    all_additional_input_names = {
+        input_name
+        for updater_cls in updaters.values()
+        for input_name in source_additional_input_names(updater_cls)
+    }
+    all_known_names = all_source_names | all_ref_names | all_additional_input_names
 
     target_names = opts.target_names
     source_names = select_target_source_names(target_names, updaters)
@@ -249,13 +346,18 @@ def resolve_update_targets[ResolvedTargetsT](
 
 
 __all__ = [
+    "add_aggregate_sources",
     "add_companion_source_children",
     "add_companion_source_parents",
+    "aggregate_destination_names",
+    "aggregate_source_members",
     "companion_source_depths",
     "companion_source_name",
     "companion_source_parent",
     "resolve_update_targets",
     "select_target_source_names",
+    "source_additional_input_names",
     "source_backing_input_name",
+    "source_prerequisites",
     "source_update_waves",
 ]

@@ -1,5 +1,6 @@
 {
-  "drvHash": "ddcg3i5c3b8pfr0053bqi4krx18xfc3k",
+  "drvHash": "ypb6fjdvhk98ifgc6px2krfm830gzxxv",
+  "electronVersion": "42.3.3",
   "hashes": [
     {
       "hash": "sha256-raIZjuaV+AQoGWMEgzGnjd9Vo/J7NeB7fAtYZgpnz9g=",
@@ -12,16 +13,14 @@
       "platform": "aarch64-linux"
     },
     {
-      "hash": "sha256-i6q7mlER0e4deUf3zq3TBxzlPWmlreHX3E6geLNIpj4=",
-      "hashType": "nodeModulesHash",
-      "platform": "x86_64-darwin"
-    },
-    {
       "hash": "sha256-Zk1wE9wsh7d2d2/PYffGigS5PjHDemOgQsgE+quBWHs=",
       "hashType": "nodeModulesHash",
       "platform": "x86_64-linux"
     }
   ],
   "input": "opencode",
+  "pins": {
+    "desktopWorkspace": "packages/desktop"
+  },
   "version": "gkze/fixes"
 }

@@ -19,7 +19,9 @@ if TYPE_CHECKING:
 
 _PACKAGE_DIR = REPO_ROOT / "packages/mole-app"
 _VERSION = "1.39.0"
-_SOURCE_URL = f"https://github.com/tw93/Mole/archive/refs/tags/V{_VERSION}.tar.gz"
+_COMMIT = "a" * 40
+_OLD_COMMIT = "b" * 40
+_SOURCE_URL = f"https://github.com/tw93/Mole/archive/{_COMMIT}.tar.gz"
 _SOURCE_HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 _BINARY_HASHES = {
     "aarch64-darwin": "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
@@ -31,13 +33,64 @@ def _load_updater_module() -> ModuleType:
     return load_repo_module("packages/mole-app/updater.py", "mole_app_updater_test")
 
 
+def _candidate_info() -> VersionInfo:
+    return VersionInfo(
+        _VERSION,
+        metadata={"commit": _COMMIT, "tag": f"V{_VERSION}"},
+    )
+
+
+def test_mole_resolves_the_pinned_tag_to_an_immutable_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recreated pinned tag must produce fresh candidate source identity."""
+    module = _load_updater_module()
+    updater = module.MoleAppUpdater()
+
+    monkeypatch.setattr(module, "read_pinned_source_version", lambda name: _VERSION)
+
+    async def resolve_release_tag_commit(session: object, tag: str) -> str:
+        assert session is not None
+        assert tag == f"V{_VERSION}"
+        return _COMMIT
+
+    monkeypatch.setattr(
+        updater,
+        "_resolve_release_tag_commit",
+        resolve_release_tag_commit,
+    )
+
+    assert run_async(updater.fetch_latest(object())) == _candidate_info()
+
+
+def test_mole_same_version_requires_the_resolved_commit() -> None:
+    """Moved tags and legacy entries without a commit must both be stale."""
+    module = _load_updater_module()
+    updater = module.MoleAppUpdater()
+    info = _candidate_info()
+    urls = updater._platform_urls(info)
+
+    for current_commit in (None, _OLD_COMMIT):
+        current = SourceEntry(
+            version=_VERSION,
+            commit=current_commit,
+            urls=urls,
+            hashes=[],
+        )
+        assert not run_async(updater._is_latest(current, info))
+
+    current = SourceEntry(version=_VERSION, commit=_COMMIT, urls=urls, hashes=[])
+    assert run_async(updater._is_latest(current, info))
+
+
 def test_mole_updater_owns_source_and_binary_downloads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One updater result must contain every fixed-output input used by Mole."""
     module = _load_updater_module()
     updater = module.MoleAppUpdater()
-    binary_urls = updater._platform_urls(VersionInfo(_VERSION))
+    info = _candidate_info()
+    binary_urls = updater._platform_urls(info)
     expected_urls = {"source": _SOURCE_URL, **binary_urls}
 
     async def compute_url_hashes(
@@ -63,9 +116,7 @@ def test_mole_updater_owns_source_and_binary_downloads(
 
     monkeypatch.setattr("lib.update.process.compute_url_hashes", compute_url_hashes)
 
-    events = run_async(
-        collect_events(updater.fetch_hashes(VersionInfo(_VERSION), object()))
-    )
+    events = run_async(collect_events(updater.fetch_hashes(info, object())))
 
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
@@ -79,8 +130,9 @@ def test_mole_updater_owns_source_and_binary_downloads(
         ],
     ]
     assert events[-1].payload == hashes
-    assert updater.build_result(VersionInfo(_VERSION), hashes) == SourceEntry(
+    assert updater.build_result(info, hashes) == SourceEntry(
         version=_VERSION,
+        commit=_COMMIT,
         urls=binary_urls,
         hashes=hashes,
     )

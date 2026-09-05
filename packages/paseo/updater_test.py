@@ -11,7 +11,7 @@ from hashlib import sha256
 from pathlib import Path
 from textwrap import dedent
 from types import ModuleType
-from typing import cast
+from typing import Protocol, cast
 
 import pytest
 from nix_manipulator.expressions.binary import BinaryExpression
@@ -51,6 +51,7 @@ from lib.tests._updater_helpers import (
     run_async,
 )
 from lib.update.artifacts import GeneratedArtifact
+from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
     UpdateEventKind,
     expect_artifact_updates,
@@ -66,6 +67,9 @@ _PACKAGE_DIR = REPO_ROOT / "packages/paseo"
 _VERSION = "0.6.1"
 _TAG = f"v{_VERSION}"
 _COMMIT = "20d7efc46a316f5a274b9943a5c43b0322269825"
+_LATEST_VERSION = "0.7.2"
+_LATEST_TAG = f"v{_LATEST_VERSION}"
+_LATEST_COMMIT = "9400a49af670fdb5db4af58e73f8df98588dbea9"
 _ELECTRON_VERSION = "41.2.0"
 _SHERPA_VERSION = "1.12.28"
 _SHERPA_COMMIT = "86d3d00e28c22c102fb7d01c7b62fdc4e7a69f1b"
@@ -73,29 +77,74 @@ _ONNXRUNTIME_VERSION = "1.23.2"
 _ONNXRUNTIME_COMMIT = "a83fc4d58cb48eb68890dd689f94f28288cf2278"
 _NODE_ADDON_API_VERSION = "8.3.0"
 _NPM_FETCHER_VERSION = 2
-_NODE_ADDON_API_HASH = "sha256-oM5nZTolH1bqQNLqsIeXk0ts/J201IdmeV2Xu5tNlg0="
 _ESBUILD_VERSION = "0.25.12"
 _CLAUDE_AGENT_SDK_VERSION = "0.3.220"
 _APP_BUILDER_LIB_VERSION = "26.8.1"
 _APP_BUILDER_LIB_BACKPORT_COMMIT = "2ff9190aadc791503a6e62cdcbfa975448bc49bf"
-_CLAUDE_AGENT_SDK_URL = (
-    "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/"
-    f"claude-agent-sdk-{_CLAUDE_AGENT_SDK_VERSION}.tgz"
-)
+_ONNX_DEPENDENCIES = {
+    "abseilCpp": {
+        "owner": "abseil",
+        "repo": "abseil-cpp",
+        "tag": "20240722.2",
+        "version": "20240722.2",
+        "commit": "216a6bed75c9ec254ae0e5af537e5b9635b45191",
+    },
+    "dlpack": {
+        "owner": "dmlc",
+        "repo": "dlpack",
+        "commit": "5c210da409e7f1e51ddf445134a4376fdbd70d7d",
+    },
+    "flatbuffers": {
+        "owner": "google",
+        "repo": "flatbuffers",
+        "tag": "v23.5.26",
+        "version": "23.5.26",
+        "commit": "0100f6a5779831fa7a651e4b67ef389a8752bd9b",
+    },
+    "mp11": {
+        "owner": "boostorg",
+        "repo": "mp11",
+        "tag": "boost-1.82.0",
+        "version": "boost-1.82.0",
+        "commit": "0a0b5fb001ce0233ae3a6f99d849c0649e5a7361",
+    },
+    "onnx": {
+        "owner": "onnx",
+        "repo": "onnx",
+        "tag": "v1.18.0",
+        "version": "v1.18.0",
+        "commit": "e709452ef2bbc1d113faf678c24e6d3467696e83",
+    },
+    "re2": {
+        "owner": "google",
+        "repo": "re2",
+        "tag": "2024-07-02",
+        "version": "2024-07-02",
+        "commit": "6dcd83d60f7944926bfd308cc13979fc53dd69ca",
+    },
+    "safeint": {
+        "owner": "dcleblanc",
+        "repo": "safeint",
+        "tag": "3.0.28",
+        "version": "3.0.28",
+        "commit": "4cafc9196c4da9c817992b20f5253ef967685bf8",
+    },
+}
 _CLAUDE_AGENT_SDK_INTEGRITY = (
     "sha512-glc7SdwPkOkLw8oxwLo9PKTdLJGqW/PIR4urWXFoRtX9YllwozsEVc5Tc1+EvLSkfrsx"
     "PJqQWqOgpjUOQXf1oA=="
-)
-_CLAUDE_AGENT_SDK_DARWIN_ARM64_URL = (
-    "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-darwin-arm64/-/"
-    f"claude-agent-sdk-darwin-arm64-{_CLAUDE_AGENT_SDK_VERSION}.tgz"
 )
 _CLAUDE_AGENT_SDK_DARWIN_ARM64_INTEGRITY = (
     "sha512-7VxlbEosK7DODiOnsjoVd0DSJzbnaPrM2jelMHI0y8zx1UnLS3WC6EFUXbvy74F2s"
     "XqEznh2tzn7EKWInaRN6Q=="
 )
-_CLAUDE_PROVIDER_SOURCE_DIGEST = (
-    "0a5062a28d1a2e54017b62a3de46f15a4eadb37f5c6f2e9b15d93b99c85019e6"
+_LATEST_CLAUDE_AGENT_SDK_INTEGRITY = (
+    "sha512-FtR0HoHHNqeqJWjZN8qLUAzZVFUI9ztXYNPPwv98Ecmv9qq2QTauI8IzkY26CC0mleWA"
+    "qb9RQEW2C0OtiUliug=="
+)
+_LATEST_CLAUDE_AGENT_SDK_DARWIN_ARM64_INTEGRITY = (
+    "sha512-pYDv2RT+UVOvEapMEWKf7Gm5a87Si1Zf+XR23IMGYbG5mESatNJ8Gz2PmkrwfTezZknb"
+    "0ljWZe8zgcTFITM3dA=="
 )
 _CLAUDE_RESOLVER_FIXTURE = b"""\
 async function resolveClaudeBinary(runtimeSettings?: ProviderRuntimeSettings): Promise<string> {
@@ -131,43 +180,69 @@ _CLAUDE_PROVIDER_FIXTURE = (
     _CLAUDE_RESOLVER_FIXTURE
     + b"""\
 
-async function resolveClaudeCodeVersion(): Promise<string> {
+export async function resolveClaudeCodeVersion(
+  runtimeSettings?: ProviderRuntimeSettings,
+  signal?: AbortSignal,
+): Promise<string> {
   const launch = await resolveProviderLaunch({
-    commandConfig: undefined,
+    commandConfig: runtimeSettings?.command,
     defaultBinary: "claude",
   });
+  const availability = await checkProviderLaunchAvailable(launch);
   return launch.command;
 }
 
-export class ClaudeAgentClient {
+export class ClaudeAgentClient implements AgentClient {
   async isAvailable(): Promise<boolean> {
     const launch = await resolveProviderLaunch({
       commandConfig: this.runtimeSettings?.command,
       defaultBinary: "claude",
     });
-    return (await checkProviderLaunchAvailable(launch)).available;
+    const availability = await checkProviderLaunchAvailable(launch);
+    return availability.available;
   }
 
-  async getDiagnostic(): Promise<string> {
-    const launch = await resolveProviderLaunch({
+  async getDiagnostic(): Promise<{ diagnostic: string }> {
+    try {
+      const launch = await resolveProviderLaunch({
         commandConfig: this.runtimeSettings?.command,
         defaultBinary: "claude",
       });
-    return launch.command;
+      const availability = await checkProviderLaunchAvailable(launch);
+      return { diagnostic: launch.command };
+    } catch (error) {
+      return { diagnostic: String(error) };
+    }
   }
 
   constructor(options: ClaudeAgentClientOptions) {
+    this.queryFactory = options.queryFactory;
     this.resolveBinary = options.resolveBinary ?? (() => resolveClaudeBinary(this.runtimeSettings));
+    this.resolveVersion =
+      options.resolveVersion ??
+      ((signal) => resolveClaudeCodeVersion(this.runtimeSettings, signal));
   }
 
   createSession(): ClaudeAgentSession {
-    return new ClaudeAgentSession({ resolveBinary: this.resolveBinary });
+    return new ClaudeAgentSession({
+      resolveBinary: this.resolveBinary,
+    });
+  }
+
+  resumeSession(): ClaudeAgentSession {
+    return new ClaudeAgentSession({
+      resolveBinary: this.resolveBinary,
+    });
   }
 }
 
-class ClaudeAgentSession {
+class ClaudeAgentSession implements AgentSession {
   constructor(options: ClaudeAgentSessionOptions) {
+    this.queryFactory = options.queryFactory;
     this.resolveBinary = options.resolveBinary;
+    this.contextUsage = new ClaudeContextUsageState(
+      200_000,
+    );
   }
 
   private async buildOptions(): Promise<ClaudeOptions> {
@@ -213,6 +288,16 @@ _REQUIRED_ANCHOR_COUNTS = {
     "packages/desktop/src/integrations/cli-install/install.ts": 1,
     "packages/server/src/server/session/daemon/npm-global-cli.ts": 1,
 }
+
+
+class _ManifestContractLike(Protocol):
+    app_builder_lib_version: str
+    esbuild_version: str
+    node_addon_api_version: str
+    onnxruntime_version: str
+    sherpa_version: str
+
+
 # These fixtures and expected replacement fragments are intentionally authored
 # from the pinned v0.6.1 tree, never generated from the production patch tables.
 _PINNED_REPLACEMENT_FRAGMENTS = {
@@ -362,16 +447,11 @@ def _load_updater_module() -> ModuleType:
     )
 
 
-def _load_patcher_module(*, fixture_digest: bool = True) -> ModuleType:
-    module = load_repo_module(
+def _load_patcher_module() -> ModuleType:
+    return load_repo_module(
         "packages/paseo/patch_nix_managed.py",
         "paseo_patcher_dedicated_test",
     )
-    if fixture_digest:
-        module._CLAUDE_PROVIDER_SOURCE_DIGEST = sha256(
-            _CLAUDE_PROVIDER_FIXTURE
-        ).hexdigest()
-    return module
 
 
 def _sherpa_addon_install_phase() -> str:
@@ -390,7 +470,7 @@ def _sherpa_addon_install_phase() -> str:
     return indented_string_body(install_phase.rebuild())
 
 
-def _urls() -> dict[str, str]:
+def _urls(*, paseo_commit: str = _COMMIT) -> dict[str, str]:
     return {
         "nodeAddonApiUrl": (
             "https://registry.npmjs.org/node-addon-api/-/node-addon-api-8.3.0.tgz"
@@ -399,7 +479,9 @@ def _urls() -> dict[str, str]:
             "https://github.com/microsoft/onnxruntime/archive/"
             f"{_ONNXRUNTIME_COMMIT}.tar.gz"
         ),
-        "paseoUrl": f"https://github.com/getpaseo/paseo/archive/{_COMMIT}.tar.gz",
+        "paseoUrl": (
+            f"https://github.com/getpaseo/paseo/archive/{paseo_commit}.tar.gz"
+        ),
         "sherpaOnnxNodeUrl": (
             "https://registry.npmjs.org/sherpa-onnx-node/-/sherpa-onnx-node-1.12.28.tgz"
         ),
@@ -409,16 +491,33 @@ def _urls() -> dict[str, str]:
     }
 
 
-def _version_info(**metadata_overrides: str) -> VersionInfo:
+def _version_info(
+    *,
+    release_version: str = _VERSION,
+    release_commit: str = _COMMIT,
+    claude_sdk_version: str = _CLAUDE_AGENT_SDK_VERSION,
+    **metadata_overrides: str,
+) -> VersionInfo:
     metadata = {
-        "commit": _COMMIT,
-        "electronVersion": "41.2.0",
-        "tag": _TAG,
-        **_urls(),
+        "appBuilderLibVersion": _APP_BUILDER_LIB_VERSION,
+        "claudeAgentSdkVersion": claude_sdk_version,
+        "commit": release_commit,
+        "electronVersion": _ELECTRON_VERSION,
+        "esbuildVersion": _ESBUILD_VERSION,
+        "nodeAddonApiVersion": _NODE_ADDON_API_VERSION,
+        "onnxDependencies": {
+            name: dict(dependency) for name, dependency in _ONNX_DEPENDENCIES.items()
+        },
+        "onnxruntimeCommit": _ONNXRUNTIME_COMMIT,
+        "onnxruntimeVersion": _ONNXRUNTIME_VERSION,
+        "sherpaCommit": _SHERPA_COMMIT,
+        "sherpaVersion": _SHERPA_VERSION,
+        "tag": f"v{release_version}",
+        **_urls(paseo_commit=release_commit),
     }
     metadata.update(metadata_overrides)
     return VersionInfo(
-        version=_VERSION,
+        version=release_version,
         metadata=metadata,
     )
 
@@ -438,23 +537,61 @@ def _complete_hash_entries(urls: dict[str, str]) -> list[HashEntry]:
     ]
 
 
-def _lock_manifest() -> dict[str, object]:
+def _lock_manifest(
+    *,
+    version: str = _VERSION,
+    claude_sdk_version: str = _CLAUDE_AGENT_SDK_VERSION,
+    claude_sdk_integrity: str = _CLAUDE_AGENT_SDK_INTEGRITY,
+    claude_sdk_platform_integrity: str = (_CLAUDE_AGENT_SDK_DARWIN_ARM64_INTEGRITY),
+    hoisted_claude_sdk: bool = False,
+) -> dict[str, object]:
+    sdk_path = (
+        "node_modules/@anthropic-ai/claude-agent-sdk"
+        if hoisted_claude_sdk
+        else "packages/server/node_modules/@anthropic-ai/claude-agent-sdk"
+    )
+    platform_package = "@anthropic-ai/claude-agent-sdk-darwin-arm64"
+    platform_path = (
+        f"node_modules/{platform_package}"
+        if hoisted_claude_sdk
+        else f"{sdk_path}/node_modules/{platform_package}"
+    )
     return {
-        "version": _VERSION,
+        "version": version,
         "packages": {
+            "": {"version": version},
             "node_modules/electron": {"version": "41.2.0"},
-            "packages/server/node_modules/@anthropic-ai/claude-agent-sdk": {
-                "version": _CLAUDE_AGENT_SDK_VERSION,
-                "resolved": _CLAUDE_AGENT_SDK_URL,
-                "integrity": _CLAUDE_AGENT_SDK_INTEGRITY,
+            "node_modules/electron-builder": {
+                "version": _APP_BUILDER_LIB_VERSION,
+                "dependencies": {
+                    "app-builder-lib": _APP_BUILDER_LIB_VERSION,
+                },
             },
-            (
-                "packages/server/node_modules/@anthropic-ai/claude-agent-sdk/"
-                "node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64"
-            ): {
-                "version": _CLAUDE_AGENT_SDK_VERSION,
-                "resolved": _CLAUDE_AGENT_SDK_DARWIN_ARM64_URL,
-                "integrity": _CLAUDE_AGENT_SDK_DARWIN_ARM64_INTEGRITY,
+            "node_modules/app-builder-lib": {
+                "version": _APP_BUILDER_LIB_VERSION,
+            },
+            sdk_path: {
+                "version": claude_sdk_version,
+                "resolved": (
+                    "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/"
+                    f"claude-agent-sdk-{claude_sdk_version}.tgz"
+                ),
+                "integrity": claude_sdk_integrity,
+                "optionalDependencies": {
+                    platform_package: claude_sdk_version,
+                },
+            },
+            platform_path: {
+                "version": claude_sdk_version,
+                "resolved": (
+                    "https://registry.npmjs.org/@anthropic-ai/"
+                    "claude-agent-sdk-darwin-arm64/-/"
+                    f"claude-agent-sdk-darwin-arm64-{claude_sdk_version}.tgz"
+                ),
+                "integrity": claude_sdk_platform_integrity,
+                "optional": True,
+                "os": ["darwin"],
+                "cpu": ["arm64"],
             },
             # The desktop lock has its own wrapper dependency. The source-built
             # Sherpa addon is audited independently at node-addon-api 8.3.0.
@@ -480,19 +617,26 @@ def _validate_manifests(
     module: ModuleType,
     *,
     lock_payload: object | None = None,
+    release_version: str = _VERSION,
     root_payload: object | None = None,
     server_payload: object | None = None,
+    sherpa_payload: object | None = None,
     sherpa_ort_cmake: str | None = None,
-) -> None:
-    module.PaseoUpdater._validate_manifests(
-        root_payload={"version": _VERSION} if root_payload is None else root_payload,
+) -> _ManifestContractLike:
+    return module.PaseoUpdater._validate_manifests(
+        root_payload=(
+            {"version": release_version} if root_payload is None else root_payload
+        ),
         desktop_payload={
-            "version": _VERSION,
-            "devDependencies": {"electron": "41.2.0"},
+            "version": release_version,
+            "devDependencies": {
+                "electron": _ELECTRON_VERSION,
+                "electron-builder": _APP_BUILDER_LIB_VERSION,
+            },
         },
         server_payload=(
             {
-                "version": _VERSION,
+                "version": release_version,
                 "dependencies": {
                     "@anthropic-ai/claude-agent-sdk": _CLAUDE_AGENT_SDK_VERSION,
                     "esbuild": f"^{_ESBUILD_VERSION}",
@@ -502,23 +646,92 @@ def _validate_manifests(
             if server_payload is None
             else server_payload
         ),
-        lock_payload=_lock_manifest() if lock_payload is None else lock_payload,
-        sherpa_payload={"dependencies": {"node-addon-api": "^8.3.0"}},
+        lock_payload=(
+            _lock_manifest(version=release_version)
+            if lock_payload is None
+            else lock_payload
+        ),
+        sherpa_payload=(
+            {"dependencies": {"node-addon-api": "^8.3.0"}}
+            if sherpa_payload is None
+            else sherpa_payload
+        ),
         sherpa_ort_cmake=(
             "https://github.com/microsoft/onnxruntime/releases/download/"
             "v1.23.2/onnxruntime-osx-arm64-1.23.2.tgz"
             if sherpa_ort_cmake is None
             else sherpa_ort_cmake
         ),
+        release_version=release_version,
     )
+
+
+def test_paseo_accepts_a_compatible_future_release_version() -> None:
+    """A routine later release must not require changing an updater version pin."""
+    module = _load_updater_module()
+
+    _validate_manifests(module, release_version="9.8.7")
+
+
+@pytest.mark.parametrize(
+    ("component", "expected_error"),
+    [
+        ("app-builder-lib", "supported app-builder-lib version must be"),
+        ("sherpa", "supported Sherpa version must be"),
+        ("onnxruntime", "supported ONNX Runtime version must be"),
+    ],
+)
+def test_paseo_rejects_unreviewed_native_inventory_versions(
+    component: str,
+    expected_error: str,
+) -> None:
+    """Version-specific patches and source inventories must fail closed on drift."""
+    module = _load_updater_module()
+    lock = _lock_manifest()
+    packages = cast("dict[str, object]", lock["packages"])
+    server_payload: object | None = None
+    sherpa_ort_cmake: str | None = None
+    if component == "app-builder-lib":
+        electron_builder = cast(
+            "dict[str, object]",
+            packages["node_modules/electron-builder"],
+        )
+        dependencies = cast("dict[str, object]", electron_builder["dependencies"])
+        dependencies["app-builder-lib"] = "26.9.0"
+        packages["node_modules/app-builder-lib"] = {"version": "26.9.0"}
+    elif component == "sherpa":
+        packages["node_modules/sherpa-onnx-node"] = {"version": "1.13.0"}
+        packages["node_modules/sherpa-onnx-darwin-arm64"] = {"version": "1.13.0"}
+        server_payload = {
+            "version": _VERSION,
+            "dependencies": {
+                "@anthropic-ai/claude-agent-sdk": _CLAUDE_AGENT_SDK_VERSION,
+                "esbuild": f"^{_ESBUILD_VERSION}",
+                "sherpa-onnx-node": "1.13.0",
+            },
+        }
+    else:
+        sherpa_ort_cmake = (
+            "https://github.com/microsoft/onnxruntime/releases/download/"
+            "v1.24.0/onnxruntime-osx-arm64-1.24.0.tgz"
+        )
+
+    with pytest.raises(RuntimeError, match=expected_error):
+        _validate_manifests(
+            module,
+            lock_payload=lock,
+            server_payload=server_payload,
+            sherpa_ort_cmake=sherpa_ort_cmake,
+        )
 
 
 def test_paseo_resolves_exact_release_and_native_source_graph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Discovery must prove each release, runtime, and native-source pin."""
+    """Discovery must accept the current release from relational source evidence."""
     module = _load_updater_module()
     updater = module.PaseoUpdater()
+    claude_sdk_version = "0.3.246"
     api_paths: list[str] = []
     fetched_urls: list[str] = []
 
@@ -530,12 +743,18 @@ def test_paseo_resolves_exact_release_and_native_source_graph(
     ) -> dict[str, str]:
         assert config == updater.config
         api_paths.append(path)
-        return {"tag_name": _TAG}
+        return {"tag_name": _LATEST_TAG}
 
     commits = {
-        "repos/getpaseo/paseo/commits/v0.6.1": _COMMIT,
+        f"repos/getpaseo/paseo/commits/{_LATEST_TAG}": _LATEST_COMMIT,
         "repos/k2-fsa/sherpa-onnx/commits/v1.12.28": _SHERPA_COMMIT,
         "repos/microsoft/onnxruntime/commits/v1.23.2": _ONNXRUNTIME_COMMIT,
+        **{
+            f"repos/{dependency['owner']}/{dependency['repo']}/commits/"
+            f"{dependency['tag']}": dependency["commit"]
+            for dependency in _ONNX_DEPENDENCIES.values()
+            if "tag" in dependency
+        },
     }
 
     async def commit_payload(
@@ -556,21 +775,35 @@ def test_paseo_resolves_exact_release_and_native_source_graph(
     ) -> object:
         assert config == updater.config
         fetched_urls.append(url)
-        if url.endswith(f"/{_COMMIT}/package.json"):
-            return {"version": _VERSION}
+        if url.endswith(f"/{_LATEST_COMMIT}/package.json"):
+            return {"version": _LATEST_VERSION}
         if url.endswith("/packages/desktop/package.json"):
-            return {"version": _VERSION, "devDependencies": {"electron": "41.2.0"}}
+            return {
+                "version": _LATEST_VERSION,
+                "devDependencies": {
+                    "electron": _ELECTRON_VERSION,
+                    "electron-builder": _APP_BUILDER_LIB_VERSION,
+                },
+            }
         if url.endswith("/packages/server/package.json"):
             return {
-                "version": _VERSION,
+                "version": _LATEST_VERSION,
                 "dependencies": {
-                    "@anthropic-ai/claude-agent-sdk": _CLAUDE_AGENT_SDK_VERSION,
+                    "@anthropic-ai/claude-agent-sdk": claude_sdk_version,
                     "esbuild": f"^{_ESBUILD_VERSION}",
                     "sherpa-onnx-node": "1.12.28",
                 },
             }
         if url.endswith("/package-lock.json"):
-            return _lock_manifest()
+            return _lock_manifest(
+                version=_LATEST_VERSION,
+                claude_sdk_version=claude_sdk_version,
+                claude_sdk_integrity=_LATEST_CLAUDE_AGENT_SDK_INTEGRITY,
+                claude_sdk_platform_integrity=(
+                    _LATEST_CLAUDE_AGENT_SDK_DARWIN_ARM64_INTEGRITY
+                ),
+                hoisted_claude_sdk=True,
+            )
         if url.endswith("/scripts/node-addon-api/package.json"):
             return {"dependencies": {"node-addon-api": "^8.3.0"}}
         msg = f"unexpected exact-source URL: {url}"
@@ -598,18 +831,23 @@ def test_paseo_resolves_exact_release_and_native_source_graph(
     monkeypatch.setattr(module, "fetch_github_api", commit_payload)
     monkeypatch.setattr(module, "fetch_json", json_payload)
     monkeypatch.setattr(module, "fetch_url", bytes_payload)
-    monkeypatch.setattr(
-        module.PaseoUpdater,
-        "CLAUDE_PROVIDER_SOURCE_DIGEST",
-        sha256(_CLAUDE_PROVIDER_FIXTURE).hexdigest(),
-    )
 
-    assert run_async(updater.fetch_latest(object())) == _version_info()
+    assert run_async(updater.fetch_latest(object())) == _version_info(
+        release_version=_LATEST_VERSION,
+        release_commit=_LATEST_COMMIT,
+        claude_sdk_version=claude_sdk_version,
+    )
     assert api_paths == [
         "repos/getpaseo/paseo/releases/latest",
-        "repos/getpaseo/paseo/commits/v0.6.1",
+        f"repos/getpaseo/paseo/commits/{_LATEST_TAG}",
         "repos/k2-fsa/sherpa-onnx/commits/v1.12.28",
         "repos/microsoft/onnxruntime/commits/v1.23.2",
+        "repos/abseil/abseil-cpp/commits/20240722.2",
+        "repos/google/flatbuffers/commits/v23.5.26",
+        "repos/boostorg/mp11/commits/boost-1.82.0",
+        "repos/onnx/onnx/commits/v1.18.0",
+        "repos/google/re2/commits/2024-07-02",
+        "repos/dcleblanc/safeint/commits/3.0.28",
     ]
     assert len(fetched_urls) == 7
 
@@ -617,7 +855,10 @@ def test_paseo_resolves_exact_release_and_native_source_graph(
 @pytest.mark.parametrize(
     ("package_path", "expected_error"),
     [
-        ("packages/server/node_modules/esbuild", "locked server esbuild must be"),
+        (
+            "packages/server/node_modules/esbuild",
+            "locked server esbuild darwin-arm64",
+        ),
         (
             "packages/server/node_modules/@esbuild/darwin-arm64",
             "locked server esbuild darwin-arm64",
@@ -638,11 +879,34 @@ def test_paseo_rejects_unreviewed_packaged_esbuild_runtime(
         _validate_manifests(module, lock_payload=lock)
 
 
-def test_paseo_rejects_unreviewed_esbuild_dependency_range() -> None:
-    """The source manifest must not float beyond the install-check contract."""
+@pytest.mark.parametrize(
+    "spec",
+    [_ESBUILD_VERSION, f"^{_ESBUILD_VERSION}", f"~{_ESBUILD_VERSION}"],
+)
+def test_paseo_accepts_supported_esbuild_dependency_specs(spec: str) -> None:
+    """Exact, caret, and tilde specs may select the exact locked compiler."""
     module = _load_updater_module()
 
-    with pytest.raises(RuntimeError, match="esbuild dependency must be"):
+    contract = _validate_manifests(
+        module,
+        server_payload={
+            "version": _VERSION,
+            "dependencies": {
+                "@anthropic-ai/claude-agent-sdk": _CLAUDE_AGENT_SDK_VERSION,
+                "esbuild": spec,
+                "sherpa-onnx-node": _SHERPA_VERSION,
+            },
+        },
+    )
+
+    assert contract.esbuild_version == _ESBUILD_VERSION
+
+
+def test_paseo_rejects_out_of_range_esbuild_dependency() -> None:
+    """The source manifest must include the exact compiler selected by the lock."""
+    module = _load_updater_module()
+
+    with pytest.raises(RuntimeError, match="does not satisfy npm range"):
         _validate_manifests(
             module,
             server_payload={
@@ -656,28 +920,18 @@ def test_paseo_rejects_unreviewed_esbuild_dependency_range() -> None:
         )
 
 
-def test_paseo_rejects_claude_external_runtime_seam_drift(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Re-pinning bytes cannot silently restore the opaque SDK runtime."""
+def test_paseo_rejects_claude_external_runtime_seam_drift() -> None:
+    """Changing the executable handoff must fail structural validation."""
     module = _load_updater_module()
     source = _CLAUDE_PROVIDER_FIXTURE.replace(
         b"pathToClaudeCodeExecutable: claudeBinary,",
         b"pathToClaudeCodeExecutable: bundledSdkBinary,",
     )
-    monkeypatch.setattr(
-        module.PaseoUpdater,
-        "CLAUDE_PROVIDER_SOURCE_DIGEST",
-        sha256(source).hexdigest(),
-    )
-
     with pytest.raises(RuntimeError, match="Claude provider runtime seam"):
         module.PaseoUpdater._validate_claude_provider_source(source)
 
 
-def test_paseo_rejects_incomplete_claude_launch_defaults(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_paseo_rejects_incomplete_claude_launch_defaults() -> None:
     """Every provider launch surface must default to the package executable."""
     module = _load_updater_module()
     prefix, separator, suffix = _CLAUDE_PROVIDER_FIXTURE.rpartition(
@@ -685,34 +939,35 @@ def test_paseo_rejects_incomplete_claude_launch_defaults(
     )
     assert separator == _CLAUDE_DEFAULT_BINARY
     source = prefix + b'defaultBinary: "codexx",' + suffix
-    monkeypatch.setattr(
-        module.PaseoUpdater,
-        "CLAUDE_PROVIDER_SOURCE_DIGEST",
-        sha256(source).hexdigest(),
-    )
-
     with pytest.raises(RuntimeError, match="Claude provider runtime seam"):
         module.PaseoUpdater._validate_claude_provider_source(source)
 
 
-def test_paseo_pins_the_exact_claude_provider_source_digest() -> None:
-    """The external Claude executable seam is tied to the immutable Paseo tree."""
+def test_paseo_accepts_unrelated_claude_provider_source_changes() -> None:
+    """Immutable source provenance must not pin unrelated provider bytes."""
     module = _load_updater_module()
-
-    assert module.PaseoUpdater.CLAUDE_PROVIDER_SOURCE_DIGEST == (
-        _CLAUDE_PROVIDER_SOURCE_DIGEST
+    module.PaseoUpdater._validate_claude_provider_source(
+        b"// unrelated compatible upstream change\n" + _CLAUDE_PROVIDER_FIXTURE
     )
 
 
-def test_paseo_patcher_and_updater_pin_the_same_claude_provider_digest() -> None:
-    """Build-time mutation and update-time audit share one immutable preimage."""
-    patcher = _load_patcher_module(fixture_digest=False)
-    updater = _load_updater_module()
-
-    assert patcher._CLAUDE_PROVIDER_SOURCE_DIGEST == (
-        updater.PaseoUpdater.CLAUDE_PROVIDER_SOURCE_DIGEST
+def test_paseo_patcher_accepts_unrelated_claude_provider_source_changes(
+    tmp_path: Path,
+) -> None:
+    """The patcher keys compatibility to mutation seams rather than a file digest."""
+    module = _load_patcher_module()
+    root = tmp_path / "source"
+    _write_patcher_fixture(root)
+    provider = root / _CLAUDE_PROVIDER_PATH
+    provider.write_bytes(
+        b"// unrelated compatible upstream change\n" + provider.read_bytes()
     )
-    assert patcher._CLAUDE_PROVIDER_SOURCE_DIGEST == (_CLAUDE_PROVIDER_SOURCE_DIGEST)
+
+    module.patch_tree(
+        root,
+        claude_code_executable=_TEST_CLAUDE_CODE_EXECUTABLE,
+        check=True,
+    )
 
 
 def test_paseo_manifest_drift_fails_closed() -> None:
@@ -727,7 +982,10 @@ def test_paseo_manifest_drift_fails_closed() -> None:
             root_payload={"version": _VERSION},
             desktop_payload={
                 "version": _VERSION,
-                "devDependencies": {"electron": "41.2.0"},
+                "devDependencies": {
+                    "electron": _ELECTRON_VERSION,
+                    "electron-builder": _APP_BUILDER_LIB_VERSION,
+                },
             },
             server_payload={
                 "version": _VERSION,
@@ -743,6 +1001,7 @@ def test_paseo_manifest_drift_fails_closed() -> None:
                 "https://github.com/microsoft/onnxruntime/releases/download/"
                 "v1.23.2/onnxruntime-osx-arm64-1.23.2.tgz"
             ),
+            release_version=_VERSION,
         )
 
 
@@ -756,6 +1015,122 @@ def test_paseo_rejects_malformed_manifest_payloads() -> None:
         module._require_string({}, "version", context="test payload")
     with pytest.raises(TypeError, match="test payload is missing version"):
         module._require_string({"version": ""}, "version", context="test payload")
+    with pytest.raises(RuntimeError, match="exact semantic version"):
+        module._require_exact_version("latest", context="test version")
+    with pytest.raises(RuntimeError, match="immutable commit"):
+        module._require_commit("main", context="test commit")
+
+
+@pytest.mark.parametrize("value", ["invalid", "0"])
+def test_paseo_rejects_invalid_npm_fetcher_compatibility_pin(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    """The reviewed fetcher schema pin must remain a positive integer."""
+    module = _load_updater_module()
+    compatibility_pins = {
+        **module.PaseoUpdater.compatibility_pins,
+        "npmFetcherVersion": value,
+    }
+    monkeypatch.setattr(module.PaseoUpdater, "compatibility_pins", compatibility_pins)
+
+    with pytest.raises(RuntimeError, match="must be a positive integer"):
+        module.PaseoUpdater._npm_fetcher_version()
+
+
+def test_paseo_rejects_a_missing_claude_sdk_lock_entry() -> None:
+    """A manifest dependency without a resolvable lock entry must fail closed."""
+    module = _load_updater_module()
+    lock = _lock_manifest()
+    packages = cast("dict[str, object]", lock["packages"])
+    del packages["packages/server/node_modules/@anthropic-ai/claude-agent-sdk"]
+
+    with pytest.raises(RuntimeError, match="Claude Agent SDK is missing"):
+        _validate_manifests(module, lock_payload=lock)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("optional", False, "must be optional"),
+        ("os", ["linux"], "os must be"),
+        ("cpu", ["x64"], "cpu must be"),
+    ],
+)
+def test_paseo_rejects_incompatible_claude_platform_metadata(
+    field: str,
+    value: object,
+    match: str,
+) -> None:
+    """The resolved opaque SDK runtime must be the optional Darwin arm64 package."""
+    module = _load_updater_module()
+    lock = _lock_manifest()
+    packages = cast("dict[str, object]", lock["packages"])
+    platform = cast(
+        "dict[str, object]",
+        packages[
+            "packages/server/node_modules/@anthropic-ai/claude-agent-sdk/"
+            "node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64"
+        ],
+    )
+    platform[field] = value
+
+    with pytest.raises(RuntimeError, match=match):
+        _validate_manifests(module, lock_payload=lock)
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        _NODE_ADDON_API_VERSION,
+        f"^{_NODE_ADDON_API_VERSION}",
+        f"~{_NODE_ADDON_API_VERSION}",
+    ],
+)
+def test_paseo_accepts_supported_node_addon_api_specs(spec: str) -> None:
+    """Range spelling may vary while the fetched native header stays exact."""
+    module = _load_updater_module()
+
+    contract = _validate_manifests(
+        module,
+        sherpa_payload={"dependencies": {"node-addon-api": spec}},
+    )
+
+    assert contract.node_addon_api_version == _NODE_ADDON_API_VERSION
+
+
+def test_paseo_rejects_an_invalid_node_addon_api_spec() -> None:
+    """Unsupported npm range syntax must fail before source hashing."""
+    module = _load_updater_module()
+    with pytest.raises(RuntimeError, match="valid npm semantic-version range"):
+        _validate_manifests(
+            module,
+            sherpa_payload={"dependencies": {"node-addon-api": "latest"}},
+        )
+
+
+def test_paseo_rejects_out_of_range_node_addon_api_dependency() -> None:
+    """Sherpa's dependency range must contain the exact fetched header version."""
+    module = _load_updater_module()
+
+    with pytest.raises(RuntimeError, match="does not satisfy npm range"):
+        _validate_manifests(
+            module,
+            sherpa_payload={"dependencies": {"node-addon-api": "^9.0.0"}},
+        )
+
+
+def test_paseo_rejects_inconsistent_onnxruntime_archive_identity() -> None:
+    """Sherpa's ONNX Runtime tag and archive filename must identify one version."""
+    module = _load_updater_module()
+    with pytest.raises(RuntimeError, match="one exact ONNX Runtime archive"):
+        _validate_manifests(
+            module,
+            sherpa_ort_cmake=(
+                "https://github.com/microsoft/onnxruntime/releases/download/"
+                "v1.23.2/onnxruntime-osx-arm64-1.23.1.tgz"
+            ),
+        )
 
 
 def test_paseo_rejects_nonimmutable_commit(
@@ -787,18 +1162,46 @@ def test_paseo_rejects_nonimmutable_commit(
         )
 
 
-def test_paseo_rejects_wrong_onnxruntime_marker() -> None:
-    """The Sherpa source must select the audited ONNX Runtime archive."""
+def test_paseo_rejects_an_incomplete_onnx_dependency_inventory() -> None:
+    """Hashing must not silently omit a native source from the reviewed graph."""
     module = _load_updater_module()
+    info = _version_info()
+    metadata = cast("dict[str, object]", info.metadata)
+    dependencies = cast(
+        "dict[str, dict[str, str]]",
+        metadata["onnxDependencies"],
+    )
+    del dependencies["safeint"]
 
-    with pytest.raises(RuntimeError, match="does not select ONNX Runtime 1.23.2"):
-        _validate_manifests(
-            module,
-            sherpa_ort_cmake=(
-                "https://github.com/microsoft/onnxruntime/releases/download/"
-                "v1.23.1/onnxruntime-osx-arm64-1.23.1.tgz"
-            ),
-        )
+    with pytest.raises(RuntimeError, match="do not match the supported inventory"):
+        module.PaseoUpdater._required_onnx_dependencies(info)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_error"),
+    [
+        ("owner", "unreviewed", "ONNX dependency abseilCpp owner must be"),
+        ("commit", "main", "must be an immutable commit"),
+        ("rev", "20240722.2", "has unexpected fields"),
+    ],
+)
+def test_paseo_rejects_drifted_onnx_dependency_metadata(
+    field: str,
+    value: str,
+    expected_error: str,
+) -> None:
+    """Only reviewed provenance plus one immutable commit reaches native hashing."""
+    module = _load_updater_module()
+    info = _version_info()
+    metadata = cast("dict[str, object]", info.metadata)
+    dependencies = cast(
+        "dict[str, dict[str, str]]",
+        metadata["onnxDependencies"],
+    )
+    dependencies["abseilCpp"][field] = value
+
+    with pytest.raises(RuntimeError, match=expected_error):
+        module.PaseoUpdater._required_onnx_dependencies(info)
 
 
 def test_paseo_rejects_an_untrusted_claude_sdk_platform_runtime() -> None:
@@ -865,10 +1268,25 @@ def test_paseo_hashes_sources_then_npm_closure(
     native_lock = json.loads(
         (_PACKAGE_DIR / "native-lock.json").read_text(encoding="utf-8")
     )
+    native_hashes_by_identity = {
+        **{
+            f"sherpa:{name}": item["hash"]
+            for name, item in native_lock["sherpaOnnx"]["dependencies"].items()
+        },
+        **{
+            f"onnx:{name}": item["hash"]
+            for name, item in native_lock["onnxruntime"]["dependencies"].items()
+        },
+        **{
+            f"patch:{index}": item["hash"]
+            for index, item in enumerate(native_lock["onnxruntime"]["patches"])
+        },
+    }
+    native_requests = updater._native_hash_requests({
+        name: dict(dependency) for name, dependency in _ONNX_DEPENDENCIES.items()
+    })
     native_hashes = [
-        *(item["hash"] for item in native_lock["sherpaOnnx"]["dependencies"].values()),
-        *(item["hash"] for item in native_lock["onnxruntime"]["dependencies"].values()),
-        *(item["hash"] for item in native_lock["onnxruntime"]["patches"]),
+        native_hashes_by_identity[identity] for identity, _expression in native_requests
     ]
     calls = install_fixed_hash_stream(
         monkeypatch,
@@ -882,7 +1300,7 @@ def test_paseo_hashes_sources_then_npm_closure(
     value_events = [event for event in events if event.kind is UpdateEventKind.VALUE]
     entries = cast("list[HashEntry]", expect_source_hashes(value_events[-1].payload))
 
-    assert len(calls) == 29
+    assert len(calls) == 28
     assert_nix_ast_equal(
         str(calls[0]["expr"]),
         _build_fetch_from_github_call(
@@ -903,10 +1321,34 @@ def test_paseo_hashes_sources_then_npm_closure(
     )
     assert_nix_ast_equal(
         str(calls[5]["expr"]),
-        updater._npm_deps_expr(src_hash=_HASHES[0]),
+        updater._npm_deps_expr(
+            commit=_COMMIT,
+            src_hash=_HASHES[0],
+            version=_VERSION,
+        ),
+    )
+    abseil_request_index = next(
+        index
+        for index, (identity, _expression) in enumerate(native_requests)
+        if identity == "onnx:abseilCpp"
+    )
+    assert_nix_ast_equal(
+        str(calls[6 + abseil_request_index]["expr"]),
+        _build_fetch_from_github_call(
+            "abseil",
+            "abseil-cpp",
+            rev=_ONNX_DEPENDENCIES["abseilCpp"]["commit"],
+            fetch_submodules=False,
+        ),
     )
     npm_expression = expect_instance(
-        parse_nix_expr(updater._npm_deps_expr(src_hash=_HASHES[0])),
+        parse_nix_expr(
+            updater._npm_deps_expr(
+                commit=_COMMIT,
+                src_hash=_HASHES[0],
+                version=_VERSION,
+            )
+        ),
         FunctionCall,
     )
     npm_arguments = expect_instance(npm_expression.argument, AttributeSet)
@@ -928,6 +1370,17 @@ def test_paseo_hashes_sources_then_npm_closure(
     artifact_event = next(
         event for event in events if event.kind is UpdateEventKind.ARTIFACT
     )
+    native_lock["paseo"] = {
+        "version": _VERSION,
+        "commit": _COMMIT,
+        "electronVersion": _ELECTRON_VERSION,
+        "nodeAddonApiVersion": _NODE_ADDON_API_VERSION,
+        "npmFetcherVersion": _NPM_FETCHER_VERSION,
+        "esbuildVersion": _ESBUILD_VERSION,
+        "claudeAgentSdkVersion": _CLAUDE_AGENT_SDK_VERSION,
+        "appBuilderLibVersion": _APP_BUILDER_LIB_VERSION,
+        "appBuilderLibBackportCommit": _APP_BUILDER_LIB_BACKPORT_COMMIT,
+    }
     assert expect_artifact_updates(artifact_event.payload) == [
         GeneratedArtifact.json(_PACKAGE_DIR / "native-lock.json", native_lock)
     ]
@@ -945,7 +1398,7 @@ def test_paseo_hashing_requires_a_discovered_artifact_directory(
     updater = MissingArtifactDirectoryUpdater()
     install_fixed_hash_stream(
         monkeypatch,
-        ((None, _HASHES[0]),) * 29,
+        ((None, _HASHES[0]),) * 28,
     )
 
     with pytest.raises(
@@ -964,18 +1417,58 @@ def test_paseo_updater_owns_the_complete_native_lock() -> None:
     native_lock = json.loads(
         (_PACKAGE_DIR / "native-lock.json").read_text(encoding="utf-8")
     )
+    source = SourceEntry.model_validate_json(
+        (_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")
+    )
+    assert source.version is not None
+    assert source.commit is not None
+    assert source.electron_version is not None
+    assert source.urls is not None
     assert native_lock["schemaVersion"] == 1
-    assert native_lock["paseo"] == {
-        "appBuilderLibBackportCommit": _APP_BUILDER_LIB_BACKPORT_COMMIT,
-        "appBuilderLibVersion": _APP_BUILDER_LIB_VERSION,
-        "claudeAgentSdkVersion": _CLAUDE_AGENT_SDK_VERSION,
-        "commit": _COMMIT,
-        "electronVersion": _ELECTRON_VERSION,
-        "esbuildVersion": _ESBUILD_VERSION,
-        "nodeAddonApiVersion": _NODE_ADDON_API_VERSION,
-        "npmFetcherVersion": _NPM_FETCHER_VERSION,
-        "version": _VERSION,
+    paseo_lock = native_lock["paseo"]
+    assert set(paseo_lock) == {
+        "appBuilderLibBackportCommit",
+        "appBuilderLibVersion",
+        "claudeAgentSdkVersion",
+        "commit",
+        "electronVersion",
+        "esbuildVersion",
+        "nodeAddonApiVersion",
+        "npmFetcherVersion",
+        "version",
     }
+    assert paseo_lock["version"] == source.version
+    assert paseo_lock["commit"] == source.commit
+    assert paseo_lock["electronVersion"] == source.electron_version
+    assert paseo_lock["appBuilderLibBackportCommit"] == updater.get_compatibility_pin(
+        "appBuilderLibBackportCommit"
+    )
+    assert paseo_lock["npmFetcherVersion"] == int(
+        updater.get_compatibility_pin("npmFetcherVersion")
+    )
+    updater._required_metadata(
+        VersionInfo(
+            version=source.version,
+            metadata={
+                "appBuilderLibVersion": paseo_lock["appBuilderLibVersion"],
+                "claudeAgentSdkVersion": paseo_lock["claudeAgentSdkVersion"],
+                "commit": source.commit,
+                "electronVersion": source.electron_version,
+                "esbuildVersion": paseo_lock["esbuildVersion"],
+                "nodeAddonApiUrl": source.urls["nodeAddonApi"],
+                "nodeAddonApiVersion": paseo_lock["nodeAddonApiVersion"],
+                "onnxruntimeCommit": native_lock["onnxruntime"]["commit"],
+                "onnxruntimeUrl": source.urls["onnxruntime"],
+                "onnxruntimeVersion": native_lock["onnxruntime"]["version"],
+                "paseoUrl": source.urls["paseo"],
+                "sherpaCommit": native_lock["sherpaOnnx"]["commit"],
+                "sherpaOnnxNodeUrl": source.urls["sherpaOnnxNode"],
+                "sherpaOnnxUrl": source.urls["sherpaOnnx"],
+                "sherpaVersion": native_lock["sherpaOnnx"]["version"],
+                "tag": f"v{source.version}",
+            },
+        )
+    )
     assert native_lock["sherpaOnnx"]["version"] == _SHERPA_VERSION
     assert native_lock["sherpaOnnx"]["commit"] == _SHERPA_COMMIT
     assert native_lock["onnxruntime"]["version"] == _ONNXRUNTIME_VERSION
@@ -999,10 +1492,14 @@ def test_paseo_updater_owns_the_complete_native_lock() -> None:
         "flatbuffers",
         "mp11",
         "onnx",
-        "protobuf",
         "re2",
         "safeint",
     }
+    assert all(
+        set(dependency) == set(_ONNX_DEPENDENCIES[name]) | {"hash"}
+        and dependency["commit"] == _ONNX_DEPENDENCIES[name]["commit"]
+        for name, dependency in native_lock["onnxruntime"]["dependencies"].items()
+    )
     assert len(native_lock["onnxruntime"]["patches"]) == 4
 
     hashes = {
@@ -1028,7 +1525,6 @@ def test_paseo_updater_owns_the_complete_native_lock() -> None:
         "sha256-e+dNPNbCHYDXUS/W+hMqf/37fhVgEGzId6rhP3cToTE=",
         "sha256-cLPvjkf2Au+B19PJNrUkTW/VPxybi1MpPxnIl4oo4/o=",
         "sha256-UhtF+CWuyv5/Pq/5agLL4Y95YNP63W2BraprhRqJOag=",
-        "sha256-wfu1MyCycGpxFB++eicA0F41j886/Y52I/4+ciRUg2o=",
         "sha256-IeANwJlJl45yf8iu/AZNDoiyIvTCZIeK1b74sdCfAIc=",
         "sha256-pjwjrqq6dfiVsXIhbBtbolhiysiFlFTnx5XcX77f+C0=",
         "sha256-FFAJuJse4nmNT3ixvEdlqzbr3edY46SqEFv7z/oo6m0=",
@@ -1037,6 +1533,19 @@ def test_paseo_updater_owns_the_complete_native_lock() -> None:
         "sha256-vX+kaFiNdmqWI91JELcLpoaVIHBb5EPbI7rCAMYAx04=",
     }
     assert "sourceHash" not in native_lock["onnxruntime"]
+
+
+def test_paseo_validates_the_materialized_darwin_package() -> None:
+    """Promotion must build the candidate so every patch and native gate runs."""
+    module = _load_updater_module()
+
+    assert module.PaseoUpdater.get_derivation_validations() == (
+        DerivationValidation(
+            installable="path:.#pkgs.{system}.{name}",
+            systems=("aarch64-darwin",),
+            mode="build",
+        ),
+    )
 
 
 def test_paseo_derivations_consume_only_the_updater_owned_native_lock() -> None:
@@ -1078,6 +1587,25 @@ def test_paseo_derivations_consume_only_the_updater_owned_native_lock() -> None:
     assert_nix_ast_equal(
         completeness_terms[4],
         "npmFetcherVersion > 0",
+    )
+    assert_nix_ast_equal(
+        expect_binding(package_scope, "completeGitHubDependency").value,
+        """
+        dependency:
+        nonEmptyString (dependency.owner or null)
+        && nonEmptyString (dependency.repo or null)
+        && commitString (dependency.commit or null)
+        && builtins.isString (dependency.hash or null)
+        && lib.hasPrefix "sha256-" dependency.hash
+        """,
+    )
+    assert_nix_ast_equal(
+        completeness_terms[17],
+        "builtins.length (builtins.attrValues onnxruntimeDependencies) == 7",
+    )
+    assert_nix_ast_equal(
+        completeness_terms[18],
+        "builtins.all completeGitHubDependency (builtins.attrValues onnxruntimeDependencies)",
     )
     assert_nix_ast_equal(
         expect_binding(package_scope, "sherpaClosure").value,
@@ -1150,6 +1678,7 @@ def test_paseo_build_result_requires_complete_exact_closure() -> None:
         "commit": _COMMIT,
         "electronVersion": "41.2.0",
         "hashes": HashCollection.from_value(entries),
+        "pins": updater.compatibility_pins,
         "urls": {
             "nodeAddonApi": urls["nodeAddonApiUrl"],
             "onnxruntime": urls["onnxruntimeUrl"],
@@ -1168,6 +1697,43 @@ def test_paseo_build_result_rejects_unpinned_release_tag() -> None:
     with pytest.raises(RuntimeError, match="release tag must be 'v0.6.1'"):
         updater.build_result(
             _version_info(tag="release-0.6.1"),
+            _complete_hash_entries(_urls()),
+        )
+
+
+@pytest.mark.parametrize(
+    ("metadata_key", "value", "expected_error"),
+    [
+        (
+            "appBuilderLibVersion",
+            "26.9.0",
+            "supported appBuilderLibVersion must be",
+        ),
+        (
+            "nodeAddonApiVersion",
+            "8.4.0",
+            "supported nodeAddonApiVersion must be",
+        ),
+        ("sherpaVersion", "1.13.0", "supported sherpaVersion must be"),
+        (
+            "onnxruntimeVersion",
+            "1.24.0",
+            "supported onnxruntimeVersion must be",
+        ),
+    ],
+)
+def test_paseo_build_result_rejects_unreviewed_native_inventory_versions(
+    metadata_key: str,
+    value: str,
+    expected_error: str,
+) -> None:
+    """Persisted package metadata cannot bypass version-specific inventory pins."""
+    module = _load_updater_module()
+    updater = module.PaseoUpdater()
+
+    with pytest.raises(RuntimeError, match=expected_error):
+        updater.build_result(
+            _version_info(**{metadata_key: value}),
             _complete_hash_entries(_urls()),
         )
 
@@ -1284,36 +1850,59 @@ def test_paseo_patcher_rejects_missing_independent_anchor(tmp_path: Path) -> Non
         )
 
 
-@pytest.mark.parametrize(
-    "prefix",
-    [
-        b'// defaultBinary: "claude"\n',
-        b'const quotedDecoy = "defaultBinary: \\"claude\\"";\n',
-        b'const templateDecoy = `defaultBinary: "claude"`;\n',
-        b"if (false) { const cfgDecoy = 'defaultBinary'; }\n",
-        b"disabled!({ defaultBinary: 'claude' });\n",
-    ],
-    ids=("comment", "string", "template", "cfg", "macro"),
-)
-def test_paseo_patcher_rejects_provider_digest_decoy_drift(
+def test_paseo_patcher_rejects_a_scoped_launch_change_hidden_by_a_decoy(
     tmp_path: Path,
-    prefix: bytes,
 ) -> None:
-    """Any unaudited provider token stream fails before source matching."""
+    """A matching comment cannot replace the reviewed availability launch site."""
     module = _load_patcher_module()
     root = tmp_path / "source"
     _write_patcher_fixture(root)
     provider = root / _CLAUDE_PROVIDER_PATH
-    provider.write_bytes(prefix + provider.read_bytes())
-    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    source = provider.read_bytes()
+    availability_launch = b"""\
+  async isAvailable(): Promise<boolean> {
+    const launch = await resolveProviderLaunch({
+      commandConfig: this.runtimeSettings?.command,
+      defaultBinary: "claude",
+    });
+"""
+    assert source.count(availability_launch) == 1
+    provider.write_bytes(
+        b'// defaultBinary: "claude",\n'
+        + source.replace(
+            availability_launch,
+            availability_launch.replace(b'"claude"', b'"codexx"'),
+        )
+    )
 
-    with pytest.raises(RuntimeError, match="Claude provider source digest"):
+    with pytest.raises(RuntimeError, match="Claude executable wiring"):
         module.patch_tree(
             root,
             claude_code_executable=_TEST_CLAUDE_CODE_EXECUTABLE,
         )
 
-    assert {path: path.read_bytes() for path in before} == before
+
+def test_paseo_patcher_rejects_an_additional_provider_launch(tmp_path: Path) -> None:
+    """Every Claude process launch must be one of the four reviewed call sites."""
+    module = _load_patcher_module()
+    root = tmp_path / "source"
+    _write_patcher_fixture(root)
+    provider = root / _CLAUDE_PROVIDER_PATH
+    provider.write_bytes(
+        b"""\
+async function unreviewedLaunch(): Promise<void> {
+  await resolveProviderLaunch({ defaultBinary: "codexx" });
+}
+
+"""
+        + provider.read_bytes()
+    )
+
+    with pytest.raises(RuntimeError, match="Claude executable wiring"):
+        module.patch_tree(
+            root,
+            claude_code_executable=_TEST_CLAUDE_CODE_EXECUTABLE,
+        )
 
 
 @pytest.mark.parametrize(
@@ -1332,6 +1921,10 @@ def test_paseo_patcher_rejects_provider_digest_decoy_drift(
             b"return bundledOptions;\n    " + _CLAUDE_BINARY_RESOLUTION,
         ),
         (
+            _CLAUDE_BINARY_RESOLUTION,
+            _CLAUDE_BINARY_RESOLUTION + b"    return bundledOptions;\n",
+        ),
+        (
             _CLAUDE_OPTIONS_HANDOFF,
             _CLAUDE_OPTIONS_HANDOFF
             + b"\n      ...{ pathToClaudeCodeExecutable: bundledSdkBinary },",
@@ -1344,27 +1937,23 @@ def test_paseo_patcher_rejects_provider_digest_decoy_drift(
             b"  private async buildOptions",
             b"  @disabled\n  private async buildOptions",
         ),
-        (
-            b'commandConfig: runtimeSettings?.command,\n    defaultBinary: "claude",',
-            b'commandConfig: runtimeSettings?.command,\n    defaultBinary: "codexx",',
-        ),
     ],
     ids=(
         "short-circuited-client-owner",
         "unbraced-dead-constructor",
         "unreachable-build-chain",
+        "post-resolution-early-return",
         "later-spread-override",
         "client-class-decorator",
         "method-decorator",
-        "resolver-default",
     ),
 )
-def test_paseo_patcher_rejects_provider_digest_control_flow_drift(
+def test_paseo_patcher_rejects_claude_control_flow_drift(
     tmp_path: Path,
     old: bytes,
     new: bytes,
 ) -> None:
-    """Authenticated provider bytes close control-flow and override decoys."""
+    """Targeted wiring checks reject dead paths and later executable overrides."""
     module = _load_patcher_module()
     root = tmp_path / "source"
     _write_patcher_fixture(root)
@@ -1372,25 +1961,26 @@ def test_paseo_patcher_rejects_provider_digest_control_flow_drift(
     source = provider.read_bytes()
     assert source.count(old) == 1
     provider.write_bytes(source.replace(old, new))
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
 
-    with pytest.raises(RuntimeError, match="Claude provider source digest"):
+    with pytest.raises(RuntimeError, match="reviewed Claude"):
         module.patch_tree(
             root,
             claude_code_executable=_TEST_CLAUDE_CODE_EXECUTABLE,
         )
 
+    assert {path: path.read_bytes() for path in before} == before
 
-def test_paseo_patcher_checks_provider_digest_before_utf8_decode(
-    tmp_path: Path,
-) -> None:
-    """Untrusted provider bytes cannot reach decoding before authentication."""
+
+def test_paseo_patcher_rejects_non_utf8_provider_source(tmp_path: Path) -> None:
+    """Provider source must remain valid UTF-8 before structural patching."""
     module = _load_patcher_module()
     root = tmp_path / "source"
     _write_patcher_fixture(root)
     provider = root / _CLAUDE_PROVIDER_PATH
     provider.write_bytes(b"\xff" + provider.read_bytes())
 
-    with pytest.raises(RuntimeError, match="Claude provider source digest"):
+    with pytest.raises(UnicodeDecodeError):
         module.patch_tree(
             root,
             claude_code_executable=_TEST_CLAUDE_CODE_EXECUTABLE,
@@ -1413,7 +2003,6 @@ def test_paseo_patcher_rejects_ambiguous_claude_resolver_function(
     else:
         source = _CLAUDE_RESOLVER_FIXTURE + source
     provider.write_bytes(source)
-    module._CLAUDE_PROVIDER_SOURCE_DIGEST = sha256(source).hexdigest()
     before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
 
     with pytest.raises(RuntimeError, match="reviewed Claude resolver function"):
@@ -1460,7 +2049,6 @@ def test_paseo_patcher_rejects_incomplete_claude_launch_defaults_after_repin(
     assert separator == _CLAUDE_DEFAULT_BINARY
     source = prefix + b'defaultBinary: "codexx",' + suffix
     provider.write_bytes(source)
-    module._CLAUDE_PROVIDER_SOURCE_DIGEST = sha256(source).hexdigest()
     before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
 
     with pytest.raises(RuntimeError, match="reviewed Claude launch defaults"):
@@ -1488,7 +2076,6 @@ def test_paseo_patcher_rejects_ambiguous_claude_build_options_tail(
     else:
         source = _CLAUDE_BUILD_OPTIONS_TAIL_FIXTURE + source
     provider.write_bytes(source)
-    module._CLAUDE_PROVIDER_SOURCE_DIGEST = sha256(source).hexdigest()
     before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
 
     with pytest.raises(RuntimeError, match="reviewed Claude buildOptions tail"):
@@ -1567,30 +2154,34 @@ def test_paseo_patcher_cli_checks_then_applies(tmp_path: Path) -> None:
         assert all(effect in source for effect in effects)
 
 
-def test_paseo_source_metadata_is_exact_and_the_reviewed_manifest_is_default() -> None:
-    """The promoted wrapper must retain exact metadata and a direct override seam."""
+def test_paseo_source_metadata_is_complete_and_the_manifest_is_default() -> None:
+    """The generated source graph must remain complete across routine releases."""
     source = SourceEntry.model_validate_json(
         (_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")
     )
     entries = source.hashes.entries
     assert entries is not None
-    assert source.version == _VERSION
-    assert source.commit == _COMMIT
-    assert source.electron_version == "41.2.0"
-    node_addon_api_url = _urls()["nodeAddonApiUrl"]
-    assert (
-        next(entry.hash for entry in entries if entry.url == node_addon_api_url)
-        == _NODE_ADDON_API_HASH
-    )
-    paseo_url = _urls()["paseoUrl"]
-    assert (
-        next(
-            entry.hash
-            for entry in entries
-            if entry.hash_type == "npmDepsHash" and entry.url == paseo_url
-        )
-        == "sha256-XcFInRQCGZp1KsaxAStcTBv9i6Xx74C1NrcbQQPxqPY="
-    )
+    assert source.version is not None
+    assert source.commit is not None
+    assert source.electron_version is not None
+    assert source.urls is not None
+    assert set(source.urls) == {
+        "nodeAddonApi",
+        "onnxruntime",
+        "paseo",
+        "sherpaOnnx",
+        "sherpaOnnxNode",
+    }
+    expected = {
+        ("srcHash", source.urls["paseo"]),
+        ("srcHash", source.urls["sherpaOnnx"]),
+        ("srcHash", source.urls["onnxruntime"]),
+        ("sha256", source.urls["nodeAddonApi"]),
+        ("sha256", source.urls["sherpaOnnxNode"]),
+        ("npmDepsHash", source.urls["paseo"]),
+    }
+    assert len(entries) == len(expected)
+    assert {(entry.hash_type, entry.url) for entry in entries} == expected
     assert all(
         not entry.hash.startswith(HashCollection.FAKE_HASH_PREFIX) for entry in entries
     )
@@ -1639,7 +2230,7 @@ def test_paseo_registry_exports_only_on_arm64_darwin() -> None:
 
 
 def test_paseo_reviewed_native_manifest_matches_the_realized_inventory() -> None:
-    """The reviewed candidate must use the exact provisional-build inventory."""
+    """The realized package must retain the exact reviewed native inventory."""
     manifest = (_PACKAGE_DIR / "native-manifest.txt").read_bytes()
 
     assert manifest.endswith(b"\n")
@@ -1969,7 +2560,7 @@ def test_paseo_fetches_the_onnxruntime_submodule_closure() -> None:
 
 
 def test_paseo_onnxruntime_helper_declares_the_reviewed_source_closure() -> None:
-    """The private helper exposes the exact upstream and nixpkgs recipe evidence."""
+    """The helper fetches immutable sources and requires protobuf_32 capability."""
     helper = expect_instance(
         parse_nix_expr(
             (_PACKAGE_DIR / "onnxruntime-source.nix").read_text(encoding="utf-8")
@@ -1980,6 +2571,32 @@ def test_paseo_onnxruntime_helper_declares_the_reviewed_source_closure() -> None
     assert_nix_ast_equal(
         expect_binding(derivation.scope, "effectiveClosureContract").value,
         "closureContract // { inherit sourceHash; }",
+    )
+    assert_nix_ast_equal(
+        expect_binding(derivation.scope, "fetchGitHubDependency").value,
+        FunctionDefinition(
+            argument_set=Identifier(name="dependency"),
+            output=FunctionCall(
+                name=Identifier(name="fetchFromGitHub"),
+                argument=AttributeSet(
+                    values=[
+                        Inherit(
+                            from_expression=Identifier(name="dependency"),
+                            names=[
+                                Identifier(name="owner"),
+                                Identifier(name="repo"),
+                                Identifier(name="hash"),
+                            ],
+                            name_gaps=[" ", " "],
+                        ),
+                        Binding(
+                            name="rev",
+                            value=identifier_attr_path("dependency", "commit"),
+                        ),
+                    ]
+                ),
+            ),
+        ),
     )
     assert_nix_ast_equal(
         expect_binding(derivation.scope, "abseilCppSrc").value,
@@ -2007,17 +2624,17 @@ def test_paseo_onnxruntime_helper_declares_the_reviewed_source_closure() -> None
     assert "protobuf_32" in formal_names
     assert "protobuf" not in formal_names
     assert_nix_ast_equal(
-        expect_binding(derivation.scope, "protobufExact").value,
+        expect_binding(derivation.scope, "protobuf32").value,
         """
         assert lib.assertMsg
-          (lib.getVersion protobuf_32 == closureContract.dependencies.protobuf.version)
-          "Paseo ONNX Runtime requires protobuf ${closureContract.dependencies.protobuf.version}";
+          (lib.versions.major (lib.getVersion protobuf_32) == "32")
+          "Paseo ONNX Runtime requires the protobuf_32 major version lane";
         protobuf_32
         """,
     )
     assert_nix_ast_equal(
         expect_binding(attributes.values, "nativeBuildInputs").value,
-        "[ cmake pkg-config protobufExact python3 ]",
+        "[ cmake pkg-config protobuf32 python3 ]",
     )
     assert_nix_ast_equal(
         expect_binding(attributes.values, "buildInputs").value,
@@ -2029,7 +2646,7 @@ def test_paseo_onnxruntime_helper_declares_the_reviewed_source_closure() -> None
           libpng
           microsoft-gsl
           nlohmann_json
-          protobufExact
+          protobuf32
           zlib
         ]
         ++ lib.optional (lib.meta.availableOn stdenv.hostPlatform cpuinfo) cpuinfo
@@ -2042,14 +2659,14 @@ def test_paseo_onnxruntime_helper_declares_the_reviewed_source_closure() -> None
     )
     assert_nix_ast_equal(
         cmake_flags.value[13],
-        '(lib.cmakeFeature "ONNX_CUSTOM_PROTOC_EXECUTABLE" (lib.getExe protobufExact))',
+        '(lib.cmakeFeature "ONNX_CUSTOM_PROTOC_EXECUTABLE" (lib.getExe protobuf32))',
     )
     assert_nix_ast_equal(
         expect_binding(attributes.values, "passthru").value,
         """
         {
           paseoExactSource = effectiveClosureContract;
-          protobuf = protobufExact;
+          protobuf = protobuf32;
         }
         """,
     )

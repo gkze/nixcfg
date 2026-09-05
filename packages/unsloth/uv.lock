@@ -11,6 +11,9 @@ required-markers = [
     "platform_machine == 'arm64' and sys_platform == 'darwin'",
 ]
 
+[options]
+exclude-newer = "2026-09-02T13:07:26.568015Z"
+
 [manifest]
 overrides = [
     { name = "triton", marker = "sys_platform == 'linux'", specifier = ">=3.0.0" },
@@ -1165,14 +1168,14 @@ wheels = [
 
 [[package]]
 name = "nixcfg-unsloth-runtime"
-version = "0.1.804b0"
+version = "0.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "unsloth", extra = ["studio"] },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "unsloth", extras = ["studio"], url = "https://files.pythonhosted.org/packages/1b/5c/7645fb279567ab0f81751c284b8c916673e7721aee87acd841478cfab8b7/unsloth-2026.8.22.tar.gz" }]
+requires-dist = [{ name = "unsloth", extras = ["studio"], url = "https://files.pythonhosted.org/packages/d0/57/ff53f570f7641218eb969137f5eea2dbf8c5b951893498881ebd9ab7942c/unsloth-2026.9.2.tar.gz" }]
 
 [[package]]
 name = "numpy"
@@ -1942,8 +1945,8 @@ wheels = [
 
 [[package]]
 name = "unsloth"
-version = "2026.8.22"
-source = { url = "https://files.pythonhosted.org/packages/1b/5c/7645fb279567ab0f81751c284b8c916673e7721aee87acd841478cfab8b7/unsloth-2026.8.22.tar.gz" }
+version = "2026.9.2"
+source = { url = "https://files.pythonhosted.org/packages/d0/57/ff53f570f7641218eb969137f5eea2dbf8c5b951893498881ebd9ab7942c/unsloth-2026.9.2.tar.gz" }
 dependencies = [
     { name = "accelerate" },
     { name = "bitsandbytes" },
@@ -1973,7 +1976,7 @@ dependencies = [
     { name = "unsloth-zoo" },
     { name = "wheel" },
 ]
-sdist = { hash = "sha256:2b7c1bb5baaf30af625f7aa72e101409453abf063032301f1cdfafdf0574c9de" }
+sdist = { hash = "sha256:c519ef9f1a5ce3f468eb196ff3906d88fc972667f4161f8d2630b7a8380817d1" }
 
 [package.optional-dependencies]
 studio = [
@@ -2436,10 +2439,10 @@ requires-dist = [
     { name = "unsloth", extras = ["triton"], marker = "extra == 'amd'" },
     { name = "unsloth", extras = ["triton"], marker = "extra == 'colab-new'" },
     { name = "unsloth-zoo", specifier = ">=2026.8.16" },
-    { name = "unsloth-zoo", marker = "extra == 'amd'", specifier = ">=2026.8.16" },
-    { name = "unsloth-zoo", marker = "extra == 'colab-new'", specifier = ">=2026.8.16" },
+    { name = "unsloth-zoo", marker = "extra == 'amd'", specifier = ">=2026.9.1" },
+    { name = "unsloth-zoo", marker = "extra == 'colab-new'", specifier = ">=2026.9.1" },
     { name = "unsloth-zoo", marker = "extra == 'huggingface'", specifier = ">=2026.8.16" },
-    { name = "unsloth-zoo", marker = "extra == 'huggingfacenotorch'", specifier = ">=2026.8.16" },
+    { name = "unsloth-zoo", marker = "extra == 'huggingfacenotorch'", specifier = ">=2026.9.1" },
     { name = "urllib3", marker = "extra == 'studio'", specifier = ">=2.3.0" },
     { name = "uvicorn", marker = "python_full_version >= '3.10' and extra == 'studio'", specifier = "==0.52.1" },
     { name = "uvicorn", marker = "python_full_version < '3.10' and extra == 'studio'", specifier = "==0.39.0" },

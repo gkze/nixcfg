@@ -1,56 +1,6 @@
 {
   "hashes": [
     {
-      "hash": "sha256-uR4S7GaV+WnM95LZXcfqXaNfOZzsK+1NeyXYofVFtd4=",
-      "hashType": "sha256",
-      "platform": "38.7.2:aarch64-darwin"
-    },
-    {
-      "hash": "sha256-c+h8Qy+lK5AF4S4jofz/z62oU94ZSS+QXFDbtG/XeN8=",
-      "hashType": "sha256",
-      "platform": "38.7.2:aarch64-linux"
-    },
-    {
-      "hash": "sha256-lQQPQhKzpjjinmHBlTfm86LKjSsP1KVB2a6Aw3BAI7g=",
-      "hashType": "sha256",
-      "platform": "38.7.2:headers"
-    },
-    {
-      "hash": "sha256-RZ3QXwDCnUNREllvh7xb0K6xZ5bf8HROVCEIZBeHfSQ=",
-      "hashType": "sha256",
-      "platform": "38.7.2:x86_64-darwin"
-    },
-    {
-      "hash": "sha256-/kKM0hJoDh1t9h+mfvwmC5Ih0InHoUyYY/GLy+rOVig=",
-      "hashType": "sha256",
-      "platform": "38.7.2:x86_64-linux"
-    },
-    {
-      "hash": "sha256-8oZvO4TgvbejMz9UAfgkSuFLNPXOZ+1F8lmjrDk7Ooc=",
-      "hashType": "sha256",
-      "platform": "40.1.0:aarch64-darwin"
-    },
-    {
-      "hash": "sha256-Twf/AERacHKJ1G9S3/1vqlBKS2A1Xdsg3zb/japc/HA=",
-      "hashType": "sha256",
-      "platform": "40.1.0:aarch64-linux"
-    },
-    {
-      "hash": "sha256-9hXTUMbgcX99JHRovCzBeD4q/oXCQdLJkhXi3hgkEDE=",
-      "hashType": "sha256",
-      "platform": "40.1.0:headers"
-    },
-    {
-      "hash": "sha256-hCVMai3Bv/hcjE3jVyIYEB1oMUwVwokmk6GZKxk66Gs=",
-      "hashType": "sha256",
-      "platform": "40.1.0:x86_64-darwin"
-    },
-    {
-      "hash": "sha256-JvdnXMED9soKESLYLzC+11RMGl1VB6aYCZKuB+yHahI=",
-      "hashType": "sha256",
-      "platform": "40.1.0:x86_64-linux"
-    },
-    {
       "hash": "sha256-6ImzXjmfN09dypMhlSh7NzxLQ/i/JC5Qw1+Ip1FRGhM=",
       "hashType": "sha256",
       "platform": "40.10.2:aarch64-darwin"
@@ -74,56 +24,6 @@
       "hash": "sha256-AkYgFABgCsCJxRo28VqARbXbcjukK4ZPcyqbTkhzHpc=",
       "hashType": "sha256",
       "platform": "40.10.2:x86_64-linux"
-    },
-    {
-      "hash": "sha256-zPbPigk/IAwO2viH++f1u4hl6+f6SL7WEWUpP01rdlU=",
-      "hashType": "sha256",
-      "platform": "40.7.0:aarch64-darwin"
-    },
-    {
-      "hash": "sha256-/dUAOLRDa5d1hdo94KTxGK79h/Ex7jQqZR1h6R6qFQs=",
-      "hashType": "sha256",
-      "platform": "40.7.0:aarch64-linux"
-    },
-    {
-      "hash": "sha256-eNxMR7UthxvYyDurji/AH3PLdxJ95gsUhbiGsrEM+MM=",
-      "hashType": "sha256",
-      "platform": "40.7.0:headers"
-    },
-    {
-      "hash": "sha256-BfpYmYm1mfrI1voXCVpXktK0vMSqdFpjiRbqWmwK/bk=",
-      "hashType": "sha256",
-      "platform": "40.7.0:x86_64-darwin"
-    },
-    {
-      "hash": "sha256-D3utkbADhMTStZ6++QRBW+lb8G7b/llfD8tX9R/RR+Q=",
-      "hashType": "sha256",
-      "platform": "40.7.0:x86_64-linux"
-    },
-    {
-      "hash": "sha256-ekAMKK66e99pH/A9KmILdsf4x1/frB9FQ6jcE7A5+iQ=",
-      "hashType": "sha256",
-      "platform": "40.8.5:aarch64-darwin"
-    },
-    {
-      "hash": "sha256-WvAHPFKo3HKeEYNAtfUMSykyvZS6mS4cU4D+FUUzA3M=",
-      "hashType": "sha256",
-      "platform": "40.8.5:aarch64-linux"
-    },
-    {
-      "hash": "sha256-O5ZK+FTxrI25WmtG3EQ+jVwhd1/YKngm7f3EhT14LMs=",
-      "hashType": "sha256",
-      "platform": "40.8.5:headers"
-    },
-    {
-      "hash": "sha256-JgDYmy/6RSu13C/hHw93Ga4AEnP29saJiBQJhuX5VQg=",
-      "hashType": "sha256",
-      "platform": "40.8.5:x86_64-darwin"
-    },
-    {
-      "hash": "sha256-O85u5OTkgffObQvjhPbFOc4W4Lm39GEVrsZRZ3D2wm0=",
-      "hashType": "sha256",
-      "platform": "40.8.5:x86_64-linux"
     },
     {
       "hash": "sha256-6DqXt8cBfsNunhn1sgQwdp6J5wHCszfaJoXBOFT+cPM=",
@@ -151,29 +51,29 @@
       "platform": "40.9.3:x86_64-linux"
     },
     {
-      "hash": "sha256-9Q17q5jF5R6s4fNYrY0kyYTpZMw/X1gy0Lz4VpTTh/A=",
+      "hash": "sha256-iWHNtXyVwHP/R3C8kwmVODL0R1dfGpEScBD3tIcIhLM=",
       "hashType": "sha256",
-      "platform": "41.0.0:aarch64-darwin"
+      "platform": "41.10.3:aarch64-darwin"
     },
     {
-      "hash": "sha256-2CXR9IJJOmbFN+MTtfEmxhw9+3hSMtM3FsdK/dGIM94=",
+      "hash": "sha256-HBj06aZ6a1r/szWW2MiG81Bj4EOcvveab8cDfRR9G7s=",
       "hashType": "sha256",
-      "platform": "41.0.0:aarch64-linux"
+      "platform": "41.10.3:aarch64-linux"
     },
     {
-      "hash": "sha256-4F539t9Ljduj7tigHldnczPzvVMdytvJN0PRbCFgef0=",
+      "hash": "sha256-udZXsWXfyV1aW0xSRw/wmfTRXEI4PJvRjqRCHxo8BPg=",
       "hashType": "sha256",
-      "platform": "41.0.0:headers"
+      "platform": "41.10.3:headers"
     },
     {
-      "hash": "sha256-4QDDdb+TTZ2EoY+vhOdd5Ypv+9rgGNcyoj+/GeUSZfk=",
+      "hash": "sha256-chivFLSEV+0SjzM5K/BJdyUwDbl9R0tsynI38MRNhH0=",
       "hashType": "sha256",
-      "platform": "41.0.0:x86_64-darwin"
+      "platform": "41.10.3:x86_64-darwin"
     },
     {
-      "hash": "sha256-oo1atjj6BlhTyA1fJ+qdfsf4Yh2SQiAPdHeYxe0xk9Q=",
+      "hash": "sha256-MzwIxVE4cFaWaDip9VyxDPggPmjKmeg5gs5T3dQDg+k=",
       "hashType": "sha256",
-      "platform": "41.0.0:x86_64-linux"
+      "platform": "41.10.3:x86_64-linux"
     },
     {
       "hash": "sha256-4BhoT5bIc0FfvqRxP8fblrbR4r09tFE+K4wYh+yDpxk=",
@@ -224,31 +124,6 @@
       "hash": "sha256-BMx/1UAMCM2Y4sxcXl9gzrtLcvplAgqK4qiNj0gyhxA=",
       "hashType": "sha256",
       "platform": "41.2.1:x86_64-linux"
-    },
-    {
-      "hash": "sha256-CRpYQQo1O39/xYmMy2zDHG5ep6zYyu30SIM3E1Y++uI=",
-      "hashType": "sha256",
-      "platform": "41.5.0:aarch64-darwin"
-    },
-    {
-      "hash": "sha256-HQyJaYvMMCnQwZeiFWecFMZatnCGxFKdXqkCgPPVvMI=",
-      "hashType": "sha256",
-      "platform": "41.5.0:aarch64-linux"
-    },
-    {
-      "hash": "sha256-9sMU6WAr+N3BHRoLb5JUSeTeGzawCziGlLvhhKXcL0k=",
-      "hashType": "sha256",
-      "platform": "41.5.0:headers"
-    },
-    {
-      "hash": "sha256-MIW1L8kOgcDD7X9Zt1n3ELF2xaiYnO1kpRYY6P0+ii4=",
-      "hashType": "sha256",
-      "platform": "41.5.0:x86_64-darwin"
-    },
-    {
-      "hash": "sha256-HVNkeU3/4kk9dKl1XUm6N+zf09Gajio4NJzZN0rbGdQ=",
-      "hashType": "sha256",
-      "platform": "41.5.0:x86_64-linux"
     },
     {
       "hash": "sha256-PenF66HPeaUSBYE01l7P+JliM3X/FBnf8v4RNGpcRd0=",
@@ -326,56 +201,6 @@
       "platform": "42.3.3:x86_64-linux"
     },
     {
-      "hash": "sha256-E7fDeCrHO6ZEEFQkEKLQbwIsUVcw6XxRSa/yGQpsjoA=",
-      "hashType": "sha256",
-      "platform": "42.7.1:aarch64-darwin"
-    },
-    {
-      "hash": "sha256-uh+AVaa2AenNdxp8dQ7Te5EsSGpR9R5YZU7ZQUvImLo=",
-      "hashType": "sha256",
-      "platform": "42.7.1:aarch64-linux"
-    },
-    {
-      "hash": "sha256-bX7A+n4uauqBXjNoekq4/wv+2jlQoYqTKeA7eLBZLao=",
-      "hashType": "sha256",
-      "platform": "42.7.1:headers"
-    },
-    {
-      "hash": "sha256-ovNhtmsktpRxWwV6nUuowwRXzplOGazZGFwTFTm8iQA=",
-      "hashType": "sha256",
-      "platform": "42.7.1:x86_64-darwin"
-    },
-    {
-      "hash": "sha256-6FsoJF3qp1w8Tyz12ghPTH++3VrxYwxZqCfEGsH14a8=",
-      "hashType": "sha256",
-      "platform": "42.7.1:x86_64-linux"
-    },
-    {
-      "hash": "sha256-IZPD4LnlLoBR2ozDaaAcKJOhhb0vuLc8zMFFHWjHFbY=",
-      "hashType": "sha256",
-      "platform": "42.9.1:aarch64-darwin"
-    },
-    {
-      "hash": "sha256-YNdNSsIGXN9T7Ms1OdCpd1aQ1c1ejF0z/H5HbuyXULA=",
-      "hashType": "sha256",
-      "platform": "42.9.1:aarch64-linux"
-    },
-    {
-      "hash": "sha256-w3uCtYSN3dHKftfTKNBBeMtI8xSSPUuhXcw7IRrn+9U=",
-      "hashType": "sha256",
-      "platform": "42.9.1:headers"
-    },
-    {
-      "hash": "sha256-JRxZ7CAY3Z6zfp6YtnOK//OlnokBjYJHcG1vzACiGoI=",
-      "hashType": "sha256",
-      "platform": "42.9.1:x86_64-darwin"
-    },
-    {
-      "hash": "sha256-lFewpgghgXNFmoe0bWsI3DLIvTtRlUOa70TF43QljaA=",
-      "hashType": "sha256",
-      "platform": "42.9.1:x86_64-linux"
-    },
-    {
       "hash": "sha256-7pOdFWTYPWEDKzs8sjr05GAFpJAMkfBpX37Xk/DOboM=",
       "hashType": "sha256",
       "platform": "43.3.0:aarch64-darwin"
@@ -424,7 +249,89 @@
       "hash": "sha256-fF95GLyudKBagUVDlA6yhGnAVe2qPPz0HQ/xeHsxTFI=",
       "hashType": "sha256",
       "platform": "43.4.0:x86_64-linux"
+    },
+    {
+      "hash": "sha256-/jysjL/Zuhc5+sbGkWbPMISHQfk8viUdgArm73zrtks=",
+      "hashType": "sha256",
+      "platform": "43.4.1:aarch64-darwin"
+    },
+    {
+      "hash": "sha256-nitc+9OH4TjwbHuxmzmbs+5IfbtBECFd8JfZToBDGJI=",
+      "hashType": "sha256",
+      "platform": "43.4.1:aarch64-linux"
+    },
+    {
+      "hash": "sha256-G2qJv1Jo9mV19uiXzKrCdvmFx4Qr0GP4rFkTKjAi9GA=",
+      "hashType": "sha256",
+      "platform": "43.4.1:headers"
+    },
+    {
+      "hash": "sha256-T9DxgmZgqUIWoGM2AKPD4s2H7p5LxvDh7fcXrY4wwQs=",
+      "hashType": "sha256",
+      "platform": "43.4.1:x86_64-darwin"
+    },
+    {
+      "hash": "sha256-edTv1p8Mzx/BGJHqUHUynHs/rdrXmgjZ+zlbvWMWms8=",
+      "hashType": "sha256",
+      "platform": "43.4.1:x86_64-linux"
     }
   ],
+  "urls": {
+    "40.10.2:aarch64-darwin": "https://github.com/electron/electron/releases/download/v40.10.2/electron-v40.10.2-darwin-arm64.zip",
+    "40.10.2:aarch64-linux": "https://github.com/electron/electron/releases/download/v40.10.2/electron-v40.10.2-linux-arm64.zip",
+    "40.10.2:headers": "https://artifacts.electronjs.org/headers/dist/v40.10.2/node-v40.10.2-headers.tar.gz",
+    "40.10.2:x86_64-darwin": "https://github.com/electron/electron/releases/download/v40.10.2/electron-v40.10.2-darwin-x64.zip",
+    "40.10.2:x86_64-linux": "https://github.com/electron/electron/releases/download/v40.10.2/electron-v40.10.2-linux-x64.zip",
+    "40.9.3:aarch64-darwin": "https://github.com/electron/electron/releases/download/v40.9.3/electron-v40.9.3-darwin-arm64.zip",
+    "40.9.3:aarch64-linux": "https://github.com/electron/electron/releases/download/v40.9.3/electron-v40.9.3-linux-arm64.zip",
+    "40.9.3:headers": "https://artifacts.electronjs.org/headers/dist/v40.9.3/node-v40.9.3-headers.tar.gz",
+    "40.9.3:x86_64-darwin": "https://github.com/electron/electron/releases/download/v40.9.3/electron-v40.9.3-darwin-x64.zip",
+    "40.9.3:x86_64-linux": "https://github.com/electron/electron/releases/download/v40.9.3/electron-v40.9.3-linux-x64.zip",
+    "41.10.3:aarch64-darwin": "https://github.com/electron/electron/releases/download/v41.10.3/electron-v41.10.3-darwin-arm64.zip",
+    "41.10.3:aarch64-linux": "https://github.com/electron/electron/releases/download/v41.10.3/electron-v41.10.3-linux-arm64.zip",
+    "41.10.3:headers": "https://artifacts.electronjs.org/headers/dist/v41.10.3/node-v41.10.3-headers.tar.gz",
+    "41.10.3:x86_64-darwin": "https://github.com/electron/electron/releases/download/v41.10.3/electron-v41.10.3-darwin-x64.zip",
+    "41.10.3:x86_64-linux": "https://github.com/electron/electron/releases/download/v41.10.3/electron-v41.10.3-linux-x64.zip",
+    "41.2.0:aarch64-darwin": "https://github.com/electron/electron/releases/download/v41.2.0/electron-v41.2.0-darwin-arm64.zip",
+    "41.2.0:aarch64-linux": "https://github.com/electron/electron/releases/download/v41.2.0/electron-v41.2.0-linux-arm64.zip",
+    "41.2.0:headers": "https://artifacts.electronjs.org/headers/dist/v41.2.0/node-v41.2.0-headers.tar.gz",
+    "41.2.0:x86_64-darwin": "https://github.com/electron/electron/releases/download/v41.2.0/electron-v41.2.0-darwin-x64.zip",
+    "41.2.0:x86_64-linux": "https://github.com/electron/electron/releases/download/v41.2.0/electron-v41.2.0-linux-x64.zip",
+    "41.2.1:aarch64-darwin": "https://github.com/electron/electron/releases/download/v41.2.1/electron-v41.2.1-darwin-arm64.zip",
+    "41.2.1:aarch64-linux": "https://github.com/electron/electron/releases/download/v41.2.1/electron-v41.2.1-linux-arm64.zip",
+    "41.2.1:headers": "https://artifacts.electronjs.org/headers/dist/v41.2.1/node-v41.2.1-headers.tar.gz",
+    "41.2.1:x86_64-darwin": "https://github.com/electron/electron/releases/download/v41.2.1/electron-v41.2.1-darwin-x64.zip",
+    "41.2.1:x86_64-linux": "https://github.com/electron/electron/releases/download/v41.2.1/electron-v41.2.1-linux-x64.zip",
+    "41.7.0:aarch64-darwin": "https://github.com/electron/electron/releases/download/v41.7.0/electron-v41.7.0-darwin-arm64.zip",
+    "41.7.0:aarch64-linux": "https://github.com/electron/electron/releases/download/v41.7.0/electron-v41.7.0-linux-arm64.zip",
+    "41.7.0:headers": "https://artifacts.electronjs.org/headers/dist/v41.7.0/node-v41.7.0-headers.tar.gz",
+    "41.7.0:x86_64-darwin": "https://github.com/electron/electron/releases/download/v41.7.0/electron-v41.7.0-darwin-x64.zip",
+    "41.7.0:x86_64-linux": "https://github.com/electron/electron/releases/download/v41.7.0/electron-v41.7.0-linux-x64.zip",
+    "42.0.1:aarch64-darwin": "https://github.com/electron/electron/releases/download/v42.0.1/electron-v42.0.1-darwin-arm64.zip",
+    "42.0.1:aarch64-linux": "https://github.com/electron/electron/releases/download/v42.0.1/electron-v42.0.1-linux-arm64.zip",
+    "42.0.1:headers": "https://artifacts.electronjs.org/headers/dist/v42.0.1/node-v42.0.1-headers.tar.gz",
+    "42.0.1:x86_64-darwin": "https://github.com/electron/electron/releases/download/v42.0.1/electron-v42.0.1-darwin-x64.zip",
+    "42.0.1:x86_64-linux": "https://github.com/electron/electron/releases/download/v42.0.1/electron-v42.0.1-linux-x64.zip",
+    "42.3.3:aarch64-darwin": "https://github.com/electron/electron/releases/download/v42.3.3/electron-v42.3.3-darwin-arm64.zip",
+    "42.3.3:aarch64-linux": "https://github.com/electron/electron/releases/download/v42.3.3/electron-v42.3.3-linux-arm64.zip",
+    "42.3.3:headers": "https://artifacts.electronjs.org/headers/dist/v42.3.3/node-v42.3.3-headers.tar.gz",
+    "42.3.3:x86_64-darwin": "https://github.com/electron/electron/releases/download/v42.3.3/electron-v42.3.3-darwin-x64.zip",
+    "42.3.3:x86_64-linux": "https://github.com/electron/electron/releases/download/v42.3.3/electron-v42.3.3-linux-x64.zip",
+    "43.3.0:aarch64-darwin": "https://github.com/electron/electron/releases/download/v43.3.0/electron-v43.3.0-darwin-arm64.zip",
+    "43.3.0:aarch64-linux": "https://github.com/electron/electron/releases/download/v43.3.0/electron-v43.3.0-linux-arm64.zip",
+    "43.3.0:headers": "https://artifacts.electronjs.org/headers/dist/v43.3.0/node-v43.3.0-headers.tar.gz",
+    "43.3.0:x86_64-darwin": "https://github.com/electron/electron/releases/download/v43.3.0/electron-v43.3.0-darwin-x64.zip",
+    "43.3.0:x86_64-linux": "https://github.com/electron/electron/releases/download/v43.3.0/electron-v43.3.0-linux-x64.zip",
+    "43.4.0:aarch64-darwin": "https://github.com/electron/electron/releases/download/v43.4.0/electron-v43.4.0-darwin-arm64.zip",
+    "43.4.0:aarch64-linux": "https://github.com/electron/electron/releases/download/v43.4.0/electron-v43.4.0-linux-arm64.zip",
+    "43.4.0:headers": "https://artifacts.electronjs.org/headers/dist/v43.4.0/node-v43.4.0-headers.tar.gz",
+    "43.4.0:x86_64-darwin": "https://github.com/electron/electron/releases/download/v43.4.0/electron-v43.4.0-darwin-x64.zip",
+    "43.4.0:x86_64-linux": "https://github.com/electron/electron/releases/download/v43.4.0/electron-v43.4.0-linux-x64.zip",
+    "43.4.1:aarch64-darwin": "https://github.com/electron/electron/releases/download/v43.4.1/electron-v43.4.1-darwin-arm64.zip",
+    "43.4.1:aarch64-linux": "https://github.com/electron/electron/releases/download/v43.4.1/electron-v43.4.1-linux-arm64.zip",
+    "43.4.1:headers": "https://artifacts.electronjs.org/headers/dist/v43.4.1/node-v43.4.1-headers.tar.gz",
+    "43.4.1:x86_64-darwin": "https://github.com/electron/electron/releases/download/v43.4.1/electron-v43.4.1-darwin-x64.zip",
+    "43.4.1:x86_64-linux": "https://github.com/electron/electron/releases/download/v43.4.1/electron-v43.4.1-linux-x64.zip"
+  },
   "version": "inventory-v1"
 }

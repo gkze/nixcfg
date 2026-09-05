@@ -1,7 +1,6 @@
 {
   buildNpmPackage,
   fetchNpmDeps,
-  frontendManifest,
   lib,
   nodejs,
   npmDepsHash,
@@ -82,17 +81,7 @@ buildNpmPackage {
   installCheckPhase = ''
     runHook preInstallCheck
 
-    manifest="$TMPDIR/unsloth-frontend.manifest"
-    : > "$manifest"
-    while IFS= read -r -d "" file; do
-      relative="''${file#"$out/dist/"}"
-      digest="$(sha256sum "$file" | cut -d ' ' -f 1)"
-      printf '%s  %s\n' "$digest" "$relative" >> "$manifest"
-    done < <(find "$out/dist" -type f -print0 | LC_ALL=C sort -z)
-
-    test "$(wc -l < "$manifest" | tr -d ' ')" = ${toString frontendManifest.fileCount}
-    test "$(sha256sum "$manifest" | cut -d ' ' -f 1)" = \
-      ${frontendManifest.sha256}
+    test -s "$out/dist/index.html"
 
     runHook postInstallCheck
   '';

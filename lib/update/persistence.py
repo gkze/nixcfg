@@ -14,9 +14,10 @@ import sys
 import tempfile
 from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from threading import Lock
-from typing import TYPE_CHECKING, Self, cast
+from typing import TYPE_CHECKING, Never, Self, cast
 
 from filelock import FileLock, Timeout
 
@@ -65,8 +66,55 @@ class _WorkspaceSnapshotError(RuntimeError):
     """Internal signal that a path changed while its state was being read."""
 
 
+class UpdatePromotionState(StrEnum):
+    """Authoritative live-checkout state after promotion recovery."""
+
+    PROMOTED = "promoted"
+    ROLLED_BACK = "rolled_back"
+    UNKNOWN = "unknown"
+
+
+class _CommittedCleanupState(StrEnum):
+    """Outcome of cleaning one retained original after durable commit."""
+
+    COMPLETE = "complete"
+    PENDING = "pending"
+    CONFLICT = "conflict"
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateValidationSnapshot:
+    """One captured source tree and the changes represented by that tree."""
+
+    root: Path
+    changed_paths: tuple[Path, ...]
+
+
 class UpdateWorkspaceError(RuntimeError):
     """Base error for isolated update workspace promotion failures."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        promotion_state: UpdatePromotionState | None = None,
+    ) -> None:
+        """Record the recovered candidate state when promotion had started."""
+        self.promotion_state = promotion_state
+        super().__init__(message)
+
+
+class UpdateWorkspacePromotionError(UpdateWorkspaceError):
+    """Expected promotion I/O failure with an authoritative recovery state."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        promotion_state: UpdatePromotionState,
+    ) -> None:
+        """Require promotion failures to declare their recovered state."""
+        super().__init__(message, promotion_state=promotion_state)
 
 
 class UpdateWorkspaceUnexpectedPathsError(UpdateWorkspaceError):
@@ -82,11 +130,19 @@ class UpdateWorkspaceUnexpectedPathsError(UpdateWorkspaceError):
 class UpdateWorkspaceConflictError(UpdateWorkspaceError):
     """Raised when promotion or rollback would overwrite an external edit."""
 
-    def __init__(self, paths: Iterable[Path]) -> None:
+    def __init__(
+        self,
+        paths: Iterable[Path],
+        *,
+        promotion_state: UpdatePromotionState | None = None,
+    ) -> None:
         """Report paths preserved because their live state diverged."""
         self.paths = tuple(paths)
         joined = ", ".join(os.fspath(path) for path in self.paths)
-        super().__init__(f"Update workspace conflict; preserved paths: {joined}")
+        super().__init__(
+            f"Update workspace conflict; preserved paths: {joined}",
+            promotion_state=promotion_state,
+        )
 
 
 def _git_binary() -> str:
@@ -122,10 +178,10 @@ def _run_git(root: Path, *args: str) -> None:
     )
 
 
-def _git_common_dir(root: Path) -> Path:
+def _git_metadata_dir(root: Path, option: str) -> Path:
     git = _git_binary()
     result = subprocess.run(  # noqa: S603 -- fixed local Git operation
-        [git, "rev-parse", "--git-common-dir"],
+        [git, "rev-parse", option],
         cwd=root,
         check=True,
         capture_output=True,
@@ -133,6 +189,16 @@ def _git_common_dir(root: Path) -> Path:
     )
     path = Path(result.stdout.strip())
     return path.resolve() if path.is_absolute() else (root / path).resolve()
+
+
+def _git_common_dir(root: Path) -> Path:
+    """Return metadata shared by every linked worktree for repository locking."""
+    return _git_metadata_dir(root, "--git-common-dir")
+
+
+def _git_dir(root: Path) -> Path:
+    """Return metadata owned by one worktree for its recovery journal."""
+    return _git_metadata_dir(root, "--git-dir")
 
 
 def _stat_fingerprint(metadata: os.stat_result) -> tuple[int, ...]:
@@ -289,6 +355,37 @@ def _snapshot_source_view(
             return second
     msg = f"Update source changed while creating a stable snapshot: {root}"
     raise UpdateWorkspaceError(msg)
+
+
+@contextmanager
+def _materialized_source_view(
+    source_root: Path,
+    source_view: Mapping[Path, _WorkspacePathState],
+) -> Iterator[Path]:
+    """Materialize one already-stable source view without rereading its source."""
+    with tempfile.TemporaryDirectory(prefix="nixcfg-source-") as temporary:
+        root = Path(temporary, "repo").resolve()
+        root.mkdir()
+        for path, state in source_view.items():
+            _validate_workspace_symlink(source_root, path, state)
+            _install_workspace_state(root / path, state)
+        yield root
+
+
+@contextmanager
+def visible_source_snapshot(repo_root: Path | None = None) -> Iterator[Path]:
+    """Yield an exact, ``.git``-free copy of the complete visible source view."""
+    live_root = (
+        get_repo_root() if repo_root is None else repo_root.expanduser().resolve()
+    )
+    live_descriptor = os.open(live_root, _OPEN_DIRECTORY_FLAGS)
+    try:
+        source_view = _snapshot_source_view(live_root, live_descriptor)
+    finally:
+        os.close(live_descriptor)
+
+    with _materialized_source_view(live_root, source_view) as root:
+        yield root
 
 
 def _restore_process_context(cwd: Path, repo_root: str | None) -> None:
@@ -548,7 +645,7 @@ def _parse_fingerprint(value: object) -> _OptionalFingerprint:
     return _StateFingerprint(kind=kind, mode=mode, sha256=digest)
 
 
-def _parse_transaction(data: bytes, expected_root: Path) -> _Transaction:
+def _parse_transaction(data: bytes, expected_root: Path | None) -> _Transaction:
     try:
         value = json.loads(data)
         if not isinstance(value, dict) or value.get("version") != 1:
@@ -558,7 +655,9 @@ def _parse_transaction(data: bytes, expected_root: Path) -> _Transaction:
         raw_paths = value.get("paths")
         if (
             not isinstance(root_value, str)
-            or Path(root_value) != expected_root
+            or not Path(root_value).is_absolute()
+            or ".." in Path(root_value).parts
+            or (expected_root is not None and Path(root_value) != expected_root)
             or not isinstance(committed, bool)
             or not isinstance(raw_paths, list)
         ):
@@ -592,9 +691,11 @@ def _parse_transaction(data: bytes, expected_root: Path) -> _Transaction:
                 )
             )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-        msg = f"Invalid update transaction journal: {expected_root}"
+        msg = "Invalid update transaction journal"
+        if expected_root is not None:
+            msg = f"{msg}: {expected_root}"
         raise UpdateWorkspaceError(msg) from error
-    return _Transaction(expected_root, committed, tuple(records))
+    return _Transaction(Path(root_value), committed, tuple(records))
 
 
 def _fsync_directory_descriptor(descriptor: int) -> None:
@@ -641,7 +742,7 @@ def _remove_transaction(journal: Path) -> None:
         os.close(directory)
 
 
-def _read_transaction(journal: Path, root: Path) -> _Transaction | None:
+def _read_transaction(journal: Path, root: Path | None) -> _Transaction | None:
     try:
         descriptor = os.open(journal, _OPEN_FILE_FLAGS)
     except FileNotFoundError:
@@ -793,27 +894,27 @@ def _rollback_transaction_path(
 def _cleanup_committed_path(
     root_descriptor: int,
     record: _TransactionPath,
-) -> bool:
+) -> _CommittedCleanupState:
     """Remove an exact retained original after a durable commit marker."""
     canonical, retained, descriptor = _transaction_leaf_fingerprints(
         root_descriptor,
         record,
     )
     if descriptor is None:
-        return False
+        return _CommittedCleanupState.CONFLICT
     try:
         if canonical != record.produced:
-            return False
+            return _CommittedCleanupState.CONFLICT
         if retained is None:
-            return True
+            return _CommittedCleanupState.COMPLETE
         if retained != record.original:
-            return False
+            return _CommittedCleanupState.CONFLICT
         os.unlink(record.retained, dir_fd=descriptor)
         _fsync_directory_descriptor(descriptor)
     except OSError:
-        return False
+        return _CommittedCleanupState.PENDING
     else:
-        return True
+        return _CommittedCleanupState.COMPLETE
     finally:
         os.close(descriptor)
 
@@ -822,17 +923,28 @@ def _recover_transaction(
     journal: Path,
     root: Path,
     root_descriptor: int,
-) -> None:
+) -> bool | None:
     """Complete or roll back one journal after the repository lock is held."""
     transaction = _read_transaction(journal, root)
     if transaction is None:
-        return
+        return None
+    return _recover_loaded_transaction(journal, transaction, root_descriptor)
+
+
+def _recover_loaded_transaction(
+    journal: Path,
+    transaction: _Transaction,
+    root_descriptor: int,
+) -> bool:
+    """Recover validated state after its owner matches the open root descriptor."""
+    root = transaction.root
     try:
         conflicts = tuple(
             record.path
             for record in reversed(transaction.paths)
             if not (
                 _cleanup_committed_path(root_descriptor, record)
+                is _CommittedCleanupState.COMPLETE
                 if transaction.committed
                 else _rollback_transaction_path(root_descriptor, record)
             )
@@ -847,6 +959,86 @@ def _recover_transaction(
     except OSError as error:
         msg = f"Update transaction recovery cleanup failed: {root}"
         raise UpdateWorkspaceError(msg) from error
+    return transaction.committed
+
+
+def _recover_workspace_transactions(
+    journal: Path,
+    shared_journal: Path,
+    root: Path,
+    root_descriptor: int,
+) -> None:
+    """Reconcile old and current journal locations before capturing a baseline."""
+    if shared_journal != journal:
+        # Older linked-worktree runs stored their recovery authority in the
+        # common directory. A sibling's journal never authorizes our writes.
+        legacy = _read_transaction(shared_journal, None)
+        if legacy is not None and legacy.root == root:
+            if _read_transaction(journal, root) is not None:
+                msg = f"Conflicting update transaction journals for worktree: {root}"
+                raise UpdateWorkspaceError(msg)
+            _recover_loaded_transaction(shared_journal, legacy, root_descriptor)
+    _recover_transaction(journal, root, root_descriptor)
+
+
+def _recover_promotion_state(
+    journal: Path,
+    root: Path,
+    root_descriptor: int,
+    *,
+    original_error: BaseException,
+) -> UpdatePromotionState:
+    """Recover a failed promotion and classify the resulting live state."""
+    try:
+        recovered_committed = _recover_transaction(journal, root, root_descriptor)
+    except UpdateWorkspaceConflictError as recovery_error:
+        original_conflicts = (
+            original_error.paths
+            if isinstance(original_error, UpdateWorkspaceConflictError)
+            else ()
+        )
+        raise UpdateWorkspaceConflictError(
+            tuple(sorted(set(original_conflicts) | set(recovery_error.paths))),
+            promotion_state=UpdatePromotionState.UNKNOWN,
+        ) from original_error
+    except (OSError, UpdateWorkspaceError) as recovery_error:
+        msg = (
+            "Update promotion failed and recovery could not determine "
+            f"the live candidate state: {root}: {recovery_error}"
+        )
+        raise UpdateWorkspacePromotionError(
+            msg,
+            promotion_state=UpdatePromotionState.UNKNOWN,
+        ) from original_error
+    return (
+        UpdatePromotionState.PROMOTED
+        if recovered_committed is True
+        else UpdatePromotionState.ROLLED_BACK
+    )
+
+
+def _raise_recovered_promotion_error(
+    error: BaseException,
+    *,
+    root: Path,
+    promotion_state: UpdatePromotionState,
+) -> Never:
+    """Re-raise a failed promotion with its recovered state attached."""
+    if isinstance(error, UpdateWorkspaceConflictError):
+        raise UpdateWorkspaceConflictError(
+            error.paths,
+            promotion_state=promotion_state,
+        ) from error
+    if isinstance(error, OSError):
+        msg = (
+            "Update promotion failed; candidate state is "
+            f"{promotion_state.value}: {root}: {error}"
+        )
+        raise UpdateWorkspacePromotionError(
+            msg,
+            promotion_state=promotion_state,
+        ) from error
+    raise error  # pragma: no cover -- defensive re-raise preserves unknown failures
 
 
 def _create_candidate(
@@ -965,6 +1157,7 @@ class IsolatedUpdateWorkspace:
         self._live_descriptor: int | None = None
         self._workspace_descriptor: int | None = None
         self._journal: Path | None = None
+        self._validated_source_view: dict[Path, _WorkspacePathState] | None = None
 
     @property
     def root(self) -> Path:
@@ -995,8 +1188,13 @@ class IsolatedUpdateWorkspace:
             cleanup.callback(lock.release)
             live_descriptor = os.open(self._live_root, _OPEN_DIRECTORY_FLAGS)
             cleanup.callback(os.close, live_descriptor)
-            journal = common_dir / _TRANSACTION_JOURNAL
-            _recover_transaction(journal, self._live_root, live_descriptor)
+            journal = _git_dir(self._live_root) / _TRANSACTION_JOURNAL
+            _recover_workspace_transactions(
+                journal,
+                common_dir / _TRANSACTION_JOURNAL,
+                self._live_root,
+                live_descriptor,
+            )
             temporary = tempfile.TemporaryDirectory(prefix="nixcfg-update-")
             cleanup.callback(temporary.cleanup)
             root = Path(temporary.name, "repo").resolve()
@@ -1042,19 +1240,40 @@ class IsolatedUpdateWorkspace:
         self._resources = cleanup
         return self
 
-    def _workspace_changes(self) -> dict[Path, _WorkspacePathState]:
-        root = self.root
-        descriptor = cast("int", self._workspace_descriptor)
-        current = _snapshot_source_view(root, descriptor)
+    def _changes_from_source_view(
+        self,
+        current: Mapping[Path, _WorkspacePathState],
+    ) -> dict[Path, _WorkspacePathState]:
+        """Return candidate changes relative to the captured live baseline."""
         return {
             path: current.get(path)
             for path in sorted(self._start.keys() | current.keys())
             if current.get(path) != self._start.get(path)
         }
 
+    def _workspace_changes(self) -> dict[Path, _WorkspacePathState]:
+        root = self.root
+        descriptor = cast("int", self._workspace_descriptor)
+        return self._changes_from_source_view(
+            _snapshot_source_view(root, descriptor),
+        )
+
     def changed_paths(self) -> tuple[Path, ...]:
         """Return changed tracked and untracked, non-ignored relative paths."""
         return tuple(self._workspace_changes())
+
+    @contextmanager
+    def validation_snapshot(self) -> Iterator[UpdateValidationSnapshot]:
+        """Yield and remember the exact candidate source presented to validation."""
+        root = self.root
+        descriptor = cast("int", self._workspace_descriptor)
+        source_view = _snapshot_source_view(root, descriptor)
+        with _materialized_source_view(root, source_view) as snapshot_root:
+            yield UpdateValidationSnapshot(
+                root=snapshot_root,
+                changed_paths=tuple(self._changes_from_source_view(source_view)),
+            )
+        self._validated_source_view = source_view
 
     def _validated_changes(
         self,
@@ -1064,7 +1283,18 @@ class IsolatedUpdateWorkspace:
             msg = "Update workspace has already been committed"
             raise RuntimeError(msg)
         allowed = set(_normalize_workspace_paths(allowed_paths))
-        produced = self._workspace_changes()
+        descriptor = cast("int", self._workspace_descriptor)
+        current = _snapshot_source_view(self.root, descriptor)
+        if (
+            self._validated_source_view is not None
+            and current != self._validated_source_view
+        ):
+            msg = (
+                "Update candidate changed after root closure validation; "
+                "no changes were applied"
+            )
+            raise UpdateWorkspaceError(msg)
+        produced = self._changes_from_source_view(current)
         changed = tuple(produced)
         if unexpected := tuple(path for path in changed if path not in allowed):
             raise UpdateWorkspaceUnexpectedPathsError(unexpected)
@@ -1193,26 +1423,38 @@ class IsolatedUpdateWorkspace:
             )
             _write_transaction(journal, committed)
             self._committed = True
-            cleanup_complete = all(
-                _cleanup_committed_path(live_descriptor, record)
+            cleanup_results = tuple(
+                (record, _cleanup_committed_path(live_descriptor, record))
                 for record in transaction.paths
             )
-            if cleanup_complete:
+            if cleanup_conflicts := tuple(
+                record.path
+                for record, result in cleanup_results
+                if result is _CommittedCleanupState.CONFLICT
+            ):
+                raise UpdateWorkspaceConflictError(  # noqa: TRY301 -- recovery path
+                    cleanup_conflicts
+                )
+            if all(
+                result is _CommittedCleanupState.COMPLETE
+                for _record, result in cleanup_results
+            ):
                 with suppress(OSError):
                     _remove_transaction(journal)
-        except BaseException as error:
-            try:
-                _recover_transaction(journal, self._live_root, live_descriptor)
-            except UpdateWorkspaceConflictError as recovery_error:
-                original_conflicts = (
-                    error.paths
-                    if isinstance(error, UpdateWorkspaceConflictError)
-                    else ()
-                )
-                raise UpdateWorkspaceConflictError(
-                    tuple(sorted(set(original_conflicts) | set(recovery_error.paths)))
-                ) from error
-            raise
+        except BaseException as error:  # noqa: BLE001 -- every failure requires recovery
+            promotion_state = _recover_promotion_state(
+                journal,
+                self._live_root,
+                live_descriptor,
+                original_error=error,
+            )
+            if promotion_state is UpdatePromotionState.PROMOTED:
+                self._committed = True
+            _raise_recovered_promotion_error(
+                error,
+                root=self._live_root,
+                promotion_state=promotion_state,
+            )
         finally:
             for record in promoted:
                 os.close(record.parent_descriptor)
@@ -1230,6 +1472,7 @@ class IsolatedUpdateWorkspace:
             self._live_descriptor = None
             self._workspace_descriptor = None
             self._journal = None
+            self._validated_source_view = None
             self._resources = None
 
 
@@ -1441,8 +1684,11 @@ def persist_materialized_updates(
 
 __all__ = [
     "IsolatedUpdateWorkspace",
+    "UpdatePromotionState",
+    "UpdateValidationSnapshot",
     "UpdateWorkspaceConflictError",
     "UpdateWorkspaceError",
+    "UpdateWorkspacePromotionError",
     "UpdateWorkspaceUnexpectedPathsError",
     "flatten_artifact_updates",
     "merge_source_updates",

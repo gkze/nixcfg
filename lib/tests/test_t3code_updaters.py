@@ -12,6 +12,7 @@ from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.tests._updater_helpers import collect_events as _collect
@@ -19,6 +20,7 @@ from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import resolve_config
+from lib.update.electron_manifest import ElectronManifestMetadata
 from lib.update.events import (
     CommandResult,
     UpdateEvent,
@@ -42,6 +44,21 @@ if TYPE_CHECKING:
 
 HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 NEW_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+
+
+def _version_info(updater: object) -> VersionInfo:
+    if getattr(updater, "name", None) != "t3code-desktop":
+        return VersionInfo(version="main")
+    return VersionInfo(
+        version="main",
+        metadata=ElectronManifestMetadata(
+            node=FlakeLockNode(),
+            commit="a" * 40,
+            electron_version="41.5.0",
+            manifest_path="apps/desktop/package.json",
+            manifest_version="0.0.35",
+        ),
+    )
 
 
 async def _unexpected_inner() -> AsyncIterator[UpdateEvent]:
@@ -124,9 +141,10 @@ def test_t3code_desktop_updater_targets_the_main_t3code_input() -> None:
     assert module.T3CodeDesktopUpdater.supported_platforms == ("aarch64-darwin",)
     assert module.T3CodeDesktopUpdater.input_name == "t3code"
     assert module.T3CodeDesktopUpdater.hash_attr_path == ".node_modules"
-    assert module.T3CodeDesktopUpdater.source_pins == {
+    assert module.T3CodeDesktopUpdater.compatibility_pins == {
         "electronBuilderVersion": "26.15.7",
     }
+    assert module.T3CodeDesktopUpdater.compatibility_pin_rationale
 
 
 def test_shared_runtime_locks_use_one_candidate_view_during_desktop_pin_bump(
@@ -152,7 +170,7 @@ def test_shared_runtime_locks_use_one_candidate_view_during_desktop_pin_bump(
     materialized: list[tuple[str, str | None, tuple[GeneratedArtifact, ...]]] = []
 
     async def _fetch_latest(_self: object, _session: object) -> VersionInfo:
-        return VersionInfo(version="main")
+        return _version_info(_self)
 
     async def _not_latest(
         _self: object,
@@ -315,9 +333,11 @@ def test_t3code_updaters_hash_only_their_node_modules_attr(
         _fake_compute_fixed_output_hash,
     )
 
-    info = VersionInfo(version="main")
+    info = _version_info(updater)
     source_override = (
-        updater.build_result(info, []) if updater.source_pins is not None else None
+        updater.build_result(info, [])
+        if updater.compatibility_pins is not None
+        else None
     )
     events = _run(
         _collect(updater._compute_hash_for_system(info, system="aarch64-darwin"))
@@ -370,7 +390,7 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
     captured: dict[str, object] = {}
 
     async def _fetch_latest(_session: object) -> VersionInfo:
-        return VersionInfo(version="main")
+        return _version_info(updater)
 
     monkeypatch.setattr(updater, "fetch_latest", _fetch_latest)
 
@@ -456,8 +476,8 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
     assert result.hashes.entries[0].hash == NEW_HASH
     assert captured["fingerprint_source"] == package_name
     fingerprint_override = (
-        updater.build_result(VersionInfo(version="main"), [])
-        if updater.source_pins is not None
+        updater.build_result(_version_info(updater), [])
+        if updater.compatibility_pins is not None
         else None
     )
     assert_nix_ast_equal(
@@ -511,7 +531,7 @@ def test_t3code_fingerprints_materialized_locks_and_is_idempotent(
     fingerprint_states: list[str] = []
 
     async def _fetch_latest(_session: object) -> VersionInfo:
-        return VersionInfo(version="main")
+        return _version_info(updater)
 
     async def _fingerprint(_source_override: SourceEntry | None = None) -> str:
         fingerprint_states.append(checked_in_lock)
@@ -710,7 +730,7 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
         lambda: "aarch64-darwin",
     )
 
-    info = VersionInfo(version="main")
+    info = _version_info(updater)
     monkeypatch.setattr(updater, "fetch_latest", _fetch_latest)
     monkeypatch.setattr(updater, "_compute_drv_fingerprint", _fingerprint)
     events = _run(
@@ -726,7 +746,9 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
     assert captured["source"] == package_name
     assert captured["args"][:4] == ["nix", "run", "--impure", "--expr"]
     source_override = (
-        updater.build_result(info, []) if updater.source_pins is not None else None
+        updater.build_result(info, [])
+        if updater.compatibility_pins is not None
+        else None
     )
     assert_nix_ast_equal(
         captured["args"][4],

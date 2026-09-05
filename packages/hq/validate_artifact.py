@@ -2,6 +2,7 @@
 
 import argparse
 import plistlib
+import re
 from pathlib import Path
 
 from policy_contract import (
@@ -12,7 +13,75 @@ from policy_contract import (
     ORIGINAL_UPDATER_URL,
     RELEASES_URL_COUNT,
     UPDATER_URL_COUNT,
+    MachinePatch,
+    MaskedBytes,
 )
+
+_FULL_BYTE_MASK = 0xFF
+
+
+# Keep matching and branch decoding independent from patch_updater so the
+# install check can detect an incorrect transformation of the shared contract.
+def _masked_regex(masked: MaskedBytes) -> re.Pattern[bytes]:
+    expression = b"".join(
+        re.escape(bytes((value,))) if keep == _FULL_BYTE_MASK else b"."
+        for value, keep in zip(masked.pattern, masked.mask, strict=True)
+    )
+    return re.compile(b"(?=(" + expression + b"))", re.DOTALL)
+
+
+def _matching_offsets(payload: bytes, masked: MaskedBytes) -> list[int]:
+    offsets: list[int] = []
+    for match in _masked_regex(masked).finditer(payload):
+        candidate = match.group(1)
+        if all(  # pragma: no branch -- regex overapproximates partial-byte masks
+            actual & keep == expected & keep
+            for actual, expected, keep in zip(
+                candidate,
+                masked.pattern,
+                masked.mask,
+                strict=True,
+            )
+        ):
+            offsets.append(match.start())
+    return offsets
+
+
+def _signed_field(value: int, width: int) -> int:
+    sign_bit = 1 << (width - 1)
+    return value - (1 << width) if value & sign_bit else value
+
+
+def _validate_disabled_control_flow(
+    executable: bytes,
+    offset: int,
+    patch: MachinePatch,
+) -> None:
+    branch = patch.disabled_branch
+    if branch is None:
+        return
+    instruction_offset = offset + branch.offset
+    if branch.encoding == "x86-jmp-rel32":
+        displacement = int.from_bytes(
+            executable[instruction_offset + 1 : instruction_offset + 5],
+            byteorder="little",
+            signed=True,
+        )
+        target = instruction_offset + 5 + displacement
+    else:
+        word = int.from_bytes(
+            executable[instruction_offset : instruction_offset + 4],
+            byteorder="little",
+        )
+        field = word & 0x03FFFFFF
+        target = instruction_offset + (_signed_field(field, 26) << 2)
+    if target <= offset + len(patch.disabled.pattern) or target >= len(executable):
+        msg = (
+            f"HQ disabled {patch.label} control flow drifted: branch target {target} "
+            "does not continue within the executable after the reviewed mutation "
+            "block"
+        )
+        raise ValueError(msg)
 
 
 def validate_artifact(
@@ -53,17 +122,18 @@ def validate_artifact(
                 f"HQ disabled update URL expected {expected_count}, got {actual_count}"
             )
             raise ValueError(msg)
-    for label, original, replacement in AUTOMATIC_MUTATION_PATCHES:
-        if original in executable:
-            msg = f"HQ executable retains automatic mutation path: {label}"
+    for patch in AUTOMATIC_MUTATION_PATCHES:
+        if _matching_offsets(executable, patch.original):
+            msg = f"HQ executable retains automatic mutation path: {patch.label}"
             raise ValueError(msg)
-        actual_count = executable.count(replacement)
-        if actual_count != 1:
+        disabled_offsets = _matching_offsets(executable, patch.disabled)
+        if len(disabled_offsets) != 1:
             msg = (
-                f"HQ disabled automatic mutation signature {label} "
-                f"expected 1, got {actual_count}"
+                f"HQ disabled automatic mutation signature {patch.label} "
+                f"expected 1, got {len(disabled_offsets)}"
             )
             raise ValueError(msg)
+        _validate_disabled_control_flow(executable, disabled_offsets[0], patch)
 
 
 def main() -> None:

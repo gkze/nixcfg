@@ -30,6 +30,7 @@ class BbUpdater(GitHubReleaseUpdater):
     """Track immutable desktop tags and rebuild bb from their source commits."""
 
     name = "bb"
+    aggregate_into = ("electron-runtimes",)
     GITHUB_OWNER = "get-bb"
     GITHUB_REPO = "bb"
     TAG_PREFIX = "desktop-v"
@@ -78,16 +79,9 @@ class BbUpdater(GitHubReleaseUpdater):
 
     async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
         """Resolve the latest immutable desktop release and its source commit."""
-        payload = await self._fetch_latest_release_payload(session)
-        tag_name = self._release_tag_from_payload(payload)
-        version = self._normalize_release_version(tag_name)
-        commit = payload.get("target_commitish")
-        if (
-            not isinstance(commit, str)
-            or self._COMMIT_PATTERN.fullmatch(commit) is None
-        ):
-            msg = f"bb release {tag_name} has no immutable target commit"
-            raise RuntimeError(msg)
+        version, tag_name, commit = await self._fetch_release_version_tag_commit(
+            session
+        )
         desktop_manifest = await fetch_json(
             session,
             github_raw_url(

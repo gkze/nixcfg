@@ -17,7 +17,6 @@ from lib.update.updaters import (
     register_updater,
 )
 from lib.update.updaters.github_release import GitHubReleaseUpdater
-from lib.update.updaters.metadata import GitHubReleaseMetadata
 
 if TYPE_CHECKING:
     import aiohttp
@@ -134,13 +133,14 @@ class CrushUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
                 msg = f"Missing tag_name in release payload: {release!r}"
                 raise RuntimeError(msg)
 
+            commit = await self._resolve_release_tag_commit(session, tag_name)
             go_mod = (
                 await fetch_url(
                     session,
                     github_raw_url(
                         self.GITHUB_OWNER,
                         self.GITHUB_REPO,
-                        tag_name,
+                        commit,
                         "go.mod",
                     ),
                     config=self.config,
@@ -150,20 +150,21 @@ class CrushUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
             if required_go <= supported_go:
                 return VersionInfo(
                     version=self._normalize_release_version(tag_name),
-                    metadata=GitHubReleaseMetadata(tag=tag_name),
+                    metadata={"commit": commit, "tag": tag_name},
                 )
 
         current_version = self._current_version()
         current_tag = f"v{current_version}"
+        current_commit = await self._resolve_release_tag_commit(session, current_tag)
         return VersionInfo(
             version=current_version,
-            metadata=GitHubReleaseMetadata(tag=current_tag),
+            metadata={"commit": current_commit, "tag": current_tag},
         )
 
     @staticmethod
-    def _src_expr(version: str) -> str:
+    def _src_expr(commit: str) -> str:
         return _build_fetch_from_github_expr(
             "charmbracelet",
             "crush",
-            tag=f"v{version}",
+            rev=commit,
         )

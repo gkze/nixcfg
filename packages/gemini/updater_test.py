@@ -23,6 +23,11 @@ from lib.tests._nix_ast import (
 )
 from lib.tests._nix_source import nix_source_fragment_expr
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
+from lib.tests._source_metadata import (
+    assert_https_url,
+    assert_platform_source_entry,
+    assert_release_version,
+)
 from lib.tests._updater_helpers import collect_events, load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import UpdateEvent
@@ -512,13 +517,16 @@ def test_gemini_system_route_refuses_future_downgrades() -> None:
 
 
 def test_gemini_sources_pin_the_official_release_dmg() -> None:
-    """Checked-in source metadata should match Google's current native release."""
-    sources = json.loads(
+    """Checked-in metadata must remain a complete official Omaha-selected DMG."""
+    source = SourceEntry.model_validate_json(
         (REPO_ROOT / "packages/gemini/sources.json").read_text(encoding="utf-8")
     )
-
-    assert sources == {
-        "hashes": {"aarch64-darwin": _HASH},
-        "urls": {"aarch64-darwin": _URL},
-        "version": _VERSION,
-    }
+    assert_release_version(source.version)
+    _hashes, urls = assert_platform_source_entry(
+        source,
+        platforms={"aarch64-darwin"},
+    )
+    url = urls["aarch64-darwin"]
+    assert_https_url(url, host="dl.google.com")
+    assert "/release2/" in url
+    assert url.endswith("/Gemini.dmg")

@@ -6,6 +6,7 @@ import os
 import shutil
 import stat
 import subprocess
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, ClassVar, cast
@@ -44,9 +45,14 @@ from lib.update.cli import (
     _is_tty,
     _load_sources_for_run,
     _maybe_reexec_checkout_update,
+    _requires_root_closure_validation,
     _resolve_full_output,
     _resolve_runtime_config,
     _resolve_tty_settings,
+    _revalidate_runtime_source_snapshot,
+    _runtime_source_policy,
+    _runtime_source_relpaths,
+    _same_source_path,
     _split_trailing_target_options,
     _update_library_matches_checkout,
     check_required_tools,
@@ -70,12 +76,15 @@ from lib.update.cli_inventory import (
     handle_list_targets_request,
 )
 from lib.update.cli_validation import handle_validate_request
+from lib.update.derivation_validation import DerivationValidationFailure
 from lib.update.flake import resolve_root_input_node
 from lib.update.paths import REPO_ROOT
 from lib.update.persistence import (
     IsolatedUpdateWorkspace,
+    UpdatePromotionState,
     UpdateWorkspaceConflictError,
     UpdateWorkspaceError,
+    UpdateWorkspacePromotionError,
     UpdateWorkspaceUnexpectedPathsError,
     flatten_artifact_updates,
     merge_source_updates,
@@ -106,10 +115,30 @@ def _run_async[T](awaitable: object) -> T:
     return asyncio.run(awaitable)  # type: ignore[arg-type]
 
 
+_RUNTIME_SOURCE_POLICY = """[tool.nixcfg.runtimeSource]
+schemaVersion = 1
+rootPaths = ["nixcfg.py", "pyproject.toml", "uv.lock"]
+libraryExtensions = ["json", "py", "pyi", "yaml"]
+libraryNames = ["py.typed"]
+excludedLibraryPaths = ["tests"]
+dynamicRoots = ["packages", "overlays"]
+dynamicExtensions = ["py", "pyi"]
+dynamicExcludedFileSuffixes = ["_test.py"]
+"""
+
+
 def _write_update_file(root: Path, relative_path: str, content: str) -> None:
     path = root / "lib" / "update" / relative_path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+    policy_path = root / "pyproject.toml"
+    if not policy_path.exists():
+        policy_path.write_text(_RUNTIME_SOURCE_POLICY, encoding="utf-8")
+    for root_file in (root / "nixcfg.py", root / "uv.lock"):
+        if not root_file.exists():
+            root_file.write_text("fixture runtime root\n", encoding="utf-8")
+    for dynamic_root in (root / "packages", root / "overlays"):
+        dynamic_root.mkdir(exist_ok=True)
 
 
 def test_update_library_matches_checkout_same_and_equal_trees(tmp_path: Path) -> None:
@@ -119,36 +148,502 @@ def test_update_library_matches_checkout_same_and_equal_trees(tmp_path: Path) ->
 
     assert _update_library_matches_checkout(
         repo_root,
-        runtime_update_root=repo_root / "lib" / "update",
+        runtime_source_root=repo_root,
     )
 
     _write_update_file(tmp_path / "runtime-root", "cli.py", "VALUE = 1\n")
-    runtime_root = tmp_path / "runtime-root" / "lib" / "update"
+    runtime_root = tmp_path / "runtime-root"
 
-    assert _update_library_matches_checkout(repo_root, runtime_update_root=runtime_root)
+    assert _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_root,
+    )
 
 
 def test_update_library_detects_missing_or_changed_checkout(tmp_path: Path) -> None:
     """Reject missing, differently shaped, or content-skewed update libraries."""
     repo_root = tmp_path / "repo"
     runtime_source_root = tmp_path / "runtime-root"
-    runtime_root = runtime_source_root / "lib" / "update"
+    runtime_root = runtime_source_root
 
     assert not _update_library_matches_checkout(
         repo_root,
-        runtime_update_root=runtime_root,
+        runtime_source_root=runtime_root,
     )
 
     _write_update_file(repo_root, "cli.py", "VALUE = 1\n")
     _write_update_file(runtime_source_root, "other.py", "VALUE = 1\n")
     assert not _update_library_matches_checkout(
-        repo_root, runtime_update_root=runtime_root
+        repo_root, runtime_source_root=runtime_root
     )
 
-    (runtime_root / "other.py").unlink()
+    (runtime_root / "lib" / "update" / "other.py").unlink()
     _write_update_file(runtime_source_root, "cli.py", "VALUE = 2\n")
     assert not _update_library_matches_checkout(
-        repo_root, runtime_update_root=runtime_root
+        repo_root, runtime_source_root=runtime_root
+    )
+
+
+@pytest.mark.parametrize("runtime_path", ["nixcfg.py", "pyproject.toml", "uv.lock"])
+def test_update_library_detects_runtime_root_input_changes(
+    runtime_path: str,
+    tmp_path: Path,
+) -> None:
+    """Entrypoint, project metadata, and lock changes must all force a handoff."""
+    repo_root = tmp_path / "repo"
+    runtime_source_root = tmp_path / "runtime-root"
+    _write_update_file(repo_root, "cli.py", "VALUE = 1\n")
+    _write_update_file(runtime_source_root, "cli.py", "VALUE = 1\n")
+    for root in (repo_root, runtime_source_root):
+        (root / "nixcfg.py").write_text("VALUE = 1\n", encoding="utf-8")
+        (root / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+
+    changed_path = repo_root / runtime_path
+    changed_path.write_text(
+        changed_path.read_text(encoding="utf-8") + "# changed\n",
+        encoding="utf-8",
+    )
+
+    assert not _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+
+def test_update_library_detects_packaged_policy_data_changes(tmp_path: Path) -> None:
+    """Policy-only edits must trigger the checkout-matching runtime handoff."""
+    repo_root = tmp_path / "repo"
+    runtime_source_root = tmp_path / "runtime-root"
+    _write_update_file(repo_root, "cli.py", "VALUE = 1\n")
+    _write_update_file(runtime_source_root, "cli.py", "VALUE = 1\n")
+    repo_policy = repo_root / "lib" / "system-policy.json"
+    runtime_policy = runtime_source_root / "lib" / "system-policy.json"
+    repo_policy.write_text('{"schemaVersion": 1}\n', encoding="utf-8")
+    runtime_policy.write_text('{"schemaVersion": 2}\n', encoding="utf-8")
+
+    assert not _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+    runtime_policy.write_bytes(repo_policy.read_bytes())
+    assert _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+
+def test_update_library_detects_dynamic_updater_changes(tmp_path: Path) -> None:
+    """Live updater code must never run against a silently stale installed core."""
+    repo_root = tmp_path / "repo"
+    runtime_source_root = tmp_path / "runtime-root"
+    for root in (repo_root, runtime_source_root):
+        _write_update_file(root, "cli.py", "VALUE = 1\n")
+        updater = root / "packages" / "demo" / "updater.py"
+        updater.parent.mkdir(parents=True)
+        updater.write_text("VALUE = 1\n", encoding="utf-8")
+        (updater.parent / "updater_test.py").write_text(
+            "TEST_VALUE = 1\n",
+            encoding="utf-8",
+        )
+
+    assert _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+    (repo_root / "packages" / "demo" / "updater.py").write_text(
+        "VALUE = 2\n",
+        encoding="utf-8",
+    )
+    assert not _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+    (repo_root / "packages" / "demo" / "updater.py").write_text(
+        "VALUE = 1\n",
+        encoding="utf-8",
+    )
+    (repo_root / "packages" / "demo" / "updater_test.py").write_text(
+        "TEST_VALUE = 2\n",
+        encoding="utf-8",
+    )
+    assert _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+
+def test_runtime_source_relpaths_excludes_non_runtime_files(tmp_path: Path) -> None:
+    """Apply every policy filter before comparing packaged runtime sources."""
+    _write_update_file(tmp_path, "cli.py", "VALUE = 1\n")
+    excluded_library_file = tmp_path / "lib" / "tests" / "helper.py"
+    excluded_library_file.parent.mkdir(parents=True)
+    excluded_library_file.write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "lib" / "update" / "notes.txt").write_text(
+        "not runtime source\n",
+        encoding="utf-8",
+    )
+    package_dir = tmp_path / "packages" / "demo"
+    package_dir.mkdir(parents=True)
+    (package_dir / "updater.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (package_dir / "updater_test.py").write_text(
+        "TEST_VALUE = 1\n",
+        encoding="utf-8",
+    )
+    (package_dir / "README.md").write_text("ignored\n", encoding="utf-8")
+
+    assert _runtime_source_relpaths(
+        tmp_path,
+        _runtime_source_policy(tmp_path),
+    ) == {
+        Path("nixcfg.py"),
+        Path("pyproject.toml"),
+        Path("uv.lock"),
+        Path("lib/update/cli.py"),
+        Path("packages/demo/updater.py"),
+    }
+
+
+def test_update_library_compares_declared_runtime_directories(
+    tmp_path: Path,
+) -> None:
+    """Directory root paths must match the recursive fileset packaged by Nix."""
+    repo_root = tmp_path / "repo"
+    runtime_source_root = tmp_path / "runtime-root"
+    policy = _RUNTIME_SOURCE_POLICY.replace(
+        'rootPaths = ["nixcfg.py", "pyproject.toml", "uv.lock"]',
+        'rootPaths = ["nixcfg.py", "pyproject.toml", "uv.lock", "runtime-data"]',
+    )
+    for root in (repo_root, runtime_source_root):
+        _write_update_file(root, "cli.py", "VALUE = 1\n")
+        (root / "pyproject.toml").write_text(policy, encoding="utf-8")
+        runtime_file = root / "runtime-data" / "behavior.py"
+        runtime_file.parent.mkdir()
+        runtime_file.write_text("VALUE = 1\n", encoding="utf-8")
+
+    assert _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+    (repo_root / "runtime-data" / "behavior.py").write_text(
+        "VALUE = 2\n",
+        encoding="utf-8",
+    )
+    assert not _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+    (repo_root / "runtime-data" / "behavior.py").unlink()
+    assert not _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+
+def test_update_library_compares_file_valued_dynamic_roots(tmp_path: Path) -> None:
+    """A dynamic file root must match the fileFilter semantics used by Nix."""
+    repo_root = tmp_path / "repo"
+    runtime_source_root = tmp_path / "runtime-root"
+    policy = _RUNTIME_SOURCE_POLICY.replace(
+        'dynamicRoots = ["packages", "overlays"]',
+        'dynamicRoots = ["dynamic.py"]',
+    )
+    for root in (repo_root, runtime_source_root):
+        _write_update_file(root, "cli.py", "VALUE = 1\n")
+        (root / "pyproject.toml").write_text(policy, encoding="utf-8")
+        (root / "dynamic.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    assert _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+    (repo_root / "dynamic.py").write_text("VALUE = 2\n", encoding="utf-8")
+    assert not _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+    (repo_root / "dynamic.py").unlink()
+    assert not _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+
+@pytest.mark.parametrize("root_path", ["missing.py", "../outside", "/outside"])
+def test_update_library_rejects_invalid_declared_runtime_roots(
+    root_path: str,
+    tmp_path: Path,
+) -> None:
+    """Missing or checkout-escaping source roots must force a safe re-exec."""
+    repo_root = tmp_path / "repo"
+    runtime_source_root = tmp_path / "runtime-root"
+    policy = _RUNTIME_SOURCE_POLICY.replace(
+        'rootPaths = ["nixcfg.py", "pyproject.toml", "uv.lock"]',
+        f'rootPaths = ["{root_path}"]',
+    )
+    for root in (repo_root, runtime_source_root):
+        _write_update_file(root, "cli.py", "VALUE = 1\n")
+        (root / "pyproject.toml").write_text(policy, encoding="utf-8")
+
+    assert not _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+
+def test_update_library_rejects_invalid_or_different_runtime_policy(
+    tmp_path: Path,
+) -> None:
+    """Fail closed when either packaged policy cannot define the same boundary."""
+    repo_root = tmp_path / "repo"
+    runtime_source_root = tmp_path / "runtime-root"
+    for root in (repo_root, runtime_source_root):
+        _write_update_file(root, "cli.py", "VALUE = 1\n")
+
+    runtime_policy = runtime_source_root / "pyproject.toml"
+    runtime_policy.write_text("[", encoding="utf-8")
+    assert not _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+    runtime_policy.write_text(
+        _RUNTIME_SOURCE_POLICY.replace(
+            'libraryNames = ["py.typed"]',
+            'libraryNames = ["py.typed", "runtime.marker"]',
+        ),
+        encoding="utf-8",
+    )
+    assert not _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+
+def test_update_library_uses_packaged_runtime_source_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The installed wrapper's source boundary must drive the skew comparison."""
+    repo_root = tmp_path / "repo"
+    runtime_source_root = tmp_path / "runtime-root"
+    for root in (repo_root, runtime_source_root):
+        _write_update_file(root, "cli.py", "VALUE = 1\n")
+        (root / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+    monkeypatch.setenv("NIXCFG_UPDATE_EXECUTION_SOURCE", str(runtime_source_root))
+
+    assert _update_library_matches_checkout(repo_root)
+
+    (repo_root / "uv.lock").write_text("version = 2\n", encoding="utf-8")
+    assert not _update_library_matches_checkout(repo_root)
+
+
+@pytest.mark.parametrize(
+    ("policy", "error_type", "message"),
+    [
+        (
+            _RUNTIME_SOURCE_POLICY.replace("schemaVersion = 1", "schemaVersion = 2"),
+            RuntimeError,
+            "schema",
+        ),
+        (
+            _RUNTIME_SOURCE_POLICY.replace("schemaVersion = 1", "schemaVersion = true"),
+            RuntimeError,
+            "schema",
+        ),
+        (
+            _RUNTIME_SOURCE_POLICY.replace(
+                'rootPaths = ["nixcfg.py", "pyproject.toml", "uv.lock"]',
+                'rootPaths = "nixcfg.py"',
+            ),
+            TypeError,
+            "rootPaths",
+        ),
+        (
+            '[tool.nixcfg]\nruntimeSource = "invalid"\n',
+            TypeError,
+            "policy table",
+        ),
+        (
+            _RUNTIME_SOURCE_POLICY.replace(
+                'dynamicRoots = ["packages", "overlays"]',
+                'dynamicRoots = ["../outside"]',
+            ),
+            TypeError,
+            "dynamicRoots",
+        ),
+        (
+            _RUNTIME_SOURCE_POLICY.replace(
+                'excludedLibraryPaths = ["tests"]',
+                'excludedLibraryPaths = ["/outside"]',
+            ),
+            TypeError,
+            "excludedLibraryPaths",
+        ),
+    ],
+)
+def test_runtime_source_policy_rejects_invalid_metadata(
+    policy: str,
+    error_type: type[Exception],
+    message: str,
+    tmp_path: Path,
+) -> None:
+    """Malformed source policy must fail closed before a skew comparison."""
+    (tmp_path / "pyproject.toml").write_text(policy, encoding="utf-8")
+
+    with pytest.raises(error_type, match=message):
+        _runtime_source_policy(tmp_path)
+
+
+def test_runtime_source_comparison_preserves_symlink_identity(tmp_path: Path) -> None:
+    """Equal file bytes must not conceal a changed packaged symlink contract."""
+    target = tmp_path / "target"
+    target.write_text("content\n", encoding="utf-8")
+    same_target = tmp_path / "same-target"
+    same_target.write_text("content\n", encoding="utf-8")
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    left.symlink_to(target.name)
+    right.symlink_to(target.name)
+    assert _same_source_path(left, right)
+
+    right.unlink()
+    right.symlink_to(same_target.name)
+    assert not _same_source_path(left, right)
+
+    right.unlink()
+    right.write_text("content\n", encoding="utf-8")
+    assert not _same_source_path(left, right)
+
+
+def test_update_library_comparison_fails_closed_on_path_race(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A file disappearing during the final byte comparison is source skew."""
+    repo_root = tmp_path / "repo"
+    runtime_source_root = tmp_path / "runtime-root"
+    for root in (repo_root, runtime_source_root):
+        _write_update_file(root, "cli.py", "VALUE = 1\n")
+
+    def _raise_oserror(_left: Path, _right: Path) -> bool:
+        raise OSError("source changed")
+
+    monkeypatch.setattr("lib.update.cli._same_source_path", _raise_oserror)
+
+    assert not _update_library_matches_checkout(
+        repo_root,
+        runtime_source_root=runtime_source_root,
+    )
+
+
+def test_run_updates_revalidates_snapshot_before_updater_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Abort with retry guidance when source changes during workspace capture."""
+    live = tmp_path / "live"
+    _init_update_workspace_repo(live)
+
+    def _unexpected_plan(_opts: UpdateOptions) -> None:
+        raise AssertionError("updater planning ran after the source race")
+
+    monkeypatch.setattr("lib.update.cli.sys.argv", ["nixcfg", "update"])
+    monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: live)
+    monkeypatch.setattr(
+        "lib.update.cli._update_library_matches_checkout",
+        lambda _root: False,
+    )
+    monkeypatch.setattr("lib.update.cli._build_run_plan", _unexpected_plan)
+
+    assert _run_async(run_updates(UpdateOptions())) == 1
+    captured = capsys.readouterr()
+    assert "Update source changed while preparing the isolated workspace" in (
+        captured.err
+    )
+    assert "retry `nixcfg update`" in captured.err
+
+
+def test_runtime_source_revalidation_accepts_matching_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Continue when the captured workspace still matches the selected runtime."""
+    observed: list[Path] = []
+    monkeypatch.setattr("lib.update.cli.sys.argv", ["nixcfg"])
+    monkeypatch.setenv("NIXCFG_UPDATE_EXECUTION_SOURCE", "/nix/store/runtime-source")
+
+    def _matches(root: Path) -> bool:
+        observed.append(root)
+        return True
+
+    monkeypatch.setattr(
+        "lib.update.cli._update_library_matches_checkout",
+        _matches,
+    )
+
+    _revalidate_runtime_source_snapshot(tmp_path)
+
+    assert observed == [tmp_path]
+
+
+def test_run_update_command_discovers_updaters_only_after_snapshot_revalidation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Keep the real command's updater-dependent tool check inside isolation."""
+    events: list[str] = []
+
+    class _ObservedWorkspace:
+        def __init__(self, _root: Path) -> None:
+            self.root = tmp_path / "candidate"
+
+        def __enter__(self) -> _ObservedWorkspace:
+            events.append("capture")
+            return self
+
+        def __exit__(self, *_exc_info: object) -> None:
+            events.append("close")
+
+    def _matches(_root: Path) -> bool:
+        events.append("revalidate")
+        return True
+
+    def _discover() -> dict[str, object]:
+        events.append("discover")
+        return {}
+
+    monkeypatch.setattr("lib.update.cli.sys.argv", ["nixcfg"])
+    monkeypatch.setenv("NIXCFG_UPDATE_EXECUTION_SOURCE", "/nix/store/runtime-source")
+    monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        "lib.update.persistence.IsolatedUpdateWorkspace",
+        _ObservedWorkspace,
+    )
+    monkeypatch.setattr("lib.update.cli._update_library_matches_checkout", _matches)
+    monkeypatch.setattr("lib.update.cli._get_updaters", _discover)
+    monkeypatch.setattr(
+        "lib.update.cli.shutil.which",
+        lambda tool: None if tool == "uv" else f"/bin/{tool}",
+    )
+    monkeypatch.setattr(
+        "lib.update.cli._build_run_plan",
+        lambda _opts: pytest.fail("planning ran after a missing-tool failure"),
+    )
+
+    assert run_update_command(no_refs=True) == 1
+    assert events == ["capture", "revalidate", "discover", "close"]
+    assert capsys.readouterr().err == (
+        "Error: Required tools not found: uv\n"
+        "Please install them and ensure they are in your PATH.\n"
     )
 
 
@@ -195,14 +690,21 @@ def test_maybe_reexec_checkout_update_execs_checkout_flake(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Handoff uses the checkout flake and preserves the original update argv."""
+    """Handoff uses a complete visible snapshot and preserves update argv."""
     calls: dict[str, object] = {}
 
-    def _execvpe(file: str, args: list[str], env: dict[str, str]) -> None:
-        calls["file"] = file
+    def _run(
+        args: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        check: bool,
+    ) -> SimpleNamespace:
         calls["args"] = args
+        calls["cwd"] = cwd
         calls["env"] = env
-        raise RuntimeError("exec called")
+        calls["check"] = check
+        return SimpleNamespace(returncode=23)
 
     monkeypatch.setattr(
         "lib.update.cli.sys.argv",
@@ -214,28 +716,29 @@ def test_maybe_reexec_checkout_update_execs_checkout_flake(
     )
     monkeypatch.setattr("lib.update.cli.shutil.which", lambda _tool: "/bin/nix")
     monkeypatch.setattr(
-        "lib.update.cli.os.chdir", lambda path: calls.setdefault("cwd", path)
+        "lib.update.cli.update_persistence.visible_source_snapshot",
+        lambda root: nullcontext(tmp_path / "snapshot"),
     )
-    monkeypatch.setattr("lib.update.cli.os.execvpe", _execvpe)
+    monkeypatch.setattr("lib.update.cli.subprocess.run", _run)
 
-    with pytest.raises(RuntimeError, match="exec called"):
-        _maybe_reexec_checkout_update()
+    assert _maybe_reexec_checkout_update() == 23
 
     assert calls["cwd"] == tmp_path
-    assert calls["file"] == "/bin/nix"
     assert calls["args"] == [
         "/bin/nix",
         "run",
-        ".#nixcfg",
+        f"path:{tmp_path / 'snapshot'}#nixcfg",
         "--",
         "update",
         "--check",
         "t3code",
     ]
+    assert calls["check"] is False
     assert (
         cast("dict[str, str]", calls["env"])["NIXCFG_UPDATE_REEXECED_FROM_CHECKOUT"]
         == "1"
     )
+    assert cast("dict[str, str]", calls["env"])["REPO_ROOT"] == str(tmp_path)
 
 
 def test_argv_runs_top_level_update() -> None:
@@ -1122,8 +1625,13 @@ def test_build_update_inventory_uses_logical_targets(
     class _DenoUpdater(DenoManifestUpdater):
         name = "deno"
 
+    class _AuxiliaryInputUpdater(Updater):
+        name = "aux"
+        additional_input_names = ("zon2nix",)
+
     sources = SourcesFile(
         entries={
+            "aux": SourceEntry(hashes={}),
             "both": SourceEntry(
                 version="v1.0.0",
                 hashes=[HashEntry.create("vendorHash", "sha256-ghi=")],
@@ -1161,6 +1669,7 @@ def test_build_update_inventory_uses_logical_targets(
         cli_inventory_module,
         "package_file_map",
         lambda _filename: {
+            "aux": REPO_ROOT / "packages" / "aux" / "sources.json",
             "both": REPO_ROOT / "packages" / "both" / "sources.json",
             "desktop": REPO_ROOT / "packages" / "desktop" / "sources.json",
         },
@@ -1190,6 +1699,7 @@ def test_build_update_inventory_uses_logical_targets(
         cli_inventory_module,
         "UPDATERS",
         {
+            "aux": _AuxiliaryInputUpdater,
             "both": _BothUpdater,
             "desktop": _DesktopUpdater,
             "deno": _DenoUpdater,
@@ -1210,11 +1720,19 @@ def test_build_update_inventory_uses_logical_targets(
     by_name = {target.name: target for target in targets}
 
     assert [target.name for target in targets] == [
+        "aux",
         "both",
         "deno",
         "desktop",
         "ref-only",
     ]
+    assert by_name["aux"].classification == "sourceWithInputRefresh"
+    assert by_name["aux"].backing_input is None
+    assert by_name["aux"].additional_inputs == ("zon2nix",)
+    assert by_name["aux"].source_value() == "zon2nix"
+    assert by_name["aux"].write_labels() == ("flake.lock", "sources.json")
+    assert by_name["aux"].to_dict()["additionalInputs"] == ["zon2nix"]
+
     assert by_name["both"].classification == "refAndSourceWithInputRefresh"
     assert by_name["both"].backing_input == "both"
     assert by_name["both"].ref_target is not None
@@ -1904,21 +2422,24 @@ def test_top_level_entrypoints(
     monkeypatch.setattr(
         "lib.update.cli._handle_preflight_requests", lambda _opts, _out: 7
     )
-    assert _run_async(run_updates(UpdateOptions())) == 7
+    assert _run_async(run_updates(UpdateOptions(), check_tools=True)) == 7
 
     monkeypatch.setattr(
         "lib.update.cli._handle_preflight_requests", lambda _opts, _out: None
     )
 
-    # run_update_command tool checks and execution
-    monkeypatch.setattr(
-        "lib.update.cli.check_required_tools", lambda **_kwargs: ["nix"]
-    )
-    assert run_update_command() == 1
+    # run_update_command delegates tool-checked execution.
+    async def _run_command(
+        _opts: UpdateOptions,
+        *,
+        check_tools: bool = False,
+    ) -> int:
+        assert check_tools is True
+        return 5
 
-    monkeypatch.setattr("lib.update.cli.check_required_tools", lambda **_kwargs: [])
     monkeypatch.setattr(
-        "lib.update.cli.run_updates", lambda _opts: asyncio.sleep(0, result=5)
+        "lib.update.cli.run_updates",
+        _run_command,
     )
     assert run_update_command(list_targets=True) == 5
 
@@ -2351,9 +2872,13 @@ def test_update_workspace_cleans_temporary_file_after_install_failure(
             raise OSError("exchange failed")
 
         monkeypatch.setattr(persistence_module, "_rename_exchange", _fail_exchange)
-        with pytest.raises(OSError, match="exchange failed"):
+        with pytest.raises(
+            UpdateWorkspacePromotionError,
+            match="exchange failed",
+        ) as exc_info:
             workspace.promote({"tracked.txt"})
 
+    assert exc_info.value.promotion_state is UpdatePromotionState.ROLLED_BACK
     assert (live / "tracked.txt").read_text(encoding="utf-8") == "committed\n"
     assert list(live.glob(".tracked.txt.nixcfg-*")) == []
 
@@ -2644,9 +3169,13 @@ def test_update_workspace_cleans_candidate_after_creation_failure(
             raise OSError("candidate write failed")
 
         monkeypatch.setattr(os, "fchmod", _fail_fchmod)
-        with pytest.raises(OSError, match="candidate write failed"):
+        with pytest.raises(
+            UpdateWorkspacePromotionError,
+            match="candidate write failed",
+        ) as exc_info:
             workspace.promote({"tracked.txt"})
 
+    assert exc_info.value.promotion_state is UpdatePromotionState.ROLLED_BACK
     assert (live / "tracked.txt").read_text(encoding="utf-8") == "committed\n"
     assert list(live.glob(".tracked.txt.nixcfg-*")) == []
 
@@ -2666,9 +3195,13 @@ def test_update_workspace_cleans_temporary_journal_after_fsync_failure(
             raise OSError("journal fsync failed")
 
         monkeypatch.setattr(os, "fsync", _fail_fsync)
-        with pytest.raises(OSError, match="journal fsync failed"):
+        with pytest.raises(
+            UpdateWorkspacePromotionError,
+            match="journal fsync failed",
+        ) as exc_info:
             workspace.promote({"tracked.txt"})
 
+    assert exc_info.value.promotion_state is UpdatePromotionState.ROLLED_BACK
     assert (live / "tracked.txt").read_text(encoding="utf-8") == "committed\n"
     assert list((live / ".git").glob("*nixcfg-update-transaction*")) == []
 
@@ -2936,11 +3469,12 @@ def test_update_workspace_rolls_back_partial_promotion(tmp_path: Path) -> None:
             nested.parent.mkdir()
             nested.write_text("new\n", encoding="utf-8")
 
-            with pytest.raises(PermissionError):
+            with pytest.raises(UpdateWorkspacePromotionError) as exc_info:
                 workspace.promote({"tracked.txt", "z-output/new.txt"})
     finally:
         blocked_parent.chmod(0o700)
 
+    assert exc_info.value.promotion_state is UpdatePromotionState.ROLLED_BACK
     assert (live / "tracked.txt").read_text() == "committed\n"
     assert not (blocked_parent / "new.txt").exists()
 
@@ -3107,9 +3641,10 @@ def test_update_workspace_rolls_back_a_promoted_deletion(
 
         monkeypatch.setattr(persistence_module, "_promote_path", _fail_later)
 
-        with pytest.raises(PermissionError):
+        with pytest.raises(UpdateWorkspacePromotionError) as exc_info:
             workspace.promote({"tracked.txt", "z-output.txt"})
 
+    assert exc_info.value.promotion_state is UpdatePromotionState.ROLLED_BACK
     assert (live / "tracked.txt").read_text(encoding="utf-8") == "committed\n"
     assert not (live / "z-output.txt").exists()
 
@@ -3227,6 +3762,7 @@ def test_run_updates_promotes_only_after_isolated_execution(
         assert output.read_text(encoding="utf-8") == "committed\n"
         return SimpleNamespace(
             summary=UpdateSummary(updated=["demo"]),
+            candidate_updates=("demo",),
             had_errors=False,
             written_paths=(isolated_output,),
         )
@@ -3243,6 +3779,400 @@ def test_run_updates_promotes_only_after_isolated_execution(
     assert execution_roots
     assert execution_roots[0] != live
     assert output.read_text(encoding="utf-8") == "validated update\n"
+
+
+@pytest.mark.parametrize(
+    ("targets", "changed_paths", "expected"),
+    [
+        ((), (), True),
+        (("demo",), (), False),
+        (("demo",), (Path("flake.lock"),), True),
+        (("demo",), (Path("packages/demo/sources.json"),), True),
+    ],
+)
+def test_root_closure_validation_trigger_is_transaction_scoped(
+    targets: tuple[str, ...],
+    changed_paths: tuple[Path, ...],
+    expected: bool,
+) -> None:
+    """Validate full runs and every targeted transaction that changed files."""
+    assert (
+        _requires_root_closure_validation(
+            UpdateOptions(targets=targets),
+            changed_paths,
+        )
+        is expected
+    )
+
+
+@pytest.mark.parametrize("targets", [(), ("demo",)])
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_root_closure_failure_prevents_atomic_promotion(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    targets: tuple[str, ...],
+    json_mode: bool,
+) -> None:
+    """Never promote a changed candidate whose configured roots do not all build."""
+    live = tmp_path / "live"
+    _init_update_workspace_repo(live)
+    output = live / "tracked.txt"
+    plan = make_run_plan(source_names=("demo",))
+
+    async def _execute_result(*_args: object) -> SimpleNamespace:
+        candidate = Path.cwd() / "tracked.txt"
+        candidate.write_text("candidate\n", encoding="utf-8")
+        summary = UpdateSummary()
+        summary.accumulate({"demo": "updated"})
+        return SimpleNamespace(
+            summary=summary,
+            candidate_updates=("demo",),
+            had_errors=False,
+            written_paths=(candidate,),
+        )
+
+    configure_isolated_run(
+        monkeypatch,
+        root=live,
+        plan=plan,
+        execute_result=_execute_result,
+        planned_paths=("tracked.txt",),
+    )
+
+    def _fail_root_closures(**_kwargs: object) -> tuple[DerivationValidationFailure]:
+        assert Path.cwd() != live
+        assert output.read_text(encoding="utf-8") == "committed\n"
+        return (
+            DerivationValidationFailure(
+                source="root-closures",
+                installable="path:.#checks.aarch64-darwin.root-closures",
+                message="closure failed",
+            ),
+        )
+
+    monkeypatch.setattr(
+        "lib.update.derivation_validation.validate_root_closures",
+        _fail_root_closures,
+    )
+
+    assert _run_async(run_updates(UpdateOptions(targets=targets, json=json_mode))) == 1
+    assert output.read_text(encoding="utf-8") == "committed\n"
+    captured = capsys.readouterr()
+    if json_mode:
+        assert captured.err == ""
+        assert json.loads(captured.out) == {
+            "updated": [],
+            "errors": ["root-closures"],
+            "noChange": [],
+            "success": False,
+            "candidateUpdatesDiscarded": ["demo"],
+        }
+    else:
+        assert "closure failed" in captured.err
+        assert "Updated: demo" not in captured.out
+        assert "Candidate updates discarded: demo" in captured.out
+
+
+@pytest.mark.parametrize(
+    ("commit_marker_written", "expected_state", "expected_content"),
+    [
+        pytest.param(False, "rolled_back", "committed\n", id="pre-commit"),
+        pytest.param(True, "promoted", "candidate\n", id="post-commit"),
+    ],
+)
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_run_updates_reports_recovered_promotion_io_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    commit_marker_written: bool,
+    expected_state: str,
+    expected_content: str,
+    json_mode: bool,
+) -> None:
+    """Report the journal-authoritative live outcome after promotion I/O fails."""
+    live = tmp_path / "live"
+    _init_update_workspace_repo(live)
+    output = live / "tracked.txt"
+    plan = make_run_plan(source_names=("demo",))
+
+    async def _execute_result(*_args: object) -> SimpleNamespace:
+        candidate = Path.cwd() / "tracked.txt"
+        candidate.write_text("candidate\n", encoding="utf-8")
+        summary = UpdateSummary()
+        summary.accumulate({"demo": "updated"})
+        return SimpleNamespace(
+            summary=summary,
+            candidate_updates=("demo",),
+            had_errors=False,
+            written_paths=(candidate,),
+        )
+
+    configure_isolated_run(
+        monkeypatch,
+        root=live,
+        plan=plan,
+        execute_result=_execute_result,
+        planned_paths=("tracked.txt",),
+    )
+    from lib.update import persistence as persistence_module
+
+    original_write = persistence_module._write_transaction
+
+    def _fail_commit_write(
+        journal: Path,
+        transaction: persistence_module._Transaction,
+    ) -> None:
+        if not transaction.committed:
+            original_write(journal, transaction)
+            return
+        if commit_marker_written:
+            original_write(journal, transaction)
+        raise OSError("simulated commit journal I/O failure")
+
+    monkeypatch.setattr(
+        persistence_module,
+        "_write_transaction",
+        _fail_commit_write,
+    )
+
+    assert (
+        _run_async(run_updates(UpdateOptions(targets=("demo",), json=json_mode))) == 1
+    )
+    assert output.read_text(encoding="utf-8") == expected_content
+    captured = capsys.readouterr()
+    if json_mode:
+        assert captured.err == ""
+        payload = json.loads(captured.out)
+        assert payload["success"] is False
+        assert payload["candidatePromotionState"] == expected_state
+        assert payload["errors"] == ["workspace"]
+        if commit_marker_written:
+            assert payload["updated"] == ["demo"]
+            assert "candidateUpdatesDiscarded" not in payload
+        else:
+            assert payload["updated"] == []
+            assert payload["candidateUpdatesDiscarded"] == ["demo"]
+    elif commit_marker_written:
+        assert "Updated: demo" in captured.out
+        assert "Candidate updates discarded" not in captured.out
+    else:
+        assert "Updated: demo" not in captured.out
+        assert "Candidate updates discarded: demo" in captured.out
+
+
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_run_updates_exposes_unknown_promotion_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    json_mode: bool,
+) -> None:
+    """Fail closed without claiming promotion or rollback when recovery fails."""
+    live = tmp_path / "live"
+    _init_update_workspace_repo(live)
+    plan = make_run_plan(source_names=("demo",))
+
+    async def _execute_result(*_args: object) -> SimpleNamespace:
+        candidate = Path.cwd() / "tracked.txt"
+        candidate.write_text("candidate\n", encoding="utf-8")
+        summary = UpdateSummary()
+        summary.accumulate({"demo": "updated"})
+        return SimpleNamespace(
+            summary=summary,
+            candidate_updates=("demo",),
+            had_errors=False,
+            written_paths=(candidate,),
+        )
+
+    configure_isolated_run(
+        monkeypatch,
+        root=live,
+        plan=plan,
+        execute_result=_execute_result,
+        planned_paths=("tracked.txt",),
+    )
+    from lib.update import persistence as persistence_module
+
+    original_write = persistence_module._write_transaction
+    original_recover = persistence_module._recover_transaction
+
+    def _fail_commit_write(
+        journal: Path,
+        transaction: persistence_module._Transaction,
+    ) -> None:
+        if transaction.committed:
+            raise OSError("simulated commit journal I/O failure")
+        original_write(journal, transaction)
+
+    def _fail_recovery(
+        journal: Path,
+        root: Path,
+        root_descriptor: int,
+    ) -> bool | None:
+        if journal.exists():
+            msg = "simulated recovery failure"
+            raise UpdateWorkspaceError(msg)
+        return original_recover(journal, root, root_descriptor)
+
+    monkeypatch.setattr(
+        persistence_module,
+        "_write_transaction",
+        _fail_commit_write,
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "_recover_transaction",
+        _fail_recovery,
+    )
+
+    assert (
+        _run_async(run_updates(UpdateOptions(targets=("demo",), json=json_mode))) == 1
+    )
+    captured = capsys.readouterr()
+    if json_mode:
+        assert captured.err == ""
+        payload = json.loads(captured.out)
+        assert payload["success"] is False
+        assert payload["updated"] == []
+        assert payload["candidatePromotionState"] == "unknown"
+        assert payload["candidateUpdatesIndeterminate"] == ["demo"]
+        assert "candidateUpdatesDiscarded" not in payload
+    else:
+        assert "Candidate updates have unknown promotion state: demo" in captured.out
+        assert "Candidate updates discarded" not in captured.out
+        assert "Updated: demo" not in captured.out
+        assert "recovery could not determine" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("candidate_name", "expected_validation_calls"),
+    [
+        (None, 0),
+        ("tracked.txt", 1),
+        ("flake.lock", 1),
+    ],
+)
+def test_narrow_update_validates_roots_only_when_candidate_changes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    candidate_name: str | None,
+    expected_validation_calls: int,
+) -> None:
+    """Skip roots for targeted no-ops but gate every changed targeted candidate."""
+    live = tmp_path / "live"
+    _init_update_workspace_repo(live)
+    (live / "flake.lock").write_text("current\n", encoding="utf-8")
+    changes_lock = candidate_name == "flake.lock"
+    plan = make_run_plan(
+        source_names=("demo",),
+        do_input_refresh=changes_lock,
+    )
+
+    async def _execute_result(*_args: object) -> SimpleNamespace:
+        summary = UpdateSummary()
+        summary.accumulate({
+            "demo": "no_change" if candidate_name is None else "updated"
+        })
+        written_paths: tuple[Path, ...] = ()
+        if candidate_name is not None:
+            candidate = Path.cwd() / candidate_name
+            candidate.write_text("candidate\n", encoding="utf-8")
+            if not changes_lock:
+                written_paths = (candidate,)
+        return SimpleNamespace(
+            summary=summary,
+            candidate_updates=tuple(summary.updated),
+            had_errors=False,
+            written_paths=written_paths,
+        )
+
+    class _InputUpdater:
+        input_name = "demo"
+        additional_input_names: tuple[str, ...] = ()
+
+        @staticmethod
+        def get_generated_artifact_files() -> tuple[str, ...]:
+            return ()
+
+    configure_isolated_run(
+        monkeypatch,
+        root=live,
+        plan=plan,
+        execute_result=_execute_result,
+        planned_paths=("tracked.txt",) if candidate_name == "tracked.txt" else (),
+        updaters={"demo": _InputUpdater},
+    )
+    validation_calls = 0
+
+    def _validate_root_closures(**kwargs: object) -> tuple[object, ...]:
+        nonlocal validation_calls
+        validation_calls += 1
+        assert Path.cwd() != live
+        snapshot_root = kwargs["flake_root"]
+        assert isinstance(snapshot_root, Path)
+        assert snapshot_root != Path.cwd()
+        if candidate_name is not None:
+            assert (snapshot_root / candidate_name).read_text(encoding="utf-8") == (
+                "candidate\n"
+            )
+        return ()
+
+    monkeypatch.setattr(
+        "lib.update.derivation_validation.validate_root_closures",
+        _validate_root_closures,
+    )
+
+    assert _run_async(run_updates(UpdateOptions(targets=("demo",)))) == 0
+    assert validation_calls == expected_validation_calls
+    if candidate_name is None:
+        assert (live / "tracked.txt").read_text(encoding="utf-8") == "committed\n"
+        assert (live / "flake.lock").read_text(encoding="utf-8") == "current\n"
+    else:
+        assert (live / candidate_name).read_text(encoding="utf-8") == "candidate\n"
+
+
+def test_targeted_noop_rejects_changes_after_its_validation_decision(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A late candidate write cannot turn an unbuilt no-op into a promotion."""
+    live = tmp_path / "live"
+    _init_update_workspace_repo(live)
+
+    async def _execute_result(*_args: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            summary=UpdateSummary(no_change=["demo"]),
+            candidate_updates=(),
+            had_errors=False,
+            written_paths=(),
+        )
+
+    configure_isolated_run(
+        monkeypatch,
+        root=live,
+        plan=make_run_plan(source_names=("demo",)),
+        execute_result=_execute_result,
+        planned_paths=("tracked.txt",),
+    )
+
+    def _decide_then_change(
+        opts: UpdateOptions, changed_paths: tuple[Path, ...]
+    ) -> bool:
+        assert not _requires_root_closure_validation(opts, changed_paths)
+        (Path.cwd() / "tracked.txt").write_text("late update\n", encoding="utf-8")
+        return False
+
+    monkeypatch.setattr(
+        "lib.update.cli._requires_root_closure_validation", _decide_then_change
+    )
+    assert _run_async(run_updates(UpdateOptions(targets=("demo",)))) == 1
+    assert (live / "tracked.txt").read_text(encoding="utf-8") == "committed\n"
+    assert "changed after root closure validation" in capsys.readouterr().err
 
 
 def test_run_updates_check_validates_the_candidate_in_isolation(
@@ -3291,7 +4221,15 @@ def test_run_updates_check_validates_the_candidate_in_isolation(
         assert (Path.cwd() / "flake.lock").read_text(encoding="utf-8") == (
             "candidate input\n"
         )
+        assert _kwargs["all_declared_systems"] is True
         events.append("validate")
+        return ()
+
+    def _validate_roots(**_kwargs: object) -> tuple[object, ...]:
+        assert (Path.cwd() / "flake.lock").read_text(encoding="utf-8") == (
+            "candidate input\n"
+        )
+        events.append("roots")
         return ()
 
     monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: live)
@@ -3306,11 +4244,15 @@ def test_run_updates_check_validates_the_candidate_in_isolation(
         "lib.update.derivation_validation.validate_derivations", _validate
     )
     monkeypatch.setattr(
+        "lib.update.derivation_validation.validate_root_closures",
+        _validate_roots,
+    )
+    monkeypatch.setattr(
         "lib.update.persistence.planned_update_paths", lambda *_args: ()
     )
 
     assert _run_async(run_updates(UpdateOptions(check=True))) == 0
-    assert events == ["ref", "hash", "persist", "validate"]
+    assert events == ["ref", "hash", "persist", "validate", "roots"]
     rendered = capsys.readouterr().out
     assert "Phase 1: flake input refs" in rendered
     assert "Phase 2: sources.json updates" in rendered
@@ -3350,6 +4292,10 @@ def test_run_updates_ref_only_skips_the_source_phase(
         lambda *_args, **_kwargs: (),
     )
     monkeypatch.setattr(
+        "lib.update.derivation_validation.validate_root_closures",
+        lambda **_kwargs: (),
+    )
+    monkeypatch.setattr(
         "lib.update.persistence.planned_update_paths",
         lambda *_args: (),
     )
@@ -3373,6 +4319,7 @@ def test_run_updates_source_input_refresh_declares_flake_lock(
         candidate.write_text("refreshed input\n", encoding="utf-8")
         return SimpleNamespace(
             summary=UpdateSummary(updated=["demo"]),
+            candidate_updates=("demo",),
             had_errors=False,
             written_paths=(),
         )
@@ -3421,6 +4368,7 @@ def test_run_updates_does_not_declare_lock_for_source_without_input(
         candidate.write_text("unauthorized\n", encoding="utf-8")
         return SimpleNamespace(
             summary=UpdateSummary(updated=["demo"]),
+            candidate_updates=("demo",),
             had_errors=False,
             written_paths=(candidate,),
         )
@@ -3542,6 +4490,7 @@ def test_run_updates_enforces_isolated_output_authority(
                 errors=["demo"] if had_errors else [],
                 updated=[] if had_errors else ["demo"],
             ),
+            candidate_updates=() if had_errors else ("demo",),
             had_errors=had_errors,
             written_paths=written_paths,
         )
@@ -3611,6 +4560,7 @@ def test_run_updates_emits_once_after_workspace_cleanup_failure(
         summary.accumulate({"demo": "error"})
         return SimpleNamespace(
             summary=summary,
+            candidate_updates=(),
             had_errors=True,
             written_paths=(),
         )
@@ -3678,17 +4628,36 @@ def test_run_updates_emits_empty_result_only_after_workspace_cleanup(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Do not emit even a no-op summary until the workspace has closed."""
+    """Gate a full empty plan and emit its no-op only after workspace cleanup."""
+    events: list[str] = []
 
     class _ObservedWorkspace:
         def __init__(self, root: Path) -> None:
             self.root = root
 
         def __enter__(self) -> _ObservedWorkspace:
+            events.append("enter")
             return self
 
         def __exit__(self, *_exc_info: object) -> None:
             assert capsys.readouterr().out == ""
+            events.append("close")
+
+        def validation_snapshot(self) -> nullcontext[SimpleNamespace]:
+            events.append("snapshot")
+            return nullcontext(
+                SimpleNamespace(root=self.root, changed_paths=()),
+            )
+
+        def promote(self, allowed_paths: tuple[Path, ...]) -> tuple[Path, ...]:
+            assert allowed_paths == ()
+            events.append("promote")
+            return ()
+
+    def _validate_roots(**kwargs: object) -> tuple[object, ...]:
+        assert kwargs["flake_root"] == tmp_path
+        events.append("roots")
+        return ()
 
     monkeypatch.setattr(
         "lib.update.persistence.IsolatedUpdateWorkspace",
@@ -3696,14 +4665,166 @@ def test_run_updates_emits_empty_result_only_after_workspace_cleanup(
     )
     monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: tmp_path)
     monkeypatch.setattr("lib.update.cli._build_run_plan", lambda _opts: None)
+    monkeypatch.setattr(
+        "lib.update.derivation_validation.validate_root_closures",
+        _validate_roots,
+    )
 
     assert _run_async(run_updates(UpdateOptions(json=True))) == 0
+    assert events == ["enter", "snapshot", "roots", "promote", "close"]
     assert json.loads(capsys.readouterr().out) == {
         "updated": [],
         "errors": [],
         "noChange": [],
         "success": True,
     }
+
+
+def test_run_updates_empty_full_plan_root_failure_prevents_finalization(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Fail an empty full update when its discovered roots do not build."""
+    live = tmp_path / "live"
+    _init_update_workspace_repo(live)
+    promoted = False
+    original_promote = IsolatedUpdateWorkspace.promote
+
+    def _fail_roots(**_kwargs: object) -> tuple[DerivationValidationFailure]:
+        return (
+            DerivationValidationFailure(
+                source="root-closures",
+                installable="path:.#checks.aarch64-darwin.root-closures",
+                message="closure failed",
+            ),
+        )
+
+    def _observe_promote(
+        workspace: IsolatedUpdateWorkspace,
+        allowed_paths: tuple[Path, ...],
+    ) -> tuple[Path, ...]:
+        nonlocal promoted
+        promoted = True
+        return original_promote(workspace, allowed_paths)
+
+    monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: live)
+    monkeypatch.setattr("lib.update.cli._build_run_plan", lambda _opts: None)
+    monkeypatch.setattr(
+        "lib.update.derivation_validation.validate_root_closures",
+        _fail_roots,
+    )
+    monkeypatch.setattr(IsolatedUpdateWorkspace, "promote", _observe_promote)
+
+    assert _run_async(run_updates(UpdateOptions(json=True))) == 1
+    assert not promoted
+    assert (live / "tracked.txt").read_text(encoding="utf-8") == "committed\n"
+    assert json.loads(capsys.readouterr().out) == {
+        "updated": [],
+        "errors": ["root-closures"],
+        "noChange": [],
+        "success": False,
+    }
+
+
+def test_run_updates_empty_full_plan_check_preserves_live_tree(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Validate an empty full check through a snapshot without promoting."""
+    live = tmp_path / "live"
+    _init_update_workspace_repo(live)
+    live_output = live / "tracked.txt"
+    live_output.write_text("working tree\n", encoding="utf-8")
+    events: list[str] = []
+    original_validate = IsolatedUpdateWorkspace.validate_changes
+
+    def _validate_roots(**kwargs: object) -> tuple[object, ...]:
+        snapshot_root = kwargs["flake_root"]
+        assert isinstance(snapshot_root, Path)
+        assert snapshot_root != live
+        assert (snapshot_root / "tracked.txt").read_text(encoding="utf-8") == (
+            "working tree\n"
+        )
+        events.append("roots")
+        return ()
+
+    def _observe_validate(
+        workspace: IsolatedUpdateWorkspace,
+        allowed_paths: tuple[Path, ...],
+    ) -> tuple[Path, ...]:
+        assert allowed_paths == ()
+        events.append("validate")
+        return original_validate(workspace, allowed_paths)
+
+    def _unexpected_promote(*_args: object, **_kwargs: object) -> tuple[Path, ...]:
+        pytest.fail("check mode must not promote")
+
+    monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: live)
+    monkeypatch.setattr("lib.update.cli._build_run_plan", lambda _opts: None)
+    monkeypatch.setattr(
+        "lib.update.derivation_validation.validate_root_closures",
+        _validate_roots,
+    )
+    monkeypatch.setattr(
+        IsolatedUpdateWorkspace,
+        "validate_changes",
+        _observe_validate,
+    )
+    monkeypatch.setattr(IsolatedUpdateWorkspace, "promote", _unexpected_promote)
+
+    assert _run_async(run_updates(UpdateOptions(check=True, json=True))) == 0
+    assert events == ["roots", "validate"]
+    assert live_output.read_text(encoding="utf-8") == "working tree\n"
+
+
+def test_run_updates_targeted_empty_plan_skips_roots_and_finalizes_noop(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Keep targeted empty plans cheap while completing the shared lifecycle."""
+    live = tmp_path / "live"
+    _init_update_workspace_repo(live)
+    events: list[str] = []
+    original_decision = _requires_root_closure_validation
+    original_promote = IsolatedUpdateWorkspace.promote
+
+    def _observe_decision(
+        opts: UpdateOptions,
+        changed_paths: tuple[Path, ...],
+    ) -> bool:
+        assert changed_paths == ()
+        decision = original_decision(opts, changed_paths)
+        assert not decision
+        events.append("decision")
+        return decision
+
+    def _unexpected_roots(**_kwargs: object) -> tuple[object, ...]:
+        pytest.fail("a targeted byte-for-byte no-op must skip root builds")
+
+    def _observe_promote(
+        workspace: IsolatedUpdateWorkspace,
+        allowed_paths: tuple[Path, ...],
+    ) -> tuple[Path, ...]:
+        assert allowed_paths == ()
+        events.append("promote")
+        return original_promote(workspace, allowed_paths)
+
+    monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: live)
+    monkeypatch.setattr("lib.update.cli._build_run_plan", lambda _opts: None)
+    monkeypatch.setattr(
+        "lib.update.cli._requires_root_closure_validation",
+        _observe_decision,
+    )
+    monkeypatch.setattr(
+        "lib.update.derivation_validation.validate_root_closures",
+        _unexpected_roots,
+    )
+    monkeypatch.setattr(IsolatedUpdateWorkspace, "promote", _observe_promote)
+
+    assert _run_async(run_updates(UpdateOptions(targets=("demo",), json=True))) == 0
+    assert events == ["decision", "promote"]
+    assert (live / "tracked.txt").read_text(encoding="utf-8") == "committed\n"
 
 
 def test_update_workspace_reports_repository_lock_conflict(

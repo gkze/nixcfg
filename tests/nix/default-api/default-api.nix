@@ -2,11 +2,10 @@
   src ? ../../..,
 }:
 let
-  exportedSystems = [
-    "aarch64-darwin"
-    "aarch64-linux"
-    "x86_64-linux"
-  ];
+  systemPolicy = builtins.fromJSON (builtins.readFile (src + "/lib/system-policy.json"));
+  exportedSystems =
+    assert systemPolicy.schemaVersion == 1;
+    builtins.attrNames systemPolicy.systems;
   packageSmokeSystem = "aarch64-darwin";
 
   flake = import (src + "/default.nix") {
@@ -130,6 +129,9 @@ let
   );
 
   names = attrs: builtins.sort builtins.lessThan (builtins.attrNames attrs);
+  systemsContaining =
+    packageName:
+    builtins.filter (system: builtins.hasAttr packageName (registry.forSystem system)) exportedSystems;
   systemChecks = builtins.concatLists (
     builtins.map (
       system:
@@ -202,6 +204,14 @@ let
     )
     (assertEq "registry names match flake package paths" (names registry.packagePaths) (
       names flake.packagePaths
+    ))
+    (assertEq "aarch64 Darwin package capability" [ "aarch64-darwin" ] (systemsContaining "buzz"))
+    (assertEq "Darwin and x86_64 Linux package capability" [
+      "aarch64-darwin"
+      "x86_64-linux"
+    ] (systemsContaining "gitbutler"))
+    (assertEq "non-x86 Darwin and Linux package capability" exportedSystems (
+      systemsContaining "opencode-desktop"
     ))
     (assertEq "registry wispr path matches base helper" (toString registry.packagePaths.wispr-flow) (
       toString baseHelper.packagePaths.wispr-flow

@@ -60,7 +60,7 @@ class T3RuntimeUpdater(FlakeInputHashUpdater):
             for name in _RUNTIME_LOCK_SOURCES
             if name in context.effective_sources
         }
-        if self.source_pins is None and not source_overrides:
+        if self.source_pins_for(info) is None and not source_overrides:
             return None
 
         current = source_overrides.get(self.name) or context.current

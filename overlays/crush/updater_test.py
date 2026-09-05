@@ -7,10 +7,16 @@ import pytest
 
 from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._updater_helpers import collect_events as _collect_events
-from lib.tests._updater_helpers import install_fixed_hash_stream, load_repo_module
+from lib.tests._updater_helpers import (
+    install_fixed_hash_stream,
+    load_repo_module,
+)
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.nix import _build_overlay_expr
 from lib.update.updaters import VersionInfo
+
+COMMIT = "c" * 40
+CURRENT_COMMIT = "d" * 40
 
 
 def _load_module() -> ModuleType:
@@ -219,7 +225,6 @@ def test_fetch_latest_requires_release_tag_name(
             result=[{"draft": False, "prerelease": False, "tag_name": ""}],
         ),
     )
-
     with pytest.raises(RuntimeError, match="Missing tag_name in release payload"):
         _run(updater.fetch_latest(object()))
 
@@ -254,6 +259,11 @@ def test_fetch_latest_skips_drafts_and_prereleases(
             ],
         ),
     )
+    monkeypatch.setattr(
+        updater,
+        "_resolve_release_tag_commit",
+        lambda _session, _tag: asyncio.sleep(0, result=COMMIT),
+    )
 
     async def _fetch_url(_session, url: str, **_kwargs):
         fetched_tags.append(url)
@@ -264,9 +274,23 @@ def test_fetch_latest_skips_drafts_and_prereleases(
     latest = _run(updater.fetch_latest(object()))
 
     assert latest.version == stable_version
-    assert latest.metadata.tag == stable_tag
+    assert latest.metadata["tag"] == stable_tag
+    assert latest.metadata["commit"] == COMMIT
+    assert (
+        _run(
+            updater._is_latest(
+                SourceEntry(
+                    version=stable_version,
+                    commit="a" * 40,
+                    hashes=[],
+                ),
+                latest,
+            )
+        )
+        is False
+    )
     assert len(fetched_tags) == 1
-    assert stable_tag in fetched_tags[0]
+    assert COMMIT in fetched_tags[0]
 
 
 def test_fetch_latest_falls_back_to_current_pin_when_all_stable_releases_need_newer_go(
@@ -299,11 +323,20 @@ def test_fetch_latest_falls_back_to_current_pin_when_all_stable_releases_need_ne
         ),
     )
     monkeypatch.setattr(updater, "_current_version", lambda: current_version)
+    monkeypatch.setattr(
+        updater,
+        "_resolve_release_tag_commit",
+        lambda _session, tag: asyncio.sleep(
+            0,
+            result=CURRENT_COMMIT if tag == f"v{current_version}" else COMMIT,
+        ),
+    )
 
     latest = _run(updater.fetch_latest(object()))
 
     assert latest.version == current_version
-    assert latest.metadata.tag == f"v{current_version}"
+    assert latest.metadata["tag"] == f"v{current_version}"
+    assert latest.metadata["commit"] == CURRENT_COMMIT
 
 
 def test_fetch_hashes_computes_src_and_vendor_hashes(
@@ -312,7 +345,7 @@ def test_fetch_hashes_computes_src_and_vendor_hashes(
     """Compute both source and vendor hashes from mocked build streams."""
     module = _load_module()
     updater = module.CrushUpdater()
-    info = VersionInfo(version="fixture-version")
+    info = VersionInfo(version="fixture-version", metadata={"commit": COMMIT})
 
     calls = install_fixed_hash_stream(
         monkeypatch,
@@ -328,7 +361,7 @@ def test_fetch_hashes_computes_src_and_vendor_hashes(
     assert calls == [
         {
             "name": "crush",
-            "expr": updater._src_expr(info.version),
+            "expr": updater._src_expr(COMMIT),
             "env": None,
             "config": updater.config,
         },
@@ -339,6 +372,7 @@ def test_fetch_hashes_computes_src_and_vendor_hashes(
                 source_overrides={
                     "crush": SourceEntry(
                         version=info.version,
+                        commit=COMMIT,
                         hashes=[
                             HashEntry.create("srcHash", "sha256-src"),
                             HashEntry.create("vendorHash", updater.config.fake_hash),

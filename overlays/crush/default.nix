@@ -22,11 +22,11 @@ let
       }
     else
       prev.crush;
-  inherit (selfSource) version;
+  inherit (selfSource) commit version;
   src = prev.fetchFromGitHub {
     owner = "charmbracelet";
     repo = "crush";
-    tag = "v${version}";
+    rev = commit;
     hash = slib.sourceHash "crush" "srcHash";
   };
 in

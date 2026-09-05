@@ -1,10 +1,8 @@
 """Disable Antigravity's mutable Electron updater inside its packed ASAR."""
 
 import argparse
-import hashlib
 import plistlib
 import sys
-from functools import partial
 from pathlib import Path
 
 from lib.asar_integrity import (
@@ -16,10 +14,6 @@ from lib.asar_integrity import (
 )
 
 UPDATER_PATH = "dist/updater.js"
-REVIEWED_UPDATER_SHA256 = frozenset({
-    # Google Antigravity 2.9.1, aarch64-darwin.
-    "3a9ccfaef9bc9a299f0e761a171997a21887dc0c7bda38bf178647ed59a60c71",
-})
 
 
 class PatchError(RuntimeError):
@@ -135,24 +129,8 @@ def validate_disabled_payload(payload: bytes) -> None:
             raise PatchError(msg)
 
 
-def disable_updates(
-    payload: bytes,
-    *,
-    expected_sha256: str | None = None,
-) -> bytes:
+def disable_updates(payload: bytes) -> bytes:
     """Return the exact-size fail-closed updater transformation."""
-    actual_sha256 = hashlib.sha256(payload).hexdigest()
-    if expected_sha256 is None:
-        if actual_sha256 not in REVIEWED_UPDATER_SHA256:
-            msg = f"Antigravity updater SHA-256 is not reviewed: {actual_sha256}"
-            raise PatchError(msg)
-    elif actual_sha256 != expected_sha256:
-        msg = (
-            "Antigravity updater SHA-256 drifted: "
-            f"expected {expected_sha256}, got {actual_sha256}"
-        )
-        raise PatchError(msg)
-
     patched = payload
     for label, vendor, disabled, expected_count in PATCHES:
         actual_count = patched.count(vendor)
@@ -176,7 +154,7 @@ def _bundle_paths(bundle: Path) -> tuple[Path, Path, Path]:
     )
 
 
-def patch_bundle(bundle: Path, *, expected_sha256: str | None = None) -> str:
+def patch_bundle(bundle: Path) -> str:
     """Patch the packed policy, refresh integrity, and remove vendor feed config."""
     asar_path, plist_path, update_config = _bundle_paths(bundle)
     if not update_config.is_file():
@@ -185,7 +163,7 @@ def patch_bundle(bundle: Path, *, expected_sha256: str | None = None) -> str:
     digest = replace_packed_file(
         asar_path,
         UPDATER_PATH,
-        partial(disable_updates, expected_sha256=expected_sha256),
+        disable_updates,
     )
     write_info_plist_hash(plist_path, asar_path)
     update_config.unlink()

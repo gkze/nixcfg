@@ -22,6 +22,7 @@ from lib.asar_integrity import (
     check_info_plist_hash,
     read_packed_file,
 )
+from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
@@ -29,6 +30,12 @@ from lib.tests._nix_ast import (
     parse_nix_expr,
 )
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
+from lib.tests._source_metadata import (
+    assert_https_url,
+    assert_platform_source_entry,
+    assert_release_version,
+    assert_url_contains_version,
+)
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.paths import REPO_ROOT
@@ -499,14 +506,19 @@ def test_grok_build_package_owns_update_policy_and_resigns_bundle() -> None:
 
 
 def test_grok_build_sources_pin_the_official_stable_zip() -> None:
-    """Checked-in source metadata must match the updater's immutable artifact."""
-    sources = json.loads((_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8"))
-
-    assert sources == {
-        "hashes": {"aarch64-darwin": _HASH},
-        "urls": {"aarch64-darwin": _ARTIFACT_URL},
-        "version": _VERSION,
-    }
+    """Checked-in metadata must identify one immutable official arm64 ZIP."""
+    source = SourceEntry.model_validate_json(
+        (_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")
+    )
+    version = assert_release_version(source.version)
+    _hashes, urls = assert_platform_source_entry(
+        source,
+        platforms={"aarch64-darwin"},
+    )
+    url = urls["aarch64-darwin"]
+    assert_https_url(url, host="storage.googleapis.com")
+    assert_url_contains_version(url, version)
+    assert url.endswith("-arm64-mac.zip")
 
 
 def test_update_patch_updates_payload_file_hashes_and_plist(

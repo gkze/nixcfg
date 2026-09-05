@@ -1,15 +1,15 @@
 {
-  "commit": "95154bee4034ca7a40b33095c2ddbde8c9aa1614",
+  "commit": "9ceb1f79bbc21785a0a075c40aecb3c058b1ea15",
   "hashes": [
     {
-      "hash": "sha256-lY+RpF27tXET7RXhAHLQ3SwEJR+1g4EnMKY+QFPqavQ=",
+      "hash": "sha256-3OJbkr3GM2lQY9nHKdrg5b1lct32KZJ0+wjCdupoiCw=",
       "hashType": "cargoHash",
-      "url": "https://github.com/block/buzz/archive/95154bee4034ca7a40b33095c2ddbde8c9aa1614.tar.gz"
+      "url": "https://github.com/block/buzz/archive/9ceb1f79bbc21785a0a075c40aecb3c058b1ea15.tar.gz"
     },
     {
-      "hash": "sha256-eYkZY0OWiQvC31HHaXhC4b7vtVT2N10OORMbZBOI080=",
+      "hash": "sha256-qxtgbCeivfpAQg2+JOUGCQo7agf0GAARvLle89jFzu4=",
       "hashType": "npmDepsHash",
-      "url": "https://github.com/block/buzz/archive/95154bee4034ca7a40b33095c2ddbde8c9aa1614.tar.gz"
+      "url": "https://github.com/block/buzz/archive/9ceb1f79bbc21785a0a075c40aecb3c058b1ea15.tar.gz"
     },
     {
       "hash": "sha256-RXjmM66u40cxnacbvTtCFJShMK4BM+MHOyJ2vQ7Gw60=",
@@ -17,9 +17,9 @@
       "url": "https://github.com/Mesh-LLM/mesh-llm/archive/3295c902d4c4f859aaadf9240042ffdaf06dd07e.tar.gz"
     },
     {
-      "hash": "sha256-+5fdFmxB9TOgYoeJrEs2FCYldku4OyEJVrpdC/FYRFQ=",
+      "hash": "sha256-p4WLDBwiNiw1qlVo12Sz5js/r/6A3SiHBNCx8V9WlSs=",
       "hashType": "srcHash",
-      "url": "https://github.com/block/buzz/archive/95154bee4034ca7a40b33095c2ddbde8c9aa1614.tar.gz"
+      "url": "https://github.com/block/buzz/archive/9ceb1f79bbc21785a0a075c40aecb3c058b1ea15.tar.gz"
     },
     {
       "hash": "sha256-cN+27Zi0dGo30D08CxwpPwb2hY4NgkGNaWgkmz8I0f8=",
@@ -37,17 +37,20 @@
       "url": "https://github.com/microsoft/onnxruntime/archive/8f0278c77bf44b0cc83c098c6c722b92a36ac4b5.tar.gz"
     },
     {
-      "hash": "sha256-y067FJWvsJAe6mvtnLPSW1YK0/gcBrKuZX45OCO8/2U=",
+      "hash": "sha256-q8FUmTHnPfy/Ub+TNs3UK3exOoX1GdZGwHkH5pDteKE=",
       "hashType": "vendorHash",
-      "url": "https://github.com/block/buzz/archive/95154bee4034ca7a40b33095c2ddbde8c9aa1614.tar.gz"
+      "url": "https://github.com/block/buzz/archive/9ceb1f79bbc21785a0a075c40aecb3c058b1ea15.tar.gz"
     }
   ],
+  "pins": {
+    "onnxruntimeVersion": "1.27.0"
+  },
   "urls": {
-    "buzz": "https://github.com/block/buzz/archive/95154bee4034ca7a40b33095c2ddbde8c9aa1614.tar.gz",
+    "buzz": "https://github.com/block/buzz/archive/9ceb1f79bbc21785a0a075c40aecb3c058b1ea15.tar.gz",
     "llamaCpp": "https://github.com/ggml-org/llama.cpp/archive/8190848bb36c7df4251db4352bd81bc07d0a4385.tar.gz",
     "meshLlm": "https://github.com/Mesh-LLM/mesh-llm/archive/3295c902d4c4f859aaadf9240042ffdaf06dd07e.tar.gz",
     "onnxruntime": "https://github.com/microsoft/onnxruntime/archive/8f0278c77bf44b0cc83c098c6c722b92a36ac4b5.tar.gz",
     "sherpaOnnx": "https://github.com/k2-fsa/sherpa-onnx/archive/142807252687d81b40d6315f23470a1512a00de3.tar.gz"
   },
-  "version": "0.5.20"
+  "version": "0.5.22"
 }

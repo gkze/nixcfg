@@ -1336,7 +1336,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_DataExchange" "Win32_System_Memory" "Win32_System_Ole" "Win32_UI_Shell" ];
           }
@@ -2631,27 +2631,6 @@ rec {
         features = {
         };
       };
-      "bisync" = rec {
-        crateName = "bisync";
-        version = "0.3.0";
-        edition = "2021";
-        sha256 = "19s1xjbbqz71j9wv6ll0g37y37bgnf6j4ppmr9n1j8vgdlpq482h";
-        dependencies = [
-          {
-            name = "bisync_macros";
-            packageId = "bisync_macros";
-          }
-        ];
-
-      };
-      "bisync_macros" = rec {
-        crateName = "bisync_macros";
-        version = "0.2.3";
-        edition = "2021";
-        sha256 = "1xis2zqwj78q492vmcll8z9qkx4c8hkgniby22mgc057a39l07yj";
-        procMacro = true;
-
-      };
       "bit-set 0.5.3" = rec {
         crateName = "bit-set";
         version = "0.5.3";
@@ -3553,7 +3532,7 @@ rec {
             name = "syntect";
             packageId = "syntect";
             usesDefaultFeatures = false;
-            features = [ "default-syntaxes" "default-themes" "regex-onig" "metadata" "html" ];
+            features = [ "default-themes" "regex-onig" "metadata" "html" ];
           }
           {
             name = "tempfile";
@@ -3593,6 +3572,12 @@ rec {
             name = "tracing-subscriber";
             packageId = "tracing-subscriber";
             features = [ "env-filter" "std" "fmt" ];
+          }
+          {
+            name = "two-face";
+            packageId = "two-face";
+            usesDefaultFeatures = false;
+            features = [ "syntect-onig" ];
           }
           {
             name = "unicode-width";
@@ -4399,6 +4384,10 @@ rec {
             features = [ "derive" "std" ];
           }
           {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
             name = "thiserror";
             packageId = "thiserror 2.0.18";
           }
@@ -4417,10 +4406,6 @@ rec {
             packageId = "reqwest";
             usesDefaultFeatures = false;
             features = [ "rustls" "json" "multipart" "query" "stream" "blocking" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
           }
           {
             name = "tokio";
@@ -4972,6 +4957,10 @@ rec {
             features = [ "progress-tree" "render-line" "render-line-autoconfigure" "render-line-crossterm" "unit-bytes" ];
           }
           {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+          {
             name = "tracing";
             packageId = "tracing";
           }
@@ -4988,7 +4977,7 @@ rec {
             name = "zip";
             packageId = "zip";
             usesDefaultFeatures = false;
-            features = [ "bzip2" ];
+            features = [ "bzip2" "deflate-flate2-zlib-rs" ];
           }
         ];
         devDependencies = [
@@ -5000,10 +4989,6 @@ rec {
             name = "snapbox";
             packageId = "snapbox";
             features = [ "json" ];
-          }
-          {
-            name = "tempfile";
-            packageId = "tempfile";
           }
           {
             name = "termtree";
@@ -5124,6 +5109,10 @@ rec {
           {
             name = "but-db";
             packageId = "but-db";
+          }
+          {
+            name = "but-error";
+            packageId = "but-error";
           }
           {
             name = "but-forge-storage";
@@ -5455,6 +5444,10 @@ rec {
             features = [ "derive" "std" ];
           }
           {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
             name = "thiserror";
             packageId = "thiserror 2.0.18";
           }
@@ -5469,10 +5462,19 @@ rec {
         ];
         devDependencies = [
           {
+            name = "keyring";
+            packageId = "keyring";
+            features = [ "apple-native" "windows-native" "linux-native-sync-persistent" "crypto-rust" ];
+          }
+          {
             name = "reqwest";
             packageId = "reqwest";
             usesDefaultFeatures = false;
             features = [ "rustls" "json" "multipart" "query" "stream" "blocking" ];
+          }
+          {
+            name = "tempfile";
+            packageId = "tempfile";
           }
           {
             name = "tokio";
@@ -8320,7 +8322,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" ];
           }
@@ -9757,7 +9759,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: ("msvc" == target."env" or null);
             features = [ "Win32_Foundation" "Win32_System_LibraryLoader" "Win32_Security_Cryptography" ];
           }
@@ -9813,7 +9815,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Networking_WinSock" ];
           }
@@ -10672,7 +10674,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_UI_Shell" "Win32_Foundation" "Win32_Globalization" "Win32_System_Com" ];
           }
@@ -11334,7 +11336,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Diagnostics_Debug" ];
           }
@@ -11812,6 +11814,13 @@ rec {
             target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
             features = [ "with-alloc" "simd" ];
           }
+          {
+            name = "zlib-rs";
+            packageId = "zlib-rs";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" "rust-allocator" ];
+          }
         ];
         features = {
           "any_c_zlib" = [ "any_zlib" ];
@@ -11831,7 +11840,7 @@ rec {
           "zlib-ng-compat" = [ "zlib" "libz-sys/zlib-ng" "dep:crc32fast" ];
           "zlib-rs" = [ "any_zlib" "dep:zlib-rs" ];
         };
-        resolvedDefaultFeatures = [ "any_impl" "default" "miniz_oxide" "rust_backend" ];
+        resolvedDefaultFeatures = [ "any_impl" "any_zlib" "default" "miniz_oxide" "rust_backend" "zlib-rs" ];
       };
       "flume" = rec {
         crateName = "flume";
@@ -13916,7 +13925,7 @@ rec {
             name = "tokio";
             packageId = "tokio";
             usesDefaultFeatures = false;
-            features = [ "macros" "rt-multi-thread" ];
+            features = [ "macros" "rt-multi-thread" "test-util" ];
           }
         ];
         features = {
@@ -14883,13 +14892,13 @@ rec {
       };
       "gix" = rec {
         crateName = "gix";
-        version = "0.87.0";
+        version = "0.87.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         authors = [
           "Sebastian Thiel <sebastian.thiel@icloud.com>"
@@ -15231,8 +15240,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_actor";
         authors = [
@@ -15274,8 +15283,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_attributes";
         authors = [
@@ -15342,8 +15351,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_bitmap";
         authors = [
@@ -15364,8 +15373,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_chunk";
         authors = [
@@ -15386,8 +15395,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_command";
         authors = [
@@ -15426,8 +15435,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_commitgraph";
         authors = [
@@ -15491,8 +15500,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_config";
         authors = [
@@ -15561,8 +15570,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_config_value";
         authors = [
@@ -15605,8 +15614,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_credentials";
         authors = [
@@ -15686,8 +15695,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_date";
         authors = [
@@ -15728,13 +15737,13 @@ rec {
       };
       "gix-diff" = rec {
         crateName = "gix-diff";
-        version = "0.67.0";
+        version = "0.67.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_diff";
         authors = [
@@ -15871,13 +15880,13 @@ rec {
       };
       "gix-dir" = rec {
         crateName = "gix-dir";
-        version = "0.29.0";
+        version = "0.29.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_dir";
         authors = [
@@ -15954,8 +15963,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_discover";
         authors = [
@@ -16006,8 +16015,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_error";
         authors = [
@@ -16033,8 +16042,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_features";
         authors = [
@@ -16122,8 +16131,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_filter";
         authors = [
@@ -16211,8 +16220,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_fs";
         authors = [
@@ -16252,8 +16261,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_glob";
         authors = [
@@ -16299,8 +16308,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_hash";
         authors = [
@@ -16358,8 +16367,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_hashtable";
         authors = [
@@ -16401,8 +16410,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_ignore";
         authors = [
@@ -16452,8 +16461,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_imara_diff";
         authors = [
@@ -16484,8 +16493,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_index";
         authors = [
@@ -16617,8 +16626,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_lock";
         authors = [
@@ -16642,15 +16651,49 @@ rec {
         ];
 
       };
-      "gix-mailmap" = rec {
-        crateName = "gix-mailmap";
-        version = "0.34.0";
+      "gix-macros" = rec {
+        crateName = "gix-macros";
+        version = "0.1.6";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
+        };
+        procMacro = true;
+        libName = "gix_macros";
+        authors = [
+          "Jiahao XU <Jiahao_XU@outlook.com>"
+          "Andre Bogus <bogusandre@gmail.com>"
+          "Sebastian Thiel <sebastian.thiel@icloud.com>"
+        ];
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.118";
+            features = [ "full" "fold" ];
+          }
+        ];
+
+      };
+      "gix-mailmap" = rec {
+        crateName = "gix-mailmap";
+        version = "0.34.1";
+        edition = "2024";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/GitoxideLabs/gitoxide";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_mailmap";
         authors = [
@@ -16691,13 +16734,13 @@ rec {
       };
       "gix-merge" = rec {
         crateName = "gix-merge";
-        version = "0.20.0";
+        version = "0.20.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_merge";
         authors = [
@@ -16794,13 +16837,13 @@ rec {
       };
       "gix-negotiate" = rec {
         crateName = "gix-negotiate";
-        version = "0.35.0";
+        version = "0.35.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_negotiate";
         authors = [
@@ -16846,13 +16889,13 @@ rec {
       };
       "gix-note" = rec {
         crateName = "gix-note";
-        version = "0.1.0";
+        version = "0.1.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_note";
         authors = [
@@ -16889,8 +16932,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_object";
         authors = [
@@ -16986,8 +17029,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_odb";
         authors = [
@@ -17082,13 +17125,13 @@ rec {
       };
       "gix-pack" = rec {
         crateName = "gix-pack";
-        version = "0.74.1";
+        version = "0.74.2";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_pack";
         authors = [
@@ -17201,13 +17244,13 @@ rec {
       };
       "gix-packetline" = rec {
         crateName = "gix-packetline";
-        version = "0.22.1";
+        version = "0.22.2";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_packetline";
         authors = [
@@ -17281,8 +17324,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_path";
         authors = [
@@ -17317,8 +17360,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_pathspec";
         authors = [
@@ -17368,8 +17411,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_prompt";
         authors = [
@@ -17404,23 +17447,19 @@ rec {
       };
       "gix-protocol" = rec {
         crateName = "gix-protocol";
-        version = "0.65.0";
+        version = "0.65.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_protocol";
         authors = [
           "Sebastian Thiel <sebastian.thiel@icloud.com>"
         ];
         dependencies = [
-          {
-            name = "bisync";
-            packageId = "bisync";
-          }
           {
             name = "bstr";
             packageId = "bstr";
@@ -17449,6 +17488,10 @@ rec {
             name = "gix-lock";
             packageId = "gix-lock";
             optional = true;
+          }
+          {
+            name = "gix-macros";
+            packageId = "gix-macros";
           }
           {
             name = "gix-negotiate";
@@ -17527,8 +17570,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_quote";
         authors = [
@@ -17559,8 +17602,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_ref";
         authors = [
@@ -17643,13 +17686,13 @@ rec {
       };
       "gix-refspec" = rec {
         crateName = "gix-refspec";
-        version = "0.45.0";
+        version = "0.45.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_refspec";
         authors = [
@@ -17693,13 +17736,13 @@ rec {
       };
       "gix-revision" = rec {
         crateName = "gix-revision";
-        version = "0.49.0";
+        version = "0.49.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_revision";
         authors = [
@@ -17781,8 +17824,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_revwalk";
         authors = [
@@ -17841,8 +17884,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_sec";
         authors = [
@@ -17890,8 +17933,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_shallow";
         authors = [
@@ -17936,13 +17979,13 @@ rec {
       };
       "gix-status" = rec {
         crateName = "gix-status";
-        version = "0.34.0";
+        version = "0.34.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_status";
         authors = [
@@ -18081,8 +18124,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_submodule";
         authors = [
@@ -18131,8 +18174,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_tempfile";
         authors = [
@@ -18190,8 +18233,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_testtools";
         authors = [
@@ -18339,8 +18382,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_trace";
         authors = [
@@ -18363,13 +18406,13 @@ rec {
       };
       "gix-transport" = rec {
         crateName = "gix-transport";
-        version = "0.59.0";
+        version = "0.59.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_transport";
         authors = [
@@ -18477,8 +18520,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_traverse";
         authors = [
@@ -18544,8 +18587,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_url";
         authors = [
@@ -18596,8 +18639,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_utils";
         authors = [
@@ -18658,8 +18701,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_validate";
         authors = [
@@ -18682,8 +18725,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_worktree";
         authors = [
@@ -18767,13 +18810,13 @@ rec {
       };
       "gix-worktree-state" = rec {
         crateName = "gix-worktree-state";
-        version = "0.34.0";
+        version = "0.34.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_worktree_state";
         authors = [
@@ -18851,13 +18894,13 @@ rec {
       };
       "gix-worktree-stream" = rec {
         crateName = "gix-worktree-stream";
-        version = "0.36.0";
+        version = "0.36.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_worktree_stream";
         authors = [
@@ -18926,8 +18969,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/GitoxideLabs/gitoxide";
-          rev = "6704303ed5ef3403b129e2b6cc4a9214432ffd03";
-          sha256 = "0jczkli133amp29f5phx36wd5q5rd1399d77shq5wsiz228i92na";
+          rev = "dda600d7ee29a6bda4cf1047d0d1782e76b16f98";
+          sha256 = "1di28n6r1vcxh7w27c74i4l869sj9dpzgm4vnmsvm9vz00r4xail";
         };
         libName = "gix_zlib";
         authors = [
@@ -21356,7 +21399,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" ];
           }
@@ -24262,7 +24305,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             rename = "windows";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" "Win32_Storage_FileSystem" "Win32_Security" ];
@@ -27105,7 +27148,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.45.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Pipes" "Win32_Security" ];
           }
@@ -29153,7 +29196,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_IO" "Win32_Networking_WinSock" ];
           }
@@ -31528,7 +31571,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" ];
           }
@@ -31789,7 +31832,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Security_Cryptography" ];
@@ -34808,7 +34851,7 @@ rec {
           "yaml-load" = [ "yaml-rust" "parsing" ];
           "yaml-rust" = [ "dep:yaml-rust" ];
         };
-        resolvedDefaultFeatures = [ "bincode" "default-syntaxes" "default-themes" "dump-create" "dump-load" "flate2" "fnv" "html" "metadata" "onig" "parsing" "plist" "plist-load" "regex-onig" "regex-syntax" ];
+        resolvedDefaultFeatures = [ "bincode" "default-themes" "dump-create" "dump-load" "flate2" "fnv" "html" "metadata" "onig" "parsing" "plist" "plist-load" "regex-onig" "regex-syntax" ];
       };
       "sys-locale" = rec {
         crateName = "sys-locale";
@@ -37281,7 +37324,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Storage_FileSystem" "Win32_Foundation" ];
           }
@@ -37467,7 +37510,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" ];
           }
@@ -38261,7 +38304,7 @@ rec {
           "tracing" = [ "dep:tracing" ];
           "windows-sys" = [ "dep:windows-sys" ];
         };
-        resolvedDefaultFeatures = [ "bytes" "default" "fs" "full" "io-std" "io-util" "libc" "macros" "mio" "net" "parking_lot" "process" "rt" "rt-multi-thread" "signal" "signal-hook-registry" "socket2" "sync" "time" "tokio-macros" "tracing" "windows-sys" ];
+        resolvedDefaultFeatures = [ "bytes" "default" "fs" "full" "io-std" "io-util" "libc" "macros" "mio" "net" "parking_lot" "process" "rt" "rt-multi-thread" "signal" "signal-hook-registry" "socket2" "sync" "test-util" "time" "tokio-macros" "tracing" "windows-sys" ];
       };
       "tokio-macros" = rec {
         crateName = "tokio-macros";
@@ -39900,6 +39943,45 @@ rec {
           "webpki-roots" = [ "dep:webpki-roots" ];
         };
         resolvedDefaultFeatures = [ "data-encoding" "handshake" "http" "httparse" "sha1" ];
+      };
+      "two-face" = rec {
+        crateName = "two-face";
+        version = "0.5.2+bat-0.26.1";
+        edition = "2021";
+        sha256 = "1b7x1rhhhhv7kika34mr0dhg8im1l3nz6wdzmhw46vzzqanyfnwi";
+        libName = "two_face";
+        dependencies = [
+          {
+            name = "serde";
+            packageId = "serde";
+          }
+          {
+            name = "serde_derive";
+            packageId = "serde_derive";
+          }
+          {
+            name = "syntect";
+            packageId = "syntect";
+            usesDefaultFeatures = false;
+            features = [ "dump-load" "parsing" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "syntect";
+            packageId = "syntect";
+            usesDefaultFeatures = false;
+            features = [ "html" ];
+          }
+        ];
+        features = {
+          "default" = [ "syntect-onig" ];
+          "syntect-default-fancy" = [ "syntect-fancy" "syntect/default-fancy" ];
+          "syntect-default-onig" = [ "syntect-onig" "syntect/default-onig" ];
+          "syntect-fancy" = [ "syntect/regex-fancy" ];
+          "syntect-onig" = [ "syntect/regex-onig" ];
+        };
+        resolvedDefaultFeatures = [ "syntect-onig" ];
       };
       "typeid" = rec {
         crateName = "typeid";
@@ -42170,7 +42252,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" "Win32_System_SystemInformation" ];
           }
@@ -44392,7 +44474,7 @@ rec {
           "Win32_UI_WindowsAndMessaging" = [ "Win32_UI" ];
           "Win32_UI_Wpf" = [ "Win32_UI" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Security" "Win32_System" "Win32_System_Pipes" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Globalization" "default" ];
       };
       "windows-sys 0.52.0" = rec {
         crateName = "windows-sys";
@@ -44899,7 +44981,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_DataExchange" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Ole" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_Time" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Dwm" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_LibraryLoader" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_Time" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-sys 0.60.2" = rec {
         crateName = "windows-sys";
@@ -45164,7 +45246,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_Security" "Win32_Security_Credentials" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_DataExchange" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Controls" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Credentials" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_DataExchange" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Ole" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Controls" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-sys 0.61.2" = rec {
         crateName = "windows-sys";
@@ -45426,7 +45508,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-targets 0.42.2" = rec {
         crateName = "windows-targets";
@@ -47393,6 +47475,12 @@ rec {
             packageId = "crc32fast";
           }
           {
+            name = "flate2";
+            packageId = "flate2";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
             name = "indexmap";
             packageId = "indexmap 2.14.0";
           }
@@ -47427,7 +47515,7 @@ rec {
           "zeroize" = [ "dep:zeroize" ];
           "zstd" = [ "dep:zstd" ];
         };
-        resolvedDefaultFeatures = [ "bzip2" ];
+        resolvedDefaultFeatures = [ "_deflate-any" "bzip2" "deflate-flate2" "deflate-flate2-zlib-rs" ];
       };
       "zlib-rs" = rec {
         crateName = "zlib-rs";

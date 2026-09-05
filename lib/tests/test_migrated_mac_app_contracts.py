@@ -187,7 +187,6 @@ def test_baseten_switch_separates_the_cli_from_its_managed_app() -> None:
           pkgs.baseten-switch.cliPackage
           pkgs.executor.cliPackage
           pkgs.pants-preview
-          pkgs.traycer.cliPackage
           pkgs.writer-computer.cliPackage
         ]
         """,

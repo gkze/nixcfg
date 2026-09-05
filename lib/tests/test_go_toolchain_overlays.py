@@ -11,7 +11,7 @@ from lib.update.paths import REPO_ROOT
 
 
 def test_gogcli_uses_go_1_27_without_weakening_upstreams_floor() -> None:
-    """Build current gogcli with a compiler that satisfies its declared minimum."""
+    """Keep the intentional Go compatibility choice in the Nix package."""
     overlay = expect_instance(
         nix_file_expr(REPO_ROOT / "overlays/gogcli/default.nix"),
         FunctionDefinition,
@@ -20,7 +20,10 @@ def test_gogcli_uses_go_1_27_without_weakening_upstreams_floor() -> None:
     call = expect_instance(expect_binding(output.values, "gogcli").value, FunctionCall)
     arguments = expect_instance(call.argument, AttributeSet)
 
-    assert_nix_ast_equal(expect_binding(arguments.values, "go").value, "final.go_1_27")
+    assert_nix_ast_equal(
+        expect_binding(arguments.values, "go").value,
+        "final.go_1_27",
+    )
     assert "postPatch" not in arguments.values
 
 

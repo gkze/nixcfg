@@ -26,6 +26,7 @@ dependencies = [
   "libcst>=1.8.6",
   "lz4>=4.4.5",
   "nix-manipulator",
+  "node-semver>=0.9.1,<1",
   "packaging>=26.0",
   "pydantic-settings>=2.13.1",
   "pydantic>=2.12.5",
@@ -154,9 +155,22 @@ include = ["lib*"]
 exclude = ["lib.tests*"]
 
 [tool.setuptools.package-data]
+# Ship the cross-language system policy beside ``lib.system_policy``.
+"lib" = ["system-policy.json"]
 # Ship the type marker and schemas owned by the Nix model/codegen package.
 "lib.nix" = ["py.typed"]
 "lib.nix.schemas" = ["*.yaml", "_version.json"]
+
+[tool.nixcfg.runtimeSource]
+# Keep the updater re-exec boundary aligned with the uv2nix workspace source.
+schemaVersion = 1
+rootPaths = ["nixcfg.py", "pyproject.toml", "uv.lock"]
+libraryExtensions = ["json", "py", "pyi", "yaml"]
+libraryNames = ["py.typed"]
+excludedLibraryPaths = ["tests"]
+dynamicRoots = ["packages", "overlays"]
+dynamicExtensions = ["py", "pyi", "zig"]
+dynamicExcludedFileSuffixes = ["_test.py"]
 
 [tool.ty.src]
 # Restrict Ty analysis to maintained source trees and explicit extensionless Python entrypoints.

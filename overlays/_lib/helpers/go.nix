@@ -36,6 +36,10 @@ rec {
         vendorHash = slib.sourceHash pname "vendorHash";
         inherit doCheck;
         nativeBuildInputs = [ prev.installShellFiles ];
+        passthru = (args.passthru or { }) // {
+          # Stable package boundary for compatibility-aware updaters.
+          goVersion = go.version;
+        };
         postInstall = ''
           installShellCompletion --cmd ${cmdName} \
             --bash <($out/bin/${cmdName} ${completionCommand} bash) \
@@ -57,6 +61,7 @@ rec {
         "meta"
         "doCheck"
         "go"
+        "passthru"
       ])
     );
 

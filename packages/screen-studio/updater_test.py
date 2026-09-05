@@ -12,12 +12,19 @@ from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
     expect_binding,
     parse_nix_expr,
+)
+from lib.tests._source_metadata import (
+    assert_https_url,
+    assert_platform_source_entry,
+    assert_release_version,
+    assert_url_contains_version,
 )
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
@@ -252,13 +259,19 @@ def test_screen_studio_package_preserves_the_signed_vendor_bundle() -> None:
 
 
 def test_screen_studio_sources_pin_official_architecture_specific_zips() -> None:
-    """Checked-in source metadata should match the stable official artifacts."""
-    sources = json.loads(
+    """Checked-in metadata must contain both version-coherent official ZIPs."""
+    source = SourceEntry.model_validate_json(
         (REPO_ROOT / "packages/screen-studio/sources.json").read_text(encoding="utf-8")
     )
-
-    assert sources == {
-        "hashes": _HASHES,
-        "urls": _URLS,
-        "version": _VERSION,
-    }
+    version = assert_release_version(source.version)
+    _hashes, urls = assert_platform_source_entry(
+        source,
+        platforms={"aarch64-darwin", "x86_64-darwin"},
+    )
+    assert len(set(urls.values())) == 2
+    for url in urls.values():
+        assert_https_url(url, host="screenstudioassets.com")
+        assert_url_contains_version(url, version)
+        assert url.endswith("-mac.zip")
+    assert "arm64" in urls["aarch64-darwin"]
+    assert "arm64" not in urls["x86_64-darwin"]

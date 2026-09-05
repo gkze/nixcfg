@@ -1065,6 +1065,7 @@ dependencies = [
     { name = "libcst" },
     { name = "lz4" },
     { name = "nix-manipulator" },
+    { name = "node-semver" },
     { name = "packaging" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -1112,6 +1113,7 @@ requires-dist = [
     { name = "libcst", specifier = ">=1.8.6" },
     { name = "lz4", specifier = ">=4.4.5" },
     { name = "nix-manipulator", git = "https://github.com/hoh/nix-manipulator.git?rev=dbe47853d2f48b6314a9e07e5bad6ba78bdbf6bc" },
+    { name = "node-semver", specifier = ">=0.9.1,<1" },
     { name = "packaging", specifier = ">=26.0" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pydantic-settings", specifier = ">=2.13.1" },
@@ -1138,6 +1140,15 @@ dev = [
     { name = "tree-sitter", specifier = ">=0.25.2,<0.26" },
     { name = "tree-sitter-bash", specifier = ">=0.25.0" },
     { name = "ty", specifier = ">=0.0.18" },
+]
+
+[[package]]
+name = "node-semver"
+version = "0.9.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/80/46/83d4ff2e6ee95a2395c9695f92b83c7aec16a8341cf4b50be08d67f59deb/node_semver-0.9.1.tar.gz", hash = "sha256:f052dbdcbc42dd5a0c04b22829a3af98c1f29e4675cc6d88db24250a3f7f8ec7", size = 12828, upload-time = "2026-06-23T03:06:50.862Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/05/82/aee31be77e4539deb4b1305f2b42ed5f92a2ff7b8057ada67a0c3ba12187/node_semver-0.9.1-py3-none-any.whl", hash = "sha256:47669dc0f7e104cc482f69fda53c04fbe34ce9b7c9d6990e43c99a028d1628bd", size = 12051, upload-time = "2026-06-23T03:06:49.633Z" },
 ]
 
 [[package]]

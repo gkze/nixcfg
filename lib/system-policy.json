@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "systems": {
+    "aarch64-darwin": {},
+    "aarch64-linux": {},
+    "x86_64-linux": {}
+  },
+  "requiredRootKinds": ["darwin", "home"],
+  "electronArtifacts": {
+    "aarch64-darwin": "darwin-arm64",
+    "aarch64-linux": "linux-arm64",
+    "x86_64-darwin": "darwin-x64",
+    "x86_64-linux": "linux-x64"
+  },
+  "bunArtifacts": {
+    "aarch64-darwin": "bun-darwin-aarch64.zip",
+    "aarch64-linux": "bun-linux-aarch64.zip",
+    "x86_64-darwin": "bun-darwin-x64.zip",
+    "x86_64-linux": "bun-linux-x64-baseline.zip"
+  }
+}

@@ -2,10 +2,12 @@
   backend,
   cargo-tauri,
   cargoHash,
+  diffutils,
   frontend,
   lib,
   pkg-config,
   python3,
+  runCommand,
   rustPlatform,
   rustToolchain,
   src,
@@ -13,6 +15,47 @@
   version,
 }:
 assert stdenv.hostPlatform.system == "aarch64-darwin";
+let
+  patchSupport = lib.fileset.toSource {
+    root = ../..;
+    fileset = lib.fileset.unions [
+      ../../lib/__init__.py
+      ../../lib/exact_text_patch.py
+      ./patch_nix_managed.py
+    ];
+  };
+  cargoConsistencyPatch =
+    runCommand "unsloth-${version}-cargo-consistency.patch"
+      {
+        nativeBuildInputs = [
+          diffutils
+          python3
+        ];
+      }
+      ''
+        for tree in before after; do
+          mkdir -p "$tree/studio/src-tauri"
+          cp ${src}/studio/src-tauri/Cargo.toml "$tree/studio/src-tauri/Cargo.toml"
+          cp ${src}/studio/src-tauri/Cargo.lock "$tree/studio/src-tauri/Cargo.lock"
+          chmod -R u+w "$tree"
+        done
+
+        PYTHONPATH=${patchSupport} ${lib.getExe python3} \
+          ${patchSupport}/packages/unsloth/patch_nix_managed.py after \
+          --cargo-only --desktop-version ${lib.escapeShellArg version}
+
+        : > "$out"
+        for cargoFile in Cargo.toml Cargo.lock; do
+          diffStatus=0
+          diff -u \
+            --label "a/studio/src-tauri/$cargoFile" \
+            --label "b/studio/src-tauri/$cargoFile" \
+            "before/studio/src-tauri/$cargoFile" \
+            "after/studio/src-tauri/$cargoFile" >> "$out" || diffStatus=$?
+          test "$diffStatus" -le 1
+        done
+      '';
+in
 rustPlatform.buildRustPackage {
   pname = "unsloth-desktop";
   inherit
@@ -25,12 +68,10 @@ rustPlatform.buildRustPackage {
   buildAndTestSubdir = "studio";
   strictDeps = true;
 
-  # Cargo source identity and release metadata must be identical while
-  # vendoring and during the final offline build.
-  cargoPatches = [
-    ./studio-release-version.patch
-    ./studio-fix-path-env-revision.patch
-  ];
+  # Generate this from the immutable candidate source so vendoring and the
+  # final offline build consume the same release and Git dependency identities.
+  # The patch may be empty when upstream already expresses both identities.
+  cargoPatches = [ cargoConsistencyPatch ];
 
   nativeBuildInputs = [
     cargo-tauri.hook
@@ -47,15 +88,8 @@ rustPlatform.buildRustPackage {
   };
 
   postPatch = ''
-    PYTHONPATH=${
-      lib.fileset.toSource {
-        root = ../..;
-        fileset = lib.fileset.unions [
-          ../../lib/__init__.py
-          ../../lib/exact_text_patch.py
-        ];
-      }
-    } ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD"
+    PYTHONPATH=${patchSupport} ${lib.getExe python3} \
+      ${patchSupport}/packages/unsloth/patch_nix_managed.py "$PWD"
     rm -rf studio/frontend/dist
     mkdir -p studio/frontend/dist
     cp -R ${frontend}/dist/. studio/frontend/dist/
@@ -70,8 +104,8 @@ rustPlatform.buildRustPackage {
   ];
   doCheck = false;
 
-  # cargo-tauri propagates the Cargo used to build its CLI. Keep the audited
-  # Rust 1.89 toolchain first for the hook's later `cargo tauri` invocation.
+  # cargo-tauri propagates the Cargo used to build its CLI. Keep the
+  # source-declared toolchain first for the hook's later `cargo tauri` invocation.
   preBuild = ''
     export PATH="${rustToolchain}/bin:$PATH"
   '';

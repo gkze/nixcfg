@@ -21,12 +21,12 @@ from lib.update.events import (
 from lib.update.nix import _build_fetchgit_expr
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters import (
-    HashEntryUpdater,
     UpdateContext,
     VersionInfo,
     register_updater,
 )
 from lib.update.updaters.core import _coerce_context
+from lib.update.updaters.github_release import GitHubReleaseUpdater
 
 if TYPE_CHECKING:
     import aiohttp
@@ -35,12 +35,14 @@ if TYPE_CHECKING:
 
 
 @register_updater
-class CodexV8Updater(HashEntryUpdater):
+class CodexV8Updater(GitHubReleaseUpdater):
     """Track the Codex-pinned rusty_v8 release and compute its source hash."""
 
     name = "codex-v8"
-    input_name = "codex-v8"
     companion_of = "codex"
+    GITHUB_OWNER = "denoland"
+    GITHUB_REPO = "rusty_v8"
+    RESOLVE_TAG_COMMIT = True
     _CODEX_CARGO_NIX_PATH = Path("packages/codex/Cargo.nix")
     _CODEX_V8_VERSION_RE = re.compile(
         r'"v8"\s*=\s*rec\s*\{.*?^\s*version\s*=\s*"(?P<version>[^"]+)";',
@@ -72,10 +74,12 @@ class CodexV8Updater(HashEntryUpdater):
         *,
         context: UpdateContext | SourceEntry | None = None,
     ) -> VersionInfo:
-        """Resolve the rusty_v8 release from Codex's generated dependency graph."""
-        _ = session
+        """Resolve Codex's rusty_v8 tag and persist its immutable commit."""
+        version = self._codex_v8_version(self._cargo_nix_text(context))
+        commit = await self._resolve_release_tag_commit(session, version)
         return VersionInfo(
-            version=self._codex_v8_version(self._cargo_nix_text(context))
+            version=version,
+            metadata={"commit": commit, "tag": version},
         )
 
     @staticmethod
@@ -104,7 +108,12 @@ class CodexV8Updater(HashEntryUpdater):
         info: VersionInfo,
     ) -> bool:
         current = getattr(context, "current", context)
-        if current is None or getattr(current, "version", None) != info.version:
+        if (
+            current is None
+            or getattr(current, "version", None) != info.version
+            or info.commit is None
+            or getattr(current, "commit", None) != info.commit
+        ):
             return False
 
         hashes = getattr(current, "hashes", None)
@@ -141,11 +150,12 @@ class CodexV8Updater(HashEntryUpdater):
         """Compute the recursive fetchgit source hash and Linux release assets."""
         _ = (context, session)
 
+        commit = self._require_commit(info)
         src_hash_drain = ValueDrain[str]()
         async for event in drain_value_events(
             update_nix.compute_fixed_output_hash(
                 self.name,
-                self._src_expr(info.version),
+                self._src_expr(commit),
                 config=self.config,
             ),
             src_hash_drain,

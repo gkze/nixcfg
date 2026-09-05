@@ -7,15 +7,18 @@ from typing import TypedDict, Unpack
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from lib.system_policy import supported_systems
 from lib.update.constants import FAKE_HASH
 
 
 def default_max_nix_builds() -> int:
-    """Return a conservative default for concurrent update/build jobs."""
-    cores = os.cpu_count()
-    if cores is None:
-        return 2
-    return max(1, min(cores, 2))
+    """Serialize Nix builds unless the caller explicitly opts into fan-out.
+
+    Update probes may share one memory-constrained remote builder even when the
+    local host has many CPU cores.  Local CPU count therefore cannot establish
+    a safe concurrency level for the complete build topology.
+    """
+    return 1
 
 
 @dataclass(frozen=True)
@@ -32,6 +35,8 @@ class UpdateConfig:
     fake_hash: str
     max_nix_builds: int  # concurrent nix build processes
     hash_build_platforms: tuple[str, ...]
+    # Preserve explicit CLI/env bounds for operations with a longer default.
+    subprocess_timeout_override: int | None = None
 
     @property
     def deno_deps_platforms(self) -> tuple[str, ...]:
@@ -51,11 +56,7 @@ class UpdateSettings(BaseSettings):
     retry_backoff: float = 1.0
     fake_hash: str = FAKE_HASH
     max_nix_builds: int = default_max_nix_builds()
-    hash_build_platforms: tuple[str, ...] = (
-        "aarch64-darwin",
-        "aarch64-linux",
-        "x86_64-linux",
-    )
+    hash_build_platforms: tuple[str, ...] = supported_systems()
     deno_deps_platforms: tuple[str, ...] | None = None
 
     @field_validator("hash_build_platforms", "deno_deps_platforms", mode="before")
@@ -89,6 +90,11 @@ def _settings_to_config(settings: UpdateSettings) -> UpdateConfig:
         fake_hash=settings.fake_hash,
         max_nix_builds=max(1, settings.max_nix_builds),
         hash_build_platforms=platforms,
+        subprocess_timeout_override=(
+            settings.subprocess_timeout
+            if "subprocess_timeout" in settings.model_fields_set
+            else None
+        ),
     )
 
 
@@ -116,7 +122,6 @@ def default_config() -> UpdateConfig:
     return _settings_to_config(default_settings())
 
 
-DEFAULT_SETTINGS = default_settings()
 DEFAULT_CONFIG = default_config()
 
 
@@ -139,9 +144,8 @@ def resolve_active_config(config: UpdateConfig | None) -> UpdateConfig:
     """Return *config* if provided, otherwise the default configuration."""
     if config is not None:
         return config
-    if default_settings().model_dump() == DEFAULT_SETTINGS.model_dump():
-        return DEFAULT_CONFIG
-    return default_config()
+    active = default_config()
+    return DEFAULT_CONFIG if active == DEFAULT_CONFIG else active
 
 
 def env_bool(name: str, *, default: bool = False) -> bool:
@@ -177,7 +181,7 @@ def _normalize_platform_override_names(
 
 def resolve_config(**overrides: Unpack[_ResolveConfigOverrides]) -> UpdateConfig:
     """Build an UpdateConfig by merging explicit overrides onto env defaults."""
-    settings_data = default_settings().model_dump()
+    settings_data = default_settings().model_dump(exclude_unset=True)
 
     override_values = dict(overrides.items())
     normalized_overrides = _normalize_platform_override_names(override_values)

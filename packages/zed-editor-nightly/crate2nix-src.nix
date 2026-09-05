@@ -1,7 +1,2 @@
-{
-  callPackage,
-  ...
-}:
-callPackage ./default.nix {
-  crate2nixSourceOnly = true;
-}
+{ zed-editor-nightly, ... }:
+zed-editor-nightly.patchedSrc

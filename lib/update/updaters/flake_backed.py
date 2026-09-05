@@ -41,7 +41,7 @@ from lib.update.events import (
     expect_str,
     require_value,
 )
-from lib.update.flake import flake_fetch_expr
+from lib.update.flake import flake_source_path_expr
 from lib.update.nix import _build_package_path_attr_expr
 from lib.update.platform_hashes import (
     PreservedPlatformHash,
@@ -132,7 +132,7 @@ class FlakeInputMetadataUpdater(FlakeInputUpdater):
             hashes=HashCollection.from_value(hashes),
             input=self._input,
             commit=info.commit,
-            pins=self.source_pins,
+            pins=self.source_pins_for(info),
         )
 
     async def _is_latest(
@@ -186,7 +186,7 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
             version=info.version,
             hashes=HashCollection.from_value(hashes),
             input=self._input,
-            pins=self.source_pins,
+            pins=self.source_pins_for(info),
         )
 
     async def _is_latest(
@@ -196,15 +196,17 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
     ) -> bool:
         context = _coerce_context(context)
         current = context.current
+        expected = self.build_result(info, [])
         if (
             current is None
             or current.version != info.version
             or current.drv_hash is None
-            or current.pins != self.source_pins
+            or current.pins != expected.pins
+            or current.electron_version != expected.electron_version
         ):
             return False
         try:
-            new_fingerprint = await self._compute_drv_fingerprint(current)
+            new_fingerprint = await self._compute_drv_fingerprint(expected)
         except RuntimeError:
             return False
         context.drv_fingerprint = new_fingerprint
@@ -309,8 +311,11 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         *,
         system: str | None,
     ) -> EventStream:
+        candidate = self.build_result(info, [])
         source_override = (
-            self.build_result(info, []) if self.source_pins is not None else None
+            candidate
+            if candidate.pins is not None or candidate.electron_version is not None
+            else None
         )
         package_expr = self._package_hash_expr(
             system=system,
@@ -364,13 +369,21 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         self,
         source_override: SourceEntry | None = None,
     ) -> str:
-        if self.source_pins is None:
+        if source_override is None or (
+            source_override.pins is None and source_override.electron_version is None
+        ):
             source_override = None
         fingerprint_override = (
             source_override.model_copy(
                 update={
                     "drv_hash": None,
-                    "hashes": HashCollection(entries=[]),
+                    "hashes": HashCollection(
+                        entries=[
+                            entry
+                            for entry in source_override.hashes.entries or ()
+                            if entry.hash_type != self.hash_type
+                        ],
+                    ),
                 }
             )
             if source_override is not None
@@ -523,7 +536,7 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
         info: VersionInfo,
         current: SourceEntry | None,
     ) -> SourceEntry | None:
-        if self.source_pins is None:
+        if self.source_pins_for(info) is None:
             return None
         hashes: SourceHashes
         if current is None:
@@ -609,7 +622,7 @@ class DenoManifestUpdater(FlakeInputUpdater):
             hashes=HashCollection.from_value(hashes),
             input=self._input,
             commit=info.commit,
-            pins=self.source_pins,
+            pins=self.source_pins_for(info),
         )
 
     async def fetch_hashes(
@@ -702,7 +715,7 @@ class UvLockUpdater(FlakeInputUpdater):
             hashes=HashCollection.from_value(hashes),
             input=self._input,
             commit=info.commit,
-            pins=self.source_pins,
+            pins=self.source_pins_for(info),
         )
 
     def _render_lock_env(self, info: VersionInfo) -> dict[str, str]:
@@ -712,10 +725,7 @@ class UvLockUpdater(FlakeInputUpdater):
         }
 
     async def _resolve_source_path(self, node: FlakeLockNode) -> EventStream:
-        source_path_expr = (
-            f"let src = {flake_fetch_expr(node)}; "
-            "in if builtins.isAttrs src then src.outPath else src"
-        )
+        source_path_expr = flake_source_path_expr(node)
         source_path_drain = ValueDrain[CommandResult]()
         async for event in drain_value_events(
             update_process.run_command(

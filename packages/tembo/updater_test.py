@@ -1,6 +1,5 @@
 """Behavioral and package-shape tests for Tembo desktop."""
 
-import json
 from types import ModuleType
 from typing import TYPE_CHECKING, cast
 
@@ -11,12 +10,20 @@ from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
     expect_binding,
     parse_nix_expr,
+)
+from lib.tests._source_metadata import (
+    assert_https_url,
+    assert_immutable_commit,
+    assert_platform_source_entry,
+    assert_release_version,
+    assert_url_contains_version,
 )
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
@@ -398,14 +405,23 @@ def test_tembo_package_preserves_vendor_bundle_for_system_scope_ownership() -> N
 
 
 def test_tembo_sources_pin_current_vendor_manifest_release() -> None:
-    """Keep both current immutable vendor DMGs and the release commit atomic."""
-    sources = json.loads(
+    """Keep both immutable vendor DMGs and their release commit atomic."""
+    source = SourceEntry.model_validate_json(
         (REPO_ROOT / "packages/tembo/sources.json").read_text(encoding="utf-8")
     )
-
-    assert sources == {
-        "commit": _COMMIT,
-        "hashes": _SRI_HASHES,
-        "urls": _URLS,
-        "version": _VERSION,
-    }
+    version = assert_release_version(source.version)
+    assert_immutable_commit(source.commit)
+    _hashes, urls = assert_platform_source_entry(
+        source,
+        platforms={"aarch64-darwin", "x86_64-darwin"},
+    )
+    assert len(set(urls.values())) == 2
+    for url in urls.values():
+        assert_https_url(
+            url,
+            host="tembo-desktop-releases-844506114394.s3.us-east-1.amazonaws.com",
+        )
+        assert_url_contains_version(url, version)
+        assert url.endswith(".dmg")
+    assert urls["aarch64-darwin"].endswith("-arm64.dmg")
+    assert urls["x86_64-darwin"].endswith("-x64.dmg")

@@ -32,8 +32,8 @@ let
     };
     github-copilot = systemApp pkgs.github-copilot-app;
     gooeypi = systemApp pkgs.gooeypi;
+    "grok-bot" = systemApp pkgs.grok-bot;
     grok-build.package = pkgs.grok-build;
-    humanlayer = systemApp pkgs.humanlayer;
     hermes = systemApp pkgs.hermes-desktop;
     hq = systemApp pkgs.hq;
     mach-studio = systemApp pkgs.mach-studio;
@@ -44,7 +44,6 @@ let
     screen-studio = systemApp pkgs.screen-studio;
     tailscale.package = pkgs.tailscale-app;
     "town-assistant".package = pkgs.town-assistant-nightly;
-    traycer = systemApp pkgs.traycer;
     unsloth = systemApp pkgs.unsloth;
     voiceos = systemApp pkgs.voiceos;
     waku = systemApp pkgs.waku;
@@ -75,43 +74,12 @@ in
         pkgs.baseten-switch.cliPackage
         pkgs.executor.cliPackage
         pkgs.pants-preview
-        pkgs.traycer.cliPackage
         pkgs.writer-computer.cliPackage
       ];
     };
     opencode = {
       activeProfile = lib.mkDefault "work";
       profiles.work.mcpServers = catalog.work;
-    };
-  };
-
-  launchd.agents."ai.traycer.host" = {
-    enable = true;
-    config = {
-      Label = "ai.traycer.host";
-      AssociatedBundleIdentifiers = [ "ai.traycer.desktop" ];
-      ProgramArguments = [
-        "${pkgs.traycer.cliPackage}/bin/traycer"
-        "host"
-        "start"
-        "--service-label"
-        "ai.traycer.host"
-      ];
-      RunAtLoad = true;
-      KeepAlive = {
-        SuccessfulExit = false;
-        Crashed = true;
-      };
-      ThrottleInterval = 10;
-      ProcessType = "Interactive";
-      SoftResourceLimits = {
-        NumberOfFiles = 8192;
-      };
-      EnvironmentVariables = {
-        HOME = config.home.homeDirectory;
-        NODE_OPTIONS = "--max-semi-space-size=16";
-        PATH = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
-      };
     };
   };
 

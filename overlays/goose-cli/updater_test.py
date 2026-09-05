@@ -11,7 +11,12 @@ from nix_manipulator.expressions.set import AttributeSet
 from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
-from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
+from lib.tests._nix_ast import (
+    assert_nix_ast_equal,
+    binding_map,
+    expect_binding,
+    parse_nix_expr,
+)
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
@@ -23,13 +28,9 @@ _BITCOIN_INTERNALS_RUST_VERSIONS = {
     "0.5.0": "1.74.0",
     "0.6.0": "1.74.0",
 }
-_CLANG_RESOURCE_VERSION = "22"
 _SOURCE_PINS = {
-    **{
-        f"bitcoinInternals.{version}": rust_version
-        for version, rust_version in _BITCOIN_INTERNALS_RUST_VERSIONS.items()
-    },
-    "clangResourceVersion": _CLANG_RESOURCE_VERSION,
+    f"bitcoinInternals.{version}": rust_version
+    for version, rust_version in _BITCOIN_INTERNALS_RUST_VERSIONS.items()
 }
 
 
@@ -66,7 +67,8 @@ def test_goose_cli_bitcoin_compatibility_map_is_updater_owned() -> None:
     """Exact crate compatibility metadata must come from the updater sidecar."""
     updater = _load_module("goose_cli_compatibility_test").GooseCliUpdater()
 
-    assert updater.source_pins == _SOURCE_PINS
+    assert updater.compatibility_pins == _SOURCE_PINS
+    assert updater.compatibility_pin_rationale
     result = updater.build_result(
         VersionInfo("1.48.0", {"commit": "a" * 40}),
         [],
@@ -75,10 +77,12 @@ def test_goose_cli_bitcoin_compatibility_map_is_updater_owned() -> None:
     checked_in = SourceEntry.model_validate(
         json.loads((_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8"))
     )
-    assert updater.build_result(
-        VersionInfo(checked_in.version or "", {"commit": checked_in.commit}),
-        [],
-    ).equivalent_to(checked_in)
+    checked_in_pins = checked_in.pins or {}
+    assert {
+        name: value
+        for name, value in checked_in_pins.items()
+        if name.startswith("bitcoinInternals.")
+    } == _SOURCE_PINS
 
     package = expect_instance(
         parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),
@@ -111,21 +115,19 @@ def test_goose_cli_bitcoin_compatibility_map_is_updater_owned() -> None:
 
     v8_build = expect_instance(expect_binding(scope, "v8Build").value, FunctionCall)
     v8_arguments = expect_instance(v8_build.argument, AttributeSet)
-    assert_nix_ast_equal(
-        expect_binding(v8_arguments.values, "clangResourceVersion").value,
-        "selfSource.pins.clangResourceVersion",
-    )
+    assert "clangResourceVersion" not in binding_map(v8_arguments.values)
 
 
-def test_goose_checked_in_candidate_materializes_then_is_immediately_current(
+def test_goose_clean_candidate_materializes_then_is_immediately_current(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """One persisted candidate should feed materialization and produce no rewrite."""
+    """One clean candidate should feed materialization and produce no rewrite."""
     updater = _load_module("goose_cli_candidate_noop_test").GooseCliUpdater()
     current = SourceEntry.model_validate(
         json.loads((_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8"))
     )
     info = VersionInfo(current.version or "", {"commit": current.commit})
+    current = updater.build_result(info, [])
     captured: dict[str, object] = {}
 
     async def fetch_latest(_session: object) -> VersionInfo:

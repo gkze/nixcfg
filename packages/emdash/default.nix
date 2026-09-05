@@ -11,13 +11,12 @@
   libiconv,
   libsecret,
   libutempter,
-  nodejs_24,
   openssl,
   outputs,
   patchelf,
+  pkgs,
   pkg-config,
   pnpmConfigHook,
-  pnpm_10,
   nixcfgElectron,
   python3,
   rpm,
@@ -33,8 +32,22 @@ let
   slib = outputs.lib;
   version = slib.getFlakeVersion pname;
   src = inputs.emdash;
-  nodejs = nodejs_24;
-  pnpm = pnpm_10.override { nodejs-slim = nodejs; };
+  toolchain = selfSource.pins or (throw "${pname} sources.json is missing toolchain pins");
+  sourceManifest =
+    let
+      manifest = builtins.fromJSON (builtins.readFile "${src}/package.json");
+    in
+    assert lib.assertMsg (builtins.isAttrs manifest) "${pname} package.json must be an object";
+    manifest;
+  sourceEngines =
+    let
+      engines = sourceManifest.engines or null;
+    in
+    assert lib.assertMsg (builtins.isAttrs engines) "${pname} package.json is missing engines";
+    engines;
+  nodejs = builtins.getAttr toolchain.nodejsAttr pkgs;
+  pnpmPackage = builtins.getAttr toolchain.pnpmAttr pkgs;
+  pnpm = pnpmPackage.override { nodejs-slim = nodejs; };
   inherit (stdenv.hostPlatform) system;
   npmDepsHash =
     let
@@ -42,21 +55,21 @@ let
     in
     if perPlatformHash.success then perPlatformHash.value else slib.sourceHash pname "npmDepsHash";
 
-  electronVersion = selfSource.pins.electronVersion;
+  inherit (selfSource) electronVersion;
   electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
   electronRuntime = electronBuild.runtime;
   electronRuntimeVersion = electronBuild.runtimeVersion;
   electronHeaders = electronBuild.headers;
   electronDist = electronBuild.dist;
-  supportedSystems = [
-    "aarch64-darwin"
-    "aarch64-linux"
-    "x86_64-linux"
-  ];
+  systemPolicy = builtins.fromJSON (builtins.readFile ../../lib/system-policy.json);
+  supportedSystems =
+    assert systemPolicy.schemaVersion == 1;
+    builtins.attrNames systemPolicy.systems;
   electronBuilderTarget = if stdenv.hostPlatform.isDarwin then "mac" else "linux";
   patchNodeAddonApi = ./patch_node_addon_api.py;
   materializeAsarNodeModules = ./materialize_asar_node_modules.cjs;
   msShim = ./ms-shim.cjs;
+  stageWorkspacePackages = ./stage_workspace_packages.py;
 
   pnpmDeps =
     if fetchPnpmDeps != null then
@@ -81,6 +94,19 @@ let
         hash = npmDepsHash;
       };
 in
+assert lib.assertMsg (
+  (sourceManifest.packageManager or null) == toolchain.packageManager
+) "${pname} sources.json packageManager does not match package.json";
+assert lib.assertMsg (
+  (sourceEngines.node or null) == toolchain.nodeEngine
+) "${pname} sources.json Node engine does not match package.json";
+assert lib.assertMsg (
+  (sourceEngines.pnpm or null) == toolchain.pnpmEngine
+) "${pname} sources.json pnpm engine does not match package.json";
+assert lib.assertMsg (nodejs.version == toolchain.nodejsVersion)
+  "${pname} sources.json selected Node.js ${toolchain.nodejsVersion}, but ${toolchain.nodejsAttr} is ${nodejs.version}";
+assert lib.assertMsg (pnpmPackage.version == toolchain.pnpmVersion)
+  "${pname} sources.json selected pnpm ${toolchain.pnpmVersion}, but ${toolchain.pnpmAttr} is ${pnpmPackage.version}";
 stdenv.mkDerivation {
   inherit
     pname
@@ -131,8 +157,22 @@ stdenv.mkDerivation {
   };
 
   postPatch = ''
-    substituteInPlace ${appDir}/src/main/utils/userEnv.ts \
-      --replace-fail " -ilc 'env'" " -lc 'env'"
+    shell_env_capture_pattern="spawnSync(shell, ['-ilc', 'env'], shellEnvProbeOptions)"
+    mapfile -t shell_env_capture_paths < <(
+      grep --recursive --files-with-matches --fixed-strings \
+        --include='*.ts' \
+        "$shell_env_capture_pattern" \
+        apps packages
+    )
+    if (( ''${#shell_env_capture_paths[@]} != 1 )); then
+      echo \
+        "Expected exactly one Emdash interactive shell environment probe; found ''${#shell_env_capture_paths[@]}" \
+        >&2
+      printf '  %s\n' "''${shell_env_capture_paths[@]}" >&2
+      exit 1
+    fi
+    substituteInPlace "''${shell_env_capture_paths[0]}" \
+      --replace-fail "['-ilc', 'env']" "['-lc', 'env']"
   '';
 
   buildPhase = ''
@@ -145,32 +185,20 @@ stdenv.mkDerivation {
     rm -rf ${appDir}/node_modules
     ln -s ../../node_modules ${appDir}/node_modules
 
-    mkdir -p node_modules/@emdash
-    workspace_packages=(
-      chat-ui
-      core
-      plugins
-      shared
-      ui
-    )
-    for workspace_package in "''${workspace_packages[@]}"
-    do
-      ln -sfn "../../packages/$workspace_package" \
-        "node_modules/@emdash/$workspace_package"
-    done
+    workspace_package_paths="$TMPDIR/emdash-workspace-package-paths"
+    pnpm \
+      --filter '@emdash/emdash-desktop^...' \
+      list \
+      --depth -1 \
+      --parseable \
+      > "$workspace_package_paths"
+    ${lib.getExe python3} ${stageWorkspacePackages} \
+      link "$PWD" "$PWD/node_modules" "$workspace_package_paths"
 
-    pnpm --filter @emdash/shared run build
-    pnpm --filter @emdash/core run build
-    pnpm --filter @emdash/plugins run build
-    pnpm --filter @emdash/chat-ui run build
-    pnpm --filter @emdash/ui run build
+    node tooling/scripts/ensure-packages-built.mjs
 
-    for workspace_package in "''${workspace_packages[@]}"
-    do
-      rm "node_modules/@emdash/$workspace_package"
-      cp -R "packages/$workspace_package" \
-        "node_modules/@emdash/$workspace_package"
-    done
+    ${lib.getExe python3} ${stageWorkspacePackages} \
+      copy "$PWD" "$PWD/node_modules" "$workspace_package_paths"
 
     pushd ${appDir}
 
@@ -475,6 +503,8 @@ stdenv.mkDerivation {
       electronRuntimeVersion
       electronVersion
       ;
+    nodejsVersion = nodejs.version;
+    pnpmVersion = pnpmPackage.version;
     macApp = {
       bundleName = "Emdash.app";
       bundleRelPath = "Applications/Emdash.app";

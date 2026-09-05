@@ -25,10 +25,10 @@ class TursoCliUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
     )
 
     @staticmethod
-    def _src_expr(version: str) -> str:
+    def _src_expr(commit: str) -> str:
         return _build_fetch_from_github_expr(
             "tursodatabase",
             "turso-cli",
-            tag=f"v{version}",
+            rev=commit,
             fetch_submodules=False,
         )

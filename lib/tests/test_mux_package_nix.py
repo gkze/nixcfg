@@ -48,7 +48,7 @@ def test_mux_electron_lock_comes_from_updater_metadata() -> None:
 
     assert_nix_ast_equal(
         expect_binding(package.output.scope, "electronVersion").value,
-        "selfSource.pins.electronVersion",
+        "selfSource.electronVersion",
     )
 
 

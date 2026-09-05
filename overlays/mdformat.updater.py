@@ -11,11 +11,11 @@ from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.updaters import (
     FixedOutputHashStep,
     UpdateContext,
-    Updater,
     VersionInfo,
     register_updater,
     stream_fixed_output_hashes,
 )
+from lib.update.updaters.github_release import GitHubReleaseUpdater
 
 if TYPE_CHECKING:
     import aiohttp
@@ -27,10 +27,14 @@ _PYPI_URL = "https://pypi.org/pypi/mdformat/json"
 
 
 @register_updater
-class MdformatUpdater(Updater):
+class MdformatUpdater(GitHubReleaseUpdater):
     """Track the PyPI release and hash the matching GitHub source tag."""
 
     name = "mdformat"
+    GITHUB_OWNER = "hukkin"
+    GITHUB_REPO = "mdformat"
+    TAG_PREFIX = ""
+    RESOLVE_TAG_COMMIT = True
     derivation_validations = (
         DerivationValidation(
             installable="path:.#pkgs.{system}.mdformat",
@@ -59,14 +63,18 @@ class MdformatUpdater(Updater):
         if not version:
             msg = f"Empty PyPI version in {_PYPI_URL}"
             raise RuntimeError(msg)
-        return VersionInfo(version=version)
+        commit = await self._resolve_release_tag_commit(session, version)
+        return VersionInfo(
+            version=version,
+            metadata={"commit": commit, "tag": version},
+        )
 
     @staticmethod
-    def _src_expr(version: str) -> str:
+    def _src_expr(commit: str) -> str:
         return _build_fetch_from_github_expr(
             "hukkin",
             "mdformat",
-            tag=version,
+            rev=commit,
             fetch_submodules=False,
         )
 
@@ -79,13 +87,14 @@ class MdformatUpdater(Updater):
     ) -> EventStream:
         """Hash the unpacked source tree for the matching GitHub tag."""
         _ = (session, context)
+        commit = self._require_commit(info)
         async for event in stream_fixed_output_hashes(
             self.name,
             steps=(
                 FixedOutputHashStep(
                     hash_type="srcHash",
                     error="Missing mdformat srcHash output",
-                    expr=lambda _resolved: self._src_expr(info.version),
+                    expr=lambda _resolved: self._src_expr(commit),
                 ),
             ),
             config=self.config,

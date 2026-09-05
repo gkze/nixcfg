@@ -353,14 +353,23 @@ async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
         for wave in source_waves:
             runnable: list[str] = []
             for name in wave:
-                parent = getattr(updaters.get(name), "companion_of", None)
-                if (
-                    isinstance(parent, str)
-                    and parent in all_results
-                    and not all_results[parent].completed
-                ):
+                failed_prerequisites = [
+                    prerequisite
+                    for prerequisite in update_planner.source_prerequisites(
+                        updaters,
+                        name,
+                        selected=set(context.source_names),
+                    )
+                    if prerequisite in all_results
+                    and not all_results[prerequisite].completed
+                ]
+                if failed_prerequisites:
+                    prerequisites = ", ".join(failed_prerequisites)
                     await context.queue.put(
-                        UpdateEvent.error(name, f"Prerequisite update failed: {parent}")
+                        UpdateEvent.error(
+                            name,
+                            f"Prerequisite update failed: {prerequisites}",
+                        )
                     )
                     all_results[name] = SourceTaskResult(completed=False)
                     continue

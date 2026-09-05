@@ -180,6 +180,31 @@ def test_flake_python_check_filesets_reuse_the_shared_lint_inventory() -> None:
     )
 
 
+def test_flake_pytest_source_excludes_local_node_modules() -> None:
+    """The hermetic TypeScript fixture must not inherit ignored workspace installs."""
+    assert_nix_ast_equal(
+        nix_source_fragment_expr(
+            "flake.nix",
+            "          pytestFiles = ",
+            ";\n          schemaVerificationFiles",
+        ),
+        "lib.fileset.difference ./. (lib.fileset.maybeMissing ./node_modules)",
+    )
+
+    pytest_check = expect_instance(
+        nix_source_fragment_expr(
+            "flake.nix",
+            '            "test-python-pytest" = ',
+            ";\n\n          };",
+        ),
+        AttributeSet,
+    )
+    assert_nix_ast_equal(
+        expect_binding(pytest_check.values, "source").value,
+        "mkCheckSource pytestFiles",
+    )
+
+
 def test_flake_repo_check_only_resolves_inputs_that_are_actually_dynamic() -> None:
     """Repo-check sources and working directories are static by construction."""
     repo_check = expect_instance(

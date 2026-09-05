@@ -139,6 +139,7 @@ let
       manifestUrlEnvironment = "MESH_LLM_NATIVE_RUNTIME_MANIFEST_URL";
       manifestUrlUnset = true;
       createsCacheDirectory = false;
+      installCheckSmoke = true;
     };
     signing = {
       identity = "adhoc";
@@ -678,6 +679,54 @@ let
 
     ${runtimeValidationCommand} "$runtimeDestination"
   '';
+  launcherSmokeScript = ''
+    launcherSmokeRoot="$TMPDIR/buzz-candidate-launcher-smoke"
+    launcherSmokeApp="$launcherSmokeRoot/Buzz Smoke.app"
+    launcherSmokeMacos="$launcherSmokeApp/Contents/MacOS"
+    launcherSmokeRuntime="$launcherSmokeApp/Contents/Resources/mesh-runtime"
+    launcherSmokeHome="$launcherSmokeRoot/home"
+    launcherSmokeRecord="$launcherSmokeRoot/record"
+    launcherSmokeExpected="$launcherSmokeRoot/expected"
+
+    if [ -e "$launcherSmokeRoot" ] || [ -L "$launcherSmokeRoot" ]; then
+      echo "Buzz candidate launcher smoke root already exists" >&2
+      exit 1
+    fi
+    mkdir -p "$launcherSmokeMacos" "$launcherSmokeRuntime" "$launcherSmokeHome"
+    install -m0755 "$launcher" "$launcherSmokeMacos/buzz-desktop"
+    printf '{}\n' > "$launcherSmokeRuntime/manifest.json"
+    printf '%s\n' \
+      '#!/bin/sh' \
+      'set -eu' \
+      'if [ "''${MESH_LLM_NATIVE_RUNTIME_MANIFEST_URL+set}" = set ]; then' \
+      '  echo "launcher preserved the manifest URL" >&2' \
+      '  exit 1' \
+      'fi' \
+      'printf "%s\n" "$MESH_LLM_NATIVE_RUNTIME_BUNDLE_DIR" "$MESH_LLM_NATIVE_RUNTIME_CACHE_DIR" "$1" > "$BUZZ_LAUNCHER_SMOKE_RECORD"' \
+      > "$launcherSmokeMacos/buzz-desktop.real"
+    chmod 0755 "$launcherSmokeMacos/buzz-desktop.real"
+
+    /usr/bin/env -i \
+      HOME="$launcherSmokeHome" \
+      BUZZ_LAUNCHER_SMOKE_RECORD="$launcherSmokeRecord" \
+      MESH_LLM_NATIVE_RUNTIME_BUNDLE_DIR=/hostile/bundle \
+      MESH_LLM_NATIVE_RUNTIME_CACHE_DIR=relative-cache \
+      MESH_LLM_NATIVE_RUNTIME_MANIFEST_URL=https://example.invalid/runtime.json \
+      "$launcherSmokeMacos/buzz-desktop" "probe argument"
+    printf '%s\n' \
+      "$launcherSmokeRuntime" \
+      "$launcherSmokeHome/Library/Caches/xyz.block.buzz.app/mesh-llm/native-runtimes" \
+      "probe argument" \
+      > "$launcherSmokeExpected"
+    if ! cmp -s "$launcherSmokeExpected" "$launcherSmokeRecord"; then
+      echo "Buzz candidate launcher smoke contract differs" >&2
+      exit 1
+    fi
+    if [ -e "$launcherSmokeHome/Library" ] || [ -L "$launcherSmokeHome/Library" ]; then
+      echo "Buzz candidate launcher created its runtime cache" >&2
+      exit 1
+    fi
+  '';
   buildPhase = ''
     runHook preBuild
     "$CC" \
@@ -723,6 +772,7 @@ let
     test -x "$payload"
     test ! -e "$app/Contents/embedded.provisionprofile"
     ${runtimeValidationCommand} "$runtime"
+    ${launcherSmokeScript}
 
     test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$infoPlist")" = \
       buzz-desktop

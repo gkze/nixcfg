@@ -20,6 +20,7 @@ from lib.update.nix import (
     compute_fixed_output_hash,
     compute_overlay_hash,
     get_current_nix_platform,
+    is_retryable_nix_network_failure,
     normalize_nix_platform,
 )
 
@@ -117,6 +118,10 @@ def test_retryable_fixed_output_hash_failure_classification() -> None:
         ),
     )
     assert _is_retryable_fixed_output_hash_failure(transient)
+    assert is_retryable_nix_network_failure(
+        stdout=transient.stdout,
+        stderr=transient.stderr,
+    )
 
     pnpm_timeout = CommandResult(
         args=["nix"],
@@ -128,6 +133,46 @@ def test_retryable_fixed_output_hash_failure_classification() -> None:
         ),
     )
     assert _is_retryable_fixed_output_hash_failure(pnpm_timeout)
+    assert not is_retryable_nix_network_failure(
+        stdout=pnpm_timeout.stdout,
+        stderr=pnpm_timeout.stderr,
+    )
+
+    bun_extract_failure = CommandResult(
+        args=["nix"],
+        returncode=1,
+        stdout="",
+        stderr=(
+            'error: Fail extracting tarball for "mermaid"\n'
+            "error: Fail extracting tarball from mermaid"
+        ),
+    )
+    assert _is_retryable_fixed_output_hash_failure(bun_extract_failure)
+    assert not is_retryable_nix_network_failure(
+        stdout=bun_extract_failure.stdout,
+        stderr=bun_extract_failure.stderr,
+    )
+
+    http2_protocol_failure = CommandResult(
+        args=["nix"],
+        returncode=1,
+        stdout="",
+        stderr=(
+            "the server made an unrecoverable HTTP protocol violation\n"
+            "Caused by: [92] Stream error in the HTTP/2 framing layer"
+        ),
+    )
+    assert _is_retryable_fixed_output_hash_failure(http2_protocol_failure)
+    assert is_retryable_nix_network_failure(
+        stdout=http2_protocol_failure.stdout,
+        stderr=http2_protocol_failure.stderr,
+    )
+
+    for libcurl_failure in (
+        "Failure when receiving data from the peer",
+        "Operation too slow. Less than 1 bytes/sec transferred the last 5 seconds",
+    ):
+        assert is_retryable_nix_network_failure(stdout="", stderr=libcurl_failure)
 
     hash_mismatch = CommandResult(
         args=["nix"],
@@ -136,10 +181,15 @@ def test_retryable_fixed_output_hash_failure_classification() -> None:
         stderr=(
             "error: hash mismatch in fixed-output derivation\n"
             "  specified: sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"
-            "     got:    sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+            "     got:    sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=\n"
+            "HTTP error 502 while another substituter was queried"
         ),
     )
     assert not _is_retryable_fixed_output_hash_failure(hash_mismatch)
+    assert not is_retryable_nix_network_failure(
+        stdout=hash_mismatch.stdout,
+        stderr=hash_mismatch.stderr,
+    )
 
     permanent = CommandResult(
         args=["nix"],
@@ -148,6 +198,10 @@ def test_retryable_fixed_output_hash_failure_classification() -> None:
         stderr="error: file 'missing.nix' was not found",
     )
     assert not _is_retryable_fixed_output_hash_failure(permanent)
+    assert not is_retryable_nix_network_failure(
+        stdout=permanent.stdout,
+        stderr=permanent.stderr,
+    )
 
 
 def test_emit_sri_hash_from_build_result_paths(monkeypatch: pytest.MonkeyPatch) -> None:

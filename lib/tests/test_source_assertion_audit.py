@@ -11,17 +11,41 @@ _SELF_PATH = Path(__file__).resolve()
 _EXCLUDED_PARTS = {".venv", "__pycache__", "mutants", "node_modules"}
 _NIX_EVAL_HELPER_PATH = _REPO_ROOT / "lib/tests/_nix_eval.py"
 _NIX_EVAL_TEST_ALLOWLIST = {
+    "lib/tests/test_electron_runtime_nix.py::test_electron_overlay_backfills_a_new_artifact_for_an_existing_candidate": (
+        "Only evaluation resolves the dynamic artifact backfill for an existing "
+        "candidate version."
+    ),
     "lib/tests/test_electron_runtime_nix.py::test_electron_overlay_reconstructs_the_updater_inventory": (
         "Only evaluation resolves dynamic runtime-version attribute grouping."
     ),
+    "lib/tests/test_electron_runtime_nix.py::test_electron_overlay_rejects_a_url_outside_the_system_policy": (
+        "Only evaluation forces the URL-policy assertion after decoding the "
+        "runtime inventory."
+    ),
     "lib/tests/test_electron_runtime_nix.py::test_electron_overlay_rejects_an_incomplete_runtime": (
         "Only evaluation proves the fail-closed inventory branch is forced."
+    ),
+    "lib/tests/test_electron_runtime_nix.py::test_electron_overlay_rejects_legacy_pin_metadata": (
+        "Only evaluation forces the fail-closed legacy-pin branch in the "
+        "dynamic source projection."
+    ),
+    "lib/tests/test_electron_runtime_nix.py::test_electron_overlay_synthesizes_only_update_candidate_versions": (
+        "Only evaluation resolves the dynamic candidate version and its exact "
+        "synthetic artifact set."
+    ),
+    "lib/tests/test_electron_runtime_nix.py::test_electron_runtime_build_uses_the_persisted_policy_url": (
+        "Only evaluation resolves the selected runtime and header derivation "
+        "URLs through the overlay."
     ),
     "lib/tests/test_goose_cli_package_nix.py::test_goose_cli_reviews_every_bitcoin_internals_version": (
         "Only evaluation resolves the locked crate graph across generated artifacts."
     ),
     "lib/tests/test_mac_apps_nix.py::test_guarded_bin_link_requires_an_executable": (
         "Only evaluation renders the interpolated shell program exercised by Bash."
+    ),
+    "lib/tests/test_mac_apps_nix.py::test_overlay_layer_merge_rejects_shadowed_fragment_outputs": (
+        "Only evaluation proves that the merge helper throws before a later overlay "
+        "can replace a fragment output."
     ),
     "lib/tests/test_mac_apps_nix.py::test_managed_app_overlap_assertion_accepts_context_carrying_output_paths": (
         "Only evaluation can create and compare context-carrying Nix paths."
@@ -1568,3 +1592,158 @@ def test_shell():
     visitor.visit(ast.parse(source))
 
     assert visitor.violations == []
+
+
+def _updater_class(tree: ast.Module, name: str) -> ast.ClassDef:
+    matches = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == name
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _class_attribute(updater: ast.ClassDef, name: str) -> ast.expr:
+    for statement in updater.body:
+        if (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+            and statement.target.id == name
+            and statement.value is not None
+        ):
+            return statement.value
+        if isinstance(statement, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == name
+            for target in statement.targets
+        ):
+            return statement.value
+    msg = f"{updater.name}.{name} is not declared in class scope"
+    raise AssertionError(msg)
+
+
+def _literal_string(node: ast.expr) -> str:
+    assert isinstance(node, ast.Constant)
+    assert isinstance(node.value, str)
+    return node.value
+
+
+def _literal_string_mapping(node: ast.expr) -> dict[str, str]:
+    assert isinstance(node, ast.Dict)
+    return {
+        _literal_string(key): _literal_string(value)
+        for key, value in zip(node.keys, node.values, strict=True)
+        if key is not None
+    }
+
+
+def _name_mapping(node: ast.expr) -> dict[str, str]:
+    assert isinstance(node, ast.Dict)
+    result: dict[str, str] = {}
+    for key, value in zip(node.keys, node.values, strict=True):
+        assert key is not None
+        assert isinstance(value, ast.Name)
+        result[_literal_string(key)] = value.id
+    return result
+
+
+def _updater_method(
+    updater: ast.ClassDef,
+    name: str,
+) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    matches = [
+        node
+        for node in updater.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == name
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _literal_getter_keys(node: ast.AST, getter: str) -> set[str]:
+    keys: set[str] = set()
+    for child in ast.walk(node):
+        if (
+            isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Attribute)
+            and child.func.attr == getter
+            and child.args
+            and isinstance(child.args[0], ast.Constant)
+            and isinstance(child.args[0].value, str)
+        ):
+            keys.add(child.args[0].value)
+    return keys
+
+
+def _parse_updater(path: str) -> tuple[ast.Module, ast.ClassDef]:
+    source_path = _REPO_ROOT / path
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    class_name = f"{source_path.parent.name.title()}Updater"
+    return tree, _updater_class(tree, class_name)
+
+
+def test_buzz_declares_and_consumes_its_reviewed_compatibility_contracts() -> None:
+    """Buzz's intentional scalar and byte constraints remain explicit policy."""
+    tree, updater = _parse_updater("packages/buzz/updater.py")
+
+    assert _literal_string_mapping(_class_attribute(updater, "compatibility_pins")) == {
+        "onnxruntimeVersion": "1.27.0",
+    }
+    assert _literal_string(
+        _class_attribute(updater, "compatibility_pin_rationale")
+    ).strip()
+    assert _name_mapping(_class_attribute(updater, "compatibility_source_digests")) == {
+        "meshLlm": "_MESH_SOURCE_DIGESTS",
+        "onnxruntime": "_ONNX_SOURCE_DIGESTS",
+        "sherpaOnnx": "_SHERPA_SOURCE_DIGESTS",
+    }
+    assert _literal_string(
+        _class_attribute(updater, "compatibility_source_digest_rationale")
+    ).strip()
+    assert _literal_getter_keys(
+        _updater_method(updater, "_required_metadata"),
+        "get_compatibility_pin",
+    ) == {"onnxruntimeVersion"}
+    assert _literal_getter_keys(
+        _updater_method(updater, "fetch_latest"),
+        "get_compatibility_source_digest_contract",
+    ) == {"meshLlm", "onnxruntime", "sherpaOnnx"}
+    assert _literal_getter_keys(
+        tree,
+        "get_compatibility_source_digest_contract",
+    ) == {"meshLlm", "onnxruntime", "sherpaOnnx"}
+
+
+def test_paseo_declares_and_consumes_its_reviewed_compatibility_contracts() -> None:
+    """Paseo's version-specific patches and inventories remain fail-closed policy."""
+    tree, updater = _parse_updater("packages/paseo/updater.py")
+
+    assert _literal_string_mapping(_class_attribute(updater, "compatibility_pins")) == {
+        "appBuilderLibBackportCommit": "2ff9190aadc791503a6e62cdcbfa975448bc49bf",
+        "appBuilderLibVersion": "26.8.1",
+        "nodeAddonApiVersion": "8.3.0",
+        "npmFetcherVersion": "2",
+        "onnxruntimeVersion": "1.23.2",
+        "sherpaVersion": "1.12.28",
+    }
+    assert _literal_string(
+        _class_attribute(updater, "compatibility_pin_rationale")
+    ).strip()
+    assert _literal_getter_keys(
+        _updater_method(updater, "_validate_manifests"),
+        "get_compatibility_pin",
+    ) == {
+        "appBuilderLibVersion",
+        "nodeAddonApiVersion",
+        "onnxruntimeVersion",
+        "sherpaVersion",
+    }
+    assert _literal_getter_keys(tree, "get_compatibility_pin") == {
+        "appBuilderLibBackportCommit",
+        "appBuilderLibVersion",
+        "nodeAddonApiVersion",
+        "npmFetcherVersion",
+        "onnxruntimeVersion",
+        "sherpaVersion",
+    }

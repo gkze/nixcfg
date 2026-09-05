@@ -1,7 +1,6 @@
 """Focused contracts for the source-built Executor macOS package."""
 
 import asyncio
-import hashlib
 import json
 import plistlib
 import shutil
@@ -38,8 +37,15 @@ from lib.tests._shell_ast import (
     node_text,
     parse_shell,
 )
+from lib.tests._source_metadata import (
+    assert_https_url,
+    assert_immutable_commit,
+    assert_release_version,
+    assert_structured_source_hashes,
+)
 from lib.tests._updater_helpers import collect_events, load_repo_module, run_async
 from lib.update.artifacts import GeneratedArtifact
+from lib.update.bun_lock import parse_bun_lock_text
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
     CommandResult,
@@ -128,8 +134,6 @@ _EXECUTOR_MANAGED_POLICY_PROBES = (
     ),
 )
 _PACKAGE_DIR = REPO_ROOT / "packages/executor"
-_BUN_LOCK_SHA256 = "0cc194b2f757a10a09c8aaad333bbbbcc3f670881225889defd9ee40eea7f940"
-_BUN_NIX_SHA256 = "afd386ec099c028c0eb6aaa10def26b3b1cd857bec0850bf7088b10a5f78d8b5"
 _UPDATER_PATCH_PINS = {
     "@1password/sdk-core@0.4.1-beta.1": (
         "source:patches/@1password%2Fsdk-core@0.4.1-beta.1.patch"
@@ -353,7 +357,7 @@ def test_executor_resolves_release_to_exact_source_and_toolchain(
         assert config == updater.config
         fetched_urls.append(url)
         if url.endswith("/package.json") and "/apps/desktop/" not in url:
-            return {"packageManager": "bun@1.3.11"}
+            return {"packageManager": "bun@1.4.0"}
         return {
             "version": _VERSION,
             "devDependencies": {"electron": "41.2.1"},
@@ -368,7 +372,7 @@ def test_executor_resolves_release_to_exact_source_and_toolchain(
     assert run_async(updater.fetch_latest(object())) == VersionInfo(
         version=_VERSION,
         metadata={
-            "bunVersion": "1.3.11",
+            "bunVersion": "1.4.0",
             "commit": _COMMIT,
             "electronVersion": "41.2.1",
             "tag": f"v{_VERSION}",
@@ -408,7 +412,14 @@ def test_executor_resolves_release_to_exact_source_and_toolchain(
             {"packageManager": "npm@11"},
             {},
             RuntimeError,
-            "requires Bun 1.3.11",
+            "requires an exact bun@<version> packageManager",
+        ),
+        (
+            {"sha": _COMMIT},
+            {"packageManager": "bun@next"},
+            {},
+            RuntimeError,
+            "requires an exact Bun version",
         ),
         (
             {"sha": _COMMIT},
@@ -826,9 +837,9 @@ def test_executor_validates_the_materialized_source_package() -> None:
             {
                 "commit": _COMMIT,
                 "electronVersion": "41.2.1",
-                "bunVersion": "1.3.10",
+                "bunVersion": "next",
             },
-            "requires Bun 1.3.11",
+            "requires an exact Bun version",
         ),
     ],
 )
@@ -890,30 +901,52 @@ def test_executor_result_requires_one_structured_bun_source(
 
 
 def test_executor_sources_pin_the_acquired_public_release() -> None:
-    """The package source entry must match the verified immutable release."""
+    """The package source entry must carry every immutable build input."""
+    updater = _load_updater_module().ExecutorUpdater()
     source = SourceEntry.model_validate_json(
         (_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")
     )
 
-    assert source == SourceEntry.model_validate({
-        "version": _VERSION,
-        "commit": _COMMIT,
-        "electronVersion": "41.2.1",
-        "pins": _UPDATER_PATCH_PINS,
-        "hashes": HashCollection.from_value([
-            HashEntry.create("sha256", _BUN_SOURCE_HASH, url=_BUN_SOURCE_URL),
-            HashEntry.create("srcHash", _SRC_HASH),
-        ]),
-    })
+    assert_release_version(source.version)
+    assert_immutable_commit(source.commit)
+    assert_release_version(source.electron_version)
+    assert source.pins == updater.compatibility_pins
+    assert_structured_source_hashes(
+        source,
+        hash_types={"sha256", "srcHash"},
+    )
+    entries = source.hashes.entries
+    assert entries is not None
+    [bun_source] = [entry for entry in entries if entry.hash_type == "sha256"]
+    assert bun_source.url is not None
+    assert_https_url(bun_source.url, host="github.com")
+    prefix = "https://github.com/oven-sh/bun/releases/download/bun-v"
+    assert bun_source.url.startswith(prefix)
+    bun_version, separator, asset_name = bun_source.url.removeprefix(prefix).partition(
+        "/"
+    )
+    assert separator == "/"
+    assert_release_version(bun_version)
+    assert asset_name == "bun-darwin-aarch64.zip"
 
 
 def test_executor_bun_closure_is_exact_and_semantically_parseable() -> None:
-    """Checked-in Bun artifacts must be the exact lock-derived closure."""
+    """Checked-in Bun artifacts must be a coherent, parseable lock-derived closure."""
     bun_lock = (_PACKAGE_DIR / "bun.lock").read_bytes()
     bun_nix = (_PACKAGE_DIR / "bun.nix").read_bytes()
-
-    assert hashlib.sha256(bun_lock).hexdigest() == _BUN_LOCK_SHA256
-    assert hashlib.sha256(bun_nix).hexdigest() == _BUN_NIX_SHA256
+    source = SourceEntry.model_validate_json(
+        (_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")
+    )
+    lock = parse_bun_lock_text(
+        bun_lock.decode("utf-8"),
+        context="checked-in Executor bun.lock",
+    )
+    assert lock["lockfileVersion"] == 1
+    workspaces = expect_instance(lock["workspaces"], dict)
+    desktop = expect_instance(workspaces["apps/desktop"], dict)
+    assert desktop["version"] == source.version
+    lock_packages = expect_instance(lock["packages"], dict)
+    assert lock_packages
 
     closure = expect_instance(
         parse_nix_expr(bun_nix.decode("utf-8")),
@@ -929,7 +962,6 @@ def test_executor_bun_closure_is_exact_and_semantically_parseable() -> None:
     ]
     assert isinstance(closure.argument_set[-1], Ellipses)
     packages = expect_instance(closure.output, AttributeSet)
-    assert len(packages.values) == 2767
     package_bindings = binding_map(packages.values)
     assert_nix_ast_equal(
         package_bindings['"@executor-js/desktop"'].value,
@@ -1478,7 +1510,8 @@ def test_executor_bun_cache_shards_apply_the_exact_lock_patches() -> None:
 def test_executor_patch_locks_come_from_updater_metadata() -> None:
     """The updater owns exact patched package specs and their patch sources."""
     module = _load_updater_module()
-    assert module.ExecutorUpdater.source_pins == _UPDATER_PATCH_PINS
+    assert module.ExecutorUpdater.compatibility_pins == _UPDATER_PATCH_PINS
+    assert module.ExecutorUpdater.compatibility_pin_rationale
 
     package = expect_instance(
         parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),

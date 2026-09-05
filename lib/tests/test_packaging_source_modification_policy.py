@@ -918,7 +918,7 @@ _ALLOWED_NIX_SUBSTITUTE_SITES: Final = (
     ),
     *_nix_sites(
         "packages/emdash/default.nix",
-        r'''substituteInPlace ${appDir}/src/main/utils/userEnv.ts --replace-fail " -ilc 'env'" " -lc 'env'"''',
+        r'''substituteInPlace "''${shell_env_capture_paths[0]}" --replace-fail "['-ilc', 'env']" "['-lc', 'env']"''',
         r'''substituteInPlace node_modules/debug/src/common.js --replace-fail "require('ms')" "require('../../../out/main/ms-shim.cjs')"''',
         r'''substituteInPlace "$out/bin/emdash" --replace-fail "#!/usr/bin/env bash" "#!${stdenv.shell}" --replace-fail "@out@" "$out"''',
         r'''substituteInPlace "$out/bin/emdash" --replace-fail "#!/usr/bin/env bash" "#!${stdenv.shell}" --replace-fail "@out@" "$out"''',
@@ -948,7 +948,12 @@ _ALLOWED_NIX_SUBSTITUTE_SITES: Final = (
     ),
     *_nix_sites(
         "packages/zed-editor-nightly/default.nix",
-        r'''substituteInPlace "$crateRoot/src/assets.rs" --replace-fail '#[folder = "../../assets"]' '#[folder = "workspace-assets"]' --replace-fail 'use rust_embed::RustEmbed;' 'use rust_embed::{Embed, RustEmbed};' --replace-fail ".filter_map(|p| {" ".filter_map(|p: std::borrow::Cow<'static, str>| {"''',
+        # Zed changed from direct rust-embed attributes to util::fs_embed!.
+        # Keep both semantic source-location forms supported during updates;
+        # an unknown third contract fails closed in the package preparation.
+        r"""substituteInPlace ${sourceFile} --replace-fail 'crate_relative = "../../assets"' 'crate_relative = "workspace-assets"'""",
+        r"""substituteInPlace ${sourceFile} --replace-fail '#[folder = "../../assets"]' '#[folder = "workspace-assets"]'""",
+        r'''substituteInPlace "$crateRoot/src/assets.rs" --replace-fail 'use rust_embed::RustEmbed;' 'use rust_embed::{Embed, RustEmbed};' --replace-fail ".filter_map(|p| {" ".filter_map(|p: std::borrow::Cow<'static, str>| {"''',
         r"""substituteInPlace "$crateRoot/src/main.rs" --replace-fail 'include_bytes!("../../../script/uninstall.sh")' 'include_bytes!("../uninstall.sh")'""",
         r"""substituteInPlace "$crateRoot/build.rs" --replace-fail 'std::fs::read_to_string("../zed/Cargo.toml")' 'std::fs::read_to_string("./zed-Cargo.toml")'""",
         r"""substituteInPlace "$crateRoot/src/filter_languages.rs" --replace-fail '#[folder = "../grammars/src/"]' '#[folder = "workspace-language-configs-src/"]'""",
@@ -959,11 +964,13 @@ _ALLOWED_NIX_SUBSTITUTE_SITES: Final = (
         r"""substituteInPlace "$crateRoot/build.rs" --replace-fail 'std::fs::read_to_string("../zed/Cargo.toml")' 'std::fs::read_to_string("./zed-Cargo.toml")' --replace-fail 'println!("cargo:rerun-if-changed=../zed/Cargo.toml");' 'println!("cargo:rerun-if-changed=./zed-Cargo.toml");'""",
         r"""substituteInPlace "$crateRoot/build.rs" --replace-fail 'PathBuf::from("../extension_api/wit")' 'PathBuf::from("workspace-extension-api-wit")'""",
         r"""substituteInPlace "$path" --replace-fail 'path: "../extension_api/wit/' 'path: "workspace-extension-api-wit/'""",
+        r"""substituteInPlace "$crateRoot/build.rs" --replace-fail 'gpui::GPUI_MANIFEST_DIR.into()' 'PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("workspace-gpui")'""",
+        r"""substituteInPlace "$crateRoot/build.rs" --replace-fail '.join("../gpui")' '.join("workspace-gpui")'""",
         r"""substituteInPlace "$crateRoot/build.rs" --replace-fail '    let mut path = std::path::PathBuf::from(&cargo_manifest_dir);' '    println!("cargo:rustc-env=ZED_REPO_DIR={}", cargo_manifest_dir);""",
         r"""substituteInPlace "$crateRoot/src/prompt_store.rs" --replace-fail 'include_str!("../../git_ui/src/commit_message_prompt.txt")' 'include_str!("../commit_message_prompt.txt")'""",
         r"""substituteInPlace "$crateRoot/src/lib.rs" --replace-fail 'include_str!("../../zed/RELEASE_CHANNEL")' 'include_str!("../RELEASE_CHANNEL")'""",
         r"""substituteInPlace "$crateRoot/build.rs" --replace-fail 'include_str!("../zed/Cargo.toml")' 'include_str!("./zed-Cargo.toml")'""",
-        r"""substituteInPlace "$crateRoot/src/settings.rs" --replace-fail '#[folder = "../../assets"]' '#[folder = "workspace-assets"]' --replace-fail 'use rust_embed::RustEmbed;' 'use rust_embed::{Embed, RustEmbed};'""",
+        r"""substituteInPlace "$crateRoot/src/settings.rs" --replace-fail 'use rust_embed::RustEmbed;' 'use rust_embed::{Embed, RustEmbed};'""",
         r"""substituteInPlace src/lib.rs --replace-fail 'concat!("../", std::env!("CARGO_PKG_README"))' '"../README.md"'""",
     ),
 )

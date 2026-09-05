@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 import pytest
+from tenacity import AsyncRetrying, RetryCallState
 
 from lib.update import net
 from lib.update.config import resolve_config
@@ -237,6 +238,177 @@ def test_request_success_and_failure(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     assert len(requests) == expected_attempts
+
+
+@pytest.mark.parametrize(
+    ("retry_after", "expected_delay"),
+    [
+        ("0", 0.0),
+        ("7", 7.0),
+        ("999999", 300.0),
+        ("Fri, 31 Dec 9999 23:59:59 GMT", 300.0),
+        (None, 3.0),
+        ("not-a-date", 3.0),
+        ("31 Dec 9999 23:59:59", 3.0),
+        ("Thu, 01 Jan 1970 00:00:00 GMT", 3.0),
+    ],
+)
+def test_request_honors_bounded_retry_after_or_exponential_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    retry_after: str | None,
+    expected_delay: float,
+) -> None:
+    """Use valid server cooldowns and fall back for absent or unusable values."""
+    response_headers = {} if retry_after is None else {"Retry-After": retry_after}
+    response_queue = [
+        _FakeResponse(
+            status=429,
+            reason="Too Many Requests",
+            payload=b"slow down",
+            headers=response_headers,
+        ),
+        _FakeResponse(status=200, reason="OK", payload=b"payload"),
+    ]
+    requests = 0
+
+    def _fake_request(
+        self: aiohttp.ClientSession,
+        method: str,
+        url: str,
+        **kwargs: object,
+    ) -> _FakeResponseCM:
+        _ = (self, method, url, kwargs)
+        nonlocal requests
+        requests += 1
+        return _FakeResponseCM(response_queue.pop(0))
+
+    observed_delays: list[float] = []
+    real_retry_wait = net._retry_wait
+
+    def _recording_retry_wait(
+        backoff: float,
+    ) -> Callable[[RetryCallState], float]:
+        wait = real_retry_wait(backoff)
+
+        def _wait(retry_state: RetryCallState) -> float:
+            observed_delays.append(wait(retry_state))
+            return 0.0
+
+        return _wait
+
+    monkeypatch.setattr(aiohttp.ClientSession, "request", _fake_request)
+    monkeypatch.setattr(net, "_build_request_headers", lambda _url, _ua: {})
+    monkeypatch.setattr(net, "_retry_wait", _recording_retry_wait)
+
+    payload, _headers = _run_with_session(
+        lambda session: net._request(
+            session,
+            "https://example.com",
+            retries=2,
+            backoff=3.0,
+        )
+    )
+
+    assert payload == b"payload"
+    assert requests == 2
+    assert observed_delays == [expected_delay]
+
+
+@pytest.mark.parametrize(
+    "retry_after",
+    ["7", "Fri, 31 Dec 9999 23:59:59 GMT"],
+)
+def test_request_retries_forbidden_only_with_valid_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+    retry_after: str,
+) -> None:
+    """A server-directed 403 cooldown is transient rather than an auth failure."""
+    responses = [
+        _FakeResponse(
+            status=403,
+            reason="Forbidden",
+            payload=b"temporarily throttled",
+            headers={"Retry-After": retry_after},
+        ),
+        _FakeResponse(status=200, reason="OK", payload=b"payload"),
+    ]
+    requests = 0
+
+    def _fake_request(
+        _self: aiohttp.ClientSession,
+        _method: str,
+        _url: str,
+        **_kwargs: object,
+    ) -> _FakeResponseCM:
+        nonlocal requests
+        requests += 1
+        return _FakeResponseCM(responses.pop(0))
+
+    monkeypatch.setattr(aiohttp.ClientSession, "request", _fake_request)
+    monkeypatch.setattr(net, "_build_request_headers", lambda _url, _ua: {})
+    monkeypatch.setattr(net, "_retry_wait", lambda _backoff: lambda _state: 0.0)
+
+    payload, _headers = _run_with_session(
+        lambda session: net._request(
+            session,
+            "https://example.com/rate-limited",
+            retries=2,
+        )
+    )
+
+    assert payload == b"payload"
+    assert requests == 2
+
+
+@pytest.mark.parametrize(
+    "retry_after",
+    [None, "not-a-date", "Thu, 01 Jan 1970 00:00:00 GMT"],
+)
+def test_request_keeps_ordinary_forbidden_responses_permanent(
+    monkeypatch: pytest.MonkeyPatch,
+    retry_after: str | None,
+) -> None:
+    """Missing or invalid cooldown metadata must not retry an authentication 403."""
+    requests = 0
+    headers = {} if retry_after is None else {"Retry-After": retry_after}
+
+    def _fake_request(
+        _self: aiohttp.ClientSession,
+        _method: str,
+        _url: str,
+        **_kwargs: object,
+    ) -> _FakeResponseCM:
+        nonlocal requests
+        requests += 1
+        return _FakeResponseCM(
+            _FakeResponse(
+                status=403,
+                reason="Forbidden",
+                payload=b"bad credentials",
+                headers=headers,
+            )
+        )
+
+    monkeypatch.setattr(aiohttp.ClientSession, "request", _fake_request)
+    monkeypatch.setattr(net, "_build_request_headers", lambda _url, _ua: {})
+
+    with pytest.raises(RuntimeError, match="HTTP 403 Forbidden"):
+        _run_with_session(
+            lambda session: net._request(
+                session,
+                "https://example.com/auth",
+                retries=3,
+                backoff=0.0,
+            )
+        )
+
+    assert requests == 1
+
+
+def test_retry_wait_without_outcome_uses_exponential_fallback() -> None:
+    """Preserve exponential behavior when Tenacity has no response outcome."""
+    retry_state = RetryCallState(AsyncRetrying(), None, (), {})
+    assert net._retry_wait(3.0)(retry_state) == 3.0
 
 
 def test_request_rejects_non_https_targets() -> None:
@@ -547,7 +719,10 @@ def test_githubkit_fetch_helpers_wrap_client_errors(
 
     assert repo.default_branch == "main"
     assert commits[0].sha == "deadbeef"
-    assert created == [("token", "ua", 3), ("token", "ua", 3)]
+    assert created == [
+        ("token", "ua", 3),
+        ("token", "ua", 3),
+    ]
 
     class _FailingRepos:
         async def async_get(self, *_args: object, **_kwargs: object) -> object:

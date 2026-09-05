@@ -95,7 +95,12 @@ def test_nixcfg_update_parses_native_only(monkeypatch: _MonkeyPatchLike) -> None
     """Ensure `nixcfg update --native-only` maps to UpdateOptions.native_only."""
     called: dict[str, UpdateOptions] = {}
 
-    async def _fake_run_updates(opts: UpdateOptions) -> int:
+    async def _fake_run_updates(
+        opts: UpdateOptions,
+        *,
+        check_tools: bool = False,
+    ) -> int:
+        assert check_tools is True
         called["opts"] = opts
         return 0
 
@@ -113,7 +118,12 @@ def test_nixcfg_update_parses_multiple_targets(monkeypatch: _MonkeyPatchLike) ->
     """Ensure `nixcfg update a b` maps to multiple update targets."""
     called: dict[str, UpdateOptions] = {}
 
-    async def _fake_run_updates(opts: UpdateOptions) -> int:
+    async def _fake_run_updates(
+        opts: UpdateOptions,
+        *,
+        check_tools: bool = False,
+    ) -> int:
+        assert check_tools is True
         called["opts"] = opts
         return 0
 
@@ -134,7 +144,12 @@ def test_nixcfg_update_parses_options_after_target(
     """Ensure `nixcfg update target --check` keeps legacy option placement."""
     called: dict[str, UpdateOptions] = {}
 
-    async def _fake_run_updates(opts: UpdateOptions) -> int:
+    async def _fake_run_updates(
+        opts: UpdateOptions,
+        *,
+        check_tools: bool = False,
+    ) -> int:
+        assert check_tools is True
         called["opts"] = opts
         return 0
 

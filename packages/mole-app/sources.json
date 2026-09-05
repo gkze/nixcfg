@@ -1,4 +1,5 @@
 {
+  "commit": "df905bd082c8e2e94cd765c5968e15161dbc1ff7",
   "hashes": [
     {
       "hash": "sha256-mVeDNRw7iUYZHvQPKIr7MUdimvEDJjhf23wFmoeh/UY=",
@@ -11,9 +12,9 @@
       "platform": "x86_64-darwin"
     },
     {
-      "hash": "sha256-g+FH9DohdbTbJ2JBHjh5g2TBPpvV8jhohRhmLTAD/3I=",
+      "hash": "sha256-Ce2+wdRbKrcMii4eRpD/dqSUBMNFvdggU1kNDBG7Y1E=",
       "hashType": "srcHash",
-      "url": "https://github.com/tw93/Mole/archive/refs/tags/V1.39.0.tar.gz"
+      "url": "https://github.com/tw93/Mole/archive/df905bd082c8e2e94cd765c5968e15161dbc1ff7.tar.gz"
     }
   ],
   "urls": {

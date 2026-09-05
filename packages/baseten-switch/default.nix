@@ -9,12 +9,12 @@
 }:
 let
   pname = "baseten-switch";
-  inherit (selfSource) version;
+  inherit (selfSource) commit version;
 
   src = fetchFromGitHub {
     owner = "basetenlabs";
     repo = pname;
-    tag = "v${version}";
+    rev = commit;
     hash = outputs.lib.sourceHash pname "srcHash";
   };
 
@@ -41,10 +41,7 @@ let
     # Finder-launched apps do not inherit Home Manager's PATH. Keep the
     # packaged CLI discoverable and use Xcode's Swift toolchain through a
     # reviewed patch that must continue to apply to the pinned release.
-    patches = [
-      ./nix-managed.patch
-      ./deterministic-trace-recovery-test.patch
-    ];
+    patches = [ ./nix-managed.patch ];
 
     # Match upstream's release build: one universal Go CLI plus one universal,
     # ad-hoc-signed SwiftUI app bundle. The upstream CI build number is not part

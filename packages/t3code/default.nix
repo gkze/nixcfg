@@ -71,22 +71,6 @@ let
         --ignore-scripts \
         --no-progress
 
-      ${lib.getExe pythonForRuntimeManifest} - <<'PY'
-      import json
-      from pathlib import Path
-
-      package_json = Path("node_modules/@pierre/diffs/package.json")
-      payload = json.loads(package_json.read_text(encoding="utf-8"))
-      exports = payload.get("exports")
-      if not isinstance(exports, dict):
-          raise TypeError("@pierre/diffs package.json exports must be an object")
-      exports["./utils/*"] = {
-          "types": "./dist/utils/*.d.ts",
-          "import": "./dist/utils/*.js",
-      }
-      package_json.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
-      PY
-
       # Bun can create package-local bin links nondeterministically inside its
       # private .bun store. The runtime only needs the top-level node_modules
       # links, so remove nested .bin directories before hashing the output.

@@ -38,6 +38,7 @@ let
   checks = builtins.concatMap checksFor [
     "argus"
     "rocinante"
+    "zeus"
   ];
 in
 builtins.deepSeq checks true

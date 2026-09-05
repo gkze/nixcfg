@@ -1,24 +1,8 @@
 {
   "buzz": {
-    "commit": "95154bee4034ca7a40b33095c2ddbde8c9aa1614",
+    "commit": "9ceb1f79bbc21785a0a075c40aecb3c058b1ea15",
     "rustVersion": "1.95.0",
-    "version": "0.5.20"
-  },
-  "desktopBundleValidation": {
-    "candidate": {
-      "derivationPath": "/nix/store/3b5gv1l2iriy0fw48dnhg1zd770knrfw-buzz-desktop-candidate-0.5.20.drv",
-      "outputPath": "/nix/store/55pw5giij3bb8cqn2dzw4djc54vkzzw2-buzz-desktop-candidate-0.5.20"
-    },
-    "checks": [
-      "realized-candidate",
-      "isolated-launcher-startup",
-      "offline-runtime-loading",
-      "signatures",
-      "exact-app-metadata",
-      "reference-free-final-bundle"
-    ],
-    "schemaVersion": 1,
-    "status": "passed"
+    "version": "0.5.22"
   },
   "llamaCpp": {
     "commit": "8190848bb36c7df4251db4352bd81bc07d0a4385"
@@ -40,14 +24,6 @@
   "schemaVersion": 1,
   "sherpaOnnx": {
     "commit": "142807252687d81b40d6315f23470a1512a00de3",
-    "dependencyOrder": [
-      "kaldiNativeFbank",
-      "simpleSentencepiece",
-      "kaldifst",
-      "kaldiDecoder",
-      "openfst",
-      "kissfft"
-    ],
     "dependencies": {
       "kaldiDecoder": {
         "cmakeVariable": "KALDI_DECODER",
@@ -86,6 +62,14 @@
         "url": "https://github.com/pkufool/simple-sentencepiece/archive/refs/tags/v0.7.tar.gz"
       }
     },
+    "dependencyOrder": [
+      "kaldiNativeFbank",
+      "simpleSentencepiece",
+      "kaldifst",
+      "kaldiDecoder",
+      "openfst",
+      "kissfft"
+    ],
     "version": "1.13.4"
   }
 }

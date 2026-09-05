@@ -90,8 +90,89 @@ def test_load_bun_lock_normalizes_textual_json(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
+    parsed = bun_lock.parse_bun_lock_text(
+        lock_file.read_text(encoding="utf-8"),
+        context="test Bun lock",
+    )
     loaded = bun_lock._load_bun_lock(lock_file)
+    assert parsed == loaded
     assert loaded["overrides"] == {"dep": "https://example.test/dep.tgz"}
+
+
+def test_bun_lock_normalization_preserves_string_content() -> None:
+    """Only structural trailing commas are removed from textual JSON."""
+    expected = {
+        "object-close": "value,}",
+        "array-close": "value,]",
+        "escaped": 'quote: ",} and slash: \\',
+    }
+    canonical = json.dumps(expected, separators=(",", ":"))
+    text = f"{canonical[:-1]},}}\n"
+
+    normalized = bun_lock._normalize_textual_json(text)
+
+    assert json.loads(normalized) == expected
+
+
+def test_bun_lock_parser_accepts_jsonc_comments() -> None:
+    """Accept Bun comments as trivia, including before structural trailing commas."""
+    text = r"""
+    {
+      // A line comment before a property.
+      "url": "https://example.test/a//b/*literal*/",
+      "nested" /* between key and colon */: {
+        "values": [1, 2, /* before a trailing comma */],
+      }, // trailing object property
+      "escaped": "quote: \" and slash: \\",
+    }
+    """
+
+    assert bun_lock.parse_bun_lock_text(text) == {
+        "url": "https://example.test/a//b/*literal*/",
+        "nested": {"values": [1, 2]},
+        "escaped": 'quote: " and slash: \\',
+    }
+
+
+def test_bun_lock_parser_rejects_unterminated_block_comment() -> None:
+    """Do not normalize malformed comments into silently valid JSON."""
+    with pytest.raises(ValueError, match="Invalid textual bun.lock JSON"):
+        bun_lock.parse_bun_lock_text('{"value": 1 /* unterminated')
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"value": /not-a-comment}',
+        '{"value": 1, /* comment */ "value": 2}',
+    ],
+)
+def test_bun_lock_parser_rejects_other_ambiguous_jsonc(text: str) -> None:
+    """Comments do not make invalid tokens or duplicate keys acceptable."""
+    with pytest.raises(ValueError, match="Invalid textual bun.lock JSON"):
+        bun_lock.parse_bun_lock_text(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"packages": {,}}',
+        '{"values": [,]}',
+        '{"value": ,}',
+        '{"values": [1,,]}',
+    ],
+)
+def test_bun_lock_parser_does_not_repair_missing_values(text: str) -> None:
+    """Trailing-comma normalization must not turn malformed syntax into JSON."""
+    with pytest.raises(ValueError, match="Invalid textual bun.lock JSON"):
+        bun_lock.parse_bun_lock_text(text)
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_bun_lock_parser_rejects_non_json_numeric_constants(constant: str) -> None:
+    """Match Bun's JSONC number grammar instead of Python's permissive extension."""
+    with pytest.raises(ValueError, match="non-JSON numeric constant"):
+        bun_lock.parse_bun_lock_text(f'{{"value": {constant}}}')
 
 
 def test_helper_error_paths_and_url_fetch(monkeypatch: pytest.MonkeyPatch) -> None:

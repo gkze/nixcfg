@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nixcfg-unsloth-runtime"
-version = "0.1.804b0"
+version = "0.0.0"
 requires-python = "==3.12.*"
 dependencies = [
-  "unsloth[studio] @ https://files.pythonhosted.org/packages/1b/5c/7645fb279567ab0f81751c284b8c916673e7721aee87acd841478cfab8b7/unsloth-2026.8.22.tar.gz",
+  "unsloth[studio] @ https://files.pythonhosted.org/packages/d0/57/ff53f570f7641218eb969137f5eea2dbf8c5b951893498881ebd9ab7942c/unsloth-2026.9.2.tar.gz",
 ]
 
 [tool.uv]

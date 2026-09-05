@@ -1,8 +1,8 @@
 """Updater for the shared, exact Electron runtime inventory."""
 
-import json
 import re
-from typing import TYPE_CHECKING, ClassVar, cast
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, ClassVar, override
 
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
@@ -11,8 +11,10 @@ from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
+from lib.system_policy import electron_artifact_tags
 from lib.update import nix as update_nix
 from lib.update import process as update_process
+from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import (
     EventStream,
     UpdateEvent,
@@ -24,16 +26,20 @@ from lib.update.events import (
 )
 from lib.update.nix_expr import compact_nix_expr, select_attrs
 from lib.update.paths import updater_dir_for
+from lib.update.planner import aggregate_source_members
 from lib.update.updaters import (
     UpdateContext,
     Updater,
     VersionInfo,
+    ensure_updaters_loaded,
     register_updater,
 )
 from lib.update.updaters.core import _coerce_context
-from lib.update.updaters.metadata import metadata_as_mapping
+from lib.update.updaters.metadata import MappingMetadata, metadata_as_mapping
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import aiohttp
 
 _INVENTORY_VERSION = "inventory-v1"
@@ -41,6 +47,18 @@ _POLICY_SCHEMA_VERSION = 1
 _VERSION_PATTERN = re.compile(
     r"^(?P<major>[0-9]+)\.(?P<minor>[0-9]+)\.(?P<patch>[0-9]+)$"
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ElectronInventoryMetadata(MappingMetadata):
+    """Exact runtime versions derived from all declared source consumers."""
+
+    versions: tuple[str, ...]
+
+    @override
+    def to_dict(self) -> dict[str, object]:
+        """Expose a JSON-compatible version list through updater metadata."""
+        return {"versions": list(self.versions)}
 
 
 def _version_key(version: str) -> tuple[int, int, int]:
@@ -56,21 +74,21 @@ def _version_key(version: str) -> tuple[int, int, int]:
 
 
 def _validate_versions(raw_versions: object) -> tuple[str, ...]:
-    if not isinstance(raw_versions, list):
-        msg = "Electron runtime policy version list must be an array"
+    if not isinstance(raw_versions, list | tuple):
+        msg = "Electron runtime inventory version list must be an array"
         raise TypeError(msg)
     if not raw_versions:
-        msg = "Electron runtime policy requires at least one Electron version"
+        msg = "Electron runtime inventory requires at least one Electron version"
         raise RuntimeError(msg)
     if not all(isinstance(version, str) for version in raw_versions):
-        msg = "Electron runtime policy version list must contain only strings"
+        msg = "Electron runtime inventory version list must contain only strings"
         raise TypeError(msg)
-    versions = cast("list[str]", raw_versions)
+    versions = tuple(raw_versions)
     ordered = sorted(versions, key=_version_key)
-    if versions != ordered or len(set(versions)) != len(versions):
-        msg = "Electron runtime policy versions must be unique and strictly increasing"
+    if list(versions) != ordered or len(set(versions)) != len(versions):
+        msg = "Electron runtime versions must be unique and strictly increasing"
         raise RuntimeError(msg)
-    return tuple(versions)
+    return versions
 
 
 @register_updater
@@ -78,32 +96,47 @@ class ElectronRuntimesUpdater(Updater):
     """Materialize immutable Electron release artifacts for exact policy versions."""
 
     name = "electron-runtimes"
-    PLATFORMS: ClassVar[dict[str, str]] = {
-        "aarch64-darwin": "darwin-arm64",
-        "aarch64-linux": "linux-arm64",
-        "x86_64-darwin": "darwin-x64",
-        "x86_64-linux": "linux-x64",
-    }
+    materialize_when_current = True
+    generated_artifact_files = ("versions.json",)
+    PLATFORMS: ClassVar[dict[str, str]] = electron_artifact_tags()
 
     @classmethod
-    def _policy_versions(cls) -> tuple[str, ...]:
-        package_dir = updater_dir_for(cls.name)
-        if package_dir is None:
-            msg = f"Package directory not found for {cls.name}"
+    def _consumer_versions(
+        cls,
+        effective_sources: Mapping[str, SourceEntry],
+    ) -> tuple[str, ...]:
+        """Derive the runtime inventory from every declared consumer source."""
+        consumer_names = aggregate_source_members(ensure_updaters_loaded(), cls.name)
+        if not consumer_names:
+            msg = "Electron runtime inventory has no registered consumers"
             raise RuntimeError(msg)
-        policy_path = package_dir / "versions.json"
-        payload = json.loads(policy_path.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            msg = "Electron runtime policy must be a JSON object"
-            raise TypeError(msg)
-        schema_version = cast("dict[str, object]", payload).get("schemaVersion")
-        if schema_version != _POLICY_SCHEMA_VERSION:
-            msg = (
-                "Electron runtime policy schema version must be "
-                f"{_POLICY_SCHEMA_VERSION}, got {schema_version!r}"
-            )
+        missing_sources = [
+            name for name in consumer_names if name not in effective_sources
+        ]
+        if missing_sources:
+            missing = ", ".join(missing_sources)
+            msg = f"Electron runtime consumers are missing source metadata: {missing}"
             raise RuntimeError(msg)
-        return _validate_versions(payload.get("versions"))
+
+        versions: set[str] = set()
+        for name in consumer_names:
+            entry = effective_sources[name]
+            if (entry.pins or {}).get("electronVersion") is not None:
+                msg = (
+                    f"Electron runtime consumer {name!r} still uses legacy "
+                    "pins.electronVersion metadata"
+                )
+                raise RuntimeError(msg)
+            version = entry.electron_version
+            if version is None:
+                msg = (
+                    f"Electron runtime consumer {name!r} does not contribute "
+                    "an exact electronVersion"
+                )
+                raise RuntimeError(msg)
+            _version_key(version)
+            versions.add(version)
+        return tuple(sorted(versions, key=_version_key))
 
     @staticmethod
     def _require_versions(info: VersionInfo) -> tuple[str, ...]:
@@ -123,12 +156,12 @@ class ElectronRuntimesUpdater(Updater):
         return f"{version}:{artifact}"
 
     @classmethod
-    def _required_keys(cls, versions: tuple[str, ...]) -> tuple[str, ...]:
-        return tuple(
-            cls._runtime_key(version, artifact)
+    def _required_urls(cls, versions: tuple[str, ...]) -> dict[str, str]:
+        return {
+            cls._runtime_key(version, artifact): cls._artifact_url(version, artifact)
             for version in versions
             for artifact in ("headers", *cls.PLATFORMS)
-        )
+        }
 
     @staticmethod
     def _current_hashes(
@@ -149,6 +182,13 @@ class ElectronRuntimesUpdater(Updater):
             hashes[key] = entry
         return hashes
 
+    @staticmethod
+    def _current_urls(
+        context: UpdateContext | SourceEntry | None,
+    ) -> dict[str, str]:
+        current = _coerce_context(context).current
+        return {} if current is None else current.urls or {}
+
     @classmethod
     def _binary_url(cls, version: str, platform: str) -> str:
         tag = cls.PLATFORMS[platform]
@@ -165,7 +205,13 @@ class ElectronRuntimesUpdater(Updater):
         )
 
     @classmethod
-    def _headers_expr(cls, version: str) -> str:
+    def _artifact_url(cls, version: str, artifact: str) -> str:
+        if artifact == "headers":
+            return cls._headers_url(version)
+        return cls._binary_url(version, artifact)
+
+    @classmethod
+    def _headers_expr(cls, version: str, url: str) -> str:
         expression = FunctionCall(
             name=select_attrs(Identifier(name="pkgs"), "fetchzip"),
             argument=AttributeSet(
@@ -176,7 +222,7 @@ class ElectronRuntimesUpdater(Updater):
                     ),
                     Binding(
                         name="url",
-                        value=StringPrimitive(value=cls._headers_url(version)),
+                        value=StringPrimitive(value=url),
                     ),
                     Binding(
                         name="hash",
@@ -191,12 +237,18 @@ class ElectronRuntimesUpdater(Updater):
         )
         return compact_nix_expr(expression.rebuild())
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
-        """Read the checked-in exact-version policy."""
+    async def fetch_latest(
+        self,
+        session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | SourceEntry | None = None,
+    ) -> VersionInfo:
+        """Derive exact versions from the run's effective consumer sources."""
         _ = session
+        versions = self._consumer_versions(_coerce_context(context).effective_sources)
         return VersionInfo(
             version=_INVENTORY_VERSION,
-            metadata={"versions": list(self._policy_versions())},
+            metadata=ElectronInventoryMetadata(versions=versions),
         )
 
     async def _is_latest(
@@ -208,11 +260,24 @@ class ElectronRuntimesUpdater(Updater):
         current = _coerce_context(context).current
         if current is None or current.version != _INVENTORY_VERSION:
             return False
-        required = set(self._required_keys(self._require_versions(info)))
+        required_urls = self._required_urls(self._require_versions(info))
         current_hashes = self._current_hashes(context)
-        return set(current_hashes) == required and all(
-            not entry.hash.startswith(HashCollection.FAKE_HASH_PREFIX)
-            for entry in current_hashes.values()
+        return (
+            self._current_urls(context) == required_urls
+            and set(current_hashes) == set(required_urls)
+            and all(
+                not entry.hash.startswith(HashCollection.FAKE_HASH_PREFIX)
+                for entry in current_hashes.values()
+            )
+        )
+
+    @override
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
+        """Persist the exact URL mapping that owns every artifact hash."""
+        return self._build_result_with_urls(
+            info,
+            hashes,
+            self._required_urls(self._require_versions(info)),
         )
 
     async def fetch_hashes(
@@ -225,17 +290,22 @@ class ElectronRuntimesUpdater(Updater):
         """Hash missing runtime binaries and unpacked header trees."""
         _ = session
         versions = self._require_versions(info)
-        required_keys = self._required_keys(versions)
+        required_urls = self._required_urls(versions)
+        required_keys = tuple(required_urls)
         current_hashes = self._current_hashes(context)
+        current_urls = self._current_urls(context)
         reusable = {
             key: entry
             for key, entry in current_hashes.items()
-            if key in required_keys
+            if key in required_urls
+            and current_urls.get(key) == required_urls[key]
             and not entry.hash.startswith(HashCollection.FAKE_HASH_PREFIX)
         }
 
         binary_urls = {
-            self._runtime_key(version, platform): self._binary_url(version, platform)
+            self._runtime_key(version, platform): required_urls[
+                self._runtime_key(version, platform)
+            ]
             for version in versions
             for platform in self.PLATFORMS
             if self._runtime_key(version, platform) not in reusable
@@ -266,7 +336,7 @@ class ElectronRuntimesUpdater(Updater):
                 async for event in drain_value_events(
                     update_nix.compute_fixed_output_hash(
                         self.name,
-                        self._headers_expr(version),
+                        self._headers_expr(version, required_urls[header_key]),
                         config=self.config,
                     ),
                     header_drain,
@@ -299,4 +369,18 @@ class ElectronRuntimesUpdater(Updater):
                 )
 
         hashes: SourceHashes = [resolved[key] for key in required_keys]
+        package_dir = updater_dir_for(self.name)
+        if package_dir is None:
+            msg = f"Package directory not found for {self.name}"
+            raise RuntimeError(msg)
+        yield UpdateEvent.artifact(
+            self.name,
+            GeneratedArtifact.json(
+                package_dir / self.generated_artifact_files[0],
+                {
+                    "schemaVersion": _POLICY_SCHEMA_VERSION,
+                    "versions": list(versions),
+                },
+            ),
+        )
         yield UpdateEvent.value(self.name, hashes)

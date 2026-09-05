@@ -5,6 +5,10 @@
   ...
 }:
 let
+  systemPolicy = builtins.fromJSON (builtins.readFile ../../lib/system-policy.json);
+  artifactSystems =
+    assert systemPolicy.schemaVersion == 1;
+    builtins.attrNames systemPolicy.electronArtifacts;
   versions = nixcfgElectron.versionsForSystem stdenvNoCC.hostPlatform.system;
   runtimeFor = version: nixcfgElectron.runtimeFor version;
   runtimeLinks = lib.concatMapStringsSep "\n" (version: ''
@@ -43,11 +47,6 @@ stdenvNoCC.mkDerivation {
   meta = with lib; {
     description = "Cache target for Electron runtimes packaged by nixcfg";
     license = licenses.mit;
-    platforms = [
-      "aarch64-darwin"
-      "aarch64-linux"
-      "x86_64-darwin"
-      "x86_64-linux"
-    ];
+    platforms = artifactSystems;
   };
 }

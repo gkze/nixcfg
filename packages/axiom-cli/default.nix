@@ -5,6 +5,7 @@
 }:
 mkGoCli {
   pname = "axiom-cli";
+  # Intentional compatibility policy; the updater reads this choice through package passthru.
   go = go_1_27;
   cmdName = "axiom";
   description = "The power of Axiom on the command line";

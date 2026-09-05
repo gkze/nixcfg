@@ -52,6 +52,38 @@ let
     inherit (goCliPackage) input subPackages;
   };
 
+  defaultGo = {
+    version = "1.26.0";
+  };
+  selectedGo = {
+    version = "1.27.4";
+  };
+  mkBuildGoModule = go: {
+    __functor = _: args: args // { builtWithGoVersion = go.version; };
+    override = { go }: mkBuildGoModule go;
+  };
+  goHelpers = import (src + "/overlays/_lib/helpers/go.nix") {
+    final = { };
+    inputs = { };
+    prev = {
+      go = defaultGo;
+      buildGoModule = mkBuildGoModule defaultGo;
+      installShellFiles = "install-shell-files";
+    };
+    slib.sourceHash = _: _: "sha256-fixture";
+  };
+  goCliWithToolchainContract = goHelpers.mkGoCliPackage {
+    pname = "demo";
+    input = "demo-source";
+    subPackages = [ "cmd/demo" ];
+    version = "1.2.3";
+    go = selectedGo;
+    passthru = {
+      existing = "preserved";
+      goVersion = "caller-override";
+    };
+  };
+
   checks = [
     (assertEq "sidecar names" [
       "alpha"
@@ -75,6 +107,11 @@ let
       license = "Apache-2.0";
       mainProgram = "demo";
     } goCliMeta)
+    (assertEq "go cli selected toolchain" "1.27.4" goCliWithToolchainContract.builtWithGoVersion)
+    (assertEq "go cli toolchain passthru" {
+      existing = "preserved";
+      goVersion = "1.27.4";
+    } goCliWithToolchainContract.passthru)
   ];
 in
 builtins.deepSeq checks true

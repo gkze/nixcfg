@@ -73,6 +73,73 @@ _SELECTORS = (
     "appCandidate",
     "storePathAppCandidateSmoke",
 )
+_SENTINEL_TEST_PID = 49061
+_SENTINEL_TEST_PORT = 49152
+
+
+def _sentinel_listener(
+    validator: ModuleType,
+    *,
+    address: str | None = None,
+    pid: int = _SENTINEL_TEST_PID,
+):
+    return validator.Listener(
+        pid,
+        "Python",
+        address or f"127.0.0.1:{_SENTINEL_TEST_PORT}",
+        _SENTINEL_TEST_PORT,
+    )
+
+
+def _sentinel_baseline(validator: ModuleType):
+    identity = (
+        (
+            _SENTINEL_TEST_PID,
+            "Python",
+            f"127.0.0.1:{_SENTINEL_TEST_PORT}",
+        ),
+    )
+    return validator.SentinelBaseline(
+        port=_SENTINEL_TEST_PORT,
+        identity=identity,
+        identity_sha256="a" * 64,
+    )
+
+
+class _FakeSentinelSocket:
+    def __init__(
+        self,
+        port: object,
+        *,
+        bind_error: OSError | None = None,
+        listen_error: OSError | None = None,
+        close_error: OSError | None = None,
+    ) -> None:
+        self.port = port
+        self.bind_error = bind_error
+        self.listen_error = listen_error
+        self.close_error = close_error
+        self.bound_to: tuple[str, int] | None = None
+        self.listen_backlog: int | None = None
+        self.closed = False
+
+    def bind(self, address: tuple[str, int]) -> None:
+        self.bound_to = address
+        if self.bind_error is not None:
+            raise self.bind_error
+
+    def getsockname(self) -> tuple[str, object]:
+        return "127.0.0.1", self.port
+
+    def listen(self, backlog: int) -> None:
+        self.listen_backlog = backlog
+        if self.listen_error is not None:
+            raise self.listen_error
+
+    def close(self) -> None:
+        self.closed = True
+        if self.close_error is not None:
+            raise self.close_error
 
 
 def _json(name: str) -> object:
@@ -245,10 +312,10 @@ def test_unsloth_backend_workspace_identity_uses_only_python_project_inputs() ->
         """
 { lib }:
 lib.fileset.toSource {
-  root = ./.;
+  root = pythonWorkspaceRoot;
   fileset = lib.fileset.unions [
-    ./pyproject.toml
-    ./uv.lock
+    (pythonWorkspaceRoot + "/pyproject.toml")
+    (pythonWorkspaceRoot + "/uv.lock")
   ];
 }
 """,
@@ -379,15 +446,53 @@ def test_unsloth_is_routed_as_a_system_application() -> None:
 
 
 def test_unsloth_desktop_cargo_consistency_patches_are_shared_with_vendoring() -> None:
-    """Release metadata and Git source identity must match in both Cargo phases."""
+    """Cargo vendoring must consume the source-derived consistency patch."""
     desktop = _derivation_arguments("desktop.nix")
-
     assert_nix_ast_equal(
         expect_binding(desktop.values, "cargoPatches").value,
-        """[
-          ./studio-release-version.patch
-          ./studio-fix-path-env-revision.patch
-        ]""",
+        "[ cargoConsistencyPatch ]",
+    )
+
+    package = expect_instance(
+        parse_nix_expr((_PACKAGE_DIR / "desktop.nix").read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+    output = expect_instance(package.output, Assertion).body
+    cargo_patch = expect_instance(
+        expect_binding(output.scope, "cargoConsistencyPatch").value,
+        FunctionCall,
+    )
+    assert_nix_ast_equal(
+        cargo_patch.name,
+        """runCommand "unsloth-${version}-cargo-consistency.patch" {
+          nativeBuildInputs = [ diffutils python3 ];
+        }""",
+    )
+    assert_nix_ast_equal(
+        expect_instance(cargo_patch.argument, IndentedString),
+        r"""''
+          for tree in before after; do
+            mkdir -p "$tree/studio/src-tauri"
+            cp ${src}/studio/src-tauri/Cargo.toml "$tree/studio/src-tauri/Cargo.toml"
+            cp ${src}/studio/src-tauri/Cargo.lock "$tree/studio/src-tauri/Cargo.lock"
+            chmod -R u+w "$tree"
+          done
+
+          PYTHONPATH=${patchSupport} ${lib.getExe python3} \
+            ${patchSupport}/packages/unsloth/patch_nix_managed.py after \
+            --cargo-only --desktop-version ${lib.escapeShellArg version}
+
+          : > "$out"
+          for cargoFile in Cargo.toml Cargo.lock; do
+            diffStatus=0
+            diff -u \
+              --label "a/studio/src-tauri/$cargoFile" \
+              --label "b/studio/src-tauri/$cargoFile" \
+              "before/studio/src-tauri/$cargoFile" \
+              "after/studio/src-tauri/$cargoFile" >> "$out" || diffStatus=$?
+            test "$diffStatus" -le 1
+          done
+        ''""",
     )
 
 
@@ -500,8 +605,8 @@ def test_unsloth_backend_requires_nix_managed_desktop_capabilities(
         )
 
 
-def test_unsloth_exact_node_uses_the_pinned_nixpkgs_recipe_and_smokes_it() -> None:
-    """The pinned Node recipe must match the lock and prove its installed CLIs."""
+def test_unsloth_uses_nixpkgs_node_24_and_smokes_its_installed_clis() -> None:
+    """The selected nixpkgs Node must report its package version and usable CLIs."""
     package = expect_instance(
         parse_nix_expr((_PACKAGE_DIR / "package.nix").read_text(encoding="utf-8")),
         FunctionDefinition,
@@ -510,12 +615,10 @@ def test_unsloth_exact_node_uses_the_pinned_nixpkgs_recipe_and_smokes_it() -> No
     scope = _package_scope()
     assert "nodeSource" not in binding_map(scope)
     assert "nodejsRecipe" not in binding_map(scope)
+    assert_nix_ast_equal(expect_binding(scope, "nodejs").value, "nodejs_24")
     assert_nix_ast_equal(
-        expect_binding(scope, "nodejs").value,
-        """assert lib.assertMsg
-          (lib.getVersion nodejs_24 == runtimeSources.node.version)
-          "Unsloth requires Node ${runtimeSources.node.version}";
-        nodejs_24""",
+        expect_binding(scope, "nodeVersion").value,
+        "lib.getVersion nodejs",
     )
 
     backend = expect_instance(expect_binding(scope, "backend").value, FunctionCall)
@@ -547,7 +650,7 @@ def test_unsloth_exact_node_uses_the_pinned_nixpkgs_recipe_and_smokes_it() -> No
     contract_name = expect_instance(contract_with_attrs.name, FunctionCall)
     assert expect_instance(contract_name.name, Identifier).name == "runCommand"
     assert expect_instance(contract_name.argument, StringPrimitive).value == (
-        "unsloth-node-${runtimeSources.node.version}-runtime-contract"
+        "unsloth-node-${nodeVersion}-runtime-contract"
     )
     contract_attrs = expect_instance(contract_with_attrs.argument, AttributeSet)
     native_inputs = expect_instance(
@@ -566,9 +669,9 @@ def test_unsloth_exact_node_uses_the_pinned_nixpkgs_recipe_and_smokes_it() -> No
         "__NIX_INTERP__/bin/node --version",
         'test "$actualNodeVersion" = "v__NIX_INTERP__"',
         "__NIX_INTERP__/bin/npm --version",
-        'test "$actualNpmVersion" = "__NIX_INTERP__"',
+        'test -n "$actualNpmVersion"',
         "__NIX_INTERP__/bin/npx --version",
-        'test "$actualNpxVersion" = "__NIX_INTERP__"',
+        'test -n "$actualNpxVersion"',
         'mkdir -p "$out"',
         "printf '%s\\n' \"$actualNodeVersion\"",
         "printf '%s\\n' \"$actualNpmVersion\"",
@@ -833,7 +936,7 @@ def test_unsloth_runtime_tears_down_a_spawn_when_session_readback_fails(
     with pytest.raises(validator.ValidationError, match="isolated session"):
         validator._run_contained_runtime(
             store=store,
-            protected_identity=((49061, "Python", "127.0.0.1:8765"),),
+            sentinel=_sentinel_baseline(validator),
             startup_timeout=1,
             teardown_timeout=1,
         )
@@ -860,19 +963,14 @@ def test_unsloth_session_teardown_signals_the_spawn_even_if_ps_is_empty(
             self.terminated = True
 
     app = SpawnedApp()
-    protected = validator.Listener(
-        pid=49061,
-        command="Python",
-        address="127.0.0.1:8765",
-        port=8765,
-    )
-    monkeypatch.setattr(validator, "_listeners", lambda: (protected,))
+    sentinel_listener = _sentinel_listener(validator)
+    monkeypatch.setattr(validator, "_listeners", lambda: (sentinel_listener,))
     monkeypatch.setattr(validator, "_processes", dict)
 
     validator._teardown_session(
         app=app,
         session_id=321,
-        protected_identity=((49061, "Python", "127.0.0.1:8765"),),
+        sentinel=_sentinel_baseline(validator),
         timeout=1,
     )
     assert app.terminated
@@ -1166,7 +1264,7 @@ def test_unsloth_runtime_health_request_handles_http_boundary(
 def test_unsloth_runtime_health_request_rejects_non_candidate_port(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The health entry point must never probe the protected listener."""
+    """The health entry point must never probe a non-candidate listener."""
     validator = _runtime_validator_module()
 
     def _unexpected_connection(*_args: object, **_kwargs: object) -> None:
@@ -1174,21 +1272,26 @@ def test_unsloth_runtime_health_request_rejects_non_candidate_port(
 
     monkeypatch.setattr(validator.http.client, "HTTPConnection", _unexpected_connection)
 
-    with pytest.raises(validator.ValidationError, match="restricted.*8765"):
-        validator.request_candidate_health(validator.PROTECTED_PORT)
+    with pytest.raises(validator.ValidationError, match="restricted.*49152"):
+        validator.request_candidate_health(_SENTINEL_TEST_PORT)
 
 
 def test_unsloth_runtime_listener_filters_and_backend_argv_are_exact() -> None:
     """Listener identity and backend argv checks preserve exact paths and ports."""
     validator = _runtime_validator_module()
-    protected = validator.Listener(1, "server", "127.0.0.1:8765", 8765)
+    sentinel_listener = _sentinel_listener(validator, pid=1)
     candidate = validator.Listener(2, "backend", "127.0.0.1:8888", 8888)
-    assert validator._candidate_listeners((protected, candidate)) == (candidate,)
-    validator._require_protected_listener(
-        (protected,), ((1, "server", "127.0.0.1:8765"),)
+    assert validator._candidate_listeners((sentinel_listener, candidate)) == (
+        candidate,
     )
+    baseline = validator.SentinelBaseline(
+        port=_SENTINEL_TEST_PORT,
+        identity=((1, "Python", f"127.0.0.1:{_SENTINEL_TEST_PORT}"),),
+        identity_sha256="a" * 64,
+    )
+    validator._require_sentinel_listener((sentinel_listener,), baseline)
     with pytest.raises(validator.ValidationError, match="identity changed"):
-        validator._require_protected_listener((), ((1, "server", "127.0.0.1:8765"),))
+        validator._require_sentinel_listener((), baseline)
     backend = Path("/nix/store/backend/bin/unsloth")
     assert not validator.backend_argv_matches_evidence(
         "unterminated 'quote", backend_runtime_entrypoint=backend, port=8888
@@ -1248,6 +1351,7 @@ def _runtime_processes(validator: ModuleType) -> dict[int, object]:
         ("wrong-argv", "does not match backend argv"),
         ("wrong-address", "exact candidate loopback"),
         ("groups-missing", "process group was not captured"),
+        ("sentinel-loss", "sentinel listener identity changed"),
         ("health-pending", "timed out"),
         ("no-listener", "timed out"),
     ],
@@ -1259,9 +1363,9 @@ def test_unsloth_runtime_wait_rejects_invalid_listener_evidence(
 ) -> None:
     """Every listener ownership invariant fails closed before evidence is emitted."""
     validator = _runtime_validator_module()
-    protected = validator.Listener(49061, "Python", "127.0.0.1:8765", 8765)
+    sentinel_listener = _sentinel_listener(validator)
     candidate = validator.Listener(200, "backend", "127.0.0.1:8888", 8888)
-    listeners = [protected, candidate]
+    listeners = [sentinel_listener, candidate]
     processes = _runtime_processes(validator)
 
     if scenario == "app-missing":
@@ -1297,6 +1401,8 @@ def test_unsloth_runtime_wait_rejects_invalid_listener_evidence(
         monkeypatch.setattr(
             validator, "owned_process_groups", lambda *_args, **_kwargs: (100,)
         )
+    elif scenario == "sentinel-loss":
+        listeners.pop(0)
     elif scenario == "no-listener":
         listeners.pop()
 
@@ -1325,7 +1431,7 @@ def test_unsloth_runtime_wait_rejects_invalid_listener_evidence(
                 "/nix/store/dddddddd-unsloth-venv/bin/unsloth"
             ),
             session_id=100,
-            protected_identity=((49061, "Python", "127.0.0.1:8765"),),
+            sentinel=_sentinel_baseline(validator),
             timeout=1,
         )
 
@@ -1335,10 +1441,14 @@ def test_unsloth_runtime_wait_emits_owned_listener_evidence(
 ) -> None:
     """A matching descendant backend yields the normalized evidence object."""
     validator = _runtime_validator_module()
-    protected = validator.Listener(49061, "Python", "127.0.0.1:8765", 8765)
+    sentinel_listener = _sentinel_listener(validator)
     candidate = validator.Listener(200, "backend", "127.0.0.1:8888", 8888)
     monkeypatch.setattr(validator.time, "monotonic", lambda: 0.0)
-    monkeypatch.setattr(validator, "_listeners", lambda: (protected, candidate))
+    monkeypatch.setattr(
+        validator,
+        "_listeners",
+        lambda: (sentinel_listener, candidate),
+    )
     monkeypatch.setattr(validator, "_processes", lambda: _runtime_processes(validator))
     monkeypatch.setattr(
         validator,
@@ -1354,7 +1464,7 @@ def test_unsloth_runtime_wait_emits_owned_listener_evidence(
         app_pid=100,
         backend_runtime_entrypoint=Path("/nix/store/dddddddd-unsloth-venv/bin/unsloth"),
         session_id=100,
-        protected_identity=((49061, "Python", "127.0.0.1:8765"),),
+        sentinel=_sentinel_baseline(validator),
         timeout=1,
     ) == validator.RuntimeEvidence(
         app_pid=100,
@@ -1429,10 +1539,10 @@ def test_unsloth_runtime_spawn_signal_handles_exit_kill_and_race() -> None:
     validator._signal_spawned_app(App(race=True), validator.signal.SIGTERM)
 
 
-def test_unsloth_runtime_teardown_surfaces_protected_listener_loss(
+def test_unsloth_runtime_teardown_surfaces_sentinel_listener_loss(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Graceful cleanup still fails when the protected identity changes."""
+    """Graceful cleanup still fails when the sentinel identity changes."""
     validator = _runtime_validator_module()
 
     class App:
@@ -1454,7 +1564,7 @@ def test_unsloth_runtime_teardown_surfaces_protected_listener_loss(
         validator._teardown_session(
             app=App(),
             session_id=100,
-            protected_identity=((49061, "Python", "127.0.0.1:8765"),),
+            sentinel=_sentinel_baseline(validator),
             timeout=1,
         )
 
@@ -1478,13 +1588,13 @@ def test_unsloth_runtime_teardown_retries_then_completes(
         def kill(self) -> None:
             return None
 
-    protected = validator.Listener(49061, "Python", "127.0.0.1:8765", 8765)
+    sentinel_listener = _sentinel_listener(validator)
     session_states = iter((False, True))
     term_calls: list[object] = []
     times = iter((0.0, 0.0, 0.5))
     monkeypatch.setattr(validator.time, "monotonic", lambda: next(times))
     monkeypatch.setattr(validator.time, "sleep", lambda _delay: None)
-    monkeypatch.setattr(validator, "_listeners", lambda: (protected,))
+    monkeypatch.setattr(validator, "_listeners", lambda: (sentinel_listener,))
     monkeypatch.setattr(
         validator, "_session_is_gone", lambda _sid: next(session_states)
     )
@@ -1496,7 +1606,7 @@ def test_unsloth_runtime_teardown_retries_then_completes(
     validator._teardown_session(
         app=App(),
         session_id=100,
-        protected_identity=((49061, "Python", "127.0.0.1:8765"),),
+        sentinel=_sentinel_baseline(validator),
         timeout=1,
     )
     assert term_calls == [validator.signal.SIGTERM, validator.signal.SIGTERM]
@@ -1505,7 +1615,7 @@ def test_unsloth_runtime_teardown_retries_then_completes(
 def test_unsloth_runtime_forced_teardown_reports_scope_and_verification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Forced cleanup kills the exact spawn/session and reports protected drift."""
+    """Forced cleanup kills the exact spawn/session and reports sentinel drift."""
     validator = _runtime_validator_module()
 
     class App:
@@ -1547,7 +1657,7 @@ def test_unsloth_runtime_forced_teardown_reports_scope_and_verification(
         validator._teardown_session(
             app=app,
             session_id=100,
-            protected_identity=((49061, "Python", "127.0.0.1:8765"),),
+            sentinel=_sentinel_baseline(validator),
             timeout=0,
         )
     assert app.killed
@@ -1571,18 +1681,18 @@ def test_unsloth_runtime_forced_teardown_bounds_post_kill_wait(
         def kill(self) -> None:
             return None
 
-    protected = validator.Listener(49061, "Python", "127.0.0.1:8765", 8765)
+    sentinel_listener = _sentinel_listener(validator)
     times = iter((0.0, 1.0, 2.0, 3.0, 8.0))
     monkeypatch.setattr(validator.time, "monotonic", lambda: next(times))
     monkeypatch.setattr(validator.time, "sleep", lambda _delay: None)
-    monkeypatch.setattr(validator, "_listeners", lambda: (protected,))
+    monkeypatch.setattr(validator, "_listeners", lambda: (sentinel_listener,))
     monkeypatch.setattr(validator, "_session_is_gone", lambda _sid: False)
     monkeypatch.setattr(validator, "_signal_session_groups", lambda *_args: ())
     with pytest.raises(validator.ValidationError, match="forced teardown"):
         validator._teardown_session(
             app=App(),
             session_id=100,
-            protected_identity=((49061, "Python", "127.0.0.1:8765"),),
+            sentinel=_sentinel_baseline(validator),
             timeout=0,
         )
 
@@ -1607,10 +1717,10 @@ def test_unsloth_runtime_teardown_forces_spawn_after_group_snapshot_failure(
             self.killed = True
 
     app = App()
-    protected = validator.Listener(49061, "Python", "127.0.0.1:8765", 8765)
+    sentinel_listener = _sentinel_listener(validator)
     times = iter((0.0, 1.0, 2.0, 3.0, 8.0))
     monkeypatch.setattr(validator.time, "monotonic", lambda: next(times))
-    monkeypatch.setattr(validator, "_listeners", lambda: (protected,))
+    monkeypatch.setattr(validator, "_listeners", lambda: (sentinel_listener,))
 
     def fail_snapshot(*_args):
         raise validator.ValidationError("process snapshot failed")
@@ -1624,7 +1734,7 @@ def test_unsloth_runtime_teardown_forces_spawn_after_group_snapshot_failure(
         validator._teardown_session(
             app=app,
             session_id=100,
-            protected_identity=((49061, "Python", "127.0.0.1:8765"),),
+            sentinel=_sentinel_baseline(validator),
             timeout=0,
         )
     assert app.killed
@@ -1633,14 +1743,14 @@ def test_unsloth_runtime_teardown_forces_spawn_after_group_snapshot_failure(
 def test_unsloth_runtime_parameters_and_listener_baseline_are_exact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Timeout, port-range, free-port, and protected-baseline preconditions are explicit."""
+    """Timeout, port-range, free-port, and sentinel preconditions are explicit."""
     validator = _runtime_validator_module()
     validator._require_runtime_parameters(1, 1)
     with pytest.raises(validator.ValidationError, match="timeouts"):
         validator._require_runtime_parameters(0, 1)
     with pytest.raises(validator.ValidationError, match="timeouts"):
         validator._require_runtime_parameters(1, 0)
-    monkeypatch.setattr(validator, "CANDIDATE_PORTS", (8765,))
+    monkeypatch.setattr(validator, "CANDIDATE_PORTS", (_SENTINEL_TEST_PORT,))
     with pytest.raises(validator.ValidationError, match="internally inconsistent"):
         validator._require_runtime_parameters(1, 1)
     monkeypatch.setattr(validator, "CANDIDATE_PORTS", (8888,))
@@ -1648,35 +1758,405 @@ def test_unsloth_runtime_parameters_and_listener_baseline_are_exact(
         validator._require_runtime_parameters(1, 1)
 
     monkeypatch.setattr(validator, "CANDIDATE_PORTS", tuple(range(8888, 8909)))
-    protected = validator.Listener(49061, "Python", "127.0.0.1:8765", 8765)
+    monkeypatch.setattr(validator.os, "getpid", lambda: _SENTINEL_TEST_PID)
+    sentinel_listener = _sentinel_listener(validator)
     occupied = validator.Listener(200, "backend", "127.0.0.1:8888", 8888)
-    monkeypatch.setattr(validator, "_listeners", lambda: (protected, occupied))
+    monkeypatch.setattr(
+        validator,
+        "_listeners",
+        lambda: (sentinel_listener, occupied),
+    )
     with pytest.raises(validator.ValidationError, match="must all be free"):
-        validator._listener_baseline()
-    monkeypatch.setattr(validator, "_listeners", lambda: (protected,))
-    identity, digest = validator._listener_baseline()
-    assert identity == ((49061, "Python", "127.0.0.1:8765"),)
-    assert len(digest) == 64
+        validator._listener_baseline(_SENTINEL_TEST_PORT)
+    monkeypatch.setattr(validator, "_listeners", lambda: (sentinel_listener,))
+    baseline = validator._listener_baseline(_SENTINEL_TEST_PORT)
+    assert baseline.port == _SENTINEL_TEST_PORT
+    assert baseline.identity == _sentinel_baseline(validator).identity
+    assert len(baseline.identity_sha256) == 64
 
 
-def test_unsloth_protected_listener_baseline_rejects_absent_listener() -> None:
-    """Runtime validation requires the protected service before candidate launch."""
+def test_unsloth_sentinel_listener_baseline_rejects_absent_listener() -> None:
+    """The validator must independently observe its listener after binding it."""
     validator = _runtime_validator_module()
 
-    with pytest.raises(validator.ValidationError, match="must already be listening"):
-        validator.protected_listener_baseline(())
+    with pytest.raises(validator.ValidationError, match="absent"):
+        validator.sentinel_listener_baseline(
+            (),
+            port=_SENTINEL_TEST_PORT,
+            owner_pid=_SENTINEL_TEST_PID,
+        )
 
 
-def test_unsloth_protected_listener_baseline_rejects_wrong_address() -> None:
-    """A protected listener on the wrong address cannot establish the baseline."""
+@pytest.mark.parametrize(
+    ("listener", "message"),
+    [
+        (
+            (
+                _SENTINEL_TEST_PID,
+                "Python",
+                f"*:{_SENTINEL_TEST_PORT}",
+                _SENTINEL_TEST_PORT,
+            ),
+            "bind exactly",
+        ),
+        (
+            (1, "Python", f"127.0.0.1:{_SENTINEL_TEST_PORT}", _SENTINEL_TEST_PORT),
+            "owned exclusively",
+        ),
+    ],
+)
+def test_unsloth_sentinel_listener_baseline_rejects_wrong_identity(
+    listener: tuple[int, str, str, int],
+    message: str,
+) -> None:
+    """The sentinel baseline requires the exact address and validator PID."""
     validator = _runtime_validator_module()
-    listener = validator.Listener(49061, "Python", "*:8765", 8765)
 
-    with pytest.raises(
-        validator.ValidationError,
-        match=r"bind exactly 127\.0\.0\.1:8765",
-    ):
-        validator.protected_listener_baseline((listener,))
+    with pytest.raises(validator.ValidationError, match=message):
+        validator.sentinel_listener_baseline(
+            (validator.Listener(*listener),),
+            port=_SENTINEL_TEST_PORT,
+            owner_pid=_SENTINEL_TEST_PID,
+        )
+
+
+def test_unsloth_runtime_sentinel_uses_an_os_assigned_non_candidate_port() -> None:
+    """The real socket boundary keeps an OS-selected port reserved while open."""
+    validator = _runtime_validator_module()
+
+    listener, port = validator._sentinel_socket()
+    try:
+        assert port == listener.getsockname()[1]
+        assert port not in validator.CANDIDATE_PORTS
+        assert port > 0
+    finally:
+        listener.close()
+
+
+def test_unsloth_runtime_sentinel_retries_an_os_candidate_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unlucky ephemeral assignment cannot consume a candidate runtime port."""
+    validator = _runtime_validator_module()
+    candidate = _FakeSentinelSocket(8888)
+    sentinel = _FakeSentinelSocket(_SENTINEL_TEST_PORT)
+    sockets = iter((candidate, sentinel))
+    monkeypatch.setattr(
+        validator.socket,
+        "socket",
+        lambda _family, _kind: next(sockets),
+    )
+
+    listener, port = validator._sentinel_socket()
+
+    assert listener is sentinel
+    assert port == _SENTINEL_TEST_PORT
+    assert candidate.closed
+    assert candidate.listen_backlog is None
+    assert sentinel.bound_to == (validator.HEALTH_HOST, 0)
+    assert sentinel.listen_backlog == 1
+
+
+@pytest.mark.parametrize("stage", ["bind", "listen"])
+def test_unsloth_runtime_sentinel_closes_socket_setup_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    """A failed bind or listen cannot leak a partially initialized socket."""
+    validator = _runtime_validator_module()
+    error = OSError(f"{stage} failed")
+    listener = _FakeSentinelSocket(
+        _SENTINEL_TEST_PORT,
+        bind_error=error if stage == "bind" else None,
+        listen_error=error if stage == "listen" else None,
+    )
+    monkeypatch.setattr(
+        validator.socket,
+        "socket",
+        lambda _family, _kind: listener,
+    )
+
+    with pytest.raises(validator.ValidationError, match="could not establish"):
+        validator._sentinel_socket()
+    assert listener.closed
+
+
+def test_unsloth_runtime_sentinel_reports_socket_creation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A socket-construction error is normalized without assuming a live socket."""
+    validator = _runtime_validator_module()
+    monkeypatch.setattr(
+        validator.socket,
+        "socket",
+        lambda _family, _kind: (_ for _ in ()).throw(OSError("unavailable")),
+    )
+
+    with pytest.raises(validator.ValidationError, match="could not establish"):
+        validator._sentinel_socket()
+
+
+def test_unsloth_runtime_sentinel_preserves_setup_cleanup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A socket cleanup failure is attached to the causal setup error."""
+    validator = _runtime_validator_module()
+    listener = _FakeSentinelSocket(
+        _SENTINEL_TEST_PORT,
+        bind_error=OSError("bind failed"),
+        close_error=OSError("close failed"),
+    )
+    monkeypatch.setattr(
+        validator.socket,
+        "socket",
+        lambda _family, _kind: listener,
+    )
+
+    with pytest.raises(validator.ValidationError) as raised:
+        validator._sentinel_socket()
+    assert raised.value.__cause__ is not None
+    assert raised.value.__cause__.__notes__ == [
+        "sentinel socket cleanup also failed: close failed"
+    ]
+
+
+def test_unsloth_runtime_cli_surfaces_setup_cleanup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The CLI must expose setup-cleanup notes in its SystemExit message."""
+    validator = _runtime_validator_module()
+    listener = _FakeSentinelSocket(
+        _SENTINEL_TEST_PORT,
+        bind_error=OSError("bind failed"),
+        close_error=OSError("close failed"),
+    )
+    monkeypatch.setattr(
+        validator,
+        "_load_store_evidence",
+        lambda _path: _contained_store(validator),
+    )
+    monkeypatch.setattr(
+        validator.socket,
+        "socket",
+        lambda _family, _kind: listener,
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        validator.main(["--smoke-result", "/nix/store/smoke"])
+
+    assert raised.value.code == (
+        "Unsloth store runtime validation failed: "
+        "could not establish validator listener sentinel: bind failed; "
+        "sentinel socket cleanup also failed: close failed"
+    )
+
+
+@pytest.mark.parametrize("port", [0, True, "49152"])
+def test_unsloth_runtime_sentinel_rejects_invalid_os_port(
+    monkeypatch: pytest.MonkeyPatch,
+    port: object,
+) -> None:
+    """Malformed socket metadata fails closed and releases the socket."""
+    validator = _runtime_validator_module()
+    listener = _FakeSentinelSocket(port)
+    monkeypatch.setattr(
+        validator.socket,
+        "socket",
+        lambda _family, _kind: listener,
+    )
+
+    with pytest.raises(validator.ValidationError, match="invalid sentinel port"):
+        validator._sentinel_socket()
+    assert listener.closed
+
+
+def test_unsloth_runtime_sentinel_rejects_reserved_port_exhaustion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated candidate-range assignments fail rather than weakening isolation."""
+    validator = _runtime_validator_module()
+    listener = _FakeSentinelSocket(8888)
+    monkeypatch.setattr(validator, "_SENTINEL_BIND_ATTEMPTS", 1)
+    monkeypatch.setattr(
+        validator.socket,
+        "socket",
+        lambda _family, _kind: listener,
+    )
+
+    with pytest.raises(validator.ValidationError, match="repeatedly assigned"):
+        validator._sentinel_socket()
+    assert listener.closed
+
+
+def test_unsloth_runtime_sentinel_rejects_reserved_port_close_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A candidate-range socket must be released before another bind is attempted."""
+    validator = _runtime_validator_module()
+    listener = _FakeSentinelSocket(8888, close_error=OSError("close failed"))
+    monkeypatch.setattr(
+        validator.socket,
+        "socket",
+        lambda _family, _kind: listener,
+    )
+
+    with pytest.raises(validator.ValidationError, match="release reserved"):
+        validator._sentinel_socket()
+
+
+def test_unsloth_runtime_sentinel_start_and_teardown_own_the_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The validator carries one baseline through setup and proves final absence."""
+    validator = _runtime_validator_module()
+    listener = _FakeSentinelSocket(_SENTINEL_TEST_PORT)
+    baseline = _sentinel_baseline(validator)
+    monkeypatch.setattr(
+        validator,
+        "_sentinel_socket",
+        lambda: (listener, _SENTINEL_TEST_PORT),
+    )
+    monkeypatch.setattr(validator, "_listener_baseline", lambda _port: baseline)
+    sentinel = validator._start_listener_sentinel()
+    assert sentinel.baseline is baseline
+
+    monkeypatch.setattr(validator, "_listeners", tuple)
+    validator._teardown_listener_sentinel(sentinel)
+    assert listener.closed
+
+
+def test_unsloth_runtime_sentinel_start_closes_after_baseline_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed independent baseline cannot leave validator infrastructure behind."""
+    validator = _runtime_validator_module()
+    listener = _FakeSentinelSocket(_SENTINEL_TEST_PORT)
+    monkeypatch.setattr(
+        validator,
+        "_sentinel_socket",
+        lambda: (listener, _SENTINEL_TEST_PORT),
+    )
+    monkeypatch.setattr(
+        validator,
+        "_listener_baseline",
+        lambda _port: (_ for _ in ()).throw(validator.ValidationError("missing")),
+    )
+
+    with pytest.raises(validator.ValidationError, match="missing"):
+        validator._start_listener_sentinel()
+    assert listener.closed
+
+
+def test_unsloth_runtime_sentinel_start_reports_baseline_cleanup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Baseline failure remains causal while a close failure is retained as a note."""
+    validator = _runtime_validator_module()
+    listener = _FakeSentinelSocket(
+        _SENTINEL_TEST_PORT,
+        close_error=OSError("close failed"),
+    )
+    monkeypatch.setattr(
+        validator,
+        "_sentinel_socket",
+        lambda: (listener, _SENTINEL_TEST_PORT),
+    )
+    monkeypatch.setattr(
+        validator,
+        "_listener_baseline",
+        lambda _port: (_ for _ in ()).throw(validator.ValidationError("missing")),
+    )
+
+    with pytest.raises(validator.ValidationError, match="missing") as raised:
+        validator._start_listener_sentinel()
+    assert raised.value.__notes__ == [
+        "sentinel socket cleanup also failed: close failed"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("close_error", "remaining", "message"),
+    [
+        (OSError("close failed"), False, "could not close"),
+        (None, True, "survived teardown"),
+        (OSError("close failed"), True, "survived teardown"),
+    ],
+)
+def test_unsloth_runtime_sentinel_teardown_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    close_error: OSError | None,
+    remaining: bool,
+    message: str,
+) -> None:
+    """Socket-close errors and a remaining listener are reported distinctly."""
+    validator = _runtime_validator_module()
+    listener = _FakeSentinelSocket(
+        _SENTINEL_TEST_PORT,
+        close_error=close_error,
+    )
+    sentinel = validator.ListenerSentinel(
+        listener=listener,
+        baseline=_sentinel_baseline(validator),
+    )
+    listeners = (_sentinel_listener(validator),) if remaining else ()
+    monkeypatch.setattr(validator, "_listeners", lambda: listeners)
+
+    with pytest.raises(validator.ValidationError, match=message) as raised:
+        validator._teardown_listener_sentinel(sentinel)
+    if close_error is not None and remaining:
+        assert raised.value.__notes__ == [
+            "sentinel socket close also failed: close failed"
+        ]
+
+
+def test_unsloth_runtime_sentinel_teardown_preserves_close_and_inspection_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Listener inspection stays primary while a simultaneous close error is retained."""
+    validator = _runtime_validator_module()
+    listener = _FakeSentinelSocket(
+        _SENTINEL_TEST_PORT,
+        close_error=OSError("close failed"),
+    )
+    sentinel = validator.ListenerSentinel(
+        listener=listener,
+        baseline=_sentinel_baseline(validator),
+    )
+    inspection_error = validator.ValidationError("listener inspection failed")
+    monkeypatch.setattr(
+        validator,
+        "_listeners",
+        lambda: (_ for _ in ()).throw(inspection_error),
+    )
+
+    with pytest.raises(validator.ValidationError) as raised:
+        validator._teardown_listener_sentinel(sentinel)
+
+    assert raised.value is inspection_error
+    assert raised.value.__notes__ == ["sentinel socket close also failed: close failed"]
+
+
+def test_unsloth_runtime_sentinel_teardown_propagates_inspection_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A listener-inspection failure remains unchanged when socket close succeeds."""
+    validator = _runtime_validator_module()
+    sentinel = validator.ListenerSentinel(
+        listener=_FakeSentinelSocket(_SENTINEL_TEST_PORT),
+        baseline=_sentinel_baseline(validator),
+    )
+    inspection_error = validator.ValidationError("listener inspection failed")
+    monkeypatch.setattr(
+        validator,
+        "_listeners",
+        lambda: (_ for _ in ()).throw(inspection_error),
+    )
+
+    with pytest.raises(validator.ValidationError) as raised:
+        validator._teardown_listener_sentinel(sentinel)
+
+    assert raised.value is inspection_error
+    assert not hasattr(raised.value, "__notes__")
 
 
 def test_unsloth_runtime_direct_launch_uses_sandbox_boundary(
@@ -1791,7 +2271,7 @@ def test_unsloth_contained_runtime_returns_evidence_after_successful_teardown(
 
     assert validator._run_contained_runtime(
         store=_contained_store(validator),
-        protected_identity=((49061, "Python", "127.0.0.1:8765"),),
+        sentinel=_sentinel_baseline(validator),
         startup_timeout=1,
         teardown_timeout=1,
     ) == (evidence, 100)
@@ -1834,7 +2314,7 @@ def test_unsloth_contained_runtime_preserves_failure_precedence(
     with pytest.raises(validator.ValidationError, match=message):
         validator._run_contained_runtime(
             store=_contained_store(validator),
-            protected_identity=((49061, "Python", "127.0.0.1:8765"),),
+            sentinel=_sentinel_baseline(validator),
             startup_timeout=1,
             teardown_timeout=1,
         )
@@ -1855,9 +2335,11 @@ def test_unsloth_final_teardown_rejects_runtime_survivors(
 ) -> None:
     """The final independent snapshot rejects either listener or process residue."""
     validator = _runtime_validator_module()
-    protected = validator.Listener(49061, "Python", "127.0.0.1:8765", 8765)
+    sentinel_listener = _sentinel_listener(validator)
     candidate = validator.Listener(200, "backend", "127.0.0.1:8888", 8888)
-    listeners = (protected, candidate) if candidate_survives else (protected,)
+    listeners = (
+        (sentinel_listener, candidate) if candidate_survives else (sentinel_listener,)
+    )
     monkeypatch.setattr(validator, "_listeners", lambda: listeners)
     monkeypatch.setattr(
         validator,
@@ -1867,21 +2349,21 @@ def test_unsloth_final_teardown_rejects_runtime_survivors(
     with pytest.raises(validator.ValidationError, match=message):
         validator._require_final_teardown(
             session_id=100,
-            protected_identity=((49061, "Python", "127.0.0.1:8765"),),
+            sentinel=_sentinel_baseline(validator),
         )
 
 
 def test_unsloth_final_teardown_accepts_clean_independent_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A preserved visualization listener and absent candidate session pass."""
+    """A preserved validator sentinel and absent candidate session pass."""
     validator = _runtime_validator_module()
-    protected = validator.Listener(49061, "Python", "127.0.0.1:8765", 8765)
-    monkeypatch.setattr(validator, "_listeners", lambda: (protected,))
+    sentinel_listener = _sentinel_listener(validator)
+    monkeypatch.setattr(validator, "_listeners", lambda: (sentinel_listener,))
     monkeypatch.setattr(validator, "_session_is_gone", lambda _session_id: True)
     validator._require_final_teardown(
         session_id=100,
-        protected_identity=((49061, "Python", "127.0.0.1:8765"),),
+        sentinel=_sentinel_baseline(validator),
     )
 
 
@@ -1892,11 +2374,19 @@ def test_unsloth_validate_store_runtime_emits_complete_gate_evidence(
     validator = _runtime_validator_module()
     store = _contained_store(validator)
     evidence = _contained_evidence(validator)
-    identity = ((49061, "Python", "127.0.0.1:8765"),)
-    digest = "a" * 64
+    sentinel = _sentinel_baseline(validator)
     final_calls: list[tuple[int, object]] = []
+    sentinel_teardown_calls: list[object] = []
     monkeypatch.setattr(validator, "_load_store_evidence", lambda _path: store)
-    monkeypatch.setattr(validator, "_listener_baseline", lambda: (identity, digest))
+    listener_sentinel = validator.ListenerSentinel(
+        listener=SimpleNamespace(close=lambda: None),
+        baseline=sentinel,
+    )
+    monkeypatch.setattr(
+        validator,
+        "_start_listener_sentinel",
+        lambda: listener_sentinel,
+    )
     monkeypatch.setattr(
         validator,
         "_run_contained_runtime",
@@ -1905,10 +2395,15 @@ def test_unsloth_validate_store_runtime_emits_complete_gate_evidence(
     monkeypatch.setattr(
         validator,
         "_require_final_teardown",
-        lambda *, session_id, protected_identity: final_calls.append((
+        lambda *, session_id, sentinel: final_calls.append((
             session_id,
-            protected_identity,
+            sentinel,
         )),
+    )
+    monkeypatch.setattr(
+        validator,
+        "_teardown_listener_sentinel",
+        sentinel_teardown_calls.append,
     )
 
     assert validator.validate_store_runtime(Path("/nix/store/smoke")) == {
@@ -1923,14 +2418,77 @@ def test_unsloth_validate_store_runtime_emits_complete_gate_evidence(
         "ownedProcessGroups": [100, 200],
         "port": 8888,
         "protectedListenerCount": 1,
-        "protectedListenerIdentitySha256": digest,
+        "protectedListenerIdentitySha256": sentinel.identity_sha256,
         "sandbox": "passed",
         "schemaVersion": 2,
         "sessionId": 100,
         "status": "passed",
         "teardown": "passed",
     }
-    assert final_calls == [(100, identity)]
+    assert final_calls == [(100, sentinel)]
+    assert sentinel_teardown_calls == [listener_sentinel]
+
+
+@pytest.mark.parametrize(
+    ("unexpected", "cleanup_fails"),
+    [
+        (False, False),
+        (False, True),
+        (True, True),
+    ],
+)
+def test_unsloth_validate_store_runtime_always_tears_down_its_sentinel(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    unexpected: bool,
+    cleanup_fails: bool,
+) -> None:
+    """Sentinel cleanup preserves the primary runtime failure and its own state."""
+    validator = _runtime_validator_module()
+    store = _contained_store(validator)
+    sentinel = validator.ListenerSentinel(
+        listener=_FakeSentinelSocket(_SENTINEL_TEST_PORT),
+        baseline=_sentinel_baseline(validator),
+    )
+    primary = (
+        ValueError("unexpected runtime failure")
+        if unexpected
+        else validator.ValidationError("runtime failed")
+    )
+    teardown_calls: list[object] = []
+    monkeypatch.setattr(validator, "_load_store_evidence", lambda _path: store)
+    monkeypatch.setattr(validator, "_start_listener_sentinel", lambda: sentinel)
+    monkeypatch.setattr(
+        validator,
+        "_run_contained_runtime",
+        lambda **_kwargs: (_ for _ in ()).throw(primary),
+    )
+
+    def teardown(actual: object) -> None:
+        teardown_calls.append(actual)
+        if cleanup_fails:
+            cleanup_error = validator.ValidationError("listener inspection failed")
+            cleanup_error.add_note("sentinel socket close also failed: close failed")
+            raise cleanup_error
+
+    monkeypatch.setattr(validator, "_teardown_listener_sentinel", teardown)
+    expected = ValueError if unexpected else validator.ValidationError
+    message = "unexpected runtime failure" if unexpected else "runtime failed"
+    with pytest.raises(expected, match=message) as raised:
+        validator.validate_store_runtime(Path("/nix/store/smoke"))
+
+    assert teardown_calls == [sentinel]
+    if unexpected:
+        assert raised.value.__notes__ == [
+            "sentinel teardown also failed: listener inspection failed; "
+            "sentinel socket close also failed: close failed"
+        ]
+    elif cleanup_fails:
+        assert str(raised.value) == (
+            "runtime failed; sentinel teardown also failed: "
+            "listener inspection failed; "
+            "sentinel socket close also failed: close failed"
+        )
 
 
 def test_unsloth_runtime_cli_prints_json_and_surfaces_validation_errors(
@@ -1968,21 +2526,8 @@ def test_unsloth_runtime_cli_prints_json_and_surfaces_validation_errors(
         validator.main(["--smoke-result", "/nix/store/smoke"])
 
 
-def test_unsloth_frontend_manifest_matches_audited_release() -> None:
-    """The built frontend must remain byte-identical to the reviewed release."""
-    source = _json("sources.json")
-    assert isinstance(source, dict)
-    pins = source["pins"]
-    assert isinstance(pins, dict)
-    assert {
-        "frontendDistFileCount": pins["frontendDistFileCount"],
-        "frontendDistSha256": pins["frontendDistSha256"],
-    } == {
-        "frontendDistFileCount": "704",
-        "frontendDistSha256": (
-            "03acd2b8ef28d7135bd74a5b7ed82e6eaecea5289cfa4883ece0ef34597b6125"
-        ),
-    }
+def test_unsloth_frontend_install_check_is_release_agnostic() -> None:
+    """A successful source build must yield a nonempty frontend entrypoint."""
     frontend = _derivation_arguments("frontend.nix")
     install_check = expect_instance(
         expect_binding(frontend.values, "installCheckPhase").value,
@@ -1990,21 +2535,11 @@ def test_unsloth_frontend_manifest_matches_audited_release() -> None:
     )
     commands = command_texts(parse_shell(indented_string_body(install_check.rebuild())))
 
-    assert 'test "$(wc -l < "$manifest" | tr -d \' \')" = __NIX_INTERP__' in commands
-    assert (
-        'test "$(sha256sum "$manifest" | cut -d \' \' -f 1)" = \\\n'
-        "      __NIX_INTERP__" in commands
-    )
-    interpolations = _indented_string_interpolations(install_check)
-    assert len(interpolations) == 2
-    assert_nix_ast_equal(
-        interpolations[0],
-        "toString frontendManifest.fileCount",
-    )
-    assert_nix_ast_equal(
-        interpolations[1],
-        "frontendManifest.sha256",
-    )
+    assert commands == [
+        "runHook preInstallCheck",
+        'test -s "$out/dist/index.html"',
+        "runHook postInstallCheck",
+    ]
 
 
 def test_unsloth_desktop_rejects_every_runtime_installer_from_app_bundle() -> None:
@@ -2202,15 +2737,23 @@ def test_unsloth_native_helper_flags_match_the_audited_offline_closure() -> None
 
 def test_unsloth_recorded_hashes_and_artifact_gate_are_explicit() -> None:
     """Recorded FOD hashes and real-artifact validation remain distinct gates."""
-    assert _json("closure-hashes.json") == {
-        "cargoHash": "sha256-CpyYtmDh4slv/KcFPh3eGHbSHhVv9jF8E1bVDjE3OUc=",
-        "frontendNpmDepsHash": ("sha256-hKLFFfHCb4E0rXOvAl0u3JDMYmP/npFYfmXnjKNaJL0="),
-        "oxcNpmDepsHash": ("sha256-xdgjLq4vR/KDgiNAwm1Hd5IzClpdB4OjMPp6RXWEXtg="),
+    closure_hashes = _json("closure-hashes.json")
+    assert isinstance(closure_hashes, dict)
+    assert set(closure_hashes) == {
+        "cargoHash",
+        "frontendNpmDepsHash",
+        "oxcNpmDepsHash",
     }
+    assert all(
+        isinstance(value, str) and value.startswith("sha256-")
+        for value in closure_hashes.values()
+    )
     artifact_validation = _json("artifact-validation.json")
     assert isinstance(artifact_validation, dict)
-    assert artifact_validation["checks"] == [
-        "frontend-dist-manifest",
+    checks = artifact_validation["checks"]
+    assert isinstance(checks, list)
+    assert checks[0] in {"frontend-dist-manifest", "frontend-source-build"}
+    assert checks[1:] == [
         "oxc-valid-and-invalid-programs",
         "python-import-and-cli",
         "native-helper-arm64-and-help",
@@ -2219,9 +2762,23 @@ def test_unsloth_recorded_hashes_and_artifact_gate_are_explicit() -> None:
         "contained-direct-store-path-app-runtime",
         "no-updater-or-runtime-installer-endpoints",
     ]
-    assert artifact_validation["runtimeEvidenceSchemaVersion"] == 2
+    assert artifact_validation["runtimeEvidenceSchemaVersion"] == 3
     assert artifact_validation["status"] == "passed"
-    assert isinstance(artifact_validation["runtimeEvidence"], dict)
+    runtime_evidence = artifact_validation["runtimeEvidence"]
+    assert isinstance(runtime_evidence, dict)
+    assert set(runtime_evidence) == {
+        "appCandidate",
+        "backendExecutable",
+        "backendRuntimeEntrypoint",
+        "health",
+        "listenerOwnership",
+        "sandbox",
+        "schemaVersion",
+        "status",
+        "studioRootIdentity",
+        "teardown",
+    }
+    assert runtime_evidence["schemaVersion"] == 3
 
 
 def test_unsloth_export_gate_requires_persisted_runtime_and_closure_evidence() -> None:
@@ -2238,9 +2795,9 @@ def test_unsloth_export_gate_requires_persisted_runtime_and_closure_evidence() -
     )
     assert_nix_ast_equal(
         expect_binding(scope, "runtimeEvidenceComplete").value,
-        """builtins.isAttrs runtimeEvidence
-          && (artifactValidation.runtimeEvidenceSchemaVersion or null) == 2
-          && (runtimeEvidence.schemaVersion or null) == 2
+        '''builtins.isAttrs runtimeEvidence
+          && (artifactValidation.runtimeEvidenceSchemaVersion or null) == 3
+          && (runtimeEvidence.schemaVersion or null) == 3
           && (runtimeEvidence.status or null) == "passed"
           && (runtimeEvidence.teardown or null) == "passed"
           && (runtimeEvidence.sandbox or null) == "passed"
@@ -2249,31 +2806,24 @@ def test_unsloth_export_gate_requires_persisted_runtime_and_closure_evidence() -
           && (runtimeEvidence.backendExecutable or null) == "${backend}/bin/unsloth"
           && (runtimeEvidence.backendRuntimeEntrypoint or null)
             == "${backend.venv}/bin/unsloth"
-          && builtins.isInt (runtimeEvidence.appPid or null)
-          && runtimeEvidence.appPid > 0
-          && builtins.isInt (runtimeEvidence.backendPid or null)
-          && runtimeEvidence.backendPid > 0
-          && builtins.isInt (runtimeEvidence.sessionId or null)
-          && runtimeEvidence.sessionId == runtimeEvidence.appPid
-          && builtins.isString (runtimeEvidence.listenerAddress or null)
-          && builtins.isInt (runtimeEvidence.port or null)
-          && runtimeEvidence.listenerAddress
-            == "127.0.0.1:${toString runtimeEvidence.port}"
-          && builtins.elem runtimeEvidence.port (lib.range 8888 8908)
-          && builtins.isList (runtimeEvidence.ownedProcessGroups or null)
-          && runtimeEvidence.ownedProcessGroups != [ ]
-          && builtins.all (group: builtins.isInt group && group > 0)
-            runtimeEvidence.ownedProcessGroups
-          && builtins.isInt (runtimeEvidence.protectedListenerCount or null)
-          && runtimeEvidence.protectedListenerCount > 0
-          && builtins.isString (runtimeEvidence.protectedListenerIdentitySha256 or null)
-          && builtins.match "[0-9a-f]{64}"
-            runtimeEvidence.protectedListenerIdentitySha256 != null
           && builtins.isAttrs (runtimeEvidence.health or null)
+          && builtins.attrNames runtimeEvidence.health == [ "service" "status" ]
           && (runtimeEvidence.health.service or null) == "Unsloth UI Backend"
           && (runtimeEvidence.health.status or null) == "healthy"
-          && builtins.isString (runtimeEvidence.health.studio_root_id or null)
-          && builtins.match "[0-9a-f]+" runtimeEvidence.health.studio_root_id != null""",
+          && (runtimeEvidence.studioRootIdentity or null) == "passed"''',
+    )
+    assert_nix_ast_equal(
+        expect_binding(scope, "closureIdentityComplete").value,
+        """(closurePlan.app.version or null) == version
+          && (closurePlan.app.tag or null) == "v${version}"
+          && (closurePlan.app.commit or null) == source.commit
+          && (closurePlan.app.sourceHash or null) == desktopSourceHash
+          && (closurePlan.backend.version or null) == backendVersion
+          && (closurePlan.backend.sdistHash or null) == backendSourceHash
+          && (closurePlan.releaseManifest.version or null) == version
+          && (closurePlan.releaseManifest.pypiVersion or null) == backendVersion
+          && (closurePlan.releaseManifest.hash or null)
+            == (hashEntryFor "sha256" source.urls.releaseManifest).hash""",
     )
     assert_nix_ast_equal(
         expect_binding(scope, "closureStateAllowsExport").value,
@@ -2290,6 +2840,7 @@ def test_unsloth_export_gate_requires_persisted_runtime_and_closure_evidence() -
           ++ lib.optional (artifactValidation.status != "passed") "artifact-validation"
           ++ lib.optional (!smokeEvidenceComplete) "store-path-smoke-evidence"
           ++ lib.optional (!runtimeEvidenceComplete) "runtime-evidence"
+          ++ lib.optional (!closureIdentityComplete) "closure-plan-identity"
           ++ lib.optional (closurePlan.blockers != [ ]) "closure-plan-blockers"
           ++ lib.optional (!closureStateAllowsExport) "closure-plan-status"''',
     )

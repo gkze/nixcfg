@@ -1,13 +1,11 @@
 {
-  mkDmgApp,
-  mkSimpleDarwinApp,
+  mkDmgApp7zz,
   selfSource,
   ...
 }:
-mkSimpleDarwinApp {
-  builder = mkDmgApp;
+mkDmgApp7zz {
   pname = "factory";
-  appName = "Factory";
+  bundleName = "Factory.app";
   executableName = "factory-desktop";
   info = selfSource;
   description = "Native AI agent workspace from Factory";

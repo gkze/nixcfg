@@ -1,5 +1,6 @@
 """Updater for the source-built GooeyPi macOS app."""
 
+import re
 from typing import TYPE_CHECKING, ClassVar, cast
 
 from nix_manipulator.expressions.binding import Binding
@@ -14,6 +15,7 @@ from lib.update.nix import (
     _build_fetch_from_github_expr,
 )
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
+from lib.update.npm_semver import require_npm_version_matches_spec
 from lib.update.updaters import (
     FixedOutputHashStep,
     GitHubReleaseUpdater,
@@ -23,6 +25,10 @@ from lib.update.updaters import (
     stream_fixed_output_hashes,
 )
 from lib.update.updaters.metadata import require_metadata_str
+from lib.update.updaters.node_compatibility import (
+    require_supported_node_engine,
+    resolve_package_passthru_version,
+)
 
 if TYPE_CHECKING:
     import aiohttp
@@ -30,19 +36,53 @@ if TYPE_CHECKING:
     from lib.update.events import EventStream
 
 
+_EXACT_VERSION_PATTERN = re.compile(
+    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
+)
+_ENGINE_MINIMUM_PATTERN = re.compile(
+    r"^>=\s*(?P<version>(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"\.(?:0|[1-9][0-9]*))$"
+)
+_NPM_PACKAGE_MANAGER_PATTERN = re.compile(
+    r"^npm@(?P<version>(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"\.(?:0|[1-9][0-9]*))$"
+)
+
+
+def _version_triplet(version: str, *, context: str) -> tuple[int, int, int]:
+    if _EXACT_VERSION_PATTERN.fullmatch(version) is None:
+        msg = f"GooeyPi {context} must be an exact semantic version, got {version!r}"
+        raise RuntimeError(msg)
+    major, minor, patch = version.split(".")
+    return int(major), int(minor), int(patch)
+
+
+def _engine_minimum(engine: object, *, context: str) -> tuple[int, int, int]:
+    if not isinstance(engine, str) or not engine:
+        msg = f"GooeyPi package {context} engine is missing"
+        raise TypeError(msg)
+    match = _ENGINE_MINIMUM_PATTERN.fullmatch(engine.strip())
+    if match is None:
+        msg = (
+            f"GooeyPi package {context} engine must be a simple >= minimum range, "
+            f"got {engine!r}"
+        )
+        raise RuntimeError(msg)
+    return _version_triplet(match.group("version"), context=f"{context} engine minimum")
+
+
 @register_updater
 class GooeyPiUpdater(GitHubReleaseUpdater):
     """Track immutable GooeyPi releases and their npm dependency closure."""
 
     name = "gooeypi"
+    aggregate_into = ("electron-runtimes",)
     GITHUB_OWNER = "am-will"
     GITHUB_REPO = "gooey-pi"
     RELEASE_DISPLAY_NAME = "GooeyPi"
     DARWIN_PLATFORM: ClassVar[str] = "aarch64-darwin"
     APP_ID: ClassVar[str] = "app.gooeypi.desktop"
-    NODE_ENGINE: ClassVar[str] = ">=24.15.0"
-    NPM_ENGINE: ClassVar[str] = ">=12.0.2"
-    PACKAGE_MANAGER: ClassVar[str] = "npm@12.0.2"
+    NODEJS_VERSION_PASSTHRU: ClassVar[str] = "nodejsVersion"
     supported_platforms = (DARWIN_PLATFORM,)
 
     @staticmethod
@@ -82,34 +122,51 @@ class GooeyPiUpdater(GitHubReleaseUpdater):
         return electron
 
     @classmethod
-    def _validate_build_toolchain(cls, package_manifest: object) -> str:
+    def _validate_build_toolchain(
+        cls,
+        package_manifest: object,
+        *,
+        selected_node_version: str,
+    ) -> str:
         package = cast("dict[str, object]", package_manifest)
         engines = package.get("engines")
         if not isinstance(engines, dict):
             msg = "GooeyPi package build toolchain is missing"
             raise TypeError(msg)
-        node_engine = cast("dict[str, object]", engines).get("node")
-        if node_engine != cls.NODE_ENGINE:
-            msg = (
-                f"GooeyPi package Node engine {node_engine!r} does not match "
-                f"the source-build contract {cls.NODE_ENGINE!r}"
-            )
-            raise RuntimeError(msg)
-        npm_engine = cast("dict[str, object]", engines).get("npm")
-        if npm_engine != cls.NPM_ENGINE:
-            msg = (
-                f"GooeyPi package npm engine {npm_engine!r} does not match "
-                f"the source-build contract {cls.NPM_ENGINE!r}"
-            )
-            raise RuntimeError(msg)
+
+        require_supported_node_engine(
+            cast("dict[str, object]", engines).get("node"),
+            selected_attr=f"{cls.name}.passthru.{cls.NODEJS_VERSION_PASSTHRU}",
+            selected_version=selected_node_version,
+            source_name="GooeyPi",
+        )
+
         package_manager = package.get("packageManager")
-        if package_manager != cls.PACKAGE_MANAGER:
+        if not isinstance(package_manager, str) or not package_manager:
+            msg = "GooeyPi package manager is missing"
+            raise TypeError(msg)
+        package_manager_match = _NPM_PACKAGE_MANAGER_PATTERN.fullmatch(package_manager)
+        if package_manager_match is None:
             msg = (
-                f"GooeyPi package manager {package_manager!r} does not match "
-                f"the source-build contract {cls.PACKAGE_MANAGER!r}"
+                "GooeyPi package manager must select an exact npm@<version>, "
+                f"got {package_manager!r}"
             )
             raise RuntimeError(msg)
-        return cls.PACKAGE_MANAGER.removeprefix("npm@")
+        npm_version = package_manager_match.group("version")
+        npm_minimum = _engine_minimum(
+            cast("dict[str, object]", engines).get("npm"),
+            context="npm",
+        )
+        if (
+            _version_triplet(npm_version, context="package manager version")
+            < npm_minimum
+        ):
+            msg = (
+                f"GooeyPi package manager {package_manager!r} does not satisfy "
+                f"the npm engine minimum {'.'.join(map(str, npm_minimum))}"
+            )
+            raise RuntimeError(msg)
+        return npm_version
 
     @staticmethod
     def _locked_electron_version(lock_manifest: object) -> str:
@@ -135,6 +192,7 @@ class GooeyPiUpdater(GitHubReleaseUpdater):
         version: str,
         package_manifest: object,
         lock_manifest: object,
+        selected_node_version: str,
     ) -> tuple[str, str]:
         package_version = cls._manifest_version(package_manifest, label="package")
         if package_version != version:
@@ -153,15 +211,19 @@ class GooeyPiUpdater(GitHubReleaseUpdater):
 
         cls._validate_app_id(package_manifest)
         electron_spec = cls._electron_spec(package_manifest)
-        npm_version = cls._validate_build_toolchain(package_manifest)
+        npm_version = cls._validate_build_toolchain(
+            package_manifest,
+            selected_node_version=selected_node_version,
+        )
         electron_version = cls._locked_electron_version(lock_manifest)
-        if electron_spec not in {electron_version, f"^{electron_version}"}:
-            msg = (
-                f"GooeyPi package Electron spec {electron_spec!r} does not resolve "
-                f"exactly to locked version {electron_version!r}"
-            )
-            raise RuntimeError(msg)
-        return electron_version, npm_version
+        return (
+            require_npm_version_matches_spec(
+                electron_version,
+                electron_spec,
+                context="GooeyPi package Electron",
+            ),
+            npm_version,
+        )
 
     @staticmethod
     def _require_electron_version(info: VersionInfo) -> str:
@@ -205,10 +267,17 @@ class GooeyPiUpdater(GitHubReleaseUpdater):
             ),
             config=self.config,
         )
+        selected_node_version = await resolve_package_passthru_version(
+            self.name,
+            self.NODEJS_VERSION_PASSTHRU,
+            command_timeout=self.config.default_subprocess_timeout,
+            source_name="GooeyPi",
+        )
         electron_version, npm_version = self._validate_release_manifests(
             version=version,
             package_manifest=package_manifest,
             lock_manifest=lock_manifest,
+            selected_node_version=selected_node_version,
         )
         return VersionInfo(
             version=version,

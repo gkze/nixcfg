@@ -44,7 +44,7 @@ def test_zed_editor_nightly_updater_refreshes_root_rust_overlay() -> None:
 
 
 def test_zed_source_preparations_follow_apple_shader_owner() -> None:
-    """Give gpui_apple stable access to the sibling sources its build reads."""
+    """Give gpui_apple stable access across its supported source contracts."""
     package = expect_instance(
         parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),
         FunctionDefinition,
@@ -61,7 +61,17 @@ def test_zed_source_preparations_follow_apple_shader_owner() -> None:
         preparation_bindings["gpui_apple"].value,
         r"""''
           cp -r ${src}/crates/gpui "$crateRoot/workspace-gpui"
-          (cd "$crateRoot" && patch -p3 < ${./crate2nix-gpui-manifest-dir.patch})
+          if grep -Fq 'gpui::GPUI_MANIFEST_DIR.into()' "$crateRoot/build.rs"; then
+            substituteInPlace "$crateRoot/build.rs" \
+              --replace-fail 'gpui::GPUI_MANIFEST_DIR.into()' \
+              'PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("workspace-gpui")'
+          elif grep -Fq '.join("../gpui")' "$crateRoot/build.rs"; then
+            substituteInPlace "$crateRoot/build.rs" \
+              --replace-fail '.join("../gpui")' '.join("workspace-gpui")'
+          else
+            echo "unsupported Zed gpui_apple source-location contract" >&2
+            exit 1
+          fi
         ''""",
     )
 

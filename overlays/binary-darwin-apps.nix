@@ -48,7 +48,6 @@ in
   grok-bot = callDarwinAppPackage "grok-bot";
   grok-build = callDarwinAppPackage "grok-build";
   github-copilot-app = callDarwinAppPackage "github-copilot-app";
-  humanlayer = callDarwinAppPackage "humanlayer";
   hermes-desktop = callDarwinAppPackage "hermes-desktop";
   hq = callDarwinAppPackage "hq";
   jacq = callDarwinAppPackage "jacq";
@@ -76,7 +75,6 @@ in
   tembo = callDarwinAppPackage "tembo";
   todoist-desktop = callDarwinAppPackage "todoist-desktop";
   tolaria = callDarwinAppPackage "tolaria";
-  traycer = callDarwinAppPackage "traycer";
   unsloth = callDarwinAppPackage "unsloth";
   voiceos = callDarwinAppPackage "voiceos";
   waku = callDarwinAppPackage "waku";

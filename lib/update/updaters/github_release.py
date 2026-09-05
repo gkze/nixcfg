@@ -4,12 +4,14 @@ import re
 import urllib.parse
 from typing import TYPE_CHECKING, ClassVar, cast
 
+from lib.nix.models.sources import SourceEntry, SourceHashes
 from lib.update.net import fetch_github_api
 from lib.update.updaters.core import DownloadHashUpdater, Updater
 from lib.update.updaters.metadata import (
     AssetURLsMetadata,
     GitHubReleaseMetadata,
     VersionInfo,
+    metadata_get,
 )
 
 if TYPE_CHECKING:
@@ -130,6 +132,16 @@ class GitHubReleaseUpdater(Updater):
             metadata=GitHubReleaseMetadata(tag=tag_name),
         )
 
+    def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
+        """Persist a resolved commit whenever this updater requests one."""
+        result = super().build_result(info, hashes)
+        if not self.RESOLVE_TAG_COMMIT:
+            return result
+        return SourceEntry.model_validate({
+            **result.to_dict(),
+            "commit": self._require_commit(info),
+        })
+
 
 class GitHubReleaseAssetURLsUpdater(GitHubReleaseUpdater, DownloadHashUpdater):
     """Download-hash updater that resolves assets from a GitHub latest release."""
@@ -208,11 +220,12 @@ class GitHubReleaseAssetURLsUpdater(GitHubReleaseUpdater, DownloadHashUpdater):
 
     def get_download_url(self, platform: str, info: VersionInfo) -> str:
         """Return a resolved release asset URL, falling back to the convention."""
-        metadata = info.metadata
-        asset_urls = (
-            metadata.asset_urls if isinstance(metadata, AssetURLsMetadata) else None
+        asset_urls = metadata_get(
+            info.metadata,
+            "asset_urls",
+            context=f"{self.name} release metadata",
         )
-        if asset_urls is not None:
+        if isinstance(asset_urls, dict):
             candidate = asset_urls.get(platform)
             if isinstance(candidate, str) and candidate:
                 return candidate

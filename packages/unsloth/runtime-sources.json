@@ -11,12 +11,6 @@
     "tag": "b10472-mix-4b653db",
     "url": "https://github.com/unslothai/llama.cpp/releases/download/b10472-mix-4b653db/llama.cpp-source-commit-7a556b8f93d601cb277c0545e3e6166b45ebfac8.tar.gz"
   },
-  "node": {
-    "hash": "sha256-9tleEKBDHuEGf8aqvp92KQi0cW3TUyTh3bSxRmt2ZZ8=",
-    "npmVersion": "11.17.0",
-    "url": "https://nodejs.org/dist/v24.19.0/node-v24.19.0.tar.xz",
-    "version": "24.19.0"
-  },
   "stableDiffusionCpp": {
     "commit": "13b9d92b5e9a1563536c9c980e700470f9ab6702",
     "hash": "sha256-aW/710d1hUbpuMc5AI06Tg5aGuGryoKBR8Wdc7FuZ9U=",

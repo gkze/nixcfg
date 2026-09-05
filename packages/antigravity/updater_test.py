@@ -400,10 +400,7 @@ def test_package_policy_disables_every_update_entry_point(tmp_path: Path) -> Non
     asar_path = bundle / "Contents/Resources/app.asar"
     original_size = asar_path.stat().st_size
 
-    module.patch_bundle(
-        bundle,
-        expected_sha256=hashlib.sha256(_POLICY_FIXTURE).hexdigest(),
-    )
+    module.patch_bundle(bundle)
 
     patched = read_packed_file(asar_path, "dist/updater.js")
     assert asar_path.stat().st_size == original_size
@@ -419,27 +416,36 @@ def test_package_policy_disables_every_update_entry_point(tmp_path: Path) -> Non
     module.validate_bundle(bundle)
 
 
-def test_package_policy_rejects_unreviewed_or_incomplete_payloads() -> None:
-    """Vendor drift must stop before any unreviewed archive can be promoted."""
+@pytest.mark.parametrize("patch_index", range(9))
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_package_policy_rejects_drifted_payloads(
+    patch_index: int,
+    *,
+    duplicate: bool,
+) -> None:
+    """Every missing or duplicate policy anchor must fail before promotion."""
     module = _load_policy_module()
-
-    with pytest.raises(module.PatchError, match="is not reviewed"):
-        module.disable_updates(_POLICY_FIXTURE)
-    with pytest.raises(module.PatchError, match="SHA-256 drifted"):
-        module.disable_updates(_POLICY_FIXTURE, expected_sha256="0" * 64)
-
-    _label, vendor, _disabled, _count = module.PATCHES[0]
-    incomplete = _POLICY_FIXTURE.replace(vendor, b"X" * len(vendor), 1)
-    with pytest.raises(module.PatchError, match="inventory drifted"):
-        module.disable_updates(
-            incomplete,
-            expected_sha256=hashlib.sha256(incomplete).hexdigest(),
-        )
-
-    assert (
-        frozenset({"3a9ccfaef9bc9a299f0e761a171997a21887dc0c7bda38bf178647ed59a60c71"})
-        == module.REVIEWED_UPDATER_SHA256
+    assert len(module.PATCHES) == 9
+    _label, vendor, _disabled, _count = module.PATCHES[patch_index]
+    drifted = (
+        _POLICY_FIXTURE + b"\n" + vendor
+        if duplicate
+        else _POLICY_FIXTURE.replace(vendor, b"X" * len(vendor), 1)
     )
+
+    with pytest.raises(module.PatchError, match="inventory drifted"):
+        module.disable_updates(drifted)
+
+
+def test_package_policy_allows_unrelated_vendor_byte_drift() -> None:
+    """Unrelated release changes must not duplicate the outer artifact gate."""
+    module = _load_policy_module()
+    payload = b"unrelated vendor code\n" + _POLICY_FIXTURE
+
+    patched = module.disable_updates(payload)
+
+    assert patched.startswith(b"unrelated vendor code\n")
+    module.validate_disabled_payload(patched)
 
 
 def test_package_policy_validator_rejects_vendor_and_drifted_disabled_anchors() -> None:
@@ -448,10 +454,7 @@ def test_package_policy_validator_rejects_vendor_and_drifted_disabled_anchors() 
     with pytest.raises(module.PatchError, match="still contains"):
         module.validate_disabled_payload(_POLICY_FIXTURE)
 
-    patched = module.disable_updates(
-        _POLICY_FIXTURE,
-        expected_sha256=hashlib.sha256(_POLICY_FIXTURE).hexdigest(),
-    )
+    patched = module.disable_updates(_POLICY_FIXTURE)
     _label, _vendor, disabled, _count = module.PATCHES[0]
     with pytest.raises(module.PatchError, match="disabled .* inventory drifted"):
         module.validate_disabled_payload(
@@ -470,10 +473,7 @@ def test_package_policy_requires_and_removes_the_vendor_feed(tmp_path: Path) -> 
     update_config = bundle / "Contents/Resources/app-update.yml"
     update_config.unlink()
     with pytest.raises(module.PatchError, match="updater config is missing"):
-        module.patch_bundle(
-            bundle,
-            expected_sha256=hashlib.sha256(_POLICY_FIXTURE).hexdigest(),
-        )
+        module.patch_bundle(bundle)
 
 
 def test_package_policy_cli_patches_checks_and_reports_errors(
@@ -483,15 +483,9 @@ def test_package_policy_cli_patches_checks_and_reports_errors(
     """The derivation-facing CLI should read back success and surface failures."""
     module = _load_policy_module()
     bundle = _write_policy_bundle(tmp_path, _POLICY_FIXTURE)
-    reviewed = hashlib.sha256(_POLICY_FIXTURE).hexdigest()
 
-    original = module.REVIEWED_UPDATER_SHA256
-    module.REVIEWED_UPDATER_SHA256 = frozenset({reviewed})
-    try:
-        assert module.main([str(bundle)]) == 0
-        assert module.main(["--check", str(bundle)]) == 0
-    finally:
-        module.REVIEWED_UPDATER_SHA256 = original
+    assert module.main([str(bundle)]) == 0
+    assert module.main(["--check", str(bundle)]) == 0
     output = capsys.readouterr().out
     assert "disabled Antigravity updates" in output
     assert "verified Antigravity updates" in output

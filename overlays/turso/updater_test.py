@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 SRC_HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 CARGO_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+COMMIT = "d" * 40
 
 
 def _load_module() -> ModuleType:
@@ -47,7 +48,7 @@ def test_turso_computes_source_then_cargo_hash(
     """Hash the release source before evaluating the overlaid Rust package."""
     module = _load_module()
     updater = module.TursoUpdater()
-    info = VersionInfo(version="9.9.9")
+    info = VersionInfo(version="9.9.9", metadata={"commit": COMMIT})
     calls = install_fixed_hash_stream(
         monkeypatch,
         (
@@ -64,7 +65,7 @@ def test_turso_computes_source_then_cargo_hash(
         _build_fetch_from_github_call(
             "tursodatabase",
             "turso",
-            tag="v9.9.9",
+            rev=COMMIT,
             fetch_submodules=False,
         ),
     )
@@ -75,6 +76,7 @@ def test_turso_computes_source_then_cargo_hash(
             source_overrides={
                 "turso": SourceEntry(
                     version=info.version,
+                    commit=COMMIT,
                     hashes=[
                         HashEntry.create("srcHash", SRC_HASH),
                         HashEntry.create("cargoHash", updater.config.fake_hash),

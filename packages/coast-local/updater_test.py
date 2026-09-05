@@ -1,6 +1,5 @@
 """Behavioral and package-shape tests for Coast Local."""
 
-import json
 from dataclasses import dataclass, field
 from types import ModuleType
 from typing import TYPE_CHECKING
@@ -12,12 +11,18 @@ from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
     expect_binding,
     parse_nix_expr,
+)
+from lib.tests._source_metadata import (
+    assert_https_url,
+    assert_platform_source_entry,
+    assert_sha256_sri,
 )
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
@@ -249,13 +254,20 @@ def test_coast_local_package_preserves_bundle_and_exposes_vendor_cli() -> None:
 
 
 def test_coast_local_sources_pin_retained_official_dmg() -> None:
-    """The checked-in source is the content-addressed official public DMG."""
-    sources = json.loads(
+    """The checked-in public DMG identity must be content-addressed end to end."""
+    source = SourceEntry.model_validate_json(
         (REPO_ROOT / "packages/coast-local/sources.json").read_text(encoding="utf-8")
     )
-
-    assert sources == {
-        "hashes": {"aarch64-darwin": _SRI_HASH},
-        "urls": {"aarch64-darwin": _DOWNLOAD_URL},
-        "version": _CONTENT_VERSION,
-    }
+    hashes, urls = assert_platform_source_entry(
+        source,
+        platforms={"aarch64-darwin"},
+    )
+    assert source.version is not None
+    algorithm, separator, digest = source.version.partition("-")
+    assert (algorithm, separator) == ("sha256", "-")
+    assert len(digest) == 64
+    assert all(character in "0123456789abcdef" for character in digest)
+    assert assert_sha256_sri(hashes["aarch64-darwin"]).hex() == digest
+    url = urls["aarch64-darwin"]
+    assert_https_url(url, host="dmg.cdn-coast.app")
+    assert url == _load_module().CoastLocalUpdater.PLATFORMS["aarch64-darwin"]

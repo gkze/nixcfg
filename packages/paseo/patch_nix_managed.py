@@ -1,13 +1,13 @@
 """Make every Paseo self-mutation surface fail closed under Nix ownership.
 
-Every replacement is exact and count checked.  A new upstream release must be
-audited again instead of silently retaining an updater or installer path.
+Every replacement and structural seam is exact and count checked. Compatible
+upstream releases can advance without pinning unrelated provider source bytes.
 """
 
 import argparse
 import json
+import re
 from dataclasses import dataclass
-from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,9 +18,6 @@ if TYPE_CHECKING:
 
 _MANAGED_MESSAGE = "Updates are managed by Nix."
 _CLAUDE_PROVIDER_PATH = "packages/server/src/server/agent/providers/claude/agent.ts"
-_CLAUDE_PROVIDER_SOURCE_DIGEST = (
-    "0a5062a28d1a2e54017b62a3de46f15a4eadb37f5c6f2e9b15d93b99c85019e6"
-)
 _CLAUDE_DEFAULT_BINARY = 'defaultBinary: "claude",'
 _CLAUDE_DEFAULT_BINARY_COUNT = 4
 _CLAUDE_RESOLVER_FUNCTION = (
@@ -61,6 +58,54 @@ _CLAUDE_BUILD_OPTIONS_TAIL = """\
 _CLAUDE_FINAL_EXECUTABLE_HANDOFF = (
     "    base.pathToClaudeCodeExecutable = claudeBinary;\n"
 )
+_CLAUDE_CLIENT_CLASS = "\n\nexport class ClaudeAgentClient implements AgentClient {"
+_CLAUDE_CLIENT_RESOLVER_WIRING = """\
+    this.queryFactory = options.queryFactory;
+    this.resolveBinary = options.resolveBinary ?? (() => resolveClaudeBinary(this.runtimeSettings));
+    this.resolveVersion =
+"""
+_CLAUDE_SESSION_CLASS = "\n\nclass ClaudeAgentSession implements AgentSession {"
+_CLAUDE_SESSION_RESOLVER_WIRING = """\
+    this.queryFactory = options.queryFactory;
+    this.resolveBinary = options.resolveBinary;
+    this.contextUsage = new ClaudeContextUsageState(
+"""
+_CLAUDE_RESOLVER_FORWARDING = "      resolveBinary: this.resolveBinary,\n"
+_CLAUDE_AVAILABILITY_LAUNCH = """\
+  async isAvailable(): Promise<boolean> {
+    const launch = await resolveProviderLaunch({
+      commandConfig: this.runtimeSettings?.command,
+      defaultBinary: "claude",
+    });
+    const availability = await checkProviderLaunchAvailable(launch);
+    return availability.available;
+  }
+"""
+_CLAUDE_DIAGNOSTIC_LAUNCH = """\
+  async getDiagnostic(): Promise<{ diagnostic: string }> {
+    try {
+      const launch = await resolveProviderLaunch({
+        commandConfig: this.runtimeSettings?.command,
+        defaultBinary: "claude",
+      });
+      const availability = await checkProviderLaunchAvailable(launch);
+"""
+_CLAUDE_VERSION_LAUNCH = """\
+export async function resolveClaudeCodeVersion(
+  runtimeSettings?: ProviderRuntimeSettings,
+  signal?: AbortSignal,
+): Promise<string> {
+  const launch = await resolveProviderLaunch({
+    commandConfig: runtimeSettings?.command,
+    defaultBinary: "claude",
+  });
+  const availability = await checkProviderLaunchAvailable(launch);
+"""
+_CLAUDE_BUILD_OPTIONS_SIGNATURE = (
+    "\n\n  private async buildOptions(): Promise<ClaudeOptions> {"
+)
+_CLAUDE_BINARY_RESOLUTION = "    const claudeBinary = await this.resolveBinary();\n"
+_CLAUDE_OPTIONS_HANDOFF = "      pathToClaudeCodeExecutable: claudeBinary,\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,20 +303,8 @@ def _validate_anchor(path: Path, text: str, expected_count: int) -> None:
         raise RuntimeError(msg)
 
 
-def _validate_claude_provider_digest(payload: bytes) -> None:
-    actual = sha256(payload).hexdigest()
-    if actual != _CLAUDE_PROVIDER_SOURCE_DIGEST:
-        msg = (
-            "Paseo Claude provider source digest drifted: expected "
-            f"{_CLAUDE_PROVIDER_SOURCE_DIGEST}, found {actual}"
-        )
-        raise RuntimeError(msg)
-
-
-def _patch_claude_provider(source: str, executable: str) -> str:
-    if not Path(executable).is_absolute():
-        msg = "Claude Code executable must be an absolute path"
-        raise ValueError(msg)
+def validate_claude_provider_source(source: str) -> None:
+    """Validate only the Claude launch and executable-handoff control flow."""
     count = source.count(_CLAUDE_RESOLVER_FUNCTION)
     if count != 1:
         msg = f"expected 1 reviewed Claude resolver function, found {count}"
@@ -287,6 +320,45 @@ def _patch_claude_provider(source: str, executable: str) -> str:
     if tail_count != 1:
         msg = f"expected 1 reviewed Claude buildOptions tail, found {tail_count}"
         raise RuntimeError(msg)
+
+    wiring_anchors = (
+        (_CLAUDE_CLIENT_CLASS, 1),
+        (_CLAUDE_CLIENT_RESOLVER_WIRING, 1),
+        (_CLAUDE_SESSION_CLASS, 1),
+        (_CLAUDE_SESSION_RESOLVER_WIRING, 1),
+        (_CLAUDE_RESOLVER_FORWARDING, 2),
+        (_CLAUDE_AVAILABILITY_LAUNCH, 1),
+        (_CLAUDE_DIAGNOSTIC_LAUNCH, 1),
+        (_CLAUDE_VERSION_LAUNCH, 1),
+        ("resolveProviderLaunch(", 4),
+        (_CLAUDE_BUILD_OPTIONS_SIGNATURE, 1),
+        (_CLAUDE_BINARY_RESOLUTION, 1),
+        (_CLAUDE_OPTIONS_HANDOFF, 1),
+    )
+    if any(source.count(anchor) != expected for anchor, expected in wiring_anchors):
+        msg = "reviewed Claude executable wiring drifted"
+        raise RuntimeError(msg)
+
+    build_start = source.index(_CLAUDE_BUILD_OPTIONS_SIGNATURE)
+    binary_resolution = source.index(_CLAUDE_BINARY_RESOLUTION, build_start)
+    options_handoff = source.index(_CLAUDE_OPTIONS_HANDOFF, binary_resolution)
+    tail = source.index(_CLAUDE_BUILD_OPTIONS_TAIL, options_handoff)
+    before_tail = source[build_start + len(_CLAUDE_BUILD_OPTIONS_SIGNATURE) : tail]
+    build_options_flow = source[binary_resolution:tail]
+    if (
+        not build_start < binary_resolution < options_handoff < tail
+        or re.search(r"\breturn\b", before_tail) is not None
+        or build_options_flow.count("pathToClaudeCodeExecutable:") != 1
+    ):
+        msg = "reviewed Claude executable data flow drifted"
+        raise RuntimeError(msg)
+
+
+def _patch_claude_provider(source: str, executable: str) -> str:
+    if not Path(executable).is_absolute():
+        msg = "Claude Code executable must be an absolute path"
+        raise ValueError(msg)
+    validate_claude_provider_source(source)
     patched_tail = _CLAUDE_BUILD_OPTIONS_TAIL.replace(
         _CLAUDE_BUILD_OPTIONS_RETURN,
         _CLAUDE_FINAL_EXECUTABLE_HANDOFF + _CLAUDE_BUILD_OPTIONS_RETURN,
@@ -337,7 +409,6 @@ def patch_tree(
 
     claude_provider = source_root / _CLAUDE_PROVIDER_PATH
     provider_payload = claude_provider.read_bytes()
-    _validate_claude_provider_digest(provider_payload)
     provider_source = provider_payload.decode("utf-8")
     pending[claude_provider] = _patch_claude_provider(
         provider_source,

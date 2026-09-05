@@ -1,6 +1,5 @@
 """Tests for the source-built bb desktop updater."""
 
-import asyncio
 import json
 import shutil
 import subprocess
@@ -75,6 +74,20 @@ _PINNED_MAIN_PROCESS_FIXTURE = dedent(
       type ConnectSessionRenewal,
     } from "./connect-session-renewal.js";
 
+    let serverTargetStore;
+    let connectCredentialCache;
+    let cachedConnectCredential;
+    const userDataPath = "/tmp/bb-test";
+    const SERVER_TARGET_FILE_NAME = "server-target.json";
+
+    function createServerTargetStore(_options: object) {
+      return { async load(): Promise<void> {} };
+    }
+
+    function createDesktopLogger() {
+      return {};
+    }
+
     async function startDesktop(): Promise<void> {
       serverTargetStore = createServerTargetStore({
         storagePath: join(userDataPath, SERVER_TARGET_FILE_NAME),
@@ -87,91 +100,14 @@ _PINNED_MAIN_PROCESS_FIXTURE = dedent(
       cachedConnectCredential = await connectCredentialCache.read();
       const logger = createDesktopLogger();
     }
+
+    await startDesktop();
+    console.log(JSON.stringify({
+      cacheCallCount: globalThis.__bbCacheEncryptionSources.length,
+      cacheEncryptionSource: globalThis.__bbCacheEncryptionSources[0],
+    }));
     """
 )
-
-_MAIN_PROCESS_AST_ANALYZER = r"""
-const fs = require("node:fs");
-const ts = require("typescript");
-
-const sourcePath = process.argv[1];
-const source = fs.readFileSync(sourcePath, "utf8");
-const sourceFile = ts.createSourceFile(
-  sourcePath,
-  source,
-  ts.ScriptTarget.Latest,
-  true,
-  ts.ScriptKind.TS,
-);
-if (sourceFile.parseDiagnostics.length !== 0) {
-  throw new Error("fixture did not parse as TypeScript");
-}
-
-let adapterBindingImported = false;
-let electronImportsSafeStorage = false;
-for (const statement of sourceFile.statements) {
-  if (!ts.isImportDeclaration(statement)) continue;
-  if (!ts.isStringLiteral(statement.moduleSpecifier)) continue;
-  const bindings = statement.importClause?.namedBindings;
-  if (!bindings || !ts.isNamedImports(bindings)) continue;
-  const names = new Set(bindings.elements.map((element) => element.name.text));
-  if (statement.moduleSpecifier.text === "electron") {
-    electronImportsSafeStorage = names.has("safeStorage");
-  }
-  if (
-    statement.moduleSpecifier.text ===
-    "./nix-managed-connect-credential-encryption.js"
-  ) {
-    adapterBindingImported = names.has(
-      "nixManagedConnectCredentialEncryption",
-    );
-  }
-}
-
-let cacheCallCount = 0;
-let cacheEncryptionIdentifier = null;
-let safeStorageReferenced = false;
-function visit(node) {
-  if (ts.isIdentifier(node) && node.text === "safeStorage") {
-    safeStorageReferenced = true;
-  }
-  if (
-    ts.isCallExpression(node) &&
-    ts.isIdentifier(node.expression) &&
-    node.expression.text === "createConnectCredentialCache"
-  ) {
-    cacheCallCount += 1;
-    const options = node.arguments[0];
-    if (options && ts.isObjectLiteralExpression(options)) {
-      const encryption = options.properties.find(
-        (property) =>
-          ts.isPropertyAssignment(property) &&
-          ts.isIdentifier(property.name) &&
-          property.name.text === "encryption",
-      );
-      if (
-        encryption &&
-        ts.isPropertyAssignment(encryption) &&
-        ts.isIdentifier(encryption.initializer)
-      ) {
-        cacheEncryptionIdentifier = encryption.initializer.text;
-      }
-    }
-  }
-  ts.forEachChild(node, visit);
-}
-visit(sourceFile);
-
-console.log(
-  JSON.stringify({
-    adapterBindingImported,
-    cacheCallCount,
-    cacheEncryptionIdentifier,
-    electronImportsSafeStorage,
-    safeStorageReferenced,
-  }),
-);
-"""
 
 _PINNED_THEME_GENERATOR_FIXTURE = dedent(
     """\
@@ -220,15 +156,93 @@ def _load_module() -> ModuleType:
     return load_repo_module("packages/bb/updater.py", "bb_updater_test")
 
 
-def _analyze_main_process(source_path: Path) -> dict[str, object]:
+def _github_release_api(
+    *,
+    commit: object = _COMMIT,
+    paths: list[str] | None = None,
+):
+    async def _fetch(
+        _session: object,
+        path: str,
+        **_kwargs: object,
+    ) -> object:
+        if paths is not None:
+            paths.append(path)
+        if path == "repos/get-bb/bb/releases/latest":
+            return {
+                "tag_name": "desktop-v0.38.0",
+                # GitHub commonly exposes the mutable branch here. The updater
+                # must resolve the tag through the commits API instead.
+                "target_commitish": "main",
+            }
+        assert path == "repos/get-bb/bb/commits/desktop-v0.38.0"
+        return {"sha": commit}
+
+    return _fetch
+
+
+def _install_main_process_runtime(root: Path) -> None:
+    (root / "package.json").write_text('{"type":"module"}\n', encoding="utf-8")
+    electron = root / "node_modules/electron"
+    electron.mkdir(parents=True)
+    (electron / "package.json").write_text(
+        '{"name":"electron","type":"module","exports":"./index.js"}\n',
+        encoding="utf-8",
+    )
+    (electron / "index.js").write_text(
+        dedent(
+            """\
+            export const app = {};
+            export const BrowserWindow = {};
+            export const clipboard = {};
+            export const ipcMain = {};
+            export const nativeImage = {};
+            export const nativeTheme = {};
+            export const net = {};
+            export const safeStorage = { source: "electron-safe-storage" };
+            export const session = {};
+            export const shell = {};
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    source_dir = root / "apps/desktop/src"
+    source_dir.mkdir(parents=True)
+    (source_dir / "connect-credential-cache.js").write_text(
+        dedent(
+            """\
+            export function createConnectCredentialCache(options) {
+              globalThis.__bbCacheEncryptionSources ??= [];
+              globalThis.__bbCacheEncryptionSources.push(options.encryption.source);
+              return { async read() { return null; } };
+            }
+            """
+        ),
+        encoding="utf-8",
+    )
+    (source_dir / "connect-machine-enrollment.js").write_text(
+        "export function enrollDesktopMachine() {}\n",
+        encoding="utf-8",
+    )
+    (source_dir / "connect-session-renewal.js").write_text(
+        "export function createConnectSessionRenewal() {}\n",
+        encoding="utf-8",
+    )
+    (source_dir / "nix-managed-connect-credential-encryption.js").write_text(
+        "export const nixManagedConnectCredentialEncryption = "
+        '{ source: "nix-managed-adapter" };\n',
+        encoding="utf-8",
+    )
+
+
+def _run_main_process(source_path: Path) -> dict[str, object]:
     node = shutil.which("node")
     assert node is not None
-    completed = subprocess.run(  # noqa: S603 -- fixed semantic AST analyzer
+    completed = subprocess.run(  # noqa: S603 -- fixed runtime fixture
         [
             node,
-            "--input-type=commonjs",
-            "--eval",
-            _MAIN_PROCESS_AST_ANALYZER,
+            "--experimental-strip-types",
             str(source_path),
         ],
         check=True,
@@ -342,6 +356,8 @@ def test_bb_normalizes_pnpm_patch_hashes_before_dependency_fetch_and_build() -> 
 
 def test_bb_theme_generator_supports_pnpm_10_root_hoisting(tmp_path: Path) -> None:
     """Resolve the app's style dependency from pnpm 10's workspace root."""
+    git = shutil.which("git")
+    assert git is not None
     source = (
         tmp_path / "packages" / "plugin-build" / "scripts" / "generate-plugin-theme.mjs"
     )
@@ -352,8 +368,8 @@ def test_bb_theme_generator_supports_pnpm_10_root_hoisting(tmp_path: Path) -> No
     (root_dependency / "package.json").write_text("{}\n", encoding="utf-8")
 
     subprocess.run(  # noqa: S603 -- applies a fixed repository patch fixture
-        [  # noqa: S607 -- resolves the fixed Git executable from the test PATH
-            "git",
+        [
+            git,
             "apply",
             "--include=packages/plugin-build/scripts/generate-plugin-theme.mjs",
             str(_PACKAGE_DIR / "patches/pnpm-10-hoisted-runtime-manifest.patch"),
@@ -377,37 +393,31 @@ def test_bb_main_process_uses_nix_managed_encryption_adapter(
     tmp_path: Path,
 ) -> None:
     """The real source patch must replace safeStorage at the cache boundary."""
+    git = shutil.which("git")
+    assert git is not None
+    _install_main_process_runtime(tmp_path)
     main_source = tmp_path / "apps/desktop/src/main.ts"
-    main_source.parent.mkdir(parents=True)
     main_source.write_text(_PINNED_MAIN_PROCESS_FIXTURE, encoding="utf-8")
 
-    assert _analyze_main_process(main_source) == {
-        "adapterBindingImported": False,
+    assert _run_main_process(main_source) == {
         "cacheCallCount": 1,
-        "cacheEncryptionIdentifier": "safeStorage",
-        "electronImportsSafeStorage": True,
-        "safeStorageReferenced": True,
+        "cacheEncryptionSource": "electron-safe-storage",
     }
     subprocess.run(  # noqa: S603 -- applies the repository-owned source patch
         [
-            "/usr/bin/patch",
-            "-p1",
-            "-d",
-            str(tmp_path),
-            "-i",
+            git,
+            "apply",
             str(_PACKAGE_DIR / "patches/nix-managed-connect-credential-cache.patch"),
         ],
+        cwd=tmp_path,
         check=True,
         capture_output=True,
         text=True,
     )
 
-    assert _analyze_main_process(main_source) == {
-        "adapterBindingImported": True,
+    assert _run_main_process(main_source) == {
         "cacheCallCount": 1,
-        "cacheEncryptionIdentifier": "nixManagedConnectCredentialEncryption",
-        "electronImportsSafeStorage": False,
-        "safeStorageReferenced": False,
+        "cacheEncryptionSource": "nix-managed-adapter",
     }
 
 
@@ -432,15 +442,10 @@ def test_bb_update_pins_release_source_and_pnpm_closure(
         ],
     )
 
+    release_api_paths: list[str] = []
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",
-        lambda *_args, **_kwargs: asyncio.sleep(
-            0,
-            result={
-                "tag_name": "desktop-v0.38.0",
-                "target_commitish": _COMMIT,
-            },
-        ),
+        _github_release_api(paths=release_api_paths),
     )
     manifest_urls: list[str] = []
 
@@ -472,6 +477,10 @@ def test_bb_update_pins_release_source_and_pnpm_closure(
 
     events = run_async(collect_events(updater.update_stream(current, object())))
 
+    assert release_api_paths == [
+        "repos/get-bb/bb/releases/latest",
+        "repos/get-bb/bb/commits/desktop-v0.38.0",
+    ]
     assert manifest_urls == [
         github_raw_url("get-bb", "bb", _COMMIT, "apps/desktop/package.json"),
         github_raw_url("get-bb", "bb", _COMMIT, "packages/bb-app/package.json"),
@@ -583,13 +592,7 @@ def test_bb_rejects_incoherent_release_manifests(
     module = _load_module()
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",
-        lambda *_args, **_kwargs: asyncio.sleep(
-            0,
-            result={
-                "tag_name": "desktop-v0.38.0",
-                "target_commitish": _COMMIT,
-            },
-        ),
+        _github_release_api(),
     )
 
     async def _fetch_json(
@@ -606,7 +609,7 @@ def test_bb_rejects_incoherent_release_manifests(
 
 
 @pytest.mark.parametrize("commit", [None, "main", "ABCDEF"])
-def test_bb_rejects_release_without_immutable_commit(
+def test_bb_rejects_tag_without_immutable_commit(
     monkeypatch: pytest.MonkeyPatch,
     commit: object,
 ) -> None:
@@ -614,16 +617,10 @@ def test_bb_rejects_release_without_immutable_commit(
     module = _load_module()
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",
-        lambda *_args, **_kwargs: asyncio.sleep(
-            0,
-            result={
-                "tag_name": "desktop-v0.38.0",
-                "target_commitish": commit,
-            },
-        ),
+        _github_release_api(commit=commit),
     )
 
-    with pytest.raises(RuntimeError, match="no immutable target commit"):
+    with pytest.raises(RuntimeError, match="no immutable source commit"):
         run_async(module.BbUpdater().fetch_latest(object()))
 
 

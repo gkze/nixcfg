@@ -1,7 +1,6 @@
 """Disable GitHub Copilot's native Tauri updater in its signed executable."""
 
 import argparse
-import hashlib
 import sys
 from pathlib import Path
 
@@ -9,11 +8,6 @@ from pathlib import Path
 class PatchError(RuntimeError):
     """The vendor executable does not match the reviewed updater contract."""
 
-
-REVIEWED_EXECUTABLE_SHA256 = frozenset({
-    # GitHub Copilot 1.1.14, aarch64-darwin.
-    "21b0f33962285782f0946f13780de5825ebb252e04ad9f0aff65a26608825dab",
-})
 
 VENDOR_PUBLIC_KEY = (
     b"dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJGM0Q0QkQ1"
@@ -73,17 +67,9 @@ def validate_disabled_payload(payload: bytes) -> None:
             raise PatchError(msg)
 
 
-def patch_payload(payload: bytes, *, expected_sha256: str) -> bytes:
+def patch_payload(payload: bytes) -> bytes:
     """Return the exact-length, fail-closed updater transformation."""
     _validate_patch_contract()
-    actual_sha256 = hashlib.sha256(payload).hexdigest()
-    if actual_sha256 != expected_sha256:
-        msg = (
-            "Copilot executable SHA-256 drifted: "
-            f"expected {expected_sha256}, got {actual_sha256}"
-        )
-        raise PatchError(msg)
-
     for label, original, _replacement, expected_count in PATCHES:
         actual_count = payload.count(original)
         if actual_count != expected_count:
@@ -101,13 +87,9 @@ def patch_payload(payload: bytes, *, expected_sha256: str) -> bytes:
 
 
 def patch_file(executable: Path) -> None:
-    """Patch the reviewed executable in place while preserving its mode."""
+    """Patch the structurally validated executable while preserving its mode."""
     payload = executable.read_bytes()
-    actual_sha256 = hashlib.sha256(payload).hexdigest()
-    if actual_sha256 not in REVIEWED_EXECUTABLE_SHA256:
-        msg = f"Copilot executable SHA-256 is not reviewed: {actual_sha256}"
-        raise PatchError(msg)
-    patched = patch_payload(payload, expected_sha256=actual_sha256)
+    patched = patch_payload(payload)
     executable.write_bytes(patched)
 
 

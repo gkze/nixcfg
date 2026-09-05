@@ -4,6 +4,25 @@
 let
   pkgDir = src + "/packages";
   discovery = import ../lib/discovery.nix;
+  systemPolicy = builtins.fromJSON (builtins.readFile (src + "/lib/system-policy.json"));
+  rootSystems =
+    assert systemPolicy.schemaVersion == 1;
+    builtins.attrNames systemPolicy.systems;
+
+  systemsForCapability = predicate: builtins.filter predicate rootSystems;
+  hasArchitecture = architecture: system: builtins.match "${architecture}-.*" system != null;
+  hasKernel = kernel: system: builtins.match ".*-${kernel}" system != null;
+  isAarch64Darwin = system: hasArchitecture "aarch64" system && hasKernel "darwin" system;
+  isX86_64Linux = system: hasArchitecture "x86_64" system && hasKernel "linux" system;
+  isSupportedLinux =
+    system:
+    (hasArchitecture "aarch64" system || hasArchitecture "x86_64" system) && hasKernel "linux" system;
+  aarch64DarwinSystems = systemsForCapability isAarch64Darwin;
+  darwinLinuxSystems = systemsForCapability (system: isAarch64Darwin system || isX86_64Linux system);
+  nonX86DarwinLinuxSystems = systemsForCapability (
+    system: isAarch64Darwin system || isSupportedLinux system
+  );
+  sculptorSystems = builtins.sort builtins.lessThan (darwinLinuxSystems ++ [ "x86_64-darwin" ]);
 
   discoveredPackages = discovery.discoverDefaultNixEntries {
     root = pkgDir;
@@ -114,7 +133,6 @@ let
         "google-drive"
         "grok-build"
         "hq"
-        "humanlayer"
         "hermes-desktop"
         "jacq"
         "logi-options-plus"
@@ -136,7 +154,6 @@ let
         "todoist-desktop"
         "tolaria"
         "town-assistant-nightly"
-        "traycer"
         "unsloth"
         "waku"
         "warp-preview"
@@ -162,38 +179,19 @@ let
       nonX86DarwinLinuxPackages = [
         "baseten"
         "emdash"
-        "pants-preview"
-      ];
-      allLocalSystemsPackages = [
         "opencode-desktop"
         "opencode-desktop-dev"
+        "pants-preview"
       ];
     in
     metadataFor { helper = true; } helperPackages
     // constrainedTo "darwin" darwinPackages
-    // constrainedTo [ "aarch64-darwin" ] aarch64DarwinPackages
-    // constrainedTo [
-      "aarch64-darwin"
-      "x86_64-linux"
-    ] darwinLinuxPackages
-    // constrainedTo [
-      "aarch64-darwin"
-      "aarch64-linux"
-      "x86_64-linux"
-    ] nonX86DarwinLinuxPackages
-    // constrainedTo [
-      "aarch64-darwin"
-      "x86_64-darwin"
-      "aarch64-linux"
-      "x86_64-linux"
-    ] allLocalSystemsPackages
+    // constrainedTo aarch64DarwinSystems aarch64DarwinPackages
+    // constrainedTo darwinLinuxSystems darwinLinuxPackages
+    // constrainedTo nonX86DarwinLinuxSystems nonX86DarwinLinuxPackages
     // {
       sculptor = {
-        constraint = [
-          "aarch64-darwin"
-          "x86_64-darwin"
-          "x86_64-linux"
-        ];
+        constraint = sculptorSystems;
       };
     };
 
@@ -238,7 +236,6 @@ let
   packagePaths = packagePathsMatching (_meta: true);
   helperEntries = packageNamesMatching (meta: meta.helper);
   darwinOnly = packageNamesMatching (meta: meta.constraint == "darwin");
-  sculptorSystems = packageMetadata.sculptor.constraint;
 in
 {
   inherit

@@ -497,8 +497,16 @@ def test_mole_app_pinned_version_and_urls(monkeypatch: pytest.MonkeyPatch) -> No
         lambda _name: "1.2.3",
     )
     updater = _updater(module)
+    commit = "a" * 40
+
+    async def _resolve_commit(_session: object, tag: str) -> str:
+        assert tag == "V1.2.3"
+        return commit
+
+    monkeypatch.setattr(updater, "_resolve_release_tag_commit", _resolve_commit)
     info = run_async(updater.fetch_latest(object()))
     assert info.version == "1.2.3"
+    assert info.commit == commit
     assert updater.get_download_url("aarch64-darwin", info).endswith(".tar.gz")
 
 
@@ -536,56 +544,6 @@ def test_github_asset_name_updaters(
     updater = cast("_AssetNameUpdater", _updater(_load(path)))
     asset_name = cast("Callable[[str, str], str]", updater._asset_name)
     assert asset_name(version, platform) == expected
-
-
-def test_signal_beta_release_selection(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = _load("packages/signal-beta/updater.py")
-    releases: list[object] = [
-        {"draft": True, "prerelease": True, "tag_name": "v7.0.0-beta.1"},
-        {"draft": False, "prerelease": False, "tag_name": "v7.0.0"},
-        {"draft": False, "prerelease": True, "tag_name": "v7.1.0-beta.2"},
-    ]
-
-    async def fake_releases(*_args: object, **_kwargs: object) -> list[object]:
-        return releases
-
-    monkeypatch.setattr(module, "fetch_github_api_paginated", fake_releases)
-    updater = _updater(module)
-    info = run_async(updater.fetch_latest(object()))
-    assert info.version == "7.1.0-beta.2"
-    assert updater.get_download_url("aarch64-darwin", info).endswith(
-        "arm64-7.1.0-beta.2.zip"
-    )
-
-
-@pytest.mark.parametrize(
-    ("releases", "match"),
-    [
-        ([object()], "Unexpected Signal release payload"),
-        ([{"draft": False, "prerelease": True}], "Missing Signal release tag"),
-        ([{"draft": False, "prerelease": False, "tag_name": "v7.1.0"}], "No Signal"),
-    ],
-)
-def test_signal_beta_rejects_bad_release_payloads(
-    monkeypatch: pytest.MonkeyPatch,
-    releases: list[object],
-    match: str,
-) -> None:
-    module = _load("packages/signal-beta/updater.py")
-
-    async def fake_releases(*_args: object, **_kwargs: object) -> list[object]:
-        return releases
-
-    monkeypatch.setattr(module, "fetch_github_api_paginated", fake_releases)
-    with pytest.raises((RuntimeError, TypeError), match=match):
-        run_async(_updater(module).fetch_latest(object()))
-
-
-@pytest.mark.parametrize("tag", ["7.1.0-beta.2", "v7.1.0"])
-def test_signal_beta_rejects_unexpected_tags(tag: str) -> None:
-    updater = _updater(_load("packages/signal-beta/updater.py"))
-    with pytest.raises(RuntimeError):
-        updater._normalize_release_version(tag)
 
 
 @pytest.mark.parametrize(

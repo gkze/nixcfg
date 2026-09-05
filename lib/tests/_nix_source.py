@@ -89,3 +89,37 @@ def nix_file_binding_expr(
         f"expected binding {binding_name!r} occurrence {occurrence} in {relative_path}"
     )
     return parse_nix_expr(node_text(matches[occurrence]))
+
+
+def nix_file_inherited_attr_source_expr(
+    relative_path: str,
+    binding_name: str,
+    *,
+    occurrence: int = 0,
+) -> NixExpression:
+    """Parse the source expression for one ``inherit (source) name`` binding."""
+    source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+    encoded = source.encode()
+    root = parse(source).node
+    matches: list[Node] = []
+
+    def node_text(node: Node) -> str:
+        return encoded[node.start_byte : node.end_byte].decode()
+
+    def visit(node: Node) -> None:
+        if node.type == "inherit_from":
+            children = node.named_children
+            if len(children) == 2 and any(
+                node_text(attribute) == binding_name
+                for attribute in children[1].named_children
+            ):
+                matches.append(children[0])
+        for child in node.named_children:
+            visit(child)
+
+    visit(root)
+    assert occurrence < len(matches), (
+        f"expected inherited binding {binding_name!r} occurrence {occurrence} "
+        f"in {relative_path}"
+    )
+    return parse_nix_expr(node_text(matches[occurrence]))

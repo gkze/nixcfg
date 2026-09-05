@@ -8,12 +8,10 @@
   lib,
   libiconv ? null,
   librsvg,
-  nodejs_22,
   outputs,
   pkgs,
   pkg-config,
   pnpmConfigHook,
-  pnpm_10,
   python3,
   runCommand,
   stdenv,
@@ -28,11 +26,14 @@ let
   appName = "GitButler";
   appBundleName = "${appName}.app";
   slib = outputs.lib;
+  source = slib.sourceEntry pname;
+  toolchain = source.pins or (throw "${pname} sources.json is missing toolchain pins");
   version = lib.removePrefix "release/" (slib.getFlakeVersion pname);
   src = inputs.gitbutler;
   crateCachePolicy = import ./crate-cache-policy.nix { inherit lib; };
-  nodejs = nodejs_22;
-  pnpm = pnpm_10.override { nodejs-slim = nodejs; };
+  nodejs = builtins.getAttr toolchain.nodejsAttr pkgs;
+  pnpmPackage = builtins.getAttr toolchain.pnpmAttr pkgs;
+  pnpm = pnpmPackage.override { nodejs-slim = nodejs; };
 
   pnpmDeps =
     if fetchPnpmDeps != null then
@@ -375,6 +376,8 @@ in
 if crate2nixSourceOnly then
   crate2nixSrc
 else
+  assert nodejs.version == toolchain.nodejsVersion;
+  assert pnpmPackage.version == toolchain.pnpmVersion;
   gitbutlerApp.overrideAttrs (_old: {
     inherit pname version;
     name = "${pname}-${version}";

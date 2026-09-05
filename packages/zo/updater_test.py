@@ -22,6 +22,7 @@ from lib.asar_integrity import (
     check_info_plist_hash,
     read_packed_file,
 )
+from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
@@ -29,6 +30,12 @@ from lib.tests._nix_ast import (
     parse_nix_expr,
 )
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
+from lib.tests._source_metadata import (
+    assert_https_url,
+    assert_platform_source_entry,
+    assert_release_version,
+    assert_url_contains_version,
+)
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.paths import REPO_ROOT
@@ -359,14 +366,21 @@ def test_zo_package_patches_integrity_then_deep_resigns() -> None:
 
 
 def test_zo_sources_pin_the_official_latest_release_zip() -> None:
-    """Checked-in metadata must be ready only for the routed hash discovery."""
-    sources = json.loads((_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8"))
-
-    assert sources == {
-        "hashes": dict.fromkeys(_PLATFORMS, _HASH),
-        "urls": dict.fromkeys(_PLATFORMS, _ARTIFACT_URL),
-        "version": _VERSION,
-    }
+    """Checked-in metadata must route both systems to one official universal ZIP."""
+    source = SourceEntry.model_validate_json(
+        (_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")
+    )
+    version = assert_release_version(source.version)
+    hashes, urls = assert_platform_source_entry(
+        source,
+        platforms=set(_PLATFORMS),
+    )
+    assert len(set(hashes.values())) == 1
+    assert len(set(urls.values())) == 1
+    url = urls["aarch64-darwin"]
+    assert_https_url(url, host="github.com")
+    assert_url_contains_version(url, version)
+    assert url.endswith("-universal-mac.zip")
 
 
 def test_zo_patch_updates_payload_file_hashes_and_plist(tmp_path: Path) -> None:

@@ -572,7 +572,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
           }
         ];
 
@@ -1797,7 +1797,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
             usesDefaultFeatures = false;
             features = [ "clone-impls" "full" "parsing" "printing" "proc-macro" "visit-mut" ];
           }
@@ -3641,9 +3641,9 @@ rec {
       };
       "aws-smithy-runtime-api" = rec {
         crateName = "aws-smithy-runtime-api";
-        version = "1.13.0";
+        version = "1.15.0";
         edition = "2021";
-        sha256 = "1w0j8v5kyxsidw6rn6p6fy7lpv4d42lga982ay2fm58adsz1xv92";
+        sha256 = "1j9a2741ya6h40q52bc7ndk6970vs8spmw3r4qnp41s5x0y5ck4m";
         libName = "aws_smithy_runtime_api";
         authors = [
           "AWS Rust SDK Team <aws-sdk-rust@amazon.com>"
@@ -3705,6 +3705,7 @@ rec {
         ];
         features = {
           "http-auth" = [ "dep:zeroize" ];
+          "legacy-client" = [ "client" ];
           "test-util" = [ "aws-smithy-types/test-util" "http-1x" ];
         };
         resolvedDefaultFeatures = [ "client" "default" "http-1x" "http-auth" "test-util" ];
@@ -4462,7 +4463,7 @@ rec {
           }
           {
             name = "miniz_oxide";
-            packageId = "miniz_oxide";
+            packageId = "miniz_oxide 0.8.9";
             usesDefaultFeatures = false;
             target = { target, features }: (!((target."windows" or false) && ("msvc" == target."env" or null) && (!("uwp" == target."vendor" or null))));
           }
@@ -4736,7 +4737,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             features = [ "serde" ];
           }
           {
@@ -7454,11 +7455,11 @@ rec {
         ];
 
       };
-      "chacha20 0.10.1" = rec {
+      "chacha20 0.10.2" = rec {
         crateName = "chacha20";
-        version = "0.10.1";
+        version = "0.10.2";
         edition = "2024";
-        sha256 = "108aajbvs3rwl4d0pdvq3p8ydy4pwh0rxy2z265ynwkflrmla96m";
+        sha256 = "01hvvbgdmqkcgs2s4f12s9wa5h2gbq05rqvypv61azlwd55mxhv5";
         authors = [
           "RustCrypto Developers"
         ];
@@ -7968,7 +7969,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
             features = [ "full" ];
           }
         ];
@@ -9777,7 +9778,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
             features = [ "full" "extra-traits" ];
           }
         ];
@@ -9858,7 +9859,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
           }
         ];
 
@@ -10014,7 +10015,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
             usesDefaultFeatures = false;
             features = [ "parsing" "proc-macro" ];
           }
@@ -10528,7 +10529,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             features = [ "serde" ];
           }
           {
@@ -10660,7 +10661,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             features = [ "serde" "serde" ];
           }
           {
@@ -10793,7 +10794,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
           }
           {
             name = "libc";
@@ -11075,7 +11076,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
           }
           {
             name = "log";
@@ -11120,7 +11121,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
           }
           {
             name = "proc-macro2";
@@ -11192,7 +11193,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             features = [ "serde" "serde" ];
           }
           {
@@ -11369,7 +11370,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             features = [ "serde" ];
           }
           {
@@ -12935,7 +12936,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
             features = [ "full" ];
           }
         ];
@@ -13184,7 +13185,7 @@ rec {
           }
           {
             name = "miniz_oxide";
-            packageId = "miniz_oxide";
+            packageId = "miniz_oxide 0.8.9";
           }
           {
             name = "rayon-core";
@@ -13494,9 +13495,9 @@ rec {
       };
       "flate2" = rec {
         crateName = "flate2";
-        version = "1.1.9";
+        version = "1.1.10";
         edition = "2018";
-        sha256 = "0g2pb7cxnzcbzrj8bw4v6gpqqp21aycmf6d84rzb6j748qkvlgw4";
+        sha256 = "1jvd2cl8j5hyf8imi62y1x7gwzz1hajirni0801yxhds1qp4wqvf";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
           "Josh Triplett <josh@joshtriplett.org>"
@@ -13506,40 +13507,33 @@ rec {
             name = "crc32fast";
             packageId = "crc32fast";
             optional = true;
+            usesDefaultFeatures = false;
           }
           {
             name = "miniz_oxide";
-            packageId = "miniz_oxide";
+            packageId = "miniz_oxide 0.9.1";
             optional = true;
-            usesDefaultFeatures = false;
-            features = [ "with-alloc" "simd" ];
-          }
-          {
-            name = "miniz_oxide";
-            packageId = "miniz_oxide";
-            usesDefaultFeatures = false;
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
-            features = [ "with-alloc" "simd" ];
+            features = [ "simd" ];
           }
           {
             name = "zlib-rs";
             packageId = "zlib-rs";
             optional = true;
             usesDefaultFeatures = false;
-            features = [ "std" "rust-allocator" ];
+            features = [ "rust-allocator" ];
           }
         ];
         features = {
           "any_c_zlib" = [ "any_zlib" ];
           "any_zlib" = [ "any_impl" ];
-          "cloudflare-zlib-sys" = [ "dep:cloudflare-zlib-sys" ];
-          "cloudflare_zlib" = [ "any_c_zlib" "cloudflare-zlib-sys" "dep:crc32fast" ];
-          "default" = [ "rust_backend" ];
+          "cloudflare_zlib" = [ "zlib" ];
+          "default" = [ "rust_backend" "runtime_detection" ];
           "document-features" = [ "dep:document-features" ];
           "libz-ng-sys" = [ "dep:libz-ng-sys" ];
           "libz-sys" = [ "dep:libz-sys" ];
           "miniz-sys" = [ "rust_backend" ];
           "miniz_oxide" = [ "any_impl" "dep:miniz_oxide" "dep:crc32fast" ];
+          "runtime_detection" = [ "zlib-rs?/std" "crc32fast?/std" ];
           "rust_backend" = [ "miniz_oxide" "any_impl" ];
           "zlib" = [ "any_c_zlib" "libz-sys" "dep:crc32fast" ];
           "zlib-default" = [ "any_c_zlib" "libz-sys/default" "dep:crc32fast" ];
@@ -13547,7 +13541,7 @@ rec {
           "zlib-ng-compat" = [ "zlib" "libz-sys/zlib-ng" "dep:crc32fast" ];
           "zlib-rs" = [ "any_zlib" "dep:zlib-rs" ];
         };
-        resolvedDefaultFeatures = [ "any_impl" "any_zlib" "default" "miniz_oxide" "rust_backend" "zlib-rs" ];
+        resolvedDefaultFeatures = [ "any_impl" "any_zlib" "default" "miniz_oxide" "runtime_detection" "rust_backend" "zlib-rs" ];
       };
       "float8" = rec {
         crateName = "float8";
@@ -13809,22 +13803,22 @@ rec {
       };
       "fraction" = rec {
         crateName = "fraction";
-        version = "0.15.4";
+        version = "0.17.0";
         edition = "2015";
-        sha256 = "0wmqlp84vn9q4vmjvbhd3min6x2wyg508pzd6d9l7b1xnidh8xp0";
+        sha256 = "002m55m7v92il8lq1hif0gjnhkyf0v263cj3r6yfps6xhhh5cip2";
         authors = [
           "dnsl48 <dnsl48@gmail.com>"
         ];
         dependencies = [
           {
-            name = "lazy_static";
-            packageId = "lazy_static";
-            optional = true;
-          }
-          {
             name = "num";
             packageId = "num";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "num-bigint";
+            packageId = "num-bigint";
+            optional = true;
           }
         ];
         features = {
@@ -13832,17 +13826,17 @@ rec {
           "bytes" = [ "dep:bytes" ];
           "default" = [ "with-bigint" "with-decimal" "with-dynaint" ];
           "juniper" = [ "dep:juniper" ];
-          "lazy_static" = [ "dep:lazy_static" ];
+          "num-bigint" = [ "dep:num-bigint" ];
           "postgres-types" = [ "dep:postgres-types" ];
           "serde" = [ "dep:serde" ];
           "serde_derive" = [ "dep:serde_derive" ];
           "with-approx" = [ "with-bigint" ];
-          "with-bigint" = [ "num/num-bigint" "num/std" "lazy_static" ];
+          "with-bigint" = [ "num/num-bigint" "num/std" "num-bigint" ];
           "with-juniper-support" = [ "juniper" ];
           "with-postgres-support" = [ "postgres-types" "byteorder" "bytes" ];
           "with-serde-support" = [ "serde" "serde_derive" "num/serde" ];
         };
-        resolvedDefaultFeatures = [ "lazy_static" "with-bigint" ];
+        resolvedDefaultFeatures = [ "num-bigint" "with-bigint" ];
       };
       "fragile" = rec {
         crateName = "fragile";
@@ -14315,7 +14309,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
             features = [ "full" ];
           }
         ];
@@ -15930,7 +15924,7 @@ rec {
       };
       "goose" = rec {
         crateName = "goose";
-        version = "1.48.0";
+        version = "1.49.0";
         edition = "2021";
         crateBin = [
           {
@@ -16018,6 +16012,13 @@ rec {
             optional = true;
             usesDefaultFeatures = false;
             features = [ "rt-tokio" ];
+          }
+          {
+            name = "aws-smithy-runtime-api";
+            packageId = "aws-smithy-runtime-api";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "client" ];
           }
           {
             name = "aws-smithy-types";
@@ -16187,7 +16188,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             usesDefaultFeatures = false;
             features = [ "serde" "std" ];
           }
@@ -16651,7 +16652,7 @@ rec {
           }
           {
             name = "which";
-            packageId = "which 8.0.5";
+            packageId = "which 8.0.6";
             usesDefaultFeatures = false;
             features = [ "real-sys" ];
           }
@@ -16764,7 +16765,7 @@ rec {
           }
         ];
         features = {
-          "aws-providers" = [ "dep:aws-config" "dep:aws-smithy-types" "dep:aws-sdk-bedrockruntime" "dep:aws-sdk-sagemakerruntime" "dep:smithy-transport-reqwest" ];
+          "aws-providers" = [ "dep:aws-config" "dep:aws-smithy-types" "dep:aws-sdk-bedrockruntime" "dep:aws-smithy-runtime-api" "dep:aws-sdk-sagemakerruntime" "dep:smithy-transport-reqwest" ];
           "code-mode" = [ "dep:pctx_code_mode" ];
           "cuda" = [ "local-inference" "candle-core/cuda" "candle-nn/cuda" "goose-providers/cuda" ];
           "local-inference" = [ "dep:candle-core" "dep:candle-nn" "dep:candle-transformers" "goose-providers/local-inference" "dep:tokenizers" "dep:symphonia" "dep:rubato" "dep:byteorder" ];
@@ -16781,7 +16782,7 @@ rec {
       };
       "goose-acp-macros" = rec {
         crateName = "goose-acp-macros";
-        version = "1.48.0";
+        version = "1.49.0";
         edition = "2021";
         src = crateSource sourceFilter "crates/goose-acp-macros";
         procMacro = true;
@@ -16797,7 +16798,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
             usesDefaultFeatures = false;
             features = [ "full" "extra-traits" ];
           }
@@ -16824,6 +16825,12 @@ rec {
             name = "async-trait";
             packageId = "async-trait";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
           }
           {
             name = "goose-provider-types";
@@ -16855,6 +16862,18 @@ rec {
             features = [ "compat" ];
           }
           {
+            name = "tracing";
+            packageId = "tracing";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "tracing-futures";
+            packageId = "tracing-futures";
+            usesDefaultFeatures = false;
+            features = [ "futures-03" "std" "std-future" ];
+          }
+          {
             name = "uuid";
             packageId = "uuid";
             usesDefaultFeatures = false;
@@ -16865,7 +16884,7 @@ rec {
       };
       "goose-cli" = rec {
         crateName = "goose-cli";
-        version = "1.48.0";
+        version = "1.49.0";
         edition = "2021";
         crateBin = [
           {
@@ -17454,6 +17473,11 @@ rec {
             features = [ "loader" "multi_template" "serde" ];
           }
           {
+            name = "pulldown-cmark";
+            packageId = "pulldown-cmark";
+            usesDefaultFeatures = false;
+          }
+          {
             name = "regex";
             packageId = "regex";
             usesDefaultFeatures = false;
@@ -17523,7 +17547,7 @@ rec {
       };
       "goose-mcp" = rec {
         crateName = "goose-mcp";
-        version = "1.48.0";
+        version = "1.49.0";
         edition = "2021";
         src = crateSource sourceFilter "crates/goose-mcp";
         libName = "goose_mcp";
@@ -17979,7 +18003,7 @@ rec {
       };
       "goose-roaming" = rec {
         crateName = "goose-roaming";
-        version = "1.48.0";
+        version = "1.49.0";
         edition = "2021";
         src = crateSource sourceFilter "crates/goose-roaming";
         libName = "goose_roaming";
@@ -18190,7 +18214,7 @@ rec {
       };
       "goose-test" = rec {
         crateName = "goose-test";
-        version = "1.48.0";
+        version = "1.49.0";
         edition = "2021";
         crateBin = [
           {
@@ -18222,7 +18246,7 @@ rec {
       };
       "goose-test-support" = rec {
         crateName = "goose-test-support";
-        version = "1.48.0";
+        version = "1.49.0";
         edition = "2021";
         src = crateSource sourceFilter "crates/goose-test-support";
         libName = "goose_test_support";
@@ -18324,7 +18348,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             features = [ "std" ];
           }
           {
@@ -21068,7 +21092,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             features = [ "serde" ];
           }
           {
@@ -21184,11 +21208,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "serde" "serde-1" "std" ];
       };
-      "indexmap 2.14.0" = rec {
+      "indexmap 2.14.1" = rec {
         crateName = "indexmap";
-        version = "2.14.0";
+        version = "2.14.1";
         edition = "2024";
-        sha256 = "1na9z6f0d5pkjr1lgsni470v98gv2r7c41j8w48skr089x2yjrnl";
+        sha256 = "1sq9z90viwfw8053l32rrby563hy67xl8n6k65d92hi22i421ah7";
         dependencies = [
           {
             name = "equivalent";
@@ -21473,9 +21497,9 @@ rec {
       };
       "iroh" = rec {
         crateName = "iroh";
-        version = "1.0.3";
+        version = "1.1.0";
         edition = "2024";
-        sha256 = "0whsflj51hpycx249pkajvq8dfasgs4z4cb9cjql2fqnaayfc3a6";type = [ "lib" "cdylib" ];
+        sha256 = "1rdrjhk7cbbkpkjgvws65kn9wa7n2r967m9r8k5mqsz4skx5559j";type = [ "lib" "cdylib" ];
         authors = [
           "dignifiedquire <me@dignifiedquire.com>"
           "n0 team"
@@ -21747,9 +21771,9 @@ rec {
       };
       "iroh-base" = rec {
         crateName = "iroh-base";
-        version = "1.0.3";
+        version = "1.1.0";
         edition = "2024";
-        sha256 = "1a2rip349jfsp13zymn1xk3zfdmr1nm1l4mkm6n27j91xqb3xrvb";
+        sha256 = "13jawvmjg82qhljpr3mwyc4fbpva3h1jrawm00yg0bm0d3g4rkrw";
         libName = "iroh_base";
         authors = [
           "n0 team"
@@ -21826,9 +21850,9 @@ rec {
       };
       "iroh-dns" = rec {
         crateName = "iroh-dns";
-        version = "1.0.3";
+        version = "1.1.0";
         edition = "2024";
-        sha256 = "0j9k9kfd6svv20dy83sjbk5y5214kwlzs6hmbigk9rhqknrskxj6";
+        sha256 = "191sxsr2d8bxpzwh3r0b11sd2dmjqqzhgm1mk58mq2hln1724hcs";
         libName = "iroh_dns";
         authors = [
           "n0 team"
@@ -22061,10 +22085,10 @@ rec {
       };
       "iroh-relay" = rec {
         crateName = "iroh-relay";
-        version = "1.0.3";
+        version = "1.1.0";
         edition = "2024";
         crateBin = [];
-        sha256 = "14w1pyzr447p3w2q8ir8rq0sjpybafdn7hvfyl0bgxr7z5n5ig94";
+        sha256 = "12j25y1bqvb1d3k1clsx2qh47sjakzh4p1p2hayc9c69w83nypqv";
         libName = "iroh_relay";type = [ "lib" "cdylib" ];
         authors = [
           "n0 team"
@@ -22969,9 +22993,9 @@ rec {
       };
       "jsonschema" = rec {
         crateName = "jsonschema";
-        version = "0.49.9";
+        version = "0.52.0";
         edition = "2021";
-        sha256 = "1cliinbvf6v3lwbnxsxswx8a6p4hgq06iahlc7q2klgf3cj8mv2r";
+        sha256 = "1bnlwd5bmwikj02fd126rgn4wcgmylx5vl6qg0rf8kpij1rqdr8f";
         authors = [
           "Dmitry Dygalo <dmitry@dygalo.dev>"
         ];
@@ -23009,10 +23033,6 @@ rec {
             packageId = "getrandom 0.3.4";
             target = { target, features }: ("wasm32" == target."arch" or null);
             features = [ "wasm_js" ];
-          }
-          {
-            name = "idna";
-            packageId = "idna";
           }
           {
             name = "itoa";
@@ -23075,7 +23095,8 @@ rec {
         features = {
           "arbitrary-precision" = [ "serde_json/arbitrary_precision" "dep:num-bigint" "jsonschema-macros?/arbitrary-precision" "jsonschema-value/arbitrary-precision" ];
           "conformance" = [ "jsonschema-value/conformance" ];
-          "default" = [ "resolve-http" "resolve-file" "tls-aws-lc-rs" ];
+          "default" = [ "resolve-http" "resolve-file" "tls-aws-lc-rs" "idna" ];
+          "idna" = [ "dep:idna" ];
           "macros" = [ "dep:jsonschema-macros" "jsonschema-macros/float-roundtrip" "jsonschema-value/macros" ];
           "magnus" = [ "jsonschema-value/magnus" ];
           "pyo3" = [ "jsonschema-value/pyo3" ];
@@ -23088,9 +23109,9 @@ rec {
       };
       "jsonschema-regex" = rec {
         crateName = "jsonschema-regex";
-        version = "0.49.9";
+        version = "0.52.1";
         edition = "2021";
-        sha256 = "11fzzfapa4fgny3h686ph1ikl0ybyhaq96z5m1mfdmby052lz6ci";
+        sha256 = "0y0bmzcghrcm0d1dqbh2f9164szsy7nyqds71dpwj1m67yl0xngm";
         libName = "jsonschema_regex";
         authors = [
           "Dmitry Dygalo <dmitry@dygalo.dev>"
@@ -23105,9 +23126,9 @@ rec {
       };
       "jsonschema-value" = rec {
         crateName = "jsonschema-value";
-        version = "0.49.9";
+        version = "0.52.1";
         edition = "2021";
-        sha256 = "1jwykf5nl4m5r9a9ir4cxra4bpmvpxz5yqpdws58c475hdzn7ivy";
+        sha256 = "1g5fa72c35k5fmnvllcv66273c10rr22hn63v0bs30c1wp5v8jns";
         libName = "jsonschema_value";
         authors = [
           "Dmitry Dygalo <dmitry@dygalo.dev>"
@@ -23142,6 +23163,10 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "float_roundtrip" ];
+          }
+          {
+            name = "zmij";
+            packageId = "zmij";
           }
         ];
         features = {
@@ -23997,7 +24022,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
           }
           {
             name = "itoa";
@@ -24063,9 +24088,9 @@ rec {
       };
       "lru" = rec {
         crateName = "lru";
-        version = "0.18.2";
+        version = "0.18.3";
         edition = "2015";
-        sha256 = "02nrs4r8jdnmrm08ab6pvsy87gimklr9ks77jm6v5rm79fdjybsx";
+        sha256 = "0k7zn18j9nlbkcdgnim1ww2malr5c7n5hmr7rsnfd65kkr5pnc8d";
         authors = [
           "Jerome Froelich <jeromefroelic@hotmail.com>"
         ];
@@ -24480,7 +24505,7 @@ rec {
         };
         resolvedDefaultFeatures = [ "std" ];
       };
-      "miniz_oxide" = rec {
+      "miniz_oxide 0.8.9" = rec {
         crateName = "miniz_oxide";
         version = "0.8.9";
         edition = "2021";
@@ -24511,6 +24536,41 @@ rec {
           "serde" = [ "dep:serde" ];
           "simd" = [ "simd-adler32" ];
           "simd-adler32" = [ "dep:simd-adler32" ];
+        };
+        resolvedDefaultFeatures = [ "default" "simd" "simd-adler32" "with-alloc" ];
+      };
+      "miniz_oxide 0.9.1" = rec {
+        crateName = "miniz_oxide";
+        version = "0.9.1";
+        edition = "2021";
+        sha256 = "0k2bgjzk2sbsynpsv4wizwxbqp6vs7g08y5anbkrh3l6a15bqgxn";
+        authors = [
+          "Frommi <daniil.liferenko@gmail.com>"
+          "oyvindln <oyvindln@users.noreply.github.com>"
+          "Rich Geldreich richgel99@gmail.com"
+        ];
+        dependencies = [
+          {
+            name = "adler2";
+            packageId = "adler2";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "simd-adler32";
+            packageId = "simd-adler32";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "alloc" = [ "dep:alloc" ];
+          "core" = [ "dep:core" ];
+          "default" = [ "with-alloc" ];
+          "rustc-dep-of-std" = [ "core" "alloc" "adler2/rustc-dep-of-std" ];
+          "serde" = [ "dep:serde" ];
+          "simd" = [ "simd-adler32" ];
+          "simd-adler32" = [ "dep:simd-adler32" ];
+          "std" = [ "serde?/std" ];
         };
         resolvedDefaultFeatures = [ "default" "simd" "simd-adler32" "with-alloc" ];
       };
@@ -25015,7 +25075,7 @@ rec {
         };
         resolvedDefaultFeatures = [ "std" ];
       };
-      "netdev" = rec {
+      "netdev 0.45.0" = rec {
         crateName = "netdev";
         version = "0.45.0";
         edition = "2024";
@@ -25067,17 +25127,17 @@ rec {
           }
           {
             name = "netlink-packet-core";
-            packageId = "netlink-packet-core";
+            packageId = "netlink-packet-core 0.8.2";
             target = { target, features }: (("linux" == target."os" or null) || ("android" == target."os" or null));
           }
           {
             name = "netlink-packet-route";
-            packageId = "netlink-packet-route";
+            packageId = "netlink-packet-route 0.31.0";
             target = { target, features }: (("linux" == target."os" or null) || ("android" == target."os" or null));
           }
           {
             name = "netlink-sys";
-            packageId = "netlink-sys";
+            packageId = "netlink-sys 0.8.8";
             target = { target, features }: (("linux" == target."os" or null) || ("android" == target."os" or null));
           }
           {
@@ -25132,7 +25192,110 @@ rec {
         };
         resolvedDefaultFeatures = [ "android-extra" "apple-system-configuration-extra" "default" "gateway" ];
       };
-      "netlink-packet-core" = rec {
+      "netdev 0.46.2" = rec {
+        crateName = "netdev";
+        version = "0.46.2";
+        edition = "2024";
+        sha256 = "0qpdfh4i6fn60vhb823az9cih66mr6d9skrwh6vf7nkx31di7d2d";
+        authors = [
+          "shellrow <shellrow@foctal.com>"
+        ];
+        dependencies = [
+          {
+            name = "block2";
+            packageId = "block2";
+            target = { target, features }: ("ios" == target."os" or null);
+          }
+          {
+            name = "dispatch2";
+            packageId = "dispatch2";
+            target = { target, features }: ("ios" == target."os" or null);
+          }
+          {
+            name = "dlopen2";
+            packageId = "dlopen2";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("android" == target."os" or null);
+          }
+          {
+            name = "ipnet";
+            packageId = "ipnet";
+          }
+          {
+            name = "jni";
+            packageId = "jni 0.21.1";
+            optional = true;
+            target = { target, features }: ("android" == target."os" or null);
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+            target = { target, features }: (target."unix" or false);
+          }
+          {
+            name = "mac-addr";
+            packageId = "mac-addr";
+          }
+          {
+            name = "ndk-context";
+            packageId = "ndk-context";
+            optional = true;
+            target = { target, features }: ("android" == target."os" or null);
+          }
+          {
+            name = "netlink-packet-core";
+            packageId = "netlink-packet-core 0.9.0";
+            target = { target, features }: (("linux" == target."os" or null) || ("android" == target."os" or null));
+          }
+          {
+            name = "netlink-packet-route";
+            packageId = "netlink-packet-route 0.33.0";
+            target = { target, features }: (("linux" == target."os" or null) || ("android" == target."os" or null));
+          }
+          {
+            name = "netlink-sys";
+            packageId = "netlink-sys 0.9.0";
+            target = { target, features }: (("linux" == target."os" or null) || ("android" == target."os" or null));
+          }
+          {
+            name = "objc2-core-foundation";
+            packageId = "objc2-core-foundation";
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+          }
+          {
+            name = "objc2-system-configuration";
+            packageId = "objc2-system-configuration";
+            usesDefaultFeatures = false;
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+            features = [ "SCNetworkConfiguration" ];
+          }
+          {
+            name = "once_cell";
+            packageId = "once_cell";
+            target = { target, features }: ("android" == target."os" or null);
+          }
+          {
+            name = "plist";
+            packageId = "plist";
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+          }
+          {
+            name = "windows-sys";
+            packageId = "windows-sys 0.61.2";
+            target = { target, features }: (target."windows" or false);
+            features = [ "Win32_Foundation" "Win32_NetworkManagement_IpHelper" "Win32_Networking_WinSock" "Win32_NetworkManagement_Ndis" "Win32_System_LibraryLoader" ];
+          }
+        ];
+        features = {
+          "android-extra" = [ "dep:jni" "dep:ndk-context" ];
+          "apple-system-configuration-extra" = [ "objc2-system-configuration/SCPreferences" "objc2-system-configuration/SCDynamicStore" "objc2-system-configuration/SCDynamicStoreKey" "objc2-system-configuration/SCSchemaDefinitions" ];
+          "apple-wifi-extra" = [ "dep:objc2" "dep:objc2-core-wlan" "dep:objc2-foundation" ];
+          "default" = [ "gateway" "apple-system-configuration-extra" "android-extra" ];
+          "serde" = [ "dep:serde" "mac-addr/serde" "ipnet/serde" ];
+        };
+        resolvedDefaultFeatures = [ "android-extra" "apple-system-configuration-extra" "default" "gateway" ];
+      };
+      "netlink-packet-core 0.8.2" = rec {
         crateName = "netlink-packet-core";
         version = "0.8.2";
         edition = "2021";
@@ -25149,7 +25312,18 @@ rec {
         ];
 
       };
-      "netlink-packet-route" = rec {
+      "netlink-packet-core 0.9.0" = rec {
+        crateName = "netlink-packet-core";
+        version = "0.9.0";
+        edition = "2021";
+        sha256 = "1par81yylm5kcv64wa8p7ph05gp6l1h6hw0l4wq22blckapjsvid";
+        libName = "netlink_packet_core";
+        authors = [
+          "Corentin Henry <corentinhenry@gmail.com>"
+        ];
+
+      };
+      "netlink-packet-route 0.31.0" = rec {
         crateName = "netlink-packet-route";
         version = "0.31.0";
         edition = "2021";
@@ -25174,7 +25348,42 @@ rec {
           }
           {
             name = "netlink-packet-core";
-            packageId = "netlink-packet-core";
+            packageId = "netlink-packet-core 0.8.2";
+          }
+        ];
+
+      };
+      "netlink-packet-route 0.33.0" = rec {
+        crateName = "netlink-packet-route";
+        version = "0.33.0";
+        edition = "2021";
+        sha256 = "0xjm1mfvx5hai6zbcxfqqgxjp3v6fa654y08zzhhd9bkigy8zm2r";
+        libName = "netlink_packet_route";
+        authors = [
+          "Corentin Henry <corentinhenry@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.0";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "log";
+            packageId = "log";
+            features = [ "std" ];
+          }
+          {
+            name = "netlink-packet-core";
+            packageId = "netlink-packet-core 0.9.0";
+          }
+          {
+            name = "zerocopy";
+            packageId = "zerocopy";
+            features = [ "derive" ];
           }
         ];
 
@@ -25208,11 +25417,11 @@ rec {
           }
           {
             name = "netlink-packet-core";
-            packageId = "netlink-packet-core";
+            packageId = "netlink-packet-core 0.8.2";
           }
           {
             name = "netlink-sys";
-            packageId = "netlink-sys";
+            packageId = "netlink-sys 0.8.8";
             usesDefaultFeatures = false;
           }
           {
@@ -25227,7 +25436,7 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "tokio_socket" ];
       };
-      "netlink-sys" = rec {
+      "netlink-sys 0.8.8" = rec {
         crateName = "netlink-sys";
         version = "0.8.8";
         edition = "2021";
@@ -25281,11 +25490,45 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "futures-util" "tokio" "tokio_socket" ];
       };
+      "netlink-sys 0.9.0" = rec {
+        crateName = "netlink-sys";
+        version = "0.9.0";
+        edition = "2021";
+        sha256 = "041sm0a1qk3mpwmlrsv8mj1asgbwcrp85q0gjjgg83a21gh3i7f9";
+        libName = "netlink_sys";
+        authors = [
+          "Corentin Henry <corentinhenry@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "bytes";
+            packageId = "bytes";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+        ];
+        features = {
+          "async-io" = [ "dep:async-io" ];
+          "futures-util" = [ "dep:futures-util" ];
+          "mio" = [ "dep:mio" ];
+          "mio_socket" = [ "mio" ];
+          "smol_socket" = [ "async-io" "futures-util" ];
+          "tokio" = [ "dep:tokio" ];
+          "tokio_socket" = [ "tokio" "futures-util" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
       "netwatch" = rec {
         crateName = "netwatch";
-        version = "0.19.1";
+        version = "0.19.3";
         edition = "2024";
-        sha256 = "0xhrl5x36ag6r18znyg6861yspizc286cgbl1msyyiqkfh0vx72d";
+        sha256 = "15jyz5pmv8wcygxryp8ipbzbal8f50xpsj893x047ai3bynrrnir";
         authors = [
           "n0 team"
         ];
@@ -25301,25 +25544,11 @@ rec {
           {
             name = "derive_more";
             packageId = "derive_more";
-            target = { target, features }: ((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null));
-            features = [ "display" ];
-          }
-          {
-            name = "derive_more";
-            packageId = "derive_more";
-            target = { target, features }: ("android" == target."os" or null);
-            features = [ "display" ];
-          }
-          {
-            name = "derive_more";
-            packageId = "derive_more";
-            target = { target, features }: ("windows" == target."os" or null);
-            features = [ "debug" ];
+            features = [ "debug" "display" ];
           }
           {
             name = "ipnet";
             packageId = "ipnet";
-            target = { target, features }: (!((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null)));
           }
           {
             name = "js-sys";
@@ -25345,17 +25574,22 @@ rec {
           }
           {
             name = "netdev";
-            packageId = "netdev";
-            target = { target, features }: (!(("espidf" == target."os" or null) || ((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null))));
+            packageId = "netdev 0.45.0";
+            target = { target, features }: ((!(("espidf" == target."os" or null) || ((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null)))) && ("windows" == target."os" or null));
+          }
+          {
+            name = "netdev";
+            packageId = "netdev 0.46.2";
+            target = { target, features }: (!(("espidf" == target."os" or null) || ((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null)) || ("windows" == target."os" or null)));
           }
           {
             name = "netlink-packet-core";
-            packageId = "netlink-packet-core";
+            packageId = "netlink-packet-core 0.8.2";
             target = { target, features }: (("linux" == target."os" or null) || ("android" == target."os" or null));
           }
           {
             name = "netlink-packet-route";
-            packageId = "netlink-packet-route";
+            packageId = "netlink-packet-route 0.31.0";
             target = { target, features }: (("linux" == target."os" or null) || ("android" == target."os" or null));
           }
           {
@@ -25365,7 +25599,7 @@ rec {
           }
           {
             name = "netlink-sys";
-            packageId = "netlink-sys";
+            packageId = "netlink-sys 0.8.8";
             target = { target, features }: (("linux" == target."os" or null) || ("android" == target."os" or null));
           }
           {
@@ -25411,13 +25645,19 @@ rec {
           {
             name = "tokio";
             packageId = "tokio";
+            target = { target, features }: ((!(("espidf" == target."os" or null) || ((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null)))) && ("windows" == target."os" or null));
+            features = [ "fs" "io-std" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
             target = { target, features }: (!((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null)));
             features = [ "rt" "net" ];
           }
           {
             name = "tokio";
             packageId = "tokio";
-            target = { target, features }: (!(("espidf" == target."os" or null) || ((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null))));
+            target = { target, features }: (!(("espidf" == target."os" or null) || ((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null)) || ("windows" == target."os" or null)));
             features = [ "fs" "io-std" ];
           }
           {
@@ -25717,9 +25957,9 @@ rec {
       };
       "noq" = rec {
         crateName = "noq";
-        version = "1.1.1";
+        version = "1.2.0";
         edition = "2024";
-        sha256 = "1nhhkfx0cpb13z7sryzql1sxga6mcwr82mw91l8kqm7s05kbpr09";
+        sha256 = "05a57418kcdgv9sfhsrzl20l8v06fdhcj3ig4hdfjsyjadrwbrpi";
         dependencies = [
           {
             name = "bytes";
@@ -25839,9 +26079,9 @@ rec {
       };
       "noq-proto" = rec {
         crateName = "noq-proto";
-        version = "1.1.1";
+        version = "1.2.0";
         edition = "2024";
-        sha256 = "058sis4a15q91gwv26bjl6qhjb83h6l6fplm1n5cda8rv36bb9xs";
+        sha256 = "098j27j64vd535m2k6jb4yxrf74fkaizzdjpcgwc8abc60z82ils";
         libName = "noq_proto";
         dependencies = [
           {
@@ -25977,9 +26217,9 @@ rec {
       };
       "noq-udp" = rec {
         crateName = "noq-udp";
-        version = "1.1.1";
+        version = "1.2.0";
         edition = "2024";
-        sha256 = "0ix6jqpdkpadzhi98khj584hms71za1chkni1b6icnks147a5fq2";
+        sha256 = "0h2zln75ypsa3ikdi4vl7w8d1y0rr1lcqfdbar9knxy1s8g64vdm";
         libName = "noq_udp";
         dependencies = [
           {
@@ -26030,9 +26270,9 @@ rec {
       };
       "nostr" = rec {
         crateName = "nostr";
-        version = "0.45.2";
+        version = "0.45.3";
         edition = "2024";
-        sha256 = "0in7jqp9ymqnqaq9mxxrakmsb7i9mpvb25lhakd6y3a4gi0ypy7i";
+        sha256 = "0yn13j04vxvpxy4xxm8s3xj67ymw8161mfk9cic8h4b38g735fmh";
         authors = [
           "Yuki Kishimoto <yukikishimoto@protonmail.com>"
           "Nostr Dev Kit Developers"
@@ -28204,10 +28444,10 @@ rec {
       };
       "open" = rec {
         crateName = "open";
-        version = "5.4.1";
+        version = "5.4.2";
         edition = "2018";
         crateBin = [];
-        sha256 = "0204wdb57cvc12fbjxfdv9mx1wf066p4kng3qy468j4wgs9yzkzr";
+        sha256 = "0mfxj1p2s8fz1vb9zfn22mw76sqp9kq1ac0krqvza7mwci3bxqxd";
         authors = [
           "Sebastian Thiel <byronimo@gmail.com>"
         ];
@@ -29604,7 +29844,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
           }
           {
             name = "regex";
@@ -29664,7 +29904,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             features = [ "serde" ];
           }
           {
@@ -29982,7 +30222,7 @@ rec {
           "serde" = [ "dep:serde_core" ];
           "std" = [ "base64/std" "serde_core?/std" ];
         };
-        resolvedDefaultFeatures = [ "std" ];
+        resolvedDefaultFeatures = [ "default" "std" ];
       };
       "pem-rfc7468 0.7.0" = rec {
         crateName = "pem-rfc7468";
@@ -30622,7 +30862,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
           }
           {
             name = "quick-xml";
@@ -30673,7 +30913,7 @@ rec {
           }
           {
             name = "miniz_oxide";
-            packageId = "miniz_oxide";
+            packageId = "miniz_oxide 0.8.9";
             features = [ "simd" ];
           }
         ];
@@ -30708,7 +30948,7 @@ rec {
           }
           {
             name = "miniz_oxide";
-            packageId = "miniz_oxide";
+            packageId = "miniz_oxide 0.8.9";
             features = [ "simd" ];
           }
         ];
@@ -31292,7 +31532,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
           }
           {
             name = "nix";
@@ -31464,6 +31704,40 @@ rec {
           "unicase" = [ "dep:unicase" ];
         };
         resolvedDefaultFeatures = [ "default" "idna" "punycode" ];
+      };
+      "pulldown-cmark" = rec {
+        crateName = "pulldown-cmark";
+        version = "0.13.4";
+        edition = "2021";
+        crateBin = [];
+        sha256 = "0kii5zdm7nvdjh7rjkjpvxd0sx1cyd21p0qijmgiq1z7m3mniw79";
+        libName = "pulldown_cmark";
+        authors = [
+          "Raph Levien <raph.levien@gmail.com>"
+          "Marcus Klaas de Vries <mail@marcusklaas.nl>"
+        ];
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.0";
+          }
+          {
+            name = "memchr";
+            packageId = "memchr";
+          }
+          {
+            name = "unicase";
+            packageId = "unicase";
+          }
+        ];
+        features = {
+          "default" = [ "getopts" "html" ];
+          "getopts" = [ "dep:getopts" ];
+          "html" = [ "pulldown-cmark-escape" ];
+          "pulldown-cmark-escape" = [ "dep:pulldown-cmark-escape" ];
+          "serde" = [ "dep:serde" ];
+          "simd" = [ "pulldown-cmark-escape?/simd" ];
+        };
       };
       "pulp 0.21.5" = rec {
         crateName = "pulp";
@@ -31994,7 +32268,7 @@ rec {
         dependencies = [
           {
             name = "chacha20";
-            packageId = "chacha20 0.10.1";
+            packageId = "chacha20 0.10.2";
             optional = true;
             usesDefaultFeatures = false;
             features = [ "rng" ];
@@ -32382,9 +32656,9 @@ rec {
       };
       "rcgen" = rec {
         crateName = "rcgen";
-        version = "0.14.9";
+        version = "0.14.10";
         edition = "2021";
-        sha256 = "1d3zcv5b5vmpzazfxbq7jpzrxm19p8n8xki7gawgxrl6gn77l7h9";
+        sha256 = "1n4aig4zp79qidnxhsfm9rhq4jv9f5zgwa3airc19q8dgmdf0x47";
         dependencies = [
           {
             name = "aws-lc-rs";
@@ -32394,7 +32668,7 @@ rec {
           }
           {
             name = "pem";
-            packageId = "pem 3.0.6";
+            packageId = "pem 4.0.0";
             optional = true;
           }
           {
@@ -32425,7 +32699,7 @@ rec {
         ];
         features = {
           "aws_lc_rs" = [ "crypto" "dep:aws-lc-rs" "aws-lc-rs/aws-lc-sys" "x509-parser?/verify-aws" ];
-          "aws_lc_rs_unstable" = [ "aws_lc_rs" "aws-lc-rs/unstable" "x509-parser?/verify-aws" ];
+          "aws_lc_rs_unstable" = [ "aws_lc_rs" ];
           "default" = [ "crypto" "pem" "ring" ];
           "fips" = [ "crypto" "dep:aws-lc-rs" "aws-lc-rs/fips" ];
           "pem" = [ "dep:pem" ];
@@ -32570,9 +32844,9 @@ rec {
       };
       "referencing" = rec {
         crateName = "referencing";
-        version = "0.49.9";
+        version = "0.52.1";
         edition = "2021";
-        sha256 = "0y42rr6jwnasam7md4dszfl3j6psy8c8sanxxkyy0p3gx9a23ykf";
+        sha256 = "0gwbm9fbgmlidnpsnph5lxxkpx7iphcp86rnjfcdq3044m2h32nk";
         authors = [
           "Dmitry Dygalo <dmitry@dygalo.dev>"
         ];
@@ -33809,7 +34083,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             features = [ "serde" ];
           }
           {
@@ -34035,7 +34309,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
             features = [ "full" ];
           }
         ];
@@ -35285,13 +35559,13 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
           }
         ];
         devDependencies = [
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
             features = [ "extra-traits" ];
           }
         ];
@@ -35689,7 +35963,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
             usesDefaultFeatures = false;
             features = [ "clone-impls" "derive" "parsing" "printing" "proc-macro" ];
           }
@@ -35751,7 +36025,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
             usesDefaultFeatures = false;
             features = [ "clone-impls" "derive" "parsing" "printing" ];
           }
@@ -35770,7 +36044,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             optional = true;
           }
           {
@@ -36055,7 +36329,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             rename = "indexmap_2";
             optional = true;
             usesDefaultFeatures = false;
@@ -36187,7 +36461,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
           }
           {
             name = "itoa";
@@ -36300,7 +36574,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
             usesDefaultFeatures = false;
             features = [ "full" "printing" "parsing" "clone-impls" ];
           }
@@ -37434,9 +37708,9 @@ rec {
       };
       "simple-dns" = rec {
         crateName = "simple-dns";
-        version = "0.11.3";
+        version = "0.12.0";
         edition = "2021";
-        sha256 = "1d7fjwazbg87ynjz3p0lm35856ig8qz9f150jqsk2d7r3ggcnxbs";
+        sha256 = "06icn8yii7x65lvrmlgz5k98v5hyp2pd7ysbfw0q3m58m57qhvrb";
         libName = "simple_dns";
         authors = [
           "Ilson Roberto Balliego Junior <ilson.balliego@gmail.com>"
@@ -38133,7 +38407,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
           }
           {
             name = "log";
@@ -39462,7 +39736,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
           }
           {
             name = "serde";
@@ -39945,7 +40219,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
           }
           {
             name = "once_cell";
@@ -40152,7 +40426,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
           }
           {
             name = "once_cell";
@@ -40285,7 +40559,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
           }
           {
             name = "num_cpus";
@@ -41062,11 +41336,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "clone-impls" "default" "derive" "extra-traits" "fold" "full" "parsing" "printing" "proc-macro" "visit" "visit-mut" ];
       };
-      "syn 3.0.3" = rec {
+      "syn 3.0.4" = rec {
         crateName = "syn";
-        version = "3.0.3";
+        version = "3.0.4";
         edition = "2021";
-        sha256 = "18srnql3cd39j9q6hf1az02p67rlr1rf6njx9zx4vxj9i3jvmsak";
+        sha256 = "17v4ac61x0hvj1879ywqzlwhyzg7n9lr9zniwrsif3b1ykfmq9z6";
         authors = [
           "David Tolnay <dtolnay@gmail.com>"
         ];
@@ -42013,7 +42287,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.3";
+            packageId = "syn 3.0.4";
           }
         ];
 
@@ -43677,7 +43951,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -43741,7 +44015,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -43847,7 +44121,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             features = [ "std" ];
           }
           {
@@ -44095,7 +44369,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             optional = true;
           }
           {
@@ -44907,10 +45181,10 @@ rec {
       };
       "tree-sitter" = rec {
         crateName = "tree-sitter";
-        version = "0.26.12";
+        version = "0.26.13";
         edition = "2021";
         links = "tree-sitter";
-        sha256 = "1v0g78jsnmv9p5960bzmx8x0497x2q5kg41ck0h3zscaw6l6gic3";
+        sha256 = "0adakl6757qvy42a3yng6rihmzn0qg8dnvw71f4s2a3yb8xdvsqp";
         build = "binding_rust/build.rs";
         libName = "tree_sitter";
         libPath = "binding_rust/lib.rs";
@@ -46115,7 +46389,7 @@ rec {
         dependencies = [
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
             features = [ "serde" ];
           }
           {
@@ -46199,9 +46473,9 @@ rec {
       };
       "uuid" = rec {
         crateName = "uuid";
-        version = "1.24.1";
+        version = "1.26.0";
         edition = "2021";
-        sha256 = "1n8b7fg7dbx6ws64387l2i0qq900rw9b7qax63acdh37sczw1vrc";
+        sha256 = "04kqmzwdqbh1lgci3dhv4ir1nk12bff98z8iq9m8m2myr5qjsxxm";
         authors = [
           "Ashley Mannix<ashleymannix@live.com.au>"
           "Dylan DPC<dylan.dpc@gmail.com>"
@@ -46352,7 +46626,7 @@ rec {
           }
           {
             name = "miniz_oxide";
-            packageId = "miniz_oxide";
+            packageId = "miniz_oxide 0.8.9";
           }
           {
             name = "which";
@@ -47509,11 +47783,11 @@ rec {
           "tracing" = [ "dep:tracing" ];
         };
       };
-      "which 8.0.5" = rec {
+      "which 8.0.6" = rec {
         crateName = "which";
-        version = "8.0.5";
+        version = "8.0.6";
         edition = "2021";
-        sha256 = "0g7lkzgs7sdkc8fbv2dprrhl7wl05r3z3hkm7361p4ab2a2gaglg";
+        sha256 = "0kq3r101j662briq4hrlrd9jv090ppsr3k0smcf7lr0np2rg5qms";
         authors = [
           "Harry Fei <tiziyuanfang@gmail.com>, Jacob Kiesel <jake@bitcrafters.co>"
         ];
@@ -52926,7 +53200,7 @@ rec {
           }
           {
             name = "indexmap";
-            packageId = "indexmap 2.14.0";
+            packageId = "indexmap 2.14.1";
           }
           {
             name = "memchr";
@@ -52989,9 +53263,9 @@ rec {
       };
       "zmij" = rec {
         crateName = "zmij";
-        version = "1.0.21";
+        version = "1.0.23";
         edition = "2021";
-        sha256 = "1amb5i6gz7yjb0dnmz5y669674pqmwbj44p4yfxfv2ncgvk8x15q";
+        sha256 = "06zwri21nnrl34rwinmvbciap8yk1mrl8qfg9pff7lgspc56sri9";
         authors = [
           "David Tolnay <dtolnay@gmail.com>"
         ];

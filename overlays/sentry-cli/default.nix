@@ -10,7 +10,7 @@
       filteredSrc = prev.fetchFromGitHub {
         owner = "getsentry";
         repo = "sentry-cli";
-        tag = selfSource.version;
+        rev = selfSource.commit;
         hash = slib.sourceHash "sentry-cli" "srcHash";
         postFetch = ''
           find $out -name '*.xcarchive' -type d -exec rm -rf {} +

@@ -1,6 +1,7 @@
 {
-  "commit": "5fc308a70719a83cccdbba4c0e39c23f5a8239d5",
+  "commit": "29112bef099274229cadff79cdff7bf7b99c4b77",
+  "electronVersion": "40.10.2",
   "hashes": [],
   "input": "hermes-agent",
-  "version": "v2026.8.27"
+  "version": "v2026.8.31"
 }

@@ -33,6 +33,7 @@ class SentryCliUpdater(GitHubReleaseUpdater):
     GITHUB_OWNER = "getsentry"
     GITHUB_REPO = "sentry-cli"
     TAG_PREFIX = ""
+    RESOLVE_TAG_COMMIT = True
     XCARCHIVE_FILTER = "find $out -name '*.xcarchive' -type d -exec rm -rf {} +"
     # Restrict hash computation to Darwin. The cargoHash
     # materializes by invoking ``rustPlatform.fetchCargoVendor``, whose
@@ -45,7 +46,7 @@ class SentryCliUpdater(GitHubReleaseUpdater):
 
     def _src_nix_expression(
         self,
-        version: str,
+        commit: str,
         hash_value: str | None = None,
     ) -> FunctionCall:
         hash_expr: str | NixExpression = (
@@ -59,24 +60,24 @@ class SentryCliUpdater(GitHubReleaseUpdater):
                 {
                     "owner": self.GITHUB_OWNER,
                     "repo": self.GITHUB_REPO,
-                    "tag": version,
+                    "rev": commit,
                     "hash": hash_expr,
                     "postFetch": self.XCARCHIVE_FILTER,
                 },
             ),
         )
 
-    def _src_nix_expr(self, version: str, hash_value: str | None = None) -> str:
+    def _src_nix_expr(self, commit: str, hash_value: str | None = None) -> str:
         return compact_nix_expr(
-            self._src_nix_expression(version, hash_value).rebuild(),
+            self._src_nix_expression(commit, hash_value).rebuild(),
         )
 
-    def _cargo_nix_expr(self, version: str, src_hash: str) -> str:
+    def _cargo_nix_expr(self, commit: str, src_hash: str) -> str:
         cargo_vendor_expr = FunctionCall(
             name=identifier_attr_path("pkgs", "rustPlatform", "fetchCargoVendor"),
             argument=AttributeSet.from_dict(
                 {
-                    "src": self._src_nix_expression(version, src_hash),
+                    "src": self._src_nix_expression(commit, src_hash),
                     "hash": identifier_attr_path("pkgs", "lib", "fakeHash"),
                 },
             ),
@@ -92,6 +93,7 @@ class SentryCliUpdater(GitHubReleaseUpdater):
     ) -> EventStream:
         """Compute ``srcHash`` and ``cargoHash`` via fixed-output builds."""
         _ = (session, context)
+        commit = self._require_commit(info)
 
         async for event in stream_fixed_output_hashes(
             self.name,
@@ -99,15 +101,13 @@ class SentryCliUpdater(GitHubReleaseUpdater):
                 FixedOutputHashStep(
                     hash_type="srcHash",
                     error="Missing srcHash output",
-                    expr=lambda _resolved: _build_nix_expr(
-                        self._src_nix_expr(info.version)
-                    ),
+                    expr=lambda _resolved: _build_nix_expr(self._src_nix_expr(commit)),
                 ),
                 FixedOutputHashStep(
                     hash_type="cargoHash",
                     error="Missing cargoHash output",
                     expr=lambda resolved: _build_nix_expr(
-                        self._cargo_nix_expr(info.version, resolved["srcHash"])
+                        self._cargo_nix_expr(commit, resolved["srcHash"])
                     ),
                 ),
             ),

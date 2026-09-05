@@ -4,6 +4,7 @@
   stdenv,
   stdenvNoCC,
   bun,
+  fetchurl,
   nodejs,
   makeWrapper,
   makeDesktopItem,
@@ -20,9 +21,24 @@ let
   pname = "mux";
   version = outputs.lib.getFlakeVersion pname;
   src = inputs.mux;
+  packageManifest = builtins.fromJSON (builtins.readFile "${src}/package.json");
+  bunVersion =
+    (selfSource.pins or { }).bunVersion or (throw "mux sources.json is missing pins.bunVersion");
+  bunRuntime =
+    import ../../lib/exact-bun.nix
+      {
+        inherit bun fetchurl lib;
+      }
+      {
+        inherit packageManifest;
+        packageName = pname;
+        source = selfSource;
+        system = stdenv.hostPlatform.system;
+        version = bunVersion;
+      };
   # The updater owns the exact lock and validates it against the realized
   # node_modules tree during configurePhase.
-  electronVersion = selfSource.pins.electronVersion;
+  inherit (selfSource) electronVersion;
   electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
   electronRuntime = electronBuild.runtime;
   electronRuntimeVersion = electronBuild.runtimeVersion;
@@ -56,7 +72,7 @@ let
     };
 
     nativeBuildInputs = [
-      bun
+      bunRuntime
       cacert
     ];
 
@@ -99,7 +115,7 @@ stdenv.mkDerivation {
   '';
 
   nativeBuildInputs = [
-    bun
+    bunRuntime
     nodejs
     makeWrapper
     gnumake
@@ -130,7 +146,7 @@ stdenv.mkDerivation {
     resolvedElectronVersion="$(node -p "require('./node_modules/electron/package.json').version")"
     if [ "$resolvedElectronVersion" != "${electronVersion}" ]; then
       echo "mux electron version mismatch: expected ${electronVersion}, got $resolvedElectronVersion" >&2
-      echo "Update packages/mux/default.nix with the new Electron headers hash." >&2
+      echo "Run 'nixcfg update mux' to refresh updater-owned Electron metadata." >&2
       exit 1
     fi
 
@@ -233,6 +249,8 @@ stdenv.mkDerivation {
       electronRuntime
       electronRuntimeVersion
       electronVersion
+      bunRuntime
+      bunVersion
       ;
   };
 

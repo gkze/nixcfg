@@ -571,16 +571,24 @@ def test_hermes_desktop_tracks_the_authoritative_flake_input() -> None:
     assert node.locked.rev is not None
     info = VersionInfo(
         get_flake_input_version(node),
-        {"commit": node.locked.rev},
+        module.ElectronManifestMetadata(
+            node=node,
+            commit=node.locked.rev,
+            electron_version="42.3.3",
+            manifest_path="apps/desktop/package.json",
+            manifest_version="1.2.3",
+        ),
     )
     result = updater.build_result(info, [])
-    desktop_source = load_source_entry(_PACKAGE_DIR / "sources.json")
     agent_source = load_source_entry(REPO_ROOT / "packages/hermes-agent/sources.json")
 
     assert updater.name == "hermes-desktop"
     assert updater.supported_platforms == ("aarch64-darwin",)
-    assert result.equivalent_to(desktop_source)
-    assert desktop_source.equivalent_to(agent_source)
+    assert result.version == agent_source.version
+    assert result.input == agent_source.input
+    assert result.commit == agent_source.commit
+    assert result.hashes.equivalent_to(agent_source.hashes)
+    assert result.electron_version == "42.3.3"
 
 
 def _patched_pinned_source(

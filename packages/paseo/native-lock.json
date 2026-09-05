@@ -3,6 +3,7 @@
     "commit": "a83fc4d58cb48eb68890dd689f94f28288cf2278",
     "dependencies": {
       "abseilCpp": {
+        "commit": "216a6bed75c9ec254ae0e5af537e5b9635b45191",
         "hash": "sha256-PuS7MLwi824c4z4Cubh029DEUVYSNPD3MwCDsgzsp3Y=",
         "owner": "abseil",
         "repo": "abseil-cpp",
@@ -13,17 +14,18 @@
         "commit": "5c210da409e7f1e51ddf445134a4376fdbd70d7d",
         "hash": "sha256-YqgzCyNywixebpHGx16tUuczmFS5pjCz5WjR89mv9eI=",
         "owner": "dmlc",
-        "repo": "dlpack",
-        "rev": "5c210da409e7f1e51ddf445134a4376fdbd70d7d"
+        "repo": "dlpack"
       },
       "flatbuffers": {
+        "commit": "0100f6a5779831fa7a651e4b67ef389a8752bd9b",
         "hash": "sha256-e+dNPNbCHYDXUS/W+hMqf/37fhVgEGzId6rhP3cToTE=",
         "owner": "google",
         "repo": "flatbuffers",
-        "rev": "v23.5.26",
+        "tag": "v23.5.26",
         "version": "23.5.26"
       },
       "mp11": {
+        "commit": "0a0b5fb001ce0233ae3a6f99d849c0649e5a7361",
         "hash": "sha256-cLPvjkf2Au+B19PJNrUkTW/VPxybi1MpPxnIl4oo4/o=",
         "owner": "boostorg",
         "repo": "mp11",
@@ -31,38 +33,29 @@
         "version": "boost-1.82.0"
       },
       "onnx": {
+        "commit": "e709452ef2bbc1d113faf678c24e6d3467696e83",
         "hash": "sha256-UhtF+CWuyv5/Pq/5agLL4Y95YNP63W2BraprhRqJOag=",
         "owner": "onnx",
         "repo": "onnx",
         "tag": "v1.18.0",
         "version": "v1.18.0"
       },
-      "protobuf": {
-        "hash": "sha256-wfu1MyCycGpxFB++eicA0F41j886/Y52I/4+ciRUg2o=",
-        "nixpkgsAttribute": "protobuf_32",
-        "owner": "protocolbuffers",
-        "repo": "protobuf",
-        "tag": "v32.1",
-        "version": "32.1"
-      },
       "re2": {
+        "commit": "6dcd83d60f7944926bfd308cc13979fc53dd69ca",
         "hash": "sha256-IeANwJlJl45yf8iu/AZNDoiyIvTCZIeK1b74sdCfAIc=",
         "owner": "google",
         "repo": "re2",
-        "rev": "2024-07-02",
+        "tag": "2024-07-02",
         "version": "2024-07-02"
       },
       "safeint": {
+        "commit": "4cafc9196c4da9c817992b20f5253ef967685bf8",
         "hash": "sha256-pjwjrqq6dfiVsXIhbBtbolhiysiFlFTnx5XcX77f+C0=",
         "owner": "dcleblanc",
         "repo": "safeint",
         "tag": "3.0.28",
         "version": "3.0.28"
       }
-    },
-    "nixpkgsRecipe": {
-      "commit": "e1e423f183cde97926ac113d8a4de5a5042a7264",
-      "path": "pkgs/by-name/on/onnxruntime/package.nix"
     },
     "patches": [
       {
@@ -93,13 +86,13 @@
   "paseo": {
     "appBuilderLibBackportCommit": "2ff9190aadc791503a6e62cdcbfa975448bc49bf",
     "appBuilderLibVersion": "26.8.1",
-    "claudeAgentSdkVersion": "0.3.220",
-    "commit": "20d7efc46a316f5a274b9943a5c43b0322269825",
+    "claudeAgentSdkVersion": "0.3.246",
+    "commit": "9400a49af670fdb5db4af58e73f8df98588dbea9",
     "electronVersion": "41.2.0",
     "esbuildVersion": "0.25.12",
     "nodeAddonApiVersion": "8.3.0",
     "npmFetcherVersion": 2,
-    "version": "0.6.1"
+    "version": "0.7.2"
   },
   "schemaVersion": 1,
   "sherpaOnnx": {

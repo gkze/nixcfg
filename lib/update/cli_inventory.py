@@ -19,7 +19,10 @@ from lib.update.paths import (
     sources_file_for,
     updater_dir_for,
 )
-from lib.update.planner import source_backing_input_name
+from lib.update.planner import (
+    source_additional_input_names,
+    source_backing_input_name,
+)
 from lib.update.refs import get_flake_inputs_with_refs
 from lib.update.sources import load_all_sources
 from lib.update.updaters import UPDATERS, ensure_updaters_loaded
@@ -125,6 +128,14 @@ class _InventoryTarget:
     ref_target: _InventoryRefTarget | None
     source_target: _InventorySourceTarget | None
     generated_artifacts: tuple[str, ...]
+    additional_inputs: tuple[str, ...] = ()
+
+    def input_names(self) -> tuple[str, ...]:
+        names = (
+            *((self.backing_input,) if self.backing_input else ()),
+            *self.additional_inputs,
+        )
+        return tuple(dict.fromkeys(names))
 
     def selector_value(self) -> str | None:
         if self.ref_target is not None:
@@ -141,8 +152,8 @@ class _InventoryTarget:
         return None
 
     def source_value(self) -> str:
-        if self.backing_input:
-            return self.backing_input
+        if input_names := self.input_names():
+            return ", ".join(input_names)
         if self.ref_target is not None:
             return self.ref_target.source_locator()
         if self.source_target is not None and self.source_target.path is not None:
@@ -175,6 +186,7 @@ class _InventoryTarget:
             "handles": self.handles.to_dict(),
             "classification": self.classification,
             "backingInput": self.backing_input,
+            "additionalInputs": list(self.additional_inputs),
             "refTarget": None if self.ref_target is None else self.ref_target.to_dict(),
             "sourceTarget": (
                 None if self.source_target is None else self.source_target.to_dict()
@@ -299,6 +311,7 @@ def build_update_inventory() -> list[_InventoryTarget]:
         entry = sources.entries.get(name)
         ref_input = ref_inputs.get(name)
         source_backing_input = source_backing_input_name(name, updater_cls, entry)
+        additional_inputs = source_additional_input_names(updater_cls)
         backing_input = source_backing_input or (
             ref_input.name if ref_input is not None else None
         )
@@ -307,7 +320,8 @@ def build_update_inventory() -> list[_InventoryTarget]:
         )
         handles = _InventoryHandles(
             ref_update=name in ref_inputs,
-            input_refresh=source_backing_input is not None and updater_cls is not None,
+            input_refresh=updater_cls is not None
+            and (source_backing_input is not None or bool(additional_inputs)),
             source_update=updater_cls is not None,
             artifact_write=bool(generated_artifacts),
         )
@@ -346,6 +360,7 @@ def build_update_inventory() -> list[_InventoryTarget]:
                 ref_target=ref_target,
                 source_target=source_target,
                 generated_artifacts=generated_artifacts,
+                additional_inputs=additional_inputs,
             )
         )
 
@@ -384,7 +399,7 @@ def _render_inventory_table(targets: list[_InventoryTarget]) -> None:
             target.name,
             target.classification_label(),
             ", ".join(target.handles.touch_labels()) or "<none>",
-            target.backing_input or "<none>",
+            ", ".join(target.input_names()) or "<none>",
             target.selector_value() or "<none>",
             ", ".join(target.write_labels()) or "<none>",
         )

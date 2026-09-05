@@ -15,7 +15,8 @@ into reusable framework primitives and a standalone library of modules.
 
 - Primary focus is [`nix-darwin`](https://github.com/LnL7/nix-darwin) plus
   [Home Manager](https://github.com/nix-community/home-manager).
-- Active Darwin hosts: [`argus`](darwin/argus.nix) (work profile enabled) and
+- Active Darwin hosts: [`argus`](darwin/argus.nix) and
+  [`zeus`](darwin/zeus.nix) (work profile enabled), plus
   [`rocinante`](darwin/rocinante.nix) (personal profile).
 - Active Home Manager output: [`homeConfigurations.george`](flake.nix).
 - Exported systems: [`aarch64-darwin`](flake.nix),
@@ -49,20 +50,45 @@ into reusable framework primitives and a standalone library of modules.
 
 ## Install and apply
 
-1. Install Nix (recommended:
-   [Determinate Nix Installer](https://github.com/DeterminateSystems/nix-installer)).
-1. Clone this repository to [`~/.config/nixcfg`](.).
-1. Apply the Darwin configuration:
+1. Install vanilla Nix using the official multi-user installer:
 
-```bash
-nh darwin switch --no-nom .
-```
+   ```bash
+   curl -L https://nixos.org/nix/install | sh -s -- --daemon
+   ```
+
+   Then either open a new terminal or load the daemon profile in the current
+   shell:
+
+   ```bash
+   . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+   ```
+
+1. Clone this repository to [`~/.config/nixcfg`](.).
+
+1. Bootstrap nix-darwin with the intended host selected explicitly (the
+   pre-switch macOS hostname is not yet declarative):
+
+   ```bash
+   cd ~/.config/nixcfg
+   sudo /nix/var/nix/profiles/default/bin/nix \
+     --extra-experimental-features 'nix-command flakes' \
+     run --inputs-from . nix-darwin#darwin-rebuild -- \
+     switch --flake .#zeus
+   ```
+
+1. After the first successful switch, use the managed `nh` command for normal
+   updates:
+
+   ```bash
+   nh darwin switch --no-nom .#zeus
+   ```
 
 Useful build-only checks:
 
 ```bash
 nix build .#checks.aarch64-darwin.darwin-argus
 nix build .#checks.aarch64-darwin.darwin-rocinante
+nix build .#checks.aarch64-darwin.darwin-zeus
 nix build .#homeConfigurations.george.activationPackage
 ```
 
@@ -109,6 +135,25 @@ nix run .#nixcfg -- update --help
 nix run .#nixcfg -- ci --help
 nix run .#nixcfg -- schema --help
 ```
+
+`nixcfg update` prepares changes in an isolated copy of the checkout. Every full
+update must build all configured root closures before it changes the checkout.
+A root closure contains a system or Home Manager configuration and all its
+dependencies. Targeted updates use the same build gate when they change files.
+Root discovery follows `darwin/*.nix`, `nixos/*.nix`, and `home/*/default.nix`.
+It does not require a separate list of host names.
+
+If a root build fails, the updater leaves the candidate changes outside the
+checkout. The updater also rejects source changes that invalidate the tested
+snapshot. It preserves existing user edits and does not activate a system or
+Home Manager configuration.
+
+Source-derived toolchain metadata comes from the pinned upstream manifests and
+locks. Node and pnpm selection must satisfy upstream requirements through the
+pinned nixpkgs package set. Mux and Superset use the exact Bun version from
+`packageManager`, with updater-generated runtime hashes. The updater owns these
+generated values. Reviewed compatibility pins and platform policy remain
+explicit.
 
 ## Reuse as a framework
 

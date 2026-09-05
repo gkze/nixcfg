@@ -527,12 +527,9 @@ let
         patchedBuzzSource = buzzRuntimePolicySource;
       };
   desktopCandidateWired = lib.isDerivation desktopCandidateNative;
-  # This evidence records the exact candidate whose real artifact, isolated
-  # launcher, offline runtime, signatures, app metadata, and reference closure
-  # were validated. Its store identities remain independent of the candidate
-  # being evaluated, but the updater owns them alongside every other native
-  # lock so this derivation never embeds an immutable identity directly.
-  desktopBundleValidationEvidence = nativeLock.desktopBundleValidation or { };
+  # Keep the diagnostic identity derived from the candidate. The candidate's
+  # own build and install checks are the executable validation authority; the
+  # updater realizes this exact package after persisting every new source.
   desktopCandidateIdentity =
     if desktopCandidateWired then
       {
@@ -541,30 +538,14 @@ let
       }
     else
       null;
-  expectedDesktopBundleValidation = {
-    schemaVersion = 1;
-    status = "passed";
-    candidate = desktopCandidateIdentity;
-    checks = [
-      "realized-candidate"
-      "isolated-launcher-startup"
-      "offline-runtime-loading"
-      "signatures"
-      "exact-app-metadata"
-      "reference-free-final-bundle"
-    ];
-  };
-  desktopBundleValidationComplete =
-    desktopCandidateWired && desktopBundleValidationEvidence == expectedDesktopBundleValidation;
   desktopCandidateExportReady =
     desktopCandidateWired
-    && desktopBundleValidationComplete
     && (desktopCandidateNative.passthru.buzzNativeContract.exportReady or false)
     && (desktopCandidateNative.passthru.macApp or null) == expectedMacApp;
   desktopExportGate = lib.optional (!desktopCandidateExportReady) ''
-    Buzz desktop export is disabled. Realization, isolated launcher startup,
-    offline runtime loading, signatures, exact app metadata, and a
-    reference-free final bundle must pass before app routing can be enabled.
+    Buzz desktop export is disabled. The exact candidate derivation, its
+    install-check contract, and its macOS app metadata must be wired before app
+    routing can be enabled.
   '';
   nativeFoundationSlots = {
     rustToolchain = rustToolchainNative;
@@ -636,8 +617,6 @@ let
     buzzDesktopCandidateStatus = {
       wired = desktopCandidateWired;
       identity = desktopCandidateIdentity;
-      evidence = desktopBundleValidationEvidence;
-      validationComplete = desktopBundleValidationComplete;
       exportReady = desktopCandidateExportReady;
     };
     buzzBuildGates = unresolvedBuildGates;

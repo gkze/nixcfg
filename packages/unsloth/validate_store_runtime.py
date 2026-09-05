@@ -13,6 +13,7 @@ import os
 import re
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -27,7 +28,6 @@ if TYPE_CHECKING:
     from typing import IO
 
 CANDIDATE_PORTS = tuple(range(8888, 8909))
-PROTECTED_PORT = 8765
 HEALTH_HOST = "127.0.0.1"
 HEALTH_PATH = "/api/health"
 REQUIRED_HEALTH_FIELDS = {
@@ -62,11 +62,25 @@ _PROCESS_SNAPSHOT_FIELD_COUNT = 5
 _RAW_PS_FIELD_COUNT = 4
 _HTTP_SUCCESS_MIN = 200
 _HTTP_SUCCESS_MAX = 300
+_MAX_TCP_PORT = 65535
 _FORCED_CLEANUP_TIMEOUT_SECONDS = 5
+_SENTINEL_BIND_ATTEMPTS = 32
+
+type ListenerIdentity = tuple[tuple[int, str, str], ...]
 
 
 class ValidationError(RuntimeError):
     """The contained host-runtime contract was not satisfied."""
+
+
+def _error_message(error: BaseException) -> str:
+    """Render one error plus cleanup notes carried by its explicit cause chain."""
+    details = [str(error)]
+    current: BaseException | None = error
+    while current is not None:
+        details.extend(getattr(current, "__notes__", ()))
+        current = current.__cause__
+    return "; ".join(details)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +91,23 @@ class Listener:
     command: str
     address: str
     port: int
+
+
+@dataclass(frozen=True, slots=True)
+class SentinelBaseline:
+    """Exact identity of the validator-owned listener during candidate execution."""
+
+    port: int
+    identity: ListenerIdentity
+    identity_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class ListenerSentinel:
+    """Live socket and its independently observed listener baseline."""
+
+    listener: socket.socket
+    baseline: SentinelBaseline
 
 
 @dataclass(frozen=True, slots=True)
@@ -451,7 +482,7 @@ def _processes() -> dict[int, Process]:
 def _listener_identity(
     listeners: Sequence[Listener],
     port: int,
-) -> tuple[tuple[int, str, str], ...]:
+) -> ListenerIdentity:
     return tuple(
         sorted(
             (listener.pid, listener.command, listener.address)
@@ -461,13 +492,13 @@ def _listener_identity(
     )
 
 
-def _require_protected_listener(
+def _require_sentinel_listener(
     listeners: Sequence[Listener],
-    expected: tuple[tuple[int, str, str], ...],
+    sentinel: SentinelBaseline,
 ) -> None:
-    actual = _listener_identity(listeners, PROTECTED_PORT)
-    if actual != expected:
-        msg = f"protected port {PROTECTED_PORT} listener identity changed"
+    actual = _listener_identity(listeners, sentinel.port)
+    if actual != sentinel.identity:
+        msg = f"validator sentinel listener identity changed on port {sentinel.port}"
         raise ValidationError(msg)
 
 
@@ -476,7 +507,7 @@ def _candidate_listeners(listeners: Sequence[Listener]) -> tuple[Listener, ...]:
 
 
 def request_candidate_health(port: int) -> object | None:
-    """Read health only from a candidate port, never from protected port 8765."""
+    """Read health only from the dedicated candidate port range."""
     if port not in CANDIDATE_PORTS:
         msg = f"health requests are restricted to candidate health ports: {port}"
         raise ValidationError(msg)
@@ -532,13 +563,13 @@ def _wait_for_runtime(
     app_pid: int,
     backend_runtime_entrypoint: Path,
     session_id: int,
-    protected_identity: tuple[tuple[int, str, str], ...],
+    sentinel: SentinelBaseline,
     timeout: float,
 ) -> RuntimeEvidence:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         listeners = _listeners()
-        _require_protected_listener(listeners, protected_identity)
+        _require_sentinel_listener(listeners, sentinel)
         processes = _processes()
         app_process = processes.get(app_pid)
         if app_process is None:
@@ -648,7 +679,7 @@ def _teardown_session(
     *,
     app: subprocess.Popen[bytes],
     session_id: int,
-    protected_identity: tuple[tuple[int, str, str], ...],
+    sentinel: SentinelBaseline,
     timeout: float,
 ) -> None:
     verification_errors: list[ValidationError] = []
@@ -679,7 +710,7 @@ def _teardown_session(
         app_exit = app.poll()
         try:
             listeners = _listeners()
-            _require_protected_listener(listeners, protected_identity)
+            _require_sentinel_listener(listeners, sentinel)
         except ValidationError as error:
             remember(error)
             listeners = ()
@@ -707,7 +738,7 @@ def _teardown_session(
             break
         time.sleep(0.1)
     try:
-        _require_protected_listener(_listeners(), protected_identity)
+        _require_sentinel_listener(_listeners(), sentinel)
     except ValidationError as error:
         remember(error)
     details = "; ".join(str(error) for error in verification_errors)
@@ -725,14 +756,86 @@ def _require_runtime_parameters(
     if startup_timeout <= 0 or teardown_timeout <= 0:
         msg = "timeouts must be positive"
         raise ValidationError(msg)
-    if PROTECTED_PORT in CANDIDATE_PORTS or len(CANDIDATE_PORTS) != len(
-        range(8888, 8909)
-    ):
+    if tuple(range(8888, 8909)) != CANDIDATE_PORTS:
         msg = "candidate port contract is internally inconsistent"
         raise ValidationError(msg)
 
 
-def _listener_baseline() -> tuple[tuple[tuple[int, str, str], ...], str]:
+def _close_sentinel_after_setup_failure(
+    listener: socket.socket | None,
+    error: BaseException,
+) -> None:
+    if listener is None:
+        return
+    try:
+        listener.close()
+    except OSError as cleanup_error:
+        error.add_note(f"sentinel socket cleanup also failed: {cleanup_error}")
+
+
+def _sentinel_socket() -> tuple[socket.socket, int]:
+    """Bind a validator-owned IPv4 listener outside the candidate port range."""
+    for _attempt in range(_SENTINEL_BIND_ATTEMPTS):
+        listener: socket.socket | None = None
+        try:
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.bind((HEALTH_HOST, 0))
+            bound_address = listener.getsockname()
+        except OSError as error:
+            _close_sentinel_after_setup_failure(listener, error)
+            msg = f"could not establish validator listener sentinel: {error}"
+            raise ValidationError(msg) from error
+        port = bound_address[1]
+        if (
+            not isinstance(port, int)
+            or isinstance(port, bool)
+            or not 0 < port <= _MAX_TCP_PORT
+        ):
+            error = ValidationError(f"OS assigned an invalid sentinel port: {port!r}")
+            _close_sentinel_after_setup_failure(listener, error)
+            raise error
+        if port in CANDIDATE_PORTS:
+            try:
+                listener.close()
+            except OSError as error:
+                msg = f"could not release reserved candidate port {port}: {error}"
+                raise ValidationError(msg) from error
+            continue
+        try:
+            listener.listen(1)
+        except OSError as error:
+            _close_sentinel_after_setup_failure(listener, error)
+            msg = f"could not establish validator listener sentinel: {error}"
+            raise ValidationError(msg) from error
+        return listener, port
+    msg = "OS repeatedly assigned sentinel ports reserved for the candidate runtime"
+    raise ValidationError(msg)
+
+
+def sentinel_listener_baseline(
+    listeners: Sequence[Listener],
+    *,
+    port: int,
+    owner_pid: int,
+) -> ListenerIdentity:
+    """Require the exact validator-owned IPv4 listener after binding it."""
+    sentinel_identity = _listener_identity(listeners, port)
+    if not sentinel_identity:
+        msg = f"validator sentinel on port {port} is absent from the listener snapshot"
+        raise ValidationError(msg)
+    expected_address = f"{HEALTH_HOST}:{port}"
+    if any(
+        address != expected_address for _pid, _command, address in sentinel_identity
+    ):
+        msg = f"validator sentinel must bind exactly {expected_address}"
+        raise ValidationError(msg)
+    if len(sentinel_identity) != 1 or sentinel_identity[0][0] != owner_pid:
+        msg = "validator sentinel listener is not owned exclusively by this validator"
+        raise ValidationError(msg)
+    return sentinel_identity
+
+
+def _listener_baseline(port: int) -> SentinelBaseline:
     initial_listeners = _listeners()
     occupied = sorted({
         listener.port for listener in _candidate_listeners(initial_listeners)
@@ -740,28 +843,59 @@ def _listener_baseline() -> tuple[tuple[tuple[int, str, str], ...], str]:
     if occupied:
         msg = f"candidate ports must all be free before launch; occupied: {occupied}"
         raise ValidationError(msg)
-    protected_identity = protected_listener_baseline(initial_listeners)
-    protected_digest = hashlib.sha256(
-        json.dumps(protected_identity, separators=(",", ":")).encode()
+    sentinel_identity = sentinel_listener_baseline(
+        initial_listeners,
+        port=port,
+        owner_pid=os.getpid(),
+    )
+    sentinel_digest = hashlib.sha256(
+        json.dumps(sentinel_identity, separators=(",", ":")).encode()
     ).hexdigest()
-    return protected_identity, protected_digest
+    return SentinelBaseline(
+        port=port,
+        identity=sentinel_identity,
+        identity_sha256=sentinel_digest,
+    )
 
 
-def protected_listener_baseline(
-    listeners: Sequence[Listener],
-) -> tuple[tuple[int, str, str], ...]:
-    """Require a live, exact IPv4 visualization-server listener before launch."""
-    protected_identity = _listener_identity(listeners, PROTECTED_PORT)
-    if not protected_identity:
-        msg = f"protected port {PROTECTED_PORT} must already be listening"
-        raise ValidationError(msg)
-    expected_address = f"{HEALTH_HOST}:{PROTECTED_PORT}"
-    if any(
-        address != expected_address for _pid, _command, address in protected_identity
-    ):
-        msg = f"protected listener must bind exactly {expected_address}"
-        raise ValidationError(msg)
-    return protected_identity
+def _start_listener_sentinel() -> ListenerSentinel:
+    """Create and independently observe the validator-owned listener sentinel."""
+    listener, port = _sentinel_socket()
+    try:
+        baseline = _listener_baseline(port)
+    except BaseException as error:
+        try:
+            listener.close()
+        except OSError as cleanup_error:
+            error.add_note(f"sentinel socket cleanup also failed: {cleanup_error}")
+        raise
+    return ListenerSentinel(listener=listener, baseline=baseline)
+
+
+def _teardown_listener_sentinel(sentinel: ListenerSentinel) -> None:
+    """Close the owned sentinel and prove that its listener is absent."""
+    close_error: OSError | None = None
+    try:
+        sentinel.listener.close()
+    except OSError as error:
+        close_error = error
+    try:
+        remaining = _listener_identity(_listeners(), sentinel.baseline.port)
+    except ValidationError as inspection_error:
+        if close_error is not None:
+            inspection_error.add_note(
+                f"sentinel socket close also failed: {close_error}"
+            )
+        raise
+    if remaining:
+        msg = f"validator sentinel on port {sentinel.baseline.port} survived teardown"
+        error = ValidationError(msg)
+        if close_error is not None:
+            error.add_note(f"sentinel socket close also failed: {close_error}")
+        raise error from close_error
+    if close_error is not None:
+        msg = f"could not close validator listener sentinel: {close_error}"
+        raise ValidationError(msg) from close_error
 
 
 def _launch_direct_app(
@@ -802,7 +936,7 @@ def _isolated_session_id(app: subprocess.Popen[bytes]) -> int:
 def _run_contained_runtime(
     *,
     store: StoreEvidence,
-    protected_identity: tuple[tuple[int, str, str], ...],
+    sentinel: SentinelBaseline,
     startup_timeout: float,
     teardown_timeout: float,
 ) -> tuple[RuntimeEvidence, int]:
@@ -831,7 +965,7 @@ def _run_contained_runtime(
                         app_pid=app.pid,
                         backend_runtime_entrypoint=store.backend_runtime_entrypoint,
                         session_id=session_id,
-                        protected_identity=protected_identity,
+                        sentinel=sentinel,
                         timeout=startup_timeout,
                     )
                 except ValidationError as error:
@@ -841,7 +975,7 @@ def _run_contained_runtime(
                     _teardown_session(
                         app=app,
                         session_id=session_id,
-                        protected_identity=protected_identity,
+                        sentinel=sentinel,
                         timeout=teardown_timeout,
                     )
                 except ValidationError as error:
@@ -863,10 +997,10 @@ def _run_contained_runtime(
 def _require_final_teardown(
     *,
     session_id: int,
-    protected_identity: tuple[tuple[int, str, str], ...],
+    sentinel: SentinelBaseline,
 ) -> None:
     final_listeners = _listeners()
-    _require_protected_listener(final_listeners, protected_identity)
+    _require_sentinel_listener(final_listeners, sentinel)
     if _candidate_listeners(final_listeners):
         msg = "candidate listener survived contained teardown"
         raise ValidationError(msg)
@@ -884,17 +1018,33 @@ def validate_store_runtime(
     """Run the direct store-path app gate and return machine-readable evidence."""
     _require_runtime_parameters(startup_timeout, teardown_timeout)
     store = _load_store_evidence(smoke_result)
-    protected_identity, protected_digest = _listener_baseline()
-    evidence, session_id = _run_contained_runtime(
-        store=store,
-        protected_identity=protected_identity,
-        startup_timeout=startup_timeout,
-        teardown_timeout=teardown_timeout,
-    )
-    _require_final_teardown(
-        session_id=session_id,
-        protected_identity=protected_identity,
-    )
+    listener_sentinel = _start_listener_sentinel()
+    try:
+        evidence, session_id = _run_contained_runtime(
+            store=store,
+            sentinel=listener_sentinel.baseline,
+            startup_timeout=startup_timeout,
+            teardown_timeout=teardown_timeout,
+        )
+        _require_final_teardown(
+            session_id=session_id,
+            sentinel=listener_sentinel.baseline,
+        )
+    except BaseException as error:
+        try:
+            _teardown_listener_sentinel(listener_sentinel)
+        except ValidationError as cleanup_error:
+            if isinstance(error, ValidationError):
+                msg = (
+                    f"{error}; sentinel teardown also failed: "
+                    f"{_error_message(cleanup_error)}"
+                )
+                raise ValidationError(msg) from error
+            error.add_note(
+                f"sentinel teardown also failed: {_error_message(cleanup_error)}"
+            )
+        raise
+    _teardown_listener_sentinel(listener_sentinel)
 
     return {
         "appCandidate": str(store.app_candidate),
@@ -907,8 +1057,8 @@ def validate_store_runtime(
         "listenerOwnership": "passed",
         "ownedProcessGroups": list(evidence.owned_process_groups),
         "port": evidence.port,
-        "protectedListenerCount": len(protected_identity),
-        "protectedListenerIdentitySha256": protected_digest,
+        "protectedListenerCount": len(listener_sentinel.baseline.identity),
+        "protectedListenerIdentitySha256": (listener_sentinel.baseline.identity_sha256),
         "sandbox": "passed",
         "schemaVersion": 2,
         "sessionId": evidence.session_id,
@@ -941,7 +1091,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             teardown_timeout=args.teardown_timeout,
         )
     except ValidationError as error:
-        msg = f"Unsloth store runtime validation failed: {error}"
+        msg = f"Unsloth store runtime validation failed: {_error_message(error)}"
         raise SystemExit(msg) from error
     sys.stdout.write(f"{json.dumps(evidence, sort_keys=True)}\n")
     return 0

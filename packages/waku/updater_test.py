@@ -28,6 +28,11 @@ from lib.tests._shell_ast import (
     node_text,
     parse_shell,
 )
+from lib.tests._source_metadata import (
+    assert_immutable_commit,
+    assert_release_version,
+    assert_structured_source_hashes,
+)
 from lib.tests._updater_helpers import (
     collect_events,
     install_fixed_hash_stream,
@@ -469,19 +474,21 @@ def test_waku_requires_commit_when_building_source_result() -> None:
 
 
 def test_waku_source_metadata_is_exact_and_never_names_a_vendor_binary() -> None:
-    """Bootstrap metadata pins source only; the ZIP/DMG remain evidence."""
-    source = json.loads((_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8"))
+    """Bootstrap metadata pins immutable source closures, never vendor binaries."""
+    source = SourceEntry.model_validate_json(
+        (_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")
+    )
 
-    assert source == {
-        "commit": _COMMIT,
-        "hashes": [
-            {"hash": _CARGO_HASH, "hashType": "cargoHash"},
-            {"hash": _SRC_HASH, "hashType": "srcHash"},
-        ],
-        "version": _VERSION,
-    }
-    assert ".zip" not in json.dumps(source)
-    assert ".dmg" not in json.dumps(source)
+    assert_release_version(source.version)
+    assert_immutable_commit(source.commit)
+    assert_structured_source_hashes(
+        source,
+        hash_types={"cargoHash", "srcHash"},
+    )
+    assert source.urls is None
+    serialized = json.dumps(source.to_dict())
+    assert ".zip" not in serialized
+    assert ".dmg" not in serialized
 
 
 def test_waku_validates_the_materialized_bootstrap_source() -> None:

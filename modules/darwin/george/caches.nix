@@ -1,5 +1,7 @@
 {
   nixcfg.common.nix = {
+    minFreeStoreBytes = 32 * 1024 * 1024 * 1024;
+    maxFreeStoreBytes = 128 * 1024 * 1024 * 1024;
     substituters = [
       "https://gkze.cachix.org"
       "https://zed.cachix.org"

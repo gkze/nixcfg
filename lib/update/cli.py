@@ -5,7 +5,9 @@ import contextlib
 import json
 import os
 import shutil
+import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Unpack, cast
@@ -196,45 +198,209 @@ __all__ = (
 )
 
 _REEXEC_ENV = "NIXCFG_UPDATE_REEXECED_FROM_CHECKOUT"
-_UPDATE_LIBRARY_RELATIVE_ROOT = Path("lib/update")
+_EXECUTION_SOURCE_ENV = "NIXCFG_UPDATE_EXECUTION_SOURCE"
 
 
-def _python_file_relpaths(root: Path) -> set[Path]:
-    return {path.relative_to(root) for path in root.rglob("*.py")}
+class _UpdateSourceChangedError(update_persistence.UpdateWorkspaceError):
+    """The update runtime no longer matches the stable workspace snapshot."""
 
 
-def _same_file_bytes(left: Path, right: Path) -> bool:
-    return left.read_bytes() == right.read_bytes()
+@dataclass(frozen=True, slots=True)
+class _RuntimeSourcePolicy:
+    root_paths: tuple[str, ...]
+    library_extensions: tuple[str, ...]
+    library_names: tuple[str, ...]
+    excluded_library_paths: tuple[str, ...]
+    dynamic_roots: tuple[str, ...]
+    dynamic_extensions: tuple[str, ...]
+    dynamic_excluded_file_suffixes: tuple[str, ...]
+
+
+def _runtime_source_policy(root: Path) -> _RuntimeSourcePolicy:
+    """Load the cross-language runtime source policy from project metadata."""
+    with (root / "pyproject.toml").open("rb") as handle:
+        project = tomllib.load(handle)
+    raw_value = project["tool"]["nixcfg"]["runtimeSource"]
+    if not isinstance(raw_value, dict):
+        msg = "Invalid nixcfg runtime source policy table"
+        raise TypeError(msg)
+    raw = cast("dict[str, object]", raw_value)
+    schema_version = raw.get("schemaVersion")
+    if (
+        not isinstance(schema_version, int)
+        or isinstance(schema_version, bool)
+        or schema_version != 1
+    ):
+        msg = "Unsupported nixcfg runtime source policy schema"
+        raise RuntimeError(msg)
+
+    def _strings(name: str) -> tuple[str, ...]:
+        values = raw[name]
+        if not isinstance(values, list) or not all(
+            isinstance(value, str) and value for value in values
+        ):
+            msg = f"Invalid nixcfg runtime source policy field: {name}"
+            raise TypeError(msg)
+        return tuple(values)
+
+    def _paths(name: str) -> tuple[str, ...]:
+        values = _strings(name)
+        if any(
+            Path(value).is_absolute() or ".." in Path(value).parts for value in values
+        ):
+            msg = f"Invalid nixcfg runtime source policy path field: {name}"
+            raise TypeError(msg)
+        return values
+
+    return _RuntimeSourcePolicy(
+        root_paths=_paths("rootPaths"),
+        library_extensions=_strings("libraryExtensions"),
+        library_names=_strings("libraryNames"),
+        excluded_library_paths=_paths("excludedLibraryPaths"),
+        dynamic_roots=_paths("dynamicRoots"),
+        dynamic_extensions=_strings("dynamicExtensions"),
+        dynamic_excluded_file_suffixes=_strings("dynamicExcludedFileSuffixes"),
+    )
+
+
+def _runtime_source_relpaths(
+    root: Path,
+    policy: _RuntimeSourcePolicy,
+) -> set[Path]:
+    """Return the source files admitted by the shared runtime policy."""
+    runtime_paths: set[Path] = set()
+    for raw_path in policy.root_paths:
+        relative_root = Path(raw_path)
+        source_root = root / relative_root
+        if source_root.is_file() or source_root.is_symlink():
+            runtime_paths.add(relative_root)
+            continue
+        if not source_root.is_dir():
+            msg = f"Declared runtime source root does not exist: {raw_path}"
+            raise RuntimeError(msg)
+        runtime_paths.update(
+            relative_root / path.relative_to(source_root)
+            for path in source_root.rglob("*")
+            if path.is_file() or path.is_symlink()
+        )
+    library_root = root / "lib"
+    for path in library_root.rglob("*"):
+        if not path.is_file() and not path.is_symlink():
+            continue
+        relative_path = path.relative_to(library_root)
+        if any(
+            relative_path.is_relative_to(excluded)
+            for excluded in map(Path, policy.excluded_library_paths)
+        ):
+            continue
+        if (
+            path.suffix.removeprefix(".") in policy.library_extensions
+            or path.name in policy.library_names
+        ):
+            runtime_paths.add(Path("lib") / relative_path)
+    for raw_root in policy.dynamic_roots:
+        relative_root = Path(raw_root)
+        dynamic_root = root / relative_root
+        if dynamic_root.is_file() or dynamic_root.is_symlink():
+            dynamic_paths = (dynamic_root,)
+        elif dynamic_root.is_dir():
+            dynamic_paths = dynamic_root.rglob("*")
+        else:
+            msg = f"Declared dynamic runtime source root does not exist: {raw_root}"
+            raise RuntimeError(msg)
+        for path in dynamic_paths:
+            if not path.is_file() and not path.is_symlink():
+                continue
+            if path.suffix.removeprefix(".") not in policy.dynamic_extensions:
+                continue
+            if any(
+                path.name.endswith(suffix)
+                for suffix in policy.dynamic_excluded_file_suffixes
+            ):
+                continue
+            runtime_paths.add(
+                relative_root
+                if path == dynamic_root
+                else relative_root / path.relative_to(dynamic_root)
+            )
+    return runtime_paths
+
+
+def _same_source_path(left: Path, right: Path) -> bool:
+    """Compare one packaged path without hiding symlink identity changes."""
+    if left.is_symlink() or right.is_symlink():
+        return (
+            left.is_symlink()
+            and right.is_symlink()
+            and left.readlink() == right.readlink()
+        )
+    return (
+        left.is_file() and right.is_file() and left.read_bytes() == right.read_bytes()
+    )
 
 
 def _update_library_matches_checkout(
     repo_root: Path,
     *,
-    runtime_update_root: Path | None = None,
+    runtime_source_root: Path | None = None,
 ) -> bool:
-    """Return whether the running update library matches the checkout copy."""
-    repo_update_root = repo_root / _UPDATE_LIBRARY_RELATIVE_ROOT
+    """Return whether the complete packaged runtime matches the checkout."""
+    checkout_root = repo_root.expanduser().resolve()
+    configured_runtime_root = os.environ.get(_EXECUTION_SOURCE_ENV)
     runtime_root = (
-        Path(__file__).resolve().parent
-        if runtime_update_root is None
-        else runtime_update_root
+        Path(configured_runtime_root).expanduser().resolve()
+        if runtime_source_root is None and configured_runtime_root
+        else (
+            Path(__file__).resolve().parents[2]
+            if runtime_source_root is None
+            else runtime_source_root.expanduser().resolve()
+        )
     )
     try:
-        if runtime_root.samefile(repo_update_root):
+        if runtime_root.samefile(checkout_root):
             return True
-    except FileNotFoundError:
+    except OSError:
         return False
 
-    repo_files = _python_file_relpaths(repo_update_root)
-    runtime_files = _python_file_relpaths(runtime_root)
-    return repo_files == runtime_files and all(
-        _same_file_bytes(repo_update_root / relpath, runtime_root / relpath)
-        for relpath in repo_files
-    )
+    try:
+        repo_policy = _runtime_source_policy(checkout_root)
+        runtime_policy = _runtime_source_policy(runtime_root)
+    except KeyError, OSError, RuntimeError, TypeError, tomllib.TOMLDecodeError:
+        return False
+    if repo_policy != runtime_policy:
+        return False
+
+    try:
+        repo_files = _runtime_source_relpaths(checkout_root, repo_policy)
+        runtime_files = _runtime_source_relpaths(runtime_root, runtime_policy)
+    except OSError, RuntimeError:
+        return False
+    try:
+        return repo_files == runtime_files and all(
+            _same_source_path(checkout_root / relpath, runtime_root / relpath)
+            for relpath in repo_files
+        )
+    except OSError:
+        return False
 
 
 def _argv_runs_top_level_update(argv: list[str]) -> bool:
     return len(argv) > 1 and argv[1] == "update"
+
+
+def _revalidate_runtime_source_snapshot(workspace_root: Path) -> None:
+    """Reject a source race between runtime selection and workspace capture."""
+    if not (
+        _argv_runs_top_level_update(sys.argv) or os.environ.get(_EXECUTION_SOURCE_ENV)
+    ):
+        return
+    if _update_library_matches_checkout(workspace_root):
+        return
+    msg = (
+        "Update source changed while preparing the isolated workspace. "
+        "No changes were applied; retry `nixcfg update`."
+    )
+    raise _UpdateSourceChangedError(msg)
 
 
 def _maybe_reexec_checkout_update() -> int | None:
@@ -249,7 +415,7 @@ def _maybe_reexec_checkout_update() -> int | None:
     if os.environ.get(_REEXEC_ENV):
         sys.stderr.write(
             "Error: running nixcfg update code still differs from this checkout "
-            "after re-exec. Run `nix run .#nixcfg -- update ...` directly.\n"
+            "after re-exec. Run `nix run path:.#nixcfg -- update ...` directly.\n"
         )
         return 1
 
@@ -257,16 +423,27 @@ def _maybe_reexec_checkout_update() -> int | None:
     if nix is None:
         sys.stderr.write(
             "Error: installed nixcfg update code differs from this checkout, "
-            "but `nix` was not found for `nix run .#nixcfg -- update ...`.\n"
+            "but `nix` was not found for a checkout re-exec.\n"
         )
         return 1
 
     env = dict(os.environ)
     env[_REEXEC_ENV] = "1"
-    os.chdir(repo_root)
-    os.execvpe(nix, [nix, "run", ".#nixcfg", "--", *sys.argv[1:]], env)  # noqa: S606
-    msg = "unreachable"
-    raise AssertionError(msg)
+    env["REPO_ROOT"] = os.fspath(repo_root)
+    with update_persistence.visible_source_snapshot(repo_root) as snapshot_root:
+        result = subprocess.run(  # noqa: S603 -- fixed local Nix executable
+            [
+                nix,
+                "run",
+                f"path:{snapshot_root}#nixcfg",
+                "--",
+                *sys.argv[1:],
+            ],
+            cwd=repo_root,
+            env=env,
+            check=False,
+        )
+    return result.returncode
 
 
 def _get_updaters() -> dict[str, UpdaterClass]:
@@ -338,9 +515,6 @@ def check_required_tools(
 
 def _handle_required_tool_check(opts: UpdateOptions) -> int | None:
     """Validate required external tools for non-query update runs."""
-    if opts.list_targets or opts.schema or opts.validate:
-        return None
-
     missing = check_required_tools(
         include_flake_edit=_needs_flake_edit(opts),
         targets=opts.target_names,
@@ -538,10 +712,9 @@ def _build_item_meta(
         has_materialize_artifacts_phase = _shows_materialize_artifacts_phase(
             updater_cls
         )
-        has_input_refresh = (
-            update_planner.source_backing_input_name(name, updater_cls, entry)
-            is not None
-        )
+        has_input_refresh = update_planner.source_backing_input_name(
+            name, updater_cls, entry
+        ) is not None or bool(update_planner.source_additional_input_names(updater_cls))
 
         if in_flake and in_sources:
             origin = _ORIGIN_BOTH
@@ -591,9 +764,13 @@ def _emit_summary(
     had_errors: bool,
     out: OutputOptions,
     dry_run: bool,
+    discarded_updates: tuple[str, ...] = (),
+    indeterminate_updates: tuple[str, ...] = (),
 ) -> int:
     if out.json_output:
-        sys.stdout.write(f"{json.dumps(summary.to_dict())}\n")
+        payload = summary.to_dict()
+        payload["success"] = not had_errors
+        sys.stdout.write(f"{json.dumps(payload)}\n")
         return 1 if had_errors else 0
 
     if dry_run:
@@ -604,6 +781,17 @@ def _emit_summary(
             )
         else:
             out.print("\nNo updates available.", style="dim")
+    elif discarded_updates:
+        out.print(
+            f"\nCandidate updates discarded: {', '.join(discarded_updates)}",
+            style="yellow",
+        )
+    elif indeterminate_updates:
+        out.print(
+            "\nCandidate updates have unknown promotion state: "
+            f"{', '.join(indeterminate_updates)}",
+            style="yellow",
+        )
     elif summary.updated:
         out.print(
             f"\nUpdated: {', '.join(summary.updated)}",
@@ -684,6 +872,7 @@ class _RunExecutionResult:
     """Validated phase result awaiting promotion into the live checkout."""
 
     summary: UpdateSummary
+    candidate_updates: tuple[str, ...]
     had_errors: bool
     written_paths: tuple[Path, ...]
 
@@ -702,9 +891,25 @@ class _RunOutcome:
     """Final update result emitted only after workspace teardown."""
 
     summary: UpdateSummary = field(default_factory=UpdateSummary)
+    candidate_updates: tuple[str, ...] = ()
     had_errors: bool = False
+    promoted: bool = False
+    promotion_state: update_persistence.UpdatePromotionState | None = None
     plan_error: _RunPlanError | None = None
     workspace_error: str | None = None
+
+
+def _record_workspace_failure(
+    outcome: _RunOutcome,
+    error: update_persistence.UpdateWorkspaceError,
+) -> None:
+    """Merge one workspace failure and its recovered promotion state."""
+    outcome.summary.accumulate({"workspace": "error"})
+    outcome.had_errors = True
+    outcome.promotion_state = error.promotion_state
+    if error.promotion_state is update_persistence.UpdatePromotionState.PROMOTED:
+        outcome.promoted = True
+    outcome.workspace_error = str(error)
 
 
 def _handle_preflight_requests(opts: UpdateOptions, out: OutputOptions) -> int | None:
@@ -760,6 +965,24 @@ def _build_run_plan(opts: UpdateOptions) -> _RunPlan | _RunPlanError | None:
         item_meta=item_meta,
         order=order,
     )
+
+
+def _record_derivation_validation_failures(
+    summary: UpdateSummary,
+    out: OutputOptions,
+    failures: Iterable[update_derivation_validation.DerivationValidationFailure],
+) -> bool:
+    """Record and report derivation failures through one consistent boundary."""
+    materialized_failures = tuple(failures)
+    if not materialized_failures:
+        return False
+    summary.accumulate({failure.source: "error" for failure in materialized_failures})
+    for failure in materialized_failures:
+        out.print_error(
+            f"[{failure.source}] Derivation validation failed for "
+            f"{failure.installable}:\n{failure.message}"
+        )
+    return True
 
 
 async def _execute_run_plan_result(
@@ -845,6 +1068,7 @@ async def _execute_run_plan_result(
                 completed,
                 updaters=_get_updaters(),
                 timeout=config.default_subprocess_timeout,
+                all_declared_systems=True,
             )
     except BaseException:
         await queue.put(None)
@@ -854,17 +1078,17 @@ async def _execute_run_plan_result(
 
     summary = UpdateSummary()
     summary.accumulate(phase_result.details)
-    if validation_failures:
-        summary.accumulate({failure.source: "error" for failure in validation_failures})
-        for failure in validation_failures:
-            out.print_error(
-                f"[{failure.source}] Derivation validation failed for "
-                f"{failure.installable}:\n{failure.message}"
-            )
+    candidate_updates = tuple(summary.updated)
+    validation_failed = _record_derivation_validation_failures(
+        summary,
+        out,
+        validation_failures,
+    )
 
     return _RunExecutionResult(
         summary=summary,
-        had_errors=phase_result.errors > 0 or bool(validation_failures),
+        candidate_updates=candidate_updates,
+        had_errors=phase_result.errors > 0 or validation_failed,
         written_paths=tuple(written_paths or ()),
     )
 
@@ -911,9 +1135,17 @@ def _sources_refresh_flake_lock(
     """Return whether selected source tasks invoke any input refresh."""
     return any(
         update_planner.source_backing_input_name(name, updaters.get(name))
-        or getattr(updaters.get(name), "additional_input_names", ())
+        or update_planner.source_additional_input_names(updaters.get(name))
         for name in source_names
     )
+
+
+def _requires_root_closure_validation(
+    opts: UpdateOptions,
+    changed_paths: Iterable[Path],
+) -> bool:
+    """Return whether this transaction can affect configured root closures."""
+    return not opts.target_names or bool(tuple(changed_paths))
 
 
 def _emit_run_outcome(
@@ -925,8 +1157,38 @@ def _emit_run_outcome(
     """Emit exactly one final result after isolated workspace teardown."""
     plan_error = outcome.plan_error
     workspace_error = outcome.workspace_error
+    discarded_updates = (
+        outcome.candidate_updates
+        if (
+            not dry_run
+            and outcome.had_errors
+            and not outcome.promoted
+            and outcome.promotion_state
+            is not update_persistence.UpdatePromotionState.UNKNOWN
+        )
+        else ()
+    )
+    indeterminate_updates = (
+        outcome.candidate_updates
+        if (
+            not dry_run
+            and outcome.promotion_state
+            is update_persistence.UpdatePromotionState.UNKNOWN
+        )
+        else ()
+    )
+    candidate_state_known = not dry_run and outcome.promotion_state is not None
     if out.json_output:
         payload = cast("dict[str, object]", outcome.summary.to_dict())
+        payload["success"] = not outcome.had_errors
+        if discarded_updates:
+            payload["candidateUpdatesDiscarded"] = list(discarded_updates)
+            payload["updated"] = []
+        elif indeterminate_updates:
+            payload["candidateUpdatesIndeterminate"] = list(indeterminate_updates)
+            payload["updated"] = []
+        if candidate_state_known:
+            payload["candidatePromotionState"] = outcome.promotion_state.value
         if plan_error is not None:
             payload.update({
                 "unknownTargets": list(plan_error.unknown_targets),
@@ -953,10 +1215,16 @@ def _emit_run_outcome(
         had_errors=outcome.had_errors,
         out=out,
         dry_run=dry_run,
+        discarded_updates=discarded_updates,
+        indeterminate_updates=indeterminate_updates,
     )
 
 
-async def run_updates(opts: UpdateOptions) -> int:
+async def run_updates(
+    opts: UpdateOptions,
+    *,
+    check_tools: bool = False,
+) -> int:
     """Core update workflow — accepts typed UpdateOptions, returns exit code."""
     out = OutputOptions(json_output=opts.json, quiet=opts.quiet)
     config = _resolve_runtime_config(opts)
@@ -970,9 +1238,15 @@ async def run_updates(opts: UpdateOptions) -> int:
         with update_persistence.IsolatedUpdateWorkspace(
             get_repo_root(),
         ) as workspace:
+            _revalidate_runtime_source_snapshot(workspace.root)
+            if (
+                check_tools
+                and (tool_check := _handle_required_tool_check(opts)) is not None
+            ):
+                return tool_check
             update_flake.invalidate_flake_lock()
-            run_plan = _build_run_plan(opts)
-            if isinstance(run_plan, _RunPlanError):
+            allowed_paths: tuple[Path, ...] = ()
+            if isinstance(run_plan := _build_run_plan(opts), _RunPlanError):
                 outcome.plan_error = run_plan
                 outcome.summary.accumulate(
                     dict.fromkeys(run_plan.unknown_targets, "error")
@@ -1009,6 +1283,7 @@ async def run_updates(opts: UpdateOptions) -> int:
                     explicit_phase_outputs.append(flake_lock)
                 result = await _execute_run_plan_result(opts, out, config, run_plan)
                 outcome.summary = result.summary
+                outcome.candidate_updates = result.candidate_updates
                 outcome.had_errors = result.had_errors
                 allowed_paths = _workspace_allowed_paths(
                     workspace.root,
@@ -1016,15 +1291,31 @@ async def run_updates(opts: UpdateOptions) -> int:
                     result.written_paths,
                     explicit_phase_outputs,
                 )
+            if not outcome.had_errors:
+                with workspace.validation_snapshot() as snapshot:
+                    if _requires_root_closure_validation(
+                        opts,
+                        snapshot.changed_paths,
+                    ):
+                        outcome.had_errors = (
+                            _record_derivation_validation_failures(
+                                outcome.summary,
+                                out,
+                                update_derivation_validation.validate_root_closures(
+                                    flake_root=snapshot.root,
+                                    timeout=config.subprocess_timeout_override,
+                                ),
+                            )
+                            or outcome.had_errors
+                        )
                 if not outcome.had_errors:
                     if opts.check:
                         workspace.validate_changes(allowed_paths)
                     else:
                         workspace.promote(allowed_paths)
+                        outcome.promoted = True
     except update_persistence.UpdateWorkspaceError as error:
-        outcome.summary.accumulate({"workspace": "error"})
-        outcome.had_errors = True
-        outcome.workspace_error = str(error)
+        _record_workspace_failure(outcome, error)
     finally:
         update_flake.invalidate_flake_lock()
 
@@ -1055,11 +1346,7 @@ def run_update_command(
         msg = f"Expected UpdateOptions, got {type(opts)!r}"
         raise TypeError(msg)
 
-    tool_check = _handle_required_tool_check(opts)
-    if tool_check is not None:
-        return tool_check
-
-    return asyncio.run(run_updates(opts))
+    return asyncio.run(run_updates(opts, check_tools=True))
 
 
 app = typer.Typer(
@@ -1185,7 +1472,10 @@ def cli(
         typer.Option(
             "-T",
             "--subprocess-timeout",
-            help="Subprocess timeout in seconds.",
+            help=(
+                "Per-subprocess timeout in seconds, including root validation. "
+                "Defaults to 40 minutes for package commands and 6 hours for roots."
+            ),
         ),
     ] = None,
     tty: Annotated[

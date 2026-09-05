@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-d1tStqbKsDA79lNRIPIq1SL3DHGQ2oCnVH2Gg0lUEyQ=",
-    "x86_64-darwin": "sha256-d1tStqbKsDA79lNRIPIq1SL3DHGQ2oCnVH2Gg0lUEyQ="
+    "aarch64-darwin": "sha256-SUw8bnkcXApQQTcfgjSm3/qclCYWXV70x9vPha3lhhc=",
+    "x86_64-darwin": "sha256-SUw8bnkcXApQQTcfgjSm3/qclCYWXV70x9vPha3lhhc="
   },
   "urls": {
-    "aarch64-darwin": "https://downloads.claude.ai/releases/darwin/universal/1.37937.3/Claude-28dcf5a3323c61fa946efcc50e7112a198ea503c.zip",
-    "x86_64-darwin": "https://downloads.claude.ai/releases/darwin/universal/1.37937.3/Claude-28dcf5a3323c61fa946efcc50e7112a198ea503c.zip"
+    "aarch64-darwin": "https://downloads.claude.ai/releases/darwin/universal/1.46388.4/Claude-50e62f90a2c85243eef42913398f7c8f1534abef.zip",
+    "x86_64-darwin": "https://downloads.claude.ai/releases/darwin/universal/1.46388.4/Claude-50e62f90a2c85243eef42913398f7c8f1534abef.zip"
   },
-  "version": "1.37937.3"
+  "version": "1.46388.4"
 }

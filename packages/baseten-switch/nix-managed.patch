@@ -1,7 +1,9 @@
 diff --git a/scripts/build-menubar.sh b/scripts/build-menubar.sh
+index f24670e..08bc9ca 100755
 --- a/scripts/build-menubar.sh
 +++ b/scripts/build-menubar.sh
-@@ -118,17 +118,17 @@ APP_ICON_SOURCE="Assets/AppIcon.icns"
+@@ -117,18 +117,18 @@ APP_ICON_SOURCE="Assets/AppIcon.icns"
+ 
  echo "==> swift build -c release (${BUILD_CHANNEL}, universal: arm64 + x86_64)"
  if [[ -n "${BASETEN_SWITCH_SWIFT_BUILD_FLAGS:-}" ]]; then
 -    swift build -c release --arch arm64 --arch x86_64 "${SWIFT_BUILD_FLAGS[@]}"
@@ -24,9 +26,11 @@ diff --git a/scripts/build-menubar.sh b/scripts/build-menubar.sh
  BIN="${BIN_DIR}/BasetenSwitch"
  test -x "$BIN" || { echo "error: release binary not found at $BIN" >&2; exit 1; }
 diff --git a/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchState.swift b/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchState.swift
+index c8e7aab..df63505 100644
 --- a/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchState.swift
 +++ b/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchState.swift
-@@ -1319,9 +1319,27 @@ final class BasetenSwitchState: ObservableObject {
+@@ -2103,10 +2103,28 @@ final class BasetenSwitchState: ObservableObject {
+         guard !starting else { return }
          starting = true
          defer { starting = false }
 -        let result = await executeCLI(
@@ -55,7 +59,9 @@ diff --git a/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchState.swift b/
          guard result.succeeded else {
              lastError = result.timedOut
                  ? "Starting Baseten Switch timed out."
-@@ -1705,21 +1723,29 @@ final class BasetenSwitchState: ObservableObject {
+@@ -2508,7 +2526,8 @@ final class BasetenSwitchState: ObservableObject {
+     }
+ 
      nonisolated static func locateBasetenSwitchBinary(
 -        variant: AppVariant = .current()
 +        variant: AppVariant = .current(),
@@ -63,9 +69,7 @@ diff --git a/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchState.swift b/
      ) -> URL? {
          if variant.channel == .preview {
              guard let path = variant.runtime.environment["BASETEN_SWITCH_GATEWAY_BIN"],
-                   FileManager.default.isExecutableFile(atPath: path) else {
-                 return nil
-             }
+@@ -2518,6 +2537,10 @@ final class BasetenSwitchState: ObservableObject {
              return URL(fileURLWithPath: path)
          }
          var candidates: [String] = []
@@ -76,7 +80,7 @@ diff --git a/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchState.swift b/
          if let raw = variant.runtime.environment["BASETEN_SWITCH_GATEWAY_BIN"],
             !raw.isEmpty {
              candidates.append(raw)
-         } else if let raw = ProcessInfo.processInfo.environment["BASETEN_SWITCH_GATEWAY_BIN"],
+@@ -2525,6 +2548,9 @@ final class BasetenSwitchState: ObservableObject {
             !raw.isEmpty {
              candidates.append(raw)
          }
@@ -87,23 +91,24 @@ diff --git a/mac/BasetenSwitch/Sources/BasetenSwitch/BasetenSwitchState.swift b/
          candidates.append("/opt/homebrew/opt/baseten-switch/bin/baseten-switch")
          candidates.append("/usr/local/opt/baseten-switch/bin/baseten-switch")
 diff --git a/mac/BasetenSwitch/Tests/BasetenSwitchTests/DisplayTests.swift b/mac/BasetenSwitch/Tests/BasetenSwitchTests/DisplayTests.swift
+index f734981..c876f17 100644
 --- a/mac/BasetenSwitch/Tests/BasetenSwitchTests/DisplayTests.swift
 +++ b/mac/BasetenSwitch/Tests/BasetenSwitchTests/DisplayTests.swift
-@@ -882,11 +882,36 @@ final class DisplayTests: XCTestCase {
+@@ -1000,8 +1000,8 @@ final class DisplayTests: XCTestCase {
+     }
+ 
      // Binary lookup: whatever the chain resolves must be executable.
 -    // The candidate order ($BASETEN_SWITCH_GATEWAY_BIN, ~/.local/bin, brew opt
 -    // paths, no repo-dev path) is pinned by code review; env vars
--    // cannot be varied per-test portably.
 +    // The candidate order (bundled CLI, explicit override, Nix profiles, then
 +    // local and Homebrew fallbacks) is pinned by code review; ambient env vars
-+    // cannot be varied per-test portably.
+     // cannot be varied per-test portably.
      func testLocateBinaryReturnsExecutableOrNil() {
          if let url = BasetenSwitchState.locateBasetenSwitchBinary() {
-             XCTAssertTrue(FileManager.default.isExecutableFile(atPath: url.path))
+@@ -1009,6 +1009,31 @@ final class DisplayTests: XCTestCase {
          }
      }
--
-+
+ 
 +    func testStableLocateBinaryPrefersBundledCLI() throws {
 +        let manager = FileManager.default
 +        let resources = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -133,25 +138,71 @@ diff --git a/mac/BasetenSwitch/Tests/BasetenSwitchTests/DisplayTests.swift b/mac
                          fallback: Bool = false) -> ClientStatus {
          ClientStatus(dict: [
 diff --git a/mac/BasetenSwitch/Sources/BasetenSwitch/RuntimeCoordination.swift b/mac/BasetenSwitch/Sources/BasetenSwitch/RuntimeCoordination.swift
+index 032a15b..714e198 100644
 --- a/mac/BasetenSwitch/Sources/BasetenSwitch/RuntimeCoordination.swift
 +++ b/mac/BasetenSwitch/Sources/BasetenSwitch/RuntimeCoordination.swift
-@@ -467,7 +467,8 @@ func allowlistedCLIEnvironment(
+@@ -551,19 +551,29 @@ func allowlistedCLIEnvironment(
+     ambient: [String: String] = ProcessInfo.processInfo.environment,
      overrides: [String: String]
  ) -> [String: String] {
-+    let homeDirectory = ambient["HOME"] ?? NSHomeDirectory()
-     let fixedPath =
--        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-+        "/etc/profiles/per-user/\(NSUserName())/bin:\(homeDirectory)/.nix-profile/bin:/run/current-system/sw/bin:\(homeDirectory)/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
++    let homeDirectory = currentUserHomeDirectory(home: ambient["HOME"])
+     var executableSearchPaths = [
++        "/etc/profiles/per-user/\(NSUserName())/bin",
++    ]
++    if let homeDirectory {
++        executableSearchPaths.append(
++            homeDirectory.appendingPathComponent(".nix-profile/bin").path)
++    }
++    executableSearchPaths.append("/run/current-system/sw/bin")
++    if let homeDirectory {
++        executableSearchPaths.append(
++            homeDirectory.appendingPathComponent(".local/bin").path)
++    }
++    // Finder does not inherit the shell PATH. Prefer the managed profiles
++    // while preserving upstream's validated HOME and environment allowlist.
++    executableSearchPaths.append(contentsOf: [
+         "/opt/homebrew/bin",
+         "/usr/local/bin",
+         "/usr/bin",
+         "/bin",
+         "/usr/sbin",
+         "/sbin",
+-    ]
+-    if let localBin = currentUserLocalBin(home: ambient["HOME"]) {
+-        // Keep system locations first while supporting Claude Code's standard
+-        // user-local installer location without inheriting an ambient PATH.
+-        executableSearchPaths.append(localBin)
+-    }
++    ])
      let inherited = [
          "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR",
          "LANG", "LC_ALL",
+@@ -582,15 +592,14 @@ func allowlistedCLIEnvironment(
+     return result
+ }
+ 
+-private func currentUserLocalBin(home: String?) -> String? {
++private func currentUserHomeDirectory(home: String?) -> URL? {
+     guard let home,
+           !home.isEmpty,
+           home.hasPrefix("/"),
+           !home.contains(":"),
+           !home.contains("\0") else { return nil }
+     return URL(fileURLWithPath: home, isDirectory: true)
+-        .appendingPathComponent(".local/bin", isDirectory: true)
+-        .standardizedFileURL.path
++        .standardizedFileURL
+ }
+ 
+ /// Returns a user-facing refusal when any Preview runtime entry can escape the
 diff --git a/mac/BasetenSwitch/Tests/BasetenSwitchTests/RuntimeCoordinationTests.swift b/mac/BasetenSwitch/Tests/BasetenSwitchTests/RuntimeCoordinationTests.swift
+index d41b63f..d3abdc7 100644
 --- a/mac/BasetenSwitch/Tests/BasetenSwitchTests/RuntimeCoordinationTests.swift
 +++ b/mac/BasetenSwitch/Tests/BasetenSwitchTests/RuntimeCoordinationTests.swift
-@@ -379,6 +379,44 @@ private actor BlockingFirstRunner: CLIRunning {
+@@ -440,6 +440,44 @@ private actor BlockingFirstRunner: CLIRunning {
      }
  }
-
+ 
 +private actor StartSystemRunner: CLIRunning {
 +    enum Scenario {
 +        case missingConfigThenSuccess
@@ -193,19 +244,62 @@ diff --git a/mac/BasetenSwitch/Tests/BasetenSwitchTests/RuntimeCoordinationTests
  private actor ReconciliationReceiptRunner: CLIRunning {
      private static let requestFingerprint =
          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-@@ -1412,7 +1450,7 @@ final class RuntimeCoordinationTests: XCTestCase {
+@@ -1568,7 +1606,7 @@ final class RuntimeCoordinationTests: XCTestCase {
          XCTAssertEqual(environment["HOME"], "/Users/test")
          XCTAssertEqual(
              environment["PATH"],
--            "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+-            "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/test/.local/bin")
 +            "/etc/profiles/per-user/\(NSUserName())/bin:/Users/test/.nix-profile/bin:/run/current-system/sw/bin:/Users/test/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
          XCTAssertFalse(environment["PATH"]?.contains("/attacker") ?? true)
          XCTAssertEqual(
              environment["BASETEN_SWITCH_CONFIG_PATH"],
-@@ -1849,6 +1887,53 @@ final class RuntimeCoordinationTests: XCTestCase {
+@@ -1580,19 +1618,31 @@ final class RuntimeCoordinationTests: XCTestCase {
+         XCTAssertNil(environment["SSH_AUTH_SOCK"])
+     }
+ 
+-    func testCLIEnvironmentDoesNotAddRelativeOrEmptyHomeToPath() {
++    func testCLIEnvironmentDoesNotAddMissingOrInvalidHomeToPath() {
+         let systemPath =
+-            "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+-        let relative = allowlistedCLIEnvironment(
+-            ambient: ["HOME": "relative/home"],
+-            overrides: [:])
+-        let empty = allowlistedCLIEnvironment(
+-            ambient: ["HOME": ""],
+-            overrides: [:])
++            "/etc/profiles/per-user/\(NSUserName())/bin:/run/current-system/sw/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
++        let invalidHomes: [String?] = [
++            nil, "", "relative/home", "/Users/test:/attacker/bin", "/Users/test\0",
++        ]
++        for home in invalidHomes {
++            var ambient = ["PATH": "/attacker/bin"]
++            ambient["HOME"] = home
++            let environment = allowlistedCLIEnvironment(
++                ambient: ambient,
++                overrides: [:])
++            XCTAssertEqual(environment["PATH"], systemPath)
++        }
++    }
+ 
+-        XCTAssertEqual(relative["PATH"], systemPath)
+-        XCTAssertEqual(empty["PATH"], systemPath)
+-        XCTAssertFalse(relative["PATH"]?.contains("relative") ?? true)
++    func testCLIEnvironmentNormalizesValidHomeBeforeAddingProfiles() {
++        for home in ["/Users/old/../test", "/Users/test/"] {
++            let environment = allowlistedCLIEnvironment(
++                ambient: ["HOME": home],
++                overrides: [:])
++            XCTAssertEqual(
++                environment["PATH"],
++                "/etc/profiles/per-user/\(NSUserName())/bin:/Users/test/.nix-profile/bin:/run/current-system/sw/bin:/Users/test/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
++        }
+     }
+ 
+     func testPreviewRuntimeFilesystemAcceptsPrivateRegularTree() throws {
+@@ -2146,6 +2196,53 @@ final class RuntimeCoordinationTests: XCTestCase {
          return arguments[index + 1]
      }
-
+ 
 +    @MainActor
 +    func testStableStartInitializesOnlyTheMissingDefaultConfig() async {
 +        let runner = StartSystemRunner(scenario: .missingConfigThenSuccess)
@@ -257,10 +351,13 @@ diff --git a/mac/BasetenSwitch/Tests/BasetenSwitchTests/RuntimeCoordinationTests
          let started = Date()
          let result = await SystemCLIRunner().run(CLIExecutionRequest(
 diff --git a/gateway/cmd/baseten-switch/version_probe.go b/gateway/cmd/baseten-switch/version_probe.go
+index 43890ed..6e7b6e7 100644
 --- a/gateway/cmd/baseten-switch/version_probe.go
 +++ b/gateway/cmd/baseten-switch/version_probe.go
-@@ -62,2 +62,12 @@ var menubarLocalBin = func() string {
--	return filepath.Join(home, ".local", "bin", "baseten-switch")
+@@ -59,6 +59,16 @@ var menubarLocalBin = func() string {
+ 	if err != nil {
+ 		return ""
+ 	}
 +	for _, candidate := range []string{
 +		filepath.Join("/etc/profiles/per-user", os.Getenv("USER"), "bin", "baseten-switch"),
 +		filepath.Join(home, ".nix-profile", "bin", "baseten-switch"),
@@ -271,5 +368,6 @@ diff --git a/gateway/cmd/baseten-switch/version_probe.go b/gateway/cmd/baseten-s
 +			return candidate
 +		}
 +	}
-+	return filepath.Join(home, ".local", "bin", "baseten-switch")
+ 	return filepath.Join(home, ".local", "bin", "baseten-switch")
  }
+ 

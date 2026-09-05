@@ -10,6 +10,7 @@
   nodejs,
   oxcNodeModules,
   python312,
+  pythonWorkspaceRoot ? ./.,
   runCommand,
   stableDiffusionCpp,
   stdenv,
@@ -21,10 +22,10 @@ let
   platformCompat = import ../../lib/pinned-input-platform-compat;
   workspace = inputs.uv2nix.lib.workspace.loadWorkspace {
     workspaceRoot = lib.fileset.toSource {
-      root = ./.;
+      root = pythonWorkspaceRoot;
       fileset = lib.fileset.unions [
-        ./pyproject.toml
-        ./uv.lock
+        (pythonWorkspaceRoot + "/pyproject.toml")
+        (pythonWorkspaceRoot + "/uv.lock")
       ];
     };
   };

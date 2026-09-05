@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from types import ModuleType
 from typing import cast
 
@@ -13,6 +14,7 @@ from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.if_expression import IfExpression
 from nix_manipulator.expressions.parenthesis import Parenthesis
+from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
@@ -33,6 +35,7 @@ from lib.tests._updater_helpers import (
     run_async,
 )
 from lib.update.artifacts import GeneratedArtifact
+from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
     UpdateEventKind,
     expect_artifact_updates,
@@ -127,12 +130,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 """,
     ]
     if mesh:
-        packages.append(f"""
+        packages.extend(
+            f"""
 [[package]]
-name = "mesh-llm-sdk"
+name = "{package}"
 version = "0.75.1"
 source = "{_MESH_SOURCE}"
-""")
+"""
+            for package in (
+                "mesh-llm-sdk",
+                "mesh-llm-host-runtime",
+                "mesh-llm-client",
+                "mesh-llm-node",
+                "mesh-llm-system",
+                "mesh-llm-events",
+            )
+        )
     return "\n".join(packages).encode()
 
 
@@ -601,9 +614,9 @@ def _archive_url(owner: str, repo: str, commit: str) -> str:
     return f"https://github.com/{owner}/{repo}/archive/{commit}.tar.gz"
 
 
-def _urls() -> dict[str, str]:
+def _urls(*, commit: str = _COMMIT) -> dict[str, str]:
     return {
-        "buzzUrl": _archive_url("block", "buzz", _COMMIT),
+        "buzzUrl": _archive_url("block", "buzz", commit),
         "llamaCppUrl": _LLAMA_URL,
         "meshLlmUrl": _MESH_URL,
         "onnxruntimeUrl": _archive_url(
@@ -619,6 +632,42 @@ def _urls() -> dict[str, str]:
     }
 
 
+def _metadata(
+    *,
+    version: str = _VERSION,
+    commit: str = _COMMIT,
+    pnpm_version: str = "11.4.0",
+    rust_version: str = _RUST_VERSION,
+) -> dict[str, str]:
+    return {
+        "buzzUrl": _archive_url("block", "buzz", commit),
+        "commit": commit,
+        "llamaCppCommit": _LLAMA_COMMIT,
+        "llamaCppUrl": _LLAMA_URL,
+        "meshLlmCommit": _MESH_COMMIT,
+        "meshLlmUrl": _MESH_URL,
+        "meshLlmVersion": _MESH_VERSION,
+        "onnxruntimeCommit": _ONNX_RUNTIME_COMMIT,
+        "onnxruntimeUrl": _archive_url(
+            "microsoft",
+            "onnxruntime",
+            _ONNX_RUNTIME_COMMIT,
+        ),
+        "onnxruntimeVersion": _ONNX_RUNTIME_VERSION,
+        "pnpmVersion": pnpm_version,
+        "rustVersion": rust_version,
+        "sherpaOnnxCommit": _SHERPA_ONNX_COMMIT,
+        "sherpaOnnxUrl": _archive_url(
+            "k2-fsa",
+            "sherpa-onnx",
+            _SHERPA_ONNX_COMMIT,
+        ),
+        "sherpaOnnxVersion": _SHERPA_ONNX_VERSION,
+        "skippyAbi": _SKIPPY_ABI,
+        "tag": f"desktop-v{version}",
+    }
+
+
 def _install_digest_contracts(
     monkeypatch: pytest.MonkeyPatch,
     module: ModuleType,
@@ -627,53 +676,45 @@ def _install_digest_contracts(
     onnx_payloads: dict[str, bytes] | None = None,
     sherpa_payloads: dict[str, bytes] | None = None,
 ) -> None:
-    buzz_paths = tuple(module._BUZZ_SOURCE_DIGESTS)
-    mesh_paths = tuple(module._MESH_SOURCE_DIGESTS)
-    monkeypatch.setattr(
-        module,
-        "_BUZZ_SOURCE_DIGESTS",
-        {path: hashlib.sha256(buzz_payloads[path]).hexdigest() for path in buzz_paths},
-    )
-    monkeypatch.setattr(
-        module,
-        "_MESH_SOURCE_DIGESTS",
-        {path: hashlib.sha256(mesh_payloads[path]).hexdigest() for path in mesh_paths},
-    )
-    monkeypatch.setattr(module, "_MESH_SOURCE_PATHS", mesh_paths)
+    _ = buzz_payloads
+    contracts = {
+        name: dict(digests)
+        for name, digests in module.BuzzUpdater.compatibility_source_digests.items()
+    }
+    mesh_paths = tuple(contracts["meshLlm"])
+    contracts["meshLlm"] = {
+        path: hashlib.sha256(mesh_payloads[path]).hexdigest() for path in mesh_paths
+    }
     if onnx_payloads is not None:
-        onnx_paths = tuple(module._ONNX_SOURCE_DIGESTS)
-        monkeypatch.setattr(
-            module,
-            "_ONNX_SOURCE_DIGESTS",
-            {
-                path: hashlib.sha256(onnx_payloads[path]).hexdigest()
-                for path in onnx_paths
-            },
-        )
-        monkeypatch.setattr(module, "_ONNX_SOURCE_PATHS", onnx_paths)
+        onnx_paths = tuple(contracts["onnxruntime"])
+        contracts["onnxruntime"] = {
+            path: hashlib.sha256(onnx_payloads[path]).hexdigest() for path in onnx_paths
+        }
     if sherpa_payloads is not None:
-        sherpa_paths = tuple(module._SHERPA_SOURCE_DIGESTS)
-        monkeypatch.setattr(
-            module,
-            "_SHERPA_SOURCE_DIGESTS",
-            {
-                path: hashlib.sha256(sherpa_payloads[path]).hexdigest()
-                for path in sherpa_paths
-            },
-        )
-        monkeypatch.setattr(module, "_SHERPA_SOURCE_PATHS", sherpa_paths)
+        sherpa_paths = tuple(contracts["sherpaOnnx"])
+        contracts["sherpaOnnx"] = {
+            path: hashlib.sha256(sherpa_payloads[path]).hexdigest()
+            for path in sherpa_paths
+        }
+    monkeypatch.setattr(
+        module.BuzzUpdater,
+        "compatibility_source_digests",
+        contracts,
+    )
 
 
 def _version_info() -> VersionInfo:
     return VersionInfo(
         _VERSION,
-        {"commit": _COMMIT, "tag": _TAG, **_urls()},
+        _metadata(),
     )
 
 
 def _source_override(
     updater: object,
     *,
+    version: str = _VERSION,
+    commit: str = _COMMIT,
     src_hash: str,
     onnx_hash: str,
     sherpa_hash: str,
@@ -684,41 +725,42 @@ def _source_override(
     desktop_hash: str,
 ) -> SourceEntry:
     assert hasattr(updater, "name")
+    urls = _urls(commit=commit)
     return SourceEntry(
-        version=_VERSION,
-        commit=_COMMIT,
+        version=version,
+        commit=commit,
         hashes=HashCollection.from_value([
-            HashEntry.create("srcHash", src_hash, url=_urls()["buzzUrl"]),
+            HashEntry.create("srcHash", src_hash, url=urls["buzzUrl"]),
             HashEntry.create(
                 "srcHash",
                 onnx_hash,
-                url=_urls()["onnxruntimeUrl"],
+                url=urls["onnxruntimeUrl"],
             ),
             HashEntry.create(
                 "srcHash",
                 sherpa_hash,
-                url=_urls()["sherpaOnnxUrl"],
+                url=urls["sherpaOnnxUrl"],
             ),
             HashEntry.create(
                 "srcHash",
                 mesh_hash,
-                url=_urls()["meshLlmUrl"],
+                url=urls["meshLlmUrl"],
             ),
             HashEntry.create(
                 "srcHash",
                 llama_hash,
-                url=_urls()["llamaCppUrl"],
+                url=urls["llamaCppUrl"],
             ),
-            HashEntry.create("npmDepsHash", npm_hash, url=_urls()["buzzUrl"]),
-            HashEntry.create("vendorHash", root_hash, url=_urls()["buzzUrl"]),
-            HashEntry.create("cargoHash", desktop_hash, url=_urls()["buzzUrl"]),
+            HashEntry.create("npmDepsHash", npm_hash, url=urls["buzzUrl"]),
+            HashEntry.create("vendorHash", root_hash, url=urls["buzzUrl"]),
+            HashEntry.create("cargoHash", desktop_hash, url=urls["buzzUrl"]),
         ]),
         urls={
-            "buzz": _urls()["buzzUrl"],
-            "llamaCpp": _urls()["llamaCppUrl"],
-            "meshLlm": _urls()["meshLlmUrl"],
-            "onnxruntime": _urls()["onnxruntimeUrl"],
-            "sherpaOnnx": _urls()["sherpaOnnxUrl"],
+            "buzz": urls["buzzUrl"],
+            "llamaCpp": urls["llamaCppUrl"],
+            "meshLlm": urls["meshLlmUrl"],
+            "onnxruntime": urls["onnxruntimeUrl"],
+            "sherpaOnnx": urls["sherpaOnnxUrl"],
         },
     )
 
@@ -730,6 +772,26 @@ def test_buzz_audits_the_exact_release_source_topology(
     module = _load_updater_module()
     updater = module.BuzzUpdater()
     payloads = _source_payloads()
+    candidate_version = "0.5.21"
+    candidate_tag = f"desktop-v{candidate_version}"
+    candidate_commit = "a" * 40
+    root_package = json.loads(payloads["package.json"])
+    root_package["packageManager"] = "pnpm@11.5.1"
+    payloads["package.json"] = _json_bytes(root_package)
+    for path in (
+        "desktop/package.json",
+        "desktop/src-tauri/tauri.conf.json",
+        "desktop/src-tauri/Cargo.toml",
+    ):
+        payloads[path] = payloads[path].replace(
+            _VERSION.encode(),
+            candidate_version.encode(),
+            1,
+        )
+    payloads["rust-toolchain.toml"] = payloads["rust-toolchain.toml"].replace(
+        _RUST_VERSION.encode(),
+        b"1.96.0",
+    )
     mesh_payloads = _mesh_source_payloads()
     onnx_payloads = _onnx_source_payloads()
     sherpa_payloads = _sherpa_source_payloads()
@@ -742,7 +804,7 @@ def test_buzz_audits_the_exact_release_source_topology(
         sherpa_payloads,
     )
     raw_payloads = {
-        github_raw_url("block", "buzz", _COMMIT, path): payload
+        github_raw_url("block", "buzz", candidate_commit, path): payload
         for path, payload in payloads.items()
     }
     raw_payloads.update({
@@ -781,7 +843,7 @@ def test_buzz_audits_the_exact_release_source_topology(
     ) -> dict[str, str]:
         assert config == updater.config
         api_paths.append(path)
-        return {"tag_name": _TAG}
+        return {"tag_name": candidate_tag}
 
     async def commit_payload(
         _session: object,
@@ -791,7 +853,17 @@ def test_buzz_audits_the_exact_release_source_topology(
     ) -> dict[str, str]:
         assert config == updater.config
         api_paths.append(path)
-        return {"sha": _COMMIT}
+        commits = {
+            f"repos/block/buzz/commits/{candidate_tag}": candidate_commit,
+            f"repos/Mesh-LLM/mesh-llm/commits/v{_MESH_VERSION}": _MESH_COMMIT,
+            (
+                f"repos/k2-fsa/sherpa-onnx/commits/v{_SHERPA_ONNX_VERSION}"
+            ): _SHERPA_ONNX_COMMIT,
+            (
+                f"repos/microsoft/onnxruntime/commits/v{_ONNX_RUNTIME_VERSION}"
+            ): _ONNX_RUNTIME_COMMIT,
+        }
+        return {"sha": commits[path]}
 
     async def raw_payload(
         _session: object,
@@ -810,10 +882,21 @@ def test_buzz_audits_the_exact_release_source_topology(
     monkeypatch.setattr(module, "fetch_github_api", commit_payload)
     monkeypatch.setattr(module, "fetch_url", raw_payload)
 
-    assert run_async(updater.fetch_latest(object())) == _version_info()
+    assert run_async(updater.fetch_latest(object())) == VersionInfo(
+        candidate_version,
+        _metadata(
+            version=candidate_version,
+            commit=candidate_commit,
+            pnpm_version="11.5.1",
+            rust_version="1.96.0",
+        ),
+    )
     assert api_paths == [
         "repos/block/buzz/releases/latest",
-        f"repos/block/buzz/commits/{_TAG}",
+        f"repos/block/buzz/commits/{candidate_tag}",
+        f"repos/Mesh-LLM/mesh-llm/commits/v{_MESH_VERSION}",
+        f"repos/k2-fsa/sherpa-onnx/commits/v{_SHERPA_ONNX_VERSION}",
+        f"repos/microsoft/onnxruntime/commits/v{_ONNX_RUNTIME_VERSION}",
     ]
     assert set(fetched_urls) == set(raw_payloads)
 
@@ -822,9 +905,12 @@ def test_buzz_onnx_source_contract_pins_the_exact_audited_revision() -> None:
     """ONNX source acceptance must remain tied to the reviewed v1.27.0 bytes."""
     module = _load_updater_module()
 
-    assert module._ONNX_RUNTIME_VERSION == _ONNX_RUNTIME_VERSION
-    assert module._ONNX_RUNTIME_COMMIT == _ONNX_RUNTIME_COMMIT
-    assert module._ONNX_SOURCE_DIGESTS == {
+    assert module.BuzzUpdater.compatibility_pins == {
+        "onnxruntimeVersion": _ONNX_RUNTIME_VERSION
+    }
+    assert module.BuzzUpdater.get_compatibility_source_digest_contract(
+        "onnxruntime"
+    ) == {
         "VERSION_NUMBER": (
             "7ef1ea58fece676ff7345f6edac427e671daf20f0d7499ef2e42ada241d4fe24"
         ),
@@ -855,7 +941,8 @@ def test_buzz_mesh_runtime_schema_pins_the_exact_audited_sources() -> None:
         ),
     }
 
-    assert {path: module._MESH_SOURCE_DIGESTS[path] for path in expected} == expected
+    contract = module.BuzzUpdater.get_compatibility_source_digest_contract("meshLlm")
+    assert {path: contract[path] for path in expected} == expected
 
 
 def test_buzz_rust_method_extractor_rejects_malformed_structure() -> None:
@@ -1623,9 +1710,9 @@ def test_buzz_sherpa_source_contract_pins_the_exact_audited_revision() -> None:
     """Sherpa source acceptance must remain tied to the reviewed v1.13.4 bytes."""
     module = _load_updater_module()
 
-    assert module._SHERPA_ONNX_VERSION == _SHERPA_ONNX_VERSION
-    assert module._SHERPA_ONNX_COMMIT == _SHERPA_ONNX_COMMIT
-    assert module._SHERPA_SOURCE_DIGESTS == {
+    assert module.BuzzUpdater.get_compatibility_source_digest_contract(
+        "sherpaOnnx"
+    ) == {
         "CMakeLists.txt": (
             "9f75d36e8f19358b5d23368a5f59ecdfec507f5f2ff47c84ea9296f14399a8e3"
         ),
@@ -1739,7 +1826,10 @@ def test_buzz_sherpa_rust_build_contract_fails_closed_on_semantic_drift(
     )
 
     with pytest.raises(RuntimeError, match="sherpa-onnx Rust build semantics"):
-        module._validate_sherpa_source_contract(payloads)
+        module._validate_sherpa_source_contract(
+            payloads,
+            expected_version=_SHERPA_ONNX_VERSION,
+        )
 
 
 @pytest.mark.parametrize(
@@ -1790,23 +1880,173 @@ def test_buzz_sherpa_rust_build_contract_ignores_unrelated_matching_tokens(
     )
 
     with pytest.raises(RuntimeError, match="sherpa-onnx Rust build semantics"):
-        module._validate_sherpa_source_contract(payloads)
+        module._validate_sherpa_source_contract(
+            payloads,
+            expected_version=_SHERPA_ONNX_VERSION,
+        )
+
+
+def test_buzz_release_contract_derives_routine_release_tool_versions() -> None:
+    """A new desktop release may carry new pnpm and Rust versions without code edits."""
+    module = _load_updater_module()
+    payloads = _source_payloads()
+    candidate_version = "0.6.0"
+    package = json.loads(payloads["package.json"])
+    package["packageManager"] = "pnpm@11.5.1"
+    payloads["package.json"] = _json_bytes(package)
+    for path in (
+        "desktop/package.json",
+        "desktop/src-tauri/tauri.conf.json",
+        "desktop/src-tauri/Cargo.toml",
+    ):
+        payloads[path] = payloads[path].replace(
+            _VERSION.encode(),
+            candidate_version.encode(),
+            1,
+        )
+    payloads["rust-toolchain.toml"] = payloads["rust-toolchain.toml"].replace(
+        _RUST_VERSION.encode(),
+        b"1.96.0",
+    )
+
+    assert module._validate_source_contract(
+        payloads,
+        release_version=candidate_version,
+    ) == module._BuzzReleaseContract(
+        mesh_commit=_MESH_COMMIT,
+        mesh_version=_MESH_VERSION,
+        pnpm_version="11.5.1",
+        rust_version="1.96.0",
+        sherpa_version=_SHERPA_ONNX_VERSION,
+    )
+
+
+def test_buzz_cargo_contract_accepts_equivalent_sherpa_declaration() -> None:
+    """The lock, not TOML shorthand syntax, owns Sherpa's resolved version."""
+    module = _load_updater_module()
+    payloads = _source_payloads()
+    payloads["desktop/src-tauri/Cargo.toml"] = payloads[
+        "desktop/src-tauri/Cargo.toml"
+    ].replace(
+        b'sherpa-onnx = "1.12"',
+        b'sherpa-onnx = { version = "1.12", default-features = false }',
+    )
+
+    contract = module._validate_cargo_contract(
+        payloads,
+        release_version=_VERSION,
+    )
+
+    assert contract.sherpa_version == _SHERPA_ONNX_VERSION
+
+
+def test_buzz_cargo_contract_requires_a_sherpa_dependency() -> None:
+    """Removing Sherpa entirely must still fail before native hashing."""
+    module = _load_updater_module()
+    payloads = _source_payloads()
+    payloads["desktop/src-tauri/Cargo.toml"] = payloads[
+        "desktop/src-tauri/Cargo.toml"
+    ].replace(b'sherpa-onnx = "1.12"\n', b"")
+
+    with pytest.raises(RuntimeError, match="missing sherpa-onnx"):
+        module._validate_cargo_contract(
+            payloads,
+            release_version=_VERSION,
+        )
+
+
+def test_buzz_native_lock_serializes_discovered_release_identity() -> None:
+    """Generated lock data must follow discovery instead of updater literals."""
+    module = _load_updater_module()
+    updater = module.BuzzUpdater()
+    candidate_version = "0.6.0"
+    candidate_commit = "a" * 40
+    metadata = updater._required_metadata(
+        VersionInfo(
+            candidate_version,
+            _metadata(
+                version=candidate_version,
+                commit=candidate_commit,
+                pnpm_version="11.5.1",
+                rust_version="1.96.0",
+            ),
+        )
+    )
+    pnpm_url = updater._pnpm_url("11.5.1")
+    hashes = {
+        pnpm_url: "sha256-pnpm",
+        **{
+            dependency["url"]: f"sha256-{name}"
+            for name, dependency in module._SHERPA_FETCHCONTENT_LOCK.items()
+        },
+    }
+
+    native_lock = updater._native_lock_payload(metadata, hashes)
+
+    assert native_lock["buzz"] == {
+        "commit": candidate_commit,
+        "rustVersion": "1.96.0",
+        "version": candidate_version,
+    }
+    assert native_lock["pnpm"] == {
+        "hash": "sha256-pnpm",
+        "url": pnpm_url,
+        "version": "11.5.1",
+    }
+    assert "desktopBundleValidation" not in native_lock
+
+
+@pytest.mark.parametrize(
+    ("key", "unsupported", "message"),
+    [
+        ("meshLlmCommit", "a" * 40, "Mesh source URL drifted"),
+        ("sherpaOnnxCommit", "b" * 40, "sherpa-onnx source URL drifted"),
+        ("onnxruntimeVersion", "1.27.1", "supported onnxruntimeVersion drifted"),
+        ("onnxruntimeCommit", "c" * 40, "ONNX Runtime source URL drifted"),
+        ("llamaCppCommit", "d" * 40, "llama.cpp source URL drifted"),
+    ],
+)
+def test_buzz_release_metadata_rejects_incoherent_or_unreviewed_foundations(
+    key: str,
+    unsupported: str,
+    message: str,
+) -> None:
+    """Metadata keeps exact URLs coherent and preserves the intentional ONNX pin."""
+    module = _load_updater_module()
+    metadata = _metadata()
+    metadata[key] = unsupported
+
+    with pytest.raises(RuntimeError, match=message):
+        module.BuzzUpdater._required_metadata(VersionInfo(_VERSION, metadata))
+
+
+def test_buzz_release_metadata_accepts_source_derived_native_versions() -> None:
+    """Manifest-derived Mesh, Sherpa, and Skippy versions need no code update."""
+    module = _load_updater_module()
+    metadata = _metadata()
+    metadata.update({
+        "meshLlmVersion": "0.75.2",
+        "sherpaOnnxVersion": "1.13.5",
+        "skippyAbi": "0.1.36",
+    })
+
+    assert module.BuzzUpdater._required_metadata(
+        VersionInfo(_VERSION, metadata)
+    ) == metadata | {"version": _VERSION}
 
 
 @pytest.mark.parametrize(
     "drift",
     [
-        "pnpm",
         "sidecars",
         "desktop-lock",
         "updater-gate",
-        "rust-toolchain",
         "mesh-feature-graph",
         "runtime-manifest-default",
         "runtime-download",
         "runtime-install-manifest",
         "runtime-manifest-env",
-        "llama-pin",
+        "llama-pin-format",
     ],
 )
 def test_buzz_source_audit_fails_closed_on_build_topology_drift(
@@ -1817,9 +2057,7 @@ def test_buzz_source_audit_fails_closed_on_build_topology_drift(
     module = _load_updater_module()
     payloads = _source_payloads()
     mesh_payloads = _mesh_source_payloads()
-    if drift == "pnpm":
-        payloads["package.json"] = _json_bytes({"packageManager": "pnpm@11.5.0"})
-    elif drift == "sidecars":
+    if drift == "sidecars":
         config = json.loads(payloads["desktop/src-tauri/tauri.conf.json"])
         config["bundle"]["externalBin"].pop()
         payloads["desktop/src-tauri/tauri.conf.json"] = _json_bytes(config)
@@ -1833,11 +2071,6 @@ def test_buzz_source_audit_fails_closed_on_build_topology_drift(
         payloads["desktop/src-tauri/build.rs"] = payloads[
             "desktop/src-tauri/build.rs"
         ].replace(b" && ", b" || ")
-    elif drift == "rust-toolchain":
-        payloads["rust-toolchain.toml"] = payloads["rust-toolchain.toml"].replace(
-            b"1.95.0",
-            b"1.94.0",
-        )
     elif drift == "mesh-feature-graph":
         mesh_payloads["crates/mesh-llm-sdk/Cargo.toml"] = mesh_payloads[
             "crates/mesh-llm-sdk/Cargo.toml"
@@ -1880,15 +2113,19 @@ def test_buzz_source_audit_fails_closed_on_build_topology_drift(
         )
     else:
         mesh_payloads["third_party/llama.cpp/upstream.txt"] = (
-            b"0000000000000000000000000000000000000000\n"
+            b"000000000000000000000000000000000000000\n"
         )
 
     # Re-pin synthetic bytes so this test exercises the semantic contract
     # independently from the separate digest-contract tests.
     _install_digest_contracts(monkeypatch, module, payloads, mesh_payloads)
 
-    with pytest.raises(RuntimeError):
-        module._validate_source_contract(payloads, mesh_payloads=mesh_payloads)
+    if drift in {"sidecars", "desktop-lock", "updater-gate"}:
+        with pytest.raises(RuntimeError):
+            module._validate_source_contract(payloads, release_version=_VERSION)
+    else:
+        with pytest.raises(RuntimeError):
+            module._validate_mesh_source_contract(mesh_payloads)
 
 
 def test_buzz_contract_helpers_reject_malformed_or_incomplete_sources(
@@ -1909,6 +2146,14 @@ def test_buzz_contract_helpers_reject_malformed_or_incomplete_sources(
         module._decode_json(b"\xff", context="JSON")
     with pytest.raises(RuntimeError, match="valid UTF-8 TOML"):
         module._decode_toml(b"[", context="TOML")
+    with pytest.raises(RuntimeError, match="exact semantic version"):
+        module._require_exact_version("1.2", context="version")
+    with pytest.raises(RuntimeError, match="must start with 'pnpm@'"):
+        module._require_prefixed_version(
+            "npm@11.4.0",
+            "pnpm@",
+            context="package manager",
+        )
     with pytest.raises(RuntimeError, match="missing paths"):
         module._validate_digest_contract({}, {"required": "digest"}, context="digest")
     with pytest.raises(RuntimeError, match="exactly one absent"):
@@ -1917,6 +2162,18 @@ def test_buzz_contract_helpers_reject_malformed_or_incomplete_sources(
             "absent",
             context="lock",
             version="1",
+        )
+    module._validate_locked_package(
+        {"package": [{"name": "present", "version": "1"}]},
+        "present",
+        context="lock",
+        version="1",
+    )
+    with pytest.raises(RuntimeError, match="exactly one absent"):
+        module._locked_package_version(
+            {"package": []},
+            "absent",
+            context="lock",
         )
     with pytest.raises(RuntimeError, match="target gate"):
         module._sidecars_for_target("", "aarch64-apple-darwin")
@@ -1935,16 +2192,64 @@ def test_buzz_contract_helpers_reject_malformed_or_incomplete_sources(
     root_manifest = payloads["Cargo.toml"]
     payloads["Cargo.toml"] = b"[workspace]\nmembers = []\n"
     with pytest.raises(RuntimeError, match="missing sidecar crates"):
-        module._validate_cargo_contract(payloads)
+        module._validate_cargo_contract(payloads, release_version=_VERSION)
     payloads["Cargo.toml"] = root_manifest
 
     with pytest.raises(RuntimeError, match="source audit is missing paths"):
-        module._validate_source_contract({}, mesh_payloads={})
+        module._validate_source_contract({}, release_version=_VERSION)
+
+    missing_mesh_row = _source_payloads()
+    missing_mesh_row["desktop/src-tauri/Cargo.lock"] = missing_mesh_row[
+        "desktop/src-tauri/Cargo.lock"
+    ].replace(b'name = "mesh-llm-sdk"', b'name = "mesh-llm-sdk-missing"')
+    with pytest.raises(RuntimeError, match="exactly one mesh-llm-sdk"):
+        module._validate_cargo_contract(
+            missing_mesh_row,
+            release_version=_VERSION,
+        )
+
+    malformed_mesh_source = _source_payloads()
+    malformed_mesh_source["desktop/src-tauri/Cargo.lock"] = malformed_mesh_source[
+        "desktop/src-tauri/Cargo.lock"
+    ].replace(_MESH_SOURCE.encode(), b"git+https://example.invalid/mesh#floating")
+    with pytest.raises(RuntimeError, match="not one immutable tagged commit"):
+        module._validate_cargo_contract(
+            malformed_mesh_source,
+            release_version=_VERSION,
+        )
 
     mesh_payloads["crates/skippy-ffi/build.rs"] = b"fn main() {}\n"
     _install_digest_contracts(monkeypatch, module, payloads, mesh_payloads)
     with pytest.raises(RuntimeError, match="bypasses LLAMA_STAGE_BUILD_DIR"):
         module._validate_mesh_source_contract(mesh_payloads)
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        b"",
+        b"pub const ABI_VERSION_MINOR: u32 = 35;",
+    ],
+)
+def test_buzz_mesh_contract_rejects_incomplete_or_duplicate_abi_components(
+    monkeypatch: pytest.MonkeyPatch,
+    replacement: bytes,
+) -> None:
+    """Skippy ABI discovery requires one distinct declaration per component."""
+    module = _load_updater_module()
+    payloads = _mesh_source_payloads()
+    payloads["crates/skippy-ffi/src/lib.rs"] = payloads[
+        "crates/skippy-ffi/src/lib.rs"
+    ].replace(b"pub const ABI_VERSION_PATCH: u32 = 35;", replacement)
+    _install_digest_contracts(
+        monkeypatch,
+        module,
+        _source_payloads(),
+        payloads,
+    )
+
+    with pytest.raises(RuntimeError, match="one major, minor, and patch"):
+        module._validate_mesh_source_contract(payloads)
 
 
 def test_buzz_digest_contract_detects_independent_byte_drift() -> None:
@@ -2004,10 +2309,31 @@ def test_buzz_sidecar_script_semantics_match_tauri_on_darwin() -> None:
 def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Hashing must preserve all five exact source identities and lock closures."""
+    """A future toolchain must own every probe before dependency hashing."""
     module = _load_updater_module()
     updater = module.BuzzUpdater()
-    info = _version_info()
+    candidate_version = "0.6.0"
+    candidate_commit = "a" * 40
+    candidate_pnpm_version = "11.5.1"
+    info = VersionInfo(
+        candidate_version,
+        _metadata(
+            version=candidate_version,
+            commit=candidate_commit,
+            pnpm_version=candidate_pnpm_version,
+            rust_version="1.96.0",
+        ),
+    )
+    candidate_urls = _urls(commit=candidate_commit)
+    pnpm_hash = "sha256-50EGpaDrJWn0WDUEQg6tX8HCY+QXoyFsqxy+DM3LTq4="
+    sherpa_hashes = (
+        "sha256-ufNM+0/TsTRBAO6tee9NN6oVliJ0ueMFbeNFAh92obA=",
+        "sha256-kXbMZvx84e34XPNVsG4yDFfbYpffdCd/V1GDRoiTz2E=",
+        "sha256-PyR7flokCQcSAvXivGIABg9mcowKNEPAOSOtJyPgQLM=",
+        "sha256-SXED5mQWjr45WAt1etvmFvbPhaFlcq9YHKe8QtCrE/0=",
+        "sha256-V/vEuVCugbGg4eKYrxVlLalopnI6WSt4dOm0AnqApbQ=",
+        "sha256-F0ioIgYKNbqp9mCfhO/I61TcDnS57OPYI2e3EZ/cda8=",
+    )
     calls = install_fixed_hash_stream(
         monkeypatch,
         (
@@ -2016,19 +2342,14 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
             (None, _SHERPA_SOURCE_NAR_HASH),
             (None, _MESH_SOURCE_NAR_HASH),
             (None, _LLAMA_SOURCE_NAR_HASH),
-            (None, _NPM_DEPS_HASH),
-            (None, _ROOT_CARGO_HASH),
-            (None, _DESKTOP_CARGO_HASH),
             (
                 "hashing updater-owned pnpm archive",
-                "sha256-50EGpaDrJWn0WDUEQg6tX8HCY+QXoyFsqxy+DM3LTq4=",
+                pnpm_hash,
             ),
-            (None, "sha256-ufNM+0/TsTRBAO6tee9NN6oVliJ0ueMFbeNFAh92obA="),
-            (None, "sha256-kXbMZvx84e34XPNVsG4yDFfbYpffdCd/V1GDRoiTz2E="),
-            (None, "sha256-PyR7flokCQcSAvXivGIABg9mcowKNEPAOSOtJyPgQLM="),
-            (None, "sha256-SXED5mQWjr45WAt1etvmFvbPhaFlcq9YHKe8QtCrE/0="),
-            (None, "sha256-V/vEuVCugbGg4eKYrxVlLalopnI6WSt4dOm0AnqApbQ="),
-            (None, "sha256-F0ioIgYKNbqp9mCfhO/I61TcDnS57OPYI2e3EZ/cda8="),
+            *((None, value) for value in sherpa_hashes),
+            ("hashing Buzz pnpm closure", _NPM_DEPS_HASH),
+            (None, _ROOT_CARGO_HASH),
+            (None, _DESKTOP_CARGO_HASH),
         ),
     )
 
@@ -2043,13 +2364,21 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
         and event.message == "hashing updater-owned pnpm archive"
         for event in events
     )
-    assert {call["isolate_by_drv_hash"] for call in calls[:8]} == {True}
+    assert any(
+        event.kind is UpdateEventKind.STATUS
+        and event.message == "hashing Buzz pnpm closure"
+        for event in events
+    )
+    assert len(calls) == 15
+    assert all(call.get("isolate_by_drv_hash") is True for call in calls[:5])
+    assert all("isolate_by_drv_hash" not in call for call in calls[5:12])
+    assert all(call.get("isolate_by_drv_hash") is True for call in calls[12:])
     assert_nix_ast_equal(
         str(calls[0]["expr"]),
         _build_fetch_from_github_call(
             "block",
             "buzz",
-            rev=_COMMIT,
+            rev=candidate_commit,
             fetch_submodules=False,
         ),
     )
@@ -2089,12 +2418,42 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
             fetch_submodules=False,
         ),
     )
+
+    native_urls = [
+        updater._pnpm_url(candidate_pnpm_version),
+        *(
+            dependency["url"]
+            for dependency in module._SHERPA_FETCHCONTENT_LOCK.values()
+        ),
+    ]
+    native_hashes = dict(zip(native_urls, (pnpm_hash, *sherpa_hashes), strict=True))
+    for call, url in zip(calls[5:12], native_urls, strict=True):
+        assert_nix_ast_equal(
+            str(call["expr"]),
+            f'pkgs.fetchurl {{ url = "{url}"; hash = pkgs.lib.fakeHash; }}',
+        )
+
+    prospective_native_lock = updater._native_lock_payload(
+        updater._required_metadata(info),
+        native_hashes,
+    )
+    native_lock_expr = expect_instance(
+        updater._native_lock_expr(prospective_native_lock),
+        FunctionCall,
+    )
+    assert_nix_ast_equal(native_lock_expr.name, "builtins.fromJSON")
+    embedded_lock = expect_instance(native_lock_expr.argument, StringPrimitive)
+    assert json.loads(embedded_lock.value) == prospective_native_lock
+    package_args = {"nativeLock": native_lock_expr}
+
     fake_hash = updater.config.fake_hash
     expected_steps = (
         (
             ".pnpmDeps",
             _source_override(
                 updater,
+                version=candidate_version,
+                commit=candidate_commit,
                 src_hash=_SOURCE_NAR_HASH,
                 onnx_hash=_ONNX_SOURCE_NAR_HASH,
                 sherpa_hash=_SHERPA_SOURCE_NAR_HASH,
@@ -2109,6 +2468,8 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
             ".rootCargoDeps",
             _source_override(
                 updater,
+                version=candidate_version,
+                commit=candidate_commit,
                 src_hash=_SOURCE_NAR_HASH,
                 onnx_hash=_ONNX_SOURCE_NAR_HASH,
                 sherpa_hash=_SHERPA_SOURCE_NAR_HASH,
@@ -2123,6 +2484,8 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
             ".desktopCargoDeps",
             _source_override(
                 updater,
+                version=candidate_version,
+                commit=candidate_commit,
                 src_hash=_SOURCE_NAR_HASH,
                 onnx_hash=_ONNX_SOURCE_NAR_HASH,
                 sherpa_hash=_SHERPA_SOURCE_NAR_HASH,
@@ -2135,7 +2498,7 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
         ),
     )
     for call, (attribute, source_override) in zip(
-        calls[5:8], expected_steps, strict=True
+        calls[12:], expected_steps, strict=True
     ):
         assert_nix_ast_equal(
             str(call["expr"]),
@@ -2143,70 +2506,61 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
                 "packages/buzz/package.nix",
                 attribute,
                 system="aarch64-darwin",
+                package_args=package_args,
                 source_overrides={"buzz": source_override},
             ),
-        )
-
-    native_lock = json.loads(
-        (_PACKAGE_DIR / "native-lock.json").read_text(encoding="utf-8")
-    )
-    native_urls = [
-        native_lock["pnpm"]["url"],
-        *(
-            dependency["url"]
-            for dependency in native_lock["sherpaOnnx"]["dependencies"].values()
-        ),
-    ]
-    assert len(calls) == 15
-    for call, url in zip(calls[8:], native_urls, strict=True):
-        assert_nix_ast_equal(
-            str(call["expr"]),
-            f'pkgs.fetchurl {{ url = "{url}"; hash = pkgs.lib.fakeHash; }}',
         )
 
     artifact_event = next(
         event for event in events if event.kind is UpdateEventKind.ARTIFACT
     )
     assert expect_artifact_updates(artifact_event.payload) == [
-        GeneratedArtifact.json(_PACKAGE_DIR / "native-lock.json", native_lock)
+        GeneratedArtifact.json(
+            _PACKAGE_DIR / "native-lock.json",
+            prospective_native_lock,
+        )
     ]
 
     hashes = [
-        HashEntry.create("srcHash", _SOURCE_NAR_HASH, url=_urls()["buzzUrl"]),
+        HashEntry.create(
+            "srcHash",
+            _SOURCE_NAR_HASH,
+            url=candidate_urls["buzzUrl"],
+        ),
         HashEntry.create(
             "srcHash",
             _ONNX_SOURCE_NAR_HASH,
-            url=_urls()["onnxruntimeUrl"],
+            url=candidate_urls["onnxruntimeUrl"],
         ),
         HashEntry.create(
             "srcHash",
             _SHERPA_SOURCE_NAR_HASH,
-            url=_urls()["sherpaOnnxUrl"],
+            url=candidate_urls["sherpaOnnxUrl"],
         ),
         HashEntry.create(
             "srcHash",
             _MESH_SOURCE_NAR_HASH,
-            url=_urls()["meshLlmUrl"],
+            url=candidate_urls["meshLlmUrl"],
         ),
         HashEntry.create(
             "srcHash",
             _LLAMA_SOURCE_NAR_HASH,
-            url=_urls()["llamaCppUrl"],
+            url=candidate_urls["llamaCppUrl"],
         ),
         HashEntry.create(
             "npmDepsHash",
             _NPM_DEPS_HASH,
-            url=_urls()["buzzUrl"],
+            url=candidate_urls["buzzUrl"],
         ),
         HashEntry.create(
             "vendorHash",
             _ROOT_CARGO_HASH,
-            url=_urls()["buzzUrl"],
+            url=candidate_urls["buzzUrl"],
         ),
         HashEntry.create(
             "cargoHash",
             _DESKTOP_CARGO_HASH,
-            url=_urls()["buzzUrl"],
+            url=candidate_urls["buzzUrl"],
         ),
     ]
     value_events = [event for event in events if event.kind is UpdateEventKind.VALUE]
@@ -2215,15 +2569,16 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
         == hashes
     )
     expected_result = SourceEntry(
-        version=_VERSION,
-        commit=_COMMIT,
+        version=candidate_version,
+        commit=candidate_commit,
         hashes=HashCollection.from_value(hashes),
+        pins=updater.compatibility_pins,
         urls={
-            "buzz": _urls()["buzzUrl"],
-            "llamaCpp": _urls()["llamaCppUrl"],
-            "meshLlm": _urls()["meshLlmUrl"],
-            "onnxruntime": _urls()["onnxruntimeUrl"],
-            "sherpaOnnx": _urls()["sherpaOnnxUrl"],
+            "buzz": candidate_urls["buzzUrl"],
+            "llamaCpp": candidate_urls["llamaCppUrl"],
+            "meshLlm": candidate_urls["meshLlmUrl"],
+            "onnxruntime": candidate_urls["onnxruntimeUrl"],
+            "sherpaOnnx": candidate_urls["sherpaOnnxUrl"],
         },
     )
     assert updater.build_result(info, hashes) == expected_result
@@ -2253,103 +2608,93 @@ def test_buzz_hashing_requires_a_discovered_artifact_directory(
 
 
 def test_buzz_updater_owns_the_complete_native_lock() -> None:
-    """The updater artifact is the sole authority for direct native FODs."""
-    updater = _load_updater_module().BuzzUpdater()
+    """The live lock is coherent without freezing routine release identity."""
+    module = _load_updater_module()
+    updater = module.BuzzUpdater()
 
     assert updater.get_generated_artifact_files() == ("native-lock.json",)
+    assert updater.get_derivation_validations() == (
+        DerivationValidation(
+            installable="path:.#pkgs.{system}.{name}",
+            systems=("aarch64-darwin",),
+            mode="build",
+        ),
+    )
 
     native_lock = json.loads(
         (_PACKAGE_DIR / "native-lock.json").read_text(encoding="utf-8")
     )
+    source = SourceEntry.model_validate_json(
+        (_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")
+    )
+    assert set(native_lock) == {
+        "schemaVersion",
+        "buzz",
+        "onnxruntime",
+        "meshLlm",
+        "llamaCpp",
+        "pnpm",
+        "sherpaOnnx",
+    }
     assert native_lock["schemaVersion"] == 1
-    assert native_lock["buzz"] == {
-        "commit": _COMMIT,
-        "rustVersion": _RUST_VERSION,
-        "version": _VERSION,
-    }
-    assert native_lock["desktopBundleValidation"] == {
-        "candidate": {
-            "derivationPath": (
-                "/nix/store/3b5gv1l2iriy0fw48dnhg1zd770knrfw-"
-                f"buzz-desktop-candidate-{_VERSION}.drv"
-            ),
-            "outputPath": (
-                "/nix/store/55pw5giij3bb8cqn2dzw4djc54vkzzw2-"
-                f"buzz-desktop-candidate-{_VERSION}"
-            ),
-        },
-        "checks": [
-            "realized-candidate",
-            "isolated-launcher-startup",
-            "offline-runtime-loading",
-            "signatures",
-            "exact-app-metadata",
-            "reference-free-final-bundle",
-        ],
-        "schemaVersion": 1,
-        "status": "passed",
-    }
-    assert native_lock["onnxruntime"] == {
-        "commit": _ONNX_RUNTIME_COMMIT,
-        "version": _ONNX_RUNTIME_VERSION,
-    }
-    assert native_lock["meshLlm"] == {
-        "commit": _MESH_COMMIT,
-        "skippyAbi": _SKIPPY_ABI,
-        "version": _MESH_VERSION,
-    }
-    assert native_lock["llamaCpp"] == {"commit": _LLAMA_COMMIT}
-    assert native_lock["pnpm"] == {
-        "hash": "sha256-50EGpaDrJWn0WDUEQg6tX8HCY+QXoyFsqxy+DM3LTq4=",
-        "url": "https://registry.npmjs.org/pnpm/-/pnpm-11.4.0.tgz",
-        "version": "11.4.0",
-    }
-    sherpa = native_lock["sherpaOnnx"]
-    assert sherpa["version"] == _SHERPA_ONNX_VERSION
-    assert sherpa["commit"] == _SHERPA_ONNX_COMMIT
-    assert sherpa["dependencyOrder"] == [
-        "kaldiNativeFbank",
-        "simpleSentencepiece",
-        "kaldifst",
-        "kaldiDecoder",
-        "openfst",
-        "kissfft",
-    ]
-    assert {
-        (dependency["file"], dependency["url"], dependency["hash"])
-        for dependency in sherpa["dependencies"].values()
-    } == {
-        (
-            "kaldi-native-fbank-1.22.3.tar.gz",
-            "https://github.com/csukuangfj/kaldi-native-fbank/archive/refs/tags/v1.22.3.tar.gz",
-            "sha256-kXbMZvx84e34XPNVsG4yDFfbYpffdCd/V1GDRoiTz2E=",
-        ),
-        (
-            "simple-sentencepiece-0.7.tar.gz",
-            "https://github.com/pkufool/simple-sentencepiece/archive/refs/tags/v0.7.tar.gz",
-            "sha256-F0ioIgYKNbqp9mCfhO/I61TcDnS57OPYI2e3EZ/cda8=",
-        ),
-        (
-            "kaldifst-1.8.0.tar.gz",
-            "https://github.com/k2-fsa/kaldifst/archive/refs/tags/v1.8.0.tar.gz",
-            "sha256-PyR7flokCQcSAvXivGIABg9mcowKNEPAOSOtJyPgQLM=",
-        ),
-        (
-            "kaldi-decoder-0.3.0.tar.gz",
-            "https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.3.0.tar.gz",
-            "sha256-ufNM+0/TsTRBAO6tee9NN6oVliJ0ueMFbeNFAh92obA=",
-        ),
-        (
-            "openfst-1.8.5-2026-04-11.tar.gz",
-            "https://github.com/csukuangfj/openfst/archive/refs/tags/v1.8.5-2026-04-11.tar.gz",
-            "sha256-V/vEuVCugbGg4eKYrxVlLalopnI6WSt4dOm0AnqApbQ=",
-        ),
-        (
-            "kissfft-febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip",
-            "https://github.com/mborgerding/kissfft/archive/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip",
-            "sha256-SXED5mQWjr45WAt1etvmFvbPhaFlcq9YHKe8QtCrE/0=",
-        ),
-    }
+    buzz = expect_instance(native_lock["buzz"], dict)
+    assert buzz["version"] == source.version
+    assert buzz["commit"] == source.commit
+    assert re.fullmatch(
+        r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)",
+        expect_instance(buzz["rustVersion"], str),
+    )
+
+    def source_commit(name: str) -> str:
+        assert source.urls is not None
+        match = re.fullmatch(
+            r"https://github\.com/[^/]+/[^/]+/archive/([0-9a-f]{40})\.tar\.gz",
+            source.urls[name],
+        )
+        assert match is not None
+        return match.group(1)
+
+    onnxruntime = expect_instance(native_lock["onnxruntime"], dict)
+    assert onnxruntime["commit"] == source_commit("onnxruntime")
+    assert onnxruntime["version"] == updater.get_compatibility_pin("onnxruntimeVersion")
+    mesh = expect_instance(native_lock["meshLlm"], dict)
+    assert mesh["commit"] == source_commit("meshLlm")
+    for key in ("version", "skippyAbi"):
+        assert re.fullmatch(
+            r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)",
+            expect_instance(mesh[key], str),
+        )
+    assert native_lock["llamaCpp"] == {"commit": source_commit("llamaCpp")}
+    pnpm = expect_instance(native_lock["pnpm"], dict)
+    pnpm_version = expect_instance(pnpm["version"], str)
+    assert re.fullmatch(
+        r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)",
+        pnpm_version,
+    )
+    assert pnpm["url"] == updater._pnpm_url(pnpm_version)
+    assert re.fullmatch(
+        r"sha256-[A-Za-z0-9+/]{43}=",
+        expect_instance(pnpm["hash"], str),
+    )
+
+    sherpa = expect_instance(native_lock["sherpaOnnx"], dict)
+    assert re.fullmatch(
+        r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)",
+        expect_instance(sherpa["version"], str),
+    )
+    assert sherpa["commit"] == source_commit("sherpaOnnx")
+    assert sherpa["dependencyOrder"] == list(module._SHERPA_FETCHCONTENT_ORDER)
+    dependencies = expect_instance(sherpa["dependencies"], dict)
+    assert set(dependencies) == set(module._SHERPA_FETCHCONTENT_LOCK)
+    for name, expected in module._SHERPA_FETCHCONTENT_LOCK.items():
+        actual = expect_instance(dependencies[name], dict)
+        assert {key: actual[key] for key in ("cmakeVariable", "file", "url")} == (
+            expected
+        )
+        assert re.fullmatch(
+            r"sha256-[A-Za-z0-9+/]{43}=",
+            expect_instance(actual["hash"], str),
+        )
 
 
 def test_buzz_derivations_consume_only_the_updater_owned_direct_fod_lock() -> None:
@@ -2379,10 +2724,7 @@ def test_buzz_derivations_consume_only_the_updater_owned_direct_fod_lock() -> No
         expect_binding(package_scope, "sherpaOnnxClosure").value,
         "nativeLock.sherpaOnnx or { }",
     )
-    assert_nix_ast_equal(
-        expect_binding(package_scope, "desktopBundleValidationEvidence").value,
-        "nativeLock.desktopBundleValidation or { }",
-    )
+    assert "desktopBundleValidationEvidence" not in binding_map(package_scope)
     for binding, field in (
         ("buzzLock", "buzz"),
         ("onnxRuntimeClosure", "onnxruntime"),
@@ -2441,9 +2783,9 @@ def test_buzz_rejects_partial_or_unpinned_hash_results() -> None:
 
     with pytest.raises(RuntimeError, match="exact closure keys"):
         updater.build_result(_version_info(), partial)
-    with pytest.raises(RuntimeError, match="only accepts the audited"):
+    with pytest.raises(RuntimeError, match="release tag drifted"):
         updater.build_result(
-            VersionInfo("0.5.15", {"commit": _COMMIT}),
+            VersionInfo("0.5.15", _metadata()),
             partial,
         )
     with pytest.raises(TypeError, match="structured source hash entries"):
@@ -2477,63 +2819,61 @@ def test_buzz_rejects_partial_or_unpinned_hash_results() -> None:
 
 
 def test_buzz_source_metadata_pins_every_authoritative_fixed_output() -> None:
-    """Promoted metadata must pin both sources and all three dependency closures."""
+    """Promoted metadata must follow the generated lock across future releases."""
+    module = _load_updater_module()
+    updater = module.BuzzUpdater()
     source = SourceEntry.model_validate_json(
         (_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")
     )
+    native_lock = json.loads(
+        (_PACKAGE_DIR / "native-lock.json").read_text(encoding="utf-8")
+    )
+    buzz = expect_instance(native_lock["buzz"], dict)
+    assert source.version == buzz["version"]
+    assert source.commit == buzz["commit"]
 
-    assert source == SourceEntry(
-        version=_VERSION,
-        commit=_COMMIT,
-        hashes=HashCollection.from_value([
-            HashEntry.create(
-                "cargoHash",
-                _DESKTOP_CARGO_HASH,
-                url=_urls()["buzzUrl"],
-            ),
-            HashEntry.create(
-                "npmDepsHash",
-                _NPM_DEPS_HASH,
-                url=_urls()["buzzUrl"],
-            ),
-            HashEntry.create(
-                "srcHash",
-                _MESH_SOURCE_NAR_HASH,
-                url=_urls()["meshLlmUrl"],
-            ),
-            HashEntry.create(
-                "srcHash",
-                _SOURCE_NAR_HASH,
-                url=_urls()["buzzUrl"],
-            ),
-            HashEntry.create(
-                "srcHash",
-                _LLAMA_SOURCE_NAR_HASH,
-                url=_urls()["llamaCppUrl"],
-            ),
-            HashEntry.create(
-                "srcHash",
-                _SHERPA_SOURCE_NAR_HASH,
-                url=_urls()["sherpaOnnxUrl"],
-            ),
-            HashEntry.create(
-                "srcHash",
-                _ONNX_SOURCE_NAR_HASH,
-                url=_urls()["onnxruntimeUrl"],
-            ),
-            HashEntry.create(
-                "vendorHash",
-                _ROOT_CARGO_HASH,
-                url=_urls()["buzzUrl"],
-            ),
-        ]),
-        urls={
-            "buzz": _urls()["buzzUrl"],
-            "llamaCpp": _urls()["llamaCppUrl"],
-            "meshLlm": _urls()["meshLlmUrl"],
-            "onnxruntime": _urls()["onnxruntimeUrl"],
-            "sherpaOnnx": _urls()["sherpaOnnxUrl"],
-        },
+    commit = expect_instance(source.commit, str)
+    onnxruntime = expect_instance(native_lock["onnxruntime"], dict)
+    sherpa = expect_instance(native_lock["sherpaOnnx"], dict)
+    mesh = expect_instance(native_lock["meshLlm"], dict)
+    llama = expect_instance(native_lock["llamaCpp"], dict)
+    expected_urls = {
+        "buzz": updater._archive_url("block", "buzz", commit),
+        "llamaCpp": updater._archive_url(
+            "ggml-org",
+            "llama.cpp",
+            expect_instance(llama["commit"], str),
+        ),
+        "meshLlm": updater._archive_url(
+            "Mesh-LLM",
+            "mesh-llm",
+            expect_instance(mesh["commit"], str),
+        ),
+        "onnxruntime": updater._archive_url(
+            "microsoft",
+            "onnxruntime",
+            expect_instance(onnxruntime["commit"], str),
+        ),
+        "sherpaOnnx": updater._archive_url(
+            "k2-fsa",
+            "sherpa-onnx",
+            expect_instance(sherpa["commit"], str),
+        ),
+    }
+    assert source.urls == expected_urls
+
+    entries = source.hashes.entries
+    assert entries is not None
+    expected_keys = {
+        *(("srcHash", url) for url in expected_urls.values()),
+        ("npmDepsHash", expected_urls["buzz"]),
+        ("vendorHash", expected_urls["buzz"]),
+        ("cargoHash", expected_urls["buzz"]),
+    }
+    assert len(entries) == len(expected_keys) == 8
+    assert {(entry.hash_type, entry.url) for entry in entries} == expected_keys
+    assert all(
+        re.fullmatch(r"sha256-[A-Za-z0-9+/]{43}=", entry.hash) for entry in entries
     )
 
 

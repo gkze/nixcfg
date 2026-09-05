@@ -90,24 +90,33 @@ _HASH_MISMATCH_INDICATORS = (
 )
 
 _FIXED_OUTPUT_HASH_MAX_ATTEMPTS = 3
-_FIXED_OUTPUT_HASH_TRANSIENT_MARKERS = (
+_NIX_NETWORK_TRANSIENT_MARKERS = (
     "502 Bad Gateway",
     "503 Service Unavailable",
     "504 Gateway Time-out",
     "Could not resolve host",
+    "Failure when receiving data from the peer",
     "Failed to connect",
     "HTTP error 502",
     "HTTP error 503",
     "HTTP error 504",
+    "HTTP protocol violation",
+    "HTTP/2 framing layer",
+    "HTTP/2 stream",
     "NameServerFailure",
-    "Operation timed out",
+    "Operation too slow",
     "Temporary failure in name resolution",
-    "aborted due to timeout",
-    "cannot download source from any mirror",
     "connection reset",
     "returned error: 502",
     "returned error: 503",
     "returned error: 504",
+)
+
+_FIXED_OUTPUT_ONLY_TRANSIENT_MARKERS = (
+    "Operation timed out",
+    "aborted due to timeout",
+    "cannot download source from any mirror",
+    "Fail extracting tarball",
     "timed out",
 )
 
@@ -126,20 +135,6 @@ def _nix_string_or_expr(value: str | NixExpression) -> NixExpression:
 
 def _fake_hash_expr() -> NixExpression:
     return select_attrs(Identifier(name="pkgs"), "lib", "fakeHash")
-
-
-def _build_pnpm_10_nodejs_22_expr() -> FunctionCall:
-    return FunctionCall(
-        name=select_attrs(Identifier(name="pkgs"), "pnpm_10", "override"),
-        argument=AttributeSet(
-            values=[
-                Binding(
-                    name="nodejs-slim",
-                    value=select_attrs(Identifier(name="pkgs"), "nodejs_22"),
-                ),
-            ]
-        ),
-    )
 
 
 def _build_get_flake_expr(flake_url: str) -> FunctionCall:
@@ -525,13 +520,27 @@ def _has_hash_mismatch_signal(output: str) -> bool:
     return any(indicator in output for indicator in _HASH_MISMATCH_INDICATORS)
 
 
+def is_retryable_nix_network_failure(*, stdout: str, stderr: str) -> bool:
+    """Return whether Nix reported a transient network or substituter failure."""
+    output = f"{stderr}\n{stdout}"
+    if _has_hash_mismatch_signal(output):
+        return False
+    folded = output.casefold()
+    return any(marker.casefold() in folded for marker in _NIX_NETWORK_TRANSIENT_MARKERS)
+
+
 def _is_retryable_fixed_output_hash_failure(result: CommandResult) -> bool:
     output = f"{result.stderr}\n{result.stdout}"
     if _has_hash_mismatch_signal(output):
         return False
+    if is_retryable_nix_network_failure(
+        stdout=result.stdout,
+        stderr=result.stderr,
+    ):
+        return True
     folded = output.casefold()
     return any(
-        marker.casefold() in folded for marker in _FIXED_OUTPUT_HASH_TRANSIENT_MARKERS
+        marker.casefold() in folded for marker in _FIXED_OUTPUT_ONLY_TRANSIENT_MARKERS
     )
 
 
@@ -759,19 +768,10 @@ def _build_overlay_expression(
     source_overrides: Mapping[str, SourceEntry] | None = None,
     fake_hashes: bool | None = None,
 ) -> NixExpression:
-    """Build a Nix expression that evaluates an overlay package.
+    """Evaluate a package with the host's shared overlay order.
 
-    Uses a manual fixed-point (``lib.fix``) to apply the flake overlay on top
-    of a plain nixpkgs import.  This avoids infinite recursion that occurs
-    when using ``import nixpkgs { overlays = [ ... ]; }`` — that codepath
-    triggers ``with self;`` in ``pkgs/top-level/aliases.nix`` which re-enters
-    the overlay before its own attributes are defined, producing an infinite
-    recursion on newer nixpkgs revisions.
-
-    The ``lib.fix`` approach creates the self-referential attribute set
-    *outside* of nixpkgs' own overlay machinery, so the overlay's ``final``
-    parameter correctly resolves to ``pkgs // overlay final pkgs`` without
-    hitting the aliases.nix ``with self`` trap.
+    The contextual scope supplies candidate source metadata and hash settings
+    without changing the checkout or evaluating the host configuration.
     """
     return LetExpression(
         local_variables=_contextual_overlay_bindings(
@@ -880,25 +880,29 @@ def _contextual_overlay_bindings(
         Binding(
             name="applied",
             value=FunctionCall(
-                name=select_attrs(Identifier(name="pkgs"), "lib", "fix"),
+                name=select_attrs(Identifier(name="pkgs"), "appendOverlays"),
                 argument=Parenthesis(
-                    value=FunctionDefinition(
-                        argument_set=Identifier(name="self"),
-                        output=BinaryExpression(
-                            operator=Operator(name="//"),
-                            left=Identifier(name="pkgs"),
-                            right=FunctionCall(
-                                name=FunctionCall(
-                                    name=select_attrs(
-                                        Identifier(name="flake"),
-                                        "overlays",
-                                        "default",
+                    value=FunctionCall(
+                        name=FunctionCall(
+                            name=Identifier(name="import"),
+                            argument=Parenthesis(
+                                value=BinaryExpression(
+                                    operator=Operator(name="+"),
+                                    left=select_attrs(
+                                        Identifier(name="rootFlake"), "outPath"
                                     ),
-                                    argument=Identifier(name="self"),
+                                    right=StringPrimitive(
+                                        value="/lib/package-overlays.nix"
+                                    ),
                                 ),
-                                argument=Identifier(name="pkgs"),
                             ),
                         ),
+                        argument=AttributeSet.from_dict({
+                            "inputs": select_attrs(
+                                Identifier(name="rootFlake"), "inputs"
+                            ),
+                            "outputs": Identifier(name="flake"),
+                        }),
                     ),
                 ),
             ),
@@ -1051,5 +1055,6 @@ __all__ = [
     "compute_fixed_output_hash",
     "compute_overlay_hash",
     "get_current_nix_platform",
+    "is_retryable_nix_network_failure",
     "normalize_nix_platform",
 ]

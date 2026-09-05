@@ -33,11 +33,11 @@ class TsgolintUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
     )
 
     @staticmethod
-    def _src_expr(version: str) -> str:
+    def _src_expr(commit: str) -> str:
         return _build_fetch_from_github_expr(
             "oxc-project",
             "tsgolint",
-            tag=f"v{version}",
+            rev=commit,
             fetch_submodules=False,
         )
 
@@ -52,7 +52,9 @@ class TsgolintUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
         else:
             update_context = UpdateContext(current=context)
         current = update_context.current
-        if current is None or current.version != info.version:
+        if current is None:
+            return False
+        if not await super()._is_latest(update_context, info):
             return False
 
         hashes = current.hashes
