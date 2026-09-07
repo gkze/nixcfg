@@ -39,7 +39,7 @@ from lib.tests._source_metadata import (
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import AssetURLsMetadata
 
 _PACKAGE_DIR = REPO_ROOT / "packages/zo"
@@ -252,7 +252,7 @@ def test_zo_resolves_one_canonical_immutable_universal_zip(
         _fetch_github_api,
     )
 
-    info = _run(updater.fetch_latest(object()))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     result = updater.build_result(info, dict.fromkeys(_PLATFORMS, _HASH))
 
     assert updater.PLATFORMS == _PLATFORMS

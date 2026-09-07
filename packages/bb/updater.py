@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, ClassVar, cast
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update.derivation_validation import DerivationValidation
+from lib.update.events import EventSink, ignore_event
 from lib.update.net import fetch_json, github_raw_url
 from lib.update.nix import (
     _build_fetch_from_github_expr,
@@ -21,8 +22,6 @@ from lib.update.updaters.metadata import require_metadata_str
 
 if TYPE_CHECKING:
     import aiohttp
-
-    from lib.update.events import EventStream
 
 
 @register_updater
@@ -77,8 +76,11 @@ class BbUpdater(GitHubReleaseUpdater):
             context="bb release metadata",
         )
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the latest immutable desktop release and its source commit."""
+        _ = context
         version, tag_name, commit = await self._fetch_release_version_tag_commit(
             session
         )
@@ -134,7 +136,7 @@ class BbUpdater(GitHubReleaseUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Recompute the pnpm closure before deciding metadata is unchanged."""
@@ -171,22 +173,21 @@ class BbUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash the immutable source, then the pnpm dependency closure."""
         _ = (session, context)
         commit = self._require_commit(info)
-        async for event in stream_fixed_output_hashes(
+        return await stream_fixed_output_hashes(
             self.name,
             steps=(
                 FixedOutputHashStep(
                     hash_type="srcHash",
-                    error="Missing srcHash output",
                     expr=lambda _resolved: self._src_expr(commit),
                 ),
                 FixedOutputHashStep(
                     hash_type="npmDepsHash",
-                    error="Missing npmDepsHash output",
                     expr=lambda resolved: _build_package_path_attr_expr(
                         self.name,
                         ".pnpmDeps",
@@ -201,8 +202,8 @@ class BbUpdater(GitHubReleaseUpdater):
                 ),
             ),
             config=self.config,
-        ):
-            yield event
+            emit=emit,
+        )
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist both release version and exact source commit."""

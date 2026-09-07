@@ -7,7 +7,7 @@ import pytest
 
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 
 def _load_module() -> ModuleType:
@@ -94,7 +94,7 @@ def test_fetch_latest_resolves_shared_version_from_latest_redirects() -> None:
         ),
     })
 
-    info = _run(updater.fetch_latest(session))
+    info = _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
 
     assert info == VersionInfo(version="9.9.9.99999", metadata=module.NO_METADATA)
     assert [(method, url) for method, url, _kwargs in session.calls] == [
@@ -135,7 +135,11 @@ def test_fetch_latest_rejects_failed_or_mismatched_redirects() -> None:
         ),
     })
     with pytest.raises(RuntimeError, match="mismatched versions"):
-        _run(updater.fetch_latest(mismatched_session))
+        _run(
+            updater.fetch_latest(
+                mismatched_session, context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_get_download_url_uses_pinned_zoom_paths_and_rejects_unknown_platform() -> None:

@@ -1666,10 +1666,6 @@ def test_event_consumer_dispatch_routes_and_skip(
     assert not object.__getattribute__(consumer, "_dispatch")(
         UpdateEvent.error("demo", "boom"), item
     )
-    assert not object.__getattribute__(consumer, "_dispatch")(
-        UpdateEvent(source="demo", kind=UpdateEventKind.VALUE, payload="ignored"),
-        item,
-    )
 
 
 def test_event_consumer_run_non_tty(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1679,9 +1675,7 @@ def test_event_consumer_run_non_tty(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _run() -> None:
         await queue.put(UpdateEvent.status("demo", "Checking demo (current: 1.0)"))
         await queue.put(UpdateEvent.status("missing", "ignored"))
-        await queue.put(
-            UpdateEvent(source="demo", kind=UpdateEventKind.VALUE, payload="v")
-        )
+        await queue.put(UpdateEvent.status("demo", "v"))
         await queue.put(None)
         return await consumer.run()
 

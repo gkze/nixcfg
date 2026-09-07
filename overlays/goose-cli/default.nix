@@ -83,12 +83,8 @@ let
   v8NativeDrv = v8Build.nativeDrv;
   inherit (v8Build) chromiumToolchainBundle;
 
-  cargoNixForVersionChecks = cargoNixFn {
-    pkgs = prev;
-    rootSrc = upstreamSrc;
-  };
-  cargoNixGooseVersion = cargoNixForVersionChecks.internal.crates."goose-cli".version;
-  cargoNixV8Version = cargoNixForVersionChecks.internal.crates."v8-goose".version;
+  cargoNixGooseVersion = cargoNix.internal.crates."goose-cli".version;
+  cargoNixV8Version = cargoNix.internal.crates."v8-goose".version;
   cargoNixVersionCheck =
     if cargoNixGooseVersion == version then
       true

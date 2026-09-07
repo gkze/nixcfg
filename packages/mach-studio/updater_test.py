@@ -35,7 +35,7 @@ from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import AssetURLsMetadata
 
 _VERSION = "0.1.142"
@@ -340,7 +340,7 @@ def test_mach_studio_resolves_the_immutable_arm64_vendor_dmg(
         _fetch_asset_urls,
     )
 
-    info = _run(updater.fetch_latest(object()))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     result = updater.build_result(info, {"aarch64-darwin": _HASH})
 
     assert updater.PLATFORMS == {"aarch64-darwin": "arm64"}

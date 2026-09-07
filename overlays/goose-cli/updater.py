@@ -13,6 +13,8 @@ from lib.update.updaters.metadata import FlakeInputMetadata
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 
 @register_updater
 class GooseCliUpdater(Crate2NixMetadataUpdater):
@@ -43,10 +45,10 @@ class GooseCliUpdater(Crate2NixMetadataUpdater):
         )
 
     async def fetch_latest(
-        self,
-        session: aiohttp.ClientSession,
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
         """Resolve the package version from the locked ``v<version>`` ref."""
+        _ = context
         _ = session
         node = self._resolve_flake_node(VersionInfo(version="ignored"))
         ref = node.original.ref if node.original is not None else None

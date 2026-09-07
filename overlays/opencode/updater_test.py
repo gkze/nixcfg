@@ -95,18 +95,6 @@ def test_opencode_updater_tracks_all_supported_platform_hashes() -> None:
         ),
         pytest.param(
             True,
-            UpdateContext(
-                current=_source_entry(
-                    "aarch64-darwin",
-                    "aarch64-linux",
-                    "x86_64-linux",
-                )
-            ),
-            True,
-            id="update-context",
-        ),
-        pytest.param(
-            True,
             _source_entry("aarch64-darwin", "x86_64-linux"),
             False,
             id="missing-platform",
@@ -127,7 +115,7 @@ def test_opencode_updater_tracks_all_supported_platform_hashes() -> None:
 def test_opencode_is_latest_validates_platform_hash_coverage(
     monkeypatch: pytest.MonkeyPatch,
     base_latest: bool,
-    current: UpdateContext | SourceEntry | None,
+    current: SourceEntry | None,
     expected: bool,
 ) -> None:
     """Latest checks require a base match and the exact supported-platform set."""
@@ -144,4 +132,11 @@ def test_opencode_is_latest_validates_platform_hash_coverage(
         _base_is_latest,
     )
 
-    assert _run(updater._is_latest(current, VersionInfo(version="1.2.3"))) is expected
+    assert (
+        _run(
+            updater._is_latest(
+                UpdateContext(current=current), VersionInfo(version="1.2.3")
+            )
+        )
+        is expected
+    )

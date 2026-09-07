@@ -10,6 +10,7 @@ from typing import cast
 
 import pytest
 
+from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.update import persistence as persistence_module
 from lib.update.persistence import (
     IsolatedUpdateWorkspace,
@@ -1086,3 +1087,36 @@ def test_promotion_conflict_reports_successful_rollback_state(
     assert exc_info.value.paths == (Path("external.txt"),)
     assert exc_info.value.promotion_state is UpdatePromotionState.ROLLED_BACK
     assert (live / "a.txt").read_text(encoding="utf-8") == "a-original\n"
+
+
+def test_source_only_update_preserves_generated_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A source-only update writes its sidecar without touching generated files."""
+    monkeypatch.setenv("REPO_ROOT", str(tmp_path))
+    package = tmp_path / "packages" / "demo"
+    package.mkdir(parents=True)
+    sidecar = package / "sources.json"
+    sidecar.write_text('{"version":"1","hashes":{}}\n', encoding="utf-8")
+    generated = package / "generated.lock"
+    generated.write_text("retained artifact\n", encoding="utf-8")
+    before = generated.stat()
+    sources = SourcesFile(entries={"demo": SourceEntry(version="1", hashes={})})
+    candidate = SourceEntry(version="2", hashes={})
+
+    written = persistence_module.persist_materialized_updates(
+        do_sources=True,
+        source_names=["demo"],
+        native_only=False,
+        sources=sources,
+        source_updates={"demo": candidate},
+        artifact_updates={},
+        details={"demo": "updated"},
+    )
+
+    assert written == (sidecar,)
+    assert SourceEntry.model_validate_json(sidecar.read_text()) == candidate
+    assert sources.entries["demo"] == candidate
+    assert generated.read_text() == "retained artifact\n"
+    after = generated.stat()
+    assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)

@@ -23,11 +23,9 @@ from lib.update import nix as update_nix
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
+    EventSink,
     UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_str,
-    require_value,
+    ignore_event,
 )
 from lib.update.net import fetch_github_api, fetch_json, fetch_url, github_raw_url
 from lib.update.nix import _build_fetch_from_github_call, _build_fetch_from_github_expr
@@ -48,7 +46,6 @@ if TYPE_CHECKING:
     from nix_manipulator.expressions.inherit import Inherit
 
     from lib.update.config import UpdateConfig
-    from lib.update.events import EventStream
 
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _EXACT_VERSION_PATTERN = re.compile(
@@ -210,7 +207,6 @@ class _HashRequest:
     hash_type: HashType
     url: str
     expr: str
-    error: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -729,8 +725,11 @@ class PaseoUpdater(GitHubReleaseUpdater):
             sherpa_version=sherpa_version,
         )
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the latest release against the supported native foundation."""
+        _ = context
         release = await self._fetch_latest_release_payload(session)
         tag = self._release_tag_from_payload(release)
         version = _require_exact_version(
@@ -870,7 +869,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Recompute closure hashes before considering this source current."""
@@ -1174,8 +1173,9 @@ class PaseoUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash every exact source plus the npm lock closure, without building."""
         _ = (session, context)
         metadata = self._required_metadata(info)
@@ -1190,7 +1190,6 @@ class PaseoUpdater(GitHubReleaseUpdater):
                     rev=commit,
                     fetch_submodules=fetch_submodules,
                 ),
-                error=f"Missing {repo} srcHash output",
             )
             for owner, repo, commit, url_key, fetch_submodules in (
                 (
@@ -1223,81 +1222,57 @@ class PaseoUpdater(GitHubReleaseUpdater):
                     hash_type="sha256",
                     url=url,
                     expr=self._fetchurl_expr(url),
-                    error=f"Missing URL hash output for {url}",
                 )
             )
 
         entries: list[HashEntry] = []
         source_hashes: dict[str, str] = {}
         for request in requests:
-            drain = ValueDrain[str]()
-            async for event in drain_value_events(
-                update_nix.compute_fixed_output_hash(
-                    self.name,
-                    request.expr,
-                    config=self.config,
-                ),
-                drain,
-                parse=expect_str,
-            ):
-                yield event
-            value = require_value(drain, request.error)
+            drain = await update_nix.compute_fixed_output_hash(
+                self.name, request.expr, config=self.config, emit=emit
+            )
+            value = drain
             entries.append(HashEntry.create(request.hash_type, value, url=request.url))
             source_hashes[request.url] = value
 
         paseo_url = metadata["paseoUrl"]
-        npm_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            update_nix.compute_fixed_output_hash(
-                self.name,
-                self._npm_deps_expr(
-                    commit=metadata["commit"],
-                    src_hash=source_hashes[paseo_url],
-                    version=info.version,
-                ),
-                config=self.config,
+        npm_hash = await update_nix.compute_fixed_output_hash(
+            self.name,
+            self._npm_deps_expr(
+                commit=metadata["commit"],
+                src_hash=source_hashes[paseo_url],
+                version=info.version,
             ),
-            npm_drain,
-            parse=expect_str,
-        ):
-            yield event
-        npm_hash = require_value(npm_drain, "Missing Paseo npmDepsHash output")
+            config=self.config,
+            emit=emit,
+        )
         entries.append(HashEntry.create("npmDepsHash", npm_hash, url=paseo_url))
 
         native_hashes: dict[str, str] = {}
         for identity, expression in self._native_hash_requests(onnx_dependencies):
-            drain = ValueDrain[str]()
-            async for event in drain_value_events(
-                update_nix.compute_fixed_output_hash(
-                    self.name,
-                    expression,
-                    config=self.config,
-                ),
-                drain,
-                parse=expect_str,
-            ):
-                yield event
-            native_hashes[identity] = require_value(
-                drain,
-                f"Missing native lock hash output for {identity}",
+            drain = await update_nix.compute_fixed_output_hash(
+                self.name, expression, config=self.config, emit=emit
             )
+            native_hashes[identity] = drain
 
         package_dir = updater_dir_for(self.name)
         if package_dir is None:
             msg = f"Package directory not found for {self.name}"
             raise RuntimeError(msg)
-        yield UpdateEvent.artifact(
-            self.name,
-            GeneratedArtifact.json(
-                package_dir / self.generated_artifact_files[0],
-                self._native_lock_payload(
-                    metadata,
-                    native_hashes,
-                    onnx_dependencies,
+        await emit(
+            UpdateEvent.artifact(
+                self.name,
+                GeneratedArtifact.json(
+                    package_dir / self.generated_artifact_files[0],
+                    self._native_lock_payload(
+                        metadata,
+                        native_hashes,
+                        onnx_dependencies,
+                    ),
                 ),
-            ),
+            )
         )
-        yield UpdateEvent.value(self.name, entries)
+        return entries
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist only the complete six-entry exact-source closure."""

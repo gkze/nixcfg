@@ -881,7 +881,7 @@ def test_update_summary_and_emit_summary(capsys: pytest.CaptureFixture[str]) -> 
     payload = json.loads(capsys.readouterr().out)
     assert payload["errors"] == ["a"]
 
-    summary_no_updates = UpdateSummary(updated=[], errors=[], no_change=[])
+    summary_no_updates = UpdateSummary(statuses={})
     code_no_updates = _emit_summary(
         summary_no_updates,
         had_errors=False,
@@ -2050,7 +2050,6 @@ def test_load_sources_and_persist_updates(monkeypatch: pytest.MonkeyPatch) -> No
     persist_source_updates(
         do_sources=resolved.do_sources,
         source_names=resolved.source_names,
-        dry_run=resolved.dry_run,
         native_only=resolved.native_only,
         sources=source_file,
         source_updates=updates,
@@ -2062,7 +2061,6 @@ def test_load_sources_and_persist_updates(monkeypatch: pytest.MonkeyPatch) -> No
         persist_source_updates(
             do_sources=False,
             source_names=["a"],
-            dry_run=False,
             native_only=False,
             sources=source_file,
             source_updates=updates,
@@ -2074,7 +2072,6 @@ def test_load_sources_and_persist_updates(monkeypatch: pytest.MonkeyPatch) -> No
         persist_source_updates(
             do_sources=True,
             source_names=["a"],
-            dry_run=False,
             native_only=False,
             sources=source_file,
             source_updates=updates,
@@ -2100,7 +2097,6 @@ def test_load_sources_and_persist_updates(monkeypatch: pytest.MonkeyPatch) -> No
     persist_source_updates(
         do_sources=True,
         source_names=["a"],
-        dry_run=False,
         native_only=True,
         sources=source_file,
         source_updates=updates,
@@ -2108,25 +2104,13 @@ def test_load_sources_and_persist_updates(monkeypatch: pytest.MonkeyPatch) -> No
     )
     assert native_save_options == [(True, True)]
 
-    assert (
-        persist_source_updates(
-            do_sources=True,
-            source_names=["a"],
-            dry_run=True,
-            native_only=False,
-            sources=source_file,
-            source_updates=updates,
-            details={"a": "updated"},
-        )
-        == ()
-    )
     assert len(save_calls) == 1
 
 
 def test_persist_generated_artifacts_and_materialized_updates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Persist generated artifacts before sources and respect dry-run."""
+    """Persist successful generated artifacts before their source updates."""
     artifact = GeneratedArtifact.text("artifacts/demo.txt", "hello\n")
     other_artifact = GeneratedArtifact.text("artifacts/other.txt", "other\n")
     assert flatten_artifact_updates(
@@ -2147,7 +2131,6 @@ def test_persist_generated_artifacts_and_materialized_updates(
     persist_generated_artifacts(
         do_sources=True,
         source_names=["demo"],
-        dry_run=False,
         artifact_updates={"demo": (artifact,)},
         details={"demo": "updated"},
     )
@@ -2156,7 +2139,6 @@ def test_persist_generated_artifacts_and_materialized_updates(
     persist_materialized_updates(
         do_sources=True,
         source_names=["demo"],
-        dry_run=False,
         native_only=False,
         sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
         source_updates={"demo": SourceEntry(hashes={"x86_64-linux": "sha256-1"})},
@@ -2167,18 +2149,8 @@ def test_persist_generated_artifacts_and_materialized_updates(
     assert len(saved_sources) == 1
 
     persist_generated_artifacts(
-        do_sources=True,
-        source_names=["demo"],
-        dry_run=True,
-        artifact_updates={"demo": (artifact,)},
-        details={"demo": "updated"},
-    )
-    assert len(saved_artifacts) == 2
-
-    persist_generated_artifacts(
         do_sources=False,
         source_names=["demo"],
-        dry_run=False,
         artifact_updates={"demo": (artifact,)},
         details={"demo": "updated"},
     )
@@ -2187,7 +2159,6 @@ def test_persist_generated_artifacts_and_materialized_updates(
     persist_generated_artifacts(
         do_sources=True,
         source_names=["demo"],
-        dry_run=False,
         artifact_updates={"demo": (artifact,)},
         details={"demo": "error"},
     )
@@ -3761,7 +3732,7 @@ def test_run_updates_promotes_only_after_isolated_execution(
         isolated_output.write_text("validated update\n", encoding="utf-8")
         assert output.read_text(encoding="utf-8") == "committed\n"
         return SimpleNamespace(
-            summary=UpdateSummary(updated=["demo"]),
+            summary=UpdateSummary(statuses={"demo": "updated"}),
             candidate_updates=("demo",),
             had_errors=False,
             written_paths=(isolated_output,),
@@ -4146,7 +4117,7 @@ def test_targeted_noop_rejects_changes_after_its_validation_decision(
 
     async def _execute_result(*_args: object) -> SimpleNamespace:
         return SimpleNamespace(
-            summary=UpdateSummary(no_change=["demo"]),
+            summary=UpdateSummary(statuses={"demo": "no_change"}),
             candidate_updates=(),
             had_errors=False,
             written_paths=(),
@@ -4194,9 +4165,9 @@ def test_run_updates_check_validates_the_candidate_in_isolation(
         show_phase_headers=True,
     )
     events: list[str] = []
+    validated_snapshots: list[Path] = []
 
-    async def _run_ref_phase(*, dry_run: bool, **_kwargs: object) -> UpdatePhaseResult:
-        assert dry_run is False
+    async def _run_ref_phase(**_kwargs: object) -> UpdatePhaseResult:
         assert Path.cwd() != live
         (Path.cwd() / "flake.lock").write_text("candidate input\n", encoding="utf-8")
         events.append("ref")
@@ -4204,7 +4175,6 @@ def test_run_updates_check_validates_the_candidate_in_isolation(
 
     async def _run_sources_phase(context: object) -> UpdatePhaseResult:
         assert context.update_input is True
-        assert context.dry_run is False
         assert (Path.cwd() / "flake.lock").read_text(encoding="utf-8") == (
             "candidate input\n"
         )
@@ -4213,7 +4183,6 @@ def test_run_updates_check_validates_the_candidate_in_isolation(
         return UpdatePhaseResult(details={"demo": "updated"})
 
     def _persist(**kwargs: object) -> tuple[Path, ...]:
-        assert kwargs["dry_run"] is False
         events.append("persist")
         return ()
 
@@ -4222,6 +4191,13 @@ def test_run_updates_check_validates_the_candidate_in_isolation(
             "candidate input\n"
         )
         assert _kwargs["all_declared_systems"] is True
+        snapshot_root = _kwargs["flake_root"]
+        assert isinstance(snapshot_root, Path)
+        assert snapshot_root != Path.cwd()
+        assert (snapshot_root / "flake.lock").read_text(
+            encoding="utf-8"
+        ) == "candidate input\n"
+        validated_snapshots.append(snapshot_root)
         events.append("validate")
         return ()
 
@@ -4229,6 +4205,10 @@ def test_run_updates_check_validates_the_candidate_in_isolation(
         assert (Path.cwd() / "flake.lock").read_text(encoding="utf-8") == (
             "candidate input\n"
         )
+        assert _kwargs["flake_root"] == validated_snapshots[0]
+        assert (validated_snapshots[0] / "flake.lock").read_text(
+            encoding="utf-8"
+        ) == "candidate input\n"
         events.append("roots")
         return ()
 
@@ -4318,7 +4298,7 @@ def test_run_updates_source_input_refresh_declares_flake_lock(
         candidate = Path.cwd() / "flake.lock"
         candidate.write_text("refreshed input\n", encoding="utf-8")
         return SimpleNamespace(
-            summary=UpdateSummary(updated=["demo"]),
+            summary=UpdateSummary(statuses={"demo": "updated"}),
             candidate_updates=("demo",),
             had_errors=False,
             written_paths=(),
@@ -4367,7 +4347,7 @@ def test_run_updates_does_not_declare_lock_for_source_without_input(
         candidate = Path.cwd() / "flake.lock"
         candidate.write_text("unauthorized\n", encoding="utf-8")
         return SimpleNamespace(
-            summary=UpdateSummary(updated=["demo"]),
+            summary=UpdateSummary(statuses={"demo": "updated"}),
             candidate_updates=("demo",),
             had_errors=False,
             written_paths=(candidate,),
@@ -4487,8 +4467,7 @@ def test_run_updates_enforces_isolated_output_authority(
             written_paths = ()
         return SimpleNamespace(
             summary=UpdateSummary(
-                errors=["demo"] if had_errors else [],
-                updated=[] if had_errors else ["demo"],
+                statuses={"demo": "error" if had_errors else "updated"}
             ),
             candidate_updates=() if had_errors else ("demo",),
             had_errors=had_errors,

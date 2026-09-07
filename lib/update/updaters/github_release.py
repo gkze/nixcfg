@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, ClassVar, cast
 
 from lib.nix.models.sources import SourceEntry, SourceHashes
 from lib.update.net import fetch_github_api
-from lib.update.updaters.core import DownloadHashUpdater, Updater
+from lib.update.updaters.core import DownloadHashUpdater, UpdateContext, Updater
 from lib.update.updaters.metadata import (
     AssetURLsMetadata,
     GitHubReleaseMetadata,
@@ -112,10 +112,10 @@ class GitHubReleaseUpdater(Updater):
         return version, tag_name, commit
 
     async def fetch_latest(
-        self,
-        session: aiohttp.ClientSession,
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
         """Resolve version metadata from the latest GitHub release tag."""
+        _ = context
         if self.RESOLVE_TAG_COMMIT:
             version, tag_name, commit = await self._fetch_release_version_tag_commit(
                 session
@@ -200,10 +200,10 @@ class GitHubReleaseAssetURLsUpdater(GitHubReleaseUpdater, DownloadHashUpdater):
         return asset_urls
 
     async def fetch_latest(
-        self,
-        session: aiohttp.ClientSession,
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
         """Resolve latest version and matching release asset URLs."""
+        _ = context
         payload = await self._fetch_latest_release_payload(session)
         tag_name = self._release_tag_from_payload(payload)
         version = self._normalize_release_version(tag_name)

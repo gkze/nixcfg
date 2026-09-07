@@ -36,6 +36,7 @@ from lib.tests._nix_ast import (
 )
 from lib.tests._package_registry import registry_capability_constraints
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
+from lib.tests._updater_helpers import collect_events
 from lib.update import crate2nix
 from lib.update.events import (
     StatusInfo,
@@ -682,9 +683,9 @@ def test_stream_crate2nix_artifact_updates_emits_changed_artifacts(
     )
 
     async def _collect() -> list[UpdateEvent]:
-        return [
-            event async for event in crate2nix.stream_crate2nix_artifact_updates("demo")
-        ]
+        return await collect_events(
+            lambda emit: crate2nix.stream_crate2nix_artifact_updates("demo", emit=emit)
+        )
 
     events = asyncio.run(_collect())
 
@@ -747,9 +748,9 @@ def test_stream_crate2nix_artifact_updates_skips_unknown_or_unsupported_targets(
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "darwin")
 
     async def _collect(name: str) -> list[UpdateEvent]:
-        return [
-            event async for event in crate2nix.stream_crate2nix_artifact_updates(name)
-        ]
+        return await collect_events(
+            lambda emit: crate2nix.stream_crate2nix_artifact_updates(name, emit=emit)
+        )
 
     missing_events = asyncio.run(_collect("missing-target"))
     assert len(missing_events) == 1
@@ -779,10 +780,9 @@ def test_stream_crate2nix_artifact_updates_reports_up_to_date(
     )
 
     async def _collect() -> list[UpdateEvent]:
-        return [
-            event
-            async for event in crate2nix.stream_crate2nix_artifact_updates("codex")
-        ]
+        return await collect_events(
+            lambda emit: crate2nix.stream_crate2nix_artifact_updates("codex", emit=emit)
+        )
 
     events = asyncio.run(_collect())
 
@@ -821,10 +821,9 @@ def test_stream_crate2nix_artifact_updates_reports_bounded_live_progress(
     monkeypatch.setattr(crate2nix, "crate2nix_artifact_updates", _artifacts)
 
     async def _collect() -> list[UpdateEvent]:
-        return [
-            event
-            async for event in crate2nix.stream_crate2nix_artifact_updates("codex")
-        ]
+        return await collect_events(
+            lambda emit: crate2nix.stream_crate2nix_artifact_updates("codex", emit=emit)
+        )
 
     events = asyncio.run(_collect())
     progress_events = [event for event in events if event.kind == UpdateEventKind.LINE]
@@ -875,10 +874,7 @@ def test_stream_crate2nix_artifact_updates_cancels_worker_promptly(
     monkeypatch.setattr(crate2nix, "crate2nix_artifact_updates", _artifacts)
 
     async def _cancel() -> None:
-        stream = crate2nix.stream_crate2nix_artifact_updates("codex")
-        initial = await anext(stream)
-        assert initial.message == "Refreshing crate2nix artifacts..."
-        task = asyncio.create_task(anext(stream))
+        task = asyncio.create_task(crate2nix.stream_crate2nix_artifact_updates("codex"))
         assert await asyncio.to_thread(started.wait, 1.0)
         started_at = time.monotonic()
         task.cancel()
@@ -886,15 +882,14 @@ def test_stream_crate2nix_artifact_updates_cancels_worker_promptly(
             await task
         assert time.monotonic() - started_at < 1.0
         assert stopped.is_set()
-        await stream.aclose()
 
     asyncio.run(_cancel())
 
 
-def test_stream_crate2nix_artifact_updates_close_cancels_worker(
+def test_stream_crate2nix_artifact_updates_sink_failure_cancels_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Closing a partially consumed stream should not strand its executor worker."""
+    """A failed progress sink must stop and join the running artifact worker."""
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "x86_64-linux")
     started = threading.Event()
     stopped = threading.Event()
@@ -913,14 +908,15 @@ def test_stream_crate2nix_artifact_updates_close_cancels_worker(
 
     monkeypatch.setattr(crate2nix, "crate2nix_artifact_updates", _artifacts)
 
+    async def _emit(event: UpdateEvent) -> None:
+        if event.kind is UpdateEventKind.LINE:
+            assert started.is_set()
+            raise RuntimeError("progress sink failed")
+
     async def _close() -> None:
-        stream = crate2nix.stream_crate2nix_artifact_updates("codex")
-        await anext(stream)
-        progress_event = await anext(stream)
-        assert progress_event.kind == UpdateEventKind.LINE
-        assert started.is_set()
         started_at = time.monotonic()
-        await stream.aclose()
+        with pytest.raises(RuntimeError, match="progress sink failed"):
+            await crate2nix.stream_crate2nix_artifact_updates("codex", emit=_emit)
         assert time.monotonic() - started_at < 1.0
         assert stopped.is_set()
 

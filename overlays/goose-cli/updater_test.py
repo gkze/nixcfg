@@ -20,8 +20,8 @@ from lib.tests._nix_ast import (
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.events import UpdateEvent
-from lib.update.updaters import VersionInfo
+from lib.update.events import EventSink, UpdateEvent, ignore_event
+from lib.update.updaters import UpdateContext, VersionInfo
 
 _PACKAGE_DIR = Path(__file__).parent
 _BITCOIN_INTERNALS_RUST_VERSIONS = {
@@ -48,19 +48,29 @@ def test_goose_cli_updater_forwards_materialized_artifacts_without_source_hashin
     async def _artifacts(
         *,
         source_overrides: dict[str, SourceEntry] | None = None,
-    ):
+        emit: EventSink = ignore_event,
+    ) -> object:
         assert source_overrides == {
             "goose-cli": updater.build_result(VersionInfo("1.2.3", {}), [])
         }
-        yield UpdateEvent.status("goose-cli", "materialized cargo artifacts")
+        await emit(UpdateEvent.status("goose-cli", "materialized cargo artifacts"))
 
     monkeypatch.setattr(updater, "stream_materialized_artifacts", _artifacts)
 
-    events = _run(_collect(updater.fetch_hashes(VersionInfo("1.2.3", {}), object())))
+    events = _run(
+        _collect(
+            lambda emit: updater.fetch_hashes(
+                VersionInfo("1.2.3", {}),
+                object(),
+                emit=emit,
+                context=UpdateContext(current=None),
+            )
+        )
+    )
 
-    assert [event.kind.value for event in events] == ["status", "value"]
+    assert [event.kind.value for event in events] == ["status"]
     assert events[0].message == "materialized cargo artifacts"
-    assert events[-1].payload == []
+    assert events.result == []
 
 
 def test_goose_cli_bitcoin_compatibility_map_is_updater_owned() -> None:
@@ -130,21 +140,26 @@ def test_goose_clean_candidate_materializes_then_is_immediately_current(
     current = updater.build_result(info, [])
     captured: dict[str, object] = {}
 
-    async def fetch_latest(_session: object) -> VersionInfo:
+    async def fetch_latest(
+        _session: object, *, context: UpdateContext | None = None
+    ) -> VersionInfo:
         return info
 
     async def materialize(
         *,
         source_overrides: dict[str, SourceEntry] | None = None,
-    ):
+        emit: EventSink = ignore_event,
+    ) -> object:
         captured["source_overrides"] = source_overrides
         if False:
-            yield UpdateEvent.status("goose-cli", "unreachable")
+            await emit(UpdateEvent.status("goose-cli", "unreachable"))
 
     monkeypatch.setattr(updater, "fetch_latest", fetch_latest)
     monkeypatch.setattr(updater, "stream_materialized_artifacts", materialize)
 
-    events = _run(_collect(updater.update_stream(current, object())))
+    events = _run(
+        _collect(lambda emit: updater.update_stream(current, object(), emit=emit))
+    )
 
     assert captured["source_overrides"] == {"goose-cli": current}
     assert [event.payload for event in events if event.kind.value == "result"] == [None]
@@ -176,4 +191,4 @@ def test_goose_cli_updater_requires_a_versioned_release_ref(
     monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
 
     with pytest.raises(RuntimeError, match="v<version> ref"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))

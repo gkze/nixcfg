@@ -20,9 +20,10 @@ from lib.nix.commands.flake import nix_flake_lock_update
 from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode
 from lib.update.events import (
     CommandResult,
-    EventStream,
+    EventSink,
     UpdateEvent,
     UpdateEventKind,
+    ignore_event,
 )
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import get_repo_root
@@ -30,6 +31,15 @@ from lib.update.paths import get_repo_root
 if TYPE_CHECKING:
     from nix_manipulator.expressions.expression import NixExpression
     from nix_manipulator.expressions.inherit import Inherit
+
+
+type FlakeInputState = tuple[bytes, bytes]
+
+
+def read_flake_input_state() -> FlakeInputState:
+    """Capture the exact declarations and lock graph used by an input refresh."""
+    root = get_repo_root()
+    return (root / "flake.nix").read_bytes(), (root / "flake.lock").read_bytes()
 
 
 @functools.cache
@@ -208,19 +218,25 @@ def nixpkgs_expression() -> NixExpression:
     )
 
 
-async def update_flake_input(input_name: str, *, source: str) -> EventStream:
+async def update_flake_input(
+    input_name: str, *, source: str, emit: EventSink = ignore_event
+) -> None:
     """Update a single flake input via :func:`lib.nix.commands.flake.nix_flake_lock_update`."""
     args = ["nix", "flake", "lock", "--update-input", input_name]
-    yield UpdateEvent(
-        source=source,
-        kind=UpdateEventKind.COMMAND_START,
-        message=shlex.join(args),
-        payload=args,
+    await emit(
+        UpdateEvent(
+            source=source,
+            kind=UpdateEventKind.COMMAND_START,
+            message=shlex.join(args),
+            payload=args,
+        )
     )
     await nix_flake_lock_update(input_name)
     invalidate_flake_lock()
-    yield UpdateEvent(
-        source=source,
-        kind=UpdateEventKind.COMMAND_END,
-        payload=CommandResult(args=args, returncode=0, stdout="", stderr=""),
+    await emit(
+        UpdateEvent(
+            source=source,
+            kind=UpdateEventKind.COMMAND_END,
+            payload=CommandResult(args=args, returncode=0, stdout="", stderr=""),
+        )
     )

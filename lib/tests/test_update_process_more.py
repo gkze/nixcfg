@@ -7,19 +7,21 @@ import pytest
 
 from lib.nix.commands.base import CommandResult as LibCommandResult
 from lib.nix.commands.base import NixCommandError, ProcessDone, ProcessLine
+from lib.tests._updater_helpers import collect_events
 from lib.update.config import resolve_config
 from lib.update.events import (
-    GatheredValues,
+    CommandResult,
+    EventSink,
     StatusInfo,
     StatusKind,
     StatusPayload,
     UpdateEvent,
     UpdateEventKind,
+    ignore_event,
 )
 from lib.update.process import (
     NixBuildOptions,
     RunCommandOptions,
-    StreamCommandOptions,
     _emit_successful_command,
     _nix_prefetch_name,
     _sanitize_log_line,
@@ -29,21 +31,14 @@ from lib.update.process import (
     convert_nix_hash_to_sri,
     run_command,
     run_nix_build,
-    stream_command,
 )
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 
-def _collect_stream(stream: AsyncIterator[UpdateEvent]) -> list[UpdateEvent]:
-    async def _run() -> list[UpdateEvent]:
-        items: list[UpdateEvent] = []
-        async for item in stream:
-            items.append(item)
-        return items
-
-    return asyncio.run(_run())
+def _collect_stream(operation):
+    return asyncio.run(collect_events(operation))
 
 
 def test_sanitize_and_truncate_helpers() -> None:
@@ -58,18 +53,20 @@ def test_sanitize_and_truncate_helpers() -> None:
     assert truncated.endswith(" [...]")
 
 
-def test_stream_command_success_and_tail_capture(
+def test_run_command_success_and_tail_capture(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Emit command lifecycle events and preserve nix-build stderr tail lines."""
 
     async def _fake_stream_process(
-        _args: list[str],
+        args: list[str],
         *,
         timeout: float,
         env: object,
     ) -> AsyncIterator[ProcessLine | ProcessDone]:
-        _ = (timeout, env)
+        assert args == ["nix", "build", "demo"]
+        assert timeout == 5
+        assert env == {"NIX_CONFIG": "accept-flake-config = true"}
         yield ProcessLine("stderr", "line-one\n")
         yield ProcessLine("stderr", "noise line\n")
         yield ProcessDone(
@@ -83,13 +80,16 @@ def test_stream_command_success_and_tail_capture(
 
     monkeypatch.setattr("lib.update.process.stream_process", _fake_stream_process)
     events = _collect_stream(
-        stream_command(
+        lambda emit: run_command(
             ["nix", "build", "demo"],
-            options=StreamCommandOptions(
+            options=RunCommandOptions(
                 source="demo",
+                env={"NIX_CONFIG": "accept-flake-config = true"},
+                allow_failure=True,
                 suppress_patterns=("noise",),
                 config=resolve_config(subprocess_timeout=5),
             ),
+            emit=emit,
         )
     )
 
@@ -99,29 +99,35 @@ def test_stream_command_success_and_tail_capture(
         UpdateEventKind.LINE,
         UpdateEventKind.COMMAND_END,
     ]
-    end_payload = events[-1].payload
-    if not isinstance(end_payload, type(events[-1].payload)):
-        raise AssertionError
-    assert hasattr(end_payload, "tail_lines")
-    assert tuple(end_payload.tail_lines) == ("[stderr] line-one",)
+    assert events[-1].payload is events.result
+    assert events.result == CommandResult(
+        args=["nix", "build", "demo"],
+        returncode=0,
+        stdout="out",
+        stderr="err",
+        allow_failure=True,
+        tail_lines=("[stderr] line-one",),
+    )
 
 
-def test_stream_command_timeout_and_missing_result(
+def test_run_command_timeout_and_missing_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Raise user-facing errors for timeout and malformed stream output."""
 
     async def _timeout_stream(
-        *_args: object, **_kwargs: object
-    ) -> AsyncIterator[object]:
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
         msg = "timeout"
         raise TimeoutError(msg)
-        yield UpdateEvent.status("never", "never")
+        yield ProcessLine("stdout", "never")
 
     monkeypatch.setattr("lib.update.process.stream_process", _timeout_stream)
     with pytest.raises(RuntimeError, match="Command timed out"):
         _collect_stream(
-            stream_command(["echo", "x"], options=StreamCommandOptions(source="demo"))
+            lambda emit: run_command(
+                ["echo", "x"], options=RunCommandOptions(source="demo"), emit=emit
+            )
         )
 
     async def _missing_done(*_args: object, **_kwargs: object) -> AsyncIterator[object]:
@@ -130,140 +136,62 @@ def test_stream_command_timeout_and_missing_result(
     monkeypatch.setattr("lib.update.process.stream_process", _missing_done)
     with pytest.raises(RuntimeError, match="without result"):
         _collect_stream(
-            stream_command(["echo", "x"], options=StreamCommandOptions(source="demo"))
-        )
-
-
-def test_run_command_and_run_nix_build(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Capture command result as VALUE event and build proper nix args."""
-
-    async def _fake_stream(
-        _args: list[str],
-        *,
-        options: StreamCommandOptions,
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent(
-            source=options.source,
-            kind=UpdateEventKind.COMMAND_END,
-            payload=UpdateEvent.value(
-                options.source,
-                "ignored",
-            ).payload,
-        )
-        yield UpdateEvent(
-            source=options.source,
-            kind=UpdateEventKind.COMMAND_END,
-            payload=type(
-                "_Result",
-                (),
-                {
-                    "args": ["x"],
-                    "returncode": 0,
-                    "stdout": "s",
-                    "stderr": "",
-                    "allow_failure": False,
-                    "tail_lines": (),
-                },
-            )(),
-        )
-
-    # use a real CommandResult payload on second event to set drain.value
-    stream_options: list[StreamCommandOptions] = []
-
-    async def _fake_stream_real(
-        _args: list[str],
-        *,
-        options: StreamCommandOptions,
-    ) -> AsyncIterator[UpdateEvent]:
-        stream_options.append(options)
-        yield UpdateEvent(
-            source=options.source,
-            kind=UpdateEventKind.COMMAND_END,
-            payload=type("_Ignore", (), {})(),
-        )
-        from lib.update.events import CommandResult
-
-        yield UpdateEvent(
-            source=options.source,
-            kind=UpdateEventKind.COMMAND_END,
-            payload=CommandResult(args=["x"], returncode=0, stdout="ok", stderr=""),
-        )
-
-    monkeypatch.setattr("lib.update.process.stream_command", _fake_stream_real)
-    out_events = _collect_stream(
-        run_command(
-            ["echo", "x"],
-            options=RunCommandOptions(
-                source="demo",
-                error="failed",
-                command_timeout=12.5,
-            ),
-        )
-    )
-    assert out_events[-1].kind == UpdateEventKind.VALUE
-    assert stream_options[0].command_timeout == 12.5
-
-    async def _fake_stream_missing(
-        _args: list[str],
-        *,
-        options: StreamCommandOptions,
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.status(options.source, "only status")
-
-    monkeypatch.setattr("lib.update.process.stream_command", _fake_stream_missing)
-    with pytest.raises(RuntimeError, match="did not return output"):
-        _collect_stream(
-            run_command(
-                ["echo", "x"],
-                options=RunCommandOptions(source="demo", error="did not return output"),
+            lambda emit: run_command(
+                ["echo", "x"], options=RunCommandOptions(source="demo"), emit=emit
             )
         )
 
+
+def test_run_nix_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Build proper Nix arguments and retain command progress and results."""
     captured: dict[str, object] = {}
 
     async def _fake_run_command(
-        args: list[str],
-        *,
-        options: RunCommandOptions,
-    ) -> AsyncIterator[UpdateEvent]:
+        args: list[str], *, options: RunCommandOptions, emit: EventSink = ignore_event
+    ) -> CommandResult:
         captured["args"] = args
         captured["options"] = options
-        yield UpdateEvent.status(options.source, "ok")
+        await emit(UpdateEvent.status(options.source, "ok"))
+        return CommandResult(args=args, returncode=0, stdout="built", stderr="")
 
     monkeypatch.setattr("lib.update.process.run_command", _fake_run_command)
     events = _collect_stream(
-        run_nix_build(
+        lambda emit: run_nix_build(
             "pkgs.hello",
             options=NixBuildOptions(source="demo", verbose=True),
+            emit=emit,
         )
     )
     assert events[0].kind == UpdateEventKind.STATUS
+    assert events.result.stdout == "built"
     args = captured["args"]
     assert isinstance(args, list)
     assert args[:4] == ["nix", "build", "-L", "--verbose"]
 
 
 def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Emit command start/end/value around hash conversion helpers."""
+    """Emit command lifecycle events and return converted hashes."""
     events = _collect_stream(
-        _emit_successful_command(
+        lambda emit: _emit_successful_command(
             source="demo",
             args=["echo", "hi"],
             message="echo hi",
             runner=lambda: asyncio.sleep(0, result="hi"),
+            emit=emit,
         )
     )
     assert [event.kind for event in events] == [
         UpdateEventKind.COMMAND_START,
         UpdateEventKind.COMMAND_END,
-        UpdateEventKind.VALUE,
     ]
     monkeypatch.setattr(
         "lib.update.process.libnix_hash_convert",
         lambda _hash: asyncio.sleep(0, result="sha256-AAA="),
     )
-    convert_events = _collect_stream(convert_nix_hash_to_sri("demo", "deadbeef"))
-    assert convert_events[-1].payload == "sha256-AAA="
+    convert_events = _collect_stream(
+        lambda emit: convert_nix_hash_to_sri("demo", "deadbeef", emit=emit)
+    )
+    assert convert_events.result == "sha256-AAA="
 
     prefetch_calls: list[tuple[str, str | None, float | None]] = []
 
@@ -278,22 +206,24 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr("lib.update.process.libnix_prefetch_url", _prefetch_url)
     prefetch_events = _collect_stream(
-        compute_sri_hash(
+        lambda emit: compute_sri_hash(
             "demo",
             "https://example.com/releases/Town%20Assistant-1.8-33.dmg",
             config=resolve_config(subprocess_timeout=12),
+            emit=emit,
         )
     )
     start_message = prefetch_events[0].message
     assert start_message is not None
     assert "--name Town-Assistant-1.8-33.dmg" in start_message
-    assert prefetch_events[-1].payload == "sha256-BBB="
+    assert prefetch_events.result == "sha256-BBB="
 
     _collect_stream(
-        compute_sri_hash(
+        lambda emit: compute_sri_hash(
             "demo",
             "https://example.com/app.dmg",
             config=resolve_config(subprocess_timeout=12),
+            emit=emit,
         )
     )
     assert _nix_prefetch_name("https://example.com/releases/") is None
@@ -349,7 +279,7 @@ def test_compute_sri_hash_retries_transient_prefetch_failure(
     monkeypatch.setattr("lib.update.process.libnix_prefetch_url", _prefetch_url)
 
     events = _collect_stream(
-        compute_sri_hash(
+        lambda emit: compute_sri_hash(
             "demo",
             "https://example.com/archive.tar.gz",
             config=resolve_config(
@@ -357,6 +287,7 @@ def test_compute_sri_hash_retries_transient_prefetch_failure(
                 retry_backoff=0,
                 subprocess_timeout=19,
             ),
+            emit=emit,
         )
     )
 
@@ -378,7 +309,7 @@ def test_compute_sri_hash_retries_transient_prefetch_failure(
         for event in events
         if event.kind is UpdateEventKind.STATUS
     )
-    assert events[-1].payload == "sha256-CCC="
+    assert events.result == "sha256-CCC="
 
 
 def test_compute_url_hashes_gather_and_type_errors(
@@ -387,37 +318,59 @@ def test_compute_url_hashes_gather_and_type_errors(
     """Gather per-URL hash values into a single mapping payload."""
 
     async def _fake_compute_sri_hash(
-        source: str,
-        url: str,
-        *,
-        config: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        source: str, url: str, *, config: object, emit: EventSink = ignore_event
+    ) -> object:
         assert config is explicit_config
-        yield UpdateEvent.status(source, f"hashing {url}")
-        yield UpdateEvent.value(source, f"hash:{url}")
+        await emit(UpdateEvent.status(source, f"hashing {url}"))
+        return f"hash:{url}"
 
     monkeypatch.setattr("lib.update.process.compute_sri_hash", _fake_compute_sri_hash)
     explicit_config = resolve_config()
     events = _collect_stream(
-        compute_url_hashes(
+        lambda emit: compute_url_hashes(
             "demo",
             ["https://a", "https://a", "https://b"],
             config=explicit_config,
+            emit=emit,
         )
     )
     status_count = sum(1 for event in events if event.kind == UpdateEventKind.STATUS)
     assert status_count == 2
-    value_payload = events[-1].payload
+    value_payload = events.result
     assert value_payload == {
         "https://a": "hash:https://a",
         "https://b": "hash:https://b",
     }
 
-    async def _fake_gather(_streams: object) -> AsyncIterator[object]:
-        yield GatheredValues(values={1: "x"})
 
-    monkeypatch.setattr("lib.update.process.gather_event_streams", _fake_gather)
-    with pytest.raises(TypeError, match="Expected URL key to be str"):
-        _collect_stream(
-            compute_url_hashes("demo", ["https://a"], config=explicit_config)
-        )
+@pytest.mark.parametrize(
+    "failure", [RuntimeError("sink failed"), asyncio.CancelledError()]
+)
+def test_run_command_closes_process_before_sink_failure_returns(
+    monkeypatch: pytest.MonkeyPatch, failure: BaseException
+) -> None:
+    """A failed or cancelled progress sink must finish subprocess cleanup first."""
+    cleaned = False
+
+    async def _process(*_args: object, **_kwargs: object) -> AsyncIterator[object]:
+        nonlocal cleaned
+        try:
+            yield ProcessLine("stdout", "ready\n")
+        finally:
+            await asyncio.sleep(0)
+            cleaned = True
+
+    async def _emit(event: UpdateEvent) -> None:
+        if event.kind is UpdateEventKind.LINE:
+            raise failure
+
+    async def _run() -> None:
+        with pytest.raises(type(failure)) as caught:
+            await run_command(
+                ["demo"], options=RunCommandOptions(source="demo"), emit=_emit
+            )
+        assert caught.value is failure
+        assert cleaned
+
+    monkeypatch.setattr("lib.update.process.stream_process", _process)
+    asyncio.run(_run())

@@ -6,13 +6,11 @@ let
   pythonPyupgradeExcludes = [
     "lib/exact_text_patch.py"
   ];
-  pythonRuntimeSensitiveHelpers = [
-    "lib/crate2nix_tauri_env_rewrite.py"
-    "lib/nix/schemas/_fetch.py"
-    "lib/update/persistence.py"
-    "lib/update/updaters/_sourcefile.py"
-    "packages/sculptor/updater.py"
-  ];
+  ruffMutationExcludes =
+    (builtins.fromTOML (builtins.readFile ../pyproject.toml)).tool.ruff.format.exclude;
+  pythonRuntimeSensitiveHelpers = builtins.filter (
+    path: !(builtins.elem path pythonScriptPaths)
+  ) ruffMutationExcludes;
 in
 {
   python = {
@@ -27,7 +25,7 @@ in
       "**/*.pyi"
     ]
     ++ pythonScriptPaths;
-    ruffMutationExcludes = pythonScriptPaths ++ pythonRuntimeSensitiveHelpers;
+    inherit ruffMutationExcludes;
   };
 
   ruff = {

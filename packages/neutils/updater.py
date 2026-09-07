@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.commands.base import run_nix
+from lib.update.events import EventSink, ignore_event
 
 if TYPE_CHECKING:
     import aiohttp
@@ -23,16 +24,10 @@ from lib.update import paths as update_paths
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import (
     CommandResult,
-    EventStream,
     StatusInfo,
     StatusKind,
     UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_command_result,
-    expect_str,
     raise_failed_command,
-    require_value,
 )
 from lib.update.nix import _build_fetch_from_github_expr, _build_flake_attr_expr
 from lib.update.paths import get_repo_file, local_flake_url
@@ -150,40 +145,34 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         *,
         zig_path: str,
         system: str,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> str:
         """Read the manifest with the package-selected compiler's native ZON parser."""
-        result_drain = ValueDrain[CommandResult]()
-        async for event in drain_value_events(
-            run_command(
-                [
-                    str(Path(zig_path) / "bin" / "zig"),
-                    "run",
-                    # Select the supported platform, not a newer host OS patch
-                    # version outside this compiler's target library catalog.
-                    "-target",
-                    system.replace("-darwin", "-macos"),
-                    str(Path(__file__).with_name("read_minimum_zig_version.zig")),
-                    "--cache-dir",
-                    str(build_zig_zon.parent / ".zig-cache"),
-                    "--global-cache-dir",
-                    str(build_zig_zon.parent / ".zig-global-cache"),
-                    "--",
-                    str(build_zig_zon),
-                ],
-                options=RunCommandOptions(
-                    source=self.name,
-                    error="Could not read neutils minimum_zig_version from ZON",
-                    command_timeout=self.config.default_subprocess_timeout,
-                    config=self.config,
-                ),
+        result = await run_command(
+            [
+                str(Path(zig_path) / "bin" / "zig"),
+                "run",
+                # Select the supported platform, not a newer host OS patch
+                # version outside this compiler's target library catalog.
+                "-target",
+                system.replace("-darwin", "-macos"),
+                str(Path(__file__).with_name("read_minimum_zig_version.zig")),
+                "--cache-dir",
+                str(build_zig_zon.parent / ".zig-cache"),
+                "--global-cache-dir",
+                str(build_zig_zon.parent / ".zig-global-cache"),
+                "--",
+                str(build_zig_zon),
+            ],
+            options=RunCommandOptions(
+                source=self.name,
+                command_timeout=self.config.default_subprocess_timeout,
+                config=self.config,
             ),
-            result_drain,
-            parse=expect_command_result,
-        ):
-            yield event
-        result = require_value(result_drain, "Missing ZON parser output")
+            emit=emit,
+        )
         raise_failed_command("Read neutils minimum_zig_version from ZON", result)
-        yield UpdateEvent.value(self.name, result.stdout.strip())
+        return result.stdout.strip()
 
     @classmethod
     def _zig_version_expr(cls, *, platform: str, repo_root: Path) -> str:
@@ -264,28 +253,19 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         installable: str,
         *,
         expression: bool = False,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> str:
         command = ["nix", "build", "--no-link", "--print-out-paths"]
         if expression:
             command.extend(("--impure", "--expr"))
         command.append(installable)
-        result_drain = ValueDrain()
-        async for event in drain_value_events(
-            run_command(
-                command,
-                options=RunCommandOptions(
-                    source=self.name,
-                    error=f"nix build did not return output for {installable}",
-                    config=self.config,
-                ),
+        result = await run_command(
+            command,
+            options=RunCommandOptions(
+                source=self.name,
+                config=self.config,
             ),
-            result_drain,
-            parse=expect_command_result,
-        ):
-            yield event
-        result = require_value(
-            result_drain,
-            f"Missing nix build result for {installable}",
+            emit=emit,
         )
         if result.returncode != 0:
             msg = (
@@ -300,7 +280,7 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         if not out_paths:
             msg = f"nix build returned no out path for {installable}"
             raise RuntimeError(msg)
-        yield UpdateEvent.value(self.name, out_paths[-1])
+        return out_paths[-1]
 
     @classmethod
     def _is_transient_zon2nix_text(cls, output: str) -> bool:
@@ -315,9 +295,9 @@ class NeutilsUpdater(GitHubReleaseUpdater):
 
     @staticmethod
     def _current_context_source(
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
     ) -> SourceEntry | None:
-        return context.current if isinstance(context, UpdateContext) else context
+        return context.current
 
     async def _run_zon2nix(
         self,
@@ -327,7 +307,8 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         build_zig_zon: Path,
         output_path: Path,
         env: dict[str, str],
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> None:
         command = [
             str(Path(zon2nix_path) / "bin" / "zon2nix"),
             zig_version_flag,
@@ -337,23 +318,17 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         attempt = 1
         while True:
             await asyncio.to_thread(output_path.unlink, missing_ok=True)
-            zon2nix_result_drain = ValueDrain()
             try:
-                async for event in drain_value_events(
-                    run_command(
-                        command,
-                        options=RunCommandOptions(
-                            source=self.name,
-                            error="zon2nix did not return output",
-                            command_timeout=self._ZON2NIX_TIMEOUT_SECONDS,
-                            env=env,
-                            config=self.config,
-                        ),
+                zon2nix_result = await run_command(
+                    command,
+                    options=RunCommandOptions(
+                        source=self.name,
+                        command_timeout=self._ZON2NIX_TIMEOUT_SECONDS,
+                        env=env,
+                        config=self.config,
                     ),
-                    zon2nix_result_drain,
-                    parse=expect_command_result,
-                ):
-                    yield event
+                    emit=emit,
+                )
             except RuntimeError as exc:
                 if (
                     attempt >= self._ZON2NIX_MAX_ATTEMPTS
@@ -361,10 +336,6 @@ class NeutilsUpdater(GitHubReleaseUpdater):
                 ):
                     raise
             else:
-                zon2nix_result = require_value(
-                    zon2nix_result_drain,
-                    "Missing zon2nix command result",
-                )
                 if zon2nix_result.returncode == 0:
                     return
 
@@ -380,14 +351,16 @@ class NeutilsUpdater(GitHubReleaseUpdater):
                     raise RuntimeError(message)
 
             attempt += 1
-            yield UpdateEvent.status(
-                self.name,
-                "zon2nix hit a transient fetch failure; retrying...",
-                operation="compute_hash",
-                status=StatusInfo(
-                    kind=StatusKind.RETRY,
-                    value=f"attempt {attempt}/{self._ZON2NIX_MAX_ATTEMPTS}",
-                ),
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    "zon2nix hit a transient fetch failure; retrying...",
+                    operation="compute_hash",
+                    status=StatusInfo(
+                        kind=StatusKind.RETRY,
+                        value=f"attempt {attempt}/{self._ZON2NIX_MAX_ATTEMPTS}",
+                    ),
+                )
             )
             await asyncio.sleep(max(0.0, self.config.default_retry_backoff))
 
@@ -395,7 +368,9 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
-    ) -> EventStream:
+        *,
+        emit: EventSink = ignore_event,
+    ) -> str:
         commit = self._require_commit(info)
         archive_bytes = await update_net.fetch_url(
             session,
@@ -424,46 +399,20 @@ class NeutilsUpdater(GitHubReleaseUpdater):
             )
             zig_version_flag = self._zon2nix_zig_flag(selected_zig_version)
             output_path = tmpdir / "build.zig.zon.nix"
-
-            zig_path_drain = ValueDrain[str]()
-            async for event in drain_value_events(
-                self._resolve_installable_path(zig_installable),
-                zig_path_drain,
-                parse=expect_str,
-            ):
-                yield event
-            zig_path = require_value(zig_path_drain, "Missing Zig toolchain path")
-
-            minimum_drain = ValueDrain[str]()
-            async for event in drain_value_events(
-                self._read_minimum_zig_version(
-                    build_zig_zon,
-                    zig_path=zig_path,
-                    system=current_system,
-                ),
-                minimum_drain,
-                parse=expect_str,
-            ):
-                yield event
+            zig_path = await self._resolve_installable_path(zig_installable, emit=emit)
+            minimum_zig_version = await self._read_minimum_zig_version(
+                build_zig_zon, zig_path=zig_path, system=current_system, emit=emit
+            )
             self._validate_zig_requirement(
-                require_value(minimum_drain, "Missing minimum_zig_version"),
+                minimum_zig_version,
                 selected_zig_version=selected_zig_version,
             )
-
-            zon2nix_path_drain = ValueDrain[str]()
             zon2nix_expr = self._zon2nix_expr(
                 platform=current_system,
                 repo_root=repo_root,
             )
-            async for event in drain_value_events(
-                self._resolve_installable_path(zon2nix_expr, expression=True),
-                zon2nix_path_drain,
-                parse=expect_str,
-            ):
-                yield event
-            zon2nix_path = require_value(
-                zon2nix_path_drain,
-                "Missing zon2nix tool path",
+            zon2nix_path = await self._resolve_installable_path(
+                zon2nix_expr, expression=True, emit=emit
             )
 
             home_dir = tmpdir / ".home"
@@ -476,25 +425,25 @@ class NeutilsUpdater(GitHubReleaseUpdater):
             await asyncio.to_thread(home_dir.mkdir, parents=True, exist_ok=True)
             await asyncio.to_thread(cache_dir.mkdir, parents=True, exist_ok=True)
 
-            async for event in self._run_zon2nix(
+            await self._run_zon2nix(
                 zon2nix_path=zon2nix_path,
                 zig_version_flag=zig_version_flag,
                 build_zig_zon=build_zig_zon,
                 output_path=output_path,
                 env=env,
-            ):
-                yield event
+                emit=emit,
+            )
 
-            rendered = await asyncio.to_thread(output_path.read_text, encoding="utf-8")
-        yield UpdateEvent.value(self.name, rendered)
+            return await asyncio.to_thread(output_path.read_text, encoding="utf-8")
 
     async def fetch_hashes(
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Generate ``build.zig.zon.nix`` and compute the pinned source hash."""
         pkg_dir = update_paths.updater_dir_for(self.name)
         if pkg_dir is None:
@@ -502,23 +451,16 @@ class NeutilsUpdater(GitHubReleaseUpdater):
             raise RuntimeError(msg)
         artifact_path = pkg_dir / self.generated_artifact_files[0]
 
-        yield UpdateEvent.status(
-            self.name,
-            f"Refreshing {artifact_path.name}...",
-            operation="compute_hash",
+        await emit(
+            UpdateEvent.status(
+                self.name,
+                f"Refreshing {artifact_path.name}...",
+                operation="compute_hash",
+            )
         )
-
-        artifact_drain = ValueDrain[str]()
         try:
-            async for event in drain_value_events(
-                self._render_build_zig_zon_nix(info, session),
-                artifact_drain,
-                parse=expect_str,
-            ):
-                yield event
-            artifact_content = require_value(
-                artifact_drain,
-                f"Missing generated {artifact_path.name} content",
+            artifact_content = await self._render_build_zig_zon_nix(
+                info, session, emit=emit
             )
         except RuntimeError as exc:
             current = self._current_context_source(context)
@@ -529,14 +471,17 @@ class NeutilsUpdater(GitHubReleaseUpdater):
                 and self._is_transient_zon2nix_text(str(exc))
                 and artifact_path.exists()
             ):
-                yield UpdateEvent.status(
-                    self.name,
-                    f"Preserving existing {artifact_path.name} after transient zon2nix failure.",
-                    operation="compute_hash",
-                    status=StatusInfo(
-                        kind=StatusKind.PRESERVED_ARTIFACT,
-                        value=str(artifact_path),
-                    ),
+                await emit(
+                    UpdateEvent.status(
+                        self.name,
+                        f"Preserving existing {artifact_path.name} "
+                        "after transient zon2nix failure.",
+                        operation="compute_hash",
+                        status=StatusInfo(
+                            kind=StatusKind.PRESERVED_ARTIFACT,
+                            value=str(artifact_path),
+                        ),
+                    )
                 )
                 artifact_content = await asyncio.to_thread(
                     artifact_path.read_text,
@@ -544,23 +489,18 @@ class NeutilsUpdater(GitHubReleaseUpdater):
                 )
             else:
                 raise
-        yield UpdateEvent.artifact(
+        await emit(
+            UpdateEvent.artifact(
+                self.name,
+                GeneratedArtifact.text(artifact_path, artifact_content),
+            )
+        )
+        src_hash = await update_nix.compute_fixed_output_hash(
             self.name,
-            GeneratedArtifact.text(artifact_path, artifact_content),
+            self._src_expr(self._require_commit(info)),
+            config=self.config,
+            emit=emit,
         )
 
-        src_hash_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            update_nix.compute_fixed_output_hash(
-                self.name,
-                self._src_expr(self._require_commit(info)),
-                config=self.config,
-            ),
-            src_hash_drain,
-            parse=expect_str,
-        ):
-            yield event
-        src_hash = require_value(src_hash_drain, "Missing srcHash output")
-
         hashes: SourceHashes = [HashEntry.create("srcHash", src_hash)]
-        yield UpdateEvent.value(self.name, hashes)
+        return hashes

@@ -8,7 +8,7 @@ from lib.nix.models.flake_lock import FlakeLockNode
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.electron_manifest import ElectronManifestMetadata
-from lib.update.updaters import FlakeInputUpdater, VersionInfo
+from lib.update.updaters import FlakeInputUpdater, UpdateContext, VersionInfo
 from lib.update.updaters.metadata import FlakeInputMetadata
 
 _COMMIT = "b" * 40
@@ -78,6 +78,8 @@ def test_flake_manifest_consumers_persist_exact_electron_version(
     async def _base_fetch_latest(
         _self: object,
         _session: object,
+        *,
+        context: object,
     ) -> VersionInfo:
         return base_info
 
@@ -97,7 +99,7 @@ def test_flake_manifest_consumers_persist_exact_electron_version(
     monkeypatch.setattr(FlakeInputUpdater, "fetch_latest", _base_fetch_latest)
     monkeypatch.setattr(module, "fetch_flake_electron_manifest", _fetch_manifest)
 
-    info = _run(updater.fetch_latest(object()))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     result = updater.build_result(info, [])
 
     assert info.metadata == ElectronManifestMetadata(

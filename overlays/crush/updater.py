@@ -21,6 +21,8 @@ from lib.update.updaters.github_release import GitHubReleaseUpdater
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 _MIN_VERSION_PARTS = 2
 _PATCHED_VERSION_PARTS = 3
 
@@ -109,10 +111,10 @@ class CrushUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
         return read_pinned_source_version(self.name)
 
     async def fetch_latest(
-        self,
-        session: aiohttp.ClientSession,
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
         """Pick the newest release whose ``go.mod`` fits the update toolchain."""
+        _ = context
         supported_go = await self._resolve_supported_go_version()
         releases = await fetch_github_api_paginated(
             session,

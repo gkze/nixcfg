@@ -39,6 +39,5 @@ lib.mkDarwinHost {
       # settings.json.
       home-manager.backupFileExtension = "backup";
     }
-    (lib.mkSetOpencodeEnvModule "work.json")
   ];
 }

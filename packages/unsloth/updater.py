@@ -31,17 +31,17 @@ from lib.update import process as update_process
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
+    EventSink,
     UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_command_result,
-    expect_hash_mapping,
-    expect_str,
+    ignore_event,
     raise_failed_command,
-    require_value,
 )
 from lib.update.net import fetch_github_api, fetch_json, fetch_url, github_raw_url
-from lib.update.nix import _build_fetch_from_github_expr, _build_package_path_attr_expr
+from lib.update.nix import (
+    _build_fetch_from_github_expr,
+    _build_nix_expr,
+    _build_package_path_attr_expr,
+)
 from lib.update.nix_expr import select_attrs
 from lib.update.npm_semver import require_npm_version_matches_spec
 from lib.update.paths import updater_dir_for
@@ -51,7 +51,6 @@ from lib.update.updaters import (
     VersionInfo,
     register_updater,
 )
-from lib.update.updaters.core import _coerce_context
 from lib.update.updaters.materialization import MaterializesArtifactsMixin
 from lib.update.updaters.metadata import metadata_as_mapping
 from packages.unsloth.patch_nix_managed import (
@@ -65,8 +64,6 @@ if TYPE_CHECKING:
 
     import aiohttp
     from nix_manipulator.expressions.expression import NixExpression
-
-    from lib.update.events import EventStream
 
 
 class _BinaryReader(Protocol):
@@ -718,6 +715,7 @@ def _closure_plan_payload(
     return {
         "app": {
             "commit": source.commit,
+            "rustToolchainVersion": metadata["rustToolchainVersion"],
             "sourceHash": _source_hash(source, "srcHash"),
             "tag": cast("str", metadata["tag"]),
             "version": info.version,
@@ -1112,8 +1110,11 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         )
         return url, digest_hex, size, upload_time
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve one coherent public desktop release and backend sdist."""
+        _ = context
         payload = await self._fetch_latest_release_payload(session)
         tag_name = self._release_tag_from_payload(payload)
         version = self._normalize_release_version(tag_name)
@@ -1227,7 +1228,7 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Revalidate release evidence even when the version has not changed."""
@@ -1351,7 +1352,8 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         package_dir: Path,
         pyproject_text: str,
         upload_time: str,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> str:
         """Resolve the candidate Python closure with the release upload cutoff."""
         with tempfile.TemporaryDirectory(prefix="unsloth-uv-lock-") as temp_dir:
             root = Path(temp_dir)
@@ -1375,47 +1377,36 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
                     existing_text,
                     encoding="utf-8",
                 )
-
-            command_drain = ValueDrain()
-            async for event in drain_value_events(
-                update_process.run_command(
-                    [
-                        "uv",
-                        "-q",
-                        "lock",
-                        "--directory",
-                        str(workspace),
-                        "--exclude-newer",
-                        upload_time,
-                    ],
-                    options=update_process.RunCommandOptions(
-                        source=self.name,
-                        error="uv lock did not return output",
-                        # Keep the candidate's [tool.uv] overrides while excluding
-                        # user and system configuration from the resolution.
-                        env={
-                            "UV_CACHE_DIR": str(root / "uv-cache"),
-                            "UV_NO_SYSTEM_CONFIG": "1",
-                            "UV_PYTHON": _PYTHON_VERSION,
-                            "XDG_CACHE_HOME": str(root / "xdg-cache"),
-                            "XDG_CONFIG_HOME": str(root / "xdg-config"),
-                            "XDG_DATA_HOME": str(root / "xdg-data"),
-                            "XDG_STATE_HOME": str(root / "xdg-state"),
-                        },
-                        config=self.config,
-                    ),
+            result = await update_process.run_command(
+                [
+                    "uv",
+                    "-q",
+                    "lock",
+                    "--directory",
+                    str(workspace),
+                    "--exclude-newer",
+                    upload_time,
+                ],
+                options=update_process.RunCommandOptions(
+                    source=self.name,
+                    env={
+                        "UV_CACHE_DIR": str(root / "uv-cache"),
+                        "UV_NO_SYSTEM_CONFIG": "1",
+                        "UV_PYTHON": _PYTHON_VERSION,
+                        "XDG_CACHE_HOME": str(root / "xdg-cache"),
+                        "XDG_CONFIG_HOME": str(root / "xdg-config"),
+                        "XDG_DATA_HOME": str(root / "xdg-data"),
+                        "XDG_STATE_HOME": str(root / "xdg-state"),
+                    },
+                    config=self.config,
                 ),
-                command_drain,
-                parse=expect_command_result,
-            ):
-                yield event
-            result = require_value(command_drain, "Missing Unsloth uv lock result")
+                emit=emit,
+            )
             raise_failed_command("Refresh Unsloth Python closure", result)
             if not lock_path.is_file():
                 msg = "uv lock did not produce Unsloth uv.lock"
                 raise RuntimeError(msg)
-            lock_text = await asyncio.to_thread(lock_path.read_text, encoding="utf-8")
-        yield UpdateEvent.value(self.name, lock_text)
+            return await asyncio.to_thread(lock_path.read_text, encoding="utf-8")
 
     async def _compute_candidate_closure_hash(
         self,
@@ -1423,7 +1414,8 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         attr_path: str,
         source: SourceEntry,
         package_args: dict[str, NixExpression],
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> str:
         """Compute one dependency hash against the complete candidate identity."""
         expression = _build_package_path_attr_expr(
             self.name,
@@ -1432,20 +1424,21 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             package_args=package_args,
             source_overrides={self.name: source},
         )
-        async for event in update_nix.compute_fixed_output_hash(
+        return await update_nix.compute_fixed_output_hash(
             self.name,
             expression,
             isolate_by_drv_hash=True,
             config=self.config,
-        ):
-            yield event
+            emit=emit,
+        )
 
     async def _build_candidate_smoke(
         self,
         *,
         source: SourceEntry,
         package_args: dict[str, NixExpression],
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> str:
         """Build and return the candidate smoke output before artifact promotion."""
         expression = _build_package_path_attr_expr(
             self.name,
@@ -1454,79 +1447,60 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             package_args=package_args,
             source_overrides={self.name: source},
         )
-        command_drain = ValueDrain()
-        async for event in drain_value_events(
-            update_process.run_command(
-                [
-                    "nix",
-                    "build",
-                    "-L",
-                    "--no-link",
-                    "--print-out-paths",
-                    "--impure",
-                    "--expr",
-                    expression,
-                ],
-                options=update_process.RunCommandOptions(
-                    source=self.name,
-                    error="candidate smoke build did not return output",
-                    config=self.config,
-                ),
+        result = await update_process.run_command(
+            [
+                "nix",
+                "build",
+                "-L",
+                "--no-link",
+                "--print-out-paths",
+                "--impure",
+                "--expr",
+                expression,
+            ],
+            options=update_process.RunCommandOptions(
+                source=self.name,
+                config=self.config,
             ),
-            command_drain,
-            parse=expect_command_result,
-        ):
-            yield event
-        result = require_value(command_drain, "Missing Unsloth smoke build result")
+            emit=emit,
+        )
         raise_failed_command("Build Unsloth candidate smoke", result)
         outputs = result.stdout.splitlines()
         if len(outputs) != 1 or _NIX_STORE_OUTPUT_PATTERN.fullmatch(outputs[0]) is None:
             msg = "Unsloth candidate smoke build did not return one Nix store output"
             raise RuntimeError(msg)
-        yield UpdateEvent.value(self.name, outputs[0])
+        return outputs[0]
 
     async def _validate_candidate_runtime(
-        self,
-        *,
-        package_dir: Path,
-        smoke_output: str,
-    ) -> EventStream:
+        self, *, package_dir: Path, smoke_output: str, emit: EventSink = ignore_event
+    ) -> str:
         """Run the contained host-runtime gate and return its evidence."""
-        command_drain = ValueDrain()
-        async for event in drain_value_events(
-            update_process.run_command(
-                [
-                    sys.executable,
-                    str(package_dir / "validate_store_runtime.py"),
-                    "--smoke-result",
-                    smoke_output,
-                ],
-                options=update_process.RunCommandOptions(
-                    source=self.name,
-                    error="runtime validation did not return output",
-                    config=self.config,
-                ),
+        result = await update_process.run_command(
+            [
+                sys.executable,
+                str(package_dir / "validate_store_runtime.py"),
+                "--smoke-result",
+                smoke_output,
+            ],
+            options=update_process.RunCommandOptions(
+                source=self.name,
+                config=self.config,
             ),
-            command_drain,
-            parse=expect_command_result,
-        ):
-            yield event
-        result = require_value(command_drain, "Missing Unsloth runtime result")
+            emit=emit,
+        )
         raise_failed_command("Validate Unsloth candidate runtime", result)
         evidence = _runtime_evidence(
             _json_object_output(result.stdout, context="runtime validation")
         )
-        yield UpdateEvent.value(
-            self.name,
-            json.dumps(evidence, sort_keys=True, separators=(",", ":")),
-        )
+        return json.dumps(evidence, sort_keys=True, separators=(",", ":"))
 
     async def _validate_candidate_export(
         self,
         *,
         source: SourceEntry,
         package_args: dict[str, NixExpression],
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> str:
         """Require the final in-memory artifacts to open every export gate."""
         expression = _build_package_path_attr_expr(
             self.name,
@@ -1535,21 +1509,14 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             package_args=package_args,
             source_overrides={self.name: source},
         )
-        command_drain = ValueDrain()
-        async for event in drain_value_events(
-            update_process.run_command(
-                ["nix", "eval", "--json", "--impure", "--expr", expression],
-                options=update_process.RunCommandOptions(
-                    source=self.name,
-                    error="candidate export evaluation did not return output",
-                    config=self.config,
-                ),
+        result = await update_process.run_command(
+            ["nix", "eval", "--json", "--impure", "--expr", expression],
+            options=update_process.RunCommandOptions(
+                source=self.name,
+                config=self.config,
             ),
-            command_drain,
-            parse=expect_command_result,
-        ):
-            yield event
-        result = require_value(command_drain, "Missing Unsloth export evaluation")
+            emit=emit,
+        )
         raise_failed_command("Evaluate Unsloth candidate export", result)
         try:
             export_ready = json.loads(result.stdout)
@@ -1559,7 +1526,7 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         if export_ready is not True:
             msg = "Unsloth candidate artifacts did not satisfy the export gates"
             raise RuntimeError(msg)
-        yield UpdateEvent.value(self.name, "export-ready")
+        return "export-ready"
 
     async def _resolve_candidate_closure_hashes(
         self,
@@ -1567,7 +1534,8 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         source: SourceEntry,
         python_workspace: Path,
         closure_plan: dict[str, object],
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> dict[str, str]:
         """Resolve all release-varying fixed-output hashes in dependency order."""
         closure_hashes: dict[str, str | None] = {
             "cargoHash": None,
@@ -1586,23 +1554,11 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
                 closure_plan=closure_plan,
                 artifact_validation={"status": "pending"},
             )
-            hash_drain = ValueDrain[str]()
-            async for event in drain_value_events(
-                self._compute_candidate_closure_hash(
-                    attr_path=attr_path,
-                    source=source,
-                    package_args=package_args,
-                ),
-                hash_drain,
-                parse=expect_str,
-            ):
-                yield event
-            resolved_hashes[key] = require_value(
-                hash_drain,
-                f"Missing Unsloth {key} output",
+            resolved_hashes[key] = await self._compute_candidate_closure_hash(
+                attr_path=attr_path, source=source, package_args=package_args, emit=emit
             )
             closure_hashes[key] = resolved_hashes[key]
-        yield UpdateEvent.value(self.name, resolved_hashes)
+        return resolved_hashes
 
     async def _attest_candidate(
         self,
@@ -1612,7 +1568,8 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         python_workspace: Path,
         closure_hashes: Mapping[str, str | None],
         closure_plan: dict[str, object],
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> str:
         """Build, run, and open the export gates for one complete candidate."""
         pending_args = self._candidate_package_args(
             python_workspace=python_workspace,
@@ -1620,35 +1577,16 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             closure_plan=closure_plan,
             artifact_validation={"status": "pending"},
         )
-        smoke_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            self._build_candidate_smoke(source=source, package_args=pending_args),
-            smoke_drain,
-            parse=expect_str,
-        ):
-            yield event
-        smoke_output = require_value(
-            smoke_drain,
-            "Missing Unsloth candidate smoke output",
+        smoke_output = await self._build_candidate_smoke(
+            source=source, package_args=pending_args, emit=emit
         )
-
-        runtime_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            self._validate_candidate_runtime(
-                package_dir=package_dir,
-                smoke_output=smoke_output,
-            ),
-            runtime_drain,
-            parse=expect_str,
-        ):
-            yield event
+        runtime_output = await self._validate_candidate_runtime(
+            package_dir=package_dir, smoke_output=smoke_output, emit=emit
+        )
         artifact_validation = _artifact_validation_payload(
             smoke_output,
             _json_object_output(
-                require_value(
-                    runtime_drain,
-                    "Missing Unsloth candidate runtime evidence",
-                ),
+                runtime_output,
                 context="runtime validation",
             ),
         )
@@ -1658,26 +1596,63 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             closure_plan=closure_plan,
             artifact_validation=artifact_validation,
         )
-        export_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            self._validate_candidate_export(source=source, package_args=final_args),
-            export_drain,
-            parse=expect_str,
-        ):
-            yield event
-        if (
-            require_value(
-                export_drain,
-                "Missing Unsloth candidate export result",
-            )
-            != "export-ready"
-        ):
+        export_status = await self._validate_candidate_export(
+            source=source, package_args=final_args, emit=emit
+        )
+        if export_status != "export-ready":
             msg = "Unsloth candidate export gate did not pass"
             raise RuntimeError(msg)
-        yield UpdateEvent.value(
-            self.name,
-            json.dumps(artifact_validation, sort_keys=True, separators=(",", ":")),
+        return json.dumps(artifact_validation, sort_keys=True, separators=(",", ":"))
+
+    async def _verify_source_toolchain(
+        self,
+        *,
+        commit: str,
+        source_hash: str,
+        rust_toolchain_version: str,
+        emit: EventSink = ignore_event,
+    ) -> None:
+        """Verify release metadata against the hash-checked source before promotion."""
+        expression = _build_nix_expr(
+            _build_fetch_from_github_expr(
+                self.GITHUB_OWNER,
+                self.GITHUB_REPO,
+                rev=commit,
+                hash_value=source_hash,
+                fetch_submodules=False,
+            )
         )
+        result = await update_process.run_command(
+            [
+                "nix",
+                "build",
+                "--no-link",
+                "--print-out-paths",
+                "--impure",
+                "--expr",
+                expression,
+            ],
+            options=update_process.RunCommandOptions(
+                source=self.name,
+                config=self.config,
+            ),
+            emit=emit,
+        )
+        raise_failed_command("Verify Unsloth source toolchain", result)
+        outputs = result.stdout.splitlines()
+        if len(outputs) != 1 or _NIX_STORE_OUTPUT_PATTERN.fullmatch(outputs[0]) is None:
+            msg = "Unsloth source build did not return one Nix store output"
+            raise RuntimeError(msg)
+        cargo_manifest = await asyncio.to_thread(
+            (Path(outputs[0]) / _CARGO_MANIFEST_PATH).read_bytes
+        )
+        source_version = _rust_toolchain_version(cargo_manifest)
+        if source_version != rust_toolchain_version:
+            msg = (
+                f"Unsloth source requires Rust {source_version}, "
+                f"release metadata declared {rust_toolchain_version}"
+            )
+            raise RuntimeError(msg)
 
     async def _materialize_candidate_artifacts(
         self,
@@ -1686,22 +1661,23 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         source: SourceEntry,
         metadata: dict[str, object],
         package_dir: Path,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> None:
         """Produce every release-varying sidecar from one candidate authority."""
+        await self._verify_source_toolchain(
+            commit=cast("str", metadata["commit"]),
+            source_hash=_source_hash(source, "srcHash"),
+            rust_toolchain_version=cast("str", metadata["rustToolchainVersion"]),
+            emit=emit,
+        )
         backend_url = cast("str", metadata["backendUrl"])
         pyproject_text = _render_python_project(backend_url)
-        lock_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            self._materialize_uv_lock(
-                package_dir=package_dir,
-                pyproject_text=pyproject_text,
-                upload_time=cast("str", metadata["backendUploadTime"]),
-            ),
-            lock_drain,
-            parse=expect_str,
-        ):
-            yield event
-        lock_text = require_value(lock_drain, "Missing Unsloth uv.lock content")
+        lock_text = await self._materialize_uv_lock(
+            package_dir=package_dir,
+            pyproject_text=pyproject_text,
+            upload_time=cast("str", metadata["backendUploadTime"]),
+            emit=emit,
+        )
         closure_plan = _closure_plan_payload(info, source, metadata)
 
         with tempfile.TemporaryDirectory(
@@ -1720,56 +1696,45 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
                     content,
                     encoding="utf-8",
                 )
-            hashes_drain = ValueDrain[dict[str, str]]()
-            async for event in drain_value_events(
-                self._resolve_candidate_closure_hashes(
-                    source=source,
-                    python_workspace=python_workspace,
-                    closure_plan=closure_plan,
-                ),
-                hashes_drain,
-                parse=expect_hash_mapping,
-            ):
-                yield event
-            closure_hashes = require_value(
-                hashes_drain,
-                "Missing Unsloth closure hashes",
+            closure_hashes = await self._resolve_candidate_closure_hashes(
+                source=source,
+                python_workspace=python_workspace,
+                closure_plan=closure_plan,
+                emit=emit,
             )
-            validation_drain = ValueDrain[str]()
-            async for event in drain_value_events(
-                self._attest_candidate(
-                    source=source,
-                    package_dir=package_dir,
-                    python_workspace=python_workspace,
-                    closure_hashes=closure_hashes,
-                    closure_plan=closure_plan,
-                ),
-                validation_drain,
-                parse=expect_str,
-            ):
-                yield event
+            validation_output = await self._attest_candidate(
+                source=source,
+                package_dir=package_dir,
+                python_workspace=python_workspace,
+                closure_hashes=closure_hashes,
+                closure_plan=closure_plan,
+                emit=emit,
+            )
             artifact_validation = _json_object_output(
-                require_value(
-                    validation_drain,
-                    "Missing Unsloth artifact validation",
-                ),
+                validation_output,
                 context="artifact validation",
             )
 
-        yield UpdateEvent.artifact(
-            self.name,
-            [
-                GeneratedArtifact.text(package_dir / "pyproject.toml", pyproject_text),
-                GeneratedArtifact.text(package_dir / "uv.lock", lock_text),
-                GeneratedArtifact.json(
-                    package_dir / "closure-hashes.json", closure_hashes
-                ),
-                GeneratedArtifact.json(package_dir / "closure-plan.json", closure_plan),
-                GeneratedArtifact.json(
-                    package_dir / "artifact-validation.json",
-                    artifact_validation,
-                ),
-            ],
+        await emit(
+            UpdateEvent.artifact(
+                self.name,
+                [
+                    GeneratedArtifact.text(
+                        package_dir / "pyproject.toml", pyproject_text
+                    ),
+                    GeneratedArtifact.text(package_dir / "uv.lock", lock_text),
+                    GeneratedArtifact.json(
+                        package_dir / "closure-hashes.json", closure_hashes
+                    ),
+                    GeneratedArtifact.json(
+                        package_dir / "closure-plan.json", closure_plan
+                    ),
+                    GeneratedArtifact.json(
+                        package_dir / "artifact-validation.json",
+                        artifact_validation,
+                    ),
+                ],
+            )
         )
 
     async def fetch_hashes(
@@ -1777,41 +1742,23 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash sources and atomically materialize the complete candidate closure."""
         _ = session
-        resolved_context = _coerce_context(context)
+        _ = context
         metadata = self._required_metadata(info)
         commit = cast("str", metadata["commit"])
-
-        source_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            update_nix.compute_fixed_output_hash(
-                self.name,
-                self._src_expr(commit),
-                config=self.config,
-            ),
-            source_drain,
-            parse=expect_str,
-        ):
-            yield event
-        source_hash = require_value(source_drain, "Missing Unsloth srcHash output")
+        source_hash = await update_nix.compute_fixed_output_hash(
+            self.name, self._src_expr(commit), config=self.config, emit=emit
+        )
 
         manifest_url = cast("str", metadata["manifestUrl"])
         backend_url = cast("str", metadata["backendUrl"])
-        url_drain = ValueDrain[dict[str, str]]()
-        async for event in drain_value_events(
-            update_process.compute_url_hashes(
-                self.name,
-                (manifest_url, backend_url),
-                config=self.config,
-            ),
-            url_drain,
-            parse=expect_hash_mapping,
-        ):
-            yield event
-        url_hashes = require_value(url_drain, "Missing Unsloth URL hash output")
+        url_hashes = await update_process.compute_url_hashes(
+            self.name, (manifest_url, backend_url), config=self.config, emit=emit
+        )
         expected_hashes = {
             manifest_url: _sri_from_hex(cast("str", metadata["manifestDigestHex"])),
             backend_url: _sri_from_hex(cast("str", metadata["backendDigestHex"])),
@@ -1824,23 +1771,19 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             HashEntry.create("sha256", url_hashes[manifest_url], url=manifest_url),
             HashEntry.create("sha256", url_hashes[backend_url], url=backend_url),
         ]
-        if resolved_context.dry_run:
-            yield UpdateEvent.value(self.name, foundation_hashes)
-            return
-
         package_dir = updater_dir_for(self.name)
         if package_dir is None:
             msg = "Unsloth package directory was not found"
             raise RuntimeError(msg)
         source = self.build_result(info, foundation_hashes)
-        async for event in self._materialize_candidate_artifacts(
+        await self._materialize_candidate_artifacts(
             info=info,
             source=source,
             metadata=metadata,
             package_dir=package_dir,
-        ):
-            yield event
-        yield UpdateEvent.value(self.name, foundation_hashes)
+            emit=emit,
+        )
+        return foundation_hashes
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist only complete and authoritative foundation hashes."""

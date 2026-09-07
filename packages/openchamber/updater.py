@@ -22,11 +22,8 @@ from lib.update import nix as update_nix
 from lib.update.bun_lock import parse_bun_lock_text
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
-    UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_str,
-    require_value,
+    EventSink,
+    ignore_event,
 )
 from lib.update.net import fetch_github_api, fetch_json, fetch_url, github_raw_url
 from lib.update.nix import (
@@ -52,7 +49,6 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.update.config import UpdateConfig
-    from lib.update.events import EventStream
 
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _EXACT_VERSION_PATTERN = re.compile(
@@ -67,7 +63,6 @@ class _HashRequest:
     hash_type: HashType
     url: str
     expr: str
-    error: str
     platform: str | None = None
 
 
@@ -392,8 +387,11 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             opencode_node_modules_hash=opencode_node_modules_hash,
         )
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the latest release and prove its source-build contract."""
+        _ = context
         release = await self._fetch_latest_release_payload(session)
         tag = self._release_tag_from_payload(release)
         version = _require_exact_version(
@@ -541,7 +539,7 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Recompute every fixed-output closure before accepting current metadata."""
@@ -734,8 +732,9 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash exact sources and URL inputs, then the OpenChamber Bun closure."""
         _ = (session, context)
         metadata = self._required_metadata(info)
@@ -769,7 +768,6 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
                     rev=commit,
                     fetch_submodules=False,
                 ),
-                error=f"Missing {repo} srcHash output",
             )
             for owner, repo, commit, url_key in source_specs
         ]
@@ -780,25 +778,16 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
                     hash_type="sha256",
                     url=url,
                     expr=self._fetchurl_expr(url),
-                    error=f"Missing URL hash output for {url}",
                 )
             )
 
         entries: list[HashEntry] = []
         source_hashes: dict[str, str] = {}
         for request in requests:
-            drain = ValueDrain[str]()
-            async for event in drain_value_events(
-                update_nix.compute_fixed_output_hash(
-                    self.name,
-                    request.expr,
-                    config=self.config,
-                ),
-                drain,
-                parse=expect_str,
-            ):
-                yield event
-            value = require_value(drain, request.error)
+            drain = await update_nix.compute_fixed_output_hash(
+                self.name, request.expr, config=self.config, emit=emit
+            )
+            value = drain
             entries.append(
                 HashEntry.create(
                     request.hash_type,
@@ -819,27 +808,18 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             )
         )
         openchamber_url = metadata["openchamberUrl"]
-        node_modules_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            update_nix.compute_fixed_output_hash(
-                self.name,
-                self._node_modules_expr(
-                    bun_hash=source_hashes[metadata["bunUrl"]],
-                    bun_url=metadata["bunUrl"],
-                    bun_version=metadata["bunVersion"],
-                    commit=metadata["commit"],
-                    src_hash=source_hashes[openchamber_url],
-                    version=info.version,
-                ),
-                config=self.config,
+        node_modules_hash = await update_nix.compute_fixed_output_hash(
+            self.name,
+            self._node_modules_expr(
+                bun_hash=source_hashes[metadata["bunUrl"]],
+                bun_url=metadata["bunUrl"],
+                bun_version=metadata["bunVersion"],
+                commit=metadata["commit"],
+                src_hash=source_hashes[openchamber_url],
+                version=info.version,
             ),
-            node_modules_drain,
-            parse=expect_str,
-        ):
-            yield event
-        node_modules_hash = require_value(
-            node_modules_drain,
-            "Missing OpenChamber nodeModulesHash output",
+            config=self.config,
+            emit=emit,
         )
         entries.append(
             HashEntry.create(
@@ -849,7 +829,7 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
                 url=openchamber_url,
             )
         )
-        yield UpdateEvent.value(self.name, entries)
+        return entries
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist only the complete eight-entry exact-source closure."""

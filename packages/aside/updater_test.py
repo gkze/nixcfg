@@ -7,7 +7,7 @@ import pytest
 
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import DownloadUrlMetadata
 
 _ARTIFACT_URL = "https://releases.aside.com/dev-updater/Aside-1.0.813.1.dmg"
@@ -47,7 +47,7 @@ def test_aside_resolves_and_persists_versioned_official_artifact() -> None:
     updater = module.AsideUpdater()
     session = _FakeSession(_FakeResponse(headers={"Location": _ARTIFACT_URL}))
 
-    info = _run(updater.fetch_latest(session))
+    info = _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
     result = updater.build_result(
         info,
         dict.fromkeys(updater.PLATFORMS, _HASH),
@@ -99,4 +99,8 @@ def test_aside_reports_invalid_download_endpoint_responses(
     module = _load_module()
 
     with pytest.raises(RuntimeError, match=message):
-        _run(module.AsideUpdater().fetch_latest(_FakeSession(response)))
+        _run(
+            module.AsideUpdater().fetch_latest(
+                _FakeSession(response), context=UpdateContext(current=None)
+            )
+        )

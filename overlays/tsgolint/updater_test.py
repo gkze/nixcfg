@@ -9,7 +9,7 @@ from lib.tests._updater_helpers import install_fixed_hash_stream, load_repo_modu
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.nix import _build_fetch_from_github_call, _build_overlay_expr
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
     import pytest
@@ -50,10 +50,10 @@ def test_tsgolint_is_latest_rejects_fake_and_empty_hash_mappings() -> None:
         hashes={"x86_64-linux": "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="},
     )
 
-    assert _run(updater._is_latest(None, latest)) is False
-    assert _run(updater._is_latest(empty, latest)) is False
-    assert _run(updater._is_latest(fake, latest)) is False
-    assert _run(updater._is_latest(real, latest)) is True
+    assert _run(updater._is_latest(UpdateContext(current=None), latest)) is False
+    assert _run(updater._is_latest(UpdateContext(current=empty), latest)) is False
+    assert _run(updater._is_latest(UpdateContext(current=fake), latest)) is False
+    assert _run(updater._is_latest(UpdateContext(current=real), latest)) is True
 
 
 def test_tsgolint_is_latest_rejects_mismatched_empty_and_missing_entries() -> None:
@@ -81,9 +81,11 @@ def test_tsgolint_is_latest_rejects_mismatched_empty_and_missing_entries() -> No
     assert (
         _run(
             updater._is_latest(
-                SourceEntry(
-                    version="0.21.0",
-                    hashes=[],
+                UpdateContext(
+                    current=SourceEntry(
+                        version="0.21.0",
+                        hashes=[],
+                    )
                 ),
                 latest,
             )
@@ -101,14 +103,16 @@ def test_tsgolint_is_latest_accepts_real_structured_entries() -> None:
     assert (
         _run(
             updater._is_latest(
-                SourceEntry(
-                    version="0.21.0",
-                    hashes=[
-                        HashEntry.create(
-                            "srcHash",
-                            "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
-                        )
-                    ],
+                UpdateContext(
+                    current=SourceEntry(
+                        version="0.21.0",
+                        hashes=[
+                            HashEntry.create(
+                                "srcHash",
+                                "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+                            )
+                        ],
+                    )
                 ),
                 latest,
             )
@@ -118,9 +122,11 @@ def test_tsgolint_is_latest_accepts_real_structured_entries() -> None:
     assert (
         _run(
             updater._is_latest(
-                SourceEntry(
-                    version="0.21.0",
-                    hashes=HashCollection(entries=None, mapping=None),
+                UpdateContext(
+                    current=SourceEntry(
+                        version="0.21.0",
+                        hashes=HashCollection(entries=None, mapping=None),
+                    )
                 ),
                 latest,
             )
@@ -144,7 +150,13 @@ def test_tsgolint_fetch_hashes_computes_src_and_vendor_hashes(
     )
 
     info = VersionInfo("0.21.0", metadata={"commit": COMMIT})
-    events = _run(_collect(updater.fetch_hashes(info, object())))
+    events = _run(
+        _collect(
+            lambda emit: updater.fetch_hashes(
+                info, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
     assert len(calls) == 2
     assert_nix_ast_equal(
@@ -176,7 +188,7 @@ def test_tsgolint_fetch_hashes_computes_src_and_vendor_hashes(
         ),
     )
     assert calls[1]["env"] is None
-    assert events[-1].payload == [
+    assert events.result == [
         HashEntry.create(
             "srcHash",
             "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",

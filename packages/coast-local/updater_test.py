@@ -27,7 +27,7 @@ from lib.tests._source_metadata import (
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -89,7 +89,7 @@ def test_coast_local_discovers_public_dmg_without_device_headers() -> None:
     updater = _load_module().CoastLocalUpdater()
     session = _FakeSession()
 
-    info = _run(updater.fetch_latest(session))
+    info = _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
 
     assert info == VersionInfo(_DISCOVERY_VERSION)
     assert updater.PLATFORMS == {"aarch64-darwin": _DOWNLOAD_URL}
@@ -111,10 +111,15 @@ def test_coast_local_accepts_the_cdns_strong_multipart_etag() -> None:
     headers = dict(_VALID_HEADERS)
     headers["ETag"] = '"1b97eb0299c78f5d6ce92ab854c583cd-10"'
 
-    info = _run(updater.fetch_latest(_FakeSession(_FakeResponse(headers=headers))))
+    info = _run(
+        updater.fetch_latest(
+            _FakeSession(_FakeResponse(headers=headers)),
+            context=UpdateContext(current=None),
+        )
+    )
 
     assert info == VersionInfo(_MULTIPART_DISCOVERY_VERSION)
-    assert not _run(updater._is_latest(None, info))
+    assert not _run(updater._is_latest(UpdateContext(current=None), info))
 
 
 @pytest.mark.parametrize(
@@ -163,7 +168,11 @@ def test_coast_local_rejects_http_failures_and_redirects(
     updater = _load_module().CoastLocalUpdater()
 
     with pytest.raises(RuntimeError, match=message):
-        _run(updater.fetch_latest(_FakeSession(response)))
+        _run(
+            updater.fetch_latest(
+                _FakeSession(response), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_coast_local_persists_full_sha256_content_identity() -> None:
@@ -178,7 +187,11 @@ def test_coast_local_persists_full_sha256_content_identity() -> None:
     assert result.version == _CONTENT_VERSION
     assert result.hashes.to_json() == {"aarch64-darwin": _SRI_HASH}
     assert result.urls == {"aarch64-darwin": _DOWNLOAD_URL}
-    assert not _run(updater._is_latest(result, VersionInfo(_DISCOVERY_VERSION)))
+    assert not _run(
+        updater._is_latest(
+            UpdateContext(current=result), VersionInfo(_DISCOVERY_VERSION)
+        )
+    )
 
 
 @pytest.mark.parametrize(

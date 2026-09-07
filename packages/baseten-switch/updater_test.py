@@ -20,6 +20,7 @@ from lib.tests._shell_ast import command_texts, indented_string_body, parse_shel
 from lib.tests._updater_helpers import load_repo_module
 from lib.update.nix import _build_fetch_from_github_call
 from lib.update.paths import REPO_ROOT
+from lib.update.updaters import UpdateContext
 
 COMMIT = "b" * 40
 
@@ -165,7 +166,7 @@ def test_fetch_latest_skips_drafts_and_accepts_beta_release(
         lambda _session, tag: asyncio.sleep(0, result=COMMIT),
     )
 
-    result = _run(updater.fetch_latest(object()))
+    result = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert result.version == "0.3.0"
     assert result.metadata == {"commit": COMMIT, "tag": "v0.3.0"}
@@ -185,7 +186,7 @@ def test_fetch_latest_rejects_non_mapping_release(
     )
 
     with pytest.raises(TypeError, match="Unexpected release payload type: str"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_fetch_latest_requires_release_tag(
@@ -204,7 +205,7 @@ def test_fetch_latest_requires_release_tag(
     )
 
     with pytest.raises(RuntimeError, match="Missing tag_name in release payload"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_fetch_latest_requires_published_release(
@@ -223,4 +224,4 @@ def test_fetch_latest_requires_published_release(
     )
 
     with pytest.raises(RuntimeError, match="No published releases found"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))

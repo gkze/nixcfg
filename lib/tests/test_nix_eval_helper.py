@@ -8,6 +8,32 @@ from nix_manipulator.expressions.primitive import Primitive
 from lib.tests import _nix_eval
 
 
+def test_real_evaluation_requires_a_local_justification() -> None:
+    """An unmarked test cannot start Nix through the shared boundary."""
+    with pytest.raises(RuntimeError, match="requires @pytest.mark.nix_eval"):
+        _nix_eval.nix_eval_json(Primitive(value=True))
+
+
+@pytest.mark.parametrize("reason", [None, "", "  "])
+def test_evaluation_scope_rejects_missing_reasons(reason: object) -> None:
+    with (
+        pytest.raises(ValueError, match="nonempty semantic justification"),
+        _nix_eval.allow_nix_evaluation(reason),
+    ):
+        pytest.fail("invalid scope must not be entered")
+
+
+def test_evaluation_scopes_restore_the_previous_permission() -> None:
+    with _nix_eval.allow_nix_evaluation("Outer semantic check"):
+        with (
+            pytest.raises(ValueError, match="failure"),
+            _nix_eval.allow_nix_evaluation("Nested semantic check"),
+        ):
+            raise ValueError("failure")
+        assert _nix_eval._NIX_EVAL_REASON.get() == "Outer semantic check"
+    assert _nix_eval._NIX_EVAL_REASON.get() is None
+
+
 def test_nix_eval_result_preserves_evaluator_traces(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

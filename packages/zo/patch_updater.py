@@ -2,16 +2,14 @@
 
 import argparse
 import plistlib
-import shutil
 import sys
-import tempfile
 from pathlib import Path
 
 from lib.asar_integrity import (
     AsarIntegrityError,
+    patch_bundle_integrity,
     read_packed_file,
     replace_packed_file_preserving_header,
-    write_info_plist_hash,
 )
 
 MAIN_PATH = "out/main/index.js"
@@ -95,38 +93,12 @@ def _patch_asar(asar_path: Path) -> str:
 
 
 def patch_bundle(asar_path: Path, info_plist_path: Path) -> str:
-    """Stage both integrity rewrites before atomically publishing either file."""
-    with (
-        tempfile.TemporaryDirectory(
-            dir=asar_path.parent,
-            prefix=f".{asar_path.name}.",
-        ) as asar_staging_dir,
-        tempfile.TemporaryDirectory(
-            dir=info_plist_path.parent,
-            prefix=f".{info_plist_path.name}.",
-        ) as plist_staging_dir,
-    ):
-        staged_asar = Path(asar_staging_dir) / asar_path.name
-        original_asar = Path(asar_staging_dir) / f"{asar_path.name}.original"
-        staged_plist = Path(plist_staging_dir) / info_plist_path.name
-        shutil.copy2(asar_path, staged_asar)
-        shutil.copy2(asar_path, original_asar)
-        shutil.copy2(info_plist_path, staged_plist)
-
-        _patch_asar(staged_asar)
-        try:
-            digest = write_info_plist_hash(staged_plist, staged_asar)
-        except AsarIntegrityError as exc:
-            msg = f"Zo {exc}"
-            raise PatchError(msg) from exc
-
-        staged_asar.replace(asar_path)
-        try:
-            staged_plist.replace(info_plist_path)
-        except OSError:
-            original_asar.replace(asar_path)
-            raise
-        return digest
+    """Stage the package patch and its matching Electron integrity digest."""
+    try:
+        return patch_bundle_integrity(asar_path, info_plist_path, _patch_asar)
+    except AsarIntegrityError as exc:
+        msg = f"Zo {exc}"
+        raise PatchError(msg) from exc
 
 
 def main(argv: list[str] | None = None) -> int:

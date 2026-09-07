@@ -347,7 +347,7 @@ class EventConsumer:
                 return True
         elif kind is UpdateEventKind.ARTIFACT:
             self._handle_artifact(event, item)
-        elif kind is UpdateEventKind.ERROR:
+        else:
             self._handle_error(event, item)
         return False
 

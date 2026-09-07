@@ -74,3 +74,11 @@ __all__ = [
     "preserved_platform_hash_status",
     "preserved_platform_hash_warning",
 ]
+
+
+@dataclass(frozen=True)
+class PlatformHashResult:
+    """Computed hashes plus whether every requested platform succeeded."""
+
+    hashes: dict[str, str]
+    fully_computed: bool

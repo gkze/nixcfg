@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping
+    from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 
 # ---------------------------------------------------------------------------
 # Result / error types
@@ -311,7 +311,7 @@ async def stream_process(
     command_timeout: float = 2400.0,
     env: Mapping[str, str] | None = None,
     **kwargs: object,
-) -> AsyncIterator[ProcessEvent]:
+) -> AsyncGenerator[ProcessEvent]:
     """Yield line events from both stdout and stderr until process completion."""
     timeout_seconds = _resolve_timeout_alias(
         command_timeout=command_timeout,

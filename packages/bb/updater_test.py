@@ -35,7 +35,7 @@ from lib.update.nix import (
     _build_package_path_attr_expr,
 )
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 _PACKAGE_DIR = REPO_ROOT / "packages/bb"
 _COMMIT = "45145e51af36b4bd1346a9d2e73d7612d250ba4f"
@@ -475,7 +475,9 @@ def test_bb_update_pins_release_source_and_pnpm_closure(
         ),
     )
 
-    events = run_async(collect_events(updater.update_stream(current, object())))
+    events = run_async(
+        collect_events(lambda emit: updater.update_stream(current, object(), emit=emit))
+    )
 
     assert release_api_paths == [
         "repos/get-bb/bb/releases/latest",
@@ -605,7 +607,11 @@ def test_bb_rejects_incoherent_release_manifests(
     monkeypatch.setattr(module, "fetch_json", _fetch_json, raising=False)
 
     with pytest.raises(error_type, match=message):
-        run_async(module.BbUpdater().fetch_latest(object()))
+        run_async(
+            module.BbUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 @pytest.mark.parametrize("commit", [None, "main", "ABCDEF"])
@@ -621,7 +627,11 @@ def test_bb_rejects_tag_without_immutable_commit(
     )
 
     with pytest.raises(RuntimeError, match="no immutable source commit"):
-        run_async(module.BbUpdater().fetch_latest(object()))
+        run_async(
+            module.BbUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_bb_requires_commit_when_building_source_result() -> None:

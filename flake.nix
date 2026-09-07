@@ -340,16 +340,6 @@
           inherit name;
         }) (builtins.attrNames standaloneHomeEntries);
 
-      rootClosureData = import ./lib/root-closures.nix {
-        inherit systems;
-        inherit (inputs.nixpkgs) lib;
-        darwinConfigurations = self.darwinConfigurations or { };
-        nixosConfigurations = self.nixosConfigurations or { };
-        homeConfigurations = self.homeConfigurations or { };
-        requiredKinds = systemPolicy.requiredRootKinds;
-        requiredRoots = requiredRootSources;
-      };
-
       electronRuntimePolicy = builtins.fromJSON (
         builtins.readFile ./packages/electron-runtimes/versions.json
       );
@@ -377,105 +367,51 @@
         outputs = self;
       };
       baseOutputs = flakelight ./. (
-        { lib, ... }:
+        { config, lib, ... }:
         let
+          configurationSystem = import ./lib/configuration-system.nix;
+          rootClosureData = import ./lib/root-closures.nix {
+            inherit lib systems;
+            darwinConfigurations = self.darwinConfigurations or { };
+            nixosConfigurations = self.nixosConfigurations or { };
+            homeConfigurations = self.homeConfigurations or { };
+            declaredSystems = {
+              darwin = builtins.mapAttrs (_: configurationSystem) config.darwinConfigurations;
+              nixos = builtins.mapAttrs (_: configurationSystem) config.nixosConfigurations;
+              home = builtins.mapAttrs (_: cfg: cfg.system) standaloneHomeDefinitions;
+            };
+            requiredKinds = systemPolicy.requiredRootKinds;
+            requiredRoots = requiredRootSources;
+          };
           exports = import ./lib/exports.nix { src = ./.; };
           lintFiles = import ./lib/lint-files.nix;
           inherit (lintFiles.python)
-            compilePaths
             pyupgradePaths
             pythonPyupgradeExcludes
-            pythonScriptPaths
             ruffMutationExcludes
             ;
-          pythonScriptFindPredicates = lib.concatMapStringsSep " " (
-            path: "-o -path './${path}'"
-          ) pythonScriptPaths;
-          oxfmtPatterns = lintFiles.oxfmt.globs ++ map (glob: "!${glob}") lintFiles.oxfmt.excludeGlobs;
           mkDevShell = import ./lib/dev-shell.nix {
             src = ./.;
             gitHooks = git-hooks;
             inherit lib lintFiles mkNixcfgPackage;
           };
-          mkNixcfgPackage =
-            pkgs:
-            pkgs.callPackage ./packages/nixcfg.nix {
-              inherit (self) inputs;
-              outputs = self;
-            };
-          # Keep each check keyed to the files it can observe. Read-only checks
-          # run from these immutable store paths; only mutation checks copy one.
+          # Package discovery already instantiates this environment in the
+          # package set. Reuse it for checks, apps, formatting and the shell.
+          mkNixcfgPackage = pkgs: pkgs.nixcfg;
+          sharedRepoChecks =
+            (import ./lib/repo-checks.nix {
+              src = ./.;
+              inherit lib lintFiles;
+            }).checks;
           mkCheckSource =
             fileset:
             lib.fileset.toSource {
               root = ./.;
               inherit fileset;
             };
-          filesWithExtensions =
-            extensions:
-            lib.fileset.fileFilter (file: lib.any (extension: file.hasExt extension) extensions) ./.;
-          filesetFromPaths = paths: lib.fileset.unions (map (path: ./. + "/${path}") paths);
-          yamlFiles = lib.fileset.fileFilter (file: file.hasExt "yaml" || file.hasExt "yml") ./.;
-          yamlLintFiles = lib.fileset.difference yamlFiles (
-            lib.fileset.fileFilter (file: file.hasExt "yaml") ./lib/nix/schemas
-          );
-          webFormatFiles = lib.fileset.difference (filesWithExtensions [
-            "cjs"
-            "css"
-            "js"
-            "json"
-            "jsonc"
-            "ts"
-          ]) ./schemas/codegen/testdata/lockfile-golden/expected.codegen.lock.json;
-          webLintFiles = filesWithExtensions [
-            "cjs"
-            "js"
-            "ts"
-          ];
-          pythonFiles = lib.fileset.unions [
-            (filesWithExtensions [
-              "py"
-              "pyi"
-            ])
-            (filesetFromPaths pythonScriptPaths)
-          ];
-          generatedPythonFiles = lib.fileset.fileFilter (
-            file: (file.hasExt "py" || file.hasExt "pyi") && file.name == "_generated.py"
-          ) ./.;
-          pyupgradeExcludedFiles = filesetFromPaths pythonPyupgradeExcludes;
-          pyupgradeFiles = lib.fileset.unions [
-            ./.gitignore
-            (lib.fileset.difference pythonFiles (
-              lib.fileset.unions [
-                generatedPythonFiles
-                pyupgradeExcludedFiles
-              ]
-            ))
-          ];
-          ruffFormatFiles = lib.fileset.difference pythonFiles (filesetFromPaths ruffMutationExcludes);
-          pythonToolFiles = lib.fileset.unions [
-            ./.gitignore
-            ./pyproject.toml
-            pythonFiles
-          ];
-          ruffFormatToolFiles = lib.fileset.unions [
-            ./.gitignore
-            ./pyproject.toml
-            ruffFormatFiles
-          ];
           # A path: flake can contain ignored workspace dependencies. Pytest
           # receives its TypeScript dependency explicitly below.
           pytestFiles = lib.fileset.difference ./. (lib.fileset.maybeMissing ./node_modules);
-          schemaVerificationFiles = lib.fileset.unions [
-            ./.root
-            ./pyproject.toml
-            ./schema_codegen.yaml
-            ./nixcfg.py
-            ./lib/nix/models/_generated.py
-            ./lib/schema_codegen/models/_generated.py
-            (lib.fileset.fileFilter (file: file.hasExt "yaml") ./lib/nix/schemas)
-            (lib.fileset.fileFilter (file: file.hasExt "json") ./schemas/codegen)
-          ];
           mkRepoCheck =
             {
               name,
@@ -483,6 +419,8 @@
               repoWritable ? false,
               source,
               setup ? "",
+              beforeCheck ? "",
+              afterCheck ? "",
               command,
             }:
             {
@@ -507,7 +445,9 @@
                 else
                   "cd ${source}"
               }
+              ${resolve beforeCheck}
               ${resolve command}
+              ${resolve afterCheck}
               touch $out
             '';
           mkEvalOnlyCheck =
@@ -551,157 +491,7 @@
                     spec.command;
               }
             );
-          repoCheckSpecs = {
-            "lint-editorconfig" = {
-              source = mkCheckSource ./.;
-              command =
-                { lib, pkgs, ... }:
-                ''
-                  ${lib.getExe pkgs."editorconfig-checker"} -exclude '^\.pre-commit-config\.yaml$'
-                '';
-            };
-
-            "format-yaml-yamlfmt" = {
-              source = mkCheckSource (
-                lib.fileset.unions [
-                  ./.gitignore
-                  ./.yamlfmt
-                  yamlFiles
-                ]
-              );
-              command =
-                { lib, pkgs, ... }:
-                ''
-                  ${lib.getExe pkgs.yamlfmt} -lint -gitignore_excludes -conf .yamlfmt .
-                '';
-            };
-
-            "lint-yaml-yamllint" = {
-              source = mkCheckSource (
-                lib.fileset.unions [
-                  ./.yamllint
-                  yamlLintFiles
-                ]
-              );
-              command =
-                { lib, pkgs, ... }:
-                ''
-                  ${lib.getExe pkgs.yamllint} -c .yamllint .
-                '';
-            };
-
-            "format-web-oxfmt" = {
-              source = mkCheckSource (
-                lib.fileset.unions [
-                  ./.editorconfig
-                  ./.oxfmtrc.json
-                  ./.gitignore
-                  ./flake.lock
-                  webFormatFiles
-                ]
-              );
-              command =
-                { lib, pkgs, ... }:
-                ''
-                  ${lib.getExe pkgs.oxfmt} --check --config .oxfmtrc.json --no-error-on-unmatched-pattern ${lib.escapeShellArgs oxfmtPatterns}
-                '';
-            };
-
-            "lint-web-oxlint" = {
-              source = mkCheckSource (
-                lib.fileset.unions [
-                  ./.gitignore
-                  ./.oxlintrc.json
-                  webLintFiles
-                ]
-              );
-              command =
-                { lib, pkgs, ... }:
-                ''
-                  OXLINT_TSGOLINT_PATH=${lib.getExe pkgs.tsgolint} ${lib.getExe pkgs.oxlint} --config .oxlintrc.json --type-aware --quiet .
-                '';
-            };
-
-            "format-python-pyupgrade" = {
-              repoWritable = true;
-              nixcfg = true;
-              source = mkCheckSource pyupgradeFiles;
-              command =
-                {
-                  lib,
-                  pkgs,
-                  nixcfgVenv,
-                  ...
-                }:
-                ''
-                  ${lib.getExe pkgs.git} init -q .
-                  ${lib.getExe pkgs.git} add -A
-                  find . \
-                    \( -path './.claude/worktrees' -o -path './.direnv' -o -path './.git' -o -path './.pytest_cache' -o -path './.ruff_cache' -o -path './.venv' -o -path './node_modules' -o -path './result' -o -name '_generated.py' \) -prune -o \
-                    -type f \
-                    \( -name '*.py' -o -name '*.pyi' ${pythonScriptFindPredicates} \) \
-                    -print0 \
-                    | ${pkgs.findutils}/bin/xargs -0 -r ${nixcfgVenv}/bin/pyupgrade --py314-plus
-                  ${lib.getExe pkgs.git} diff --exit-code -- .
-                '';
-            };
-
-            "lint-python-compile" = {
-              nixcfg = true;
-              source = mkCheckSource pythonFiles;
-              command =
-                { lib, nixcfgVenv, ... }:
-                ''
-                  ${nixcfgVenv}/bin/python ${./lib/check_python_compile.py} ${lib.escapeShellArgs compilePaths}
-                '';
-            };
-
-            "format-python-ruff" = {
-              nixcfg = true;
-              source = mkCheckSource ruffFormatToolFiles;
-              setup = ''
-                export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
-              '';
-              command =
-                { nixcfgVenv, ... }:
-                ''
-                  ${nixcfgVenv}/bin/ruff format --check --config pyproject.toml .
-                '';
-            };
-
-            "lint-python-ruff" = {
-              nixcfg = true;
-              source = mkCheckSource pythonToolFiles;
-              setup = ''
-                export RUFF_CACHE_DIR="$TMPDIR/.ruff_cache"
-              '';
-              command =
-                { nixcfgVenv, ... }:
-                ''
-                  ${nixcfgVenv}/bin/ruff check --config pyproject.toml .
-                '';
-            };
-
-            "lint-python-ty" = {
-              nixcfg = true;
-              source = mkCheckSource pythonToolFiles;
-              command =
-                { nixcfgVenv, ... }:
-                ''
-                  ${nixcfgVenv}/bin/ty check --python ${nixcfgVenv}/bin/python .
-                '';
-            };
-
-            "verify-python-generated" = {
-              nixcfg = true;
-              source = mkCheckSource schemaVerificationFiles;
-              command =
-                { nixcfgVenv, ... }:
-                ''
-                  ${nixcfgVenv}/bin/python ./nixcfg.py schema verify
-                '';
-            };
-
+          repoCheckSpecs = sharedRepoChecks // {
             "verify-runtime-package" = {
               nixcfg = true;
               source = null;
@@ -775,7 +565,19 @@
 
           # Export the standalone Home Manager config manually below without
           # letting flakelight wire it into per-system checks.
-          disabledModules = [ "homeConfigurations.nix" ];
+          disabledModules = [
+            "homeConfigurations.nix"
+            # The local adapter derives check names from constructor metadata.
+            "${flakelight-darwin}/flakelight-darwin/darwinConfigurations.nix"
+          ];
+
+          outputs.lib.rootClosureManifest = rootClosureData.manifest;
+
+          outputs.checks = lib.genAttrs rootClosureData.rootSystems (system: {
+            root-closures = baseOutputs.legacyPackages.${system}.linkFarm "nixcfg-root-closures" (
+              rootClosureData.forSystem system
+            );
+          });
 
           nixpkgs.config = nixpkgsConfig;
 
@@ -789,7 +591,10 @@
               meta.description = "Unified CLI for nixcfg project tasks.";
             };
 
-          imports = [ flakelight-darwin.flakelightModules.default ];
+          imports = [
+            flakelight-darwin.flakelightModules.default
+            ./lib/flakelight-darwin-configurations.nix
+          ];
 
           # Public module API for consuming this repo as a framework.
           inherit (exports)
@@ -1029,10 +834,6 @@
               ''
             );
 
-            "root-closures" =
-              { pkgs, system, ... }:
-              pkgs.linkFarm "nixcfg-root-closures" (rootClosureData.forSystem system);
-
             "test-nix-default-api" = mkEvalOnlyCheck "test-nix-default-api" (
               _: import ./tests/nix/default-api/default-api.nix { src = ./.; }
             );
@@ -1120,14 +921,46 @@
               }
             );
 
+            "test-nix-opencode-profile" = mkEvalOnlyCheck "test-nix-opencode-profile" (
+              { pkgs, ... }:
+              import ./tests/nix/opencode-profile.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
+
+            "test-nix-jsonc" = mkEvalOnlyCheck "test-nix-jsonc" (
+              { pkgs, ... }:
+              import ./tests/nix/jsonc.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
+
+            "test-nix-repo-checks" = mkEvalOnlyCheck "test-nix-repo-checks" (
+              { pkgs, ... }:
+              import ./tests/nix/repo-checks.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
+
             "test-nix-package-helpers" = mkEvalOnlyCheck "test-nix-package-helpers" (
-              _: import ./tests/nix/package-helpers.nix { src = ./.; }
+              { pkgs, ... }:
+              assert import ./tests/nix/t3code-workspace-source.nix { inherit (pkgs) lib; };
+              assert import ./tests/nix/opencode-desktop-source.nix { inherit (pkgs) lib; };
+              assert import ./tests/nix/package-probes.nix {
+                inherit pkgs;
+                src = ./.;
+              };
+              import ./tests/nix/package-helpers.nix { src = ./.; }
             );
 
             "test-nix-root-closures" = mkEvalOnlyCheck "test-nix-root-closures" (
               _:
               import ./tests/nix/root-closures.nix {
                 actualManifest = rootClosureData.manifest;
+                flakelight = inputs.flakelight.lib;
                 inherit lib;
                 src = ./.;
               }
@@ -1239,28 +1072,22 @@
       standaloneHomeEntries = inputs.nixpkgs.lib.filterAttrs (
         name: type: type == "directory" && builtins.pathExists (./home + "/${name}/default.nix")
       ) (builtins.readDir ./home);
-      standaloneHomeConfigurations = builtins.mapAttrs (
-        name: _: mkStandaloneHomeConfiguration name (import (./home + "/${name}") { outputs = self; })
+      standaloneHomeDefinitions = builtins.mapAttrs (
+        name: _: import (./home + "/${name}") { outputs = self; }
       ) standaloneHomeEntries;
+      standaloneHomeConfigurations = builtins.mapAttrs mkStandaloneHomeConfiguration standaloneHomeDefinitions;
     in
     (builtins.removeAttrs baseOutputs [
       "checks"
       "legacyPackages"
     ])
     // {
-      lib = baseOutputs.lib // {
-        rootClosureManifest = rootClosureData.manifest;
-      };
-
       homeConfigurations = standaloneHomeConfigurations;
 
       checks = builtins.mapAttrs (
-        system: systemChecks:
+        _system: systemChecks:
         inputs.nixpkgs.lib.filterAttrs (
-          name: _:
-          name != "formatting"
-          && !(inputs.nixpkgs.lib.hasPrefix "home-" name)
-          && (name != "root-closures" || builtins.elem system rootClosureData.rootSystems)
+          name: _: name != "formatting" && !(inputs.nixpkgs.lib.hasPrefix "home-" name)
         ) systemChecks
       ) baseOutputs.checks;
       pkgs = baseOutputs.legacyPackages;

@@ -44,7 +44,7 @@ from lib.update.nix import (
     _build_repo_package_attr_expr,
 )
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 _PACKAGE_DIR = REPO_ROOT / "packages/reflect-open"
 _VERSION = "0.10.0"
@@ -258,7 +258,9 @@ def test_reflect_resolves_the_release_to_its_immutable_public_commit(
 
     monkeypatch.setattr(module, "fetch_json", manifest_payload)
 
-    assert run_async(updater.fetch_latest(object())) == VersionInfo(
+    assert run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    ) == VersionInfo(
         version=_VERSION,
         metadata={
             "commit": _COMMIT,
@@ -297,7 +299,11 @@ def test_reflect_rejects_release_without_an_immutable_commit(
     )
 
     with pytest.raises(error_type, match="has no immutable source commit"):
-        run_async(module.ReflectOpenUpdater().fetch_latest(object()))
+        run_async(
+            module.ReflectOpenUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -344,7 +350,11 @@ def test_reflect_rejects_release_without_an_exact_pnpm_toolchain(
     )
 
     with pytest.raises(error_type, match=match):
-        run_async(module.ReflectOpenUpdater().fetch_latest(object()))
+        run_async(
+            module.ReflectOpenUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_reflect_hashes_source_pnpm_and_cargo_without_exporting_the_package(
@@ -367,7 +377,13 @@ def test_reflect_hashes_source_pnpm_and_cargo_without_exporting_the_package(
         ),
     )
 
-    run_async(collect_events(updater.fetch_hashes(info, object())))
+    run_async(
+        collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
     assert updater.supported_platforms == ("aarch64-darwin",)
     assert_nix_ast_equal(
@@ -462,7 +478,11 @@ def test_reflect_hashing_rejects_mutable_or_missing_source_commits(
         match="missing an immutable source commit",
     ):
         run_async(
-            collect_events(module.ReflectOpenUpdater().fetch_hashes(info, object()))
+            collect_events(
+                lambda emit: module.ReflectOpenUpdater().fetch_hashes(
+                    info, object(), emit=emit, context=UpdateContext(current=None)
+                )
+            )
         )
 
 
@@ -471,11 +491,15 @@ def test_reflect_hashing_requires_pnpm_release_metadata() -> None:
     with pytest.raises(RuntimeError, match="missing a pnpm version"):
         run_async(
             collect_events(
-                _load_updater_module()
-                .ReflectOpenUpdater()
-                .fetch_hashes(
-                    VersionInfo(_VERSION, {"commit": _COMMIT}),
-                    object(),
+                lambda emit: (
+                    _load_updater_module()
+                    .ReflectOpenUpdater()
+                    .fetch_hashes(
+                        VersionInfo(_VERSION, {"commit": _COMMIT}),
+                        object(),
+                        emit=emit,
+                        context=UpdateContext(current=None),
+                    )
                 )
             )
         )
@@ -536,7 +560,12 @@ def test_reflect_never_skips_dependency_closure_recomputation() -> None:
         ]),
     )
 
-    assert run_async(module.ReflectOpenUpdater()._is_latest(current, info)) is False
+    assert (
+        run_async(
+            module.ReflectOpenUpdater()._is_latest(UpdateContext(current=current), info)
+        )
+        is False
+    )
 
 
 def test_reflect_source_pin_contains_promoted_authoritative_hashes() -> None:

@@ -10,11 +10,12 @@ from nix_manipulator.expressions.operator import Operator
 from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.update.events import EventSink, ignore_event
+
 if TYPE_CHECKING:
     import aiohttp
     from nix_manipulator.expressions.expression import NixExpression
 
-    from lib.update.events import EventStream
 
 from lib.nix.models.sources import HashCollection, SourceEntry, SourceHashes
 from lib.update.flake import nixpkgs_expression
@@ -92,28 +93,27 @@ class ScratchUpdater(FlakeInputUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Compute npmDepsHash and cargoHash from the package derivation."""
         _ = (info, session, context)
 
-        async for event in stream_fixed_output_hashes(
+        return await stream_fixed_output_hashes(
             self.name,
             steps=(
                 FixedOutputHashStep(
                     hash_type="npmDepsHash",
-                    error="Missing npmDepsHash output",
                     expr=lambda _resolved: self._expr_for_npm_deps(),
                 ),
                 FixedOutputHashStep(
                     hash_type="cargoHash",
-                    error="Missing cargoHash output",
                     expr=lambda _resolved: self._expr_for_cargo_vendor(),
                 ),
             ),
             config=self.config,
-        ):
-            yield event
+            emit=emit,
+        )
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build source entry including resolved version and commit."""

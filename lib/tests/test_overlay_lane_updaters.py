@@ -11,8 +11,9 @@ from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import install_fixed_hash_stream
 from lib.tests._updater_helpers import load_repo_module as _load_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.events import UpdateEvent, UpdateEventKind
+from lib.update.events import EventSink, UpdateEventKind, ignore_event
 from lib.update.updaters import VersionInfo
+from lib.update.updaters.core import UpdateContext
 from lib.update.updaters.metadata import (
     JsonObject,
     PlatformAPIMetadata,
@@ -166,7 +167,9 @@ def test_code_cursor_fetch_checksums_and_download_url_validation(
         ),
     )
 
-    async def _compute_url_hashes(name: str, urls, *, config: object) -> object:
+    async def _compute_url_hashes(
+        name: str, urls, *, config: object, emit: EventSink = ignore_event
+    ) -> object:
         assert config is updater.config
         url_list = list(urls)
         assert name == updater.name
@@ -174,13 +177,9 @@ def test_code_cursor_fetch_checksums_and_download_url_validation(
             f"https://example.com/{api_platform}.zip"
             for api_platform in updater.PLATFORMS.values()
         ]
-        yield UpdateEvent.value(
-            name,
-            {
-                url: f"sha256-{index:0<43}="
-                for index, url in enumerate(url_list, start=1)
-            },
-        )
+        return {
+            url: f"sha256-{index:0<43}=" for index, url in enumerate(url_list, start=1)
+        }
 
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
 
@@ -248,7 +247,7 @@ def test_datagrip_fetch_latest_rejects_bad_payload_shapes(
     monkeypatch.setattr(module, "fetch_json", _fetch_json)
 
     with pytest.raises((TypeError, RuntimeError), match=match):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_datagrip_helpers_fetch_checksums_and_build_result(
@@ -341,7 +340,7 @@ def test_datagrip_fetch_latest_rejects_empty_and_versionless_releases(
         lambda *_a, **_k: asyncio.sleep(0, result={"DG": []}),
     )
     with pytest.raises(RuntimeError, match="No DataGrip releases found"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     monkeypatch.setattr(
         module,
@@ -351,7 +350,7 @@ def test_datagrip_fetch_latest_rejects_empty_and_versionless_releases(
     with pytest.raises(
         RuntimeError, match="Missing DataGrip version in release payload"
     ):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_datagrip_fetch_latest_returns_typed_release_metadata(
@@ -371,7 +370,7 @@ def test_datagrip_fetch_latest_returns_typed_release_metadata(
         lambda *_a, **_k: asyncio.sleep(0, result={"DG": [release]}),
     )
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert latest.version == "2025.1"
     assert latest.metadata == ReleasePayloadMetadata(release=release)
@@ -572,9 +571,15 @@ def test_google_chrome_fetch_latest_uses_platform_full_rollout_versions(
     )
     monkeypatch.setattr(module.host_platform, "machine", lambda: "arm64")
 
-    latest = _run(updater.fetch_latest(session))
+    latest = _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
     assert isinstance(latest.metadata, module._ChromeReleaseMetadata)
-    events = _run(_collect_events(updater.fetch_hashes(latest, session)))
+    events = _run(
+        _collect_events(
+            lambda emit: updater.fetch_hashes(
+                latest, session, emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
     result = updater.build_result(latest, latest.metadata.artifact_hashes)
 
     assert latest.version == _CHROME_MAC_VERSION
@@ -596,9 +601,7 @@ def test_google_chrome_fetch_latest_uses_platform_full_rollout_versions(
     assert result.pins == latest.metadata.platform_versions
     assert result.urls == latest.metadata.asset_urls
     assert result.hashes.to_json() == latest.metadata.artifact_hashes
-    assert events == [
-        UpdateEvent.value("google-chrome", latest.metadata.artifact_hashes)
-    ]
+    assert events.result == latest.metadata.artifact_hashes
     assert len(requested_urls) == 3
     assert all("channels/stable" in url for url in requested_urls)
     assert all("filter=endtime%3Dnone%2Cfraction%3D1" in url for url in requested_urls)
@@ -991,13 +994,13 @@ def test_google_chrome_latest_check_compares_complete_published_identity() -> No
         }
     )
 
-    assert _run(updater._is_latest(None, info)) is False
-    assert _run(updater._is_latest(matching, info)) is True
+    assert _run(updater._is_latest(UpdateContext(current=None), info)) is False
+    assert _run(updater._is_latest(UpdateContext(current=matching), info)) is True
     assert (
         _run(updater._is_latest(module.UpdateContext(current=matching), info)) is True
     )
-    assert _run(updater._is_latest(changed_url, info)) is False
-    assert _run(updater._is_latest(changed_hash, info)) is False
+    assert _run(updater._is_latest(UpdateContext(current=changed_url), info)) is False
+    assert _run(updater._is_latest(UpdateContext(current=changed_hash), info)) is False
 
 
 def test_sentry_cli_fetch_hashes_handles_event_flow_and_type_errors(
@@ -1016,14 +1019,19 @@ def test_sentry_cli_fetch_hashes_handles_event_flow_and_type_errors(
         (("building src", HASH_A), ("building cargo", HASH_B)),
     )
 
-    events = _run(_collect_events(updater.fetch_hashes(info, object())))
+    events = _run(
+        _collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
         UpdateEventKind.STATUS,
-        UpdateEventKind.VALUE,
     ]
-    assert [event.message for event in events[:-1]] == [
+    assert [event.message for event in events] == [
         "building src",
         "building cargo",
     ]
@@ -1041,7 +1049,7 @@ def test_sentry_cli_fetch_hashes_handles_event_flow_and_type_errors(
             "config": updater.config,
         },
     ]
-    assert events[-1].payload == [
+    assert events.result == [
         HashEntry.create("srcHash", HASH_A),
         HashEntry.create("cargoHash", HASH_B),
     ]
@@ -1072,7 +1080,7 @@ def test_vscode_insiders_fetch_latest_checksums_and_urls(
 
     monkeypatch.setattr("lib.update.updaters.platform_api.fetch_json", _fetch_json)
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     checksums = _run(updater.fetch_checksums(latest, object()))
     result = updater.build_result(latest, dict.fromkeys(updater.PLATFORMS, HASH_A))
 

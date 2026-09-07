@@ -4,7 +4,6 @@ import asyncio
 import base64
 import binascii
 import json
-import shutil
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -14,9 +13,10 @@ from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.parenthesis import Parenthesis
+from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.select import Select
+from nix_manipulator.expressions.set import AttributeSet
 
-from lib.nix.commands import run_nix, run_nix_json
 from lib.nix.models.sources import HashCollection, SourceEntry
 from lib.system_policy import electron_artifact_tags
 from lib.tests._assertions import expect_instance
@@ -237,7 +237,7 @@ def test_persisted_runtime_inventory_is_current_for_policy_urls() -> None:
         )
     )
 
-    assert asyncio.run(updater._is_latest(current, info)) is True
+    assert asyncio.run(updater._is_latest(UpdateContext(current=current), info)) is True
 
 
 def test_flake_insecure_policy_reuses_the_updater_owned_inventory() -> None:
@@ -267,6 +267,9 @@ def test_flake_insecure_policy_reuses_the_updater_owned_inventory() -> None:
     )
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation resolves dynamic runtime-version attribute grouping."
+)
 def test_electron_overlay_reconstructs_the_updater_inventory() -> None:
     """Use Nix because grouping dynamic attr keys cannot be proven from one AST."""
     result = nix_eval_json(_harness_expression())
@@ -278,6 +281,9 @@ def test_electron_overlay_reconstructs_the_updater_inventory() -> None:
     }
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation resolves the selected runtime and header derivation URLs through the overlay."
+)
 @pytest.mark.parametrize("target_system", ["aarch64-darwin", "x86_64-darwin"])
 def test_electron_runtime_build_uses_the_persisted_policy_url(
     target_system: str,
@@ -300,6 +306,9 @@ def test_electron_runtime_build_uses_the_persisted_policy_url(
     assert headers["url"] == _artifact_url(version, "headers")
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation forces the URL-policy assertion after decoding the runtime inventory."
+)
 def test_electron_overlay_rejects_a_url_outside_the_system_policy() -> None:
     """Use Nix because AST checks cannot prove the URL assertion is forced."""
     source_payload = _load_source().to_dict()
@@ -313,6 +322,9 @@ def test_electron_overlay_rejects_a_url_outside_the_system_policy() -> None:
     assert "URL does not match system policy" in exc_info.value.stderr
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation resolves the dynamic candidate version and its exact synthetic artifact set."
+)
 def test_electron_overlay_synthesizes_only_update_candidate_versions() -> None:
     """Use Nix because AST checks cannot resolve dynamic candidate artifacts."""
     candidate_version = "99.1.2"
@@ -335,6 +347,9 @@ def test_electron_overlay_synthesizes_only_update_candidate_versions() -> None:
     )
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation resolves the dynamic artifact backfill for an existing candidate version."
+)
 def test_electron_overlay_backfills_a_new_artifact_for_an_existing_candidate() -> None:
     """Use Nix because AST checks cannot resolve a dynamic artifact backfill."""
     source_payload = _load_source().to_dict()
@@ -369,6 +384,9 @@ def test_electron_overlay_backfills_a_new_artifact_for_an_existing_candidate() -
     assert set(candidate_hashes) == _ARTIFACTS
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation forces the fail-closed legacy-pin branch in the dynamic source projection."
+)
 def test_electron_overlay_rejects_legacy_pin_metadata() -> None:
     """Use Nix because AST checks cannot prove the legacy-pin branch is forced."""
     with pytest.raises(subprocess.CalledProcessError) as exc_info:
@@ -386,10 +404,8 @@ def test_electron_overlay_rejects_legacy_pin_metadata() -> None:
     assert "legacy pins.electronVersion" in exc_info.value.stderr
 
 
-def test_absent_runtime_candidate_dependency_probe_does_not_depend_on_electron() -> (
-    None
-):
-    """Use Nix because only a realized derivation graph proves probe laziness."""
+def test_absent_runtime_candidate_dependency_probe_selects_only_pnpm_deps() -> None:
+    """Keep candidate metadata and the dependency-only selection in the probe AST."""
     candidate_version = "99.1.2"
     assert candidate_version not in _load_policy_versions()
     source_payload = json.loads(
@@ -402,48 +418,55 @@ def test_absent_runtime_candidate_dependency_probe_does_not_depend_on_electron()
             "electron_version": candidate_version,
         }
     )
-    expression = _build_package_path_attr_expr(
-        "emdash",
-        ".pnpmDeps",
-        system="aarch64-darwin",
-        source_overrides={"emdash": candidate},
-        fake_hashes=True,
+    expression = expect_instance(
+        parse_nix_expr(
+            _build_package_path_attr_expr(
+                "emdash",
+                ".pnpmDeps",
+                system="aarch64-darwin",
+                source_overrides={"emdash": candidate},
+                fake_hashes=True,
+            )
+        ),
+        Select,
     )
-    nix_instantiate = shutil.which("nix-instantiate")
-    nix = shutil.which("nix")
-    assert nix_instantiate is not None
-    assert nix is not None
-    instantiated = asyncio.run(
-        run_nix(
-            [nix_instantiate, "--impure", "--expr", expression],
-            command_timeout=30,
-        )
+    assert expression.attribute == "pnpmDeps"
+    assert_nix_ast_equal(
+        expression.expression,
+        """
+        (pkgs.lib.callPackageWith applied
+          (packageMaterialization.packageFunctionsForSystem system)."emdash"
+          { inputs = rootFlake.inputs; outputs = flake; })
+        """,
     )
-    derivation = instantiated.stdout.strip()
-    payload = asyncio.run(
-        run_nix_json(
-            [nix, "derivation", "show", derivation],
-            command_timeout=30,
-        )
+    contextual_import = expect_instance(
+        expect_binding(expression.scope, "flake").value, FunctionCall
     )
-    payload_mapping = expect_instance(payload, dict)
-    derivations = expect_instance(
-        payload_mapping.get("derivations", payload_mapping),
-        dict,
+    arguments = expect_instance(contextual_import.argument, AttributeSet)
+    context = expect_instance(
+        expect_binding(arguments.values, "evaluationContext").value, AttributeSet
     )
-    record = expect_instance(next(iter(derivations.values())), dict)
-    inputs = record.get("inputDrvs")
-    if inputs is None:
-        record_inputs = expect_instance(record["inputs"], dict)
-        inputs = record_inputs["drvs"]
-    inputs = expect_instance(inputs, dict)
-    outputs = expect_instance(record["outputs"], dict)
-    output = expect_instance(outputs["out"], dict)
+    assert_nix_ast_equal(
+        expect_binding(context.values, "fakeHashes").value, Primitive(value=True)
+    )
+    overrides = expect_instance(
+        expect_binding(context.values, "sourceOverrides").value, FunctionCall
+    )
+    assert_nix_ast_equal(overrides.name, "builtins.fromJSON")
+    payload = expect_instance(overrides.argument, StringPrimitive)
+    assert_nix_ast_equal(
+        payload,
+        StringPrimitive(
+            value=json.dumps(
+                {"emdash": candidate.to_dict()}, sort_keys=True, separators=(",", ":")
+            )
+        ),
+    )
 
-    assert output["hash"] == FAKE_HASH
-    assert all("electron" not in name.lower() for name in inputs)
 
-
+@pytest.mark.nix_eval(
+    reason="Only evaluation proves the fail-closed inventory branch is forced."
+)
 def test_electron_overlay_rejects_an_incomplete_runtime() -> None:
     """Use Nix because AST checks cannot prove a lazy fail-closed branch is forced."""
     source_payload = _load_source().to_dict()

@@ -11,9 +11,16 @@ from lib.nix.commands.base import CommandResult as NixCommandResultData
 from lib.nix.commands.base import NixCommandError
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.tests._nix_ast import assert_nix_ast_equal
+from lib.tests._updater_helpers import collect_events
 from lib.update.config import resolve_config
-from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
+from lib.update.events import (
+    EventSink,
+    UpdateEvent,
+    UpdateEventKind,
+    ignore_event,
+)
 from lib.update.nix import _build_package_path_attr_expr
+from lib.update.platform_hashes import PlatformHashResult
 from lib.update.updaters import (
     DenoDepsHashUpdater,
     DenoManifestUpdater,
@@ -24,7 +31,7 @@ from lib.update.updaters import (
     UvLockUpdater,
     VersionInfo,
 )
-from lib.update.updaters.core import stream_source_then_overlay_hashes
+from lib.update.updaters.core import UpdateContext, stream_source_then_overlay_hashes
 from lib.update.updaters.metadata import require_metadata_str
 
 
@@ -34,7 +41,10 @@ class _ConfiguredDownloadUpdater(DownloadHashUpdater):
         "aarch64-darwin": "https://example.com/archive.tar.gz"
     }
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
+        _ = context
         _ = session
         return VersionInfo(version="1.0.0")
 
@@ -251,7 +261,9 @@ def test_download_updater_applies_explicit_retry_and_timeout_config() -> None:
         updater = _ConfiguredDownloadUpdater(config=config)
         with patch("lib.update.process.libnix_prefetch_url", _prefetch):
             async with aiohttp.ClientSession() as session:
-                return [event async for event in updater.update_stream(None, session)]
+                return await collect_events(
+                    lambda emit: updater.update_stream(None, session, emit=emit)
+                )
 
     events = asyncio.run(_run())
 
@@ -275,7 +287,7 @@ def test_generic_updater_treats_changed_source_pins_as_stale() -> None:
     assert (
         asyncio.run(
             _PinnedDownloadUpdater()._is_latest(
-                current,
+                UpdateContext(current=current),
                 VersionInfo(version="1.0.0"),
             ),
         )
@@ -304,11 +316,13 @@ def test_download_updater_uses_urls_for_same_version_freshness() -> None:
         "urls": {"aarch64-darwin": "https://example.com/original.tar.gz"},
     })
 
-    assert asyncio.run(updater._is_latest(current, info)) is False
+    assert (
+        asyncio.run(updater._is_latest(UpdateContext(current=current), info)) is False
+    )
     exact = current.model_copy(
         update={"urls": {"aarch64-darwin": candidate_url}},
     )
-    assert asyncio.run(updater._is_latest(exact, info)) is True
+    assert asyncio.run(updater._is_latest(UpdateContext(current=exact), info)) is True
 
 
 class _FakeHashEntryUpdater(HashEntryUpdater):
@@ -319,8 +333,11 @@ class _FakeHashEntryUpdater(HashEntryUpdater):
         self._version = version
         self.fetch_hashes_called = False
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Run this test case."""
+        _ = context
         _ = session
         return VersionInfo(
             version=object.__getattribute__(self, "_version"), metadata={}
@@ -330,10 +347,15 @@ class _FakeHashEntryUpdater(HashEntryUpdater):
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
-    ) -> EventStream:
+        *,
+        emit: EventSink = ignore_event,
+        context=None,
+    ) -> object:
+        _ = context
         """Run this test case."""
         _ = info
         _ = session
+        _ = emit
         self.fetch_hashes_called = True
         entries: list[HashEntry] = [
             HashEntry.create(
@@ -341,10 +363,7 @@ class _FakeHashEntryUpdater(HashEntryUpdater):
                 hash_value="sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
             )
         ]
-        yield UpdateEvent.value(
-            self.name,
-            entries,
-        )
+        return entries
 
 
 def test_hash_entry_updater_build_result_preserves_version() -> None:
@@ -381,7 +400,9 @@ def test_hash_entry_updater_recomputes_before_confirming_equivalence() -> None:
         )
 
         async with aiohttp.ClientSession() as session:
-            events = [event async for event in updater.update_stream(current, session)]
+            events = await collect_events(
+                lambda emit: updater.update_stream(current, session, emit=emit)
+            )
 
         assert updater.fetch_hashes_called is True
         return events
@@ -473,7 +494,7 @@ def test_flake_input_hash_updater_treats_changed_source_pins_as_stale() -> None:
     assert (
         asyncio.run(
             _PinnedUpdater()._is_latest(
-                current,
+                UpdateContext(current=current),
                 VersionInfo(version="1.2.3"),
             ),
         )
@@ -509,7 +530,7 @@ def test_flake_input_hash_updater_treats_changed_electron_runtime_as_stale() -> 
     assert (
         asyncio.run(
             _ElectronUpdater()._is_latest(
-                current,
+                UpdateContext(current=current),
                 VersionInfo(version="main"),
             )
         )
@@ -533,7 +554,10 @@ def test_flake_input_hash_updater_dynamic_pin_change_converges_in_one_run() -> N
                 )
             }
 
-        async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+        async def fetch_latest(
+            self, session: aiohttp.ClientSession, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = context
             _ = session
             return VersionInfo(
                 version="1.0.0",
@@ -561,19 +585,14 @@ def test_flake_input_hash_updater_dynamic_pin_change_converges_in_one_run() -> N
         return "candidate-package-expression"
 
     async def _fixed_hash(
-        source: str,
-        expr: str,
-        *,
-        config: object,
-    ) -> EventStream:
+        source: str, expr: str, *, config: object, emit: EventSink = ignore_event
+    ) -> object:
         nonlocal fixed_hash_calls
         fixed_hash_calls += 1
         assert source == "t3code-desktop"
         assert expr == "candidate-package-expression"
         _ = config
-        yield UpdateEvent.value(
-            source, "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
-        )
+        return "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 
     async def _fingerprint(
         source: str,
@@ -602,12 +621,14 @@ def test_flake_input_hash_updater_dynamic_pin_change_converges_in_one_run() -> N
     async def _run() -> tuple[list[UpdateEvent], list[UpdateEvent]]:
         updater = _PinnedPackageUpdater()
         async with aiohttp.ClientSession() as session:
-            first = [event async for event in updater.update_stream(current, session)]
+            first = await collect_events(
+                lambda emit: updater.update_stream(current, session, emit=emit)
+            )
             candidate = first[-1].payload
             assert isinstance(candidate, SourceEntry)
-            second = [
-                event async for event in updater.update_stream(candidate, session)
-            ]
+            second = await collect_events(
+                lambda emit: updater.update_stream(candidate, session, emit=emit)
+            )
         return first, second
 
     with (
@@ -664,7 +685,8 @@ def test_flake_input_hash_updater_overlay_probe_receives_candidate_pins() -> Non
         config: object = None,
         source_overrides: dict[str, SourceEntry] | None = None,
         fake_hashes: bool | None = None,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
         captured.update({
             "config": config,
             "fake_hashes": fake_hashes,
@@ -672,19 +694,17 @@ def test_flake_input_hash_updater_overlay_probe_receives_candidate_pins() -> Non
             "source_overrides": source_overrides,
             "system": system,
         })
-        yield UpdateEvent.value(source, "sha256-overlay")
+        return "sha256-overlay"
 
     updater = _PinnedOverlayUpdater()
     info = VersionInfo(version="1.0.0")
 
     async def _collect() -> list[UpdateEvent]:
-        return [
-            event
-            async for event in updater._compute_hash_for_system(
-                info,
-                system="aarch64-darwin",
+        return await collect_events(
+            lambda emit: updater._compute_hash_for_system(
+                info, system="aarch64-darwin", emit=emit
             )
-        ]
+        )
 
     with (
         patch("lib.update.paths.package_file_for", return_value=None),
@@ -692,7 +712,7 @@ def test_flake_input_hash_updater_overlay_probe_receives_candidate_pins() -> Non
     ):
         events = asyncio.run(_collect())
 
-    assert events == [UpdateEvent.value(updater.name, "sha256-overlay")]
+    assert events.result == "sha256-overlay"
     assert captured == {
         "config": updater.config,
         "fake_hashes": True,
@@ -720,7 +740,8 @@ def test_deno_hash_updater_passes_candidate_pins_to_platform_probes() -> None:
         native_only: bool = False,
         config: object = None,
         source_override: SourceEntry | None = None,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
         captured.update({
             "config": config,
             "input_name": input_name,
@@ -728,9 +749,9 @@ def test_deno_hash_updater_passes_candidate_pins_to_platform_probes() -> None:
             "source": source,
             "source_override": source_override,
         })
-        yield UpdateEvent.value(
-            source,
+        return PlatformHashResult(
             {"aarch64-darwin": "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="},
+            fully_computed=True,
         )
 
     current = SourceEntry.model_validate({
@@ -749,14 +770,14 @@ def test_deno_hash_updater_passes_candidate_pins_to_platform_probes() -> None:
 
     async def _collect() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
-            return [
-                event
-                async for event in updater.fetch_hashes(
+            return await collect_events(
+                lambda emit: updater.fetch_hashes(
                     VersionInfo(version="1.0.0"),
                     session,
-                    context=current,
+                    context=UpdateContext(current=current),
+                    emit=emit,
                 )
-            ]
+            )
 
     with patch(
         "lib.update.nix_deno.compute_deno_deps_hash",
@@ -764,7 +785,7 @@ def test_deno_hash_updater_passes_candidate_pins_to_platform_probes() -> None:
     ):
         events = asyncio.run(_collect())
 
-    assert events[-1].kind is UpdateEventKind.VALUE
+    assert events.result is not None
     source_override = captured["source_override"]
     assert isinstance(source_override, SourceEntry)
     assert source_override.version == "1.0.0"
@@ -809,35 +830,31 @@ def test_source_then_overlay_hashes_carries_candidate_source_pins() -> None:
         return "dependency-expression"
 
     async def _fixed_hash(
-        source: str,
-        expr: str,
-        *,
-        config: object,
-    ) -> EventStream:
+        source: str, expr: str, *, config: object, emit: EventSink = ignore_event
+    ) -> object:
         nonlocal hash_calls
         hash_calls += 1
         assert source == "pinned-two-pass"
         assert expr in {"source-expression", "dependency-expression"}
         _ = config
-        value = (
+        return (
             "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
             if hash_calls == 1
             else "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
         )
-        yield UpdateEvent.value(source, value)
 
     async def _collect() -> list[UpdateEvent]:
-        return [
-            event
-            async for event in stream_source_then_overlay_hashes(
+        return await collect_events(
+            lambda emit: stream_source_then_overlay_hashes(
                 "pinned-two-pass",
                 version="1.0.0",
                 commit="a" * 40,
                 src_expr="source-expression",
                 dependency_hash_type="npmDepsHash",
                 source_pins={"electronVersion": "42.0.1"},
+                emit=emit,
             )
-        ]
+        )
 
     with (
         patch("lib.update.updaters.core._build_overlay_expr", _overlay_expression),
@@ -845,7 +862,7 @@ def test_source_then_overlay_hashes_carries_candidate_source_pins() -> None:
     ):
         events = asyncio.run(_collect())
 
-    assert events[-1].kind is UpdateEventKind.VALUE
+    assert events.result is not None
     assert len(captured_overrides) == 1
     source_overrides = captured_overrides[0]
     assert source_overrides is not None
@@ -863,22 +880,17 @@ def test_package_flake_input_updater_hashes_discovered_package_expression() -> N
     captured: dict[str, object] = {}
 
     async def _compute_fixed_output_hash(
-        source: str,
-        expr: str,
-        *,
-        config: object,
-    ) -> EventStream:
+        source: str, expr: str, *, config: object, emit: EventSink = ignore_event
+    ) -> object:
         captured.update({"source": source, "expr": expr, "config": config})
-        yield UpdateEvent.value(source, "sha256-package")
+        return "sha256-package"
 
     async def _collect() -> list[UpdateEvent]:
-        return [
-            event
-            async for event in updater._compute_hash_for_system(
-                VersionInfo(version="1.0.0"),
-                system="aarch64-darwin",
+        return await collect_events(
+            lambda emit: updater._compute_hash_for_system(
+                VersionInfo(version="1.0.0"), system="aarch64-darwin", emit=emit
             )
-        ]
+        )
 
     updater = _PackageUpdater()
     with (
@@ -893,7 +905,7 @@ def test_package_flake_input_updater_hashes_discovered_package_expression() -> N
     ):
         events = asyncio.run(_collect())
 
-    assert events == [UpdateEvent.value("anthropic-cli", "sha256-package")]
+    assert events.result == "sha256-package"
     assert captured["source"] == "anthropic-cli"
     assert_nix_ast_equal(
         str(captured["expr"]),
@@ -940,7 +952,9 @@ def test_package_flake_input_updater_fingerprints_discovered_package() -> None:
         ),
     ):
         is_latest = asyncio.run(
-            updater._is_latest(current, VersionInfo(version="1.0.0"))
+            updater._is_latest(
+                UpdateContext(current=current), VersionInfo(version="1.0.0")
+            )
         )
 
     assert is_latest is True

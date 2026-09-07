@@ -9,9 +9,9 @@ from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.events import UpdateEventKind
+from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
 from lib.update.nix import _build_fetchgit_call
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 
 def _load_module(module_name: str = "goose_v8_updater_test"):
@@ -132,7 +132,12 @@ def test_goose_v8_is_latest_requires_matching_version_and_hash_set(
     updater = module.GooseV8Updater()
 
     assert (
-        _run(updater._is_latest(current, VersionInfo(version="cafebabe"))) is expected
+        _run(
+            updater._is_latest(
+                UpdateContext(current=current), VersionInfo(version="cafebabe")
+            )
+        )
+        is expected
     )
 
 
@@ -147,43 +152,47 @@ def test_goose_v8_fetch_hashes_success_path(
     fetched_urls: list[tuple[object, str, object, object]] = []
     url_hash_batches: list[list[str]] = []
 
-    async def _fixed_hash(name: str, expr: str, *, config=None):
+    async def _fixed_hash(
+        name: str, expr: str, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         fixed_hash_calls.append((name, expr, config))
-        yield module.UpdateEvent.status(name, "building src")
-        yield module.UpdateEvent.value(
-            name, "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-        )
+        await emit(UpdateEvent.status(name, "building src"))
+        return "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
     async def _fetch_url(session, url: str, *, request_timeout=None, config=None):
         fetched_urls.append((session, url, request_timeout, config))
         return b'[package]\nversion = "999.0.0"\n'
 
-    async def _url_hashes(name: str, urls, *, config=None):
+    async def _url_hashes(
+        name: str, urls, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         assert config is updater.config
         batch = list(urls)
         url_hash_batches.append(batch)
-        yield module.UpdateEvent.status(name, "hashing release assets")
-        yield module.UpdateEvent.value(
-            name,
-            {
-                batch[0]: "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
-                batch[1]: "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
-            },
-        )
+        await emit(UpdateEvent.status(name, "hashing release assets"))
+        return {
+            batch[0]: "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+            batch[1]: "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
+        }
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
     monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _url_hashes)
 
     session = object()
-    events = _run(_collect_events(updater.fetch_hashes(info, session)))
+    events = _run(
+        _collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, session, emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
         UpdateEventKind.STATUS,
-        UpdateEventKind.VALUE,
     ]
-    assert [event.message for event in events[:-1]] == [
+    assert [event.message for event in events] == [
         "building src",
         "hashing release assets",
     ]
@@ -204,7 +213,7 @@ def test_goose_v8_fetch_hashes_success_path(
             "https://github.com/denoland/rusty_v8/releases/download/v999.0.0/src_binding_release_x86_64-unknown-linux-gnu.rs",
         ]
     ]
-    assert events[-1].payload == [
+    assert events.result == [
         HashEntry.create(
             "srcHash",
             "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
@@ -231,16 +240,23 @@ def test_goose_v8_fetch_hashes_rejects_non_string_src_hash(
     module = _load_module("goose_v8_updater_test_bad_src_type")
     updater = module.GooseV8Updater()
 
-    async def _bad_src_hash(_name: str, _expr: str, *, config=None):
+    async def _bad_src_hash(
+        _name: str, _expr: str, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         _ = config
-        yield module.UpdateEvent.value("goose-v8", {"hash": "sha256-src"})
+        return {"hash": "sha256-src"}
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _bad_src_hash)
 
     with pytest.raises(TypeError, match="Expected src hash string, got dict"):
         _run(
             _collect_events(
-                updater.fetch_hashes(VersionInfo(version="cafebabe"), object())
+                lambda emit: updater.fetch_hashes(
+                    VersionInfo(version="cafebabe"),
+                    object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
+                )
             )
         )
 
@@ -262,12 +278,11 @@ def test_goose_v8_fetch_hashes_rejects_bad_cargo_toml_or_missing_version(
     module = _load_module(f"goose_v8_updater_test_cargo_{expected_exception.__name__}")
     updater = module.GooseV8Updater()
 
-    async def _fixed_hash(_name: str, _expr: str, *, config=None):
+    async def _fixed_hash(
+        _name: str, _expr: str, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         _ = config
-        yield module.UpdateEvent.value(
-            "goose-v8",
-            "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-        )
+        return "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
     async def _fetch_url(_session, _url: str, *, request_timeout=None, config=None):
         _ = (request_timeout, config)
@@ -279,7 +294,12 @@ def test_goose_v8_fetch_hashes_rejects_bad_cargo_toml_or_missing_version(
     with pytest.raises(expected_exception, match=match):
         _run(
             _collect_events(
-                updater.fetch_hashes(VersionInfo(version="cafebabe"), object())
+                lambda emit: updater.fetch_hashes(
+                    VersionInfo(version="cafebabe"),
+                    object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
+                )
             )
         )
 
@@ -291,26 +311,24 @@ def test_goose_v8_fetch_hashes_rejects_missing_asset_hash(
     module = _load_module("goose_v8_updater_test_missing_asset_hash")
     updater = module.GooseV8Updater()
 
-    async def _fixed_hash(_name: str, _expr: str, *, config=None):
+    async def _fixed_hash(
+        _name: str, _expr: str, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         _ = config
-        yield module.UpdateEvent.value(
-            "goose-v8",
-            "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-        )
+        return "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
     async def _fetch_url(_session, _url: str, *, request_timeout=None, config=None):
         _ = (request_timeout, config)
         return b'[package]\nversion = "999.0.0"\n'
 
-    async def _url_hashes(name: str, urls, *, config=None):
+    async def _url_hashes(
+        name: str, urls, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         assert config is updater.config
         batch = list(urls)
-        yield module.UpdateEvent.value(
-            name,
-            {
-                batch[0]: "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
-            },
-        )
+        return {
+            batch[0]: "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+        }
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
     monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
@@ -321,106 +339,81 @@ def test_goose_v8_fetch_hashes_rejects_missing_asset_hash(
     ):
         _run(
             _collect_events(
-                updater.fetch_hashes(VersionInfo(version="cafebabe"), object())
+                lambda emit: updater.fetch_hashes(
+                    VersionInfo(version="cafebabe"),
+                    object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
+                )
             )
         )
 
 
-def test_goose_v8_fetch_hashes_requires_asset_hash_capture(
+def test_goose_v8_fetch_hashes_propagates_asset_hash_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Raise when the asset hash stream emits no final VALUE payload."""
+    """Propagate release asset hash failures."""
     module = _load_module("goose_v8_updater_test_missing_asset_capture")
     updater = module.GooseV8Updater()
 
-    async def _fixed_hash(_name: str, _expr: str, *, config=None):
+    async def _fixed_hash(
+        _name: str, _expr: str, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         _ = config
-        yield module.UpdateEvent.value(
-            "goose-v8",
-            "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-        )
+        return "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
     async def _fetch_url(_session, _url: str, *, request_timeout=None, config=None):
         _ = (request_timeout, config)
         return b'[package]\nversion = "999.0.0"\n'
 
-    async def _missing_assets(name: str, _urls, *, config=None):
+    async def _missing_assets(
+        name: str, _urls, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         assert config is updater.config
-        yield module.UpdateEvent.status(name, "hashing release assets")
+        await emit(UpdateEvent.status(name, "hashing release assets"))
+        raise RuntimeError("release asset hash probe failed")
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
     monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _missing_assets)
 
-    with pytest.raises(RuntimeError, match="Missing prebuilt rusty_v8 hash output"):
+    with pytest.raises(RuntimeError, match="release asset hash probe failed"):
         _run(
             _collect_events(
-                updater.fetch_hashes(VersionInfo(version="cafebabe"), object())
+                lambda emit: updater.fetch_hashes(
+                    VersionInfo(version="cafebabe"),
+                    object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
+                )
             )
         )
 
 
-def test_goose_v8_fetch_hashes_handles_missing_wrapped_asset_capture(
+def test_goose_v8_fetch_hashes_propagates_source_hash_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cover the fallback path when the wrapped asset capture yields nothing."""
-    module = _load_module("goose_v8_updater_test_missing_wrapped_asset_capture")
-    updater = module.GooseV8Updater()
-
-    async def _fixed_hash(_name: str, _expr: str, *, config=None):
-        _ = config
-        yield module.UpdateEvent.value(
-            "goose-v8",
-            "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-        )
-
-    async def _fetch_url(_session, _url: str, *, request_timeout=None, config=None):
-        _ = (request_timeout, config)
-        return b'[package]\nversion = "999.0.0"\n'
-
-    async def _url_hashes(name: str, _urls, *, config=None):
-        assert config is updater.config
-        yield module.UpdateEvent.status(name, "hashing release assets")
-
-    async def _capture_selectively(events, *, error: str):
-        async for _event in events:
-            pass
-        if error == "Missing srcHash output":
-            yield module.CapturedValue(
-                "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-            )
-
-    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
-    monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
-    monkeypatch.setattr("lib.update.process.compute_url_hashes", _url_hashes)
-    monkeypatch.setattr(module, "capture_stream_value", _capture_selectively)
-
-    assert (
-        _run(
-            _collect_events(
-                updater.fetch_hashes(VersionInfo(version="cafebabe"), object())
-            )
-        )
-        == []
-    )
-
-
-def test_goose_v8_fetch_hashes_requires_src_hash_capture(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Raise when the source hash stream emits no final VALUE payload."""
+    """Propagate source hash failures."""
     module = _load_module("goose_v8_updater_test_missing_src_capture")
     updater = module.GooseV8Updater()
 
-    async def _fixed_hash(_name: str, _expr: str, *, config=None):
+    async def _fixed_hash(
+        _name: str, _expr: str, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         _ = config
-        yield module.UpdateEvent.status("goose-v8", "building src")
+        await emit(UpdateEvent.status("goose-v8", "building src"))
+        raise RuntimeError("source hash probe failed")
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
-    with pytest.raises(RuntimeError, match="Missing srcHash output"):
+    with pytest.raises(RuntimeError, match="source hash probe failed"):
         _run(
             _collect_events(
-                updater.fetch_hashes(VersionInfo(version="cafebabe"), object())
+                lambda emit: updater.fetch_hashes(
+                    VersionInfo(version="cafebabe"),
+                    object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
+                )
             )
         )

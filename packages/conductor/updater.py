@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, ClassVar
 import aiohttp
 
 if TYPE_CHECKING:
-    from lib.nix.models.sources import SourceEntry
     from lib.update.updaters import UpdateContext
 
 from lib.update.updaters import (
@@ -87,8 +86,11 @@ class ConductorUpdater(AssetURLsMetadataUpdater):
                 url=self._url_without_query(str(response.url)),
             )
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Infer the current version and resolved asset URLs from redirects."""
+        _ = context
         artifacts = {
             platform: await self._fetch_resolved_artifact(session, platform)
             for platform in self.PLATFORMS
@@ -109,7 +111,7 @@ class ConductorUpdater(AssetURLsMetadataUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Recompute hashes for mutable latest-channel artifacts before comparing."""

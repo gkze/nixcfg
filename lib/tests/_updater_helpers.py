@@ -1,13 +1,18 @@
 """Shared helpers for updater-focused tests."""
 
 import asyncio
-from collections.abc import AsyncIterable, AsyncIterator, Coroutine, Sequence
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Coroutine,
+    Sequence,
+)
 from pathlib import Path
 from types import ModuleType
 from typing import Final, Protocol
 
 from lib.import_utils import load_module_from_path
-from lib.update.events import UpdateEvent
+from lib.update.events import EventSink, UpdateEvent, ignore_event
 from lib.update.paths import REPO_ROOT
 
 NO_FIXED_HASH_VALUE: Final = object()
@@ -22,16 +27,30 @@ def run_async[T](coro: Coroutine[object, object, T]) -> T:
     return asyncio.run(coro)
 
 
-async def collect_events[T](stream: AsyncIterable[T]) -> list[T]:
-    """Collect every event from an async stream."""
-    return [event async for event in stream]
+class CapturedEvents[T](list[UpdateEvent]):
+    """Real progress events and the independently returned operation value."""
+
+    def __init__(self, events: list[UpdateEvent], result: T) -> None:
+        super().__init__(events)
+        self.result = result
 
 
-async def empty_event_stream() -> AsyncIterator[UpdateEvent]:
-    """Return an empty async event stream for tests."""
-    events: tuple[UpdateEvent, ...] = ()
-    for event in events:
-        yield event
+async def collect_events[T](
+    operation: Callable[[EventSink], Awaitable[T]],
+) -> CapturedEvents[T]:
+    """Run an operation with an explicit sink and capture its typed return."""
+    events: list[UpdateEvent] = []
+
+    async def emit(event: UpdateEvent) -> None:
+        events.append(event)
+
+    result = await operation(emit)
+    return CapturedEvents(events, result)
+
+
+async def empty_event_stream(*, emit: EventSink = ignore_event) -> None:
+    """Complete an operation that has no result or progress to report."""
+    _ = emit
 
 
 def load_repo_module(path: str | Path, module_name: str) -> ModuleType:
@@ -83,7 +102,8 @@ def install_fixed_hash_stream(
         isolate_by_drv_hash: bool = False,
         env: object = None,
         config: object = None,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         index = len(calls)
         call = {
             "name": name,
@@ -95,12 +115,13 @@ def install_fixed_hash_stream(
             call["isolate_by_drv_hash"] = True
         calls.append(call)
         if index >= len(output_steps):
-            return
+            return None
         status, value = output_steps[index]
         if status is not None:
-            yield UpdateEvent.status(name, status)
+            await emit(UpdateEvent.status(name, status))
         if value is not NO_FIXED_HASH_VALUE:
-            yield UpdateEvent.value(name, value)
+            return value
+        return None
 
     monkeypatch.setattr(target, _fixed_hash)
     return calls

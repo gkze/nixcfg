@@ -194,9 +194,11 @@ class OpencodeDesktopUpdater(FlakeInputHashUpdater):
     platform_specific = True
     native_only = False
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve Electron from bun.lock at the immutable input commit."""
-        info = await super().fetch_latest(session)
+        info = await super().fetch_latest(session, context=context)
         node = self._resolve_flake_node(info)
         _, _, commit = locked_github_source(
             node,
@@ -257,13 +259,13 @@ class OpencodeDesktopUpdater(FlakeInputHashUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         if not await super()._is_latest(context, info):
             return False
 
-        entry = context.current if isinstance(context, UpdateContext) else context
+        entry = context.current
         if entry is None:
             return False
 

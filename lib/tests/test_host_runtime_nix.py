@@ -197,7 +197,6 @@ def test_zeus_preserves_the_town_workstation_contract() -> None:
             darwinDefaults.zsh.deferCompletionInitToHomeManager = true;
             home-manager.backupFileExtension = "backup";
           }
-          (lib.mkSetOpencodeEnvModule "work.json")
         ]
         """,
     )

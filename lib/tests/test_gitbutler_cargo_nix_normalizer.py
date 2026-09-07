@@ -2,8 +2,12 @@
 
 from types import ModuleType
 
+import pytest
+from nix_manipulator.expressions.function.definition import FunctionDefinition
+from nix_manipulator.expressions.set import AttributeSet
+
 from lib.import_utils import load_module_from_path
-from lib.tests._nix_ast import assert_nix_ast_equal
+from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.update.paths import REPO_ROOT
 
 
@@ -68,9 +72,9 @@ def test_normalize_disambiguates_registry_gix_trace_metadata() -> None:
         sha256 = "1q32n7l0lpa70crx3vh356l6r8s7x11q3q25d35d8dw47dj176pn";
         libName = "gix_trace";
         features = {
-          "crate2nix-source-registry" = [ ];
           "document-features" = [ "dep:document-features" ];
           "tracing" = [ "dep:tracing" ];
+          "crate2nix-source-registry" = [ ];
         };
         resolvedDefaultFeatures = [ "crate2nix-source-registry" "default" ];
       };
@@ -346,70 +350,96 @@ def test_normalize_ignores_gitbutler_tauri_workspace_wrapper() -> None:
     assert_nix_ast_equal(normalized, expected)
 
 
-def test_normalize_keeps_partially_disambiguated_gix_trace_package() -> None:
-    """A manually patched package should not receive a duplicate feature key."""
+@pytest.mark.parametrize(
+    "features", ['features = {"crate2nix-source-registry" = [];};', ""]
+)
+def test_normalize_completes_partial_source_disambiguation(features: str) -> None:
+    """Incomplete prior edits must gain both the feature and its activation."""
     module = _load_normalizer_module()
-    sample = r"""
-{ rootSrc ? ./. }:
-{
-  crates = {
-      "registry+https://github.com/rust-lang/crates.io-index#gix-trace@0.1.18" = rec {
-        crateName = "gix-trace";
-        features = {
-          "crate2nix-source-registry" = [ ];
-        };
-        resolvedDefaultFeatures = [ "default" ];
-      };
-  };
-}
-"""
-
+    sample = (
+        "{rootSrc ? ./.}: {crates = {"
+        '"registry+https://github.com/rust-lang/crates.io-index#gix-trace@0.1.18" = {'
+        + features
+        + 'resolvedDefaultFeatures = ["default"];};};}'
+    )
     normalized, rewrites, added_root_src = module.normalize(sample)
-
     assert rewrites == 0
     assert added_root_src is False
-    assert_nix_ast_equal(normalized, sample)
+    root = parse_nix_expr(normalized)
+    assert isinstance(root, FunctionDefinition)
+    assert isinstance(root.output, AttributeSet)
+    crates = expect_binding(root.output.values, "crates").value
+    assert isinstance(crates, AttributeSet)
+    package = expect_binding(
+        crates.values,
+        '"registry+https://github.com/rust-lang/crates.io-index#gix-trace@0.1.18"',
+    ).value
+    assert isinstance(package, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(package.values, "features").value,
+        '{"crate2nix-source-registry" = [];}',
+    )
+    assert_nix_ast_equal(
+        expect_binding(package.values, "resolvedDefaultFeatures").value,
+        '["crate2nix-source-registry" "default"]',
+    )
+    assert_nix_ast_equal(module.normalize(normalized)[0], normalized)
 
 
-def test_normalize_leaves_unexpected_gix_trace_package_shape_alone() -> None:
-    """Unexpected generated package shape should be left to crate2nix checks."""
+@pytest.mark.parametrize(
+    "graph",
+    [
+        "{internal = 1;}",
+        "{}",
+        "{crates = 1;}",
+        '{crates = {"gitbutler-tauri" = {};};}',
+        '{crates = {"gitbutler-tauri" = {dependencies = "wrong";};};}',
+        '{crates = {"gitbutler-tauri" = {dependencies = [1];};};}',
+        '{crates = {"registry+https://github.com/rust-lang/crates.io-index#gix-trace@0.1.18" = 1;};}',
+        '{crates = {"registry+https://github.com/rust-lang/crates.io-index#gix-trace@0.1.18" = {features = 1;};};}',
+        '{crates = {"registry+https://github.com/rust-lang/crates.io-index#gix-trace@0.1.18" = {resolvedDefaultFeatures = 1;};};}',
+        '{crates = {"registry+https://github.com/rust-lang/crates.io-index#gix-trace@0.1.18" = {features = {"crate2nix-source-registry" = ["unexpected"];};};};}',
+        "1",
+    ],
+)
+def test_normalize_rejects_unexpected_graph_shapes(graph: str) -> None:
+    """Generator drift must fail during normalization, before a Rust build."""
+    with pytest.raises((TypeError, ValueError), match="GitButler"):
+        _load_normalizer_module().normalize("{rootSrc ? ./.}: " + graph)
+
+
+def test_normalize_updates_every_dependency_kind_without_changing_git_source() -> None:
+    """Registry identity applies to every edge and must preserve other features."""
     module = _load_normalizer_module()
     sample = r"""
-{ rootSrc ? ./. }:
-{
-  crates = {
-      "registry+https://github.com/rust-lang/crates.io-index#gix-trace@0.1.18" = rec {
-        crateName = "gix-trace";
-        resolvedDefaultFeatures = [ "default" ];
+    {rootSrc ? ./.}: {internal.crates = {
+      inherit externalCrate;
+      parent = {
+        dependencies = [{packageId = "registry+https://github.com/rust-lang/crates.io-index#gix-validate@0.11.2"; features = ["extra"]; }];
+        buildDependencies = [{packageId = "registry+https://github.com/rust-lang/crates.io-index#gix-validate@0.11.2";}];
+        devDependencies = [{packageId = "git+source#gix-validate@0.11.2";}];
       };
-  };
-}
-"""
-
-    normalized, rewrites, added_root_src = module.normalize(sample)
-
-    assert rewrites == 0
-    assert added_root_src is False
-    assert_nix_ast_equal(normalized, sample)
-
-
-def test_normalize_leaves_gitbutler_tauri_without_dependencies_alone() -> None:
-    """The optional but edge can only be inserted when dependencies exist."""
-    module = _load_normalizer_module()
-    sample = r"""
-{ rootSrc ? ./. }:
-{
-  crates = {
-      "gitbutler-tauri" = rec {
-        crateName = "gitbutler-tauri";
-        buildDependencies = [ ];
+      "registry+https://github.com/rust-lang/crates.io-index#gix-validate@0.11.2" = {};
+    };}
+    """
+    expected = r"""
+    {rootSrc ? ./.}: {internal.crates = {
+      inherit externalCrate;
+      parent = {
+        dependencies = [{packageId = "registry+https://github.com/rust-lang/crates.io-index#gix-validate@0.11.2"; features = ["crate2nix-source-registry" "extra"]; }];
+        buildDependencies = [{packageId = "registry+https://github.com/rust-lang/crates.io-index#gix-validate@0.11.2"; features = ["crate2nix-source-registry"];}];
+        devDependencies = [{packageId = "git+source#gix-validate@0.11.2";}];
       };
-  };
-}
-"""
+      "registry+https://github.com/rust-lang/crates.io-index#gix-validate@0.11.2" = {
+        features = {"crate2nix-source-registry" = [];};
+        resolvedDefaultFeatures = ["crate2nix-source-registry"];
+      };
+    };}
+    """
+    assert_nix_ast_equal(module.normalize(sample)[0], expected)
 
-    normalized, rewrites, added_root_src = module.normalize(sample)
 
-    assert rewrites == 0
-    assert added_root_src is False
-    assert_nix_ast_equal(normalized, sample)
+def test_normalize_rejects_a_non_function_generator_root() -> None:
+    """A recognizable source marker does not authorize a malformed Cargo API."""
+    with pytest.raises(ValueError, match="GitButler Cargo.nix to have a function body"):
+        _load_normalizer_module().normalize("# rootSrc ? ./.\n{}")

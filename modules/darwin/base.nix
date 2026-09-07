@@ -16,6 +16,14 @@ let
     "gpg"
     "homedir"
   ] "/Users/${primaryUser}/.local/share/gnupg" config;
+  opencodeConfig = attrByPath [
+    "home-manager"
+    "users"
+    primaryUser
+    "home"
+    "sessionVariables"
+    "OPENCODE_CONFIG"
+  ] null config;
   macApps = import ../../lib/mac-apps.nix { inherit lib pkgs; };
   systemMacAppEntries = macApps.applicationsForScope "system" config.nixcfg.macApps.resolved;
   homeMacAppEntries = macApps.applicationsForScope "system" (
@@ -197,7 +205,12 @@ in
           inherit (cfg.launchd) maxfiles maxproc;
         };
 
-    launchd.user.envVariables.GNUPGHOME = gpgHome;
+    launchd.user.envVariables = {
+      GNUPGHOME = gpgHome;
+    }
+    // lib.optionalAttrs (opencodeConfig != null) {
+      OPENCODE_CONFIG = opencodeConfig;
+    };
 
     homebrew = {
       enable = pkgs.stdenv.hostPlatform.isDarwin;

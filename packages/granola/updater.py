@@ -7,6 +7,8 @@ import yaml
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 from lib import json_utils
 from lib.update.net import fetch_url
 from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
@@ -35,8 +37,11 @@ class GranolaUpdater(DownloadHashUpdater):
         )
         return f"{self.DOWNLOAD_BASE_URL}/{info.version}/{path}"
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Read version metadata from Granola's Electron updater feed."""
+        _ = context
         payload = await fetch_url(
             session,
             self.FEED_URL,

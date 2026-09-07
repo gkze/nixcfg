@@ -10,9 +10,9 @@ from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.tests._updater_helpers import collect_events, load_repo_module, run_async
-from lib.update.events import UpdateEvent, UpdateEventKind
+from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
     import pytest
@@ -60,7 +60,10 @@ def test_mole_resolves_the_pinned_tag_to_an_immutable_commit(
         resolve_release_tag_commit,
     )
 
-    assert run_async(updater.fetch_latest(object())) == _candidate_info()
+    assert (
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))
+        == _candidate_info()
+    )
 
 
 def test_mole_same_version_requires_the_resolved_commit() -> None:
@@ -77,10 +80,10 @@ def test_mole_same_version_requires_the_resolved_commit() -> None:
             urls=urls,
             hashes=[],
         )
-        assert not run_async(updater._is_latest(current, info))
+        assert not run_async(updater._is_latest(UpdateContext(current=current), info))
 
     current = SourceEntry(version=_VERSION, commit=_COMMIT, urls=urls, hashes=[])
-    assert run_async(updater._is_latest(current, info))
+    assert run_async(updater._is_latest(UpdateContext(current=current), info))
 
 
 def test_mole_updater_owns_source_and_binary_downloads(
@@ -94,34 +97,31 @@ def test_mole_updater_owns_source_and_binary_downloads(
     expected_urls = {"source": _SOURCE_URL, **binary_urls}
 
     async def compute_url_hashes(
-        name: str,
-        urls: object,
-        *,
-        config: object,
-    ):
+        name: str, urls: object, *, config: object, emit: EventSink = ignore_event
+    ) -> object:
         assert name == "mole-app"
         assert config is updater.config
         assert list(urls) == list(expected_urls.values())
-        yield UpdateEvent.status(name, "hashing Mole closure")
-        yield UpdateEvent.value(
-            name,
-            {
-                _SOURCE_URL: _SOURCE_HASH,
-                **{
-                    binary_urls[platform]: hash_value
-                    for platform, hash_value in _BINARY_HASHES.items()
-                },
+        await emit(UpdateEvent.status(name, "hashing Mole closure"))
+        return {
+            _SOURCE_URL: _SOURCE_HASH,
+            **{
+                binary_urls[platform]: hash_value
+                for platform, hash_value in _BINARY_HASHES.items()
             },
-        )
+        }
 
     monkeypatch.setattr("lib.update.process.compute_url_hashes", compute_url_hashes)
 
-    events = run_async(collect_events(updater.fetch_hashes(info, object())))
+    events = run_async(
+        collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
-    assert [event.kind for event in events] == [
-        UpdateEventKind.STATUS,
-        UpdateEventKind.VALUE,
-    ]
+    assert [event.kind for event in events] == [UpdateEventKind.STATUS]
     hashes = [
         HashEntry.create("srcHash", _SOURCE_HASH, url=_SOURCE_URL),
         *[
@@ -129,7 +129,7 @@ def test_mole_updater_owns_source_and_binary_downloads(
             for platform in sorted(_BINARY_HASHES)
         ],
     ]
-    assert events[-1].payload == hashes
+    assert events.result == hashes
     assert updater.build_result(info, hashes) == SourceEntry(
         version=_VERSION,
         commit=_COMMIT,

@@ -12,6 +12,7 @@
   python3,
   stdenv,
   stdenvNoCC,
+  t3codeWorkspaceSource ? null,
   ...
 }:
 let
@@ -27,6 +28,7 @@ let
       pnpmConfigHook
       stdenv
       ;
+    inherit t3codeWorkspaceSource;
     sourceHashPackageName = "t3code-workspace";
   };
   inherit (shared)

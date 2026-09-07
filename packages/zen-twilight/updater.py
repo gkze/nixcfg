@@ -5,16 +5,13 @@ from typing import TYPE_CHECKING, ClassVar
 
 from defusedxml import ElementTree
 
-from lib.nix.models.sources import SourceHashes
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
+    EventSink,
     StatusInfo,
     StatusKind,
     UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_source_hashes,
-    require_value,
+    ignore_event,
 )
 from lib.update.net import fetch_url
 from lib.update.updaters import (
@@ -27,8 +24,7 @@ from lib.update.updaters.vendor_feeds import require_version
 if TYPE_CHECKING:
     import aiohttp
 
-    from lib.nix.models.sources import SourceEntry
-    from lib.update.events import EventStream
+    from lib.nix.models.sources import SourceEntry, SourceHashes
     from lib.update.updaters import UpdateContext
 
 
@@ -72,8 +68,11 @@ class ZenTwilightUpdater(DownloadHashUpdater):
         ),
     )
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Combine Twilight's published app version and build ID."""
+        _ = context
         payload = await fetch_url(
             session,
             self.TWILIGHT_UPDATE_URL,
@@ -109,29 +108,19 @@ class ZenTwilightUpdater(DownloadHashUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash only a channel artifact bracketed by matching feed snapshots."""
-        before = await self.fetch_latest(session)
+        before = await self.fetch_latest(session, context=context)
         if before != info:
             raise _TwilightSnapshotChangedError(
                 phase="before",
                 expected=info.version,
                 observed=before.version,
             )
-
-        hashes_drain = ValueDrain[SourceHashes]()
-        async for event in drain_value_events(
-            super().fetch_hashes(
-                info,
-                session,
-                context=context,
-            ),
-            hashes_drain,
-            parse=expect_source_hashes,
-        ):
-            yield event
-        after = await self.fetch_latest(session)
+        hashes = await super().fetch_hashes(info, session, context=context, emit=emit)
+        after = await self.fetch_latest(session, context=context)
         if after != info:
             raise _TwilightSnapshotChangedError(
                 phase="after",
@@ -139,27 +128,23 @@ class ZenTwilightUpdater(DownloadHashUpdater):
                 observed=after.version,
             )
 
-        hashes = require_value(hashes_drain, "Missing hash output")
-        yield UpdateEvent.value(self.name, hashes)
+        return hashes
 
     async def update_stream(
         self,
         current: SourceEntry | None,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext | None = None,
+        emit: EventSink = ignore_event,
+    ) -> SourceEntry | None:
         """Resolve a fresh version and retry after channel movement."""
-        for attempt in range(
-            1, self.SNAPSHOT_ATTEMPTS + 1
-        ):  # pragma: no branch -- every attempt returns, raises, or retries
+        attempt = 1
+        while True:
             try:
-                async for event in super().update_stream(
-                    current,
-                    session,
-                    context=context,
-                ):
-                    yield event
+                return await super().update_stream(
+                    current, session, context=context, emit=emit
+                )
             except _TwilightSnapshotChangedError as exc:
                 if attempt >= self.SNAPSHOT_ATTEMPTS:
                     msg = (
@@ -168,23 +153,24 @@ class ZenTwilightUpdater(DownloadHashUpdater):
                     )
                     raise RuntimeError(msg) from exc
                 next_attempt = attempt + 1
-                yield UpdateEvent.status(
-                    self.name,
-                    "Twilight channel changed while hashing; resolving a fresh "
-                    "snapshot...",
-                    operation="compute_hash",
-                    status=StatusInfo(
-                        kind=StatusKind.RETRY,
-                        value=f"attempt {next_attempt}/{self.SNAPSHOT_ATTEMPTS}",
-                    ),
+                await emit(
+                    UpdateEvent.status(
+                        self.name,
+                        "Twilight channel changed while hashing; resolving a fresh "
+                        "snapshot...",
+                        operation="compute_hash",
+                        status=StatusInfo(
+                            kind=StatusKind.RETRY,
+                            value=f"attempt {next_attempt}/{self.SNAPSHOT_ATTEMPTS}",
+                        ),
+                    )
                 )
                 await asyncio.sleep(max(0.0, self.config.default_retry_backoff))
-            else:
-                return
+                attempt += 1
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Recompute hashes for the pinned channel artifact before comparing."""

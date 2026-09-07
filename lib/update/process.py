@@ -6,11 +6,14 @@ import posixpath
 import re
 import shlex
 from collections import deque
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlparse
 
 from rich.text import Text
+
+from lib.update.events import EventSink, ignore_event
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -28,17 +31,12 @@ from lib.update.constants import NIX_BUILD_FAILURE_TAIL_LINES, resolve_timeout_a
 from lib.update.errors import format_exception
 from lib.update.events import (
     CommandResult,
-    EventStream,
-    GatheredValues,
     StatusInfo,
     StatusKind,
     UpdateEvent,
     UpdateEventKind,
-    ValueDrain,
-    expect_str,
-    gather_event_streams,
+    gather_results,
     is_nix_build_command,
-    require_value,
 )
 
 _TASK_ERROR_TYPES: tuple[type[Exception], ...] = (
@@ -70,23 +68,10 @@ _NIX_PREFETCH_TRANSIENT_MARKERS = (
 
 
 @dataclass(frozen=True)
-class StreamCommandOptions:
-    """Options controlling streamed subprocess execution."""
-
-    source: str
-    command_timeout: float | None = None
-    env: Mapping[str, str] | None = None
-    allow_failure: bool = False
-    suppress_patterns: tuple[str, ...] | None = None
-    config: UpdateConfig | None = None
-
-
-@dataclass(frozen=True)
 class RunCommandOptions:
-    """Options controlling buffered subprocess execution."""
+    """Options controlling subprocess execution and progress reporting."""
 
     source: str
-    error: str
     command_timeout: float | None = None
     env: Mapping[str, str] | None = None
     allow_failure: bool = False
@@ -153,13 +138,14 @@ def _resolve_timeout_alias(
     )
 
 
-async def stream_command(
+async def run_command(
     args: list[str],
     *,
-    options: StreamCommandOptions,
+    options: RunCommandOptions,
+    emit: EventSink = ignore_event,
     **kwargs: object,
-) -> EventStream:
-    """Stream subprocess lifecycle events and output lines."""
+) -> CommandResult:
+    """Stream subprocess progress and return its outcome after cleanup."""
     command_timeout = _resolve_timeout_alias(
         command_timeout=options.command_timeout,
         kwargs=kwargs,
@@ -168,11 +154,13 @@ async def stream_command(
     if command_timeout is None:
         command_timeout = config.default_subprocess_timeout
     command_text = _truncate_command(shlex.join(args))
-    yield UpdateEvent(
-        source=options.source,
-        kind=UpdateEventKind.COMMAND_START,
-        message=command_text,
-        payload=args,
+    await emit(
+        UpdateEvent(
+            source=options.source,
+            kind=UpdateEventKind.COMMAND_START,
+            message=command_text,
+            payload=args,
+        )
     )
 
     tail_lines: deque[str] | None = None
@@ -180,31 +168,37 @@ async def stream_command(
         tail_lines = deque(maxlen=NIX_BUILD_FAILURE_TAIL_LINES)
     result: ProcessDone | None = None
     try:
-        async for event in stream_process(
-            args,
-            timeout=command_timeout,
-            env=options.env,
-        ):
-            if isinstance(event, ProcessLine):
-                label = event.stream
-                text = event.text
-                sanitized = _sanitize_log_line(text.rstrip("\n"))
-                if sanitized:
-                    if options.suppress_patterns and any(
-                        pattern in sanitized for pattern in options.suppress_patterns
-                    ):
-                        continue
-                    line_text = f"[{label}] {sanitized}" if label else sanitized
-                    if tail_lines is not None:
-                        tail_lines.append(line_text)
-                    yield UpdateEvent(
-                        source=options.source,
-                        kind=UpdateEventKind.LINE,
-                        message=sanitized,
-                        stream=label,
-                    )
-            else:
-                result = event
+        async with aclosing(
+            stream_process(
+                args,
+                timeout=command_timeout,
+                env=options.env,
+            )
+        ) as process_events:
+            async for event in process_events:
+                if isinstance(event, ProcessLine):
+                    label = event.stream
+                    text = event.text
+                    sanitized = _sanitize_log_line(text.rstrip("\n"))
+                    if sanitized:
+                        if options.suppress_patterns and any(
+                            pattern in sanitized
+                            for pattern in options.suppress_patterns
+                        ):
+                            continue
+                        line_text = f"[{label}] {sanitized}" if label else sanitized
+                        if tail_lines is not None:
+                            tail_lines.append(line_text)
+                        await emit(
+                            UpdateEvent(
+                                source=options.source,
+                                kind=UpdateEventKind.LINE,
+                                message=sanitized,
+                                stream=label,
+                            )
+                        )
+                else:
+                    result = event
     except TimeoutError:
         msg = f"Command timed out after {command_timeout}s: {shlex.join(args)}"
         raise RuntimeError(msg) from None
@@ -221,47 +215,19 @@ async def stream_command(
         allow_failure=options.allow_failure,
         tail_lines=tuple(tail_lines) if tail_lines else (),
     )
-    yield UpdateEvent(
-        source=options.source,
-        kind=UpdateEventKind.COMMAND_END,
-        payload=payload,
+    await emit(
+        UpdateEvent(
+            source=options.source,
+            kind=UpdateEventKind.COMMAND_END,
+            payload=payload,
+        )
     )
-
-
-async def run_command(
-    args: list[str],
-    *,
-    options: RunCommandOptions,
-) -> EventStream:
-    """Run a command and emit both command events and final VALUE result."""
-    result_drain = ValueDrain[CommandResult]()
-    stream_options = StreamCommandOptions(
-        source=options.source,
-        command_timeout=options.command_timeout,
-        env=options.env,
-        allow_failure=options.allow_failure,
-        suppress_patterns=options.suppress_patterns,
-        config=options.config,
-    )
-    async for event in stream_command(
-        args,
-        options=stream_options,
-    ):
-        if event.kind == UpdateEventKind.COMMAND_END and isinstance(
-            event.payload,
-            CommandResult,
-        ):
-            result_drain.value = event.payload
-        yield event
-    result = require_value(result_drain, options.error)
-    yield UpdateEvent.value(options.source, result)
+    return payload
 
 
 async def run_nix_build(
-    expr: str,
-    *,
-    options: NixBuildOptions,
-) -> EventStream:
+    expr: str, *, options: NixBuildOptions, emit: EventSink = ignore_event
+) -> CommandResult:
     """Run ``nix build`` and stream command events."""
     args = ["nix", "build", "-L"]
     if options.verbose:
@@ -269,17 +235,12 @@ async def run_nix_build(
     args.extend(["--no-link", "--impure", "--expr", expr])
     run_options = RunCommandOptions(
         source=options.source,
-        error="nix build did not return output",
         env=options.env,
         allow_failure=options.allow_failure,
         suppress_patterns=options.suppress_patterns,
         config=options.config,
     )
-    async for event in run_command(
-        args,
-        options=run_options,
-    ):
-        yield event
+    return await run_command(args, options=run_options, emit=emit)
 
 
 async def _emit_successful_command(
@@ -288,28 +249,35 @@ async def _emit_successful_command(
     args: list[str],
     message: str,
     runner: Callable[[], Awaitable[str]],
-) -> EventStream:
-    """Emit COMMAND_START/END + VALUE events for an async command helper."""
-    yield UpdateEvent(
-        source=source,
-        kind=UpdateEventKind.COMMAND_START,
-        message=message,
+    emit: EventSink = ignore_event,
+) -> str:
+    """Emit command lifecycle progress and return the helper result."""
+    await emit(
+        UpdateEvent(
+            source=source,
+            kind=UpdateEventKind.COMMAND_START,
+            message=message,
+        )
     )
     stdout = await runner()
-    yield UpdateEvent(
-        source=source,
-        kind=UpdateEventKind.COMMAND_END,
-        payload=CommandResult(
-            args=args,
-            returncode=0,
-            stdout=stdout,
-            stderr="",
-        ),
+    await emit(
+        UpdateEvent(
+            source=source,
+            kind=UpdateEventKind.COMMAND_END,
+            payload=CommandResult(
+                args=args,
+                returncode=0,
+                stdout=stdout,
+                stderr="",
+            ),
+        )
     )
-    yield UpdateEvent.value(source, stdout)
+    return stdout
 
 
-async def convert_nix_hash_to_sri(source: str, hash_value: str) -> EventStream:
+async def convert_nix_hash_to_sri(
+    source: str, hash_value: str, *, emit: EventSink = ignore_event
+) -> str:
     """Convert a hash to SRI format via :func:`lib.nix.commands.hash.nix_hash_convert`."""
     args = [
         "nix",
@@ -321,13 +289,13 @@ async def convert_nix_hash_to_sri(source: str, hash_value: str) -> EventStream:
         "sri",
         hash_value,
     ]
-    async for event in _emit_successful_command(
+    return await _emit_successful_command(
         source=source,
         args=args,
         message=f"nix hash convert --hash-algo sha256 --to sri {hash_value}",
         runner=lambda: libnix_hash_convert(hash_value),
-    ):
-        yield event
+        emit=emit,
+    )
 
 
 def _nix_prefetch_name(url: str) -> str | None:
@@ -350,11 +318,8 @@ def _is_retryable_prefetch_error(exc: NixCommandError) -> bool:
 
 
 async def compute_sri_hash(
-    source: str,
-    url: str,
-    *,
-    config: UpdateConfig,
-) -> EventStream:
+    source: str, url: str, *, config: UpdateConfig, emit: EventSink = ignore_event
+) -> str:
     """Prefetch a URL and return its SRI hash via :func:`lib.nix.commands.hash.nix_prefetch_url`."""
     args = ["nix-prefetch-url", "--type", "sha256"]
     prefetch_name = _nix_prefetch_name(url)
@@ -362,11 +327,10 @@ async def compute_sri_hash(
         args.extend(["--name", prefetch_name])
     args.append(url)
     attempts = max(1, config.default_retries)
-    for attempt in range(
-        1, attempts + 1
-    ):  # pragma: no branch -- loop always returns or raises before exhausting
+    attempt = 1
+    while True:
         try:
-            async for event in _emit_successful_command(
+            return await _emit_successful_command(
                 source=source,
                 args=args,
                 message=shlex.join(args),
@@ -375,35 +339,38 @@ async def compute_sri_hash(
                     name=prefetch_name,
                     command_timeout=config.default_subprocess_timeout,
                 ),
-            ):
-                yield event
+                emit=emit,
+            )
         except NixCommandError as exc:
             if attempt >= attempts or not _is_retryable_prefetch_error(exc):
                 raise
-            yield UpdateEvent(
-                source=source,
-                kind=UpdateEventKind.COMMAND_END,
-                payload=CommandResult(
-                    args=args,
-                    returncode=exc.result.returncode,
-                    stdout=exc.result.stdout,
-                    stderr=exc.result.stderr,
-                    allow_failure=True,
-                ),
+            await emit(
+                UpdateEvent(
+                    source=source,
+                    kind=UpdateEventKind.COMMAND_END,
+                    payload=CommandResult(
+                        args=args,
+                        returncode=exc.result.returncode,
+                        stdout=exc.result.stdout,
+                        stderr=exc.result.stderr,
+                        allow_failure=True,
+                    ),
+                )
             )
             next_attempt = attempt + 1
-            yield UpdateEvent.status(
-                source,
-                "nix-prefetch-url hit a transient failure; retrying...",
-                operation="compute_hash",
-                status=StatusInfo(
-                    kind=StatusKind.RETRY,
-                    value=f"attempt {next_attempt}/{attempts}",
-                ),
+            await emit(
+                UpdateEvent.status(
+                    source,
+                    "nix-prefetch-url hit a transient failure; retrying...",
+                    operation="compute_hash",
+                    status=StatusInfo(
+                        kind=StatusKind.RETRY,
+                        value=f"attempt {next_attempt}/{attempts}",
+                    ),
+                )
             )
             await asyncio.sleep(max(0.0, config.default_retry_backoff))
-        else:
-            return
+            attempt += 1
 
 
 async def compute_url_hashes(
@@ -411,19 +378,10 @@ async def compute_url_hashes(
     urls: Iterable[str],
     *,
     config: UpdateConfig,
-) -> EventStream:
+    emit: EventSink = ignore_event,
+) -> dict[str, str]:
     """Compute SRI hashes for URLs and emit a final URL-to-hash mapping."""
-    streams: dict[str, EventStream] = {
-        url: compute_sri_hash(source, url, config=config) for url in dict.fromkeys(urls)
-    }
-    async for item in gather_event_streams(streams):
-        if isinstance(item, GatheredValues):
-            hash_mapping: dict[str, str] = {}
-            for url, hash_value in item.values.items():
-                if not isinstance(url, str):
-                    msg = f"Expected URL key to be str, got {type(url)}"
-                    raise TypeError(msg)
-                hash_mapping[url] = expect_str(hash_value)
-            yield UpdateEvent.value(source, hash_mapping)
-        else:
-            yield item
+    return await gather_results({
+        url: compute_sri_hash(source, url, config=config, emit=emit)
+        for url in dict.fromkeys(urls)
+    })

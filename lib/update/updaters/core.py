@@ -1,8 +1,6 @@
 """Core updater abstractions and shared non-flake implementations."""
 
-import annotationlib
 import asyncio
-import inspect
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -12,7 +10,6 @@ from typing import TYPE_CHECKING, ClassVar
 from lib.nix.models.sources import (
     HashCollection,
     HashEntry,
-    HashMapping,
     HashType,
     SourceEntry,
     SourceHashes,
@@ -22,19 +19,12 @@ from lib.update import nix as update_nix
 from lib.update import process as update_process
 from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.events import (
-    EventStream,
-    GatheredValues,
+    EventSink,
     StatusInfo,
     StatusKind,
     UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_hash_mapping,
-    expect_source_entry,
-    expect_source_hashes,
-    expect_str,
-    gather_event_streams,
-    require_value,
+    gather_results,
+    ignore_event,
 )
 from lib.update.nix import _build_overlay_expr
 from lib.update.updaters.metadata import metadata_get, require_metadata_str
@@ -54,7 +44,6 @@ class FixedOutputHashStep:
     """One fixed-output hash computation in a sequential hash pipeline."""
 
     hash_type: HashType
-    error: str
     expr: Callable[[dict[str, str]], str]
 
 
@@ -127,48 +116,9 @@ class UpdateContext:
 
     current: SourceEntry | None
     drv_fingerprint: str | None = None
-    dry_run: bool = False
     generated_artifacts: dict[Path, str] = field(default_factory=dict)
     hashes_fully_computed: bool = True
     effective_sources: dict[str, SourceEntry] = field(default_factory=dict)
-
-
-def _coerce_context(context: UpdateContext | SourceEntry | None) -> UpdateContext:
-    if isinstance(context, UpdateContext):
-        return context
-    return UpdateContext(current=context)
-
-
-def _call_with_optional_context[T](
-    func: Callable[..., T],
-    *args: object,
-    context: UpdateContext,
-    **kwargs: object,
-) -> T:
-    signature = inspect.signature(func, annotation_format=annotationlib.Format.STRING)
-    bound_kwargs = dict(kwargs)
-    if "context" in signature.parameters:
-        bound_kwargs["context"] = context
-    if "info" not in signature.parameters:
-        bound_kwargs.pop("info", None)
-    return func(*args, **bound_kwargs)
-
-
-async def _emit_single_hash_entry(
-    source_name: str,
-    events: EventStream,
-    *,
-    error: str,
-    hash_type: HashType,
-) -> EventStream:
-    hash_drain = ValueDrain[str]()
-    async for event in drain_value_events(events, hash_drain, parse=expect_str):
-        yield event
-    hash_value = require_value(hash_drain, error)
-    yield UpdateEvent.value(
-        source_name,
-        [HashEntry.create(hash_type, hash_value)],
-    )
 
 
 async def stream_url_hash_mapping(
@@ -176,25 +126,13 @@ async def stream_url_hash_mapping(
     urls_by_key: Mapping[str, str],
     *,
     config: UpdateConfig,
-    error: str = "Missing hash output",
-) -> EventStream:
+    emit: EventSink = ignore_event,
+) -> dict[str, str]:
     """Hash a keyed URL mapping while forwarding progress events."""
-    hash_drain = ValueDrain[HashMapping]()
-    async for event in drain_value_events(
-        update_process.compute_url_hashes(
-            source_name,
-            urls_by_key.values(),
-            config=config,
-        ),
-        hash_drain,
-        parse=expect_hash_mapping,
-    ):
-        yield event
-    hashes_by_url = require_value(hash_drain, error)
-    yield UpdateEvent.value(
-        source_name,
-        {key: hashes_by_url[url] for key, url in urls_by_key.items()},
+    hashes_by_url = await update_process.compute_url_hashes(
+        source_name, urls_by_key.values(), config=config, emit=emit
     )
+    return {key: hashes_by_url[url] for key, url in urls_by_key.items()}
 
 
 async def stream_fixed_output_hashes(
@@ -202,29 +140,21 @@ async def stream_fixed_output_hashes(
     *,
     steps: tuple[FixedOutputHashStep, ...],
     config: UpdateConfig | None = None,
-) -> EventStream:
+    emit: EventSink = ignore_event,
+) -> list[HashEntry]:
     """Compute one or more fixed-output hashes and emit structured hash entries."""
     config = resolve_active_config(config)
     resolved_hashes: dict[str, str] = {}
     entries: list[HashEntry] = []
 
     for step in steps:
-        hash_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            update_nix.compute_fixed_output_hash(
-                source_name,
-                step.expr(resolved_hashes),
-                config=config,
-            ),
-            hash_drain,
-            parse=expect_str,
-        ):
-            yield event
-        hash_value = require_value(hash_drain, step.error)
+        hash_value = await update_nix.compute_fixed_output_hash(
+            source_name, step.expr(resolved_hashes), config=config, emit=emit
+        )
         resolved_hashes[step.hash_type] = hash_value
         entries.append(HashEntry.create(step.hash_type, hash_value))
 
-    yield UpdateEvent.value(source_name, entries)
+    return entries
 
 
 def _source_override(
@@ -259,20 +189,19 @@ async def stream_source_then_overlay_hashes(
     dependency_hash_type: HashType,
     source_pins: dict[str, str] | None = None,
     config: UpdateConfig | None = None,
-) -> EventStream:
+    emit: EventSink = ignore_event,
+) -> list[HashEntry]:
     """Compute srcHash, then an overlay dependency hash using source overrides."""
     config = resolve_active_config(config)
-    async for event in stream_fixed_output_hashes(
+    return await stream_fixed_output_hashes(
         source_name,
         steps=(
             FixedOutputHashStep(
                 hash_type="srcHash",
-                error="Missing srcHash output",
                 expr=lambda _resolved: src_expr,
             ),
             FixedOutputHashStep(
                 hash_type=dependency_hash_type,
-                error=f"Missing {dependency_hash_type} output",
                 expr=lambda resolved: _build_overlay_expr(
                     source_name,
                     source_overrides={
@@ -290,8 +219,8 @@ async def stream_source_then_overlay_hashes(
             ),
         ),
         config=config,
-    ):
-        yield event
+        emit=emit,
+    )
 
 
 def _validated_compatibility_pins(owner: object) -> dict[str, str] | None:
@@ -393,13 +322,14 @@ class SourceThenOverlayHashMixin:
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Compute source and dependency fixed-output hashes."""
         _ = (session, context)
         commit = self._source_commit(info)
 
-        async for event in stream_source_then_overlay_hashes(
+        return await stream_source_then_overlay_hashes(
             self.name,
             version=info.version,
             commit=commit,
@@ -407,8 +337,8 @@ class SourceThenOverlayHashMixin:
             dependency_hash_type=self.dependency_hash_type,
             source_pins=self.source_pins_for(info),
             config=self.config,
-        ):
-            yield event
+            emit=emit,
+        )
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist the version and immutable source commit with both hashes."""
@@ -499,8 +429,11 @@ class Updater(ABC):
         return contracts[name]
 
     @abstractmethod
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch latest upstream version details."""
+        _ = context
         raise NotImplementedError
 
     def source_pins_for(self, info: VersionInfo) -> dict[str, str] | None:
@@ -509,13 +442,14 @@ class Updater(ABC):
         return _validated_compatibility_pins(self)
 
     @abstractmethod
-    def fetch_hashes(
+    async def fetch_hashes(
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Compute source hashes for the fetched version."""
         raise NotImplementedError
 
@@ -545,11 +479,10 @@ class Updater(ABC):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Return a proof that recomputing would be a semantic no-op."""
-        context = _coerce_context(context)
         current = context.current
         if current is None:
             return False
@@ -566,10 +499,9 @@ class Updater(ABC):
         self,
         result: SourceEntry,
         *,
-        context: UpdateContext | SourceEntry | None = None,
+        context: UpdateContext,
     ) -> SourceEntry:
         """Return the effective result to compare against the persisted state."""
-        context = _coerce_context(context)
         current = context.current
         if current is not None and getattr(self, "native_only", False):
             return current.merge_native_update(result)
@@ -580,7 +512,7 @@ class Updater(ABC):
         current: SourceEntry,
         result: SourceEntry,
         *,
-        context: UpdateContext | SourceEntry | None = None,
+        context: UpdateContext,
     ) -> bool:
         """Return whether *result* is semantically unchanged from *current*."""
         return current.equivalent_to(
@@ -592,11 +524,12 @@ class Updater(ABC):
         result: SourceEntry,
         *,
         info: VersionInfo | None = None,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceEntry:
         """Attach additional metadata to *result* before the equality check."""
-        _ = (info, context)
-        yield UpdateEvent.value(self.name, result)
+        _ = (info, context, emit)
+        return result
 
     async def _candidate_update_stream(
         self,
@@ -604,36 +537,14 @@ class Updater(ABC):
         session: aiohttp.ClientSession,
         *,
         context: UpdateContext,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> SourceEntry | None:
         """Hash and finalize one resolved candidate source."""
-        hashes_drain = ValueDrain[SourceHashes]()
-        async for event in drain_value_events(
-            _call_with_optional_context(
-                self.fetch_hashes,
-                info,
-                session,
-                context=context,
-            ),
-            hashes_drain,
-            parse=expect_source_hashes,
-        ):
-            yield event
-        hashes = require_value(hashes_drain, "Missing hash output")
+        hashes = await self.fetch_hashes(info, session, context=context, emit=emit)
         result = self.build_result(info, hashes)
-
-        result_drain = ValueDrain[SourceEntry]()
-        async for event in drain_value_events(
-            _call_with_optional_context(
-                self._finalize_result,
-                result,
-                info=info,
-                context=context,
-            ),
-            result_drain,
-            parse=expect_source_entry,
-        ):
-            yield event
-        result = require_value(result_drain, "Missing finalized result")
+        result = await self._finalize_result(
+            result, info=info, context=context, emit=emit
+        )
 
         current = context.current
         if current is not None and not context.hashes_fully_computed:
@@ -668,93 +579,105 @@ class Updater(ABC):
                 if self.materialize_when_current
                 else "Up to date"
             )
-            yield UpdateEvent.status(
-                self.name,
-                unchanged_message,
-                operation="compute_hash",
-                status=StatusInfo(kind=StatusKind.UP_TO_DATE, scope="hash"),
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    unchanged_message,
+                    operation="compute_hash",
+                    status=StatusInfo(kind=StatusKind.UP_TO_DATE, scope="hash"),
+                )
             )
-            yield UpdateEvent.result(self.name)
-            return
-        yield UpdateEvent.result(self.name, result)
+            await emit(UpdateEvent.result(self.name))
+            return None
+        await emit(UpdateEvent.result(self.name, result))
+        return result
 
     async def update_stream(
         self,
         current: SourceEntry | None,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext | None = None,
+        emit: EventSink = ignore_event,
+    ) -> SourceEntry | None:
         """Run fetch/check/hash/update flow and emit update events."""
         if self.supported_platforms is not None:
             current_platform = update_nix.get_current_nix_platform()
             if current_platform not in self.supported_platforms:
-                yield UpdateEvent.status(
-                    self.name,
-                    f"Unsupported platform {current_platform}, skipping update",
-                    operation="check_version",
-                    status=StatusInfo(
-                        kind=StatusKind.UNSUPPORTED_PLATFORM,
-                        value=current_platform,
-                    ),
+                await emit(
+                    UpdateEvent.status(
+                        self.name,
+                        f"Unsupported platform {current_platform}, skipping update",
+                        operation="check_version",
+                        status=StatusInfo(
+                            kind=StatusKind.UNSUPPORTED_PLATFORM,
+                            value=current_platform,
+                        ),
+                    )
                 )
-                yield UpdateEvent.result(self.name)
-                return
-        context = _coerce_context(context)
+                await emit(UpdateEvent.result(self.name))
+                return None
+        context = context if context is not None else UpdateContext(current=current)
         context.current = current
-        yield UpdateEvent.status(
-            self.name,
-            f"Fetching latest {self.name} version...",
-            operation="check_version",
+        await emit(
+            UpdateEvent.status(
+                self.name,
+                f"Fetching latest {self.name} version...",
+                operation="check_version",
+            )
         )
-        info = await _call_with_optional_context(
-            self.fetch_latest,
+        info = await self.fetch_latest(
             session,
             context=context,
         )
 
-        yield UpdateEvent.status(
-            self.name,
-            f"Latest version: {info.version}",
-            operation="check_version",
-            status=StatusInfo(
-                kind=StatusKind.LATEST_VERSION,
-                value=info.version,
-            ),
-        )
-        is_latest = await self._is_latest(context, info)
-        if is_latest and not self.materialize_when_current:
-            yield UpdateEvent.status(
+        await emit(
+            UpdateEvent.status(
                 self.name,
-                f"Up to date (version: {info.version})",
+                f"Latest version: {info.version}",
                 operation="check_version",
                 status=StatusInfo(
-                    kind=StatusKind.UP_TO_DATE,
-                    scope="version",
+                    kind=StatusKind.LATEST_VERSION,
                     value=info.version,
                 ),
             )
-            yield UpdateEvent.result(self.name)
-            return
+        )
+        is_latest = await self._is_latest(context, info)
+        if is_latest and not self.materialize_when_current:
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    f"Up to date (version: {info.version})",
+                    operation="check_version",
+                    status=StatusInfo(
+                        kind=StatusKind.UP_TO_DATE,
+                        scope="version",
+                        value=info.version,
+                    ),
+                )
+            )
+            await emit(UpdateEvent.result(self.name))
+            return None
         if is_latest and self.materialize_when_current:
-            yield UpdateEvent.status(
-                self.name,
-                "Version up to date; refreshing generated artifacts...",
-                operation="compute_hash",
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    "Version up to date; refreshing generated artifacts...",
+                    operation="compute_hash",
+                )
             )
 
-        yield UpdateEvent.status(
-            self.name,
-            "Fetching hashes for all platforms...",
-            operation="compute_hash",
-            status=StatusInfo(kind=StatusKind.FETCHING_HASHES),
+        await emit(
+            UpdateEvent.status(
+                self.name,
+                "Fetching hashes for all platforms...",
+                operation="compute_hash",
+                status=StatusInfo(kind=StatusKind.FETCHING_HASHES),
+            )
         )
-        async for event in self._candidate_update_stream(
-            info,
-            session,
-            context=context,
-        ):
-            yield event
+        return await self._candidate_update_stream(
+            info, session, context=context, emit=emit
+        )
 
 
 class ChecksumProvidedUpdater(Updater):
@@ -775,39 +698,31 @@ class ChecksumProvidedUpdater(Updater):
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
-    ) -> EventStream:
+        *,
+        emit: EventSink = ignore_event,
+    ) -> dict[str, str]:
         """Emit checksum mappings while allowing subclasses to stream progress."""
-        yield UpdateEvent.value(
-            self.name,
-            await self.fetch_checksums(info, session),
-        )
+        _ = emit
+        return await self.fetch_checksums(info, session)
 
     async def fetch_hashes(
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Convert fetched hex checksums to SRI hashes."""
-        _ = _coerce_context(context)
-        checksums_drain = ValueDrain[dict[str, str]]()
-        async for event in drain_value_events(
-            self._fetch_checksums_stream(info, session),
-            checksums_drain,
-            parse=_ensure_str_mapping,
-        ):
-            yield event
-        checksums = require_value(checksums_drain, "Missing checksum output")
+        _ = context
+        checksums = await self._fetch_checksums_stream(info, session, emit=emit)
         streams = {
-            platform: update_process.convert_nix_hash_to_sri(self.name, hex_hash)
+            platform: update_process.convert_nix_hash_to_sri(
+                self.name, hex_hash, emit=emit
+            )
             for platform, hex_hash in checksums.items()
         }
-        async for item in gather_event_streams(streams):
-            if isinstance(item, GatheredValues):
-                yield UpdateEvent.value(self.name, _ensure_str_mapping(item.values))
-            else:
-                yield item
+        return await gather_results(streams)
 
     async def _fetch_checksums_from_urls(
         self,
@@ -869,11 +784,10 @@ class DownloadHashUpdater(Updater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Require the persisted artifacts to match the candidate URL identity."""
-        context = _coerce_context(context)
         current = context.current
         if current is None:
             return False
@@ -891,17 +805,15 @@ class DownloadHashUpdater(Updater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Compute platform hashes from prefetched artifact URLs."""
-        _ = (session, _coerce_context(context))
+        _ = (session, context)
         platform_urls = self._platform_urls(info)
-        async for event in stream_url_hash_mapping(
-            self.name,
-            platform_urls,
-            config=self.config,
-        ):
-            yield event
+        return await stream_url_hash_mapping(
+            self.name, platform_urls, config=self.config, emit=emit
+        )
 
 
 class DownloadUrlMetadataUpdater(DownloadHashUpdater):
@@ -957,27 +869,12 @@ class HashEntryUpdater(Updater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Hash-entry updaters must recompute before comparing semantic equality."""
         _ = (context, info)
         return False
-
-    async def _emit_single_hash_entry(
-        self,
-        events: EventStream,
-        *,
-        error: str,
-        hash_type: HashType,
-    ) -> EventStream:
-        async for event in _emit_single_hash_entry(
-            self.name,
-            events,
-            error=error,
-            hash_type=hash_type,
-        ):
-            yield event
 
 
 __all__ = [
@@ -990,9 +887,6 @@ __all__ = [
     "SourceThenOverlayHashMixin",
     "UpdateContext",
     "Updater",
-    "_call_with_optional_context",
-    "_coerce_context",
-    "_emit_single_hash_entry",
     "_ensure_str_mapping",
     "_verify_platform_versions",
     "stream_fixed_output_hashes",

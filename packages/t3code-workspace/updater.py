@@ -4,14 +4,11 @@ from typing import TYPE_CHECKING, Literal
 
 from lib.nix.models.sources import HashEntry, SourceEntry, SourceHashes
 from lib.update.events import (
-    EventStream,
+    EventSink,
     StatusInfo,
     StatusKind,
     UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_str,
-    require_value,
+    ignore_event,
 )
 from lib.update.nix import (
     _build_repo_package_attr_expr,
@@ -51,10 +48,10 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
-        entry = context.current if isinstance(context, UpdateContext) else context
+        entry = context.current
         if entry is None or entry.version != info.version or entry.drv_hash is None:
             return False
 
@@ -63,8 +60,7 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
             self._workspace_expr(),
             config=self.config,
         )
-        if isinstance(context, UpdateContext):
-            context.drv_fingerprint = fingerprint
+        context.drv_fingerprint = fingerprint
         return entry.drv_hash == fingerprint
 
     async def fetch_hashes(
@@ -72,46 +68,40 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Compute the fixed-output workspace dependency cache hash."""
         _ = (info, session, context)
-
-        hash_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            compute_fixed_output_hash(
-                self.name,
-                self._workspace_expr(),
-                config=self.config,
-            ),
-            hash_drain,
-            parse=expect_str,
-        ):
-            yield event
-        hash_value = require_value(hash_drain, "Missing nodeModulesHash output")
+        hash_value = await compute_fixed_output_hash(
+            self.name, self._workspace_expr(), config=self.config, emit=emit
+        )
 
         hashes: SourceHashes = [
             HashEntry.create(self.hash_type, hash_value, platform=self.DARWIN_PLATFORM)
         ]
-        yield UpdateEvent.value(self.name, hashes)
+        return hashes
 
     async def _finalize_result(
         self,
         result: SourceEntry,
         *,
         info: VersionInfo | None = None,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceEntry:
         _ = (info, context)
 
-        yield UpdateEvent.status(
-            self.name,
-            "Computing derivation fingerprint...",
-            operation="compute_hash",
-            status=StatusInfo(
-                kind=StatusKind.COMPUTING_HASH,
-                value="derivation fingerprint",
-            ),
+        await emit(
+            UpdateEvent.status(
+                self.name,
+                "Computing derivation fingerprint...",
+                operation="compute_hash",
+                status=StatusInfo(
+                    kind=StatusKind.COMPUTING_HASH,
+                    value="derivation fingerprint",
+                ),
+            )
         )
         try:
             previous_drv_hash: str | None = None
@@ -127,10 +117,12 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
                     break
                 previous_drv_hash = current_drv_hash
         except RuntimeError as exc:
-            yield UpdateEvent.status(
-                self.name,
-                f"Warning: derivation fingerprint unavailable ({exc})",
-                operation="compute_hash",
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    f"Warning: derivation fingerprint unavailable ({exc})",
+                    operation="compute_hash",
+                )
             )
         else:
             if drv_hash is None:
@@ -141,4 +133,4 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
                 raise RuntimeError(msg)
             result = result.model_copy(update={"drv_hash": drv_hash})
 
-        yield UpdateEvent.value(self.name, result)
+        return result

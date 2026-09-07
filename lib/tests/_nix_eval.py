@@ -3,7 +3,9 @@
 import json
 import shutil
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from nix_manipulator.expressions.binding import Binding
@@ -19,6 +21,20 @@ from nix_manipulator.expressions.set import AttributeSet
 from lib.update.paths import REPO_ROOT
 
 _NIX_EVAL_TIMEOUT_SECONDS = 30
+_NIX_EVAL_REASON: ContextVar[str | None] = ContextVar("nix_eval_reason", default=None)
+
+
+@contextmanager
+def allow_nix_evaluation(reason: str) -> Iterator[None]:
+    """Scope a test's documented need for actual Nix semantics."""
+    if not isinstance(reason, str) or not reason.strip():
+        msg = "A real Nix evaluation requires a nonempty semantic justification"
+        raise ValueError(msg)
+    token = _NIX_EVAL_REASON.set(reason)
+    try:
+        yield
+    finally:
+        _NIX_EVAL_REASON.reset(token)
 
 
 def _nix_eval_command(*, raw: bool) -> list[str]:
@@ -90,6 +106,9 @@ def nix_eval_result(
     run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Evaluate *expression* and preserve stdout and stderr for semantic tests."""
+    if run is None and _NIX_EVAL_REASON.get() is None:
+        msg = "Real Nix evaluation requires @pytest.mark.nix_eval(reason=...)"
+        raise RuntimeError(msg)
     command = _nix_eval_command(raw=raw)
     command.extend(["--expr", expression.rebuild()])
     runner = subprocess.run if run is None else run

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
+    from lib.update.updaters.core import UpdateContext
 
 type JsonObject = json_utils.JsonObject
 
@@ -268,8 +269,11 @@ class TemboUpdater(ChecksumProvidedUpdater):
             raise RuntimeError(msg)
         return value
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the current macOS release without comparing release semvers."""
+        _ = context
         payload = await fetch_json(session, self.MANIFEST_URL, config=self.config)
         return self._parse_manifest(payload)
 

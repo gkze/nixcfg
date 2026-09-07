@@ -66,11 +66,15 @@ def test_default_base16_scheme_pin_tracks_nixpkgs_source_metadata() -> None:
     )
 
 
+@pytest.mark.nix_eval(reason="Only evaluation proves the unused default remains lazy.")
 def test_explicit_base16_scheme_bypasses_default_source_metadata_check() -> None:
     """AST checks cannot prove the unused default metadata check remains lazy."""
     assert nix_eval_raw(_stylix_harness_expression()) == "/etc/hosts"
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation resolves the default through the module system."
+)
 def test_default_base16_scheme_uses_evaluator_visible_flake_input() -> None:
     """AST checks cannot prove the matching default resolves during evaluation."""
     assert (
@@ -84,6 +88,7 @@ def test_default_base16_scheme_uses_evaluator_visible_flake_input() -> None:
     )
 
 
+@pytest.mark.nix_eval(reason="Only evaluation reaches the throwing module branch.")
 def test_default_base16_scheme_rejects_mismatched_source_metadata() -> None:
     """AST checks cannot prove the default branch rejects mismatched metadata."""
     with pytest.raises(subprocess.CalledProcessError) as exc_info:

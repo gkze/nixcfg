@@ -1,7 +1,7 @@
 """Updater for Aside browser macOS releases."""
 
 import re
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlsplit
 
 import aiohttp
@@ -13,6 +13,9 @@ from lib.update.updaters import (
     register_updater,
 )
 from lib.update.updaters.metadata import DownloadUrlMetadata
+
+if TYPE_CHECKING:
+    from lib.update.updaters.core import UpdateContext
 
 _HTTP_REDIRECT_MIN = 300
 _DOWNLOAD_URL = "https://aside.com/api/download/macos"
@@ -46,8 +49,11 @@ class AsideUpdater(DownloadUrlMetadataUpdater):
             raise RuntimeError(msg)
         return match.group("version"), url
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the latest immutable Aside artifact without downloading it."""
+        _ = context
         timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
         async with session.head(
             _DOWNLOAD_URL,

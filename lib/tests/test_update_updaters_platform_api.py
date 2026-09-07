@@ -7,8 +7,10 @@ import aiohttp
 import pytest
 
 from lib.tests._assertions import expect_instance
-from lib.update.events import UpdateEvent, UpdateEventKind
+from lib.tests._updater_helpers import collect_events
+from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
 from lib.update.updaters import VersionInfo
+from lib.update.updaters.core import UpdateContext
 from lib.update.updaters.metadata import PlatformAPIMetadata
 from lib.update.updaters.platform_api import (
     DownloadingPlatformAPIUpdater,
@@ -95,7 +97,9 @@ def test_fetch_latest_accepts_mixed_platform_payload_values(
         _fetch_json,
     )
 
-    latest = _run_with_session(updater.fetch_latest)
+    latest = _run_with_session(
+        lambda s: updater.fetch_latest(s, context=UpdateContext(current=None))
+    )
     latest_info = expect_instance(latest, VersionInfo)
     assert latest_info.version == "1.110.0-insider"
     assert latest_info.metadata["build"] == "2026-02-24"
@@ -156,10 +160,7 @@ def test_downloading_platform_fetch_hashes_forwards_hash_progress(
     )
 
     async def _compute_url_hashes(
-        name: str,
-        urls: object,
-        *,
-        config: object,
+        name: str, urls: object, *, config: object, emit: EventSink = ignore_event
     ) -> object:
         assert config is updater.config
         url_list = list(urls)  # type: ignore[arg-type]
@@ -168,18 +169,17 @@ def test_downloading_platform_fetch_hashes_forwards_hash_progress(
             "https://download.example/1.110.0-insider/linux-x64",
             "https://download.example/1.110.0-insider/linux-arm64",
         ]
-        yield UpdateEvent.status(name, "prefetching artifacts")
-        yield UpdateEvent.value(
-            name,
-            {
-                url_list[0]: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-                url_list[1]: "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
-            },
-        )
+        await emit(UpdateEvent.status(name, "prefetching artifacts"))
+        return {
+            url_list[0]: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            url_list[1]: "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+        }
 
-    async def _convert_hash(name: str, hash_value: str) -> object:
-        yield UpdateEvent.status(name, f"converting {hash_value}")
-        yield UpdateEvent.value(name, hash_value)
+    async def _convert_hash(
+        name: str, hash_value: str, *, emit: EventSink = ignore_event
+    ) -> object:
+        await emit(UpdateEvent.status(name, f"converting {hash_value}"))
+        return hash_value
 
     monkeypatch.setattr(
         "lib.update.process.compute_url_hashes",
@@ -192,13 +192,11 @@ def test_downloading_platform_fetch_hashes_forwards_hash_progress(
 
     async def _collect() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
-            return [
-                event
-                async for event in updater.fetch_hashes(
-                    info,
-                    session,
+            return await collect_events(
+                lambda emit: updater.fetch_hashes(
+                    info, session, emit=emit, context=UpdateContext(current=None)
                 )
-            ]
+            )
 
     events = asyncio.run(_collect())
 
@@ -206,10 +204,9 @@ def test_downloading_platform_fetch_hashes_forwards_hash_progress(
         UpdateEventKind.STATUS,
         UpdateEventKind.STATUS,
         UpdateEventKind.STATUS,
-        UpdateEventKind.VALUE,
     ]
     assert events[0].message == "prefetching artifacts"
-    assert events[-1].payload == {
+    assert events.result == {
         "x86_64-linux": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         "aarch64-linux": "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
     }
@@ -235,7 +232,9 @@ def test_fetch_latest_requires_string_required_fields(
     )
 
     with pytest.raises(TypeError, match="Expected string field 'productVersion'"):
-        _run_with_session(updater.fetch_latest)
+        _run_with_session(
+            lambda s: updater.fetch_latest(s, context=UpdateContext(current=None))
+        )
 
 
 def test_fetch_checksums_requires_string_checksum_field() -> None:
@@ -341,7 +340,9 @@ def test_fetch_latest_payload_shape_and_optional_commit_key(
 
     monkeypatch.setattr("lib.update.updaters.platform_api.fetch_json", _fetch_bad)
     with pytest.raises(TypeError, match="Expected JSON object"):
-        _run_with_session(updater.fetch_latest)
+        _run_with_session(
+            lambda s: updater.fetch_latest(s, context=UpdateContext(current=None))
+        )
 
     no_commit = _NoCommitUpdater()
 
@@ -353,7 +354,9 @@ def test_fetch_latest_payload_shape_and_optional_commit_key(
         }
 
     monkeypatch.setattr("lib.update.updaters.platform_api.fetch_json", _fetch_good)
-    latest = _run_with_session(no_commit.fetch_latest)
+    latest = _run_with_session(
+        lambda s: no_commit.fetch_latest(s, context=UpdateContext(current=None))
+    )
     info = expect_instance(latest, VersionInfo)
     assert "commit" not in info.metadata
 

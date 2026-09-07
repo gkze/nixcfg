@@ -11,7 +11,7 @@ from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import SourceEntry
 from lib.tests._updater_helpers import load_repo_module, run_async
 from lib.update.locked_source import LockedSource
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.node_compatibility import NodejsSelection
 
 _VERSION = "1.2.3"
@@ -200,7 +200,9 @@ def test_fetch_latest_derives_identity_from_immutable_manifest_and_lock(
     )
 
     updater = updater_module.EmdashUpdater()
-    info = run_async(updater.fetch_latest(object()))
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
 
     assert info.version == _REF
     assert isinstance(info.metadata, updater_module.EmdashSourceMetadata)
@@ -238,7 +240,7 @@ def test_fetch_latest_derives_identity_from_immutable_manifest_and_lock(
         pins={"electronVersion": _ELECTRON_VERSION},
         drv_hash="unchanged-fingerprint",
     )
-    assert run_async(updater._is_latest(stale, info)) is False
+    assert run_async(updater._is_latest(UpdateContext(current=stale), info)) is False
     assert resolutions == [
         (
             node,

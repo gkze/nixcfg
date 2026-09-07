@@ -5,19 +5,15 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
 
+from lib.update.events import EventSink, ignore_event
+from lib.update.updaters.core import UpdateContext
+
 if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
-    from lib.update.events import EventStream
 
 from lib import json_utils
-from lib.update.events import (
-    ValueDrain,
-    drain_value_events,
-    expect_hash_mapping,
-    require_value,
-)
 from lib.update.net import fetch_json
 from lib.update.updaters.core import (
     ChecksumProvidedUpdater,
@@ -69,8 +65,11 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
             context=f"{self.name} metadata",
         )
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch platform metadata and verify versions match across platforms."""
+        _ = context
 
         async def _fetch_one(
             nix_plat: str,
@@ -172,15 +171,14 @@ class DownloadingPlatformAPIUpdater(PlatformAPIUpdater):
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
-    ) -> EventStream:
+        *,
+        emit: EventSink = ignore_event,
+    ) -> dict[str, str]:
         """Hash download URLs while forwarding the shared prefetch progress events."""
         _ = session
-        async for event in stream_url_hash_mapping(
-            self.name,
-            self._download_urls(info),
-            config=self.config,
-        ):
-            yield event
+        return await stream_url_hash_mapping(
+            self.name, self._download_urls(info), config=self.config, emit=emit
+        )
 
     async def fetch_checksums(
         self,
@@ -188,14 +186,7 @@ class DownloadingPlatformAPIUpdater(PlatformAPIUpdater):
         session: aiohttp.ClientSession,
     ) -> dict[str, str]:
         """Download artifacts and derive per-platform hashes."""
-        hashes_drain = ValueDrain[dict[str, str]]()
-        async for _event in drain_value_events(
-            self._fetch_checksums_stream(info, session),
-            hashes_drain,
-            parse=expect_hash_mapping,
-        ):
-            pass
-        return require_value(hashes_drain, "Missing hash output")
+        return await self._fetch_checksums_stream(info, session)
 
 
 __all__ = ["DownloadingPlatformAPIUpdater", "PlatformAPIUpdater"]

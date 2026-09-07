@@ -12,20 +12,24 @@ import pytest
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.system_policy import supported_systems
 from lib.tests._assertions import expect_instance, expect_not_none
+from lib.tests._updater_helpers import (
+    collect_events,
+)
 from lib.tests._updater_helpers import collect_events as _collect_events
-from lib.tests._updater_helpers import empty_event_stream, install_fixed_hash_stream
 from lib.update import updaters as updater_module
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import resolve_config
 from lib.update.events import (
     CommandResult,
-    EventStream,
+    EventSink,
     StatusInfo,
     StatusKind,
     StatusPayload,
     UpdateEvent,
     UpdateEventKind,
+    ignore_event,
 )
+from lib.update.platform_hashes import PlatformHashResult
 from lib.update.updaters import (
     UPDATERS,
     AssetURLsMetadataUpdater,
@@ -39,6 +43,7 @@ from lib.update.updaters import (
     FlakeInputHashUpdater,
     FlakeInputMetadataUpdater,
     HashEntryUpdater,
+    UpdateContext,
     Updater,
     UvLockUpdater,
     VersionInfo,
@@ -82,8 +87,11 @@ class _DummyUpdater(Updater):
         super().__init__()
         self.latest = latest
 
-    async def fetch_latest(self, session: object) -> VersionInfo:
+    async def fetch_latest(
+        self, session: object, *, context: UpdateContext
+    ) -> VersionInfo:
         """Return the configured dummy latest version."""
+        _ = context
         _ = session
         return VersionInfo(version=self.latest, metadata={})
 
@@ -93,11 +101,13 @@ class _DummyUpdater(Updater):
         session: object,
         *,
         context: object | None = None,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
         """Emit a simple platform hash mapping."""
+        _ = emit
         _ = (info, session, context)
         payload: dict[str, str] = {"x86_64-linux": HASH_A}
-        yield UpdateEvent.value(self.name, payload)
+        return payload
 
 
 class _DummyArtifactUpdater(_DummyUpdater):
@@ -110,22 +120,28 @@ class _DummyArtifactUpdater(_DummyUpdater):
         session: object,
         *,
         context: object | None = None,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = (info, session, context)
-        yield UpdateEvent.artifact(
-            self.name,
-            GeneratedArtifact.text("artifacts/dummy.txt", "updated\n"),
+        await emit(
+            UpdateEvent.artifact(
+                self.name,
+                GeneratedArtifact.text("artifacts/dummy.txt", "updated\n"),
+            )
         )
         payload: dict[str, str] = {"x86_64-linux": HASH_A}
-        yield UpdateEvent.value(self.name, payload)
+        return payload
 
 
 class _DummyChecksum(ChecksumProvidedUpdater):
     name = "checksum"
     PLATFORMS: ClassVar[dict[str, str]] = {"x86_64-linux": "linux"}
 
-    async def fetch_latest(self, session: object) -> VersionInfo:
+    async def fetch_latest(
+        self, session: object, *, context: UpdateContext
+    ) -> VersionInfo:
         """Return a fixed checksum-backed version."""
+        _ = context
         _ = session
         return VersionInfo(version="1.0.0", metadata={})
 
@@ -144,8 +160,11 @@ class _DummyDownload(DownloadHashUpdater):
         "aarch64-linux": "https://example.com/arm.tar.gz",
     }
 
-    async def fetch_latest(self, session: object) -> VersionInfo:
+    async def fetch_latest(
+        self, session: object, *, context: UpdateContext
+    ) -> VersionInfo:
         """Return a fixed download-backed version."""
+        _ = context
         _ = session
         return VersionInfo(version="1.0.0", metadata={})
 
@@ -154,8 +173,11 @@ class _DummyDownloadUrlMetadata(DownloadUrlMetadataUpdater):
     name = "download-url-metadata"
     PLATFORMS: ClassVar[dict[str, str]] = {"x86_64-linux": "unused"}
 
-    async def fetch_latest(self, session: object) -> VersionInfo:
+    async def fetch_latest(
+        self, session: object, *, context: UpdateContext
+    ) -> VersionInfo:
         """Return a metadata-backed URL."""
+        _ = context
         _ = session
         return VersionInfo(
             version="1.0.0",
@@ -170,8 +192,11 @@ class _DummyAssetURLsMetadata(AssetURLsMetadataUpdater):
         "aarch64-linux": "unused",
     }
 
-    async def fetch_latest(self, session: object) -> VersionInfo:
+    async def fetch_latest(
+        self, session: object, *, context: UpdateContext
+    ) -> VersionInfo:
         """Return platform-keyed metadata URLs."""
+        _ = context
         _ = session
         return VersionInfo(
             version="1.0.0",
@@ -185,8 +210,11 @@ class _DummyHashEntry(HashEntryUpdater):
     name = "hash-entry"
     input_name = "input"
 
-    async def fetch_latest(self, session: object) -> VersionInfo:
+    async def fetch_latest(
+        self, session: object, *, context: UpdateContext
+    ) -> VersionInfo:
         """Return a fixed hash-entry version."""
+        _ = context
         _ = session
         return VersionInfo(version="1.0.0", metadata={})
 
@@ -196,12 +224,14 @@ class _DummyHashEntry(HashEntryUpdater):
         session: object,
         *,
         context: object | None = None,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
         """Emit one structured hash entry."""
+        _ = emit
         _ = (info, session, context)
         entry = HashEntry.create("sha256", HASH_A)
         payload: list[HashEntry] = [entry]
-        yield UpdateEvent.value(self.name, payload)
+        return payload
 
 
 class _DummyFlakeInput(FlakeInputHashUpdater):
@@ -209,42 +239,45 @@ class _DummyFlakeInput(FlakeInputHashUpdater):
     input_name = "dummy-input"
     hash_type = "sha256"
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Delegate to the flake-input implementation."""
-        return await super().fetch_latest(session)
+        _ = context
+        return await super().fetch_latest(session, context=context)
 
-    def _compute_hash(self, info: VersionInfo) -> EventStream:
+    async def _compute_hash(
+        self, info: VersionInfo, *, emit: EventSink = ignore_event
+    ) -> str:
+        _ = emit
         _ = info
-
-        async def _stream() -> EventStream:
-            yield UpdateEvent.value(self.name, HASH_A)
-
-        return _stream()
+        return HASH_A
 
 
 class _DummyDenoDeps(DenoDepsHashUpdater):
     name = "deno-hash"
     input_name = "deno-input"
 
-    async def fetch_latest(self, session: object) -> VersionInfo:
+    async def fetch_latest(
+        self, session: object, *, context: UpdateContext
+    ) -> VersionInfo:
         """Return a fixed Deno dependency version."""
+        _ = context
         _ = session
         return VersionInfo(version="1.0.0", metadata={})
 
-    def _compute_hash(self, info: VersionInfo) -> EventStream:
-        _ = info
-
-        async def _stream() -> EventStream:
-            payload: dict[str, str] = {
-                "x86_64-linux": HASH_A,
-                "aarch64-linux": HASH_B,
-            }
-            yield UpdateEvent.value(
-                self.name,
-                payload,
-            )
-
-        return _stream()
+    async def _compute_platform_hashes(
+        self,
+        info: VersionInfo,
+        *,
+        source_override: SourceEntry | None = None,
+        emit: EventSink = ignore_event,
+    ) -> PlatformHashResult:
+        _ = (info, source_override, emit)
+        return PlatformHashResult(
+            hashes={"x86_64-linux": HASH_A, "aarch64-linux": HASH_B},
+            fully_computed=True,
+        )
 
 
 class _DummyManifest:
@@ -333,7 +366,10 @@ def test_updater_registration_rejects_duplicate_names_from_different_files(
         __module__ = "dup_one"
         name = "duplicate-updater-test"
 
-        async def fetch_latest(self, session: object) -> VersionInfo:
+        async def fetch_latest(
+            self, session: object, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = context
             _ = session
             return VersionInfo(version="1.0.0", metadata={})
 
@@ -343,9 +379,11 @@ def test_updater_registration_rejects_duplicate_names_from_different_files(
             session: object,
             *,
             context: object | None = None,
-        ) -> EventStream:
+            emit: EventSink = ignore_event,
+        ) -> object:
+            _ = emit
             _ = (info, session, context)
-            yield UpdateEvent.value(self.name, {"x86_64-linux": HASH_A})
+            return {"x86_64-linux": HASH_A}
 
     with pytest.raises(RuntimeError, match="Duplicate updater registration"):
 
@@ -354,7 +392,10 @@ def test_updater_registration_rejects_duplicate_names_from_different_files(
             __module__ = "dup_two"
             name = "duplicate-updater-test"
 
-            async def fetch_latest(self, session: object) -> VersionInfo:
+            async def fetch_latest(
+                self, session: object, *, context: UpdateContext
+            ) -> VersionInfo:
+                _ = context
                 _ = session
                 return VersionInfo(version="1.0.0", metadata={})
 
@@ -364,9 +405,11 @@ def test_updater_registration_rejects_duplicate_names_from_different_files(
                 session: object,
                 *,
                 context: object | None = None,
-            ) -> EventStream:
+                emit: EventSink = ignore_event,
+            ) -> object:
+                _ = emit
                 _ = (info, session, context)
-                yield UpdateEvent.value(self.name, {"x86_64-linux": HASH_A})
+                return {"x86_64-linux": HASH_A}
 
     UPDATERS.pop(duplicate_name, None)
 
@@ -390,7 +433,10 @@ def test_register_updater_does_not_auto_wrap_crate2nix_targets(
         name = updater_name
         input_name = "demo-input"
 
-        async def fetch_latest(self, session: object) -> VersionInfo:
+        async def fetch_latest(
+            self, session: object, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = context
             _ = session
             return VersionInfo(version="1.0.0", metadata={})
 
@@ -402,16 +448,17 @@ def test_register_updater_does_not_auto_wrap_crate2nix_targets(
 
         events = asyncio.run(
             _collect_events(
-                updater.fetch_hashes(
-                    VersionInfo(version="1.0.0", metadata={}), object()
+                lambda emit: updater.fetch_hashes(
+                    VersionInfo(version="1.0.0", metadata={}),
+                    object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
                 )
             )
         )
 
-        assert [event.kind for event in events] == [
-            UpdateEventKind.VALUE,
-        ]
-        assert events[0].payload == []
+        assert [event.kind for event in events] == []
+        assert events.result == []
     finally:
         UPDATERS.pop(updater_name, None)
 
@@ -428,7 +475,7 @@ def test_flake_metadata_latest_and_crate2nix_materialization_branches(
     assert (
         asyncio.run(
             _MetadataOnlyUpdater()._is_latest(
-                None,
+                UpdateContext(current=None),
                 VersionInfo(version="1.0.0", metadata={}),
             )
         )
@@ -440,7 +487,8 @@ def test_flake_metadata_latest_and_crate2nix_materialization_branches(
         *,
         operation: str = "materialize_artifacts",
         source_overrides: dict[str, SourceEntry] | None = None,
-    ):
+        emit: EventSink = ignore_event,
+    ) -> object:
         assert source_overrides == {
             "crate2nix-materialization-test": SourceEntry(
                 version="1.0.0",
@@ -448,7 +496,7 @@ def test_flake_metadata_latest_and_crate2nix_materialization_branches(
                 input="crate2nix-input",
             )
         }
-        yield UpdateEvent.status(name, f"{operation} started")
+        await emit(UpdateEvent.status(name, f"{operation} started"))
 
     monkeypatch.setattr(
         materialization_module,
@@ -462,18 +510,19 @@ def test_flake_metadata_latest_and_crate2nix_materialization_branches(
 
     events = asyncio.run(
         _collect_events(
-            _Crate2NixUpdater().fetch_hashes(
+            lambda emit: _Crate2NixUpdater().fetch_hashes(
                 VersionInfo(version="1.0.0", metadata={}),
                 object(),
+                emit=emit,
+                context=UpdateContext(current=None),
             )
         )
     )
 
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
-        UpdateEventKind.VALUE,
     ]
-    assert events[-1].payload == []
+    assert events.result == []
 
 
 def test_crate2nix_metadata_materializes_the_complete_latest_candidate(
@@ -495,11 +544,14 @@ def test_crate2nix_metadata_materializes_the_complete_latest_candidate(
         *,
         operation: str = "materialize_artifacts",
         source_overrides: dict[str, SourceEntry] | None = None,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
         captured["name"] = name
         captured["operation"] = operation
         captured["source_overrides"] = source_overrides
-        yield UpdateEvent.status(name, "candidate materialized", operation=operation)
+        await emit(
+            UpdateEvent.status(name, "candidate materialized", operation=operation)
+        )
 
     monkeypatch.setattr(
         materialization_module,
@@ -516,13 +568,17 @@ def test_crate2nix_metadata_materializes_the_complete_latest_candidate(
     updater = _CandidateUpdater()
     info = VersionInfo(version="1.0.0", metadata={"commit": commit})
 
-    assert asyncio.run(updater._is_latest(None, info)) is False
-    assert asyncio.run(updater._is_latest(current, info)) is True
+    assert asyncio.run(updater._is_latest(UpdateContext(current=None), info)) is False
+    assert asyncio.run(updater._is_latest(UpdateContext(current=current), info)) is True
     events = asyncio.run(
-        _collect_events(updater.fetch_hashes(info, object(), context=current))
+        _collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, object(), context=UpdateContext(current=current), emit=emit
+            )
+        )
     )
 
-    assert events[-1].payload == {"x86_64-linux": HASH_A}
+    assert events.result == {"x86_64-linux": HASH_A}
     assert captured == {
         "name": updater.name,
         "operation": "materialize_artifacts",
@@ -550,7 +606,7 @@ def test_updater_is_latest_and_update_stream_paths() -> None:
     assert (
         asyncio.run(
             object.__getattribute__(updater, "_is_latest")(
-                None, VersionInfo(version="1", metadata={})
+                UpdateContext(current=None), VersionInfo(version="1", metadata={})
             )
         )
         is False
@@ -558,7 +614,8 @@ def test_updater_is_latest_and_update_stream_paths() -> None:
     assert (
         asyncio.run(
             object.__getattribute__(updater, "_is_latest")(
-                _entry(version="2"), VersionInfo(version="1", metadata={})
+                UpdateContext(current=_entry(version="2")),
+                VersionInfo(version="1", metadata={}),
             )
         )
         is False
@@ -570,7 +627,9 @@ def test_updater_is_latest_and_update_stream_paths() -> None:
 
     async def _collect(current: SourceEntry | None) -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
-            return [event async for event in updater.update_stream(current, session)]
+            return await collect_events(
+                lambda emit: updater.update_stream(current, session, emit=emit)
+            )
 
     current_events = asyncio.run(_collect(current))
     assert any(e.message == "Latest version: 1.0.0" for e in current_events)
@@ -604,8 +663,11 @@ def test_flake_input_metadata_updater_is_latest_requires_exact_witness() -> None
         "hashes": [],
     })
 
-    assert asyncio.run(updater._is_latest(exact, latest)) is True
-    assert asyncio.run(updater._is_latest(missing_commit, latest)) is False
+    assert asyncio.run(updater._is_latest(UpdateContext(current=exact), latest)) is True
+    assert (
+        asyncio.run(updater._is_latest(UpdateContext(current=missing_commit), latest))
+        is False
+    )
 
 
 def test_default_updater_is_latest_uses_version_and_optional_commit_witness() -> None:
@@ -619,14 +681,17 @@ def test_default_updater_is_latest_uses_version_and_optional_commit_witness() ->
 
     assert (
         asyncio.run(
-            updater._is_latest(current, VersionInfo(version="1.0.0", metadata={}))
+            updater._is_latest(
+                UpdateContext(current=current),
+                VersionInfo(version="1.0.0", metadata={}),
+            )
         )
         is True
     )
     assert (
         asyncio.run(
             updater._is_latest(
-                current,
+                UpdateContext(current=current),
                 VersionInfo(version="1.0.0", metadata={"commit": "a" * 40}),
             )
         )
@@ -635,7 +700,7 @@ def test_default_updater_is_latest_uses_version_and_optional_commit_witness() ->
     assert (
         asyncio.run(
             updater._is_latest(
-                current,
+                UpdateContext(current=current),
                 VersionInfo(version="1.0.0", metadata={"commit": "b" * 40}),
             )
         )
@@ -645,7 +710,7 @@ def test_default_updater_is_latest_uses_version_and_optional_commit_witness() ->
     assert (
         asyncio.run(
             updater._is_latest(
-                missing_commit,
+                UpdateContext(current=missing_commit),
                 VersionInfo(version="1.0.0", metadata={"commit": "a" * 40}),
             )
         )
@@ -653,7 +718,10 @@ def test_default_updater_is_latest_uses_version_and_optional_commit_witness() ->
     )
     assert (
         asyncio.run(
-            updater._is_latest(current, VersionInfo(version="2.0.0", metadata={}))
+            updater._is_latest(
+                UpdateContext(current=current),
+                VersionInfo(version="2.0.0", metadata={}),
+            )
         )
         is False
     )
@@ -695,11 +763,15 @@ def test_results_equivalent_merges_native_only_partial_updates() -> None:
         ],
     })
 
-    effective = updater._comparison_result(partial, context=current)
+    effective = updater._comparison_result(
+        partial, context=UpdateContext(current=current)
+    )
 
     assert effective.pins == {"runtimeVersion": "2.0.0"}
     assert effective.hashes.equivalent_to(current.hashes)
-    assert not updater.results_equivalent(current, partial, context=current)
+    assert not updater.results_equivalent(
+        current, partial, context=UpdateContext(current=current)
+    )
 
 
 def test_stream_fixed_output_hashes_emits_entries_in_sequence(
@@ -714,37 +786,35 @@ def test_stream_fixed_output_hashes_emits_entries_in_sequence(
         *,
         env: dict[str, str] | None = None,
         config: object | None = None,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = config
         seen.append(expr)
-        yield UpdateEvent.status(source, f"hashing {expr}")
+        await emit(UpdateEvent.status(source, f"hashing {expr}"))
         if expr == "src":
-            yield UpdateEvent.value(source, HASH_A)
-            return
+            return HASH_A
         assert env is None
-        yield UpdateEvent.value(source, HASH_B)
+        return HASH_B
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
     async def _collect() -> list[UpdateEvent]:
-        return [
-            event
-            async for event in stream_fixed_output_hashes(
+        return await collect_events(
+            lambda emit: stream_fixed_output_hashes(
                 "demo",
                 steps=(
                     FixedOutputHashStep(
                         hash_type="srcHash",
-                        error="Missing srcHash output",
                         expr=lambda _resolved: "src",
                     ),
                     FixedOutputHashStep(
                         hash_type="vendorHash",
-                        error="Missing vendorHash output",
                         expr=lambda resolved: f"vendor:{resolved['srcHash']}",
                     ),
                 ),
+                emit=emit,
             )
-        ]
+        )
 
     events = asyncio.run(_collect())
 
@@ -752,57 +822,11 @@ def test_stream_fixed_output_hashes_emits_entries_in_sequence(
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
         UpdateEventKind.STATUS,
-        UpdateEventKind.VALUE,
     ]
-    assert events[-1].payload == [
+    assert events.result == [
         HashEntry.create("srcHash", HASH_A),
         HashEntry.create("vendorHash", HASH_B),
     ]
-
-
-def _fixed_hash_steps() -> tuple[FixedOutputHashStep, ...]:
-    return (
-        FixedOutputHashStep(
-            hash_type="srcHash",
-            error="Missing srcHash output",
-            expr=lambda _resolved: "src",
-        ),
-        FixedOutputHashStep(
-            hash_type="vendorHash",
-            error="Missing vendorHash output",
-            expr=lambda resolved: f"vendor:{resolved['srcHash']}",
-        ),
-    )
-
-
-@pytest.mark.parametrize(
-    ("outputs", "error_type", "match"),
-    [
-        ((), RuntimeError, "Missing srcHash output"),
-        (((None, HASH_A),), RuntimeError, "Missing vendorHash output"),
-        (((None, {"hash": HASH_A}),), TypeError, "Expected string payload, got dict"),
-        (
-            ((None, HASH_A), (None, [HASH_B])),
-            TypeError,
-            "Expected string payload, got list",
-        ),
-    ],
-)
-def test_stream_fixed_output_hashes_rejects_missing_or_wrong_payloads(
-    monkeypatch: pytest.MonkeyPatch,
-    outputs: tuple[tuple[str | None, object], ...],
-    error_type: type[Exception],
-    match: str,
-) -> None:
-    """The shared fixed-output helper owns missing and wrong-type failures."""
-    install_fixed_hash_stream(monkeypatch, outputs)
-
-    with pytest.raises(error_type, match=match):
-        asyncio.run(
-            _collect_events(
-                stream_fixed_output_hashes("demo", steps=_fixed_hash_steps())
-            )
-        )
 
 
 def test_updater_skips_update_stream_on_unsupported_current_platform(
@@ -818,7 +842,9 @@ def test_updater_skips_update_stream_on_unsupported_current_platform(
         lambda: "x86_64-linux",
     )
 
-    async def _fail_fetch_latest(_self: object, _session: object) -> VersionInfo:
+    async def _fail_fetch_latest(
+        _self: object, _session: object, *, context: object
+    ) -> VersionInfo:
         raise AssertionError("fetch_latest must not run on unsupported platforms")
 
     monkeypatch.setattr(_DarwinOnlyUpdater, "fetch_latest", _fail_fetch_latest)
@@ -826,9 +852,8 @@ def test_updater_skips_update_stream_on_unsupported_current_platform(
 
     async def _collect() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
-            return [
-                event
-                async for event in updater.update_stream(
+            return await collect_events(
+                lambda emit: updater.update_stream(
                     SourceEntry(
                         hashes=HashCollection(
                             entries=[
@@ -841,8 +866,9 @@ def test_updater_skips_update_stream_on_unsupported_current_platform(
                         )
                     ),
                     session,
+                    emit=emit,
                 )
-            ]
+            )
 
     events = asyncio.run(_collect())
     assert [event.kind for event in events] == [
@@ -854,7 +880,7 @@ def test_updater_skips_update_stream_on_unsupported_current_platform(
     assert status_payload.info is not None
     assert status_payload.info.kind is StatusKind.UNSUPPORTED_PLATFORM
     assert status_payload.info.value == "x86_64-linux"
-    assert not any(event.kind == UpdateEventKind.VALUE for event in events)
+    assert events.result is None
 
 
 def test_updater_supported_platforms_allows_native_platform(
@@ -878,7 +904,10 @@ def test_updater_supported_platforms_allows_native_platform(
         _compute_drv_fingerprint,
     )
 
-    async def _fetch_latest(_self: object, _session: object) -> VersionInfo:
+    async def _fetch_latest(
+        _self: object, _session: object, *, context=None
+    ) -> VersionInfo:
+        _ = context
         return VersionInfo(version="1.0.0", metadata={})
 
     monkeypatch.setattr(_DarwinOnlyUpdater, "fetch_latest", _fetch_latest)
@@ -886,7 +915,9 @@ def test_updater_supported_platforms_allows_native_platform(
 
     async def _collect() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
-            return [event async for event in updater.update_stream(None, session)]
+            return await collect_events(
+                lambda emit: updater.update_stream(None, session, emit=emit)
+            )
 
     events = asyncio.run(_collect())
     assert not any(
@@ -908,16 +939,16 @@ def test_updater_materializes_artifacts_when_current() -> None:
 
     async def _collect() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
-            return [
-                event
-                async for event in updater.update_stream(
+            return await collect_events(
+                lambda emit: updater.update_stream(
                     SourceEntry(
                         version="1.0.0",
                         hashes=HashCollection(mapping={"x86_64-linux": HASH_A}),
                     ),
                     session,
+                    emit=emit,
                 )
-            ]
+            )
 
     events = asyncio.run(_collect())
     assert any(event.kind == UpdateEventKind.ARTIFACT for event in events)
@@ -932,21 +963,26 @@ def test_checksum_provided_fetch_hashes(monkeypatch: pytest.MonkeyPatch) -> None
     """Convert fetched checksums into SRI hash mappings."""
     updater = _DummyChecksum()
 
-    async def _convert(name: str, hex_hash: str) -> EventStream:
-        yield UpdateEvent.status(name, f"convert {hex_hash}")
-        yield UpdateEvent.value(name, HASH_A)
+    async def _convert(
+        name: str, hex_hash: str, *, emit: EventSink = ignore_event
+    ) -> object:
+        await emit(UpdateEvent.status(name, f"convert {hex_hash}"))
+        return HASH_A
 
     monkeypatch.setattr("lib.update.process.convert_nix_hash_to_sri", _convert)
 
     async def _collect() -> list[UpdateEvent]:
         info = VersionInfo(version="1.0.0", metadata={})
         async with aiohttp.ClientSession() as session:
-            return [event async for event in updater.fetch_hashes(info, session)]
+            return await collect_events(
+                lambda emit: updater.fetch_hashes(
+                    info, session, emit=emit, context=UpdateContext(current=None)
+                )
+            )
 
     events = asyncio.run(_collect())
     assert any(e.kind == UpdateEventKind.STATUS for e in events)
-    final = [e for e in events if e.kind == UpdateEventKind.VALUE][-1]
-    assert final.payload == {"x86_64-linux": HASH_A}
+    assert events.result == {"x86_64-linux": HASH_A}
 
 
 def test_fetch_checksums_from_urls(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1002,20 +1038,24 @@ def test_download_hash_updater(monkeypatch: pytest.MonkeyPatch) -> None:
         urls: Iterable[str],
         *,
         config: object,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
+        _ = emit
         assert config is updater.config
-        mapping = dict.fromkeys(urls, HASH_A)
-        yield UpdateEvent.value("download", mapping)
+        return dict.fromkeys(urls, HASH_A)
 
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _hashes)
 
     async def _collect() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
-            return [event async for event in updater.fetch_hashes(info, session)]
+            return await collect_events(
+                lambda emit: updater.fetch_hashes(
+                    info, session, emit=emit, context=UpdateContext(current=None)
+                )
+            )
 
     events = asyncio.run(_collect())
-    final = [e for e in events if e.kind == UpdateEventKind.VALUE][-1]
-    payload = _require_hash_mapping(final.payload)
+    payload = _require_hash_mapping(events.result)
     assert set(payload) == {"x86_64-linux", "aarch64-linux"}
 
 
@@ -1091,39 +1131,13 @@ def test_asset_urls_metadata_updater() -> None:
         )
 
 
-def test_hash_entry_updater_emit_and_build_result() -> None:
-    """Build and emit structured hash-entry updater results."""
+def test_hash_entry_updater_build_result() -> None:
+    """Build structured hash-entry updater results."""
     updater = _DummyHashEntry()
     info = VersionInfo(version="1.0.0", metadata={})
     built = updater.build_result(info, [HashEntry.create("sha256", HASH_A)])
     assert built.input == "input"
-
-    async def _stream() -> EventStream:
-        yield UpdateEvent.value("x", HASH_A)
-
-    events = asyncio.run(
-        _collect_events(
-            object.__getattribute__(updater, "_emit_single_hash_entry")(
-                _stream(),
-                error="missing",
-                hash_type="sha256",
-            )
-        )
-    )
-    final = [e for e in events if e.kind == UpdateEventKind.VALUE][-1]
-    payload = _require_hash_entries(final.payload)
-    assert payload[0].hash_type == "sha256"
-
-    with pytest.raises(RuntimeError, match="missing"):
-        asyncio.run(
-            _collect_events(
-                object.__getattribute__(updater, "_emit_single_hash_entry")(
-                    empty_event_stream(),
-                    error="missing",
-                    hash_type="sha256",
-                )
-            )
-        )
+    assert built.hashes.entries == [HashEntry.create("sha256", HASH_A)]
 
 
 def test_flake_input_missing_input_raises() -> None:
@@ -1151,7 +1165,13 @@ def test_flake_input_fetch_latest_reads_lock_metadata(
     monkeypatch.setattr(
         "lib.update.flake.get_flake_input_version", lambda _node: "2.0.0"
     )
-    latest = asyncio.run(_with_session(updater.fetch_latest))
+    latest = asyncio.run(
+        _with_session(
+            lambda session: updater.fetch_latest(
+                session, context=UpdateContext(current=None)
+            )
+        )
+    )
     assert latest.version == "2.0.0"
 
 
@@ -1170,7 +1190,7 @@ def test_flake_hash_is_latest_uses_version_and_derivation_fingerprint(
     assert (
         asyncio.run(
             object.__getattribute__(updater, "_is_latest")(
-                _entry(version="0.9.0", drv_hash="drv"),
+                UpdateContext(current=_entry(version="0.9.0", drv_hash="drv")),
                 info,
             )
         )
@@ -1179,14 +1199,18 @@ def test_flake_hash_is_latest_uses_version_and_derivation_fingerprint(
     assert (
         asyncio.run(
             object.__getattribute__(updater, "_is_latest")(
-                _entry(version="1.0.0", drv_hash=None),
+                UpdateContext(current=_entry(version="1.0.0", drv_hash=None)),
                 info,
             )
         )
         is False
     )
     assert (
-        asyncio.run(object.__getattribute__(updater, "_is_latest")(current, info))
+        asyncio.run(
+            object.__getattribute__(updater, "_is_latest")(
+                UpdateContext(current=current), info
+            )
+        )
         is True
     )
     monkeypatch.setattr(
@@ -1195,7 +1219,9 @@ def test_flake_hash_is_latest_uses_version_and_derivation_fingerprint(
     )
     assert (
         asyncio.run(
-            object.__getattribute__(_DummyFlakeInput(), "_is_latest")(current, info)
+            object.__getattribute__(_DummyFlakeInput(), "_is_latest")(
+                UpdateContext(current=current), info
+            )
         )
         is False
     )
@@ -1214,22 +1240,34 @@ def test_flake_hash_finalize_reports_fingerprint_status(
         lambda *_a, **_k: asyncio.sleep(0, result="drv"),
     )
     events = asyncio.run(
-        _collect_events(object.__getattribute__(updater, "_finalize_result")(_entry()))
+        _collect_events(
+            lambda emit: object.__getattribute__(updater, "_finalize_result")(
+                _entry(), context=UpdateContext(current=None), emit=emit
+            )
+        )
     )
     assert any(e.kind == UpdateEventKind.STATUS for e in events)
-    assert any(e.kind == UpdateEventKind.VALUE for e in events)
+    assert events.result.drv_hash == "drv"
 
     monkeypatch.setattr(
         "lib.update.nix.compute_drv_fingerprint",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     assert (
-        asyncio.run(object.__getattribute__(updater, "_is_latest")(current, info))
+        asyncio.run(
+            object.__getattribute__(updater, "_is_latest")(
+                UpdateContext(current=current), info
+            )
+        )
         is False
     )
     object.__setattr__(updater, "_cached_fingerprint", None)
     warn_events = asyncio.run(
-        _collect_events(object.__getattribute__(updater, "_finalize_result")(_entry()))
+        _collect_events(
+            lambda emit: object.__getattribute__(updater, "_finalize_result")(
+                _entry(), context=UpdateContext(current=None), emit=emit
+            )
+        )
     )
     assert any(
         e.message and "Warning: derivation fingerprint unavailable" in e.message
@@ -1250,14 +1288,15 @@ def test_platform_specific_fetch_hashes_computes_configured_targets(
         *,
         system: str | None,
         config: object,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = config
         if system is None:
             msg = "Expected platform-specific system"
             raise RuntimeError(msg)
         value = HASH_A if system == "x86_64-linux" else HASH_B
-        yield UpdateEvent.status(source_name, f"system={system}")
-        yield UpdateEvent.value(source_name, value)
+        await emit(UpdateEvent.status(source_name, f"system={system}"))
+        return value
 
     monkeypatch.setattr(
         "lib.update.nix.compute_overlay_hash",
@@ -1272,11 +1311,15 @@ def test_platform_specific_fetch_hashes_computes_configured_targets(
     )
     info = VersionInfo(version="1.0.0", metadata={})
     plat_events = asyncio.run(
-        _with_session(lambda session: _collect_events(plat.fetch_hashes(info, session)))
+        _with_session(
+            lambda session: _collect_events(
+                lambda emit: plat.fetch_hashes(
+                    info, session, emit=emit, context=UpdateContext(current=None)
+                )
+            )
+        )
     )
-    plat_payload = _require_hash_entries(
-        [e for e in plat_events if e.kind == UpdateEventKind.VALUE][-1].payload
-    )
+    plat_payload = _require_hash_entries(plat_events.result)
     by_platform = {entry.platform: entry.hash for entry in plat_payload}
     assert by_platform == {
         "x86_64-linux": HASH_A,
@@ -1297,11 +1340,13 @@ def test_platform_specific_fetch_hashes_preserves_existing_on_non_native_failure
         *,
         system: str | None,
         config: object,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
+        _ = emit
         _ = config
         if system == "x86_64-linux":
             raise RuntimeError("no builder")
-        yield UpdateEvent.value(source_name, HASH_A)
+        return HASH_A
 
     monkeypatch.setattr(
         "lib.update.nix.compute_overlay_hash",
@@ -1326,12 +1371,14 @@ def test_platform_specific_fetch_hashes_preserves_existing_on_non_native_failure
     info = VersionInfo(version="1.0.0", metadata={})
     events = asyncio.run(
         _with_session(
-            lambda session: _collect_events(updater.fetch_hashes(info, session)),
+            lambda session: _collect_events(
+                lambda emit: updater.fetch_hashes(
+                    info, session, emit=emit, context=UpdateContext(current=None)
+                )
+            ),
         )
     )
-    payload = _require_hash_entries(
-        [event for event in events if event.kind == UpdateEventKind.VALUE][-1].payload
-    )
+    payload = _require_hash_entries(events.result)
     by_platform = {entry.platform: entry.hash for entry in payload}
     assert by_platform == {
         "aarch64-darwin": HASH_A,
@@ -1347,7 +1394,10 @@ def test_platform_specific_update_keeps_drv_hash_when_hashes_are_preserved(
     class _PlatformFlake(_DummyFlakeInput):
         platform_specific = True
 
-        async def fetch_latest(self, session: object) -> VersionInfo:
+        async def fetch_latest(
+            self, session: object, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = context
             _ = session
             return VersionInfo(version="1.0.0", metadata={})
 
@@ -1365,11 +1415,13 @@ def test_platform_specific_update_keeps_drv_hash_when_hashes_are_preserved(
         *,
         system: str | None,
         config: object,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
+        _ = emit
         _ = config
         if system == "x86_64-linux":
             raise RuntimeError("no builder")
-        yield UpdateEvent.value(source_name, HASH_A)
+        return HASH_A
 
     monkeypatch.setattr(
         "lib.update.nix.compute_drv_fingerprint",
@@ -1391,7 +1443,9 @@ def test_platform_specific_update_keeps_drv_hash_when_hashes_are_preserved(
     )
     events = asyncio.run(
         _with_session(
-            lambda session: _collect_events(updater.update_stream(current, session))
+            lambda session: _collect_events(
+                lambda emit: updater.update_stream(current, session, emit=emit)
+            )
         )
     )
 
@@ -1414,7 +1468,10 @@ def test_platform_specific_update_rejects_identity_change_with_preserved_hash(
     class _PlatformFlake(_DummyFlakeInput):
         platform_specific = True
 
-        async def fetch_latest(self, session: object) -> VersionInfo:
+        async def fetch_latest(
+            self, session: object, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = context
             _ = session
             return VersionInfo(version="2.0.0", metadata={})
 
@@ -1427,11 +1484,13 @@ def test_platform_specific_update_rejects_identity_change_with_preserved_hash(
         *,
         system: str | None,
         config: object,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
+        _ = emit
         _ = config
         if system == "x86_64-linux":
             raise RuntimeError("no builder")
-        yield UpdateEvent.value(source_name, HASH_A)
+        return HASH_A
 
     monkeypatch.setattr(
         "lib.update.nix.compute_overlay_hash",
@@ -1458,7 +1517,9 @@ def test_platform_specific_update_rejects_identity_change_with_preserved_hash(
     ):
         asyncio.run(
             _with_session(
-                lambda session: _collect_events(updater.update_stream(current, session))
+                lambda session: _collect_events(
+                    lambda emit: updater.update_stream(current, session, emit=emit)
+                )
             )
         )
 
@@ -1471,7 +1532,10 @@ def test_platform_specific_update_rejects_partial_hashes_without_drv_hash(
     class _PlatformFlake(_DummyFlakeInput):
         platform_specific = True
 
-        async def fetch_latest(self, session: object) -> VersionInfo:
+        async def fetch_latest(
+            self, session: object, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = context
             _ = session
             return VersionInfo(version="1.0.0", metadata={})
 
@@ -1482,11 +1546,13 @@ def test_platform_specific_update_rejects_partial_hashes_without_drv_hash(
         *,
         system: str | None,
         config: object,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
+        _ = emit
         _ = config
         if system == "x86_64-linux":
             raise RuntimeError("no builder")
-        yield UpdateEvent.value(source_name, HASH_A)
+        return HASH_A
 
     monkeypatch.setattr(
         "lib.update.nix.compute_overlay_hash",
@@ -1505,7 +1571,9 @@ def test_platform_specific_update_rejects_partial_hashes_without_drv_hash(
     with pytest.raises(RuntimeError, match="has no drvHash"):
         asyncio.run(
             _with_session(
-                lambda session: _collect_events(updater.update_stream(current, session))
+                lambda session: _collect_events(
+                    lambda emit: updater.update_stream(current, session, emit=emit)
+                )
             )
         )
 
@@ -1518,7 +1586,10 @@ def test_platform_specific_native_only_update_keeps_drv_hash(
     class _PlatformFlake(_DummyFlakeInput):
         platform_specific = True
 
-        async def fetch_latest(self, session: object) -> VersionInfo:
+        async def fetch_latest(
+            self, session: object, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = context
             _ = session
             return VersionInfo(version="1.0.0", metadata={})
 
@@ -1534,10 +1605,12 @@ def test_platform_specific_native_only_update_keeps_drv_hash(
         *,
         system: str | None,
         config: object,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
+        _ = emit
         _ = config
         assert system == "aarch64-darwin"
-        yield UpdateEvent.value(source_name, HASH_B)
+        return HASH_B
 
     monkeypatch.setattr(
         "lib.update.nix.compute_drv_fingerprint",
@@ -1560,7 +1633,9 @@ def test_platform_specific_native_only_update_keeps_drv_hash(
     updater.native_only = True
     events = asyncio.run(
         _with_session(
-            lambda session: _collect_events(updater.update_stream(current, session))
+            lambda session: _collect_events(
+                lambda emit: updater.update_stream(current, session, emit=emit)
+            )
         )
     )
 
@@ -1580,23 +1655,24 @@ def test_platform_specific_native_only_rejects_global_pin_change(
         compatibility_pin_rationale = "exercise native-only compatibility drift"
         compatibility_pins: ClassVar[dict[str, str]] = {"runtimeVersion": "2.0.0"}
 
-        async def fetch_latest(self, session: object) -> VersionInfo:
+        async def fetch_latest(
+            self, session: object, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = context
             _ = session
             return VersionInfo(version="1.0.0", metadata={})
 
-        def _compute_hash_for_system(
+        async def _compute_hash_for_system(
             self,
             info: VersionInfo,
             *,
             system: str | None,
-        ) -> EventStream:
+            emit: EventSink = ignore_event,
+        ) -> str:
+            _ = emit
             _ = info
-
-            async def _stream() -> EventStream:
-                assert system == "aarch64-darwin"
-                yield UpdateEvent.value(self.name, HASH_B)
-
-            return _stream()
+            assert system == "aarch64-darwin"
+            return HASH_B
 
     current = _platform_entry(drv_hash="old-drv").model_copy(
         update={
@@ -1627,7 +1703,9 @@ def test_platform_specific_native_only_rejects_global_pin_change(
     ):
         asyncio.run(
             _with_session(
-                lambda session: _collect_events(updater.update_stream(current, session))
+                lambda session: _collect_events(
+                    lambda emit: updater.update_stream(current, session, emit=emit)
+                )
             )
         )
 
@@ -1641,7 +1719,10 @@ def test_platform_specific_native_only_single_platform_updates_drv_hash(
         platform_specific = True
         supported_platforms = ("aarch64-darwin",)
 
-        async def fetch_latest(self, session: object) -> VersionInfo:
+        async def fetch_latest(
+            self, session: object, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = context
             _ = session
             return VersionInfo(version="1.0.0", metadata={})
 
@@ -1655,10 +1736,12 @@ def test_platform_specific_native_only_single_platform_updates_drv_hash(
         *,
         system: str | None,
         config: object,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
+        _ = emit
         _ = config
         assert system == "aarch64-darwin"
-        yield UpdateEvent.value(source_name, HASH_A)
+        return HASH_A
 
     monkeypatch.setattr(
         "lib.update.nix.compute_drv_fingerprint",
@@ -1681,7 +1764,9 @@ def test_platform_specific_native_only_single_platform_updates_drv_hash(
     updater.native_only = True
     events = asyncio.run(
         _with_session(
-            lambda session: _collect_events(updater.update_stream(current, session))
+            lambda session: _collect_events(
+                lambda emit: updater.update_stream(current, session, emit=emit)
+            )
         )
     )
 
@@ -1700,7 +1785,10 @@ def test_platform_specific_single_supported_platform_updates_drv_hash(
         platform_specific = True
         supported_platforms = ("aarch64-darwin",)
 
-        async def fetch_latest(self, session: object) -> VersionInfo:
+        async def fetch_latest(
+            self, session: object, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = context
             _ = session
             return VersionInfo(version="1.0.0", metadata={})
 
@@ -1715,13 +1803,15 @@ def test_platform_specific_single_supported_platform_updates_drv_hash(
         *,
         system: str | None,
         config: object,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
+        _ = emit
         _ = config
         seen_platforms.append(system)
         if system != "aarch64-darwin":
             msg = f"unexpected platform target: {system}"
             raise AssertionError(msg)
-        yield UpdateEvent.value(source_name, HASH_A)
+        return HASH_A
 
     monkeypatch.setattr(
         "lib.update.nix.compute_drv_fingerprint",
@@ -1743,7 +1833,9 @@ def test_platform_specific_single_supported_platform_updates_drv_hash(
     )
     events = asyncio.run(
         _with_session(
-            lambda session: _collect_events(updater.update_stream(current, session))
+            lambda session: _collect_events(
+                lambda emit: updater.update_stream(current, session, emit=emit)
+            )
         )
     )
 
@@ -1776,15 +1868,20 @@ def test_platform_specific_fetch_hashes_handles_native_only_and_mapping_fallback
         "_current_entry",
         SourceEntry(hashes=HashCollection(mapping={"x86_64-linux": HASH_A})),
     )
-    assert object.__getattribute__(updater, "_existing_platform_hashes")() == {
-        "x86_64-linux": HASH_A
-    }
+    assert object.__getattribute__(updater, "_existing_platform_hashes")(
+        UpdateContext(current=None)
+    ) == {"x86_64-linux": HASH_A}
     object.__setattr__(
         updater,
         "_current_entry",
         SourceEntry(hashes=HashCollection()),
     )
-    assert object.__getattribute__(updater, "_existing_platform_hashes")() == {}
+    assert (
+        object.__getattribute__(updater, "_existing_platform_hashes")(
+            UpdateContext(current=None)
+        )
+        == {}
+    )
 
 
 def test_platform_specific_fetch_hashes_raises_on_native_failure(
@@ -1800,11 +1897,13 @@ def test_platform_specific_fetch_hashes_raises_on_native_failure(
         *,
         system: str | None,
         config: object,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
+        _ = emit
         _ = config
         if system == "aarch64-darwin":
             raise RuntimeError("no native builder")
-        yield UpdateEvent.value("dummy-flake", HASH_A)
+        return HASH_A
 
     monkeypatch.setattr(
         "lib.update.nix.compute_overlay_hash",
@@ -1825,7 +1924,11 @@ def test_platform_specific_fetch_hashes_raises_on_native_failure(
     with pytest.raises(RuntimeError, match="no native builder"):
         asyncio.run(
             _with_session(
-                lambda session: _collect_events(updater.fetch_hashes(info, session)),
+                lambda session: _collect_events(
+                    lambda emit: updater.fetch_hashes(
+                        info, session, emit=emit, context=UpdateContext(current=None)
+                    )
+                ),
             )
         )
 
@@ -1843,11 +1946,13 @@ def test_platform_specific_fetch_hashes_rejects_missing_non_native_preserve(
         *,
         system: str | None,
         config: object,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
+        _ = emit
         _ = config
         if system == "x86_64-linux":
             raise RuntimeError("no builder")
-        yield UpdateEvent.value(source_name, HASH_A)
+        return HASH_A
 
     monkeypatch.setattr(
         "lib.update.nix.compute_overlay_hash",
@@ -1867,7 +1972,11 @@ def test_platform_specific_fetch_hashes_rejects_missing_non_native_preserve(
     with pytest.raises(RuntimeError, match="no existing hash is available"):
         asyncio.run(
             _with_session(
-                lambda session: _collect_events(updater.fetch_hashes(info, session)),
+                lambda session: _collect_events(
+                    lambda emit: updater.fetch_hashes(
+                        info, session, emit=emit, context=UpdateContext(current=None)
+                    )
+                ),
             )
         )
 
@@ -1886,12 +1995,13 @@ def test_supported_platforms_skips_on_unsupported_current_platform(
         *,
         system: str | None,
         config: object,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
+        _ = emit
         _ = (source_name, system, config)
         raise AssertionError(
             "compute_overlay_hash must not run on unsupported platforms"
         )
-        yield  # pragma: no cover - keep type as async generator
 
     monkeypatch.setattr(
         "lib.update.nix.compute_overlay_hash",
@@ -1925,7 +2035,11 @@ def test_supported_platforms_skips_on_unsupported_current_platform(
     info = VersionInfo(version="1.0.0", metadata={})
     events = asyncio.run(
         _with_session(
-            lambda session: _collect_events(updater.fetch_hashes(info, session)),
+            lambda session: _collect_events(
+                lambda emit: updater.fetch_hashes(
+                    info, session, emit=emit, context=UpdateContext(current=None)
+                )
+            ),
         )
     )
 
@@ -1938,9 +2052,7 @@ def test_supported_platforms_skips_on_unsupported_current_platform(
         and payload.info.kind is StatusKind.UNSUPPORTED_PLATFORM
         for payload in status_payloads
     )
-    value_events = [event for event in events if event.kind == UpdateEventKind.VALUE]
-    assert len(value_events) == 1
-    preserved = _require_hash_entries(value_events[0].payload)
+    preserved = _require_hash_entries(events.result)
     assert [(entry.platform, entry.hash) for entry in preserved] == [
         ("aarch64-darwin", existing_hash),
     ]
@@ -1953,29 +2065,15 @@ def test_deno_deps_hash_updater_paths() -> None:
 
     events = asyncio.run(
         _with_session(
-            lambda session: _collect_events(updater.fetch_hashes(info, session))
-        )
-    )
-    payload = _require_hash_entries(
-        [e for e in events if e.kind == UpdateEventKind.VALUE][-1].payload
-    )
-    assert {e.platform for e in payload} == {"x86_64-linux", "aarch64-linux"}
-
-    class _BadDeno(_DummyDenoDeps):
-        def _compute_hash(self, info: VersionInfo) -> EventStream:
-            _ = info
-
-            async def _stream() -> EventStream:
-                yield UpdateEvent.value(self.name, "not-a-dict")
-
-            return _stream()
-
-    with pytest.raises(TypeError, match="Expected dict of platform hashes"):
-        asyncio.run(
-            _with_session(
-                lambda session: _collect_events(_BadDeno().fetch_hashes(info, session))
+            lambda session: _collect_events(
+                lambda emit: updater.fetch_hashes(
+                    info, session, emit=emit, context=UpdateContext(current=None)
+                )
             )
         )
+    )
+    payload = _require_hash_entries(events.result)
+    assert {e.platform for e in payload} == {"x86_64-linux", "aarch64-linux"}
 
 
 def test_deno_native_only_update_keeps_drv_hash_when_hashes_are_preserved(
@@ -1987,7 +2085,10 @@ def test_deno_native_only_update_keeps_drv_hash_when_hashes_are_preserved(
         name = "deno-hash"
         input_name = "deno-input"
 
-        async def fetch_latest(self, session: object) -> VersionInfo:
+        async def fetch_latest(
+            self, session: object, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = context
             _ = session
             return VersionInfo(version="1.0.0", metadata={})
 
@@ -2007,17 +2108,19 @@ def test_deno_native_only_update_keeps_drv_hash_when_hashes_are_preserved(
         *,
         native_only: bool = False,
         config: object | None = None,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
+        _ = emit
         _ = config
         assert source == "deno-hash"
         assert input_name == "deno-input"
         assert native_only is True
-        yield UpdateEvent.value(
-            "deno-hash",
-            {
+        return PlatformHashResult(
+            hashes={
                 "aarch64-darwin": HASH_B,
                 "x86_64-linux": foreign_hash,
             },
+            fully_computed=True,
         )
 
     monkeypatch.setattr(
@@ -2041,7 +2144,9 @@ def test_deno_native_only_update_keeps_drv_hash_when_hashes_are_preserved(
     updater.native_only = True
     events = asyncio.run(
         _with_session(
-            lambda session: _collect_events(updater.update_stream(current, session))
+            lambda session: _collect_events(
+                lambda emit: updater.update_stream(current, session, emit=emit)
+            )
         )
     )
 
@@ -2060,7 +2165,10 @@ def test_deno_multi_platform_update_keeps_drv_hash_when_hashes_are_preserved(
         name = "deno-hash"
         input_name = "deno-input"
 
-        async def fetch_latest(self, session: object) -> VersionInfo:
+        async def fetch_latest(
+            self, session: object, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = context
             _ = session
             return VersionInfo(version="1.0.0", metadata={})
 
@@ -2083,23 +2191,26 @@ def test_deno_multi_platform_update_keeps_drv_hash_when_hashes_are_preserved(
         *,
         native_only: bool = False,
         config: object | None = None,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = config
         assert source == "deno-hash"
         assert input_name == "deno-input"
         assert native_only is False
-        yield UpdateEvent.status(
-            "deno-hash",
-            "Warning: 1 platform(s) failed, preserved existing hashes for: x86_64-linux",
-            operation="compute_hash",
-            status=StatusInfo(kind=StatusKind.PARTIAL_HASHES, value="x86_64-linux"),
+        await emit(
+            UpdateEvent.status(
+                "deno-hash",
+                "Warning: 1 platform(s) failed, preserved existing hashes for: x86_64-linux",
+                operation="compute_hash",
+                status=StatusInfo(kind=StatusKind.PARTIAL_HASHES, value="x86_64-linux"),
+            )
         )
-        yield UpdateEvent.value(
-            "deno-hash",
-            {
+        return PlatformHashResult(
+            hashes={
                 "aarch64-darwin": HASH_B,
                 "x86_64-linux": foreign_hash,
             },
+            fully_computed=False,
         )
 
     monkeypatch.setattr(
@@ -2118,7 +2229,9 @@ def test_deno_multi_platform_update_keeps_drv_hash_when_hashes_are_preserved(
     )
     events = asyncio.run(
         _with_session(
-            lambda session: _collect_events(updater.update_stream(current, session))
+            lambda session: _collect_events(
+                lambda emit: updater.update_stream(current, session, emit=emit)
+            )
         )
     )
 
@@ -2165,7 +2278,11 @@ def test_deno_manifest_updater_emits_manifest_artifact(
     info = VersionInfo(version="1.0.0", metadata={})
     events = asyncio.run(
         _with_session(
-            lambda session: _collect_events(updater.fetch_hashes(info, session))
+            lambda session: _collect_events(
+                lambda emit: updater.fetch_hashes(
+                    info, session, emit=emit, context=UpdateContext(current=None)
+                )
+            )
         )
     )
     artifact_events = [e for e in events if e.kind == UpdateEventKind.ARTIFACT]
@@ -2176,7 +2293,7 @@ def test_deno_manifest_updater_emits_manifest_artifact(
     artifact = expect_instance(artifacts[0], GeneratedArtifact)
     assert artifact.path.name == updater.manifest_file
     assert any(e.message and "Prepared deno-deps.json" in e.message for e in events)
-    assert [e for e in events if e.kind == UpdateEventKind.VALUE][-1].payload == []
+    assert events.result == []
 
 
 def test_deno_manifest_updater_rejects_incomplete_lock(
@@ -2192,7 +2309,12 @@ def test_deno_manifest_updater_rejects_incomplete_lock(
         asyncio.run(
             _with_session(
                 lambda session: _collect_events(
-                    updater.fetch_hashes(VersionInfo(version="1.0.0"), session)
+                    lambda emit: updater.fetch_hashes(
+                        VersionInfo(version="1.0.0"),
+                        session,
+                        emit=emit,
+                        context=UpdateContext(current=None),
+                    )
                 )
             )
         )
@@ -2220,7 +2342,12 @@ def test_deno_manifest_updater_requires_package_directory(
         asyncio.run(
             _with_session(
                 lambda session: _collect_events(
-                    updater.fetch_hashes(VersionInfo(version="1.0.0"), session)
+                    lambda emit: updater.fetch_hashes(
+                        VersionInfo(version="1.0.0"),
+                        session,
+                        emit=emit,
+                        context=UpdateContext(current=None),
+                    )
                 )
             )
         )
@@ -2255,26 +2382,22 @@ def _install_uv_lock_success(
     )
     monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: tmp_path)
 
-    async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
+    async def _fake_run_command(
+        args: list[str], *, options: object, emit: EventSink = ignore_event
+    ) -> object:
         _ = options
         if args[:4] == ["nix", "eval", "--impure", "--raw"]:
-            yield UpdateEvent.status(updater.name, "resolving")
-            yield UpdateEvent.value(
-                updater.name,
-                CommandResult(
-                    args=args, returncode=0, stdout=f"{source_dir}\n", stderr=""
-                ),
+            await emit(UpdateEvent.status(updater.name, "resolving"))
+            return CommandResult(
+                args=args, returncode=0, stdout=f"{source_dir}\n", stderr=""
             )
-            return
+            return None
         if args[:3] == ["uv", "-q", "lock"]:
             workspace_dir = Path(args[-1])
             (workspace_dir / "uv.lock").write_text("version = 1\n", encoding="utf-8")
-            yield UpdateEvent.status(updater.name, "locking")
-            yield UpdateEvent.value(
-                updater.name,
-                CommandResult(args=args, returncode=0, stdout="", stderr=""),
-            )
-            return
+            await emit(UpdateEvent.status(updater.name, "locking"))
+            return CommandResult(args=args, returncode=0, stdout="", stderr="")
+            return None
         msg = f"Unexpected command: {args}"
         raise AssertionError(msg)
 
@@ -2291,7 +2414,11 @@ def test_uv_lock_updater_emits_lock_artifact(
     info = VersionInfo(version="1.0.0", metadata={})
     events = asyncio.run(
         _with_session(
-            lambda session: _collect_events(updater.fetch_hashes(info, session))
+            lambda session: _collect_events(
+                lambda emit: updater.fetch_hashes(
+                    info, session, emit=emit, context=UpdateContext(current=None)
+                )
+            )
         )
     )
     artifact_events = [e for e in events if e.kind == UpdateEventKind.ARTIFACT]
@@ -2303,7 +2430,7 @@ def test_uv_lock_updater_emits_lock_artifact(
     assert artifact.path.name == updater.lock_file
     assert artifact.content == "version = 1\n"
     assert any(e.message and "Prepared uv.lock" in e.message for e in events)
-    assert [e for e in events if e.kind == UpdateEventKind.VALUE][-1].payload == []
+    assert events.result == []
 
 
 def test_uv_lock_updater_rejects_failed_uv_lock_command(
@@ -2322,29 +2449,26 @@ def test_uv_lock_updater_rejects_failed_uv_lock_command(
     )
     monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: tmp_path)
 
-    async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
+    async def _fake_run_command(
+        args: list[str], *, options: object, emit: EventSink = ignore_event
+    ) -> object:
+        _ = emit
         _ = options
         if args[:4] == ["nix", "eval", "--impure", "--raw"]:
-            yield UpdateEvent.value(
-                updater.name,
-                CommandResult(
-                    args=args, returncode=0, stdout=f"{source_dir}\n", stderr=""
-                ),
+            return CommandResult(
+                args=args, returncode=0, stdout=f"{source_dir}\n", stderr=""
             )
-            return
+            return None
         if args[:3] == ["uv", "-q", "lock"]:
             workspace_dir = Path(args[-1])
             (workspace_dir / "uv.lock").write_text("stale\n", encoding="utf-8")
-            yield UpdateEvent.value(
-                updater.name,
-                CommandResult(
-                    args=args,
-                    returncode=2,
-                    stdout="",
-                    stderr="lock resolution failed\n",
-                ),
+            return CommandResult(
+                args=args,
+                returncode=2,
+                stdout="",
+                stderr="lock resolution failed\n",
             )
-            return
+            return None
         msg = f"Unexpected command: {args}"
         raise AssertionError(msg)
 
@@ -2354,8 +2478,11 @@ def test_uv_lock_updater_rejects_failed_uv_lock_command(
         asyncio.run(
             _with_session(
                 lambda session: _collect_events(
-                    updater.fetch_hashes(
-                        VersionInfo(version="1.0.0", metadata={}), session
+                    lambda emit: updater.fetch_hashes(
+                        VersionInfo(version="1.0.0", metadata={}),
+                        session,
+                        emit=emit,
+                        context=UpdateContext(current=None),
                     )
                 )
             )
@@ -2375,7 +2502,11 @@ def test_uv_lock_updater_rejects_incomplete_lock(
     with pytest.raises(RuntimeError, match="incomplete lock"):
         asyncio.run(
             _with_session(
-                lambda session: _collect_events(updater.fetch_hashes(info, session))
+                lambda session: _collect_events(
+                    lambda emit: updater.fetch_hashes(
+                        info, session, emit=emit, context=UpdateContext(current=None)
+                    )
+                )
             )
         )
 
@@ -2391,18 +2522,22 @@ def test_uv_lock_updater_requires_package_directory(
     )
     monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: None)
 
-    async def _resolve_only(args: list[str], *, options: object) -> EventStream:
+    async def _resolve_only(
+        args: list[str], *, options: object, emit: EventSink = ignore_event
+    ) -> object:
+        _ = emit
         _ = options
-        yield UpdateEvent.value(
-            updater.name,
-            CommandResult(args=args, returncode=0, stdout="/tmp/source\n", stderr=""),
-        )
+        return CommandResult(args=args, returncode=0, stdout="/tmp/source\n", stderr="")
 
     monkeypatch.setattr("lib.update.process.run_command", _resolve_only)
     with pytest.raises(RuntimeError, match="Package directory not found"):
         asyncio.run(
             _with_session(
-                lambda session: _collect_events(updater.fetch_hashes(info, session))
+                lambda session: _collect_events(
+                    lambda emit: updater.fetch_hashes(
+                        info, session, emit=emit, context=UpdateContext(current=None)
+                    )
+                )
             )
         )
 
@@ -2481,15 +2616,14 @@ def test_uv_lock_updater_rejects_empty_source_path(
     monkeypatch.setattr("lib.update.flake.get_flake_input_node", lambda _name: node)
     monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: tmp_path)
 
-    async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
+    async def _fake_run_command(
+        args: list[str], *, options: object, emit: EventSink = ignore_event
+    ) -> object:
         _ = options
         if args[:4] == ["nix", "eval", "--impure", "--raw"]:
-            yield UpdateEvent.status(updater.name, "resolving")
-            yield UpdateEvent.value(
-                updater.name,
-                CommandResult(args=args, returncode=0, stdout="", stderr=""),
-            )
-            return
+            await emit(UpdateEvent.status(updater.name, "resolving"))
+            return CommandResult(args=args, returncode=0, stdout="", stderr="")
+            return None
         msg = f"Unexpected command: {args}"
         raise AssertionError(msg)
 
@@ -2499,8 +2633,11 @@ def test_uv_lock_updater_rejects_empty_source_path(
         asyncio.run(
             _with_session(
                 lambda session: _collect_events(
-                    updater.fetch_hashes(
-                        VersionInfo(version="1.0.0", metadata={}), session
+                    lambda emit: updater.fetch_hashes(
+                        VersionInfo(version="1.0.0", metadata={}),
+                        session,
+                        emit=emit,
+                        context=UpdateContext(current=None),
                     )
                 )
             )
@@ -2517,19 +2654,19 @@ def test_uv_lock_updater_rejects_failed_source_resolution(
     )
     monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: tmp_path)
 
-    async def _fake_run_command(args: list[str], *, options: object) -> EventStream:
+    async def _fake_run_command(
+        args: list[str], *, options: object, emit: EventSink = ignore_event
+    ) -> object:
+        _ = emit
         _ = options
         if args[:4] == ["nix", "eval", "--impure", "--raw"]:
-            yield UpdateEvent.value(
-                updater.name,
-                CommandResult(
-                    args=args,
-                    returncode=1,
-                    stdout="/tmp/stale-source\n",
-                    stderr="eval failed\n",
-                ),
+            return CommandResult(
+                args=args,
+                returncode=1,
+                stdout="/tmp/stale-source\n",
+                stderr="eval failed\n",
             )
-            return
+            return None
         msg = f"Unexpected command: {args}"
         raise AssertionError(msg)
 
@@ -2539,25 +2676,15 @@ def test_uv_lock_updater_rejects_failed_source_resolution(
         asyncio.run(
             _with_session(
                 lambda session: _collect_events(
-                    updater.fetch_hashes(
-                        VersionInfo(version="1.0.0", metadata={}), session
+                    lambda emit: updater.fetch_hashes(
+                        VersionInfo(version="1.0.0", metadata={}),
+                        session,
+                        emit=emit,
+                        context=UpdateContext(current=None),
                     )
                 )
             )
         )
-
-
-def test_uv_lock_updater_expect_path_payload_validates_string_inputs() -> None:
-    """Accept string payloads and reject non-string path results."""
-    updater = _DummyUvLockUpdater(config=resolve_config())
-
-    assert (
-        str(updater._expect_path_payload("demo/path", context="workspace"))
-        == "demo/path"
-    )
-
-    with pytest.raises(TypeError, match="Expected workspace path payload"):
-        updater._expect_path_payload(3, context="workspace")
 
 
 def test_flake_hash_shorthand_updaters_declare_expected_hash_types() -> None:
@@ -2631,7 +2758,9 @@ def test_version_endpoint_download_updater_resolves_plain_text_versions(
     monkeypatch.setattr("lib.update.updaters.strategies.fetch_url", _fetch_url)
     updater = _VersionEndpoint()
 
-    info = asyncio.run(updater.fetch_latest(object()))
+    info = asyncio.run(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info == VersionInfo(version="4.5.6")
     assert (
         updater.get_download_url("x86_64-linux", info)
@@ -2643,7 +2772,7 @@ def test_version_endpoint_download_updater_resolves_plain_text_versions(
         RuntimeError,
         match="Missing strategy-version-endpoint version",
     ):
-        asyncio.run(updater.fetch_latest(object()))
+        asyncio.run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_json_field_download_updater_reads_flat_and_nested_version_paths(
@@ -2673,16 +2802,18 @@ def test_json_field_download_updater_reads_flat_and_nested_version_paths(
 
     monkeypatch.setattr("lib.update.updaters.strategies.fetch_json", _fetch_json)
 
-    assert asyncio.run(_FlatJson().fetch_latest(object())) == VersionInfo(
-        version="4.5.6"
-    )
-    assert asyncio.run(_NestedJson().fetch_latest(object())) == VersionInfo(
-        version="7.8.9"
-    )
+    assert asyncio.run(
+        _FlatJson().fetch_latest(object(), context=UpdateContext(current=None))
+    ) == VersionInfo(version="4.5.6")
+    assert asyncio.run(
+        _NestedJson().fetch_latest(object(), context=UpdateContext(current=None))
+    ) == VersionInfo(version="7.8.9")
 
     payload = {"version": "   "}
     with pytest.raises(RuntimeError, match="Missing strategy-json-flat version"):
-        asyncio.run(_FlatJson().fetch_latest(object()))
+        asyncio.run(
+            _FlatJson().fetch_latest(object(), context=UpdateContext(current=None))
+        )
 
 
 def test_json_field_download_updater_applies_version_transform_hook(
@@ -2705,7 +2836,9 @@ def test_json_field_download_updater_applies_version_transform_hook(
 
     monkeypatch.setattr("lib.update.updaters.strategies.fetch_json", _fetch_json)
 
-    info = asyncio.run(_TransformedJson().fetch_latest(object()))
+    info = asyncio.run(
+        _TransformedJson().fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info == VersionInfo(version="4.5.6")
 
 
@@ -2737,7 +2870,9 @@ def test_head_artifact_download_updater_versions_from_response_headers(
     )
     updater = _HeadArtifact()
 
-    info = asyncio.run(updater.fetch_latest(object()))
+    info = asyncio.run(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info == VersionInfo(version="20260101.etag-token")
     assert (
         updater.get_download_url("aarch64-darwin", info)
@@ -2762,7 +2897,9 @@ def test_pinned_source_download_updater_rehashes_the_pinned_version(
     updater = _PinnedSource()
 
     assert _PinnedSource.materialize_when_current is True
-    info = asyncio.run(updater.fetch_latest(object()))
+    info = asyncio.run(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info == VersionInfo(version="1.0.0")
     assert (
         updater.get_download_url("aarch64-darwin", info)
@@ -2804,7 +2941,9 @@ def test_sparkle_appcast_updater_resolves_the_newest_item(
     )
     updater = _Sparkle()
 
-    info = asyncio.run(updater.fetch_latest(object()))
+    info = asyncio.run(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info == VersionInfo(version="7.8.9")
     assert (
         updater.get_download_url("aarch64-darwin", info)
@@ -2816,7 +2955,7 @@ def test_sparkle_appcast_updater_resolves_the_newest_item(
         RuntimeError,
         match="Missing version in https://example.test/appcast.xml",
     ):
-        asyncio.run(updater.fetch_latest(object()))
+        asyncio.run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_sparkle_appcast_url_updater_captures_enclosure_metadata(
@@ -2837,7 +2976,9 @@ def test_sparkle_appcast_url_updater_captures_enclosure_metadata(
         monkeypatch,
         (SparkleAppcastItem("42", "7.8.9", "https://example.test/app.pkg"),),
     )
-    info = asyncio.run(updater.fetch_latest(object()))
+    info = asyncio.run(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info == VersionInfo(
         version="42",
         metadata=DownloadUrlMetadata("https://example.test/app.pkg"),
@@ -2852,7 +2993,7 @@ def test_sparkle_appcast_url_updater_captures_enclosure_metadata(
         RuntimeError,
         match="Missing download URL in https://example.test/appcast.xml",
     ):
-        asyncio.run(updater.fetch_latest(object()))
+        asyncio.run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_sparkle_appcast_url_updater_supports_version_hooks(
@@ -2879,7 +3020,9 @@ def test_sparkle_appcast_url_updater_supports_version_hooks(
         ),
     )
 
-    info = asyncio.run(_SparkleTransform().fetch_latest(object()))
+    info = asyncio.run(
+        _SparkleTransform().fetch_latest(object(), context=UpdateContext(current=None))
+    )
 
     assert info == VersionInfo(
         version="1.2.3-42",
@@ -2922,7 +3065,9 @@ def test_electron_builder_asset_urls_updater_prefers_feed_urls(
     )
     updater = _Electron()
 
-    info = asyncio.run(updater.fetch_latest(object()))
+    info = asyncio.run(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info.version == "3.2.1"
     assert (
         updater.get_download_url("aarch64-darwin", info)

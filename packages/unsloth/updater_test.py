@@ -9,7 +9,7 @@ import sys
 import tarfile
 import textwrap
 import tomllib
-from collections.abc import AsyncIterator, Callable, Iterable
+from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -27,7 +27,13 @@ from lib.tests._nix_source import nix_file_binding_expr
 from lib.tests._updater_helpers import collect_events, load_repo_module, run_async
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.derivation_validation import DerivationValidation
-from lib.update.events import CommandResult, UpdateEvent, UpdateEventKind
+from lib.update.events import (
+    CommandResult,
+    EventSink,
+    UpdateEvent,
+    UpdateEventKind,
+    ignore_event,
+)
 from lib.update.nix import _build_fetch_from_github_call, _build_package_path_attr_expr
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
@@ -670,6 +676,9 @@ def test_unsloth_static_closures_and_export_truth_are_current() -> None:
     backend_url = source.urls["backendSdist"]
     assert plan["app"] == {
         "commit": source.commit,
+        "rustToolchainVersion": module._canonical_rust_toolchain_version(
+            plan["app"]["rustToolchainVersion"]
+        ),
         "sourceHash": source_hash("srcHash"),
         "tag": f"v{source.version}",
         "version": source.version,
@@ -1282,7 +1291,9 @@ def test_unsloth_resolves_release_commit_manifest_and_backend_sdist(
     monkeypatch.setattr(module, "fetch_url", fetch_bytes)
     monkeypatch.setattr(module, "fetch_json", fetch_pypi)
 
-    info = run_async(updater.fetch_latest(object()))
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
 
     assert info == VersionInfo(
         version=_VERSION,
@@ -1373,7 +1384,11 @@ def test_unsloth_rejects_an_oxc_dependency_range_incoherent_with_the_lock(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC locked runtime"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_accepts_coherent_source_owned_oxc_versions(
@@ -1389,7 +1404,14 @@ def test_unsloth_accepts_coherent_source_owned_oxc_versions(
     )
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
-    assert run_async(module.UnslothUpdater().fetch_latest(object())).version == _VERSION
+    assert (
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        ).version
+        == _VERSION
+    )
 
 
 def test_unsloth_accepts_backend_sdist_validator_comment_drift(
@@ -1407,7 +1429,14 @@ def test_unsloth_accepts_backend_sdist_validator_comment_drift(
         sdist_payloads=sdist_payloads,
     )
 
-    assert run_async(module.UnslothUpdater().fetch_latest(object())).version == _VERSION
+    assert (
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        ).version
+        == _VERSION
+    )
 
 
 def test_unsloth_rejects_backend_sdist_oxc_patch_seam_drift(
@@ -1429,7 +1458,11 @@ def test_unsloth_rejects_backend_sdist_oxc_patch_seam_drift(
     )
 
     with pytest.raises(RuntimeError, match="backend sdist OXC source audit"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -1575,7 +1608,11 @@ def test_unsloth_rejects_backend_sdist_metadata_mismatch(
     )
 
     with pytest.raises(RuntimeError, match="does not match PyPI metadata"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_oversized_backend_sdist_metadata() -> None:
@@ -1601,7 +1638,11 @@ def test_unsloth_rejects_re_pinned_oxc_darwin_binding_drift(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC darwin-arm64 binding"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_incomplete_oxc_optional_dependency_lock_entry(
@@ -1622,7 +1663,11 @@ def test_unsloth_rejects_incomplete_oxc_optional_dependency_lock_entry(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC locked runtime"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_accepts_a_coherent_source_owned_optional_binding(
@@ -1647,7 +1692,14 @@ def test_unsloth_accepts_a_coherent_source_owned_optional_binding(
     source_payloads[_OXC_LOCK_PATH] = json.dumps(lock, sort_keys=True).encode()
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
-    assert run_async(module.UnslothUpdater().fetch_latest(object())).version == _VERSION
+    assert (
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        ).version
+        == _VERSION
+    )
 
 
 def test_unsloth_accepts_source_owned_oxc_transitive_metadata(
@@ -1665,7 +1717,14 @@ def test_unsloth_accepts_source_owned_oxc_transitive_metadata(
     source_payloads[_OXC_LOCK_PATH] = json.dumps(lock, sort_keys=True).encode()
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
-    assert run_async(module.UnslothUpdater().fetch_latest(object())).version == _VERSION
+    assert (
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        ).version
+        == _VERSION
+    )
 
 
 def test_unsloth_rejects_re_pinned_oxc_malformed_integrity(
@@ -1683,7 +1742,11 @@ def test_unsloth_rejects_re_pinned_oxc_malformed_integrity(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC locked runtime"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_re_pinned_oxc_truncated_integrity(
@@ -1704,7 +1767,11 @@ def test_unsloth_rejects_re_pinned_oxc_truncated_integrity(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC locked runtime"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -1739,7 +1806,14 @@ def test_unsloth_accepts_source_owned_valid_oxc_integrity(
     )
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
-    assert run_async(module.UnslothUpdater().fetch_latest(object())).version == _VERSION
+    assert (
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        ).version
+        == _VERSION
+    )
 
 
 def test_unsloth_rejects_re_pinned_oxc_non_sha512_integrity(
@@ -1760,7 +1834,11 @@ def test_unsloth_rejects_re_pinned_oxc_non_sha512_integrity(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC locked runtime"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_re_pinned_oxc_setup_mutation_drift(
@@ -1773,7 +1851,11 @@ def test_unsloth_rejects_re_pinned_oxc_setup_mutation_drift(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC setup.sh npm install"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_re_pinned_additional_oxc_setup_mutation(
@@ -1790,7 +1872,11 @@ def test_unsloth_rejects_re_pinned_additional_oxc_setup_mutation(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC setup.sh npm install"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_re_pinned_split_oxc_setup_mutation(
@@ -1807,7 +1893,11 @@ def test_unsloth_rejects_re_pinned_split_oxc_setup_mutation(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC setup.sh npm install"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_re_pinned_quoted_oxc_setup_mutation(
@@ -1824,7 +1914,11 @@ def test_unsloth_rejects_re_pinned_quoted_oxc_setup_mutation(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC setup.sh npm install"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_re_pinned_quoted_hash_oxc_setup_mutation(
@@ -1841,7 +1935,11 @@ def test_unsloth_rejects_re_pinned_quoted_hash_oxc_setup_mutation(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC setup.sh npm install"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_re_pinned_oxc_windows_setup_mutation_drift(
@@ -1854,7 +1952,11 @@ def test_unsloth_rejects_re_pinned_oxc_windows_setup_mutation_drift(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC setup.ps1 npm install"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_re_pinned_additional_oxc_windows_setup_mutation(
@@ -1874,7 +1976,11 @@ def test_unsloth_rejects_re_pinned_additional_oxc_windows_setup_mutation(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC setup.ps1 npm install"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_re_pinned_case_changed_oxc_windows_setup_mutation(
@@ -1891,7 +1997,11 @@ def test_unsloth_rejects_re_pinned_case_changed_oxc_windows_setup_mutation(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC setup.ps1 npm install"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_re_pinned_quoted_oxc_windows_setup_mutation(
@@ -1908,7 +2018,11 @@ def test_unsloth_rejects_re_pinned_quoted_oxc_windows_setup_mutation(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC setup.ps1 npm install"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_re_pinned_quoted_hash_oxc_windows_setup_mutation(
@@ -1925,7 +2039,11 @@ def test_unsloth_rejects_re_pinned_quoted_hash_oxc_windows_setup_mutation(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC setup.ps1 npm install"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_re_pinned_oxc_validator_entrypoint_drift(
@@ -1940,7 +2058,11 @@ def test_unsloth_rejects_re_pinned_oxc_validator_entrypoint_drift(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC validator entrypoint"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -1979,7 +2101,11 @@ def test_unsloth_rejects_re_pinned_oxc_validator_timeout_drift(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC validator timeout"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_re_pinned_oxc_validator_missing_timeout_call_path(
@@ -1996,7 +2122,11 @@ def test_unsloth_rejects_re_pinned_oxc_validator_missing_timeout_call_path(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC validator timeout"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -2023,7 +2153,11 @@ def test_unsloth_rejects_re_pinned_oxc_caller_timeout_drift(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC caller timeout"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_accepts_validator_comment_drift(
@@ -2035,7 +2169,14 @@ def test_unsloth_accepts_validator_comment_drift(
     source_payloads[_OXC_VALIDATE_PATH] += b"\n// upstream documentation\n"
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
-    assert run_async(module.UnslothUpdater().fetch_latest(object())).version == _VERSION
+    assert (
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        ).version
+        == _VERSION
+    )
 
 
 @pytest.mark.parametrize("copies", [0, 2])
@@ -2054,7 +2195,11 @@ def test_unsloth_rejects_ambiguous_oxc_validator_patch_seam(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(RuntimeError, match="OXC validator patch seam"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -2149,7 +2294,11 @@ def test_unsloth_rejects_re_pinned_oxc_source_structure_drift(
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
 
     with pytest.raises(error_type, match=message):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_unsloth_rejects_release_without_immutable_commit(
@@ -2172,7 +2321,11 @@ def test_unsloth_rejects_release_without_immutable_commit(
     monkeypatch.setattr(module, "fetch_github_api", commit_api)
 
     with pytest.raises(RuntimeError, match="no immutable source commit"):
-        run_async(module.UnslothUpdater().fetch_latest(object()))
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -2435,14 +2588,11 @@ def test_unsloth_hashes_only_public_source_foundation(
     fixed_calls: list[tuple[str, str, object]] = []
 
     async def fixed_hash(
-        name: str,
-        expression: str,
-        *,
-        config: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        name: str, expression: str, *, config: object, emit: EventSink = ignore_event
+    ) -> object:
         fixed_calls.append((name, expression, config))
-        yield UpdateEvent.status(name, "source")
-        yield UpdateEvent.value(name, _SRC_HASH)
+        await emit(UpdateEvent.status(name, "source"))
+        return _SRC_HASH
 
     url_calls: list[tuple[str, tuple[str, ...], object]] = []
 
@@ -2451,25 +2601,25 @@ def test_unsloth_hashes_only_public_source_foundation(
         urls: Iterable[str],
         *,
         config: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         url_tuple = tuple(urls)
         url_calls.append((name, url_tuple, config))
-        yield UpdateEvent.status(name, "urls")
-        yield UpdateEvent.value(
-            name,
-            {_MANIFEST_URL: _MANIFEST_HASH, _BACKEND_URL: _BACKEND_HASH},
-        )
+        await emit(UpdateEvent.status(name, "urls"))
+        return {_MANIFEST_URL: _MANIFEST_HASH, _BACKEND_URL: _BACKEND_HASH}
+
+    async def materialize(**_kwargs: object) -> None:
+        """Keep this source-hash contract independent of candidate builds."""
 
     monkeypatch.setattr(module.update_nix, "compute_fixed_output_hash", fixed_hash)
     monkeypatch.setattr(module.update_process, "compute_url_hashes", url_hashes)
+    monkeypatch.setattr(updater, "_materialize_candidate_artifacts", materialize)
     info = VersionInfo(_VERSION, _metadata())
 
     events = run_async(
         collect_events(
-            updater.fetch_hashes(
-                info,
-                object(),
-                context=UpdateContext(current=None, dry_run=True),
+            lambda emit: updater.fetch_hashes(
+                info, object(), context=UpdateContext(current=None), emit=emit
             )
         )
     )
@@ -2489,9 +2639,8 @@ def test_unsloth_hashes_only_public_source_foundation(
     assert url_calls == [
         ("unsloth", (_MANIFEST_URL, _BACKEND_URL), updater.config),
     ]
-    values = [event.payload for event in events if event.kind is UpdateEventKind.VALUE]
-    assert values == [_foundation_hashes()]
-    assert run_async(updater._is_latest(None, info)) is False
+    assert events.result == _foundation_hashes()
+    assert run_async(updater._is_latest(UpdateContext(current=None), info)) is False
 
 
 def test_unsloth_full_hash_pass_materializes_candidate_artifacts(
@@ -2507,18 +2656,17 @@ def test_unsloth_full_hash_pass_materializes_candidate_artifacts(
 
     async def fixed_hash(
         *_args: object,
+        emit: EventSink = ignore_event,
         **_kwargs: object,
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.value("unsloth", _SRC_HASH)
+    ) -> object:
+        return _SRC_HASH
 
     async def url_hashes(
         *_args: object,
+        emit: EventSink = ignore_event,
         **_kwargs: object,
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.value(
-            "unsloth",
-            {_MANIFEST_URL: _MANIFEST_HASH, _BACKEND_URL: _BACKEND_HASH},
-        )
+    ) -> object:
+        return {_MANIFEST_URL: _MANIFEST_HASH, _BACKEND_URL: _BACKEND_HASH}
 
     async def materialize(
         *,
@@ -2526,11 +2674,14 @@ def test_unsloth_full_hash_pass_materializes_candidate_artifacts(
         source: SourceEntry,
         metadata: dict[str, object],
         package_dir: Path,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         seen.append((info, source, metadata, package_dir))
-        yield UpdateEvent.artifact(
-            "unsloth",
-            GeneratedArtifact.text(package_dir / "pyproject.toml", "candidate\n"),
+        await emit(
+            UpdateEvent.artifact(
+                "unsloth",
+                GeneratedArtifact.text(package_dir / "pyproject.toml", "candidate\n"),
+            )
         )
 
     monkeypatch.setattr(module.update_nix, "compute_fixed_output_hash", fixed_hash)
@@ -2538,14 +2689,17 @@ def test_unsloth_full_hash_pass_materializes_candidate_artifacts(
     monkeypatch.setattr(module, "updater_dir_for", lambda _name: package_dir)
     monkeypatch.setattr(updater, "_materialize_candidate_artifacts", materialize)
     info = VersionInfo(_VERSION, _metadata())
-    events = run_async(collect_events(updater.fetch_hashes(info, object())))
+    events = run_async(
+        collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, object(), context=UpdateContext(current=None), emit=emit
+            )
+        )
+    )
 
     assert seen == [(info, _candidate_source(module), _metadata(), package_dir)]
-    assert [event.kind for event in events] == [
-        UpdateEventKind.ARTIFACT,
-        UpdateEventKind.VALUE,
-    ]
-    assert events[-1].payload == _foundation_hashes()
+    assert [event.kind for event in events] == [UpdateEventKind.ARTIFACT]
+    assert events.result == _foundation_hashes()
 
 
 def test_unsloth_full_hash_pass_requires_artifact_owner(
@@ -2556,18 +2710,17 @@ def test_unsloth_full_hash_pass_requires_artifact_owner(
 
     async def fixed_hash(
         *_args: object,
+        emit: EventSink = ignore_event,
         **_kwargs: object,
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.value("unsloth", _SRC_HASH)
+    ) -> object:
+        return _SRC_HASH
 
     async def url_hashes(
         *_args: object,
+        emit: EventSink = ignore_event,
         **_kwargs: object,
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.value(
-            "unsloth",
-            {_MANIFEST_URL: _MANIFEST_HASH, _BACKEND_URL: _BACKEND_HASH},
-        )
+    ) -> object:
+        return {_MANIFEST_URL: _MANIFEST_HASH, _BACKEND_URL: _BACKEND_HASH}
 
     monkeypatch.setattr(module.update_nix, "compute_fixed_output_hash", fixed_hash)
     monkeypatch.setattr(module.update_process, "compute_url_hashes", url_hashes)
@@ -2575,8 +2728,11 @@ def test_unsloth_full_hash_pass_requires_artifact_owner(
     with pytest.raises(RuntimeError, match="package directory was not found"):
         run_async(
             collect_events(
-                module.UnslothUpdater().fetch_hashes(
-                    VersionInfo(_VERSION, _metadata()), object()
+                lambda emit: module.UnslothUpdater().fetch_hashes(
+                    VersionInfo(_VERSION, _metadata()),
+                    object(),
+                    context=UpdateContext(current=None),
+                    emit=emit,
                 )
             )
         )
@@ -2589,17 +2745,14 @@ def test_unsloth_rejects_url_hashes_that_disagree_with_authority(
     module = _load_updater_module()
 
     async def fixed_hash(
-        *_args: object, **_kwargs: object
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.value("unsloth", _SRC_HASH)
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
+        return _SRC_HASH
 
     async def url_hashes(
-        *_args: object, **_kwargs: object
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.value(
-            "unsloth",
-            {_MANIFEST_URL: _MANIFEST_HASH, _BACKEND_URL: _MANIFEST_HASH},
-        )
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
+        return {_MANIFEST_URL: _MANIFEST_HASH, _BACKEND_URL: _MANIFEST_HASH}
 
     monkeypatch.setattr(module.update_nix, "compute_fixed_output_hash", fixed_hash)
     monkeypatch.setattr(module.update_process, "compute_url_hashes", url_hashes)
@@ -2607,9 +2760,11 @@ def test_unsloth_rejects_url_hashes_that_disagree_with_authority(
     with pytest.raises(RuntimeError, match="do not match authoritative"):
         run_async(
             collect_events(
-                module.UnslothUpdater().fetch_hashes(
+                lambda emit: module.UnslothUpdater().fetch_hashes(
                     VersionInfo(_VERSION, _metadata()),
                     object(),
+                    context=UpdateContext(current=None),
+                    emit=emit,
                 )
             )
         )
@@ -2689,14 +2844,8 @@ def test_unsloth_release_varying_inputs_are_source_owned() -> None:
     )
     output = expect_instance(package.output, Assertion).body
     assert_nix_ast_equal(
-        expect_binding(output.scope, "cargoManifest").value,
-        """builtins.fromTOML (
-          builtins.readFile "${desktopSource}/studio/src-tauri/Cargo.toml"
-        )""",
-    )
-    assert_nix_ast_equal(
         expect_binding(output.scope, "rustToolchainVersion").value,
-        "lib.versions.pad 3 cargoManifest.package.rust-version",
+        "closurePlan.app.rustToolchainVersion",
     )
     assert_nix_ast_equal(
         expect_binding(output.scope, "rustToolchain").value,
@@ -2749,6 +2898,7 @@ def test_unsloth_closure_plan_is_derived_from_candidate_source() -> None:
 
     assert plan["app"] == {
         "commit": _COMMIT,
+        "rustToolchainVersion": _RUST_TOOLCHAIN_VERSION,
         "sourceHash": _SRC_HASH,
         "tag": _TAG,
         "version": _VERSION,
@@ -2763,6 +2913,100 @@ def test_unsloth_closure_plan_is_derived_from_candidate_source() -> None:
         "pypiVersion": _BACKEND_VERSION,
         "version": _VERSION,
     }
+
+
+@pytest.mark.parametrize("source_version", ["1.89", "1.88"])
+def test_unsloth_verifies_toolchain_against_the_hash_checked_source(
+    monkeypatch: pytest.MonkeyPatch, source_version: str
+) -> None:
+    """A divergent source manifest must stop candidate metadata publication."""
+    module = _load_updater_module()
+    source_path = "/nix/store/00000000000000000000000000000000-source"
+    calls: list[list[str]] = []
+
+    async def run_command(
+        args: list[str], *, options: object, emit: EventSink = ignore_event
+    ) -> CommandResult:
+        _ = options
+        calls.append(args)
+        await emit(UpdateEvent.status("unsloth", "fetch source"))
+        return CommandResult(args=args, returncode=0, stdout=source_path, stderr="")
+
+    def read_bytes(path: Path) -> bytes:
+        assert path == Path(source_path) / "studio/src-tauri/Cargo.toml"
+        return f'[package]\nrust-version = "{source_version}"\n'.encode()
+
+    monkeypatch.setattr(module.update_process, "run_command", run_command)
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+
+    async def operation(emit: EventSink) -> None:
+        await module.UnslothUpdater()._verify_source_toolchain(
+            commit=_COMMIT,
+            source_hash=_SRC_HASH,
+            rust_toolchain_version=_RUST_TOOLCHAIN_VERSION,
+            emit=emit,
+        )
+
+    if source_version == "1.88":
+        with pytest.raises(RuntimeError, match="source requires Rust 1.88.0"):
+            run_async(collect_events(operation))
+    else:
+        events = run_async(collect_events(operation))
+        assert events == [UpdateEvent.status("unsloth", "fetch source")]
+    assert calls[0][:6] == [
+        "nix",
+        "build",
+        "--no-link",
+        "--print-out-paths",
+        "--impure",
+        "--expr",
+    ]
+    assert_nix_ast_equal(
+        parse_nix_expr(calls[0][6]),
+        module.update_nix._build_nix_expr(
+            _build_fetch_from_github_call(
+                "unslothai",
+                "unsloth",
+                rev=_COMMIT,
+                hash_value=_SRC_HASH,
+                fetch_submodules=False,
+            )
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "error"),
+    [
+        (1, "", "Verify Unsloth source toolchain"),
+        (0, "", "one Nix store output"),
+        (0, "/tmp/source", "one Nix store output"),
+        (0, f"{_SMOKE_OUTPUT}\n{_SMOKE_OUTPUT}", "one Nix store output"),
+    ],
+)
+def test_unsloth_source_verification_rejects_failed_or_ambiguous_fetches(
+    monkeypatch: pytest.MonkeyPatch, returncode: int, stdout: str, error: str
+) -> None:
+    """Failed or ambiguous fetches cannot select a source tree for verification."""
+    module = _load_updater_module()
+
+    async def run_command(
+        args: list[str], *, options: object, emit: EventSink = ignore_event
+    ) -> CommandResult:
+        _ = (options, emit)
+        return CommandResult(
+            args=args, returncode=returncode, stdout=stdout, stderr="failed"
+        )
+
+    monkeypatch.setattr(module.update_process, "run_command", run_command)
+    with pytest.raises(RuntimeError, match=error):
+        run_async(
+            module.UnslothUpdater()._verify_source_toolchain(
+                commit=_COMMIT,
+                source_hash=_SRC_HASH,
+                rust_toolchain_version=_RUST_TOOLCHAIN_VERSION,
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -3003,10 +3247,8 @@ def test_unsloth_uv_lock_materialization_uses_release_cutoff_and_baseline(
     calls: list[tuple[list[str], object]] = []
 
     async def run_command(
-        args: list[str],
-        *,
-        options: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        args: list[str], *, options: object, emit: EventSink = ignore_event
+    ) -> object:
         calls.append((args, options))
         workspace = Path(args[args.index("--directory") + 1])
         assert (workspace / "pyproject.toml").read_text(encoding="utf-8") == (
@@ -3018,26 +3260,22 @@ def test_unsloth_uv_lock_materialization_uses_release_cutoff_and_baseline(
             else None
         ) == existing_lock
         (workspace / "uv.lock").write_text("resolved lock\n", encoding="utf-8")
-        yield UpdateEvent.status("unsloth", "uv")
-        yield UpdateEvent.value(
-            "unsloth",
-            CommandResult(args=args, returncode=0, stdout="", stderr=""),
-        )
+        await emit(UpdateEvent.status("unsloth", "uv"))
+        return CommandResult(args=args, returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(module.update_process, "run_command", run_command)
     events = run_async(
         collect_events(
-            updater._materialize_uv_lock(
+            lambda emit: updater._materialize_uv_lock(
                 package_dir=package_dir,
                 pyproject_text="candidate project\n",
                 upload_time=_BACKEND_UPLOAD_TIME,
+                emit=emit,
             )
         )
     )
 
-    assert [
-        event.payload for event in events if event.kind is UpdateEventKind.VALUE
-    ] == ["resolved lock\n"]
+    assert events.result == "resolved lock\n"
     args, options = calls[0]
     assert args[:3] == ["uv", "-q", "lock"]
     assert "--no-config" not in args
@@ -3073,22 +3311,17 @@ def test_unsloth_uv_lock_materialization_fails_closed(
     module = _load_updater_module()
 
     async def run_command(
-        args: list[str],
-        *,
-        options: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        args: list[str], *, options: object, emit: EventSink = ignore_event
+    ) -> object:
         _ = options
         if write_lock:
             workspace = Path(args[args.index("--directory") + 1])
             (workspace / "uv.lock").write_text("lock\n", encoding="utf-8")
-        yield UpdateEvent.value(
-            "unsloth",
-            CommandResult(
-                args=args,
-                returncode=returncode,
-                stdout="",
-                stderr="uv failed" if returncode else "",
-            ),
+        return CommandResult(
+            args=args,
+            returncode=returncode,
+            stdout="",
+            stderr="uv failed" if returncode else "",
         )
 
     monkeypatch.setattr(module.update_process, "run_command", run_command)
@@ -3097,10 +3330,11 @@ def test_unsloth_uv_lock_materialization_fails_closed(
     with pytest.raises(RuntimeError, match=message):
         run_async(
             collect_events(
-                module.UnslothUpdater()._materialize_uv_lock(
+                lambda emit: module.UnslothUpdater()._materialize_uv_lock(
                     package_dir=package_dir,
                     pyproject_text="candidate\n",
                     upload_time=_BACKEND_UPLOAD_TIME,
+                    emit=emit,
                 )
             )
         )
@@ -3131,24 +3365,24 @@ def test_unsloth_candidate_closure_hash_uses_in_memory_inputs(
         *,
         isolate_by_drv_hash: bool,
         config: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         calls.append((name, expression, isolate_by_drv_hash, config))
-        yield UpdateEvent.value(name, _CLOSURE_HASHES["cargoHash"])
+        return _CLOSURE_HASHES["cargoHash"]
 
     monkeypatch.setattr(module.update_nix, "compute_fixed_output_hash", fixed_hash)
     events = run_async(
         collect_events(
-            updater._compute_candidate_closure_hash(
+            lambda emit: updater._compute_candidate_closure_hash(
                 attr_path=".appCandidate.cargoDeps",
                 source=source,
                 package_args=package_args,
+                emit=emit,
             )
         )
     )
 
-    assert [
-        event.payload for event in events if event.kind is UpdateEventKind.VALUE
-    ] == [_CLOSURE_HASHES["cargoHash"]]
+    assert events.result == _CLOSURE_HASHES["cargoHash"]
     assert calls[0][0] == "unsloth"
     assert calls[0][2:] == (True, updater.config)
     assert_nix_ast_equal(
@@ -3184,10 +3418,8 @@ def test_unsloth_candidate_build_runtime_and_export_commands(
     calls: list[list[str]] = []
 
     async def run_command(
-        args: list[str],
-        *,
-        options: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        args: list[str], *, options: object, emit: EventSink = ignore_event
+    ) -> object:
         _ = options
         calls.append(args)
         if args[:2] == ["nix", "build"]:
@@ -3196,49 +3428,37 @@ def test_unsloth_candidate_build_runtime_and_export_commands(
             stdout = "true\n"
         else:
             stdout = json.dumps(runtime)
-        yield UpdateEvent.status("unsloth", "command")
-        yield UpdateEvent.value(
-            "unsloth",
-            CommandResult(args=args, returncode=0, stdout=stdout, stderr=""),
-        )
+        await emit(UpdateEvent.status("unsloth", "command"))
+        return CommandResult(args=args, returncode=0, stdout=stdout, stderr="")
 
     monkeypatch.setattr(module.update_process, "run_command", run_command)
     smoke_events = run_async(
         collect_events(
-            updater._build_candidate_smoke(
-                source=source,
-                package_args=package_args,
+            lambda emit: updater._build_candidate_smoke(
+                source=source, package_args=package_args, emit=emit
             )
         )
     )
     runtime_events = run_async(
         collect_events(
-            updater._validate_candidate_runtime(
-                package_dir=tmp_path,
-                smoke_output=_SMOKE_OUTPUT,
+            lambda emit: updater._validate_candidate_runtime(
+                package_dir=tmp_path, smoke_output=_SMOKE_OUTPUT, emit=emit
             )
         )
     )
     export_events = run_async(
         collect_events(
-            updater._validate_candidate_export(
-                source=source,
-                package_args=package_args,
+            lambda emit: updater._validate_candidate_export(
+                source=source, package_args=package_args, emit=emit
             )
         )
     )
 
-    assert [
-        event.payload for event in smoke_events if event.kind is UpdateEventKind.VALUE
-    ] == [_SMOKE_OUTPUT]
-    runtime_values = [
-        event.payload for event in runtime_events if event.kind is UpdateEventKind.VALUE
-    ]
-    assert len(runtime_values) == 1
-    assert json.loads(cast("str", runtime_values[0])) == _persisted_runtime_evidence()
-    assert [
-        event.payload for event in export_events if event.kind is UpdateEventKind.VALUE
-    ] == ["export-ready"]
+    assert smoke_events.result == _SMOKE_OUTPUT
+    assert (
+        json.loads(cast("str", runtime_events.result)) == _persisted_runtime_evidence()
+    )
+    assert export_events.result == "export-ready"
     assert calls[0][:7] == [
         "nix",
         "build",
@@ -3271,21 +3491,16 @@ def test_unsloth_candidate_smoke_requires_one_store_output(
     updater = module.UnslothUpdater()
 
     async def run_command(
-        args: list[str],
-        *,
-        options: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        args: list[str], *, options: object, emit: EventSink = ignore_event
+    ) -> object:
         _ = options
-        yield UpdateEvent.value(
-            "unsloth",
-            CommandResult(args=args, returncode=0, stdout=stdout, stderr=""),
-        )
+        return CommandResult(args=args, returncode=0, stdout=stdout, stderr="")
 
     monkeypatch.setattr(module.update_process, "run_command", run_command)
     with pytest.raises(RuntimeError, match="one Nix store output"):
         run_async(
             collect_events(
-                updater._build_candidate_smoke(
+                lambda emit: updater._build_candidate_smoke(
                     source=_candidate_source(module),
                     package_args=updater._candidate_package_args(
                         python_workspace=tmp_path,
@@ -3293,6 +3508,7 @@ def test_unsloth_candidate_smoke_requires_one_store_output(
                         closure_plan={},
                         artifact_validation={},
                     ),
+                    emit=emit,
                 )
             )
         )
@@ -3319,15 +3535,10 @@ def test_unsloth_candidate_attestation_rejects_invalid_command_output(
     updater = module.UnslothUpdater()
 
     async def run_command(
-        args: list[str],
-        *,
-        options: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        args: list[str], *, options: object, emit: EventSink = ignore_event
+    ) -> object:
         _ = options
-        yield UpdateEvent.value(
-            "unsloth",
-            CommandResult(args=args, returncode=0, stdout=stdout, stderr=""),
-        )
+        return CommandResult(args=args, returncode=0, stdout=stdout, stderr="")
 
     monkeypatch.setattr(module.update_process, "run_command", run_command)
     source = _candidate_source(module)
@@ -3337,7 +3548,7 @@ def test_unsloth_candidate_attestation_rejects_invalid_command_output(
         closure_plan={},
         artifact_validation={},
     )
-    stream = (
+    operation = (
         updater._validate_candidate_runtime(
             package_dir=tmp_path,
             smoke_output=_SMOKE_OUTPUT,
@@ -3349,7 +3560,7 @@ def test_unsloth_candidate_attestation_rejects_invalid_command_output(
         )
     )
     with pytest.raises(RuntimeError, match=message):
-        run_async(collect_events(stream))
+        run_async(operation)
 
 
 @pytest.mark.parametrize("method", ["smoke", "runtime", "export"])
@@ -3363,15 +3574,10 @@ def test_unsloth_candidate_commands_propagate_failure(
     updater = module.UnslothUpdater()
 
     async def run_command(
-        args: list[str],
-        *,
-        options: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        args: list[str], *, options: object, emit: EventSink = ignore_event
+    ) -> object:
         _ = options
-        yield UpdateEvent.value(
-            "unsloth",
-            CommandResult(args=args, returncode=1, stdout="", stderr="failed"),
-        )
+        return CommandResult(args=args, returncode=1, stdout="", stderr="failed")
 
     monkeypatch.setattr(module.update_process, "run_command", run_command)
     source = _candidate_source(module)
@@ -3381,22 +3587,20 @@ def test_unsloth_candidate_commands_propagate_failure(
         closure_plan={},
         artifact_validation={},
     )
-    streams = {
-        "smoke": updater._build_candidate_smoke(
-            source=source,
-            package_args=package_args,
-        ),
-        "runtime": updater._validate_candidate_runtime(
+    if method == "runtime":
+        operation = updater._validate_candidate_runtime(
             package_dir=tmp_path,
             smoke_output=_SMOKE_OUTPUT,
-        ),
-        "export": updater._validate_candidate_export(
-            source=source,
-            package_args=package_args,
-        ),
-    }
+        )
+    else:
+        build_or_export = (
+            updater._build_candidate_smoke
+            if method == "smoke"
+            else updater._validate_candidate_export
+        )
+        operation = build_or_export(source=source, package_args=package_args)
     with pytest.raises(RuntimeError, match=r"failed \(exit 1\)"):
-        run_async(collect_events(streams[method]))
+        run_async(operation)
 
 
 def test_unsloth_resolves_candidate_hashes_in_dependency_order(
@@ -3418,12 +3622,13 @@ def test_unsloth_resolves_candidate_hashes_in_dependency_order(
         attr_path: str,
         source: SourceEntry,
         package_args: dict[str, object],
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         assert source == _candidate_source(module)
         expression = cast("Any", package_args["closureHashes"])
         seen.append((attr_path, json.loads(expression.argument.value)))
-        yield UpdateEvent.status("unsloth", f"hash {attr_path}")
-        yield UpdateEvent.value("unsloth", values[attr_path])
+        await emit(UpdateEvent.status("unsloth", f"hash {attr_path}"))
+        return values[attr_path]
 
     monkeypatch.setattr(updater, "_compute_candidate_closure_hash", compute_hash)
     source = _candidate_source(module)
@@ -3432,10 +3637,8 @@ def test_unsloth_resolves_candidate_hashes_in_dependency_order(
     )
     events = run_async(
         collect_events(
-            updater._resolve_candidate_closure_hashes(
-                source=source,
-                python_workspace=tmp_path,
-                closure_plan=plan,
+            lambda emit: updater._resolve_candidate_closure_hashes(
+                source=source, python_workspace=tmp_path, closure_plan=plan, emit=emit
             )
         )
     )
@@ -3466,9 +3669,7 @@ def test_unsloth_resolves_candidate_hashes_in_dependency_order(
             },
         ),
     ]
-    assert [
-        event.payload for event in events if event.kind is UpdateEventKind.VALUE
-    ] == [_CLOSURE_HASHES]
+    assert events.result == _CLOSURE_HASHES
     assert sum(event.kind is UpdateEventKind.STATUS for event in events) == 3
 
 
@@ -3483,24 +3684,27 @@ def test_unsloth_attestation_rechecks_final_export_with_runtime_evidence(
     runtime = _persisted_runtime_evidence()
     seen_final: list[dict[str, object]] = []
 
-    async def smoke(**_kwargs: object) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.status("unsloth", "smoke")
-        yield UpdateEvent.value("unsloth", _SMOKE_OUTPUT)
+    async def smoke(*, emit: EventSink = ignore_event, **_kwargs: object) -> object:
+        await emit(UpdateEvent.status("unsloth", "smoke"))
+        return _SMOKE_OUTPUT
 
-    async def runtime_gate(**_kwargs: object) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.status("unsloth", "runtime")
-        yield UpdateEvent.value("unsloth", json.dumps(runtime))
+    async def runtime_gate(
+        *, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
+        await emit(UpdateEvent.status("unsloth", "runtime"))
+        return json.dumps(runtime)
 
     async def export_gate(
         *,
         source: SourceEntry,
         package_args: dict[str, object],
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         assert source == _candidate_source(module)
         expression = cast("Any", package_args["artifactValidation"])
         seen_final.append(json.loads(expression.argument.value))
-        yield UpdateEvent.status("unsloth", "export")
-        yield UpdateEvent.value("unsloth", "export-ready")
+        await emit(UpdateEvent.status("unsloth", "export"))
+        return "export-ready"
 
     monkeypatch.setattr(updater, "_build_candidate_smoke", smoke)
     monkeypatch.setattr(updater, "_validate_candidate_runtime", runtime_gate)
@@ -3510,12 +3714,13 @@ def test_unsloth_attestation_rechecks_final_export_with_runtime_evidence(
     )
     events = run_async(
         collect_events(
-            updater._attest_candidate(
+            lambda emit: updater._attest_candidate(
                 source=source,
                 package_dir=tmp_path,
                 python_workspace=tmp_path,
                 closure_hashes=_CLOSURE_HASHES,
                 closure_plan=plan,
+                emit=emit,
             )
         )
     )
@@ -3529,9 +3734,7 @@ def test_unsloth_attestation_rechecks_final_export_with_runtime_evidence(
             "storePathAppCandidateSmokeOutput": _SMOKE_OUTPUT,
         }
     ]
-    values = [event.payload for event in events if event.kind is UpdateEventKind.VALUE]
-    assert len(values) == 1
-    assert json.loads(cast("str", values[0])) == seen_final[0]
+    assert json.loads(cast("str", events.result)) == seen_final[0]
     assert sum(event.kind is UpdateEventKind.STATUS for event in events) == 3
 
 
@@ -3543,14 +3746,18 @@ def test_unsloth_attestation_rejects_missing_final_export_marker(
     module = _load_updater_module()
     updater = module.UnslothUpdater()
 
-    async def smoke(**_kwargs: object) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.value("unsloth", _SMOKE_OUTPUT)
+    async def smoke(*, emit: EventSink = ignore_event, **_kwargs: object) -> object:
+        return _SMOKE_OUTPUT
 
-    async def runtime_gate(**_kwargs: object) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.value("unsloth", json.dumps(_persisted_runtime_evidence()))
+    async def runtime_gate(
+        *, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
+        return json.dumps(_persisted_runtime_evidence())
 
-    async def export_gate(**_kwargs: object) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.value("unsloth", "not-ready")
+    async def export_gate(
+        *, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
+        return "not-ready"
 
     monkeypatch.setattr(updater, "_build_candidate_smoke", smoke)
     monkeypatch.setattr(updater, "_validate_candidate_runtime", runtime_gate)
@@ -3559,7 +3766,7 @@ def test_unsloth_attestation_rejects_missing_final_export_marker(
     with pytest.raises(RuntimeError, match="export gate did not pass"):
         run_async(
             collect_events(
-                updater._attest_candidate(
+                lambda emit: updater._attest_candidate(
                     source=source,
                     package_dir=tmp_path,
                     python_workspace=tmp_path,
@@ -3567,6 +3774,7 @@ def test_unsloth_attestation_rejects_missing_final_export_marker(
                     closure_plan=module._closure_plan_payload(
                         VersionInfo(_VERSION, _metadata()), source, _metadata()
                     ),
+                    emit=emit,
                 )
             )
         )
@@ -3599,22 +3807,23 @@ def test_unsloth_materializes_all_candidate_artifacts_together(
         lambda **_kwargs: nullcontext(str(temporary_workspace)),
     )
 
-    async def uv_lock(**kwargs: object) -> AsyncIterator[UpdateEvent]:
+    async def uv_lock(*, emit: EventSink = ignore_event, **kwargs: object) -> object:
         assert kwargs["package_dir"] == package_dir
         assert kwargs["upload_time"] == _BACKEND_UPLOAD_TIME
         project = tomllib.loads(cast("str", kwargs["pyproject_text"]))
         assert project["project"]["dependencies"] == [
             f"unsloth[studio] @ {_BACKEND_URL}"
         ]
-        yield UpdateEvent.status("unsloth", "lock")
-        yield UpdateEvent.value("unsloth", "version = 1\n")
+        await emit(UpdateEvent.status("unsloth", "lock"))
+        return "version = 1\n"
 
     async def hashes(
         *,
         source: SourceEntry,
         python_workspace: Path,
         closure_plan: dict[str, object],
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         assert source == _candidate_source(module)
         inspected_workspace_paths.append(python_workspace)
         inspected_workspaces.append({
@@ -3622,24 +3831,34 @@ def test_unsloth_materializes_all_candidate_artifacts_together(
             for name in ("pyproject.toml", "uv.lock")
         })
         assert closure_plan["app"]["version"] == _VERSION
-        yield UpdateEvent.status("unsloth", "hashes")
-        yield UpdateEvent.value("unsloth", _CLOSURE_HASHES)
+        await emit(UpdateEvent.status("unsloth", "hashes"))
+        return _CLOSURE_HASHES
 
-    async def attest(**kwargs: object) -> AsyncIterator[UpdateEvent]:
+    async def attest(*, emit: EventSink = ignore_event, **kwargs: object) -> object:
         assert kwargs["closure_hashes"] == _CLOSURE_HASHES
-        yield UpdateEvent.status("unsloth", "attestation")
-        yield UpdateEvent.value("unsloth", json.dumps(validation))
+        await emit(UpdateEvent.status("unsloth", "attestation"))
+        return json.dumps(validation)
 
+    async def verify(*, emit: EventSink = ignore_event, **kwargs: object) -> None:
+        assert kwargs == {
+            "commit": _COMMIT,
+            "source_hash": _SRC_HASH,
+            "rust_toolchain_version": _RUST_TOOLCHAIN_VERSION,
+        }
+        await emit(UpdateEvent.status("unsloth", "source verification"))
+
+    monkeypatch.setattr(updater, "_verify_source_toolchain", verify)
     monkeypatch.setattr(updater, "_materialize_uv_lock", uv_lock)
     monkeypatch.setattr(updater, "_resolve_candidate_closure_hashes", hashes)
     monkeypatch.setattr(updater, "_attest_candidate", attest)
     events = run_async(
         collect_events(
-            updater._materialize_candidate_artifacts(
+            lambda emit: updater._materialize_candidate_artifacts(
                 info=VersionInfo(_VERSION, _metadata()),
                 source=source,
                 metadata=_metadata(),
                 package_dir=package_dir,
+                emit=emit,
             )
         )
     )
@@ -3663,7 +3882,7 @@ def test_unsloth_materializes_all_candidate_artifacts_together(
     assert json.loads(payloads["closure-hashes.json"]) == _CLOSURE_HASHES
     assert json.loads(payloads["artifact-validation.json"]) == validation
     assert json.loads(payloads["closure-plan.json"])["app"]["commit"] == _COMMIT
-    assert sum(event.kind is UpdateEventKind.STATUS for event in events) == 3
+    assert sum(event.kind is UpdateEventKind.STATUS for event in events) == 4
 
 
 @pytest.mark.parametrize(

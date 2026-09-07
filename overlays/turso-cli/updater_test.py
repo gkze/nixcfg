@@ -13,7 +13,7 @@ from lib.tests._updater_helpers import (
 )
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.nix import _build_fetch_from_github_call, _build_overlay_expr
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
     import pytest
@@ -57,7 +57,13 @@ def test_turso_cli_computes_source_then_vendor_hash(
         ),
     )
 
-    events = run_async(collect_events(updater.fetch_hashes(info, object())))
+    events = run_async(
+        collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
     assert len(calls) == 2
     assert_nix_ast_equal(
@@ -87,7 +93,7 @@ def test_turso_cli_computes_source_then_vendor_hash(
     )
     assert calls[0]["env"] is None
     assert calls[1]["env"] is None
-    assert events[-1].payload == [
+    assert events.result == [
         HashEntry.create("srcHash", SRC_HASH),
         HashEntry.create("vendorHash", VENDOR_HASH),
     ]

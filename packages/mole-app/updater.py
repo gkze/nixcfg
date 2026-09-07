@@ -5,12 +5,8 @@ from typing import TYPE_CHECKING, ClassVar
 from lib.nix.models.sources import HashEntry, SourceEntry, SourceHashes
 from lib.update import process as update_process
 from lib.update.events import (
-    EventStream,
-    UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_hash_mapping,
-    require_value,
+    EventSink,
+    ignore_event,
 )
 from lib.update.updaters import (
     GitHubReleaseUpdater,
@@ -43,8 +39,11 @@ class MoleAppUpdater(GitHubReleaseUpdater, PinnedSourceDownloadUpdater):
         "V{version}/binaries-{platform_value}.tar.gz"
     )
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the pinned release tag to its current immutable commit."""
+        _ = context
         version = read_pinned_source_version(self.name)
         tag = f"{self.TAG_PREFIX}{version}"
         commit = await self._resolve_release_tag_commit(session, tag)
@@ -65,35 +64,28 @@ class MoleAppUpdater(GitHubReleaseUpdater, PinnedSourceDownloadUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash the script source and both immutable helper archives together."""
         _ = (session, context)
         source_url = self._source_url(info)
         platform_urls = self._platform_urls(info)
         urls = [source_url, *platform_urls.values()]
-        hash_drain = ValueDrain[dict[str, str]]()
-        async for event in drain_value_events(
-            update_process.compute_url_hashes(self.name, urls, config=self.config),
-            hash_drain,
-            parse=expect_hash_mapping,
-        ):
-            yield event
-        hashes_by_url = require_value(hash_drain, "Missing Mole source hashes")
-        yield UpdateEvent.value(
-            self.name,
-            [
-                HashEntry.create("srcHash", hashes_by_url[source_url], url=source_url),
-                *[
-                    HashEntry.create(
-                        "sha256",
-                        hashes_by_url[url],
-                        platform=platform,
-                    )
-                    for platform, url in sorted(platform_urls.items())
-                ],
-            ],
+        hashes_by_url = await update_process.compute_url_hashes(
+            self.name, urls, config=self.config, emit=emit
         )
+        return [
+            HashEntry.create("srcHash", hashes_by_url[source_url], url=source_url),
+            *[
+                HashEntry.create(
+                    "sha256",
+                    hashes_by_url[url],
+                    platform=platform,
+                )
+                for platform, url in sorted(platform_urls.items())
+            ],
+        ]
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist every URL and hash consumed by the Mole derivation."""

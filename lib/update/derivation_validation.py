@@ -1,11 +1,17 @@
 """Target-aware Nix derivation validation after updater persistence."""
 
+import re
 import subprocess
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.function.definition import FunctionDefinition
+from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.list import NixList
+from nix_manipulator.expressions.primitive import StringPrimitive
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from lib.system_policy import RootClosureKind, required_root_kinds
@@ -14,6 +20,7 @@ from lib.update.nix import (
     get_current_nix_platform,
     is_retryable_nix_network_failure,
 )
+from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.paths import get_repo_root
 
 if TYPE_CHECKING:
@@ -60,6 +67,9 @@ _ROOT_CLOSURE_MANIFEST_INSTALLABLE = "path:.#lib.rootClosureManifest"
 ROOT_CLOSURE_VALIDATION_TIMEOUT_SECONDS = 6 * 60 * 60
 _VALIDATION_MAX_ATTEMPTS = 3
 _VALIDATION_RETRY_BACKOFF_SECONDS = 1.0
+_SIMPLE_ATTRIBUTE_PATH = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)+"
+)
 
 
 class _RootClosureIdentity(BaseModel):
@@ -187,9 +197,10 @@ def _run_validation_command(
     timeout: float | None,
     run: _Runner,
     sleep: _Sleeper,
+    max_attempts: int = _VALIDATION_MAX_ATTEMPTS,
 ) -> _RunResult:
     """Run once for deterministic failures and retry transient Nix I/O failures."""
-    for attempt in range(_VALIDATION_MAX_ATTEMPTS):
+    for attempt in range(max_attempts):
         result = run(
             args,
             cwd=cwd,
@@ -200,7 +211,7 @@ def _run_validation_command(
         )
         if (
             result.returncode == 0
-            or attempt + 1 == _VALIDATION_MAX_ATTEMPTS
+            or attempt + 1 == max_attempts
             or not is_retryable_nix_network_failure(
                 stdout=result.stdout,
                 stderr=result.stderr,
@@ -264,6 +275,87 @@ def resolve_derivation_validations(
     return tuple(requests)
 
 
+def _validation_args(
+    request: DerivationValidationRequest,
+    *,
+    flake_root: Path | None,
+) -> list[str]:
+    """Keep the individual validation command as the diagnostic fallback."""
+    return [
+        "nix",
+        request.mode,
+        *(
+            ["--no-update-lock-file"]
+            if _is_candidate_flake_installable(request.installable)
+            else []
+        ),
+        *(
+            ["--no-link"]
+            if request.mode == "build"
+            else ["--option", "allow-import-from-derivation", "false", "--raw"]
+        ),
+        _normalize_local_installable(request.installable, flake_root=flake_root),
+    ]
+
+
+def _batch_key(
+    request: DerivationValidationRequest,
+    *,
+    flake_root: Path | None,
+) -> tuple[DerivationValidationMode, str] | None:
+    """Only batch explicit local attribute paths from one immutable snapshot."""
+    if flake_root is None or not request.installable.startswith((".#", "path:.#")):
+        return None
+    attributes = request.installable.split("#", 1)[1]
+    if not _SIMPLE_ATTRIBUTE_PATH.fullmatch(attributes):
+        return None
+    if request.mode == "eval" and not attributes.endswith(".drvPath"):
+        return None
+    return request.mode, attributes.split(".", 1)[0]
+
+
+def _batch_validation_args(
+    requests: Sequence[DerivationValidationRequest],
+    *,
+    flake_root: Path | None,
+) -> list[str]:
+    args = _validation_args(requests[0], flake_root=flake_root)
+    if requests[0].mode == "build":
+        return [
+            *args,
+            *(
+                _normalize_local_installable(request.installable, flake_root=flake_root)
+                for request in requests[1:]
+            ),
+        ]
+    # Concatenation forces every string just as the individual --raw evals do.
+    # Nix retains their contexts, including each instantiated derivation path.
+    apply = FunctionDefinition(
+        argument_set=Identifier(name="root"),
+        output=FunctionCall(
+            name=FunctionCall(
+                name=identifier_attr_path("builtins", "concatStringsSep"),
+                argument=StringPrimitive(value=""),
+            ),
+            argument=NixList(
+                value=[
+                    identifier_attr_path(
+                        "root", *request.installable.split("#", 1)[1].split(".")[1:]
+                    )
+                    for request in requests
+                ]
+            ),
+        ),
+    )
+    flake_url, attribute_path = args[-1].split("#", 1)
+    return [
+        *args[:-1],
+        f"{flake_url}#{attribute_path.split('.', 1)[0]}",
+        "--apply",
+        compact_nix_expr(apply.rebuild()),
+    ]
+
+
 def validate_derivation_requests(
     requests: Iterable[DerivationValidationRequest],
     *,
@@ -272,64 +364,69 @@ def validate_derivation_requests(
     flake_root: Path | None = None,
     sleep: _Sleeper | None = None,
 ) -> tuple[DerivationValidationFailure, ...]:
-    """Validate concrete derivation requests with a timeout for each request."""
+    """Batch snapshot validations, retaining individual failure diagnostics.
+
+    A failed batch adds one timeout-bounded attempt before each member's
+    original timeout and retry policy. Every requested target remains required.
+    """
     runner = subprocess.run if run is None else run
     sleeper = time.sleep if sleep is None else sleep
     command_root = get_repo_root() if flake_root is None else flake_root
-    failures: list[DerivationValidationFailure] = []
-    for request in requests:
-        candidate_flake = _is_candidate_flake_installable(request.installable)
-        installable = _normalize_local_installable(
-            request.installable,
-            flake_root=flake_root,
-        )
-        args = (
-            [
-                "nix",
-                "build",
-                *(["--no-update-lock-file"] if candidate_flake else []),
-                "--no-link",
-                installable,
-            ]
-            if request.mode == "build"
-            else [
-                "nix",
-                "eval",
-                *(["--no-update-lock-file"] if candidate_flake else []),
-                "--option",
-                "allow-import-from-derivation",
-                "false",
-                "--raw",
-                installable,
-            ]
-        )
-        try:
-            result = _run_validation_command(
-                args,
-                cwd=command_root,
-                timeout=timeout,
-                run=runner,
-                sleep=sleeper,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            message = str(exc)
-        else:
-            if result.returncode == 0:
-                continue
-            message = (
-                result.stderr.strip()
-                or result.stdout.strip()
-                or f"nix {request.mode} failed"
-            )
-        failures.append(
-            DerivationValidationFailure(
+    groups: dict[
+        tuple[DerivationValidationMode, str] | int,
+        list[tuple[int, DerivationValidationRequest]],
+    ] = {}
+    for index, request in enumerate(requests):
+        key = _batch_key(request, flake_root=flake_root)
+        groups.setdefault(index if key is None else key, []).append((index, request))
+
+    failures: dict[int, DerivationValidationFailure] = {}
+    for group in groups.values():
+        if len(group) > 1:
+            try:
+                result = _run_validation_command(
+                    _batch_validation_args(
+                        [request for _, request in group], flake_root=flake_root
+                    ),
+                    cwd=command_root,
+                    timeout=timeout,
+                    run=runner,
+                    sleep=sleeper,
+                    max_attempts=1,
+                )
+            except OSError, subprocess.TimeoutExpired:
+                pass
+            else:
+                if result.returncode == 0:
+                    continue
+        # A batch is an optimization, never evidence that each member failed.
+        # Retry each member with its original timeout and network retry policy.
+        for index, request in group:
+            try:
+                result = _run_validation_command(
+                    _validation_args(request, flake_root=flake_root),
+                    cwd=command_root,
+                    timeout=timeout,
+                    run=runner,
+                    sleep=sleeper,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                message = str(exc)
+            else:
+                if result.returncode == 0:
+                    continue
+                message = (
+                    result.stderr.strip()
+                    or result.stdout.strip()
+                    or f"nix {request.mode} failed"
+                )
+            failures[index] = DerivationValidationFailure(
                 source=request.source,
                 installable=request.installable,
                 message=message,
             )
-        )
 
-    return tuple(failures)
+    return tuple(failures[index] for index in sorted(failures))
 
 
 def validate_derivations(
@@ -338,6 +435,7 @@ def validate_derivations(
     updaters: Mapping[str, type[object]],
     timeout: float | None = None,
     all_declared_systems: bool = False,
+    flake_root: Path | None = None,
     run: _Runner | None = None,
     sleep: _Sleeper | None = None,
 ) -> tuple[DerivationValidationFailure, ...]:
@@ -349,6 +447,7 @@ def validate_derivations(
     )
     return validate_derivation_requests(
         requests,
+        flake_root=flake_root,
         timeout=timeout,
         run=run,
         sleep=sleep,

@@ -27,7 +27,7 @@ from lib.tests._source_metadata import (
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import AssetURLsMetadata
 
 if TYPE_CHECKING:
@@ -70,7 +70,7 @@ def test_voiceos_resolves_one_immutable_universal_vendor_zip(
         _fetch_asset_urls,
     )
 
-    info = _run(updater.fetch_latest(object()))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     hashes = dict.fromkeys(updater.PLATFORMS, _HASH)
     result = updater.build_result(info, hashes)
 

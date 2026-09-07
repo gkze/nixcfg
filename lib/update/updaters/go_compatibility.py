@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.flake_lock import FlakeLockNode
+    from lib.update.updaters.core import UpdateContext
     from lib.update.updaters.metadata import VersionInfo
 
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -225,9 +226,11 @@ class GoModCompatibilityUpdater(GoVendorHashUpdater):
             raise RuntimeError(msg)
 
     @override
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Validate ``go.mod`` at the immutable refreshed input commit."""
-        info = await super().fetch_latest(session)
+        info = await super().fetch_latest(session, context=context)
         node = self._resolve_flake_node(info)
         _locked_github_source(
             node,

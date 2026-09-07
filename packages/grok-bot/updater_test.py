@@ -27,7 +27,7 @@ from lib.tests._source_metadata import (
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import PlatformAPIMetadata
 
 _VERSION = "0.29.0"
@@ -89,7 +89,7 @@ def test_grok_bot_resolves_current_vendor_feed_payloads(
     monkeypatch.setattr(module, "fetch_json", _fetch_json)
 
     session = object()
-    info = _run(updater.fetch_latest(session))
+    info = _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
     result = updater.build_result(info, _HASHES)
 
     assert info == VersionInfo(version=_VERSION, metadata=_metadata())
@@ -129,7 +129,7 @@ def test_grok_bot_rehashes_same_version_republication() -> None:
     })
     unchanged = VersionInfo(version=_VERSION, metadata=_metadata())
 
-    assert _run(updater._is_latest(current, unchanged)) is False
+    assert _run(updater._is_latest(UpdateContext(current=current), unchanged)) is False
 
 
 @pytest.mark.parametrize(
@@ -184,7 +184,7 @@ def test_grok_bot_rejects_malformed_feed_payloads(
     monkeypatch.setattr(module, "fetch_json", _fetch_json)
 
     with pytest.raises(exception, match=message):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 @pytest.mark.parametrize(
@@ -269,7 +269,7 @@ def test_grok_bot_requires_one_release_across_platforms(
     monkeypatch.setattr(module, "fetch_json", _fetch_json)
 
     with pytest.raises(RuntimeError, match="mismatched versions"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_grok_bot_download_url_revalidates_typed_metadata() -> None:

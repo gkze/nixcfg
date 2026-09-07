@@ -22,7 +22,7 @@ from lib.tests._nix_ast import (
 )
 from lib.tests._nix_source import nix_file_expr, nix_source_fragment_expr
 from lib.tests._updater_helpers import load_repo_module, run_async
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import AssetURLsMetadata
 
 if TYPE_CHECKING:
@@ -74,7 +74,9 @@ def test_agentlog_updater_pins_the_official_arm64_release_asset(
         _fetch_release,
     )
 
-    info = run_async(updater.fetch_latest(object()))
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     result = updater.build_result(info, {"aarch64-darwin": _AGENTLOG_HASH})
 
     assert updater.PLATFORMS == {"aarch64-darwin": "aarch64"}

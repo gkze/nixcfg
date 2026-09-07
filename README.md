@@ -124,6 +124,21 @@ uv run cosmic-ray exec cosmic-ray.toml .cosmic-ray.sqlite
 uv run cr-report .cosmic-ray.sqlite
 ```
 
+Python tests compare parsed source structure or behavior. A test that needs
+actual Nix evaluation uses the shared `lib.tests._nix_eval` helper and declares
+`@pytest.mark.nix_eval(reason="Why evaluation is necessary")` locally. The
+helper rejects unmarked execution and enforces a 30-second timeout. Keep the
+expression limited to the semantic unit under test; host and closure checks
+belong in the native Nix checks.
+
+Vendored Nix schemas define the wire contract. The public Python models retain
+construction defaults, legacy full store paths, and ergonomic views of
+experimental data. `lib/tests/test_nix_model_contracts.py` checks their fields,
+enums, scalar constraints, numeric bounds, and deliberate compatibility
+differences against those schemas. Generated bindings remain reference
+artifacts, with freshness checked by `nixcfg schema verify`; freshness alone
+does not establish conformance of the public models.
+
 ## Update tooling
 
 Updates and package-artifact maintenance are explicit CLI operations; the
@@ -147,6 +162,11 @@ If a root build fails, the updater leaves the candidate changes outside the
 checkout. The updater also rejects source changes that invalidate the tested
 snapshot. It preserves existing user edits and does not activate a system or
 Home Manager configuration.
+
+Updater coroutines return their typed results directly and send progress through
+an awaited `emit` callback. Hooks receive an explicit `UpdateContext`.
+Intermediate values use ordinary returns. `--check` performs the same
+candidate preparation and validation, then skips promotion to the checkout.
 
 Source-derived toolchain metadata comes from the pinned upstream manifests and
 locks. Node and pnpm selection must satisfy upstream requirements through the

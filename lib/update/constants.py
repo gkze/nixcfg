@@ -27,7 +27,7 @@ def resolve_timeout_alias(
     """Extract and validate a legacy ``timeout`` kwarg.
 
     Both :func:`~lib.update.net.fetch_url` and
-    :func:`~lib.update.process.stream_command` accept a primary timeout
+    :func:`~lib.update.process.run_command` accept a primary timeout
     parameter *and* a legacy ``timeout`` keyword.  This function pops the
     legacy key from *kwargs*, validates that only one was provided, and
     returns the resolved timeout value.  Any remaining unknown keys in

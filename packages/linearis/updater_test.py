@@ -8,8 +8,8 @@ from lib.nix.models.sources import HashEntry
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.events import UpdateEvent, UpdateEventKind
-from lib.update.updaters import VersionInfo
+from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import DownloadUrlMetadata
 
 
@@ -34,7 +34,7 @@ def test_linearis_fetch_latest_reads_version_and_tarball(
 
     monkeypatch.setattr(module, "fetch_json", _fetch_json)
 
-    info = _run(updater.fetch_latest(object()))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert info == VersionInfo(
         version="1.2.3",
@@ -83,50 +83,46 @@ def test_linearis_fetch_latest_rejects_missing_required_npm_fields(
     monkeypatch.setattr(module, "fetch_json", _fetch_json)
 
     with pytest.raises(RuntimeError, match=match):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_linearis_fetch_hashes_emits_single_tarball_hash(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Forward non-value events and emit one sha256 HashEntry for the tarball."""
+    """Forward hash progress and return one sha256 HashEntry for the tarball."""
     module = _load_module()
     updater = module.LinearisUpdater()
     tarball = "https://registry.npmjs.org/linearis/-/linearis-1.2.3.tgz"
     hash_value = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
     async def _compute_url_hashes(
-        name: str,
-        urls: list[str],
-        *,
-        config: object,
-    ):
+        name: str, urls: list[str], *, config: object, emit: EventSink = ignore_event
+    ) -> object:
         assert config is updater.config
         assert name == "linearis"
         assert urls == [tarball]
-        yield UpdateEvent.status(name, "hashing tarball")
-        yield UpdateEvent.value(name, {tarball: hash_value})
+        await emit(UpdateEvent.status(name, "hashing tarball"))
+        return {tarball: hash_value}
 
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
 
     events = _run(
         _collect_events(
-            updater.fetch_hashes(
+            lambda emit: updater.fetch_hashes(
                 VersionInfo(
                     version="1.2.3",
                     metadata=DownloadUrlMetadata(url=tarball),
                 ),
                 object(),
+                emit=emit,
+                context=UpdateContext(current=None),
             )
         )
     )
 
-    assert [event.kind for event in events] == [
-        UpdateEventKind.STATUS,
-        UpdateEventKind.VALUE,
-    ]
+    assert [event.kind for event in events] == [UpdateEventKind.STATUS]
     assert events[0].message == "hashing tarball"
-    assert events[1].payload == [
+    assert events.result == [
         HashEntry.create("sha256", hash_value, url=tarball),
     ]
 
@@ -149,9 +145,11 @@ def test_linearis_fetch_hashes_rejects_missing_tarball_metadata(
     with pytest.raises(RuntimeError, match="Missing tarball metadata"):
         _run(
             _collect_events(
-                updater.fetch_hashes(
+                lambda emit: updater.fetch_hashes(
                     VersionInfo(version="1.2.3", metadata=metadata),
                     object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
                 )
             )
         )

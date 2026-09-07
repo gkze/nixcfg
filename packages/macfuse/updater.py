@@ -15,6 +15,8 @@ from lib.update.updaters.metadata import DownloadUrlMetadata
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 
 @register_updater
 class MacfuseUpdater(DownloadUrlMetadataUpdater):
@@ -27,8 +29,11 @@ class MacfuseUpdater(DownloadUrlMetadataUpdater):
     }
     URL_METADATA_CONTEXT = "macFUSE metadata"
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch the latest macFUSE version and DMG URL."""
+        _ = context
         payload = await fetch_url(
             session,
             self.RELEASE_PLIST_URL,

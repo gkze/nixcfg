@@ -1,11 +1,11 @@
 """Updater for the flat mdformat overlay source metadata."""
 
 # ruff: noqa: N999 -- updater discovery intentionally uses a flat dotted sidecar.
-
 from typing import TYPE_CHECKING
 
 from lib import json_utils
 from lib.update.derivation_validation import DerivationValidation
+from lib.update.events import EventSink, ignore_event
 from lib.update.net import fetch_json
 from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.updaters import (
@@ -20,8 +20,7 @@ from lib.update.updaters.github_release import GitHubReleaseUpdater
 if TYPE_CHECKING:
     import aiohttp
 
-    from lib.nix.models.sources import SourceEntry
-    from lib.update.events import EventStream
+    from lib.nix.models.sources import SourceHashes
 
 _PYPI_URL = "https://pypi.org/pypi/mdformat/json"
 
@@ -42,8 +41,11 @@ class MdformatUpdater(GitHubReleaseUpdater):
         ),
     )
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the latest published mdformat version from PyPI."""
+        _ = context
         payload = await fetch_json(
             session,
             _PYPI_URL,
@@ -83,20 +85,20 @@ class MdformatUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash the unpacked source tree for the matching GitHub tag."""
         _ = (session, context)
         commit = self._require_commit(info)
-        async for event in stream_fixed_output_hashes(
+        return await stream_fixed_output_hashes(
             self.name,
             steps=(
                 FixedOutputHashStep(
                     hash_type="srcHash",
-                    error="Missing mdformat srcHash output",
                     expr=lambda _resolved: self._src_expr(commit),
                 ),
             ),
             config=self.config,
-        ):
-            yield event
+            emit=emit,
+        )

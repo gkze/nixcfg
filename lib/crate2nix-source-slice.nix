@@ -16,7 +16,13 @@ let
     && builtins.substring (valueLength - suffixLength) suffixLength value == suffix;
 
   sourcePath =
-    rootSrc: relativePath: if relativePath == "." then rootSrc else "${rootSrc}/${relativePath}";
+    rootSrc: relativePath:
+    if relativePath == "." then
+      rootSrc
+    else if builtins.isPath rootSrc then
+      rootSrc + "/${relativePath}"
+    else
+      "${rootSrc}/${relativePath}";
 
   materializeOne =
     {

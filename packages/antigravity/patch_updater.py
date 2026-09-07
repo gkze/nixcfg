@@ -8,9 +8,9 @@ from pathlib import Path
 from lib.asar_integrity import (
     AsarIntegrityError,
     check_info_plist_hash,
+    patch_bundle_integrity,
     read_packed_file,
     replace_packed_file,
-    write_info_plist_hash,
 )
 
 UPDATER_PATH = "dist/updater.js"
@@ -160,12 +160,11 @@ def patch_bundle(bundle: Path) -> str:
     if not update_config.is_file():
         msg = f"Antigravity updater config is missing: {update_config}"
         raise PatchError(msg)
-    digest = replace_packed_file(
+    digest = patch_bundle_integrity(
         asar_path,
-        UPDATER_PATH,
-        disable_updates,
+        plist_path,
+        lambda staged: replace_packed_file(staged, UPDATER_PATH, disable_updates),
     )
-    write_info_plist_hash(plist_path, asar_path)
     update_config.unlink()
     return digest
 

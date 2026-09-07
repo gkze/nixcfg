@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, ClassVar
 from lib.nix.models.sources import (
     HashCollection,
     HashEntry,
-    HashMapping,
     HashType,
     SourceEntry,
     SourceHashes,
@@ -27,23 +26,16 @@ from lib.update import paths as update_paths
 from lib.update import process as update_process
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import (
-    CommandResult,
-    EventStream,
+    EventSink,
     StatusInfo,
     StatusKind,
-    StatusPayload,
     UpdateEvent,
-    UpdateEventKind,
-    ValueDrain,
-    drain_value_events,
-    expect_command_result,
-    expect_hash_mapping,
-    expect_str,
-    require_value,
+    ignore_event,
 )
 from lib.update.flake import flake_source_path_expr
 from lib.update.nix import _build_package_path_attr_expr
 from lib.update.platform_hashes import (
+    PlatformHashResult,
     PreservedPlatformHash,
     preserve_existing_platform_hash,
     preserved_platform_hash_status,
@@ -52,8 +44,6 @@ from lib.update.platform_hashes import (
 from lib.update.updaters.core import (
     UpdateContext,
     Updater,
-    _coerce_context,
-    _emit_single_hash_entry,
 )
 from lib.update.updaters.metadata import (
     FlakeInputMetadata,
@@ -108,10 +98,10 @@ class FlakeInputUpdater(Updater):
         return update_flake.get_flake_input_node(self._input)
 
     async def fetch_latest(
-        self,
-        session: aiohttp.ClientSession,
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
         """Resolve the latest version from the flake lock node."""
+        _ = context
         _ = session
         node = update_flake.get_flake_input_node(self._input)
         version = update_flake.get_flake_input_version(node)
@@ -137,10 +127,9 @@ class FlakeInputMetadataUpdater(FlakeInputUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
-        context = _coerce_context(context)
         current = context.current
         if current is None:
             return False
@@ -152,12 +141,13 @@ class FlakeInputMetadataUpdater(FlakeInputUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Emit an empty hash set for metadata-only flake input tracking."""
-        _ = (info, session, _coerce_context(context))
+        _ = (info, session, context, emit)
         empty_entries: list[HashEntry] = []
-        yield UpdateEvent.value(self.name, empty_entries)
+        return empty_entries
 
 
 class FlakeInputHashUpdater(FlakeInputUpdater):
@@ -191,10 +181,9 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
-        context = _coerce_context(context)
         current = context.current
         expected = self.build_result(info, [])
         if (
@@ -217,10 +206,10 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         result: SourceEntry,
         *,
         info: VersionInfo | None = None,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceEntry:
         _ = info
-        context = _coerce_context(context)
         if not context.hashes_fully_computed:
             current_drv_hash = context.current.drv_hash if context.current else None
             if current_drv_hash is None:
@@ -231,26 +220,29 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
                 )
                 raise RuntimeError(msg)
             result = result.model_copy(update={"drv_hash": current_drv_hash})
-            yield UpdateEvent.status(
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    "Preserving previous derivation fingerprint because this run cannot "
+                    "certify all fingerprint inputs",
+                    operation="compute_hash",
+                    status=StatusInfo(
+                        kind=StatusKind.PRESERVED_DRV_HASH,
+                        value=current_drv_hash,
+                    ),
+                )
+            )
+            return result
+        await emit(
+            UpdateEvent.status(
                 self.name,
-                "Preserving previous derivation fingerprint because this run cannot "
-                "certify all fingerprint inputs",
+                "Computing derivation fingerprint...",
                 operation="compute_hash",
                 status=StatusInfo(
-                    kind=StatusKind.PRESERVED_DRV_HASH,
-                    value=current_drv_hash,
+                    kind=StatusKind.COMPUTING_HASH,
+                    value="derivation fingerprint",
                 ),
             )
-            yield UpdateEvent.value(self.name, result)
-            return
-        yield UpdateEvent.status(
-            self.name,
-            "Computing derivation fingerprint...",
-            operation="compute_hash",
-            status=StatusInfo(
-                kind=StatusKind.COMPUTING_HASH,
-                value="derivation fingerprint",
-            ),
         )
         try:
             drv_hash = context.drv_fingerprint
@@ -258,12 +250,14 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
                 drv_hash = await self._compute_drv_fingerprint(result)
             result = result.model_copy(update={"drv_hash": drv_hash})
         except RuntimeError as exc:
-            yield UpdateEvent.status(
-                self.name,
-                f"Warning: derivation fingerprint unavailable ({exc})",
-                operation="compute_hash",
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    f"Warning: derivation fingerprint unavailable ({exc})",
+                    operation="compute_hash",
+                )
             )
-        yield UpdateEvent.value(self.name, result)
+        return result
 
     def _platform_targets(self, current_platform: str) -> tuple[str, ...]:
         if self.native_only:
@@ -282,9 +276,8 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
 
     def _existing_platform_hashes(
         self,
-        context: UpdateContext | SourceEntry | None = None,
+        context: UpdateContext,
     ) -> dict[str, str]:
-        context = _coerce_context(context)
         entry = context.current
         if entry is None:
             legacy_entry = getattr(self, "_current_entry", None)
@@ -305,12 +298,9 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
             return dict(hashes.mapping)
         return {}
 
-    def _compute_hash_for_system(
-        self,
-        info: VersionInfo,
-        *,
-        system: str | None,
-    ) -> EventStream:
+    async def _compute_hash_for_system(
+        self, info: VersionInfo, *, system: str | None, emit: EventSink = ignore_event
+    ) -> str:
         candidate = self.build_result(info, [])
         source_override = (
             candidate
@@ -322,23 +312,20 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
             source_override=source_override,
         )
         if package_expr is not None:
-            return update_nix.compute_fixed_output_hash(
-                self.name,
-                package_expr,
-                config=self.config,
+            return await update_nix.compute_fixed_output_hash(
+                self.name, package_expr, config=self.config, emit=emit
             )
         if source_override is None:
-            return update_nix.compute_overlay_hash(
-                self.name,
-                system=system,
-                config=self.config,
+            return await update_nix.compute_overlay_hash(
+                self.name, system=system, config=self.config, emit=emit
             )
-        return update_nix.compute_overlay_hash(
+        return await update_nix.compute_overlay_hash(
             self.name,
             system=system,
             config=self.config,
             source_overrides={self.name: source_override},
             fake_hashes=True,
+            emit=emit,
         )
 
     def _package_hash_expr(
@@ -410,21 +397,23 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
             config=self.config,
         )
 
-    def _compute_hash(self, info: VersionInfo) -> EventStream:
+    async def _compute_hash(
+        self, info: VersionInfo, *, emit: EventSink = ignore_event
+    ) -> str:
         system = (
             update_nix.get_current_nix_platform() if self.platform_specific else None
         )
-        return self._compute_hash_for_system(info, system=system)
+        return await self._compute_hash_for_system(info, system=system, emit=emit)
 
     async def fetch_hashes(
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Compute flake-backed hashes for one or more target platforms."""
-        context = _coerce_context(context)
         _ = session
         current_platform = update_nix.get_current_nix_platform()
         if (
@@ -437,37 +426,33 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
                 HashEntry.create(self.hash_type, hash_val, platform=platform)
                 for platform, hash_val in sorted(existing_hashes.items())
             ]
-            yield UpdateEvent.status(
-                self.name,
-                f"Unsupported platform {current_platform}, preserving existing hashes",
-                operation="compute_hash",
-                status=StatusInfo(
-                    kind=StatusKind.UNSUPPORTED_PLATFORM,
-                    value=current_platform,
-                ),
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    f"Unsupported platform {current_platform}, preserving existing hashes",
+                    operation="compute_hash",
+                    status=StatusInfo(
+                        kind=StatusKind.UNSUPPORTED_PLATFORM,
+                        value=current_platform,
+                    ),
+                )
             )
-            yield UpdateEvent.value(self.name, entries)
-            return
+            return entries
         if self.platform_specific:
             if self.native_only and (
                 self.supported_platforms is None
                 or set(self.supported_platforms) != {current_platform}
             ):
                 context.hashes_fully_computed = False
-            error = f"Missing {self.hash_type} output"
             platform_hashes: dict[str, str] = {}
             existing_hashes = self._existing_platform_hashes(context)
             failed_platforms: list[PreservedPlatformHash] = []
 
             for platform in self._platform_targets(current_platform):
-                hash_drain = ValueDrain[str]()
                 try:
-                    async for event in drain_value_events(
-                        self._compute_hash_for_system(info, system=platform),
-                        hash_drain,
-                        parse=expect_str,
-                    ):
-                        yield event
+                    hash_value = await self._compute_hash_for_system(
+                        info, system=platform, emit=emit
+                    )
                 except RuntimeError as exc:
                     if platform == current_platform:
                         raise
@@ -479,28 +464,20 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
                     )
                     failed_platforms.append(preserved)
                     platform_hashes[platform] = preserved.hash
-                    yield preserved_platform_hash_status(self.name, preserved)
+                    await emit(preserved_platform_hash_status(self.name, preserved))
                     continue
-
-                hash_value = require_value(hash_drain, error)
                 platform_hashes[platform] = hash_value
 
             if failed_platforms:
-                yield preserved_platform_hash_warning(self.name, failed_platforms)
+                await emit(preserved_platform_hash_warning(self.name, failed_platforms))
 
-            entries = [
+            return [
                 HashEntry.create(self.hash_type, hash_val, platform=platform)
                 for platform, hash_val in sorted(platform_hashes.items())
             ]
-            yield UpdateEvent.value(self.name, entries)
-        else:
-            async for event in _emit_single_hash_entry(
-                self.name,
-                self._compute_hash(info),
-                error=f"Missing {self.hash_type} output",
-                hash_type=self.hash_type,
-            ):
-                yield event
+        return [
+            HashEntry.create(self.hash_type, await self._compute_hash(info, emit=emit))
+        ]
 
 
 class DenoDepsHashUpdater(FlakeInputHashUpdater):
@@ -509,26 +486,29 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
     hash_type: HashType = "denoDepsHash"
     native_only: bool = False
 
-    def _compute_hash(
+    async def _compute_platform_hashes(
         self,
         info: VersionInfo,
         *,
         source_override: SourceEntry | None = None,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> PlatformHashResult:
         _ = info
         if source_override is None:
-            return update_nix_deno.compute_deno_deps_hash(
+            return await update_nix_deno.compute_deno_deps_hash(
                 self.name,
                 self._input,
                 native_only=self.native_only,
                 config=self.config,
+                emit=emit,
             )
-        return update_nix_deno.compute_deno_deps_hash(
+        return await update_nix_deno.compute_deno_deps_hash(
             self.name,
             self._input,
             native_only=self.native_only,
             config=self.config,
             source_override=source_override,
+            emit=emit,
         )
 
     def _candidate_source_override(
@@ -552,54 +532,29 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Compute structured Deno dependency hashes for all target platforms."""
         _ = session
-        context = _coerce_context(context)
         source_override = self._candidate_source_override(info, context.current)
         if self.native_only:
             current_platform = update_nix.get_current_nix_platform()
             if set(self.config.hash_build_platforms) != {current_platform}:
                 context.hashes_fully_computed = False
 
-        def _expect_platform_hashes(payload: object) -> HashMapping:
-            if isinstance(payload, dict):
-                return expect_hash_mapping(payload)
-            msg = f"Expected dict of platform hashes, got {type(payload)}"
-            raise TypeError(msg)
-
-        error = f"Missing {self.hash_type} output"
-        hash_drain = ValueDrain[HashMapping]()
-        hash_stream = (
-            self._compute_hash(info, source_override=source_override)
-            if source_override is not None
-            else self._compute_hash(info)
+        computed = await self._compute_platform_hashes(
+            info,
+            source_override=source_override,
+            emit=emit,
         )
-        async for event in drain_value_events(
-            hash_stream,
-            hash_drain,
-            parse=_expect_platform_hashes,
-        ):
-            payload = event.payload
-            if (
-                event.kind is UpdateEventKind.STATUS
-                and isinstance(payload, StatusPayload)
-                and payload.info is not None
-                and payload.info.kind is StatusKind.PARTIAL_HASHES
-            ):
-                context.hashes_fully_computed = False
-            yield event
-        platform_hashes = require_value(hash_drain, error)
-        if not isinstance(platform_hashes, dict):
-            msg = f"Expected dict of platform hashes, got {type(platform_hashes)}"
-            raise TypeError(msg)
-
-        entries = [
+        if not computed.fully_computed:
+            context.hashes_fully_computed = False
+        platform_hashes = computed.hashes
+        return [
             HashEntry.create(self.hash_type, hash_val, platform=platform)
             for platform, hash_val in sorted(platform_hashes.items())
         ]
-        yield UpdateEvent.value(self.name, entries)
 
 
 class DenoManifestUpdater(FlakeInputUpdater):
@@ -630,10 +585,11 @@ class DenoManifestUpdater(FlakeInputUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Resolve ``deno.lock`` and emit the generated manifest artifact."""
-        _ = _coerce_context(context)
+        _ = context
         node = self._resolve_flake_node(info)
         locked = node.locked
         if locked is None or not locked.owner or not locked.repo or not locked.rev:
@@ -644,11 +600,13 @@ class DenoManifestUpdater(FlakeInputUpdater):
             f"https://raw.githubusercontent.com/"
             f"{locked.owner}/{locked.repo}/{locked.rev}/{self.lock_file}"
         )
-        yield UpdateEvent.status(
-            self.name,
-            f"Fetching {self.lock_file} from {locked.owner}/{locked.repo}...",
-            operation="compute_hash",
-            status=StatusInfo(kind=StatusKind.COMPUTING_HASH, value=self.lock_file),
+        await emit(
+            UpdateEvent.status(
+                self.name,
+                f"Fetching {self.lock_file} from {locked.owner}/{locked.repo}...",
+                operation="compute_hash",
+                status=StatusInfo(kind=StatusKind.COMPUTING_HASH, value=self.lock_file),
+            )
         )
         lock_bytes = await update_net.fetch_url(
             session,
@@ -662,10 +620,12 @@ class DenoManifestUpdater(FlakeInputUpdater):
             tmp_name = tmp.name
 
         try:
-            yield UpdateEvent.status(
-                self.name,
-                "Resolving Deno dependencies...",
-                operation="compute_hash",
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    "Resolving Deno dependencies...",
+                    operation="compute_hash",
+                )
             )
             manifest = await deno_lock.resolve_deno_deps(Path(tmp_name))
         finally:
@@ -677,22 +637,26 @@ class DenoManifestUpdater(FlakeInputUpdater):
             msg = f"Package directory not found for {self.name}"
             raise RuntimeError(msg)
         manifest_path = pkg_dir / self.manifest_file
-        yield UpdateEvent.artifact(
-            self.name,
-            GeneratedArtifact.json(manifest_path, manifest.to_dict()),
+        await emit(
+            UpdateEvent.artifact(
+                self.name,
+                GeneratedArtifact.json(manifest_path, manifest.to_dict()),
+            )
         )
 
         total_files = sum(len(p.files) for p in manifest.jsr_packages)
-        yield UpdateEvent.status(
-            self.name,
-            f"Prepared {manifest_path.name}: "
-            f"{len(manifest.jsr_packages)} JSR ({total_files} files) + "
-            f"{len(manifest.npm_packages)} npm packages",
-            operation="compute_hash",
+        await emit(
+            UpdateEvent.status(
+                self.name,
+                f"Prepared {manifest_path.name}: "
+                f"{len(manifest.jsr_packages)} JSR ({total_files} files) + "
+                f"{len(manifest.npm_packages)} npm packages",
+                operation="compute_hash",
+            )
         )
 
         empty_entries: list[HashEntry] = []
-        yield UpdateEvent.value(self.name, empty_entries)
+        return empty_entries
 
 
 class UvLockUpdater(FlakeInputUpdater):
@@ -724,38 +688,24 @@ class UvLockUpdater(FlakeInputUpdater):
             for key, value in self.lock_env.items()
         }
 
-    async def _resolve_source_path(self, node: FlakeLockNode) -> EventStream:
+    async def _resolve_source_path(
+        self, node: FlakeLockNode, *, emit: EventSink = ignore_event
+    ) -> Path:
         source_path_expr = flake_source_path_expr(node)
-        source_path_drain = ValueDrain[CommandResult]()
-        async for event in drain_value_events(
-            update_process.run_command(
-                ["nix", "eval", "--impure", "--raw", "--expr", source_path_expr],
-                options=update_process.RunCommandOptions(
-                    source=self.name,
-                    error="nix eval did not return output",
-                    config=self.config,
-                ),
+        source_path_result = await update_process.run_command(
+            ["nix", "eval", "--impure", "--raw", "--expr", source_path_expr],
+            options=update_process.RunCommandOptions(
+                source=self.name,
+                config=self.config,
             ),
-            source_path_drain,
-            parse=expect_command_result,
-        ):
-            yield event
-        source_path_result = require_value(
-            source_path_drain,
-            "Missing nix eval result for source path",
+            emit=emit,
         )
         _raise_failed_command("nix eval", source_path_result)
         resolved_path = source_path_result.stdout.strip()
         if not resolved_path:
             msg = f"Failed to resolve source path for {self._input}"
             raise RuntimeError(msg)
-        yield UpdateEvent.value(self.name, resolved_path)
-
-    def _expect_path_payload(self, payload: object, *, context: str) -> Path:
-        if isinstance(payload, str):
-            return Path(payload)
-        msg = f"Expected {context} path payload, got {type(payload)!r}"
-        raise TypeError(msg)
+        return Path(resolved_path)
 
     async def _copy_workspace(self, source_path: Path, workspace_dir: Path) -> None:
         await asyncio.to_thread(
@@ -772,63 +722,49 @@ class UvLockUpdater(FlakeInputUpdater):
         info: VersionInfo,
         home_dir: Path,
         workspace_dir: Path,
-    ) -> EventStream:
-        uv_result_drain = ValueDrain[CommandResult]()
-        async for event in drain_value_events(
-            update_process.run_command(
-                ["uv", "-q", "lock", "--directory", str(workspace_dir)],
-                options=update_process.RunCommandOptions(
-                    source=self.name,
-                    error="uv lock did not return output",
-                    env={
-                        "HOME": str(home_dir),
-                        "UV_PYTHON": sys.executable,
-                        **self._render_lock_env(info),
-                    },
-                    config=self.config,
-                ),
+        emit: EventSink = ignore_event,
+    ) -> Path:
+        uv_result = await update_process.run_command(
+            ["uv", "-q", "lock", "--directory", str(workspace_dir)],
+            options=update_process.RunCommandOptions(
+                source=self.name,
+                env={
+                    "HOME": str(home_dir),
+                    "UV_PYTHON": sys.executable,
+                    **self._render_lock_env(info),
+                },
+                config=self.config,
             ),
-            uv_result_drain,
-            parse=expect_command_result,
-        ):
-            yield event
-        uv_result = require_value(uv_result_drain, "Missing uv lock result")
+            emit=emit,
+        )
         _raise_failed_command("uv lock", uv_result)
-        yield UpdateEvent.value(self.name, str(workspace_dir / self.lock_file))
+        return workspace_dir / self.lock_file
 
     async def fetch_hashes(
         self,
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Materialize ``uv.lock`` and emit it as a generated artifact."""
-        _ = (session, _coerce_context(context))
+        _ = (session, context)
         node = self._resolve_flake_node(info)
         locked = node.locked
         if locked is None or not locked.owner or not locked.repo or not locked.rev:
             msg = f"Cannot resolve source for {self._input}: incomplete lock"
             raise RuntimeError(msg)
 
-        yield UpdateEvent.status(
-            self.name,
-            f"Resolving source tree for {locked.owner}/{locked.repo}...",
-            operation="compute_hash",
-            status=StatusInfo(kind=StatusKind.COMPUTING_HASH, value=self.lock_file),
+        await emit(
+            UpdateEvent.status(
+                self.name,
+                f"Resolving source tree for {locked.owner}/{locked.repo}...",
+                operation="compute_hash",
+                status=StatusInfo(kind=StatusKind.COMPUTING_HASH, value=self.lock_file),
+            )
         )
-
-        source_path_drain = ValueDrain[Path]()
-        async for event in drain_value_events(
-            self._resolve_source_path(node),
-            source_path_drain,
-            parse=lambda payload: self._expect_path_payload(
-                payload,
-                context="resolved source",
-            ),
-        ):
-            yield event
-        source_path = require_value(source_path_drain, "Missing resolved source path")
+        source_path = await self._resolve_source_path(node, emit=emit)
 
         pkg_dir = update_paths.updater_dir_for(self.name)
         if pkg_dir is None:
@@ -842,45 +778,38 @@ class UvLockUpdater(FlakeInputUpdater):
             workspace_dir = tmpdir / "workspace"
             home_dir.mkdir()
 
-            yield UpdateEvent.status(
-                self.name,
-                "Copying source tree for lock resolution...",
-                operation="compute_hash",
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    "Copying source tree for lock resolution...",
+                    operation="compute_hash",
+                )
             )
             await self._copy_workspace(source_path, workspace_dir)
-
-            lock_file_drain = ValueDrain[Path]()
-            async for event in drain_value_events(
-                self._run_uv_lock(
-                    info=info,
-                    home_dir=home_dir,
-                    workspace_dir=workspace_dir,
-                ),
-                lock_file_drain,
-                parse=lambda payload: self._expect_path_payload(
-                    payload,
-                    context="uv lock",
-                ),
-            ):
-                yield event
-            resolved_lock_path = require_value(lock_file_drain, "Missing uv lock path")
+            resolved_lock_path = await self._run_uv_lock(
+                info=info, home_dir=home_dir, workspace_dir=workspace_dir, emit=emit
+            )
             lock_text = await asyncio.to_thread(
                 resolved_lock_path.read_text,
                 encoding="utf-8",
             )
 
-        yield UpdateEvent.artifact(
-            self.name,
-            GeneratedArtifact.text(lock_path, lock_text),
+        await emit(
+            UpdateEvent.artifact(
+                self.name,
+                GeneratedArtifact.text(lock_path, lock_text),
+            )
         )
-        yield UpdateEvent.status(
-            self.name,
-            f"Prepared {lock_path.name}",
-            operation="compute_hash",
+        await emit(
+            UpdateEvent.status(
+                self.name,
+                f"Prepared {lock_path.name}",
+                operation="compute_hash",
+            )
         )
 
         empty_entries: list[HashEntry] = []
-        yield UpdateEvent.value(self.name, empty_entries)
+        return empty_entries
 
 
 class GoVendorHashUpdater(FlakeInputHashUpdater):

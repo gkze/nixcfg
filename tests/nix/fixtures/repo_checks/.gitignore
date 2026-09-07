@@ -1,0 +1,2 @@
+# Keep the dependency-directory fixture tracked for the native fileset test.
+!/.direnv/

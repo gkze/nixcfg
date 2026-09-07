@@ -94,8 +94,11 @@ class SignalBetaUpdater(AssetURLsMetadataUpdater):
             selected[platform] = matches[0]
         return selected
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the version and both ZIP URLs from Signal's macOS beta feed."""
+        _ = context
         version, urls = await fetch_electron_builder_feed(
             session,
             self.FEED_URL,
@@ -109,11 +112,11 @@ class SignalBetaUpdater(AssetURLsMetadataUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Refresh when Signal republishes a feed URL under the same version."""
         if not await super()._is_latest(context, info):
             return False
-        current = context.current if isinstance(context, UpdateContext) else context
+        current = context.current
         return cast("SourceEntry", current).urls == self._platform_urls(info)

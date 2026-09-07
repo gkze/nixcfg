@@ -7,28 +7,32 @@ from typing import TYPE_CHECKING
 
 from packaging.version import InvalidVersion, Version
 
+from lib.update.events import EventSink, ignore_event
+
 if TYPE_CHECKING:
     import asyncio
     from collections.abc import Iterable, Mapping
 
     import aiohttp
 
-    from lib.update.ui_state import SummaryStatus
+    from lib.update.flake import FlakeInputState
+    from lib.update.outcomes import SummaryStatus
 
 from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.events import (
-    CommandResult,
-    EventStream,
     RefUpdatePayload,
     StatusInfo,
     StatusKind,
     UpdateEvent,
-    UpdateEventKind,
 )
-from lib.update.flake import invalidate_flake_lock, load_flake_lock
+from lib.update.flake import (
+    invalidate_flake_lock,
+    load_flake_lock,
+    read_flake_input_state,
+)
 from lib.update.net import fetch_github_api_paginated
 from lib.update.paths import get_repo_root
-from lib.update.process import StreamCommandOptions, run_queue_task, stream_command
+from lib.update.process import RunCommandOptions, run_command, run_queue_task
 
 _BRANCH_REF_PATTERNS = {
     "master",
@@ -430,9 +434,9 @@ def _update_explicit_input_ref_in_flake(input_name: str, new_ref: str) -> bool:
 class RefTaskOptions:
     """Options controlling ``update_refs_task`` behavior."""
 
-    dry_run: bool = False
     flake_edit_lock: asyncio.Lock | None = None
     config: UpdateConfig | None = None
+    input_refreshes: dict[str, FlakeInputState] | None = None
 
 
 async def check_flake_ref_update(
@@ -498,24 +502,29 @@ async def update_flake_ref(
     new_ref: str,
     *,
     source: str,
-) -> EventStream:
-    yield UpdateEvent.status(
-        source,
-        f"Updating ref: {input_ref.ref} -> {new_ref}",
-        operation="update_ref",
-        status=StatusInfo(
-            kind=StatusKind.UPDATING_REF,
-            current=input_ref.ref,
-            latest=new_ref,
-        ),
+    emit: EventSink = ignore_event,
+) -> None:
+    await emit(
+        UpdateEvent.status(
+            source,
+            f"Updating ref: {input_ref.ref} -> {new_ref}",
+            operation="update_ref",
+            status=StatusInfo(
+                kind=StatusKind.UPDATING_REF,
+                current=input_ref.ref,
+                latest=new_ref,
+            ),
+        )
     )
 
     if input_ref.input_type in {"github", "gitlab"}:
         if _update_explicit_input_ref_in_flake(input_ref.name, new_ref):
-            yield UpdateEvent.status(
-                source,
-                f"Updated flake.nix input ref: {input_ref.name} -> {new_ref}",
-                operation="update_ref",
+            await emit(
+                UpdateEvent.status(
+                    source,
+                    f"Updated flake.nix input ref: {input_ref.name} -> {new_ref}",
+                    operation="update_ref",
+                )
             )
             new_url = None
         else:
@@ -525,50 +534,43 @@ async def update_flake_ref(
     elif input_ref.input_type == "git":
         ref = _format_git_ref_update(input_ref.ref, new_ref)
         _update_git_input_ref_in_flake(input_ref.name, ref)
-        yield UpdateEvent.status(
-            source,
-            f"Updated flake.nix input ref: {input_ref.name} -> {ref}",
-            operation="update_ref",
+        await emit(
+            UpdateEvent.status(
+                source,
+                f"Updated flake.nix input ref: {input_ref.name} -> {ref}",
+                operation="update_ref",
+            )
         )
         new_url = None
     else:
         msg = f"Unsupported input type: {input_ref.input_type}"
         raise RuntimeError(msg)
     if new_url is not None:
-        async for event in _run_checked_command(
+        await _run_checked_command(
             ["flake-edit", "change", input_ref.name, new_url],
             source=source,
             error_prefix="flake-edit change failed",
-        ):
-            yield event
+            emit=emit,
+        )
 
-    async for event in _run_checked_command(
+    await _run_checked_command(
         ["nix", "flake", "lock", "--update-input", input_ref.name],
         source=source,
         error_prefix="nix flake lock failed",
-    ):
-        yield event
+        emit=emit,
+    )
     invalidate_flake_lock()
 
 
 async def _run_checked_command(
-    args: list[str],
-    *,
-    source: str,
-    error_prefix: str,
-) -> EventStream:
-    result: CommandResult | None = None
-    async for event in stream_command(
+    args: list[str], *, source: str, error_prefix: str, emit: EventSink = ignore_event
+) -> None:
+    result = await run_command(
         args,
-        options=StreamCommandOptions(source=source),
-    ):
-        if event.kind == UpdateEventKind.COMMAND_END and isinstance(
-            event.payload,
-            CommandResult,
-        ):
-            result = event.payload
-        yield event
-    if result is None or result.returncode == 0:
+        options=RunCommandOptions(source=source),
+        emit=emit,
+    )
+    if result.returncode == 0:
         return
     stderr = result.stderr.strip()
     msg = (
@@ -642,26 +644,13 @@ async def update_refs_task(
             "current": result.current_ref,
             "latest": latest_ref,
         }
-        if task_options.dry_run:
-            await put(
-                UpdateEvent.status(
-                    source,
-                    f"Update available: {result.current_ref} -> {result.latest_ref}",
-                    operation="check_version",
-                    status=StatusInfo(
-                        kind=StatusKind.UPDATE_AVAILABLE,
-                        current=result.current_ref,
-                        latest=result.latest_ref,
-                    ),
-                ),
-            )
-            await put(UpdateEvent.result(source, update_payload))
-            detail = "updated"
-            return
 
         async def do_update() -> None:
-            async for event in update_flake_ref(input_ref, latest_ref, source=source):
-                await put(event)
+            await update_flake_ref(input_ref, latest_ref, source=source, emit=put)
+            if task_options.input_refreshes is not None:
+                # Record the successful refresh before another ref task can
+                # acquire the lock and change declarations or graph topology.
+                task_options.input_refreshes[source] = read_flake_input_state()
 
         if task_options.flake_edit_lock:
             async with task_options.flake_edit_lock:

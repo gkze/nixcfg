@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
+    from lib.update.updaters.core import UpdateContext
 
 
 @register_updater
@@ -28,9 +29,11 @@ class T3CodeDesktopUpdater(T3RuntimeUpdater):
     compatibility_pins: ClassVar[dict[str, str]] = {"electronBuilderVersion": "26.15.7"}
     generated_artifact_files = ("../t3code/bun.lock", "bun.lock")
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve Electron from the desktop manifest at the locked input commit."""
-        info = await super().fetch_latest(session)
+        info = await super().fetch_latest(session, context=context)
         metadata = await fetch_flake_electron_manifest(
             session,
             node=self._resolve_flake_node(info),

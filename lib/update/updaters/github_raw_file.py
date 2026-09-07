@@ -2,17 +2,13 @@
 
 from typing import TYPE_CHECKING
 
+from lib.nix.models.sources import SourceHashes
+from lib.update.events import EventSink, ignore_event
+
 if TYPE_CHECKING:
     import aiohttp
 
-from lib.nix.models.sources import HashEntry, SourceEntry
-from lib.update.events import (
-    CapturedValue,
-    EventStream,
-    UpdateEvent,
-    capture_stream_value,
-    expect_hash_mapping,
-)
+from lib.nix.models.sources import HashEntry
 from lib.update.net import (
     fetch_github_default_branch,
     fetch_github_latest_commit,
@@ -34,8 +30,11 @@ class GitHubRawFileUpdater(HashEntryUpdater):
     repo: str
     path: str
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch default branch and latest file commit SHA from GitHub."""
+        _ = context
         branch = await fetch_github_default_branch(
             session,
             self.owner,
@@ -58,8 +57,9 @@ class GitHubRawFileUpdater(HashEntryUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Compute a sha256 hash entry for the resolved raw file URL."""
         _ = (session, context)
         try:
@@ -72,19 +72,9 @@ class GitHubRawFileUpdater(HashEntryUpdater):
             msg = f"Expected string revision metadata for {self.name}"
             raise TypeError(msg) from exc
         url = github_raw_url(self.owner, self.repo, rev, self.path)
-        async for item in capture_stream_value(
-            compute_url_hashes(self.name, [url], config=self.config),
-            error="Missing hash output",
-        ):
-            if isinstance(item, CapturedValue):
-                hash_mapping = expect_hash_mapping(item.captured)
-                hash_value = hash_mapping[url]
-                entries: list[HashEntry] = [
-                    HashEntry.create("sha256", hash_value, url=url)
-                ]
-                yield UpdateEvent.value(
-                    self.name,
-                    entries,
-                )
-            else:
-                yield item
+        hash_mapping = await compute_url_hashes(
+            self.name, [url], config=self.config, emit=emit
+        )
+        hash_value = hash_mapping[url]
+        entries: list[HashEntry] = [HashEntry.create("sha256", hash_value, url=url)]
+        return entries

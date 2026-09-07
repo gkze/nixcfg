@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update.derivation_validation import DerivationValidation
+from lib.update.events import EventSink, ignore_event
 from lib.update.nix import (
     _build_fetch_from_github_expr,
     _build_package_path_attr_expr,
@@ -19,8 +20,6 @@ from lib.update.updaters import (
 
 if TYPE_CHECKING:
     import aiohttp
-
-    from lib.update.events import EventStream
 
 
 @register_updater
@@ -43,7 +42,7 @@ class WriterComputerUpdater(GitHubReleaseUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Recompute source closures before accepting release metadata."""
@@ -82,23 +81,22 @@ class WriterComputerUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash source, pnpm store, and Cargo vendor tree in dependency order."""
         _ = (session, context)
         commit = self._require_commit(info)
         fake_hash = self.config.fake_hash
-        async for event in stream_fixed_output_hashes(
+        return await stream_fixed_output_hashes(
             self.name,
             steps=(
                 FixedOutputHashStep(
                     hash_type="srcHash",
-                    error="Missing srcHash output",
                     expr=lambda _resolved: self._src_expr(commit),
                 ),
                 FixedOutputHashStep(
                     hash_type="npmDepsHash",
-                    error="Missing npmDepsHash output",
                     expr=lambda resolved: _build_package_path_attr_expr(
                         self.name,
                         ".pnpmDeps",
@@ -115,7 +113,6 @@ class WriterComputerUpdater(GitHubReleaseUpdater):
                 ),
                 FixedOutputHashStep(
                     hash_type="cargoHash",
-                    error="Missing cargoHash output",
                     expr=lambda resolved: _build_package_path_attr_expr(
                         self.name,
                         ".cargoDeps",
@@ -132,8 +129,8 @@ class WriterComputerUpdater(GitHubReleaseUpdater):
                 ),
             ),
             config=self.config,
-        ):
-            yield event
+            emit=emit,
+        )
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist release version, source commit, and both dependency hashes."""

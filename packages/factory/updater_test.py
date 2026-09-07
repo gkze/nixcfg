@@ -6,7 +6,7 @@ import pytest
 
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 _HASH = "sha256-XvFsRD+vPvNIST+8qrgI9x38gGqPyjPzyNUXaBdKm+Q="
 
@@ -32,7 +32,7 @@ def test_factory_resolves_latest_and_builds_versioned_arch_urls(
 
     monkeypatch.setattr(module, "fetch_url", _fetch_url)
 
-    info = _run(updater.fetch_latest(object()))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     result = updater.build_result(
         info,
         dict.fromkeys(updater.PLATFORMS, _HASH),
@@ -76,4 +76,4 @@ def test_factory_rejects_malformed_latest_feed(
     monkeypatch.setattr(module, "fetch_url", _fetch_url)
 
     with pytest.raises(RuntimeError, match="Could not parse Factory version"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))

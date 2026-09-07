@@ -1120,6 +1120,9 @@ def _guarded_bin_link_script() -> str:
     )
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation renders the interpolated shell program exercised by Bash."
+)
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 @pytest.mark.parametrize(
     "executable_state", ["missing", "non_executable", "executable"]
@@ -2767,6 +2770,9 @@ def test_remove_profile_copies_script_rejects_nested_bundle_names(
     )
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation establishes the assertion message produced by the Nix function."
+)
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_managed_app_overlap_assertion_reports_conflicting_package_lists() -> None:
     """Evaluate conflicts because AST inspection cannot resolve package identities."""
@@ -2793,6 +2799,9 @@ def test_managed_app_overlap_assertion_reports_conflicting_package_lists() -> No
     }
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation can create and compare context-carrying Nix paths."
+)
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_managed_app_overlap_assertion_accepts_context_carrying_output_paths() -> None:
     """Evaluate context paths because AST inspection cannot coerce real Nix strings."""
@@ -2862,6 +2871,9 @@ def test_managed_app_overlap_assertion_accepts_context_carrying_output_paths() -
     }
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation establishes the assertion result produced by the Nix function."
+)
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_managed_app_overlap_assertion_allows_distinct_package_lists() -> None:
     """Evaluate distinct packages because AST inspection cannot resolve output identities."""
@@ -2887,6 +2899,9 @@ def test_managed_app_overlap_assertion_allows_distinct_package_lists() -> None:
     }
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation proves that thrown package outputs remain guarded by tryEval."
+)
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_managed_app_overlap_assertion_ignores_unevaluable_package_outputs() -> None:
     """Evaluate tryEval semantics that AST inspection cannot establish structurally."""
@@ -2911,6 +2926,9 @@ def test_managed_app_overlap_assertion_ignores_unevaluable_package_outputs() -> 
     }
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation establishes the ordered conflicts produced by the Nix function."
+)
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_managed_app_overlap_assertion_preserves_conflict_order() -> None:
     """Evaluate conflict messages because AST inspection cannot establish output order."""
@@ -2987,6 +3005,9 @@ def test_managed_app_overlap_assertion_preserves_conflict_order() -> None:
     }
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation proves unused package values remain lazy."
+)
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_managed_app_overlap_assertion_keeps_unused_packages_lazy() -> None:
     """Evaluate laziness because AST inspection cannot prove thrown values stay unused."""
@@ -3051,6 +3072,7 @@ def test_managed_app_overlap_assertion_keeps_unused_packages_lazy() -> None:
     assert unused_managed_metadata == expected
 
 
+@pytest.mark.nix_eval(reason="Only evaluator traces expose repeated package coercion.")
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_managed_app_overlap_assertion_normalizes_each_package_once() -> None:
     """Evaluate traces because AST inspection cannot observe normalization frequency."""
@@ -3614,6 +3636,9 @@ def test_george_config_enables_signal_beta_downgrade_protection_opt_in() -> None
     assert "preventDowngrade" not in binding_map(slack_entry.values)
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation proves that the merge helper throws before a later overlay can replace a fragment output."
+)
 @pytest.mark.skipif(shutil.which("nix") is None, reason="nix command not available")
 def test_overlay_layer_merge_rejects_shadowed_fragment_outputs() -> None:
     """Use Nix evaluation because an AST cannot prove collision failure semantics."""

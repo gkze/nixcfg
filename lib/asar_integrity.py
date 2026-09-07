@@ -4,8 +4,10 @@ import argparse
 import hashlib
 import json
 import plistlib
+import shutil
 import struct
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -351,6 +353,53 @@ def write_info_plist_hash(
     with plist_path.open("wb") as handle:
         plistlib.dump(info, handle)
     return digest
+
+
+def patch_bundle_integrity(
+    asar_path: Path,
+    plist_path: Path,
+    transform: Callable[[Path], object],
+) -> str:
+    """Stage an archive patch and its plist hash, restoring on publish failure.
+
+    This is a build-time operation on an exclusively owned bundle. Each rename
+    is atomic; the pair is not a transaction visible to concurrent readers.
+    """
+    archive_staging = tempfile.TemporaryDirectory(dir=asar_path.parent, delete=False)
+    retain_original = False
+    try:
+        with (
+            archive_staging as asar_staging_dir,
+            tempfile.TemporaryDirectory(dir=plist_path.parent) as plist_staging_dir,
+        ):
+            staged_asar = Path(asar_staging_dir) / asar_path.name
+            original_asar = Path(asar_staging_dir) / f"{asar_path.name}.original"
+            staged_plist = Path(plist_staging_dir) / plist_path.name
+            shutil.copy2(asar_path, staged_asar)
+            shutil.copy2(asar_path, original_asar)
+            shutil.copy2(plist_path, staged_plist)
+            transform(staged_asar)
+            digest = write_info_plist_hash(staged_plist, staged_asar)
+
+            staged_asar.replace(asar_path)
+            try:
+                staged_plist.replace(plist_path)
+            except OSError as publication_error:
+                try:
+                    original_asar.replace(asar_path)
+                except OSError as rollback_error:
+                    retain_original = True
+                    msg = (
+                        f"Could not publish ASAR integrity plist: {publication_error}; "
+                        f"archive rollback also failed: {rollback_error}; "
+                        f"original archive retained at {original_asar}"
+                    )
+                    raise AsarIntegrityError(msg) from publication_error
+                raise
+            return digest
+    finally:
+        if not retain_original:
+            archive_staging.cleanup()
 
 
 def check_info_plist_hash(

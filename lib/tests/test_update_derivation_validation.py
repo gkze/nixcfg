@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.update import derivation_validation as validation
 from lib.update.derivation_validation import (
     DerivationValidation,
@@ -441,15 +442,6 @@ def test_validate_root_closures_builds_flake_owned_aggregate(
                 "--no-update-lock-file",
                 "--no-link",
                 f"path:{snapshot_root}#checks.aarch64-darwin.root-closures",
-            ],
-            expected_kwargs,
-        ),
-        (
-            [
-                "nix",
-                "build",
-                "--no-update-lock-file",
-                "--no-link",
                 f"path:{snapshot_root}#checks.x86_64-linux.root-closures",
             ],
             expected_kwargs,
@@ -921,3 +913,166 @@ def test_validate_derivations_reports_process_errors(
     assert len(failures) == 1
     assert failures[0].source == "portable"
     assert expected in failures[0].message
+
+
+def test_snapshot_evaluations_share_one_flake_output(tmp_path: Path) -> None:
+    """Force every selected platform's derivation with one pure, locked eval."""
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def _run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout="paths", stderr="")
+
+    assert (
+        validation.validate_derivations(
+            ["demo", "second"],
+            updaters={"demo": _DarwinAndLinuxUpdater, "second": _DarwinAndLinuxUpdater},
+            all_declared_systems=True,
+            flake_root=tmp_path,
+            timeout=42,
+            run=_run,
+        )
+        == ()
+    )
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args[:-1] == [
+        "nix",
+        "eval",
+        "--no-update-lock-file",
+        "--option",
+        "allow-import-from-derivation",
+        "false",
+        "--raw",
+        f"path:{tmp_path}#pkgs",
+        "--apply",
+    ]
+    assert_nix_ast_equal(
+        args[-1],
+        """
+        root: builtins.concatStringsSep "" [
+            root.aarch64-darwin.demo.drvPath
+            root.x86_64-linux.demo.drvPath
+            root.aarch64-darwin.second.drvPath
+            root.x86_64-linux.second.drvPath
+        ]
+    """,
+    )
+    assert kwargs == {
+        "cwd": tmp_path,
+        "text": True,
+        "capture_output": True,
+        "check": False,
+        "timeout": 42,
+    }
+
+
+@pytest.mark.parametrize("batch_failure", ["evaluation", "timeout", "os_error"])
+def test_failed_batch_rechecks_each_target_with_original_retry_policy(
+    tmp_path: Path,
+    batch_failure: str,
+) -> None:
+    """A batch failure neither blames healthy peers nor loses per-target retries."""
+    requests = [
+        DerivationValidationRequest("healthy", ".#pkgs.system.healthy.drvPath"),
+        DerivationValidationRequest("broken", "path:.#pkgs.system.broken.drvPath"),
+        DerivationValidationRequest("network", ".#pkgs.system.network.drvPath"),
+    ]
+    attempts: list[list[str]] = []
+    sleeps: list[float] = []
+    network_attempts = 0
+
+    def _run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal network_attempts
+        attempts.append(args)
+        assert kwargs["timeout"] == 7
+        if "--apply" in args:
+            if batch_failure == "timeout":
+                raise subprocess.TimeoutExpired(args, 7)
+            if batch_failure == "os_error":
+                raise OSError("batch could not start")
+            return subprocess.CompletedProcess(
+                args, 1, stdout="", stderr="batch failed"
+            )
+        if args[-1].endswith(".broken.drvPath"):
+            return subprocess.CompletedProcess(
+                args, 1, stdout="", stderr="broken member"
+            )
+        if args[-1].endswith(".network.drvPath"):
+            network_attempts += 1
+            if network_attempts == 1:
+                return subprocess.CompletedProcess(
+                    args,
+                    1,
+                    stdout="",
+                    stderr="error: unable to download 'https://cache.nixos.org/example': HTTP error 503",
+                )
+        return subprocess.CompletedProcess(args, 0, stdout="path", stderr="")
+
+    assert validation.validate_derivation_requests(
+        requests,
+        flake_root=tmp_path,
+        timeout=7,
+        run=_run,
+        sleep=sleeps.append,
+    ) == (
+        DerivationValidationFailure("broken", requests[1].installable, "broken member"),
+    )
+    assert len(attempts) == 5
+    assert network_attempts == 2
+    assert sleeps == [1]
+
+
+def test_snapshot_validation_preserves_mixed_modes_and_failure_order(
+    tmp_path: Path,
+) -> None:
+    """Unsupported installables remain individual and failure ownership stays ordered."""
+    requests = [
+        DerivationValidationRequest("a", ".#pkgs.system.a.drvPath"),
+        DerivationValidationRequest("external", "github:owner/repo#thing"),
+        DerivationValidationRequest("b", ".#pkgs.system.b.drvPath"),
+        DerivationValidationRequest("quoted", '.#pkgs."quoted.name".drvPath'),
+        DerivationValidationRequest("build", ".#pkgs.system.a", mode="build"),
+        DerivationValidationRequest("other", ".#checks.system.a.drvPath"),
+        DerivationValidationRequest("raw-path", ".#pkgs.system.a.outPath"),
+        DerivationValidationRequest("raw-value", ".#pkgs.system.b.version"),
+    ]
+    calls: list[list[str]] = []
+
+    def _run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="invalid target")
+
+    failures = validation.validate_derivation_requests(
+        requests, flake_root=tmp_path, run=_run
+    )
+    assert [failure.source for failure in failures] == [
+        request.source for request in requests
+    ]
+    assert len(calls) == 9
+    assert len([args for args in calls if "--apply" in args]) == 1
+    external = next(args for args in calls if args[-1] == "github:owner/repo#thing")
+    assert "--no-update-lock-file" not in external
+    assert [args[1] for args in calls].count("build") == 1
+
+
+def test_failed_build_batch_attributes_individual_timeouts(tmp_path: Path) -> None:
+    """A slow aggregate does not make a healthy build inherit another timeout."""
+    requests = [
+        DerivationValidationRequest("a", ".#checks.system.a", mode="build"),
+        DerivationValidationRequest("b", ".#checks.system.b", mode="build"),
+    ]
+    calls: list[list[str]] = []
+
+    def _run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if len(calls) != 2:
+            raise subprocess.TimeoutExpired(args, 3)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    failures = validation.validate_derivation_requests(
+        requests, flake_root=tmp_path, timeout=3, run=_run
+    )
+    assert len(calls) == 3
+    assert [failure.source for failure in failures] == ["b"]
+    assert "timed out after 3 seconds" in failures[0].message

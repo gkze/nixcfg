@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING
@@ -21,9 +21,11 @@ from lib.update.config import resolve_config
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
     CommandResult,
+    EventSink,
     UpdateEvent,
     UpdateEventKind,
     expect_artifact_updates,
+    ignore_event,
 )
 from lib.update.paths import REPO_ROOT
 from lib.update.persistence import planned_update_paths
@@ -32,7 +34,7 @@ from lib.update.source_runner import (
     UpdatePhaseResult,
     run_sources_phase,
 )
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
     from lib.update.process import RunCommandOptions
@@ -185,14 +187,13 @@ def _install_url_hashes(
     async def _compute_url_hashes(
         source: str,
         urls: Iterable[str],
+        *,
+        emit: EventSink = ignore_event,
         **_kwargs: object,
-    ) -> AsyncIterator[UpdateEvent]:
+    ) -> object:
         url_list = list(urls)
         hashes = (asset_hash,) if url_list == [asset_url] else _BUN_HASHES
-        yield UpdateEvent.value(
-            source,
-            dict(zip(url_list, hashes, strict=True)),
-        )
+        return dict(zip(url_list, hashes, strict=True))
 
     monkeypatch.setattr(
         "lib.update.updaters.core.update_process.compute_url_hashes",
@@ -215,19 +216,28 @@ def test_missing_download_hashes_prevent_artifact_generation(
     module = _load_module()
     _install_release_metadata(module, monkeypatch)
     updater = module.SupersetUpdater()
-    info = _run(updater.fetch_latest(object()))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     seen_urls: list[list[str]] = []
 
-    async def _hashes(source, urls, **_kwargs):
+    async def _hashes(
+        source, urls, *, emit: EventSink = ignore_event, **_kwargs
+    ) -> object:
         requested = list(urls)
         seen_urls.append(requested)
-        yield UpdateEvent.status(source, "downloading")
+        await emit(UpdateEvent.status(source, "downloading"))
         if failure == "runtime" and requested == [_ASSET_URL]:
-            yield UpdateEvent.value(source, {_ASSET_URL: _ASSET_HASH})
+            return {_ASSET_URL: _ASSET_HASH}
+        raise RuntimeError("download hash probe failed")
 
     monkeypatch.setattr(module.update_process, "compute_url_hashes", _hashes)
-    with pytest.raises(RuntimeError, match="Missing.*hash"):
-        _run(_collect(updater.fetch_hashes(info, object())))
+    with pytest.raises(RuntimeError, match="download hash probe failed"):
+        _run(
+            _collect(
+                lambda emit: updater.fetch_hashes(
+                    info, object(), emit=emit, context=UpdateContext(current=None)
+                )
+            )
+        )
     assert len(seen_urls) == (1 if failure == "asset" else 2)
 
 
@@ -313,17 +323,12 @@ def test_current_superset_still_materializes_bun_artifacts_before_hashing(
     asset_hash = _ASSET_HASH
 
     async def _run_command(
-        args: list[str],
-        *,
-        options: RunCommandOptions,
-    ) -> AsyncIterator[UpdateEvent]:
+        args: list[str], *, options: RunCommandOptions, emit: EventSink = ignore_event
+    ) -> object:
         seen_commands.append(args)
         bun_lock.write_text("new lock\n", encoding="utf-8")
         bun_nix.write_text("new nix\n", encoding="utf-8")
-        yield UpdateEvent.value(
-            options.source,
-            CommandResult(args=args, returncode=0, stdout="", stderr=""),
-        )
+        return CommandResult(args=args, returncode=0, stdout="", stderr="")
 
     candidate_sources: list[SourceEntry] = []
 
@@ -370,7 +375,13 @@ def test_current_superset_still_materializes_bun_artifacts_before_hashing(
         pins={"electronVersion": _ELECTRON_VERSION},
     )
 
-    events = _run(_collect(module.SupersetUpdater().update_stream(current, object())))
+    events = _run(
+        _collect(
+            lambda emit: module.SupersetUpdater().update_stream(
+                current, object(), emit=emit
+            )
+        )
+    )
 
     assert seen_commands == [
         ["nix", "run", "--impure", "--expr", "candidate-update-script"]
@@ -404,18 +415,13 @@ def test_superset_materialization_failure_remains_an_error(
     asset_hash = _ASSET_HASH
 
     async def _failed_command(
-        args: list[str],
-        *,
-        options: RunCommandOptions,
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.value(
-            options.source,
-            CommandResult(
-                args=args,
-                returncode=17,
-                stdout="",
-                stderr="broken generator",
-            ),
+        args: list[str], *, options: RunCommandOptions, emit: EventSink = ignore_event
+    ) -> object:
+        return CommandResult(
+            args=args,
+            returncode=17,
+            stdout="",
+            stderr="broken generator",
         )
 
     _install_release_metadata(module, monkeypatch)
@@ -506,7 +512,7 @@ def test_fetch_latest_rejects_invalid_payload_shapes(
     )
 
     with pytest.raises(error_type, match=message):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_fetch_latest_ignores_non_dict_and_empty_asset_urls(
@@ -535,7 +541,7 @@ def test_fetch_latest_ignores_non_dict_and_empty_asset_urls(
     with pytest.raises(
         RuntimeError, match="Could not find Superset desktop release asset"
     ):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_fetch_latest_rejects_non_desktop_tag(
@@ -556,7 +562,7 @@ def test_fetch_latest_rejects_non_desktop_tag(
     )
 
     with pytest.raises(RuntimeError, match="Unexpected Superset release tag format"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_fetch_latest_returns_version_info_with_asset_metadata(
@@ -567,7 +573,7 @@ def test_fetch_latest_returns_version_info_with_asset_metadata(
     updater = module.SupersetUpdater()
     _install_release_metadata(module, monkeypatch)
 
-    info = _run(updater.fetch_latest(object()))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert info.version == _RELEASE_VERSION
     assert info.metadata == {
@@ -615,7 +621,11 @@ def test_fetch_latest_rejects_source_input_release_mismatch(
     )
 
     with pytest.raises(RuntimeError, match="does not match release tag commit"):
-        _run(module.SupersetUpdater().fetch_latest(object()))
+        _run(
+            module.SupersetUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_fetch_latest_rejects_non_utf8_bun_lock(
@@ -626,7 +636,11 @@ def test_fetch_latest_rejects_non_utf8_bun_lock(
     _install_release_metadata(module, monkeypatch, bun_lock=b"\xff")
 
     with pytest.raises(ValueError, match="bun.lock is not UTF-8 text"):
-        _run(module.SupersetUpdater().fetch_latest(object()))
+        _run(
+            module.SupersetUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_fetch_latest_requires_exact_root_bun_package_manager(
@@ -641,7 +655,11 @@ def test_fetch_latest_requires_exact_root_bun_package_manager(
     )
 
     with pytest.raises(RuntimeError, match="exact semantic version"):
-        _run(module.SupersetUpdater().fetch_latest(object()))
+        _run(
+            module.SupersetUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_locked_source_commit_requires_matching_release_tag(

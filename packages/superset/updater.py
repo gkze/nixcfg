@@ -16,18 +16,14 @@ from lib.update.bun_toolchain import (
 )
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
-    UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_hash_mapping,
-    require_value,
+    EventSink,
+    ignore_event,
 )
 from lib.update.generated_artifact_commands import stream_command_materialized_artifacts
 from lib.update.net import fetch_json, fetch_url, github_raw_url
 from lib.update.nix import _build_package_path_attr_expr
 from lib.update.npm_semver import require_npm_version_matches_spec
-from lib.update.updaters import register_updater
-from lib.update.updaters.core import _coerce_context
+from lib.update.updaters import register_updater, stream_url_hash_mapping
 from lib.update.updaters.github_release import GitHubReleaseAssetURLsUpdater
 from lib.update.updaters.materialization import MaterializesArtifactsMixin
 from lib.update.updaters.metadata import VersionInfo, require_metadata_str
@@ -36,7 +32,6 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
-    from lib.update.events import EventStream
     from lib.update.updaters import UpdateContext
 
 _BUN_ARTIFACTS = (
@@ -219,8 +214,11 @@ class SupersetUpdater(MaterializesArtifactsMixin, GitHubReleaseAssetURLsUpdater)
             context="Superset Electron",
         )
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve one internally coherent immutable desktop release."""
+        _ = context
         payload = await self._fetch_latest_release_payload(session)
         tag_name = self._release_tag_from_payload(payload)
         version = self._normalize_release_version(tag_name)
@@ -320,20 +318,13 @@ class SupersetUpdater(MaterializesArtifactsMixin, GitHubReleaseAssetURLsUpdater)
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash exact Bun and binary inputs before regenerating Bun artifacts."""
-        context = _coerce_context(context)
-        asset_hash_drain = ValueDrain[dict[str, str]]()
-        async for event in drain_value_events(
-            super().fetch_hashes(info, session, context=context),
-            asset_hash_drain,
-            parse=expect_hash_mapping,
-        ):
-            yield event
-        asset_hashes = require_value(
-            asset_hash_drain,
-            "Missing Superset AppImage hashes",
+        _ = (session, context)
+        asset_hashes = await stream_url_hash_mapping(
+            self.name, self._platform_urls(info), config=self.config, emit=emit
         )
         asset_entries = [
             HashEntry.create("sha256", hash_value, platform=platform)
@@ -342,21 +333,13 @@ class SupersetUpdater(MaterializesArtifactsMixin, GitHubReleaseAssetURLsUpdater)
 
         bun_version = self.source_pins_for(info)["bunVersion"]
         bun_urls = bun_release_urls(bun_version, _SOURCE_BUILD_SYSTEMS)
-        bun_hash_drain = ValueDrain[dict[str, str]]()
-        async for event in drain_value_events(
-            update_process.compute_url_hashes(
-                self.name,
-                bun_urls.values(),
-                config=self.config,
-            ),
-            bun_hash_drain,
-            parse=expect_hash_mapping,
-        ):
-            yield event
+        hashes_by_url = await update_process.compute_url_hashes(
+            self.name, bun_urls.values(), config=self.config, emit=emit
+        )
         bun_entries = bun_runtime_hash_entries(
             bun_version,
             _SOURCE_BUILD_SYSTEMS,
-            require_value(bun_hash_drain, "Missing Superset Bun runtime hashes"),
+            hashes_by_url,
         )
         hashes = [*bun_entries, *asset_entries]
         candidate = self.build_result(info, hashes)
@@ -367,17 +350,16 @@ class SupersetUpdater(MaterializesArtifactsMixin, GitHubReleaseAssetURLsUpdater)
             fake_hashes=False,
         )
 
-        async def emit_hashes() -> EventStream:
-            yield UpdateEvent.value(self.name, hashes)
+        async def emit_hashes() -> SourceHashes:
+            return hashes
 
-        async for event in stream_command_materialized_artifacts(
+        return await stream_command_materialized_artifacts(
             self.name,
             args=["nix", "run", "--impure", "--expr", update_script_expr],
             artifact_paths=_BUN_ARTIFACTS,
-            inner=emit_hashes(),
-            dry_run=context.dry_run,
+            inner=emit_hashes,
             config=self.config,
             detail=_BUN_ARTIFACT_DETAIL,
             artifact_normalizers={_BUN_ARTIFACTS[1]: normalize_bun_nix},
-        ):
-            yield event
+            emit=emit,
+        )

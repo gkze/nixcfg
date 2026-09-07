@@ -18,7 +18,7 @@ from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.events import UpdateEvent, UpdateEventKind
+from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
 from lib.update.nix import _contextual_overlay_bindings
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.updaters import VersionInfo
@@ -55,7 +55,9 @@ def _install_main_version(
     monkeypatch: pytest.MonkeyPatch,
     updater: object,
 ) -> None:
-    async def _fetch_latest(_session: object) -> VersionInfo:
+    async def _fetch_latest(
+        _session: object, *, context: UpdateContext | None = None
+    ) -> VersionInfo:
         return VersionInfo(version="main")
 
     monkeypatch.setattr(updater, "fetch_latest", _fetch_latest)
@@ -124,17 +126,27 @@ def test_t3code_workspace_fetch_hashes_uses_shared_fixed_output_hash_probe(
         *,
         env: dict[str, str] | None = None,
         config: object,
-    ):
+        emit: EventSink = ignore_event,
+    ) -> object:
         captured["source"] = source
         captured["expr"] = expr
         captured["env"] = env
         captured["config"] = config
-        yield UpdateEvent.status(source, "retrying")
-        yield UpdateEvent.value(source, HASH)
+        await emit(UpdateEvent.status(source, "retrying"))
+        return HASH
 
     monkeypatch.setattr(module, "compute_fixed_output_hash", _fake_compute)
 
-    events = _run(_collect(updater.fetch_hashes(VersionInfo(version="main"), object())))
+    events = _run(
+        _collect(
+            lambda emit: updater.fetch_hashes(
+                VersionInfo(version="main"),
+                object(),
+                emit=emit,
+                context=UpdateContext(current=None),
+            )
+        )
+    )
 
     assert captured["source"] == updater.name
     expr = captured["expr"]
@@ -143,8 +155,8 @@ def test_t3code_workspace_fetch_hashes_uses_shared_fixed_output_hash_probe(
     assert captured["env"] is None
     assert captured["config"] is updater.config
     assert events[0].message == "retrying"
-    assert events[-1].kind is UpdateEventKind.VALUE
-    payload = events[-1].payload
+
+    payload = events.result
     assert isinstance(payload, list)
     assert len(payload) == 1
     hash_entry = payload[0]
@@ -178,7 +190,14 @@ def test_t3code_workspace_is_latest_uses_direct_fingerprint_expr(
 
     monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
 
-    assert _run(updater._is_latest(current, VersionInfo(version="main"))) is True
+    assert (
+        _run(
+            updater._is_latest(
+                UpdateContext(current=current), VersionInfo(version="main")
+            )
+        )
+        is True
+    )
     assert captured["source"] == "t3code-workspace"
     assert_nix_ast_equal(str(captured["expr"]), _expected_workspace_expr())
 
@@ -187,9 +206,19 @@ def test_t3code_workspace_is_latest_rejects_missing_metadata() -> None:
     """Latest checks should short-circuit when version or drv hash is absent."""
     updater = _load_module().T3CodeWorkspaceUpdater()
 
-    assert _run(updater._is_latest(None, VersionInfo(version="main"))) is False
     assert (
-        _run(updater._is_latest(_source_entry(), VersionInfo(version="other"))) is False
+        _run(
+            updater._is_latest(UpdateContext(current=None), VersionInfo(version="main"))
+        )
+        is False
+    )
+    assert (
+        _run(
+            updater._is_latest(
+                UpdateContext(current=_source_entry()), VersionInfo(version="other")
+            )
+        )
+        is False
     )
 
 
@@ -233,14 +262,15 @@ def test_t3code_workspace_rechecks_node_modules_when_drv_fingerprint_matches(
         *,
         env: dict[str, str] | None = None,
         config: object,
-    ):
+        emit: EventSink = ignore_event,
+    ) -> object:
         captured.update({
             "hash_source": source,
             "hash_expr": expr,
             "hash_env": env,
             "hash_config": config,
         })
-        yield UpdateEvent.value(source, NEW_HASH)
+        return NEW_HASH
 
     monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
     monkeypatch.setattr(module, "compute_fixed_output_hash", _fake_compute)
@@ -251,9 +281,8 @@ def test_t3code_workspace_rechecks_node_modules_when_drv_fingerprint_matches(
 
     events = _run(
         _collect(
-            updater.update_stream(
-                _source_entry(drv_hash="abc123"),
-                object(),
+            lambda emit: updater.update_stream(
+                _source_entry(drv_hash="abc123"), object(), emit=emit
             )
         )
     )
@@ -287,8 +316,10 @@ def test_t3code_workspace_persists_settled_post_materialization_fingerprint(
     async def _fake_fingerprint(*_args: object, **_kwargs: object) -> str:
         return next(fingerprints)
 
-    async def _fake_compute(*_args: object, **_kwargs: object):
-        yield UpdateEvent.value(updater.name, HASH)
+    async def _fake_compute(
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
+        return HASH
 
     monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
     monkeypatch.setattr(module, "compute_fixed_output_hash", _fake_compute)
@@ -299,9 +330,8 @@ def test_t3code_workspace_persists_settled_post_materialization_fingerprint(
 
     events = _run(
         _collect(
-            updater.update_stream(
-                _source_entry(drv_hash="before"),
-                object(),
+            lambda emit: updater.update_stream(
+                _source_entry(drv_hash="before"), object(), emit=emit
             )
         )
     )
@@ -328,8 +358,10 @@ def test_t3code_workspace_rejects_unstable_post_materialization_fingerprint(
     async def _fake_fingerprint(*_args: object, **_kwargs: object) -> str:
         return next(fingerprints)
 
-    async def _fake_compute(*_args: object, **_kwargs: object):
-        yield UpdateEvent.value(updater.name, HASH)
+    async def _fake_compute(
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
+        return HASH
 
     monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
     monkeypatch.setattr(module, "compute_fixed_output_hash", _fake_compute)
@@ -344,9 +376,8 @@ def test_t3code_workspace_rejects_unstable_post_materialization_fingerprint(
     ):
         _run(
             _collect(
-                updater.update_stream(
-                    _source_entry(drv_hash="before"),
-                    object(),
+                lambda emit: updater.update_stream(
+                    _source_entry(drv_hash="before"), object(), emit=emit
                 )
             )
         )
@@ -364,10 +395,15 @@ def test_t3code_workspace_finalize_result_computes_missing_fingerprint(
 
     monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
 
-    events = _run(_collect(updater._finalize_result(_source_entry())))
+    events = _run(
+        _collect(
+            lambda emit: updater._finalize_result(
+                _source_entry(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
-    assert events[-1].kind is UpdateEventKind.VALUE
-    assert events[-1].payload.drv_hash == "abc123"
+    assert events.result.drv_hash == "abc123"
 
 
 def test_t3code_workspace_finalize_result_warns_when_fingerprint_fails(
@@ -383,9 +419,15 @@ def test_t3code_workspace_finalize_result_warns_when_fingerprint_fails(
 
     monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
 
-    events = _run(_collect(updater._finalize_result(_source_entry())))
+    events = _run(
+        _collect(
+            lambda emit: updater._finalize_result(
+                _source_entry(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
     assert events[1].kind is UpdateEventKind.STATUS
     assert "Warning: derivation fingerprint unavailable (boom)" in events[1].message
-    assert events[-1].kind is UpdateEventKind.VALUE
-    assert events[-1].payload.drv_hash is None
+
+    assert events.result.drv_hash is None

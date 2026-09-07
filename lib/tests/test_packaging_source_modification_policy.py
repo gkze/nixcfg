@@ -986,21 +986,6 @@ _ALLOWED_PYTHON_AD_HOC_REWRITE_SITES: Final = (
         "packages/codex/patch_allocator_weak_linkage.py",
         r"""original.replace(_WEAK_LINKAGE_ATTR, '')""",
     ),
-    *_python_sites(
-        "packages/gitbutler/normalize_cargo_nix.py",
-        r"""_GITBUTLER_TAURI_PACKAGE_PREFIX.sub(replace_package, text, count=1)""",
-        r"""_GIX_TRACE_REGISTRY_DEPENDENCY.sub(replace_dependency, text, count=1)""",
-        r"""_GIX_TRACE_REGISTRY_PACKAGE.sub(replace_package, text, count=1)""",
-        r"""_GIX_VALIDATE_REGISTRY_DEPENDENCY.sub(replace_dependency, text, count=1)""",
-        r"""_GIX_VALIDATE_REGISTRY_PACKAGE.sub(replace_package, text, count=1)""",
-        r"""dependency.replace(package_id_line, f'{package_id_line}{indent}  features = [ "{_REGISTRY_SOURCE_DISAMBIGUATOR}" ];\n', 1)""",
-        r"""dependency.replace(package_id_line, f'{package_id_line}{indent}  features = [ "{_REGISTRY_SOURCE_DISAMBIGUATOR}" ];\n', 1)""",
-        r"""package.replace('        resolvedDefaultFeatures = [ "default" ];', f'        resolvedDefaultFeatures = [ "{_REGISTRY_SOURCE_DISAMBIGUATOR}" "default" ];', 1)""",
-        r"""package.replace('        resolvedDefaultFeatures = [ "default" ];', f'        resolvedDefaultFeatures = [ "{_REGISTRY_SOURCE_DISAMBIGUATOR}" "default" ];', 1).replace('      resolvedDefaultFeatures = [ "default" ];', f'      resolvedDefaultFeatures = [ "{_REGISTRY_SOURCE_DISAMBIGUATOR}" "default" ];', 1)""",
-        r"""package.replace(closing, insertion + closing, 1)""",
-        r"""package.replace(dependencies_match.group(0), dependencies_match.group(0) + dependency, 1)""",
-        r"""package.replace(features_match.group(0), f'{features_match.group(0)}{source_line}', 1)""",
-    ),
 )
 
 _NIX_SUBSTITUTE_AUDIT = NixSubstituteAudit(_ALLOWED_NIX_SUBSTITUTE_SITES)

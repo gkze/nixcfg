@@ -5,12 +5,13 @@ from typing import TYPE_CHECKING
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.update.events import EventSink, ignore_event
+
 if TYPE_CHECKING:
     import aiohttp
     from nix_manipulator.expressions.expression import NixExpression
 
-    from lib.nix.models.sources import SourceEntry
-    from lib.update.events import EventStream
+    from lib.nix.models.sources import SourceHashes
 
 from lib.update.nix import _build_nix_expr
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
@@ -89,28 +90,27 @@ class SentryCliUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Compute ``srcHash`` and ``cargoHash`` via fixed-output builds."""
         _ = (session, context)
         commit = self._require_commit(info)
 
-        async for event in stream_fixed_output_hashes(
+        return await stream_fixed_output_hashes(
             self.name,
             steps=(
                 FixedOutputHashStep(
                     hash_type="srcHash",
-                    error="Missing srcHash output",
                     expr=lambda _resolved: _build_nix_expr(self._src_nix_expr(commit)),
                 ),
                 FixedOutputHashStep(
                     hash_type="cargoHash",
-                    error="Missing cargoHash output",
                     expr=lambda resolved: _build_nix_expr(
                         self._cargo_nix_expr(commit, resolved["srcHash"])
                     ),
                 ),
             ),
             config=self.config,
-        ):
-            yield event
+            emit=emit,
+        )

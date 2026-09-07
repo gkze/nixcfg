@@ -10,13 +10,11 @@ from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.events import UpdateEvent, UpdateEventKind
+from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-
     import aiohttp
 
 ROOT_HASH = "sha256-rFnOc1QtnRBeEfv/moud3FTirqiPWCu0NEXJ6PQ+c14="
@@ -73,7 +71,7 @@ def test_github_desktop_fetch_latest_reads_locked_release_ref(
     updater = module.GitHubDesktopUpdater()
     session = cast("aiohttp.ClientSession", object())
 
-    info = _run(updater.fetch_latest(session))
+    info = _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
 
     assert info.version == "3.5.9-beta2"
     assert info.commit == "a" * 40
@@ -113,7 +111,11 @@ def test_github_desktop_fetch_latest_requires_exact_electron_version(
     monkeypatch.setattr(module, "fetch_json", _fetch_json)
 
     with pytest.raises(TypeError, match="exact Electron version"):
-        _run(module.GitHubDesktopUpdater().fetch_latest(object()))
+        _run(
+            module.GitHubDesktopUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_github_desktop_fetch_latest_requires_release_ref(
@@ -127,7 +129,12 @@ def test_github_desktop_fetch_latest_requires_release_ref(
     updater = module.GitHubDesktopUpdater()
 
     with pytest.raises(RuntimeError, match="Expected GitHub Desktop release ref"):
-        _run(updater.fetch_latest(cast("aiohttp.ClientSession", object())))
+        _run(
+            updater.fetch_latest(
+                cast("aiohttp.ClientSession", object()),
+                context=UpdateContext(current=None),
+            )
+        )
 
 
 def test_github_desktop_fetch_latest_requires_locked_commit(
@@ -142,7 +149,11 @@ def test_github_desktop_fetch_latest_requires_locked_commit(
     )
 
     with pytest.raises(RuntimeError, match="missing an immutable commit"):
-        _run(module.GitHubDesktopUpdater().fetch_latest(object()))
+        _run(
+            module.GitHubDesktopUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_github_desktop_fetch_latest_rejects_empty_release_version(
@@ -157,7 +168,12 @@ def test_github_desktop_fetch_latest_rejects_empty_release_version(
     updater = module.GitHubDesktopUpdater()
 
     with pytest.raises(RuntimeError, match="Empty GitHub Desktop version"):
-        _run(updater.fetch_latest(cast("aiohttp.ClientSession", object())))
+        _run(
+            updater.fetch_latest(
+                cast("aiohttp.ClientSession", object()),
+                context=UpdateContext(current=None),
+            )
+        )
 
 
 def test_github_desktop_build_result_tracks_input_and_hashes() -> None:
@@ -211,18 +227,21 @@ def test_github_desktop_fetch_hashes_computes_both_yarn_caches(
         *,
         env: object = None,
         config: object = None,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         calls.append({"name": name, "expr": expr, "env": env, "config": config})
-        yield UpdateEvent.value(name, ROOT_HASH if len(calls) == 1 else APP_HASH)
+        return ROOT_HASH if len(calls) == 1 else APP_HASH
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
     updater = module.GitHubDesktopUpdater()
 
     events = _run(
         _collect_events(
-            updater.fetch_hashes(
+            lambda emit: updater.fetch_hashes(
                 _version_info(),
                 cast("aiohttp.ClientSession", object()),
+                emit=emit,
+                context=UpdateContext(current=None),
             )
         )
     )
@@ -231,17 +250,17 @@ def test_github_desktop_fetch_hashes_computes_both_yarn_caches(
     assert all(call["env"] is None for call in calls)
     assert "cacheRoot" in cast("str", calls[0]["expr"])
     assert "cacheApp" in cast("str", calls[1]["expr"])
-    assert events[-1].kind is UpdateEventKind.VALUE
-    assert events[-1].payload == [
+
+    assert events.result == [
         HashEntry.create("yarnRootHash", ROOT_HASH),
         HashEntry.create("yarnAppHash", APP_HASH),
     ]
 
 
-def test_github_desktop_fetch_hashes_requires_each_cache_hash(
+def test_github_desktop_fetch_hashes_propagates_cache_hash_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Fail clearly if a cache hash command produces no value event."""
+    """Propagate cache hash failures before constructing a candidate."""
     module = _load_updater_module()
 
     async def _fixed_hash(
@@ -250,19 +269,23 @@ def test_github_desktop_fetch_hashes_requires_each_cache_hash(
         *,
         env: object = None,
         config: object = None,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = (env, config)
-        yield UpdateEvent.status(name, "hashing")
+        await emit(UpdateEvent.status(name, "hashing"))
+        raise RuntimeError("cache hash probe failed")
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
     updater = module.GitHubDesktopUpdater()
 
-    with pytest.raises(RuntimeError, match="Missing yarnRootHash output"):
+    with pytest.raises(RuntimeError, match="cache hash probe failed"):
         _run(
             _collect_events(
-                updater.fetch_hashes(
+                lambda emit: updater.fetch_hashes(
                     _version_info(),
                     cast("aiohttp.ClientSession", object()),
+                    emit=emit,
+                    context=UpdateContext(current=None),
                 )
             )
         )
@@ -281,6 +304,8 @@ def test_github_desktop_electron_change_uses_candidate_override_and_converges(
     async def _latest(
         _self: object,
         _session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext | None = None,
     ) -> VersionInfo:
         return _version_info()
 
@@ -302,17 +327,13 @@ def test_github_desktop_electron_change_uses_candidate_override_and_converges(
         return f"candidate-overlay{attr_path}"
 
     async def _fixed_hash(
-        name: str,
-        expr: str,
-        *,
-        config: object = None,
-    ) -> AsyncIterator[UpdateEvent]:
+        name: str, expr: str, *, config: object = None, emit: EventSink = ignore_event
+    ) -> object:
         nonlocal fixed_hash_calls
         fixed_hash_calls += 1
         assert name == "github-desktop"
         _ = (expr, config)
-        value = ROOT_HASH if fixed_hash_calls == 1 else APP_HASH
-        yield UpdateEvent.value(name, value)
+        return ROOT_HASH if fixed_hash_calls == 1 else APP_HASH
 
     async def _fingerprint(
         name: str,
@@ -350,9 +371,8 @@ def test_github_desktop_electron_change_uses_candidate_override_and_converges(
 
     first_events = _run(
         _collect_events(
-            updater.update_stream(
-                current,
-                cast("aiohttp.ClientSession", object()),
+            lambda emit: updater.update_stream(
+                current, cast("aiohttp.ClientSession", object()), emit=emit
             )
         )
     )
@@ -360,9 +380,8 @@ def test_github_desktop_electron_change_uses_candidate_override_and_converges(
     assert isinstance(first_result, SourceEntry)
     second_events = _run(
         _collect_events(
-            updater.update_stream(
-                first_result,
-                cast("aiohttp.ClientSession", object()),
+            lambda emit: updater.update_stream(
+                first_result, cast("aiohttp.ClientSession", object()), emit=emit
             )
         )
     )
@@ -414,12 +433,23 @@ def test_github_desktop_is_latest_requires_hashes_and_drv_fingerprint(
 
     monkeypatch.setattr("lib.update.nix.compute_drv_fingerprint", _fingerprint)
 
-    assert _run(updater._is_latest(entry, _version_info())) is True
-    assert _run(updater._is_latest(entry, _version_info("3.5.9-beta3"))) is False
+    assert (
+        _run(updater._is_latest(UpdateContext(current=entry), _version_info())) is True
+    )
     assert (
         _run(
             updater._is_latest(
-                entry.model_copy(update={"electron_version": "41.7.0"}),
+                UpdateContext(current=entry), _version_info("3.5.9-beta3")
+            )
+        )
+        is False
+    )
+    assert (
+        _run(
+            updater._is_latest(
+                UpdateContext(
+                    current=entry.model_copy(update={"electron_version": "41.7.0"})
+                ),
                 _version_info(),
             )
         )
@@ -428,7 +458,7 @@ def test_github_desktop_is_latest_requires_hashes_and_drv_fingerprint(
     assert (
         _run(
             updater._is_latest(
-                entry.model_copy(update={"drv_hash": "old"}),
+                UpdateContext(current=entry.model_copy(update={"drv_hash": "old"})),
                 _version_info(),
             )
         )
@@ -446,7 +476,9 @@ def test_github_desktop_is_latest_requires_hashes_and_drv_fingerprint(
         raise RuntimeError(msg)
 
     monkeypatch.setattr("lib.update.nix.compute_drv_fingerprint", _fingerprint_failure)
-    assert _run(updater._is_latest(entry, _version_info())) is False
+    assert (
+        _run(updater._is_latest(UpdateContext(current=entry), _version_info())) is False
+    )
 
 
 def test_github_desktop_finalize_result_uses_cached_context_fingerprint() -> None:
@@ -463,11 +495,15 @@ def test_github_desktop_finalize_result_uses_cached_context_fingerprint() -> Non
     })
     context = UpdateContext(current=None, drv_fingerprint="drv")
 
-    events = _run(_collect_events(updater._finalize_result(entry, context=context)))
+    events = _run(
+        _collect_events(
+            lambda emit: updater._finalize_result(entry, context=context, emit=emit)
+        )
+    )
 
     assert events[0].kind is UpdateEventKind.STATUS
-    assert events[-1].kind is UpdateEventKind.VALUE
-    assert events[-1].payload.drv_hash == "drv"
+
+    assert events.result.drv_hash == "drv"
 
 
 def test_github_desktop_finalize_result_warns_when_fingerprint_fails(
@@ -497,9 +533,15 @@ def test_github_desktop_finalize_result_warns_when_fingerprint_fails(
 
     monkeypatch.setattr("lib.update.nix.compute_drv_fingerprint", _fingerprint_failure)
 
-    events = _run(_collect_events(updater._finalize_result(entry)))
+    events = _run(
+        _collect_events(
+            lambda emit: updater._finalize_result(
+                entry, emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
     assert events[1].kind is UpdateEventKind.STATUS
     assert "Warning: derivation fingerprint unavailable (boom)" in events[1].message
-    assert events[-1].kind is UpdateEventKind.VALUE
-    assert events[-1].payload.drv_hash is None
+
+    assert events.result.drv_hash is None

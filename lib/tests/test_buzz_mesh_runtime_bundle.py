@@ -5,11 +5,10 @@ import json
 import os
 import runpy
 import sys
-from collections.abc import Callable
 from functools import cache
 from pathlib import Path
 from textwrap import dedent
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 from nix_manipulator.expressions.assertion import Assertion
@@ -19,11 +18,12 @@ from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.import_utils import load_module_from_path
 from lib.tests._assertions import expect_instance
 from lib.tests._buzz_native_lock import (
     buzz_native_lock_string,
-    render_buzz_native_lock_interpolations,
 )
+from lib.tests._macho import macho, string_command
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
 from lib.update.paths import REPO_ROOT
@@ -32,6 +32,9 @@ if TYPE_CHECKING:
     from nix_manipulator.expressions.scope import Scope
 
 _BUNDLE_PATH = REPO_ROOT / "packages/buzz/native/mesh-runtime-bundle.nix"
+bundle = load_module_from_path(
+    _BUNDLE_PATH.with_name("mesh_runtime_bundle.py"), "buzz_mesh_runtime_bundle"
+)
 _BUZZ_PACKAGE_PATH = REPO_ROOT / "packages/buzz/package.nix"
 _MESH_VERSION = buzz_native_lock_string("meshLlm", "version")
 _MESH_COMMIT = buzz_native_lock_string("meshLlm", "commit")
@@ -80,16 +83,6 @@ def _assertion_conditions() -> list[object]:
 def _derivation_arguments() -> AttributeSet:
     _package, derivation = _bundle_package()
     return expect_instance(derivation.argument, AttributeSet)
-
-
-def _bundle_script() -> str:
-    script = expect_instance(
-        expect_binding(_package_scope(), "bundleScript").value,
-        IndentedString,
-    )
-    return render_buzz_native_lock_interpolations(
-        dedent(indented_string_body(script.rebuild()))
-    )
 
 
 @cache
@@ -182,14 +175,22 @@ def _library_payload(
 
 def _write_library(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")),
-        encoding="utf-8",
+    commands = []
+    if payload["install_id"]:
+        commands.append(string_command(0xD, str(payload["install_id"])))
+    commands.extend(
+        string_command(0xC, str(value)) for value in payload["dependencies"]
+    )
+    cpu = 0x100000C if payload["architecture"] == "arm64" else 0x1000007
+    path.write_bytes(
+        macho(commands, cpu=cpu, filetype=6)
+        + b"\nFIXTURE\n"
+        + json.dumps(payload).encode()
     )
 
 
 def _read_library(path: Path) -> dict[str, object]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = json.loads(path.read_bytes().split(b"\nFIXTURE\n", 1)[1])
     assert isinstance(value, dict)
     return value
 
@@ -227,24 +228,9 @@ def _write_llama_fixture(root: Path) -> tuple[Path, Path, Path]:
 
 
 @pytest.fixture(scope="module")
-def bundle_program(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Materialize one script path so coverage combines all branch outcomes."""
-    script = tmp_path_factory.mktemp("mesh-runtime-bundle") / "bundle.py"
-    script.write_text(_bundle_script(), encoding="utf-8")
-    return script
-
-
-@pytest.fixture(scope="module")
-def embedded_program(bundle_program: Path) -> dict[str, object]:
-    """Load helper functions without executing the command-line entrypoint."""
-    return runpy.run_path(str(bundle_program), run_name="buzz_mesh_runtime_bundle")
-
-
-def _embedded_function(
-    program: dict[str, object],
-    name: str,
-) -> Callable[..., object]:
-    return cast("Callable[..., object]", program[name])
+def bundle_program() -> Path:
+    """Exercise the exact Python file invoked by the Nix derivation."""
+    return Path(bundle.__file__)
 
 
 @pytest.fixture(scope="module")
@@ -262,19 +248,9 @@ def fake_macho_tools(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path
 
             tool = Path(sys.argv[0]).name
             library = Path(sys.argv[-1])
-            payload = json.loads(library.read_text(encoding="utf-8"))
+            payload = json.loads(library.read_bytes().split(b"\\nFIXTURE\\n", 1)[1])
 
-            if tool == "lipo":
-                print(payload["architecture"])
-            elif tool == "otool" and "-D" in sys.argv:
-                print(f"{library}:")
-                print(payload["install_id"])
-            elif tool == "otool" and "-L" in sys.argv:
-                print(f"{library}:")
-                print()
-                for dependency in [payload["install_id"], *payload["dependencies"]]:
-                    print(f"    {dependency} (compatibility version 0.0.0, current version 0.0.0)")
-            elif tool == "nm":
+            if tool == "nm":
                 print("\\n".join(payload["symbols"]))
             elif tool == "codesign" and "--verify" in sys.argv:
                 if payload["signature"] == "invalid":
@@ -291,7 +267,7 @@ def fake_macho_tools(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path
     )
     dispatcher.chmod(0o755)
     tools: dict[str, Path] = {}
-    for name in ("codesign", "lipo", "nm", "otool"):
+    for name in ("codesign", "nm"):
         path = root / name
         path.symlink_to(dispatcher.name)
         tools[name] = path
@@ -320,10 +296,12 @@ def _run_bundle(
             str(output),
             "lib",
             json.dumps(resource_subpaths or []),
-            str(tools["lipo"]),
-            str(tools["otool"]),
             str(tools["nm"]),
             str(tools["codesign"]),
+            _MESH_VERSION,
+            _MESH_COMMIT,
+            _LLAMA_COMMIT,
+            _SKIPPY_ABI,
         ],
     )
     runpy.run_path(str(program), run_name="__main__")
@@ -515,7 +493,7 @@ def test_install_phase_is_an_unpacked_offline_python_boundary() -> None:
         assert_nix_ast_equal(expect_binding(attrs.values, name).value, "true")
     assert_nix_ast_equal(
         expect_binding(attrs.values, "nativeBuildInputs").value,
-        "[ cctools python3 ]",
+        "[ cctools inspectionPython ]",
     )
 
     install_phase = expect_instance(
@@ -524,10 +502,10 @@ def test_install_phase_is_an_unpacked_offline_python_boundary() -> None:
     )
     shell = parse_shell(dedent(indented_string_body(install_phase.rebuild())))
     assert command_texts(shell, "__NIX_INTERP__/bin/python3") == [
-        "__NIX_INTERP__/bin/python3 -c __NIX_INTERP__ __NIX_INTERP__ "
+        "__NIX_INTERP__/bin/python3 __NIX_INTERP__ __NIX_INTERP__ "
         '__NIX_INTERP__ __NIX_INTERP__ "$out" lib __NIX_INTERP__ '
-        "__NIX_INTERP__/bin/lipo __NIX_INTERP__/bin/otool __NIX_INTERP__/bin/nm "
-        "/usr/bin/codesign"
+        "__NIX_INTERP__/bin/nm "
+        "/usr/bin/codesign __NIX_INTERP__ __NIX_INTERP__ __NIX_INTERP__ __NIX_INTERP__"
     ]
     for prohibited in ("curl", "git", "tar", "wget", "zip"):
         assert command_texts(shell, prohibited) == []
@@ -917,13 +895,12 @@ def test_bundle_rejects_undeclared_or_unsafe_llama_output(
 
 def test_embedded_command_boundary_rejects_malformed_arguments(
     tmp_path: Path,
-    embedded_program: dict[str, object],
 ) -> None:
     """The standalone builder rejects malformed argv and JSON before filesystem work."""
-    main = _embedded_function(embedded_program, "main")
-    with pytest.raises(SystemExit, match="exactly ten arguments"):
+    main = bundle.main
+    with pytest.raises(SystemExit, match="exactly twelve arguments"):
         main([])
-    arguments = [str(tmp_path)] * 10
+    arguments = [str(tmp_path)] * 12
     arguments[5] = "{"
     with pytest.raises(SystemExit, match="invalid llama.cpp resourceSubpaths JSON"):
         main(arguments)
@@ -931,11 +908,10 @@ def test_embedded_command_boundary_rejects_malformed_arguments(
 
 def test_embedded_inventory_boundary_rejects_wrong_layout_types(
     tmp_path: Path,
-    embedded_program: dict[str, object],
 ) -> None:
     """Direct callers cannot replace either declared passthru layout shape."""
     llama_root, _dependency, _primary = _write_llama_fixture(tmp_path)
-    validate = _embedded_function(embedded_program, "validate_llama_inventory")
+    validate = bundle.validate_llama_inventory
     with pytest.raises(SystemExit, match="unexpected llama.cpp library subdirectory"):
         validate(llama_root, "libraries", [])
     with pytest.raises(SystemExit, match="resourceSubpaths must be a list"):
@@ -944,23 +920,20 @@ def test_embedded_inventory_boundary_rejects_wrong_layout_types(
 
 def test_embedded_manifest_rejects_an_empty_file_map(
     tmp_path: Path,
-    embedded_program: dict[str, object],
 ) -> None:
     """The generated manifest cannot checksum itself or be the only output."""
     output = tmp_path / "empty-runtime"
     output.mkdir()
     (output / "manifest.json").write_text("{}\n", encoding="utf-8")
-    collect = _embedded_function(embedded_program, "manifest_files")
+    collect = bundle.manifest_files
 
     with pytest.raises(SystemExit, match="runtime files manifest is empty"):
         collect(output)
 
 
-def test_embedded_manifest_rejects_a_library_without_a_digest(
-    embedded_program: dict[str, object],
-) -> None:
+def test_embedded_manifest_rejects_a_library_without_a_digest() -> None:
     """Every dependency-ordered loader entry must be checksum-covered."""
-    validate = _embedded_function(embedded_program, "validate_manifest_files")
+    validate = bundle.validate_manifest_files
 
     with pytest.raises(
         SystemExit,
@@ -998,11 +971,10 @@ def test_bundle_refuses_to_merge_into_an_existing_output(
 
 @pytest.mark.parametrize("value", [None, "", "/absolute", "a/../b", "a//b"])
 def test_embedded_relative_path_validator_rejects_unsafe_values(
-    embedded_program: dict[str, object],
     value: object,
 ) -> None:
     """Manifest and dependency paths must remain normalized and relative."""
-    validate = _embedded_function(embedded_program, "safe_relative_path")
+    validate = bundle.safe_relative_path
     with pytest.raises(SystemExit, match="relative path|normalized relative path"):
         validate(value, "fixture path")
 

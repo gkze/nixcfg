@@ -48,7 +48,7 @@ def test_cli_root_validation_honors_explicit_subprocess_bounds(
         candidate = Path.cwd() / "tracked.txt"
         candidate.write_text("candidate\n", encoding="utf-8")
         return SimpleNamespace(
-            summary=UpdateSummary(updated=["demo"]),
+            summary=UpdateSummary(statuses={"demo": "updated"}),
             candidate_updates=("demo",),
             had_errors=False,
             written_paths=(candidate,),

@@ -1,7 +1,7 @@
 """Updater for Jacq macOS releases."""
 
 import re
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlparse
 
 import aiohttp
@@ -13,6 +13,9 @@ from lib.update.updaters import (
     register_updater,
 )
 from lib.update.updaters.metadata import DownloadUrlMetadata
+
+if TYPE_CHECKING:
+    from lib.update.updaters.core import UpdateContext
 
 _LATEST_URL = "https://downloads.jacquard.dev/latest/mac-arm64.dmg"
 _VERSION_PATTERN = re.compile(
@@ -28,8 +31,11 @@ class JacqUpdater(DownloadUrlMetadataUpdater):
     PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": "arm64"}
     URL_METADATA_CONTEXT = "Jacq metadata"
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the current version from Jacq's official latest redirect."""
+        _ = context
         timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
         async with session.request(
             "HEAD",

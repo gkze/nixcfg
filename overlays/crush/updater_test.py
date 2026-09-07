@@ -13,7 +13,7 @@ from lib.tests._updater_helpers import (
 )
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.nix import _build_overlay_expr
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 COMMIT = "c" * 40
 CURRENT_COMMIT = "d" * 40
@@ -202,7 +202,7 @@ def test_fetch_latest_rejects_non_mapping_release(
     )
 
     with pytest.raises(TypeError, match="Unexpected release payload type: str"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_fetch_latest_requires_release_tag_name(
@@ -226,7 +226,7 @@ def test_fetch_latest_requires_release_tag_name(
         ),
     )
     with pytest.raises(RuntimeError, match="Missing tag_name in release payload"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_fetch_latest_skips_drafts_and_prereleases(
@@ -271,7 +271,7 @@ def test_fetch_latest_skips_drafts_and_prereleases(
 
     monkeypatch.setattr(module, "fetch_url", _fetch_url)
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert latest.version == stable_version
     assert latest.metadata["tag"] == stable_tag
@@ -279,10 +279,12 @@ def test_fetch_latest_skips_drafts_and_prereleases(
     assert (
         _run(
             updater._is_latest(
-                SourceEntry(
-                    version=stable_version,
-                    commit="a" * 40,
-                    hashes=[],
+                UpdateContext(
+                    current=SourceEntry(
+                        version=stable_version,
+                        commit="a" * 40,
+                        hashes=[],
+                    )
                 ),
                 latest,
             )
@@ -332,7 +334,7 @@ def test_fetch_latest_falls_back_to_current_pin_when_all_stable_releases_need_ne
         ),
     )
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert latest.version == current_version
     assert latest.metadata["tag"] == f"v{current_version}"
@@ -352,9 +354,15 @@ def test_fetch_hashes_computes_src_and_vendor_hashes(
         (("building src", "sha256-src"), ("building vendor", "sha256-vendor")),
     )
 
-    events = _run(_collect_events(updater.fetch_hashes(info, object())))
+    events = _run(
+        _collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
-    assert [event.message for event in events[:-1]] == [
+    assert [event.message for event in events] == [
         "building src",
         "building vendor",
     ]
@@ -384,7 +392,7 @@ def test_fetch_hashes_computes_src_and_vendor_hashes(
             "config": updater.config,
         },
     ]
-    assert events[-1].payload == [
+    assert events.result == [
         HashEntry.create("srcHash", "sha256-src"),
         HashEntry.create("vendorHash", "sha256-vendor"),
     ]

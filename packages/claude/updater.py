@@ -14,6 +14,8 @@ from lib.update.updaters.metadata import DownloadUrlMetadata
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 
 @register_updater
 class ClaudeUpdater(DownloadUrlMetadataUpdater):
@@ -27,8 +29,11 @@ class ClaudeUpdater(DownloadUrlMetadataUpdater):
     }
     URL_METADATA_CONTEXT = "Claude metadata"
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch the latest Claude version and immutable download URL."""
+        _ = context
         payload = await fetch_json(
             session,
             self.RELEASES_URL,

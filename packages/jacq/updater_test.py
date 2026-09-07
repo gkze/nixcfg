@@ -7,6 +7,7 @@ import pytest
 
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
+from lib.update.updaters import UpdateContext
 
 
 def _load_module() -> ModuleType:
@@ -46,7 +47,7 @@ def test_jacq_resolves_latest_redirect_to_versioned_dmg() -> None:
     )
     session = _FakeSession(_FakeResponse(url=resolved_url))
 
-    info = _run(updater.fetch_latest(session))
+    info = _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
 
     assert info.version == "0.3.2609"
     assert updater.get_download_url("aarch64-darwin", info) == resolved_url
@@ -66,7 +67,12 @@ def test_jacq_accepts_legacy_versioned_dmg_path() -> None:
         "https://downloads.jacquard.dev/releases/0.3.2186/Jacq-0.3.2186-arm64.dmg"
     )
 
-    info = _run(updater.fetch_latest(_FakeSession(_FakeResponse(url=resolved_url))))
+    info = _run(
+        updater.fetch_latest(
+            _FakeSession(_FakeResponse(url=resolved_url)),
+            context=UpdateContext(current=None),
+        )
+    )
 
     assert info.version == "0.3.2186"
     assert updater.get_download_url("aarch64-darwin", info) == resolved_url
@@ -91,7 +97,12 @@ def test_jacq_rejects_untrusted_or_malformed_latest_redirects(
     updater = module.JacqUpdater()
 
     with pytest.raises(RuntimeError, match="Could not extract Jacq version"):
-        _run(updater.fetch_latest(_FakeSession(_FakeResponse(url=resolved_url))))
+        _run(
+            updater.fetch_latest(
+                _FakeSession(_FakeResponse(url=resolved_url)),
+                context=UpdateContext(current=None),
+            )
+        )
 
 
 def test_jacq_reports_latest_endpoint_http_failures() -> None:
@@ -110,4 +121,4 @@ def test_jacq_reports_latest_endpoint_http_failures() -> None:
         RuntimeError,
         match=("Failed to resolve Jacq latest URL .*: HTTP 503 Service Unavailable"),
     ):
-        _run(updater.fetch_latest(session))
+        _run(updater.fetch_latest(session, context=UpdateContext(current=None)))

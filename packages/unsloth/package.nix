@@ -169,10 +169,9 @@ let
       ;
   };
 
-  cargoManifest = builtins.fromTOML (
-    builtins.readFile "${desktopSource}/studio/src-tauri/Cargo.toml"
-  );
-  rustToolchainVersion = lib.versions.pad 3 cargoManifest.package.rust-version;
+  # The updater verifies this source-owned value against desktopSource before
+  # publishing the closure plan. Reading that derivation here would cause IFD.
+  rustToolchainVersion = closurePlan.app.rustToolchainVersion;
   rustToolchain = (inputs.rust-overlay.lib.mkRustBin { } pkgs).stable.${rustToolchainVersion}.default;
   exactRustPlatform = makeRustPlatform {
     cargo = rustToolchain;

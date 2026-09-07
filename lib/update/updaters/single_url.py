@@ -2,15 +2,11 @@
 
 from typing import TYPE_CHECKING, ClassVar
 
-from lib.nix.models.sources import HashEntry, SourceEntry
+from lib.nix.models.sources import HashEntry, SourceHashes
 from lib.update import process as update_process
 from lib.update.events import (
-    EventStream,
-    UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_hash_mapping,
-    require_value,
+    EventSink,
+    ignore_event,
 )
 from lib.update.updaters.core import HashEntryUpdater, UpdateContext
 from lib.update.updaters.metadata import VersionInfo, metadata_get_str
@@ -26,21 +22,13 @@ async def stream_single_url_hash_entry(
     url: str,
     *,
     config: UpdateConfig,
-    error: str = "Missing hash output",
-) -> EventStream:
+    emit: EventSink = ignore_event,
+) -> list[HashEntry]:
     """Hash one URL and emit a single sha256 :class:`HashEntry` with that URL."""
-    hash_drain = ValueDrain[dict[str, str]]()
-    async for event in drain_value_events(
-        update_process.compute_url_hashes(source_name, [url], config=config),
-        hash_drain,
-        parse=expect_hash_mapping,
-    ):
-        yield event
-    hashes_by_url = require_value(hash_drain, error)
-    yield UpdateEvent.value(
-        source_name,
-        [HashEntry.create("sha256", hashes_by_url[url], url=url)],
+    hashes_by_url = await update_process.compute_url_hashes(
+        source_name, [url], config=config, emit=emit
     )
+    return [HashEntry.create("sha256", hashes_by_url[url], url=url)]
 
 
 class SingleURLHashEntryUpdater(HashEntryUpdater):
@@ -67,16 +55,14 @@ class SingleURLHashEntryUpdater(HashEntryUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Compute a single sha256 entry for the resolved download URL."""
         _ = (session, context)
-        async for event in stream_single_url_hash_entry(
-            self.name,
-            self.get_download_url(info),
-            config=self.config,
-        ):
-            yield event
+        return await stream_single_url_hash_entry(
+            self.name, self.get_download_url(info), config=self.config, emit=emit
+        )
 
 
 __all__ = ["SingleURLHashEntryUpdater", "stream_single_url_hash_entry"]

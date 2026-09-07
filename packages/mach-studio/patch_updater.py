@@ -9,9 +9,9 @@ from pathlib import Path
 from lib.asar_integrity import (
     AsarIntegrityError,
     packed_file_paths,
+    patch_bundle_integrity,
     read_packed_file,
     replace_packed_file,
-    write_info_plist_hash,
 )
 
 MAIN_PATH = "dist-electron/main.js"
@@ -158,18 +158,11 @@ def patch_bundle(asar_path: Path, info_plist_path: Path) -> str:
     patch_main(main_payload)
     patch_renderer(renderer_payload)
 
-    replace_packed_file(
-        asar_path,
-        MAIN_PATH,
-        patch_main,
-    )
-    digest = replace_packed_file(
-        asar_path,
-        renderer_path,
-        patch_renderer,
-    )
-    write_info_plist_hash(info_plist_path, asar_path)
-    return digest
+    def patch_archive(staged: Path) -> str:
+        replace_packed_file(staged, MAIN_PATH, patch_main)
+        return replace_packed_file(staged, renderer_path, patch_renderer)
+
+    return patch_bundle_integrity(asar_path, info_plist_path, patch_archive)
 
 
 def main(argv: list[str] | None = None) -> int:

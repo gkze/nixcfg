@@ -4,6 +4,7 @@
   darwinConfigurations ? { },
   nixosConfigurations ? { },
   homeConfigurations ? { },
+  declaredSystems ? null,
   requiredKinds ? [ ],
   requiredRoots ? [ ],
 }:
@@ -13,13 +14,18 @@ let
     "nixos"
     "home"
   ];
+  configurations = {
+    darwin = darwinConfigurations;
+    nixos = nixosConfigurations;
+    home = homeConfigurations;
+  };
 
   mkRoots =
-    kind: closureFor: configurations:
+    kind: closureFor: kindConfigurations:
     lib.mapAttrsToList (
-      name: configuration:
+      name: metadata:
       let
-        closure = closureFor configuration;
+        closure = closureFor kindConfigurations.${name};
       in
       {
         inherit
@@ -27,9 +33,9 @@ let
           kind
           name
           ;
-        inherit (closure) system;
+        system = if declaredSystems == null then closure.system else metadata;
       }
-    ) configurations;
+    ) (if declaredSystems == null then kindConfigurations else declaredSystems.${kind} or { });
 
   roots =
     mkRoots "darwin" (configuration: configuration.system) darwinConfigurations
@@ -50,6 +56,22 @@ let
   manifestRoots = map (root: {
     inherit (root) kind name system;
   }) roots;
+  mismatchedSystems = builtins.filter (root: root.system != root.closure.system) roots;
+  mismatchedNames = builtins.filter (
+    kind:
+    declaredSystems != null
+    && builtins.attrNames configurations.${kind} != builtins.attrNames (declaredSystems.${kind} or { })
+  ) supportedKinds;
+  validateClosures =
+    value:
+    assert lib.assertMsg (mismatchedNames == [ ]) (
+      "root closure names differ from their declarations: " + lib.concatStringsSep ", " mismatchedNames
+    );
+    assert lib.assertMsg (mismatchedSystems == [ ]) (
+      "root closure systems differ from their declarations: "
+      + lib.concatStringsSep ", " (map (root: "${root.kind}:${root.name}") mismatchedSystems)
+    );
+    value;
 in
 assert lib.assertMsg (
   lib.unique requiredKinds == requiredKinds
@@ -70,18 +92,22 @@ assert lib.assertMsg (unsupportedSystems == [ ]) (
   + lib.concatStringsSep ", " unsupportedSystems
 );
 {
-  manifest = {
+  manifest = validateClosures {
     schemaVersion = 2;
     inherit requiredKinds requiredRoots;
     roots = manifestRoots;
   };
 
+  # Discovery uses constructor metadata. Actual closure validation remains at
+  # the manifest and root-check boundaries, where those closures are needed.
   rootSystems = lib.unique (map (root: root.system) roots);
 
   forSystem =
     system:
-    map (root: {
-      name = "${root.kind}-${root.name}";
-      path = root.closure;
-    }) (builtins.filter (root: root.system == system) roots);
+    validateClosures (
+      map (root: {
+        name = "${root.kind}-${root.name}";
+        path = root.closure;
+      }) (builtins.filter (root: root.system == system) roots)
+    );
 }

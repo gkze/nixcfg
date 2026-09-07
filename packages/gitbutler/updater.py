@@ -4,14 +4,10 @@ import asyncio
 import re
 from typing import TYPE_CHECKING, ClassVar, Literal, cast
 
-from lib.nix.models.sources import HashEntry
+from lib.nix.models.sources import HashEntry, SourceHashes
 from lib.update.events import (
-    EventStream,
-    UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_str,
-    require_value,
+    EventSink,
+    ignore_event,
 )
 from lib.update.locked_source import resolve_locked_source
 from lib.update.npm_semver import require_npm_version_matches_spec
@@ -30,8 +26,6 @@ from lib.update.updaters.node_compatibility import (
 
 if TYPE_CHECKING:
     import aiohttp
-
-    from lib.nix.models.sources import SourceEntry
 
 
 _IMMUTABLE_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -133,10 +127,10 @@ class GitButlerUpdater(Crate2NixArtifactsMixin, FlakeInputHashUpdater):
         }
 
     async def fetch_latest(
-        self,
-        session: aiohttp.ClientSession,
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
         """Resolve the release and its toolchain from one immutable input tree."""
+        _ = context
         _ = session
         node = self._resolve_flake_node(VersionInfo(version="ignored"))
         ref = node.original.ref if node.original is not None else None
@@ -185,22 +179,11 @@ class GitButlerUpdater(Crate2NixArtifactsMixin, FlakeInputHashUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Refresh crate2nix artifacts before computing the pnpm hash."""
         _ = (session, context)
-        async for event in self.stream_materialized_artifacts():
-            yield event
-
-        hash_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            self._compute_hash(info),
-            hash_drain,
-            parse=expect_str,
-        ):
-            yield event
-        hash_value = require_value(hash_drain, "Missing npmDepsHash output")
-        yield UpdateEvent.value(
-            self.name,
-            [HashEntry.create(self.hash_type, hash_value)],
-        )
+        await self.stream_materialized_artifacts(emit=emit)
+        hash_value = await self._compute_hash(info, emit=emit)
+        return [HashEntry.create(self.hash_type, hash_value)]

@@ -290,8 +290,8 @@ def test_unsloth_source_build_leaves_are_parseable() -> None:
         assert package.output is not None
 
 
-def test_unsloth_backend_workspace_identity_uses_only_python_project_inputs() -> None:
-    """Evidence and export files beside the lock must not rebuild the backend."""
+def test_unsloth_backend_reads_metadata_without_expanding_its_build_source() -> None:
+    """Read metadata directly while evidence files stay outside the build source."""
     backend = expect_instance(
         parse_nix_expr((_PACKAGE_DIR / "backend.nix").read_text(encoding="utf-8")),
         FunctionDefinition,
@@ -307,10 +307,10 @@ def test_unsloth_backend_workspace_identity_uses_only_python_project_inputs() ->
     workspace_arguments = expect_instance(workspace.argument, AttributeSet)
 
     workspace_root = expect_binding(workspace_arguments.values, "workspaceRoot").value
+    assert_nix_ast_equal(workspace_root, "pythonWorkspaceRoot")
     assert_nix_ast_equal(
-        f"{{ lib }}: {workspace_root.rebuild()}",
+        expect_binding(derivation.scope, "pythonSource").value,
         """
-{ lib }:
 lib.fileset.toSource {
   root = pythonWorkspaceRoot;
   fileset = lib.fileset.unions [

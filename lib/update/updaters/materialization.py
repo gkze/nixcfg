@@ -4,8 +4,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from lib.update.crate2nix import TARGETS, stream_crate2nix_artifact_updates
 from lib.update.derivation_validation import DerivationValidation
-from lib.update.events import EventStream, UpdateEvent
-from lib.update.updaters.core import _coerce_context
+from lib.update.events import EventSink, ignore_event
 from lib.update.updaters.flake_backed import FlakeInputMetadataUpdater
 
 if TYPE_CHECKING:
@@ -45,22 +44,22 @@ class Crate2NixArtifactsMixin(MaterializesArtifactsMixin):
         self,
         *,
         source_overrides: dict[str, SourceEntry] | None = None,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> None:
         """Emit crate2nix artifact events using the standard materialization phase."""
         stream = (
             stream_crate2nix_artifact_updates(
                 self.name,
                 operation=self.artifact_operation,
                 source_overrides=source_overrides,
+                emit=emit,
             )
             if source_overrides is not None
             else stream_crate2nix_artifact_updates(
-                self.name,
-                operation=self.artifact_operation,
+                self.name, operation=self.artifact_operation, emit=emit
             )
         )
-        async for event in stream:
-            yield event
+        await stream
 
 
 class Crate2NixMetadataUpdater(Crate2NixArtifactsMixin, FlakeInputMetadataUpdater):
@@ -79,25 +78,25 @@ class Crate2NixMetadataUpdater(Crate2NixArtifactsMixin, FlakeInputMetadataUpdate
         self,
         info: VersionInfo,
         *,
-        context: UpdateContext | SourceEntry | None = None,
+        context: UpdateContext,
     ) -> dict[str, SourceEntry]:
         """Build the complete candidate source consumed during materialization."""
-        current = _coerce_context(context).current
+        current = context.current
         hashes = self._preserved_source_hashes(current)
         return {self.name: self.build_result(info, hashes)}
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Compare metadata while retaining any independently persisted hashes."""
-        current = _coerce_context(context).current
+        current = context.current
         if current is None:
             return False
         expected = self.materialization_source_overrides(
             info,
-            context=current,
+            context=context,
         )[self.name]
         return current.equivalent_to(expected)
 
@@ -106,8 +105,9 @@ class Crate2NixMetadataUpdater(Crate2NixArtifactsMixin, FlakeInputMetadataUpdate
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Refresh crate2nix artifacts without changing source hashes."""
         _ = session
         source_overrides = self.materialization_source_overrides(
@@ -115,15 +115,11 @@ class Crate2NixMetadataUpdater(Crate2NixArtifactsMixin, FlakeInputMetadataUpdate
             context=context,
         )
 
-        async for event in self.stream_materialized_artifacts(
-            source_overrides=source_overrides
-        ):
-            yield event
-
-        yield UpdateEvent.value(
-            self.name,
-            self._preserved_source_hashes(source_overrides[self.name]),
+        await self.stream_materialized_artifacts(
+            source_overrides=source_overrides, emit=emit
         )
+
+        return self._preserved_source_hashes(source_overrides[self.name])
 
 
 __all__ = [

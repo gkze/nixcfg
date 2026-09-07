@@ -1,14 +1,23 @@
 """Clean derivation models for the Nix derivation-v4 JSON schema.
 
-Aligned with derivation-v4 schema from NixOS/nix. These models provide
-a simplified, ergonomic interface over the auto-generated types in
-``_generated.py``, collapsing the multiple output union variants into a
-single ``DerivationOutput`` model with optional fields.
+These compatibility views are checked against the vendored derivation-v4
+schema in ``test_nix_model_contracts.py``. They deliberately keep output
+variants in one optional-field record, accept full store paths from older
+command responses, supply absent empty collections, and preserve unknown
+top-level fields. Generated bindings are reference models, not base classes.
 """
 
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from .content_address import (
+    ContentAddressMethod,  # noqa: TC001 -- Pydantic resolves this at runtime
+)
+from .hash import (  # noqa: TC001 -- Pydantic resolves these at runtime
+    HashAlgorithm,
+    NixHash,
+)
 
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
@@ -18,30 +27,32 @@ class DerivationOutput(BaseModel):
     """A single derivation output specification.
 
     Aligned with derivation-v4 schema from NixOS/nix.  The generated schema
-    represents outputs as a discriminated union of four variants:
+    represents outputs as a union of five variants:
 
     * **Input-addressed** -- only ``path`` is set.
     * **Fixed content-addressed** -- ``method`` and ``hash`` are set.
     * **Floating content-addressed** -- ``method`` and ``hashAlgo`` are set.
+    * **Deferred** -- no fields are set until the output can be resolved.
     * **Impure** -- ``impure`` is ``True``, plus ``method`` and ``hashAlgo``.
 
     This model flattens those variants into optional fields so callers can
-    inspect whichever fields are present.
+    inspect whichever fields are present. Populated scalar fields retain
+    the wire schema's methods, algorithms, SRI hashes, and impure marker.
     """
 
     path: str | None = None
     """Store path for input-addressed outputs."""
 
-    method: str | None = None
+    method: ContentAddressMethod | None = None
     """Content-addressing method (``flat``, ``nar``, ``text``, ``git``)."""
 
-    hash_algo: str | None = Field(default=None, alias="hashAlgo")
+    hash_algo: HashAlgorithm | None = Field(default=None, alias="hashAlgo")
     """Hash algorithm for floating CA or impure outputs."""
 
-    hash: str | None = None
+    hash: NixHash | None = None
     """Expected content hash for fixed CA outputs (SRI string)."""
 
-    impure: bool | None = None
+    impure: Literal[True] | None = None
     """``True`` for impure derivation outputs."""
 
 

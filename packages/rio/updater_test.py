@@ -78,7 +78,9 @@ def test_rio_update_uses_latest_source_when_release_has_no_rio_dmg(
         ),
     )
 
-    events = run_async(collect_events(updater.update_stream(current, object())))
+    events = run_async(
+        collect_events(lambda emit: updater.update_stream(current, object(), emit=emit))
+    )
 
     assert len(calls) == 2
     assert_nix_ast_equal(

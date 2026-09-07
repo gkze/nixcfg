@@ -28,7 +28,7 @@ from lib.tests._source_metadata import (
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import PlatformAPIMetadata
 
 if TYPE_CHECKING:
@@ -144,7 +144,7 @@ def test_tembo_pins_manifest_selected_immutable_per_architecture_dmgs(
 
     monkeypatch.setattr(module, "fetch_json", _fetch_json)
 
-    info = _run(updater.fetch_latest(object()))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     checksums = _run(updater.fetch_checksums(info, object()))
     result = updater.build_result(info, _SRI_HASHES)
 

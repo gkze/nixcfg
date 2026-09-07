@@ -37,7 +37,7 @@ from lib.update.net import github_raw_url
 from lib.update.nix import _build_fetch_from_github_call
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT, package_file_names_in
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 _VERSION = "1.1.15"
 _COMMIT = "9a562bb34c0accc7b1bd1396309d0c003b23f3e2"
@@ -170,7 +170,9 @@ def test_gooeypi_update_pins_source_and_hashes_build_closure_without_derivation(
         ),
     )
 
-    events = run_async(collect_events(updater.update_stream(current, object())))
+    events = run_async(
+        collect_events(lambda emit: updater.update_stream(current, object(), emit=emit))
+    )
 
     assert api_paths == [
         "repos/am-will/gooey-pi/releases/latest",
@@ -718,7 +720,11 @@ def test_gooeypi_rejects_release_without_immutable_commit(
     )
 
     with pytest.raises(error_type, match="no immutable source commit"):
-        run_async(module.GooeyPiUpdater().fetch_latest(object()))
+        run_async(
+            module.GooeyPiUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 @pytest.mark.parametrize("commit", [None, "main", "A" * 40])

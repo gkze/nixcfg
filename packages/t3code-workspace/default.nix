@@ -8,6 +8,7 @@
   pnpm_11,
   pnpmConfigHook,
   stdenv,
+  t3codeWorkspaceSource ? null,
   ...
 }:
 (import ../t3code/_shared.nix {
@@ -22,5 +23,6 @@
     pnpmConfigHook
     stdenv
     ;
+  inherit t3codeWorkspaceSource;
   sourceHashPackageName = "t3code-workspace";
 }).node_modules

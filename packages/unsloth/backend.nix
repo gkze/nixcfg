@@ -20,14 +20,15 @@
 assert stdenv.hostPlatform.system == "aarch64-darwin";
 let
   platformCompat = import ../../lib/pinned-input-platform-compat;
+  pythonSource = lib.fileset.toSource {
+    root = pythonWorkspaceRoot;
+    fileset = lib.fileset.unions [
+      (pythonWorkspaceRoot + "/pyproject.toml")
+      (pythonWorkspaceRoot + "/uv.lock")
+    ];
+  };
   workspace = inputs.uv2nix.lib.workspace.loadWorkspace {
-    workspaceRoot = lib.fileset.toSource {
-      root = pythonWorkspaceRoot;
-      fileset = lib.fileset.unions [
-        (pythonWorkspaceRoot + "/pyproject.toml")
-        (pythonWorkspaceRoot + "/uv.lock")
-      ];
-    };
+    workspaceRoot = pythonWorkspaceRoot;
   };
   pySet =
     (callPackage inputs.pyproject-nix.build.packages {
@@ -48,6 +49,9 @@ let
             };
           })
           (_pyFinal: pyPrev: {
+            nixcfg-unsloth-runtime = pyPrev.nixcfg-unsloth-runtime.overrideAttrs {
+              src = pythonSource;
+            };
             unsloth = pyPrev.unsloth.overrideAttrs (old: {
               src = backendSrc;
               postPatch = (old.postPatch or "") + ''

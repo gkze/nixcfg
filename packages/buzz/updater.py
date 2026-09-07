@@ -26,11 +26,9 @@ from lib.update import nix as update_nix
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
+    EventSink,
     UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_str,
-    require_value,
+    ignore_event,
 )
 from lib.update.net import fetch_github_api, fetch_url, github_raw_url
 from lib.update.nix import (
@@ -59,7 +57,6 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.update.config import UpdateConfig
-    from lib.update.events import EventStream
 
 _APP_ID = "xyz.block.buzz.app"
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -136,7 +133,6 @@ _SHERPA_FETCHCONTENT_ORDER = (
 class _HashRequest:
     hash_type: HashType
     url: str
-    error: str
     expr: Callable[[dict[_HashIdentity, str]], str]
 
 
@@ -1677,8 +1673,11 @@ class BuzzUpdater(GitHubReleaseUpdater):
         )
         return result
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the latest release against the supported native foundation."""
+        _ = context
         release = await self._fetch_latest_release_payload(session)
         tag = self._release_tag_from_payload(release)
         version = _require_exact_version(
@@ -1852,7 +1851,7 @@ class BuzzUpdater(GitHubReleaseUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Never skip the dual-lock/source audit on metadata equality."""
@@ -1914,8 +1913,9 @@ class BuzzUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash all five exact sources plus Buzz's three lock closures."""
         _ = (session, context)
         metadata = self._required_metadata(info)
@@ -1953,13 +1953,11 @@ class BuzzUpdater(GitHubReleaseUpdater):
             _HashRequest(
                 hash_type="srcHash",
                 url=buzz_url,
-                error="Missing Buzz srcHash output",
                 expr=lambda _resolved: self._src_expr(commit),
             ),
             _HashRequest(
                 hash_type="srcHash",
                 url=onnxruntime_url,
-                error="Missing ONNX Runtime srcHash output",
                 expr=lambda _resolved: _build_fetch_from_github_expr(
                     "microsoft",
                     "onnxruntime",
@@ -1970,7 +1968,6 @@ class BuzzUpdater(GitHubReleaseUpdater):
             _HashRequest(
                 hash_type="srcHash",
                 url=sherpa_onnx_url,
-                error="Missing sherpa-onnx srcHash output",
                 expr=lambda _resolved: _build_fetch_from_github_expr(
                     "k2-fsa",
                     "sherpa-onnx",
@@ -1981,7 +1978,6 @@ class BuzzUpdater(GitHubReleaseUpdater):
             _HashRequest(
                 hash_type="srcHash",
                 url=mesh_llm_url,
-                error="Missing Mesh srcHash output",
                 expr=lambda _resolved: _build_fetch_from_github_expr(
                     "Mesh-LLM",
                     "mesh-llm",
@@ -1992,7 +1988,6 @@ class BuzzUpdater(GitHubReleaseUpdater):
             _HashRequest(
                 hash_type="srcHash",
                 url=llama_cpp_url,
-                error="Missing llama.cpp srcHash output",
                 expr=lambda _resolved: _build_fetch_from_github_expr(
                     "ggml-org",
                     "llama.cpp",
@@ -2004,29 +1999,25 @@ class BuzzUpdater(GitHubReleaseUpdater):
         resolved: dict[_HashIdentity, str] = {}
         entries: list[HashEntry] = []
 
-        async def hash_requests(requests: tuple[_HashRequest, ...]) -> EventStream:
+        async def hash_requests(
+            requests: tuple[_HashRequest, ...], *, emit: EventSink = ignore_event
+        ) -> None:
             for request in requests:
-                drain = ValueDrain[str]()
-                async for event in drain_value_events(
-                    update_nix.compute_fixed_output_hash(
-                        self.name,
-                        request.expr(resolved),
-                        isolate_by_drv_hash=True,
-                        config=self.config,
-                    ),
-                    drain,
-                    parse=expect_str,
-                ):
-                    yield event
-                value = require_value(drain, request.error)
+                drain = await update_nix.compute_fixed_output_hash(
+                    self.name,
+                    request.expr(resolved),
+                    isolate_by_drv_hash=True,
+                    config=self.config,
+                    emit=emit,
+                )
+                value = drain
                 identity = (request.hash_type, request.url)
                 resolved[identity] = value
                 entries.append(
                     HashEntry.create(request.hash_type, value, url=request.url),
                 )
 
-        async for event in hash_requests(source_requests):
-            yield event
+        await hash_requests(source_requests, emit=emit)
 
         native_hashes: dict[str, str] = {}
         native_sources = (
@@ -2037,21 +2028,10 @@ class BuzzUpdater(GitHubReleaseUpdater):
         )
         for native_source in native_sources:
             url = native_source["url"]
-            drain = ValueDrain[str]()
-            async for event in drain_value_events(
-                update_nix.compute_fixed_output_hash(
-                    self.name,
-                    self._fetchurl_expr(url),
-                    config=self.config,
-                ),
-                drain,
-                parse=expect_str,
-            ):
-                yield event
-            native_hashes[url] = require_value(
-                drain,
-                f"Missing native lock hash output for {url}",
+            drain = await update_nix.compute_fixed_output_hash(
+                self.name, self._fetchurl_expr(url), config=self.config, emit=emit
             )
+            native_hashes[url] = drain
 
         prospective_native_lock = self._native_lock_payload(metadata, native_hashes)
         package_args = {
@@ -2061,7 +2041,6 @@ class BuzzUpdater(GitHubReleaseUpdater):
             _HashRequest(
                 hash_type="npmDepsHash",
                 url=buzz_url,
-                error="Missing Buzz npmDepsHash output",
                 expr=lambda resolved: _build_repo_package_attr_expr(
                     package_file,
                     ".pnpmDeps",
@@ -2078,7 +2057,6 @@ class BuzzUpdater(GitHubReleaseUpdater):
             _HashRequest(
                 hash_type="vendorHash",
                 url=buzz_url,
-                error="Missing Buzz root vendorHash output",
                 expr=lambda resolved: _build_repo_package_attr_expr(
                     package_file,
                     ".rootCargoDeps",
@@ -2095,7 +2073,6 @@ class BuzzUpdater(GitHubReleaseUpdater):
             _HashRequest(
                 hash_type="cargoHash",
                 url=buzz_url,
-                error="Missing Buzz desktop cargoHash output",
                 expr=lambda resolved: _build_repo_package_attr_expr(
                     package_file,
                     ".desktopCargoDeps",
@@ -2110,21 +2087,22 @@ class BuzzUpdater(GitHubReleaseUpdater):
                 ),
             ),
         )
-        async for event in hash_requests(dependency_requests):
-            yield event
+        await hash_requests(dependency_requests, emit=emit)
 
         package_dir = updater_dir_for(self.name)
         if package_dir is None:
             msg = f"Package directory not found for {self.name}"
             raise RuntimeError(msg)
-        yield UpdateEvent.artifact(
-            self.name,
-            GeneratedArtifact.json(
-                package_dir / self.generated_artifact_files[0],
-                prospective_native_lock,
-            ),
+        await emit(
+            UpdateEvent.artifact(
+                self.name,
+                GeneratedArtifact.json(
+                    package_dir / self.generated_artifact_files[0],
+                    prospective_native_lock,
+                ),
+            )
         )
-        yield UpdateEvent.value(self.name, entries)
+        return entries
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist only the complete, URL-keyed eight-entry source closure."""

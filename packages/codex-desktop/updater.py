@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 _SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 _SPARKLE_SHORT_VERSION = f"{{{_SPARKLE_NS}}}shortVersionString"
 _SPARKLE_BUILD_VERSION = f"{{{_SPARKLE_NS}}}version"
@@ -169,8 +171,11 @@ class CodexDesktopUpdater(DownloadHashUpdater):
         root = self._parse_appcast(xml_payload.decode(), appcast_url=appcast_url)
         return self._extract_appcast_items(root, appcast_url=appcast_url)
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch both appcasts and return a release plus per-platform archive URLs."""
+        _ = context
         items_by_platform = {
             platform: await self._fetch_appcast_items(session, platform)
             for platform in self.PLATFORMS

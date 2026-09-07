@@ -7,8 +7,8 @@ from pathlib import Path
 
 from lib.asar_integrity import (
     AsarIntegrityError,
+    patch_bundle_integrity,
     replace_packed_file,
-    write_info_plist_hash,
 )
 
 MAIN_PATH = "out/main/index.js"
@@ -51,13 +51,11 @@ def patch_bundle(
     info_plist_path: Path,
 ) -> str:
     """Apply the Energy policy and refresh Electron's top-level ASAR digest."""
-    digest = replace_packed_file(
+    return patch_bundle_integrity(
         asar_path,
-        MAIN_PATH,
-        disable_updates,
+        info_plist_path,
+        lambda staged: replace_packed_file(staged, MAIN_PATH, disable_updates),
     )
-    write_info_plist_hash(info_plist_path, asar_path)
-    return digest
 
 
 def main(argv: list[str] | None = None) -> int:

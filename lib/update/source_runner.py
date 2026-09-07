@@ -17,15 +17,14 @@ from lib.update.events import (
     UpdateEvent,
     UpdateEventKind,
     expect_artifact_updates,
-    expect_source_entry,
 )
+from lib.update.outcomes import SummaryStatus, merge_statuses
 from lib.update.refs import FlakeInputRef, RefTaskOptions
 from lib.update.updaters import UPDATERS, ensure_updaters_loaded
-from lib.update.updaters.core import UpdateContext, _call_with_optional_context
+from lib.update.updaters.core import UpdateContext
 from lib.update.updaters.flake_backed import FlakeInputHashUpdater
 
 _AIOHTTP_MAX_FIELD_SIZE = 64 * 1024
-_SUMMARY_STATUS_PRIORITY = {"no_change": 0, "updated": 1, "error": 2}
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -34,7 +33,7 @@ if TYPE_CHECKING:
     from lib.nix.models.sources import SourceEntry, SourcesFile
     from lib.update.artifacts import GeneratedArtifact
     from lib.update.config import UpdateConfig
-    from lib.update.ui_state import SummaryStatus
+    from lib.update.flake import FlakeInputState
     from lib.update.updaters import UpdaterClass
 
 
@@ -59,8 +58,8 @@ class SourceTaskContext:
     queue: asyncio.Queue[UpdateEvent | None]
     generated_artifacts: dict[Path, str]
     config: UpdateConfig
-    dry_run: bool = False
     effective_sources: dict[str, SourceEntry] = field(default_factory=dict)
+    input_refreshes: dict[str, FlakeInputState] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -73,7 +72,7 @@ class SourcesPhaseContext:
     update_input: bool
     native_only: bool
     config: UpdateConfig
-    dry_run: bool = False
+    input_refreshes: dict[str, FlakeInputState] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -90,6 +89,7 @@ class UpdatePhaseResult:
     """Authoritative domain outcome from one update phase."""
 
     details: dict[str, SummaryStatus] = field(default_factory=dict)
+    input_refreshes: dict[str, FlakeInputState] = field(default_factory=dict)
     source_updates: dict[str, SourceEntry] = field(default_factory=dict)
     artifact_updates: dict[str, tuple[GeneratedArtifact, ...]] = field(
         default_factory=dict
@@ -102,15 +102,9 @@ class UpdatePhaseResult:
 
     def merged(self, other: UpdatePhaseResult) -> UpdatePhaseResult:
         """Combine sequential phase outcomes into one run result."""
-        details = dict(self.details)
-        for name, status in other.details.items():
-            details[name] = max(
-                details.get(name, "no_change"),
-                status,
-                key=_SUMMARY_STATUS_PRIORITY.__getitem__,
-            )
         return UpdatePhaseResult(
-            details=details,
+            details=merge_statuses(self.details, other.details),
+            input_refreshes={**self.input_refreshes, **other.input_refreshes},
             source_updates={**self.source_updates, **other.source_updates},
             artifact_updates={**self.artifact_updates, **other.artifact_updates},
         )
@@ -169,8 +163,7 @@ async def _refresh_input_task(
             status=StatusInfo(kind=StatusKind.REFRESH_LOCK, value=input_name),
         )
     )
-    async for event in update_flake.update_flake_input(input_name, source=source):
-        await put(event)
+    await update_flake.update_flake_input(input_name, source=source, emit=put)
 
 
 async def _ensure_input_refreshed(
@@ -182,7 +175,13 @@ async def _ensure_input_refreshed(
     put = context.queue.put
     async with context.update_input_lock:
         task = context.update_input_tasks.get(input_name)
-        if task is None:
+        receipt = context.input_refreshes.get(input_name)
+        reused_ref_phase = (
+            task is None
+            and receipt is not None
+            and receipt == update_flake.read_flake_input_state()
+        )
+        if task is None and not reused_ref_phase:
             task = asyncio.create_task(
                 _refresh_input_task(
                     input_name=input_name,
@@ -209,7 +208,8 @@ async def _ensure_input_refreshed(
         # Every refresh rewrites the shared flake.lock. Keep the lock held
         # until the command finishes so different inputs cannot race and lose
         # each other's updates.
-        await task
+        if task is not None:
+            await task
 
 
 async def update_source_task(
@@ -236,7 +236,6 @@ async def update_source_task(
         put = context.queue.put
         update_context = UpdateContext(
             current=current,
-            dry_run=context.dry_run,
             generated_artifacts=context.generated_artifacts,
             effective_sources=context.effective_sources,
         )
@@ -256,18 +255,18 @@ async def update_source_task(
                     context=context,
                 )
 
-        async for event in _call_with_optional_context(
-            updater.update_stream,
-            current,
-            context.session,
-            context=update_context,
-        ):
+        async def emit(event: UpdateEvent) -> None:
             if event.kind is UpdateEventKind.ARTIFACT and event.payload is not None:
                 for artifact in expect_artifact_updates(event.payload):
                     artifacts_by_path[artifact.path] = artifact
-            elif event.kind is UpdateEventKind.RESULT and event.payload is not None:
-                source_update = expect_source_entry(event.payload)
             await put(event)
+
+        source_update = await updater.update_stream(
+            current,
+            context.session,
+            context=update_context,
+            emit=emit,
+        )
 
         completed = True
 
@@ -283,7 +282,6 @@ async def run_ref_phase(
     *,
     ref_inputs: list[FlakeInputRef],
     queue: asyncio.Queue[UpdateEvent | None],
-    dry_run: bool,
     config: UpdateConfig,
 ) -> UpdatePhaseResult:
     """Run the flake ref update phase."""
@@ -291,6 +289,7 @@ async def run_ref_phase(
         max_field_size=_AIOHTTP_MAX_FIELD_SIZE,
     ) as session:
         flake_edit_lock = asyncio.Lock()
+        input_refreshes: dict[str, FlakeInputState] = {}
         async with asyncio.TaskGroup() as group:
             tasks = {
                 inp.name: group.create_task(
@@ -299,16 +298,22 @@ async def run_ref_phase(
                         session,
                         queue,
                         options=RefTaskOptions(
-                            dry_run=dry_run,
                             flake_edit_lock=flake_edit_lock,
                             config=config,
+                            input_refreshes=input_refreshes,
                         ),
                     ),
                 )
                 for inp in ref_inputs
             }
+        details = {name: task.result() for name, task in tasks.items()}
         return UpdatePhaseResult(
-            details={name: task.result() for name, task in tasks.items()}
+            details=details,
+            input_refreshes={
+                name: state
+                for name, state in input_refreshes.items()
+                if details[name] == "updated"
+            },
         )
 
 
@@ -338,8 +343,8 @@ async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
                 queue=context.queue,
                 generated_artifacts=generated_artifacts,
                 effective_sources=effective_sources,
+                input_refreshes=context.input_refreshes,
                 config=context.config,
-                dry_run=context.dry_run,
             )
 
         async def _run_source_with_limit(name: str) -> SourceTaskResult:

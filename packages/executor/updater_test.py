@@ -49,10 +49,11 @@ from lib.update.bun_lock import parse_bun_lock_text
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
     CommandResult,
+    EventSink,
     UpdateEvent,
     UpdateEventKind,
     expect_artifact_updates,
-    expect_source_hashes,
+    ignore_event,
 )
 from lib.update.nix import _build_fetch_from_github_call
 from lib.update.nix_expr import identifier_attr_path
@@ -60,7 +61,7 @@ from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterable
+    from collections.abc import Iterable
 
     from lib.update.process import RunCommandOptions
 
@@ -369,7 +370,9 @@ def test_executor_resolves_release_to_exact_source_and_toolchain(
     )
     monkeypatch.setattr(module, "fetch_json", manifest_payload)
 
-    assert run_async(updater.fetch_latest(object())) == VersionInfo(
+    assert run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    ) == VersionInfo(
         version=_VERSION,
         metadata={
             "bunVersion": "1.4.0",
@@ -482,7 +485,11 @@ def test_executor_rejects_incoherent_release_metadata(
     )
 
     with pytest.raises(error_type, match=match):
-        run_async(module.ExecutorUpdater().fetch_latest(object()))
+        run_async(
+            module.ExecutorUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_executor_materializes_bun_closure_then_hashes_exact_commit(
@@ -505,33 +512,25 @@ def test_executor_materializes_bun_closure_then_hashes_exact_commit(
         return b"exact bun lock\n"
 
     async def run_command(
-        args: list[str],
-        *,
-        options: RunCommandOptions,
-    ) -> AsyncIterator[UpdateEvent]:
+        args: list[str], *, options: RunCommandOptions, emit: EventSink = ignore_event
+    ) -> object:
         assert options.source == "executor"
         seen_commands.append(args)
         output_path = Path(args[-1])
         output_path.write_text("{ generated = true; }\n", encoding="utf-8")
-        yield UpdateEvent.status(options.source, "bun2nix running")
-        yield UpdateEvent.value(
-            options.source,
-            CommandResult(args=args, returncode=0, stdout="", stderr=""),
-        )
+        await emit(UpdateEvent.status(options.source, "bun2nix running"))
+        return CommandResult(args=args, returncode=0, stdout="", stderr="")
 
     computed_hashes = iter((_SRC_HASH, _BUN_SOURCE_HASH))
 
     async def compute_hash(
-        source: str,
-        expr: str,
-        *,
-        config: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        source: str, expr: str, *, config: object, emit: EventSink = ignore_event
+    ) -> object:
         assert source == "executor"
         assert config == updater.config
         hash_calls.append(expr)
-        yield UpdateEvent.status(source, "fixed-output hash running")
-        yield UpdateEvent.value(source, next(computed_hashes))
+        await emit(UpdateEvent.status(source, "fixed-output hash running"))
+        return next(computed_hashes)
 
     def normalize_bun_nix_path(path: Path) -> None:
         normalized_inputs.append(path.read_text(encoding="utf-8"))
@@ -551,7 +550,13 @@ def test_executor_materializes_bun_closure_then_hashes_exact_commit(
         },
     )
 
-    events = run_async(collect_events(updater.fetch_hashes(info, object())))
+    events = run_async(
+        collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
     assert fetched_urls == [
         f"https://raw.githubusercontent.com/UsefulSoftwareCo/executor/{_COMMIT}/bun.lock"
@@ -598,9 +603,8 @@ def test_executor_materializes_bun_closure_then_hashes_exact_commit(
         }}
         """,
     )
-    value_event = events[-1]
-    assert value_event.kind is UpdateEventKind.VALUE
-    assert expect_source_hashes(value_event.payload) == [
+
+    assert events.result == [
         HashEntry.create("srcHash", _SRC_HASH),
         HashEntry.create("sha256", _BUN_SOURCE_HASH),
     ]
@@ -610,56 +614,6 @@ def test_executor_materializes_bun_closure_then_hashes_exact_commit(
         "bun2nix running",
         "fixed-output hash running",
         "fixed-output hash running",
-    ]
-
-
-def test_executor_dry_run_skips_generated_artifact_work(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Dry-run hashing must remain read-only and avoid the Bun generator."""
-    module = _load_updater_module()
-    updater = module.ExecutorUpdater()
-
-    async def forbidden(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("artifact materialization ran during dry-run")
-
-    computed_hashes = iter((_SRC_HASH, _BUN_SOURCE_HASH))
-
-    async def compute_hash(
-        source: str,
-        _expr: str,
-        *,
-        config: object,
-    ) -> AsyncIterator[UpdateEvent]:
-        assert config == updater.config
-        yield UpdateEvent.value(source, next(computed_hashes))
-
-    monkeypatch.setattr(module.update_net, "fetch_url", forbidden)
-    monkeypatch.setattr(module, "run_command", forbidden)
-    monkeypatch.setattr(module.update_nix, "compute_fixed_output_hash", compute_hash)
-    info = VersionInfo(
-        _VERSION,
-        {
-            "bunVersion": "1.3.11",
-            "commit": _COMMIT,
-            "electronVersion": "41.2.1",
-        },
-    )
-
-    events = run_async(
-        collect_events(
-            updater.fetch_hashes(
-                info,
-                object(),
-                context=UpdateContext(current=None, dry_run=True),
-            )
-        )
-    )
-
-    assert all(event.kind is not UpdateEventKind.ARTIFACT for event in events)
-    assert expect_source_hashes(events[-1].payload) == [
-        HashEntry.create("srcHash", _SRC_HASH),
-        HashEntry.create("sha256", _BUN_SOURCE_HASH),
     ]
 
 
@@ -685,7 +639,13 @@ def test_executor_materialization_requires_a_registered_package_directory(
     )
 
     with pytest.raises(RuntimeError, match="Package directory not found"):
-        run_async(collect_events(updater.fetch_hashes(info, object())))
+        run_async(
+            collect_events(
+                lambda emit: updater.fetch_hashes(
+                    info, object(), emit=emit, context=UpdateContext(current=None)
+                )
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -709,20 +669,15 @@ def test_executor_rejects_failed_or_incomplete_bun_generation(
         return b"exact bun lock\n"
 
     async def run_command(
-        args: list[str],
-        *,
-        options: RunCommandOptions,
-    ) -> AsyncIterator[UpdateEvent]:
+        args: list[str], *, options: RunCommandOptions, emit: EventSink = ignore_event
+    ) -> object:
         if writes_output:
             Path(args[-1]).write_text("{ generated = true; }\n", encoding="utf-8")
-        yield UpdateEvent.value(
-            options.source,
-            CommandResult(
-                args=args,
-                returncode=returncode,
-                stdout="",
-                stderr="generator failed" if returncode else "",
-            ),
+        return CommandResult(
+            args=args,
+            returncode=returncode,
+            stdout="",
+            stderr="generator failed" if returncode else "",
         )
 
     monkeypatch.setattr(module.update_net, "fetch_url", fetch_url)
@@ -737,44 +692,10 @@ def test_executor_rejects_failed_or_incomplete_bun_generation(
     )
 
     with pytest.raises(RuntimeError, match=match):
-        run_async(collect_events(updater.fetch_hashes(info, object())))
-
-
-def test_executor_hashing_requires_a_value_event(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A silent hash worker must not create a source entry."""
-    module = _load_updater_module()
-    updater = module.ExecutorUpdater()
-
-    async def compute_hash(
-        source: str,
-        _expr: str,
-        *,
-        config: object,
-    ) -> AsyncIterator[UpdateEvent]:
-        assert source == updater.name
-        assert config == updater.config
-        if False:
-            yield UpdateEvent.status(source, "unreachable")
-
-    monkeypatch.setattr(module.update_nix, "compute_fixed_output_hash", compute_hash)
-    info = VersionInfo(
-        _VERSION,
-        {
-            "bunVersion": "1.3.11",
-            "commit": _COMMIT,
-            "electronVersion": "41.2.1",
-        },
-    )
-
-    with pytest.raises(RuntimeError, match="Missing srcHash output"):
         run_async(
             collect_events(
-                updater.fetch_hashes(
-                    info,
-                    object(),
-                    context=UpdateContext(current=None, dry_run=True),
+                lambda emit: updater.fetch_hashes(
+                    info, object(), emit=emit, context=UpdateContext(current=None)
                 )
             )
         )

@@ -34,6 +34,13 @@ let
   slib = outputs.lib;
   inherit (opencode) version;
   inherit (opencode) src;
+  # Upstream's filtered build source may not exist during read-only evaluation.
+  # Read its metadata from the input, but honor a caller's different source.
+  workspaceMetadataSource =
+    if toString src == toString inputs.opencode.packages.${system}.opencode.src then
+      inputs.opencode
+    else
+      src;
   repoRoot = ../..;
   opencodeOverlayDir = repoRoot + "/overlays/opencode";
   appBundleName = "${appName}.app";
@@ -46,21 +53,23 @@ let
     (selfSource.pins or { }).desktopWorkspace
       or (throw "packages/opencode-desktop/default.nix is missing its updater-derived desktop workspace");
   desktopPackagePathCheck =
-    if pathExists (src + "/${desktopPackagePath}/package.json") then
+    if pathExists (workspaceMetadataSource + "/${desktopPackagePath}/package.json") then
       true
     else
       throw ''
         packages/opencode-desktop/default.nix cannot find the updater-derived desktop workspace
         ${desktopPackagePath} in the selected source
       '';
-  desktopPackageJson = fromJSON (readFile (src + "/${desktopPackagePath}/package.json"));
+  desktopPackageJson = fromJSON (
+    readFile (workspaceMetadataSource + "/${desktopPackagePath}/package.json")
+  );
   desktopPackageVersion = desktopPackageJson.version;
   inherit (selfSource) electronVersion;
   electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
   electronRuntime = electronBuild.runtime;
   electronRuntimeVersion = electronBuild.runtimeVersion;
   optionalDesktopWorkspacePaths = lib.optional (pathExists (
-    src + "/packages/llm/package.json"
+    workspaceMetadataSource + "/packages/llm/package.json"
   )) "packages/llm";
   desktopWorkspacePaths = [
     "packages/opencode"
@@ -498,6 +507,7 @@ stdenv.mkDerivation {
       electronRuntimeVersion
       electronVersion
       desktopWorkspacePaths
+      workspaceMetadataSource
       canonicalSessionDatabaseEnv
       node_modules
       opencodeChannel

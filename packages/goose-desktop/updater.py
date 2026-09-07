@@ -22,23 +22,21 @@ from lib.update.electron_manifest import (
     ElectronManifestMetadata,
     fetch_flake_electron_manifest,
 )
+from lib.update.events import EventSink, ignore_event
 from lib.update.nix import _build_package_path_attr_expr
 from lib.update.nix_expr import select_attrs
 from lib.update.paths import REPO_ROOT, sources_file_for
 from lib.update.updaters import (
     HashEntryUpdater,
+    UpdateContext,
     VersionInfo,
     register_updater,
 )
-from lib.update.updaters.core import _coerce_context
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     import aiohttp
-
-    from lib.update.events import EventStream
-    from lib.update.updaters import UpdateContext
 
 
 @register_updater
@@ -79,9 +77,9 @@ class GooseDesktopUpdater(HashEntryUpdater):
 
     @staticmethod
     def _goose_cli_source(
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
     ) -> SourceEntry:
-        resolved_context = _coerce_context(context)
+        resolved_context = context
         effective_source = resolved_context.effective_sources.get("goose-cli")
         if effective_source is not None:
             return effective_source
@@ -96,7 +94,7 @@ class GooseDesktopUpdater(HashEntryUpdater):
         self,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
+        context: UpdateContext,
     ) -> VersionInfo:
         """Resolve desktop metadata from the effective immutable Goose source."""
         entry = self._goose_cli_source(context)
@@ -133,9 +131,9 @@ class GooseDesktopUpdater(HashEntryUpdater):
     @contextmanager
     def _cargo_nix_path(
         cls,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
     ) -> Iterator[Path]:
-        resolved_context = _coerce_context(context)
+        resolved_context = context
         generated = resolved_context.generated_artifacts.get(cls._GOOSE_CARGO_NIX_PATH)
         if generated is None:
             yield REPO_ROOT / cls._GOOSE_CARGO_NIX_PATH
@@ -150,9 +148,9 @@ class GooseDesktopUpdater(HashEntryUpdater):
     @contextmanager
     def _crate_sources_path(
         cls,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
     ) -> Iterator[Path]:
-        resolved_context = _coerce_context(context)
+        resolved_context = context
         generated = resolved_context.generated_artifacts.get(
             cls._GOOSE_CRATE_SOURCES_PATH
         )
@@ -270,8 +268,9 @@ class GooseDesktopUpdater(HashEntryUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Compute the desktop pnpm dependency cache hash directly."""
         _ = session
         goose_cli_source = self._goose_cli_source(context)
@@ -298,13 +297,9 @@ class GooseDesktopUpdater(HashEntryUpdater):
                     source_overrides,
                 ),
                 config=self.config,
+                emit=emit,
             )
-            async for event in self._emit_single_hash_entry(
-                hash_stream,
-                error="Missing nodeModulesHash output",
-                hash_type="nodeModulesHash",
-            ):
-                yield event
+            return [HashEntry.create("nodeModulesHash", await hash_stream)]
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist the Goose source version with a platform-specific dependency hash."""

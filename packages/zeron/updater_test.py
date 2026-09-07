@@ -38,7 +38,7 @@ from lib.update.nix import (
 )
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -105,7 +105,9 @@ def test_zeron_resolves_the_release_tag_to_an_immutable_public_commit(
         github_payload,
     )
 
-    assert run_async(updater.fetch_latest(object())) == VersionInfo(
+    assert run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    ) == VersionInfo(
         version=_VERSION,
         metadata={"commit": _COMMIT, "tag": f"v{_VERSION}"},
     )
@@ -137,7 +139,11 @@ def test_zeron_rejects_release_without_an_immutable_commit(
     )
 
     with pytest.raises(error_type, match="has no immutable source commit"):
-        run_async(module.ZeronUpdater().fetch_latest(object()))
+        run_async(
+            module.ZeronUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_zeron_hashes_the_exact_source_and_cargo_closure(
@@ -155,7 +161,13 @@ def test_zeron_hashes_the_exact_source_and_cargo_closure(
         ),
     )
 
-    run_async(collect_events(updater.fetch_hashes(info, object())))
+    run_async(
+        collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
     assert updater.supported_platforms == ("aarch64-darwin",)
     assert_nix_ast_equal(

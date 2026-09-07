@@ -117,8 +117,11 @@ class CoastLocalUpdater(DownloadHashUpdater):
     supported_platforms = ("aarch64-darwin",)
     PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": _DOWNLOAD_URL}
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve a content identity using only generic public CDN headers."""
+        _ = context
         timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
         headers = {
             "Accept": "application/x-apple-diskimage, application/octet-stream",
@@ -146,7 +149,7 @@ class CoastLocalUpdater(DownloadHashUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Rehash every time because the public Coast URL is mutable."""

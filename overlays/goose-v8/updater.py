@@ -3,19 +3,13 @@
 import tomllib
 from typing import TYPE_CHECKING, ClassVar
 
-from lib.nix.models.sources import HashEntry, HashType, SourceEntry, SourceHashes
+from lib.nix.models.sources import HashEntry, HashType, SourceHashes
 from lib.update import net as update_net
 from lib.update import nix as update_nix
 from lib.update import process as update_process
 from lib.update.events import (
-    CapturedValue,
-    EventStream,
-    UpdateEvent,
-    ValueDrain,
-    capture_stream_value,
-    drain_value_events,
-    expect_hash_mapping,
-    require_value,
+    EventSink,
+    ignore_event,
 )
 from lib.update.nix import _build_fetchgit_expr
 from lib.update.updaters import (
@@ -73,7 +67,7 @@ class GooseV8Updater(FlakeInputUpdater, HashEntryUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         current = getattr(context, "current", context)
@@ -100,24 +94,14 @@ class GooseV8Updater(FlakeInputUpdater, HashEntryUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Compute the recursive source hash and matching upstream Linux assets."""
         _ = context
-
-        src_hash_drain = ValueDrain[object]()
-        async for event in drain_value_events(
-            update_nix.compute_fixed_output_hash(
-                self.name,
-                self._src_expr(info.version),
-                config=self.config,
-            ),
-            src_hash_drain,
-            parse=lambda payload: payload,
-        ):
-            yield event
-
-        src_hash = require_value(src_hash_drain, "Missing srcHash output")
+        src_hash = await update_nix.compute_fixed_output_hash(
+            self.name, self._src_expr(info.version), config=self.config, emit=emit
+        )
         if not isinstance(src_hash, str):
             msg = f"Expected src hash string, got {type(src_hash).__name__}"
             raise TypeError(msg)
@@ -142,26 +126,16 @@ class GooseV8Updater(FlakeInputUpdater, HashEntryUpdater):
             platform_urls[("rustyV8BindingHash", platform)] = self._binding_url(
                 release_version, platform
             )
-
-        async for asset_item in capture_stream_value(
-            update_process.compute_url_hashes(
-                self.name,
-                platform_urls.values(),
-                config=self.config,
-            ),
-            error="Missing prebuilt rusty_v8 hash output",
-        ):
-            if isinstance(asset_item, CapturedValue):
-                hashes_by_url = expect_hash_mapping(asset_item.captured)
-                hashes: SourceHashes = [HashEntry.create("srcHash", src_hash)] + [
-                    HashEntry.create(
-                        hash_type,
-                        hashes_by_url[url],
-                        platform=platform,
-                        url=url,
-                    )
-                    for (hash_type, platform), url in sorted(platform_urls.items())
-                ]
-                yield UpdateEvent.value(self.name, hashes)
-            else:
-                yield asset_item
+        hashes_by_url = await update_process.compute_url_hashes(
+            self.name, platform_urls.values(), config=self.config, emit=emit
+        )
+        hashes: SourceHashes = [HashEntry.create("srcHash", src_hash)] + [
+            HashEntry.create(
+                hash_type,
+                hashes_by_url[url],
+                platform=platform,
+                url=url,
+            )
+            for (hash_type, platform), url in sorted(platform_urls.items())
+        ]
+        return hashes

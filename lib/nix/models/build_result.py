@@ -2,9 +2,10 @@
 
 Aligned with build-result-v1 schema from NixOS/nix.
 
-Provides clean, discriminated-union models for successful and failed builds,
-replacing the auto-generated BuildResult1/BuildResult2/Status/Status1 types
-with ergonomic names and a proper tagged union.
+Provides named success and failure variants. The vendored schema conformance
+tests protect their fields, status values, and numeric constraints. Missing
+success tags and empty built outputs have construction defaults; build trace
+entries remain JSON to preserve experimental extensions from Nix.
 """
 
 from enum import StrEnum

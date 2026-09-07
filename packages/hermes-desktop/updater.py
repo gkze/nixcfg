@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
+    from lib.update.updaters.core import UpdateContext
 
 
 @register_updater
@@ -35,9 +36,11 @@ class HermesDesktopUpdater(FlakeInputMetadataUpdater):
         ),
     )
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve Electron from the desktop manifest at the locked input commit."""
-        info = await super().fetch_latest(session)
+        info = await super().fetch_latest(session, context=context)
         metadata = await fetch_flake_electron_manifest(
             session,
             node=self._resolve_flake_node(info),

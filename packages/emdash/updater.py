@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
     from lib.nix.models.flake_lock import FlakeLockNode
     from lib.nix.models.sources import SourceEntry, SourceHashes
+    from lib.update.updaters.core import UpdateContext
 
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _PNPM_PACKAGE_MANAGER_PATTERN = re.compile(
@@ -363,9 +364,11 @@ class EmdashUpdater(NpmDepsHashUpdater):
             raise TypeError(msg)
         return info.metadata.toolchain.to_pins()
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve Electron from manifests at the immutable refreshed input commit."""
-        info = await super().fetch_latest(session)
+        info = await super().fetch_latest(session, context=context)
         node = self._resolve_flake_node(info)
         _, _, commit = _locked_github_source(node)
 

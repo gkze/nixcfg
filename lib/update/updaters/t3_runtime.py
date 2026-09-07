@@ -2,6 +2,7 @@
 
 from typing import TYPE_CHECKING, Literal
 
+from lib.update.events import EventSink, ignore_event
 from lib.update.generated_artifact_commands import stream_command_materialized_artifacts
 from lib.update.nix import _build_package_path_attr_expr
 from lib.update.updaters.flake_backed import FlakeInputHashUpdater
@@ -10,7 +11,6 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry
-    from lib.update.events import EventStream
     from lib.update.updaters import UpdateContext, VersionInfo
 
 _RUNTIME_LOCK_ARTIFACTS = (
@@ -49,6 +49,12 @@ class T3RuntimeUpdater(FlakeInputHashUpdater):
     platform_specific = True
     supported_platforms = ("aarch64-darwin",)
 
+    async def _is_latest(self, context: UpdateContext, info: VersionInfo) -> bool:
+        """Report version freshness without evaluating locks that will be replaced."""
+        # This only chooses the progress message: T3 always materializes locks,
+        # hashes the candidate and fingerprints it before deciding what changed.
+        return context.current is not None and context.current.version == info.version
+
     def _runtime_lock_source_overrides(
         self,
         info: VersionInfo,
@@ -83,24 +89,22 @@ class T3RuntimeUpdater(FlakeInputHashUpdater):
         session: aiohttp.ClientSession,
         *,
         context: UpdateContext,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> SourceEntry | None:
         """Keep shared runtime locks materialized through finalization."""
         source_overrides = self._runtime_lock_source_overrides(info, context)
         context.drv_fingerprint = None
-        async for event in stream_command_materialized_artifacts(
+        return await stream_command_materialized_artifacts(
             self.name,
             args=_runtime_lock_command(source_overrides),
             artifact_paths=_RUNTIME_LOCK_ARTIFACTS,
-            inner=super()._candidate_update_stream(
-                info,
-                session,
-                context=context,
+            inner=lambda: super(T3RuntimeUpdater, self)._candidate_update_stream(
+                info, session, context=context, emit=emit
             ),
-            dry_run=context.dry_run,
             config=self.config,
             detail=_RUNTIME_LOCK_DETAIL,
-        ):
-            yield event
+            emit=emit,
+        )
 
 
 __all__ = ["T3RuntimeUpdater"]

@@ -30,11 +30,11 @@ from lib.tests._updater_helpers import (
     run_async,
 )
 from lib.update.derivation_validation import DerivationValidation
-from lib.update.events import UpdateEventKind, expect_source_hashes
+from lib.update.events import UpdateEventKind
 from lib.update.nix import _build_fetch_from_github_call
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 _PACKAGE_DIR = REPO_ROOT / "packages/openchamber"
 _VERSION = "9.8.7"
@@ -489,7 +489,10 @@ def test_openchamber_resolves_one_exact_release_and_companion_graph(
         _resolve_package_passthru_version,
     )
 
-    assert run_async(updater.fetch_latest(object())) == _version_info()
+    assert (
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))
+        == _version_info()
+    )
     assert api_paths == [
         "repos/openchamber/openchamber/releases/latest",
         f"repos/openchamber/openchamber/commits/{_TAG}",
@@ -607,10 +610,18 @@ def test_openchamber_hashes_every_source_and_closure_in_order(
         tuple((f"hash-step-{index}", value) for index, value in enumerate(outputs)),
     )
 
-    events = run_async(collect_events(updater.fetch_hashes(_version_info(), object())))
+    events = run_async(
+        collect_events(
+            lambda emit: updater.fetch_hashes(
+                _version_info(),
+                object(),
+                emit=emit,
+                context=UpdateContext(current=None),
+            )
+        )
+    )
     status_events = [event for event in events if event.kind is UpdateEventKind.STATUS]
-    value_events = [event for event in events if event.kind is UpdateEventKind.VALUE]
-    hashes = expect_source_hashes(value_events[-1].payload)
+    hashes = events.result
     entries = cast("list[HashEntry]", hashes)
 
     assert len(calls) == 7
@@ -1334,7 +1345,11 @@ def test_openchamber_revalidates_even_current_metadata() -> None:
     """A current version must still refresh all exact-source evidence."""
     module = _load_updater_module()
     assert (
-        run_async(module.OpenChamberUpdater()._is_latest(None, _version_info()))
+        run_async(
+            module.OpenChamberUpdater()._is_latest(
+                UpdateContext(current=None), _version_info()
+            )
+        )
         is False
     )
 
@@ -1350,7 +1365,11 @@ def test_openchamber_rejects_non_exact_release_metadata() -> None:
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(monkeypatch_target, latest)
         with pytest.raises(RuntimeError, match="exact semantic version"):
-            run_async(module.OpenChamberUpdater().fetch_latest(object()))
+            run_async(
+                module.OpenChamberUpdater().fetch_latest(
+                    object(), context=UpdateContext(current=None)
+                )
+            )
 
 
 def test_openchamber_commit_metadata_must_be_immutable() -> None:
@@ -1487,16 +1506,25 @@ def test_openchamber_validates_the_materialized_darwin_package() -> None:
     )
 
 
-def test_openchamber_missing_hash_event_fails_closed(
+def test_openchamber_hash_failure_cannot_promote_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The updater cannot promote metadata when any fixed-output probe is empty."""
+    """The updater cannot promote metadata when a fixed-output probe fails."""
     module = _load_updater_module()
-    install_fixed_hash_stream(monkeypatch, ((None, object()),))
-    with pytest.raises(TypeError, match="Expected string payload"):
+
+    async def failed_hash(*_args: object, **_kwargs: object) -> str:
+        raise RuntimeError("hash probe failed")
+
+    monkeypatch.setattr(module.update_nix, "compute_fixed_output_hash", failed_hash)
+    with pytest.raises(RuntimeError, match="hash probe failed"):
         run_async(
             collect_events(
-                module.OpenChamberUpdater().fetch_hashes(_version_info(), object())
+                lambda emit: module.OpenChamberUpdater().fetch_hashes(
+                    _version_info(),
+                    object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
+                )
             )
         )
 

@@ -1,7 +1,6 @@
 """Focused contracts for the flat treesitter-textobjects source and updater."""
 
 # ruff: noqa: N999, S101 -- flat sidecar name and pytest assertions are intentional.
-
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,14 +26,13 @@ from lib.tests._updater_helpers import (
     run_async,
 )
 from lib.update.derivation_validation import DerivationValidation
-from lib.update.events import UpdateEvent, UpdateEventKind
+from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
 from lib.update.nix import _build_fetch_from_github_call
 from lib.update.nix_expr import select_attrs
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
     from types import ModuleType
 
 _COMMIT = "52bda74e087034408e2d563cb4499c1601038f9d"
@@ -63,7 +61,9 @@ def _install_source_hash(
         isolate_by_drv_hash: bool = False,
         env: object = None,
         config: object = None,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
+        _ = emit
         calls.append({
             "name": name,
             "expr": expr,
@@ -71,7 +71,7 @@ def _install_source_hash(
             "env": env,
             "config": config,
         })
-        yield UpdateEvent.value(name, _UPDATED_HASH)
+        return _UPDATED_HASH
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
     return calls
@@ -174,7 +174,9 @@ def test_treesitter_textobjects_update_hashes_the_main_branch_head(
         hashes=HashCollection.from_value([HashEntry.create("srcHash", _SOURCE_HASH)]),
     )
 
-    events = run_async(collect_events(updater.update_stream(current, session)))
+    events = run_async(
+        collect_events(lambda emit: updater.update_stream(current, session, emit=emit))
+    )
 
     assert updater.get_derivation_validations() == (
         DerivationValidation(
@@ -237,7 +239,11 @@ def test_treesitter_textobjects_update_rejects_mutable_branch_metadata(
     monkeypatch.setattr(module, "fetch_github_api", _fetch_github_api)
 
     with pytest.raises(error_type, match=match):
-        run_async(module.TreesitterTextobjectsUpdater().fetch_latest(object()))
+        run_async(
+            module.TreesitterTextobjectsUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_treesitter_textobjects_hashing_requires_immutable_commit_metadata() -> None:
@@ -248,9 +254,11 @@ def test_treesitter_textobjects_hashing_requires_immutable_commit_metadata() -> 
     with pytest.raises(RuntimeError, match="metadata has no immutable commit"):
         run_async(
             collect_events(
-                updater.fetch_hashes(
+                lambda emit: updater.fetch_hashes(
                     VersionInfo(version="main", metadata={"commit": "main"}),
                     object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
                 )
             )
         )

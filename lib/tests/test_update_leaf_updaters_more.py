@@ -12,7 +12,7 @@ from lib.tests._updater_helpers import (
     run_async,
     updater_from_module,
 )
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters import strategies as updater_strategies
 from lib.update.updaters.metadata import AssetURLsMetadata, DownloadUrlMetadata
 from lib.update.updaters.vendor_feeds import SparkleAppcastItem
@@ -23,7 +23,9 @@ def _load(path: str) -> ModuleType:
 
 
 class _PackageUpdater(Protocol):
-    async def fetch_latest(self, session: object) -> VersionInfo: ...
+    async def fetch_latest(
+        self, session: object, *, context: object
+    ) -> VersionInfo: ...
 
     def get_download_url(self, platform: str, info: VersionInfo) -> str: ...
 
@@ -126,7 +128,9 @@ def test_sparkle_package_updaters(
         return await _fake_sparkle_items(*args, item=item, **kwargs)
 
     _patch_dependency(monkeypatch, module, "fetch_sparkle_appcast_items", fake_fetch)
-    info = run_async(_updater(module).fetch_latest(object()))
+    info = run_async(
+        _updater(module).fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info.version == expected_version
     if expected_url is not None:
         assert _download_url(info) == expected_url
@@ -149,7 +153,9 @@ def test_ghostty_tip_requires_commit_url(monkeypatch: pytest.MonkeyPatch) -> Non
 
     _patch_dependency(monkeypatch, module, "fetch_sparkle_appcast_items", fake_fetch)
     with pytest.raises(RuntimeError, match="Could not parse Ghostty tip commit"):
-        run_async(_updater(module).fetch_latest(object()))
+        run_async(
+            _updater(module).fetch_latest(object(), context=UpdateContext(current=None))
+        )
 
 
 @pytest.mark.parametrize(
@@ -208,7 +214,9 @@ def test_json_download_url_package_updaters(
         return payload
 
     _patch_dependency(monkeypatch, module, "fetch_json", fake_fetch_json)
-    info = run_async(_updater(module).fetch_latest(object()))
+    info = run_async(
+        _updater(module).fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info.version == expected_version
     assert _download_url(info) == expected_url
 
@@ -243,7 +251,10 @@ def test_json_hash_package_updaters(
 
     _patch_dependency(monkeypatch, module, "fetch_json", fake_fetch_json)
     assert (
-        run_async(_updater(module).fetch_latest(object())).version == expected_version
+        run_async(
+            _updater(module).fetch_latest(object(), context=UpdateContext(current=None))
+        ).version
+        == expected_version
     )
 
 
@@ -264,7 +275,9 @@ def test_figma_uses_per_platform_release_metadata(
 
     monkeypatch.setattr(module, "fetch_json", fake_fetch_json)
     updater = _updater(module)
-    info = run_async(updater.fetch_latest(object()))
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info.version == "125.0"
     assert (
         updater.get_download_url("aarch64-darwin", info)
@@ -287,7 +300,9 @@ def test_figma_rejects_mismatched_platform_versions(
 
     monkeypatch.setattr(module, "fetch_json", fake_fetch_json)
     with pytest.raises(RuntimeError, match="mismatched versions"):
-        run_async(_updater(module).fetch_latest(object()))
+        run_async(
+            _updater(module).fetch_latest(object(), context=UpdateContext(current=None))
+        )
 
 
 def test_figma_falls_back_when_metadata_lacks_platform_url() -> None:
@@ -317,7 +332,9 @@ def test_text_version_package_updaters(
 
     _patch_dependency(monkeypatch, module, "fetch_url", fake_fetch_url)
     updater = _updater(module)
-    info = run_async(updater.fetch_latest(object()))
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info.version == expected_version
     platform_updater = cast("_PlatformUpdater", updater)
     assert updater.get_download_url(next(iter(platform_updater.PLATFORMS)), info)
@@ -338,7 +355,9 @@ def test_text_version_package_updaters_require_version(
 
     _patch_dependency(monkeypatch, module, "fetch_url", fake_fetch_url)
     with pytest.raises(RuntimeError, match="Missing"):
-        run_async(_updater(module).fetch_latest(object()))
+        run_async(
+            _updater(module).fetch_latest(object(), context=UpdateContext(current=None))
+        )
 
 
 def test_cleanshot_parses_changelog_and_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -349,7 +368,9 @@ def test_cleanshot_parses_changelog_and_url(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(module, "fetch_url", fake_fetch_url)
     updater = _updater(module)
-    info = run_async(updater.fetch_latest(object()))
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info.version == "4.8.2"
     assert updater.get_download_url("aarch64-darwin", info).endswith(
         "CleanShot-X-4.8.2.dmg"
@@ -366,7 +387,9 @@ def test_macfuse_parses_release_plist(monkeypatch: pytest.MonkeyPatch) -> None:
         return payload
 
     monkeypatch.setattr(module, "fetch_url", fake_fetch_url)
-    info = run_async(_updater(module).fetch_latest(object()))
+    info = run_async(
+        _updater(module).fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info.version == "4.9.3"
     assert _download_url(info) == "https://example.com/fuse.dmg"
 
@@ -394,7 +417,10 @@ def test_head_artifact_package_updaters(
         fake_head_version,
     )
     assert (
-        run_async(_updater(module).fetch_latest(object())).version == "20260101.stable"
+        run_async(
+            _updater(module).fetch_latest(object(), context=UpdateContext(current=None))
+        ).version
+        == "20260101.stable"
     )
 
 
@@ -442,7 +468,9 @@ def test_linear_uses_selected_electron_builder_url(
     monkeypatch.setattr(
         module, "fetch_electron_builder_artifact_url", fake_artifact_url
     )
-    info = run_async(_updater(module).fetch_latest(object()))
+    info = run_async(
+        _updater(module).fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info.version == "1.2.3"
     assert _download_url(info) == "https://example.com/Linear.dmg"
 
@@ -473,7 +501,9 @@ def test_electron_builder_asset_url_package_updaters(
         fake_asset_urls,
     )
     updater = _updater(module)
-    info = run_async(updater.fetch_latest(object()))
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert isinstance(info.metadata, AssetURLsMetadata)
     assert (
         updater.get_download_url("aarch64-darwin", info)
@@ -504,7 +534,9 @@ def test_mole_app_pinned_version_and_urls(monkeypatch: pytest.MonkeyPatch) -> No
         return commit
 
     monkeypatch.setattr(updater, "_resolve_release_tag_commit", _resolve_commit)
-    info = run_async(updater.fetch_latest(object()))
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info.version == "1.2.3"
     assert info.commit == commit
     assert updater.get_download_url("aarch64-darwin", info).endswith(".tar.gz")
@@ -596,4 +628,6 @@ def test_leaf_updaters_reject_invalid_vendor_payloads(
         _patch_dependency(monkeypatch, module, "fetch_json", fake_fetch_json)
 
     with pytest.raises((RuntimeError, TypeError)):
-        run_async(_updater(module).fetch_latest(object()))
+        run_async(
+            _updater(module).fetch_latest(object(), context=UpdateContext(current=None))
+        )

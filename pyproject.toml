@@ -37,6 +37,7 @@ dependencies = [
   "tomlkit>=0.14.0",
   "typer>=0.24.1",
   "githubkit>=0.15.1",
+  "macholib>=1.16.4",
 ]
 
 [project.scripts]
@@ -59,9 +60,9 @@ extend-include = ["home/george/bin/git-ignore", "home/george/bin/zentool"]
 
 [tool.ruff.format]
 # Ruff 0.15.x can de-parenthesize multi-exception handlers into invalid Python
-# 2-era syntax on these entrypoints and helper modules; keep this list aligned
-# with lib/lint-files.nix and do not format them until the upstream formatter
-# bug is fixed.
+# 2-era syntax on these entrypoints and helper modules. lib/lint-files.nix
+# derives its exclusions from this list. Do not format them until the upstream
+# formatter bug is fixed.
 exclude = [
   "home/george/bin/git-ignore",
   "home/george/bin/zentool",
@@ -238,6 +239,9 @@ testpaths = ["lib", "packages", "overlays"]
 python_files = ["test_*.py", "*_test.py"]
 # Fail when xfail-marked tests unexpectedly pass.
 xfail_strict = true
+markers = [
+  "nix_eval(reason): permit a bounded real Nix evaluation with an explicit semantic justification",
+]
 
 [tool.coverage.run]
 # Measure branch coverage in addition to line coverage.

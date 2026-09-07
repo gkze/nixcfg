@@ -39,7 +39,6 @@ from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
     UpdateEventKind,
     expect_artifact_updates,
-    expect_source_hashes,
 )
 from lib.update.net import github_raw_url
 from lib.update.nix import (
@@ -47,7 +46,7 @@ from lib.update.nix import (
     _build_repo_package_attr_expr,
 )
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 _PACKAGE_DIR = REPO_ROOT / "packages/buzz"
 _VERSION = "0.5.20"
@@ -882,7 +881,9 @@ def test_buzz_audits_the_exact_release_source_topology(
     monkeypatch.setattr(module, "fetch_github_api", commit_payload)
     monkeypatch.setattr(module, "fetch_url", raw_payload)
 
-    assert run_async(updater.fetch_latest(object())) == VersionInfo(
+    assert run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    ) == VersionInfo(
         candidate_version,
         _metadata(
             version=candidate_version,
@@ -2353,7 +2354,13 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
         ),
     )
 
-    events = run_async(collect_events(updater.fetch_hashes(info, object())))
+    events = run_async(
+        collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
     assert updater.supported_platforms == ("aarch64-darwin",)
     assert events[0].kind is UpdateEventKind.STATUS
@@ -2563,11 +2570,7 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
             url=candidate_urls["buzzUrl"],
         ),
     ]
-    value_events = [event for event in events if event.kind is UpdateEventKind.VALUE]
-    assert (
-        cast("list[HashEntry]", expect_source_hashes(value_events[-1].payload))
-        == hashes
-    )
+    assert cast("list[HashEntry]", events.result) == hashes
     expected_result = SourceEntry(
         version=candidate_version,
         commit=candidate_commit,
@@ -2582,7 +2585,7 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
         },
     )
     assert updater.build_result(info, hashes) == expected_result
-    assert run_async(updater._is_latest(None, info)) is False
+    assert run_async(updater._is_latest(UpdateContext(current=None), info)) is False
 
 
 def test_buzz_hashing_requires_a_discovered_artifact_directory(
@@ -2604,7 +2607,16 @@ def test_buzz_hashing_requires_a_discovered_artifact_directory(
         RuntimeError,
         match="Package directory not found for missing-buzz-artifact-owner",
     ):
-        run_async(collect_events(updater.fetch_hashes(_version_info(), object())))
+        run_async(
+            collect_events(
+                lambda emit: updater.fetch_hashes(
+                    _version_info(),
+                    object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
+                )
+            )
+        )
 
 
 def test_buzz_updater_owns_the_complete_native_lock() -> None:

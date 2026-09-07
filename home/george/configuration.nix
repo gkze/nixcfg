@@ -588,7 +588,8 @@
     antigravity-cli.enable = true;
     awscli.enable = true;
     bottom.enable = true;
-    codex.enable = true;
+    # Keep the standalone derivation available without adding it to any profile.
+    codex.enable = false;
     discord = {
       enable = true;
       package = null;

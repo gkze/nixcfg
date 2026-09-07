@@ -39,7 +39,7 @@ from lib.tests._source_metadata import (
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import AssetURLsMetadata
 
 _PACKAGE_DIR = REPO_ROOT / "packages/grok-build"
@@ -392,7 +392,7 @@ def test_grok_build_resolves_one_immutable_official_arm64_zip(
         _fetch_asset_urls,
     )
 
-    info = _run(updater.fetch_latest(object()))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     result = updater.build_result(info, {"aarch64-darwin": _HASH})
 
     assert updater.PLATFORMS == {"aarch64-darwin": "arm64"}

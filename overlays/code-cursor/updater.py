@@ -2,7 +2,7 @@
 
 import asyncio
 import re
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urljoin
 
 import aiohttp
@@ -11,6 +11,9 @@ from lib.update.net import fetch_url
 from lib.update.updaters import VersionInfo, register_updater
 from lib.update.updaters.metadata import PlatformAPIMetadata
 from lib.update.updaters.platform_api import DownloadingPlatformAPIUpdater
+
+if TYPE_CHECKING:
+    from lib.update.updaters.core import UpdateContext
 
 HTTP_REDIRECT_MIN = 300
 HTTP_BAD_REQUEST = 400
@@ -100,8 +103,11 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
             raise RuntimeError(msg)
         return values.pop()
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch Cursor release metadata from the download page redirect targets."""
+        _ = context
         page = (
             await fetch_url(session, self.DOWNLOAD_PAGE, config=self.config)
         ).decode(errors="replace")

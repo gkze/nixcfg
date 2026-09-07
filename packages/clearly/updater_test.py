@@ -18,7 +18,7 @@ from lib.update.nix import (
     _build_fetch_from_github_call,
     _build_package_path_attr_expr,
 )
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 _COMMIT = "f9ed673ff753698eb55786fe056b367726464543"
 _CMARK_COMMIT = "1111111111111111111111111111111111111111"
@@ -133,7 +133,9 @@ def test_clearly_update_pins_source_and_swift_dependency_closure(
         ),
     )
 
-    events = run_async(collect_events(updater.update_stream(current, object())))
+    events = run_async(
+        collect_events(lambda emit: updater.update_stream(current, object(), emit=emit))
+    )
 
     assert len(calls) == 2
     assert_nix_ast_equal(
@@ -279,7 +281,11 @@ def test_clearly_rejects_release_without_immutable_commit(
     )
     error = TypeError if isinstance(payload, list) else RuntimeError
     with pytest.raises(error, match="has no immutable source commit"):
-        run_async(module.ClearlyUpdater().fetch_latest(object()))
+        run_async(
+            module.ClearlyUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 @pytest.mark.parametrize(

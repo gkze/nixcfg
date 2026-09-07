@@ -1,5 +1,6 @@
 """Structural tests for the Goose CLI crate2nix package."""
 
+import pytest
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 
 from lib.tests._assertions import expect_instance
@@ -51,6 +52,9 @@ def test_goose_cli_restores_bitcoin_internals_rust_version_metadata() -> None:
     )
 
 
+@pytest.mark.nix_eval(
+    reason="Only evaluation resolves the locked crate graph across generated artifacts."
+)
 def test_goose_cli_reviews_every_bitcoin_internals_version() -> None:
     """Use Nix because cross-artifact graph coverage cannot be proven by one AST."""
     versions = nix_eval_json(

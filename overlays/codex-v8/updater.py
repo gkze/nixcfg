@@ -8,15 +8,8 @@ from lib.nix.models.sources import HashEntry, HashType, SourceHashes
 from lib.update import nix as update_nix
 from lib.update import process as update_process
 from lib.update.events import (
-    CapturedValue,
-    EventStream,
-    UpdateEvent,
-    ValueDrain,
-    capture_stream_value,
-    drain_value_events,
-    expect_hash_mapping,
-    expect_str,
-    require_value,
+    EventSink,
+    ignore_event,
 )
 from lib.update.nix import _build_fetchgit_expr
 from lib.update.paths import REPO_ROOT
@@ -25,13 +18,10 @@ from lib.update.updaters import (
     VersionInfo,
     register_updater,
 )
-from lib.update.updaters.core import _coerce_context
 from lib.update.updaters.github_release import GitHubReleaseUpdater
 
 if TYPE_CHECKING:
     import aiohttp
-
-    from lib.nix.models.sources import SourceEntry
 
 
 @register_updater
@@ -53,8 +43,8 @@ class CodexV8Updater(GitHubReleaseUpdater):
     }
 
     @classmethod
-    def _cargo_nix_text(cls, context: UpdateContext | SourceEntry | None) -> str:
-        resolved_context = _coerce_context(context)
+    def _cargo_nix_text(cls, context: UpdateContext) -> str:
+        resolved_context = context
         overridden = resolved_context.generated_artifacts.get(cls._CODEX_CARGO_NIX_PATH)
         if overridden is not None:
             return overridden
@@ -72,7 +62,7 @@ class CodexV8Updater(GitHubReleaseUpdater):
         self,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
+        context: UpdateContext,
     ) -> VersionInfo:
         """Resolve Codex's rusty_v8 tag and persist its immutable commit."""
         version = self._codex_v8_version(self._cargo_nix_text(context))
@@ -104,7 +94,7 @@ class CodexV8Updater(GitHubReleaseUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         current = getattr(context, "current", context)
@@ -145,24 +135,16 @@ class CodexV8Updater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Compute the recursive fetchgit source hash and Linux release assets."""
         _ = (context, session)
 
         commit = self._require_commit(info)
-        src_hash_drain = ValueDrain[str]()
-        async for event in drain_value_events(
-            update_nix.compute_fixed_output_hash(
-                self.name,
-                self._src_expr(commit),
-                config=self.config,
-            ),
-            src_hash_drain,
-            parse=expect_str,
-        ):
-            yield event
-        src_hash = require_value(src_hash_drain, "Missing srcHash output")
+        src_hash = await update_nix.compute_fixed_output_hash(
+            self.name, self._src_expr(commit), config=self.config, emit=emit
+        )
 
         platform_urls: dict[tuple[HashType, str], str] = {}
         for platform in self.PLATFORMS:
@@ -172,26 +154,16 @@ class CodexV8Updater(GitHubReleaseUpdater):
             platform_urls[("rustyV8BindingHash", platform)] = self._binding_url(
                 info.version, platform
             )
-
-        async for item in capture_stream_value(
-            update_process.compute_url_hashes(
-                self.name,
-                platform_urls.values(),
-                config=self.config,
-            ),
-            error="Missing prebuilt rusty_v8 hash output",
-        ):
-            if isinstance(item, CapturedValue):
-                hashes_by_url = expect_hash_mapping(item.captured)
-                hashes: SourceHashes = [HashEntry.create("srcHash", src_hash)] + [
-                    HashEntry.create(
-                        hash_type,
-                        hashes_by_url[url],
-                        platform=platform,
-                        url=url,
-                    )
-                    for (hash_type, platform), url in sorted(platform_urls.items())
-                ]
-                yield UpdateEvent.value(self.name, hashes)
-            else:
-                yield item
+        hashes_by_url = await update_process.compute_url_hashes(
+            self.name, platform_urls.values(), config=self.config, emit=emit
+        )
+        hashes: SourceHashes = [HashEntry.create("srcHash", src_hash)] + [
+            HashEntry.create(
+                hash_type,
+                hashes_by_url[url],
+                platform=platform,
+                url=url,
+            )
+            for (hash_type, platform), url in sorted(platform_urls.items())
+        ]
+        return hashes

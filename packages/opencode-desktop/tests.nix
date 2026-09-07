@@ -86,7 +86,9 @@ let
       workspacePaths = package.passthru.desktopWorkspacePaths;
       manifests = builtins.map (
         workspacePath:
-        builtins.fromJSON (builtins.readFile (package.src + "/${workspacePath}/package.json"))
+        builtins.fromJSON (
+          builtins.readFile (package.passthru.workspaceMetadataSource + "/${workspacePath}/package.json")
+        )
       ) workspacePaths;
       includedNames = builtins.map (
         manifest: manifest.name or (throw "${label}: workspace manifest has no name")

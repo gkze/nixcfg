@@ -9,10 +9,10 @@ from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events, load_repo_module, run_async
-from lib.update.events import UpdateEvent
+from lib.update.events import EventSink, UpdateEvent, ignore_event
 from lib.update.net import github_raw_url
 from lib.update.nix import _build_package_path_attr_expr
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 _VERSION = "2.3.4"
 _REF = f"v{_VERSION}"
@@ -118,7 +118,9 @@ def test_fetch_latest_derives_identity_from_immutable_manifest_and_lock(
     monkeypatch.setattr(updater_module, "fetch_url", fetch_url)
 
     updater = updater_module.MuxUpdater()
-    info = run_async(updater.fetch_latest(object()))
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
 
     assert info.version == _REF
     assert isinstance(info.metadata, updater_module.MuxSourceMetadata)
@@ -141,7 +143,7 @@ def test_fetch_latest_derives_identity_from_immutable_manifest_and_lock(
         pins={"electronVersion": _ELECTRON_VERSION},
         drv_hash="unchanged-fingerprint",
     )
-    assert run_async(updater._is_latest(stale, info)) is False
+    assert run_async(updater._is_latest(UpdateContext(current=stale), info)) is False
     assert fetched_urls == [
         github_raw_url("example", "mux", _COMMIT, "package.json"),
         github_raw_url("example", "mux", _COMMIT, "bun.lock"),
@@ -218,21 +220,17 @@ def test_fetch_hashes_uses_exact_bun_sources_for_node_modules_probes(
     )
     seen_candidates: dict[str, SourceEntry] = {}
 
-    async def compute_url_hashes(_source, urls, **_kwargs):
+    async def compute_url_hashes(
+        _source, urls, *, emit: EventSink = ignore_event, **_kwargs
+    ) -> object:
         url_list = list(urls)
-        yield UpdateEvent.value(
-            "mux",
-            dict(zip(url_list, (_HASH_A, _HASH_B, _HASH_C), strict=True)),
-        )
+        return dict(zip(url_list, (_HASH_A, _HASH_B, _HASH_C), strict=True))
 
-    def compute_node_hash(self, candidate_info, *, system):
+    async def compute_node_hash(self, candidate_info, *, system, emit=ignore_event):
         candidate = self.build_result(candidate_info, [])
         seen_candidates[system] = candidate
 
-        async def events():
-            yield UpdateEvent.value("mux", _NODE_HASHES[system])
-
-        return events()
+        return _NODE_HASHES[system]
 
     monkeypatch.setattr(
         updater_module.update_process,
@@ -250,9 +248,13 @@ def test_fetch_hashes_uses_exact_bun_sources_for_node_modules_probes(
     )
 
     events = run_async(
-        collect_events(updater_module.MuxUpdater().fetch_hashes(info, object()))
+        collect_events(
+            lambda emit: updater_module.MuxUpdater().fetch_hashes(
+                info, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
     )
-    hashes = events[-1].payload
+    hashes = events.result
 
     assert isinstance(hashes, list)
     assert [entry.hash_type for entry in hashes] == [
@@ -357,7 +359,9 @@ def test_missing_structured_runtime_sources_force_refresh(
 ) -> None:
     """Legacy metadata cannot certify the runtime used for dependency hashing."""
     assert not run_async(
-        updater_module.MuxUpdater()._is_latest(current, _release_info(updater_module))
+        updater_module.MuxUpdater()._is_latest(
+            UpdateContext(current=current), _release_info(updater_module)
+        )
     )
 
 
@@ -396,7 +400,7 @@ def test_reusable_fingerprint_preserves_runtime_sources_and_normalizes_cache_has
         return "current-fingerprint"
 
     monkeypatch.setattr("lib.update.nix.compute_expr_drv_fingerprint", _fingerprint)
-    assert run_async(updater._is_latest(current, info)) is True
+    assert run_async(updater._is_latest(UpdateContext(current=current), info)) is True
     assert run_async(updater._compute_drv_fingerprint(current)) == "current-fingerprint"
     assert len(expressions) == 2
 
@@ -404,8 +408,8 @@ def test_reusable_fingerprint_preserves_runtime_sources_and_normalizes_cache_has
 @pytest.mark.parametrize(
     ("failure", "error", "message"),
     [
-        ("runtime", RuntimeError, "Missing Mux Bun runtime hashes"),
-        ("node", RuntimeError, "Missing Mux node_modules hashes"),
+        ("runtime", RuntimeError, "runtime hash probe failed"),
+        ("node", RuntimeError, "node hash probe failed"),
         ("invalid-node", TypeError, "must use structured hash entries"),
     ],
 )
@@ -418,15 +422,21 @@ def test_incomplete_hash_producers_cannot_yield_a_candidate(
 ) -> None:
     """Missing or malformed probe output cannot be persisted as a complete update."""
 
-    async def _runtime_hashes(_source, urls, **_kwargs):
-        yield UpdateEvent.status("mux", "probing runtime")
-        if failure != "runtime":
-            yield UpdateEvent.value("mux", dict.fromkeys(urls, _HASH_A))
+    async def _runtime_hashes(
+        _source, urls, *, emit: EventSink = ignore_event, **_kwargs
+    ) -> object:
+        await emit(UpdateEvent.status("mux", "probing runtime"))
+        if failure == "runtime":
+            raise RuntimeError("runtime hash probe failed")
+        return dict.fromkeys(urls, _HASH_A)
 
-    async def _node_hashes(_self, _info, _session, **_kwargs):
-        yield UpdateEvent.status("mux", "probing dependencies")
+    async def _node_hashes(
+        _self, _info, _session, *, emit: EventSink = ignore_event, **_kwargs
+    ) -> object:
+        await emit(UpdateEvent.status("mux", "probing dependencies"))
         if failure == "invalid-node":
-            yield UpdateEvent.value("mux", {"aarch64-darwin": _HASH_B})
+            return {"aarch64-darwin": _HASH_B}
+        raise RuntimeError("node hash probe failed")
 
     monkeypatch.setattr(
         updater_module.update_process, "compute_url_hashes", _runtime_hashes
@@ -437,8 +447,11 @@ def test_incomplete_hash_producers_cannot_yield_a_candidate(
     with pytest.raises(error, match=message):
         run_async(
             collect_events(
-                updater_module.MuxUpdater().fetch_hashes(
-                    _release_info(updater_module), object()
+                lambda emit: updater_module.MuxUpdater().fetch_hashes(
+                    _release_info(updater_module),
+                    object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
                 )
             )
         )

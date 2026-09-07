@@ -16,7 +16,6 @@ from lib.update.updaters import (
 from lib.update.updaters.metadata import AssetURLsMetadata
 
 if TYPE_CHECKING:
-    from lib.nix.models.sources import SourceEntry
     from lib.update.updaters import UpdateContext
 
 HTTP_BAD_REQUEST = 400
@@ -89,8 +88,11 @@ class SuperconductorUpdater(AssetURLsMetadataUpdater):
                 url=url,
             )
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Infer the current nightly version and resolved asset URL."""
+        _ = context
         artifacts = {
             platform: await self._fetch_resolved_artifact(session, platform)
             for platform in self.PLATFORMS
@@ -114,7 +116,7 @@ class SuperconductorUpdater(AssetURLsMetadataUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Recompute hashes because the nightly discovery endpoint is mutable."""

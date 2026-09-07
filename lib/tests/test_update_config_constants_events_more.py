@@ -1,12 +1,11 @@
 """Additional tests for update config/constants/events helpers."""
 
 import asyncio
-import builtins
-from typing import TYPE_CHECKING
 
 import pytest
 
-from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
+from lib.nix.models.sources import HashCollection, SourceEntry
+from lib.tests._updater_helpers import collect_events
 from lib.update import constants
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import (
@@ -19,30 +18,17 @@ from lib.update.config import (
     resolve_config,
 )
 from lib.update.events import (
-    CapturedValue,
     CommandResult,
-    GatheredValues,
     StatusInfo,
     StatusKind,
     StatusPayload,
     UpdateEvent,
-    UpdateEventKind,
-    ValueDrain,
-    capture_stream_value,
-    drain_value_events,
     expect_artifact_updates,
     expect_command_result,
-    expect_hash_mapping,
     expect_source_entry,
-    expect_source_hashes,
-    expect_str,
-    gather_event_streams,
+    gather_results,
     is_nix_build_command,
-    require_value,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
 
 
 def test_default_max_nix_builds_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,27 +207,7 @@ def test_update_event_expect_helpers_and_type_guards() -> None:
     with pytest.raises(TypeError, match="Expected CommandResult payload"):
         expect_command_result("x")
 
-    assert expect_str("ok") == "ok"
-    with pytest.raises(TypeError, match="Expected string payload"):
-        expect_str(1)
-
     mapping = {"sha256": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
-    assert expect_hash_mapping(mapping) == mapping
-    with pytest.raises(TypeError, match="Expected hash mapping payload"):
-        expect_hash_mapping({"a": 1})
-
-    entries = [
-        HashEntry.create(
-            "sha256", "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-        )
-    ]
-    assert expect_source_hashes(mapping) == mapping
-    assert expect_source_hashes(entries) == entries
-    with pytest.raises(TypeError, match="Expected SourceHashes payload"):
-        expect_source_hashes(["bad"])
-    with pytest.raises(TypeError, match="Expected SourceHashes payload"):
-        expect_source_hashes("bad")
-
     source_entry = SourceEntry(hashes=HashCollection.from_value(mapping))
     assert expect_source_entry(source_entry) is source_entry
     with pytest.raises(TypeError, match="Expected SourceEntry payload"):
@@ -269,150 +235,91 @@ def test_update_event_expect_helpers_and_type_guards() -> None:
     assert typed_status.payload == StatusPayload(operation="compute_hash")
 
 
-def _collect_async[T](stream: AsyncIterator[T]) -> list[T]:
-    async def _run() -> list[T]:
-        result: list[T] = []
-        async for item in stream:
-            result.append(item)
-        return result
+def test_gather_results_keeps_typed_results_and_real_progress() -> None:
+    """Concurrent operations return values separately from awaited progress."""
 
-    return asyncio.run(_run())
+    async def run():
+        async def operations(emit):
+            async def one(name):
+                await emit(UpdateEvent.status(name, "started"))
+                return f"hash:{name}"
 
+            return await gather_results({name: one(name) for name in ("a", "b")})
 
-def test_drain_value_events_and_require_value() -> None:
-    """Capture VALUE events while forwarding non-value events."""
+        return await collect_events(operations)
 
-    async def _events() -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.status("demo", "working")
-        yield UpdateEvent.value("demo", "value")
-
-    drain = ValueDrain[str]()
-    forwarded = _collect_async(drain_value_events(_events(), drain, parse=expect_str))
-    assert [event.kind for event in forwarded] == [UpdateEventKind.STATUS]
-    assert require_value(drain, "missing") == "value"
-
-    async def _missing_value() -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent(source="demo", kind=UpdateEventKind.VALUE, payload=None)
-
-    with pytest.raises(RuntimeError, match="missing payload"):
-        _collect_async(
-            drain_value_events(_missing_value(), ValueDrain(), parse=expect_str)
-        )
-
-    with pytest.raises(RuntimeError, match="need value"):
-        require_value(ValueDrain[str](), "need value")
+    captured = asyncio.run(run())
+    assert captured.result == {"a": "hash:a", "b": "hash:b"}
+    assert [event.source for event in captured] == ["a", "b"]
 
 
-def test_capture_stream_value_emits_wrapper() -> None:
-    """Wrap final captured VALUE payload in CapturedValue."""
+def test_gather_results_cancels_siblings_and_preserves_failure() -> None:
+    """A failed operation cancels and awaits a blocked sibling before returning."""
+    cancelled = []
 
-    async def _events() -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.status("demo", "one")
-        yield UpdateEvent.value("demo", "captured")
+    async def run():
+        started = asyncio.Event()
 
-    items = _collect_async(capture_stream_value(_events(), error="missing"))
-    assert isinstance(items[0], UpdateEvent)
-    wrapped = items[1]
-    if not isinstance(wrapped, CapturedValue):
-        raise AssertionError
-    assert wrapped.captured == "captured"
+        async def slow():
+            try:
+                started.set()
+                await asyncio.Event().wait()
+            finally:
+                cancelled.append("slow")
 
+        async def fail():
+            await started.wait()
+            raise RuntimeError("hash failed")
 
-def test_gather_event_streams_success_and_errors() -> None:
-    """Gather VALUE payloads while forwarding non-value events."""
+        return await gather_results({"slow": slow(), "broken": fail()})
 
-    async def _stream_ok(name: str, payload: str) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.status(name, f"start-{name}")
-        yield UpdateEvent.value(name, payload)
-
-    items = _collect_async(
-        gather_event_streams({"a": _stream_ok("a", "1"), "b": _stream_ok("b", "2")})
-    )
-    statuses = [item for item in items if isinstance(item, UpdateEvent)]
-    assert len(statuses) == 2
-    gathered = next(item for item in items if isinstance(item, GatheredValues))
-    assert gathered.values == {"a": "1", "b": "2"}
-
-    async def _missing_payload() -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent(source="x", kind=UpdateEventKind.VALUE, payload=None)
-
-    with pytest.raises(RuntimeError, match="missing payload"):
-        _collect_async(gather_event_streams({"x": _missing_payload()}))
-
-    async def _boom() -> AsyncIterator[UpdateEvent]:
-        msg = "boom"
-        raise RuntimeError(msg)
-        yield UpdateEvent.status("never", "never")
-
-    with pytest.raises(RuntimeError, match="boom") as exc_info:
-        _collect_async(gather_event_streams({"x": _boom()}))
-
-    assert "event stream key: 'x'" in "\n".join(exc_info.value.__notes__)
-
-    async def _boom_one() -> AsyncIterator[UpdateEvent]:
-        msg = "first"
-        raise RuntimeError(msg)
-        yield UpdateEvent.status("never", "never")
-
-    async def _boom_two() -> AsyncIterator[UpdateEvent]:
-        msg = "second"
-        raise RuntimeError(msg)
-        yield UpdateEvent.status("never", "never")
-
-    with pytest.raises(RuntimeError, match="Multiple event streams failed") as exc_info:
-        _collect_async(gather_event_streams({"a": _boom_one(), "b": _boom_two()}))
-
-    notes = "\n".join(exc_info.value.__notes__)
-    assert "'a': RuntimeError('first')" in notes
-    assert "'b': RuntimeError('second')" in notes
+    with pytest.raises(RuntimeError, match="hash failed") as caught:
+        asyncio.run(run())
+    assert cancelled == ["slow"]
+    assert "update operation key: 'broken'" in caught.value.__notes__
 
 
-def test_gather_event_streams_cancels_siblings_after_error() -> None:
-    """Cancel in-flight sibling streams once one stream fails."""
-    cancelled = False
+def test_gather_results_reports_simultaneous_failures() -> None:
+    """Independent errors retain their causes when tasks fail together."""
 
-    async def _slow_stream() -> AsyncIterator[UpdateEvent]:
-        nonlocal cancelled
-        try:
-            await asyncio.sleep(1)
-            yield UpdateEvent.value("slow", "late")
-        except asyncio.CancelledError:
-            cancelled = True
-            raise
+    async def run():
+        async def fail(message):
+            raise RuntimeError(message)
 
-    async def _boom() -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.status("boom", "starting")
-        msg = "boom"
-        raise RuntimeError(msg)
+        return await gather_results({"a": fail("first"), "b": fail("second")})
 
-    with pytest.raises(RuntimeError, match="boom"):
-        _collect_async(gather_event_streams({"slow": _slow_stream(), "boom": _boom()}))
-
-    assert cancelled is True
+    with pytest.raises(RuntimeError, match="first.*second") as caught:
+        asyncio.run(run())
+    assert isinstance(caught.value.__cause__, ExceptionGroup)
 
 
-def test_gather_event_streams_reraises_without_add_note_support(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Re-raise a single stream error even if add_note is unavailable."""
-    original_hasattr = builtins.hasattr
+def test_sink_backpressure_and_caller_cancellation() -> None:
+    """An awaited bounded sink pauses producers and cancellation joins cleanup."""
 
-    def _fake_hasattr(obj: object, name: str) -> bool:
-        if isinstance(obj, RuntimeError) and name == "add_note":
-            return False
-        return original_hasattr(obj, name)
+    async def run():
+        queue = asyncio.Queue(maxsize=1)
+        started = asyncio.Event()
+        finished = []
 
-    monkeypatch.setattr("builtins.hasattr", _fake_hasattr)
+        async def produce():
+            try:
+                await queue.put(UpdateEvent.status("demo", "first"))
+                started.set()
+                await queue.put(UpdateEvent.status("demo", "second"))
+                raise AssertionError("bounded sink did not apply backpressure")
+            finally:
+                finished.append(True)
 
-    async def _boom() -> AsyncIterator[UpdateEvent]:
-        msg = "boom"
-        raise RuntimeError(msg)
-        yield UpdateEvent.status("never", "never")
+        task = asyncio.create_task(gather_results({"demo": produce()}))
+        await started.wait()
+        assert queue.qsize() == 1
+        assert not task.done()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert finished == [True]
 
-    with pytest.raises(RuntimeError, match="boom") as exc_info:
-        _collect_async(gather_event_streams({"x": _boom()}))
-
-    assert not getattr(exc_info.value, "__notes__", [])
+    asyncio.run(run())
 
 
 def test_update_event_status_includes_structured_fields() -> None:

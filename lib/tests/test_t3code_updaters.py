@@ -3,7 +3,7 @@
 import asyncio
 import json
 import shlex
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,9 +23,11 @@ from lib.update.config import resolve_config
 from lib.update.electron_manifest import ElectronManifestMetadata
 from lib.update.events import (
     CommandResult,
+    EventSink,
     UpdateEvent,
     UpdateEventKind,
     expect_artifact_updates,
+    ignore_event,
 )
 from lib.update.generated_artifact_commands import stream_command_materialized_artifacts
 from lib.update.nix import _build_package_path_attr_expr
@@ -61,9 +63,8 @@ def _version_info(updater: object) -> VersionInfo:
     )
 
 
-async def _unexpected_inner() -> AsyncIterator[UpdateEvent]:
+async def _unexpected_inner(*, emit: EventSink = ignore_event) -> object:
     raise AssertionError("invalid generated artifact reached hashing")
-    yield  # pragma: no cover -- makes this an async generator
 
 
 def _current_entry() -> SourceEntry:
@@ -169,7 +170,10 @@ def test_shared_runtime_locks_use_one_candidate_view_during_desktop_pin_bump(
     })
     materialized: list[tuple[str, str | None, tuple[GeneratedArtifact, ...]]] = []
 
-    async def _fetch_latest(_self: object, _session: object) -> VersionInfo:
+    async def _fetch_latest(
+        _self: object, _session: object, *, context=None
+    ) -> VersionInfo:
+        _ = context
         return _version_info(_self)
 
     async def _not_latest(
@@ -191,21 +195,22 @@ def test_shared_runtime_locks_use_one_candidate_view_during_desktop_pin_bump(
         *,
         env: dict[str, str] | None = None,
         config: object | None = None,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = (env, config)
-        yield UpdateEvent.value(source, NEW_HASH)
+        return NEW_HASH
 
     async def _materialize(
         source: str,
         *,
         args: list[str],
         artifact_paths: tuple[str, ...],
-        inner: AsyncIterator[UpdateEvent],
-        dry_run: bool,
+        inner: Callable[[], Awaitable[object]],
         config: object | None = None,
         detail: str,
-    ) -> AsyncIterator[UpdateEvent]:
-        _ = (dry_run, config, detail)
+        emit: EventSink = ignore_event,
+    ) -> object:
+        _ = (config, detail)
         overrides = _source_overrides_from_package_expr(args[4])
         desktop = overrides.get("t3code-desktop")
         pins = desktop.get("pins") if isinstance(desktop, dict) else None
@@ -225,9 +230,8 @@ def test_shared_runtime_locks_use_one_candidate_view_during_desktop_pin_bump(
             for path in artifact_paths
         )
         materialized.append((source, electron_builder_version, artifacts))
-        yield UpdateEvent.artifact(source, list(artifacts))
-        async for event in inner:
-            yield event
+        await emit(UpdateEvent.artifact(source, list(artifacts)))
+        return await inner()
 
     async def _run_queue_task(
         *,
@@ -324,9 +328,10 @@ def test_t3code_updaters_hash_only_their_node_modules_attr(
         *,
         env: dict[str, str] | None = None,
         config: object | None = None,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         captured.update({"source": source, "expr": expr, "env": env, "config": config})
-        yield UpdateEvent.value(source, HASH)
+        return HASH
 
     monkeypatch.setattr(
         "lib.update.nix.compute_fixed_output_hash",
@@ -340,7 +345,11 @@ def test_t3code_updaters_hash_only_their_node_modules_attr(
         else None
     )
     events = _run(
-        _collect(updater._compute_hash_for_system(info, system="aarch64-darwin"))
+        _collect(
+            lambda emit: updater._compute_hash_for_system(
+                info, system="aarch64-darwin", emit=emit
+            )
+        )
     )
 
     assert captured["source"] == package_name
@@ -357,7 +366,7 @@ def test_t3code_updaters_hash_only_their_node_modules_attr(
             fake_hashes=True if source_override is not None else None,
         ),
     )
-    assert events == [UpdateEvent.value(package_name, HASH)]
+    assert events.result == HASH
 
 
 @pytest.mark.parametrize(
@@ -389,7 +398,8 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
     updater = getattr(module, class_name)()
     captured: dict[str, object] = {}
 
-    async def _fetch_latest(_session: object) -> VersionInfo:
+    async def _fetch_latest(_session: object, *, context=None) -> VersionInfo:
+        _ = context
         return _version_info(updater)
 
     monkeypatch.setattr(updater, "fetch_latest", _fetch_latest)
@@ -399,21 +409,19 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
         *,
         args: list[str],
         artifact_paths: tuple[str, ...],
-        inner: AsyncIterator[UpdateEvent],
-        dry_run: bool,
+        inner: Callable[[], Awaitable[object]],
         config: object | None = None,
         detail: str,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         captured.update({
             "materialize_source": source,
             "materialize_args": args,
             "materialize_artifact_paths": artifact_paths,
-            "materialize_dry_run": dry_run,
             "materialize_config": config,
             "materialize_detail": detail,
         })
-        async for event in inner:
-            yield event
+        return await inner()
 
     async def _fake_compute_expr_drv_fingerprint(
         source: str,
@@ -434,9 +442,10 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
         *,
         env: dict[str, str] | None = None,
         config: object | None = None,
-    ):
+        emit: EventSink = ignore_event,
+    ) -> object:
         captured.update({"source": source, "expr": expr, "env": env, "config": config})
-        yield UpdateEvent.value(source, NEW_HASH)
+        return NEW_HASH
 
     monkeypatch.setattr(
         "lib.update.nix.compute_expr_drv_fingerprint",
@@ -457,10 +466,7 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
 
     events = _run(
         _collect(
-            updater.update_stream(
-                _current_entry(),
-                object(),
-            )
+            lambda emit: updater.update_stream(_current_entry(), object(), emit=emit)
         )
     )
 
@@ -530,7 +536,8 @@ def test_t3code_fingerprints_materialized_locks_and_is_idempotent(
     candidate_lock = "candidate lock"
     fingerprint_states: list[str] = []
 
-    async def _fetch_latest(_session: object) -> VersionInfo:
+    async def _fetch_latest(_session: object, *, context=None) -> VersionInfo:
+        _ = context
         return _version_info(updater)
 
     async def _fingerprint(_source_override: SourceEntry | None = None) -> str:
@@ -543,38 +550,40 @@ def test_t3code_fingerprints_materialized_locks_and_is_idempotent(
         *,
         env: dict[str, str] | None = None,
         config: object | None = None,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = (env, config)
-        yield UpdateEvent.value(source, NEW_HASH)
+        return NEW_HASH
 
     async def _materialize(
         source: str,
         *,
         args: list[str],
         artifact_paths: tuple[str, ...],
-        inner: AsyncIterator[UpdateEvent],
-        dry_run: bool,
+        inner: Callable[[], Awaitable[object]],
         config: object | None = None,
         detail: str,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         nonlocal checked_in_lock
-        _ = (args, dry_run, config, detail)
+        _ = (args, config, detail)
         previous = checked_in_lock
         checked_in_lock = candidate_lock
         try:
-            yield UpdateEvent.artifact(
-                source,
-                [
-                    GeneratedArtifact.text(
-                        path,
-                        candidate_lock,
-                        changed_from_snapshot=previous != candidate_lock,
-                    )
-                    for path in artifact_paths
-                ],
+            await emit(
+                UpdateEvent.artifact(
+                    source,
+                    [
+                        GeneratedArtifact.text(
+                            path,
+                            candidate_lock,
+                            changed_from_snapshot=previous != candidate_lock,
+                        )
+                        for path in artifact_paths
+                    ],
+                )
             )
-            async for event in inner:
-                yield event
+            return await inner()
         finally:
             checked_in_lock = previous
 
@@ -596,7 +605,7 @@ def test_t3code_fingerprints_materialized_locks_and_is_idempotent(
     })
     first_events = _run(
         _collect(
-            updater.update_stream(
+            lambda emit: updater.update_stream(
                 old_desktop,
                 object(),
                 context=UpdateContext(
@@ -606,6 +615,7 @@ def test_t3code_fingerprints_materialized_locks_and_is_idempotent(
                         "t3code-desktop": old_desktop,
                     },
                 ),
+                emit=emit,
             )
         )
     )
@@ -621,7 +631,7 @@ def test_t3code_fingerprints_materialized_locks_and_is_idempotent(
     checked_in_lock = candidate_lock
     second_events = _run(
         _collect(
-            updater.update_stream(
+            lambda emit: updater.update_stream(
                 first_result,
                 object(),
                 context=UpdateContext(
@@ -631,13 +641,13 @@ def test_t3code_fingerprints_materialized_locks_and_is_idempotent(
                         "t3code-desktop": first_result,
                     },
                 ),
+                emit=emit,
             )
         )
     )
 
     assert first_result.drv_hash == "drv-candidate lock"
-    assert fingerprint_states
-    assert set(fingerprint_states) == {candidate_lock}
+    assert fingerprint_states == [candidate_lock, candidate_lock]
     assert not any(
         event.kind is UpdateEventKind.RESULT and event.payload is not None
         for event in second_events
@@ -684,22 +694,20 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
         *,
         args: list[str],
         artifact_paths: tuple[str, ...],
-        inner: AsyncIterator[UpdateEvent],
-        dry_run: bool,
+        inner: Callable[[], Awaitable[object]],
         config: object | None = None,
         detail: str,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         captured.update({
             "source": source,
             "args": args,
             "artifact_paths": artifact_paths,
-            "dry_run": dry_run,
             "config": config,
             "detail": detail,
         })
-        yield UpdateEvent.status(source, "materialized")
-        async for event in inner:
-            yield event
+        await emit(UpdateEvent.status(source, "materialized"))
+        return await inner()
 
     async def _fake_compute_fixed_output_hash(
         source: str,
@@ -707,11 +715,13 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
         *,
         env: dict[str, str] | None = None,
         config: object | None = None,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         captured.update({"hash_source": source, "expr": expr, "env": env})
-        yield UpdateEvent.value(source, NEW_HASH)
+        return NEW_HASH
 
-    async def _fetch_latest(_session: object) -> VersionInfo:
+    async def _fetch_latest(_session: object, *, context=None) -> VersionInfo:
+        _ = context
         return info
 
     async def _fingerprint(_source_override: SourceEntry | None = None) -> str:
@@ -735,10 +745,8 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
     monkeypatch.setattr(updater, "_compute_drv_fingerprint", _fingerprint)
     events = _run(
         _collect(
-            updater.update_stream(
-                None,
-                object(),
-                context=UpdateContext(current=None, dry_run=True),
+            lambda emit: updater.update_stream(
+                None, object(), context=UpdateContext(current=None), emit=emit
             )
         )
     )
@@ -765,7 +773,6 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
         "packages/t3code/bun.lock",
         "packages/t3code-desktop/bun.lock",
     )
-    assert captured["dry_run"] is True
     assert captured["detail"] == "T3 runtime Bun locks"
     assert captured["hash_source"] == package_name
     assert captured["env"] is None
@@ -775,74 +782,6 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
     assert isinstance(result.payload, SourceEntry)
     assert result.payload.hashes.entries[0].hash == NEW_HASH
     assert result.payload.drv_hash == "candidate-drv"
-
-
-def test_command_materialized_artifacts_dry_run_skips_live_refresh(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Dry-run hashes still run without commands touching checked-in artifacts."""
-    first_lock = tmp_path / "packages/t3code/bun.lock"
-    second_lock = tmp_path / "packages/t3code-desktop/bun.lock"
-    first_lock.parent.mkdir(parents=True)
-    second_lock.parent.mkdir(parents=True)
-    first_lock.write_text("old standalone\n", encoding="utf-8")
-    second_lock.write_text("old desktop\n", encoding="utf-8")
-    before = {
-        path: (path.stat().st_ino, path.stat().st_mtime_ns)
-        for path in (first_lock, second_lock)
-    }
-    seen_by_hash: list[tuple[str, str]] = []
-
-    async def _unexpected_run_command(
-        _args: list[str],
-        *,
-        options: RunCommandOptions,
-    ) -> AsyncIterator[UpdateEvent]:
-        _ = options
-        raise AssertionError("dry-run invoked materializer")
-        yield  # pragma: no cover -- makes this an async generator
-
-    async def _inner_hash() -> AsyncIterator[UpdateEvent]:
-        seen_by_hash.append((
-            first_lock.read_text(encoding="utf-8"),
-            second_lock.read_text(encoding="utf-8"),
-        ))
-        yield UpdateEvent.value("t3code", HASH)
-
-    monkeypatch.setattr(
-        "lib.update.generated_artifact_commands._run_command",
-        _unexpected_run_command,
-    )
-
-    async def _collect_with_change_detection() -> list[UpdateEvent]:
-        events: list[UpdateEvent] = []
-        async for event in stream_command_materialized_artifacts(
-            "t3code",
-            args=["refresh-locks"],
-            artifact_paths=(
-                "packages/t3code/bun.lock",
-                "packages/t3code-desktop/bun.lock",
-            ),
-            inner=_inner_hash(),
-            dry_run=True,
-            detail="T3 runtime Bun locks",
-            repo_root=tmp_path,
-        ):
-            events.append(event)
-        return events
-
-    events = _run(_collect_with_change_detection())
-
-    assert seen_by_hash == [("old standalone\n", "old desktop\n")]
-    assert first_lock.read_text(encoding="utf-8") == "old standalone\n"
-    assert second_lock.read_text(encoding="utf-8") == "old desktop\n"
-    assert all(event.kind is not UpdateEventKind.ARTIFACT for event in events)
-    assert events[-1] == UpdateEvent.value("t3code", HASH)
-    assert {
-        path: (path.stat().st_ino, path.stat().st_mtime_ns)
-        for path in (first_lock, second_lock)
-    } == before
 
 
 def test_command_materialized_artifacts_restore_when_hashing_raises(
@@ -856,35 +795,29 @@ def test_command_materialized_artifacts_restore_when_hashing_raises(
     lock_file.chmod(0o640)
 
     async def _refresh(
-        args: list[str],
-        *,
-        options: RunCommandOptions,
-    ) -> AsyncIterator[UpdateEvent]:
+        args: list[str], *, options: RunCommandOptions, emit: EventSink = ignore_event
+    ) -> object:
         lock_file.write_text("temporary\n", encoding="utf-8")
         lock_file.chmod(0o600)
-        yield UpdateEvent.value(
-            options.source,
-            CommandResult(args=args, returncode=0, stdout="", stderr=""),
-        )
+        return CommandResult(args=args, returncode=0, stdout="", stderr="")
 
-    async def _failed_hash() -> AsyncIterator[UpdateEvent]:
+    async def _failed_hash(*, emit: EventSink = ignore_event) -> object:
         assert lock_file.read_text(encoding="utf-8") == "temporary\n"
         assert lock_file.stat().st_mode & 0o777 == 0o600
         raise RuntimeError("hash failed")
-        yield  # pragma: no cover -- makes this an async generator
 
     monkeypatch.setattr("lib.update.generated_artifact_commands._run_command", _refresh)
 
     with pytest.raises(RuntimeError, match="hash failed"):
         _run(
             _collect(
-                stream_command_materialized_artifacts(
+                lambda emit: stream_command_materialized_artifacts(
                     "t3code",
                     args=["refresh-locks"],
                     artifact_paths=("packages/t3code/bun.lock",),
-                    inner=_failed_hash(),
-                    dry_run=False,
+                    inner=_failed_hash,
                     repo_root=tmp_path,
+                    emit=emit,
                 )
             )
         )
@@ -904,18 +837,18 @@ def test_command_materializer_does_not_rewrite_an_unchanged_artifact(
     lock_file.write_text("unchanged\n", encoding="utf-8")
     before = lock_file.stat()
 
-    async def _hash() -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.value("t3code", HASH)
+    async def _hash(*, emit: EventSink = ignore_event) -> object:
+        return HASH
 
     events = _run(
         _collect(
-            stream_command_materialized_artifacts(
+            lambda emit: stream_command_materialized_artifacts(
                 "t3code",
                 args=["sh", "-c", "true"],
                 artifact_paths=("packages/t3code/bun.lock",),
-                inner=_hash(),
-                dry_run=False,
+                inner=_hash,
                 repo_root=tmp_path,
+                emit=emit,
             )
         )
     )
@@ -935,13 +868,13 @@ def test_command_materializer_removes_new_artifact_after_hashing(
     artifact = tmp_path / "packages/t3code/generated.lock"
     seen_by_hash: list[str] = []
 
-    async def _hash() -> AsyncIterator[UpdateEvent]:
+    async def _hash(*, emit: EventSink = ignore_event) -> object:
         seen_by_hash.append(artifact.read_text(encoding="utf-8"))
-        yield UpdateEvent.value("t3code", HASH)
+        return HASH
 
     events = _run(
         _collect(
-            stream_command_materialized_artifacts(
+            lambda emit: stream_command_materialized_artifacts(
                 "t3code",
                 args=[
                     "sh",
@@ -950,9 +883,9 @@ def test_command_materializer_removes_new_artifact_after_hashing(
                     f"printf 'generated\\n' > {shlex.quote(str(artifact))}",
                 ],
                 artifact_paths=("packages/t3code/generated.lock",),
-                inner=_hash(),
-                dry_run=False,
+                inner=_hash,
                 repo_root=tmp_path,
+                emit=emit,
             )
         )
     )
@@ -974,13 +907,10 @@ def test_command_materializer_rejects_preexisting_directory(
     artifact.mkdir(parents=True)
 
     async def _unexpected_command(
-        _args: list[str],
-        *,
-        options: RunCommandOptions,
-    ) -> AsyncIterator[UpdateEvent]:
+        _args: list[str], *, options: RunCommandOptions, emit: EventSink = ignore_event
+    ) -> object:
         _ = options
         raise AssertionError("generator ran for an invalid artifact path")
-        yield  # pragma: no cover -- makes this an async generator
 
     monkeypatch.setattr(
         "lib.update.generated_artifact_commands._run_command",
@@ -990,13 +920,13 @@ def test_command_materializer_rejects_preexisting_directory(
     with pytest.raises(RuntimeError, match="not a regular file"):
         _run(
             _collect(
-                stream_command_materialized_artifacts(
+                lambda emit: stream_command_materialized_artifacts(
                     "t3code",
                     args=["refresh-locks"],
                     artifact_paths=("packages/t3code/bun.lock",),
-                    inner=_unexpected_inner(),
-                    dry_run=False,
+                    inner=_unexpected_inner,
                     repo_root=tmp_path,
+                    emit=emit,
                 )
             )
         )
@@ -1012,16 +942,11 @@ def test_command_materializer_restores_file_replaced_by_directory(
     artifact.write_text("before\n", encoding="utf-8")
 
     async def _replace_with_directory(
-        args: list[str],
-        *,
-        options: RunCommandOptions,
-    ) -> AsyncIterator[UpdateEvent]:
+        args: list[str], *, options: RunCommandOptions, emit: EventSink = ignore_event
+    ) -> object:
         artifact.unlink()
         artifact.mkdir()
-        yield UpdateEvent.value(
-            options.source,
-            CommandResult(args=args, returncode=0, stdout="", stderr=""),
-        )
+        return CommandResult(args=args, returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(
         "lib.update.generated_artifact_commands._run_command",
@@ -1031,13 +956,13 @@ def test_command_materializer_restores_file_replaced_by_directory(
     with pytest.raises(RuntimeError, match="was not produced"):
         _run(
             _collect(
-                stream_command_materialized_artifacts(
+                lambda emit: stream_command_materialized_artifacts(
                     "t3code",
                     args=["refresh-locks"],
                     artifact_paths=("packages/t3code/bun.lock",),
-                    inner=_unexpected_inner(),
-                    dry_run=False,
+                    inner=_unexpected_inner,
                     repo_root=tmp_path,
+                    emit=emit,
                 )
             )
         )
@@ -1107,7 +1032,6 @@ def test_shared_materialized_artifact_keeps_each_successful_source_owner(
     persist_generated_artifacts(
         do_sources=True,
         source_names=source_names,
-        dry_run=False,
         artifact_updates=result.artifact_updates,
         details=result.details,
     )
@@ -1191,7 +1115,6 @@ def test_shared_materialized_artifact_rejects_conflicting_successful_snapshots(
         persist_generated_artifacts(
             do_sources=True,
             source_names=source_names,
-            dry_run=False,
             artifact_updates=result.artifact_updates,
             details=result.details,
         )
@@ -1211,46 +1134,41 @@ def test_command_materialized_artifacts_serializes_overlapping_paths(
     seen_by_hash: list[tuple[str, str]] = []
 
     async def _fake_run_command(
-        args: list[str],
-        *,
-        options: RunCommandOptions,
-    ) -> AsyncIterator[UpdateEvent]:
+        args: list[str], *, options: RunCommandOptions, emit: EventSink = ignore_event
+    ) -> object:
         _ = args
         lock_file.write_text(f"{options.source}\n", encoding="utf-8")
-        yield UpdateEvent.value(
-            options.source,
-            CommandResult(args=[], returncode=0, stdout="", stderr=""),
-        )
+        return CommandResult(args=[], returncode=0, stdout="", stderr="")
 
-    async def _inner_hash(source: str) -> AsyncIterator[UpdateEvent]:
+    async def _inner_hash(source: str, *, emit: EventSink = ignore_event) -> object:
         nonlocal active_hashes, max_active_hashes
         active_hashes += 1
         max_active_hashes = max(max_active_hashes, active_hashes)
         await asyncio.sleep(0)
         seen_by_hash.append((source, lock_file.read_text(encoding="utf-8")))
         active_hashes -= 1
-        yield UpdateEvent.value(source, HASH)
+        return HASH
 
     async def _run_both() -> None:
         await asyncio.gather(
             _collect(
-                stream_command_materialized_artifacts(
+                lambda emit: stream_command_materialized_artifacts(
                     "first",
                     args=["refresh-locks"],
                     artifact_paths=("packages/t3code/bun.lock",),
-                    inner=_inner_hash("first"),
-                    dry_run=False,
+                    inner=lambda: _inner_hash("first"),
                     repo_root=tmp_path,
+                    emit=emit,
                 )
             ),
             _collect(
-                stream_command_materialized_artifacts(
+                lambda emit: stream_command_materialized_artifacts(
                     "second",
                     args=["refresh-locks"],
                     artifact_paths=("packages/t3code/bun.lock",),
-                    inner=_inner_hash("second"),
-                    dry_run=False,
+                    inner=lambda: _inner_hash("second"),
                     repo_root=tmp_path,
+                    emit=emit,
                 )
             ),
         )

@@ -55,13 +55,12 @@ from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
     UpdateEventKind,
     expect_artifact_updates,
-    expect_source_hashes,
 )
 from lib.update.net import github_raw_url
 from lib.update.nix import _build_fetch_from_github_call
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 _PACKAGE_DIR = REPO_ROOT / "packages/paseo"
 _VERSION = "0.6.1"
@@ -832,7 +831,9 @@ def test_paseo_resolves_exact_release_and_native_source_graph(
     monkeypatch.setattr(module, "fetch_json", json_payload)
     monkeypatch.setattr(module, "fetch_url", bytes_payload)
 
-    assert run_async(updater.fetch_latest(object())) == _version_info(
+    assert run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    ) == _version_info(
         release_version=_LATEST_VERSION,
         release_commit=_LATEST_COMMIT,
         claude_sdk_version=claude_sdk_version,
@@ -1296,9 +1297,17 @@ def test_paseo_hashes_sources_then_npm_closure(
         ),
     )
 
-    events = run_async(collect_events(updater.fetch_hashes(_version_info(), object())))
-    value_events = [event for event in events if event.kind is UpdateEventKind.VALUE]
-    entries = cast("list[HashEntry]", expect_source_hashes(value_events[-1].payload))
+    events = run_async(
+        collect_events(
+            lambda emit: updater.fetch_hashes(
+                _version_info(),
+                object(),
+                emit=emit,
+                context=UpdateContext(current=None),
+            )
+        )
+    )
+    entries = cast("list[HashEntry]", events.result)
 
     assert len(calls) == 28
     assert_nix_ast_equal(
@@ -1405,7 +1414,16 @@ def test_paseo_hashing_requires_a_discovered_artifact_directory(
         RuntimeError,
         match="Package directory not found for missing-paseo-artifact-owner",
     ):
-        run_async(collect_events(updater.fetch_hashes(_version_info(), object())))
+        run_async(
+            collect_events(
+                lambda emit: updater.fetch_hashes(
+                    _version_info(),
+                    object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
+                )
+            )
+        )
 
 
 def test_paseo_updater_owns_the_complete_native_lock() -> None:
@@ -4055,7 +4073,10 @@ def test_paseo_nix_files_are_structurally_parseable() -> None:
 def test_paseo_revalidates_current_metadata() -> None:
     """Current version metadata must still refresh every fixed-output closure."""
     updater = _load_updater_module().PaseoUpdater()
-    assert run_async(updater._is_latest(None, _version_info())) is False
+    assert (
+        run_async(updater._is_latest(UpdateContext(current=None), _version_info()))
+        is False
+    )
 
 
 def test_paseo_raw_urls_are_commit_pinned() -> None:

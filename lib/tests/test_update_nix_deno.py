@@ -1,20 +1,21 @@
 """Tests for deno dependency hash computation helpers."""
 
 import asyncio
-from typing import TYPE_CHECKING
 
 import pytest
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
-from lib.tests._updater_helpers import empty_event_stream
+from lib.tests._updater_helpers import collect_events
 from lib.update.config import resolve_config
 from lib.update.events import (
     CommandResult,
+    EventSink,
     StatusInfo,
     StatusKind,
     StatusPayload,
     UpdateEvent,
     UpdateEventKind,
+    ignore_event,
 )
 from lib.update.nix_deno import (
     _build_deno_deps_expr,
@@ -24,23 +25,13 @@ from lib.update.nix_deno import (
     _existing_platform_hashes,
     _PlatformHashContext,
     _process_platform_hash,
-    _try_platform_hash_event,
     compute_deno_deps_hash,
 )
 from lib.update.platform_hashes import PreservedPlatformHash
 
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
 
-
-def _collect(stream: AsyncIterator[UpdateEvent]) -> list[UpdateEvent]:
-    async def _run() -> list[UpdateEvent]:
-        items: list[UpdateEvent] = []
-        async for item in stream:
-            items.append(item)
-        return items
-
-    return asyncio.run(_run())
+def _collect(operation):
+    return asyncio.run(collect_events(operation))
 
 
 def test_hash_entry_builders_and_payload_helpers() -> None:
@@ -69,12 +60,6 @@ def test_hash_entry_builders_and_payload_helpers() -> None:
         input_name="new-input", original_entry=None, entries=entries
     )
     assert temp_new.input == "new-input"
-
-    value_event = UpdateEvent.value("demo", ("x86_64-linux", "sha256-abc"))
-    assert _try_platform_hash_event(value_event) == ("x86_64-linux", "sha256-abc")
-    assert _try_platform_hash_event(UpdateEvent.status("demo", "x")) is None
-    assert _try_platform_hash_event(UpdateEvent.value("demo", ("x", 1))) is None
-    assert _try_platform_hash_event(UpdateEvent.value("demo", ("x", "y", "z"))) is None
 
 
 def test_build_deno_deps_expr_delegates_to_overlay_builder(
@@ -107,24 +92,18 @@ def test_compute_deno_deps_hash_for_platform_emits_value_and_errors(
     """Capture build/hash drains and surface missing-hash failures."""
 
     async def _fixed_output_build(
-        *_args: object, **_kwargs: object
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.status("demo", "building")
-        yield UpdateEvent.value(
-            "demo",
-            CommandResult(
-                args=["nix"], returncode=1, stdout="", stderr="hash mismatch"
-            ),
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
+        await emit(UpdateEvent.status("demo", "building"))
+        return CommandResult(
+            args=["nix"], returncode=1, stdout="", stderr="hash mismatch"
         )
 
     async def _emit_sri(
-        *_args: object, **_kwargs: object
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.status("demo", "converting")
-        yield UpdateEvent.value(
-            "demo",
-            "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-        )
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
+        await emit(UpdateEvent.status("demo", "converting"))
+        return "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
     monkeypatch.setattr(
         "lib.update.nix_deno._run_fixed_output_build", _fixed_output_build
@@ -134,33 +113,17 @@ def test_compute_deno_deps_hash_for_platform_emits_value_and_errors(
     )
 
     events = _collect(
-        _compute_deno_deps_hash_for_platform(
-            "demo",
-            "input",
-            "x86_64-linux",
+        lambda emit: _compute_deno_deps_hash_for_platform(
+            "demo", "input", "x86_64-linux", emit=emit
         )
     )
-    assert len(events) == 3
+    assert len(events) == 2
     assert events[0].kind == UpdateEventKind.STATUS
     assert events[1].kind == UpdateEventKind.STATUS
-    assert events[2].kind == UpdateEventKind.VALUE
-    assert events[2].payload == (
+    assert events.result == (
         "x86_64-linux",
         "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     )
-
-    monkeypatch.setattr(
-        "lib.update.nix_deno._emit_sri_hash_from_build_result",
-        lambda *_args, **_kwargs: empty_event_stream(),
-    )
-    with pytest.raises(RuntimeError, match="Hash conversion failed"):
-        _collect(
-            _compute_deno_deps_hash_for_platform(
-                "demo",
-                "input",
-                "x86_64-linux",
-            )
-        )
 
 
 def test_existing_platform_hashes_from_entry_variants() -> None:
@@ -189,16 +152,17 @@ def test_process_platform_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         *,
         source_override: SourceEntry,
         config: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         assert source_override.input == "input"
         _ = config
-        yield UpdateEvent.status("demo", f"build {platform}")
+        await emit(UpdateEvent.status("demo", f"build {platform}"))
         hash_value = (
             "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
             if platform == "x86_64-linux"
             else "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
         )
-        yield UpdateEvent.value("demo", (platform, hash_value))
+        return (platform, hash_value)
 
     monkeypatch.setattr(
         "lib.update.nix_deno._compute_deno_deps_hash_for_platform", _compute_ok
@@ -216,7 +180,9 @@ def test_process_platform_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         config=resolve_config(fake_hash="sha256-fake"),
     )
 
-    success_events = _collect(_process_platform_hash("x86_64-linux", context=context))
+    success_events = _collect(
+        lambda emit: _process_platform_hash("x86_64-linux", context=context, emit=emit)
+    )
     assert any(
         (event.message or "").startswith("Computing hash") for event in success_events
     )
@@ -226,21 +192,27 @@ def test_process_platform_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     async def _compute_fail(
-        *_args: object, **_kwargs: object
-    ) -> AsyncIterator[UpdateEvent]:
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
         msg = "boom"
         raise RuntimeError(msg)
-        yield UpdateEvent.status("never", "never")
+        await emit(UpdateEvent.status("never", "never"))
 
     monkeypatch.setattr(
         "lib.update.nix_deno._compute_deno_deps_hash_for_platform", _compute_fail
     )
 
     with pytest.raises(RuntimeError):
-        _collect(_process_platform_hash("x86_64-linux", context=context))
+        _collect(
+            lambda emit: _process_platform_hash(
+                "x86_64-linux", context=context, emit=emit
+            )
+        )
 
     recovered_events = _collect(
-        _process_platform_hash("aarch64-darwin", context=context)
+        lambda emit: _process_platform_hash(
+            "aarch64-darwin", context=context, emit=emit
+        )
     )
     assert [failure.platform for failure in context.failed_platforms] == [
         "aarch64-darwin"
@@ -253,7 +225,11 @@ def test_process_platform_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     context.existing_hashes = {}
     context.failed_platforms = []
     with pytest.raises(RuntimeError, match="no existing hash is available"):
-        _collect(_process_platform_hash("aarch64-darwin", context=context))
+        _collect(
+            lambda emit: _process_platform_hash(
+                "aarch64-darwin", context=context, emit=emit
+            )
+        )
 
 
 def test_compute_deno_deps_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -281,14 +257,14 @@ def test_compute_deno_deps_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         "lib.update.nix_deno.get_current_nix_platform", lambda: "arm-linux"
     )
     with pytest.raises(RuntimeError, match="not in supported platforms"):
-        _collect(compute_deno_deps_hash("demo", "input"))
+        _collect(lambda emit: compute_deno_deps_hash("demo", "input", emit=emit))
 
     monkeypatch.setattr(
         "lib.update.nix_deno.get_current_nix_platform", lambda: "x86_64-linux"
     )
     monkeypatch.setattr("lib.update.nix_deno.sources_file_for", lambda _name: None)
     with pytest.raises(RuntimeError, match="No sources.json found"):
-        _collect(compute_deno_deps_hash("demo", "input"))
+        _collect(lambda emit: compute_deno_deps_hash("demo", "input", emit=emit))
 
     monkeypatch.setattr(
         "lib.update.nix_deno.sources_file_for", lambda _name: "dummy-path"
@@ -299,8 +275,11 @@ def test_compute_deno_deps_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     async def _process(
-        platform_name: str, *, context: _PlatformHashContext
-    ) -> AsyncIterator[UpdateEvent]:
+        platform_name: str,
+        *,
+        context: _PlatformHashContext,
+        emit: EventSink = ignore_event,
+    ) -> object:
         context.platform_hashes[platform_name] = f"sha256-{platform_name}"
         if platform_name == "aarch64-darwin":
             context.failed_platforms.append(
@@ -310,11 +289,15 @@ def test_compute_deno_deps_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
                     error="boom",
                 )
             )
-        yield UpdateEvent.status("demo", f"processed {platform_name}")
+        await emit(UpdateEvent.status("demo", f"processed {platform_name}"))
 
     monkeypatch.setattr("lib.update.nix_deno._process_platform_hash", _process)
 
-    events = _collect(compute_deno_deps_hash("demo", "input", native_only=False))
+    events = _collect(
+        lambda emit: compute_deno_deps_hash(
+            "demo", "input", native_only=False, emit=emit
+        )
+    )
     warning_events = [event for event in events if "Warning:" in (event.message or "")]
     assert len(warning_events) == 1
     assert warning_events[0].message == (
@@ -324,14 +307,17 @@ def test_compute_deno_deps_hash_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         operation="compute_hash",
         info=StatusInfo(kind=StatusKind.PARTIAL_HASHES, value="aarch64-darwin"),
     )
-    final = events[-1]
-    assert final.kind == UpdateEventKind.VALUE
-    payload = final.payload
+    assert events.result.fully_computed is False
+    payload = events.result.hashes
     assert isinstance(payload, dict)
     assert payload["x86_64-linux"] == "sha256-x86_64-linux"
 
-    native_events = _collect(compute_deno_deps_hash("demo", "input", native_only=True))
-    native_payload = native_events[-1].payload
+    native_events = _collect(
+        lambda emit: compute_deno_deps_hash(
+            "demo", "input", native_only=True, emit=emit
+        )
+    )
+    native_payload = native_events.result.hashes
     assert isinstance(native_payload, dict)
     assert "x86_64-linux" in native_payload
 
@@ -371,19 +357,18 @@ def test_compute_deno_deps_hash_uses_candidate_override_without_disk_lookup(
         platform_name: str,
         *,
         context: _PlatformHashContext,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         captured["original_entry"] = context.original_entry
         captured["existing_hashes"] = context.existing_hashes
         context.platform_hashes[platform_name] = "sha256-updated"
-        yield UpdateEvent.status(context.source, "processed candidate")
+        await emit(UpdateEvent.status(context.source, "processed candidate"))
 
     monkeypatch.setattr("lib.update.nix_deno._process_platform_hash", _process)
 
     events = _collect(
-        compute_deno_deps_hash(
-            "demo",
-            "candidate-input",
-            source_override=candidate,
+        lambda emit: compute_deno_deps_hash(
+            "demo", "candidate-input", source_override=candidate, emit=emit
         )
     )
 
@@ -391,4 +376,5 @@ def test_compute_deno_deps_hash_uses_candidate_override_without_disk_lookup(
         "existing_hashes": {"x86_64-linux": "sha256-existing"},
         "original_entry": candidate,
     }
-    assert events[-1].payload == {"x86_64-linux": "sha256-updated"}
+    assert events.result.hashes == {"x86_64-linux": "sha256-updated"}
+    assert events.result.fully_computed is True

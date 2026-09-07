@@ -10,7 +10,7 @@ from lib.system_policy import supported_systems
 from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import load_repo_module
 from lib.update.nix import _build_fetch_from_github_call
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 COMMIT = "b" * 40
 
@@ -56,12 +56,16 @@ def test_same_version_moved_tag_is_stale_and_persists_new_commit(
         _fetch,
     )
 
-    info = asyncio.run(updater.fetch_latest(object()))
+    info = asyncio.run(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     moved = SourceEntry(version=info.version, commit="a" * 40, hashes=[])
     unchanged = SourceEntry(version=info.version, commit=COMMIT, hashes=[])
 
-    assert asyncio.run(updater._is_latest(moved, info)) is False
-    assert asyncio.run(updater._is_latest(unchanged, info)) is True
+    assert asyncio.run(updater._is_latest(UpdateContext(current=moved), info)) is False
+    assert (
+        asyncio.run(updater._is_latest(UpdateContext(current=unchanged), info)) is True
+    )
     assert updater.build_result(
         info, [HashEntry.create("srcHash", "sha256-source")]
     ) == (

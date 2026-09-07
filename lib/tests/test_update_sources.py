@@ -288,7 +288,6 @@ def test_persist_source_updates_writes_only_successful_run_entries(
     persist_source_updates(
         do_sources=True,
         source_names=["updated", "failed"],
-        dry_run=False,
         native_only=False,
         sources=run_snapshot,
         source_updates={
@@ -338,7 +337,6 @@ def test_persist_source_updates_preserves_concurrent_native_platform_updates(
     persist_source_updates(
         do_sources=True,
         source_names=["demo"],
-        dry_run=False,
         native_only=True,
         sources=darwin_snapshot,
         source_updates={
@@ -353,7 +351,6 @@ def test_persist_source_updates_preserves_concurrent_native_platform_updates(
     persist_source_updates(
         do_sources=True,
         source_names=["demo"],
-        dry_run=False,
         native_only=True,
         sources=linux_snapshot,
         source_updates={
@@ -397,7 +394,6 @@ def test_persist_source_updates_replaces_single_platform_pins(
     persist_source_updates(
         do_sources=True,
         source_names=["demo"],
-        dry_run=False,
         native_only=True,
         sources=sources,
         source_updates={

@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
+    from lib.update.updaters.core import UpdateContext
 
 from lib.update.net import fetch_url
 from lib.update.updaters import (
@@ -38,8 +39,11 @@ class DroidUpdater(ChecksumProvidedUpdater):
         os_name, arch = self._PLATFORM_INFO[nix_platform]
         return f"{self.BASE_URL}/{version}/{os_name}/{arch}/droid"
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Parse the latest version from the install bootstrap script."""
+        _ = context
         script = await fetch_url(
             session,
             self.INSTALL_SCRIPT_URL,

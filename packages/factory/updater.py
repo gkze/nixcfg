@@ -9,6 +9,8 @@ from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updat
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 
 @register_updater
 class FactoryUpdater(DownloadHashUpdater):
@@ -28,8 +30,11 @@ class FactoryUpdater(DownloadHashUpdater):
         "darwin/{platform_value}/Factory-{version}-{platform_value}.dmg"
     )
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch and validate the current Factory desktop version."""
+        _ = context
         payload = await fetch_url(
             session,
             self.LATEST_URL,

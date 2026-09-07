@@ -13,15 +13,17 @@ from lib.tests._updater_helpers import load_repo_module_for_test as _load_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import (
-    EventStream,
+    EventSink,
     StatusInfo,
     StatusKind,
     StatusPayload,
     UpdateEvent,
     UpdateEventKind,
+    ignore_event,
 )
 from lib.update.updaters import VersionInfo
 from lib.update.updaters import materialization as materialization_mod
+from lib.update.updaters.core import UpdateContext
 from lib.update.updaters.flake_backed import FlakeInputMetadataUpdater
 from lib.update.updaters.metadata import FlakeInputMetadata
 
@@ -81,37 +83,53 @@ def test_codex_updater_refreshes_crate2nix_artifacts(
     assert updater.materialize_when_current is True
     assert updater.shows_materialize_artifacts_phase is True
 
-    async def _stream(name: str) -> EventStream:
-        yield UpdateEvent.status(
-            name,
-            "Refreshing crate2nix artifacts...",
-            operation="materialize_artifacts",
+    async def _stream(name: str, *, emit: EventSink = ignore_event) -> object:
+        await emit(
+            UpdateEvent.status(
+                name,
+                "Refreshing crate2nix artifacts...",
+                operation="materialize_artifacts",
+            )
         )
-        yield UpdateEvent.artifact(
-            name,
-            GeneratedArtifact.text("packages/codex/Cargo.nix", "{ codex = true; }\n"),
+        await emit(
+            UpdateEvent.artifact(
+                name,
+                GeneratedArtifact.text(
+                    "packages/codex/Cargo.nix", "{ codex = true; }\n"
+                ),
+            )
         )
-        yield UpdateEvent.status(
-            name,
-            "Prepared crate2nix artifacts",
-            operation="materialize_artifacts",
-            status=StatusInfo(kind=StatusKind.UPDATED, value="crate2nix artifacts"),
+        await emit(
+            UpdateEvent.status(
+                name,
+                "Prepared crate2nix artifacts",
+                operation="materialize_artifacts",
+                status=StatusInfo(kind=StatusKind.UPDATED, value="crate2nix artifacts"),
+            )
         )
 
     monkeypatch.setattr(
         codex_module.CodexUpdater,
         "stream_materialized_artifacts",
-        lambda _self, **_kwargs: _stream("codex"),
+        lambda _self, *, emit, **_kwargs: _stream("codex", emit=emit),
     )
 
-    events = _run(_collect(updater.fetch_hashes(VersionInfo("main", {}), object())))
+    events = _run(
+        _collect(
+            lambda emit: updater.fetch_hashes(
+                VersionInfo("main", {}),
+                object(),
+                context=UpdateContext(current=None),
+                emit=emit,
+            )
+        )
+    )
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
         UpdateEventKind.ARTIFACT,
         UpdateEventKind.STATUS,
-        UpdateEventKind.VALUE,
     ]
-    assert events[-1].payload == []
+    assert events.result == []
 
 
 def test_goose_cli_updater_materializes_crate2nix_from_locked_input(
@@ -124,17 +142,19 @@ def test_goose_cli_updater_materializes_crate2nix_from_locked_input(
     assert updater.shows_materialize_artifacts_phase is True
     assert updater.input_name == "goose"
 
-    async def _stream(name: str) -> EventStream:
-        yield UpdateEvent.artifact(
-            name,
-            GeneratedArtifact.text(
-                "overlays/goose-cli/Cargo.nix",
-                "{ goose = true; }\n",
-            ),
+    async def _stream(name: str, *, emit: EventSink = ignore_event) -> object:
+        await emit(
+            UpdateEvent.artifact(
+                name,
+                GeneratedArtifact.text(
+                    "overlays/goose-cli/Cargo.nix",
+                    "{ goose = true; }\n",
+                ),
+            )
         )
 
-    def _materialize(_self: object, **_kwargs: object):
-        return _stream("goose-cli")
+    def _materialize(_self: object, *, emit, **_kwargs: object):
+        return _stream("goose-cli", emit=emit)
 
     monkeypatch.setattr(
         goose_cli_module.GooseCliUpdater,
@@ -142,20 +162,23 @@ def test_goose_cli_updater_materializes_crate2nix_from_locked_input(
         _materialize,
     )
 
-    events = _run(_collect(updater.fetch_hashes(VersionInfo("1.0.0", {}), object())))
+    events = _run(
+        _collect(
+            lambda emit: updater.fetch_hashes(
+                VersionInfo("1.0.0", {}),
+                object(),
+                context=UpdateContext(current=None),
+                emit=emit,
+            )
+        )
+    )
     artifact_index = next(
         index
         for index, event in enumerate(events)
         if event.kind == UpdateEventKind.ARTIFACT
     )
-    value_index = max(
-        index
-        for index, event in enumerate(events)
-        if event.kind == UpdateEventKind.VALUE
-    )
-    assert artifact_index < value_index
-    payload = expect_instance(events[value_index].payload, list)
-    assert payload == []
+    assert artifact_index >= 0
+    assert events.result == []
 
 
 def test_goose_cli_updater_reads_version_and_commit_from_release_input(
@@ -181,7 +204,7 @@ def test_goose_cli_updater_reads_version_and_commit_from_release_input(
     updater = goose_cli_module.GooseCliUpdater()
     monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
 
-    info = _run(updater.fetch_latest(object()))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert info.version == "1.46.0"
     assert info.commit == "a" * 40
@@ -193,11 +216,15 @@ def test_crate2nix_artifacts_mixin_streams_shared_materialization_events(
 ) -> None:
     """The shared crate2nix materialization mixin should proxy the standard stream."""
 
-    async def _stream(name: str, *, operation: str) -> EventStream:
-        yield UpdateEvent.status(name, "refreshing", operation=operation)
-        yield UpdateEvent.artifact(
-            name,
-            GeneratedArtifact.text("packages/demo/Cargo.nix", "{ demo = true; }\n"),
+    async def _stream(
+        name: str, *, operation: str, emit: EventSink = ignore_event
+    ) -> object:
+        await emit(UpdateEvent.status(name, "refreshing", operation=operation))
+        await emit(
+            UpdateEvent.artifact(
+                name,
+                GeneratedArtifact.text("packages/demo/Cargo.nix", "{ demo = true; }\n"),
+            )
         )
 
     monkeypatch.setattr(
@@ -210,7 +237,9 @@ def test_crate2nix_artifacts_mixin_streams_shared_materialization_events(
         name = "demo"
 
     updater = _Updater()
-    events = _run(_collect(updater.stream_materialized_artifacts()))
+    events = _run(
+        _collect(lambda emit: updater.stream_materialized_artifacts(emit=emit))
+    )
 
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
@@ -241,7 +270,7 @@ def test_commander_fetches_latest_version_from_changelog(
         "fetch_headers",
         lambda *_a, **_k: asyncio.sleep(0, result={"ETag": '"abc"'}),
     )
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     assert latest.version == "0.7.875"
 
 
@@ -268,7 +297,7 @@ def test_commander_fetches_latest_version_from_html_changelog(
         "fetch_headers",
         lambda *_a, **_k: asyncio.sleep(0, result={"ETag": '"abc"'}),
     )
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     assert latest.version == "0.7.875"
 
 
@@ -296,7 +325,7 @@ def test_commander_recomputes_hashes_for_mutable_release_artifacts(
     updater = commander_module.CommanderUpdater()
     latest = VersionInfo(version="0.7.890")
 
-    assert _run(updater._is_latest(None, latest)) is False
+    assert _run(updater._is_latest(UpdateContext(current=None), latest)) is False
 
 
 def test_commander_falls_back_to_latest_download_url_when_versioned_asset_is_missing(
@@ -336,7 +365,7 @@ def test_commander_falls_back_to_latest_download_url_when_versioned_asset_is_mis
 
     monkeypatch.setattr(commander_module, "fetch_headers", _fetch_headers)
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     assert latest.version == changelog_version
     assert (
         latest.metadata["url"]
@@ -380,7 +409,7 @@ def test_commander_propagates_non_404_probe_failures(
     monkeypatch.setattr(commander_module, "fetch_headers", _fetch_headers_fail)
 
     with pytest.raises(RuntimeError, match="network timeout"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_commander_rejects_changelog_without_release_heading(
@@ -395,7 +424,7 @@ def test_commander_rejects_changelog_without_release_heading(
         lambda *_a, **_k: asyncio.sleep(0, result=b"# Changelog\n\nNo releases yet\n"),
     )
     with pytest.raises(RuntimeError, match="Could not parse latest Commander version"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_codex_desktop_reads_platform_appcasts(
@@ -440,7 +469,7 @@ def test_codex_desktop_reads_platform_appcasts(
 
     monkeypatch.setattr(codex_desktop_module, "fetch_url", _fetch_url)
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert latest.version == "26.429.20946-2312"
     assert updater.get_download_url("aarch64-darwin", latest) == arm_url
@@ -469,7 +498,7 @@ def test_codex_desktop_rejects_appcasts_without_common_release(
     monkeypatch.setattr(codex_desktop_module, "fetch_url", _fetch_url)
 
     with pytest.raises(RuntimeError, match="No common Codex desktop release"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_codex_desktop_rejects_invalid_appcast_shape(
@@ -485,7 +514,7 @@ def test_codex_desktop_rejects_invalid_appcast_shape(
     )
 
     with pytest.raises(RuntimeError, match="No items found in Codex appcast"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 @pytest.mark.parametrize(
@@ -529,7 +558,7 @@ def test_codex_desktop_rejects_blank_appcast_fields(
     )
 
     with pytest.raises(RuntimeError, match=message):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 @pytest.mark.parametrize(
@@ -575,11 +604,19 @@ def test_flake_input_metadata_updater_emits_empty_hash_entries() -> None:
         input_name = "demo"
 
     updater = _DemoUpdater()
-    events = _run(_collect(updater.fetch_hashes(VersionInfo("main"), object())))
+    events = _run(
+        _collect(
+            lambda emit: updater.fetch_hashes(
+                VersionInfo("main"),
+                object(),
+                context=UpdateContext(current=None),
+                emit=emit,
+            )
+        )
+    )
 
-    assert [event.kind for event in events] == [UpdateEventKind.VALUE]
-    assert events[0].source == "demo"
-    assert events[0].payload == []
+    assert [event.kind for event in events] == []
+    assert events.result == []
 
 
 def test_crush_prefers_newest_release_compatible_with_repo_go_floor(
@@ -638,7 +675,7 @@ def test_crush_prefers_newest_release_compatible_with_repo_go_floor(
         ),
     )
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     assert latest.version == compatible_version
     assert latest.metadata["tag"] == compatible_tag
     assert latest.metadata["commit"] == compatible_commit
@@ -691,7 +728,7 @@ def test_crush_falls_back_to_current_pin_when_no_release_is_compatible(
         ),
     )
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     assert latest.version == pinned_version
     assert latest.metadata["tag"] == f"v{pinned_version}"
     assert latest.metadata["commit"] == pinned_commit

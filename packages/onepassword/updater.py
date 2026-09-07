@@ -14,6 +14,8 @@ from lib.update.updaters.metadata import DownloadUrlMetadata
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 
 @register_updater
 class OnePasswordUpdater(DownloadUrlMetadataUpdater):
@@ -27,8 +29,11 @@ class OnePasswordUpdater(DownloadUrlMetadataUpdater):
     }
     URL_METADATA_CONTEXT = "1Password metadata"
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch the latest 1Password version and ZIP URL."""
+        _ = context
         payload = await fetch_json(
             session,
             self.UPDATE_URL,

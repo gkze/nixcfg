@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 from lib import json_utils
 from lib.update.net import fetch_json
 from lib.update.updaters import SingleURLHashEntryUpdater, VersionInfo
@@ -20,8 +22,11 @@ class LinearisUpdater(SingleURLHashEntryUpdater):
     LATEST_URL = "https://registry.npmjs.org/linearis/latest"
     URL_METADATA_LABEL = "tarball"
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the latest published version and tarball URL from npm."""
+        _ = context
         payload = await fetch_json(
             session,
             self.LATEST_URL,

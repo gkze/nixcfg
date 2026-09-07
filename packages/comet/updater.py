@@ -8,6 +8,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 
+from lib.update.events import EventSink, ignore_event
 from lib.update.updaters import (
     DownloadHashUpdater,
     VersionInfo,
@@ -16,8 +17,7 @@ from lib.update.updaters import (
 )
 
 if TYPE_CHECKING:
-    from lib.nix.models.sources import SourceEntry
-    from lib.update.events import EventStream
+    from lib.nix.models.sources import SourceHashes
     from lib.update.updaters import UpdateContext
 
 
@@ -137,8 +137,11 @@ class CometUpdater(DownloadHashUpdater):
             urls_by_platform[platform] = signed_url
         return urls_by_platform
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve one current version from the official installer redirects."""
+        _ = context
         artifacts = await self._resolve_artifacts(session)
         return VersionInfo(version=self._uniform_version(artifacts))
 
@@ -147,8 +150,9 @@ class CometUpdater(DownloadHashUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash freshly signed artifacts that still match the resolved version."""
         _ = context
         artifacts = await self._resolve_artifacts(session)
@@ -159,9 +163,9 @@ class CometUpdater(DownloadHashUpdater):
                 f"to {resolved_version} while fetching hashes"
             )
             raise RuntimeError(msg)
-        async for event in stream_url_hash_mapping(
+        return await stream_url_hash_mapping(
             self.name,
             self._deduplicated_hash_urls(artifacts),
             config=self.config,
-        ):
-            yield event
+            emit=emit,
+        )

@@ -3,7 +3,7 @@
 import asyncio
 import json
 import re
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar
 
 import aiohttp
 
@@ -16,9 +16,6 @@ from lib.update.updaters import (
     register_updater,
 )
 from lib.update.updaters.metadata import DownloadUrlMetadata
-
-if TYPE_CHECKING:
-    from lib.nix.models.sources import SourceEntry
 
 _APP_ID = "com.google.geminimacos"
 _CHANNEL = "m1-prod"
@@ -41,10 +38,10 @@ def _version_key(version: str) -> tuple[int, ...]:
 
 
 def _effective_version_info(
-    context: UpdateContext | SourceEntry | None,
+    context: UpdateContext,
     upstream: VersionInfo,
 ) -> VersionInfo:
-    current = context.current if isinstance(context, UpdateContext) else context
+    current = context.current
     if (
         current is None
         or current.version is None
@@ -217,7 +214,7 @@ class GeminiUpdater(DownloadUrlMetadataUpdater):
         self,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
+        context: UpdateContext,
     ) -> VersionInfo:
         """Resolve one release from Google's updater and public download page."""
         version, page_bytes = await asyncio.gather(

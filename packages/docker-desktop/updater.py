@@ -14,6 +14,8 @@ from lib.update.updaters.metadata import DownloadUrlMetadata
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 
 @register_updater
 class DockerDesktopUpdater(DownloadUrlMetadataUpdater):
@@ -26,8 +28,11 @@ class DockerDesktopUpdater(DownloadUrlMetadataUpdater):
     }
     URL_METADATA_CONTEXT = "Docker Desktop metadata"
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch the latest Docker Desktop build and DMG URL."""
+        _ = context
         payload = await fetch_json(
             session,
             self.APPCAST_URL,

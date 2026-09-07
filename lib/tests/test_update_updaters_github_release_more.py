@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
-from lib.update.events import EventStream, UpdateEvent
+from lib.update.events import EventSink, UpdateEvent, ignore_event
+from lib.update.updaters.core import UpdateContext
 from lib.update.updaters.github_release import (
     GitHubReleaseAssetURLsUpdater,
     GitHubReleaseUpdater,
@@ -27,10 +28,11 @@ class _DemoReleaseUpdater(GitHubReleaseUpdater):
         session: aiohttp.ClientSession,
         *,
         context: object | None = None,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = (info, session, context)
         if False:
-            yield UpdateEvent.status(self.name, "never")
+            await emit(UpdateEvent.status(self.name, "never"))
 
 
 class _DemoAssetReleaseUpdater(GitHubReleaseAssetURLsUpdater):
@@ -73,7 +75,9 @@ def test_fetch_latest_success_and_error_paths(monkeypatch: pytest.MonkeyPatch) -
         "lib.update.updaters.github_release.fetch_github_api",
         lambda *_args, **_kwargs: asyncio.sleep(0, result={"tag_name": "v9.9.9"}),
     )
-    info = asyncio.run(updater.fetch_latest(object()))
+    info = asyncio.run(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     assert info.version == "9.9.9"
     assert info.metadata["tag"] == "v9.9.9"
 
@@ -82,14 +86,14 @@ def test_fetch_latest_success_and_error_paths(monkeypatch: pytest.MonkeyPatch) -
         lambda *_args, **_kwargs: asyncio.sleep(0, result=[]),
     )
     with pytest.raises(TypeError, match="Unexpected release payload type"):
-        asyncio.run(updater.fetch_latest(object()))
+        asyncio.run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     monkeypatch.setattr(
         "lib.update.updaters.github_release.fetch_github_api",
         lambda *_args, **_kwargs: asyncio.sleep(0, result={}),
     )
     with pytest.raises(RuntimeError, match="Missing tag_name"):
-        asyncio.run(updater.fetch_latest(object()))
+        asyncio.run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_fetch_latest_can_resolve_release_tag_to_immutable_commit(
@@ -111,7 +115,11 @@ def test_fetch_latest_can_resolve_release_tag_to_immutable_commit(
         fetch,
     )
 
-    info = asyncio.run(_DemoCommitReleaseUpdater().fetch_latest(object()))
+    info = asyncio.run(
+        _DemoCommitReleaseUpdater().fetch_latest(
+            object(), context=UpdateContext(current=None)
+        )
+    )
 
     assert info == VersionInfo(
         version="1.2.3/rc1",
@@ -126,7 +134,9 @@ def test_fetch_latest_can_resolve_release_tag_to_immutable_commit(
     assert result.commit == "a" * 40
     assert (
         asyncio.run(
-            updater._is_latest(result.model_copy(update={"commit": None}), info)
+            updater._is_latest(
+                UpdateContext(current=result.model_copy(update={"commit": None})), info
+            )
         )
         is False
     )
@@ -158,7 +168,11 @@ def test_commit_backed_release_rejects_nonimmutable_tag_targets(
     )
 
     with pytest.raises(error_type, match="has no immutable source commit"):
-        asyncio.run(_DemoCommitReleaseUpdater().fetch_latest(object()))
+        asyncio.run(
+            _DemoCommitReleaseUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 @pytest.mark.parametrize("commit", [None, "main", "A" * 40])

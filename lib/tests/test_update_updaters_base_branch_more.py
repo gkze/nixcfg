@@ -8,9 +8,10 @@ import pytest
 
 from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import SourceEntry
-from lib.tests._updater_helpers import empty_event_stream
+from lib.tests._updater_helpers import collect_events
 from lib.update.config import resolve_config
-from lib.update.events import UpdateEvent
+from lib.update.events import EventSink, UpdateEvent, ignore_event
+from lib.update.platform_hashes import PlatformHashResult
 from lib.update.updaters import (
     ChecksumProvidedUpdater,
     DenoDepsHashUpdater,
@@ -22,13 +23,11 @@ from lib.update.updaters import (
 )
 from lib.update.updaters._sourcefile import resolve_sourcefile
 from lib.update.updaters.core import (
-    _call_with_optional_context,
     _ensure_str_mapping,
 )
 from lib.update.updaters.metadata import FlakeInputMetadata
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
 
     class _TypingOnlyValue:
         """A type intentionally unavailable to runtime annotation evaluation."""
@@ -41,31 +40,49 @@ def _run[T](awaitable: object) -> T:
     return asyncio.run(awaitable)  # type: ignore[arg-type]
 
 
-async def _collect(stream: AsyncIterator[UpdateEvent]) -> list[UpdateEvent]:
-    return [event async for event in stream]
+async def _collect(operation):
+    return await collect_events(operation)
 
 
 class _YieldingUpdater(Updater):
     name = "yielding"
 
-    async def fetch_latest(self, session: object) -> VersionInfo:
+    async def fetch_latest(
+        self, session: object, *, context: UpdateContext
+    ) -> VersionInfo:
+        _ = context
         _ = session
         return VersionInfo(version="1.0.0", metadata={})
 
     async def fetch_hashes(
-        self, info: VersionInfo, session: object
-    ) -> AsyncIterator[UpdateEvent]:
+        self,
+        info: VersionInfo,
+        session: object,
+        *,
+        emit: EventSink = ignore_event,
+        context=None,
+    ) -> object:
+        _ = context
         _ = (info, session)
-        yield UpdateEvent.status(self.name, "hashing")
-        yield UpdateEvent.value(self.name, {"x86_64-linux": HASH_A})
+        await emit(UpdateEvent.status(self.name, "hashing"))
+        return {"x86_64-linux": HASH_A}
 
     async def _is_latest(self, current: SourceEntry | None, info: VersionInfo) -> bool:
         _ = (current, info)
         return False
 
-    async def _finalize_result(self, result: SourceEntry) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.status(self.name, "finalizing")
-        yield UpdateEvent.value(self.name, result)
+    async def _finalize_result(
+        self,
+        result: SourceEntry,
+        *,
+        emit: EventSink = ignore_event,
+        context=None,
+        info=None,
+    ) -> object:
+        _ = info
+        _ = context
+        await emit(UpdateEvent.status(self.name, "finalizing"))
+        return result
 
 
 class _DownloadNoBase(DownloadHashUpdater):
@@ -73,7 +90,10 @@ class _DownloadNoBase(DownloadHashUpdater):
     BASE_URL = ""
     PLATFORMS: ClassVar[dict[str, str]] = {"x86_64-linux": "https://example.com/a"}
 
-    async def fetch_latest(self, session: object) -> VersionInfo:
+    async def fetch_latest(
+        self, session: object, *, context: UpdateContext
+    ) -> VersionInfo:
+        _ = context
         _ = session
         return VersionInfo(version="1.0.0", metadata={})
 
@@ -88,7 +108,10 @@ class _DefaultDeno(DenoDepsHashUpdater):
     name = "default-deno"
     input_name = "default-deno"
 
-    async def fetch_latest(self, session: object) -> VersionInfo:
+    async def fetch_latest(
+        self, session: object, *, context: UpdateContext
+    ) -> VersionInfo:
+        _ = context
         _ = session
         return VersionInfo(version="1.0.0", metadata={})
 
@@ -97,7 +120,10 @@ class _Manifest(DenoDepsHashUpdater):
     name = "manifest-like"
     input_name = "manifest-like"
 
-    async def fetch_latest(self, session: object) -> VersionInfo:
+    async def fetch_latest(
+        self, session: object, *, context: UpdateContext
+    ) -> VersionInfo:
+        _ = context
         _ = session
         return VersionInfo(version="1.0.0", metadata={})
 
@@ -116,16 +142,25 @@ def test_updater_sourcefile_falls_back_to_module_file() -> None:
     class _FallbackUpdater(Updater):
         name = "fallback-sourcefile"
 
-        async def fetch_latest(self, session: object) -> VersionInfo:
+        async def fetch_latest(
+            self, session: object, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = context
             _ = session
             return VersionInfo(version="1", metadata={})
 
         async def fetch_hashes(
-            self, info: VersionInfo, session: object
-        ) -> AsyncIterator[UpdateEvent]:
+            self,
+            info: VersionInfo,
+            session: object,
+            *,
+            emit: EventSink = ignore_event,
+            context=None,
+        ) -> object:
+            _ = emit
+            _ = context
             _ = (info, session)
-            async for event in empty_event_stream():
-                yield event
+            return []
 
     class _FakeInspect:
         @staticmethod
@@ -148,26 +183,41 @@ def test_unbound_abstract_methods_raise() -> None:
     class _Concrete(Updater):
         name = "concrete"
 
-        async def fetch_latest(self, session: object) -> VersionInfo:
+        async def fetch_latest(
+            self, session: object, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = context
             _ = session
             return VersionInfo(version="1", metadata={})
 
         async def fetch_hashes(
-            self, info: VersionInfo, session: object
-        ) -> AsyncIterator[UpdateEvent]:
+            self,
+            info: VersionInfo,
+            session: object,
+            *,
+            emit: EventSink = ignore_event,
+            context=None,
+        ) -> object:
+            _ = emit
+            _ = context
             _ = (info, session)
-            async for event in empty_event_stream():
-                yield event
+            return []
 
     updater = _Concrete()
 
     with pytest.raises(NotImplementedError):
-        _ = _run(Updater.fetch_latest(updater, object()))
+        _ = _run(
+            Updater.fetch_latest(updater, object(), context=UpdateContext(current=None))
+        )
     with pytest.raises(NotImplementedError):
         _ = _run(
             _collect(
-                Updater.fetch_hashes(
-                    updater, VersionInfo(version="1", metadata={}), object()
+                lambda emit: Updater.fetch_hashes(
+                    updater,
+                    VersionInfo(version="1", metadata={}),
+                    object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
                 )
             )
         )
@@ -176,7 +226,10 @@ def test_unbound_abstract_methods_raise() -> None:
         name = "checksum-abstract"
         PLATFORMS: ClassVar[dict[str, str]] = {"x86_64-linux": "linux"}
 
-        async def fetch_latest(self, session: object) -> VersionInfo:
+        async def fetch_latest(
+            self, session: object, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = context
             _ = session
             return VersionInfo(version="1", metadata={})
 
@@ -204,7 +257,9 @@ def test_update_stream_yields_intermediate_events_and_up_to_date_result() -> Non
 
     async def _run_events() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
-            return [event async for event in updater.update_stream(current, session)]
+            return await collect_events(
+                lambda emit: updater.update_stream(current, session, emit=emit)
+            )
 
     events = _run(_run_events())
     assert any(event.message == "hashing" for event in events)
@@ -223,16 +278,21 @@ def test_download_and_hash_entry_branch_yields(monkeypatch: pytest.MonkeyPatch) 
         _urls: object,
         *,
         config: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         assert config is updater.config
-        yield UpdateEvent.status("download-no-base", "computing")
-        yield UpdateEvent.value("download-no-base", {"https://example.com/a": HASH_A})
+        await emit(UpdateEvent.status("download-no-base", "computing"))
+        return {"https://example.com/a": HASH_A}
 
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _hashes)
 
     async def _run_events() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
-            return [event async for event in updater.fetch_hashes(info, session)]
+            return await collect_events(
+                lambda emit: updater.fetch_hashes(
+                    info, session, emit=emit, context=UpdateContext(current=None)
+                )
+            )
 
     events = _run(_run_events())
     assert any(event.message == "computing" for event in events)
@@ -249,10 +309,11 @@ def test_flake_updater_default_compute_and_fetch_hash_branches(
         *,
         system: str | None,
         config: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = config
-        yield UpdateEvent.status(source_name, f"system={system}")
-        yield UpdateEvent.value(source_name, HASH_A)
+        await emit(UpdateEvent.status(source_name, f"system={system}"))
+        return HASH_A
 
     monkeypatch.setattr("lib.update.nix.compute_overlay_hash", _compute_overlay_hash)
     monkeypatch.setattr(
@@ -261,24 +322,35 @@ def test_flake_updater_default_compute_and_fetch_hash_branches(
 
     # _is_latest current=None branch
     assert (
-        _run(updater._is_latest(None, VersionInfo(version="1", metadata={}))) is False
+        _run(
+            updater._is_latest(
+                UpdateContext(current=None), VersionInfo(version="1", metadata={})
+            )
+        )
+        is False
     )
 
     # default _compute_hash with non-platform-specific system=None
     non_platform = _run(
-        _collect(updater._compute_hash(VersionInfo(version="1", metadata={})))
+        _collect(
+            lambda emit: updater._compute_hash(
+                VersionInfo(version="1", metadata={}), emit=emit
+            )
+        )
     )
     assert any(event.message == "system=None" for event in non_platform)
 
-    # non-platform fetch_hashes delegates through _emit_single_hash_entry path
+    # The non-platform result carries the configured hash type.
     async def _run_non_platform() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
-            return [
-                event
-                async for event in updater.fetch_hashes(
-                    VersionInfo(version="1", metadata={}), session
+            return await collect_events(
+                lambda emit: updater.fetch_hashes(
+                    VersionInfo(version="1", metadata={}),
+                    session,
+                    emit=emit,
+                    context=UpdateContext(current=None),
                 )
-            ]
+            )
 
     non_platform_events = _run(_run_non_platform())
     assert any(event.message == "system=None" for event in non_platform_events)
@@ -288,27 +360,33 @@ def test_flake_updater_default_compute_and_fetch_hash_branches(
 
     plat = _PlatformFlake()
     plat_events = _run(
-        _collect(plat._compute_hash(VersionInfo(version="1", metadata={})))
+        _collect(
+            lambda emit: plat._compute_hash(
+                VersionInfo(version="1", metadata={}), emit=emit
+            )
+        )
     )
     assert any(event.message == "system=x86_64-linux" for event in plat_events)
 
     async def _run_platform() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
-            return [
-                event
-                async for event in plat.fetch_hashes(
-                    VersionInfo(version="1", metadata={}), session
+            return await collect_events(
+                lambda emit: plat.fetch_hashes(
+                    VersionInfo(version="1", metadata={}),
+                    session,
+                    emit=emit,
+                    context=UpdateContext(current=None),
                 )
-            ]
+            )
 
     platform_events = _run(_run_platform())
     assert any(event.message == "system=x86_64-linux" for event in platform_events)
 
 
-def test_deno_deps_default_compute_and_type_enforcement(
+def test_deno_deps_default_compute_returns_platform_entries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cover DenoDeps default compute path and post-parse dict assertion."""
+    """Deno hash computation returns entries and forwards tool progress."""
     updater = _DefaultDeno()
 
     async def _compute_deno(
@@ -317,36 +395,36 @@ def test_deno_deps_default_compute_and_type_enforcement(
         *,
         native_only: bool,
         config: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = (input_name, native_only, config)
-        yield UpdateEvent.status(source_name, "deno-hash")
-        yield UpdateEvent.value(source_name, {"x86_64-linux": HASH_A})
+        await emit(UpdateEvent.status(source_name, "deno-hash"))
+        return PlatformHashResult(hashes={"x86_64-linux": HASH_A}, fully_computed=True)
 
     monkeypatch.setattr("lib.update.nix_deno.compute_deno_deps_hash", _compute_deno)
 
-    # default _compute_hash body
     body_events = _run(
-        _collect(updater._compute_hash(VersionInfo(version="1", metadata={})))
+        _collect(
+            lambda emit: updater._compute_platform_hashes(
+                VersionInfo(version="1", metadata={}), emit=emit
+            )
+        )
     )
     assert any(event.message == "deno-hash" for event in body_events)
 
     async def _run_hashes() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
-            return [
-                event
-                async for event in updater.fetch_hashes(
-                    VersionInfo(version="1", metadata={}), session
+            return await collect_events(
+                lambda emit: updater.fetch_hashes(
+                    VersionInfo(version="1", metadata={}),
+                    session,
+                    emit=emit,
+                    context=UpdateContext(current=None),
                 )
-            ]
+            )
 
     hash_events = _run(_run_hashes())
     assert any(event.message == "deno-hash" for event in hash_events)
-
-    monkeypatch.setattr(
-        "lib.update.updaters.flake_backed.expect_hash_mapping", lambda _payload: ["bad"]
-    )
-    with pytest.raises(TypeError, match="Expected dict of platform hashes"):
-        _run(_run_hashes())
 
 
 def test_deno_native_only_single_platform_status_keeps_full_hash_context(
@@ -360,11 +438,14 @@ def test_deno_native_only_single_platform_status_keeps_full_hash_context(
         *,
         native_only: bool,
         config: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = (input_name, config)
         assert native_only is True
-        yield UpdateEvent.status(source_name, "hashing", operation="compute_hash")
-        yield UpdateEvent.value(source_name, {"aarch64-darwin": HASH_A})
+        await emit(UpdateEvent.status(source_name, "hashing", operation="compute_hash"))
+        return PlatformHashResult(
+            hashes={"aarch64-darwin": HASH_A}, fully_computed=True
+        )
 
     monkeypatch.setattr("lib.update.nix_deno.compute_deno_deps_hash", _compute_deno)
     monkeypatch.setattr(
@@ -380,14 +461,14 @@ def test_deno_native_only_single_platform_status_keeps_full_hash_context(
 
     async def _run_hashes() -> list[UpdateEvent]:
         async with aiohttp.ClientSession() as session:
-            return [
-                event
-                async for event in updater.fetch_hashes(
+            return await collect_events(
+                lambda emit: updater.fetch_hashes(
                     VersionInfo(version="1", metadata={}),
                     session,
                     context=context,
+                    emit=emit,
                 )
-            ]
+            )
 
     events = _run(_run_hashes())
     assert any(event.message == "hashing" for event in events)
@@ -407,8 +488,9 @@ def test_manifest_updater_rejects_non_flake_node_metadata() -> None:
 
     async def _run_events() -> None:
         async with aiohttp.ClientSession() as session:
-            async for _event in updater.fetch_hashes(info, session):
-                pass
+            await updater.fetch_hashes(
+                info, session, context=UpdateContext(current=None)
+            )
 
     with pytest.raises(TypeError, match="Expected flake lock node in metadata"):
         _run(_run_events())
@@ -427,8 +509,9 @@ def test_manifest_updater_accepts_flake_node_metadata_and_checks_lock() -> None:
 
     async def _run_events() -> None:
         async with aiohttp.ClientSession() as session:
-            async for _event in updater.fetch_hashes(info, session):
-                pass
+            await updater.fetch_hashes(
+                info, session, context=UpdateContext(current=None)
+            )
 
     with pytest.raises(RuntimeError, match="incomplete lock"):
         _run(_run_events())
@@ -438,36 +521,6 @@ def test_optional_context_and_flake_helper_branches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Cover optional-context fallbacks and typed flake metadata branches."""
-    context = UpdateContext(current=None)
-
-    def _boom(*_args: object, **_kwargs: object) -> None:
-        raise TypeError("boom")
-
-    with pytest.raises(TypeError, match="boom"):
-        _call_with_optional_context(_boom, context=context)
-
-    def _only_args(*_args: object) -> None:
-        return None
-
-    with pytest.raises(TypeError, match="extra"):
-        _call_with_optional_context(_only_args, context=context, extra=True)
-
-    def _typing_only_annotation(
-        _value: _TypingOnlyValue,
-        *,
-        context: UpdateContext,
-    ) -> UpdateContext:
-        return context
-
-    assert (
-        _call_with_optional_context(
-            _typing_only_annotation,
-            object(),
-            context=context,
-        )
-        is context
-    )
-
     updater = _DefaultFlake()
     typed_node = FlakeLockNode(locked=None)
     assert (
@@ -497,22 +550,25 @@ def test_optional_context_and_flake_helper_branches(
     )
     finalized = _run(
         _collect(
-            updater._finalize_result(
+            lambda emit: updater._finalize_result(
                 SourceEntry.model_validate({"version": "1", "hashes": {}}),
                 context=UpdateContext(current=None, drv_fingerprint="drv"),
+                emit=emit,
             )
         )
     )
-    payload = finalized[-1].payload
+    payload = finalized.result
     assert isinstance(payload, SourceEntry)
     if not isinstance(payload, SourceEntry):
         raise AssertionError("expected SourceEntry payload")
     assert payload.drv_hash == "drv"
     assert updater._existing_platform_hashes(
-        SourceEntry.model_validate({
-            "hashes": {"x86_64-linux": HASH_A},
-        })
+        UpdateContext(
+            current=SourceEntry.model_validate({
+                "hashes": {"x86_64-linux": HASH_A},
+            })
+        )
     ) == {"x86_64-linux": HASH_A}
-    assert updater._existing_platform_hashes() == {}
+    assert updater._existing_platform_hashes(UpdateContext(current=None)) == {}
     object.__setattr__(updater, "_current_entry", "bad")
-    assert updater._existing_platform_hashes() == {}
+    assert updater._existing_platform_hashes(UpdateContext(current=None)) == {}

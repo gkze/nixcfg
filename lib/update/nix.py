@@ -30,14 +30,11 @@ from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.constants import FIXED_OUTPUT_NOISE
 from lib.update.events import (
     CommandResult,
-    EventStream,
+    EventSink,
     StatusInfo,
     StatusKind,
     UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_command_result,
-    require_value,
+    ignore_event,
 )
 from lib.update.flake import nixpkgs_expression
 from lib.update.nix_expr import compact_nix_expr, select_attrs
@@ -560,13 +557,12 @@ async def _emit_sri_hash_from_build_result(
     result: CommandResult,
     *,
     config: UpdateConfig | None = None,
-) -> EventStream:
+    emit: EventSink = ignore_event,
+) -> str:
     hash_value = _extract_nix_hash(result.stderr + result.stdout, config=config)
     if is_sri(hash_value):
-        yield UpdateEvent.value(source, hash_value)
-        return
-    async for event in convert_nix_hash_to_sri(source, hash_value):
-        yield event
+        return hash_value
+    return await convert_nix_hash_to_sri(source, hash_value, emit=emit)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -584,28 +580,23 @@ async def _run_fixed_output_build(
     expr: str,
     *,
     options: _FixedOutputBuildOptions,
-) -> EventStream:
-    result_drain = ValueDrain()
-    async for event in drain_value_events(
-        run_nix_build(
-            expr,
-            options=NixBuildOptions(
-                source=source,
-                allow_failure=options.allow_failure,
-                suppress_patterns=options.suppress_patterns,
-                env=options.env,
-                verbose=options.verbose,
-                config=options.config,
-            ),
+    emit: EventSink = ignore_event,
+) -> CommandResult:
+    result = await run_nix_build(
+        expr,
+        options=NixBuildOptions(
+            source=source,
+            allow_failure=options.allow_failure,
+            suppress_patterns=options.suppress_patterns,
+            env=options.env,
+            verbose=options.verbose,
+            config=options.config,
         ),
-        result_drain,
-        parse=expect_command_result,
-    ):
-        yield event
-    result = require_value(result_drain, "nix build did not return output")
+        emit=emit,
+    )
     if result.returncode == 0:
         raise RuntimeError(options.success_error)
-    yield UpdateEvent.value(source, result)
+    return result
 
 
 @dataclasses.dataclass
@@ -644,7 +635,8 @@ async def compute_fixed_output_hash(
     isolate_by_drv_hash: bool = False,
     env: Mapping[str, str] | None = None,
     config: UpdateConfig | None = None,
-) -> EventStream:
+    emit: EventSink = ignore_event,
+) -> str:
     """Compute an SRI hash by extracting nix fixed-output mismatch output.
 
     ``isolate_by_drv_hash`` salts the probe output using the unsalted derivation
@@ -657,51 +649,43 @@ async def compute_fixed_output_hash(
     attempt = 1
     while True:
         async with semaphore:
-            result_drain = ValueDrain()
-            async for event in drain_value_events(
-                _run_fixed_output_build(
-                    source,
-                    expr,
-                    options=_FixedOutputBuildOptions(
-                        allow_failure=True,
-                        suppress_patterns=FIXED_OUTPUT_NOISE,
-                        verbose=True,
-                        success_error=(
-                            "Expected nix build to fail with hash mismatch, "
-                            "but it succeeded"
-                        ),
-                        env=env,
-                        config=config,
+            result = await _run_fixed_output_build(
+                source,
+                expr,
+                options=_FixedOutputBuildOptions(
+                    allow_failure=True,
+                    suppress_patterns=FIXED_OUTPUT_NOISE,
+                    verbose=True,
+                    success_error=(
+                        "Expected nix build to fail with hash mismatch, "
+                        "but it succeeded"
                     ),
+                    env=env,
+                    config=config,
                 ),
-                result_drain,
-                parse=expect_command_result,
-            ):
-                yield event
-            result = require_value(result_drain, "nix build did not return output")
+                emit=emit,
+            )
         if (
             attempt < _FIXED_OUTPUT_HASH_MAX_ATTEMPTS
             and _is_retryable_fixed_output_hash_failure(result)
         ):
             attempt += 1
-            yield UpdateEvent.status(
-                source,
-                "fixed-output source fetch hit a transient failure; retrying...",
-                operation="compute_hash",
-                status=StatusInfo(
-                    kind=StatusKind.RETRY,
-                    value=f"attempt {attempt}/{_FIXED_OUTPUT_HASH_MAX_ATTEMPTS}",
-                ),
+            await emit(
+                UpdateEvent.status(
+                    source,
+                    "fixed-output source fetch hit a transient failure; retrying...",
+                    operation="compute_hash",
+                    status=StatusInfo(
+                        kind=StatusKind.RETRY,
+                        value=f"attempt {attempt}/{_FIXED_OUTPUT_HASH_MAX_ATTEMPTS}",
+                    ),
+                )
             )
             await asyncio.sleep(max(0.0, config.default_retry_backoff))
             continue
-        async for event in _emit_sri_hash_from_build_result(
-            source,
-            result,
-            config=config,
-        ):
-            yield event
-        return
+        return await _emit_sri_hash_from_build_result(
+            source, result, config=config, emit=emit
+        )
 
 
 def _build_nix_expr(
@@ -937,7 +921,8 @@ async def compute_overlay_hash(
     repo_root: str | None = None,
     source_overrides: Mapping[str, SourceEntry] | None = None,
     fake_hashes: bool | None = None,
-) -> EventStream:
+    emit: EventSink = ignore_event,
+) -> str:
     """Compute a hash by building the overlay with explicit fake-hash context.
 
     The contextual library makes its source hash helpers return ``lib.fakeHash``.
@@ -953,12 +938,7 @@ async def compute_overlay_hash(
         source_overrides=source_overrides,
         fake_hashes=fake_hashes,
     )
-    async for event in compute_fixed_output_hash(
-        source,
-        expr,
-        config=config,
-    ):
-        yield event
+    return await compute_fixed_output_hash(source, expr, config=config, emit=emit)
 
 
 async def compute_drv_fingerprint(
@@ -1002,22 +982,13 @@ async def compute_expr_drv_fingerprint(
     config = resolve_active_config(config)
     expr = _build_drv_path_expr(expr)
     args = ["nix", "eval", "--quiet", "--raw", "--impure", "--expr", expr]
-
-    result_drain = ValueDrain()
-    async for _event in drain_value_events(
-        run_command(
-            args,
-            options=RunCommandOptions(
-                source=source,
-                error="nix eval did not return output",
-                config=config,
-            ),
+    result = await run_command(
+        args,
+        options=RunCommandOptions(
+            source=source,
+            config=config,
         ),
-        result_drain,
-        parse=expect_command_result,
-    ):
-        pass  # discard streaming events during fingerprint eval
-    result = require_value(result_drain, "nix eval did not return output")
+    )
     if result.returncode != 0:
         msg = f"nix eval failed:\n{result.stderr}"
         raise RuntimeError(msg)

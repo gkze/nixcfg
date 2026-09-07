@@ -13,12 +13,15 @@ let
     path = inputs.red;
     name = builtins.unsafeDiscardStringContext (builtins.baseNameOf (toString inputs.red));
   };
-  workspace = uv2nix.lib.workspace.loadWorkspace { workspaceRoot = redSource; };
+  workspace = uv2nix.lib.workspace.loadWorkspace { workspaceRoot = inputs.red; };
   pySet = (callPackage pyproject-nix.build.packages { python = python313; }).overrideScope (
     lib.composeManyExtensions [
       platformCompat.overlay
       pyproject-build-systems.overlays.default
       (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
+      (_final: prev: {
+        red-reddit-cli = prev.red-reddit-cli.overrideAttrs { src = redSource; };
+      })
     ]
   );
 in

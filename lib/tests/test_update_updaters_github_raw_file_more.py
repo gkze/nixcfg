@@ -1,20 +1,22 @@
 """Tests for GitHub raw-file updater helpers."""
 
 import asyncio
-from typing import TYPE_CHECKING
 
 import aiohttp
 import pytest
 
-from lib.update.events import CapturedValue, UpdateEvent, UpdateEventKind
+from lib.nix.models.sources import HashEntry
+from lib.tests._updater_helpers import collect_events
+from lib.update.events import (
+    UpdateEvent,
+    ignore_event,
+)
 from lib.update.updaters import VersionInfo
+from lib.update.updaters.core import UpdateContext
 from lib.update.updaters.github_raw_file import (
     GitHubRawFileMetadata,
     GitHubRawFileUpdater,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
 
 
 class _DemoRawFileUpdater(GitHubRawFileUpdater):
@@ -24,14 +26,8 @@ class _DemoRawFileUpdater(GitHubRawFileUpdater):
     path = "path/to/file.txt"
 
 
-def _collect(stream: AsyncIterator[UpdateEvent]) -> list[UpdateEvent]:
-    async def _run() -> list[UpdateEvent]:
-        items: list[UpdateEvent] = []
-        async for item in stream:
-            items.append(item)
-        return items
-
-    return asyncio.run(_run())
+def _collect(operation):
+    return asyncio.run(collect_events(operation))
 
 
 def test_fetch_latest_uses_default_branch_and_latest_commit(
@@ -73,7 +69,9 @@ def test_fetch_latest_uses_default_branch_and_latest_commit(
 
     async def _run() -> VersionInfo:
         async with aiohttp.ClientSession() as session:
-            return await updater.fetch_latest(session)
+            return await updater.fetch_latest(
+                session, context=UpdateContext(current=None)
+            )
 
     info = asyncio.run(_run())
     assert info.version == "deadbeef"
@@ -81,92 +79,64 @@ def test_fetch_latest_uses_default_branch_and_latest_commit(
     assert info.metadata["branch"] == "main"
 
 
-def test_fetch_hashes_emits_entries_and_validates_metadata(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Compute URL hashes and return a sha256 hash entry list."""
+def test_fetch_hashes_returns_entries_and_validates_metadata(monkeypatch) -> None:
+    """Hash the immutable URL, forward progress, and reject missing revision."""
     updater = _DemoRawFileUpdater()
-
+    context = UpdateContext(current=None)
     with pytest.raises(TypeError, match="Expected string revision metadata"):
-        _collect(
+        asyncio.run(
             updater.fetch_hashes(
-                VersionInfo(version="v1", metadata={}),
-                session=object(),  # type: ignore[arg-type]
+                VersionInfo(version="v1", metadata={}), object(), context=context
             )
         )
 
-    async def _capture(
-        _stream: object,
-        *,
-        error: str,
-    ) -> AsyncIterator[UpdateEvent | CapturedValue[object]]:
-        _ = error
-        captured_url = (
+    async def hashes(source, urls, *, config, emit=ignore_event):
+        assert urls == [
             "https://raw.githubusercontent.com/owner/repo/deadbeef/path/to/file.txt"
-        )
-        captured_hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-        yield UpdateEvent.status("demo", "running")
-        yield CapturedValue({captured_url: captured_hash})
+        ]
+        await emit(UpdateEvent.status(source, "running"))
+        return {urls[0]: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
 
     monkeypatch.setattr(
-        "lib.update.updaters.github_raw_file.capture_stream_value", _capture
+        "lib.update.updaters.github_raw_file.compute_url_hashes", hashes
     )
-    monkeypatch.setattr(
-        "lib.update.updaters.github_raw_file.compute_url_hashes",
-        lambda *_args, **_kwargs: iter(()),
-    )
-
-    events = _collect(
-        updater.fetch_hashes(
+    captured = _collect(
+        lambda emit: updater.fetch_hashes(
             VersionInfo(version="deadbeef", metadata={"rev": "deadbeef"}),
-            session=object(),  # type: ignore[arg-type]
+            object(),
+            context=context,
+            emit=emit,
         )
     )
-    assert events[0].kind == UpdateEventKind.STATUS
-    assert events[-1].kind == UpdateEventKind.VALUE
-    payload = events[-1].payload
-    assert isinstance(payload, list)
-    assert payload[0].hash == "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    assert [event.message for event in captured] == ["running"]
+    assert captured.result == [
+        HashEntry.create(
+            "sha256",
+            "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            url="https://raw.githubusercontent.com/owner/repo/deadbeef/path/to/file.txt",
+        )
+    ]
 
 
-def test_fetch_hashes_accepts_typed_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Accept pre-typed metadata without dict coercion."""
+def test_fetch_hashes_accepts_typed_metadata(monkeypatch) -> None:
+    """Pretyped revision metadata uses the same typed hashing boundary."""
+    updater = _DemoRawFileUpdater()
 
-    class _TypedDemoRawFileUpdater(GitHubRawFileUpdater):
-        name = "typed-demo"
-        owner = "owner"
-        repo = "repo"
-        path = "path/to/file.txt"
-
-    updater = _TypedDemoRawFileUpdater()
-
-    async def _capture(
-        _stream: object,
-        *,
-        error: str,
-    ) -> AsyncIterator[UpdateEvent | CapturedValue[object]]:
-        _ = error
-        url = "https://raw.githubusercontent.com/owner/repo/deadbeef/path/to/file.txt"
-        yield CapturedValue({
-            url: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-        })
+    async def hashes(_source, urls, **_kwargs):
+        return {urls[0]: "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
 
     monkeypatch.setattr(
-        "lib.update.updaters.github_raw_file.capture_stream_value",
-        _capture,
+        "lib.update.updaters.github_raw_file.compute_url_hashes", hashes
     )
-    monkeypatch.setattr(
-        "lib.update.updaters.github_raw_file.compute_url_hashes",
-        lambda *_args, **_kwargs: iter(()),
-    )
-
-    events = _collect(
-        updater.fetch_hashes(
+    captured = _collect(
+        lambda emit: updater.fetch_hashes(
             VersionInfo(
                 version="deadbeef",
                 metadata=GitHubRawFileMetadata(rev="deadbeef", branch="main"),
             ),
-            session=object(),  # type: ignore[arg-type]
+            object(),
+            context=UpdateContext(current=None),
+            emit=emit,
         )
     )
-    assert events[-1].kind == UpdateEventKind.VALUE
+    assert len(captured.result) == 1

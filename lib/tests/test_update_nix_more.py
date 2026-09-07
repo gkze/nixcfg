@@ -1,12 +1,18 @@
 """Additional tests for update.nix hash helpers and build flows."""
 
 import asyncio
-from typing import TYPE_CHECKING
 
 import pytest
 
+from lib.tests._updater_helpers import collect_events
 from lib.update.config import resolve_config
-from lib.update.events import CommandResult, UpdateEvent, UpdateEventKind
+from lib.update.events import (
+    CommandResult,
+    EventSink,
+    UpdateEvent,
+    UpdateEventKind,
+    ignore_event,
+)
 from lib.update.nix import (
     _NIX_BUILD_SEMAPHORE_STATE,
     _emit_sri_hash_from_build_result,
@@ -24,18 +30,9 @@ from lib.update.nix import (
     normalize_nix_platform,
 )
 
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
 
-
-def _collect_events(stream: AsyncIterator[UpdateEvent]) -> list[UpdateEvent]:
-    async def _run() -> list[UpdateEvent]:
-        items: list[UpdateEvent] = []
-        async for item in stream:
-            items.append(item)
-        return items
-
-    return asyncio.run(_run())
+def _collect_events(operation):
+    return asyncio.run(collect_events(operation))
 
 
 def test_platform_normalization_and_current_platform(
@@ -214,23 +211,25 @@ def test_emit_sri_hash_from_build_result_paths(monkeypatch: pytest.MonkeyPatch) 
             "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
         ),
     )
-    direct = _collect_events(_emit_sri_hash_from_build_result("demo", result))
-    assert len(direct) == 1
-    assert direct[0].kind == UpdateEventKind.VALUE
+    direct = _collect_events(
+        lambda emit: _emit_sri_hash_from_build_result("demo", result, emit=emit)
+    )
+    assert direct == []
+    assert direct.result == "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
-    async def _convert(_source: str, _hash: str) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.value(
-            "demo", "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
-        )
+    async def _convert(
+        _source: str, _hash: str, *, emit: EventSink = ignore_event
+    ) -> object:
+        return "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 
     monkeypatch.setattr(
         "lib.update.nix._extract_nix_hash", lambda _output, config=None: "legacy"
     )
     monkeypatch.setattr("lib.update.nix.convert_nix_hash_to_sri", _convert)
-    converted = _collect_events(_emit_sri_hash_from_build_result("demo", result))
-    assert (
-        converted[-1].payload == "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+    converted = _collect_events(
+        lambda emit: _emit_sri_hash_from_build_result("demo", result, emit=emit)
     )
+    assert converted.result == "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 
 
 def test_run_fixed_output_build_and_compute_fixed_output_hash(
@@ -239,50 +238,51 @@ def test_run_fixed_output_build_and_compute_fixed_output_hash(
     """Surface successful mismatch extraction and success-path guard rails."""
 
     async def _build_success(
-        *_args: object, **_kwargs: object
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent(
-            source="demo",
-            kind=UpdateEventKind.COMMAND_END,
-            payload=CommandResult(args=["nix"], returncode=0, stdout="", stderr=""),
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
+        await emit(
+            UpdateEvent(
+                source="demo",
+                kind=UpdateEventKind.COMMAND_END,
+                payload=CommandResult(args=["nix"], returncode=0, stdout="", stderr=""),
+            )
         )
-        yield UpdateEvent.value(
-            "demo",
-            CommandResult(args=["nix"], returncode=0, stdout="", stderr=""),
-        )
+        return CommandResult(args=["nix"], returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(
         "lib.update.nix.run_nix_build", lambda *_args, **_kwargs: _build_success()
     )
     with pytest.raises(RuntimeError, match="it succeeded"):
         _collect_events(
-            _run_fixed_output_build(
+            lambda emit: _run_fixed_output_build(
                 "demo",
                 "pkgs.hello",
                 options=_FixedOutputBuildOptions(success_error="it succeeded"),
+                emit=emit,
             )
         )
 
     async def _build_failure(
-        *_args: object, **_kwargs: object
-    ) -> AsyncIterator[UpdateEvent]:
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
         failed = CommandResult(args=["nix"], returncode=1, stdout="", stderr="stderr")
-        yield UpdateEvent(
-            kind=UpdateEventKind.COMMAND_END, source="demo", payload=failed
+        await emit(
+            UpdateEvent(kind=UpdateEventKind.COMMAND_END, source="demo", payload=failed)
         )
-        yield UpdateEvent.value("demo", failed)
+        return failed
 
     monkeypatch.setattr(
         "lib.update.nix.run_nix_build", lambda *_args, **_kwargs: _build_failure()
     )
     failed_events = _collect_events(
-        _run_fixed_output_build(
+        lambda emit: _run_fixed_output_build(
             "demo",
             "pkgs.hello",
             options=_FixedOutputBuildOptions(success_error="it succeeded"),
+            emit=emit,
         )
     )
-    assert failed_events[-1].kind == UpdateEventKind.VALUE
+    assert failed_events.result.returncode == 1
 
     # compute_fixed_output_hash end-to-end with mocked subflows
     monkeypatch.setattr(
@@ -294,16 +294,20 @@ def test_run_fixed_output_build_and_compute_fixed_output_hash(
     )
 
     async def _emit_sri(
-        _source: str, _result: CommandResult, *, config: object = None
-    ) -> AsyncIterator[UpdateEvent]:
+        _source: str,
+        _result: CommandResult,
+        *,
+        config: object = None,
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = config
-        yield UpdateEvent.value(
-            "demo", "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
-        )
+        return "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
 
     monkeypatch.setattr("lib.update.nix._emit_sri_hash_from_build_result", _emit_sri)
-    events = _collect_events(compute_fixed_output_hash("demo", "pkgs.hello"))
-    assert events[-1].payload == "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
+    events = _collect_events(
+        lambda emit: compute_fixed_output_hash("demo", "pkgs.hello", emit=emit)
+    )
+    assert events.result == "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
 
 
 def test_compute_fixed_output_hash_retries_transient_source_fetch(
@@ -316,7 +320,9 @@ def test_compute_fixed_output_hash_retries_transient_source_fetch(
     attempts: list[int] = []
     sleep_delays: list[float] = []
 
-    async def _build(*_args: object, **_kwargs: object) -> AsyncIterator[UpdateEvent]:
+    async def _build(
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
         attempts.append(1)
         if len(attempts) == 1:
             result = CommandResult(
@@ -340,7 +346,7 @@ def test_compute_fixed_output_hash_retries_transient_source_fetch(
                     "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
                 ),
             )
-        yield UpdateEvent.value("demo", result)
+        return result
 
     async def _sleep(delay: float) -> None:
         sleep_delays.append(delay)
@@ -350,7 +356,9 @@ def test_compute_fixed_output_hash_retries_transient_source_fetch(
 
     cfg = resolve_config(retry_backoff=0.25)
     events = _collect_events(
-        compute_fixed_output_hash("demo", "pkgs.hello", config=cfg)
+        lambda emit: compute_fixed_output_hash(
+            "demo", "pkgs.hello", config=cfg, emit=emit
+        )
     )
 
     assert len(attempts) == 2
@@ -358,7 +366,7 @@ def test_compute_fixed_output_hash_retries_transient_source_fetch(
     assert [
         event.message for event in events if event.kind is UpdateEventKind.STATUS
     ] == ["fixed-output source fetch hit a transient failure; retrying..."]
-    assert events[-1].payload == "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
+    assert events.result == "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
 
 
 def test_compute_fixed_output_hash_stops_after_transient_retry_budget(
@@ -371,15 +379,16 @@ def test_compute_fixed_output_hash_stops_after_transient_retry_budget(
     attempts: list[int] = []
     sleep_delays: list[float] = []
 
-    async def _build(*_args: object, **_kwargs: object) -> AsyncIterator[UpdateEvent]:
+    async def _build(
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
         attempts.append(1)
-        result = CommandResult(
+        return CommandResult(
             args=["nix"],
             returncode=1,
             stdout="",
             stderr="curl: (22) The requested URL returned error: 502",
         )
-        yield UpdateEvent.value("demo", result)
 
     async def _sleep(delay: float) -> None:
         sleep_delays.append(delay)
@@ -388,7 +397,9 @@ def test_compute_fixed_output_hash_stops_after_transient_retry_budget(
     monkeypatch.setattr("lib.update.nix.asyncio.sleep", _sleep)
 
     with pytest.raises(RuntimeError, match="Could not find hash"):
-        _collect_events(compute_fixed_output_hash("demo", "pkgs.hello"))
+        _collect_events(
+            lambda emit: compute_fixed_output_hash("demo", "pkgs.hello", emit=emit)
+        )
 
     assert len(attempts) == 3
     assert sleep_delays == [1.0, 1.0]
@@ -422,13 +433,16 @@ def test_compute_overlay_hash_embeds_fake_hash_context(
         *,
         env: dict[str, str] | None = None,
         config: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         captured.update({"source": source, "expr": expr, "env": env, "config": config})
-        yield UpdateEvent.value(source, "ok")
+        return "ok"
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fake_compute)
-    events = _collect_events(compute_overlay_hash("demo", system="x86_64-linux"))
-    assert events[-1].payload == "ok"
+    events = _collect_events(
+        lambda emit: compute_overlay_hash("demo", system="x86_64-linux", emit=emit)
+    )
+    assert events.result == "ok"
     assert captured["source"] == "demo"
     assert captured["env"] is None
 
@@ -437,61 +451,61 @@ def test_compute_drv_fingerprint_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """Extract stable drv fingerprints and report eval failures."""
 
     async def _run_command_success(
-        *_args: object, **_kwargs: object
-    ) -> AsyncIterator[UpdateEvent]:
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
         result = CommandResult(
             args=["nix"],
             returncode=0,
             stdout="/nix/store/abc123-demo.drv\n",
             stderr="",
         )
-        yield UpdateEvent(
-            kind=UpdateEventKind.COMMAND_END, source="demo", payload=result
+        await emit(
+            UpdateEvent(kind=UpdateEventKind.COMMAND_END, source="demo", payload=result)
         )
-        yield UpdateEvent.value("demo", result)
+        return result
 
     monkeypatch.setattr("lib.update.nix.run_command", _run_command_success)
     fingerprint = _run_async(compute_drv_fingerprint("demo"))
     assert fingerprint == "abc123"
 
     async def _run_command_old_style(
-        *_args: object, **_kwargs: object
-    ) -> AsyncIterator[UpdateEvent]:
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
         result = CommandResult(
             args=["nix"],
             returncode=0,
             stdout="def456-demo.drv",
             stderr="",
         )
-        yield UpdateEvent(
-            kind=UpdateEventKind.COMMAND_END, source="demo", payload=result
+        await emit(
+            UpdateEvent(kind=UpdateEventKind.COMMAND_END, source="demo", payload=result)
         )
-        yield UpdateEvent.value("demo", result)
+        return result
 
     monkeypatch.setattr("lib.update.nix.run_command", _run_command_old_style)
     assert _run_async(compute_drv_fingerprint("demo")) == "def456"
 
     async def _run_command_nonzero(
-        *_args: object, **_kwargs: object
-    ) -> AsyncIterator[UpdateEvent]:
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
         result = CommandResult(args=["nix"], returncode=1, stdout="", stderr="bad")
-        yield UpdateEvent(
-            kind=UpdateEventKind.COMMAND_END, source="demo", payload=result
+        await emit(
+            UpdateEvent(kind=UpdateEventKind.COMMAND_END, source="demo", payload=result)
         )
-        yield UpdateEvent.value("demo", result)
+        return result
 
     monkeypatch.setattr("lib.update.nix.run_command", _run_command_nonzero)
     with pytest.raises(RuntimeError, match="nix eval failed"):
         _run_async(compute_drv_fingerprint("demo"))
 
     async def _run_command_empty_stdout(
-        *_args: object, **_kwargs: object
-    ) -> AsyncIterator[UpdateEvent]:
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
         result = CommandResult(args=["nix"], returncode=0, stdout="", stderr="")
-        yield UpdateEvent(
-            kind=UpdateEventKind.COMMAND_END, source="demo", payload=result
+        await emit(
+            UpdateEvent(kind=UpdateEventKind.COMMAND_END, source="demo", payload=result)
         )
-        yield UpdateEvent.value("demo", result)
+        return result
 
     monkeypatch.setattr("lib.update.nix.run_command", _run_command_empty_stdout)
     with pytest.raises(RuntimeError, match="empty drvPath"):

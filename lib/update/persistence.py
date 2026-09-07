@@ -58,7 +58,7 @@ if TYPE_CHECKING:
 
     from lib.nix.models.sources import SourceEntry
     from lib.update.artifacts import GeneratedArtifact
-    from lib.update.ui_state import SummaryStatus
+    from lib.update.outcomes import SummaryStatus
     from lib.update.updaters import UpdaterClass
 
 
@@ -1567,14 +1567,11 @@ def persist_generated_artifacts(
     *,
     do_sources: bool,
     source_names: list[str],
-    dry_run: bool,
     artifact_updates: dict[str, tuple[GeneratedArtifact, ...]],
     details: dict[str, SummaryStatus],
 ) -> tuple[Path, ...]:
     """Persist generated artifacts emitted by successful source updaters."""
     if not (do_sources and source_names):
-        return ()
-    if dry_run or not artifact_updates:
         return ()
     completed_updates = {
         source: artifacts
@@ -1605,7 +1602,6 @@ def persist_source_updates(
     *,
     do_sources: bool,
     source_names: list[str],
-    dry_run: bool,
     native_only: bool,
     sources: SourcesFile,
     source_updates: dict[str, SourceEntry],
@@ -1624,7 +1620,7 @@ def persist_source_updates(
     if not successful_updates:
         return ()
 
-    if native_only and not dry_run:
+    if native_only:
         merged_updates = update_sources.save_source_updates(
             successful_updates,
             merge_existing=True,
@@ -1637,11 +1633,9 @@ def persist_source_updates(
             native_only=native_only,
         )
 
-    if not dry_run and not native_only:
+    if not native_only:
         update_sources.save_sources(SourcesFile(entries=merged_updates))
     sources.entries.update(merged_updates)
-    if dry_run:
-        return ()
     root = get_repo_root()
     path_map = package_file_map_in(root, "sources.json")
     return tuple(
@@ -1655,7 +1649,6 @@ def persist_materialized_updates(
     *,
     do_sources: bool,
     source_names: list[str],
-    dry_run: bool,
     native_only: bool,
     sources: SourcesFile,
     source_updates: dict[str, SourceEntry],
@@ -1666,14 +1659,12 @@ def persist_materialized_updates(
     artifact_paths = persist_generated_artifacts(
         do_sources=do_sources,
         source_names=source_names,
-        dry_run=dry_run,
         artifact_updates=artifact_updates,
         details=details,
     )
     source_paths = persist_source_updates(
         do_sources=do_sources,
         source_names=source_names,
-        dry_run=dry_run,
         native_only=native_only,
         sources=sources,
         source_updates=source_updates,

@@ -6,6 +6,8 @@
 }:
 let
   localZshSiteFuncsPath = "zsh/site-functions";
+  codexBundledCliPath = "${config.nixcfg.macApps.resolved.codex.targetPath}/Contents/Resources/codex";
+  codexBundledResPath = "${config.nixcfg.macApps.resolved.codex.targetPath}/Contents/Resources";
   codexBundledPluginRepair = pkgs.writeShellApplication {
     name = "codex-bundled-plugin-repair";
     runtimeInputs = [
@@ -186,6 +188,34 @@ let
   };
 in
 {
+  # Run after Home Manager removes the previous generation's store-backed link.
+  home.activation.codexBundledCli =
+    lib.hm.dag.entryAfter
+      [
+        "linkGeneration"
+        "nixcfgUserApplications"
+      ]
+      ''
+        codex_res_dir=${lib.escapeShellArg codexBundledResPath}
+        codex_bin_dir=${lib.escapeShellArg "${config.home.homeDirectory}/.local/bin"}
+        for codex_link_name in codex codex-code-mode-host; do
+          codex_target="$codex_res_dir/$codex_link_name"
+          codex_link="$codex_bin_dir/$codex_link_name"
+          if [[ ! -v DRY_RUN && ! -x "$codex_target" ]]; then
+            echo "Bundled Codex CLI is missing or not executable: $codex_target" >&2
+            exit 1
+          fi
+          if [ -e "$codex_link" ] && [ ! -L "$codex_link" ]; then
+            echo "Refusing to replace non-symlink bundled Codex binary: $codex_link" >&2
+            exit 1
+          fi
+          if [ ! -L "$codex_link" ] || [ "$(readlink "$codex_link")" != "$codex_target" ]; then
+            run mkdir -p "$codex_bin_dir"
+            run ln -sfn "$codex_target" "$codex_link"
+          fi
+        done
+      '';
+
   home.activation.codexBundledPluginRepair = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     ${lib.getExe codexBundledPluginRepair}
   '';
@@ -250,10 +280,29 @@ in
     };
   };
 
-  xdg.dataFile.${localZshSiteFuncsPath} = {
-    source = pkgs.homebrew-zsh-completion;
-    recursive = true;
-    executable = true;
+  xdg.dataFile = {
+    ${localZshSiteFuncsPath} = {
+      source = pkgs.homebrew-zsh-completion;
+      recursive = true;
+      executable = true;
+    };
+
+    # Load completions from the live bundle on demand so app updates stay aligned.
+    "${localZshSiteFuncsPath}/_codex".text = ''
+      #compdef codex
+      [[ -x ${lib.escapeShellArg codexBundledCliPath} ]] || return 1
+      local completions
+      completions=$(${lib.escapeShellArg codexBundledCliPath} completion zsh) || return
+      eval "$completions" && _codex "$@"
+    '';
+    "bash-completion/completions/codex".text = ''
+      [[ -x ${lib.escapeShellArg codexBundledCliPath} ]] || return 1
+      source <(${lib.escapeShellArg codexBundledCliPath} completion bash)
+    '';
+    "fish/vendor_completions.d/codex.fish".text = ''
+      test -x ${lib.escapeShellArg codexBundledCliPath}; or return 1
+      ${lib.escapeShellArg codexBundledCliPath} completion fish | source
+    '';
   };
 
   programs.zsh.initContent = lib.mkMerge [
@@ -264,6 +313,7 @@ in
       # >>> town:mise-shell-activation-v1 >>>
       if [[ -x "${config.home.homeDirectory}/.local/bin/mise" ]]; then
         eval "$("${config.home.homeDirectory}/.local/bin/mise" activate zsh)"
+        eval "$("${config.home.homeDirectory}/.local/bin/mise" completions zsh)"
       fi
       # <<< town:mise-shell-activation-v1 <<<
     '')

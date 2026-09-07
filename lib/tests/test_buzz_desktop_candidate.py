@@ -1,10 +1,12 @@
 """Contracts for Buzz's validated desktop application candidate."""
 
+import ctypes
 import hashlib
 import json
 import os
 import plistlib
 import pwd
+import runpy
 import shlex
 import subprocess
 import sys
@@ -12,7 +14,9 @@ from collections.abc import Callable
 from functools import cache
 from pathlib import Path
 from textwrap import dedent
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
+from unittest.mock import Mock, call
 
 import pytest
 from nix_manipulator.expressions.assertion import Assertion
@@ -23,11 +27,13 @@ from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.import_utils import load_module_from_path
 from lib.tests._assertions import expect_instance
 from lib.tests._buzz_native_lock import (
     buzz_native_lock_string,
     render_buzz_native_lock_interpolations,
 )
+from lib.tests._macho import build_version, macho, string_command
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     expect_binding,
@@ -40,6 +46,18 @@ if TYPE_CHECKING:
     from nix_manipulator.expressions.scope import Scope
 
 _CANDIDATE_PATH = REPO_ROOT / "packages/buzz/native/desktop-candidate.nix"
+validate_entitlements = load_module_from_path(
+    _CANDIDATE_PATH.with_name("validate_entitlements.py"), "buzz_validate_entitlements"
+)
+validate_rpaths = load_module_from_path(
+    _CANDIDATE_PATH.with_name("validate_rpaths.py"), "buzz_validate_rpaths"
+)
+validate_runtime = load_module_from_path(
+    _CANDIDATE_PATH.with_name("validate_runtime.py"), "buzz_validate_runtime"
+)
+validate_runtime_load = load_module_from_path(
+    _CANDIDATE_PATH.with_name("validate_runtime_load.py"), "buzz_validate_runtime_load"
+)
 _LAUNCHER_PATH = REPO_ROOT / "packages/buzz/native/buzz-launcher.c"
 _APP_EXECUTABLES = (
     "buzz-desktop",
@@ -112,11 +130,11 @@ def _candidate_scope() -> Scope:
 
 def _assembly_script() -> str:
     script = _scope_string("assemblyScript")
-    return _expand_embedded_validators(script)
+    return _expand_validation_commands(script)
 
 
 def _install_check_script() -> str:
-    script = _expand_embedded_validators(_scope_string("installCheckPhase"))
+    script = _expand_validation_commands(_scope_string("installCheckPhase"))
     replacements = {
         "${python3}/bin/python3": '"$PYTHON_TOOL"',
         "${cctools}/bin/lipo": '"$LIPO_TOOL"',
@@ -130,47 +148,31 @@ def _install_check_script() -> str:
     return "runHook() { :; }\n" + script
 
 
-def _expand_embedded_validators(script: str) -> str:
+def _expand_validation_commands(script: str) -> str:
     if "${launcherSmokeScript}" in script:
         script = script.replace(
             "${launcherSmokeScript}",
             _scope_string("launcherSmokeScript"),
         )
-    validator = _scope_string("runtimeValidator")
-    validation_command = f'"$PYTHON_TOOL" -c {shlex.quote(validator)}'
-    script = script.replace("${runtimeValidationCommand}", validation_command)
-    if "${runtimeLoadValidationCommand}" in script:
+    native = _CANDIDATE_PATH.parent
+    commands = {
+        "runtimeValidationCommand": [
+            str(native / "validate_runtime.py"),
+            _MESH_VERSION,
+            _SKIPPY_ABI,
+        ],
+        "entitlementsValidationCommand": [str(native / "validate_entitlements.py")],
+    }
+    for name, arguments in commands.items():
         script = script.replace(
-            "${runtimeLoadValidationCommand}", '"$RUNTIME_LOAD_VALIDATOR"'
+            "${" + name + "}", '"$PYTHON_TOOL" ' + shlex.join(arguments)
         )
-    if "${entitlementsValidationCommand}" in script:
-        entitlements_validator = _scope_string("entitlementsValidator")
-        entitlements_command = (
-            f'"$PYTHON_TOOL" -c {shlex.quote(entitlements_validator)}'
-        )
-        script = script.replace(
-            "${entitlementsValidationCommand}", entitlements_command
-        )
-    if "${rpathValidationCommand}" in script:
-        rpath_validator = _scope_string("rpathValidator")
-        rpath_command = f'"$PYTHON_TOOL" -c {shlex.quote(rpath_validator)}'
-        script = script.replace("${rpathValidationCommand}", rpath_command)
-    return script
-
-
-def test_updater_lock_interpolation_preserves_attested_validator_text() -> None:
-    """Externalized identities must not perturb the validated candidate derivation."""
-    runtime_validator = _scope_string("runtimeValidator")
-    assert "EXPECTED_MESH_VERSION" not in runtime_validator
-    assert "EXPECTED_SKIPPY_ABI" not in runtime_validator
-    assert f'if runtime.get("mesh_version") != "{_MESH_VERSION}":' in runtime_validator
-    assert f'if runtime.get("skippy_abi") != "{_SKIPPY_ABI}":' in runtime_validator
-
-    runtime_load_validator = _scope_string("runtimeLoadValidator")
-    expected_abi = ", ".join(_SKIPPY_ABI.split("."))
-    assert "EXPECTED_ABI_TEXT" not in runtime_load_validator
-    assert f"EXPECTED_ABI = ({expected_abi})" in runtime_load_validator
-    assert f'"Skippy ABI differs from {_SKIPPY_ABI}: "' in runtime_load_validator
+    script = script.replace(
+        "${rpathValidationCommand}", '"$PYTHON_TOOL" "$RPATH_VALIDATOR"'
+    )
+    return script.replace(
+        "${runtimeLoadValidationCommand}", '"$RUNTIME_LOAD_VALIDATOR"'
+    )
 
 
 def _write_executable(path: Path, body: bytes = b"fixture\n") -> None:
@@ -302,7 +304,7 @@ def _install_check_tools(
     *,
     extra_dumped_entitlement: bool = False,
     fail_inventory_find: bool = False,
-    fail_otool: bool = False,
+    invalid_macho: bool = False,
     fail_runtime_find: bool = False,
     macho_case: str | None = None,
 ) -> dict[str, str]:
@@ -310,7 +312,6 @@ def _install_check_tools(
     tools.mkdir()
     file_tool = tools / "file"
     lipo_tool = tools / "lipo"
-    otool_tool = tools / "otool"
     plistbuddy_tool = tools / "PlistBuddy"
     codesign_tool = tools / "codesign"
     runtime_load_validator = tools / "runtime-load-validator"
@@ -338,40 +339,27 @@ def _install_check_tools(
         "resolved-rpath": "@loader_path",
     }
     rpath = rpath_cases.get(macho_key)
-    load_commands: list[str] = []
-    for minimum_version in minimum_versions:
-        load_commands.extend([
-            f"Load command {len(load_commands)}",
-            "          cmd LC_BUILD_VERSION",
-            "      cmdsize 32",
-            f"     platform {platform}",
-            f"        minos {minimum_version}",
-            "          sdk 15.0",
-        ])
+    commands = [
+        build_version(
+            int(value.split(".")[0]) << 16 | int(value.split(".")[1]) << 8,
+            int(platform),
+        )
+        for value in minimum_versions
+    ]
+    commands.append(string_command(0xC, dependency))
     if rpath is not None:
-        load_commands.extend([
-            f"Load command {len(load_commands)}",
-            "          cmd LC_RPATH",
-            "      cmdsize 48",
-            f"         path {rpath} (offset 12)",
-        ])
-    otool_tool.write_text(
-        f"""#!{sys.executable}
-import sys
-
-if {fail_otool!r}:
-    raise SystemExit(47)
-if sys.argv[1] == "-L":
-    print(f"{{sys.argv[2]}}:")
-    print({dependency!r} + " (compatibility version 1.0.0, current version 1.0.0)")
-elif sys.argv[1] == "-l":
-    print("\\n".join({load_commands!r}))
-else:
-    raise SystemExit(49)
-""",
-        encoding="utf-8",
+        commands.append(string_command(0x8000001C, rpath))
+    binary = tools / "inspection.macho"
+    binary.write_bytes(b"invalid" if invalid_macho else macho(commands))
+    validator = tools / "validate-rpaths.py"
+    # Shell launcher fixtures remain executable scripts; only their native
+    # metadata source is substituted. The parser consumes real Mach-O bytes.
+    validator.write_text(
+        "import sys, runpy\nfrom pathlib import Path\nimport lib.macho\n"
+        f"metadata = lib.macho.read_macho(Path({str(binary)!r}))\n"
+        "lib.macho.read_macho = lambda path: metadata\n"
+        f"runpy.run_path({str(_CANDIDATE_PATH.with_name('validate_rpaths.py'))!r}, run_name='__main__')\n"
     )
-    otool_tool.chmod(0o755)
 
     plistbuddy_tool.write_text(
         f"""#!{sys.executable}
@@ -439,11 +427,12 @@ exec /usr/bin/find "$@"
         "FAIL_RUNTIME_FIND": "1" if fail_runtime_find else "0",
         "FILE_TOOL": str(file_tool),
         "LIPO_TOOL": str(lipo_tool),
-        "OTOOL_TOOL": str(otool_tool),
         "PATH": path,
         "PLISTBUDDY_TOOL": str(plistbuddy_tool),
         "PYTHON_TOOL": sys.executable,
         "RUNTIME_LOAD_VALIDATOR": str(runtime_load_validator),
+        "RPATH_VALIDATOR": str(validator),
+        "PYTHONPATH": str(REPO_ROOT),
     }
 
 
@@ -534,7 +523,7 @@ def _run_install_check(
     broken_launcher: bool = False,
     extra_dumped_entitlement: bool = False,
     fail_inventory_find: bool = False,
-    fail_otool: bool = False,
+    invalid_macho: bool = False,
     fail_runtime_find: bool = False,
     macho_case: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -560,7 +549,7 @@ exec "$macos/buzz-desktop.real" "$@"
         tmp_path,
         extra_dumped_entitlement=extra_dumped_entitlement,
         fail_inventory_find=fail_inventory_find,
-        fail_otool=fail_otool,
+        invalid_macho=invalid_macho,
         fail_runtime_find=fail_runtime_find,
         macho_case=macho_case,
     )
@@ -783,26 +772,35 @@ def test_candidate_compiles_launcher_then_disables_all_generic_fixup() -> None:
 
 
 @pytest.mark.parametrize(
-    ("command_name", "validator_name"),
+    ("command_name", "invocation"),
     [
-        ("runtimeValidationCommand", "runtimeValidator"),
-        ("runtimeLoadValidationCommand", "runtimeLoadValidator"),
-        ("entitlementsValidationCommand", "entitlementsValidator"),
-        ("rpathValidationCommand", "rpathValidator"),
+        (
+            "runtimeValidationCommand",
+            "${./validate_runtime.py} ${lib.escapeShellArg meshLlmVersion} ${lib.escapeShellArg skippyAbi}",
+        ),
+        (
+            "runtimeLoadValidationCommand",
+            "${./validate_runtime_load.py} ${lib.escapeShellArg skippyAbi}",
+        ),
+        ("entitlementsValidationCommand", "${./validate_entitlements.py}"),
+        ("rpathValidationCommand", "${./validate_rpaths.py}"),
     ],
 )
 def test_validator_command_prefix_keeps_call_site_arguments_on_same_command(
     command_name: str,
-    validator_name: str,
+    invocation: str,
 ) -> None:
-    """A command prefix must not end with a newline before its positional args."""
+    """Nix must call the standalone validator with its pinned arguments."""
     command = expect_instance(
         expect_binding(_candidate_scope(), command_name).value,
         StringPrimitive,
     )
-    assert command.value == (
-        f'\\"$PYTHON_TOOL\\" -c ${{lib.escapeShellArg {validator_name}}}'
+    prefix = (
+        "PYTHONPATH=${inspectionSource} ${inspectionPython}/bin/python3 "
+        if command_name == "rpathValidationCommand"
+        else '\\"$PYTHON_TOOL\\" '
     )
+    assert command.value == prefix + invocation
 
 
 def test_assembly_embeds_runtime_last_and_signs_only_mutable_app_code(
@@ -1037,7 +1035,12 @@ struct AbiVersion skippy_abi_version(void) {{
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     result = subprocess.run(  # noqa: S603 -- Executes the repository-owned validator.
-        [sys.executable, "-c", _scope_string("runtimeLoadValidator"), str(runtime)],
+        [
+            sys.executable,
+            str(_CANDIDATE_PATH.parent / "validate_runtime_load.py"),
+            _SKIPPY_ABI,
+            str(runtime),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -1046,9 +1049,9 @@ struct AbiVersion skippy_abi_version(void) {{
     if not accepted:
         assert f"Skippy ABI differs from {_SKIPPY_ABI}" in result.stderr
 
-    assert '${runtimeLoadValidationCommand} "$runtime"' in _scope_string(
-        "installCheckPhase"
-    )
+    assert command_texts(
+        parse_shell(_install_check_script()), '"$RUNTIME_LOAD_VALIDATOR"'
+    ) == ['"$RUNTIME_LOAD_VALIDATOR" "$runtime"']
 
 
 @pytest.mark.parametrize("macho_case", ["resolved-loader", "resolved-rpath"])
@@ -1102,7 +1105,7 @@ def test_install_check_rejects_app_identity_drift(
 @pytest.mark.parametrize(
     ("failure", "expected_error"),
     [
-        ("otool", "otool -L failed"),
+        ("malformed-macho", "invalid Mach-O"),
         ("rpath-absolute", "forbidden LC_RPATH"),
         ("rpath-traversal", "LC_RPATH escapes Buzz.app"),
         ("dependency-traversal", "dynamic-library edge escapes Buzz.app"),
@@ -1130,7 +1133,7 @@ def test_install_check_rejects_failed_or_ambiguous_audit(
         output,
         extra_dumped_entitlement=failure == "entitlements",
         fail_inventory_find=failure == "inventory-find",
-        fail_otool=failure == "otool",
+        invalid_macho=failure == "malformed-macho",
         fail_runtime_find=failure == "runtime-find",
         macho_case=failure,
     )
@@ -1263,3 +1266,343 @@ def test_launcher_rejects_incomplete_app_layout(tmp_path: Path, missing: str) ->
     )
     assert result.returncode != 0
     assert result.stderr.startswith("Buzz launcher:")
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"id": "other"}, "runtime.id"),
+        ({"mesh_version": "other"}, "runtime.mesh_version"),
+        ({"skippy_abi": "other"}, "runtime.skippy_abi"),
+        ({"platform": {}}, "runtime.platform"),
+        ({"backend": {}}, "runtime.backend"),
+        ({"rank": True}, "runtime.rank"),
+        ({"rank": 1}, "runtime.rank"),
+        ({"extra": 1}, "runtime schema"),
+        ({"files": []}, "runtime.files"),
+        ({"files": {}}, "runtime.files"),
+        ({"libraries": None}, "runtime.libraries"),
+        ({"libraries": []}, "runtime.libraries"),
+        ({"libraries": [""]}, "runtime.libraries"),
+        ({"libraries": [1]}, "runtime.libraries"),
+        ({"libraries": ["lib/libmesh.dylib"] * 2}, "duplicates"),
+        ({"libraries": ["unlisted"]}, "not all covered"),
+        ({"files": {"": "a" * 64}}, "invalid file path"),
+        ({"files": {"/absolute": "a" * 64}}, "not normalized"),
+        ({"files": {"lib//file": "a" * 64}}, "not normalized"),
+        ({"files": {"../file": "a" * 64}}, "unsafe"),
+        ({"files": {"manifest.json": "a" * 64}}, "unsafe"),
+        ({"files": {"lib/libmesh.dylib": 1}}, "digest is invalid"),
+        ({"files": {"lib/libmesh.dylib": "bad"}}, "digest is invalid"),
+        ({"files": {"lib/libmesh.dylib": "a" * 64}}, "digest mismatch"),
+        ({"files": {"missing": "a" * 64}}, "file is missing"),
+    ],
+)
+def test_runtime_validator_rejects_manifest_contract_drift_directly(
+    tmp_path: Path, change: dict[str, object], message: str
+) -> None:
+    runtime = _runtime_fixture(tmp_path)
+    manifest_path = runtime / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["runtime"].update(change)
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(SystemExit, match=message):
+        validate_runtime.validate(runtime, _MESH_VERSION, _SKIPPY_ABI)
+
+
+@pytest.mark.parametrize("validator", ["validate_runtime", "validate_runtime_load"])
+@pytest.mark.parametrize(
+    ("case", "message"),
+    [
+        ("missing-root", "root is not a regular directory"),
+        ("symlink-root", "root is not a regular directory"),
+        ("missing-manifest", "manifest.json is not a regular file"),
+        ("symlink-manifest", "manifest.json is not a regular file"),
+        ("invalid-json", "invalid manifest.json"),
+        ("invalid-unicode", "invalid manifest.json"),
+        ("manifest-list", "schema|runtime.libraries"),
+        ("runtime-list", "no runtime object|runtime.libraries"),
+    ],
+)
+def test_runtime_validators_reject_unreadable_bundle(
+    tmp_path: Path, validator: str, case: str, message: str
+) -> None:
+    runtime = _runtime_fixture(tmp_path)
+    manifest_path = runtime / "manifest.json"
+    match case:
+        case "missing-root":
+            runtime = tmp_path / "missing"
+        case "symlink-root":
+            link = tmp_path / "link"
+            link.symlink_to(runtime, target_is_directory=True)
+            runtime = link
+        case "missing-manifest":
+            manifest_path.unlink()
+        case "symlink-manifest":
+            target = tmp_path / "manifest.json"
+            manifest_path.rename(target)
+            manifest_path.symlink_to(target)
+        case "invalid-json":
+            manifest_path.write_text("{")
+        case "invalid-unicode":
+            manifest_path.write_bytes(b"\xff")
+        case "manifest-list":
+            manifest_path.write_text("[]")
+        case "runtime-list":
+            manifest_path.write_text('{"runtime": []}')
+    if validator == "validate_runtime":
+        with pytest.raises(SystemExit, match=message):
+            validate_runtime.validate(runtime, _MESH_VERSION, _SKIPPY_ABI)
+    else:
+        with pytest.raises(SystemExit, match=message):
+            validate_runtime_load.validate(runtime, _SKIPPY_ABI)
+
+
+@pytest.mark.parametrize("case", ["extra-file", "escaping-symlink"])
+def test_runtime_validator_checks_inventory_and_resolved_paths(
+    tmp_path: Path, case: str
+) -> None:
+    runtime = _runtime_fixture(tmp_path)
+    if case == "extra-file":
+        (runtime / "extra").write_text("unlisted")
+        message = "file inventory differs"
+    else:
+        library = runtime / "lib/libmesh.dylib"
+        target = tmp_path / "outside.dylib"
+        library.rename(target)
+        library.symlink_to(target)
+        message = "file escapes"
+    with pytest.raises(SystemExit, match=message):
+        validate_runtime.validate(runtime, _MESH_VERSION, _SKIPPY_ABI)
+
+
+def test_runtime_validator_cli_accepts_complete_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _runtime_fixture(tmp_path)
+    monkeypatch.setattr(
+        sys, "argv", ["validate_runtime.py", _MESH_VERSION, _SKIPPY_ABI, str(runtime)]
+    )
+    runpy.run_path(
+        str(_CANDIDATE_PATH.parent / "validate_runtime.py"), run_name="__main__"
+    )
+
+
+@pytest.mark.parametrize(
+    ("libraries", "message"),
+    [
+        (None, "nonempty string list"),
+        ([], "nonempty string list"),
+        ([""], "nonempty string list"),
+        ([1], "nonempty string list"),
+        (["/absolute"], "not normalized"),
+        (["lib//mesh"], "not normalized"),
+        (["../outside"], "unsafe"),
+        (["missing"], "escapes the bundle"),
+        (["lib"], "not a file"),
+    ],
+)
+def test_runtime_load_rejects_invalid_library_inventory(
+    tmp_path: Path, libraries: object, message: str
+) -> None:
+    runtime = _runtime_fixture(tmp_path)
+    (runtime / "manifest.json").write_text(
+        json.dumps({"runtime": {"libraries": libraries}})
+    )
+    with pytest.raises(SystemExit, match=message):
+        validate_runtime_load.validate(runtime, _SKIPPY_ABI)
+
+
+@pytest.mark.parametrize(
+    "case", ["success", "load-error", "missing-symbol", "wrong-abi"]
+)
+def test_runtime_load_attests_the_exported_abi(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    runtime = _runtime_fixture(tmp_path)
+    manifest_path = runtime / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["runtime"]["libraries"].append("share/mesh-runtime.txt")
+    manifest_path.write_text(json.dumps(manifest))
+    abi = [int(part) for part in _SKIPPY_ABI.split(".")]
+    if case == "wrong-abi":
+        abi[-1] += 1
+    function = Mock(return_value=validate_runtime_load.AbiVersion(*abi))
+    handles = [SimpleNamespace(skippy_abi_version=function), SimpleNamespace()]
+    if case == "missing-symbol":
+        handles = [SimpleNamespace(), SimpleNamespace()]
+    loader = Mock(
+        side_effect=OSError("load failed") if case == "load-error" else handles
+    )
+    monkeypatch.setattr(validate_runtime_load.ctypes, "CDLL", loader)
+    if case == "success":
+        validate_runtime_load.validate(runtime, _SKIPPY_ABI)
+        assert function.restype is validate_runtime_load.AbiVersion
+        assert loader.call_args_list == [
+            call(str((runtime / library).resolve()), mode=ctypes.RTLD_GLOBAL)
+            for library in manifest["runtime"]["libraries"]
+        ]
+    else:
+        expected = {
+            "load-error": "could not load",
+            "missing-symbol": "symbol not found",
+            "wrong-abi": "Skippy ABI differs",
+        }
+        with pytest.raises(SystemExit, match=expected[case]):
+            validate_runtime_load.validate(runtime, _SKIPPY_ABI)
+
+
+@pytest.mark.parametrize("case", ["valid", "extra", "invalid", "missing"])
+def test_entitlement_validator_exact_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    path = tmp_path / "entitlements.plist"
+    if case != "missing":
+        value = dict(_REQUIRED_ENTITLEMENTS)
+        if case == "extra":
+            value["unreviewed"] = True
+        path.write_bytes(b"invalid" if case == "invalid" else plistlib.dumps(value))
+    if case == "valid":
+        monkeypatch.setattr(sys, "argv", ["validate_entitlements.py", str(path), "app"])
+        runpy.run_path(
+            str(_CANDIDATE_PATH.parent / "validate_entitlements.py"),
+            run_name="__main__",
+        )
+    else:
+        with pytest.raises(SystemExit, match="app entitlement"):
+            validate_entitlements.validate(path, "app")
+
+
+def _rpath_fixture(root: Path) -> tuple[Path, Path]:
+    app = root / "Buzz.app"
+    executable = app / "Contents/MacOS/buzz"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(macho([build_version()]))
+    framework = app / "Contents/Frameworks"
+    framework.mkdir()
+    (framework / "libmesh.dylib").touch()
+    return app, executable
+
+
+@pytest.mark.parametrize("origin", ["@loader_path", "@executable_path"])
+@pytest.mark.parametrize("indirect", [False, True])
+def test_rpath_validator_resolves_app_local_libraries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, origin: str, *, indirect: bool
+) -> None:
+    app, executable = _rpath_fixture(tmp_path)
+    commands = [build_version(), string_command(0xC, "/usr/lib/libSystem.B.dylib")]
+    edge = f"{origin}/../Frameworks/libmesh.dylib"
+    if indirect:
+        commands.append(string_command(0x8000001C, f"{origin}/../Frameworks"))
+        edge = "@rpath/libmesh.dylib"
+    commands.append(string_command(0xC, edge))
+    executable.write_bytes(macho(commands))
+    monkeypatch.setattr(sys, "argv", ["validate_rpaths.py", str(app), str(executable)])
+    runpy.run_path(
+        str(_CANDIDATE_PATH.with_name("validate_rpaths.py")), run_name="__main__"
+    )
+
+
+@pytest.mark.parametrize(
+    ("commands", "message"),
+    [
+        ([], "no unique macOS deployment target"),
+        ([build_version(), build_version()], "no unique macOS deployment target"),
+        ([build_version(platform=2)], "not a macOS executable"),
+        ([build_version(0xE0100)], "requires macOS newer"),
+        (
+            [build_version(), string_command(0x8000001C, "/usr/lib")],
+            "forbidden LC_RPATH",
+        ),
+        (
+            [build_version(), string_command(0x8000001C, "@loader_path/buzz")],
+            "not an app-local directory",
+        ),
+        (
+            [build_version(), string_command(0x8000001C, "@loader_path/missing")],
+            "escapes Buzz.app",
+        ),
+    ],
+)
+def test_rpath_validator_rejects_invalid_load_commands(
+    tmp_path: Path, commands: list[bytes], message: str
+) -> None:
+    app, executable = _rpath_fixture(tmp_path)
+    executable.write_bytes(macho(commands))
+    with pytest.raises(SystemExit, match=message):
+        validate_rpaths.validate(app, executable)
+
+
+def test_runtime_load_cli_reports_native_loader_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _runtime_fixture(tmp_path)
+    monkeypatch.setattr(
+        sys, "argv", ["validate_runtime_load.py", _SKIPPY_ABI, str(runtime)]
+    )
+    monkeypatch.setattr(ctypes, "CDLL", Mock(side_effect=OSError("invalid library")))
+    with pytest.raises(SystemExit, match="could not load lib/libmesh.dylib"):
+        runpy.run_path(
+            str(_CANDIDATE_PATH.parent / "validate_runtime_load.py"),
+            run_name="__main__",
+        )
+
+
+@pytest.mark.parametrize(
+    ("edge", "message"),
+    [
+        ("/usr/lib/../evil.dylib", "forbidden dynamic-library edge"),
+        ("/usr//lib/evil.dylib", "forbidden dynamic-library edge"),
+        ("/opt/evil.dylib", "forbidden dynamic-library edge"),
+        ("@loader_path/missing", "escapes Buzz.app"),
+        ("@executable_path", "not an app-local file"),
+        ("@rpath/missing", "unresolved @rpath"),
+        ("@rpath", "unresolved @rpath"),
+        ("@rpath/..", "unresolved @rpath"),
+    ],
+)
+def test_rpath_validator_rejects_unresolved_or_external_libraries(
+    tmp_path: Path, edge: str, message: str
+) -> None:
+    paths = _rpath_fixture(tmp_path)
+    paths[1].write_bytes(
+        macho([
+            build_version(),
+            string_command(0xC, edge),
+            string_command(0x8000001C, "@loader_path"),
+        ])
+    )
+    with pytest.raises(SystemExit, match=message):
+        validate_rpaths.validate(*paths)
+
+
+def test_rpath_validator_rejects_symlink_escape(tmp_path: Path) -> None:
+    paths = _rpath_fixture(tmp_path)
+    outside = tmp_path / "outside.dylib"
+    outside.touch()
+    (paths[1].parent / "escape.dylib").symlink_to(outside)
+    paths[1].write_bytes(
+        macho([
+            build_version(),
+            string_command(0xC, "@rpath/escape.dylib"),
+            string_command(0x8000001C, "@loader_path"),
+        ])
+    )
+    with pytest.raises(SystemExit, match="dynamic-library edge escapes Buzz.app"):
+        validate_rpaths.validate(*paths)
+
+
+@pytest.mark.parametrize("outside", [False, True])
+def test_rpath_validator_rejects_unreadable_or_unscoped_input(
+    tmp_path: Path, *, outside: bool
+) -> None:
+    app, executable = _rpath_fixture(tmp_path)
+    if outside:
+        executable = tmp_path / "outside"
+        executable.touch()
+        message = "executable escapes Buzz.app"
+    else:
+        executable.write_bytes(b"invalid")
+        message = "invalid Mach-O"
+    with pytest.raises(SystemExit, match=message):
+        validate_rpaths.validate(app, executable)

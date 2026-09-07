@@ -94,6 +94,17 @@ let
     })
       sourceFilter
       relativePath;
+  capturedStoreSlice =
+    (helper.sourceFor {
+      rootSrc = {
+        outPath = "/nix/store/fixture-source";
+      };
+      source = sourceIdentity;
+      inherit sourceInfo;
+      materializePath = attributes: attributes;
+    })
+      sourceFilter
+      relativePath;
 
   rustyV8 = import (src + "/lib/rusty-v8.nix") { inherit (pkgs) lib; };
   v8CrateOverride = rustyV8.mkRustyV8CrateOverride {
@@ -118,6 +129,9 @@ assert builtins.all (result: !result.success) staleSourceResults;
 assert !missingSliceResult.success;
 assert !missingHashResult.success;
 assert capturedHashedSlice.sha256 == sliceHash;
+assert builtins.isPath capturedHashedSlice.path;
+assert capturedHashedSlice.path == rootA + "/${relativePath}";
+assert capturedStoreSlice.path == "/nix/store/fixture-source/${relativePath}";
 assert overriddenV8SourceResult.success;
 assert overriddenV8SourceResult.value == "patched-source";
 pkgs.runCommand "test-nix-crate2nix-source-slice" { } ''

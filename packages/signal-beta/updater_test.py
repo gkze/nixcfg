@@ -71,7 +71,9 @@ files:
 """.encode(),
     )
 
-    info = run_async(updater.fetch_latest(object()))
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     result = updater.build_result(info, _HASHES)
 
     assert calls == [(_FEED_URL, updater.config)]
@@ -111,7 +113,9 @@ files:
 """.encode(),
     )
 
-    info = run_async(updater.fetch_latest(object()))
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
 
     assert info == VersionInfo(
         version=version,
@@ -141,7 +145,7 @@ files:
         RuntimeError,
         match="Expected exactly one Signal beta URL.*aarch64-darwin.*found 2",
     ):
-        run_async(updater.fetch_latest(object()))
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 @pytest.mark.parametrize(
@@ -213,12 +217,14 @@ def test_signal_beta_detects_same_version_url_drift() -> None:
         }
     )
 
-    assert run_async(updater._is_latest(matching, info)) is True
+    assert run_async(updater._is_latest(UpdateContext(current=matching), info)) is True
     assert run_async(updater._is_latest(UpdateContext(current=stale), info)) is False
     assert (
         run_async(
             updater._is_latest(
-                matching.model_copy(update={"version": "8.26.0-beta.1"}),
+                UpdateContext(
+                    current=matching.model_copy(update={"version": "8.26.0-beta.1"})
+                ),
                 info,
             )
         )

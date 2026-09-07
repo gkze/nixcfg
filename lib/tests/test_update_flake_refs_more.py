@@ -12,8 +12,15 @@ from nix_manipulator.expressions.set import AttributeSet
 from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode, LockedRef, OriginalRef
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
+from lib.tests._updater_helpers import collect_events
 from lib.update.config import resolve_config
-from lib.update.events import CommandResult, UpdateEvent, UpdateEventKind
+from lib.update.events import (
+    CommandResult,
+    EventSink,
+    UpdateEvent,
+    UpdateEventKind,
+    ignore_event,
+)
 from lib.update.flake import (
     flake_fetch_expr,
     get_flake_input_node,
@@ -57,14 +64,6 @@ if TYPE_CHECKING:
 def _run_async[T](
     value: AsyncIterator[T] | asyncio.Future[T] | asyncio.Task[T],
 ) -> list[T] | T:
-    async def _collect_stream(stream: AsyncIterator[T]) -> list[T]:
-        items: list[T] = []
-        async for item in stream:
-            items.append(item)
-        return items
-
-    if hasattr(value, "__aiter__"):
-        return asyncio.run(_collect_stream(value))
     return asyncio.run(value)  # type: ignore[arg-type]
 
 
@@ -172,7 +171,11 @@ def test_update_flake_input_stream(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "lib.update.flake.invalidate_flake_lock", lambda: invalidated.append(True)
     )
-    events = _run_async(update_flake_input("demo", source="demo-source"))
+    events = _run_async(
+        collect_events(
+            lambda emit: update_flake_input("demo", source="demo-source", emit=emit)
+        )
+    )
     event_list = cast("list[UpdateEvent]", events)
     assert len(event_list) == 2
     assert event_list[0].kind == UpdateEventKind.COMMAND_START
@@ -869,64 +872,63 @@ def test_run_checked_command_and_update_flake_ref_paths(
     """Raise descriptive errors for failed commands and emit events for updates."""
 
     async def _stream_ok(
-        *_args: object, **_kwargs: object
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent(
-            source="demo",
-            kind=UpdateEventKind.COMMAND_END,
-            payload=CommandResult(args=["x"], returncode=0, stdout="", stderr=""),
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
+        await emit(
+            UpdateEvent(
+                source="demo",
+                kind=UpdateEventKind.COMMAND_END,
+                payload=CommandResult(args=["x"], returncode=0, stdout="", stderr=""),
+            )
         )
+        return CommandResult(args=["x"], returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("lib.update.refs.stream_command", _stream_ok)
+    monkeypatch.setattr("lib.update.refs.run_command", _stream_ok)
     ok_events = _run_async(
-        _run_checked_command(["x"], source="demo", error_prefix="failed")
+        collect_events(
+            lambda emit: _run_checked_command(
+                ["x"], source="demo", error_prefix="failed", emit=emit
+            )
+        )
     )
     assert isinstance(ok_events, list)
     assert len(ok_events) == 1
 
-    async def _stream_non_result_end(
-        *_args: object,
-        **_kwargs: object,
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.status("demo", "running")
-        yield UpdateEvent(
-            source="demo",
-            kind=UpdateEventKind.COMMAND_END,
-            payload="done",
-        )
-
-    monkeypatch.setattr("lib.update.refs.stream_command", _stream_non_result_end)
-    non_result_events = _run_async(
-        _run_checked_command(["x"], source="demo", error_prefix="failed")
-    )
-    assert isinstance(non_result_events, list)
-    assert len(non_result_events) == 2
-
     async def _stream_fail_empty(
         *_args: object,
+        emit: EventSink = ignore_event,
         **_kwargs: object,
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent(
-            source="demo",
-            kind=UpdateEventKind.COMMAND_END,
-            payload=CommandResult(args=["x"], returncode=2, stdout="", stderr=""),
+    ) -> object:
+        await emit(
+            UpdateEvent(
+                source="demo",
+                kind=UpdateEventKind.COMMAND_END,
+                payload=CommandResult(args=["x"], returncode=2, stdout="", stderr=""),
+            )
         )
+        return CommandResult(args=["x"], returncode=2, stdout="", stderr="")
 
-    monkeypatch.setattr("lib.update.refs.stream_command", _stream_fail_empty)
+    monkeypatch.setattr("lib.update.refs.run_command", _stream_fail_empty)
     with pytest.raises(RuntimeError, match=r"failed \(exit 2\)"):
         _run_async(_run_checked_command(["x"], source="demo", error_prefix="failed"))
 
     async def _stream_fail_stderr(
         *_args: object,
+        emit: EventSink = ignore_event,
         **_kwargs: object,
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent(
-            source="demo",
-            kind=UpdateEventKind.COMMAND_END,
-            payload=CommandResult(args=["x"], returncode=2, stdout="", stderr="oops"),
+    ) -> object:
+        await emit(
+            UpdateEvent(
+                source="demo",
+                kind=UpdateEventKind.COMMAND_END,
+                payload=CommandResult(
+                    args=["x"], returncode=2, stdout="", stderr="oops"
+                ),
+            )
         )
+        return CommandResult(args=["x"], returncode=2, stdout="", stderr="oops")
 
-    monkeypatch.setattr("lib.update.refs.stream_command", _stream_fail_stderr)
+    monkeypatch.setattr("lib.update.refs.run_command", _stream_fail_stderr)
     with pytest.raises(RuntimeError, match="oops"):
         _run_async(_run_checked_command(["x"], source="demo", error_prefix="failed"))
 
@@ -937,10 +939,11 @@ def test_run_checked_command_and_update_flake_ref_paths(
         *,
         source: str,
         error_prefix: str,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = (source, error_prefix)
         called_args.append(args)
-        yield UpdateEvent.status("demo", "ok")
+        await emit(UpdateEvent.status("demo", "ok"))
 
     monkeypatch.setattr("lib.update.refs._run_checked_command", _record_run_checked)
     rewritten_refs: list[tuple[str, str]] = []
@@ -988,10 +991,12 @@ def test_update_flake_ref_invalidates_cached_lock_after_success(
 
     async def _record_run_checked(
         args: list[str],
+        *,
+        emit: EventSink = ignore_event,
         **_kwargs: object,
-    ) -> AsyncIterator[UpdateEvent]:
+    ) -> object:
         calls.append(args)
-        yield UpdateEvent.status("demo", "ok")
+        await emit(UpdateEvent.status("demo", "ok"))
 
     monkeypatch.setattr("lib.update.refs._run_checked_command", _record_run_checked)
     monkeypatch.setattr(
@@ -1034,10 +1039,12 @@ def test_update_flake_ref_rewrites_split_github_input(
 
     async def _record_run_checked(
         args: list[str],
+        *,
+        emit: EventSink = ignore_event,
         **_kwargs: object,
-    ) -> AsyncIterator[UpdateEvent]:
+    ) -> object:
         commands.append(args)
-        yield UpdateEvent.status("goose", "ok")
+        await emit(UpdateEvent.status("goose", "ok"))
 
     monkeypatch.setattr("lib.update.refs.get_repo_root", lambda: tmp_path)
     monkeypatch.setattr("lib.update.refs._run_checked_command", _record_run_checked)
@@ -1076,8 +1083,9 @@ def test_update_refs_task_flow_variants(monkeypatch: pytest.MonkeyPatch) -> None
         _new_ref: str,
         *,
         source: str,
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.status(source, "updated")
+        emit: EventSink = ignore_event,
+    ) -> object:
+        await emit(UpdateEvent.status(source, "updated"))
 
     monkeypatch.setattr("lib.update.refs.update_flake_ref", _fake_update_flake_ref)
 
@@ -1135,21 +1143,19 @@ def test_update_refs_task_flow_variants(monkeypatch: pytest.MonkeyPatch) -> None
     )
     assert any(event.kind == UpdateEventKind.ERROR for event in events_missing_latest)
 
-    events_dry_run = _run_async(
+    events_without_lock = _run_async(
         _run_case(
             RefUpdateResult(name="demo", current_ref="v1", latest_ref="v2"),
-            options=RefTaskOptions(dry_run=True),
+            options=RefTaskOptions(),
         )
     )
-    assert any("Update available" in (event.message or "") for event in events_dry_run)
+    assert any(event.message == "updated" for event in events_without_lock)
 
     lock = asyncio.Lock()
     events_real = _run_async(
         _run_case(
             RefUpdateResult(name="demo", current_ref="v1", latest_ref="v2"),
-            options=RefTaskOptions(
-                dry_run=False, flake_edit_lock=lock, config=resolve_config()
-            ),
+            options=RefTaskOptions(flake_edit_lock=lock, config=resolve_config()),
         )
     )
     assert any((event.message or "") == "updated" for event in events_real)
@@ -1158,7 +1164,7 @@ def test_update_refs_task_flow_variants(monkeypatch: pytest.MonkeyPatch) -> None
     events_real_no_lock = _run_async(
         _run_case(
             RefUpdateResult(name="demo", current_ref="v1", latest_ref="v2"),
-            options=RefTaskOptions(dry_run=False, config=resolve_config()),
+            options=RefTaskOptions(config=resolve_config()),
         )
     )
     assert any((event.message or "") == "updated" for event in events_real_no_lock)

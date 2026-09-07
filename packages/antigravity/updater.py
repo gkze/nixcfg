@@ -15,6 +15,8 @@ from lib.update.updaters.vendor_feeds import fetch_electron_builder_feed
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 
 @register_updater
 class AntigravityUpdater(DownloadUrlMetadataUpdater):
@@ -58,8 +60,11 @@ class AntigravityUpdater(DownloadUrlMetadataUpdater):
             raise RuntimeError(msg)
         return release, url.removesuffix(".zip") + ".dmg"
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch the latest Antigravity version and immutable DMG URL."""
+        _ = context
         product_version, artifact_urls = await fetch_electron_builder_feed(
             session,
             self.FEED_URL,

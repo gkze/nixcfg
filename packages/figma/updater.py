@@ -10,6 +10,8 @@ from lib.update.updaters.metadata import AssetURLsMetadata
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 
 @register_updater
 class FigmaUpdater(DownloadHashUpdater):
@@ -41,8 +43,11 @@ class FigmaUpdater(DownloadHashUpdater):
         download_url = json_utils.get_required_str(data, "url", context=url)
         return version, download_url
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch the latest Figma version and per-platform ZIP URLs."""
+        _ = context
         versions: dict[str, str] = {}
         asset_urls: dict[str, str] = {}
         for platform, channel in self.PLATFORMS.items():

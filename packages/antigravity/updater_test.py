@@ -28,7 +28,7 @@ from lib.tests._updater_helpers import run_async as _run
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.paths import REPO_ROOT
 from lib.update.sources import load_source_entry
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import DownloadUrlMetadata
 
 _PRODUCT_VERSION = "2.10.0"
@@ -297,7 +297,7 @@ def test_google_manifest_resolves_the_immutable_arm64_dmg(
 
     monkeypatch.setattr(module, "fetch_electron_builder_feed", _fetch_feed)
 
-    info = _run(updater.fetch_latest(object()))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     result = updater.build_result(info, {"aarch64-darwin": _HASH})
 
     assert info == VersionInfo(
@@ -343,7 +343,11 @@ def test_google_manifest_rejects_untrusted_or_mismatched_artifacts(
     monkeypatch.setattr(module, "fetch_electron_builder_feed", _fetch_feed)
 
     with pytest.raises(RuntimeError, match="No matching Google Antigravity artifact"):
-        _run(module.AntigravityUpdater().fetch_latest(object()))
+        _run(
+            module.AntigravityUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_google_manifest_ignores_unrelated_assets_before_the_dmg_peer(
@@ -360,7 +364,11 @@ def test_google_manifest_ignores_unrelated_assets_before_the_dmg_peer(
 
     monkeypatch.setattr(module, "fetch_electron_builder_feed", _fetch_feed)
 
-    assert _run(module.AntigravityUpdater().fetch_latest(object())) == VersionInfo(
+    assert _run(
+        module.AntigravityUpdater().fetch_latest(
+            object(), context=UpdateContext(current=None)
+        )
+    ) == VersionInfo(
         version=_VERSION,
         metadata=DownloadUrlMetadata(url=_DMG_URL),
     )

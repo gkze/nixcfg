@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from lib.tests._updater_helpers import collect_events
 from lib.update import crate2nix
 from lib.update.events import UpdateEvent, UpdateEventKind
 
@@ -309,10 +310,11 @@ def test_stream_drains_progress_queued_by_an_already_completed_worker(
             return future
 
         monkeypatch.setattr(loop, "run_in_executor", run_immediately)
-        return [
-            event
-            async for event in crate2nix.stream_crate2nix_artifact_updates(target.name)
-        ]
+        return await collect_events(
+            lambda emit: crate2nix.stream_crate2nix_artifact_updates(
+                target.name, emit=emit
+            )
+        )
 
     events = asyncio.run(collect())
 

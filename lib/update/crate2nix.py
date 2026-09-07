@@ -38,11 +38,12 @@ from nix_manipulator.expressions.set import AttributeSet
 from lib.import_utils import load_module_from_path
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import (
-    EventStream,
+    EventSink,
     StatusInfo,
     StatusKind,
     UpdateEvent,
     UpdateEventKind,
+    ignore_event,
 )
 from lib.update.flake import get_flake_input_node
 from lib.update.io import atomic_write_text
@@ -1593,38 +1594,45 @@ async def stream_crate2nix_artifact_updates(
     *,
     operation: str = "materialize_artifacts",
     source_overrides: dict[str, SourceEntry] | None = None,
-) -> EventStream:
+    emit: EventSink = ignore_event,
+) -> None:
     """Emit normal updater events for checked-in crate2nix artifacts."""
     target = TARGETS.get(name)
     if target is None:
-        yield UpdateEvent.status(
-            name,
-            "No crate2nix target registered; skipping artifact refresh",
-            operation=operation,
-            status=StatusInfo(kind=StatusKind.SKIPPED, value="unknown_target"),
+        await emit(
+            UpdateEvent.status(
+                name,
+                "No crate2nix target registered; skipping artifact refresh",
+                operation=operation,
+                status=StatusInfo(kind=StatusKind.SKIPPED, value="unknown_target"),
+            )
         )
         return
     current_platform = _current_platform()
     if current_platform not in target.supported_platforms:
-        yield UpdateEvent.status(
-            name,
-            "crate2nix target is unsupported on this platform; skipping artifact refresh",
-            operation=operation,
-            status=StatusInfo(
-                kind=StatusKind.UNSUPPORTED_PLATFORM,
-                value=current_platform,
-            ),
+        await emit(
+            UpdateEvent.status(
+                name,
+                "crate2nix target is unsupported on this platform; skipping artifact refresh",
+                operation=operation,
+                status=StatusInfo(
+                    kind=StatusKind.UNSUPPORTED_PLATFORM,
+                    value=current_platform,
+                ),
+            )
         )
         return
 
-    yield UpdateEvent.status(
-        name,
-        "Refreshing crate2nix artifacts...",
-        operation=operation,
-        status=StatusInfo(
-            kind=StatusKind.COMPUTING_HASH,
-            value="crate2nix artifacts",
-        ),
+    await emit(
+        UpdateEvent.status(
+            name,
+            "Refreshing crate2nix artifacts...",
+            operation=operation,
+            status=StatusInfo(
+                kind=StatusKind.COMPUTING_HASH,
+                value="crate2nix artifacts",
+            ),
+        )
     )
 
     loop = asyncio.get_running_loop()
@@ -1660,11 +1668,13 @@ async def stream_crate2nix_artifact_updates(
             except queue.Empty:
                 await asyncio.sleep(_CRATE2NIX_PROCESS_POLL_SECONDS)
                 continue
-            yield UpdateEvent(
-                source=name,
-                kind=UpdateEventKind.LINE,
-                message=message,
-                stream="crate2nix",
+            await emit(
+                UpdateEvent(
+                    source=name,
+                    kind=UpdateEventKind.LINE,
+                    message=message,
+                    stream="crate2nix",
+                )
             )
         artifacts = await asyncio.shield(future)
         while True:
@@ -1672,11 +1682,13 @@ async def stream_crate2nix_artifact_updates(
                 message = progress_queue.get_nowait()
             except queue.Empty:
                 break
-            yield UpdateEvent(
-                source=name,
-                kind=UpdateEventKind.LINE,
-                message=message,
-                stream="crate2nix",
+            await emit(
+                UpdateEvent(
+                    source=name,
+                    kind=UpdateEventKind.LINE,
+                    message=message,
+                    stream="crate2nix",
+                )
             )
     except asyncio.CancelledError:
         await _cancel_artifact_worker(future, cancel_event)
@@ -1685,24 +1697,28 @@ async def stream_crate2nix_artifact_updates(
         if not future.done():
             await _cancel_artifact_worker(future, cancel_event)
     if artifacts:
-        yield UpdateEvent.artifact(name, list(artifacts))
-        yield UpdateEvent.status(
-            name,
-            "Prepared crate2nix artifacts",
-            operation=operation,
-            status=StatusInfo(kind=StatusKind.UPDATED, value="crate2nix artifacts"),
+        await emit(UpdateEvent.artifact(name, list(artifacts)))
+        await emit(
+            UpdateEvent.status(
+                name,
+                "Prepared crate2nix artifacts",
+                operation=operation,
+                status=StatusInfo(kind=StatusKind.UPDATED, value="crate2nix artifacts"),
+            )
         )
         return
 
-    yield UpdateEvent.status(
-        name,
-        "crate2nix artifacts up to date",
-        operation=operation,
-        status=StatusInfo(
-            kind=StatusKind.UP_TO_DATE,
-            scope="artifacts",
-            value="crate2nix artifacts",
-        ),
+    await emit(
+        UpdateEvent.status(
+            name,
+            "crate2nix artifacts up to date",
+            operation=operation,
+            status=StatusInfo(
+                kind=StatusKind.UP_TO_DATE,
+                scope="artifacts",
+                value="crate2nix artifacts",
+            ),
+        )
     )
 
 

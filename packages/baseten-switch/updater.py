@@ -15,6 +15,8 @@ from lib.update.updaters.github_release import GitHubReleaseUpdater
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 
 @register_updater
 class BasetenSwitchUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
@@ -33,10 +35,10 @@ class BasetenSwitchUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
     )
 
     async def fetch_latest(
-        self,
-        session: aiohttp.ClientSession,
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
         """Select the newest published release, including the public beta line."""
+        _ = context
         releases = await fetch_github_api_paginated(
             session,
             f"repos/{self.GITHUB_OWNER}/{self.GITHUB_REPO}/releases",

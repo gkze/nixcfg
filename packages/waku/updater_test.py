@@ -47,7 +47,7 @@ from lib.update.nix import (
 )
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 _PACKAGE_DIR = REPO_ROOT / "packages/waku"
 _VERSION = "0.1.15"
@@ -307,7 +307,9 @@ def test_waku_resolver_correlates_three_authoritative_release_surfaces(
     module = _load_updater_module()
     urls = _install_release_boundaries(monkeypatch, module)
 
-    assert run_async(module.WakuUpdater().fetch_latest(object())) == VersionInfo(
+    assert run_async(
+        module.WakuUpdater().fetch_latest(object(), context=UpdateContext(current=None))
+    ) == VersionInfo(
         version=_VERSION,
         metadata={
             "commit": _COMMIT,
@@ -345,7 +347,11 @@ def test_waku_rejects_release_without_an_immutable_commit(
     )
 
     with pytest.raises(error_type, match="has no immutable source commit"):
-        run_async(module.WakuUpdater().fetch_latest(object()))
+        run_async(
+            module.WakuUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -391,7 +397,11 @@ def test_waku_rejects_divergent_source_provenance(
     )
 
     with pytest.raises(RuntimeError, match=error):
-        run_async(module.WakuUpdater().fetch_latest(object()))
+        run_async(
+            module.WakuUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_waku_hashes_the_exact_source_and_cargo_closure(
@@ -413,7 +423,13 @@ def test_waku_hashes_the_exact_source_and_cargo_closure(
         ((None, _SRC_HASH), (None, _CARGO_HASH)),
     )
 
-    run_async(collect_events(updater.fetch_hashes(info, object())))
+    run_async(
+        collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
     assert updater.supported_platforms == ("aarch64-darwin",)
     assert_nix_ast_equal(

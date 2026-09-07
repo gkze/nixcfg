@@ -31,7 +31,7 @@ from lib.update.nix import (
     _build_package_path_attr_expr,
 )
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 _PACKAGE_DIR = REPO_ROOT / "packages/writer-computer"
 _VERSION = "0.5.0"
@@ -73,7 +73,9 @@ def test_writer_resolves_release_to_an_immutable_public_commit(
         github_payload,
     )
 
-    assert run_async(updater.fetch_latest(object())) == VersionInfo(
+    assert run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    ) == VersionInfo(
         version=_VERSION,
         metadata={"commit": _COMMIT, "tag": f"v{_VERSION}"},
     )
@@ -105,7 +107,11 @@ def test_writer_rejects_release_without_an_immutable_commit(
     )
 
     with pytest.raises(error_type, match="has no immutable source commit"):
-        run_async(module.WriterComputerUpdater().fetch_latest(object()))
+        run_async(
+            module.WriterComputerUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_writer_hashes_source_pnpm_and_cargo_in_dependency_order(
@@ -124,7 +130,13 @@ def test_writer_hashes_source_pnpm_and_cargo_in_dependency_order(
         ),
     )
 
-    run_async(collect_events(updater.fetch_hashes(info, object())))
+    run_async(
+        collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
     assert updater.supported_platforms == ("aarch64-darwin",)
     assert updater.get_derivation_validations() == (
@@ -215,7 +227,7 @@ def test_writer_always_recomputes_source_closures_for_current_release() -> None:
     updater = _load_module().WriterComputerUpdater()
     info = VersionInfo(_VERSION, {"commit": _COMMIT, "tag": f"v{_VERSION}"})
 
-    assert run_async(updater._is_latest(None, info)) is False
+    assert run_async(updater._is_latest(UpdateContext(current=None), info)) is False
 
 
 def test_writer_package_is_a_nix_owned_source_built_arm64_app() -> None:

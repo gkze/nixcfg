@@ -30,9 +30,9 @@ from lib.tests._source_metadata import (
 )
 from lib.tests._updater_helpers import collect_events, load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.events import UpdateEvent
+from lib.update.events import EventSink, UpdateEvent, ignore_event
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import DownloadUrlMetadata
 
 _VERSION = "1.99.2.791"
@@ -139,7 +139,7 @@ def test_gemini_cross_checks_omaha_version_and_official_download_page(
 
     monkeypatch.setattr(module, "fetch_url", _fetch_url)
 
-    info = _run(updater.fetch_latest(session))
+    info = _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
     result = updater.build_result(info, {"aarch64-darwin": _HASH})
 
     assert info == VersionInfo(
@@ -231,13 +231,12 @@ def test_gemini_rehashes_the_current_pin_during_a_stale_omaha_rollout(
         _self: object,
         info: VersionInfo,
         _session: object,
+        *,
+        emit: EventSink = ignore_event,
         **_kwargs: object,
-    ):
+    ) -> object:
         hashed_infos.append(info)
-        yield UpdateEvent.value(
-            "gemini",
-            {"aarch64-darwin": refreshed_hash},
-        )
+        return {"aarch64-darwin": refreshed_hash}
 
     monkeypatch.setattr(module, "fetch_url", _fetch_url)
     monkeypatch.setattr(module.GeminiUpdater, "fetch_hashes", _fetch_hashes)
@@ -246,7 +245,9 @@ def test_gemini_rehashes_the_current_pin_during_a_stale_omaha_rollout(
         lambda: "aarch64-darwin",
     )
 
-    events = _run(collect_events(updater.update_stream(current, session)))
+    events = _run(
+        collect_events(lambda emit: updater.update_stream(current, session, emit=emit))
+    )
 
     effective_info = VersionInfo(
         version=_VERSION,
@@ -288,7 +289,10 @@ def test_gemini_accepts_missing_equal_or_newer_pins(
         metadata=DownloadUrlMetadata(url=_URL),
     )
 
-    assert module._effective_version_info(entry, upstream) is upstream
+    assert (
+        module._effective_version_info(UpdateContext(current=entry), upstream)
+        is upstream
+    )
 
 
 @pytest.mark.parametrize("urls", [None, {}, {"aarch64-darwin": ""}])
@@ -304,7 +308,7 @@ def test_gemini_refuses_to_guess_the_url_for_a_newer_current_pin(
     )
 
     with pytest.raises(RuntimeError, match="without its current DMG URL"):
-        module._effective_version_info(current, stale)
+        module._effective_version_info(UpdateContext(current=current), stale)
 
 
 def test_gemini_reports_omaha_http_failure(
@@ -324,7 +328,11 @@ def test_gemini_reports_omaha_http_failure(
         RuntimeError,
         match="Omaha request failed with HTTP 503 Service Unavailable",
     ):
-        _run(updater.fetch_latest(_FakeSession(response)))
+        _run(
+            updater.fetch_latest(
+                _FakeSession(response), context=UpdateContext(current=None)
+            )
+        )
 
 
 @pytest.mark.parametrize(

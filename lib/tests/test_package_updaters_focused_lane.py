@@ -1,7 +1,7 @@
 """Focused tests for a small non-overlapping package-updater lane."""
 
 import asyncio
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from types import ModuleType
 
@@ -20,14 +20,17 @@ from lib.tests._updater_helpers import run_async as _run
 from lib.update.config import resolve_config
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
+    EventSink,
     StatusInfo,
     StatusKind,
     StatusPayload,
     UpdateEvent,
     UpdateEventKind,
+    ignore_event,
 )
 from lib.update.updaters import VersionInfo
 from lib.update.updaters import strategies as updater_strategies
+from lib.update.updaters.core import UpdateContext
 from lib.update.updaters.metadata import GranolaFeedMetadata
 from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
@@ -63,14 +66,12 @@ def _install_twilight_hashes(
         urls: Iterable[str],
         *,
         config: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = config
         resolved_urls = tuple(urls)
         calls.append(resolved_urls)
-        yield UpdateEvent.value(
-            source,
-            dict.fromkeys(resolved_urls, next(values)),
-        )
+        return dict.fromkeys(resolved_urls, next(values))
 
     monkeypatch.setattr(
         "lib.update.process.compute_url_hashes",
@@ -100,7 +101,7 @@ def test_granola_fetch_latest_and_download_url(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(module, "fetch_url", _fetch_url)
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert latest == VersionInfo(
         version="2.3.4",
@@ -127,7 +128,7 @@ def test_granola_rejects_non_mapping_feed_payload(
     )
 
     with pytest.raises(TypeError, match="Expected JSON object"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_raycast_platform_urls_and_commit_metadata(
@@ -147,7 +148,7 @@ def test_raycast_platform_urls_and_commit_metadata(
 
     monkeypatch.setattr("lib.update.updaters.platform_api.fetch_json", _fetch_json)
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert latest.version == "1.99.0"
     assert latest.metadata.commit == "abc123"
@@ -178,7 +179,7 @@ def test_wispr_flow_platform_urls_and_required_tools(
 
     monkeypatch.setattr("lib.update.updaters.platform_api.fetch_json", _fetch_json)
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert latest.version == "5.4.3"
     assert updater.required_tools == ("nix", "nix-prefetch-url")
@@ -237,7 +238,7 @@ def test_codex_desktop_fetch_latest_and_download_urls(
 
     monkeypatch.setattr(module, "fetch_url", _fetch_url)
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert latest.version == "26.429.20946-2312"
     assert {
@@ -286,7 +287,7 @@ def test_codex_desktop_rejects_invalid_appcast_shapes(
     )
 
     with pytest.raises(RuntimeError, match=match):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_netnewswire_fetch_latest_and_download_url(
@@ -311,7 +312,7 @@ def test_netnewswire_fetch_latest_and_download_url(
 
     monkeypatch.setattr(updater_strategies, "fetch_sparkle_appcast_items", _fetch_items)
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert latest.version == "6.2.1"
     assert latest.metadata.url == "https://example.invalid/NetNewsWire.zip"
@@ -355,7 +356,7 @@ def test_netnewswire_rejects_invalid_appcast_shapes(
     )
 
     with pytest.raises(RuntimeError, match=match):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_netnewswire_requires_download_url_metadata() -> None:
@@ -382,7 +383,12 @@ def test_sculptor_fetch_latest_paths(monkeypatch: pytest.MonkeyPatch) -> None:
             result={"Last-Modified": "Tue, 20 Feb 2024 12:34:56 GMT"},
         ),
     )
-    assert _run(updater.fetch_latest(object())).version == "2024-02-20"
+    assert (
+        _run(
+            updater.fetch_latest(object(), context=UpdateContext(current=None))
+        ).version
+        == "2024-02-20"
+    )
 
     monkeypatch.setattr(
         module,
@@ -394,7 +400,12 @@ def test_sculptor_fetch_latest_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         "fetch_headers",
         lambda *_a, **_k: asyncio.sleep(0, result={"Last-Modified": "invalid-date"}),
     )
-    assert _run(updater.fetch_latest(object())).version == "invalid-da"
+    assert (
+        _run(
+            updater.fetch_latest(object(), context=UpdateContext(current=None))
+        ).version
+        == "invalid-da"
+    )
 
 
 def test_sculptor_resolves_absolute_platform_urls() -> None:
@@ -436,7 +447,12 @@ def test_sculptor_accepts_naive_last_modified_timestamp(
         ),
     )
 
-    assert _run(updater.fetch_latest(object())).version == "2024-02-20"
+    assert (
+        _run(
+            updater.fetch_latest(object(), context=UpdateContext(current=None))
+        ).version
+        == "2024-02-20"
+    )
 
 
 def test_sculptor_rejects_missing_last_modified_header(
@@ -454,7 +470,7 @@ def test_sculptor_rejects_missing_last_modified_header(
     )
 
     with pytest.raises(RuntimeError, match="No Last-Modified header"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_zen_twilight_reads_channel_version_and_recomputes_hashes(
@@ -478,7 +494,7 @@ def test_zen_twilight_reads_channel_version_and_recomputes_hashes(
 
     monkeypatch.setattr(module, "fetch_url", _fetch_url)
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert latest == VersionInfo(version="1.22t-20260803113308")
     assert updater.PLATFORMS == {
@@ -486,7 +502,7 @@ def test_zen_twilight_reads_channel_version_and_recomputes_hashes(
         "x86_64-darwin": updater.TWILIGHT_DMG_URL,
     }
     assert updater.supported_platforms == tuple(updater.PLATFORMS)
-    assert _run(updater._is_latest(None, latest)) is False
+    assert _run(updater._is_latest(UpdateContext(current=None), latest)) is False
 
 
 def test_zen_twilight_skips_unsupported_linux_runner(
@@ -503,12 +519,14 @@ def test_zen_twilight_skips_unsupported_linux_runner(
         lambda: "x86_64-linux",
     )
 
-    async def _fail_fetch_latest(_session: object) -> VersionInfo:
+    async def _fail_fetch_latest(_session: object, *, context: object) -> VersionInfo:
         raise AssertionError("unsupported runners must not fetch the Twilight feed")
 
     monkeypatch.setattr(updater, "fetch_latest", _fail_fetch_latest)
 
-    events = _run(_collect_events(updater.update_stream(None, object())))
+    events = _run(
+        _collect_events(lambda emit: updater.update_stream(None, object(), emit=emit))
+    )
 
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
@@ -548,7 +566,7 @@ def test_zen_twilight_rejects_invalid_update_metadata(
     )
 
     with pytest.raises(RuntimeError, match=match):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 @pytest.mark.usefixtures("_twilight_darwin_platform")
@@ -567,7 +585,9 @@ def test_zen_twilight_hashes_one_stable_channel_snapshot(
     )
     hash_calls = _install_twilight_hashes(monkeypatch, ("sha256-stable",))
 
-    events = _run(_collect_events(updater.update_stream(None, object())))
+    events = _run(
+        _collect_events(lambda emit: updater.update_stream(None, object(), emit=emit))
+    )
 
     results = [
         event.payload
@@ -608,9 +628,11 @@ def test_zen_twilight_rejects_a_snapshot_that_moves_before_hashing(
     with pytest.raises(RuntimeError, match="changed before hashing"):
         _run(
             _collect_events(
-                updater.fetch_hashes(
+                lambda emit: updater.fetch_hashes(
                     VersionInfo("1.22t-20260803113308"),
                     object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
                 )
             )
         )
@@ -649,10 +671,11 @@ def test_zen_twilight_forwards_hash_diagnostics_before_failure(
         _urls: Iterable[str],
         *,
         config: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = config
-        yield command_start
-        yield retry
+        await emit(command_start)
+        await emit(retry)
         raise RuntimeError("permanent prefetch failure")
 
     monkeypatch.setattr(
@@ -662,12 +685,16 @@ def test_zen_twilight_forwards_hash_diagnostics_before_failure(
 
     events: list[UpdateEvent] = []
 
+    async def _emit(event: UpdateEvent) -> None:
+        events.append(event)
+
     async def _consume_failure() -> None:
-        async for event in updater.fetch_hashes(
+        await updater.fetch_hashes(
             VersionInfo("1.22t-20260803113308"),
             object(),
-        ):
-            events.append(event)
+            context=UpdateContext(current=None),
+            emit=_emit,
+        )
 
     with pytest.raises(RuntimeError, match="permanent prefetch failure"):
         _run(_consume_failure())
@@ -717,7 +744,9 @@ def test_zen_twilight_retries_the_whole_unpinned_snapshot(
         ("sha256-raced", "sha256-current"),
     )
 
-    events = _run(_collect_events(updater.update_stream(None, object())))
+    events = _run(
+        _collect_events(lambda emit: updater.update_stream(None, object(), emit=emit))
+    )
 
     result_payloads = [
         event.payload
@@ -780,7 +809,11 @@ def test_zen_twilight_bounds_repeated_snapshot_changes(
         RuntimeError,
         match="Twilight channel changed repeatedly while hashing",
     ):
-        _run(_collect_events(updater.update_stream(None, object())))
+        _run(
+            _collect_events(
+                lambda emit: updater.update_stream(None, object(), emit=emit)
+            )
+        )
 
     assert len(hash_calls) == 2
 
@@ -823,14 +856,19 @@ def test_scratch_expr_builders_fetch_hashes_and_build_result(
         (("hashing npm deps", "sha256-npm"), ("hashing cargo vendor", "sha256-cargo")),
     )
 
-    events = _run(_collect_events(updater.fetch_hashes(latest, object())))
+    events = _run(
+        _collect_events(
+            lambda emit: updater.fetch_hashes(
+                latest, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
         UpdateEventKind.STATUS,
-        UpdateEventKind.VALUE,
     ]
-    assert [event.message for event in events[:-1]] == [
+    assert [event.message for event in events] == [
         "hashing npm deps",
         "hashing cargo vendor",
     ]
@@ -848,12 +886,12 @@ def test_scratch_expr_builders_fetch_hashes_and_build_result(
             "config": updater.config,
         },
     ]
-    assert events[-1].payload == [
+    assert events.result == [
         HashEntry.create("npmDepsHash", "sha256-npm"),
         HashEntry.create("cargoHash", "sha256-cargo"),
     ]
 
-    result = updater.build_result(latest, events[-1].payload)
+    result = updater.build_result(latest, events.result)
     assert result.version == "9.9.9"
     assert result.input == "scratch"
     assert result.commit == "f" * 40

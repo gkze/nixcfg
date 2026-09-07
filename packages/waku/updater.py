@@ -21,6 +21,7 @@ from defusedxml import ElementTree
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update.derivation_validation import DerivationValidation
+from lib.update.events import EventSink, ignore_event
 from lib.update.net import fetch_github_api, fetch_url, github_raw_url
 from lib.update.nix import (
     _build_fetch_from_github_expr,
@@ -39,8 +40,6 @@ if TYPE_CHECKING:
     from xml.etree.ElementTree import Element
 
     import aiohttp
-
-    from lib.update.events import EventStream
 
 
 APPCAST_URL = "https://releases.waku.sh/appcast.xml"
@@ -211,8 +210,11 @@ class WakuUpdater(Updater):
             raise RuntimeError(msg)
         return commit
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Correlate the appcast release with its exact public source tree."""
+        _ = context
         appcast = await fetch_url(
             session,
             APPCAST_URL,
@@ -300,22 +302,21 @@ class WakuUpdater(Updater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash the immutable source, then the exact Cargo dependency closure."""
         _ = (session, context)
         commit = self._require_commit(info)
-        async for event in stream_fixed_output_hashes(
+        return await stream_fixed_output_hashes(
             self.name,
             steps=(
                 FixedOutputHashStep(
                     hash_type="srcHash",
-                    error="Missing srcHash output",
                     expr=lambda _resolved: self._src_expr(commit),
                 ),
                 FixedOutputHashStep(
                     hash_type="cargoHash",
-                    error="Missing cargoHash output",
                     expr=lambda resolved: _build_package_path_attr_expr(
                         self.name,
                         ".cargoDeps",
@@ -330,8 +331,8 @@ class WakuUpdater(Updater):
                 ),
             ),
             config=self.config,
-        ):
-            yield event
+            emit=emit,
+        )
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist version, immutable source commit, and complete source hashes."""

@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from lib.nix.models.sources import SourceEntry
     from lib.update.events import CommandArgs
 
-SummaryStatus = Literal["updated", "error", "no_change"]
+from lib.update.outcomes import SummaryStatus
 
 _TERMINAL_STATUS_KINDS = frozenset({
     StatusKind.UPDATE_AVAILABLE,

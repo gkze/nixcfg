@@ -17,7 +17,12 @@ from lib.tests._updater_helpers import load_repo_module_for_test as _load_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update import flake as update_flake
 from lib.update.artifacts import GeneratedArtifact
-from lib.update.events import EventStream, UpdateEvent, UpdateEventKind
+from lib.update.events import (
+    EventSink,
+    UpdateEvent,
+    UpdateEventKind,
+    ignore_event,
+)
 from lib.update.nix import _build_package_path_attr_expr
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
@@ -134,11 +139,16 @@ def test_goose_desktop_updater_uses_goose_cli_source_file(
         effective_sources={"goose-cli": effective_entry},
     )
     assert _run(updater.fetch_latest(object(), context=context)).version == "1.38.0"
-    assert _run(updater.fetch_latest(object())).version == "1.37.0"
+    assert (
+        _run(
+            updater.fetch_latest(object(), context=UpdateContext(current=None))
+        ).version
+        == "1.37.0"
+    )
 
     monkeypatch.setattr(goose_desktop_module, "sources_file_for", lambda _name: None)
     with pytest.raises(RuntimeError, match="goose-cli sources.json was not found"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     missing_version = SourceEntry.model_validate({"hashes": []})
     monkeypatch.setattr(
@@ -152,7 +162,7 @@ def test_goose_desktop_updater_uses_goose_cli_source_file(
         lambda _path: missing_version,
     )
     with pytest.raises(RuntimeError, match="missing a pinned version"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     missing_identity = SourceEntry.model_validate({"version": "1.37.0", "hashes": []})
     monkeypatch.setattr(
@@ -161,7 +171,7 @@ def test_goose_desktop_updater_uses_goose_cli_source_file(
         lambda _path: missing_identity,
     )
     with pytest.raises(RuntimeError, match="immutable Goose input identity"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 @pytest.mark.parametrize(
@@ -269,11 +279,12 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
         *,
         env: dict[str, str] | None = None,
         config: object | None = None,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
         captured.update({"source": source, "expr": expr, "env": env, "config": config})
         assert cargo_nix_path.read_text(encoding="utf-8") == cargo_nix_text
         assert crate_sources_path.read_text(encoding="utf-8") == crate_sources_text
-        yield UpdateEvent.value(source, HASH_A)
+        return HASH_A
 
     monkeypatch.setattr(
         goose_desktop_module.tempfile,
@@ -287,14 +298,12 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
 
     events = _run(
         _collect(
-            updater.fetch_hashes(
-                info,
-                object(),
-                context=context,
+            lambda emit: updater.fetch_hashes(
+                info, object(), context=context, emit=emit
             )
         )
     )
-    payload = _require_hash_entries(events[-1].payload)
+    payload = _require_hash_entries(events.result)
     assert payload == [
         HashEntry.create("nodeModulesHash", HASH_A),
     ]
@@ -357,13 +366,14 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
     with pytest.raises(RuntimeError, match="does not match goose-desktop version"):
         _run(
             _collect(
-                updater.fetch_hashes(
+                lambda emit: updater.fetch_hashes(
                     VersionInfo(
                         "1.38.0",
                         _goose_metadata(goose_desktop_module, version="1.38.0"),
                     ),
                     object(),
                     context=context,
+                    emit=emit,
                 )
             )
         )
@@ -430,7 +440,7 @@ def test_superconductor_updater_resolves_nightly_redirect(
         )
     ])
 
-    latest = _run(updater.fetch_latest(session))
+    latest = _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
 
     resolved_url = url.removesuffix("?signature=ignored")
     assert latest.version == "2026-06-12-9bd387bf"
@@ -490,7 +500,9 @@ def test_superconductor_updater_rejects_bad_metadata(
         ),
     ])
     with pytest.raises(RuntimeError, match="mismatched versions"):
-        _run(updater.fetch_latest(mismatch_session))
+        _run(
+            updater.fetch_latest(mismatch_session, context=UpdateContext(current=None))
+        )
 
 
 def test_code_cursor_updater_paths(
@@ -519,11 +531,12 @@ def test_code_cursor_updater_paths(
         urls: Iterable[str],
         *,
         config: object,
-    ) -> EventStream:
+        emit: EventSink = ignore_event,
+    ) -> object:
         assert config is updater.config
         url_map = dict.fromkeys(urls, HASH_A)
-        yield UpdateEvent.status("code-cursor", "hashing")
-        yield UpdateEvent.value("code-cursor", url_map)
+        await emit(UpdateEvent.status("code-cursor", "hashing"))
+        return url_map
 
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _hashes)
     checksums = _run(updater.fetch_checksums(info, object()))
@@ -575,7 +588,7 @@ def test_code_cursor_fetch_latest_from_download_page(
     monkeypatch.setattr(code_cursor_module, "fetch_url", _fetch_url)
     monkeypatch.setattr(updater, "_resolve_download_url", _resolve_download_url)
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert latest.version == "3.9.16"
     assert latest.commit == commit
@@ -670,7 +683,7 @@ def test_sentry_cli_updater_paths(
             ),
         ),
     )
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     assert latest.version == "v9.9.9"
     assert latest.commit == commit
 
@@ -694,27 +707,26 @@ def test_sentry_cli_updater_paths(
 
     call_count = 0
 
-    async def _fixed_hash(_name: str, expr: str, **_kwargs: object) -> EventStream:
+    async def _fixed_hash(
+        _name: str, expr: str, *, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
         nonlocal call_count
         call_count += 1
-        yield UpdateEvent.status("sentry-cli", f"build {expr[:5]}")
-        yield UpdateEvent.value("sentry-cli", HASH_A if call_count == 1 else HASH_B)
+        await emit(UpdateEvent.status("sentry-cli", f"build {expr[:5]}"))
+        return HASH_A if call_count == 1 else HASH_B
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
-    events = _run(_collect(updater.fetch_hashes(latest, object())))
-    values = [e for e in events if e.kind == UpdateEventKind.VALUE]
-    payload = _require_hash_entries(values[-1].payload)
+    events = _run(
+        _collect(
+            lambda emit: updater.fetch_hashes(
+                latest, object(), context=UpdateContext(current=None), emit=emit
+            )
+        )
+    )
+    payload = _require_hash_entries(events.result)
     assert payload[0].hash_type == "srcHash"
     assert payload[1].hash_type == "cargoHash"
     assert updater.build_result(latest, payload).commit == commit
-
-    async def _no_hash(_name: str, _expr: str, **_kwargs: object) -> EventStream:
-        if False:
-            yield UpdateEvent.status("x", "y")
-
-    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _no_hash)
-    with pytest.raises(RuntimeError, match="Missing srcHash output"):
-        _run(_collect(updater.fetch_hashes(latest, object())))
 
 
 def test_conductor_updater_paths(
@@ -804,7 +816,7 @@ def test_conductor_updater_paths(
         "_fetch_resolved_artifact",
         _artifact,
     )
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     assert latest.version == "1.2.3"
     assert updater.get_download_url("aarch64-darwin", latest) == (
         "https://cdn.crabnebula.app/asset/aarch64-darwin"
@@ -812,7 +824,7 @@ def test_conductor_updater_paths(
     assert updater.get_download_url("x86_64-darwin", latest) == (
         "https://cdn.crabnebula.app/asset/x86_64-darwin"
     )
-    assert _run(updater._is_latest(None, latest)) is False
+    assert _run(updater._is_latest(UpdateContext(current=None), latest)) is False
 
     with pytest.raises(RuntimeError, match="Could not parse version"):
         updater._version_from_header("attachment; filename=oops")
@@ -830,7 +842,7 @@ def test_conductor_updater_paths(
         _mismatched_artifact,
     )
     with pytest.raises(RuntimeError, match="mismatched versions"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_droid_updater_paths(
@@ -846,7 +858,7 @@ def test_droid_updater_paths(
         "fetch_url",
         lambda *_a, **_k: asyncio.sleep(0, result=b'#!/bin/sh\nVER="2.3.4"\n'),
     )
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     assert latest.version == "2.3.4"
 
     monkeypatch.setattr(
@@ -855,7 +867,7 @@ def test_droid_updater_paths(
         lambda *_a, **_k: asyncio.sleep(0, result=b"no version"),
     )
     with pytest.raises(RuntimeError, match="Could not parse version"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     captured: dict[str, str] = {}
 
@@ -898,7 +910,7 @@ def test_scratch_updater_paths(
         "lib.update.flake.get_flake_input_version",
         lambda _node: "9.9.9",
     )
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     assert latest.version == "9.9.9"
     assert latest.metadata["commit"] == "f" * 40
 
@@ -906,26 +918,24 @@ def test_scratch_updater_paths(
     cargo_expr = object.__getattribute__(updater, "_expr_for_cargo_vendor")()
     seen_exprs: list[str] = []
 
-    async def _fixed_hash(_name: str, expr: str, **_kwargs: object) -> EventStream:
+    async def _fixed_hash(
+        _name: str, expr: str, *, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
         seen_exprs.append(expr)
-        yield UpdateEvent.value("scratch", HASH_A if len(seen_exprs) == 1 else HASH_B)
+        return HASH_A if len(seen_exprs) == 1 else HASH_B
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
-    events = _run(_collect(updater.fetch_hashes(latest, object())))
-    payload = _require_hash_entries(
-        [e for e in events if e.kind == UpdateEventKind.VALUE][-1].payload
+    events = _run(
+        _collect(
+            lambda emit: updater.fetch_hashes(
+                latest, object(), context=UpdateContext(current=None), emit=emit
+            )
+        )
     )
+    payload = _require_hash_entries(events.result)
     assert_nix_ast_equal(seen_exprs[0], npm_expr)
     assert_nix_ast_equal(seen_exprs[1], cargo_expr)
     assert [entry.hash_type for entry in payload] == ["npmDepsHash", "cargoHash"]
-
-    async def _no_hash(_name: str, _expr: str, **_kwargs: object) -> EventStream:
-        if False:
-            yield UpdateEvent.status("scratch", "none")
-
-    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _no_hash)
-    with pytest.raises(RuntimeError, match="Missing npmDepsHash output"):
-        _run(_collect(updater.fetch_hashes(latest, object())))
 
     built = updater.build_result(
         latest,
@@ -953,7 +963,7 @@ def test_tsgolint_updater_paths(
             ),
         ),
     )
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     assert latest.version == "0.21.0"
     assert latest.commit == commit
 
@@ -973,8 +983,10 @@ def test_tsgolint_updater_paths(
             HashEntry.create("vendorHash", HASH_B),
         ],
     )
-    assert _run(updater._is_latest(fake_current, latest)) is False
-    assert _run(updater._is_latest(real_current, latest)) is True
+    assert (
+        _run(updater._is_latest(UpdateContext(current=fake_current), latest)) is False
+    )
+    assert _run(updater._is_latest(UpdateContext(current=real_current), latest)) is True
 
 
 def test_neutils_updater_emits_generated_artifact_and_src_hash(
@@ -984,8 +996,10 @@ def test_neutils_updater_emits_generated_artifact_and_src_hash(
     """Neutils should refresh build.zig.zon.nix alongside the source hash."""
     updater = neutils_module.NeutilsUpdater()
 
-    async def _render(_info: object, _session: object) -> EventStream:
-        yield UpdateEvent.value("neutils", "# generated\n")
+    async def _render(
+        _info: object, _session: object, *, emit: EventSink = ignore_event
+    ) -> object:
+        return "# generated\n"
 
     monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
     monkeypatch.setattr(
@@ -993,13 +1007,21 @@ def test_neutils_updater_emits_generated_artifact_and_src_hash(
         lambda _name: REPO_ROOT / "packages" / "neutils",
     )
 
-    async def _fixed_hash(_name: str, _expr: str, **_kwargs: object) -> EventStream:
-        yield UpdateEvent.value("neutils", HASH_A)
+    async def _fixed_hash(
+        _name: str, _expr: str, *, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
+        return HASH_A
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
     latest = VersionInfo(version="0.7.2", metadata={"commit": "a" * 40})
-    events = _run(_collect(updater.fetch_hashes(latest, object())))
+    events = _run(
+        _collect(
+            lambda emit: updater.fetch_hashes(
+                latest, object(), context=UpdateContext(current=None), emit=emit
+            )
+        )
+    )
 
     artifact_event = next(
         event for event in events if event.kind == UpdateEventKind.ARTIFACT
@@ -1009,9 +1031,7 @@ def test_neutils_updater_emits_generated_artifact_and_src_hash(
     assert artifact.path == REPO_ROOT / "packages" / "neutils" / "build.zig.zon.nix"
     assert artifact.content == "# generated\n"
 
-    hashes = _require_hash_entries(
-        [event for event in events if event.kind == UpdateEventKind.VALUE][-1].payload
-    )
+    hashes = _require_hash_entries(events.result)
     assert hashes == [HashEntry.create("srcHash", HASH_A)]
     assert updater.materialize_when_current is True
     assert updater.generated_artifact_files == ("build.zig.zon.nix",)

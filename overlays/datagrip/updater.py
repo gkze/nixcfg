@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
+    from lib.update.updaters.core import UpdateContext
 
 from lib import json_utils
 from lib.update.net import fetch_json
@@ -67,8 +68,11 @@ class DataGripUpdater(ChecksumProvidedUpdater):
         msg = f"Missing DataGrip download field {field!r} for {platform_key}: {platform_payload!r}"
         raise RuntimeError(msg)
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch latest DataGrip version metadata from JetBrains."""
+        _ = context
         payload = await fetch_json(session, self.API_URL, config=self.config)
         if not isinstance(payload, dict):
             msg = f"Unexpected DataGrip payload type: {type(payload).__name__}"

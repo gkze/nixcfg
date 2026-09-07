@@ -10,15 +10,11 @@ from typing import TYPE_CHECKING
 from lib.update import events as update_events
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import (
-    CommandResult,
-    EventStream,
+    EventSink,
     StatusInfo,
     StatusKind,
     UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_command_result,
-    require_value,
+    ignore_event,
 )
 from lib.update.io import atomic_write_bytes
 from lib.update.paths import REPO_ROOT
@@ -26,7 +22,7 @@ from lib.update.process import RunCommandOptions
 from lib.update.process import run_command as _run_command
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Iterable, Mapping
+    from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 
     from lib.update.config import UpdateConfig
 
@@ -156,51 +152,41 @@ def _read_artifacts(
     return tuple(artifacts)
 
 
-async def stream_command_materialized_artifacts(
+async def stream_command_materialized_artifacts[T](
     source: str,
     *,
     args: list[str],
     artifact_paths: tuple[str | Path, ...],
-    inner: EventStream,
-    dry_run: bool,
+    inner: Callable[[], Awaitable[T]],
     config: UpdateConfig | None = None,
     detail: str = "generated artifacts",
     env: Mapping[str, str] | None = None,
     operation: str = "materialize_artifacts",
     repo_root: Path = REPO_ROOT,
     artifact_normalizers: Mapping[str | Path, ArtifactNormalizer] | None = None,
-) -> EventStream:
+    emit: EventSink = ignore_event,
+) -> T:
     """Refresh artifacts inside the run workspace, hash, and restore them."""
-    if dry_run:
-        async for event in inner:
-            yield event
-        return
-
     async with _artifact_locks(artifact_paths, repo_root=repo_root):
         snapshot = _snapshot_artifacts(artifact_paths, repo_root=repo_root)
         try:
-            yield UpdateEvent.status(
-                source,
-                f"Refreshing {detail}...",
-                operation=operation,
-                status=StatusInfo(kind=StatusKind.COMPUTING_HASH, value=detail),
+            await emit(
+                UpdateEvent.status(
+                    source,
+                    f"Refreshing {detail}...",
+                    operation=operation,
+                    status=StatusInfo(kind=StatusKind.COMPUTING_HASH, value=detail),
+                )
             )
-            result_drain = ValueDrain[CommandResult]()
-            async for event in drain_value_events(
-                _run_command(
-                    args,
-                    options=RunCommandOptions(
-                        source=source,
-                        error=f"Missing {detail} command result",
-                        env=env,
-                        config=config,
-                    ),
+            result = await _run_command(
+                args,
+                options=RunCommandOptions(
+                    source=source,
+                    env=env,
+                    config=config,
                 ),
-                result_drain,
-                parse=expect_command_result,
-            ):
-                yield event
-            result = require_value(result_drain, f"Missing {detail} command result")
+                emit=emit,
+            )
             _raise_failed_command(f"Refresh {detail}", result)
 
             artifacts = _read_artifacts(
@@ -209,16 +195,17 @@ async def stream_command_materialized_artifacts(
                 repo_root=repo_root,
                 artifact_normalizers=artifact_normalizers,
             )
-            yield UpdateEvent.artifact(source, list(artifacts))
-            yield UpdateEvent.status(
-                source,
-                f"Prepared {detail}",
-                operation=operation,
-                status=StatusInfo(kind=StatusKind.UPDATED, value=detail),
+            await emit(UpdateEvent.artifact(source, list(artifacts)))
+            await emit(
+                UpdateEvent.status(
+                    source,
+                    f"Prepared {detail}",
+                    operation=operation,
+                    status=StatusInfo(kind=StatusKind.UPDATED, value=detail),
+                )
             )
 
-            async for event in inner:
-                yield event
+            return await inner()
         finally:
             _restore_artifacts(snapshot)
 

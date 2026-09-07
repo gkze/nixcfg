@@ -1,10 +1,5 @@
 """Updater for tsgolint source and vendor hashes."""
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from lib.nix.models.sources import SourceEntry
-
 from lib.nix.models.sources import HashCollection
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.nix import _build_fetch_from_github_expr
@@ -43,14 +38,11 @@ class TsgolintUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Treat fake source hashes as stale so placeholder entries rehash once."""
-        if isinstance(context, UpdateContext):
-            update_context = context
-        else:
-            update_context = UpdateContext(current=context)
+        update_context = context
         current = update_context.current
         if current is None:
             return False

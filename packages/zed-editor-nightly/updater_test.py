@@ -19,14 +19,16 @@ from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import (
+    EventSink,
     StatusInfo,
     StatusKind,
     UpdateEvent,
     UpdateEventKind,
     expect_artifact_updates,
+    ignore_event,
 )
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import FlakeInputMetadata
 
 _PACKAGE_DIR = REPO_ROOT / "packages/zed-editor-nightly"
@@ -137,24 +139,31 @@ def test_zed_editor_nightly_updater_tracks_manifest_version(
         ),
     )
 
-    async def _empty_stream(_name: str):
-        if False:
-            yield None
+    async def _empty_stream(_name: str, *, emit: EventSink = ignore_event) -> None:
+        pass
 
     monkeypatch.setattr(
         module.ZedEditorNightlyUpdater,
         "stream_materialized_artifacts",
-        lambda _self, **_kwargs: _empty_stream("zed-editor-nightly"),
+        lambda _self, **_kwargs: _empty_stream(
+            "zed-editor-nightly", emit=_kwargs["emit"]
+        ),
     )
 
-    info = _run(updater.fetch_latest(object()))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     assert info.version == "0.999.0"
     assert info.commit == "a" * 40
     assert info.metadata == FlakeInputMetadata(node=node, commit="a" * 40)
 
-    events = _run(_collect_events(updater.fetch_hashes(info, object())))
-    assert len(events) == 1
-    assert events[0].payload == []
+    events = _run(
+        _collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
+    assert events == []
+    assert events.result == []
 
     result = updater.build_result(info, [])
     assert result == SourceEntry(
@@ -195,7 +204,7 @@ def test_zed_editor_nightly_updater_rejects_missing_manifest_version(
     )
 
     with pytest.raises(RuntimeError, match="package.version"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_zed_editor_nightly_updater_rejects_missing_locked_metadata(
@@ -223,7 +232,7 @@ def test_zed_editor_nightly_updater_rejects_missing_locked_metadata(
     monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
 
     with pytest.raises(RuntimeError, match="missing owner/repo/rev metadata"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_zed_editor_nightly_updater_refreshes_crate2nix_artifacts(
@@ -235,50 +244,63 @@ def test_zed_editor_nightly_updater_refreshes_crate2nix_artifacts(
     assert updater.materialize_when_current is True
     assert updater.shows_materialize_artifacts_phase is True
 
-    async def _fake_stream(name: str):
-        yield UpdateEvent.status(
-            name,
-            "Refreshing crate2nix artifacts...",
-            operation="materialize_artifacts",
-            status=StatusInfo(
-                kind=StatusKind.COMPUTING_HASH,
-                value="crate2nix artifacts",
-            ),
+    async def _fake_stream(name: str, *, emit: EventSink = ignore_event) -> object:
+        await emit(
+            UpdateEvent.status(
+                name,
+                "Refreshing crate2nix artifacts...",
+                operation="materialize_artifacts",
+                status=StatusInfo(
+                    kind=StatusKind.COMPUTING_HASH,
+                    value="crate2nix artifacts",
+                ),
+            )
         )
-        yield UpdateEvent.artifact(
-            name,
-            GeneratedArtifact.text(
-                "packages/zed-editor-nightly/Cargo.nix",
-                "{ zed = true; }\n",
-            ),
+        await emit(
+            UpdateEvent.artifact(
+                name,
+                GeneratedArtifact.text(
+                    "packages/zed-editor-nightly/Cargo.nix",
+                    "{ zed = true; }\n",
+                ),
+            )
         )
-        yield UpdateEvent.status(
-            name,
-            "Prepared crate2nix artifacts",
-            operation="materialize_artifacts",
-            status=StatusInfo(kind=StatusKind.UPDATED, value="crate2nix artifacts"),
+        await emit(
+            UpdateEvent.status(
+                name,
+                "Prepared crate2nix artifacts",
+                operation="materialize_artifacts",
+                status=StatusInfo(kind=StatusKind.UPDATED, value="crate2nix artifacts"),
+            )
         )
 
     monkeypatch.setattr(
         module.ZedEditorNightlyUpdater,
         "stream_materialized_artifacts",
-        lambda _self, **_kwargs: _fake_stream("zed-editor-nightly"),
+        lambda _self, **_kwargs: _fake_stream(
+            "zed-editor-nightly", emit=_kwargs["emit"]
+        ),
     )
 
     info = VersionInfo(
         version="0.999.0",
         metadata=FlakeInputMetadata(node=object(), commit="c" * 40),
     )
-    events = _run(_collect_events(updater.fetch_hashes(info, object())))
+    events = _run(
+        _collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
         UpdateEventKind.ARTIFACT,
         UpdateEventKind.STATUS,
-        UpdateEventKind.VALUE,
     ]
     artifact_paths = tuple(
         str(artifact.path) for artifact in expect_artifact_updates(events[1].payload)
     )
     assert artifact_paths == ("packages/zed-editor-nightly/Cargo.nix",)
-    assert events[-1].payload == []
+    assert events.result == []

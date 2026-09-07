@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, ClassVar
 import aiohttp
 
 from lib import json_utils
-from lib.update.events import UpdateEvent
+from lib.update.events import EventSink, ignore_event
 from lib.update.net import HTTP_BAD_REQUEST, fetch_json, fetch_url
 from lib.update.updaters import (
     UpdateContext,
@@ -23,7 +23,6 @@ from lib.update.updaters import (
 
 if TYPE_CHECKING:
     from lib.nix.models.sources import SourceEntry, SourceHashes
-    from lib.update.events import EventStream
 
 _VERSION_HISTORY_URL = (
     "https://versionhistory.googleapis.com/v1/chrome/platforms/{platform}/"
@@ -508,8 +507,11 @@ class GoogleChromeUpdater(Updater):
         )
         return _parse_linux_artifact(payload, expected_version=expected_version)
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch the active 100% Stable baseline for each artifact platform."""
+        _ = context
 
         async def _fetch_one(api_platform: str) -> tuple[str, str]:
             payload = await fetch_json(
@@ -567,12 +569,13 @@ class GoogleChromeUpdater(Updater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Return checksums published alongside the immutable artifacts."""
-        _ = (session, context)
+        _ = (session, context, emit)
         metadata = self._metadata(info)
-        yield UpdateEvent.value(self.name, dict(metadata.artifact_hashes))
+        return dict(metadata.artifact_hashes)
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist URLs, hashes, and exact package versions as one identity."""
@@ -581,11 +584,11 @@ class GoogleChromeUpdater(Updater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Skip only when the complete vendor-published identity is unchanged."""
-        current = context.current if isinstance(context, UpdateContext) else context
+        current = context.current
         if current is None:
             return False
         metadata = self._metadata(info)

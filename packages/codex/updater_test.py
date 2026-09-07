@@ -12,9 +12,9 @@ from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import binding_map, parse_nix_expr
 from lib.tests._updater_helpers import collect_events, load_repo_module, run_async
 from lib.update.artifacts import GeneratedArtifact
-from lib.update.events import UpdateEvent, UpdateEventKind
+from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
     import pytest
@@ -53,10 +53,16 @@ def test_codex_updater_discards_obsolete_closure_metadata() -> None:
 
     assert updater.materialization_source_overrides(
         _INFO,
-        context=_LEGACY_SOURCE,
+        context=UpdateContext(current=_LEGACY_SOURCE),
     ) == {"codex": _CLEAN_SOURCE}
-    assert run_async(updater._is_latest(_LEGACY_SOURCE, _INFO)) is False
-    assert run_async(updater._is_latest(_CLEAN_SOURCE, _INFO)) is True
+    assert (
+        run_async(updater._is_latest(UpdateContext(current=_LEGACY_SOURCE), _INFO))
+        is False
+    )
+    assert (
+        run_async(updater._is_latest(UpdateContext(current=_CLEAN_SOURCE), _INFO))
+        is True
+    )
 
 
 def test_codex_updater_materializes_from_the_clean_candidate(
@@ -68,34 +74,35 @@ def test_codex_updater_materializes_from_the_clean_candidate(
     async def materialize(
         *,
         source_overrides: dict[str, SourceEntry] | None = None,
-    ):
+        emit: EventSink = ignore_event,
+    ) -> object:
         assert source_overrides == {"codex": _CLEAN_SOURCE}
-        yield UpdateEvent.artifact(
-            "codex",
-            GeneratedArtifact.text(
-                _PACKAGE_DIR / "Cargo.nix",
-                "{ generated = true; }\n",
-            ),
+        await emit(
+            UpdateEvent.artifact(
+                "codex",
+                GeneratedArtifact.text(
+                    _PACKAGE_DIR / "Cargo.nix",
+                    "{ generated = true; }\n",
+                ),
+            )
         )
 
     monkeypatch.setattr(updater, "stream_materialized_artifacts", materialize)
 
     events = run_async(
         collect_events(
-            updater.fetch_hashes(
+            lambda emit: updater.fetch_hashes(
                 _INFO,
                 object(),
-                context=_LEGACY_SOURCE,
+                context=UpdateContext(current=_LEGACY_SOURCE),
+                emit=emit,
             )
         )
     )
 
-    assert [event.kind for event in events] == [
-        UpdateEventKind.ARTIFACT,
-        UpdateEventKind.VALUE,
-    ]
-    assert events[-1].payload == []
-    assert updater.build_result(_INFO, events[-1].payload) == _CLEAN_SOURCE
+    assert [event.kind for event in events] == [UpdateEventKind.ARTIFACT]
+    assert events.result == []
+    assert updater.build_result(_INFO, events.result) == _CLEAN_SOURCE
 
 
 def test_codex_package_uses_only_graph_owned_v8_inputs() -> None:

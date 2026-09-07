@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 from lib import json_utils
 from lib.nix.models.sources import HashCollection, SourceEntry, SourceHashes
-from lib.update.events import EventStream, UpdateEvent
+from lib.update.events import EventSink, ignore_event
 from lib.update.net import fetch_json
 from lib.update.updaters import UpdateContext, Updater, VersionInfo, register_updater
 from lib.update.updaters.metadata import metadata_as_mapping
@@ -75,8 +75,11 @@ class McpRuntimeToolsUpdater(Updater):
             raise RuntimeError(msg)
         return package, f"{package}=={version}"
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve every tracked package from its authoritative registry."""
+        _ = context
         resolved = await asyncio.gather(
             *(self._fetch_npm_pin(session, package) for package in self._NPM_PACKAGES),
             *(
@@ -107,10 +110,10 @@ class McpRuntimeToolsUpdater(Updater):
     @override
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
-        current = context.current if isinstance(context, UpdateContext) else context
+        current = context.current
         return (
             current is not None
             and current.version == info.version
@@ -122,11 +125,12 @@ class McpRuntimeToolsUpdater(Updater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Emit an empty hash mapping because registry specs are the artifacts."""
-        _ = (info, session, context)
-        yield UpdateEvent.value(self.name, {})
+        _ = (info, session, context, emit)
+        return {}
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist resolved package specs through the common source model."""

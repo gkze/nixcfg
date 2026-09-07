@@ -22,93 +22,24 @@ let
       ln -s "$tool" "$out/bin/$name"
     done
   '';
-  pythonExe = "${nixcfgVenv}/bin/python";
-  pyupgradeExe = "${pythonToolBins}/bin/pyupgrade";
-  ruffExe = "${pythonToolBins}/bin/ruff";
-  tyExe = "${pythonToolBins}/bin/ty";
-  tyPythonFlag = " --python ${pythonExe}";
-  pythonScriptFindPredicates = lib.concatMapStringsSep " " (
-    path: "-o -path './${path}'"
-  ) lintFiles.python.pythonScriptPaths;
-  pythonPyupgradeFindPredicates = lib.concatMapStringsSep " " (
-    path: "-o -path './${path}'"
-  ) lintFiles.python.pythonPyupgradeExcludes;
-  oxfmtPatterns = lintFiles.oxfmt.globs ++ map (glob: "!${glob}") lintFiles.oxfmt.excludeGlobs;
-
-  pythonPyupgradeCheck = pkgs.writeShellScriptBin "check-python-pyupgrade" ''
-    set -euo pipefail
-
-    find . \
-      \( -path './.claude/worktrees' -o -path './.direnv' -o -path './.git' -o -path './.pytest_cache' -o -path './.ruff_cache' -o -path './.venv' -o -path './node_modules' -o -path './result' -o -name '_generated.py' ${pythonPyupgradeFindPredicates} \) -prune -o \
-      -type f \
-      \( -name '*.py' -o -name '*.pyi' ${pythonScriptFindPredicates} \) \
-      -print0 \
-      | ${pkgs.findutils}/bin/xargs -0 -r ${pyupgradeExe} --py314-plus
-  '';
-
-  pythonCompileCheck = pkgs.writeShellScriptBin "check-python-compile" ''
-    set -euo pipefail
-
-    ${pythonExe} ${./check_python_compile.py} ${lib.escapeShellArgs lintFiles.python.compilePaths}
-  '';
-
-  standardHookSpecs = {
-    lint-editorconfig = {
-      package = pkgs."editorconfig-checker";
-      entry = "editorconfig-checker -exclude ^\\.pre-commit-config\\.yaml$";
-    };
-    format-yaml-yamlfmt = {
-      package = pkgs.yamlfmt;
-      entry = "yamlfmt -lint -gitignore_excludes -conf .yamlfmt .";
-    };
-    lint-yaml-yamllint = {
-      package = pkgs.yamllint;
-      entry = "yamllint -c .yamllint .";
-    };
-    format-web-oxfmt = {
-      package = pkgs.oxfmt;
-      entry = "oxfmt --check --config .oxfmtrc.json --no-error-on-unmatched-pattern ${lib.escapeShellArgs oxfmtPatterns}";
-    };
-    lint-web-oxlint = {
-      package = pkgs.oxlint;
-      entry = "env OXLINT_TSGOLINT_PATH=${lib.getExe pkgs.tsgolint} oxlint --config .oxlintrc.json --type-aware --quiet .";
-    };
-    format-python-pyupgrade = {
-      package = pythonPyupgradeCheck;
-      entry = "${pythonPyupgradeCheck}/bin/check-python-pyupgrade";
-    };
-    format-python-ruff = {
-      package = pythonToolBins;
-      entry = "${ruffExe} format --check --config pyproject.toml .";
-    };
-    lint-python-compile = {
-      package = pythonCompileCheck;
-      entry = "${pythonCompileCheck}/bin/check-python-compile";
-    };
-    lint-python-ruff = {
-      package = pythonToolBins;
-      entry = "${ruffExe} check --config pyproject.toml .";
-    };
-    lint-python-ty = {
-      package = pythonToolBins;
-      entry = "${tyExe} check${tyPythonFlag} .";
-    };
-    verify-python-generated = {
-      package = pythonToolBins;
-      entry = "${pythonExe} ./nixcfg.py schema verify";
-    };
-  };
+  repoChecks = (import ./repo-checks.nix { inherit src lib lintFiles; }).checks;
   standardHooks = lib.mapAttrs (
     name: spec:
+    let
+      package = pkgs.writeShellScriptBin "check-${name}" ''
+        set -euo pipefail
+        ${spec.command { inherit lib pkgs nixcfgVenv; }}
+      '';
+    in
     {
       enable = true;
-      inherit name;
+      inherit name package;
+      entry = lib.getExe package;
       pass_filenames = false;
       always_run = true;
       priority = hookPriority;
     }
-    // spec
-  ) standardHookSpecs;
+  ) repoChecks;
 
   pre-commit-check = gitHooks.lib.${pkgs.system}.run {
     inherit src;
@@ -185,7 +116,10 @@ pkgs.devshell.mkShell {
       uv
       yamlfmt
     ]
-    ++ [ nixcfgPkg ]
+    ++ [
+      nixcfgPkg
+      pythonToolBins
+    ]
     ++ lib.optional pkgs.stdenv.hostPlatform.isLinux dconf2nix
     ++ pre-commit-check.enabledPackages;
 

@@ -40,6 +40,7 @@ from lib.update.config import (
     resolve_config,
 )
 from lib.update.constants import ALL_TOOLS, NIX_BUILD_FAILURE_TAIL_LINES, REQUIRED_TOOLS
+from lib.update.outcomes import SummaryStatus, merge_statuses
 from lib.update.paths import get_repo_root
 from lib.update.refs import (
     FlakeInputRef,
@@ -47,7 +48,7 @@ from lib.update.refs import (
 )
 from lib.update.sources import load_all_sources
 from lib.update.ui_consumer import ConsumeEventsOptions, consume_events
-from lib.update.ui_state import ItemMeta, OperationKind, SummaryStatus
+from lib.update.ui_state import ItemMeta, OperationKind
 from lib.update.updaters import UPDATERS, UpdaterClass, ensure_updaters_loaded
 
 if TYPE_CHECKING:
@@ -617,54 +618,37 @@ _ORIGIN_BOTH = "(flake.nix + sources.json)"
 
 @dataclass
 class UpdateSummary:
-    """Aggregate final per-source update outcomes."""
+    """Final outcomes, with presentation lists derived from one ordered map."""
 
-    updated: list[str] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
-    no_change: list[str] = field(default_factory=list)
-    _status_by_name: dict[str, SummaryStatus] = field(default_factory=dict, repr=False)
-    _order: list[str] = field(default_factory=list, repr=False)
+    statuses: dict[str, SummaryStatus] = field(default_factory=dict)
 
-    def _set_status(self, name: str, status: SummaryStatus) -> None:
-        normalized = status if status in _SUMMARY_STATUS_PRIORITY else "no_change"
-        if name not in self._status_by_name:
-            self._order.append(name)
-            self._status_by_name[name] = normalized
-            return
-        current = self._status_by_name[name]
-        if _SUMMARY_STATUS_PRIORITY[normalized] > _SUMMARY_STATUS_PRIORITY[current]:
-            self._status_by_name[name] = normalized
+    @property
+    def updated(self) -> list[str]:
+        """Targets whose candidate changed."""
+        return [name for name, status in self.statuses.items() if status == "updated"]
 
-    def _rebuild_lists(self) -> None:
-        self.updated = []
-        self.errors = []
-        self.no_change = []
-        for name in self._order:
-            status = self._status_by_name[name]
-            if status == "updated":
-                self.updated.append(name)
-            elif status == "error":
-                self.errors.append(name)
-            else:
-                self.no_change.append(name)
+    @property
+    def errors(self) -> list[str]:
+        """Targets with an execution or validation failure."""
+        return [name for name, status in self.statuses.items() if status == "error"]
+
+    @property
+    def no_change(self) -> list[str]:
+        """Targets that completed without a candidate change."""
+        return [name for name, status in self.statuses.items() if status == "no_change"]
 
     def to_dict(self) -> dict[str, list[str] | bool]:
-        """Return a JSON-serializable summary payload."""
+        """Return the stable JSON summary projection."""
         return {
             "updated": self.updated,
             "errors": self.errors,
             "noChange": self.no_change,
-            "success": len(self.errors) == 0,
+            "success": not self.errors,
         }
 
     def accumulate(self, details: dict[str, SummaryStatus]) -> None:
-        """Merge per-source statuses and rebuild summary lists."""
-        for name, detail in details.items():
-            self._set_status(name, detail)
-        self._rebuild_lists()
-
-
-_SUMMARY_STATUS_PRIORITY = {"no_change": 0, "updated": 1, "error": 2}
+        """Merge outcomes without downgrading failures or changing target order."""
+        self.statuses = merge_statuses(self.statuses, details)
 
 
 @dataclass(frozen=True)
@@ -869,7 +853,7 @@ class _RunPlan:
 
 @dataclass(frozen=True)
 class _RunExecutionResult:
-    """Validated phase result awaiting promotion into the live checkout."""
+    """Materialized phase result awaiting snapshot validation and promotion."""
 
     summary: UpdateSummary
     candidate_updates: tuple[str, ...]
@@ -1017,7 +1001,6 @@ async def _execute_run_plan_result(
     )
 
     phase_result = update_source_runner.UpdatePhaseResult()
-    validation_failures = ()
     try:
         if plan.resolved.do_refs and plan.resolved.ref_inputs:
             if plan.show_phase_headers:
@@ -1025,7 +1008,6 @@ async def _execute_run_plan_result(
             ref_result = await update_source_runner.run_ref_phase(
                 ref_inputs=plan.resolved.ref_inputs,
                 queue=queue,
-                dry_run=False,
                 config=config,
             )
             phase_result = phase_result.merged(ref_result)
@@ -1041,7 +1023,7 @@ async def _execute_run_plan_result(
                     update_input=plan.resolved.do_input_refresh,
                     native_only=plan.resolved.native_only,
                     config=config,
-                    dry_run=False,
+                    input_refreshes=phase_result.input_refreshes,
                 ),
             )
             phase_result = phase_result.merged(source_result)
@@ -1052,24 +1034,12 @@ async def _execute_run_plan_result(
         written_paths = update_persistence.persist_materialized_updates(
             do_sources=plan.resolved.do_sources,
             source_names=plan.resolved.source_names,
-            dry_run=False,
             native_only=plan.resolved.native_only,
             sources=plan.sources,
             source_updates=phase_result.source_updates,
             artifact_updates=phase_result.artifact_updates,
             details=phase_result.details,
         )
-
-        if phase_result.errors == 0:
-            completed = [
-                name for name in plan.order if phase_result.details.get(name) != "error"
-            ]
-            validation_failures = update_derivation_validation.validate_derivations(
-                completed,
-                updaters=_get_updaters(),
-                timeout=config.default_subprocess_timeout,
-                all_declared_systems=True,
-            )
     except BaseException:
         await queue.put(None)
         with contextlib.suppress(BaseException):
@@ -1079,16 +1049,11 @@ async def _execute_run_plan_result(
     summary = UpdateSummary()
     summary.accumulate(phase_result.details)
     candidate_updates = tuple(summary.updated)
-    validation_failed = _record_derivation_validation_failures(
-        summary,
-        out,
-        validation_failures,
-    )
 
     return _RunExecutionResult(
         summary=summary,
         candidate_updates=candidate_updates,
-        had_errors=phase_result.errors > 0 or validation_failed,
+        had_errors=phase_result.errors > 0,
         written_paths=tuple(written_paths or ()),
     )
 
@@ -1220,6 +1185,39 @@ def _emit_run_outcome(
     )
 
 
+def _validate_run_snapshot(
+    plan: _RunPlan | _RunPlanError | None,
+    snapshot: update_persistence.UpdateValidationSnapshot,
+    summary: UpdateSummary,
+    opts: UpdateOptions,
+    out: OutputOptions,
+    config: UpdateConfig,
+) -> bool:
+    """Validate packages and root closures against the same captured source tree."""
+    if isinstance(plan, _RunPlan) and _record_derivation_validation_failures(
+        summary,
+        out,
+        update_derivation_validation.validate_derivations(
+            plan.order,
+            updaters=_get_updaters(),
+            flake_root=snapshot.root,
+            timeout=config.default_subprocess_timeout,
+            all_declared_systems=True,
+        ),
+    ):
+        return True
+    return _requires_root_closure_validation(
+        opts, snapshot.changed_paths
+    ) and _record_derivation_validation_failures(
+        summary,
+        out,
+        update_derivation_validation.validate_root_closures(
+            flake_root=snapshot.root,
+            timeout=config.subprocess_timeout_override,
+        ),
+    )
+
+
 async def run_updates(
     opts: UpdateOptions,
     *,
@@ -1293,21 +1291,9 @@ async def run_updates(
                 )
             if not outcome.had_errors:
                 with workspace.validation_snapshot() as snapshot:
-                    if _requires_root_closure_validation(
-                        opts,
-                        snapshot.changed_paths,
-                    ):
-                        outcome.had_errors = (
-                            _record_derivation_validation_failures(
-                                outcome.summary,
-                                out,
-                                update_derivation_validation.validate_root_closures(
-                                    flake_root=snapshot.root,
-                                    timeout=config.subprocess_timeout_override,
-                                ),
-                            )
-                            or outcome.had_errors
-                        )
+                    outcome.had_errors = _validate_run_snapshot(
+                        run_plan, snapshot, outcome.summary, opts, out, config
+                    )
                 if not outcome.had_errors:
                     if opts.check:
                         workspace.validate_changes(allowed_paths)

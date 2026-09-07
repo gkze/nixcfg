@@ -10,6 +10,7 @@ from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update.derivation_validation import DerivationValidation
+from lib.update.events import EventSink, ignore_event
 from lib.update.net import fetch_json, github_raw_url
 from lib.update.nix import (
     _build_fetch_from_github_expr,
@@ -29,7 +30,6 @@ from lib.update.updaters.metadata import require_metadata_str
 if TYPE_CHECKING:
     import aiohttp
 
-    from lib.update.events import EventStream
 
 _PACKAGE_MANAGER_PATTERN = re.compile(
     r"^pnpm@(?P<version>[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)$"
@@ -81,9 +81,11 @@ class ReflectOpenUpdater(GitHubReleaseUpdater):
             msg = "Reflect release metadata is missing a pnpm version"
             raise RuntimeError(msg) from exc
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the release commit and exact package-manager toolchain."""
-        info = await super().fetch_latest(session)
+        info = await super().fetch_latest(session, context=context)
         commit = self._require_commit(info)
         manifest = await fetch_json(
             session,
@@ -107,7 +109,7 @@ class ReflectOpenUpdater(GitHubReleaseUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Recompute both dependency closures before accepting release metadata."""
@@ -175,30 +177,28 @@ class ReflectOpenUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash source, pnpm store, and Cargo vendor tree in dependency order."""
         _ = (session, context)
         commit = self._require_commit(info)
         pnpm_version = self._require_pnpm_version(info)
         fake_hash = self.config.fake_hash
         package_file = "packages/reflect-open/package.nix"
-        async for event in stream_fixed_output_hashes(
+        return await stream_fixed_output_hashes(
             self.name,
             steps=(
                 FixedOutputHashStep(
                     hash_type="srcHash",
-                    error="Missing srcHash output",
                     expr=lambda _resolved: self._src_expr(commit),
                 ),
                 FixedOutputHashStep(
                     hash_type="sha256",
-                    error="Missing pnpm source hash output",
                     expr=lambda _resolved: self._pnpm_expr(pnpm_version),
                 ),
                 FixedOutputHashStep(
                     hash_type="npmDepsHash",
-                    error="Missing npmDepsHash output",
                     expr=lambda resolved: _build_repo_package_attr_expr(
                         package_file,
                         ".pnpmDeps",
@@ -216,7 +216,6 @@ class ReflectOpenUpdater(GitHubReleaseUpdater):
                 ),
                 FixedOutputHashStep(
                     hash_type="cargoHash",
-                    error="Missing cargoHash output",
                     expr=lambda resolved: _build_repo_package_attr_expr(
                         package_file,
                         ".cargoDeps",
@@ -234,8 +233,8 @@ class ReflectOpenUpdater(GitHubReleaseUpdater):
                 ),
             ),
             config=self.config,
-        ):
-            yield event
+            emit=emit,
+        )
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist the release commit and complete source dependency closure."""

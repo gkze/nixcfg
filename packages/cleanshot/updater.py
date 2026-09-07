@@ -9,6 +9,8 @@ from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updat
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 
 @register_updater
 class CleanShotUpdater(DownloadHashUpdater):
@@ -21,8 +23,11 @@ class CleanShotUpdater(DownloadHashUpdater):
         "x86_64-darwin": "darwin",
     }
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch the latest CleanShot X version from the public changelog."""
+        _ = context
         payload = await fetch_url(
             session,
             self.CHANGELOG_URL,

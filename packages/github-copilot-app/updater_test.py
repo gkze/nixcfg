@@ -31,7 +31,7 @@ from lib.tests._source_metadata import (
 from lib.tests._updater_helpers import load_repo_module
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import AssetURLsMetadata
 
 _PACKAGE_DIR = REPO_ROOT / "packages/github-copilot-app"
@@ -126,7 +126,9 @@ def test_latest_release_resolves_only_the_supported_arm64_dmg(
 
     monkeypatch.setattr("lib.update.updaters.github_release.fetch_github_api", _fetch)
 
-    info = asyncio.run(updater.fetch_latest(object()))
+    info = asyncio.run(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     result = updater.build_result(info, dict.fromkeys(updater.PLATFORMS, _HASH))
 
     assert info == VersionInfo(
@@ -177,7 +179,7 @@ def test_latest_release_requires_the_supported_arm64_artifact(
         RuntimeError,
         match="Could not find github-copilot-app release asset .*darwin-arm64",
     ):
-        asyncio.run(updater.fetch_latest(object()))
+        asyncio.run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_copilot_sources_pin_the_authoritative_latest_release() -> None:

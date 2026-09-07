@@ -4,19 +4,15 @@ import asyncio
 from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.commands.base import run_nix
-from lib.nix.models.sources import HashEntry, SourceEntry
+from lib.nix.models.sources import HashEntry, SourceHashes
 from lib.update import nix as update_nix
 from lib.update import process as update_process
 from lib.update.events import (
-    EventStream,
+    EventSink,
     StatusInfo,
     StatusKind,
     UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_hash_mapping,
-    expect_source_hashes,
-    require_value,
+    ignore_event,
 )
 from lib.update.nix import _build_flake_attr_expr
 from lib.update.paths import local_flake_url
@@ -107,12 +103,12 @@ class LinearCliUpdater(DenoManifestUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         if not await super()._is_latest(context, info):
             return False
-        current = context.current if isinstance(context, UpdateContext) else context
+        current = context.current
         if current is None or current.hashes.entries is None:
             return False
         deno_version = await self._resolve_deno_version()
@@ -132,19 +128,13 @@ class LinearCliUpdater(DenoManifestUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Resolve manifest plus per-platform denort fixed-output hashes."""
         for attempt in range(1, DENO_MANIFEST_ATTEMPTS + 1):
-            manifest_drain = ValueDrain()
             try:
-                async for event in drain_value_events(
-                    super().fetch_hashes(info, session, context=context),
-                    manifest_drain,
-                    parse=expect_source_hashes,
-                ):
-                    yield event
-                require_value(manifest_drain, "Missing deno manifest output")
+                await super().fetch_hashes(info, session, context=context, emit=emit)
                 break
             except BaseException as exc:
                 if (
@@ -152,15 +142,17 @@ class LinearCliUpdater(DenoManifestUpdater):
                     or not _is_transient_deno_manifest_error(exc)
                 ):
                     raise
-                yield UpdateEvent.status(
-                    self.name,
-                    "Retrying Deno manifest resolution after transient "
-                    f"{type(exc).__name__} ({attempt}/{DENO_MANIFEST_ATTEMPTS})",
-                    operation="compute_hash",
-                    status=StatusInfo(
-                        kind=StatusKind.RETRY,
-                        value=type(exc).__name__,
-                    ),
+                await emit(
+                    UpdateEvent.status(
+                        self.name,
+                        "Retrying Deno manifest resolution after transient "
+                        f"{type(exc).__name__} ({attempt}/{DENO_MANIFEST_ATTEMPTS})",
+                        operation="compute_hash",
+                        status=StatusInfo(
+                            kind=StatusKind.RETRY,
+                            value=type(exc).__name__,
+                        ),
+                    )
                 )
                 await asyncio.sleep(0.5 * attempt)
 
@@ -169,29 +161,21 @@ class LinearCliUpdater(DenoManifestUpdater):
             platform: self._denort_url(target, deno_version)
             for platform, target in self.PLATFORMS.items()
         }
-        yield UpdateEvent.status(
-            self.name,
-            f"Fetching denort runtime hashes for Deno v{deno_version}...",
-            operation="compute_hash",
-            status=StatusInfo(
-                kind=StatusKind.COMPUTING_HASH,
-                value=f"denort Deno v{deno_version}",
-            ),
-        )
-
-        hash_drain = ValueDrain()
-        async for event in drain_value_events(
-            update_process.compute_url_hashes(
+        await emit(
+            UpdateEvent.status(
                 self.name,
-                urls.values(),
-                config=self.config,
-            ),
-            hash_drain,
-            parse=expect_hash_mapping,
-        ):
-            yield event
-        hashes_by_url = require_value(hash_drain, "Missing denort hash output")
-        entries = [
+                f"Fetching denort runtime hashes for Deno v{deno_version}...",
+                operation="compute_hash",
+                status=StatusInfo(
+                    kind=StatusKind.COMPUTING_HASH,
+                    value=f"denort Deno v{deno_version}",
+                ),
+            )
+        )
+        hashes_by_url = await update_process.compute_url_hashes(
+            self.name, urls.values(), config=self.config, emit=emit
+        )
+        return [
             HashEntry.create(
                 "sha256",
                 hashes_by_url[urls[platform]],
@@ -200,4 +184,3 @@ class LinearCliUpdater(DenoManifestUpdater):
             )
             for platform in sorted(urls)
         ]
-        yield UpdateEvent.value(self.name, entries)

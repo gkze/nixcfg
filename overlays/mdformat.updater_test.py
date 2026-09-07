@@ -1,7 +1,6 @@
 """Focused contracts for the flat mdformat source and updater."""
 
 # ruff: noqa: N999, S101 -- flat sidecar name and pytest assertions are intentional.
-
 from typing import TYPE_CHECKING
 
 import pytest
@@ -23,12 +22,12 @@ from lib.tests._updater_helpers import (
     run_async,
 )
 from lib.update.derivation_validation import DerivationValidation
-from lib.update.events import UpdateEvent, UpdateEventKind
+from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
 from lib.update.nix import _build_fetch_from_github_call
 from lib.update.paths import REPO_ROOT
+from lib.update.updaters import UpdateContext
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
     from types import ModuleType
 
 _SOURCE_PATH = REPO_ROOT / "overlays" / "mdformat.sources.json"
@@ -55,7 +54,9 @@ def _install_source_hash(
         isolate_by_drv_hash: bool = False,
         env: object = None,
         config: object = None,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
+        _ = emit
         calls.append({
             "name": name,
             "expr": expr,
@@ -63,7 +64,7 @@ def _install_source_hash(
             "env": env,
             "config": config,
         })
-        yield UpdateEvent.value(name, _UPDATED_HASH)
+        return _UPDATED_HASH
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
     return calls
@@ -125,7 +126,9 @@ def test_mdformat_update_resolves_pypi_version_and_hashes_matching_tag(
         ]),
     )
 
-    events = run_async(collect_events(updater.update_stream(current, session)))
+    events = run_async(
+        collect_events(lambda emit: updater.update_stream(current, session, emit=emit))
+    )
 
     assert updater.get_derivation_validations() == (
         DerivationValidation(
@@ -192,4 +195,8 @@ def test_mdformat_update_rejects_malformed_pypi_metadata(
     monkeypatch.setattr(module, "fetch_json", _fetch_json)
 
     with pytest.raises(error_type, match=match):
-        run_async(module.MdformatUpdater().fetch_latest(object()))
+        run_async(
+            module.MdformatUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )

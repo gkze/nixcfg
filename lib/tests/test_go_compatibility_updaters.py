@@ -16,6 +16,7 @@ from lib.update import locked_source
 from lib.update.config import resolve_config
 from lib.update.flake import flake_source_path_expression
 from lib.update.nix_expr import identifier_attr_path
+from lib.update.updaters import UpdateContext
 from lib.update.updaters.go_compatibility import (
     _MAX_GO_MOD_BYTES,
     GoModCompatibilityUpdater,
@@ -301,7 +302,7 @@ def test_fetch_latest_validates_locked_go_mod_against_exact_selected_nix_go(
         _run_nix,
     )
 
-    info = run_async(updater.fetch_latest(session))
+    info = run_async(updater.fetch_latest(session, context=UpdateContext(current=None)))
 
     assert info.version == _REF
     assert info.commit == _COMMIT
@@ -418,7 +419,7 @@ def test_fetch_latest_rejects_oversized_locked_go_mod_before_go_evaluation(
     )
 
     with pytest.raises(RuntimeError, match="go.mod exceeds 1048576 bytes"):
-        run_async(updater.fetch_latest(object()))
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_selected_go_resolution_accepts_future_exact_package_contract(
@@ -491,4 +492,8 @@ def test_update_stops_before_fingerprint_or_hash_for_newer_release(
     monkeypatch.setattr(updater, "fetch_hashes", _unexpected_hashes)
 
     with pytest.raises(RuntimeError, match="requires Go 1.27.5, newer than"):
-        run_async(collect_events(updater.update_stream(None, object())))
+        run_async(
+            collect_events(
+                lambda emit: updater.update_stream(None, object(), emit=emit)
+            )
+        )

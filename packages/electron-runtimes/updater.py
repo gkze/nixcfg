@@ -16,13 +16,9 @@ from lib.update import nix as update_nix
 from lib.update import process as update_process
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import (
-    EventStream,
+    EventSink,
     UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_hash_mapping,
-    expect_str,
-    require_value,
+    ignore_event,
 )
 from lib.update.nix_expr import compact_nix_expr, select_attrs
 from lib.update.paths import updater_dir_for
@@ -34,7 +30,6 @@ from lib.update.updaters import (
     ensure_updaters_loaded,
     register_updater,
 )
-from lib.update.updaters.core import _coerce_context
 from lib.update.updaters.metadata import MappingMetadata, metadata_as_mapping
 
 if TYPE_CHECKING:
@@ -165,9 +160,9 @@ class ElectronRuntimesUpdater(Updater):
 
     @staticmethod
     def _current_hashes(
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
     ) -> dict[str, HashEntry]:
-        current = _coerce_context(context).current
+        current = context.current
         if current is None or current.hashes.entries is None:
             return {}
         hashes: dict[str, HashEntry] = {}
@@ -184,9 +179,9 @@ class ElectronRuntimesUpdater(Updater):
 
     @staticmethod
     def _current_urls(
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
     ) -> dict[str, str]:
-        current = _coerce_context(context).current
+        current = context.current
         return {} if current is None else current.urls or {}
 
     @classmethod
@@ -241,11 +236,11 @@ class ElectronRuntimesUpdater(Updater):
         self,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
+        context: UpdateContext,
     ) -> VersionInfo:
         """Derive exact versions from the run's effective consumer sources."""
         _ = session
-        versions = self._consumer_versions(_coerce_context(context).effective_sources)
+        versions = self._consumer_versions(context.effective_sources)
         return VersionInfo(
             version=_INVENTORY_VERSION,
             metadata=ElectronInventoryMetadata(versions=versions),
@@ -253,11 +248,11 @@ class ElectronRuntimesUpdater(Updater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Skip multi-gigabyte rehashing when the exact inventory is complete."""
-        current = _coerce_context(context).current
+        current = context.current
         if current is None or current.version != _INVENTORY_VERSION:
             return False
         required_urls = self._required_urls(self._require_versions(info))
@@ -285,8 +280,9 @@ class ElectronRuntimesUpdater(Updater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash missing runtime binaries and unpacked header trees."""
         _ = session
         versions = self._require_versions(info)
@@ -312,43 +308,23 @@ class ElectronRuntimesUpdater(Updater):
         }
         hashes_by_url: dict[str, str] = {}
         if binary_urls:
-            binary_drain = ValueDrain[dict[str, str]]()
-            async for event in drain_value_events(
-                update_process.compute_url_hashes(
-                    self.name,
-                    binary_urls.values(),
-                    config=self.config,
-                ),
-                binary_drain,
-                parse=expect_hash_mapping,
-            ):
-                yield event
-            hashes_by_url = require_value(
-                binary_drain,
-                "Missing Electron binary hash output",
+            hashes_by_url = await update_process.compute_url_hashes(
+                self.name, binary_urls.values(), config=self.config, emit=emit
             )
 
         resolved = dict(reusable)
         for version in versions:
             header_key = self._runtime_key(version, "headers")
             if header_key not in resolved:
-                header_drain = ValueDrain[str]()
-                async for event in drain_value_events(
-                    update_nix.compute_fixed_output_hash(
-                        self.name,
-                        self._headers_expr(version, required_urls[header_key]),
-                        config=self.config,
-                    ),
-                    header_drain,
-                    parse=expect_str,
-                ):
-                    yield event
+                header_hash = await update_nix.compute_fixed_output_hash(
+                    self.name,
+                    self._headers_expr(version, required_urls[header_key]),
+                    config=self.config,
+                    emit=emit,
+                )
                 resolved[header_key] = HashEntry.create(
                     "sha256",
-                    require_value(
-                        header_drain,
-                        f"Missing Electron {version} headers hash output",
-                    ),
+                    header_hash,
                     platform=header_key,
                 )
 
@@ -373,14 +349,16 @@ class ElectronRuntimesUpdater(Updater):
         if package_dir is None:
             msg = f"Package directory not found for {self.name}"
             raise RuntimeError(msg)
-        yield UpdateEvent.artifact(
-            self.name,
-            GeneratedArtifact.json(
-                package_dir / self.generated_artifact_files[0],
-                {
-                    "schemaVersion": _POLICY_SCHEMA_VERSION,
-                    "versions": list(versions),
-                },
-            ),
+        await emit(
+            UpdateEvent.artifact(
+                self.name,
+                GeneratedArtifact.json(
+                    package_dir / self.generated_artifact_files[0],
+                    {
+                        "schemaVersion": _POLICY_SCHEMA_VERSION,
+                        "versions": list(versions),
+                    },
+                ),
+            )
         )
-        yield UpdateEvent.value(self.name, hashes)
+        return hashes

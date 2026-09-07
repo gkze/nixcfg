@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update.derivation_validation import DerivationValidation
+from lib.update.events import EventSink, ignore_event
 from lib.update.nix import (
     _build_fetch_from_github_expr,
     _build_package_path_attr_expr,
@@ -19,8 +20,6 @@ from lib.update.updaters import (
 
 if TYPE_CHECKING:
     import aiohttp
-
-    from lib.update.events import EventStream
 
 
 @register_updater
@@ -65,22 +64,21 @@ class ZeronUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash the immutable tree, then its complete Cargo dependency closure."""
         _ = (session, context)
         commit = self._require_commit(info)
-        async for event in stream_fixed_output_hashes(
+        return await stream_fixed_output_hashes(
             self.name,
             steps=(
                 FixedOutputHashStep(
                     hash_type="srcHash",
-                    error="Missing srcHash output",
                     expr=lambda _resolved: self._src_expr(commit),
                 ),
                 FixedOutputHashStep(
                     hash_type="cargoHash",
-                    error="Missing cargoHash output",
                     expr=lambda resolved: _build_package_path_attr_expr(
                         self.name,
                         ".cargoDeps",
@@ -95,8 +93,8 @@ class ZeronUpdater(GitHubReleaseUpdater):
                 ),
             ),
             config=self.config,
-        ):
-            yield event
+            emit=emit,
+        )
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist release version, exact source commit, and both closures."""

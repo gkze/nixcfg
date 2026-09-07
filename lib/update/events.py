@@ -1,12 +1,12 @@
 """Event models and stream helpers for updater workflows."""
 
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal, ReadOnly, TypedDict, TypeIs
+from typing import Literal, ReadOnly, TypedDict
 
-from lib.nix.models.sources import HashEntry, HashMapping, SourceEntry, SourceHashes
+from lib.nix.models.sources import SourceEntry
 from lib.update.artifacts import GeneratedArtifact
 
 
@@ -22,7 +22,6 @@ class UpdateEventKind(StrEnum):
     COMMAND_START = "command_start"
     LINE = "line"
     COMMAND_END = "command_end"
-    VALUE = "value"
     RESULT = "result"
     ARTIFACT = "artifact"
     ERROR = "error"
@@ -84,7 +83,6 @@ class StatusPayload:
 
 
 type CommandArgs = list[str]
-type PlatformHash = tuple[str, str]
 type ArtifactUpdates = list[GeneratedArtifact]
 
 
@@ -106,17 +104,9 @@ type UpdateEventPayload = (
     | CommandResult
     | StatusPayload
     | SourceEntry
-    | SourceHashes
-    | PlatformHash
     | str
     | RefUpdatePayload
 )
-
-
-def _is_hash_mapping(value: object) -> TypeIs[HashMapping]:
-    if not isinstance(value, dict):
-        return False
-    return all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())
 
 
 def expect_command_result(payload: object) -> CommandResult:
@@ -134,38 +124,6 @@ def raise_failed_command(action: str, result: CommandResult) -> None:
     detail = result.stderr.strip() or result.stdout.strip()
     message = f"{action} failed (exit {result.returncode})"
     raise RuntimeError(f"{message}: {detail}" if detail else message)
-
-
-def expect_str(payload: object) -> str:
-    """Return payload as ``str`` or raise ``TypeError``."""
-    if isinstance(payload, str):
-        return payload
-    msg = f"Expected string payload, got {type(payload).__name__}"
-    raise TypeError(msg)
-
-
-def expect_hash_mapping(payload: object) -> HashMapping:
-    """Return payload as ``dict[str, str]`` or raise ``TypeError``."""
-    if _is_hash_mapping(payload):
-        return dict(payload)
-    msg = f"Expected hash mapping payload, got {type(payload).__name__}"
-    raise TypeError(msg)
-
-
-def expect_source_hashes(payload: object) -> SourceHashes:
-    """Return payload as ``SourceHashes`` or raise ``TypeError``."""
-    if _is_hash_mapping(payload):
-        return dict(payload)
-    if isinstance(payload, list):
-        entries: list[HashEntry] = []
-        for item in payload:
-            if not isinstance(item, HashEntry):
-                break
-            entries.append(item)
-        else:
-            return entries
-    msg = f"Expected SourceHashes payload, got {type(payload).__name__}"
-    raise TypeError(msg)
 
 
 def expect_source_entry(payload: object) -> SourceEntry:
@@ -246,157 +204,33 @@ class UpdateEvent:
         )
         return cls(source=source, kind=UpdateEventKind.ARTIFACT, payload=artifacts)
 
-    @classmethod
-    def value(cls, source: str, payload: UpdateEventPayload) -> UpdateEvent:
-        """Create a value event."""
-        return cls(source=source, kind=UpdateEventKind.VALUE, payload=payload)
+
+type EventSink = Callable[[UpdateEvent], Awaitable[None]]
 
 
-type EventStream = AsyncIterator[UpdateEvent]
+async def ignore_event(_event: UpdateEvent) -> None:
+    """Discard progress for callers that only need an operation's result."""
 
 
-@dataclass
-class ValueDrain[T]:
-    """Mutable holder used to capture VALUE payloads from streams."""
-
-    value: T | None = None
-
-
-async def drain_value_events[T](
-    events: EventStream,
-    drain: ValueDrain[T],
-    *,
-    parse: Callable[[UpdateEventPayload], T],
-) -> EventStream:
-    """Yield non-VALUE events while storing VALUE payloads in ``drain``."""
-    async for event in events:
-        if event.kind == UpdateEventKind.VALUE:
-            payload = event.payload
-            if payload is None:
-                msg = f"Value event from {event.source!r} is missing payload"
-                raise RuntimeError(msg)
-            drain.value = parse(payload)
-        else:
-            yield event
+async def gather_results[K, V](operations: Mapping[K, Awaitable[V]]) -> dict[K, V]:
+    """Collect typed task results, cancelling siblings if an operation fails."""
+    tasks: dict[K, asyncio.Task[V]] = {}
+    try:
+        async with asyncio.TaskGroup() as group:
+            for key, operation in operations.items():
+                tasks[key] = group.create_task(_keyed_result(key, operation))
+    except ExceptionGroup as error:
+        if len(error.exceptions) == 1:
+            raise error.exceptions[0] from None
+        message = "; ".join(str(exc) for exc in error.exceptions)
+        msg = f"Multiple update operations failed: {message}"
+        raise RuntimeError(msg) from error
+    return {key: task.result() for key, task in tasks.items()}
 
 
-def require_value[T](drain: ValueDrain[T], error: str) -> T:
-    """Extract the captured value from *drain*, raising on ``None``."""
-    if drain.value is None:
-        raise RuntimeError(error)
-    return drain.value
-
-
-@dataclass(frozen=True)
-class CapturedValue[T]:
-    """Wrapper for a required value captured from an ``EventStream``."""
-
-    captured: T
-
-
-async def capture_stream_value(
-    events: EventStream,
-    *,
-    error: str,
-) -> AsyncGenerator[UpdateEvent | CapturedValue[UpdateEventPayload]]:
-    """Yield non-VALUE events, then emit one :class:`CapturedValue`.
-
-    This wraps the common ``ValueDrain`` + ``drain_value_events`` +
-    ``require_value`` sequence while preserving streaming behavior.
-    """
-    drain = ValueDrain[UpdateEventPayload]()
-    async for event in drain_value_events(events, drain, parse=lambda payload: payload):
-        yield event
-    yield CapturedValue(require_value(drain, error))
-
-
-@dataclass(frozen=True)
-class GatheredValues[K]:
-    """Wrapper for the collected values from :func:`gather_event_streams`."""
-
-    values: dict[K, UpdateEventPayload]
-
-
-@dataclass(frozen=True)
-class _GatherDone:
-    pass
-
-
-@dataclass(frozen=True)
-class _StreamError[K]:
-    key: K
-    error: Exception
-
-
-async def gather_event_streams[K](
-    streams: dict[K, EventStream],
-) -> AsyncGenerator[UpdateEvent | GatheredValues[K]]:
-    """Run multiple ``EventStream`` generators concurrently.
-
-    Non-VALUE events are yielded as they arrive.  Each stream's VALUE payload
-    is captured keyed by its dict key.  Once every stream finishes, the
-    collected values are yielded as a :class:`GatheredValues` instance.
-
-    Usage::
-
-        async for item in gather_event_streams({"a": gen_a, "b": gen_b}):
-            if isinstance(item, GatheredValues):
-                hashes = item.values  # dict[str, str] with all results
-            else:
-                yield item  # forward UpdateEvent to caller
-    """
-    done = _GatherDone()
-    queue: asyncio.Queue[UpdateEvent | _StreamError[K] | _GatherDone] = asyncio.Queue()
-    results: dict[K, UpdateEventPayload] = {}
-
-    def _required_payload(event: UpdateEvent) -> UpdateEventPayload:
-        payload = event.payload
-        if payload is None:
-            msg = f"Value event from {event.source!r} is missing payload"
-            raise RuntimeError(msg)
-        return payload
-
-    async def _run(key: K, stream: EventStream) -> None:
-        try:
-            async for event in stream:
-                if event.kind == UpdateEventKind.VALUE:
-                    results[key] = _required_payload(event)
-                else:
-                    await queue.put(event)
-        except Exception as exc:  # noqa: BLE001
-            await queue.put(_StreamError(key=key, error=exc))
-        finally:
-            await queue.put(done)
-
-    errors: list[_StreamError[K]] = []
-    remaining = len(streams)
-    async with asyncio.TaskGroup() as group:
-        tasks: list[asyncio.Task[None]] = []
-        for key, stream in streams.items():
-            tasks.append(group.create_task(_run(key, stream)))
-
-        while remaining > 0:
-            item = await queue.get()
-            if isinstance(item, _GatherDone):
-                remaining -= 1
-                continue
-            if isinstance(item, _StreamError):
-                errors.append(item)
-                for task in tasks:
-                    if not task.done():
-                        task.cancel()
-                continue
-            yield item
-
-    if errors:
-        if len(errors) == 1:
-            error = errors[0].error
-            if hasattr(error, "add_note"):
-                error.add_note(f"event stream key: {errors[0].key!r}")
-            raise error
-        message = "; ".join(f"{error.key!r}: {error.error}" for error in errors)
-        aggregate = RuntimeError(f"Multiple event streams failed: {message}")
-        for error in errors:
-            aggregate.add_note(f"{error.key!r}: {error.error!r}")
-        raise aggregate
-    yield GatheredValues(results)
+async def _keyed_result[K, V](key: K, operation: Awaitable[V]) -> V:
+    try:
+        return await operation
+    except Exception as error:
+        error.add_note(f"update operation key: {key!r}")
+        raise

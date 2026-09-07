@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 from lib import json_utils
 from lib.update.net import fetch_json, fetch_url
 from lib.update.sources import read_pinned_source_version
-from lib.update.updaters.core import DownloadHashUpdater, DownloadUrlMetadataUpdater
+from lib.update.updaters.core import (
+    DownloadHashUpdater,
+    DownloadUrlMetadataUpdater,
+    UpdateContext,
+)
 from lib.update.updaters.metadata import (
     AssetURLsMetadata,
     DownloadUrlMetadata,
@@ -52,8 +56,11 @@ class VersionEndpointDownloadUpdater(DownloadHashUpdater):
 
     VERSION_URL: ClassVar[str]
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch and validate the plain-text version payload."""
+        _ = context
         payload = await fetch_url(
             session,
             self.VERSION_URL,
@@ -77,8 +84,11 @@ class JsonFieldDownloadUpdater(DownloadHashUpdater):
         """Normalize the raw JSON version field; identity by default."""
         return raw
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch the JSON payload and extract the configured version field."""
+        _ = context
         payload = await fetch_json(
             session,
             self.JSON_URL,
@@ -98,8 +108,11 @@ class HeadArtifactDownloadUpdater(DownloadHashUpdater):
 
     HEAD_URL: ClassVar[str]
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Build a version token from the artifact's response headers."""
+        _ = context
         version = await fetch_head_artifact_version(
             session,
             self.HEAD_URL,
@@ -113,8 +126,11 @@ class PinnedSourceDownloadUpdater(DownloadHashUpdater):
 
     materialize_when_current: ClassVar[bool] = True
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Return the version already pinned in the package's sources.json."""
+        _ = context
         _ = session
         return VersionInfo(version=read_pinned_source_version(self.name))
 
@@ -138,8 +154,11 @@ class SparkleAppcastUpdater(DownloadHashUpdater):
         _ = item
         return None
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch the appcast and resolve version details from its newest item."""
+        _ = context
         items = await fetch_sparkle_appcast_items(
             session,
             self.APPCAST_URL,
@@ -164,8 +183,11 @@ class ElectronBuilderAssetURLsUpdater(DownloadHashUpdater):
     FEED_URL: ClassVar[str]
     SELECTORS: ClassVar[Mapping[str, ElectronAssetSelector]]
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch the feed and select one artifact URL per platform."""
+        _ = context
         version, asset_urls = await fetch_electron_builder_asset_urls(
             session,
             self.FEED_URL,

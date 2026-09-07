@@ -13,6 +13,8 @@ from lib.update.updaters.vendor_feeds import fetch_electron_builder_artifact_url
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 
 @register_updater
 class LinearUpdater(DownloadUrlMetadataUpdater):
@@ -26,8 +28,11 @@ class LinearUpdater(DownloadUrlMetadataUpdater):
     }
     URL_METADATA_CONTEXT = "Linear metadata"
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Fetch Linear's latest macOS feed and return the DMG URL."""
+        _ = context
         version, dmg_url = await fetch_electron_builder_artifact_url(
             session,
             self.FEED_URL,

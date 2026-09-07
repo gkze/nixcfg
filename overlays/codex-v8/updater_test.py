@@ -10,8 +10,9 @@ from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
+from lib.update.events import EventSink, UpdateEvent, ignore_event
 from lib.update.nix import _build_fetchgit_call
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 _COMMIT = "a" * 40
 
@@ -28,40 +29,36 @@ def test_codex_v8_updater_computes_recursive_src_hash(monkeypatch) -> None:
     calls: list[str] = []
     url_batches: list[list[str]] = []
 
-    async def _hash_stream(_name: str, expr: str, *, config=None):
+    async def _hash_stream(
+        _name: str, expr: str, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         _ = config
         calls.append(expr)
-        yield module.UpdateEvent.value(
-            "codex-v8",
-            "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-        )
+        return "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
-    async def _url_hashes(_name: str, urls, *, config=None):
+    async def _url_hashes(
+        _name: str, urls, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         assert config is updater.config
         url_batches.append(list(urls))
-        yield module.UpdateEvent.value(
-            "codex-v8",
-            {
-                url_batches[0][
-                    0
-                ]: "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
-                url_batches[0][
-                    1
-                ]: "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
-            },
-        )
+        return {
+            url_batches[0][0]: "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+            url_batches[0][1]: "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
+        }
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _hash_stream)
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _url_hashes)
 
     events = _run(
         _collect_events(
-            updater.fetch_hashes(
+            lambda emit: updater.fetch_hashes(
                 VersionInfo(
                     version="v999.0.0",
                     metadata={"commit": _COMMIT, "tag": "v999.0.0"},
                 ),
                 object(),
+                emit=emit,
+                context=UpdateContext(current=None),
             )
         )
     )
@@ -74,7 +71,7 @@ def test_codex_v8_updater_computes_recursive_src_hash(monkeypatch) -> None:
             fetch_submodules=True,
         ),
     )
-    assert events[-1].payload == [
+    assert events.result == [
         HashEntry.create(
             "srcHash",
             "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
@@ -116,7 +113,7 @@ def test_codex_v8_fetch_latest_reads_version_from_codex_cargo_nix(
 
     monkeypatch.setattr(updater, "_resolve_release_tag_commit", _resolve_commit)
 
-    latest = _run(updater.fetch_latest(object()))
+    latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert latest.version == "v147.4.0"
     assert latest.commit == _COMMIT
@@ -201,35 +198,39 @@ def test_codex_v8_is_latest_requires_all_expected_hash_entries() -> None:
         ),
     )
 
-    assert _run(updater._is_latest(None, latest)) is False
+    assert _run(updater._is_latest(UpdateContext(current=None), latest)) is False
     assert (
         _run(
             updater._is_latest(
-                SimpleNamespace(
-                    version="v999.0.0",
-                    commit=_COMMIT,
-                    hashes=SimpleNamespace(entries=None),
+                UpdateContext(
+                    current=SimpleNamespace(
+                        version="v999.0.0",
+                        commit=_COMMIT,
+                        hashes=SimpleNamespace(entries=None),
+                    )
                 ),
                 latest,
             )
         )
         is False
     )
-    assert _run(updater._is_latest(incomplete, latest)) is False
+    assert _run(updater._is_latest(UpdateContext(current=incomplete), latest)) is False
     assert (
         _run(
             updater._is_latest(
-                SimpleNamespace(
-                    version="v999.0.0",
-                    commit="b" * 40,
-                    hashes=complete.hashes,
+                UpdateContext(
+                    current=SimpleNamespace(
+                        version="v999.0.0",
+                        commit="b" * 40,
+                        hashes=complete.hashes,
+                    )
                 ),
                 latest,
             )
         )
         is False
     )
-    assert _run(updater._is_latest(complete, latest)) is True
+    assert _run(updater._is_latest(UpdateContext(current=complete), latest)) is True
 
 
 def test_codex_v8_result_persists_the_resolved_commit() -> None:
@@ -255,48 +256,48 @@ def test_codex_v8_result_persists_the_resolved_commit() -> None:
     assert result.commit == _COMMIT
 
 
-def test_codex_v8_fetch_hashes_forwards_non_value_events(monkeypatch) -> None:
-    """Non-value events from both hash streams should be preserved."""
+def test_codex_v8_fetch_hashes_forwards_hash_progress(monkeypatch) -> None:
+    """Progress from both hash operations is preserved."""
     module = _load_module("codex_v8_updater_forwarding_test")
     updater = module.CodexV8Updater()
 
-    async def _hash_stream(_name: str, _expr: str, *, config=None):
+    async def _hash_stream(
+        _name: str, _expr: str, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         _ = config
-        yield module.UpdateEvent.status("codex-v8", "computing src")
-        yield module.UpdateEvent.value(
-            "codex-v8",
-            "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-        )
+        await emit(UpdateEvent.status("codex-v8", "computing src"))
+        return "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
-    async def _url_hashes(_name: str, urls, *, config=None):
+    async def _url_hashes(
+        _name: str, urls, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         assert config is updater.config
         urls = list(urls)
-        yield module.UpdateEvent.status("codex-v8", "computing assets")
-        yield module.UpdateEvent.value(
-            "codex-v8",
-            {
-                urls[0]: "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
-                urls[1]: "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
-            },
-        )
+        await emit(UpdateEvent.status("codex-v8", "computing assets"))
+        return {
+            urls[0]: "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+            urls[1]: "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
+        }
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _hash_stream)
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _url_hashes)
 
     events = _run(
         _collect_events(
-            updater.fetch_hashes(
+            lambda emit: updater.fetch_hashes(
                 VersionInfo(
                     version="v999.0.0",
                     metadata={"commit": _COMMIT, "tag": "v999.0.0"},
                 ),
                 object(),
+                emit=emit,
+                context=UpdateContext(current=None),
             )
         )
     )
 
-    assert [event.kind.value for event in events] == ["status", "status", "value"]
-    assert [event.message for event in events[:-1]] == [
+    assert [event.kind.value for event in events] == ["status", "status"]
+    assert [event.message for event in events] == [
         "computing src",
         "computing assets",
     ]

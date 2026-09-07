@@ -4,26 +4,30 @@
   src ? ../..,
 }:
 let
-  mkTestSource =
-    unrelatedFile:
-    lib.fileset.toSource {
-      root = src;
-      fileset = lib.fileset.unions [
-        (src + "/misc/zsh-plugins")
-        (src + "/modules/home/gpg-tty.zsh")
-        (src + "/modules/home/zsh.nix")
-        (src + "/${unrelatedFile}")
-      ];
+  pluginRoot = src + "/misc/zsh-plugins";
+  expectedFiles = [
+    (pluginRoot + "/zsh-vi-mode-backward-kill-word.plugin.zsh")
+    (pluginRoot + "/zsh-vi-mode-system-clipboard.plugin.zsh")
+  ];
+  # Observe the module's real projection boundary before materializing it.
+  # A plugin-only root and fileset keep unrelated repository edits out of its
+  # source identity without importing a newly projected tree during evaluation.
+  moduleLib = lib // {
+    fileset = lib.fileset // {
+      toSource =
+        { root, fileset }@args:
+        assert root == pluginRoot;
+        assert lib.fileset.toList fileset == expectedFiles;
+        lib.fileset.toSource args;
     };
-
-  sourceA = mkTestSource "default.nix";
-  sourceB = mkTestSource "flake.nix";
+  };
 
   evalPlugins =
     source:
     let
       evaluated = lib.evalModules {
         specialArgs = {
+          lib = moduleLib;
           pkgs = {
             zsh-autosuggestions = source;
             zsh-f-sy-h = source;
@@ -36,7 +40,7 @@ let
           system = "x86_64-linux";
         };
         modules = [
-          (source + "/modules/home/zsh.nix")
+          (src + "/modules/home/zsh.nix")
           (
             { lib, ... }:
             {
@@ -63,10 +67,9 @@ let
       plugin: lib.hasPrefix "zsh-vi-mode-" plugin.name && plugin.name != "zsh-vi-mode"
     ) evaluated.config.programs.zsh.plugins;
 
-  repoPluginsA = evalPlugins sourceA;
-  repoPluginsB = evalPlugins sourceB;
+  repoPlugins = evalPlugins src;
   pluginNames = plugins: builtins.map (plugin: plugin.name) plugins;
-  repoPluginsSourceA = (builtins.head repoPluginsA).src;
+  repoPluginsSource = (builtins.head repoPlugins).src;
   pluginSources = plugins: builtins.map (plugin: toString plugin.src) plugins;
   expectedNames = [
     "zsh-vi-mode-backward-kill-word"
@@ -74,33 +77,21 @@ let
   ];
   checks = [
     (
-      assert pluginNames repoPluginsA == expectedNames;
+      assert pluginNames repoPlugins == expectedNames;
       true
     )
     (
-      assert pluginNames repoPluginsB == expectedNames;
-      true
-    )
-    (
-      assert builtins.length (lib.unique (pluginSources repoPluginsA)) == 1;
-      true
-    )
-    # An unrelated repository edit must not change either plugin's source
-    # identity in the evaluated Home Manager configuration.
-    (
-      assert pluginSources repoPluginsA == pluginSources repoPluginsB;
+      assert builtins.length (lib.unique (pluginSources repoPlugins)) == 1;
       true
     )
   ];
 in
 assert builtins.deepSeq checks true;
 pkgs.runCommand "test-nix-zsh-repo-plugins" { } ''
-  test -f ${sourceA}/modules/home/zsh.nix
-  test -f ${sourceB}/modules/home/zsh.nix
-  test -f ${repoPluginsSourceA}/zsh-vi-mode-backward-kill-word.plugin.zsh
-  test -f ${repoPluginsSourceA}/zsh-vi-mode-system-clipboard.plugin.zsh
+  test -f ${repoPluginsSource}/zsh-vi-mode-backward-kill-word.plugin.zsh
+  test -f ${repoPluginsSource}/zsh-vi-mode-system-clipboard.plugin.zsh
   actual_files="$(
-    find ${repoPluginsSourceA} -mindepth 1 -maxdepth 1 -type f -exec basename {} \; \
+    find ${repoPluginsSource} -mindepth 1 -maxdepth 1 -type f -exec basename {} \; \
       | LC_ALL=C sort
   )"
   expected_files="$(printf '%s\n' \

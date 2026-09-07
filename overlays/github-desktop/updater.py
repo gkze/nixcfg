@@ -7,13 +7,11 @@ from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, Sourc
 from lib.update import flake as update_flake
 from lib.update import nix as update_nix
 from lib.update.events import (
+    EventSink,
     StatusInfo,
     StatusKind,
     UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_str,
-    require_value,
+    ignore_event,
 )
 from lib.update.net import fetch_json, github_raw_url
 from lib.update.nix import _build_overlay_attr_expr
@@ -23,13 +21,11 @@ from lib.update.updaters import (
     VersionInfo,
     register_updater,
 )
-from lib.update.updaters.core import _coerce_context
 from lib.update.updaters.metadata import require_metadata_str
 
 if TYPE_CHECKING:
     import aiohttp
 
-    from lib.update.events import EventStream
 
 type GitHubDesktopHashType = Literal["yarnRootHash", "yarnAppHash"]
 
@@ -91,8 +87,11 @@ class GitHubDesktopUpdater(FlakeInputUpdater):
             context="GitHub Desktop metadata",
         )
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the locked beta tag and its exact Electron runtime."""
+        _ = context
         node = update_flake.get_flake_input_node(self._input)
         ref = update_flake.get_flake_input_version(node)
         version = _version_from_release_ref(ref)
@@ -146,11 +145,11 @@ class GitHubDesktopUpdater(FlakeInputUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Require current version, cache hashes, input name, and drv fingerprint."""
-        update_context = _coerce_context(context)
+        update_context = context
         current = update_context.current
         if (
             current is None
@@ -180,51 +179,49 @@ class GitHubDesktopUpdater(FlakeInputUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Compute the two fixed-output Yarn caches."""
-        _ = (session, _coerce_context(context))
+        _ = (session, context)
         source_override = self.build_result(info, [])
         entries: list[HashEntry] = []
         for hash_type, attr_path in self._CACHE_ATTRS:
-            hash_drain = ValueDrain[str]()
-            async for event in drain_value_events(
-                update_nix.compute_fixed_output_hash(
+            hash_value = await update_nix.compute_fixed_output_hash(
+                self.name,
+                _build_overlay_attr_expr(
                     self.name,
-                    _build_overlay_attr_expr(
-                        self.name,
-                        attr_path,
-                        source_overrides={self.name: source_override},
-                        fake_hashes=True,
-                    ),
-                    config=self.config,
+                    attr_path,
+                    source_overrides={self.name: source_override},
+                    fake_hashes=True,
                 ),
-                hash_drain,
-                parse=expect_str,
-            ):
-                yield event
-            hash_value = require_value(hash_drain, f"Missing {hash_type} output")
+                config=self.config,
+                emit=emit,
+            )
             entries.append(HashEntry.create(hash_type, hash_value))
-        yield UpdateEvent.value(self.name, entries)
+        return entries
 
     async def _finalize_result(
         self,
         result: SourceEntry,
         *,
         info: VersionInfo | None = None,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceEntry:
         """Attach a fake-hash drv fingerprint for precise staleness checks."""
         _ = info
-        update_context = _coerce_context(context)
-        yield UpdateEvent.status(
-            self.name,
-            "Computing derivation fingerprint...",
-            operation="compute_hash",
-            status=StatusInfo(
-                kind=StatusKind.COMPUTING_HASH,
-                value="derivation fingerprint",
-            ),
+        update_context = context
+        await emit(
+            UpdateEvent.status(
+                self.name,
+                "Computing derivation fingerprint...",
+                operation="compute_hash",
+                status=StatusInfo(
+                    kind=StatusKind.COMPUTING_HASH,
+                    value="derivation fingerprint",
+                ),
+            )
         )
         try:
             drv_hash = update_context.drv_fingerprint
@@ -239,9 +236,11 @@ class GitHubDesktopUpdater(FlakeInputUpdater):
                 )
             result = result.model_copy(update={"drv_hash": drv_hash})
         except RuntimeError as exc:
-            yield UpdateEvent.status(
-                self.name,
-                f"Warning: derivation fingerprint unavailable ({exc})",
-                operation="compute_hash",
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    f"Warning: derivation fingerprint unavailable ({exc})",
+                    operation="compute_hash",
+                )
             )
-        yield UpdateEvent.value(self.name, result)
+        return result

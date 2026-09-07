@@ -10,20 +10,13 @@ from lib.update.config import (
     resolve_active_config,
 )
 from lib.update.events import (
-    CommandResult,
-    EventStream,
+    EventSink,
     StatusInfo,
     StatusKind,
     UpdateEvent,
-    UpdateEventKind,
-    ValueDrain,
-    drain_value_events,
-    expect_command_result,
-    expect_str,
-    require_value,
+    ignore_event,
 )
 from lib.update.nix import (
-    _PLATFORM_HASH_PAYLOAD_SIZE,
     _build_overlay_expr,
     _emit_sri_hash_from_build_result,
     _FixedOutputBuildOptions,
@@ -32,6 +25,7 @@ from lib.update.nix import (
 )
 from lib.update.paths import sources_file_for
 from lib.update.platform_hashes import (
+    PlatformHashResult,
     PreservedPlatformHash,
     preserve_existing_platform_hash,
     preserved_platform_hash_status,
@@ -108,47 +102,25 @@ async def _compute_deno_deps_hash_for_platform(
     *,
     source_override: SourceEntry | None = None,
     config: UpdateConfig | None = None,
-) -> EventStream:
+    emit: EventSink = ignore_event,
+) -> tuple[str, str]:
     expr = _build_deno_deps_expr(source, platform, source_override)
-    result_drain = ValueDrain[CommandResult]()
-    async for event in drain_value_events(
-        _run_fixed_output_build(
-            f"{source}:{platform}",
-            expr,
-            options=_FixedOutputBuildOptions(
-                success_error=(
-                    "Expected nix build to fail with hash mismatch "
-                    f"for {platform}, but it succeeded"
-                ),
-                config=config,
+    result = await _run_fixed_output_build(
+        f"{source}:{platform}",
+        expr,
+        options=_FixedOutputBuildOptions(
+            success_error=(
+                "Expected nix build to fail with hash mismatch "
+                f"for {platform}, but it succeeded"
             ),
+            config=config,
         ),
-        result_drain,
-        parse=expect_command_result,
-    ):
-        yield event
-    result = require_value(result_drain, "nix build did not return output")
-    hash_drain = ValueDrain[str]()
-    async for event in drain_value_events(
-        _emit_sri_hash_from_build_result(source, result, config=config),
-        hash_drain,
-        parse=expect_str,
-    ):
-        yield event
-    hash_value = require_value(hash_drain, "Hash conversion failed")
-    yield UpdateEvent.value(source, (platform, hash_value))
-
-
-def _try_platform_hash_event(event: UpdateEvent) -> tuple[str, str] | None:
-    if event.kind != UpdateEventKind.VALUE:
-        return None
-    payload = event.payload
-    if isinstance(payload, tuple) and len(payload) == _PLATFORM_HASH_PAYLOAD_SIZE:
-        first = payload[0]
-        second = payload[1]
-        if isinstance(first, str) and isinstance(second, str):
-            return first, second
-    return None
+        emit=emit,
+    )
+    hash_value = await _emit_sri_hash_from_build_result(
+        source, result, config=config, emit=emit
+    )
+    return (platform, hash_value)
 
 
 def _existing_platform_hashes(original_entry: SourceEntry | None) -> dict[str, str]:
@@ -175,15 +147,15 @@ class _PlatformHashContext:
 
 
 async def _process_platform_hash(
-    platform_name: str,
-    *,
-    context: _PlatformHashContext,
-) -> EventStream:
-    yield UpdateEvent.status(
-        context.source,
-        f"Computing hash for {platform_name}...",
-        operation="compute_hash",
-        status=StatusInfo(kind=StatusKind.COMPUTING_HASH, value=platform_name),
+    platform_name: str, *, context: _PlatformHashContext, emit: EventSink = ignore_event
+) -> None:
+    await emit(
+        UpdateEvent.status(
+            context.source,
+            f"Computing hash for {platform_name}...",
+            operation="compute_hash",
+            status=StatusInfo(kind=StatusKind.COMPUTING_HASH, value=platform_name),
+        )
     )
 
     temp_entries = _build_deno_hash_entries(
@@ -200,19 +172,15 @@ async def _process_platform_hash(
     )
 
     try:
-        async for event in _compute_deno_deps_hash_for_platform(
+        platform, hash_value = await _compute_deno_deps_hash_for_platform(
             context.source,
             context.input_name,
             platform_name,
             source_override=temp_entry,
             config=context.config,
-        ):
-            payload = _try_platform_hash_event(event)
-            if payload is None:
-                yield event
-                continue
-            plat, hash_val = payload
-            context.platform_hashes[plat] = hash_val
+            emit=emit,
+        )
+        context.platform_hashes[platform] = hash_value
     except RuntimeError as exc:
         if platform_name == context.current_platform:
             raise
@@ -223,7 +191,7 @@ async def _process_platform_hash(
         )
         context.failed_platforms.append(preserved)
         context.platform_hashes[platform_name] = preserved.hash
-        yield preserved_platform_hash_status(context.source, preserved)
+        await emit(preserved_platform_hash_status(context.source, preserved))
 
 
 async def compute_deno_deps_hash(
@@ -233,7 +201,8 @@ async def compute_deno_deps_hash(
     native_only: bool = False,
     config: UpdateConfig | None = None,
     source_override: SourceEntry | None = None,
-) -> EventStream:
+    emit: EventSink = ignore_event,
+) -> PlatformHashResult:
     """Compute Deno dependency hashes across configured platforms.
 
     Nix reads per-package ``sources.json`` values during evaluation, so each
@@ -275,17 +244,17 @@ async def compute_deno_deps_hash(
     )
 
     for platform_name in platforms_to_compute:
-        async for event in _process_platform_hash(
-            platform_name=platform_name,
-            context=context,
-        ):
-            yield event
+        await _process_platform_hash(
+            platform_name=platform_name, context=context, emit=emit
+        )
 
     if failed_platforms:
-        yield preserved_platform_hash_warning(source, failed_platforms)
+        await emit(preserved_platform_hash_warning(source, failed_platforms))
 
-    final_hashes = {**existing_hashes, **platform_hashes}
-    yield UpdateEvent.value(source, final_hashes)
+    return PlatformHashResult(
+        hashes={**existing_hashes, **platform_hashes},
+        fully_computed=not failed_platforms,
+    )
 
 
 __all__ = [

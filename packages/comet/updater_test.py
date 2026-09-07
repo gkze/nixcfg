@@ -1,6 +1,5 @@
 """Behavioral tests for the Comet browser release updater."""
 
-from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from types import ModuleType
 
@@ -8,8 +7,8 @@ import pytest
 
 from lib.tests._updater_helpers import collect_events, load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.events import UpdateEvent
-from lib.update.updaters import VersionInfo
+from lib.update.events import EventSink, ignore_event
+from lib.update.updaters import UpdateContext, VersionInfo
 
 _HASH = "sha256-yAYdnv44sf89OSRK6JIUyiJJlAm/NJdoPDJ3dF1vIvE="
 
@@ -61,7 +60,7 @@ def test_comet_resolves_latest_version_from_platform_download_redirects() -> Non
     }
     session = _FakeSession(responses)
 
-    info = _run(updater.fetch_latest(session))
+    info = _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
 
     assert info == VersionInfo(version="150.0.7871.228")
     assert [(method, url) for method, url, _kwargs in session.calls] == [
@@ -138,7 +137,11 @@ def test_comet_rejects_platform_version_mismatches() -> None:
     }
 
     with pytest.raises(RuntimeError, match="mismatched versions"):
-        _run(updater.fetch_latest(_FakeSession(responses)))
+        _run(
+            updater.fetch_latest(
+                _FakeSession(responses), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_comet_hashes_fresh_signed_artifact_and_persists_canonical_urls(
@@ -160,25 +163,32 @@ def test_comet_hashes_fresh_signed_artifact_and_persists_canonical_urls(
         urls_by_key: dict[str, str],
         *,
         config: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         assert config is updater.config
         assert source_name == "comet"
         captured_urls.update(urls_by_key)
-        yield UpdateEvent.value(
-            source_name,
-            dict.fromkeys(urls_by_key, _HASH),
-        )
+        return dict.fromkeys(urls_by_key, _HASH)
 
     monkeypatch.setattr(module, "stream_url_hash_mapping", _hash_urls)
     info = VersionInfo(version="150.0.7871.228")
 
-    events = _run(collect_events(updater.fetch_hashes(info, _FakeSession(responses))))
+    events = _run(
+        collect_events(
+            lambda emit: updater.fetch_hashes(
+                info,
+                _FakeSession(responses),
+                emit=emit,
+                context=UpdateContext(current=None),
+            )
+        )
+    )
     result = updater.build_result(
         info,
         dict.fromkeys(updater.PLATFORMS, _HASH),
     )
 
-    assert len(events) == 1
+    assert events == []
     assert set(captured_urls) == set(updater.PLATFORMS)
     assert len(set(captured_urls.values())) == 1
     assert next(iter(captured_urls.values())).startswith(
@@ -199,9 +209,11 @@ def test_comet_rejects_artifact_version_drift_before_hashing() -> None:
     with pytest.raises(RuntimeError, match="changed from 150.0.7871.228"):
         _run(
             collect_events(
-                updater.fetch_hashes(
+                lambda emit: updater.fetch_hashes(
                     VersionInfo(version="150.0.7871.228"),
                     _FakeSession(responses),
+                    emit=emit,
+                    context=UpdateContext(current=None),
                 )
             )
         )

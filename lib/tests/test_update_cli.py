@@ -3,6 +3,7 @@
 import asyncio
 import json
 import subprocess
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Protocol
@@ -26,7 +27,7 @@ from lib.update.cli_inventory import (
     _InventoryTarget,
 )
 from lib.update.derivation_validation import DerivationValidation
-from lib.update.persistence import merge_source_updates
+from lib.update.persistence import UpdateValidationSnapshot, merge_source_updates
 from lib.update.refs import FlakeInputRef
 from lib.update.source_runner import UpdatePhaseResult
 from lib.update.updaters import Updater
@@ -56,6 +57,9 @@ class _PassthroughUpdateWorkspace:
 
     def __exit__(self, *_exc_info: object) -> None:
         return None
+
+    def validation_snapshot(self) -> nullcontext[UpdateValidationSnapshot]:
+        return nullcontext(UpdateValidationSnapshot(root=self.root, changed_paths=()))
 
     def promote(self, _allowed: object) -> tuple[Path, ...]:
         return ()
@@ -618,7 +622,7 @@ def test_run_updates_json_validation_failure_is_machine_readable(
 
 def test_emit_summary_json_outputs_payload(capsys: _CaptureLike) -> None:
     """Write summary payload to stdout in json mode."""
-    summary = UpdateSummary(updated=["demo"], errors=[], no_change=["stable"])
+    summary = UpdateSummary(statuses={"demo": "updated", "stable": "no_change"})
 
     exit_code = _emit_summary(
         summary,

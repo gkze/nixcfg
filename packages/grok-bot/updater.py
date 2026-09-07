@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 
     import aiohttp
 
-    from lib.nix.models.sources import SourceEntry
     from lib.update.updaters import UpdateContext
 
 _DISCOVERY_VERSION = "0.0.0"
@@ -127,8 +126,11 @@ class GrokBotUpdater(DownloadingPlatformAPIUpdater):
         msg = f"Unknown Grok Bot API platform: {api_platform}"
         raise RuntimeError(msg)
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve one stable release and its validated per-architecture ZIPs."""
+        _ = context
 
         async def _fetch_one(
             platform: str,
@@ -169,7 +171,7 @@ class GrokBotUpdater(DownloadingPlatformAPIUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Rehash because the vendor may replace a versioned artifact in place."""

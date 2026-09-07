@@ -14,6 +14,8 @@ from lib.update.updaters.metadata import FlakeInputMetadata
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.updaters.core import UpdateContext
+
 
 @register_updater
 class ZedEditorNightlyUpdater(Crate2NixMetadataUpdater):
@@ -25,10 +27,10 @@ class ZedEditorNightlyUpdater(Crate2NixMetadataUpdater):
     _MANIFEST_PATH = "crates/zed/Cargo.toml"
 
     async def fetch_latest(
-        self,
-        session: aiohttp.ClientSession,
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
         """Resolve the current app version from the locked upstream manifest."""
+        _ = context
         node = self._resolve_flake_node(VersionInfo(version="ignored"))
         locked = node.locked
         owner = locked.owner if locked is not None else None

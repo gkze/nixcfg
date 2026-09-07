@@ -1,18 +1,19 @@
 """Tests for the GitButler updater."""
 
-from collections.abc import AsyncIterator
-
 import pytest
 
 from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._updater_helpers import collect_events as _collect
-from lib.tests._updater_helpers import empty_event_stream, load_repo_module
+from lib.tests._updater_helpers import (
+    empty_event_stream,
+    load_repo_module,
+)
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.artifacts import GeneratedArtifact
-from lib.update.events import UpdateEvent, UpdateEventKind
+from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
 from lib.update.nix import _build_package_path_attr_expr
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import FlakeInputMetadata
 from lib.update.updaters.node_compatibility import NodejsSelection
 
@@ -152,7 +153,7 @@ def test_gitbutler_updater_tracks_release_ref_and_metadata(
         expected_command_timeout=updater.config.default_subprocess_timeout,
     )
 
-    info = _run(updater.fetch_latest(object()))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert module.GitButlerUpdater.hash_type == "npmDepsHash"
     assert module.GitButlerUpdater.input_name == "gitbutler"
@@ -188,7 +189,7 @@ def test_gitbutler_updater_requires_immutable_locked_commit(
     monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
 
     with pytest.raises(RuntimeError, match="must resolve to an immutable"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 @pytest.mark.parametrize(
@@ -209,7 +210,7 @@ def test_gitbutler_updater_requires_release_ref(
     monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
 
     with pytest.raises(RuntimeError, match="must be pinned to a release"):
-        _run(updater.fetch_latest(object()))
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 @pytest.mark.parametrize(
@@ -368,26 +369,24 @@ def test_gitbutler_updater_builds_pnpm_hash_expression(
         expr: str,
         *,
         config: object | None = None,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         captured.update({"name": name, "expr": expr, "config": config})
-        yield UpdateEvent.status(name, "hashing pnpm deps")
-        yield UpdateEvent.value(name, HASH)
+        await emit(UpdateEvent.status(name, "hashing pnpm deps"))
+        return HASH
 
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
     events = _run(
         _collect(
-            updater._compute_hash_for_system(
-                _version_info(),
-                system="aarch64-darwin",
+            lambda emit: updater._compute_hash_for_system(
+                _version_info(), system="aarch64-darwin", emit=emit
             )
         )
     )
 
-    assert events == [
-        UpdateEvent.status("gitbutler", "hashing pnpm deps"),
-        UpdateEvent.value("gitbutler", HASH),
-    ]
+    assert events == [UpdateEvent.status("gitbutler", "hashing pnpm deps")]
+    assert events.result == HASH
     assert captured["name"] == "gitbutler"
     assert captured["config"] is updater.config
     assert captured["expr"] == _build_package_path_attr_expr(
@@ -407,18 +406,19 @@ def test_gitbutler_updater_streams_artifacts_before_hashing(
     updater = module.GitButlerUpdater()
     node = _flake_node(ref="release/0.19.9", rev="d" * 40)
 
-    async def _artifacts() -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.status("gitbutler", "materialized cargo artifacts")
+    async def _artifacts(*, emit: EventSink = ignore_event) -> object:
+        await emit(UpdateEvent.status("gitbutler", "materialized cargo artifacts"))
 
     async def _fixed_hash(
         name: str,
         _expr: str,
         *,
         config: object | None = None,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = config
-        yield UpdateEvent.status(name, "hashing pnpm deps")
-        yield UpdateEvent.value(name, HASH)
+        await emit(UpdateEvent.status(name, "hashing pnpm deps"))
+        return HASH
 
     monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
     _mock_toolchain_resolution(
@@ -429,16 +429,24 @@ def test_gitbutler_updater_streams_artifacts_before_hashing(
     monkeypatch.setattr(updater, "stream_materialized_artifacts", _artifacts)
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
-    events = _run(_collect(updater.fetch_hashes(_version_info(), object())))
+    events = _run(
+        _collect(
+            lambda emit: updater.fetch_hashes(
+                _version_info(),
+                object(),
+                emit=emit,
+                context=UpdateContext(current=None),
+            )
+        )
+    )
 
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
         UpdateEventKind.STATUS,
-        UpdateEventKind.VALUE,
     ]
     assert events[0].message == "materialized cargo artifacts"
     assert events[1].message == "hashing pnpm deps"
-    assert events[2].payload == [HashEntry.create("npmDepsHash", HASH)]
+    assert events.result == [HashEntry.create("npmDepsHash", HASH)]
 
 
 def test_gitbutler_update_recomputes_pnpm_drv_hash_when_cargo_artifacts_change(
@@ -461,10 +469,12 @@ def test_gitbutler_update_recomputes_pnpm_drv_hash_when_cargo_artifacts_change(
         "input": "gitbutler",
     })
 
-    async def _artifacts() -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.artifact(
-            "gitbutler",
-            GeneratedArtifact.text("packages/gitbutler/Cargo.nix", "updated"),
+    async def _artifacts(*, emit: EventSink = ignore_event) -> object:
+        await emit(
+            UpdateEvent.artifact(
+                "gitbutler",
+                GeneratedArtifact.text("packages/gitbutler/Cargo.nix", "updated"),
+            )
         )
 
     async def _fixed_hash(
@@ -472,9 +482,10 @@ def test_gitbutler_update_recomputes_pnpm_drv_hash_when_cargo_artifacts_change(
         _expr: str,
         *,
         config: object | None = None,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = config
-        yield UpdateEvent.value(name, HASH)
+        return HASH
 
     fingerprint_calls = 0
 
@@ -496,7 +507,9 @@ def test_gitbutler_update_recomputes_pnpm_drv_hash_when_cargo_artifacts_change(
         _compute_drv_fingerprint,
     )
 
-    events = _run(_collect(updater.update_stream(current, object())))
+    events = _run(
+        _collect(lambda emit: updater.update_stream(current, object(), emit=emit))
+    )
 
     result_events = [event for event in events if event.kind == UpdateEventKind.RESULT]
     assert len(result_events) == 1
@@ -509,7 +522,7 @@ def test_gitbutler_update_recomputes_pnpm_drv_hash_when_cargo_artifacts_change(
     assert fingerprint_calls == 1
 
 
-def test_gitbutler_updater_requires_npm_deps_hash(
+def test_gitbutler_updater_propagates_npm_hash_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An empty fixed-output stream should fail instead of writing no hash."""
@@ -522,14 +535,23 @@ def test_gitbutler_updater_requires_npm_deps_hash(
         _expr: str,
         *,
         config: object | None = None,
-    ) -> AsyncIterator[UpdateEvent]:
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = config
-        async for event in empty_event_stream():
-            yield event
+        raise RuntimeError("npm hash probe failed")
 
     monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
     monkeypatch.setattr(updater, "stream_materialized_artifacts", empty_event_stream)
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _missing_hash)
 
-    with pytest.raises(RuntimeError, match="Missing npmDepsHash output"):
-        _run(_collect(updater.fetch_hashes(_version_info(), object())))
+    with pytest.raises(RuntimeError, match="npm hash probe failed"):
+        _run(
+            _collect(
+                lambda emit: updater.fetch_hashes(
+                    _version_info(),
+                    object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
+                )
+            )
+        )

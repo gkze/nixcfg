@@ -19,7 +19,7 @@ from lib.tests._nix_ast import (
 )
 from lib.tests._updater_helpers import load_repo_module, run_async
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters import strategies as updater_strategies
 from lib.update.updaters.metadata import DownloadUrlMetadata
 from lib.update.updaters.vendor_feeds import SparkleAppcastItem
@@ -33,7 +33,9 @@ class _TownAssistantNightlyUpdater(Protocol):
     APPCAST_URL: str
     config: _UpdateConfig
 
-    async def fetch_latest(self, session: object) -> VersionInfo: ...
+    async def fetch_latest(
+        self, session: object, *, context: object
+    ) -> VersionInfo: ...
 
     def get_download_url(self, platform: str, info: VersionInfo) -> str: ...
 
@@ -116,7 +118,9 @@ def test_town_assistant_nightly_fetch_latest_and_download_url(
 
     monkeypatch.setattr(updater_strategies, "fetch_sparkle_appcast_items", _fetch_items)
 
-    latest = run_async(updater.fetch_latest(object()))
+    latest = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
 
     assert latest == VersionInfo(
         version="1.8-32",
@@ -170,4 +174,4 @@ def test_town_assistant_nightly_rejects_invalid_appcast_shapes(
     )
 
     with pytest.raises(RuntimeError, match=match):
-        run_async(updater.fetch_latest(object()))
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))

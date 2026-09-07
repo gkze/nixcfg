@@ -2,7 +2,7 @@
 
 import asyncio
 import re
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlparse
 
 import aiohttp
@@ -10,6 +10,9 @@ import aiohttp
 from lib.update.net import HTTP_BAD_REQUEST
 from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 from lib.update.updaters.metadata import NO_METADATA
+
+if TYPE_CHECKING:
+    from lib.update.updaters.core import UpdateContext
 
 _VERSION_PATTERN = re.compile(r"/prod/(?P<version>[^/]+)/")
 
@@ -61,8 +64,11 @@ class ZoomUsUpdater(DownloadHashUpdater):
                 raise RuntimeError(msg)
             return str(response.url)
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the latest stable Zoom version from the platform redirect URLs."""
+        _ = context
         resolved_pairs = await asyncio.gather(
             *(
                 self._resolve_platform_latest(session, platform, latest_url)

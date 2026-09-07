@@ -9,6 +9,7 @@ from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
+from lib.update.events import EventSink, ignore_event
 from lib.update.net import fetch_json, github_raw_url
 from lib.update.nix import (
     _build_fetch_from_github_call,
@@ -32,8 +33,6 @@ from lib.update.updaters.node_compatibility import (
 
 if TYPE_CHECKING:
     import aiohttp
-
-    from lib.update.events import EventStream
 
 
 _EXACT_VERSION_PATTERN = re.compile(
@@ -241,8 +240,11 @@ class GooeyPiUpdater(GitHubReleaseUpdater):
             context="GooeyPi release metadata",
         )
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the latest release to one immutable, internally coherent tree."""
+        _ = context
         version, tag_name, commit = await self._fetch_release_version_tag_commit(
             session
         )
@@ -291,7 +293,7 @@ class GooeyPiUpdater(GitHubReleaseUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Recompute both fixed-output closures even when metadata is unchanged."""
@@ -371,24 +373,23 @@ class GooeyPiUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash the immutable source tree, then its package-lock closure."""
         _ = (session, context)
         commit = self._require_commit(info)
         self._require_electron_version(info)
         npm_version = self._require_npm_version(info)
-        async for event in stream_fixed_output_hashes(
+        return await stream_fixed_output_hashes(
             self.name,
             steps=(
                 FixedOutputHashStep(
                     hash_type="srcHash",
-                    error="Missing srcHash output",
                     expr=lambda _resolved: self._src_expr(commit),
                 ),
                 FixedOutputHashStep(
                     hash_type="npmDepsHash",
-                    error="Missing npmDepsHash output",
                     expr=lambda resolved: self._npm_deps_expr(
                         commit=commit,
                         version=info.version,
@@ -397,13 +398,12 @@ class GooeyPiUpdater(GitHubReleaseUpdater):
                 ),
                 FixedOutputHashStep(
                     hash_type="sha256",
-                    error="Missing npm CLI source hash output",
                     expr=lambda _resolved: self._npm_cli_expr(npm_version),
                 ),
             ),
             config=self.config,
-        ):
-            yield event
+            emit=emit,
+        )
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist the release, immutable commit, Electron runtime, and closures."""

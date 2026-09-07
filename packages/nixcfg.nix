@@ -18,7 +18,7 @@ let
   runtimeSourcePolicy =
     (builtins.fromTOML (builtins.readFile ../pyproject.toml)).tool.nixcfg.runtimeSource;
   # Filter the workspace source to only the files that participate in the
-  # Python build (see [tool.setuptools] in pyproject.toml). Handing uv2nix the
+  # Python build (see [tool.setuptools] in pyproject.toml). Building from the
   # unfiltered repo tree couples this derivation to every file in the repo,
   # which rebuilds the venv (and the system closure) on every commit.
   runtimeSourceFiles =
@@ -56,7 +56,9 @@ let
     ];
   };
   workspace = inputs.uv2nix.lib.workspace.loadWorkspace {
-    workspaceRoot = runtimeSource;
+    # Metadata must be readable before a read-only evaluation realizes filesets.
+    # The package source is restricted to runtimeSource in the overlay below.
+    workspaceRoot = ../.;
   };
 
   pySet =
@@ -68,6 +70,9 @@ let
           platformCompat.overlay
           inputs.pyproject-build-systems.overlays.default
           (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
+          (_pyFinal: pyPrev: {
+            nixcfg = pyPrev.nixcfg.overrideAttrs { src = runtimeSource; };
+          })
           (mkResolvedBuildSystemsOverlay {
             nix-manipulator = {
               hatchling = [ ];

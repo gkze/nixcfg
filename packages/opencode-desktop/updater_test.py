@@ -20,7 +20,7 @@ from lib.tests._updater_helpers import run_async as _run
 from lib.update.config import default_config
 from lib.update.electron_manifest import ElectronManifestMetadata
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 _COMMIT = "a" * 40
 _MANIFEST_VERSION = "1.2.3"
@@ -157,7 +157,11 @@ def _fetch_latest(
         manifest=manifest,
         lock_payload=lock_payload,
     )
-    return _run(module.OpencodeDesktopUpdater().fetch_latest(object()))
+    return _run(
+        module.OpencodeDesktopUpdater().fetch_latest(
+            object(), context=UpdateContext(current=None)
+        )
+    )
 
 
 def test_opencode_desktop_uses_the_lockfiles_exact_electron_version(
@@ -181,7 +185,7 @@ def test_opencode_desktop_uses_the_lockfiles_exact_electron_version(
     )
 
     updater = module.OpencodeDesktopUpdater()
-    info = _run(updater.fetch_latest(object()))
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     result = updater.build_result(info, [])
 
     assert info.metadata == ElectronManifestMetadata(
@@ -525,4 +529,11 @@ def test_opencode_desktop_is_latest_validates_platform_hash_coverage(
 
     monkeypatch.setattr(module.FlakeInputHashUpdater, "_is_latest", _base_is_latest)
 
-    assert _run(updater._is_latest(current, VersionInfo(version="1.2.3"))) is expected
+    assert (
+        _run(
+            updater._is_latest(
+                UpdateContext(current=current), VersionInfo(version="1.2.3")
+            )
+        )
+        is expected
+    )

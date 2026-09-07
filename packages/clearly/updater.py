@@ -8,6 +8,7 @@ from packaging.version import InvalidVersion, Version
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update.derivation_validation import DerivationValidation
+from lib.update.events import EventSink, ignore_event
 from lib.update.net import fetch_github_api_paginated, fetch_url, github_raw_url
 from lib.update.nix import (
     _build_fetch_from_github_expr,
@@ -26,7 +27,6 @@ from lib.update.updaters.metadata import metadata_get
 if TYPE_CHECKING:
     import aiohttp
 
-    from lib.update.events import EventStream
 
 _GITHUB_REPO_PATH_COMPONENTS = 2
 
@@ -171,8 +171,11 @@ class ClearlyUpdater(GitHubReleaseUpdater):
             )
         return urls
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the release tag, source commit, and exact Swift dependencies."""
+        _ = context
         version, tag_name, commit = await self._fetch_release_version_tag_commit(
             session
         )
@@ -200,7 +203,7 @@ class ClearlyUpdater(GitHubReleaseUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Recompute the source closure before accepting matching metadata."""
@@ -258,23 +261,22 @@ class ClearlyUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash the release source, then its normalized SwiftPM closure."""
         _ = (session, context)
         commit = self._require_commit(info)
         dependency_urls = self._dependency_urls_from_info(info)
-        async for event in stream_fixed_output_hashes(
+        return await stream_fixed_output_hashes(
             self.name,
             steps=(
                 FixedOutputHashStep(
                     hash_type="srcHash",
-                    error="Missing srcHash output",
                     expr=lambda _resolved: self._src_expr(commit),
                 ),
                 FixedOutputHashStep(
                     hash_type="vendorHash",
-                    error="Missing vendorHash output",
                     expr=lambda resolved: _build_package_path_attr_expr(
                         self.name,
                         ".swiftDeps",
@@ -290,8 +292,8 @@ class ClearlyUpdater(GitHubReleaseUpdater):
                 ),
             ),
             config=self.config,
-        ):
-            yield event
+            emit=emit,
+        )
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist release, source commit, dependency URLs, and both hashes."""

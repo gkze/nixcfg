@@ -1,5 +1,6 @@
 {
   actualManifest,
+  flakelight,
   lib,
   src,
 }:
@@ -60,7 +61,56 @@ let
       }
     ];
   };
+  declaredInventory =
+    closure:
+    import (src + "/lib/root-closures.nix") {
+      inherit lib;
+      systems = [
+        "aarch64-darwin"
+        "x86_64-linux"
+      ];
+      declaredSystems.darwin.workstation = "aarch64-darwin";
+      darwinConfigurations.workstation.system = closure;
+      requiredKinds = [ "darwin" ];
+    };
+  lazyInventory = declaredInventory (throw "root discovery forced a closure");
+  mismatchedInventory = declaredInventory (fakeClosure "x86_64-linux" "/nix/store/wrong-system");
+  matchingInventory = declaredInventory (fakeClosure "aarch64-darwin" "/nix/store/right-system");
+  lazyConfigurationsInventory = import (src + "/lib/root-closures.nix") {
+    inherit lib;
+    systems = [ "aarch64-darwin" ];
+    declaredSystems.darwin.workstation = "aarch64-darwin";
+    darwinConfigurations = throw "root discovery forced configuration names";
+  };
+  missingDeclaredRootInventory = import (src + "/lib/root-closures.nix") {
+    inherit lib;
+    systems = [ "aarch64-darwin" ];
+    declaredSystems.darwin.workstation = "aarch64-darwin";
+  };
 in
+assert import ./flakelight-darwin.nix { inherit lib flakelight src; };
+assert lazyInventory.rootSystems == [ "aarch64-darwin" ];
+assert lazyConfigurationsInventory.rootSystems == [ "aarch64-darwin" ];
+assert !(builtins.tryEval lazyConfigurationsInventory.manifest).success;
+assert !(builtins.tryEval missingDeclaredRootInventory.manifest).success;
+assert !(builtins.tryEval (missingDeclaredRootInventory.forSystem "aarch64-darwin")).success;
+assert !(builtins.tryEval lazyInventory.manifest).success;
+assert !(builtins.tryEval (lazyInventory.forSystem "aarch64-darwin")).success;
+assert mismatchedInventory.rootSystems == [ "aarch64-darwin" ];
+assert !(builtins.tryEval mismatchedInventory.manifest).success;
+assert !(builtins.tryEval (mismatchedInventory.forSystem "aarch64-darwin")).success;
+assert !(builtins.tryEval (mismatchedInventory.forSystem "x86_64-linux")).success;
+assert
+  matchingInventory.manifest.roots == [
+    {
+      kind = "darwin";
+      name = "workstation";
+      system = "aarch64-darwin";
+    }
+  ];
+assert
+  (builtins.head (matchingInventory.forSystem "aarch64-darwin")).path.outPath
+  == "/nix/store/right-system";
 assert
   inventory.manifest == {
     schemaVersion = 2;

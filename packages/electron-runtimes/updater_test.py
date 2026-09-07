@@ -10,7 +10,14 @@ from lib.tests._nix_ast import assert_nix_ast_equal, parse_nix_expr
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.events import UpdateEvent, UpdateEventKind, expect_artifact_updates
+from lib.update.events import (
+    EventSink,
+    UpdateEvent,
+    UpdateEventKind,
+    expect_artifact_updates,
+    ignore_event,
+)
+from lib.update.updaters import UpdateContext
 
 _BINARY_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 _REFRESHED_BINARY_HASH = "sha256-EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE="
@@ -180,17 +187,20 @@ def test_fetch_hashes_requires_a_discovered_package_directory(
     with pytest.raises(RuntimeError, match="Package directory not found"):
         _run(
             _collect_events(
-                updater.fetch_hashes(
+                lambda emit: updater.fetch_hashes(
                     module.VersionInfo(
                         version="inventory-v1",
                         metadata=module.ElectronInventoryMetadata(versions=("42.0.1",)),
                     ),
                     object(),
-                    context=SourceEntry(
-                        version="inventory-v1",
-                        hashes=hashes,
-                        urls=_runtime_urls(module, "42.0.1"),
+                    context=UpdateContext(
+                        current=SourceEntry(
+                            version="inventory-v1",
+                            hashes=hashes,
+                            urls=_runtime_urls(module, "42.0.1"),
+                        )
                     ),
+                    emit=emit,
                 )
             )
         )
@@ -205,31 +215,37 @@ def test_fetch_hashes_refreshes_every_binary_and_unpacked_header(
     binary_urls: list[str] = []
     header_exprs: list[str] = []
 
-    async def _url_hashes(name: str, urls, *, config=None):
+    async def _url_hashes(
+        name: str, urls, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         assert name == updater.name
         assert config == updater.config
         binary_urls.extend(urls)
-        yield UpdateEvent.status(name, "hashing Electron binaries")
-        yield UpdateEvent.value(name, dict.fromkeys(binary_urls, _BINARY_HASH))
+        await emit(UpdateEvent.status(name, "hashing Electron binaries"))
+        return dict.fromkeys(binary_urls, _BINARY_HASH)
 
-    async def _fixed_hash(name: str, expr: str, *, config=None):
+    async def _fixed_hash(
+        name: str, expr: str, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         assert name == updater.name
         assert config == updater.config
         header_exprs.append(expr)
-        yield UpdateEvent.status(name, "hashing Electron headers")
-        yield UpdateEvent.value(name, _HEADER_HASHES[len(header_exprs) - 1])
+        await emit(UpdateEvent.status(name, "hashing Electron headers"))
+        return _HEADER_HASHES[len(header_exprs) - 1]
 
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _url_hashes)
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
     events = _run(
         _collect_events(
-            updater.fetch_hashes(
+            lambda emit: updater.fetch_hashes(
                 module.VersionInfo(
                     version="inventory-v1",
                     metadata={"versions": ["40.1.0", "42.0.1"]},
                 ),
                 object(),
+                emit=emit,
+                context=UpdateContext(current=None),
             )
         )
     )
@@ -258,8 +274,8 @@ def test_fetch_hashes_refreshes_every_binary_and_unpacked_header(
         "schemaVersion": 1,
         "versions": ["40.1.0", "42.0.1"],
     }
-    assert events[-1].kind is UpdateEventKind.VALUE
-    assert events[-1].payload == [
+
+    assert events.result == [
         _runtime_hash(
             module,
             "40.1.0",
@@ -294,7 +310,7 @@ def test_fetch_hashes_rejects_malformed_current_records(hash_entry: HashEntry) -
     current = SourceEntry(version="inventory-v1", hashes=[hash_entry])
 
     with pytest.raises(RuntimeError, match="malformed hash record"):
-        module.ElectronRuntimesUpdater._current_hashes(current)
+        module.ElectronRuntimesUpdater._current_hashes(UpdateContext(current=current))
 
 
 def test_fetch_hashes_rejects_duplicate_current_records() -> None:
@@ -304,7 +320,7 @@ def test_fetch_hashes_rejects_duplicate_current_records() -> None:
     current = SourceEntry(version="inventory-v1", hashes=[entry, entry])
 
     with pytest.raises(RuntimeError, match="duplicate record"):
-        module.ElectronRuntimesUpdater._current_hashes(current)
+        module.ElectronRuntimesUpdater._current_hashes(UpdateContext(current=current))
 
 
 def test_fetch_hashes_requires_complete_version_metadata() -> None:
@@ -315,9 +331,11 @@ def test_fetch_hashes_requires_complete_version_metadata() -> None:
     with pytest.raises(TypeError, match="version list"):
         _run(
             _collect_events(
-                updater.fetch_hashes(
+                lambda emit: updater.fetch_hashes(
                     module.VersionInfo(version="inventory-v1", metadata={}),
                     object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
                 )
             )
         )
@@ -370,12 +388,14 @@ def test_latest_check_requires_the_complete_non_fake_inventory() -> None:
         urls=_runtime_urls(module, "42.0.1"),
     )
 
-    assert _run(updater._is_latest(complete, info)) is True
-    assert _run(updater._is_latest(None, info)) is False
+    assert _run(updater._is_latest(UpdateContext(current=complete), info)) is True
+    assert _run(updater._is_latest(UpdateContext(current=None), info)) is False
     assert (
         _run(
             updater._is_latest(
-                complete.model_copy(update={"version": "inventory-v0"}),
+                UpdateContext(
+                    current=complete.model_copy(update={"version": "inventory-v0"})
+                ),
                 info,
             )
         )
@@ -384,12 +404,14 @@ def test_latest_check_requires_the_complete_non_fake_inventory() -> None:
     assert (
         _run(
             updater._is_latest(
-                complete.model_copy(
-                    update={
-                        "hashes": complete.hashes.model_copy(
-                            update={"entries": complete.hashes.entries[:-1]}
-                        )
-                    }
+                UpdateContext(
+                    current=complete.model_copy(
+                        update={
+                            "hashes": complete.hashes.model_copy(
+                                update={"entries": complete.hashes.entries[:-1]}
+                            )
+                        }
+                    )
                 ),
                 info,
             )
@@ -401,7 +423,7 @@ def test_latest_check_requires_the_complete_non_fake_inventory() -> None:
     fake.hashes.entries[0] = fake.hashes.entries[0].model_copy(
         update={"hash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
     )
-    assert _run(updater._is_latest(fake, info)) is False
+    assert _run(updater._is_latest(UpdateContext(current=fake), info)) is False
 
 
 def test_artifact_tag_drift_invalidates_and_rehashes_the_binary(
@@ -428,14 +450,13 @@ def test_artifact_tag_drift_invalidates_and_rehashes_the_binary(
 
     monkeypatch.setitem(updater.PLATFORMS, "aarch64-darwin", "changed-tag")
 
-    async def _url_hashes(name: str, urls, *, config=None):
+    async def _url_hashes(
+        name: str, urls, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         assert name == updater.name
         assert config == updater.config
         requested_urls.extend(urls)
-        yield UpdateEvent.value(
-            name,
-            dict.fromkeys(requested_urls, _REFRESHED_BINARY_HASH),
-        )
+        return dict.fromkeys(requested_urls, _REFRESHED_BINARY_HASH)
 
     def _unexpected_header_hash(*_args: object, **_kwargs: object) -> None:
         pytest.fail("unchanged Electron headers unexpectedly triggered hashing")
@@ -446,13 +467,11 @@ def test_artifact_tag_drift_invalidates_and_rehashes_the_binary(
         _unexpected_header_hash,
     )
 
-    assert _run(updater._is_latest(current, info)) is False
+    assert _run(updater._is_latest(UpdateContext(current=current), info)) is False
     events = _run(
         _collect_events(
-            updater.fetch_hashes(
-                info,
-                object(),
-                context=current,
+            lambda emit: updater.fetch_hashes(
+                info, object(), context=UpdateContext(current=current), emit=emit
             )
         )
     )
@@ -462,7 +481,7 @@ def test_artifact_tag_drift_invalidates_and_rehashes_the_binary(
         f"v{version}/electron-v{version}-changed-tag.zip"
     )
     assert requested_urls == [expected_url]
-    result = events[-1].payload
+    result = events.result
     assert isinstance(result, list)
     refreshed = next(
         entry for entry in result if entry.platform == f"{version}:aarch64-darwin"
@@ -501,27 +520,25 @@ def test_fetch_hashes_reuses_a_complete_current_inventory(
 
     events = _run(
         _collect_events(
-            updater.fetch_hashes(
+            lambda emit: updater.fetch_hashes(
                 module.VersionInfo(
                     version="inventory-v1",
                     metadata={"versions": ["42.0.1"]},
                 ),
                 object(),
-                context=current,
+                context=UpdateContext(current=current),
+                emit=emit,
             )
         )
     )
 
-    assert [event.kind for event in events] == [
-        UpdateEventKind.ARTIFACT,
-        UpdateEventKind.VALUE,
-    ]
+    assert [event.kind for event in events] == [UpdateEventKind.ARTIFACT]
     artifact = expect_artifact_updates(events[0].payload)[0]
     assert json.loads(artifact.content) == {
         "schemaVersion": 1,
         "versions": ["42.0.1"],
     }
-    assert events[1] == UpdateEvent.value(updater.name, hashes)
+    assert events.result == hashes
 
 
 def test_fetch_hashes_requires_every_binary_hash(
@@ -531,14 +548,18 @@ def test_fetch_hashes_requires_every_binary_hash(
     module = _load_module("electron_runtimes_updater_missing_binary_test")
     updater = module.ElectronRuntimesUpdater()
 
-    async def _url_hashes(name: str, urls, *, config=None):
+    async def _url_hashes(
+        name: str, urls, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         _ = config
         requested = list(urls)
-        yield UpdateEvent.value(name, dict.fromkeys(requested[:-1], _BINARY_HASH))
+        return dict.fromkeys(requested[:-1], _BINARY_HASH)
 
-    async def _fixed_hash(name: str, _expr: str, *, config=None):
+    async def _fixed_hash(
+        name: str, _expr: str, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         _ = config
-        yield UpdateEvent.value(name, _HEADER_HASHES[0])
+        return _HEADER_HASHES[0]
 
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _url_hashes)
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
@@ -546,12 +567,14 @@ def test_fetch_hashes_requires_every_binary_hash(
     with pytest.raises(RuntimeError, match="Missing Electron binary hash output"):
         _run(
             _collect_events(
-                updater.fetch_hashes(
+                lambda emit: updater.fetch_hashes(
                     module.VersionInfo(
                         version="inventory-v1",
                         metadata={"versions": ["42.0.1"]},
                     ),
                     object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
                 )
             )
         )

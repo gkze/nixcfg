@@ -13,7 +13,6 @@ from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.tests._source_metadata import assert_release_version
 from lib.tests._updater_helpers import collect_events, load_repo_module, run_async
-from lib.update.events import UpdateEventKind
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
 
@@ -100,7 +99,9 @@ def test_fetch_latest_resolves_all_npm_and_pypi_versions(
 
     monkeypatch.setattr(module, "fetch_json", _fetch_json)
 
-    info = run_async(updater.fetch_latest(object()))
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
 
     assert set(calls) == set(responses)
     assert info == VersionInfo(
@@ -144,7 +145,7 @@ def test_fetch_latest_rejects_an_empty_npm_registry_version(
     monkeypatch.setattr(module, "fetch_json", _fetch_json)
 
     with pytest.raises(RuntimeError) as error:
-        run_async(updater.fetch_latest(object()))
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert str(error.value) == f"Empty npm version in {invalid_url}"
 
@@ -167,7 +168,7 @@ def test_fetch_latest_rejects_an_empty_pypi_registry_version(
     monkeypatch.setattr(module, "fetch_json", _fetch_json)
 
     with pytest.raises(RuntimeError) as error:
-        run_async(updater.fetch_latest(object()))
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
     assert str(error.value) == f"Empty PyPI version in {invalid_url}"
 
@@ -177,11 +178,17 @@ def test_updater_persists_pin_only_sources() -> None:
     module = _load_module()
     updater = module.McpRuntimeToolsUpdater()
     info = VersionInfo(version="registry", metadata={"pins": _CURRENT_PINS})
-    events = run_async(collect_events(updater.fetch_hashes(info, object())))
+    events = run_async(
+        collect_events(
+            lambda emit: updater.fetch_hashes(
+                info, object(), emit=emit, context=UpdateContext(current=None)
+            )
+        )
+    )
 
-    assert len(events) == 1
-    assert events[0].kind == UpdateEventKind.VALUE
-    assert events[0].payload == {}
+    assert events == []
+
+    assert events.result == {}
     assert updater.build_result(info, {}) == SourceEntry.model_validate({
         "hashes": {},
         "pins": _CURRENT_PINS,
@@ -210,19 +217,15 @@ def test_updater_rejects_malformed_runtime_pin_metadata(
     assert str(error.value) == message
 
 
-@pytest.mark.parametrize("wrapped", [False, True])
-def test_latest_check_accepts_both_supported_current_source_shapes(
-    *,
-    wrapped: bool,
-) -> None:
-    """Freshness works for direct entries and the runner's update context."""
+def test_latest_check_uses_current_source_context() -> None:
+    """Freshness uses the runner's normalized current source context."""
     updater = _load_module().McpRuntimeToolsUpdater()
     current = SourceEntry(
         version="registry",
         hashes={},
         pins=_CURRENT_PINS,
     )
-    context = UpdateContext(current=current) if wrapped else current
+    context = UpdateContext(current=current)
     info = VersionInfo(version="registry", metadata={"pins": _CURRENT_PINS})
 
     assert run_async(updater._is_latest(context, info)) is True

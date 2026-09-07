@@ -5,7 +5,6 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, override
 
 from lib import json_utils
-from lib.nix.models.sources import HashEntry, SourceHashes
 from lib.system_policy import supported_systems
 from lib.update import process as update_process
 from lib.update.bun_lock import parse_bun_lock_text
@@ -15,12 +14,8 @@ from lib.update.bun_toolchain import (
     require_bun_package_manager,
 )
 from lib.update.events import (
-    UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_hash_mapping,
-    expect_source_hashes,
-    require_value,
+    EventSink,
+    ignore_event,
 )
 from lib.update.net import fetch_json, fetch_url, github_raw_url
 from lib.update.npm_semver import require_npm_version_matches_spec
@@ -30,15 +25,13 @@ from lib.update.updaters import (
     VersionInfo,
     register_updater,
 )
-from lib.update.updaters.core import _coerce_context
 from lib.update.updaters.metadata import MappingMetadata
 
 if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.flake_lock import FlakeLockNode
-    from lib.nix.models.sources import SourceEntry
-    from lib.update.events import EventStream
+    from lib.nix.models.sources import HashEntry, SourceEntry, SourceHashes
 
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _EXACT_VERSION_PATTERN = re.compile(
@@ -244,9 +237,11 @@ class MuxUpdater(BunNodeModulesHashUpdater):
     aggregate_into = ("electron-runtimes",)
     hash_attr_path = ".offlineCache"
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve Electron from manifests at the immutable refreshed input commit."""
-        info = await super().fetch_latest(session)
+        info = await super().fetch_latest(session, context=context)
         node = self._resolve_flake_node(info)
         owner, repo, commit = _locked_github_source(node)
         manifest = await fetch_json(
@@ -280,11 +275,10 @@ class MuxUpdater(BunNodeModulesHashUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         """Fingerprint the package with its persisted exact Bun sources."""
-        context = _coerce_context(context)
         current = context.current
         if current is None or current.hashes.entries is None:
             return False
@@ -311,47 +305,30 @@ class MuxUpdater(BunNodeModulesHashUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Hash exact Bun runtimes before probing Bun's node_modules cache."""
         bun_version = _require_metadata(info).bun_version
         bun_urls = bun_release_urls(bun_version, _SUPPORTED_SYSTEMS)
-        bun_hash_drain = ValueDrain[dict[str, str]]()
-        async for event in drain_value_events(
-            update_process.compute_url_hashes(
-                self.name,
-                bun_urls.values(),
-                config=self.config,
-            ),
-            bun_hash_drain,
-            parse=expect_hash_mapping,
-        ):
-            yield event
+        hashes_by_url = await update_process.compute_url_hashes(
+            self.name, bun_urls.values(), config=self.config, emit=emit
+        )
         bun_hashes = bun_runtime_hash_entries(
             bun_version,
             _SUPPORTED_SYSTEMS,
-            require_value(bun_hash_drain, "Missing Mux Bun runtime hashes"),
+            hashes_by_url,
         )
-
-        node_hash_drain = ValueDrain[SourceHashes]()
-        async for event in drain_value_events(
-            super().fetch_hashes(
-                _with_bun_runtime_hashes(info, bun_hashes),
-                session,
-                context=context,
-            ),
-            node_hash_drain,
-            parse=expect_source_hashes,
-        ):
-            yield event
-        node_hashes = require_value(
-            node_hash_drain,
-            "Missing Mux node_modules hashes",
+        node_hashes = await super().fetch_hashes(
+            _with_bun_runtime_hashes(info, bun_hashes),
+            session,
+            context=context,
+            emit=emit,
         )
         if not isinstance(node_hashes, list):
             msg = "Mux node_modules hashes must use structured hash entries"
             raise TypeError(msg)
-        yield UpdateEvent.value(self.name, [*bun_hashes, *node_hashes])
+        return [*bun_hashes, *node_hashes]
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist the lockfile-resolved Electron runtime as source identity."""

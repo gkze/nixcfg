@@ -165,18 +165,12 @@ rec {
         isList
         isString
         map
-        replaceStrings
         typeOf
         ;
       inherit (lib) concatMapStringsSep;
 
       mkIndent = level: concatStringsSep "" (map (_: " ") (lib.range 1 (level * indent)));
-      escapeString =
-        s:
-        let
-          escaped = replaceStrings [ "\\" "\"" "\n" "\r" "\t" ] [ "\\\\" "\\\"" "\\n" "\\r" "\\t" ] s;
-        in
-        "\"${escaped}\"";
+      escapeString = builtins.toJSON;
       toJSONCImpl =
         level: v:
         let
@@ -435,17 +429,47 @@ rec {
       ];
     };
 
-  mkSetOpencodeEnvModule = configName: _: {
-    launchd.user.agents.set-opencode-env = {
-      script = ''
-        launchctl setenv OPENCODE_CONFIG "$HOME/.config/opencode/${configName}"
-      '';
-      serviceConfig = {
-        Label = "com.nixcfg.set-opencode-env";
-        RunAtLoad = true;
+  # Compatibility entrypoint for consumers without the Home Manager integration.
+  # When Home Manager selects a profile, its resolved path is authoritative.
+  mkSetOpencodeEnvModule =
+    configName:
+    moduleArgs@{
+      config,
+      ...
+    }:
+    {
+      launchd.user.agents.set-opencode-env = {
+        script =
+          let
+            # Named module arguments are required even with a function default.
+            primaryUser = moduleArgs.primaryUser or null;
+            selectedPath =
+              if primaryUser == null then
+                null
+              else
+                lib.attrByPath [
+                  "home-manager"
+                  "users"
+                  primaryUser
+                  "home"
+                  "sessionVariables"
+                  "OPENCODE_CONFIG"
+                ] null config;
+            path =
+              if selectedPath == null then
+                ''"$HOME"/${lib.escapeShellArg ".config/opencode/${configName}"}''
+              else
+                lib.escapeShellArg selectedPath;
+          in
+          ''
+            launchctl setenv OPENCODE_CONFIG ${path}
+          '';
+        serviceConfig = {
+          Label = "com.nixcfg.set-opencode-env";
+          RunAtLoad = true;
+        };
       };
     };
-  };
 
   # Common base for all Darwin hosts — captures shared boilerplate so each
   # host file only declares its differences.  hostname is injected by

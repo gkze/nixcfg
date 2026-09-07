@@ -653,3 +653,44 @@ def test_module_entrypoint_exits_with_main_status(
         runpy.run_path("lib/asar_integrity.py", run_name="__main__")
 
     assert exc_info.value.code == 0
+
+
+def test_bundle_publication_retains_original_when_rollback_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed recovery must retain the bytes and the original publication cause."""
+    archive = tmp_path / "app.asar"
+    plist = tmp_path / "Info.plist"
+    _write_packed_asar(archive, "main.js", b"before")
+    plist.write_bytes(plistlib.dumps({"CFBundleIdentifier": "test"}))
+    original = archive.read_bytes()
+    publication_error = OSError("plist publish denied")
+    replace = Path.replace
+
+    def fail_publish_and_restore(source: Path, target: Path) -> Path:
+        if target == plist:
+            raise publication_error
+        if source.name.endswith(".original"):
+            msg = "archive restore denied"
+            raise OSError(msg)
+        return replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", fail_publish_and_restore)
+    with pytest.raises(
+        asar_integrity.AsarIntegrityError, match="rollback also failed"
+    ) as raised:
+        asar_integrity.patch_bundle_integrity(
+            archive,
+            plist,
+            lambda staged: asar_integrity.replace_packed_file(
+                staged, "main.js", lambda _payload: b"after!"
+            ),
+        )
+    assert raised.value.__cause__ is publication_error
+    recovery_files = list(tmp_path.glob("*/app.asar.original"))
+    assert len(recovery_files) == 1
+    assert recovery_files[0].read_bytes() == original
+    assert str(recovery_files[0]) in str(raised.value)
+    assert "plist publish denied" in str(raised.value)
+    assert "archive restore denied" in str(raised.value)

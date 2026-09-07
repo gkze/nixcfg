@@ -4,7 +4,7 @@ import asyncio
 import json
 import re
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlsplit
 
 import aiohttp
@@ -17,6 +17,9 @@ from lib.update.updaters import (
     register_updater,
 )
 from lib.update.updaters.metadata import AssetURLsMetadata
+
+if TYPE_CHECKING:
+    from lib.update.updaters.core import UpdateContext
 
 _FEED_VERSION = "0.0.0"
 _FEED_MACHINE_ID = "nixcfg-updater"
@@ -125,8 +128,11 @@ class ScreenStudioUpdater(AssetURLsMetadataUpdater):
             raise RuntimeError(msg)
         return artifact
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve one stable version and its official per-architecture ZIPs."""
+        _ = context
         artifacts = dict(
             zip(
                 self.PLATFORMS,

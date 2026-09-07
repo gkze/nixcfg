@@ -8,8 +8,8 @@ from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.events import UpdateEvent, UpdateEventKind
-from lib.update.updaters import VersionInfo
+from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
+from lib.update.updaters import UpdateContext, VersionInfo
 
 
 def _load_module() -> ModuleType:
@@ -101,7 +101,7 @@ def test_linear_cli_is_latest_requires_superclass_match(monkeypatch) -> None:
     assert (
         _run(
             updater._is_latest(
-                None,
+                UpdateContext(current=None),
                 VersionInfo(version="1.2.3"),
             )
         )
@@ -148,8 +148,22 @@ def test_linear_cli_is_latest_compares_expected_denort_urls(monkeypatch) -> None
         )
     )
 
-    assert _run(updater._is_latest(matching, VersionInfo(version="1.2.3"))) is True
-    assert _run(updater._is_latest(mismatched, VersionInfo(version="1.2.3"))) is False
+    assert (
+        _run(
+            updater._is_latest(
+                UpdateContext(current=matching), VersionInfo(version="1.2.3")
+            )
+        )
+        is True
+    )
+    assert (
+        _run(
+            updater._is_latest(
+                UpdateContext(current=mismatched), VersionInfo(version="1.2.3")
+            )
+        )
+        is False
+    )
 
 
 def test_linear_cli_is_latest_rejects_missing_current_hash_entries(
@@ -176,7 +190,14 @@ def test_linear_cli_is_latest_rejects_missing_current_hash_entries(
         },
     })
 
-    assert _run(updater._is_latest(current, VersionInfo(version="1.2.3"))) is False
+    assert (
+        _run(
+            updater._is_latest(
+                UpdateContext(current=current), VersionInfo(version="1.2.3")
+            )
+        )
+        is False
+    )
 
 
 def test_linear_cli_fetch_hashes_forwards_events_and_emits_sorted_entries(
@@ -186,15 +207,19 @@ def test_linear_cli_fetch_hashes_forwards_events_and_emits_sorted_entries(
     module = _load_module()
     updater = module.LinearCliUpdater()
 
-    async def _manifest_fetch(self, info, session, *, context=None):
+    async def _manifest_fetch(
+        self, info, session, *, context=None, emit: EventSink = ignore_event
+    ) -> object:
         _ = (self, info, session, context)
-        yield UpdateEvent.status("linear-cli", "manifest ready")
-        yield UpdateEvent.value("linear-cli", [])
+        await emit(UpdateEvent.status("linear-cli", "manifest ready"))
+        return []
 
     async def _resolve_deno_version() -> str:
         return "2.3.4"
 
-    async def _compute_url_hashes(name: str, urls, *, config: object) -> object:
+    async def _compute_url_hashes(
+        name: str, urls, *, config: object, emit: EventSink = ignore_event
+    ) -> object:
         assert config is updater.config
         url_list = list(urls)
         assert name == "linear-cli"
@@ -202,36 +227,38 @@ def test_linear_cli_fetch_hashes_forwards_events_and_emits_sorted_entries(
             updater._denort_url(target, "2.3.4")
             for target in updater.PLATFORMS.values()
         ]
-        yield UpdateEvent.status(name, "hashing denort")
-        yield UpdateEvent.value(
-            name,
-            {
-                url: f"sha256-{index:0<43}="
-                for index, url in enumerate(url_list, start=1)
-            },
-        )
+        await emit(UpdateEvent.status(name, "hashing denort"))
+        return {
+            url: f"sha256-{index:0<43}=" for index, url in enumerate(url_list, start=1)
+        }
 
     monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)
     monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
 
     events = _run(
-        _collect_events(updater.fetch_hashes(VersionInfo(version="1.2.3"), object()))
+        _collect_events(
+            lambda emit: updater.fetch_hashes(
+                VersionInfo(version="1.2.3"),
+                object(),
+                emit=emit,
+                context=UpdateContext(current=None),
+            )
+        )
     )
 
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
         UpdateEventKind.STATUS,
         UpdateEventKind.STATUS,
-        UpdateEventKind.VALUE,
     ]
-    assert [event.message for event in events[:-1]] == [
+    assert [event.message for event in events] == [
         "manifest ready",
         "Fetching denort runtime hashes for Deno v2.3.4...",
         "hashing denort",
     ]
-    assert [entry.platform for entry in events[-1].payload] == sorted(updater.PLATFORMS)
-    assert all(entry.hash_type == "sha256" for entry in events[-1].payload)
+    assert [entry.platform for entry in events.result] == sorted(updater.PLATFORMS)
+    assert all(entry.hash_type == "sha256" for entry in events.result)
 
 
 def test_linear_cli_fetch_hashes_retries_transient_manifest_failure(
@@ -246,26 +273,27 @@ def test_linear_cli_fetch_hashes_retries_transient_manifest_failure(
     async def _sleep(delay: float) -> None:
         sleeps.append(delay)
 
-    async def _manifest_fetch(self, info, session, *, context=None):
+    async def _manifest_fetch(
+        self, info, session, *, context=None, emit: EventSink = ignore_event
+    ) -> object:
         nonlocal calls
         _ = (self, info, session, context)
         calls += 1
         if calls == 1:
-            yield UpdateEvent.status("linear-cli", "manifest pending")
+            await emit(UpdateEvent.status("linear-cli", "manifest pending"))
             raise TimeoutError
-        yield UpdateEvent.status("linear-cli", "manifest ready")
-        yield UpdateEvent.value("linear-cli", [])
+        await emit(UpdateEvent.status("linear-cli", "manifest ready"))
+        return []
 
     async def _resolve_deno_version() -> str:
         return "2.3.4"
 
-    async def _compute_url_hashes(name: str, urls, *, config: object) -> object:
+    async def _compute_url_hashes(
+        name: str, urls, *, config: object, emit: EventSink = ignore_event
+    ) -> object:
         assert config is updater.config
         url_list = list(urls)
-        yield UpdateEvent.value(
-            name,
-            {url: f"sha256-{index:0<43}=" for index, url in enumerate(url_list)},
-        )
+        return {url: f"sha256-{index:0<43}=" for index, url in enumerate(url_list)}
 
     monkeypatch.setattr(module.asyncio, "sleep", _sleep)
     monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)
@@ -273,12 +301,19 @@ def test_linear_cli_fetch_hashes_retries_transient_manifest_failure(
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
 
     events = _run(
-        _collect_events(updater.fetch_hashes(VersionInfo(version="1.2.3"), object()))
+        _collect_events(
+            lambda emit: updater.fetch_hashes(
+                VersionInfo(version="1.2.3"),
+                object(),
+                emit=emit,
+                context=UpdateContext(current=None),
+            )
+        )
     )
 
     assert calls == 2
     assert sleeps == [0.5]
-    assert [event.message for event in events[:-1]] == [
+    assert [event.message for event in events] == [
         "manifest pending",
         "Retrying Deno manifest resolution after transient TimeoutError (1/3)",
         "manifest ready",
@@ -286,78 +321,66 @@ def test_linear_cli_fetch_hashes_retries_transient_manifest_failure(
     ]
 
 
-def test_linear_cli_fetch_hashes_requires_manifest_value(monkeypatch) -> None:
-    """Raise when the superclass manifest stream never yields a VALUE event."""
+def test_linear_cli_fetch_hashes_propagates_manifest_failure(monkeypatch) -> None:
+    """Propagate manifest failures before runtime resolution."""
     module = _load_module()
     updater = module.LinearCliUpdater()
 
-    async def _manifest_fetch(self, info, session, *, context=None):
+    async def _manifest_fetch(
+        self, info, session, *, context=None, emit: EventSink = ignore_event
+    ) -> object:
         _ = (self, info, session, context)
-        yield UpdateEvent.status("linear-cli", "manifest pending")
+        await emit(UpdateEvent.status("linear-cli", "manifest pending"))
+        raise RuntimeError("manifest probe failed")
 
     monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)
 
-    with pytest.raises(RuntimeError, match="Missing deno manifest output"):
+    with pytest.raises(RuntimeError, match="manifest probe failed"):
         _run(
             _collect_events(
-                updater.fetch_hashes(VersionInfo(version="1.2.3"), object())
+                lambda emit: updater.fetch_hashes(
+                    VersionInfo(version="1.2.3"),
+                    object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
+                )
             )
         )
 
 
-def test_linear_cli_fetch_hashes_requires_denort_hash_mapping(monkeypatch) -> None:
-    """Raise when denort hash computation emits no VALUE mapping."""
+def test_linear_cli_fetch_hashes_propagates_runtime_hash_failure(monkeypatch) -> None:
+    """Propagate runtime hash failures without a candidate."""
     module = _load_module()
     updater = module.LinearCliUpdater()
 
-    async def _manifest_fetch(self, info, session, *, context=None):
+    async def _manifest_fetch(
+        self, info, session, *, context=None, emit: EventSink = ignore_event
+    ) -> object:
         _ = (self, info, session, context)
-        yield UpdateEvent.value("linear-cli", [])
+        return []
 
     async def _resolve_deno_version() -> str:
         return "2.3.4"
 
-    async def _compute_url_hashes(name: str, urls, *, config: object) -> object:
+    async def _compute_url_hashes(
+        name: str, urls, *, config: object, emit: EventSink = ignore_event
+    ) -> object:
         _ = (name, list(urls), config)
-        yield UpdateEvent.status("linear-cli", "hashing denort")
+        await emit(UpdateEvent.status("linear-cli", "hashing denort"))
+        raise RuntimeError("runtime hash probe failed")
 
     monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)
     monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
 
-    with pytest.raises(RuntimeError, match="Missing denort hash output"):
+    with pytest.raises(RuntimeError, match="runtime hash probe failed"):
         _run(
             _collect_events(
-                updater.fetch_hashes(VersionInfo(version="1.2.3"), object())
-            )
-        )
-
-
-def test_linear_cli_fetch_hashes_rejects_non_mapping_hash_payload(
-    monkeypatch,
-) -> None:
-    """Surface parse failures when the denort hash stream yields the wrong type."""
-    module = _load_module()
-    updater = module.LinearCliUpdater()
-
-    async def _manifest_fetch(self, info, session, *, context=None):
-        _ = (self, info, session, context)
-        yield UpdateEvent.value("linear-cli", [])
-
-    async def _resolve_deno_version() -> str:
-        return "2.3.4"
-
-    async def _compute_url_hashes(name: str, urls, *, config: object) -> object:
-        _ = (name, list(urls), config)
-        yield UpdateEvent.value("linear-cli", "not-a-mapping")
-
-    monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)
-    monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
-    monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
-
-    with pytest.raises(TypeError, match="Expected hash mapping payload"):
-        _run(
-            _collect_events(
-                updater.fetch_hashes(VersionInfo(version="1.2.3"), object())
+                lambda emit: updater.fetch_hashes(
+                    VersionInfo(version="1.2.3"),
+                    object(),
+                    emit=emit,
+                    context=UpdateContext(current=None),
+                )
             )
         )

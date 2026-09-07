@@ -18,14 +18,10 @@ from lib.update import nix as update_nix
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
-    EventStream,
+    EventSink,
     UpdateEvent,
-    ValueDrain,
-    drain_value_events,
-    expect_command_result,
-    expect_str,
+    ignore_event,
     raise_failed_command,
-    require_value,
 )
 from lib.update.net import fetch_json, github_raw_url
 from lib.update.nix import _build_fetch_from_github_expr
@@ -38,7 +34,6 @@ from lib.update.updaters import (
     VersionInfo,
     register_updater,
 )
-from lib.update.updaters.core import _coerce_context
 from lib.update.updaters.materialization import MaterializesArtifactsMixin
 from lib.update.updaters.metadata import require_metadata_str
 
@@ -160,8 +155,11 @@ class ExecutorUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             raise TypeError(msg)
         return version, electron_version
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
         """Resolve the latest release tag to exact public source metadata."""
+        _ = context
         version, tag_name, commit = await self._fetch_release_version_tag_commit(
             session
         )
@@ -253,79 +251,70 @@ class ExecutorUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         info: VersionInfo,
         session: aiohttp.ClientSession,
         *,
-        context: UpdateContext | SourceEntry | None = None,
-    ) -> EventStream:
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
         """Materialize the exact Bun graph, then hash the immutable source."""
         commit = self._require_commit(info)
         self._require_electron_version(info)
         bun_version = self._require_bun_version(info)
-        resolved_context = _coerce_context(context)
-
-        if not resolved_context.dry_run:
-            package_dir = updater_dir_for(self.name)
-            if package_dir is None:
-                msg = f"Package directory not found for {self.name}"
-                raise RuntimeError(msg)
-            lock_bytes = await update_net.fetch_url(
-                session,
-                self._bun_lock_url(commit),
-                request_timeout=self.config.default_timeout,
-                config=self.config,
+        _ = context
+        package_dir = updater_dir_for(self.name)
+        if package_dir is None:
+            msg = f"Package directory not found for {self.name}"
+            raise RuntimeError(msg)
+        lock_bytes = await update_net.fetch_url(
+            session,
+            self._bun_lock_url(commit),
+            request_timeout=self.config.default_timeout,
+            config=self.config,
+        )
+        lock_text = lock_bytes.decode("utf-8")
+        with tempfile.TemporaryDirectory(prefix="executor-bun2nix-") as tmpdir:
+            lock_path = Path(tmpdir) / "bun.lock"
+            output_path = Path(tmpdir) / "bun.nix"
+            await asyncio.to_thread(lock_path.write_bytes, lock_bytes)
+            command = [
+                "nix",
+                "run",
+                "path:.#pkgs.aarch64-darwin.executor.passthru.bun2nix",
+                "--",
+                "--lock-file",
+                str(lock_path),
+                "--copy-prefix",
+                "./",
+                "--output-file",
+                str(output_path),
+            ]
+            result = await run_command(
+                command,
+                options=RunCommandOptions(
+                    source=self.name,
+                    config=self.config,
+                ),
+                emit=emit,
             )
-            lock_text = lock_bytes.decode("utf-8")
-            with tempfile.TemporaryDirectory(prefix="executor-bun2nix-") as tmpdir:
-                lock_path = Path(tmpdir) / "bun.lock"
-                output_path = Path(tmpdir) / "bun.nix"
-                await asyncio.to_thread(lock_path.write_bytes, lock_bytes)
-                command = [
-                    "nix",
-                    "run",
-                    "path:.#pkgs.aarch64-darwin.executor.passthru.bun2nix",
-                    "--",
-                    "--lock-file",
-                    str(lock_path),
-                    "--copy-prefix",
-                    "./",
-                    "--output-file",
-                    str(output_path),
-                ]
-                command_drain = ValueDrain()
-                async for event in drain_value_events(
-                    run_command(
-                        command,
-                        options=RunCommandOptions(
-                            source=self.name,
-                            error="bun2nix did not return a command result",
-                            config=self.config,
-                        ),
-                    ),
-                    command_drain,
-                    parse=expect_command_result,
-                ):
-                    yield event
-                result = require_value(
-                    command_drain,
-                    "Missing bun2nix command result",
-                )
-                raise_failed_command("Refresh Executor Bun closure", result)
-                if not output_path.is_file():
-                    msg = "bun2nix did not produce bun.nix"
-                    raise RuntimeError(msg)
-                await asyncio.to_thread(normalize_bun_nix_path, output_path)
-                bun_nix = await asyncio.to_thread(
-                    output_path.read_text,
-                    encoding="utf-8",
-                )
-            yield UpdateEvent.artifact(
+            raise_failed_command("Refresh Executor Bun closure", result)
+            if not output_path.is_file():
+                msg = "bun2nix did not produce bun.nix"
+                raise RuntimeError(msg)
+            await asyncio.to_thread(normalize_bun_nix_path, output_path)
+            bun_nix = await asyncio.to_thread(
+                output_path.read_text,
+                encoding="utf-8",
+            )
+        await emit(
+            UpdateEvent.artifact(
                 self.name,
                 [
                     GeneratedArtifact.text(package_dir / "bun.lock", lock_text),
                     GeneratedArtifact.text(package_dir / "bun.nix", bun_nix),
                 ],
             )
+        )
 
         entries: list[HashEntry] = []
-        for hash_type, expr, error in (
+        for hash_type, expr, _error in (
             ("srcHash", self._src_expr(commit), "Missing srcHash output"),
             (
                 "sha256",
@@ -333,20 +322,11 @@ class ExecutorUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
                 "Missing Bun source hash output",
             ),
         ):
-            hash_drain = ValueDrain[str]()
-            async for event in drain_value_events(
-                update_nix.compute_fixed_output_hash(
-                    self.name,
-                    expr,
-                    config=self.config,
-                ),
-                hash_drain,
-                parse=expect_str,
-            ):
-                yield event
-            hash_value = require_value(hash_drain, error)
+            hash_value = await update_nix.compute_fixed_output_hash(
+                self.name, expr, config=self.config, emit=emit
+            )
             entries.append(HashEntry.create(hash_type, hash_value))
-        yield UpdateEvent.value(self.name, entries)
+        return entries
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist the immutable source and shared Electron runtime version."""

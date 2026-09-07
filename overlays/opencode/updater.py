@@ -1,7 +1,5 @@
 """Updater for opencode's platform-specific Bun offline cache hashes."""
 
-from typing import TYPE_CHECKING
-
 from lib.system_policy import supported_systems
 from lib.update.updaters import (
     BunNodeModulesHashUpdater,
@@ -9,9 +7,6 @@ from lib.update.updaters import (
     VersionInfo,
     register_updater,
 )
-
-if TYPE_CHECKING:
-    from lib.nix.models.sources import SourceEntry
 
 
 @register_updater
@@ -25,13 +20,13 @@ class OpencodeUpdater(BunNodeModulesHashUpdater):
 
     async def _is_latest(
         self,
-        context: UpdateContext | SourceEntry | None,
+        context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
         if not await super()._is_latest(context, info):
             return False
 
-        entry = context.current if isinstance(context, UpdateContext) else context
+        entry = context.current
         if entry is None:
             return False
 

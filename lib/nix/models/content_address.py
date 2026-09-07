@@ -7,6 +7,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
+from .hash import NixHash  # noqa: TC001 -- Pydantic resolves this at runtime
+
 
 class ContentAddressMethod(StrEnum):
     """Method used to content-address a store object.
@@ -34,5 +36,5 @@ class ContentAddress(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     method: ContentAddressMethod
-    hash: str
+    hash: NixHash
     """SRI hash string (e.g. ``sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=``)."""

@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from lib.tests._updater_helpers import load_repo_module, run_async
 from lib.update.derivation_validation import DerivationValidation
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import AssetURLsMetadata
 
 if TYPE_CHECKING:
@@ -54,7 +54,9 @@ def test_hq_updater_tracks_the_exact_universal_release_asset(
         _fetch_github_api,
     )
 
-    info = run_async(updater.fetch_latest(object()))
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
     result = updater.build_result(info, {"aarch64-darwin": _HASH})
 
     assert updater.PLATFORMS == {"aarch64-darwin": "universal"}

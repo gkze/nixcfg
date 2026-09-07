@@ -1,6 +1,7 @@
 {
   "app": {
     "commit": "d90c0320664ef9812a1fb1d2a31f0977feaf7916",
+    "rustToolchainVersion": "1.89.0",
     "sourceHash": "sha256-oREdZTK1qdkJGhgTwIrQqKpmP3CRjUDsCx13oq6HDpY=",
     "tag": "v0.1.806-beta",
     "version": "0.1.806-beta"

@@ -29,7 +29,7 @@ from lib.tests._source_metadata import (
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import AssetURLsMetadata
 
 _VERSION = "3.7.5-4595"
@@ -99,7 +99,7 @@ def test_screen_studio_resolves_official_per_architecture_zips() -> None:
         "x64": _response(_URLS["x86_64-darwin"]),
     })
 
-    info = _run(updater.fetch_latest(session))
+    info = _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
     result = updater.build_result(info, _HASHES)
 
     assert info == VersionInfo(
@@ -140,7 +140,7 @@ def test_screen_studio_rejects_mismatched_feed_versions() -> None:
     })
 
     with pytest.raises(RuntimeError, match="returned mismatched versions"):
-        _run(updater.fetch_latest(session))
+        _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
 
 
 @pytest.mark.parametrize(
@@ -188,7 +188,7 @@ def test_screen_studio_reports_feed_http_failure() -> None:
         RuntimeError,
         match="request for aarch64-darwin failed with HTTP 503 Service Unavailable",
     ):
-        _run(updater.fetch_latest(session))
+        _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
 
 
 def test_screen_studio_rejects_feed_name_that_disagrees_with_artifact() -> None:
@@ -200,7 +200,7 @@ def test_screen_studio_rejects_feed_name_that_disagrees_with_artifact() -> None:
     })
 
     with pytest.raises(RuntimeError, match="does not match its aarch64-darwin"):
-        _run(updater.fetch_latest(session))
+        _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
 
 
 @pytest.mark.parametrize(
@@ -220,7 +220,7 @@ def test_screen_studio_rejects_malformed_feed_payload(payload: bytes) -> None:
     session = _FakeSession({"arm64": response, "x64": response})
 
     with pytest.raises((RuntimeError, TypeError)):
-        _run(updater.fetch_latest(session))
+        _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
 
 
 def test_screen_studio_package_preserves_the_signed_vendor_bundle() -> None:

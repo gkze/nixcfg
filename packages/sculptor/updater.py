@@ -1,12 +1,15 @@
 """Updater for Sculptor release artifacts."""
 
 
+
 from datetime import UTC
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     import aiohttp
+
+    from lib.update.updaters.core import UpdateContext
 
 from lib.update.net import fetch_headers
 from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
@@ -26,8 +29,14 @@ class SculptorUpdater(DownloadHashUpdater):
         "x86_64-linux": "AppImage/x64/Sculptor.AppImage",
     }
 
-    async def fetch_latest(self, session: aiohttp.ClientSession) -> VersionInfo:
+    async def fetch_latest(
+        self,
+        session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext,
+    ) -> VersionInfo:
         """Read the Last-Modified header and derive a date-based version."""
+        _ = context
         url = f"{self.BASE_URL}/Sculptor.dmg"
         headers = await fetch_headers(
             session,

@@ -13,27 +13,24 @@ import pytest
 from lib.nix.commands.base import CommandResult as LibCommandResult
 from lib.nix.commands.base import NixCommandError, ProcessDone, ProcessLine
 from lib.nix.models.sources import HashEntry
+from lib.tests._updater_helpers import collect_events
 from lib.update.events import (
     CommandResult,
+    EventSink,
     UpdateEvent,
     UpdateEventKind,
-    expect_source_hashes,
+    ignore_event,
 )
-from lib.update.process import NixBuildOptions, RunCommandOptions, StreamCommandOptions
+from lib.update.process import NixBuildOptions, RunCommandOptions
 from lib.update.ui_state import OperationKind, OperationState, _set_operation_status
+from lib.update.updaters.core import UpdateContext
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 
-def _collect(stream: AsyncIterator[UpdateEvent]) -> list[UpdateEvent]:
-    async def _run() -> list[UpdateEvent]:
-        items: list[UpdateEvent] = []
-        async for item in stream:
-            items.append(item)
-        return items
-
-    return asyncio.run(_run())
+def _collect(operation):
+    return asyncio.run(collect_events(operation))
 
 
 def test_deno_lock_known_version_skips_warning(
@@ -59,15 +56,6 @@ def test_deno_lock_known_version_skips_warning(
     assert "Unexpected deno.lock version" not in caplog.text
 
 
-def test_events_expect_source_hashes_rejects_mixed_list() -> None:
-    """Reject list payloads that mix ``HashEntry`` and non-entries."""
-    good = HashEntry.create(
-        "sha256", "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-    )
-    with pytest.raises(TypeError, match="Expected SourceHashes payload"):
-        _ = expect_source_hashes([good, "bad"])
-
-
 def test_compute_drv_fingerprint_without_store_prefix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -75,28 +63,31 @@ def test_compute_drv_fingerprint_without_store_prefix(
     from lib.update.nix import compute_drv_fingerprint
 
     async def _run_command(
-        *_args: object, **_kwargs: object
-    ) -> AsyncIterator[UpdateEvent]:
+        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
+    ) -> object:
         result = CommandResult(
             args=["nix"],
             returncode=0,
             stdout="abc123-demo.drv",
             stderr="",
         )
-        yield UpdateEvent(
-            source="demo", kind=UpdateEventKind.COMMAND_END, payload=result
+        await emit(
+            UpdateEvent(source="demo", kind=UpdateEventKind.COMMAND_END, payload=result)
         )
-        yield UpdateEvent.value("demo", result)
+        return result
 
     monkeypatch.setattr("lib.update.nix.run_command", _run_command)
     assert asyncio.run(compute_drv_fingerprint("demo")) == "abc123"
 
 
-def test_stream_command_timeout_override_and_empty_sanitized_line(
+@pytest.mark.parametrize("legacy_timeout", [False, True])
+def test_run_command_timeout_override_and_empty_sanitized_line(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    legacy_timeout: bool,
 ) -> None:
     """Use explicit timeout and skip empty sanitized lines."""
-    from lib.update.process import stream_command
+    from lib.update.process import run_command
 
     captured: dict[str, object] = {}
 
@@ -115,9 +106,13 @@ def test_stream_command_timeout_override_and_empty_sanitized_line(
 
     monkeypatch.setattr("lib.update.process.stream_process", _stream_process)
     events = _collect(
-        stream_command(
+        lambda emit: run_command(
             ["echo", "x"],
-            options=StreamCommandOptions(source="demo", command_timeout=2.5),
+            options=RunCommandOptions(
+                source="demo", command_timeout=None if legacy_timeout else 2.5
+            ),
+            emit=emit,
+            **({"timeout": 2.5} if legacy_timeout else {}),
         )
     )
     assert captured["timeout"] == 2.5
@@ -134,15 +129,17 @@ def test_run_nix_build_without_verbose(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
     async def _run_command(
-        args: list[str], *, options: RunCommandOptions
-    ) -> AsyncIterator[UpdateEvent]:
+        args: list[str], *, options: RunCommandOptions, emit: EventSink = ignore_event
+    ) -> object:
         captured["args"] = args
-        yield UpdateEvent.status(options.source, "ok")
+        await emit(UpdateEvent.status(options.source, "ok"))
 
     monkeypatch.setattr("lib.update.process.run_command", _run_command)
     _ = _collect(
-        run_nix_build(
-            "pkgs.hello", options=NixBuildOptions(source="demo", verbose=False)
+        lambda emit: run_nix_build(
+            "pkgs.hello",
+            options=NixBuildOptions(source="demo", verbose=False),
+            emit=emit,
         )
     )
     args = captured["args"]
@@ -389,23 +386,18 @@ def test_command_materialized_artifact_failures_leave_no_output(
     )
 
     async def _command(
-        args: list[str],
-        *,
-        options: RunCommandOptions,
-    ) -> AsyncIterator[UpdateEvent]:
-        yield UpdateEvent.value(
-            options.source,
-            CommandResult(
-                args=args,
-                returncode=returncode,
-                stdout="",
-                stderr=stderr,
-            ),
+        args: list[str], *, options: RunCommandOptions, emit: EventSink = ignore_event
+    ) -> object:
+        return CommandResult(
+            args=args,
+            returncode=returncode,
+            stdout="",
+            stderr=stderr,
         )
 
-    async def _empty_inner() -> AsyncIterator[UpdateEvent]:
+    async def _empty_inner(*, emit: EventSink = ignore_event) -> object:
         for event in ():
-            yield event
+            await emit(event)
 
     monkeypatch.setattr(
         "lib.update.generated_artifact_commands._run_command",
@@ -413,13 +405,13 @@ def test_command_materialized_artifact_failures_leave_no_output(
     )
     with pytest.raises(RuntimeError, match=message):
         _collect(
-            stream_command_materialized_artifacts(
+            lambda emit: stream_command_materialized_artifacts(
                 "demo",
                 args=["refresh"],
                 artifact_paths=("generated.txt",),
-                inner=_empty_inner(),
-                dry_run=False,
+                inner=_empty_inner,
                 repo_root=tmp_path,
+                emit=emit,
             )
         )
     assert not (tmp_path / "generated.txt").exists()
@@ -504,10 +496,11 @@ def test_compute_sri_hash_reraises_non_retryable_prefetch_failure(
     monkeypatch.setattr(update_process, "libnix_prefetch_url", _prefetch_url)
     with pytest.raises(NixCommandError, match="permanent failure"):
         _collect(
-            update_process.compute_sri_hash(
+            lambda emit: update_process.compute_sri_hash(
                 "demo",
                 "https://example.com/archive.tar.gz",
                 config=resolve_config(retries=3, retry_backoff=0),
+                emit=emit,
             )
         )
     assert calls == 1
@@ -677,21 +670,25 @@ def test_linear_cli_and_superconductor_branch_edges(
         return "2.3.4"
 
     async def _compute_url_hashes(
-        name: str,
-        urls: object,
-        *,
-        config: object,
-    ) -> AsyncIterator[UpdateEvent]:
+        name: str, urls: object, *, config: object, emit: EventSink = ignore_event
+    ) -> object:
         _ = config
         url_list = list(cast("Any", urls))
-        yield UpdateEvent.value(name, {url_list[0]: "sha256-demo"})
+        return {url_list[0]: "sha256-demo"}
 
     monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
     monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
 
-    events = _collect(updater.fetch_hashes(VersionInfo("1.0.0"), object()))
-    assert events[-1].kind is UpdateEventKind.VALUE
-    entries = cast("list[HashEntry]", events[-1].payload)
+    events = _collect(
+        lambda emit: updater.fetch_hashes(
+            VersionInfo("1.0.0"),
+            object(),
+            emit=emit,
+            context=UpdateContext(current=None),
+        )
+    )
+    assert events.result is not None
+    entries = cast("list[HashEntry]", events.result)
     assert entries == [
         HashEntry.create(
             "sha256",
@@ -707,7 +704,9 @@ def test_linear_cli_and_superconductor_branch_edges(
     )
     assert (
         asyncio.run(
-            superconductor.SuperconductorUpdater()._is_latest(None, VersionInfo("x"))
+            superconductor.SuperconductorUpdater()._is_latest(
+                UpdateContext(current=None), VersionInfo("x")
+            )
         )
         is False
     )

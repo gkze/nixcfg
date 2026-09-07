@@ -30,15 +30,17 @@ from lib.tests._updater_helpers import run_async as _run
 from lib.update.cli import _runtime_source_policy, _runtime_source_relpaths
 from lib.update.events import (
     CommandResult,
+    EventSink,
     StatusInfo,
     StatusKind,
     UpdateEvent,
     UpdateEventKind,
     expect_artifact_updates,
+    ignore_event,
 )
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
-from lib.update.updaters import VersionInfo
+from lib.update.updaters import UpdateContext, VersionInfo
 
 COMMIT = "a" * 40
 
@@ -195,10 +197,16 @@ def _select_zig_015(
         _resolve_selected_zig_version,
     )
 
-    async def _read_minimum(_build_zig_zon: Path, *, zig_path: str, system: str):
+    async def _read_minimum(
+        _build_zig_zon: Path,
+        *,
+        zig_path: str,
+        system: str,
+        emit: EventSink = ignore_event,
+    ) -> object:
         _ = zig_path
         assert system == "aarch64-darwin"
-        yield UpdateEvent.value(updater.name, minimum)
+        return minimum
 
     monkeypatch.setattr(updater, "_read_minimum_zig_version", _read_minimum)
 
@@ -231,7 +239,9 @@ def test_read_minimum_zig_version_invokes_selected_native_parser(
     manifest = tmp_path / "build.zig.zon"
     status = UpdateEvent.status(updater.name, "parsing ZON")
 
-    async def _run_command(args: list[str], *, options):
+    async def _run_command(
+        args: list[str], *, options, emit: EventSink = ignore_event
+    ) -> object:
         assert args == [
             "/nix/store/zig-tool/bin/zig",
             "run",
@@ -248,23 +258,19 @@ def test_read_minimum_zig_version_invokes_selected_native_parser(
         assert options.command_timeout == updater.config.default_subprocess_timeout
         assert options.config is updater.config
         assert options.allow_failure is False
-        yield status
-        yield UpdateEvent.value(
-            updater.name,
-            CommandResult(args=args, returncode=0, stdout="0.15.1\n", stderr=""),
-        )
+        await emit(status)
+        return CommandResult(args=args, returncode=0, stdout="0.15.1\n", stderr="")
 
     monkeypatch.setattr(module, "run_command", _run_command)
     events = _run(
         _collect_events(
-            updater._read_minimum_zig_version(
-                manifest,
-                zig_path="/nix/store/zig-tool",
-                system=system,
+            lambda emit: updater._read_minimum_zig_version(
+                manifest, zig_path="/nix/store/zig-tool", system=system, emit=emit
             )
         )
     )
-    assert events == [status, UpdateEvent.value(updater.name, "0.15.1")]
+    assert events == [status]
+    assert events.result == "0.15.1"
 
 
 def test_native_zon_parser_failure_preserves_the_cause(
@@ -276,19 +282,19 @@ def test_native_zon_parser_failure_preserves_the_cause(
     updater = module.NeutilsUpdater()
     error = RuntimeError("ZON parse failed: missing minimum_zig_version")
 
-    async def _run_command(_args, *, options):
+    async def _run_command(_args, *, options, emit: EventSink = ignore_event) -> object:
         assert options.allow_failure is False
         raise error
-        yield
 
     monkeypatch.setattr(module, "run_command", _run_command)
     with pytest.raises(RuntimeError, match="ZON parse failed") as raised:
         _run(
             _collect_events(
-                updater._read_minimum_zig_version(
+                lambda emit: updater._read_minimum_zig_version(
                     tmp_path / "build.zig.zon",
                     zig_path="/nix/store/zig-tool",
                     system="aarch64-darwin",
+                    emit=emit,
                 )
             )
         )
@@ -328,11 +334,8 @@ def test_fetch_hashes_rejects_failed_native_parser_before_emitting_artifact(
             )
         yield ProcessDone(result)
 
-    async def _collect() -> None:
-        async for event in updater.fetch_hashes(
-            _version_info(), object(), context=_source_entry("0.7.2")
-        ):
-            events.append(event)
+    async def _collect(event: UpdateEvent) -> None:
+        events.append(event)
 
     monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
     monkeypatch.setattr(
@@ -343,7 +346,14 @@ def test_fetch_hashes_rejects_failed_native_parser_before_emitting_artifact(
     monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: tmp_path)
 
     with pytest.raises(RuntimeError, match=re.escape(stderr)) as raised:
-        _run(_collect())
+        _run(
+            updater.fetch_hashes(
+                _version_info(),
+                object(),
+                context=UpdateContext(current=_source_entry("0.7.2")),
+                emit=_collect,
+            )
+        )
 
     assert "Read neutils minimum_zig_version from ZON failed (exit 1)" in str(
         raised.value
@@ -525,10 +535,12 @@ def test_render_build_zig_zon_rejects_newer_toolchain_before_zon2nix(
     async def _fetch_url(*_args, **_kwargs):
         return _build_archive(minimum_zig_version="0.16.0")
 
-    async def _resolve(installable: str, *, expression: bool = False):
+    async def _resolve(
+        installable: str, *, expression: bool = False, emit: EventSink = ignore_event
+    ) -> object:
         assert expression is False
         assert installable.endswith(".zig_0_15")
-        yield UpdateEvent.value(updater.name, "/nix/store/zig-tool")
+        return "/nix/store/zig-tool"
 
     monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
     monkeypatch.setattr(
@@ -541,9 +553,8 @@ def test_render_build_zig_zon_rejects_newer_toolchain_before_zon2nix(
     with pytest.raises(RuntimeError, match="newer than package-selected"):
         _run(
             _collect_events(
-                updater._render_build_zig_zon_nix(
-                    _version_info("0.8.0"),
-                    object(),
+                lambda emit: updater._render_build_zig_zon_nix(
+                    _version_info("0.8.0"), object(), emit=emit
                 )
             )
         )
@@ -641,36 +652,31 @@ def test_resolve_installable_path_returns_last_output_path(
     updater = module.NeutilsUpdater()
     calls: list[tuple[list[str], object]] = []
 
-    async def _run_command(args: list[str], *, options):
+    async def _run_command(
+        args: list[str], *, options, emit: EventSink = ignore_event
+    ) -> object:
         calls.append((args, options))
-        yield UpdateEvent.status(updater.name, "building installable")
-        yield UpdateEvent.value(
-            updater.name,
-            CommandResult(
-                args=args,
-                returncode=0,
-                stdout="\n/nix/store/old\n\n/nix/store/final\n",
-                stderr="",
-            ),
+        await emit(UpdateEvent.status(updater.name, "building installable"))
+        return CommandResult(
+            args=args,
+            returncode=0,
+            stdout="\n/nix/store/old\n\n/nix/store/final\n",
+            stderr="",
         )
 
     monkeypatch.setattr(module, "run_command", _run_command)
 
     events = _run(
         _collect_events(
-            updater._resolve_installable_path(
-                "flake#tool",
-                expression=expression,
+            lambda emit: updater._resolve_installable_path(
+                "flake#tool", expression=expression, emit=emit
             )
         )
     )
 
-    assert [event.kind for event in events] == [
-        UpdateEventKind.STATUS,
-        UpdateEventKind.VALUE,
-    ]
+    assert [event.kind for event in events] == [UpdateEventKind.STATUS]
     assert events[0].message == "building installable"
-    assert events[1].payload == "/nix/store/final"
+    assert events.result == "/nix/store/final"
     expected_command = [
         "nix",
         "build",
@@ -717,14 +723,20 @@ def test_resolve_installable_path_rejects_bad_command_results(
     module = _load_module(f"neutils_updater_test_resolve_bad_{result.returncode}")
     updater = module.NeutilsUpdater()
 
-    async def _run_command(_args: list[str], *, options):
+    async def _run_command(
+        _args: list[str], *, options, emit: EventSink = ignore_event
+    ) -> object:
         _ = options
-        yield UpdateEvent.value(updater.name, result)
+        return result
 
     monkeypatch.setattr(module, "run_command", _run_command)
 
     with pytest.raises(RuntimeError, match=match):
-        _run(_collect_events(updater._resolve_installable_path("flake#tool")))
+        _run(
+            _collect_events(
+                lambda emit: updater._resolve_installable_path("flake#tool", emit=emit)
+            )
+        )
 
 
 def test_render_build_zig_zon_nix_renders_artifact_with_resolved_tools(
@@ -744,30 +756,34 @@ def test_render_build_zig_zon_nix_renders_artifact_with_resolved_tools(
         assert config == updater.config
         return _build_archive()
 
-    async def _resolve(installable: str, *, expression: bool = False):
+    async def _resolve(
+        installable: str, *, expression: bool = False, emit: EventSink = ignore_event
+    ) -> object:
         installables.append((installable, expression))
-        yield UpdateEvent.value(
-            updater.name,
-            "/nix/store/zon2nix-tool" if expression else "/nix/store/zig-tool",
-        )
+        return "/nix/store/zon2nix-tool" if expression else "/nix/store/zig-tool"
 
-    async def _run_command(args: list[str], *, options):
+    async def _run_command(
+        args: list[str], *, options, emit: EventSink = ignore_event
+    ) -> object:
         command_calls.append((args, options))
         output_arg = next(arg for arg in args if arg.startswith("--nix="))
         Path(output_arg.removeprefix("--nix=")).write_text(
             "# rendered\n", encoding="utf-8"
         )
-        yield UpdateEvent.status(updater.name, "running zon2nix")
-        yield UpdateEvent.value(
-            updater.name,
-            CommandResult(args=args, returncode=0, stdout="ok", stderr=""),
-        )
+        await emit(UpdateEvent.status(updater.name, "running zon2nix"))
+        return CommandResult(args=args, returncode=0, stdout="ok", stderr="")
 
-    async def _read_minimum(_build_zig_zon: Path, *, zig_path: str, system: str):
+    async def _read_minimum(
+        _build_zig_zon: Path,
+        *,
+        zig_path: str,
+        system: str,
+        emit: EventSink = ignore_event,
+    ) -> object:
         assert zig_path == "/nix/store/zig-tool"
         assert system == "aarch64-darwin"
-        yield UpdateEvent.status(updater.name, "parsing ZON")
-        yield UpdateEvent.value(updater.name, "0.15.1")
+        await emit(UpdateEvent.status(updater.name, "parsing ZON"))
+        return "0.15.1"
 
     monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
     monkeypatch.setattr(
@@ -785,15 +801,18 @@ def test_render_build_zig_zon_nix_renders_artifact_with_resolved_tools(
     monkeypatch.setattr(updater, "_read_minimum_zig_version", _read_minimum)
 
     session_obj = object()
-    events = _run(_collect_events(updater._render_build_zig_zon_nix(info, session_obj)))
+    events = _run(
+        _collect_events(
+            lambda emit: updater._render_build_zig_zon_nix(info, session_obj, emit=emit)
+        )
+    )
 
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
         UpdateEventKind.STATUS,
-        UpdateEventKind.VALUE,
     ]
     assert [event.message for event in events[:2]] == ["parsing ZON", "running zon2nix"]
-    assert events[2].payload == "# rendered\n"
+    assert events.result == "# rendered\n"
     assert installables[0] == (
         "git+file:///repo/root?dirty=1#pkgs.aarch64-darwin.zig_0_15",
         False,
@@ -863,23 +882,26 @@ def test_run_zon2nix_retries_with_bounded_ordered_progress(
         assert delay == updater.config.default_retry_backoff
         timeline.append("backoff")
 
-    async def _collect() -> None:
-        async for event in updater._run_zon2nix(
+    async def _collect(event: UpdateEvent) -> None:
+        timeline.append(event.kind)
+        if event.kind is UpdateEventKind.STATUS:
+            retry_events.append(event)
+
+    async def _run_generator() -> None:
+        await updater._run_zon2nix(
             zon2nix_path="/nix/store/zon2nix-tool",
             zig_version_flag="--15",
             build_zig_zon=tmp_path / "build.zig.zon",
             output_path=output_path,
             env={"HOME": str(tmp_path)},
-        ):
-            timeline.append(event.kind)
-            if event.kind is UpdateEventKind.STATUS:
-                retry_events.append(event)
+            emit=_collect,
+        )
 
     monkeypatch.setattr("lib.update.process.stream_process", _stream_process)
     monkeypatch.setattr(module.asyncio, "sleep", _sleep)
 
     if recover:
-        _run(_collect())
+        _run(_run_generator())
         assert output_path.read_text(encoding="utf-8") == "# generated\n"
     else:
         expected_error = (
@@ -888,7 +910,7 @@ def test_run_zon2nix_retries_with_bounded_ordered_progress(
             else "dependency fetch failed"
         )
         with pytest.raises(RuntimeError, match=expected_error):
-            _run(_collect())
+            _run(_run_generator())
 
     assert calls == (2 if recover else 3)
     failed_attempt = [UpdateEventKind.COMMAND_START]
@@ -943,20 +965,22 @@ def test_run_zon2nix_surfaces_permanent_exit_without_retry(
     async def _sleep(_delay: float) -> None:
         pytest.fail("A deterministic failure must not be retried")
 
-    async def _collect() -> None:
-        async for event in updater._run_zon2nix(
-            zon2nix_path="/nix/store/zon2nix-tool",
-            zig_version_flag="--15",
-            build_zig_zon=tmp_path / "build.zig.zon",
-            output_path=tmp_path / "build.zig.zon.nix",
-            env={},
-        ):
-            events.append(event)
+    async def _collect(event: UpdateEvent) -> None:
+        events.append(event)
 
     monkeypatch.setattr("lib.update.process.stream_process", _stream_process)
     monkeypatch.setattr(module.asyncio, "sleep", _sleep)
     with pytest.raises(RuntimeError, match=f"^{re.escape(message)}$"):
-        _run(_collect())
+        _run(
+            updater._run_zon2nix(
+                zon2nix_path="/nix/store/zon2nix-tool",
+                zig_version_flag="--15",
+                build_zig_zon=tmp_path / "build.zig.zon",
+                output_path=tmp_path / "build.zig.zon.nix",
+                env={},
+                emit=_collect,
+            )
+        )
     assert [event.kind for event in events] == [
         UpdateEventKind.COMMAND_START,
         UpdateEventKind.COMMAND_END,
@@ -973,26 +997,26 @@ def test_render_build_zig_zon_nix_yields_tool_resolution_events(
     async def _fetch_url(*_args, **_kwargs):
         return _build_archive()
 
-    async def _resolve(installable: str, *, expression: bool = False):
+    async def _resolve(
+        installable: str, *, expression: bool = False, emit: EventSink = ignore_event
+    ) -> object:
         _ = expression
-        yield UpdateEvent.status(updater.name, f"resolving {installable}")
-        yield UpdateEvent.value(
-            updater.name,
+        await emit(UpdateEvent.status(updater.name, f"resolving {installable}"))
+        return (
             "/nix/store/zig-tool"
             if installable.endswith("zig_0_15")
-            else "/nix/store/zon2nix-tool",
+            else "/nix/store/zon2nix-tool"
         )
 
-    async def _run_command(args: list[str], *, options):
+    async def _run_command(
+        args: list[str], *, options, emit: EventSink = ignore_event
+    ) -> object:
         _ = options
         output_arg = next(arg for arg in args if arg.startswith("--nix="))
         Path(output_arg.removeprefix("--nix=")).write_text(
             "# rendered\n", encoding="utf-8"
         )
-        yield UpdateEvent.value(
-            updater.name,
-            CommandResult(args=args, returncode=0, stdout="ok", stderr=""),
-        )
+        return CommandResult(args=args, returncode=0, stdout="ok", stderr="")
 
     monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
     monkeypatch.setattr(
@@ -1004,10 +1028,14 @@ def test_render_build_zig_zon_nix_yields_tool_resolution_events(
     _select_zig_015(monkeypatch, updater)
 
     events = _run(
-        _collect_events(updater._render_build_zig_zon_nix(_version_info(), object()))
+        _collect_events(
+            lambda emit: updater._render_build_zig_zon_nix(
+                _version_info(), object(), emit=emit
+            )
+        )
     )
 
-    resolution_messages = [event.message for event in events[:-1]]
+    resolution_messages = [event.message for event in events]
     assert resolution_messages[0] == (
         "resolving git+file:///repo/root?dirty=1#pkgs.aarch64-darwin.zig_0_15"
     )
@@ -1024,7 +1052,7 @@ def test_render_build_zig_zon_nix_yields_tool_resolution_events(
             quoted_indices=(1, 3),
         ),
     )
-    assert events[-1].payload == "# rendered\n"
+    assert events.result == "# rendered\n"
 
 
 def test_fetch_hashes_requires_package_directory(
@@ -1037,7 +1065,16 @@ def test_fetch_hashes_requires_package_directory(
     monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: None)
 
     with pytest.raises(RuntimeError, match="Package directory not found for neutils"):
-        _run(_collect_events(updater.fetch_hashes(_version_info(), object())))
+        _run(
+            _collect_events(
+                lambda emit: updater.fetch_hashes(
+                    _version_info(),
+                    object(),
+                    context=UpdateContext(current=None),
+                    emit=emit,
+                )
+            )
+        )
 
 
 def test_fetch_hashes_emits_generated_artifact_and_src_hash(
@@ -1047,16 +1084,20 @@ def test_fetch_hashes_emits_generated_artifact_and_src_hash(
     module = _load_module("neutils_updater_test_fetch_hashes")
     updater = module.NeutilsUpdater()
 
-    async def _render(_info: object, _session: object):
-        yield UpdateEvent.status(updater.name, "rendering artifact")
-        yield UpdateEvent.value(updater.name, "# generated\n")
+    async def _render(
+        _info: object, _session: object, *, emit: EventSink = ignore_event
+    ) -> object:
+        await emit(UpdateEvent.status(updater.name, "rendering artifact"))
+        return "# generated\n"
 
-    async def _fixed_hash(name: str, expr: str, *, config=None):
+    async def _fixed_hash(
+        name: str, expr: str, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         assert name == updater.name
         assert_nix_ast_equal(expr, updater._src_expr(COMMIT))
         assert config == updater.config
-        yield UpdateEvent.status(name, "hashing src")
-        yield UpdateEvent.value(name, "sha256-src")
+        await emit(UpdateEvent.status(name, "hashing src"))
+        return "sha256-src"
 
     monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
     monkeypatch.setattr(
@@ -1065,21 +1106,29 @@ def test_fetch_hashes_emits_generated_artifact_and_src_hash(
     )
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
-    events = _run(_collect_events(updater.fetch_hashes(_version_info(), object())))
+    events = _run(
+        _collect_events(
+            lambda emit: updater.fetch_hashes(
+                _version_info(),
+                object(),
+                context=UpdateContext(current=None),
+                emit=emit,
+            )
+        )
+    )
 
     assert [event.kind for event in events] == [
         UpdateEventKind.STATUS,
         UpdateEventKind.STATUS,
         UpdateEventKind.ARTIFACT,
         UpdateEventKind.STATUS,
-        UpdateEventKind.VALUE,
     ]
     assert events[0].message == "Refreshing build.zig.zon.nix..."
     artifacts = expect_artifact_updates(events[2].payload)
     assert len(artifacts) == 1
     assert artifacts[0].path == REPO_ROOT / "packages" / "neutils" / "build.zig.zon.nix"
     assert artifacts[0].content == "# generated\n"
-    assert events[-1].payload == [HashEntry.create("srcHash", "sha256-src")]
+    assert events.result == [HashEntry.create("srcHash", "sha256-src")]
 
 
 @pytest.mark.parametrize(
@@ -1102,15 +1151,19 @@ def test_fetch_hashes_preserves_existing_artifact_after_current_transient_failur
     artifact_path = pkg_dir / "build.zig.zon.nix"
     artifact_path.write_text("# existing artifact\n", encoding="utf-8")
 
-    async def _render(_info: object, _session: object):
-        yield UpdateEvent.status(updater.name, "resolving tools")
+    async def _render(
+        _info: object, _session: object, *, emit: EventSink = ignore_event
+    ) -> object:
+        await emit(UpdateEvent.status(updater.name, "resolving tools"))
         raise RuntimeError(transient_error)
 
-    async def _fixed_hash(name: str, expr: str, *, config=None):
+    async def _fixed_hash(
+        name: str, expr: str, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         assert name == updater.name
         assert_nix_ast_equal(expr, updater._src_expr(COMMIT))
         assert config == updater.config
-        yield UpdateEvent.value(name, "sha256-src")
+        return "sha256-src"
 
     monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
     monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: pkg_dir)
@@ -1118,10 +1171,11 @@ def test_fetch_hashes_preserves_existing_artifact_after_current_transient_failur
 
     events = _run(
         _collect_events(
-            updater.fetch_hashes(
+            lambda emit: updater.fetch_hashes(
                 _version_info(),
                 object(),
-                context=_source_entry("0.7.2"),
+                context=UpdateContext(current=_source_entry("0.7.2")),
+                emit=emit,
             )
         )
     )
@@ -1131,7 +1185,6 @@ def test_fetch_hashes_preserves_existing_artifact_after_current_transient_failur
         UpdateEventKind.STATUS,
         UpdateEventKind.STATUS,
         UpdateEventKind.ARTIFACT,
-        UpdateEventKind.VALUE,
     ]
     assert events[2].message == (
         "Preserving existing build.zig.zon.nix after transient zon2nix failure."
@@ -1140,7 +1193,7 @@ def test_fetch_hashes_preserves_existing_artifact_after_current_transient_failur
     assert len(artifacts) == 1
     assert artifacts[0].path == artifact_path
     assert artifacts[0].content == "# existing artifact\n"
-    assert events[-1].payload == [HashEntry.create("srcHash", "sha256-src")]
+    assert events.result == [HashEntry.create("srcHash", "sha256-src")]
 
 
 @pytest.mark.parametrize(
@@ -1171,31 +1224,34 @@ def test_fetch_hashes_retries_transient_zon2nix_failure_before_preserving_curren
     async def _fetch_url(*_args: object, **_kwargs: object) -> bytes:
         return _build_archive()
 
-    async def _resolve(_installable: str, *, expression: bool = False):
+    async def _resolve(
+        _installable: str, *, expression: bool = False, emit: EventSink = ignore_event
+    ) -> object:
         _ = expression
-        yield UpdateEvent.value(updater.name, "/nix/store/tool")
+        return "/nix/store/tool"
 
-    async def _run_command(args: list[str], *, options: object):
+    async def _run_command(
+        args: list[str], *, options: object, emit: EventSink = ignore_event
+    ) -> object:
         _ = options
         command_calls.append(args)
-        yield UpdateEvent.value(
-            updater.name,
-            CommandResult(
-                args=args,
-                returncode=1,
-                stdout="",
-                stderr=transient_stderr,
-            ),
+        return CommandResult(
+            args=args,
+            returncode=1,
+            stdout="",
+            stderr=transient_stderr,
         )
 
     async def _sleep(delay: float) -> None:
         sleep_delays.append(delay)
 
-    async def _fixed_hash(name: str, expr: str, *, config=None):
+    async def _fixed_hash(
+        name: str, expr: str, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         assert name == updater.name
         assert_nix_ast_equal(expr, updater._src_expr(COMMIT))
         assert config == updater.config
-        yield UpdateEvent.value(name, "sha256-src")
+        return "sha256-src"
 
     monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
     monkeypatch.setattr(
@@ -1211,10 +1267,11 @@ def test_fetch_hashes_retries_transient_zon2nix_failure_before_preserving_curren
 
     events = _run(
         _collect_events(
-            updater.fetch_hashes(
+            lambda emit: updater.fetch_hashes(
                 _version_info(),
                 object(),
-                context=_source_entry("0.7.2"),
+                context=UpdateContext(current=_source_entry("0.7.2")),
+                emit=emit,
             )
         )
     )
@@ -1243,7 +1300,7 @@ def test_fetch_hashes_retries_transient_zon2nix_failure_before_preserving_curren
     assert len(artifacts) == 1
     assert artifacts[0].path == artifact_path
     assert artifacts[0].content == "# existing artifact\n"
-    assert events[-1].payload == [HashEntry.create("srcHash", "sha256-src")]
+    assert events.result == [HashEntry.create("srcHash", "sha256-src")]
 
 
 @pytest.mark.parametrize(
@@ -1271,15 +1328,16 @@ def test_fetch_hashes_rejects_preserve_when_artifact_is_not_current(
     if write_artifact:
         artifact_path.write_text("# stale artifact\n", encoding="utf-8")
 
-    async def _render(_info: object, _session: object):
-        if False:
-            yield UpdateEvent.value(updater.name, "# unreachable\n")
+    async def _render(
+        _info: object, _session: object, *, emit: EventSink = ignore_event
+    ) -> object:
         raise RuntimeError("Command timed out after 180s: zon2nix")
 
-    async def _fixed_hash(name: str, expr: str, *, config=None):
+    async def _fixed_hash(
+        name: str, expr: str, *, config=None, emit: EventSink = ignore_event
+    ) -> object:
         _ = (name, expr, config)
         raise AssertionError("srcHash computation should not run")
-        yield UpdateEvent.value(updater.name, "sha256-src")
 
     monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
     monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: pkg_dir)
@@ -1288,10 +1346,13 @@ def test_fetch_hashes_rejects_preserve_when_artifact_is_not_current(
     with pytest.raises(RuntimeError, match="Command timed out after 180s"):
         _run(
             _collect_events(
-                updater.fetch_hashes(
+                lambda emit: updater.fetch_hashes(
                     _version_info(),
                     object(),
-                    context=_source_entry(context_version, commit=context_commit),
+                    context=UpdateContext(
+                        current=_source_entry(context_version, commit=context_commit)
+                    ),
+                    emit=emit,
                 )
             )
         )
@@ -1315,27 +1376,29 @@ def test_run_zon2nix_preserves_stream_exception_and_cancellation(
     events: list[UpdateEvent] = []
     status = UpdateEvent.status(updater.name, "starting zon2nix")
 
-    async def _run_command(_args, *, options):
-        yield status
+    async def _run_command(_args, *, options, emit: EventSink = ignore_event) -> object:
+        await emit(status)
         raise error from cause
 
     async def _sleep(_delay: float) -> None:
         pytest.fail("Permanent errors and cancellation must not be retried")
 
-    async def _collect() -> None:
-        async for event in updater._run_zon2nix(
-            zon2nix_path="/nix/store/zon2nix-tool",
-            zig_version_flag="--15",
-            build_zig_zon=tmp_path / "build.zig.zon",
-            output_path=tmp_path / "build.zig.zon.nix",
-            env={},
-        ):
-            events.append(event)
+    async def _collect(event: UpdateEvent) -> None:
+        events.append(event)
 
     monkeypatch.setattr(module, "run_command", _run_command)
     monkeypatch.setattr(module.asyncio, "sleep", _sleep)
     with pytest.raises(type(error)) as raised:
-        _run(_collect())
+        _run(
+            updater._run_zon2nix(
+                zon2nix_path="/nix/store/zon2nix-tool",
+                zig_version_flag="--15",
+                build_zig_zon=tmp_path / "build.zig.zon",
+                output_path=tmp_path / "build.zig.zon.nix",
+                env={},
+                emit=_collect,
+            )
+        )
     assert raised.value is error
     assert raised.value.__cause__ is cause
     assert events == [status]
