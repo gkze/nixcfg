@@ -24,6 +24,7 @@ in
   baseten-switch = callDarwinAppPackage "baseten-switch";
   bb = callDarwinAppPackage "bb";
   buzz = callDarwinAppPackage "buzz";
+  capy = callDarwinAppPackage "capy";
   claude = callDarwinAppPackage "claude";
   claude-code = callDarwinAppPackage "claude-code";
   claude-code-url-handler = final.callPackage ../packages/claude-code-url-handler { };

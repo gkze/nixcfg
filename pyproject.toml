@@ -173,6 +173,10 @@ dynamicRoots = ["packages", "overlays"]
 dynamicExtensions = ["py", "pyi", "zig"]
 dynamicExcludedFileSuffixes = ["_test.py"]
 
+[tool.ty.environment]
+# HQ's standalone build scripts import this sibling module via PYTHONPATH in Nix.
+extra-paths = ["packages/hq"]
+
 [tool.ty.src]
 # Restrict Ty analysis to maintained source trees and explicit extensionless Python entrypoints.
 include = [

@@ -178,6 +178,7 @@
         arc.package = pkgs.arc;
         ara.package = pkgs.ara;
         betterdisplay.package = pkgs.betterdisplay;
+        capy.package = pkgs.capy;
         claude.package = pkgs.claude;
         codeedit.package = pkgs.codeedit;
         "code-cursor".package = pkgs.code-cursor;

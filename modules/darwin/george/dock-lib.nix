@@ -56,6 +56,7 @@ in
       options,
       others ? standardOthers homeDirectory,
       pkgs ? null,
+      removeApps ? [ ],
       removeOthers ? standardRemoveOthers homeDirectory,
     }:
     let
@@ -78,13 +79,18 @@ in
         kind = "kind";
       };
 
-      removeOtherCommands = concatMapStringsSep "\n" (other: ''
-        if "$dockutil" --find ${escapeShellArg other} --section others >/dev/null 2>&1; then
-          if ! "$dockutil" --remove ${escapeShellArg other} --section others --no-restart >/dev/null; then
-            echo "warning: failed to remove stale Dock item ${other}" >&2
+      removeCommands =
+        section: items:
+        concatMapStringsSep "\n" (item: ''
+          if "$dockutil" --find ${escapeShellArg item} --section ${escapeShellArg section} >/dev/null 2>&1; then
+            if ! "$dockutil" --remove ${escapeShellArg item} --section ${escapeShellArg section} --no-restart >/dev/null; then
+              echo ${escapeShellArg "warning: failed to remove stale Dock item ${item}"} >&2
+            fi
           fi
-        fi
-      '') removeOthers;
+        '') items;
+
+      removeAppCommands = removeCommands "apps" removeApps;
+      removeOtherCommands = removeCommands "others" removeOthers;
 
       positionedApps = lib.imap1 (position: app: { inherit app position; }) apps;
       positionedOthers = lib.imap1 (position: other: other // { inherit position; }) others;
@@ -138,6 +144,7 @@ in
             fi
 
             ${removeOtherCommands}
+            ${removeAppCommands}
             ${addAppCommands}
             ${addOtherCommands}
             /usr/bin/killall Dock >/dev/null 2>&1 || true

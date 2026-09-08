@@ -82,6 +82,7 @@ let
         "arc"
         "aside"
         "baseten-switch"
+        "capy"
         "claude"
         "cleanshot"
         "clearly"

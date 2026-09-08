@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-t7eiBrPSJgaJDtZHe5kg+pSutjNXmszvR1revIwcMww=",
+    "x86_64-darwin": "sha256-rCjod49RDUO/eII+rEJyZrqcl6bF21yMfRBHEh4e3Bo="
+  },
+  "urls": {
+    "aarch64-darwin": "https://d1lfowv2t69uz0.cloudfront.net/stable/Capy-0.1.0-arm64.zip",
+    "x86_64-darwin": "https://d1lfowv2t69uz0.cloudfront.net/stable/Capy-0.1.0-x64.zip"
+  },
+  "version": "0.1.0"
+}
