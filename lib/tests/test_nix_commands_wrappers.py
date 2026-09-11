@@ -4,6 +4,7 @@ import asyncio
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from pydantic import ValidationError
 
 from lib.nix.commands import _json as json_mod
 from lib.nix.commands import build as build_mod
@@ -292,23 +293,18 @@ def test_hash_and_path_info_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
             return CommandResult(
                 args=args, returncode=0, stdout="sha256-AAA=\n", stderr=""
             )
-        if args[:1] == ["nix-prefetch-url"]:
+        if args[:3] == ["nix", "store", "prefetch-file"]:
             prefetch_args.append(args)
             return CommandResult(
-                args=args, returncode=0, stdout="log\nabc\n", stderr=""
+                args=args, returncode=0, stdout='{"hash":"sha256-AAA="}', stderr=""
             )
         return CommandResult(args=args, returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(hash_mod, "run_nix", _run_nix)
     assert asyncio.run(hash_mod.nix_hash_convert("abcd")) == "sha256-AAA="
 
-    async def _convert(raw_hash: str, *, hash_algo: str = "sha256") -> str:
-        return f"converted:{hash_algo}:{raw_hash}"
-
-    monkeypatch.setattr(hash_mod, "nix_hash_convert", _convert)
     assert (
-        asyncio.run(hash_mod.nix_prefetch_url("https://example.com"))
-        == "converted:sha256:abc"
+        asyncio.run(hash_mod.nix_prefetch_url("https://example.com")) == "sha256-AAA="
     )
     assert (
         asyncio.run(
@@ -317,13 +313,24 @@ def test_hash_and_path_info_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
                 name="safe-name.dmg",
             )
         )
-        == "converted:sha256:abc"
+        == "sha256-AAA="
     )
     assert prefetch_args == [
-        ["nix-prefetch-url", "--type", "sha256", "https://example.com"],
         [
-            "nix-prefetch-url",
-            "--type",
+            "nix",
+            "store",
+            "prefetch-file",
+            "--json",
+            "--hash-type",
+            "sha256",
+            "https://example.com",
+        ],
+        [
+            "nix",
+            "store",
+            "prefetch-file",
+            "--json",
+            "--hash-type",
             "sha256",
             "--name",
             "safe-name.dmg",
@@ -445,3 +452,19 @@ def test_store_deriver_wrapper_handles_unknown_and_failure(
     monkeypatch.setattr(store_mod, "run_nix", _bad)
     with pytest.raises(NixCommandError):
         asyncio.run(store_mod.nix_store_query_deriver("/nix/store/pkg"))
+
+
+@pytest.mark.parametrize(
+    "payload", ["not-json", "{}", '{"hash":"bad"}', '{"hash":123}']
+)
+def test_prefetch_rejects_malformed_hash_result(
+    monkeypatch: pytest.MonkeyPatch, payload: str
+) -> None:
+    """Structured prefetch output must include an SRI hash before it can be saved."""
+
+    async def _run_nix(args: list[str], **_kwargs: object) -> CommandResult:
+        return CommandResult(args=args, returncode=0, stdout=payload, stderr="")
+
+    monkeypatch.setattr(hash_mod, "run_nix", _run_nix)
+    with pytest.raises(ValidationError):
+        asyncio.run(hash_mod.nix_prefetch_url("https://example.invalid/archive"))

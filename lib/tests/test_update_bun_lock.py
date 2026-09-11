@@ -661,6 +661,58 @@ def test_prepare_source_package_lock_skips_relock_when_valid(tmp_path: Path) -> 
     assert calls == ["validate:bun.lock"]
 
 
+def test_source_archive_is_fetched_once_across_repair_passes(tmp_path: Path) -> None:
+    """Repair observes one URL payload; a new invocation refreshes mutable URLs."""
+    lock = tmp_path / "bun.lock"
+    url = "https://example.test/source.tgz"
+    payload = {
+        "overrides": {"dep": url},
+        "packages": {"parent": ["parent@1", {"dependencies": {"dep": "1.0.0"}}]},
+    }
+    lock.write_text(json.dumps(payload), encoding="utf-8")
+    fetched: list[str] = []
+
+    def fetch(address: str) -> bytes:
+        fetched.append(address)
+        return _tarball_bytes({"name": "dep", "version": "2.0.0"})
+
+    def relock(_workspace: Path, _executable: str) -> None:
+        payload["packages"] = {
+            "parent": ["parent@1", {"dependencies": {"dep": "2.0.0"}}]
+        }
+        lock.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert bun_lock.prepare_source_package_lock(
+        tmp_path, lock, relock=relock, fetch_bytes=fetch
+    )
+    assert fetched == [url]
+    assert not bun_lock.prepare_source_package_lock(
+        tmp_path, lock, relock=relock, fetch_bytes=fetch
+    )
+    assert fetched == [url, url]
+
+
+def test_duplicate_source_urls_share_one_manifest_read(tmp_path: Path) -> None:
+    """Aliased overrides may be invalid, but still require only one archive fetch."""
+    lock = tmp_path / "bun.lock"
+    url = "https://example.test/source.tgz"
+    lock.write_text(
+        json.dumps({"overrides": {"dep": url, "alias": url}, "packages": {}}),
+        encoding="utf-8",
+    )
+    fetched: list[str] = []
+
+    def fetch(address: str) -> bytes:
+        fetched.append(address)
+        return _tarball_bytes({"name": "dep", "version": "1.0.0"})
+
+    with pytest.raises(
+        bun_lock.BunSourcePackageValidationError, match="package name mismatch"
+    ):
+        bun_lock.validate_source_package_exact_versions(lock, fetch_bytes=fetch)
+    assert fetched == [url]
+
+
 def test_prepare_source_package_lock_relocks_after_validation_error(
     tmp_path: Path,
 ) -> None:

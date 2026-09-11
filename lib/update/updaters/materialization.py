@@ -5,12 +5,14 @@ from typing import TYPE_CHECKING, ClassVar
 from lib.update.crate2nix import TARGETS, stream_crate2nix_artifact_updates
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import EventSink, ignore_event
+from lib.update.runtime import resource_slot, workspace_access
 from lib.update.updaters.flake_backed import FlakeInputMetadataUpdater
 
 if TYPE_CHECKING:
     import aiohttp
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
+    from lib.update.config import UpdateConfig
     from lib.update.updaters.core import UpdateContext
     from lib.update.updaters.metadata import VersionInfo
 
@@ -26,6 +28,8 @@ class MaterializesArtifactsMixin:
 
 class Crate2NixArtifactsMixin(MaterializesArtifactsMixin):
     """Mixin for updaters that materialize checked-in crate2nix artifacts."""
+
+    config: UpdateConfig
 
     @classmethod
     def get_derivation_validations(cls) -> tuple[DerivationValidation, ...]:
@@ -47,19 +51,25 @@ class Crate2NixArtifactsMixin(MaterializesArtifactsMixin):
         emit: EventSink = ignore_event,
     ) -> None:
         """Emit crate2nix artifact events using the standard materialization phase."""
-        stream = (
-            stream_crate2nix_artifact_updates(
-                self.name,
-                operation=self.artifact_operation,
-                source_overrides=source_overrides,
-                emit=emit,
+        # The synchronous worker's Nix commands read the shared flake. Keep that
+        # view stable until it joins; unrelated readers and downloads may overlap.
+        async with (
+            workspace_access(),
+            resource_slot("materialize", source=self.name, config=self.config),
+        ):
+            stream = (
+                stream_crate2nix_artifact_updates(
+                    self.name,
+                    operation=self.artifact_operation,
+                    source_overrides=source_overrides,
+                    emit=emit,
+                )
+                if source_overrides is not None
+                else stream_crate2nix_artifact_updates(
+                    self.name, operation=self.artifact_operation, emit=emit
+                )
             )
-            if source_overrides is not None
-            else stream_crate2nix_artifact_updates(
-                self.name, operation=self.artifact_operation, emit=emit
-            )
-        )
-        await stream
+            await stream
 
 
 class Crate2NixMetadataUpdater(Crate2NixArtifactsMixin, FlakeInputMetadataUpdater):

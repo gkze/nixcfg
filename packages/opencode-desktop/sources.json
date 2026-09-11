@@ -1,19 +1,19 @@
 {
-  "drvHash": "ypb6fjdvhk98ifgc6px2krfm830gzxxv",
-  "electronVersion": "42.3.3",
+  "drvHash": "platforms-v1:19081be2f4f05cff488c3ffcec5f95d5da55418c50049e918889aaf36d41fa3b",
+  "electronVersion": "42.10.1",
   "hashes": [
     {
-      "hash": "sha256-raIZjuaV+AQoGWMEgzGnjd9Vo/J7NeB7fAtYZgpnz9g=",
+      "hash": "sha256-llSqPk7coKEobIJaLYu/dxFLAwNT9g96FeG3IO+55q0=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin"
     },
     {
-      "hash": "sha256-1eWjZHb0cZC3FM5P2B56TT6gEqchEg9fE+kXsqsXWuQ=",
+      "hash": "sha256-v6/ZmP0nmK72APedEodpRsV2yPO12Tw1A9mAz5Nm990=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-linux"
     },
     {
-      "hash": "sha256-Zk1wE9wsh7d2d2/PYffGigS5PjHDemOgQsgE+quBWHs=",
+      "hash": "sha256-/u8Ws24BU/H7QFmWSbcfYvHI/pQ3e+jTmZIlVXdIGKA=",
       "hashType": "nodeModulesHash",
       "platform": "x86_64-linux"
     }
@@ -21,6 +21,11 @@
   "input": "opencode",
   "pins": {
     "desktopWorkspace": "packages/desktop"
+  },
+  "platformDrvHashes": {
+    "aarch64-darwin": "cf3qvh7g1fbxaybkmv5hb0z2mgycw3m6",
+    "aarch64-linux": "xvy3lpmyg8l9p1zmp86s6cx75kfnxmfj",
+    "x86_64-linux": "girfcn3621if1ibs13pxnb2m0dzia2qj"
   },
   "version": "gkze/fixes"
 }

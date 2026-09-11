@@ -1,6 +1,7 @@
 """Tests for low-level nix command process helpers."""
 
 import asyncio
+import os
 import sys
 import types
 
@@ -199,6 +200,47 @@ def test_hash_mismatch_fallback_parsing_and_none() -> None:
     assert HashMismatchError.from_output("plain error", result) is None
 
 
+@pytest.mark.parametrize(
+    "other_hash",
+    ["sha512-ZYX=", "sha256:abcd", "f" * 64, "z" * 52],
+)
+@pytest.mark.parametrize("reverse", [False, True])
+def test_hash_mismatch_associates_the_last_hash_with_its_own_path(
+    other_hash: str, *, reverse: bool
+) -> None:
+    """Mixed-format diagnostics retain identity regardless of output order."""
+    blocks = [
+        ("/nix/store/first.drv", "sha256-ABC=", "sha256-DEF="),
+        ("/nix/store/second.drv", other_hash, other_hash),
+    ]
+    if reverse:
+        blocks.reverse()
+    output = "\n".join(
+        f"error: hash mismatch in fixed-output derivation '{path}':\n"
+        f"  specified: {specified}\n  got: {got}\n"
+        for path, specified, got in blocks
+    )
+    result = CommandResult(args=["nix"], returncode=1, stdout="", stderr=output)
+    parsed = expect_not_none(HashMismatchError.from_output(output, result))
+    assert (parsed.drv_path, parsed.specified, parsed.hash) == blocks[-1]
+
+
+def test_hash_mismatch_does_not_inherit_missing_fields_from_a_previous_failure() -> (
+    None
+):
+    """Unidentified hash output remains unidentified instead of reusing stale proof."""
+    output = (
+        "error: hash mismatch in fixed-output derivation '/nix/store/first.drv':\n"
+        " specified: sha256-ABC=\n got: sha256-DEF=\n"
+        "hash mismatch\n got: sha256-XYZ=\n"
+    )
+    result = CommandResult(args=["nix"], returncode=1, stdout="", stderr=output)
+    parsed = expect_not_none(HashMismatchError.from_output(output, result))
+    assert parsed.drv_path is None
+    assert parsed.specified is None
+    assert parsed.hash == "sha256-XYZ="
+
+
 def test_hash_mismatch_to_sri_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
     result = CommandResult(args=["nix"], returncode=1, stdout="", stderr="")
@@ -267,6 +309,31 @@ def test_stream_process_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
         asyncio.run(_run())
 
     assert proc.killed
+
+
+def test_stream_process_timeout_after_output_closes() -> None:
+    """Closing output pipes must not let a living child escape its deadline."""
+    lines: list[ProcessLine] = []
+    script = (
+        "import os,time; print(os.getpid(), flush=True); "
+        "os.close(1); os.close(2); time.sleep(30)"
+    )
+
+    async def consume() -> None:
+        async for event in stream_process([PYTHON, "-c", script], command_timeout=1.0):
+            assert isinstance(event, ProcessLine)
+            lines.append(event)
+
+    async def run() -> None:
+        # This outer bound makes a deadline regression fail without a long wait.
+        async with asyncio.timeout(5.0):
+            with pytest.raises(TimeoutError):
+                await consume()
+
+    asyncio.run(run())
+    assert len(lines) == 1
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(lines[0].text), 0)
 
 
 def test_stream_process_handles_missing_streams(
@@ -540,3 +607,149 @@ def test_stream_nix_raises_when_subprocess_streams_missing(
 
     with pytest.raises(RuntimeError, match="Subprocess was not created"):
         asyncio.run(_run())
+
+
+def test_run_nix_reaps_cancelled_child(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cancelled concurrent prefetches must finish child cleanup before returning."""
+    started = asyncio.Event()
+
+    class Process(_LiveStreamProc):
+        async def communicate(self) -> tuple[bytes, bytes]:
+            started.set()
+            await asyncio.Future()
+
+    proc = Process()
+
+    async def spawn(*_args: object, **_kwargs: object) -> Process:
+        return proc
+
+    monkeypatch.setattr("lib.nix.commands.base.asyncio.create_subprocess_exec", spawn)
+
+    async def run() -> None:
+        task = asyncio.create_task(run_nix(["nix", "store", "prefetch-file"]))
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert proc.killed
+        assert proc.wait_count == 1
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("limit", [None, 5])
+def test_stream_capture_preserves_events_and_bounds_requested_tail(
+    limit: int | None,
+) -> None:
+    """Parser output remains complete by default while diagnostic capture can be bounded."""
+
+    async def run() -> list[ProcessLine | ProcessDone]:
+        return [
+            event
+            async for event in stream_process(
+                [
+                    PYTHON,
+                    "-c",
+                    "import sys; print('abcdefgh'); print('xyz'); print('stderr-value', file=sys.stderr)",
+                ],
+                output_limit=limit,
+            )
+        ]
+
+    events = asyncio.run(run())
+    stdout = "".join(
+        event.text
+        for event in events
+        if isinstance(event, ProcessLine) and event.stream == "stdout"
+    )
+    stderr = "".join(
+        event.text
+        for event in events
+        if isinstance(event, ProcessLine) and event.stream == "stderr"
+    )
+    assert stdout == "abcdefgh\nxyz\n"
+    assert stderr == "stderr-value\n"
+    result = events[-1]
+    assert isinstance(result, ProcessDone)
+    assert result.result.stdout == (stdout if limit is None else stdout[-limit:])
+    assert result.result.stderr == (stderr if limit is None else stderr[-limit:])
+
+
+def test_stream_capture_rejects_nonpositive_limit() -> None:
+    """Reject an invalid output policy before starting a child."""
+
+    async def run() -> None:
+        with pytest.raises(ValueError, match="output_limit must be positive"):
+            await anext(stream_process(["unused"], output_limit=0))
+
+    asyncio.run(run())
+
+
+def test_stream_reader_failure_reaps_child_promptly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed pipe reader must reach the consumer instead of waiting for the timeout."""
+
+    class BrokenStream:
+        async def readline(self) -> bytes:
+            msg = "line exceeds stream limit"
+            raise ValueError(msg)
+
+    class Process(_LiveStreamProc):
+        def __init__(self) -> None:
+            super().__init__()
+            self.stdout = BrokenStream()
+
+    proc = Process()
+
+    async def spawn(*_args: object, **_kwargs: object) -> Process:
+        return proc
+
+    monkeypatch.setattr("lib.nix.commands.base.asyncio.create_subprocess_exec", spawn)
+
+    async def run() -> None:
+        with pytest.raises(ValueError, match="line exceeds stream limit"):
+            async for _event in stream_process(["unused"]):
+                pass
+
+    asyncio.run(run())
+    assert proc.killed
+    assert proc.wait_count == 1
+
+
+def test_stream_queue_backpressure_stops_reader_fanout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A paused consumer cannot accumulate all available line events in memory."""
+
+    class ManyLines:
+        reads = 0
+
+        async def readline(self) -> bytes:
+            self.reads += 1
+            return b"line\n" if self.reads <= 100 else b""
+
+    class Process(_LiveStreamProc):
+        def __init__(self) -> None:
+            super().__init__()
+            self.stdout = ManyLines()
+            self.stderr = None
+
+    proc = Process()
+
+    async def spawn(*_args: object, **_kwargs: object) -> Process:
+        return proc
+
+    monkeypatch.setattr("lib.nix.commands.base.asyncio.create_subprocess_exec", spawn)
+    monkeypatch.setattr("lib.nix.commands.base._STREAM_QUEUE_SIZE", 2)
+
+    async def run() -> None:
+        stream = stream_process(["unused"], output_limit=10)
+        assert await anext(stream) == ProcessLine("stdout", "line\n")
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert proc.stdout.reads <= 4
+        await stream.aclose()
+
+    asyncio.run(run())
+    assert proc.killed

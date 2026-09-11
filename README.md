@@ -168,6 +168,26 @@ an awaited `emit` callback. Hooks receive an explicit `UpdateContext`.
 Intermediate values use ordinary returns. `--check` performs the same
 candidate preparation and validation, then skips promotion to the checkout.
 
+A full update requires valid, current hashes for every requested platform.
+When recomputation is needed, a failed Linux hash probe cannot count as success
+by retaining its previous hash. Use `--native-only` to request only the current
+platform explicitly.
+Freshness checks require all requested hashes and include each platform's
+derivation fingerprint, so a Darwin fingerprint cannot hide Linux-only changes.
+Existing multi-platform sources with a native-only fingerprint are refreshed
+once to establish this complete fingerprint.
+
+Use `--timings` (optionally with `--json`) to inspect operation time, admission
+waits, and cache reuse. See [update runtime efficiency](docs/update-runtime.md)
+for independent resource limits, cache invalidation, and validation behavior.
+
+Use `nixcfg update --verbose --tty off` to stream progress into a terminal or
+log file, including package and root closure build output. Human-readable
+output identifies each validation phase. Diagnostics redact URL credentials,
+query strings, and fragments. Flake edits refresh the lockfile once, through
+the same streaming command runner as source refreshes. `--subprocess-timeout`
+applies to these commands as well as package and root validation.
+
 Source-derived toolchain metadata comes from the pinned upstream manifests and
 locks. Node and pnpm selection must satisfy upstream requirements through the
 pinned nixpkgs package set. Mux and Superset use the exact Bun version from

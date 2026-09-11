@@ -331,6 +331,9 @@ class SourceEntry(BaseModel):
         min_length=1,
     )
     drv_hash: str | None = Field(default=None, alias="drvHash")
+    platform_drv_hashes: dict[str, str] | None = Field(
+        default=None, alias="platformDrvHashes"
+    )
 
     def to_dict(self) -> JsonObject:
         """Return this source entry as a stable, JSON-serializable mapping."""
@@ -339,6 +342,8 @@ class SourceEntry(BaseModel):
         }
         if self.drv_hash is not None:
             result["drvHash"] = self.drv_hash
+        if self.platform_drv_hashes is not None:
+            result["platformDrvHashes"] = dict(sorted(self.platform_drv_hashes.items()))
         if self.commit is not None:
             result["commit"] = self.commit
         if self.electron_version is not None:
@@ -376,8 +381,28 @@ class SourceEntry(BaseModel):
                 "commit": other.commit or self.commit,
                 "electronVersion": other.electron_version or self.electron_version,
                 "drvHash": other.drv_hash or self.drv_hash,
+                # Only supplied certificates can certify the incoming hashes.
+                # Preserve untouched platforms, but invalidate any overwritten
+                # platform without a replacement certificate.
+                "platformDrvHashes": self._merge_platform_certificates(other),
             },
         )
+
+    def _merge_platform_certificates(self, other: SourceEntry) -> dict[str, str] | None:
+        certificates = dict(self.platform_drv_hashes or {})
+        changed_platforms = (
+            {
+                entry.platform
+                for entry in other.hashes.entries
+                if entry.platform is not None
+            }
+            if other.hashes.entries is not None
+            else set(other.hashes.mapping or {})
+        )
+        for platform in changed_platforms:
+            certificates.pop(platform, None)
+        certificates.update(other.platform_drv_hashes or {})
+        return certificates or None
 
     def merge(self, other: SourceEntry) -> SourceEntry:
         """Merge *other* into this entry (other takes priority for scalars)."""

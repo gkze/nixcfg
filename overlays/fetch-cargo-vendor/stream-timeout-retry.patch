@@ -1,0 +1,68 @@
+--- a/fetch-cargo-vendor-util.py
++++ b/fetch-cargo-vendor-util.py
+@@ -6,6 +6,7 @@
+ import shutil
+ import subprocess
+ import sys
++import time
+ import tomllib
+ from os.path import islink, realpath
+ from pathlib import Path
+@@ -37,7 +38,7 @@
+     retries = Retry(
+         total=5,
+         backoff_factor=0.5,
+-        status_forcelist=[500, 502, 503, 504]
++        status_forcelist=[429, 500, 502, 503, 504]
+     )
+     session = requests.Session()
+     session.headers["User-Agent"] = "nixpkgs-fetchCargoVendor/2 (https://github.com/NixOS/nixpkgs)"
+@@ -46,20 +47,35 @@
+     return session
+ 
+ 
++DOWNLOAD_TIMEOUT = (10, 30)
++DOWNLOAD_STREAM_ATTEMPTS = 3
++
++
+ def download_file_with_checksum(session: requests.Session, url: str, destination_path: Path) -> str:
+-    sha256_hash = hashlib.sha256()
+-    with session.get(url, stream=True) as response:
+-        if not response.ok:
+-            raise Exception(f"Failed to fetch file from {url}. Status code: {response.status_code}")
+-        with open(destination_path, "wb") as file:
+-            for chunk in response.iter_content(1024):  # Download in chunks
+-                if chunk:  # Filter out keep-alive chunks
+-                    file.write(chunk)
+-                    sha256_hash.update(chunk)
+-
+-    # Compute the final checksum
+-    checksum = sha256_hash.hexdigest()
+-    return checksum
++    # HTTPAdapter retries connection/status failures, but not failures while
++    # consuming a streamed body. Restart those downloads from byte zero.
++    for attempt in range(DOWNLOAD_STREAM_ATTEMPTS):
++        sha256_hash = hashlib.sha256()
++        with session.get(url, stream=True, timeout=DOWNLOAD_TIMEOUT) as response:
++            if not response.ok:
++                raise Exception(f"Failed to fetch file from {url}. Status code: {response.status_code}")
++            try:
++                with open(destination_path, "wb") as file:
++                    for chunk in response.iter_content(1024):
++                        if chunk:
++                            file.write(chunk)
++                            sha256_hash.update(chunk)
++            except requests.exceptions.SSLError:
++                raise
++            except (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError) as exc:
++                destination_path.unlink(missing_ok=True)
++                if attempt + 1 == DOWNLOAD_STREAM_ATTEMPTS:
++                    raise
++                eprint(f"Retrying interrupted download {url} (attempt {attempt + 2}/{DOWNLOAD_STREAM_ATTEMPTS}): {exc}")
++            else:
++                return sha256_hash.hexdigest()
++        time.sleep(0.5 * 2 ** attempt)
++    raise AssertionError("Download attempts exhausted without a result")
+ 
+ 
+ def get_download_url_for_tarball(pkg: dict[str, Any]) -> str:

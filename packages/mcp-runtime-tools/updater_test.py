@@ -18,7 +18,7 @@ from lib.update.updaters import UpdateContext, VersionInfo
 
 _PACKAGE_DIR = REPO_ROOT / "packages/mcp-runtime-tools"
 _CURRENT_PINS = {
-    "@padenot/firefox-devtools-mcp": "@padenot/firefox-devtools-mcp@0.7.5",
+    "@mozilla/firefox-devtools-mcp": "@mozilla/firefox-devtools-mcp@0.10.2",
     "@steipete/macos-automator-mcp": "@steipete/macos-automator-mcp@0.4.6",
     "@vantasdk/vanta-mcp-server": "@vantasdk/vanta-mcp-server@1.2.0",
     "chrome-devtools-mcp": "chrome-devtools-mcp@1.7.0",
@@ -72,7 +72,7 @@ def test_fetch_latest_resolves_all_npm_and_pypi_versions(
     module = _load_module()
     updater = module.McpRuntimeToolsUpdater()
     responses = {
-        "https://registry.npmjs.org/%40padenot%2Ffirefox-devtools-mcp/latest": {
+        "https://registry.npmjs.org/%40mozilla%2Ffirefox-devtools-mcp/latest": {
             "version": "1.0.1"
         },
         "https://registry.npmjs.org/%40steipete%2Fmacos-automator-mcp/latest": {
@@ -108,8 +108,8 @@ def test_fetch_latest_resolves_all_npm_and_pypi_versions(
         version="registry",
         metadata={
             "pins": {
-                "@padenot/firefox-devtools-mcp": (
-                    "@padenot/firefox-devtools-mcp@1.0.1"
+                "@mozilla/firefox-devtools-mcp": (
+                    "@mozilla/firefox-devtools-mcp@1.0.1"
                 ),
                 "@steipete/macos-automator-mcp": (
                     "@steipete/macos-automator-mcp@2.0.2"

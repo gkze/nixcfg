@@ -119,7 +119,8 @@ rustPlatform.buildRustPackage {
   };
 
   postPatch = ''
-    ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD"
+    ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD" \
+      --package-manager ${lib.escapeShellArg "pnpm@${pnpmVersion}"}
   '';
 
   # Tauri runs upstream's source-building sidecar script before the frontend

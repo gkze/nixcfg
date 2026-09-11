@@ -1,5 +1,6 @@
 """Target planning helpers for update runs."""
 
+from graphlib import CycleError, TopologicalSorter
 from typing import TYPE_CHECKING, Protocol
 
 from lib.update.updaters.flake_backed import FlakeInputUpdater
@@ -128,36 +129,33 @@ def source_prerequisites(
     return tuple(dict.fromkeys(prerequisites))
 
 
+def source_dependency_order(
+    prerequisites: Mapping[str, tuple[str, ...]],
+) -> tuple[str, ...]:
+    """Validate source dependencies and order prerequisites before their consumers."""
+    try:
+        return tuple(TopologicalSorter(prerequisites).static_order())
+    except CycleError as error:
+        cycle = " -> ".join(error.args[1])
+        msg = f"Companion source cycle detected: {cycle}"
+        raise RuntimeError(msg) from error
+
+
 def companion_source_depths(
     names: set[str],
     updaters: Mapping[str, type[object]],
 ) -> dict[str, int]:
     """Return dependency depth for each selected source."""
-    memo: dict[str, int] = {}
-    visiting: list[str] = []
-
-    def _depth(name: str) -> int:
-        if name in memo:
-            return memo[name]
-        if name in visiting:
-            cycle = " -> ".join((*visiting, name))
-            msg = f"Companion source cycle detected: {cycle}"
-            raise RuntimeError(msg)
-
-        visiting.append(name)
-        prerequisites = source_prerequisites(updaters, name, selected=names)
-        value = (
-            0
-            if not prerequisites
-            else max(_depth(prerequisite) for prerequisite in prerequisites) + 1
+    prerequisites = {
+        name: source_prerequisites(updaters, name, selected=names)
+        for name in sorted(names)
+    }
+    depths: dict[str, int] = {}
+    for name in source_dependency_order(prerequisites):
+        depths[name] = 1 + max(
+            (depths[parent] for parent in prerequisites[name]), default=-1
         )
-        visiting.pop()
-        memo[name] = value
-        return value
-
-    for name in sorted(names):
-        _depth(name)
-    return memo
+    return depths
 
 
 def add_companion_source_parents(
@@ -165,27 +163,19 @@ def add_companion_source_parents(
     updaters: Mapping[str, type[object]],
 ) -> None:
     """Expand *names* with transitive companion parents."""
-    visited: set[str] = set()
-    visiting: list[str] = []
-
-    def _visit(name: str) -> None:
-        if name in visited:
-            return
-        if name in visiting:
-            cycle = " -> ".join((*visiting, name))
-            msg = f"Companion source cycle detected: {cycle}"
-            raise RuntimeError(msg)
-
-        visiting.append(name)
+    prerequisites: dict[str, tuple[str, ...]] = {}
+    pending = sorted(names, reverse=True)
+    while pending:
+        name = pending.pop()
+        if name in prerequisites:
+            continue
         parent = companion_source_parent(updaters, name)
         if parent is not None and parent in updaters:
-            names.add(parent)
-            _visit(parent)
-        visiting.pop()
-        visited.add(name)
-
-    for name in sorted(names):
-        _visit(name)
+            prerequisites[name] = (parent,)
+            pending.append(parent)
+        else:
+            prerequisites[name] = ()
+    names.update(source_dependency_order(prerequisites))
 
 
 def add_companion_source_children(
@@ -358,6 +348,7 @@ __all__ = [
     "select_target_source_names",
     "source_additional_input_names",
     "source_backing_input_name",
+    "source_dependency_order",
     "source_prerequisites",
     "source_update_waves",
 ]

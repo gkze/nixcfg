@@ -18,10 +18,11 @@ let
           outPath = builtins.toString original;
           packages.${system}.opencode.src = filteredSource;
         };
-        nixcfgElectron.sourceBuildFor = _: { runtimeVersion = "99.1.2"; };
+        nixcfgElectron.sourceBuildFor = _: throw "metadata or dependency probe forced Electron runtime";
         opencode = {
           src = source;
           inherit version;
+          node_modules.overrideAttrs = _: "dependency-probe";
         };
         outputs.lib = { };
         selfSource = {
@@ -37,11 +38,13 @@ let
   checkSystem =
     system:
     let
-      defaultPackage = packageFor system filteredSource "1.0.0";
+      defaultPackage = packageFor system filteredSource "0.9.0+cli-revision";
       overriddenPackage = packageFor system (builtins.toString overridden) "2.0.0";
       missingSource = builtins.tryEval (packageFor system "/missing/overridden-source" "1.0.0").version;
     in
     assert defaultPackage.src == filteredSource;
+    assert defaultPackage.version == "1.0.0";
+    assert defaultPackage.passthru.node_modules == "dependency-probe";
     assert toString defaultPackage.passthru.workspaceMetadataSource == toString original;
     assert builtins.elem "packages/llm" defaultPackage.passthru.desktopWorkspacePaths;
     assert overriddenPackage.src == toString overridden;

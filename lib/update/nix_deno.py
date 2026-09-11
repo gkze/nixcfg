@@ -18,18 +18,14 @@ from lib.update.events import (
 )
 from lib.update.nix import (
     _build_overlay_expr,
-    _emit_sri_hash_from_build_result,
-    _FixedOutputBuildOptions,
-    _run_fixed_output_build,
+    compute_fixed_output_hash,
     get_current_nix_platform,
 )
 from lib.update.paths import sources_file_for
 from lib.update.platform_hashes import (
-    PlatformHashResult,
-    PreservedPlatformHash,
-    preserve_existing_platform_hash,
-    preserved_platform_hash_status,
-    preserved_platform_hash_warning,
+    PlatformHashFailure,
+    platform_hash_failure_status,
+    require_complete_platform_hashes,
 )
 from lib.update.sources import load_source_entry
 
@@ -105,20 +101,12 @@ async def _compute_deno_deps_hash_for_platform(
     emit: EventSink = ignore_event,
 ) -> tuple[str, str]:
     expr = _build_deno_deps_expr(source, platform, source_override)
-    result = await _run_fixed_output_build(
+    hash_value = await compute_fixed_output_hash(
         f"{source}:{platform}",
         expr,
-        options=_FixedOutputBuildOptions(
-            success_error=(
-                "Expected nix build to fail with hash mismatch "
-                f"for {platform}, but it succeeded"
-            ),
-            config=config,
-        ),
+        isolate_by_drv_hash=True,
+        config=config,
         emit=emit,
-    )
-    hash_value = await _emit_sri_hash_from_build_result(
-        source, result, config=config, emit=emit
     )
     return (platform, hash_value)
 
@@ -142,7 +130,7 @@ class _PlatformHashContext:
     original_entry: SourceEntry
     existing_hashes: dict[str, str]
     platform_hashes: dict[str, str]
-    failed_platforms: list[PreservedPlatformHash]
+    failed_platforms: list[PlatformHashFailure]
     config: UpdateConfig
 
 
@@ -184,14 +172,9 @@ async def _process_platform_hash(
     except RuntimeError as exc:
         if platform_name == context.current_platform:
             raise
-        preserved = preserve_existing_platform_hash(
-            platform_name,
-            context.existing_hashes,
-            exc,
-        )
-        context.failed_platforms.append(preserved)
-        context.platform_hashes[platform_name] = preserved.hash
-        await emit(preserved_platform_hash_status(context.source, preserved))
+        failure = PlatformHashFailure(platform_name, str(exc))
+        context.failed_platforms.append(failure)
+        await emit(platform_hash_failure_status(context.source, failure))
 
 
 async def compute_deno_deps_hash(
@@ -202,7 +185,7 @@ async def compute_deno_deps_hash(
     config: UpdateConfig | None = None,
     source_override: SourceEntry | None = None,
     emit: EventSink = ignore_event,
-) -> PlatformHashResult:
+) -> dict[str, str]:
     """Compute Deno dependency hashes across configured platforms.
 
     Nix reads per-package ``sources.json`` values during evaluation, so each
@@ -230,7 +213,7 @@ async def compute_deno_deps_hash(
     platforms_to_compute = (current_platform,) if native_only else platforms
 
     platform_hashes: dict[str, str] = {}
-    failed_platforms: list[PreservedPlatformHash] = []
+    failed_platforms: list[PlatformHashFailure] = []
     context = _PlatformHashContext(
         source=source,
         input_name=input_name,
@@ -248,13 +231,9 @@ async def compute_deno_deps_hash(
             platform_name=platform_name, context=context, emit=emit
         )
 
-    if failed_platforms:
-        await emit(preserved_platform_hash_warning(source, failed_platforms))
+    require_complete_platform_hashes(source, failed_platforms)
 
-    return PlatformHashResult(
-        hashes={**existing_hashes, **platform_hashes},
-        fully_computed=not failed_platforms,
-    )
+    return {**existing_hashes, **platform_hashes}
 
 
 __all__ = [

@@ -1,16 +1,16 @@
 ---
 containers:
-  Town:
-    name: Town
-    icon: briefcase
-    color: orange
   Personal:
     name: Personal
     icon: fingerprint
     color: blue
+  Town:
+    name: Town
+    icon: briefcase
+    color: orange
 workspaces:
   Work:
-    icon: "🏢"
+    icon: 🏢
     container: Town
     tree:
       - Gmail:
@@ -22,24 +22,41 @@ workspaces:
       - Drive:
           url: https://drive.google.com/drive/u/0/home
           role: essential
-      - Rippling:
-          url: https://app.rippling.com/dashboard
-          role: essential
       - Town:
-          url: https://www.town.com
+          url: https://www.town.com/messages
+          role: essential
+      - Cursor Agent - Turn your ideas into code:
+          url: https://linear.app/towncom/my-issues/assigned
           role: essential
       - GitHub:
           url: https://github.com
           role: essential
-      - AI / LLM:
+      - ChatGPT:
+          url: https://chatgpt.com
+          role: essential
+      - Claude chat:
+          url: https://claude.ai/new
+          role: essential
+      - Grok:
+          url: https://grok.com/
+          role: essential
+      - Cursor:
+          url: https://cursor.com/dashboard
+          role: essential
+      - Capy:
+          url: https://capy.ai/new
+          role: essential
+      - Devin:
+          url: https://app.devin.ai/org/town-8
+          role: essential
+      - AI Provider Consoles:
           collapsed: false
           children:
-            - Anthropic: https://platform.claude.com/dashboard
-            - Capy: https://capy.ai
-            - Cursor: https://cursor.com/dashboard
-            - Devin: https://app.devin.ai/org/town-8
+            - Anthropic Console: https://platform.claude.com/dashboard
             - Exa: https://dashboard.exa.ai/home
-            - OpenAI: https://platform.openai.com
+            - ChatGPT Workspace: https://chatgpt.com/admin/usage
+            - OpenAI Platform: https://platform.openai.com/home
+            - OpenAI Admin Console: https://admin.openai.com/auth/tenant-picker
             - OpenRouter: https://openrouter.ai
       - Voice AI:
           - Cartesia: https://play.cartesia.ai/dashboard
@@ -49,23 +66,21 @@ workspaces:
       - AI Tooling:
           - Browserbase: https://browserbase.com
           - E2B: https://e2b.dev
-          - Firetiger: https://ui.cloud.firetiger.com
-      - Auth:
-          - Clerk: https://dashboard.clerk.com
+          - Executor: https://executor.sh/
       - CRM & Marketing:
           - HubSpot: https://hubspot.com
-          - NewsData: https://newsdata.io
+          - LinkedIn: https://www.linkedin.com/feed/
           - Pylon: https://app.usepylon.com
       - Data & Backend:
           - Convex: https://dashboard.convex.dev
           - PlanetScale: https://app.planetscale.com
-          - Supabase: https://supabase.com
+          - Turso: https://app.turso.tech/
       - Finance & HR:
           - Ashby: https://app.ashbyhq.com
           - Branch: https://app.link.com
           - Metronome: https://app.metronome.com
           - Ramp: https://app.ramp.com
-          - Rippling: https://app.rippling.com
+          - Rippling: https://app.rippling.com/dashboard
           - Stripe: https://dashboard.stripe.com
       - Email:
           - Resend: https://resend.com
@@ -77,34 +92,31 @@ workspaces:
           - Google Cloud: https://console.cloud.google.com
           - Hatchet: https://cloud.onhatchet.run/auth/login
           - Meter: https://dashboard.meter.com/org/town-com/home
+          - Fast.com: https://fast.com/
           - Render: https://dashboard.render.com
           - Temporal: https://cloud.temporal.io
-          - Vercel: https://vercel.com
+          - Vercel: https://vercel.com/townco
       - News:
-          - DevHunt: https://devhunt.org
-          - Hacker News: https://news.ycombinator.com
-          - Lobsters: https://lobste.rs
-          - Product Hunt: https://www.producthunt.com
-          - Reddit: https://www.reddit.com
-          - Terminal Trove: https://terminaltrove.com
           - X: https://x.com/home
+          - Lobsters: https://lobste.rs/
+          - Hacker News: https://news.ycombinator.com
+          - Terminal Trove: https://terminaltrove.com/
+          - Reddit: https://www.reddit.com
+          - DevHunt: https://devhunt.org/
+          - Product Hunt: https://www.producthunt.com/
       - Observability & Analytics:
           - Axiom: https://app.axiom.co
           - Datadog: https://us5.datadoghq.com
           - Hex: https://app.hex.tech
-          - LangSmith: https://smith.langchain.com
           - PagerDuty: https://towndotcom.pagerduty.com/incidents
-          - PostHog: https://posthog.com
           - Sentry: https://sentry.io
           - Statsig: https://console.statsig.com
           - StatusGator: https://statusgator.com
       - Productivity:
-          - Dropbox: https://dropbox.com
-          - Linear: https://linear.app
-          - Notion: https://notion.so
-          - Slack: https://app.slack.com
+          - Notion: https://app.notion.com/
+          - Slack: https://towndotcom.slack.com/
   Home:
-    icon: "🏡"
+    icon: 🏡
     container: Personal
     tree:
       - Gmail:
@@ -116,3 +128,5 @@ workspaces:
       - Drive:
           url: https://drive.google.com/drive/u/0/home
           role: essential
+      - YouTube: https://www.youtube.com/
+      - Maps: https://maps.google.com/

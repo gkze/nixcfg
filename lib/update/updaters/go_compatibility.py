@@ -8,6 +8,7 @@ from lib.update import locked_source as update_locked_source
 from lib.update import nix as update_nix
 from lib.update.nix import _build_flake_attr_expr
 from lib.update.paths import local_flake_url
+from lib.update.runtime import resource_slot, runtime_scope, workspace_access
 from lib.update.updaters.flake_backed import GoVendorHashUpdater
 
 if TYPE_CHECKING:
@@ -180,18 +181,26 @@ class GoModCompatibilityUpdater(GoVendorHashUpdater):
     async def _resolve_selected_go_version(self) -> str:
         """Evaluate the exact version behind the package's selected Go attribute."""
         platform = update_nix.get_current_nix_platform()
-        result = await run_nix(
-            [
-                "nix",
-                "eval",
-                "--impure",
-                "--raw",
-                "--expr",
-                self._go_version_expr(platform),
-            ],
-            command_timeout=self.config.default_subprocess_timeout,
-            check=False,
-        )
+        async with (
+            runtime_scope(self.config),
+            workspace_access(),
+            resource_slot("eval", source=self.name, config=self.config) as timing,
+        ):
+            result = await run_nix(
+                [
+                    "nix",
+                    "eval",
+                    "--impure",
+                    "--raw",
+                    "--expr",
+                    self._go_version_expr(platform),
+                ],
+                command_timeout=self.config.default_subprocess_timeout,
+                check=False,
+            )
+            timing.stdout_bytes += len(result.stdout.encode())
+            timing.stderr_bytes += len(result.stderr.encode())
+            timing.nonzero_exits += int(result.returncode != 0)
         version = result.stdout.strip()
         if result.returncode != 0 or not version:
             details = (

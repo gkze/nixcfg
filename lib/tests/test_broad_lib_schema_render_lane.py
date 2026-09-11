@@ -515,6 +515,11 @@ def test_lockfile_helper_error_and_metadata_branches(  # noqa: PLR0915
     tmp_path: Path,
 ) -> None:
     """Cover direct helper errors and optional metadata branches in lockfile code."""
+    # Header construction precedes the mocked HTTP request and must not query
+    # the host's credential stores in these error-translation tests.
+    monkeypatch.setattr(
+        codegen_lockfile.http_utils, "resolve_github_token", lambda **_kwargs: None
+    )
     reported: list[str] = []
     codegen_lockfile._emit_progress(reported.append, "hello")
     codegen_lockfile._emit_progress(None, "ignored")

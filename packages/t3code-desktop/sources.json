@@ -1,9 +1,9 @@
 {
-  "drvHash": "f8n2gagj23izrwc70gp17slqzl0j2hk6",
-  "electronVersion": "43.4.1",
+  "drvHash": "b1i7ynqhb3qyvbv3f1ymq6888scffhv6",
+  "electronVersion": "44.1.0",
   "hashes": [
     {
-      "hash": "sha256-sbMI4d+UrX7rB3acU/n+g4S50shihwT/6XNj1VRszHI=",
+      "hash": "sha256-bxB/iK4Sz2FWXGSP6htU1oI+cPrwr3PvYFsWLs2Gq2I=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin"
     }

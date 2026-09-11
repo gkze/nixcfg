@@ -248,7 +248,7 @@
         yaak.package = pkgs.yaak-beta;
         zed.package = pkgs.zed-editor-nightly;
         zen-twilight = {
-          package = pkgs.zen-twilight;
+          package = config.nixcfg.zen.finalPackage;
           scope = "system";
         };
         zoom.package = pkgs.zoom-us;
@@ -269,6 +269,14 @@
         {
           enable = true;
           profile = "Default (twilight)";
+          remoteDebugging = {
+            bidi.enable = false;
+            marionette.enable = false;
+            devtools = {
+              enable = false;
+              allowUnattended = false;
+            };
+          };
           # Follow the forked Catppuccin branch pinned in flake.lock.
           chromeSource =
             assert builtins.pathExists (themeDir + "/userChrome.css");

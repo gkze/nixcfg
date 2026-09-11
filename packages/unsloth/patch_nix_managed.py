@@ -1021,20 +1021,6 @@ _BACKEND_PATCHES = (
 """,
     ),
     _SourcePatch(
-        Path("studio/backend/core/training/worker.py"),
-        """def _run_pip(cmd: list[str], event_queue: Any, label: str) -> bool:
-    \"\"\"Run a pip install and surface success/failure via status events.\"\"\"
-    try:
-""",
-        """def _run_pip(cmd: list[str], event_queue: Any, label: str) -> bool:
-    \"\"\"Run a pip install and surface success/failure via status events.\"\"\"
-    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
-        logger.info("Skipping %s installation in the Nix-managed backend", label)
-        return False
-    try:
-""",
-    ),
-    _SourcePatch(
         Path("studio/backend/utils/transformers_version.py"),
         """def _install_to_dir(pkg: str, target_dir: str) -> bool:
     \"\"\"Install a single package into *target_dir*, preferring uv then pip.\"\"\"

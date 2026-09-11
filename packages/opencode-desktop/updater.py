@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 _LOCK_PATH = "bun.lock"
 _MAX_LOCK_BYTES = 32 * 1024 * 1024
 _MAX_MANIFEST_BYTES = 1024 * 1024
-_DESKTOP_PACKAGE_NAME = "@opencode-ai/desktop"
+_DESKTOP_PACKAGE_NAMES = ("@opencode-ai/desktop", "@opencode/desktop")
 _DESKTOP_WORKSPACE_PIN = "desktopWorkspace"
 _EXACT_VERSION_PATTERN = re.compile(
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
@@ -89,12 +89,12 @@ def _lock_contract(payload: bytes) -> _ElectronLockContract:
             raw_workspace,
             context=f"OpenCode Desktop bun.lock workspace {workspace_path}",
         )
-        if workspace.get("name") == _DESKTOP_PACKAGE_NAME:
+        if workspace.get("name") in _DESKTOP_PACKAGE_NAMES:
             matching_workspaces.append((workspace_path, workspace))
     if len(matching_workspaces) != 1:
         msg = (
             "OpenCode Desktop bun.lock must contain exactly one "
-            f"{_DESKTOP_PACKAGE_NAME} workspace, found {len(matching_workspaces)}"
+            f"OpenCode desktop workspace, found {len(matching_workspaces)}"
         )
         raise RuntimeError(msg)
     workspace_path, workspace = matching_workspaces[0]
@@ -191,6 +191,7 @@ class OpencodeDesktopUpdater(FlakeInputHashUpdater):
     aggregate_into = ("electron-runtimes",)
     input_name = "opencode"
     hash_type = "nodeModulesHash"
+    hash_attr_path = ".node_modules"
     platform_specific = True
     native_only = False
 

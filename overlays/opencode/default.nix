@@ -7,17 +7,19 @@
 }:
 {
   opencode = inputs.opencode.packages.${system}.opencode.overrideAttrs (old: {
-    nativeBuildInputs =
-      (old.nativeBuildInputs or [ ])
-      ++ (with final; [
-        bun
-        python3
-      ]);
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.python3 ];
+    passthru = (old.passthru or { }) // {
+      # Upstream owns the Bun release used by its dependency installer and CLI.
+      buildBun =
+        final.lib.findFirst (input: (input.pname or "") == "bun")
+          (throw "OpenCode's dependency installer does not expose its Bun runtime")
+          old.node_modules.nativeBuildInputs;
+    };
     # IMPORTANT: Keep this postPatch in place unless upstream removes
     # versionCheckHook/packageManager strictness. Removing it can reintroduce
     # Bun version mismatch failures when nixpkgs Bun lags/leads opencode.
     postPatch = (old.postPatch or "") + ''
-      # Keep packageManager in sync with the Bun provided by nixpkgs so
+      # Keep packageManager in sync with the selected build-time Bun so
       # versionCheckHook accepts the runtime Bun used in the build.
       bunVersion="$(bun -v | tr -d '\n')"
       ${final.lib.getExe final.python3} ${./sync_package_manager_bun_version.py} \
@@ -40,10 +42,19 @@
     # resolver can find them during the Nix build.
     preBuild = ''
       # @opentui/core is hoisted to root node_modules/ but the build script
-      # resolves it from packages/opencode/node_modules/. Symlink it so
+      # resolves it from its package-local node_modules. Symlink it so
       # fs.realpathSync can find parser.worker.js at build time.
-      ${final.stdenv.shell} ${./link-hoisted-opentui-packages.sh}
+      ${final.stdenv.shell} ${./link-hoisted-opentui-packages.sh} node_modules \
+        ${
+          if old.meta.mainProgram == "opencode2" then "packages/cli" else "packages/opencode"
+        }/node_modules
     '';
+    # Keep the configured command stable across upstream's opencode2 rename.
+    postInstall =
+      (old.postInstall or "")
+      + final.lib.optionalString (old.meta.mainProgram == "opencode2") ''
+        ln -s opencode2 "$out/bin/opencode"
+      '';
     node_modules = old.node_modules.overrideAttrs (nodeOld: {
       nativeBuildInputs = (nodeOld.nativeBuildInputs or [ ]) ++ [ final.python3 ];
       preBuild = (nodeOld.preBuild or "") + ''

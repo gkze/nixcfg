@@ -40,7 +40,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v1.2.3";
+      url = "github:generalaction/emdash/v1.2.4";
       flake = false;
     };
     git-hooks = {
@@ -84,7 +84,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v2026.8.31";
+      url = "github:NousResearch/hermes-agent/v2026.9.7";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         pyproject-build-systems.follows = "pyproject-build-systems";
@@ -134,7 +134,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.76.0";
+      url = "github:max-sixty/worktrunk/v0.77.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -189,11 +189,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.39.0";
+      url = "github:steipete/gogcli/v0.39.1";
       flake = false;
     };
     openai-cli = {
-      url = "github:openai/openai-cli/v1.11.0";
+      url = "github:openai/openai-cli/v1.13.0";
       flake = false;
     };
     github-desktop = {
@@ -207,7 +207,7 @@
       type = "github";
       owner = "aaif-goose";
       repo = "goose";
-      ref = "v1.49.0";
+      ref = "v1.50.0";
       flake = false;
     };
     goose-v8 = {
@@ -271,7 +271,7 @@
     superset = {
       # Keep the source-built Darwin package on the same immutable desktop
       # release as the binary asset. `nixcfg update` advances version-like refs.
-      url = "github:superset-sh/superset/desktop-v1.26.0";
+      url = "github:superset-sh/superset/desktop-v1.27.0";
       flake = false;
     };
     nix-manipulator = {
@@ -1010,6 +1010,9 @@
 
             "test-nix-prefetch-git-darwin-heredoc" =
               { pkgs, ... }: import ./tests/nix/nix-prefetch-git-darwin-heredoc { inherit pkgs; };
+
+            "test-fetch-cargo-vendor-network" =
+              { pkgs, ... }: import ./tests/nix/fetch-cargo-vendor.nix { inherit pkgs; };
 
             "test-nix-rio-overlay-platforms" = mkEvalOnlyCheck "test-nix-rio-overlay-platforms" (
               _: import ./tests/nix/rio-overlay-platforms { }

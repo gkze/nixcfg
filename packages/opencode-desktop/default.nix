@@ -1,5 +1,5 @@
 {
-  bun,
+  buildBun ? opencode.buildBun,
   inputs,
   lib,
   makeDesktopItem,
@@ -32,7 +32,8 @@ let
   inherit (stdenv.hostPlatform) system;
 
   slib = outputs.lib;
-  inherit (opencode) version;
+  # The CLI and Desktop have independent release versions in the v2 tree.
+  version = desktopPackageVersion;
   inherit (opencode) src;
   # Upstream's filtered build source may not exist during read-only evaluation.
   # Read its metadata from the input, but honor a caller's different source.
@@ -48,6 +49,16 @@ let
   canonicalSessionDatabaseEnv = {
     OPENCODE_DISABLE_CHANNEL_DB = "true";
   };
+  runtimeEnv = canonicalSessionDatabaseEnv // {
+    OPENCODE_APP_ID = appId;
+    OPENCODE_APP_NAME = appName;
+    OPENCODE_PROTOCOL_SCHEME = appProtocolScheme;
+  };
+  runtimeWrapperFlags = lib.concatStringsSep " " (
+    lib.mapAttrsToList (
+      name: value: "--set-default ${lib.escapeShellArg name} ${lib.escapeShellArg value}"
+    ) runtimeEnv
+  );
 
   desktopPackagePath =
     (selfSource.pins or { }).desktopWorkspace
@@ -65,21 +76,24 @@ let
   );
   desktopPackageVersion = desktopPackageJson.version;
   inherit (selfSource) electronVersion;
+  # The runtime selector owns exact-version validation. Keep it lazy so the
+  # dependency probe can run before the Electron inventory is regenerated.
   electronBuild = nixcfgElectron.sourceBuildFor electronVersion;
   electronRuntime = electronBuild.runtime;
   electronRuntimeVersion = electronBuild.runtimeVersion;
-  optionalDesktopWorkspacePaths = lib.optional (pathExists (
-    workspaceMetadataSource + "/packages/llm/package.json"
-  )) "packages/llm";
+  cliWorkspace =
+    if (desktopPackageJson.name or "") == "@opencode/desktop" then
+      "packages/cli"
+    else
+      "packages/opencode";
+  isV2 = cliWorkspace == "packages/cli";
   desktopWorkspacePaths = [
-    "packages/opencode"
+    cliWorkspace
     desktopPackagePath
     "packages/app"
     "packages/codemode"
     "packages/core"
     "packages/server"
-    "packages/effect-drizzle-sqlite"
-    "packages/effect-sqlite-node"
     "packages/http-recorder"
     "packages/plugin"
     "packages/protocol"
@@ -87,36 +101,33 @@ let
     "packages/session-ui"
     "packages/tui"
     "packages/ui"
-    "packages/sdk/js"
     "packages/script"
   ]
-  ++ optionalDesktopWorkspacePaths;
+  ++ (
+    if isV2 then
+      [
+        "packages/ai"
+        "packages/client"
+        "packages/httpapi-codegen"
+        "packages/latex"
+        "packages/merman"
+        "packages/plugin-browser"
+        "packages/simulation"
+        "packages/theme"
+        "packages/util"
+      ]
+    else
+      [
+        "packages/effect-drizzle-sqlite"
+        "packages/effect-sqlite-node"
+        "packages/sdk/js"
+      ]
+      ++ lib.optional (pathExists (workspaceMetadataSource + "/packages/llm/package.json")) "packages/llm"
+  );
   desktopWorkspaceFilters = lib.concatMapStringsSep "\n" (
     workspacePath: "        --filter './${workspacePath}' \\"
   ) desktopWorkspacePaths;
   desktopWorkspaceShellArgs = lib.escapeShellArgs desktopWorkspacePaths;
-
-  desktopPackageVersionCheck =
-    if
-      version == desktopPackageVersion
-      || lib.hasPrefix "${desktopPackageVersion}-" version
-      || lib.hasPrefix "${desktopPackageVersion}+" version
-    then
-      true
-    else
-      throw ''
-        packages/opencode-desktop/default.nix has desktop version ${version},
-        expected ${desktopPackageVersion}, ${desktopPackageVersion}-<suffix>, or ${desktopPackageVersion}+<build-metadata>
-      '';
-
-  electronRuntimeVersionCheck =
-    if electronRuntimeVersion == electronVersion then
-      true
-    else
-      throw ''
-        packages/opencode-desktop/default.nix needs Electron ${electronVersion},
-        but the selected runtime is ${electronRuntimeVersion}; add the exact runtime to nixcfgElectron
-      '';
 
   bunTargets = {
     aarch64-darwin = {
@@ -137,7 +148,7 @@ let
   electronDist = electronBuild.dist;
 
   node_modules = opencode.node_modules.overrideAttrs (old: {
-    pname = "${pname}-node_modules";
+    pname = "${sourceHashPackageName}-node_modules";
     nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ python3 ];
     preBuild = (old.preBuild or "") + ''
       # Bun re-resolves the branch-based ghostty-web dependency and mutates
@@ -194,6 +205,21 @@ let
   ghosttyWebPin = opencodeOverlayDir + "/pin_ghostty_web_ref.py";
   hoistedOpentuiLinker = opencodeOverlayDir + "/link-hoisted-opentui-packages.sh";
   patchDesktopSource = ./patch_desktop_source.sh;
+  desktopCli =
+    if opencodeChannel == "prod" then
+      opencode
+    else
+      opencode.overrideAttrs (old: {
+        env = old.env // {
+          OPENCODE_CHANNEL = opencodeChannel;
+        };
+      });
+  prepareCli = lib.optionalString isV2 ''
+    export OPENCODE_CLI_DIST="$TMPDIR/desktop-cli"
+    cliPackage=$(bun -e 'import { getCurrentCli } from "./scripts/utils.ts"; console.log(getCurrentCli().package.replace("@opencode/", ""))')
+    mkdir -p "$OPENCODE_CLI_DIST/$cliPackage/bin"
+    cp ${lib.getExe desktopCli} "$OPENCODE_CLI_DIST/$cliPackage/bin/opencode2"
+  '';
   linuxAppDirName = "${pname}";
   linuxDesktopItem = makeDesktopItem {
     name = pname;
@@ -207,8 +233,6 @@ let
   };
 in
 assert desktopPackagePathCheck;
-assert desktopPackageVersionCheck;
-assert electronRuntimeVersionCheck;
 stdenv.mkDerivation {
   inherit
     pname
@@ -217,7 +241,7 @@ stdenv.mkDerivation {
     ;
 
   nativeBuildInputs = [
-    bun
+    buildBun
     makeWrapper
     nodejs
     python3
@@ -225,19 +249,19 @@ stdenv.mkDerivation {
 
   strictDeps = true;
 
-  env = electronBuild.commonEnv // {
-    CI = "1";
-    CSC_IDENTITY_AUTO_DISCOVERY = "false";
-    MODELS_DEV_API_JSON = "${models-dev}/dist/_api.json";
-    NODE_OPTIONS = "--max-old-space-size=6144";
-    OPENCODE_APP_ID = appId;
-    OPENCODE_APP_NAME = appName;
-    OPENCODE_CHANNEL = opencodeChannel;
-    OPENCODE_DISABLE_MODELS_FETCH = "true";
-    OPENCODE_PROTOCOL_NAME = appProtocolName;
-    OPENCODE_PROTOCOL_SCHEME = appProtocolScheme;
-    OPENCODE_VERSION = version;
-  };
+  env =
+    electronBuild.commonEnv
+    // runtimeEnv
+    // {
+      CI = "1";
+      CSC_IDENTITY_AUTO_DISCOVERY = "false";
+      MODELS_DEV_API_JSON = "${models-dev}/dist/_api.json";
+      NODE_OPTIONS = "--max-old-space-size=6144";
+      OPENCODE_CHANNEL = opencodeChannel;
+      OPENCODE_DISABLE_MODELS_FETCH = "true";
+      OPENCODE_PROTOCOL_NAME = appProtocolName;
+      OPENCODE_VERSION = version;
+    };
 
   postUnpack = ''
     chmod -R u+w source
@@ -282,10 +306,11 @@ stdenv.mkDerivation {
         patchShebangs node_modules
         patchShebangs packages/*/node_modules
 
-        ${stdenv.shell} ${hoistedOpentuiLinker}
+        ${stdenv.shell} ${hoistedOpentuiLinker} node_modules ${cliWorkspace}/node_modules
 
         (
           cd ${desktopPackagePath}
+          ${prepareCli}
           bun ./scripts/prepare.ts
           bun run build
           bun x electron-builder \
@@ -316,10 +341,11 @@ stdenv.mkDerivation {
         patchShebangs node_modules
         patchShebangs packages/*/node_modules
 
-        ${stdenv.shell} ${hoistedOpentuiLinker}
+        ${stdenv.shell} ${hoistedOpentuiLinker} node_modules ${cliWorkspace}/node_modules
 
         (
           cd ${desktopPackagePath}
+          ${prepareCli}
           bun ./scripts/prepare.ts
           bun run build
           bun x electron-builder \
@@ -359,6 +385,7 @@ stdenv.mkDerivation {
         mkdir -p "$out/Applications" "$out/bin"
         cp -R "$appBundle" "$out/Applications/${appBundleName}"
         ${lib.getExe python3} - "$out/Applications/${appBundleName}/Contents/Info.plist" <<'PY'
+        import os
         import plistlib
         import sys
 
@@ -366,7 +393,8 @@ stdenv.mkDerivation {
         with open(path, "rb") as handle:
             info = plistlib.load(handle)
         environment = dict(info.get("LSEnvironment", {}))
-        environment["OPENCODE_DISABLE_CHANNEL_DB"] = "${canonicalSessionDatabaseEnv.OPENCODE_DISABLE_CHANNEL_DB}"
+        for name in ${builtins.toJSON (builtins.attrNames runtimeEnv)}:
+            environment[name] = os.environ[name]
         info["LSEnvironment"] = environment
         with open(path, "wb") as handle:
             plistlib.dump(info, handle)
@@ -374,7 +402,7 @@ stdenv.mkDerivation {
         makeWrapper \
           "$out/Applications/${appBundleName}/Contents/MacOS/${appExecutableName}" \
           "$out/bin/${pname}" \
-          --set-default OPENCODE_DISABLE_CHANNEL_DB ${lib.escapeShellArg canonicalSessionDatabaseEnv.OPENCODE_DISABLE_CHANNEL_DB}
+          ${runtimeWrapperFlags}
 
         runHook postInstall
       ''
@@ -423,7 +451,7 @@ stdenv.mkDerivation {
         makeWrapper \
           "$out/lib/${linuxAppDirName}/$(basename "$appBinary")" \
           "$out/bin/${pname}" \
-          --set-default OPENCODE_DISABLE_CHANNEL_DB ${lib.escapeShellArg canonicalSessionDatabaseEnv.OPENCODE_DISABLE_CHANNEL_DB}
+          ${runtimeWrapperFlags}
 
         if [ -f "$out/lib/${linuxAppDirName}/resources/icons/icon.png" ]; then
           install -Dm644 \
@@ -462,15 +490,17 @@ stdenv.mkDerivation {
 
         /usr/bin/codesign --verify --deep --strict "$out/Applications/${appBundleName}"
         ${lib.getExe python3} - "$out/Applications/${appBundleName}/Contents/Info.plist" <<'PY'
+        import os
         import plistlib
         import sys
 
         path = sys.argv[1]
         with open(path, "rb") as handle:
             info = plistlib.load(handle)
-        actual = info.get("LSEnvironment", {}).get("OPENCODE_DISABLE_CHANNEL_DB")
-        if actual != "${canonicalSessionDatabaseEnv.OPENCODE_DISABLE_CHANNEL_DB}":
-            raise SystemExit(f"unexpected OPENCODE_DISABLE_CHANNEL_DB value: {actual!r}")
+        for name in ${builtins.toJSON (builtins.attrNames runtimeEnv)}:
+            actual = info.get("LSEnvironment", {}).get(name)
+            if actual != os.environ[name]:
+                raise SystemExit(f"unexpected {name} value: {actual!r}")
         PY
         grep -q 'OPENCODE_DISABLE_CHANNEL_DB' "$out/bin/${pname}"
 
@@ -502,6 +532,7 @@ stdenv.mkDerivation {
       appName
       appProtocolName
       appProtocolScheme
+      buildBun
       electronDist
       electronRuntime
       electronRuntimeVersion

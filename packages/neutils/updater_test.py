@@ -856,8 +856,9 @@ def test_run_zon2nix_retries_with_bounded_ordered_progress(
     timeline: list[UpdateEventKind | str] = []
     retry_events: list[UpdateEvent] = []
 
-    async def _stream_process(args, *, timeout: float, env):
+    async def _stream_process(args, *, timeout: float, env, output_limit: int | None):
         nonlocal calls
+        assert output_limit is None
         assert timeout == updater._ZON2NIX_TIMEOUT_SECONDS
         assert env == {"HOME": str(tmp_path)}
         assert not output_path.exists()
@@ -1138,13 +1139,13 @@ def test_fetch_hashes_emits_generated_artifact_and_src_hash(
         "Command failed (exit 1): zon2nix\nstderr: err(default): ReadFailed",
     ],
 )
-def test_fetch_hashes_preserves_existing_artifact_after_current_transient_failure(
+def test_fetch_hashes_rejects_current_artifact_after_generation_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     transient_error: str,
 ) -> None:
-    """Keep the checked-in artifact after a current-version transient failure."""
-    module = _load_module("neutils_updater_test_fetch_hashes_preserve_current")
+    """An existing artifact cannot prove requested regeneration succeeded."""
+    module = _load_module("neutils_updater_test_fetch_hashes_reject_current")
     updater = module.NeutilsUpdater()
     pkg_dir = tmp_path / "neutils"
     pkg_dir.mkdir()
@@ -1160,40 +1161,30 @@ def test_fetch_hashes_preserves_existing_artifact_after_current_transient_failur
     async def _fixed_hash(
         name: str, expr: str, *, config=None, emit: EventSink = ignore_event
     ) -> object:
-        assert name == updater.name
-        assert_nix_ast_equal(expr, updater._src_expr(COMMIT))
-        assert config == updater.config
-        return "sha256-src"
+        _ = (name, expr, config, emit)
+        raise AssertionError("source hashing must follow successful regeneration")
 
     monkeypatch.setattr(updater, "_render_build_zig_zon_nix", _render)
     monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: pkg_dir)
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
-    events = _run(
-        _collect_events(
-            lambda emit: updater.fetch_hashes(
+    events: list[UpdateEvent] = []
+
+    async def _emit(event: UpdateEvent) -> None:
+        events.append(event)
+
+    with pytest.raises(RuntimeError) as error:
+        _run(
+            updater.fetch_hashes(
                 _version_info(),
                 object(),
                 context=UpdateContext(current=_source_entry("0.7.2")),
-                emit=emit,
+                emit=_emit,
             )
         )
-    )
-
-    assert [event.kind for event in events] == [
-        UpdateEventKind.STATUS,
-        UpdateEventKind.STATUS,
-        UpdateEventKind.STATUS,
-        UpdateEventKind.ARTIFACT,
-    ]
-    assert events[2].message == (
-        "Preserving existing build.zig.zon.nix after transient zon2nix failure."
-    )
-    artifacts = expect_artifact_updates(events[3].payload)
-    assert len(artifacts) == 1
-    assert artifacts[0].path == artifact_path
-    assert artifacts[0].content == "# existing artifact\n"
-    assert events.result == [HashEntry.create("srcHash", "sha256-src")]
+    assert str(error.value) == transient_error
+    assert not any(event.kind is UpdateEventKind.ARTIFACT for event in events)
+    assert artifact_path.read_text(encoding="utf-8") == "# existing artifact\n"
 
 
 @pytest.mark.parametrize(
@@ -1206,12 +1197,12 @@ def test_fetch_hashes_preserves_existing_artifact_after_current_transient_failur
         "err(default): TlsInitializationFailed",
     ],
 )
-def test_fetch_hashes_retries_transient_zon2nix_failure_before_preserving_current_artifact(
+def test_fetch_hashes_retries_transient_zon2nix_failure_before_rejecting_update(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     transient_stderr: str,
 ) -> None:
-    """Retry zon2nix transport failures before preserving current output."""
+    """Exhaust bounded retries and propagate the failure without an artifact."""
     module = _load_module("neutils_updater_test_transient_failure_retry")
     updater = module.NeutilsUpdater()
     pkg_dir = tmp_path / "neutils"
@@ -1248,10 +1239,8 @@ def test_fetch_hashes_retries_transient_zon2nix_failure_before_preserving_curren
     async def _fixed_hash(
         name: str, expr: str, *, config=None, emit: EventSink = ignore_event
     ) -> object:
-        assert name == updater.name
-        assert_nix_ast_equal(expr, updater._src_expr(COMMIT))
-        assert config == updater.config
-        return "sha256-src"
+        _ = (name, expr, config, emit)
+        raise AssertionError("source hashing must follow successful regeneration")
 
     monkeypatch.setattr("lib.update.net.fetch_url", _fetch_url)
     monkeypatch.setattr(
@@ -1265,17 +1254,21 @@ def test_fetch_hashes_retries_transient_zon2nix_failure_before_preserving_curren
     monkeypatch.setattr("lib.update.paths.updater_dir_for", lambda _name: pkg_dir)
     monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", _fixed_hash)
 
-    events = _run(
-        _collect_events(
-            lambda emit: updater.fetch_hashes(
+    events: list[UpdateEvent] = []
+
+    async def _emit(event: UpdateEvent) -> None:
+        events.append(event)
+
+    with pytest.raises(RuntimeError) as error:
+        _run(
+            updater.fetch_hashes(
                 _version_info(),
                 object(),
                 context=UpdateContext(current=_source_entry("0.7.2")),
-                emit=emit,
+                emit=_emit,
             )
         )
-    )
-
+    assert str(error.value) == transient_stderr
     assert len(command_calls) == updater._ZON2NIX_MAX_ATTEMPTS
     assert sleep_delays == [
         updater.config.default_retry_backoff,
@@ -1287,20 +1280,8 @@ def test_fetch_hashes_retries_transient_zon2nix_failure_before_preserving_curren
     assert (
         status_messages.count("zon2nix hit a transient fetch failure; retrying...") == 2
     )
-    assert (
-        "Preserving existing build.zig.zon.nix after transient zon2nix failure."
-        in status_messages
-    )
-    artifacts = [
-        artifact
-        for event in events
-        if event.kind is UpdateEventKind.ARTIFACT
-        for artifact in expect_artifact_updates(event.payload)
-    ]
-    assert len(artifacts) == 1
-    assert artifacts[0].path == artifact_path
-    assert artifacts[0].content == "# existing artifact\n"
-    assert events.result == [HashEntry.create("srcHash", "sha256-src")]
+    assert not any(event.kind is UpdateEventKind.ARTIFACT for event in events)
+    assert artifact_path.read_text(encoding="utf-8") == "# existing artifact\n"
 
 
 @pytest.mark.parametrize(
@@ -1312,14 +1293,14 @@ def test_fetch_hashes_retries_transient_zon2nix_failure_before_preserving_curren
         ("0.7.2", "b" * 40, True),
     ],
 )
-def test_fetch_hashes_rejects_preserve_when_artifact_is_not_current(
+def test_fetch_hashes_rejects_generation_failure_with_missing_or_stale_artifact(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     context_version: str,
     context_commit: str | None,
     write_artifact: bool,
 ) -> None:
-    """Do not preserve old or missing generated artifacts after zon2nix failures."""
+    """Missing or stale artifacts do not suppress generation failures either."""
     module = _load_module("neutils_updater_test_fetch_hashes_preserve_reject")
     updater = module.NeutilsUpdater()
     pkg_dir = tmp_path / "neutils"

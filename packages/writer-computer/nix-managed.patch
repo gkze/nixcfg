@@ -1,20 +1,20 @@
 diff --git a/apps/desktop/src-tauri/Cargo.toml b/apps/desktop/src-tauri/Cargo.toml
-index 358b469..3002d22 100644
+index 3d203cf..19305de 100644
 --- a/apps/desktop/src-tauri/Cargo.toml
 +++ b/apps/desktop/src-tauri/Cargo.toml
-@@ -35,7 +35,6 @@ thiserror = "2"
+@@ -35,7 +35,6 @@
  trash = "5"
  base64 = "0.22"
  tauri-plugin-store = "2.4.2"
 -tauri-plugin-updater = "2"
  tauri-plugin-single-instance = "2"
  tauri-plugin-webdriver = { version = "0.2", optional = true }
-
+ # Telemetry transport. Feature set mirrors tauri-plugin-updater's so the
 diff --git a/apps/desktop/src-tauri/Cargo.lock b/apps/desktop/src-tauri/Cargo.lock
-index 4776e50..90688d0 100644
+index e3a40bb..e4f11dd 100644
 --- a/apps/desktop/src-tauri/Cargo.lock
 +++ b/apps/desktop/src-tauri/Cargo.lock
-@@ -875,7 +875,6 @@ dependencies = [
+@@ -877,7 +877,6 @@
   "tauri-plugin-opener",
   "tauri-plugin-single-instance",
   "tauri-plugin-store",
@@ -23,7 +23,7 @@ index 4776e50..90688d0 100644
   "tempfile",
   "thiserror 2.0.18",
 diff --git a/apps/desktop/src-tauri/tauri.conf.json b/apps/desktop/src-tauri/tauri.conf.json
-index 639291e..99fa3eb 100644
+index 6caffe4..d2dd8e2 100644
 --- a/apps/desktop/src-tauri/tauri.conf.json
 +++ b/apps/desktop/src-tauri/tauri.conf.json
 @@ -40,7 +40,7 @@
@@ -53,7 +53,7 @@ diff --git a/apps/desktop/src-tauri/src/commands/mod.rs b/apps/desktop/src-tauri
 index 81a62e9..df18c87 100644
 --- a/apps/desktop/src-tauri/src/commands/mod.rs
 +++ b/apps/desktop/src-tauri/src/commands/mod.rs
-@@ -4,7 +4,5 @@ pub mod images;
+@@ -4,7 +4,5 @@
  pub mod recents;
  pub mod search;
  pub mod settings;
@@ -62,19 +62,19 @@ index 81a62e9..df18c87 100644
  pub mod startup;
  pub mod workspace;
 diff --git a/apps/desktop/src-tauri/src/lib.rs b/apps/desktop/src-tauri/src/lib.rs
-index dc9b49e..42a8323 100644
+index 30cc5cd..d2f9142 100644
 --- a/apps/desktop/src-tauri/src/lib.rs
 +++ b/apps/desktop/src-tauri/src/lib.rs
-@@ -8,8 +8,6 @@ mod ignore;
- mod macos;
+@@ -9,8 +9,6 @@
  pub mod open_target;
  mod state;
+ mod telemetry;
 -#[cfg(desktop)]
 -mod updater;
  mod watcher;
  pub mod writer_cli;
-
-@@ -19,21 +17,11 @@ use open_target::resolve_path;
+ 
+@@ -20,20 +18,10 @@
  pub use open_target::PendingOpenPayload;
  use state::AppState;
  use std::path::{Path, PathBuf};
@@ -84,7 +84,7 @@ index dc9b49e..42a8323 100644
  #[cfg(target_os = "macos")]
  use tauri::RunEvent;
  use tauri::{DragDropEvent, Emitter, Manager, PhysicalPosition, WebviewWindow, WindowEvent};
-
+-
 -#[cfg(target_os = "macos")]
 -const CLI_MENU_INSTALL_LABEL: &str = "Install 'writer' Command Line Tool…";
 -#[cfg(target_os = "macos")]
@@ -92,14 +92,13 @@ index dc9b49e..42a8323 100644
 -
 -#[cfg(target_os = "macos")]
 -struct CliMenuItem(MenuItem<tauri::Wry>);
--
- const MAIN_WINDOW_LABEL: &str = "main";
-
- /// Push an open payload into the target window's pending-open queue and emit
-@@ -252,42 +240,27 @@ fn position_new_window(app: &tauri::AppHandle, window: &WebviewWindow) {
+ 
+ pub(crate) const MAIN_WINDOW_LABEL: &str = "main";
+ 
+@@ -253,42 +241,27 @@
      let _ = window.set_position(PhysicalPosition::new(x, y));
  }
-
+ 
 -/// Build the native menu bar and wire updater menu events. macOS only needs a
 -/// menu at all because of the auto-updater; the rest of the items are standard
 -/// predefined actions so nothing has to be rewired on the frontend.
@@ -116,7 +115,7 @@ index dc9b49e..42a8323 100644
      let preferences_item = MenuItemBuilder::with_id("preferences.open", "Preferences…")
          .accelerator("CmdOrCtrl+,")
          .build(app)?;
-
+ 
 -    #[cfg(target_os = "macos")]
 -    let cli_item = MenuItemBuilder::with_id("cli.toggle", CLI_MENU_INSTALL_LABEL).build(app)?;
 -
@@ -152,13 +151,13 @@ index dc9b49e..42a8323 100644
 +        .separator()
 +        .item(&PredefinedMenuItem::quit(app, None)?)
 +        .build()?;
-
+ 
      let edit_submenu = SubmenuBuilder::new(app, "Edit")
          .undo()
-@@ -313,20 +286,8 @@ fn install_app_menu(
-
+@@ -314,20 +287,8 @@
+ 
      app.set_menu(menu)?;
-
+ 
 -    let menu_items = updater::UpdaterMenuItems { check: check_item };
 -    app.manage(updater::UpdaterManager::new(menu_items, app_data_dir));
 -
@@ -175,11 +174,11 @@ index dc9b49e..42a8323 100644
 -        "cli.toggle" => run_cli_toggle(app.clone()),
          _ => {}
      });
-
-@@ -357,82 +318,6 @@ fn emit_to_focused_window(app: &tauri::AppHandle, event: &str) {
+ 
+@@ -358,82 +319,6 @@
      }
  }
-
+ 
 -#[cfg(target_os = "macos")]
 -fn refresh_cli_menu(app: &tauri::AppHandle) {
 -    let installed = commands::shell_install::cli_status(app.clone()).installed;
@@ -259,8 +258,8 @@ index dc9b49e..42a8323 100644
  /// Handle a second Writer launch while one is already running. With
  /// `tauri-plugin-single-instance` the OS routes the second process's argv
  /// here via the existing process; we translate that into either opening a
-@@ -511,24 +396,9 @@ pub fn run() {
-
+@@ -526,24 +411,9 @@
+ 
              #[cfg(desktop)]
              {
 -                let config_dir = app
@@ -283,11 +282,11 @@ index dc9b49e..42a8323 100644
 -                    updater::spawn_daily_check(handle);
 -                });
              }
-
+ 
              // Attach drag-drop + close handlers on the main window.
-@@ -577,12 +447,6 @@ pub fn run() {
-             commands::settings::set_setting,
-             commands::settings::reset_setting,
+@@ -595,12 +465,6 @@
+             telemetry::telemetry_mark_prompted,
+             telemetry::telemetry_report_declined,
              commands::startup::get_startup_state,
 -            #[cfg(target_os = "macos")]
 -            commands::shell_install::cli_status,

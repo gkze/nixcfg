@@ -54,6 +54,7 @@ _SRC_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 _NPM_DEPS_HASH = "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
 _CARGO_HASH = "sha256-DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="
 _PNPM_VERSION = "11.18.0"
+_PACKAGE_MANAGER = f"pnpm@{_PNPM_VERSION}"
 _PNPM_URL = f"https://registry.npmjs.org/pnpm/-/pnpm-{_PNPM_VERSION}.tgz"
 _PNPM_HASH = "sha256-EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE="
 _MINIMUM_MACOS_VERSION = "14.0"
@@ -595,7 +596,9 @@ def test_reflect_nix_policy_suppresses_updates_and_uses_dev_entitlements() -> No
     """The Nix source view must retain stable identity without mutable updates."""
     module = _load_patch_module()
 
-    patched = module.patch_sources(_UPSTREAM_PATCH_SOURCES)
+    patched = module.patch_sources(
+        _UPSTREAM_PATCH_SOURCES, package_manager=_PACKAGE_MANAGER
+    )
 
     tauri_config = json.loads(patched["apps/desktop/src-tauri/tauri.conf.json"])
     assert tauri_config["plugins"] == {
@@ -630,6 +633,25 @@ def test_reflect_nix_policy_suppresses_updates_and_uses_dev_entitlements() -> No
     assert patched != _UPSTREAM_PATCH_SOURCES
 
 
+@pytest.mark.parametrize("package_manager", ["pnpm@11.18.0", "pnpm@11.24.0"])
+def test_reflect_nix_policy_accepts_the_selected_package_manager(
+    package_manager: str,
+) -> None:
+    """A toolchain update must preserve exact validation against the chosen pin."""
+    sources = dict(_UPSTREAM_PATCH_SOURCES)
+    sources["package.json"] = json.dumps({"packageManager": package_manager})
+
+    patched = _load_patch_module().patch_sources(
+        sources, package_manager=package_manager
+    )
+
+    assert json.loads(patched["package.json"]) == {"packageManager": package_manager}
+    assert (
+        "updater"
+        not in json.loads(patched["apps/desktop/src-tauri/tauri.conf.json"])["plugins"]
+    )
+
+
 @pytest.mark.parametrize(
     "package_source",
     [
@@ -651,7 +673,7 @@ def test_reflect_nix_policy_rejects_package_manager_drift(
         RuntimeError,
         match=r"expected Reflect packageManager pnpm@11\.18\.0",
     ):
-        module.patch_sources(drifted)
+        module.patch_sources(drifted, package_manager=_PACKAGE_MANAGER)
 
 
 @pytest.mark.parametrize("copies", [0, 2])
@@ -670,7 +692,7 @@ def test_reflect_nix_policy_rejects_drift_before_patching_any_source(
     before = dict(drifted)
 
     with pytest.raises(RuntimeError, match="expected one Reflect source anchor"):
-        module.patch_sources(drifted)
+        module.patch_sources(drifted, package_manager=_PACKAGE_MANAGER)
 
     assert drifted == before
 
@@ -682,7 +704,7 @@ def test_reflect_nix_policy_requires_every_source_file() -> None:
     missing.pop("apps/desktop/src-tauri/src/lib.rs")
 
     with pytest.raises(RuntimeError, match="missing Reflect source file"):
-        module.patch_sources(missing)
+        module.patch_sources(missing, package_manager=_PACKAGE_MANAGER)
 
 
 def test_reflect_nix_policy_patches_a_validated_unpacked_tree(
@@ -696,7 +718,7 @@ def test_reflect_nix_policy_patches_a_validated_unpacked_tree(
         path = Path(patch.relative_path)
         expected[path] = expected[path].replace(patch.old, patch.new)
 
-    assert module.main([str(tmp_path)]) == 0
+    assert module.main([str(tmp_path), "--package-manager", _PACKAGE_MANAGER]) == 0
 
     assert {
         path: (tmp_path / path).read_text(encoding="utf-8") for path in originals
@@ -705,7 +727,9 @@ def test_reflect_nix_policy_patches_a_validated_unpacked_tree(
 
 def test_reflect_nix_policy_checks_a_source_archive_without_extracting() -> None:
     """The streaming archive mode should accept the exact expected source view."""
-    _load_patch_module().check_tar_stream(_tar_stream())
+    _load_patch_module().check_tar_stream(
+        _tar_stream(), package_manager=_PACKAGE_MANAGER
+    )
 
 
 def test_reflect_nix_policy_rejects_duplicate_archive_sources() -> None:
@@ -714,7 +738,9 @@ def test_reflect_nix_policy_rejects_duplicate_archive_sources() -> None:
     duplicate_path = "apps/desktop/src-tauri/tauri.conf.json"
 
     with pytest.raises(RuntimeError, match="duplicate Reflect source file"):
-        module.check_tar_stream(_tar_stream(duplicate_path=duplicate_path))
+        module.check_tar_stream(
+            _tar_stream(duplicate_path=duplicate_path), package_manager=_PACKAGE_MANAGER
+        )
 
 
 def test_reflect_nix_policy_rejects_unreadable_archive_sources(
@@ -730,7 +756,7 @@ def test_reflect_nix_policy_rejects_unreadable_archive_sources(
     )
 
     with pytest.raises(RuntimeError, match="could not read Reflect source file"):
-        module.check_tar_stream(io.BytesIO())
+        module.check_tar_stream(io.BytesIO(), package_manager=_PACKAGE_MANAGER)
 
 
 def test_reflect_nix_policy_main_routes_streaming_archive_mode(
@@ -739,15 +765,29 @@ def test_reflect_nix_policy_main_routes_streaming_archive_mode(
     """The dry-check CLI should consume stdin without requiring a source root."""
     module = _load_patch_module()
     stream = io.BytesIO(b"archive")
-    calls: list[io.BytesIO] = []
-    monkeypatch.setattr(module, "check_tar_stream", calls.append)
+    calls: list[tuple[io.BytesIO, str]] = []
+
+    def check_stream(stream: io.BytesIO, *, package_manager: str) -> None:
+        calls.append((stream, package_manager))
+
+    monkeypatch.setattr(module, "check_tar_stream", check_stream)
     monkeypatch.setattr(module.sys, "stdin", SimpleNamespace(buffer=stream))
 
-    assert module.main(["--check-tar-stdin"]) == 0
-    assert calls == [stream]
+    assert (
+        module.main(["--check-tar-stdin", "--package-manager", _PACKAGE_MANAGER]) == 0
+    )
+    assert calls == [(stream, _PACKAGE_MANAGER)]
 
 
-@pytest.mark.parametrize("argv", [[], ["source", "--check-tar-stdin"]])
+@pytest.mark.parametrize(
+    "argv",
+    [
+        [],
+        ["source"],
+        ["--package-manager", _PACKAGE_MANAGER],
+        ["source", "--check-tar-stdin", "--package-manager", _PACKAGE_MANAGER],
+    ],
+)
 def test_reflect_nix_policy_main_rejects_ambiguous_inputs(argv: list[str]) -> None:
     """The CLI must require exactly one patch or archive-check mode."""
     with pytest.raises(SystemExit, match="2"):

@@ -1,5 +1,7 @@
 """Structural tests for the Goose CLI crate2nix package."""
 
+import json
+
 import pytest
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 
@@ -61,4 +63,7 @@ def test_goose_cli_reviews_every_bitcoin_internals_version() -> None:
         nix_import(REPO_ROOT / "tests/nix/goose-cli-bitcoin-internals-versions.nix")
     )
 
-    assert versions == ["0.5.0", "0.6.0"]
+    source = json.loads((REPO_ROOT / "overlays/goose-cli/sources.json").read_text())
+    assert versions
+    for version in versions:
+        assert source["pins"][f"bitcoinInternals.{version}"]

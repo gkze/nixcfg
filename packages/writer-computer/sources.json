@@ -1,8 +1,8 @@
 {
-  "commit": "e49c16f73e49b9f753ba3f349136d10ed03a286c",
+  "commit": "e26ae9fd81a75940bb92a44035a3aeb08674a6de",
   "hashes": [
     {
-      "hash": "sha256-fQnP0Tn+dsHaSsfveTjjPDlVJcI1mwzQvTdAdLfe5nU=",
+      "hash": "sha256-URBehwovKIi7twPSDPIaw1kBd1HfonfZ3I69sGw5lpc=",
       "hashType": "cargoHash"
     },
     {
@@ -10,9 +10,9 @@
       "hashType": "npmDepsHash"
     },
     {
-      "hash": "sha256-IMIaMgRwv165fB5sq3NMltFnDcfcCWXcYm8HVLbXnrk=",
+      "hash": "sha256-8W21cGA+nA3SKR7Toj360F7XYAwSWSMS6JbuAU1DouA=",
       "hashType": "srcHash"
     }
   ],
-  "version": "0.5.0"
+  "version": "0.6.0"
 }

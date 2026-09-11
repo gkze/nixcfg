@@ -30676,10 +30676,6 @@ rec {
             features = [ "include-exclude" ];
           }
           {
-            name = "toml";
-            packageId = "toml 0.8.23";
-          }
-          {
             name = "tree-sitter";
             packageId = "tree-sitter";
             optional = true;
@@ -42982,8 +42978,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/notify";
-          rev = "0890bbb8ca40a4b5d1f67031698dd7918b37d991";
-          sha256 = "1q51a4lbx352m4xywb8b5w6zqc5vjbhr626m0q1i28i7bal0cbh8";
+          rev = "d842f16b2716bd60f09caf3ae3a894237ab38f54";
+          sha256 = "1b2k1mr0j7yp4gb66ph2m2cdi4cn2xlsd6idax1q6swx060l5gss";
         };
         authors = [
           "Félix Saparelli <me@passcod.name>"
@@ -43198,8 +43194,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/notify";
-          rev = "0890bbb8ca40a4b5d1f67031698dd7918b37d991";
-          sha256 = "1q51a4lbx352m4xywb8b5w6zqc5vjbhr626m0q1i28i7bal0cbh8";
+          rev = "d842f16b2716bd60f09caf3ae3a894237ab38f54";
+          sha256 = "1b2k1mr0j7yp4gb66ph2m2cdi4cn2xlsd6idax1q6swx060l5gss";
         };
         libName = "notify_types";
         authors = [
@@ -55893,10 +55889,6 @@ rec {
             packageId = "paths";
           }
           {
-            name = "prost";
-            packageId = "prost";
-          }
-          {
             name = "release_channel";
             packageId = "release_channel";
           }
@@ -56448,7 +56440,7 @@ rec {
           }
         ];
         features = {
-          "debug-embed" = [ "dep:rust-embed" ];
+          "debug-embed" = [ "dep:rust-embed" "util/debug-embed" ];
           "test-support" = [ "fs/test-support" ];
         };
         resolvedDefaultFeatures = [ "default" "test-support" ];

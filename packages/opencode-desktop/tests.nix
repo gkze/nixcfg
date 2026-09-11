@@ -132,6 +132,12 @@ let
     (assertEq "dev runtime version matches prod (${system})" prod.passthru.electronRuntimeVersion
       dev.passthru.electronRuntimeVersion
     )
+    (assertEq "desktop channels share dependencies (${system})" prod.node_modules.drvPath
+      dev.node_modules.drvPath
+    )
+    (assertEq "desktop Bun matches CLI installer (${system})" (toString
+      self.pkgs.${system}.opencode.buildBun
+    ) (toString prod.buildBun))
     (assertStorePath "dev electronDist (${system})" dev.passthru.electronDist)
     (assertStorePath "dev drvPath (${system})" dev.drvPath)
   ];

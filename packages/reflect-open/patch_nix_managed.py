@@ -41,7 +41,6 @@ _UPDATE_PROVIDER_DECLARATION = (
     "UpdateProviderProps): ReactElement {"
 )
 _ARCHIVE_PATH_COMPONENTS = 2
-_EXPECTED_PACKAGE_MANAGER = "pnpm@11.18.0"
 
 _PATCHES = (
     SourcePatch(
@@ -121,14 +120,14 @@ _REQUIRED_PATHS = tuple(
 )
 
 
-def _validate_package_manager(source: str) -> None:
-    message = f"expected Reflect packageManager {_EXPECTED_PACKAGE_MANAGER}"
+def _validate_package_manager(source: str, package_manager: str) -> None:
+    message = f"expected Reflect packageManager {package_manager}"
     try:
         package = json.loads(source)
     except json.JSONDecodeError as error:
         raise RuntimeError(message) from error
     actual = package.get("packageManager") if isinstance(package, dict) else None
-    if actual != _EXPECTED_PACKAGE_MANAGER:
+    if actual != package_manager:
         raise RuntimeError(message)
 
 
@@ -145,14 +144,16 @@ def _replace_anchor(source: str, patch: SourcePatch) -> str:
     return f"{source[:start]}{patch.new}{source[end:]}"
 
 
-def patch_sources(sources: Mapping[str, str]) -> dict[str, str]:
+def patch_sources(
+    sources: Mapping[str, str], *, package_manager: str
+) -> dict[str, str]:
     """Return a fully validated Nix-owned source view without mutating input."""
     patched = dict(sources)
     for relative_path in _REQUIRED_PATHS:
         if relative_path not in patched:
             msg = f"missing Reflect source file: {relative_path}"
             raise RuntimeError(msg)
-    _validate_package_manager(patched["package.json"])
+    _validate_package_manager(patched["package.json"], package_manager)
     for patch in _PATCHES:
         patched[patch.relative_path] = _replace_anchor(
             patched[patch.relative_path],
@@ -161,18 +162,18 @@ def patch_sources(sources: Mapping[str, str]) -> dict[str, str]:
     return patched
 
 
-def patch_tree(source_root: Path) -> None:
+def patch_tree(source_root: Path, *, package_manager: str) -> None:
     """Apply the Nix ownership policy to one unpacked Reflect source tree."""
     sources = {
         relative_path: (source_root / relative_path).read_text(encoding="utf-8")
         for relative_path in _REQUIRED_PATHS
     }
-    patched = patch_sources(sources)
+    patched = patch_sources(sources, package_manager=package_manager)
     for relative_path, patched_source in patched.items():
         (source_root / relative_path).write_text(patched_source, encoding="utf-8")
 
 
-def check_tar_stream(stream: BinaryIO) -> None:
+def check_tar_stream(stream: BinaryIO, *, package_manager: str) -> None:
     """Validate all anchors against a GitHub source tarball without extraction."""
     sources: dict[str, str] = {}
     with tarfile.open(fileobj=stream, mode="r|gz") as archive:
@@ -193,7 +194,7 @@ def check_tar_stream(stream: BinaryIO) -> None:
                 msg = f"could not read Reflect source file: {relative_path}"
                 raise RuntimeError(msg)
             sources[relative_path] = source_file.read().decode("utf-8")
-    patch_sources(sources)
+    patch_sources(sources, package_manager=package_manager)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -201,15 +202,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source_root", nargs="?", type=Path)
     parser.add_argument("--check-tar-stdin", action="store_true")
+    parser.add_argument("--package-manager", required=True)
     args = parser.parse_args(argv)
     if args.check_tar_stdin:
         if args.source_root is not None:
             parser.error("source_root cannot be used with --check-tar-stdin")
-        check_tar_stream(sys.stdin.buffer)
+        check_tar_stream(sys.stdin.buffer, package_manager=args.package_manager)
         return 0
     if args.source_root is None:
         parser.error("source_root is required unless --check-tar-stdin is used")
-    patch_tree(args.source_root)
+    patch_tree(args.source_root, package_manager=args.package_manager)
     return 0
 
 

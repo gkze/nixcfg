@@ -1,11 +1,14 @@
 """Flake-backed updater implementations and materializers."""
 
 import asyncio
+import hashlib
+import json
 import os
 import shutil
 import sys
 import tempfile
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -33,13 +36,11 @@ from lib.update.events import (
     ignore_event,
 )
 from lib.update.flake import flake_source_path_expr
-from lib.update.nix import _build_package_path_attr_expr
+from lib.update.nix import _build_overlay_attr_expr, _build_package_path_attr_expr
 from lib.update.platform_hashes import (
-    PlatformHashResult,
-    PreservedPlatformHash,
-    preserve_existing_platform_hash,
-    preserved_platform_hash_status,
-    preserved_platform_hash_warning,
+    PlatformHashFailure,
+    platform_hash_failure_status,
+    require_complete_platform_hashes,
 )
 from lib.update.updaters.core import (
     UpdateContext,
@@ -151,7 +152,11 @@ class FlakeInputMetadataUpdater(FlakeInputUpdater):
 
 
 class FlakeInputHashUpdater(FlakeInputUpdater):
-    """Base updater for hash-only sources backed by flake inputs."""
+    """Probe and certify a fixed-output dependency backed by flake inputs.
+
+    ``hash_attr_path`` must select the dependency that owns ``hash_type``;
+    selecting a consumer package would make a nested mismatch ambiguous.
+    """
 
     hash_type: HashType
     hash_attr_path: ClassVar[str] = ""
@@ -194,12 +199,33 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
             or current.electron_version != expected.electron_version
         ):
             return False
+        if self.platform_specific:
+            current_platform = update_nix.get_current_nix_platform()
+            if self._has_partial_platform_scope(current_platform):
+                return False
+            existing_hashes = self._existing_platform_hashes(context)
+            for platform in self._platform_targets(current_platform):
+                if not self._hash_is_usable(existing_hashes.get(platform)):
+                    return False
+        elif not any(
+            entry.hash_type == self.hash_type
+            and entry.platform is None
+            and self._hash_is_usable(entry.hash)
+            for entry in current.hashes.entries or ()
+        ):
+            return False
         try:
-            new_fingerprint = await self._compute_drv_fingerprint(expected)
+            await self._prepare_hash_probes(expected, context=context)
         except RuntimeError:
             return False
-        context.drv_fingerprint = new_fingerprint
-        return current.drv_hash == new_fingerprint
+        return current.drv_hash == context.drv_fingerprint
+
+    def _hash_is_usable(self, value: str | None) -> bool:
+        return bool(
+            value
+            and value != self.config.fake_hash
+            and not value.startswith(HashCollection.FAKE_HASH_PREFIX)
+        )
 
     async def _finalize_result(
         self,
@@ -219,7 +245,12 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
                     "source entry has no drvHash"
                 )
                 raise RuntimeError(msg)
-            result = result.model_copy(update={"drv_hash": current_drv_hash})
+            result = result.model_copy(
+                update={
+                    "drv_hash": current_drv_hash,
+                    "platform_drv_hashes": context.drv_fingerprints or None,
+                }
+            )
             await emit(
                 UpdateEvent.status(
                     self.name,
@@ -247,8 +278,14 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         try:
             drv_hash = context.drv_fingerprint
             if drv_hash is None:
-                drv_hash = await self._compute_drv_fingerprint(result)
-            result = result.model_copy(update={"drv_hash": drv_hash})
+                await self._prepare_hash_probes(result, context=context)
+                drv_hash = context.drv_fingerprint
+            result = result.model_copy(
+                update={
+                    "drv_hash": drv_hash,
+                    "platform_drv_hashes": context.drv_fingerprints or None,
+                }
+            )
         except RuntimeError as exc:
             await emit(
                 UpdateEvent.status(
@@ -262,7 +299,9 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
     def _platform_targets(self, current_platform: str) -> tuple[str, ...]:
         if self.native_only:
             return (current_platform,)
+        return self._full_platform_targets(current_platform)
 
+    def _full_platform_targets(self, current_platform: str) -> tuple[str, ...]:
         targets = [current_platform]
         for platform in self.config.hash_build_platforms:
             if platform not in targets:
@@ -273,6 +312,11 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
             targets = [platform for platform in targets if platform in supported]
 
         return tuple(targets)
+
+    def _has_partial_platform_scope(self, current_platform: str) -> bool:
+        return self.native_only and set(
+            self._full_platform_targets(current_platform)
+        ) != {current_platform}
 
     def _existing_platform_hashes(
         self,
@@ -299,9 +343,22 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         return {}
 
     async def _compute_hash_for_system(
-        self, info: VersionInfo, *, system: str | None, emit: EventSink = ignore_event
+        self,
+        info: VersionInfo,
+        *,
+        system: str | None,
+        context: UpdateContext | None = None,
+        emit: EventSink = ignore_event,
     ) -> str:
         candidate = self.build_result(info, [])
+        if context is not None:
+            await self._prepare_hash_probes(candidate, context=context, emit=emit)
+            return await update_nix.compute_fixed_output_hash(
+                self.name,
+                context.prepared_probes[system or ""],
+                config=self.config,
+                emit=emit,
+            )
         source_override = (
             candidate
             if candidate.pins is not None or candidate.electron_version is not None
@@ -356,54 +413,95 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         self,
         source_override: SourceEntry | None = None,
     ) -> str:
-        if source_override is None or (
-            source_override.pins is None and source_override.electron_version is None
-        ):
-            source_override = None
-        fingerprint_override = (
-            source_override.model_copy(
-                update={
-                    "drv_hash": None,
-                    "hashes": HashCollection(
-                        entries=[
-                            entry
-                            for entry in source_override.hashes.entries or ()
-                            if entry.hash_type != self.hash_type
-                        ],
-                    ),
-                }
-            )
-            if source_override is not None
-            else None
-        )
-        package_expr = self._package_hash_expr(
-            system=None,
-            source_override=fingerprint_override,
-        )
-        if package_expr is None:
-            return await update_nix.compute_drv_fingerprint(
-                self.name,
-                config=self.config,
-                source_overrides=(
-                    {self.name: fingerprint_override}
-                    if fingerprint_override is not None
-                    else None
-                ),
-                fake_hashes=True if fingerprint_override is not None else None,
-            )
-        return await update_nix.compute_expr_drv_fingerprint(
-            self.name,
-            package_expr,
-            config=self.config,
+        return await self._prepare_hash_probes(
+            source_override or SourceEntry(hashes={}),
+            context=UpdateContext(current=None),
         )
 
+    def _fingerprint_source(self, source: SourceEntry) -> SourceEntry | None:
+        if source.pins is None and source.electron_version is None:
+            return None
+        return source.model_copy(
+            update={
+                "drv_hash": None,
+                "platform_drv_hashes": None,
+                "hashes": HashCollection(
+                    entries=[
+                        entry
+                        for entry in source.hashes.entries or ()
+                        if entry.hash_type != self.hash_type
+                    ]
+                ),
+            }
+        )
+
+    def _probe_expressions(self, source: SourceEntry) -> dict[str, str]:
+        override = self._fingerprint_source(source)
+        targets = (
+            self._platform_targets(update_nix.get_current_nix_platform())
+            if self.platform_specific
+            else ("",)
+        )
+        expressions = {}
+        for target in targets:
+            expression = self._package_hash_expr(
+                system=target or None, source_override=override
+            )
+            if expression is None:
+                expression = _build_overlay_attr_expr(
+                    self.name,
+                    self.hash_attr_path,
+                    system=target or None,
+                    source_overrides={self.name: override}
+                    if override is not None
+                    else None,
+                    fake_hashes=True if override is not None else None,
+                )
+            expressions[target] = expression
+        return expressions
+
+    async def _prepare_hash_probes(
+        self,
+        source: SourceEntry,
+        *,
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> str:
+        expressions = self._probe_expressions(source)
+        if {
+            key: probe.expression for key, probe in context.prepared_probes.items()
+        } != expressions:
+            context.prepared_probes = await update_nix.prepare_fixed_output_probes(
+                self.name, expressions, config=self.config, emit=emit
+            )
+        fingerprints = {
+            key: probe.fingerprint for key, probe in context.prepared_probes.items()
+        }
+        context.drv_fingerprints = fingerprints if self.platform_specific else {}
+        if len(fingerprints) == 1:
+            context.drv_fingerprint = next(iter(fingerprints.values()))
+        else:
+            # Scope is part of the certificate; a native-only snapshot cannot
+            # certify the full platform matrix.
+            encoded = json.dumps(fingerprints, sort_keys=True, separators=(",", ":"))
+            context.drv_fingerprint = (
+                f"platforms-v1:{hashlib.sha256(encoded.encode()).hexdigest()}"
+            )
+        return context.drv_fingerprint
+
     async def _compute_hash(
-        self, info: VersionInfo, *, emit: EventSink = ignore_event
+        self,
+        info: VersionInfo,
+        *,
+        context: UpdateContext | None = None,
+        emit: EventSink = ignore_event,
     ) -> str:
         system = (
             update_nix.get_current_nix_platform() if self.platform_specific else None
         )
-        return await self._compute_hash_for_system(info, system=system, emit=emit)
+        return await self._compute_hash_for_system(
+            info, system=system, context=context, emit=emit
+        )
 
     async def fetch_hashes(
         self,
@@ -439,44 +537,70 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
             )
             return entries
         if self.platform_specific:
-            if self.native_only and (
-                self.supported_platforms is None
-                or set(self.supported_platforms) != {current_platform}
-            ):
+            if self._has_partial_platform_scope(current_platform):
                 context.hashes_fully_computed = False
             platform_hashes: dict[str, str] = {}
+            failed_platforms: list[PlatformHashFailure] = []
+            await self._prepare_hash_probes(
+                self.build_result(info, []), context=context, emit=emit
+            )
             existing_hashes = self._existing_platform_hashes(context)
-            failed_platforms: list[PreservedPlatformHash] = []
+            certificates = (
+                context.current.platform_drv_hashes or {} if context.current else {}
+            )
 
-            for platform in self._platform_targets(current_platform):
+            async def probe(platform: str) -> str:
+                existing_hash = existing_hashes.get(platform)
+                if (
+                    existing_hash is not None
+                    and certificates.get(platform)
+                    == context.drv_fingerprints.get(platform)
+                    and self._hash_is_usable(existing_hash)
+                ):
+                    return existing_hash
+                return await update_nix.compute_fixed_output_hash(
+                    self.name,
+                    context.prepared_probes[platform],
+                    config=self.config,
+                    emit=emit,
+                )
+
+            async def foreign_probe(platform: str) -> str | PlatformHashFailure:
                 try:
-                    hash_value = await self._compute_hash_for_system(
-                        info, system=platform, emit=emit
-                    )
+                    return await probe(platform)
                 except RuntimeError as exc:
-                    if platform == current_platform:
-                        raise
-                    context.hashes_fully_computed = False
-                    preserved = preserve_existing_platform_hash(
-                        platform,
-                        existing_hashes,
-                        exc,
-                    )
-                    failed_platforms.append(preserved)
-                    platform_hashes[platform] = preserved.hash
-                    await emit(preserved_platform_hash_status(self.name, preserved))
-                    continue
-                platform_hashes[platform] = hash_value
+                    failure = PlatformHashFailure(platform, str(exc))
+                    await emit(platform_hash_failure_status(self.name, failure))
+                    return failure
 
-            if failed_platforms:
-                await emit(preserved_platform_hash_warning(self.name, failed_platforms))
+            # Retain the native failure boundary before starting remote builds.
+            # Every child uses an already prepared store path, so it never reads
+            # temporary workspace artifacts or acquires the parent's workspace lock.
+            platform_hashes[current_platform] = await probe(current_platform)
+            async with asyncio.TaskGroup() as group:
+                tasks = {
+                    platform: group.create_task(foreign_probe(platform))
+                    for platform in self._platform_targets(current_platform)
+                    if platform != current_platform
+                }
+            for platform, task in tasks.items():
+                result = task.result()
+                if isinstance(result, PlatformHashFailure):
+                    failed_platforms.append(result)
+                else:
+                    platform_hashes[platform] = result
+
+            require_complete_platform_hashes(self.name, failed_platforms)
 
             return [
                 HashEntry.create(self.hash_type, hash_val, platform=platform)
                 for platform, hash_val in sorted(platform_hashes.items())
             ]
         return [
-            HashEntry.create(self.hash_type, await self._compute_hash(info, emit=emit))
+            HashEntry.create(
+                self.hash_type,
+                await self._compute_hash(info, context=context, emit=emit),
+            )
         ]
 
 
@@ -484,6 +608,7 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
     """Hash updater for per-platform Deno dependency derivations."""
 
     hash_type: HashType = "denoDepsHash"
+    platform_specific: bool = True
     native_only: bool = False
 
     async def _compute_platform_hashes(
@@ -492,21 +617,27 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
         *,
         source_override: SourceEntry | None = None,
         emit: EventSink = ignore_event,
-    ) -> PlatformHashResult:
+    ) -> dict[str, str]:
         _ = info
+        config = replace(
+            self.config,
+            hash_build_platforms=self._full_platform_targets(
+                update_nix.get_current_nix_platform()
+            ),
+        )
         if source_override is None:
             return await update_nix_deno.compute_deno_deps_hash(
                 self.name,
                 self._input,
                 native_only=self.native_only,
-                config=self.config,
+                config=config,
                 emit=emit,
             )
         return await update_nix_deno.compute_deno_deps_hash(
             self.name,
             self._input,
             native_only=self.native_only,
-            config=self.config,
+            config=config,
             source_override=source_override,
             emit=emit,
         )
@@ -540,17 +671,14 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
         source_override = self._candidate_source_override(info, context.current)
         if self.native_only:
             current_platform = update_nix.get_current_nix_platform()
-            if set(self.config.hash_build_platforms) != {current_platform}:
+            if self._has_partial_platform_scope(current_platform):
                 context.hashes_fully_computed = False
 
-        computed = await self._compute_platform_hashes(
+        platform_hashes = await self._compute_platform_hashes(
             info,
             source_override=source_override,
             emit=emit,
         )
-        if not computed.fully_computed:
-            context.hashes_fully_computed = False
-        platform_hashes = computed.hashes
         return [
             HashEntry.create(self.hash_type, hash_val, platform=platform)
             for platform, hash_val in sorted(platform_hashes.items())
@@ -816,24 +944,28 @@ class GoVendorHashUpdater(FlakeInputHashUpdater):
     """Flake-input updater refreshing a Go ``vendorHash``."""
 
     hash_type: HashType = "vendorHash"
+    hash_attr_path = ".goModules"
 
 
 class CargoVendorHashUpdater(FlakeInputHashUpdater):
     """Flake-input updater refreshing a Rust ``cargoHash``."""
 
     hash_type: HashType = "cargoHash"
+    hash_attr_path = ".cargoDeps"
 
 
 class NpmDepsHashUpdater(FlakeInputHashUpdater):
     """Flake-input updater refreshing an npm ``npmDepsHash``."""
 
     hash_type: HashType = "npmDepsHash"
+    hash_attr_path = ".npmDeps"
 
 
 class BunNodeModulesHashUpdater(FlakeInputHashUpdater):
     """Flake-input updater refreshing a per-platform Bun ``nodeModulesHash``."""
 
     hash_type: HashType = "nodeModulesHash"
+    hash_attr_path = ".node_modules"
     platform_specific: bool = True
 
 

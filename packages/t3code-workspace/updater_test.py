@@ -18,8 +18,8 @@ from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
-from lib.update.nix import _contextual_overlay_bindings
+from lib.update.events import UpdateEventKind
+from lib.update.nix import PreparedProbe, _contextual_overlay_bindings
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.updaters import VersionInfo
 from lib.update.updaters.core import UpdateContext
@@ -112,322 +112,117 @@ def test_t3code_workspace_updater_tracks_only_aarch64_darwin() -> None:
     assert updater_cls.supported_platforms == ("aarch64-darwin",)
 
 
-def test_t3code_workspace_fetch_hashes_uses_shared_fixed_output_hash_probe(
+def _probe_boundaries(monkeypatch: pytest.MonkeyPatch):
+    prepared = []
+    built = []
+
+    async def prepare(source, expressions, **_kwargs):
+        prepared.append((source, expressions))
+        assert_nix_ast_equal(expressions["aarch64-darwin"], _expected_workspace_expr())
+        return {
+            key: PreparedProbe(
+                "/nix/store/prepared-workspace.drv", "prepared-fingerprint", expr
+            )
+            for key, expr in expressions.items()
+        }
+
+    async def build(source, probe, **_kwargs):
+        built.append((source, probe))
+        return NEW_HASH
+
+    monkeypatch.setattr("lib.update.nix.prepare_fixed_output_probes", prepare)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", build)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
+    )
+    return prepared, built
+
+
+def test_workspace_build_and_certificate_use_one_prepared_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Hash the direct helper expression through the shared retrying Nix probe."""
-    module = _load_module()
-    updater = module.T3CodeWorkspaceUpdater()
-    captured: dict[str, object] = {}
-
-    async def _fake_compute(
-        source: str,
-        expr: str,
-        *,
-        env: dict[str, str] | None = None,
-        config: object,
-        emit: EventSink = ignore_event,
-    ) -> object:
-        captured["source"] = source
-        captured["expr"] = expr
-        captured["env"] = env
-        captured["config"] = config
-        await emit(UpdateEvent.status(source, "retrying"))
-        return HASH
-
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fake_compute)
-
+    """Do not certify a later evaluation after building an earlier derivation."""
+    updater = _load_module().T3CodeWorkspaceUpdater()
+    _install_main_version(monkeypatch, updater)
+    prepared, built = _probe_boundaries(monkeypatch)
+    context = UpdateContext(current=None)
     events = _run(
         _collect(
-            lambda emit: updater.fetch_hashes(
-                VersionInfo(version="main"),
-                object(),
-                emit=emit,
-                context=UpdateContext(current=None),
+            lambda emit: updater.update_stream(
+                _source_entry(drv_hash="previous"), object(), context=context, emit=emit
             )
         )
     )
-
-    assert captured["source"] == updater.name
-    expr = captured["expr"]
-    assert isinstance(expr, str)
-    assert_nix_ast_equal(expr, _expected_workspace_expr())
-    assert captured["env"] is None
-    assert captured["config"] is updater.config
-    assert events[0].message == "retrying"
-
-    payload = events.result
-    assert isinstance(payload, list)
-    assert len(payload) == 1
-    hash_entry = payload[0]
-    assert hash_entry.hash == HASH
-    assert hash_entry.platform == "aarch64-darwin"
+    assert len(prepared) == len(built) == 1
+    assert built[0][0] == "t3code-workspace"
+    assert built[0][1].drv_path == "/nix/store/prepared-workspace.drv"
+    assert events.result.drv_hash == built[0][1].fingerprint
+    assert events.result.hashes.entries[0].hash == NEW_HASH
+    assert events.result.platform_drv_hashes == {
+        "aarch64-darwin": "prepared-fingerprint"
+    }
 
 
-def test_t3code_workspace_is_latest_uses_direct_fingerprint_expr(
+def test_workspace_reuses_a_certified_current_hash(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Latest checks should fingerprint the helper derivation directly."""
-    module = _load_module()
-    updater = module.T3CodeWorkspaceUpdater()
-    current = SourceEntry.model_validate({
-        "version": "main",
-        "drvHash": "abc123",
-        "hashes": [
+    """A current artifact with an exact per-platform proof requires no build."""
+    updater = _load_module().T3CodeWorkspaceUpdater()
+    _install_main_version(monkeypatch, updater)
+    prepared, built = _probe_boundaries(monkeypatch)
+    current = SourceEntry(
+        version="main",
+        input="t3code",
+        hashes=[
             {
                 "hashType": "nodeModulesHash",
-                "hash": HASH,
+                "hash": NEW_HASH,
                 "platform": "aarch64-darwin",
             }
         ],
-    })
-
-    captured: dict[str, object] = {}
-
-    async def _fake_fingerprint(source: str, expr: str, *, config: object):
-        captured.update({"source": source, "expr": expr, "config": config})
-        return "abc123"
-
-    monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
-
-    assert (
-        _run(
-            updater._is_latest(
-                UpdateContext(current=current), VersionInfo(version="main")
-            )
-        )
-        is True
+        drv_hash="prepared-fingerprint",
+        platform_drv_hashes={"aarch64-darwin": "prepared-fingerprint"},
     )
-    assert captured["source"] == "t3code-workspace"
-    assert_nix_ast_equal(str(captured["expr"]), _expected_workspace_expr())
+    events = _run(
+        _collect(lambda emit: updater.update_stream(current, object(), emit=emit))
+    )
+    assert events.result is None
+    assert len(prepared) == 1
+    assert built == []
 
 
-def test_t3code_workspace_is_latest_rejects_missing_metadata() -> None:
-    """Latest checks should short-circuit when version or drv hash is absent."""
+def test_workspace_cannot_publish_after_probe_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failure to hash the prepared dependency output produces no certificate."""
     updater = _load_module().T3CodeWorkspaceUpdater()
-
-    assert (
-        _run(
-            updater._is_latest(UpdateContext(current=None), VersionInfo(version="main"))
-        )
-        is False
-    )
-    assert (
-        _run(
-            updater._is_latest(
-                UpdateContext(current=_source_entry()), VersionInfo(version="other")
-            )
-        )
-        is False
-    )
-
-
-def test_t3code_workspace_is_latest_records_context_fingerprint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Successful latest checks should reuse the computed fingerprint later in the run."""
-    module = _load_module()
-    updater = module.T3CodeWorkspaceUpdater()
-    context = UpdateContext(current=_source_entry(drv_hash="abc123"))
-
-    async def _fake_fingerprint(*_args: object, **_kwargs: object) -> str:
-        return "abc123"
-
-    monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
-
-    assert _run(updater._is_latest(context, VersionInfo(version="main"))) is True
-    assert context.drv_fingerprint == "abc123"
-
-
-def test_t3code_workspace_rechecks_node_modules_when_drv_fingerprint_matches(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A matching drvHash must not hide stale workspace nodeModulesHash data."""
-    module = _load_module()
-    updater = module.T3CodeWorkspaceUpdater()
     _install_main_version(monkeypatch, updater)
-    captured: dict[str, object] = {}
+    _probe_boundaries(monkeypatch)
+    emitted = []
 
-    async def _fake_fingerprint(source: str, expr: str, *, config: object) -> str:
-        captured.update({
-            "fingerprint_source": source,
-            "expr": expr,
-            "config": config,
-        })
-        return "abc123"
+    async def fail(*_args, **_kwargs):
+        raise RuntimeError("dependency build failed")
 
-    async def _fake_compute(
-        source: str,
-        expr: str,
-        *,
-        env: dict[str, str] | None = None,
-        config: object,
-        emit: EventSink = ignore_event,
-    ) -> object:
-        captured.update({
-            "hash_source": source,
-            "hash_expr": expr,
-            "hash_env": env,
-            "hash_config": config,
-        })
-        return NEW_HASH
+    async def emit(event):
+        emitted.append(event)
 
-    monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fake_compute)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", fail)
+    with pytest.raises(RuntimeError, match="dependency build failed"):
+        _run(updater.update_stream(_source_entry(), object(), emit=emit))
+    assert not any(event.kind is UpdateEventKind.RESULT for event in emitted)
+
+
+def test_workspace_skips_unsupported_platform_before_preparation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Linux must not start a Darwin workspace probe."""
+    updater = _load_module().T3CodeWorkspaceUpdater()
+    prepared, built = _probe_boundaries(monkeypatch)
     monkeypatch.setattr(
-        "lib.update.nix.get_current_nix_platform",
-        lambda: "aarch64-darwin",
+        "lib.update.nix.get_current_nix_platform", lambda: "x86_64-linux"
     )
-
     events = _run(
-        _collect(
-            lambda emit: updater.update_stream(
-                _source_entry(drv_hash="abc123"), object(), emit=emit
-            )
-        )
+        _collect(lambda emit: updater.update_stream(None, object(), emit=emit))
     )
-
-    result_payloads = [
-        event.payload
-        for event in events
-        if event.kind is UpdateEventKind.RESULT and event.payload is not None
-    ]
-    assert len(result_payloads) == 1
-    result = result_payloads[0]
-    assert isinstance(result, SourceEntry)
-    assert result.drv_hash == "abc123"
-    assert result.hashes.entries[0].hash == NEW_HASH
-    assert captured["fingerprint_source"] == "t3code-workspace"
-    assert captured["hash_source"] == "t3code-workspace"
-    assert captured["hash_expr"] == captured["expr"]
-    assert captured["hash_env"] is None
-    assert captured["hash_config"] is updater.config
-
-
-def test_t3code_workspace_persists_settled_post_materialization_fingerprint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Persist the derivation identity that settles after dependency materialization."""
-    module = _load_module()
-    updater = module.T3CodeWorkspaceUpdater()
-    _install_main_version(monkeypatch, updater)
-    fingerprints = iter(("before", "transient", "after", "after"))
-
-    async def _fake_fingerprint(*_args: object, **_kwargs: object) -> str:
-        return next(fingerprints)
-
-    async def _fake_compute(
-        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
-    ) -> object:
-        return HASH
-
-    monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fake_compute)
-    monkeypatch.setattr(
-        "lib.update.nix.get_current_nix_platform",
-        lambda: "aarch64-darwin",
-    )
-
-    events = _run(
-        _collect(
-            lambda emit: updater.update_stream(
-                _source_entry(drv_hash="before"), object(), emit=emit
-            )
-        )
-    )
-
-    results = [
-        event.payload
-        for event in events
-        if event.kind is UpdateEventKind.RESULT and event.payload is not None
-    ]
-    assert len(results) == 1
-    assert isinstance(results[0], SourceEntry)
-    assert results[0].drv_hash == "after"
-
-
-def test_t3code_workspace_rejects_unstable_post_materialization_fingerprint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Do not publish source metadata when derivation identity keeps changing."""
-    module = _load_module()
-    updater = module.T3CodeWorkspaceUpdater()
-    _install_main_version(monkeypatch, updater)
-    fingerprints = iter(("before", "one", "two", "three"))
-
-    async def _fake_fingerprint(*_args: object, **_kwargs: object) -> str:
-        return next(fingerprints)
-
-    async def _fake_compute(
-        *_args: object, emit: EventSink = ignore_event, **_kwargs: object
-    ) -> object:
-        return HASH
-
-    monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
-    monkeypatch.setattr(module, "compute_fixed_output_hash", _fake_compute)
-    monkeypatch.setattr(
-        "lib.update.nix.get_current_nix_platform",
-        lambda: "aarch64-darwin",
-    )
-
-    with pytest.raises(
-        RuntimeError,
-        match="Derivation fingerprint did not stabilize after 3 evaluations",
-    ):
-        _run(
-            _collect(
-                lambda emit: updater.update_stream(
-                    _source_entry(drv_hash="before"), object(), emit=emit
-                )
-            )
-        )
-
-
-def test_t3code_workspace_finalize_result_computes_missing_fingerprint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Finalize should compute a drv fingerprint when the run context lacks one."""
-    module = _load_module()
-    updater = module.T3CodeWorkspaceUpdater()
-
-    async def _fake_fingerprint(*_args: object, **_kwargs: object) -> str:
-        return "abc123"
-
-    monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
-
-    events = _run(
-        _collect(
-            lambda emit: updater._finalize_result(
-                _source_entry(), emit=emit, context=UpdateContext(current=None)
-            )
-        )
-    )
-
-    assert events.result.drv_hash == "abc123"
-
-
-def test_t3code_workspace_finalize_result_warns_when_fingerprint_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Finalize should preserve the result when drv fingerprinting is unavailable."""
-    module = _load_module()
-    updater = module.T3CodeWorkspaceUpdater()
-
-    async def _fake_fingerprint(*_args: object, **_kwargs: object) -> str:
-        msg = "boom"
-        raise RuntimeError(msg)
-
-    monkeypatch.setattr(module, "compute_expr_drv_fingerprint", _fake_fingerprint)
-
-    events = _run(
-        _collect(
-            lambda emit: updater._finalize_result(
-                _source_entry(), emit=emit, context=UpdateContext(current=None)
-            )
-        )
-    )
-
-    assert events[1].kind is UpdateEventKind.STATUS
-    assert "Warning: derivation fingerprint unavailable (boom)" in events[1].message
-
-    assert events.result.drv_hash is None
+    assert events.result is None
+    assert prepared == built == []

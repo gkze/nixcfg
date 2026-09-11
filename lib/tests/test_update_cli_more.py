@@ -76,6 +76,7 @@ from lib.update.cli_inventory import (
     handle_list_targets_request,
 )
 from lib.update.cli_validation import handle_validate_request
+from lib.update.config import resolve_config
 from lib.update.derivation_validation import DerivationValidationFailure
 from lib.update.flake import resolve_root_input_node
 from lib.update.paths import REPO_ROOT
@@ -2384,11 +2385,7 @@ def test_top_level_entrypoints(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Validate top-level command short circuits and status propagation."""
-    cfg = SimpleNamespace(
-        default_log_tail_lines=10,
-        default_render_interval=0.1,
-        default_subprocess_timeout=30,
-    )
+    cfg = resolve_config(log_tail_lines=10, render_interval=0.1, subprocess_timeout=30)
     monkeypatch.setattr("lib.update.cli._resolve_runtime_config", lambda _opts: cfg)
     monkeypatch.setattr(
         "lib.update.cli._handle_preflight_requests", lambda _opts, _out: 7

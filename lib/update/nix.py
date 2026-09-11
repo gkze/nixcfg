@@ -4,6 +4,7 @@ import asyncio
 import dataclasses
 import json
 import platform
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -486,7 +487,12 @@ def _build_call_package_attr_expr(
     return compact_nix_expr(expression.rebuild())
 
 
-def _extract_nix_hash(output: str, *, config: UpdateConfig | None = None) -> str:
+def _extract_nix_hash(
+    output: str,
+    *,
+    config: UpdateConfig | None = None,
+    expected_drv_path: str | None = None,
+) -> str:
     """Extract the 'got' hash from a Nix hash-mismatch error.
 
     Delegates to :class:`lib.nix.commands.base.HashMismatchError` for the
@@ -495,6 +501,12 @@ def _extract_nix_hash(output: str, *, config: UpdateConfig | None = None) -> str
     dummy = LibnixResult(args=[], returncode=1, stdout="", stderr=output)
     err = HashMismatchError.from_output(output, dummy)
     if err is not None:
+        if expected_drv_path is not None and err.drv_path != expected_drv_path:
+            msg = (
+                f"Hash mismatch belongs to {err.drv_path or 'an unidentified derivation'}, "
+                f"not the prepared probe {expected_drv_path}"
+            )
+            raise RuntimeError(msg)
         return err.hash
     config = resolve_active_config(config)
     has_mismatch_signal = _has_hash_mismatch_signal(output)
@@ -558,8 +570,16 @@ async def _emit_sri_hash_from_build_result(
     *,
     config: UpdateConfig | None = None,
     emit: EventSink = ignore_event,
+    expected_drv_path: str | None = None,
 ) -> str:
-    hash_value = _extract_nix_hash(result.stderr + result.stdout, config=config)
+    output = result.stderr + result.stdout
+    hash_value = (
+        _extract_nix_hash(output, config=config)
+        if expected_drv_path is None
+        else _extract_nix_hash(
+            output, config=config, expected_drv_path=expected_drv_path
+        )
+    )
     if is_sri(hash_value):
         return hash_value
     return await convert_nix_hash_to_sri(source, hash_value, emit=emit)
@@ -573,6 +593,7 @@ class _FixedOutputBuildOptions:
     env: Mapping[str, str] | None = None
     verbose: bool = False
     config: UpdateConfig | None = None
+    derivation_path: str | None = None
 
 
 async def _run_fixed_output_build(
@@ -591,6 +612,7 @@ async def _run_fixed_output_build(
             env=options.env,
             verbose=options.verbose,
             config=options.config,
+            derivation_path=options.derivation_path,
         ),
         emit=emit,
     )
@@ -599,38 +621,106 @@ async def _run_fixed_output_build(
     return result
 
 
-@dataclasses.dataclass
-class _NixBuildSemaphoreState:
-    semaphore: asyncio.Semaphore | None = None
-    size: int | None = None
+@dataclasses.dataclass(frozen=True, slots=True)
+class PreparedProbe:
+    """A fixed-output build and its certificate from one evaluation snapshot.
 
-
-_NIX_BUILD_SEMAPHORE_STATE = _NixBuildSemaphoreState()
-
-
-def _get_nix_build_semaphore(config: UpdateConfig) -> asyncio.Semaphore:
-    """Lazily create a semaphore to limit concurrent ``nix build`` processes.
-
-    Each ``nix build --impure`` evaluates nixpkgs with the full overlay, using
-    1-2 GB of RAM.  Without a limit, running all sources concurrently can
-    exhaust memory.
+    The certificate identifies the original fake-hash derivation. The build
+    identity is salted by that derivation to avoid coalescing unrelated probes
+    that happen to share a name and fake output hash.
     """
-    if (
-        _NIX_BUILD_SEMAPHORE_STATE.semaphore is None
-        or _NIX_BUILD_SEMAPHORE_STATE.size != config.max_nix_builds
-    ):
-        _NIX_BUILD_SEMAPHORE_STATE.semaphore = asyncio.Semaphore(config.max_nix_builds)
-        _NIX_BUILD_SEMAPHORE_STATE.size = config.max_nix_builds
-    semaphore = _NIX_BUILD_SEMAPHORE_STATE.semaphore
-    if semaphore is None:
-        msg = "failed to initialize nix build semaphore"
+
+    drv_path: str
+    fingerprint: str
+    expression: str = ""
+
+
+_DRV_PATH = re.compile(
+    r"^/nix/store/(?P<hash>[0-9abcdfghijklmnpqrsvwxyz]{32})-[^/]+\.drv$"
+)
+
+
+def _prepared_probe_expr(expressions: Mapping[str, str]) -> str:
+    entries = []
+    for key, expression in expressions.items():
+        entries.append(
+            Binding(
+                name=_quote_attr(key),
+                value=LetExpression(
+                    local_variables=[
+                        Binding(name="original", value=parse(expression).expr)
+                    ],
+                    value=AttributeSet.from_dict({
+                        "drvPath": select_attrs(
+                            Parenthesis(
+                                value=_isolated_fixed_output_expr(
+                                    Identifier(name="original")
+                                )
+                            ),
+                            "drvPath",
+                        ),
+                        "fingerprintPath": select_attrs(
+                            Identifier(name="original"), "drvPath"
+                        ),
+                    }),
+                ),
+            )
+        )
+    return _build_nix_expr(AttributeSet(values=entries))
+
+
+async def prepare_fixed_output_probes(
+    source: str,
+    expressions: Mapping[str, str],
+    *,
+    config: UpdateConfig | None = None,
+    emit: EventSink = ignore_event,
+) -> dict[str, PreparedProbe]:
+    """Evaluate a keyed probe matrix once and retain its exact build paths."""
+    if not expressions:
+        return {}
+    result = await run_command(
+        [
+            "nix",
+            "eval",
+            "--quiet",
+            "--json",
+            "--impure",
+            "--expr",
+            _prepared_probe_expr(expressions),
+        ],
+        options=RunCommandOptions(source=source, config=resolve_active_config(config)),
+        emit=emit,
+    )
+    if result.returncode != 0:
+        msg = f"Preparing fixed-output probes for {', '.join(expressions)} failed:\n{result.stderr}"
         raise RuntimeError(msg)
-    return semaphore
+    payload = json.loads(result.stdout)
+    if not isinstance(payload, dict) or payload.keys() != expressions.keys():
+        msg = "Nix probe preparation returned an unexpected target set"
+        raise RuntimeError(msg)
+    probes = {}
+    for key, value in payload.items():
+        if not isinstance(value, dict):
+            msg = f"Nix probe preparation returned an invalid result for {key}"
+            raise TypeError(msg)
+        drv_path = value.get("drvPath")
+        fingerprint_path = value.get("fingerprintPath")
+        if (
+            not isinstance(drv_path, str)
+            or _DRV_PATH.fullmatch(drv_path) is None
+            or not isinstance(fingerprint_path, str)
+            or (match := _DRV_PATH.fullmatch(fingerprint_path)) is None
+        ):
+            msg = f"Nix probe preparation returned an invalid derivation path for {key}"
+            raise RuntimeError(msg)
+        probes[key] = PreparedProbe(drv_path, match.group("hash"), expressions[key])
+    return probes
 
 
 async def compute_fixed_output_hash(
     source: str,
-    expr: str,
+    expr: str | PreparedProbe,
     *,
     isolate_by_drv_hash: bool = False,
     env: Mapping[str, str] | None = None,
@@ -644,27 +734,30 @@ async def compute_fixed_output_hash(
     the same fake fixed-output hash from being coalesced by Nix.
     """
     config = resolve_active_config(config)
-    expr = _build_nix_expr(expr, isolate_by_drv_hash=isolate_by_drv_hash)
-    semaphore = _get_nix_build_semaphore(config)
+    prepared = expr if isinstance(expr, PreparedProbe) else None
+    expression = (
+        ""
+        if isinstance(expr, PreparedProbe)
+        else _build_nix_expr(expr, isolate_by_drv_hash=isolate_by_drv_hash)
+    )
     attempt = 1
     while True:
-        async with semaphore:
-            result = await _run_fixed_output_build(
-                source,
-                expr,
-                options=_FixedOutputBuildOptions(
-                    allow_failure=True,
-                    suppress_patterns=FIXED_OUTPUT_NOISE,
-                    verbose=True,
-                    success_error=(
-                        "Expected nix build to fail with hash mismatch, "
-                        "but it succeeded"
-                    ),
-                    env=env,
-                    config=config,
+        result = await _run_fixed_output_build(
+            source,
+            expression,
+            options=_FixedOutputBuildOptions(
+                allow_failure=True,
+                suppress_patterns=FIXED_OUTPUT_NOISE,
+                verbose=True,
+                success_error=(
+                    "Expected nix build to fail with hash mismatch, but it succeeded"
                 ),
-                emit=emit,
-            )
+                env=env,
+                config=config,
+                derivation_path=prepared.drv_path if prepared is not None else None,
+            ),
+            emit=emit,
+        )
         if (
             attempt < _FIXED_OUTPUT_HASH_MAX_ATTEMPTS
             and _is_retryable_fixed_output_hash_failure(result)
@@ -683,6 +776,14 @@ async def compute_fixed_output_hash(
             )
             await asyncio.sleep(max(0.0, config.default_retry_backoff))
             continue
+        if prepared is not None:
+            return await _emit_sri_hash_from_build_result(
+                source,
+                result,
+                config=config,
+                emit=emit,
+                expected_drv_path=prepared.drv_path,
+            )
         return await _emit_sri_hash_from_build_result(
             source, result, config=config, emit=emit
         )
@@ -701,34 +802,30 @@ def _build_nix_expr(
         local_variables.append(
             Binding(name="nixcfgFixedOutputProbe", value=body_expression)
         )
-        body_expression = FunctionCall(
-            name=FunctionCall(
-                name=select_attrs(
-                    Identifier(name="pkgs"),
-                    "testers",
-                    "invalidateFetcherByDrvHash",
-                ),
-                argument=Parenthesis(
-                    value=FunctionDefinition(
-                        argument_set=Identifier(name="_"),
-                        output=Identifier(name="nixcfgFixedOutputProbe"),
-                    )
-                ),
-            ),
-            argument=AttributeSet(
-                values=[
-                    Binding(
-                        name="name",
-                        value="nixcfg-fixed-output-probe",
-                    )
-                ]
-            ),
+        body_expression = _isolated_fixed_output_expr(
+            Identifier(name="nixcfgFixedOutputProbe")
         )
     expression = LetExpression(
         local_variables=local_variables,
         value=body_expression,
     )
     return compact_nix_expr(expression.rebuild())
+
+
+def _isolated_fixed_output_expr(probe: NixExpression) -> NixExpression:
+    return FunctionCall(
+        name=FunctionCall(
+            name=select_attrs(
+                Identifier(name="pkgs"), "testers", "invalidateFetcherByDrvHash"
+            ),
+            argument=Parenthesis(
+                value=FunctionDefinition(
+                    argument_set=Identifier(name="_"), output=probe
+                )
+            ),
+        ),
+        argument=AttributeSet.from_dict({"name": "nixcfg-fixed-output-probe"}),
+    )
 
 
 def _build_drv_path_expr(body: str | NixExpression) -> str:
@@ -956,11 +1053,10 @@ async def compute_drv_fingerprint(
     ``.drv`` store-path hash using ``nix eval --raw <expr>.drvPath``. Because
     the fake hash is constant, the path is a pure function of the build closure.
 
-    Any change to *any* transitive build input — a nixpkgs bump, a Deno
-    version change, a source force-push, a build-script edit — changes the
-    ``.drv`` hash.  Conversely, identical inputs always produce the same
-    hash.  This gives us maximally precise staleness detection: zero false
-    negatives and zero false positives.
+    This certifies the evaluated derivation identity, including its declared
+    inputs. A changed identity requires a new probe even if its eventual
+    output content would be unchanged. Prefer prepared probes when the same
+    derivation will also be built, so both operations use one snapshot.
     """
     expr = _build_overlay_expr(
         source,
@@ -1009,6 +1105,7 @@ async def compute_expr_drv_fingerprint(
 
 
 __all__ = [
+    "PreparedProbe",
     "_build_fetch_from_github_call",
     "_build_fetch_from_github_expr",
     "_build_fetchgit_call",
@@ -1028,4 +1125,5 @@ __all__ = [
     "get_current_nix_platform",
     "is_retryable_nix_network_failure",
     "normalize_nix_platform",
+    "prepare_fixed_output_probes",
 ]

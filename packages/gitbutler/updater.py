@@ -185,5 +185,8 @@ class GitButlerUpdater(Crate2NixArtifactsMixin, FlakeInputHashUpdater):
         """Refresh crate2nix artifacts before computing the pnpm hash."""
         _ = (session, context)
         await self.stream_materialized_artifacts(emit=emit)
-        hash_value = await self._compute_hash(info, emit=emit)
+        context.prepared_probes.clear()
+        context.drv_fingerprints.clear()
+        context.drv_fingerprint = None
+        hash_value = await self._compute_hash(info, context=context, emit=emit)
         return [HashEntry.create(self.hash_type, hash_value)]

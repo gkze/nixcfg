@@ -2,10 +2,11 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Literal, ReadOnly, TypedDict
 
+from lib.diagnostics import redact_urls
 from lib.nix.models.sources import SourceEntry
 from lib.update.artifacts import GeneratedArtifact
 
@@ -73,6 +74,13 @@ class StatusInfo:
     latest: str | None = None
     scope: StatusScope | None = None
 
+    def __post_init__(self) -> None:
+        """Keep status projections safe for terminal and event consumers."""
+        for field in ("value", "current", "latest"):
+            value = getattr(self, field)
+            if value is not None:
+                object.__setattr__(self, field, redact_urls(value))
+
 
 @dataclass(frozen=True)
 class StatusPayload:
@@ -123,7 +131,7 @@ def raise_failed_command(action: str, result: CommandResult) -> None:
         return
     detail = result.stderr.strip() or result.stdout.strip()
     message = f"{action} failed (exit {result.returncode})"
-    raise RuntimeError(f"{message}: {detail}" if detail else message)
+    raise RuntimeError(redact_urls(f"{message}: {detail}" if detail else message))
 
 
 def expect_source_entry(payload: object) -> SourceEntry:
@@ -157,6 +165,28 @@ class UpdateEvent:
     message: str | None = None
     stream: str | None = None
     payload: UpdateEventPayload | None = None
+
+    def __post_init__(self) -> None:
+        """Redact diagnostic projections, retaining functional results separately."""
+        if self.message is not None:
+            object.__setattr__(self, "message", redact_urls(self.message))
+        payload = self.payload
+        if isinstance(payload, CommandResult):
+            object.__setattr__(
+                self,
+                "payload",
+                replace(
+                    payload,
+                    args=[redact_urls(arg) for arg in payload.args],
+                    stdout=redact_urls(payload.stdout),
+                    stderr=redact_urls(payload.stderr),
+                    tail_lines=tuple(redact_urls(line) for line in payload.tail_lines),
+                ),
+            )
+        elif self.kind is UpdateEventKind.COMMAND_START and isinstance(payload, list):
+            args = [arg for arg in payload if isinstance(arg, str)]
+            if len(args) == len(payload):
+                object.__setattr__(self, "payload", [redact_urls(arg) for arg in args])
 
     @classmethod
     def status(

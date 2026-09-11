@@ -4,6 +4,7 @@ import json
 import sys
 from typing import TYPE_CHECKING
 
+from lib.diagnostics import redact_urls
 from lib.update import sources as update_sources
 
 if TYPE_CHECKING:
@@ -31,7 +32,7 @@ def handle_validate_request(opts: UpdateOptions, out: OutputOptions) -> int | No
     except (RuntimeError, ValueError, TypeError, OSError) as exc:
         if opts.json:
             sys.stdout.write(
-                f"{json.dumps({'valid': False, 'error': str(exc)})}\n",
+                f"{json.dumps({'valid': False, 'error': redact_urls(str(exc))})}\n",
             )
         else:
             out.print_error(f"Validation failed: {exc}")

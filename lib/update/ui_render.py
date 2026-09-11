@@ -297,6 +297,7 @@ class Renderer:
         """Print a build log line in verbose non-TTY mode."""
         if not self.is_tty and self.verbose and not self.quiet:
             sys.stdout.write(f"[{source}] {message}\n")
+            sys.stdout.flush()
 
     def _append_detail_line(self, source: str, message: str) -> bool:
         item = self.items.get(source)
@@ -314,6 +315,7 @@ class Renderer:
             self._append_detail_line(source, message)
         elif not self.quiet:
             sys.stdout.write(f"[{source}] {message}\n")
+            sys.stdout.flush()
 
     def log_error(self, source: str, message: str) -> None:
         """Record an error message for a source item."""

@@ -33,6 +33,7 @@ from lib.update.paths import (
     package_file_map_in,
     sources_file_for_updater,
 )
+from lib.update.runtime import measure
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,17 +346,21 @@ def _snapshot_source_view(
     root_descriptor: int,
 ) -> dict[Path, _WorkspacePathState]:
     """Capture two identical source views or reject a moving working tree."""
-    for _attempt in range(_SNAPSHOT_ATTEMPTS):
-        try:
-            first = _read_source_view(root, root_descriptor)
-            second = _read_source_view(root, root_descriptor)
-        except _WorkspaceSnapshotError:
-            continue
-        if first == second:
-            return second
-    msg = f"Update source changed while creating a stable snapshot: {root}"
-    raise UpdateWorkspaceError(msg)
-
+    with measure("workspace", "snapshot") as timing:
+        for _attempt in range(_SNAPSHOT_ATTEMPTS):
+            try:
+                first = _read_source_view(root, root_descriptor)
+                second = _read_source_view(root, root_descriptor)
+                timing.input_bytes += sum(
+                    len(state.content) for view in (first, second)
+                    for state in view.values() if state is not None
+                )
+            except _WorkspaceSnapshotError:
+                continue
+            if first == second:
+                return second
+        msg = f"Update source changed while creating a stable snapshot: {root}"
+        raise UpdateWorkspaceError(msg)
 
 @contextmanager
 def _materialized_source_view(

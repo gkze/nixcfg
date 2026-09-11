@@ -91,6 +91,7 @@ _OXC_PACKAGE_PATH = "studio/backend/core/data_recipe/oxc-validator/package.json"
 _OXC_LOCK_PATH = "studio/backend/core/data_recipe/oxc-validator/package-lock.json"
 _OXC_VALIDATE_PATH = OXC_VALIDATOR_PATH.as_posix()
 _OXC_CALLER_PATH = "studio/backend/core/data_recipe/local_callable_validators.py"
+_PYTHON_VERSION_PATH = "unsloth/_version.py"
 _CARGO_MANIFEST_PATH = "studio/src-tauri/Cargo.toml"
 _PYTHON_PROJECT_VERSION = "0.0.0"
 _PYTHON_VERSION = "3.12"
@@ -170,7 +171,6 @@ _SETUP_SH_OXC_NPM_LINES = (
 _SETUP_PS1_OXC_NPM_LINES = (
     _SETUP_PS1_OXC_INSTALL,
     _SETUP_PS1_OXC_ERROR,
-    _SETUP_PS1_OXC_SKIP_COMMENT,
     _SETUP_PS1_OXC_SKIP,
 )
 _OXC_LOCKFILE_VERSION = 3
@@ -426,7 +426,13 @@ def _audit_oxc_runtime_sources(payloads: dict[str, bytes]) -> None:
     if len(setup_ps1_blocks) != 1:
         msg = "Unsloth OXC setup.ps1 npm install mutation drifted"
         raise RuntimeError(msg)
-    setup_ps1_installs = _npm_source_lines(setup_ps1_blocks[0])
+    # This reviewed inert comment was removed in 0.1.807-beta. Keep every
+    # other npm-bearing line visible: physical '#' lines can be quoted code.
+    setup_ps1_installs = tuple(
+        line
+        for line in _npm_source_lines(setup_ps1_blocks[0])
+        if line != _SETUP_PS1_OXC_SKIP_COMMENT
+    )
     if setup_ps1_installs != _SETUP_PS1_OXC_NPM_LINES:
         msg = "Unsloth OXC setup.ps1 npm install mutation drifted"
         raise RuntimeError(msg)
@@ -578,9 +584,16 @@ def _oxc_sources_from_backend_sdist(
     payload: bytes,
     *,
     version: str,
+    source_commit: str | None = None,
 ) -> dict[str, bytes]:
-    """Read the exact audited runtime sources from the packaged PyPI sdist."""
-    archive_paths = {f"unsloth-{version}/{path}": path for path in _OXC_SOURCE_PATHS}
+    """Read audited sources from a PyPI sdist or the selected GitHub commit."""
+    root = f"unsloth-{source_commit or version}"
+    paths = (
+        (*_OXC_SOURCE_PATHS, _PYTHON_VERSION_PATH)
+        if source_commit
+        else _OXC_SOURCE_PATHS
+    )
+    archive_paths = {f"{root}/{path}": path for path in paths}
     sources: dict[str, bytes] = {}
     member_count = 0
     expanded_size = 0
@@ -630,9 +643,17 @@ def _oxc_sources_from_backend_sdist(
         msg = "Unsloth backend sdist OXC source archive is invalid"
         raise RuntimeError(msg) from exc
 
-    missing = sorted(set(_OXC_SOURCE_PATHS) - sources.keys())
+    missing = sorted(set(paths) - sources.keys())
     if missing:
         msg = f"Unsloth backend sdist OXC source is missing {missing[0]}"
+        raise RuntimeError(msg)
+    if (
+        source_commit
+        and _source_python_version(sources.pop(_PYTHON_VERSION_PATH)) != version
+    ):
+        msg = (
+            "Unsloth GitHub backend source version does not match the published backend"
+        )
         raise RuntimeError(msg)
     return sources
 
@@ -1072,7 +1093,8 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         payload: object,
         *,
         version: str,
-    ) -> tuple[str, str, int, str]:
+    ) -> tuple[str, str, int, str] | None:
+        """Prefer the published source archive, rejecting ambiguous source metadata."""
         metadata = _require_object(payload, context="PyPI response")
         info = _require_object(metadata.get("info"), context="PyPI info")
         if _require_string(info, "version", context="PyPI info") != version:
@@ -1083,12 +1105,16 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             msg = "Unsloth PyPI response has no file list"
             raise TypeError(msg)
         expected_filename = f"unsloth-{version}.tar.gz"
-        candidates = [
+        source_files = [
             _require_object(item, context="PyPI file")
             for item in urls
             if isinstance(item, dict)
             and cast("dict[str, object]", item).get("packagetype") == "sdist"
-            and cast("dict[str, object]", item).get("filename") == expected_filename
+        ]
+        if not source_files:
+            return None
+        candidates = [
+            item for item in source_files if item.get("filename") == expected_filename
         ]
         if len(candidates) != 1:
             msg = f"Unsloth backend {version} must have exactly one public source sdist"
@@ -1110,10 +1136,35 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         )
         return url, digest_hex, size, upload_time
 
+    @staticmethod
+    def _backend_publication_time(payload: object, *, version: str) -> str:
+        """Use the published backend's timestamp without consuming its wheel."""
+        metadata = _require_object(payload, context="PyPI response")
+        files = cast("list[object]", metadata["urls"])
+        wheels = [
+            item
+            for item in files
+            if isinstance(item, dict)
+            and item.get("packagetype") == "bdist_wheel"
+            and item.get("filename") == f"unsloth-{version}-py3-none-any.whl"
+            and not item.get("yanked", False)
+        ]
+        if len(wheels) != 1:
+            msg = f"Unsloth backend {version} has no unique published release timestamp"
+            raise RuntimeError(msg)
+        return _canonical_pypi_upload_time(
+            _require_string(wheels[0], "upload_time_iso_8601", context="PyPI release")
+        )
+
+    @classmethod
+    def _github_backend_url(cls, commit: str) -> str:
+        """Name the same immutable source commit already selected for the desktop."""
+        return f"https://github.com/{cls.GITHUB_OWNER}/{cls.GITHUB_REPO}/archive/{commit}.tar.gz"
+
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
-        """Resolve one coherent public desktop release and backend sdist."""
+        """Resolve one coherent public desktop release and backend source archive."""
         _ = context
         payload = await self._fetch_latest_release_payload(session)
         tag_name = self._release_tag_from_payload(payload)
@@ -1148,7 +1199,7 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
                 self.GITHUB_OWNER,
                 self.GITHUB_REPO,
                 commit,
-                "unsloth/_version.py",
+                _PYTHON_VERSION_PATH,
             ),
             config=self.config,
         )
@@ -1183,26 +1234,36 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             f"https://pypi.org/pypi/unsloth/{backend_version}/json",
             config=self.config,
         )
-        (
-            backend_url,
-            backend_digest_hex,
-            backend_size,
-            backend_upload_time,
-        ) = self._backend_sdist(
+        sdist = self._backend_sdist(
             pypi_payload,
             version=backend_version,
         )
+        if sdist is None:
+            if source_python_version != backend_version:
+                msg = "Unsloth GitHub backend source version does not match the published backend"
+                raise RuntimeError(msg)
+            backend_url = self._github_backend_url(commit)
+            backend_upload_time = self._backend_publication_time(
+                pypi_payload, version=backend_version
+            )
+        else:
+            backend_url, _, _, backend_upload_time = sdist
         backend_bytes = await fetch_url(session, backend_url, config=self.config)
-        if len(backend_bytes) != backend_size:
-            msg = "Unsloth backend sdist does not match PyPI metadata"
+        backend_size = len(backend_bytes)
+        if not backend_size or backend_size > _MAX_BACKEND_SDIST_BYTES:
+            msg = "Unsloth backend source archive exceeds the audit size limit or is empty"
             raise RuntimeError(msg)
-        if hashlib.sha256(backend_bytes).hexdigest() != backend_digest_hex:
+        backend_digest_hex = hashlib.sha256(backend_bytes).hexdigest()
+        if sdist is not None and (
+            backend_size != sdist[2] or backend_digest_hex != sdist[1]
+        ):
             msg = "Unsloth backend sdist does not match PyPI metadata"
             raise RuntimeError(msg)
         try:
             backend_oxc_sources = _oxc_sources_from_backend_sdist(
                 backend_bytes,
                 version=backend_version,
+                source_commit=commit if sdist is None else None,
             )
             _audit_oxc_sources(backend_oxc_sources)
         except RuntimeError as exc:
@@ -1307,7 +1368,29 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             )
             raise RuntimeError(msg)
 
-        backend_url = cast("str", metadata["backendUrl"])
+        cls._validate_backend_source_url(
+            backend_url=cast("str", metadata["backendUrl"]),
+            backend_version=backend_version,
+            source_python_version=source_python_version,
+            commit=commit,
+        )
+        return metadata
+
+    @classmethod
+    def _validate_backend_source_url(
+        cls,
+        *,
+        backend_url: str,
+        backend_version: str,
+        source_python_version: str,
+        commit: str,
+    ) -> None:
+        """Accept the published sdist or the exact version-matched source commit."""
+        if backend_url == cls._github_backend_url(commit):
+            if source_python_version != backend_version:
+                msg = "Unsloth GitHub backend source version does not match the published backend"
+                raise RuntimeError(msg)
+            return
         parsed_backend_url = urllib.parse.urlsplit(backend_url)
         if (
             parsed_backend_url.scheme != "https"
@@ -1328,7 +1411,6 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         if backend_path_match.group(1) != expected_backend_filename:
             msg = "Unsloth backend URL does not match backend version"
             raise RuntimeError(msg)
-        return metadata
 
     @staticmethod
     def _candidate_package_args(

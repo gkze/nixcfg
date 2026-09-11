@@ -2,7 +2,6 @@
 
 import functools
 import os
-import shlex
 from typing import TYPE_CHECKING
 
 from nix_manipulator.expressions.binding import Binding
@@ -16,30 +15,32 @@ from nix_manipulator.expressions.primitive import Primitive
 from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
-from lib.nix.commands.flake import nix_flake_lock_update
 from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode
 from lib.update.events import (
-    CommandResult,
     EventSink,
-    UpdateEvent,
-    UpdateEventKind,
     ignore_event,
+    raise_failed_command,
 )
+from lib.update.input_state import FlakeInputState, flake_input_state
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import get_repo_root
+from lib.update.process import RunCommandOptions, run_command
 
 if TYPE_CHECKING:
     from nix_manipulator.expressions.expression import NixExpression
     from nix_manipulator.expressions.inherit import Inherit
 
+    from lib.update.config import UpdateConfig
 
-type FlakeInputState = tuple[bytes, bytes]
 
-
-def read_flake_input_state() -> FlakeInputState:
-    """Capture the exact declarations and lock graph used by an input refresh."""
+def read_flake_input_state(input_name: str) -> FlakeInputState:
+    """Capture the input declarations and dependencies covered by its refresh."""
     root = get_repo_root()
-    return (root / "flake.nix").read_bytes(), (root / "flake.lock").read_bytes()
+    return flake_input_state(
+        input_name,
+        (root / "flake.nix").read_bytes(),
+        (root / "flake.lock").read_bytes(),
+    )
 
 
 @functools.cache
@@ -219,24 +220,17 @@ def nixpkgs_expression() -> NixExpression:
 
 
 async def update_flake_input(
-    input_name: str, *, source: str, emit: EventSink = ignore_event
+    input_name: str,
+    *,
+    source: str,
+    emit: EventSink = ignore_event,
+    config: UpdateConfig | None = None,
 ) -> None:
-    """Update a single flake input via :func:`lib.nix.commands.flake.nix_flake_lock_update`."""
-    args = ["nix", "flake", "lock", "--update-input", input_name]
-    await emit(
-        UpdateEvent(
-            source=source,
-            kind=UpdateEventKind.COMMAND_START,
-            message=shlex.join(args),
-            payload=args,
-        )
+    """Refresh a lock input with streamed diagnostics and the update run's timeout."""
+    result = await run_command(
+        ["nix", "flake", "lock", "--update-input", input_name],
+        options=RunCommandOptions(source=source, config=config),
+        emit=emit,
     )
-    await nix_flake_lock_update(input_name)
+    raise_failed_command("nix flake lock", result)
     invalidate_flake_lock()
-    await emit(
-        UpdateEvent(
-            source=source,
-            kind=UpdateEventKind.COMMAND_END,
-            payload=CommandResult(args=args, returncode=0, stdout="", stderr=""),
-        )
-    )

@@ -1,5 +1,5 @@
 {
-  "commit": "7f14df6f51173dd8c3dcd07cb55fa7ee37d74869",
+  "commit": "a32cd9091928efe75cf9c1fbaeb4e87df60a91c0",
   "electronVersion": "41.10.3",
   "hashes": [
     {
@@ -15,7 +15,7 @@
       "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64-baseline.zip"
     },
     {
-      "hash": "sha256-XX7ilHdxpjewWVK/gP34ar6Z0TETdH08D2/locwvPdY=",
+      "hash": "sha256-7u68NlADMS+XhNcZaQZLfqIN0UJgUmxT9f5vof2pVIw=",
       "hashType": "sha256",
       "platform": "x86_64-linux"
     }
@@ -24,7 +24,7 @@
     "bunVersion": "1.3.14"
   },
   "urls": {
-    "x86_64-linux": "https://github.com/superset-sh/superset/releases/download/desktop-v1.26.0/superset-1.26.0-x86_64.AppImage"
+    "x86_64-linux": "https://github.com/superset-sh/superset/releases/download/desktop-v1.27.0/superset-1.27.0-x86_64.AppImage"
   },
-  "version": "1.26.0"
+  "version": "1.27.0"
 }

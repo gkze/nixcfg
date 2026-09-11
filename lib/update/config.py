@@ -37,6 +37,10 @@ class UpdateConfig:
     hash_build_platforms: tuple[str, ...]
     # Preserve explicit CLI/env bounds for operations with a longer default.
     subprocess_timeout_override: int | None = None
+    max_source_tasks: int = 8
+    max_nix_evaluations: int = 1
+    max_downloads: int = 8
+    max_materializations: int = 1
 
     @property
     def deno_deps_platforms(self) -> tuple[str, ...]:
@@ -56,6 +60,10 @@ class UpdateSettings(BaseSettings):
     retry_backoff: float = 1.0
     fake_hash: str = FAKE_HASH
     max_nix_builds: int = default_max_nix_builds()
+    max_source_tasks: int = 8
+    max_nix_evaluations: int = 1
+    max_downloads: int = 8
+    max_materializations: int = 1
     hash_build_platforms: tuple[str, ...] = supported_systems()
     deno_deps_platforms: tuple[str, ...] | None = None
 
@@ -89,6 +97,10 @@ def _settings_to_config(settings: UpdateSettings) -> UpdateConfig:
         default_retry_backoff=settings.retry_backoff,
         fake_hash=settings.fake_hash,
         max_nix_builds=max(1, settings.max_nix_builds),
+        max_source_tasks=max(1, settings.max_source_tasks),
+        max_nix_evaluations=max(1, settings.max_nix_evaluations),
+        max_downloads=max(1, settings.max_downloads),
+        max_materializations=max(1, settings.max_materializations),
         hash_build_platforms=platforms,
         subprocess_timeout_override=(
             settings.subprocess_timeout
@@ -135,6 +147,10 @@ class _ResolveConfigOverrides(TypedDict, total=False):
     retry_backoff: float | None
     fake_hash: str | None
     max_nix_builds: int | None
+    max_source_tasks: int | None
+    max_nix_evaluations: int | None
+    max_downloads: int | None
+    max_materializations: int | None
     hash_build_platforms: str | tuple[str, ...] | None
     deno_platforms: str | None
     deno_deps_platforms: str | tuple[str, ...] | None

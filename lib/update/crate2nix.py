@@ -1,6 +1,7 @@
 """Shared crate2nix regeneration logic for updates and maintenance commands."""
 
 import asyncio
+import concurrent.futures
 import errno
 import hashlib
 import json
@@ -9,6 +10,7 @@ import queue
 import re
 import selectors
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -17,12 +19,14 @@ import threading
 import time
 import tomllib
 from collections import deque
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from dataclasses import dataclass, field, fields
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypedDict, cast
 
+import nix_manipulator
+import tree_sitter
 from nix_manipulator import parse
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.expression import NixExpression
@@ -36,7 +40,10 @@ from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.import_utils import load_module_from_path
+from lib.update import generation_receipts
+from lib.update import runtime as update_runtime
 from lib.update.artifacts import GeneratedArtifact
+from lib.update.config import resolve_active_config
 from lib.update.events import (
     EventSink,
     StatusInfo,
@@ -175,6 +182,7 @@ class Crate2NixTarget:
     root_src_relpath: Path = field(default_factory=Path)
     crate_sources: Path | None = None
     externally_overridden_source_paths: tuple[str, ...] = ()
+    cache_generation: bool = False
 
     @property
     def artifact_paths(self) -> tuple[Path, ...]:
@@ -673,6 +681,7 @@ TARGETS = {
         source_input="codex",
         root_src_relpath=Path("codex-rs"),
         supported_platforms=("aarch64-darwin", "x86_64-linux"),
+        cache_generation=True,
     ),
     "goose-cli": Crate2NixTarget(
         name="goose-cli",
@@ -684,6 +693,7 @@ TARGETS = {
         source_input="goose",
         externally_overridden_source_paths=("vendor/v8-goose-src",),
         supported_platforms=("aarch64-darwin", "x86_64-linux"),
+        cache_generation=True,
     ),
     "gitbutler": Crate2NixTarget(
         name="gitbutler",
@@ -694,6 +704,7 @@ TARGETS = {
         normalizer_path=Path("packages/gitbutler/normalize_cargo_nix.py"),
         source_input="gitbutler",
         supported_platforms=("aarch64-darwin", "x86_64-linux"),
+        cache_generation=True,
     ),
     "zed-editor-nightly": Crate2NixTarget(
         name="zed-editor-nightly",
@@ -704,6 +715,7 @@ TARGETS = {
         normalizer_path=Path("packages/zed-editor-nightly/normalize_cargo_nix.py"),
         source_input="zed",
         supported_platforms=("aarch64-darwin", "x86_64-linux"),
+        cache_generation=True,
     ),
 }
 
@@ -1086,6 +1098,31 @@ def _prepare_process_collection(
     return selector, captures, process.stdout, process.stderr
 
 
+def _completed_command_result(
+    args: list[str],
+    returncode: int,
+    captures: dict[str, _BoundedCapture],
+    timing: update_runtime.OperationTiming | None,
+) -> subprocess.CompletedProcess[str]:
+    """Classify a completed worker process without losing retained diagnostics."""
+    completed = subprocess.CompletedProcess(
+        args,
+        returncode,
+        stdout=captures["stdout"].render(),
+        stderr=captures["stderr"].render(),
+    )
+    if completed.returncode != 0:
+        if timing is not None:
+            timing.nonzero_exits += 1
+        _raise_for_command_failure(
+            args,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+            enospc=any(capture.enospc for capture in captures.values()),
+        )
+    return completed
+
+
 def _collect_managed_process(
     process: subprocess.Popen[bytes],
     args: list[str],
@@ -1093,6 +1130,7 @@ def _collect_managed_process(
     timeout: float,
     cancel_event: threading.Event | None = None,
     progress: Callable[[str], None] | None = None,
+    timing: update_runtime.OperationTiming | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Collect one isolated subprocess with bounded output and live progress."""
     selector, captures, stdout_stream, stderr_stream = _prepare_process_collection(
@@ -1158,25 +1196,15 @@ def _collect_managed_process(
             _terminate_process_group(process)
         raise
     finally:
+        if timing is not None:
+            timing.stdout_bytes += len(captures["stdout"].render().encode())
+            timing.stderr_bytes += len(captures["stderr"].render().encode())
         selector.close()
         for stream in (stdout_stream, stderr_stream):
             if not stream.closed:
                 stream.close()
 
-    completed = subprocess.CompletedProcess(
-        args,
-        returncode,
-        stdout=captures["stdout"].render(),
-        stderr=captures["stderr"].render(),
-    )
-    if completed.returncode != 0:
-        _raise_for_command_failure(
-            args,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
-            enospc=any(capture.enospc for capture in captures.values()),
-        )
-    return completed
+    return _completed_command_result(args, returncode, captures, timing)
 
 
 def _run(
@@ -1193,28 +1221,48 @@ def _run(
         msg = f"{shlex.join(args)}\ncommand cancelled before start"
         raise Crate2NixCommandCancelledError(msg)
     merged_env = (os.environ | env) if env is not None else None
-    try:
-        process = subprocess.Popen(  # noqa: S603
-            args,
-            cwd=cwd,
-            env=merged_env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
-            bufsize=0,
+    # These are all Nix entry points used by the joined worker. The async
+    # materialization owner already holds workspace read access before admission.
+    kind = update_runtime.command_resource(args)
+    admission = (
+        update_runtime.thread_resource_slot(
+            kind,
+            source=update_runtime.current_source(),
+            config=resolve_active_config(None),
+            cancel_event=cancel_event,
         )
-    except OSError as exc:
-        if exc.errno == errno.ENOSPC:
-            msg = f"Could not start {shlex.join(args)}"
-            _raise_resource_error(msg)
-        raise
-    return _collect_managed_process(
-        process,
-        args,
-        timeout=timeout,
-        cancel_event=cancel_event,
-        progress=progress,
+        if kind is not None
+        else nullcontext(None)
     )
+    try:
+        with admission as timing:
+            _raise_if_cancelled(cancel_event)
+            try:
+                process = subprocess.Popen(  # noqa: S603
+                    args,
+                    cwd=cwd,
+                    env=merged_env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    start_new_session=True,
+                    bufsize=0,
+                )
+            except OSError as exc:
+                if exc.errno == errno.ENOSPC:
+                    msg = f"Could not start {shlex.join(args)}"
+                    _raise_resource_error(msg)
+                raise
+            return _collect_managed_process(
+                process,
+                args,
+                timeout=timeout,
+                cancel_event=cancel_event,
+                progress=progress,
+                timing=timing,
+            )
+    except concurrent.futures.CancelledError as exc:
+        msg = "crate2nix command cancelled while waiting for a Nix process slot"
+        raise Crate2NixCommandCancelledError(msg) from exc
 
 
 def _is_retryable_crate2nix_generate_failure(message: str) -> bool:
@@ -1302,19 +1350,18 @@ def _run_crate2nix_generate(
     total_timeout: float = _CRATE2NIX_COMMAND_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess[str]:
     """Run crate2nix generation with bounded retries for transient prefetch flakes."""
-    _acquire_generate_lock(cancel_event, progress)
-    try:
-        deadline = time.monotonic() + total_timeout
-        attempt = 1
-        while True:
-            _raise_if_cancelled(cancel_event)
-            remaining = _remaining_generate_budget(
-                deadline,
-                total_timeout=total_timeout,
-                args=args,
-            )
-            _restore_generated_outputs(generated_outputs, seeded_outputs or {})
+    deadline = time.monotonic() + total_timeout
+    attempt = 1
+    while True:
+        _raise_if_cancelled(cancel_event)
+        try:
+            with update_runtime.measure("shared", "crate2nix_cache_wait"):
+                _acquire_generate_lock(cancel_event, progress)
             try:
+                remaining = _remaining_generate_budget(
+                    deadline, total_timeout=total_timeout, args=args
+                )
+                _restore_generated_outputs(generated_outputs, seeded_outputs or {})
                 if cancel_event is None and progress is None:
                     return _run(args, env=env, timeout=remaining)
                 return _run(
@@ -1324,40 +1371,40 @@ def _run_crate2nix_generate(
                     cancel_event=cancel_event,
                     progress=progress,
                 )
-            except (
-                Crate2NixCommandCancelledError,
-                Crate2NixCommandTimeoutError,
-                Crate2NixResourceError,
+            finally:
+                _CRATE2NIX_GENERATE_LOCK.release()
+        except (
+            Crate2NixCommandCancelledError,
+            Crate2NixCommandTimeoutError,
+            Crate2NixResourceError,
+        ):
+            raise
+        except RuntimeError as exc:
+            if attempt >= attempts or not _is_retryable_crate2nix_generate_failure(
+                str(exc)
             ):
                 raise
-            except RuntimeError as exc:
-                if attempt >= attempts or not _is_retryable_crate2nix_generate_failure(
-                    str(exc)
-                ):
-                    raise
-                retry_message = (
-                    "Retrying crate2nix generation after transient network failure "
-                    f"({attempt}/{attempts})..."
-                )
-                sys.stderr.write(f"{retry_message}\n")
-                if progress is not None:
-                    progress(retry_message)
-                delay = _CRATE2NIX_GENERATE_RETRY_DELAY_SECONDS * attempt
-                sleep_seconds = min(
-                    delay,
-                    _remaining_generate_budget(
-                        deadline,
-                        total_timeout=total_timeout,
-                        args=args,
-                    ),
-                )
-                if cancel_event is None:
-                    time.sleep(sleep_seconds)
-                elif cancel_event.wait(sleep_seconds):
-                    _raise_if_cancelled(cancel_event)
-                attempt += 1
-    finally:
-        _CRATE2NIX_GENERATE_LOCK.release()
+            retry_message = (
+                "Retrying crate2nix generation after transient network failure "
+                f"({attempt}/{attempts})..."
+            )
+            sys.stderr.write(f"{retry_message}\n")
+            if progress is not None:
+                progress(retry_message)
+            delay = _CRATE2NIX_GENERATE_RETRY_DELAY_SECONDS * attempt
+            sleep_seconds = min(
+                delay,
+                _remaining_generate_budget(
+                    deadline, total_timeout=total_timeout, args=args
+                ),
+            )
+            # Shared Cargo state is no longer in use after the subprocess exits.
+            # Other generators may proceed while this attempt backs off.
+            if cancel_event is None:
+                time.sleep(sleep_seconds)
+            elif cancel_event.wait(sleep_seconds):
+                _raise_if_cancelled(cancel_event)
+            attempt += 1
 
 
 def _build_patched_src(
@@ -1401,6 +1448,119 @@ def _build_patched_src(
     return Path(out_paths[0])
 
 
+def _generation_identity(target: Crate2NixTarget, patched_src: Path) -> str | None:
+    """Fingerprint the audited deterministic generator, never a mutable source.
+
+    The patched store source includes manifests, patches, and local Cargo config.
+    The full lock binds both the generator's nixpkgs input and production source.
+    Python and Nix implementation files are conservative invalidation boundaries;
+    generated Cargo graphs are verified as outputs, not used as identity inputs.
+    """
+    if not target.cache_generation or not patched_src.is_relative_to("/nix/store"):
+        return None
+    root = Path(REPO_ROOT)
+    output_paths = {root / path for path in target.artifact_paths}
+    code_paths = {
+        path
+        for directory in (root / "lib", (root / target.normalizer_path).parent)
+        for path in directory.rglob("*")
+        if path.suffix in {".py", ".nix"}
+        and path not in output_paths
+        and "tests" not in path.relative_to(root).parts
+    }
+    code_paths.update(root / name for name in ("flake.nix", "flake.lock", "uv.lock"))
+    cargo_home = _crate2nix_cargo_home()
+    config_paths = (
+        cargo_home / "config",
+        cargo_home / "config.toml",
+        root / ".cargo/config",
+        root / ".cargo/config.toml",
+    )
+    try:
+        code = {
+            str(path.relative_to(root)): generation_receipts.content_digest(
+                path.read_bytes()
+            )
+            for path in sorted(code_paths)
+        }
+        bindings = {
+            str(path): generation_receipts.content_digest(path.read_bytes())
+            for module in (nix_manipulator, tree_sitter)
+            for path in sorted(Path(module.__file__).parent.rglob("*"))
+            if path.is_file() and path.suffix in {".py", ".so", ".dylib"}
+        }
+        cargo_config = {
+            str(index): generation_receipts.content_digest(path.read_bytes())
+            for index, path in enumerate(config_paths)
+            if path.is_file()
+        }
+        tools = {}
+        for name in ("nix", "cargo", "rustc", "git"):
+            executable = shutil.which(name)
+            if executable is None:
+                return None
+            path = Path(executable).resolve()
+            tools[name] = (
+                str(path)
+                if path.is_relative_to("/nix/store")
+                else generation_receipts.content_digest(path.read_bytes())
+            )
+    except OSError:
+        # Uninspectable inputs cannot authorize reuse. Normal generation reports
+        # any required-input error through its usual diagnostic boundary.
+        return None
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name.startswith(("CARGO_", "RUST", "NIX_"))
+        or name in {"PATH", "SSL_CERT_FILE", "NIX_PATH"}
+    }
+    return generation_receipts.identity_digest({
+        "source": str(patched_src),
+        "target": {
+            item.name: str(getattr(target, item.name)) for item in fields(target)
+        },
+        "platform": _current_platform(),
+        "python": sys.version,
+        "code": code,
+        "bindings": bindings,
+        "cargoConfig": cargo_config,
+        "tools": tools,
+        "environment": environment,
+        "options": ["--default-features"],
+    })
+
+
+def _generation_receipt_path(target: Crate2NixTarget) -> Path:
+    name = generation_receipts.content_digest(target.name.encode())
+    return _xdg_cache_home() / "nixcfg" / "generation-receipts" / f"{name}.json"
+
+
+def _cached_refresh(
+    target: Crate2NixTarget, identity: str | None
+) -> RefreshResult | None:
+    if identity is None:
+        return None
+    try:
+        outputs = {
+            str(path): (REPO_ROOT / path).read_text(encoding="utf-8")
+            for path in target.artifact_paths
+        }
+    except OSError, UnicodeError:
+        return None
+    if not generation_receipts.matches(
+        _generation_receipt_path(target), identity=identity, outputs=outputs
+    ):
+        return None
+    return RefreshResult(
+        cargo_nix=outputs[str(target.cargo_nix)],
+        crate_hashes=outputs[str(target.crate_hashes)],
+        crate_sources=(
+            outputs[str(target.crate_sources)] if target.crate_sources else None
+        ),
+    )
+
+
 def _refresh_target_impl(
     target: Crate2NixTarget,
     *,
@@ -1421,6 +1581,15 @@ def _refresh_target_impl(
             cancel_event=cancel_event,
             progress=progress,
         )
+    with update_runtime.measure(target.name, "crate2nix_identity"):
+        identity = _generation_identity(target, patched_src)
+    cached = _cached_refresh(target, identity)
+    if cached is not None:
+        if runtime := update_runtime.active_runtime():
+            runtime.timing(target.name, "crate2nix_generation").cache_hits += 1
+        if progress is not None:
+            progress("Reusing verified crate2nix artifacts")
+        return cached
     normalize = load_normalizer(target.normalizer_path)
 
     with tempfile.TemporaryDirectory(prefix=f"crate2nix-{target.name}-") as tmp_dir:
@@ -1452,22 +1621,23 @@ def _refresh_target_impl(
             "CARGO_NET_GIT_FETCH_WITH_CLI": "true",
         }
         seeded_outputs = {generated_hashes: hash_seed} if hash_seed is not None else {}
-        if cancel_event is None and progress is None:
-            _run_crate2nix_generate(
-                generate_args,
-                env=generate_env,
-                generated_outputs=(generated_cargo, generated_hashes),
-                seeded_outputs=seeded_outputs,
-            )
-        else:
-            _run_crate2nix_generate(
-                generate_args,
-                env=generate_env,
-                generated_outputs=(generated_cargo, generated_hashes),
-                seeded_outputs=seeded_outputs,
-                cancel_event=cancel_event,
-                progress=progress,
-            )
+        with update_runtime.measure(target.name, "crate2nix_generation"):
+            if cancel_event is None and progress is None:
+                _run_crate2nix_generate(
+                    generate_args,
+                    env=generate_env,
+                    generated_outputs=(generated_cargo, generated_hashes),
+                    seeded_outputs=seeded_outputs,
+                )
+            else:
+                _run_crate2nix_generate(
+                    generate_args,
+                    env=generate_env,
+                    generated_outputs=(generated_cargo, generated_hashes),
+                    seeded_outputs=seeded_outputs,
+                    cancel_event=cancel_event,
+                    progress=progress,
+                )
 
         cargo_text, _rewrites, _added_root_src = normalize(
             generated_cargo.read_text(encoding="utf-8")
@@ -1503,11 +1673,21 @@ def _refresh_target_impl(
             raise RuntimeError(msg)
         hash_text = _normalize_json_text(_read_generated_hash_text(generated_hashes))
         hash_text = _normalize_trailing_newline(hash_text)
-        return RefreshResult(
+        refreshed = RefreshResult(
             cargo_nix=cargo_text,
             crate_hashes=hash_text,
             crate_sources=crate_sources,
         )
+        if identity is not None:
+            generation_receipts.save(
+                _generation_receipt_path(target),
+                identity=identity,
+                outputs={
+                    str(path): text
+                    for path, text in _target_artifact_payloads(target, refreshed)
+                },
+            )
+        return refreshed
 
 
 def _refresh_target(
@@ -1582,7 +1762,7 @@ async def _cancel_artifact_worker(
     """Signal and retrieve a background artifact worker during stream teardown."""
     cancel_event.set()
     try:
-        await asyncio.shield(future)
+        await update_runtime.await_cleanup(future)
     except Crate2NixCommandCancelledError:
         pass
     except OSError, RuntimeError, TypeError, ValueError:
@@ -1635,7 +1815,6 @@ async def stream_crate2nix_artifact_updates(
         )
     )
 
-    loop = asyncio.get_running_loop()
     cancel_event = threading.Event()
     progress_queue: queue.Queue[str] = queue.Queue(
         maxsize=_CRATE2NIX_PROGRESS_QUEUE_SIZE
@@ -1660,7 +1839,7 @@ async def stream_crate2nix_artifact_updates(
             progress=_enqueue_progress,
         )
     )
-    future = loop.run_in_executor(None, worker)
+    future = asyncio.create_task(asyncio.to_thread(worker))
     try:
         while not future.done():
             try:

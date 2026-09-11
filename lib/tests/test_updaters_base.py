@@ -19,8 +19,7 @@ from lib.update.events import (
     UpdateEventKind,
     ignore_event,
 )
-from lib.update.nix import _build_package_path_attr_expr
-from lib.update.platform_hashes import PlatformHashResult
+from lib.update.nix import PreparedProbe, _build_package_path_attr_expr
 from lib.update.updaters import (
     DenoDepsHashUpdater,
     DenoManifestUpdater,
@@ -585,25 +584,33 @@ def test_flake_input_hash_updater_dynamic_pin_change_converges_in_one_run() -> N
         return "candidate-package-expression"
 
     async def _fixed_hash(
-        source: str, expr: str, *, config: object, emit: EventSink = ignore_event
+        source: str,
+        expr: PreparedProbe,
+        *,
+        config: object,
+        emit: EventSink = ignore_event,
     ) -> object:
         nonlocal fixed_hash_calls
         fixed_hash_calls += 1
         assert source == "t3code-desktop"
-        assert expr == "candidate-package-expression"
+        assert expr.expression == "candidate-package-expression"
         _ = config
         return "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 
     async def _fingerprint(
         source: str,
-        expr: str,
+        expressions: dict[str, str],
         *,
         config: object,
-    ) -> str:
+        **_kwargs: object,
+    ) -> dict[str, PreparedProbe]:
         assert source == "t3code-desktop"
-        assert expr == "candidate-package-expression"
+        assert expressions == {"": "candidate-package-expression"}
         _ = config
-        return "candidate-drv"
+        return {
+            key: PreparedProbe("/nix/store/candidate.drv", "candidate-drv", expr)
+            for key, expr in expressions.items()
+        }
 
     current = SourceEntry.model_validate({
         "version": "1.0.0",
@@ -637,7 +644,7 @@ def test_flake_input_hash_updater_dynamic_pin_change_converges_in_one_run() -> N
             _package_expression,
         ),
         patch("lib.update.nix.compute_fixed_output_hash", _fixed_hash),
-        patch("lib.update.nix.compute_expr_drv_fingerprint", _fingerprint),
+        patch("lib.update.nix.prepare_fixed_output_probes", _fingerprint),
     ):
         first_events, second_events = asyncio.run(_run())
 
@@ -648,7 +655,7 @@ def test_flake_input_hash_updater_dynamic_pin_change_converges_in_one_run() -> N
     assert first_result.drv_hash == "candidate-drv"
     assert fixed_hash_calls == 1
     assert second_events[-1] == UpdateEvent.result("t3code-desktop")
-    assert len(expression_calls) == 3
+    assert len(expression_calls) == 2
     for call in expression_calls:
         assert call["fake_hashes"] is True
         source_overrides = call["source_overrides"]
@@ -664,7 +671,7 @@ def test_flake_input_hash_updater_dynamic_pin_change_converges_in_one_run() -> N
             [],
         )
     }
-    assert expression_calls[1] == expression_calls[2]
+    assert expression_calls[0] == expression_calls[1]
 
 
 def test_flake_input_hash_updater_overlay_probe_receives_candidate_pins() -> None:
@@ -749,10 +756,7 @@ def test_deno_hash_updater_passes_candidate_pins_to_platform_probes() -> None:
             "source": source,
             "source_override": source_override,
         })
-        return PlatformHashResult(
-            {"aarch64-darwin": "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="},
-            fully_computed=True,
-        )
+        return {"aarch64-darwin": "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="}
 
     current = SourceEntry.model_validate({
         "version": "1.0.0",
@@ -928,22 +932,31 @@ def test_package_flake_input_updater_fingerprints_discovered_package() -> None:
 
     async def _compute_expr_drv_fingerprint(
         source: str,
-        expr: str,
+        expressions: dict[str, str],
         *,
         config: object,
-    ) -> str:
-        captured.update({"source": source, "expr": expr, "config": config})
-        return "package-drv"
+        **_kwargs: object,
+    ) -> dict[str, PreparedProbe]:
+        captured.update({"source": source, "expr": expressions[""], "config": config})
+        return {
+            key: PreparedProbe("/nix/store/package.drv", "package-drv", expr)
+            for key, expr in expressions.items()
+        }
 
     current = SourceEntry.model_validate({
         "version": "1.0.0",
         "drvHash": "package-drv",
-        "hashes": [],
+        "hashes": [
+            {
+                "hashType": "vendorHash",
+                "hash": "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+            }
+        ],
     })
     updater = _PackageUpdater()
     with (
         patch(
-            "lib.update.nix.compute_expr_drv_fingerprint",
+            "lib.update.nix.prepare_fixed_output_probes",
             _compute_expr_drv_fingerprint,
         ),
         patch(

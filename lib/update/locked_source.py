@@ -7,7 +7,9 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from lib.nix.commands.eval import nix_eval_raw
+from lib.update.config import default_config
 from lib.update.flake import flake_source_path_expr
+from lib.update.runtime import memoize, resource_slot
 
 if TYPE_CHECKING:
     from lib.nix.models.flake_lock import FlakeLockNode
@@ -146,17 +148,31 @@ async def resolve_locked_source(
     command_timeout: float,
 ) -> LockedSource:
     """Realize one locked flake node and return its validated source root."""
-    source_path_text = await nix_eval_raw(
-        flake_source_path_expr(node),
-        command_timeout=command_timeout,
-    )
-    source_path_text = source_path_text.strip()
-    if not source_path_text:
-        msg = f"{context} locked source resolved to an empty path"
-        raise RuntimeError(msg)
+    expression = flake_source_path_expr(node)
+
+    async def realize() -> Path:
+        async with resource_slot("eval", source=context, config=default_config()):
+            source_path_text = await nix_eval_raw(
+                expression,
+                command_timeout=command_timeout,
+            )
+        source_path_text = source_path_text.strip()
+        if not source_path_text:
+            msg = f"{context} locked source resolved to an empty path"
+            raise RuntimeError(msg)
+        source = await asyncio.to_thread(
+            LockedSource,
+            root=Path(source_path_text),
+            context=context,
+        )
+        return source.root
+
+    # The expression includes the immutable revision, content hash and fetch mode.
+    # Context is deliberately not shared: each caller retains its own diagnostics.
+    root = await memoize("locked_source", f"{command_timeout}:{expression}", realize)
     return await asyncio.to_thread(
         LockedSource,
-        root=Path(source_path_text),
+        root=root,
         context=context,
     )
 

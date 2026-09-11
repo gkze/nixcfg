@@ -22,6 +22,7 @@ from tenacity.wait import wait_exponential
 from lib import http_utils, json_utils
 from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.constants import resolve_timeout_alias
+from lib.update.runtime import active_runtime, current_source, resource_slot
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -336,7 +337,18 @@ async def _request(
     try:
         async for attempt in retryer:
             with attempt:
-                return await _perform_request_once()
+                runtime = active_runtime()
+                config = (
+                    runtime.config
+                    if runtime is not None
+                    else resolve_active_config(None)
+                )
+                async with resource_slot(
+                    "download", source=current_source(), config=config
+                ) as timing:
+                    response = await _perform_request_once()
+                    timing.input_bytes += len(response[0])
+                    return response
     except (
         _NonRetryableStatusError,
         _RetryableStatusError,

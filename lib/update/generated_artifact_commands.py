@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lib.update import events as update_events
+from lib.update import runtime as update_runtime
 from lib.update.artifacts import GeneratedArtifact
+from lib.update.config import resolve_active_config
 from lib.update.events import (
     EventSink,
     StatusInfo,
@@ -32,6 +34,12 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class _ArtifactState:
     content: bytes
+    mode: int
+
+
+@dataclass(frozen=True, slots=True)
+class _ProducedArtifact:
+    artifact: GeneratedArtifact
     mode: int
 
 
@@ -164,38 +172,95 @@ async def stream_command_materialized_artifacts[T](
     operation: str = "materialize_artifacts",
     repo_root: Path = REPO_ROOT,
     artifact_normalizers: Mapping[str | Path, ArtifactNormalizer] | None = None,
+    materialization_key: Callable[[], Awaitable[str]] | None = None,
     emit: EventSink = ignore_event,
 ) -> T:
-    """Refresh artifacts inside the run workspace, hash, and restore them."""
-    async with _artifact_locks(artifact_paths, repo_root=repo_root):
+    """Produce immutable artifacts, install them for one consumer, and restore.
+
+    A shared producer owns its own lock and restoration so cancellation of one
+    consumer cannot expose an in-flight command's temporary files to another.
+    Callers supplying a key must include every generator input and output path.
+    """
+
+    async def produce() -> tuple[_ProducedArtifact, ...]:
+        async with (
+            update_runtime.workspace_access(write=True),
+            _artifact_locks(artifact_paths, repo_root=repo_root),
+            update_runtime.resource_slot(
+                "materialize", source=source, config=resolve_active_config(config)
+            ),
+        ):
+            snapshot = _snapshot_artifacts(artifact_paths, repo_root=repo_root)
+            try:
+                return await generate(snapshot)
+            finally:
+                _restore_artifacts(snapshot)
+
+    async def generate(snapshot: ArtifactSnapshot) -> tuple[_ProducedArtifact, ...]:
+        await emit(
+            UpdateEvent.status(
+                source,
+                f"Refreshing {detail}...",
+                operation=operation,
+                status=StatusInfo(kind=StatusKind.COMPUTING_HASH, value=detail),
+            )
+        )
+        result = await _run_command(
+            args,
+            options=RunCommandOptions(
+                source=source,
+                env=env,
+                config=config,
+                output_limit=64 * 1024,
+            ),
+            emit=emit,
+        )
+        _raise_failed_command(f"Refresh {detail}", result)
+
+        artifacts = _read_artifacts(
+            artifact_paths,
+            snapshot=snapshot,
+            repo_root=repo_root,
+            artifact_normalizers=artifact_normalizers,
+        )
+        return tuple(
+            _ProducedArtifact(
+                artifact,
+                artifact.resolved_path(repo_root=repo_root).stat().st_mode & 0o777,
+            )
+            for artifact in artifacts
+        )
+
+    if materialization_key is None or update_runtime.active_runtime() is None:
+        artifacts = await produce()
+    else:
+        async with (
+            update_runtime.workspace_access(),
+            _artifact_locks(artifact_paths, repo_root=repo_root),
+        ):
+            key = await materialization_key()
+        artifacts = await update_runtime.memoize("materialization", key, produce)
+    async with (
+        update_runtime.workspace_access(write=True),
+        _artifact_locks(artifact_paths, repo_root=repo_root),
+    ):
         snapshot = _snapshot_artifacts(artifact_paths, repo_root=repo_root)
         try:
-            await emit(
-                UpdateEvent.status(
-                    source,
-                    f"Refreshing {detail}...",
-                    operation=operation,
-                    status=StatusInfo(kind=StatusKind.COMPUTING_HASH, value=detail),
-                )
+            for produced in artifacts:
+                artifact = produced.artifact
+                path = artifact.resolved_path(repo_root=repo_root)
+                content = artifact.content.encode()
+                current = snapshot[path]
+                if current is None or current.content != content:
+                    atomic_write_bytes(path, content, mkdir=True)
+                if current is None or current.mode != produced.mode:
+                    path.chmod(produced.mode)
+            # Change state belongs to this consumer's snapshot, not the cached
+            # producer's snapshot. Each successful source still owns its output.
+            consumed = _read_artifacts(
+                artifact_paths, snapshot=snapshot, repo_root=repo_root
             )
-            result = await _run_command(
-                args,
-                options=RunCommandOptions(
-                    source=source,
-                    env=env,
-                    config=config,
-                ),
-                emit=emit,
-            )
-            _raise_failed_command(f"Refresh {detail}", result)
-
-            artifacts = _read_artifacts(
-                artifact_paths,
-                snapshot=snapshot,
-                repo_root=repo_root,
-                artifact_normalizers=artifact_normalizers,
-            )
-            await emit(UpdateEvent.artifact(source, list(artifacts)))
+            await emit(UpdateEvent.artifact(source, list(consumed)))
             await emit(
                 UpdateEvent.status(
                     source,

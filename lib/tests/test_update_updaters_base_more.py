@@ -12,6 +12,7 @@ import pytest
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.system_policy import supported_systems
 from lib.tests._assertions import expect_instance, expect_not_none
+from lib.tests._prepared_probe_boundary import install_prepared_probe_boundary
 from lib.tests._updater_helpers import (
     collect_events,
 )
@@ -22,14 +23,12 @@ from lib.update.config import resolve_config
 from lib.update.events import (
     CommandResult,
     EventSink,
-    StatusInfo,
     StatusKind,
     StatusPayload,
     UpdateEvent,
     UpdateEventKind,
     ignore_event,
 )
-from lib.update.platform_hashes import PlatformHashResult
 from lib.update.updaters import (
     UPDATERS,
     AssetURLsMetadataUpdater,
@@ -75,6 +74,12 @@ from lib.update.updaters.vendor_feeds import SparkleAppcastItem
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable
+
+
+@pytest.fixture(autouse=True)
+def _prepared_probe_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_prepared_probe_boundary(monkeypatch)
+
 
 HASH_A = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 HASH_B = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
@@ -247,10 +252,13 @@ class _DummyFlakeInput(FlakeInputHashUpdater):
         return await super().fetch_latest(session, context=context)
 
     async def _compute_hash(
-        self, info: VersionInfo, *, emit: EventSink = ignore_event
+        self,
+        info: VersionInfo,
+        *,
+        context: UpdateContext | None = None,
+        emit: EventSink = ignore_event,
     ) -> str:
-        _ = emit
-        _ = info
+        _ = (emit, info, context)
         return HASH_A
 
 
@@ -272,12 +280,9 @@ class _DummyDenoDeps(DenoDepsHashUpdater):
         *,
         source_override: SourceEntry | None = None,
         emit: EventSink = ignore_event,
-    ) -> PlatformHashResult:
+    ) -> dict[str, str]:
         _ = (info, source_override, emit)
-        return PlatformHashResult(
-            hashes={"x86_64-linux": HASH_A, "aarch64-linux": HASH_B},
-            fully_computed=True,
-        )
+        return {"x86_64-linux": HASH_A, "aarch64-linux": HASH_B}
 
 
 class _DummyManifest:
@@ -1182,6 +1187,9 @@ def test_flake_hash_is_latest_uses_version_and_derivation_fingerprint(
     updater = _DummyFlakeInput()
 
     current = _entry(version="1.0.0", drv_hash="drv")
+    current = current.model_copy(
+        update={"hashes": HashCollection(entries=[HashEntry.create("sha256", HASH_B)])}
+    )
     info = VersionInfo(version="1.0.0", metadata={})
     monkeypatch.setattr(
         "lib.update.nix.compute_drv_fingerprint",
@@ -1327,69 +1335,14 @@ def test_platform_specific_fetch_hashes_computes_configured_targets(
     }
 
 
-def test_platform_specific_fetch_hashes_preserves_existing_on_non_native_failure(
+@pytest.mark.parametrize("candidate_version", ["1.0.0", "2.0.0"])
+@pytest.mark.parametrize("native_hash", [HASH_A, HASH_B])
+def test_platform_specific_update_rejects_failed_foreign_hashes(
     monkeypatch: pytest.MonkeyPatch,
+    candidate_version: str,
+    native_hash: str,
 ) -> None:
-    """Preserve existing non-native hashes when remote builders are unavailable."""
-
-    class _PlatformFlake(_DummyFlakeInput):
-        platform_specific = True
-
-    async def _compute_overlay_hash(
-        source_name: str,
-        *,
-        system: str | None,
-        config: object,
-        emit: EventSink = ignore_event,
-    ) -> object:
-        _ = emit
-        _ = config
-        if system == "x86_64-linux":
-            raise RuntimeError("no builder")
-        return HASH_A
-
-    monkeypatch.setattr(
-        "lib.update.nix.compute_overlay_hash",
-        _compute_overlay_hash,
-    )
-    monkeypatch.setattr(
-        "lib.update.nix.get_current_nix_platform",
-        lambda: "aarch64-darwin",
-    )
-
-    updater = _PlatformFlake(
-        config=resolve_config(
-            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
-        )
-    )
-    object.__setattr__(
-        updater,
-        "_current_entry",
-        _platform_entry(drv_hash=None, platforms=("x86_64-linux",)),
-    )
-
-    info = VersionInfo(version="1.0.0", metadata={})
-    events = asyncio.run(
-        _with_session(
-            lambda session: _collect_events(
-                lambda emit: updater.fetch_hashes(
-                    info, session, emit=emit, context=UpdateContext(current=None)
-                )
-            ),
-        )
-    )
-    payload = _require_hash_entries(events.result)
-    by_platform = {entry.platform: entry.hash for entry in payload}
-    assert by_platform == {
-        "aarch64-darwin": HASH_A,
-        "x86_64-linux": "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M=",
-    }
-
-
-def test_platform_specific_update_keeps_drv_hash_when_hashes_are_preserved(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Do not pair a new derivation fingerprint with preserved stale hashes."""
+    """Old foreign hashes cannot certify success, even for an unchanged source."""
 
     class _PlatformFlake(_DummyFlakeInput):
         platform_specific = True
@@ -1397,15 +1350,14 @@ def test_platform_specific_update_keeps_drv_hash_when_hashes_are_preserved(
         async def fetch_latest(
             self, session: object, *, context: UpdateContext
         ) -> VersionInfo:
-            _ = context
-            _ = session
-            return VersionInfo(version="1.0.0", metadata={})
+            _ = (context, session)
+            return VersionInfo(version=candidate_version, metadata={})
 
-    preserved_hash = "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M="
+    platforms = ("aarch64-darwin", "aarch64-linux", "x86_64-linux")
     current = _platform_entry(
-        drv_hash="old-drv",
-        hash_value=preserved_hash,
+        drv_hash="old-drv", hash_value=HASH_A, platforms=platforms
     ).model_copy(update={"input": "dummy-input"})
+    attempted: list[str | None] = []
 
     async def _compute_drv_fingerprint(*_args: object, **_kwargs: object) -> str:
         return "new-drv"
@@ -1417,117 +1369,48 @@ def test_platform_specific_update_keeps_drv_hash_when_hashes_are_preserved(
         config: object,
         emit: EventSink = ignore_event,
     ) -> object:
-        _ = emit
-        _ = config
-        if system == "x86_64-linux":
-            raise RuntimeError("no builder")
-        return HASH_A
+        _ = (source_name, emit, config)
+        attempted.append(system)
+        if system != "aarch64-darwin":
+            msg = f"no builder for {system}"
+            raise RuntimeError(msg)
+        return native_hash
 
     monkeypatch.setattr(
-        "lib.update.nix.compute_drv_fingerprint",
-        _compute_drv_fingerprint,
+        "lib.update.nix.compute_drv_fingerprint", _compute_drv_fingerprint
     )
+    monkeypatch.setattr("lib.update.nix.compute_overlay_hash", _compute_overlay_hash)
     monkeypatch.setattr(
-        "lib.update.nix.compute_overlay_hash",
-        _compute_overlay_hash,
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
     )
-    monkeypatch.setattr(
-        "lib.update.nix.get_current_nix_platform",
-        lambda: "aarch64-darwin",
-    )
+    updater = _PlatformFlake(config=resolve_config(hash_build_platforms=platforms))
+    emitted: list[UpdateEvent] = []
 
-    updater = _PlatformFlake(
-        config=resolve_config(
-            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
-        )
-    )
-    events = asyncio.run(
-        _with_session(
-            lambda session: _collect_events(
-                lambda emit: updater.update_stream(current, session, emit=emit)
-            )
-        )
-    )
-
-    result_events = [event for event in events if event.kind == UpdateEventKind.RESULT]
-    assert len(result_events) == 1
-    result = expect_instance(result_events[0].payload, SourceEntry)
-    assert result.drv_hash == "old-drv"
-    payload = _require_hash_entries(result.hashes.entries)
-    assert {(entry.platform, entry.hash) for entry in payload} == {
-        ("aarch64-darwin", HASH_A),
-        ("x86_64-linux", preserved_hash),
-    }
-
-
-def test_platform_specific_update_rejects_identity_change_with_preserved_hash(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A full run must not combine new identity with a preserved foreign hash."""
-
-    class _PlatformFlake(_DummyFlakeInput):
-        platform_specific = True
-
-        async def fetch_latest(
-            self, session: object, *, context: UpdateContext
-        ) -> VersionInfo:
-            _ = context
-            _ = session
-            return VersionInfo(version="2.0.0", metadata={})
-
-    current = _platform_entry(drv_hash="old-drv").model_copy(
-        update={"input": "dummy-input"}
-    )
-
-    async def _compute_overlay_hash(
-        source_name: str,
-        *,
-        system: str | None,
-        config: object,
-        emit: EventSink = ignore_event,
-    ) -> object:
-        _ = emit
-        _ = config
-        if system == "x86_64-linux":
-            raise RuntimeError("no builder")
-        return HASH_A
-
-    monkeypatch.setattr(
-        "lib.update.nix.compute_overlay_hash",
-        _compute_overlay_hash,
-    )
-    monkeypatch.setattr(
-        "lib.update.nix.get_current_nix_platform",
-        lambda: "aarch64-darwin",
-    )
-
-    updater = _PlatformFlake(
-        config=resolve_config(
-            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
-        )
-    )
+    async def _emit(event: UpdateEvent) -> None:
+        emitted.append(event)
 
     with pytest.raises(
-        RuntimeError,
-        match=(
-            r"Cannot apply partial update for dummy-flake: updater-owned source "
-            r"identity changed \(version\) while foreign-platform hashes would be "
-            r"preserved; rerun with working builders for all configured hash platforms"
-        ),
-    ):
+        RuntimeError, match="Failed to compute all requested platform hashes"
+    ) as error:
         asyncio.run(
             _with_session(
-                lambda session: _collect_events(
-                    lambda emit: updater.update_stream(current, session, emit=emit)
-                )
+                lambda session: updater.update_stream(current, session, emit=_emit)
             )
         )
 
+    assert attempted == list(platforms)
+    assert str(error.value) == (
+        "Failed to compute all requested platform hashes for dummy-flake:\n"
+        "aarch64-linux: no builder for aarch64-linux\n"
+        "x86_64-linux: no builder for x86_64-linux"
+    )
+    assert not any(event.kind is UpdateEventKind.RESULT for event in emitted)
 
-def test_platform_specific_update_rejects_partial_hashes_without_drv_hash(
+
+def test_platform_specific_native_only_rejects_missing_drv_hash(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Partial hash updates require a previous drvHash to preserve."""
+    """Intentional native-only updates need a prior fingerprint for foreign hashes."""
 
     class _PlatformFlake(_DummyFlakeInput):
         platform_specific = True
@@ -1535,11 +1418,8 @@ def test_platform_specific_update_rejects_partial_hashes_without_drv_hash(
         async def fetch_latest(
             self, session: object, *, context: UpdateContext
         ) -> VersionInfo:
-            _ = context
-            _ = session
+            _ = (context, session)
             return VersionInfo(version="1.0.0", metadata={})
-
-    current = _platform_entry(drv_hash=None)
 
     async def _compute_overlay_hash(
         source_name: str,
@@ -1548,31 +1428,23 @@ def test_platform_specific_update_rejects_partial_hashes_without_drv_hash(
         config: object,
         emit: EventSink = ignore_event,
     ) -> object:
-        _ = emit
-        _ = config
-        if system == "x86_64-linux":
-            raise RuntimeError("no builder")
+        _ = (source_name, emit, config)
+        assert system == "aarch64-darwin"
         return HASH_A
 
+    monkeypatch.setattr("lib.update.nix.compute_overlay_hash", _compute_overlay_hash)
     monkeypatch.setattr(
-        "lib.update.nix.compute_overlay_hash",
-        _compute_overlay_hash,
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
     )
-    monkeypatch.setattr(
-        "lib.update.nix.get_current_nix_platform",
-        lambda: "aarch64-darwin",
-    )
-
     updater = _PlatformFlake(
-        config=resolve_config(
-            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
-        )
+        config=resolve_config(hash_build_platforms=("aarch64-darwin", "x86_64-linux"))
     )
+    updater.native_only = True
     with pytest.raises(RuntimeError, match="has no drvHash"):
         asyncio.run(
             _with_session(
-                lambda session: _collect_events(
-                    lambda emit: updater.update_stream(current, session, emit=emit)
+                lambda session: updater.update_stream(
+                    _platform_entry(drv_hash=None), session
                 )
             )
         )
@@ -1662,18 +1534,6 @@ def test_platform_specific_native_only_rejects_global_pin_change(
             _ = session
             return VersionInfo(version="1.0.0", metadata={})
 
-        async def _compute_hash_for_system(
-            self,
-            info: VersionInfo,
-            *,
-            system: str | None,
-            emit: EventSink = ignore_event,
-        ) -> str:
-            _ = emit
-            _ = info
-            assert system == "aarch64-darwin"
-            return HASH_B
-
     current = _platform_entry(drv_hash="old-drv").model_copy(
         update={
             "input": "dummy-input",
@@ -1684,6 +1544,11 @@ def test_platform_specific_native_only_rejects_global_pin_change(
     monkeypatch.setattr(
         "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
+    )
+
+    monkeypatch.setattr(
+        "lib.update.nix.compute_overlay_hash",
+        lambda *_args, **_kwargs: asyncio.sleep(0, result=HASH_B),
     )
 
     updater = _PinnedPlatformFlake(
@@ -1933,7 +1798,7 @@ def test_platform_specific_fetch_hashes_raises_on_native_failure(
         )
 
 
-def test_platform_specific_fetch_hashes_rejects_missing_non_native_preserve(
+def test_platform_specific_fetch_hashes_rejects_failed_foreign_hash_without_prior_hash(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Non-native failures without existing hashes should not emit partial results."""
@@ -1969,7 +1834,7 @@ def test_platform_specific_fetch_hashes_rejects_missing_non_native_preserve(
         )
     )
     info = VersionInfo(version="1.0.0", metadata={})
-    with pytest.raises(RuntimeError, match="no existing hash is available"):
+    with pytest.raises(RuntimeError, match="x86_64-linux: no builder"):
         asyncio.run(
             _with_session(
                 lambda session: _collect_events(
@@ -2115,13 +1980,10 @@ def test_deno_native_only_update_keeps_drv_hash_when_hashes_are_preserved(
         assert source == "deno-hash"
         assert input_name == "deno-input"
         assert native_only is True
-        return PlatformHashResult(
-            hashes={
-                "aarch64-darwin": HASH_B,
-                "x86_64-linux": foreign_hash,
-            },
-            fully_computed=True,
-        )
+        return {
+            "aarch64-darwin": HASH_B,
+            "x86_64-linux": foreign_hash,
+        }
 
     monkeypatch.setattr(
         "lib.update.nix.compute_drv_fingerprint",
@@ -2156,10 +2018,10 @@ def test_deno_native_only_update_keeps_drv_hash_when_hashes_are_preserved(
     assert result.drv_hash == "old-drv"
 
 
-def test_deno_multi_platform_update_keeps_drv_hash_when_hashes_are_preserved(
+def test_deno_multi_platform_update_rejects_failed_foreign_hashes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Deno multi-platform failures must not certify preserved foreign hashes."""
+    """A failed foreign Deno probe must stop a same-version source update."""
 
     class _Deno(DenoDepsHashUpdater):
         name = "deno-hash"
@@ -2168,78 +2030,59 @@ def test_deno_multi_platform_update_keeps_drv_hash_when_hashes_are_preserved(
         async def fetch_latest(
             self, session: object, *, context: UpdateContext
         ) -> VersionInfo:
-            _ = context
-            _ = session
+            _ = (context, session)
             return VersionInfo(version="1.0.0", metadata={})
 
-    foreign_hash = "sha256-cvRBvHRuunNjF07c4GVHl5rRgoTn1qfI/HdJWtOV63M="
     current = _platform_entry(
-        drv_hash="old-drv",
-        hash_type="denoDepsHash",
-        hash_value=foreign_hash,
+        drv_hash="old-drv", hash_type="denoDepsHash", hash_value=HASH_A
     ).model_copy(update={"input": "deno-input"})
-    fingerprint_calls = 0
 
     async def _compute_drv_fingerprint(*_args: object, **_kwargs: object) -> str:
-        nonlocal fingerprint_calls
-        fingerprint_calls += 1
         return "new-drv"
 
-    async def _compute_deno_deps_hash(
+    async def _compute_deno_platform_hash(
         source: str,
         input_name: str,
-        *,
-        native_only: bool = False,
-        config: object | None = None,
-        emit: EventSink = ignore_event,
-    ) -> object:
-        _ = config
-        assert source == "deno-hash"
-        assert input_name == "deno-input"
-        assert native_only is False
-        await emit(
-            UpdateEvent.status(
-                "deno-hash",
-                "Warning: 1 platform(s) failed, preserved existing hashes for: x86_64-linux",
-                operation="compute_hash",
-                status=StatusInfo(kind=StatusKind.PARTIAL_HASHES, value="x86_64-linux"),
-            )
-        )
-        return PlatformHashResult(
-            hashes={
-                "aarch64-darwin": HASH_B,
-                "x86_64-linux": foreign_hash,
-            },
-            fully_computed=False,
-        )
+        platform_name: str,
+        **_kwargs: object,
+    ) -> tuple[str, str]:
+        assert (source, input_name) == ("deno-hash", "deno-input")
+        if platform_name == "x86_64-linux":
+            raise RuntimeError("remote builder unavailable")
+        return platform_name, HASH_B
 
     monkeypatch.setattr(
-        "lib.update.nix.compute_drv_fingerprint",
-        _compute_drv_fingerprint,
+        "lib.update.nix.compute_drv_fingerprint", _compute_drv_fingerprint
     )
     monkeypatch.setattr(
-        "lib.update.nix_deno.compute_deno_deps_hash",
-        _compute_deno_deps_hash,
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
     )
-
+    monkeypatch.setattr(
+        "lib.update.nix_deno.get_current_nix_platform", lambda: "aarch64-darwin"
+    )
+    monkeypatch.setattr(
+        "lib.update.nix_deno.sources_file_for", lambda _source: "unused-path"
+    )
+    monkeypatch.setattr("lib.update.nix_deno.load_source_entry", lambda _path: current)
+    monkeypatch.setattr(
+        "lib.update.nix_deno._compute_deno_deps_hash_for_platform",
+        _compute_deno_platform_hash,
+    )
     updater = _Deno(
-        config=resolve_config(
-            hash_build_platforms=("aarch64-darwin", "x86_64-linux"),
-        )
+        config=resolve_config(hash_build_platforms=("aarch64-darwin", "x86_64-linux"))
     )
-    events = asyncio.run(
-        _with_session(
-            lambda session: _collect_events(
-                lambda emit: updater.update_stream(current, session, emit=emit)
+    emitted: list[UpdateEvent] = []
+
+    async def _emit(event: UpdateEvent) -> None:
+        emitted.append(event)
+
+    with pytest.raises(RuntimeError, match="x86_64-linux: remote builder unavailable"):
+        asyncio.run(
+            _with_session(
+                lambda session: updater.update_stream(current, session, emit=_emit)
             )
         )
-    )
-
-    result_events = [event for event in events if event.kind == UpdateEventKind.RESULT]
-    assert len(result_events) == 1
-    result = expect_instance(result_events[0].payload, SourceEntry)
-    assert result.drv_hash == "old-drv"
-    assert fingerprint_calls == 1
+    assert not any(event.kind is UpdateEventKind.RESULT for event in emitted)
 
 
 def _deno_manifest_node() -> SimpleNamespace:

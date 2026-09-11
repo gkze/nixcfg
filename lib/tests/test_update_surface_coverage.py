@@ -35,6 +35,7 @@ def test_surface_alias_and_exemption_contracts() -> None:
     }
     assert {
         "codex-v8-native",
+        "fetch-cargo-vendor",
         "goose-cli-v8-native",
         "nix",
         "nix-direnv",

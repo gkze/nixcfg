@@ -4,6 +4,7 @@ import asyncio
 import json
 import subprocess
 from contextlib import nullcontext
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Protocol
@@ -26,7 +27,7 @@ from lib.update.cli_inventory import (
     _InventorySourceTarget,
     _InventoryTarget,
 )
-from lib.update.derivation_validation import DerivationValidation
+from lib.update.derivation_validation import DerivationValidation, validate_derivations
 from lib.update.persistence import UpdateValidationSnapshot, merge_source_updates
 from lib.update.refs import FlakeInputRef
 from lib.update.source_runner import UpdatePhaseResult
@@ -394,7 +395,10 @@ def test_run_updates_persists_before_derivation_validation_failure(
         "lib.update.persistence.planned_update_paths",
         lambda *_args, **_kwargs: (),
     )
-    monkeypatch.setattr("subprocess.run", _run_nix_eval)
+    monkeypatch.setattr(
+        "lib.update.derivation_validation.validate_derivations",
+        partial(validate_derivations, run=_run_nix_eval),
+    )
 
     exit_code = asyncio.run(run_updates(UpdateOptions(targets=("demo",))))
 
@@ -442,7 +446,9 @@ def test_run_updates_skips_derivation_validation_after_phase_errors(
         "lib.update.persistence.planned_update_paths",
         lambda *_args, **_kwargs: (),
     )
-    monkeypatch.setattr("subprocess.run", _unexpected_eval)
+    monkeypatch.setattr(
+        "lib.update.derivation_validation.validate_derivations", _unexpected_eval
+    )
 
     assert asyncio.run(run_updates(UpdateOptions(targets=("demo",)))) == 1
 
@@ -604,7 +610,10 @@ def test_run_updates_json_validation_failure_is_machine_readable(
         "lib.update.persistence.planned_update_paths",
         lambda *_args, **_kwargs: (),
     )
-    monkeypatch.setattr("subprocess.run", _failed_eval)
+    monkeypatch.setattr(
+        "lib.update.derivation_validation.validate_derivations",
+        partial(validate_derivations, run=_failed_eval),
+    )
 
     exit_code = asyncio.run(run_updates(UpdateOptions(targets=("demo",), json=True)))
 

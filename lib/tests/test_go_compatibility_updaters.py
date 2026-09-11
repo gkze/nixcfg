@@ -1,5 +1,6 @@
 """Behavioral tests for locked-release Go compatibility validation."""
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,7 +13,7 @@ from nix_manipulator.expressions.primitive import StringPrimitive
 from lib.nix.models.flake_lock import FlakeLockNode
 from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events, load_repo_module, run_async
-from lib.update import locked_source
+from lib.update import locked_source, runtime
 from lib.update.config import resolve_config
 from lib.update.flake import flake_source_path_expression
 from lib.update.nix_expr import identifier_attr_path
@@ -448,6 +449,53 @@ def test_selected_go_resolution_accepts_future_exact_package_contract(
     )
 
     assert run_async(updater._resolve_selected_go_version()) == "1.28.0"
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_selected_go_resolution_waits_for_workspace_and_evaluator(
+    monkeypatch: pytest.MonkeyPatch, *, failed: bool
+) -> None:
+    """Go toolchain discovery shares the same file stability and evaluation budget."""
+    updater = _updater(suffix=f"guarded_go_{failed}")
+    calls: list[list[str]] = []
+    stdout = "1.28.0\n"
+    stderr = "échec" if failed else ""
+
+    async def evaluate(args: list[str], **_kwargs: object) -> SimpleNamespace:
+        owner = runtime.active_runtime()
+        assert owner is not None
+        assert asyncio.current_task() in owner.workspace_reader_owners
+        assert owner.slots["eval"].locked()
+        calls.append(args)
+        return SimpleNamespace(returncode=int(failed), stdout=stdout, stderr=stderr)
+
+    monkeypatch.setattr("lib.update.updaters.go_compatibility.run_nix", evaluate)
+
+    async def run() -> None:
+        async with runtime.runtime_scope(updater.config) as owner:
+            async with runtime.resource_slot(
+                "eval", source="owner", config=updater.config
+            ):
+                async with runtime.workspace_access(write=True):
+                    pending = asyncio.create_task(
+                        updater._resolve_selected_go_version()
+                    )
+                    await asyncio.sleep(0)
+                    assert not calls
+                await asyncio.sleep(0)
+                assert not calls
+            if failed:
+                with pytest.raises(RuntimeError, match="échec"):
+                    await pending
+            else:
+                assert await pending == "1.28.0"
+            assert len(calls) == 1
+            timing = owner.timing(updater.name, "eval")
+            assert timing.stdout_bytes == len(stdout.encode())
+            assert timing.stderr_bytes == len(stderr.encode())
+            assert timing.nonzero_exits == int(failed)
+
+    run_async(run())
 
 
 @pytest.mark.parametrize("required", ["1.26.9", "1.27.4"])

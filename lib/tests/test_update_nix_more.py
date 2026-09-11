@@ -14,11 +14,9 @@ from lib.update.events import (
     ignore_event,
 )
 from lib.update.nix import (
-    _NIX_BUILD_SEMAPHORE_STATE,
     _emit_sri_hash_from_build_result,
     _extract_nix_hash,
     _FixedOutputBuildOptions,
-    _get_nix_build_semaphore,
     _is_retryable_fixed_output_hash_failure,
     _run_fixed_output_build,
     _tail_output_excerpt,
@@ -286,9 +284,6 @@ def test_run_fixed_output_build_and_compute_fixed_output_hash(
 
     # compute_fixed_output_hash end-to-end with mocked subflows
     monkeypatch.setattr(
-        "lib.update.nix._get_nix_build_semaphore", lambda _cfg: asyncio.Semaphore(1)
-    )
-    monkeypatch.setattr(
         "lib.update.nix._run_fixed_output_build",
         lambda *_args, **_kwargs: _build_failure(),
     )
@@ -314,9 +309,6 @@ def test_compute_fixed_output_hash_retries_transient_source_fetch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Retry source fetch flakes before extracting the fixed-output hash."""
-    monkeypatch.setattr(
-        "lib.update.nix._get_nix_build_semaphore", lambda _cfg: asyncio.Semaphore(1)
-    )
     attempts: list[int] = []
     sleep_delays: list[float] = []
 
@@ -373,9 +365,6 @@ def test_compute_fixed_output_hash_stops_after_transient_retry_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Surface the final fetch failure after the bounded retry budget."""
-    monkeypatch.setattr(
-        "lib.update.nix._get_nix_build_semaphore", lambda _cfg: asyncio.Semaphore(1)
-    )
     attempts: list[int] = []
     sleep_delays: list[float] = []
 
@@ -403,22 +392,6 @@ def test_compute_fixed_output_hash_stops_after_transient_retry_budget(
 
     assert len(attempts) == 3
     assert sleep_delays == [1.0, 1.0]
-
-
-def test_get_nix_build_semaphore_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Reuse semaphore by size and raise when semaphore cannot be created."""
-    cfg = resolve_config(max_nix_builds=2)
-    _NIX_BUILD_SEMAPHORE_STATE.semaphore = None
-    _NIX_BUILD_SEMAPHORE_STATE.size = None
-    first = _get_nix_build_semaphore(cfg)
-    second = _get_nix_build_semaphore(cfg)
-    assert first is second
-
-    monkeypatch.setattr("lib.update.nix.asyncio.Semaphore", lambda _n: None)
-    _NIX_BUILD_SEMAPHORE_STATE.semaphore = None
-    _NIX_BUILD_SEMAPHORE_STATE.size = None
-    with pytest.raises(RuntimeError, match="failed to initialize"):
-        _get_nix_build_semaphore(cfg)
 
 
 def test_compute_overlay_hash_embeds_fake_hash_context(

@@ -157,6 +157,43 @@ def test_fetch_jsr_bytes_retries_transient_failures(
     assert sleeps == [0.5]
 
 
+def test_jsr_package_metadata_is_shared_across_versions_only_within_one_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Multiple locked versions get one coherent mutable package-meta document."""
+    fetched: list[str] = []
+
+    async def fetch(_client: object, url: str, *, context: str) -> bytes:
+        _ = context
+        fetched.append(url)
+        return b'{"manifest": {}}' if "_meta.json" in url else b"{}"
+
+    monkeypatch.setattr(deno_lock, "_fetch_jsr_bytes", fetch)
+
+    async def resolve() -> list[deno_lock.JsrPackage]:
+        metadata: dict[str, asyncio.Task[bytes]] = {}
+        return list(
+            await asyncio.gather(
+                *(
+                    deno_lock._resolve_jsr_package(
+                        object(),
+                        f"@scope/pkg@{version}",
+                        {"integrity": "sha256-value"},
+                        package_metadata=metadata,
+                    )
+                    for version in ("1.0.0", "2.0.0")
+                )
+            )
+        )
+
+    packages = asyncio.run(resolve())
+    assert len(packages) == 2
+    assert fetched.count("https://jsr.io/@scope/pkg/meta.json") == 1
+    assert len(fetched) == 3
+    asyncio.run(resolve())
+    assert fetched.count("https://jsr.io/@scope/pkg/meta.json") == 2
+
+
 def test_resolve_all_jsr_and_npm_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """Resolve package collections and surface per-package failures."""
 
@@ -176,8 +213,10 @@ def test_resolve_all_jsr_and_npm_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         _client: object,
         pkg_key: str,
         pkg_info: dict[str, object],
+        *,
+        package_metadata: dict[str, asyncio.Task[bytes]],
     ) -> deno_lock.JsrPackage:
-        _ = pkg_info
+        _ = (pkg_info, package_metadata)
         if pkg_key == "bad":
             msg = "boom"
             raise RuntimeError(msg)

@@ -1,7 +1,6 @@
 """CLI entry point for update workflows."""
 
 import asyncio
-import contextlib
 import json
 import os
 import shutil
@@ -12,10 +11,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Unpack, cast
 
+import click
 import typer
 from rich.console import Console
+from rich.text import Text
+from typer import _click as typer_click
 
 from lib.cli import HELP_CONTEXT_SETTINGS
+from lib.diagnostics import redact_urls
 from lib.nix.models.sources import SourcesFile
 from lib.update import derivation_validation as update_derivation_validation
 from lib.update import flake as update_flake
@@ -40,12 +43,15 @@ from lib.update.config import (
     resolve_config,
 )
 from lib.update.constants import ALL_TOOLS, NIX_BUILD_FAILURE_TAIL_LINES, REQUIRED_TOOLS
+from lib.update.errors import format_exception
+from lib.update.event_queue import EVENT_QUEUE_SIZE, run_event_pipeline
 from lib.update.outcomes import SummaryStatus, merge_statuses
 from lib.update.paths import get_repo_root
 from lib.update.refs import (
     FlakeInputRef,
     get_flake_inputs_with_refs,
 )
+from lib.update.runtime import active_runtime, runtime_scope
 from lib.update.sources import load_all_sources
 from lib.update.ui_consumer import ConsumeEventsOptions, consume_events
 from lib.update.ui_state import ItemMeta, OperationKind
@@ -78,6 +84,7 @@ _TRAILING_TARGET_FLAG_OPTIONS: dict[str, tuple[str, bool]] = {
     "-s": ("schema", True),
     "--validate": ("validate", True),
     "-v": ("validate", True),
+    "--timings": ("timings", True),
     "--verbose": ("verbose", True),
     "-V": ("verbose", True),
     "--zellij-guard": ("zellij_guard", True),
@@ -565,6 +572,7 @@ class OutputOptions:
 
     json_output: bool = False
     quiet: bool = False
+    timings: bool = False
     _console: Console | None = field(default=None, repr=False, init=False)
     _err_console: Console | None = field(default=None, repr=False, init=False)
 
@@ -603,12 +611,12 @@ class OutputOptions:
         """Print a message unless quiet or json mode is enabled."""
         if not self.quiet and not self.json_output:
             target = self.err_console if stderr else self.console
-            target.print(message, style=style)
+            target.print(redact_urls(message), style=style)
 
     def print_error(self, message: str) -> None:
         """Print an error message to stderr when not in json mode."""
         if not self.json_output:
-            self.err_console.print(message, style="red")
+            self.err_console.print(redact_urls(message), style="red")
 
 
 _ORIGIN_FLAKE_ONLY = "(flake.nix)"
@@ -640,9 +648,9 @@ class UpdateSummary:
     def to_dict(self) -> dict[str, list[str] | bool]:
         """Return the stable JSON summary projection."""
         return {
-            "updated": self.updated,
-            "errors": self.errors,
-            "noChange": self.no_change,
+            "updated": [redact_urls(name) for name in self.updated],
+            "errors": [redact_urls(name) for name in self.errors],
+            "noChange": [redact_urls(name) for name in self.no_change],
             "success": not self.errors,
         }
 
@@ -977,13 +985,14 @@ async def _execute_run_plan_result(
 ) -> _RunExecutionResult:
     # Every plan runs in a disposable workspace. ``resolved.dry_run`` controls
     # reporting and live promotion, not whether the candidate is materialized.
-    queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+    queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue(maxsize=EVENT_QUEUE_SIZE)
     is_tty = plan.tty_enabled and not opts.quiet and not opts.json
     full_output = _resolve_full_output(
         full_output=True if opts.tty == "full" else None,
     )
-    consumer = asyncio.create_task(
-        consume_events(
+
+    async def consume() -> None:
+        await consume_events(
             queue,
             plan.order,
             plan.sources,
@@ -997,11 +1006,10 @@ async def _execute_run_plan_result(
                 build_failure_tail_lines=NIX_BUILD_FAILURE_TAIL_LINES,
                 quiet=opts.quiet or opts.json,
             ),
-        ),
-    )
+        )
 
-    phase_result = update_source_runner.UpdatePhaseResult()
-    try:
+    async def produce() -> update_source_runner.UpdatePhaseResult:
+        phase_result = update_source_runner.UpdatePhaseResult()
         if plan.resolved.do_refs and plan.resolved.ref_inputs:
             if plan.show_phase_headers:
                 out.print("\nPhase 1: flake input refs", style="dim")
@@ -1028,23 +1036,18 @@ async def _execute_run_plan_result(
             )
             phase_result = phase_result.merged(source_result)
 
-        await queue.put(None)
-        await consumer
+        return phase_result
 
-        written_paths = update_persistence.persist_materialized_updates(
-            do_sources=plan.resolved.do_sources,
-            source_names=plan.resolved.source_names,
-            native_only=plan.resolved.native_only,
-            sources=plan.sources,
-            source_updates=phase_result.source_updates,
-            artifact_updates=phase_result.artifact_updates,
-            details=phase_result.details,
-        )
-    except BaseException:
-        await queue.put(None)
-        with contextlib.suppress(BaseException):
-            await consumer
-        raise
+    phase_result = await run_event_pipeline(queue, produce=produce, consume=consume)
+    written_paths = update_persistence.persist_materialized_updates(
+        do_sources=plan.resolved.do_sources,
+        source_names=plan.resolved.source_names,
+        native_only=plan.resolved.native_only,
+        sources=plan.sources,
+        source_updates=phase_result.source_updates,
+        artifact_updates=phase_result.artifact_updates,
+        details=phase_result.details,
+    )
 
     summary = UpdateSummary()
     summary.accumulate(phase_result.details)
@@ -1143,29 +1146,51 @@ def _emit_run_outcome(
         else ()
     )
     candidate_state_known = not dry_run and outcome.promotion_state is not None
+    runtime = active_runtime()
+    timings = runtime.report() if out.timings and runtime is not None else None
     if out.json_output:
         payload = cast("dict[str, object]", outcome.summary.to_dict())
+        if timings is not None:
+            payload["timings"] = timings
         payload["success"] = not outcome.had_errors
         if discarded_updates:
-            payload["candidateUpdatesDiscarded"] = list(discarded_updates)
+            payload["candidateUpdatesDiscarded"] = [
+                redact_urls(name) for name in discarded_updates
+            ]
             payload["updated"] = []
         elif indeterminate_updates:
-            payload["candidateUpdatesIndeterminate"] = list(indeterminate_updates)
+            payload["candidateUpdatesIndeterminate"] = [
+                redact_urls(name) for name in indeterminate_updates
+            ]
             payload["updated"] = []
         if candidate_state_known:
             payload["candidatePromotionState"] = outcome.promotion_state.value
         if plan_error is not None:
             payload.update({
-                "unknownTargets": list(plan_error.unknown_targets),
-                "availableTargets": list(plan_error.available_targets),
+                "unknownTargets": [
+                    redact_urls(name) for name in plan_error.unknown_targets
+                ],
+                "availableTargets": [
+                    redact_urls(name) for name in plan_error.available_targets
+                ],
             })
             error_key = "planError" if workspace_error is not None else "error"
-            payload[error_key] = plan_error.message
+            payload[error_key] = redact_urls(plan_error.message)
         if workspace_error is not None:
-            payload["error"] = workspace_error
+            payload["error"] = redact_urls(workspace_error)
         sys.stdout.write(f"{json.dumps(payload)}\n")
         return 1 if outcome.had_errors else 0
 
+    if timings is not None:
+        out.print(
+            "\nOperation timings (active seconds / waiting seconds):", style="dim"
+        )
+        for row in timings:
+            out.print(
+                f"{row['source']} {row['operation']}: "
+                f"{row['elapsed_seconds']:.3f} / {row['wait_seconds']:.3f} "
+                f"({row['count']} operations, {row['cache_hits']} cache hits)"
+            )
     if plan_error is not None:
         out.print_error(f"Error: {plan_error.message}")
         out.print_error(
@@ -1185,6 +1210,22 @@ def _emit_run_outcome(
     )
 
 
+def _validation_progress_output(
+    opts: UpdateOptions, out: OutputOptions, source: str
+) -> update_derivation_validation.ValidationProgress | None:
+    """Keep streamed validation text out of quiet and machine-readable output."""
+    if not opts.verbose or out.quiet or out.json_output:
+        return None
+
+    def progress(message: str) -> None:
+        line = Text(f"[{source}] ")
+        line.append_text(Text.from_ansi(redact_urls(message).replace("\r", "")))
+        out.console.print(line, soft_wrap=True)
+        out.console.file.flush()
+
+    return progress
+
+
 def _validate_run_snapshot(
     plan: _RunPlan | _RunPlanError | None,
     snapshot: update_persistence.UpdateValidationSnapshot,
@@ -1192,40 +1233,89 @@ def _validate_run_snapshot(
     opts: UpdateOptions,
     out: OutputOptions,
     config: UpdateConfig,
+    *,
+    check_cancelled: update_derivation_validation.ValidationCancellationCheck,
 ) -> bool:
     """Validate packages and root closures against the same captured source tree."""
-    if isinstance(plan, _RunPlan) and _record_derivation_validation_failures(
-        summary,
-        out,
-        update_derivation_validation.validate_derivations(
-            plan.order,
-            updaters=_get_updaters(),
-            flake_root=snapshot.root,
-            timeout=config.default_subprocess_timeout,
-            all_declared_systems=True,
-        ),
-    ):
-        return True
-    return _requires_root_closure_validation(
-        opts, snapshot.changed_paths
-    ) and _record_derivation_validation_failures(
+    if isinstance(plan, _RunPlan):
+        out.print("\nPhase 3: derivation validation", style="dim")
+        if _record_derivation_validation_failures(
+            summary,
+            out,
+            update_derivation_validation.validate_derivations(
+                plan.order,
+                updaters=_get_updaters(),
+                flake_root=snapshot.root,
+                timeout=config.default_subprocess_timeout,
+                all_declared_systems=True,
+                progress=_validation_progress_output(opts, out, "derivations"),
+                check_cancelled=check_cancelled,
+            ),
+        ):
+            return True
+    if not _requires_root_closure_validation(opts, snapshot.changed_paths):
+        return False
+    out.print("\nPhase 4: root closure builds", style="dim")
+    return _record_derivation_validation_failures(
         summary,
         out,
         update_derivation_validation.validate_root_closures(
             flake_root=snapshot.root,
             timeout=config.subprocess_timeout_override,
+            progress=_validation_progress_output(opts, out, "root-closures"),
+            check_cancelled=check_cancelled,
         ),
     )
 
 
-async def run_updates(
+def _update_cancellation_check() -> (
+    update_derivation_validation.ValidationCancellationCheck
+):
+    """Capture the async owner before entering synchronous validation."""
+    owning_task = asyncio.current_task()
+
+    def check_cancelled() -> None:
+        if owning_task is not None and owning_task.cancelling():
+            raise asyncio.CancelledError
+
+    return check_cancelled
+
+
+async def _validate_run_snapshot_for_task(
+    workspace: update_persistence.IsolatedUpdateWorkspace,
+    plan: _RunPlan | _RunPlanError | None,
+    summary: UpdateSummary,
+    opts: UpdateOptions,
+    out: OutputOptions,
+    config: UpdateConfig,
+    check_cancelled: update_derivation_validation.ValidationCancellationCheck,
+) -> bool:
+    """Finish cancellation and snapshot cleanup before promotion can begin."""
+    check_cancelled()
+    with workspace.validation_snapshot() as snapshot:
+        had_errors = _validate_run_snapshot(
+            plan,
+            snapshot,
+            summary,
+            opts,
+            out,
+            config,
+            check_cancelled=check_cancelled,
+        )
+    await asyncio.sleep(0)
+    check_cancelled()
+    return had_errors
+
+
+async def _run_updates(
     opts: UpdateOptions,
     *,
     check_tools: bool = False,
 ) -> int:
     """Core update workflow — accepts typed UpdateOptions, returns exit code."""
-    out = OutputOptions(json_output=opts.json, quiet=opts.quiet)
+    out = OutputOptions(json_output=opts.json, quiet=opts.quiet, timings=opts.timings)
     config = _resolve_runtime_config(opts)
+    check_cancelled = _update_cancellation_check()
 
     preflight_result = _handle_preflight_requests(opts, out)
     if preflight_result is not None:
@@ -1290,10 +1380,15 @@ async def run_updates(
                     explicit_phase_outputs,
                 )
             if not outcome.had_errors:
-                with workspace.validation_snapshot() as snapshot:
-                    outcome.had_errors = _validate_run_snapshot(
-                        run_plan, snapshot, outcome.summary, opts, out, config
-                    )
+                outcome.had_errors = await _validate_run_snapshot_for_task(
+                    workspace,
+                    run_plan,
+                    outcome.summary,
+                    opts,
+                    out,
+                    config,
+                    check_cancelled,
+                )
                 if not outcome.had_errors:
                     if opts.check:
                         workspace.validate_changes(allowed_paths)
@@ -1310,6 +1405,12 @@ async def run_updates(
         out=out,
         dry_run=opts.check,
     )
+
+
+async def run_updates(opts: UpdateOptions, *, check_tools: bool = False) -> int:
+    """Own shared resources through preparation, validation, and final reporting."""
+    async with runtime_scope(_resolve_runtime_config(opts)):
+        return await _run_updates(opts, check_tools=check_tools)
 
 
 def run_update_command(
@@ -1344,7 +1445,7 @@ app = typer.Typer(
 
 
 @app.callback(invoke_without_command=True)
-def cli(
+def cli(  # noqa: PLR0913 -- Typer requires an explicit parameter for each public option
     targets: Annotated[
         list[str] | None,
         typer.Argument(help="Sources or flake inputs to update (default: all)."),
@@ -1464,6 +1565,13 @@ def cli(
             ),
         ),
     ] = None,
+    timings: Annotated[
+        bool,
+        typer.Option(
+            "--timings",
+            help="Report per-operation active time, wait time, and cache reuse.",
+        ),
+    ] = False,
     tty: Annotated[
         UpdateTTYMode,
         typer.Option("--tty", "-t", help="TTY rendering mode."),
@@ -1491,7 +1599,25 @@ def cli(
 ) -> None:
     """Update source versions/hashes and flake input refs."""
     values = dict(locals())
-    normalized_targets, trailing_options = _split_trailing_target_options(targets)
-    values["targets"] = normalized_targets
-    values.update(trailing_options)
-    raise typer.Exit(code=run_update_command(**cast("UpdateOptionsKwargs", values)))
+    try:
+        normalized_targets, trailing_options = _split_trailing_target_options(targets)
+        values["targets"] = normalized_targets
+        values.update(trailing_options)
+        exit_code = run_update_command(**cast("UpdateOptionsKwargs", values))
+    except (
+        click.ClickException,
+        click.exceptions.Exit,
+        click.Abort,
+        typer_click.ClickException,
+        typer.Exit,
+        typer.Abort,
+    ):
+        raise
+    except Exception as error:  # noqa: BLE001 -- CLI errors must cross the redaction boundary
+        message = format_exception(error, include_traceback=bool(values["verbose"]))
+        if values["json_output"]:
+            sys.stdout.write(f"{json.dumps({'success': False, 'error': message})}\n")
+        else:
+            OutputOptions().print_error(message)
+        exit_code = 1
+    raise typer.Exit(code=exit_code)

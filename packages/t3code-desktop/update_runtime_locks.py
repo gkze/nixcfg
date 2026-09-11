@@ -46,7 +46,9 @@ def _run(
         raise UpdateRuntimeLocksError(msg) from exc
 
 
-def _refresh_bun_lockfile(workspace: Path) -> None:
+def _refresh_bun_lockfile(
+    workspace: Path, *, package_cache: Path | None = None
+) -> None:
     """Run Bun in isolated XDG directories to refresh the workspace lockfile."""
     with (
         tempfile.TemporaryDirectory(prefix="t3code-bun-lock-home.") as home_dir,
@@ -61,6 +63,7 @@ def _refresh_bun_lockfile(workspace: Path) -> None:
             "XDG_CONFIG_HOME": config_dir,
             "XDG_DATA_HOME": data_dir,
             "XDG_STATE_HOME": state_dir,
+            "BUN_INSTALL_CACHE_DIR": str(package_cache or Path(cache_dir) / "bun"),
         }
         _run(
             [
@@ -141,6 +144,7 @@ def _refresh_lock(
     electron_builder_version: str | None = None,
     commit_hash: str | None = None,
     server_only: bool = False,
+    package_cache: Path | None = None,
 ) -> None:
     """Refresh one runtime lockfile from the rendered manifest."""
     with tempfile.TemporaryDirectory(prefix="t3code-runtime-lock.") as tmpdir_str:
@@ -154,7 +158,7 @@ def _refresh_lock(
         )
         _stage_runtime_workspace_dirs(workspace)
         shutil.copy2(lock_file, workspace / "bun.lock")
-        _refresh_bun_lockfile(workspace)
+        _refresh_bun_lockfile(workspace, package_cache=package_cache)
         shutil.copy2(workspace / "bun.lock", lock_file)
 
 
@@ -163,17 +167,22 @@ def main() -> int:
     repo_root = Path.cwd()
     try:
         _ensure_repo_root(repo_root)
-        _refresh_lock(
-            repo_root,
-            repo_root / "packages" / "t3code" / "bun.lock",
-            server_only=True,
-        )
-        _refresh_lock(
-            repo_root,
-            repo_root / "packages" / "t3code-desktop" / "bun.lock",
-            electron_builder_version=ELECTRON_BUILDER_VERSION,
-            commit_hash=T3CODE_COMMIT_HASH,
-        )
+        # Share downloads for this coherent pair only. A later invocation must
+        # refresh mutable registry metadata instead of trusting a durable cache.
+        with tempfile.TemporaryDirectory(prefix="t3code-bun-lock-payloads.") as cache:
+            _refresh_lock(
+                repo_root,
+                repo_root / "packages" / "t3code" / "bun.lock",
+                server_only=True,
+                package_cache=Path(cache),
+            )
+            _refresh_lock(
+                repo_root,
+                repo_root / "packages" / "t3code-desktop" / "bun.lock",
+                electron_builder_version=ELECTRON_BUILDER_VERSION,
+                commit_hash=T3CODE_COMMIT_HASH,
+                package_cache=Path(cache),
+            )
     except UpdateRuntimeLocksError as exc:
         sys.stderr.write(f"{exc}\n")
         return 1

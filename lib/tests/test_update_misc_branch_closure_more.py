@@ -96,8 +96,10 @@ def test_run_command_timeout_override_and_empty_sanitized_line(
         *,
         timeout: float,
         env: object,
+        output_limit: int | None,
     ) -> AsyncIterator[ProcessLine | ProcessDone]:
         _ = env
+        assert output_limit is None
         captured["timeout"] = timeout
         yield ProcessLine("stdout", "\x1b[31m\x1b[0m\n")
         yield ProcessDone(

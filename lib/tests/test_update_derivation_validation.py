@@ -1076,3 +1076,63 @@ def test_failed_build_batch_attributes_individual_timeouts(tmp_path: Path) -> No
     assert len(calls) == 3
     assert [failure.source for failure in failures] == ["b"]
     assert "timed out after 3 seconds" in failures[0].message
+
+
+@pytest.mark.parametrize("failed_index", [0, 25, None])
+def test_sparse_validation_failure_avoids_full_individual_fallback(
+    tmp_path: Path, failed_index: int | None
+) -> None:
+    """Subdivision preserves attribution while skipping healthy large subsets."""
+    requests = [
+        DerivationValidationRequest(
+            str(index), f".#checks.system.target{index}", mode="build"
+        )
+        for index in range(26)
+    ]
+    calls: list[tuple[str, ...]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        targets = tuple(arg.split("#", 1)[1] for arg in args if "#" in arg)
+        calls.append(targets)
+        broken = f"checks.system.target{failed_index}" in targets
+        # A transient aggregate failure may disappear when both halves pass.
+        failed = broken or len(calls) == 1
+        return subprocess.CompletedProcess(
+            args, int(failed), stdout="", stderr="broken member" if failed else ""
+        )
+
+    failures = validation.validate_derivation_requests(
+        requests, flake_root=tmp_path, run=run
+    )
+    assert [failure.source for failure in failures] == (
+        [] if failed_index is None else [str(failed_index)]
+    )
+    assert len(calls) <= 11
+    assert set().union(*map(set, calls[1:])) == {
+        f"checks.system.target{i}" for i in range(26)
+    }
+
+
+def test_systemic_validation_failure_bounds_subdivision(tmp_path: Path) -> None:
+    """Widespread failure stops subdivision and retains every target diagnostic."""
+    requests = [
+        DerivationValidationRequest(
+            str(index), f".#checks.system.target{index}", mode="build"
+        )
+        for index in range(26)
+    ]
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(
+            args, 1, stdout="", stderr="invalid dependency"
+        )
+
+    failures = validation.validate_derivation_requests(
+        requests, flake_root=tmp_path, run=run
+    )
+    assert [failure.source for failure in failures] == [
+        str(index) for index in range(26)
+    ]
+    assert len(calls) == 29

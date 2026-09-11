@@ -1,5 +1,5 @@
 {
-  "commit": "960255b98ce3dccdcb5754eb67a7f989236602a1",
+  "commit": "a4aa07f9ee3fdeb5716a26a368246ea1ef9e0b78",
   "electronVersion": "41.7.0",
   "hashes": [
     {
@@ -7,9 +7,9 @@
       "hashType": "npmDepsHash"
     },
     {
-      "hash": "sha256-KbbREkK7RnUlf+RekN0qRorsGxuIhmhOKuHWIzsXy1o=",
+      "hash": "sha256-X/6LQcPfy/leY53+hFLLgxk3Xss5cfnAIozkWtxTCXY=",
       "hashType": "srcHash"
     }
   ],
-  "version": "0.42.0"
+  "version": "0.42.1"
 }

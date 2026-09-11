@@ -238,6 +238,8 @@ async def _resolve_jsr_package(
     client: aiohttp.ClientSession,
     pkg_key: str,
     pkg_info: dict[str, object],
+    *,
+    package_metadata: dict[str, asyncio.Task[bytes]] | None = None,
 ) -> JsrPackage:
     """Resolve a single JSR package into its files."""
     # pkg_key is like "@cliffy/ansi@1.0.0-rc.8"
@@ -283,11 +285,23 @@ async def _resolve_jsr_package(
         f"/{scope}/{name}/{version}_meta.json": version_meta.payload,
     }
     meta_url = f"{JSR_REGISTRY}/{scope}/{name}/meta.json"
-    meta_documents[f"/{scope}/{name}/meta.json"] = await _fetch_jsr_bytes(
-        client,
-        meta_url,
-        context=f"JSR package metadata for {scope}/{name}",
-    )
+
+    async def fetch_metadata() -> bytes:
+        return await _fetch_jsr_bytes(
+            client,
+            meta_url,
+            context=f"JSR package metadata for {scope}/{name}",
+        )
+
+    if package_metadata is None:
+        metadata = await fetch_metadata()
+    else:
+        # The unversioned document is mutable: share only within this one
+        # manifest resolution, including across versions of the same package.
+        if meta_url not in package_metadata:
+            package_metadata[meta_url] = asyncio.create_task(fetch_metadata())
+        metadata = await package_metadata[meta_url]
+    meta_documents[f"/{scope}/{name}/meta.json"] = metadata
 
     for meta_path, meta_content in meta_documents.items():
         resolved_meta_url = f"{JSR_REGISTRY}{meta_path}"
@@ -324,8 +338,13 @@ async def _resolve_all_jsr(
 
     timeout = aiohttp.ClientTimeout(total=30.0)
     async with aiohttp.ClientSession(timeout=timeout) as client:
+        package_metadata: dict[str, asyncio.Task[bytes]] = {}
         tasks = [
-            _with_sem(_resolve_jsr_package(client, pkg_key, pkg_info))
+            _with_sem(
+                _resolve_jsr_package(
+                    client, pkg_key, pkg_info, package_metadata=package_metadata
+                )
+            )
             for pkg_key, pkg_info in lock_jsr.items()
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)

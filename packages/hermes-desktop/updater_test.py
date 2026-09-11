@@ -151,7 +151,7 @@ export async function checkUpdates(): Promise<DesktopUpdateStatus | null> {
   try {
     const status = await bridge.check()
     $updateStatus.set(status)
-    maybeNotifyUpdateAvailable(status)
+    maybeNotifyUpdateAvailable(status, 'client')
     void refreshDesktopVersion()
 
     return status
@@ -345,6 +345,7 @@ for (const [name, text] of Object.entries(sources)) {
   const kind = name.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
   const source = ts.createSourceFile(name, text, ts.ScriptTarget.Latest, true, kind);
   const callbacks = {};
+  const callArguments = {};
   const callHandlers = {};
   const conditionalConditions = [];
   const functionStatements = {};
@@ -369,6 +370,7 @@ for (const [name, text] of Object.entries(sources)) {
     }
     if (ts.isCallExpression(node)) {
       const callee = node.expression.getText(source);
+      (callArguments[callee] ??= []).push(node.arguments.map((argument) => argument.getText(source)));
       for (const argument of node.arguments) {
         if ((ts.isArrowFunction(argument) || ts.isFunctionExpression(argument)) && ts.isBlock(argument.body)) {
           (callbacks[callee] ??= []).push(statements(argument.body));
@@ -424,6 +426,7 @@ for (const [name, text] of Object.entries(sources)) {
   visit(source);
   output[name] = {
     callbacks,
+    callArguments,
     callHandlers,
     conditionalConditions,
     diagnostics: source.parseDiagnostics.map((diagnostic) =>
@@ -683,6 +686,10 @@ def test_nix_policy_patch_pins_the_client_runtime_and_self_update(
     update_conditions = cast("list[str]", updates["conditionalConditions"])
 
     assert update_variables["NIX_MANAGED_CLIENT"] == "import.meta.env.PROD"
+    update_calls = cast("dict[str, list[list[str]]]", updates["callArguments"])
+    assert update_calls["maybeNotifyUpdateAvailable"] == [
+        ["effectiveStatus", "'client'"]
+    ]
     assert "NIX_MANAGED_CLIENT" in update_conditions
     managed_status = next(
         item for item in update_objects if item.get("reason") == "'nix-managed'"

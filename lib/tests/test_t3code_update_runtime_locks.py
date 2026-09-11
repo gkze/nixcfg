@@ -167,6 +167,41 @@ def test_refresh_lock_renders_manifest_and_runs_bun(
     assert lock_file.read_text(encoding="utf-8") == "original lock\n"
 
 
+def test_pair_uses_one_disposable_bun_cache_without_reusing_caller_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Both locks share downloads, while subsequent runs refresh registry state."""
+    module = _load_module()
+    _write_repo_layout(tmp_path)
+    for name in ("t3code", "t3code-desktop"):
+        (tmp_path / "packages" / name / "bun.lock").write_text("lock", encoding="utf-8")
+    caches: list[Path] = []
+    homes: list[str] = []
+
+    def run(command: list[str], *, cwd=None, env=None) -> None:
+        _ = cwd
+        if "--output" in command:
+            Path(command[command.index("--output") + 1]).write_text(
+                '{"name":"runtime"}', encoding="utf-8"
+            )
+        else:
+            cache = Path(env["BUN_INSTALL_CACHE_DIR"])
+            assert cache.is_dir()
+            caches.append(cache)
+            homes.append(env["HOME"])
+
+    monkeypatch.setattr(module.Path, "cwd", classmethod(lambda cls: tmp_path))
+    monkeypatch.setenv("BUN_INSTALL_CACHE_DIR", "caller-cache-must-not-be-used")
+    monkeypatch.setattr(module, "_run", run)
+    assert module.main() == 0
+    assert module.main() == 0
+    assert caches[0] == caches[1]
+    assert caches[2] == caches[3]
+    assert caches[0] != caches[2]
+    assert len(set(homes)) == 4
+    assert all(not path.exists() for path in caches)
+
+
 def test_stage_runtime_workspace_dirs_copies_declared_packages(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

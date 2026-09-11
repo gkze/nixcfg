@@ -3523,7 +3523,7 @@ def test_george_config_manages_mutable_gui_apps_via_scoped_applications() -> Non
         "slack": "pkgs.slack",
         "ghostty": "pkgs.ghostty-tip",
         "zed": "pkgs.zed-editor-nightly",
-        "zen-twilight": "pkgs.zen-twilight",
+        "zen-twilight": "config.nixcfg.zen.finalPackage",
         "code-cursor": "pkgs.code-cursor",
         "vscode-insiders": "pkgs.vscode-insiders",
         "superset": "pkgs.superset",

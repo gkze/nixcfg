@@ -254,7 +254,7 @@
     }
   },
   "source": {
-    "cargoNixSha256": "9ab39943cc6936b9a86c7c94de3cc53c098d0f9a0ba28a56a94b6fe2f180ef54",
+    "cargoNixSha256": "cd9c2e4f504d58918de1ce21cbfd273ad102f6b2b0a37b92bdf79288a7a68258",
     "input": "gitbutler",
     "narHash": "sha256-nW3yCbpbIhawLQVV+DptzGYiFBSKcyAP89NtDWHJM+0=",
     "subdir": "."

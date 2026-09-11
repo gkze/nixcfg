@@ -67,14 +67,6 @@ let
     export SLACK_MCP_ADD_MESSAGE_TOOL=true
     exec ${remoteWrapper.bunxExe} --bun ${runtimeSpec "slack-mcp-server"} --transport stdio
   '';
-  twilight = lib.attrByPath [
-    "nixcfg"
-    "macApps"
-    "resolved"
-    "zen-twilight"
-    "path"
-  ] "/Applications/Twilight.app" config;
-
   baseServers = {
     aws-knowledge = remote "https://knowledge-mcp.global.api.aws";
     aws-mcp = local [
@@ -92,8 +84,12 @@ let
     firefox-devtools = local [
       "npx"
       "-y"
-      (runtimeSpec "@padenot/firefox-devtools-mcp")
-      "--firefoxPath=${twilight}/Contents/MacOS/zen"
+      (runtimeSpec "@mozilla/firefox-devtools-mcp")
+      "--connect-existing"
+      "--marionette-port"
+      (toString config.nixcfg.zen.remoteDebugging.marionette.port)
+      "--tool-preset"
+      "developer"
     ];
     macos-automator = local [
       "bunx"

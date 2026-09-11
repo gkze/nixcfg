@@ -8,10 +8,10 @@ import pytest
 
 from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import SourceEntry
+from lib.tests._prepared_probe_boundary import install_prepared_probe_boundary
 from lib.tests._updater_helpers import collect_events
 from lib.update.config import resolve_config
 from lib.update.events import EventSink, UpdateEvent, ignore_event
-from lib.update.platform_hashes import PlatformHashResult
 from lib.update.updaters import (
     ChecksumProvidedUpdater,
     DenoDepsHashUpdater,
@@ -31,6 +31,11 @@ if TYPE_CHECKING:
 
     class _TypingOnlyValue:
         """A type intentionally unavailable to runtime annotation evaluation."""
+
+
+@pytest.fixture(autouse=True)
+def _prepared_probe_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_prepared_probe_boundary(monkeypatch)
 
 
 HASH_A = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -399,7 +404,7 @@ def test_deno_deps_default_compute_returns_platform_entries(
     ) -> object:
         _ = (input_name, native_only, config)
         await emit(UpdateEvent.status(source_name, "deno-hash"))
-        return PlatformHashResult(hashes={"x86_64-linux": HASH_A}, fully_computed=True)
+        return {"x86_64-linux": HASH_A}
 
     monkeypatch.setattr("lib.update.nix_deno.compute_deno_deps_hash", _compute_deno)
 
@@ -443,9 +448,7 @@ def test_deno_native_only_single_platform_status_keeps_full_hash_context(
         _ = (input_name, config)
         assert native_only is True
         await emit(UpdateEvent.status(source_name, "hashing", operation="compute_hash"))
-        return PlatformHashResult(
-            hashes={"aarch64-darwin": HASH_A}, fully_computed=True
-        )
+        return {"aarch64-darwin": HASH_A}
 
     monkeypatch.setattr("lib.update.nix_deno.compute_deno_deps_hash", _compute_deno)
     monkeypatch.setattr(

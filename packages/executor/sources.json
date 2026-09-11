@@ -1,5 +1,5 @@
 {
-  "commit": "fff7ed68553c9d249966103b74c7ed4218fe45b1",
+  "commit": "2dc399e51094fccd2a45103a38d77179c6d648ff",
   "electronVersion": "41.2.1",
   "hashes": [
     {
@@ -8,7 +8,7 @@
       "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.3.11/bun-darwin-aarch64.zip"
     },
     {
-      "hash": "sha256-5ldK8OyfSgOEiCYhNm+Jcc8DPMEmvtDKCWHj+Dx2E/4=",
+      "hash": "sha256-+D0TLhNyTcXLYF4TrA+pU6RZalCTz0DNFZttw05WE20=",
       "hashType": "srcHash"
     }
   ],
@@ -22,5 +22,5 @@
     "libsql@0.5.29": "source:patches/libsql@0.5.29.patch",
     "postgres@3.4.9": "source:patches/postgres@3.4.9.patch"
   },
-  "version": "1.6.7"
+  "version": "1.6.8"
 }

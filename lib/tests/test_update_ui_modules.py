@@ -867,6 +867,23 @@ def test_renderer_detail_append_and_tty_logging_paths(
     renderer.finalize()
 
 
+@pytest.mark.parametrize("verbose", [False, True])
+def test_renderer_flushes_progress_to_pipes(
+    monkeypatch: pytest.MonkeyPatch, *, verbose: bool
+) -> None:
+    """Progress reaches a buffered pipe before the update process finishes."""
+    output = io.BytesIO()
+    stream = io.TextIOWrapper(output, encoding="utf-8")
+    monkeypatch.setattr(ui_render_module.sys, "stdout", stream)
+    renderer = Renderer({}, [], is_tty=False, render_interval=0.1, verbose=verbose)
+    if verbose:
+        renderer.log_line("demo", "fetching archive")
+    else:
+        renderer.log("demo", "updated")
+    expected = "fetching archive" if verbose else "updated"
+    assert output.getvalue().decode() == f"[demo] {expected}\n"
+
+
 def test_renderer_non_tty_output_and_quiet(capsys: pytest.CaptureFixture[str]) -> None:
     """Run this test case."""
     item = _item()
@@ -1883,26 +1900,3 @@ def test_event_consumer_schedules_one_delayed_render_for_pending_tty_refresh(
     assert renderer.request_calls == 1
     assert len(sleep_calls) == 1
     assert len(renderer.render_due_calls) == TWO
-
-
-def test_event_consumer_error_empty_splitlines_branch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Run this test case."""
-    consumer, _queue = _consumer(monkeypatch, is_tty=True)
-    item = consumer.items["demo"]
-    item.last_operation = OperationKind.CHECK_VERSION
-
-    class _Msg:
-        def __bool__(self) -> bool:
-            return True
-
-        def splitlines(self) -> list[str]:
-            return []
-
-    object.__getattribute__(consumer, "_handle_error")(
-        UpdateEvent(
-            source="demo", kind=UpdateEventKind.ERROR, message=cast("Any", _Msg())
-        ),
-        item,
-    )

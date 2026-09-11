@@ -35,6 +35,7 @@ class _UpdateOptionsInitKwargs(TypedDict, total=False):
     sort_by: UpdateSortBy
     json: bool
     verbose: bool
+    timings: bool
     quiet: bool
     tty: UpdateTTYMode
     zellij_guard: bool | None
@@ -73,6 +74,7 @@ class UpdateOptions:
     sort_by: UpdateSortBy = "name"
     json: bool = False
     verbose: bool = False
+    timings: bool = False
     quiet: bool = False
     tty: UpdateTTYMode = "auto"
     zellij_guard: bool | None = None

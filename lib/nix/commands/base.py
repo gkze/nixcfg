@@ -12,9 +12,12 @@ import importlib
 import os
 import re
 import shlex
+from collections import deque
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+from lib.diagnostics import redact_urls
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Mapping
@@ -31,30 +34,21 @@ _HASH_ALGOS = r"(?:blake3|md5|sha1|sha256|sha512)"
 
 # --- Primary: SRI format (algorithm-base64digest) ---
 # Example: sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=
-_RE_SRI_GOT = re.compile(r"got:\s*(" + _HASH_ALGOS + r"-[A-Za-z0-9+/]+=*)")
-_RE_SRI_SPECIFIED = re.compile(r"specified:\s*(" + _HASH_ALGOS + r"-[A-Za-z0-9+/]+=*)")
-
 # --- Fallback: prefixed hex (algo:hex), bare hex, or Nix32 ---
 # Nix32 uses the alphabet 0123456789abcdfghijklmnpqrsvwxyz (32 chars)
 # sha256 lengths: hex = 64 chars, Nix32 = 52 chars
 # sha512 lengths: hex = 128 chars, Nix32 = 103 chars
 # sha1   lengths: hex = 40 chars, Nix32 = 32 chars
-_RE_FALLBACK_GOT = re.compile(
-    r"got:\s*("
+_HASH_VALUE = (
+    _HASH_ALGOS
+    + r"-[A-Za-z0-9+/]+=*|"
     + _HASH_ALGOS
     + r":[0-9a-fA-F]+"  # algo:hex (e.g., sha256:abc123...)
     + r"|[0-9a-fA-F]{40,128}"  # bare hex (40=sha1, 64=sha256, 128=sha512)
     + r"|[0-9a-df-np-sv-z]{32,103}"  # Nix32 encoding
-    + r")",
 )
-_RE_FALLBACK_SPECIFIED = re.compile(
-    r"specified:\s*("
-    + _HASH_ALGOS
-    + r":[0-9a-fA-F]+"
-    + r"|[0-9a-fA-F]{40,128}"
-    + r"|[0-9a-df-np-sv-z]{32,103}"
-    + r")",
-)
+_RE_GOT = re.compile(r"got:\s*(" + _HASH_VALUE + r")")
+_RE_SPECIFIED = re.compile(r"specified:\s*(" + _HASH_VALUE + r")")
 
 # --- Derivation path extraction ---
 # Matches both "hash mismatch in fixed-output derivation" and
@@ -66,6 +60,7 @@ _RE_DRV_PATH = re.compile(
 )
 
 _STDERR_TAIL_LINES = 20
+_STREAM_QUEUE_SIZE = 128
 
 
 def _raise_timeout() -> None:
@@ -110,7 +105,7 @@ class NixCommandError(Exception):
             else:
                 parts.append("  stderr:")
             parts.extend(f"    {line}" for line in lines)
-        return "\n".join(parts)
+        return redact_urls("\n".join(parts))
 
 
 class HashMismatchError(NixCommandError):
@@ -184,8 +179,9 @@ class HashMismatchError(NixCommandError):
         result:
             The :class:`CommandResult` for context in the exception.
 
-        Uses ``findall`` and takes the **last** match so that nested
-        derivation failures resolve to the innermost (most relevant) hash.
+        Selects the last hash and associates only the path and specified hash
+        in that same diagnostic block. Nested failures cannot cross-pair one
+        derivation's identity with another derivation's hash.
 
         Returns ``None`` when *output* does not contain a recognisable
         hash-mismatch message.
@@ -197,35 +193,23 @@ class HashMismatchError(NixCommandError):
         - ``local-store.cc``:       CA hash mismatch importing path (Nix32 or hex)
 
         """
-        # Primary: SRI-encoded hash (e.g. sha256-ABC...=, sha512-XYZ...=)
-        sri_matches = _RE_SRI_GOT.findall(output)
-        if sri_matches:
-            got_hash = sri_matches[-1]
-        else:
-            # Fallback: hex, prefixed-hex, or Nix32 representations
-            fallback_matches = _RE_FALLBACK_GOT.findall(output)
-            if fallback_matches:
-                got_hash = fallback_matches[-1]
-            else:
-                return None
-
-        # Optional: extract the "specified" hash (try SRI first, then fallback)
-        specified: str | None = None
-        spec_sri = _RE_SRI_SPECIFIED.findall(output)
-        if spec_sri:
-            specified = spec_sri[-1]
-        else:
-            spec_fallback = _RE_FALLBACK_SPECIFIED.findall(output)
-            if spec_fallback:
-                specified = spec_fallback[-1]
-
-        # Optional: extract the derivation/store path
-        drv_match = _RE_DRV_PATH.search(output)
-        drv_path = drv_match.group(1) if drv_match else None
+        got_matches = list(_RE_GOT.finditer(output))
+        if not got_matches:
+            return None
+        got = got_matches[-1]
+        block_start = got_matches[-2].end() if len(got_matches) > 1 else 0
+        paths = list(_RE_DRV_PATH.finditer(output, block_start, got.start()))
+        drv_path = paths[-1].group(1) if paths else None
+        if paths:
+            block_start = paths[-1].end()
+        specified_matches = list(
+            _RE_SPECIFIED.finditer(output, block_start, got.start())
+        )
+        specified = specified_matches[-1].group(1) if specified_matches else None
 
         return cls(
             result,
-            got_hash=got_hash,
+            got_hash=got.group(1),
             specified=specified,
             drv_path=drv_path,
         )
@@ -299,10 +283,63 @@ async def _stop_stream_process(
     """Stop and reap a streamed subprocess and its pipe readers."""
     for task in tasks:
         task.cancel()
+    await _stop_process(proc)
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _stop_process(proc: asyncio.subprocess.Process) -> None:
+    """Stop and reap a child, including the race where it has already exited."""
     with suppress(ProcessLookupError):
         proc.kill()
     await proc.wait()
-    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@dataclass
+class _OutputCapture:
+    """Keep complete parser output or an explicitly requested diagnostic tail."""
+
+    limit: int | None
+    chunks: deque[str] = field(default_factory=deque)
+    size: int = 0
+
+    def append(self, text: str) -> None:
+        self.chunks.append(text)
+        self.size += len(text)
+        if self.limit is not None:
+            while self.size > self.limit:
+                first = self.chunks.popleft()
+                excess = self.size - self.limit
+                self.size -= len(first)
+                if len(first) > excess:
+                    remainder = first[excess:]
+                    self.chunks.appendleft(remainder)
+                    self.size += len(remainder)
+
+    def text(self) -> str:
+        return "".join(self.chunks)
+
+
+async def _pump_process_stream(
+    stream: asyncio.StreamReader | None,
+    label: str,
+    store: _OutputCapture,
+    queue: asyncio.Queue[tuple[str, str | None] | Exception],
+) -> None:
+    if stream is None:
+        await queue.put((label, None))
+        return
+    try:
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            text = line.decode(errors="replace")
+            store.append(text)
+            await queue.put((label, text))
+    except (OSError, ValueError) as error:
+        await queue.put(error)
+        return
+    await queue.put((label, None))
 
 
 async def stream_process(
@@ -310,14 +347,23 @@ async def stream_process(
     *,
     command_timeout: float = 2400.0,
     env: Mapping[str, str] | None = None,
+    output_limit: int | None = None,
     **kwargs: object,
 ) -> AsyncGenerator[ProcessEvent]:
-    """Yield line events from both stdout and stderr until process completion."""
+    """Stream with backpressure; optionally retain only each stream's tail.
+
+    ``output_limit`` bounds captured characters per stream, not emitted lines.
+    Parser consumers must retain the default complete output or parse line events
+    before opting into bounded diagnostic capture.
+    """
     timeout_seconds = _resolve_timeout_alias(
         command_timeout=command_timeout,
         kwargs=kwargs,
     )
     merged_env = _merge_env(env)
+    if output_limit is not None and output_limit < 1:
+        msg = "output_limit must be positive"
+        raise ValueError(msg)
 
     proc = await asyncio.create_subprocess_exec(
         *args,
@@ -326,32 +372,21 @@ async def stream_process(
         env=merged_env,
     )
 
-    stdout_chunks: list[str] = []
-    stderr_chunks: list[str] = []
-    queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
+    stdout_chunks = _OutputCapture(output_limit)
+    stderr_chunks = _OutputCapture(output_limit)
+    queue: asyncio.Queue[tuple[str, str | None] | Exception] = asyncio.Queue(
+        maxsize=_STREAM_QUEUE_SIZE,
+    )
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_seconds
 
-    async def pump(
-        stream: asyncio.StreamReader | None,
-        label: str,
-        store: list[str],
-    ) -> None:
-        if stream is None:
-            await queue.put((label, None))
-            return
-        while True:
-            line = await stream.readline()
-            if not line:
-                break
-            text = line.decode(errors="replace")
-            store.append(text)
-            await queue.put((label, text))
-        await queue.put((label, None))
-
     tasks = [
-        asyncio.create_task(pump(proc.stdout, "stdout", stdout_chunks)),
-        asyncio.create_task(pump(proc.stderr, "stderr", stderr_chunks)),
+        asyncio.create_task(
+            _pump_process_stream(proc.stdout, "stdout", stdout_chunks, queue)
+        ),
+        asyncio.create_task(
+            _pump_process_stream(proc.stderr, "stderr", stderr_chunks, queue)
+        ),
     ]
 
     process_finished = False
@@ -361,13 +396,16 @@ async def stream_process(
             remaining = deadline - loop.time()
             if remaining <= 0:
                 _raise_timeout()
-            label, text = await asyncio.wait_for(queue.get(), timeout=remaining)
+            event = await asyncio.wait_for(queue.get(), timeout=remaining)
+            if isinstance(event, Exception):
+                raise event
+            label, text = event
             if text is None:
                 done_streams += 1
                 continue
             yield ProcessLine(label, text)
         await asyncio.gather(*tasks)
-        returncode = await proc.wait()
+        returncode = await asyncio.wait_for(proc.wait(), timeout=deadline - loop.time())
         process_finished = True
     except TimeoutError:
         raise TimeoutError from None
@@ -378,8 +416,8 @@ async def stream_process(
     result = CommandResult(
         args=args,
         returncode=returncode,
-        stdout="".join(stdout_chunks),
-        stderr="".join(stderr_chunks),
+        stdout=stdout_chunks.text(),
+        stderr=stderr_chunks.text(),
     )
     yield ProcessDone(result)
 
@@ -435,18 +473,21 @@ async def run_nix(
         env=merged_env,
     )
 
+    process_finished = False
     try:
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
             proc.communicate(),
             timeout=timeout_seconds,
         )
+        process_finished = True
     except TimeoutError:
-        proc.kill()
-        await proc.wait()
         raise NixCommandError(
             CommandResult(args=args, returncode=-1, stdout="", stderr=""),
             message=f"command timed out after {timeout_seconds}s",
         ) from None
+    finally:
+        if not process_finished:
+            await _stop_process(proc)
 
     result = CommandResult(
         args=args,

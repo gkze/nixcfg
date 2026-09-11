@@ -886,6 +886,48 @@ def test_stream_crate2nix_artifact_updates_cancels_worker_promptly(
     asyncio.run(_cancel())
 
 
+def test_stream_repeated_cancellation_waits_for_artifact_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated cancellation cannot let the stream exit while its worker runs."""
+    monkeypatch.setattr(crate2nix, "_current_platform", lambda: "x86_64-linux")
+    started = threading.Event()
+    cleaning = threading.Event()
+    finish = threading.Event()
+    stopped = threading.Event()
+
+    def artifacts(
+        _name: str, *, cancel_event: threading.Event, progress: object
+    ) -> tuple[()]:
+        _ = progress
+        started.set()
+        assert cancel_event.wait(timeout=2)
+        cleaning.set()
+        assert finish.wait(timeout=2)
+        stopped.set()
+        raise crate2nix.Crate2NixCommandCancelledError("cancelled")
+
+    monkeypatch.setattr(crate2nix, "crate2nix_artifact_updates", artifacts)
+
+    async def run() -> None:
+        task = asyncio.create_task(crate2nix.stream_crate2nix_artifact_updates("codex"))
+        try:
+            assert await asyncio.to_thread(started.wait, 1)
+            task.cancel()
+            assert await asyncio.to_thread(cleaning.wait, 1)
+            for _ in range(3):
+                task.cancel()
+                await asyncio.sleep(0)
+            assert not task.done()
+        finally:
+            finish.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert stopped.is_set()
+
+    asyncio.run(run())
+
+
 def test_stream_crate2nix_artifact_updates_sink_failure_cancels_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1010,6 +1052,7 @@ def test_package_registry_metadata_overrides_are_intentional() -> None:
         "arc",
         "aside",
         "baseten-switch",
+        "capy",
         "claude",
         "cleanshot",
         "clearly",
@@ -2107,6 +2150,7 @@ def test_run_crate2nix_generate_bounds_all_retries_by_one_deadline(
 
     def _sleep(seconds: float) -> None:
         nonlocal now
+        assert not crate2nix._CRATE2NIX_GENERATE_LOCK.locked()
         now += seconds
 
     monkeypatch.setattr(crate2nix.time, "monotonic", _monotonic)

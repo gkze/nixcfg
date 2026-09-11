@@ -1,11 +1,15 @@
 """Behavioral tests for standards-based Node.js toolchain selection."""
 
+import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import run_async
+from lib.update import runtime
+from lib.update.config import default_config
 from lib.update.nix import _build_flake_attr_expr
 from lib.update.updaters import node_compatibility
 
@@ -241,275 +245,241 @@ def test_nodejs_enumeration_expressions_target_the_pinned_package_set(
     )
 
 
-def test_nodejs_attribute_enumeration_sorts_and_deduplicates_candidates(
+def test_nodejs_inventory_expression_isolates_candidate_failures() -> None:
+    """One Nix evaluation catches unsupported aliases without forcing packages."""
+    assert_nix_ast_equal(
+        node_compatibility._nodejs_inventory_apply_expr(),
+        """pkgs: builtins.listToAttrs (builtins.map (name: {
+          name = name;
+          value = builtins.tryEval (let package = builtins.getAttr name pkgs;
+            version = if builtins.isAttrs package then package.version or null else null;
+            in if builtins.isString version then version
+              else throw "Node.js version is not a string");
+        }) ((pkgs: builtins.filter
+          (name: builtins.match "nodejs_[0-9]+" name != null)
+          (builtins.attrNames pkgs)) pkgs))""",
+    )
+
+
+def test_nodejs_inventory_selects_lowest_compatible_major_with_one_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Candidate order follows numeric majors and ignores duplicate JSON entries."""
-    calls: list[tuple[list[str], float, bool]] = []
+    """Failed aliases remain isolated and JSON key order cannot select a newer major."""
+    calls: list[list[str]] = []
 
-    async def _run_nix(
-        args: list[str],
-        *,
-        command_timeout: float,
-        check: bool,
-    ) -> SimpleNamespace:
-        calls.append((args, command_timeout, check))
+    async def _run_nix(args: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append(args)
+        assert kwargs == {"command_timeout": 29, "check": False}
         return SimpleNamespace(
             returncode=0,
-            stdout='["nodejs_24", "nodejs_20", "nodejs_24", "nodejs_22"]',
             stderr="",
+            stdout=json.dumps({
+                "nodejs_24": {"success": True, "value": "24.19.0"},
+                "nodejs_18": {"success": False, "value": False},
+                "nodejs_22": {"success": True, "value": "22.19.0"},
+            }),
         )
 
     monkeypatch.setattr(node_compatibility, "run_nix", _run_nix)
-
-    assert run_async(
-        node_compatibility._evaluate_nodejs_attributes(
-            "aarch64-darwin",
-            command_timeout=29,
-            source_name="Fixture",
+    selection = run_async(
+        node_compatibility.resolve_nixpkgs_nodejs_for_engine(
+            ">=20", command_timeout=29, source_name="Fixture"
         )
-    ) == ("nodejs_20", "nodejs_22", "nodejs_24")
+    )
+    assert selection == node_compatibility.NodejsSelection(
+        engine=">=20", attribute="nodejs_22", version="22.19.0"
+    )
     assert len(calls) == 1
-    args, timeout, check = calls[0]
-    assert args[:5] == [
-        "nix",
-        "eval",
-        "--impure",
-        "--json",
-        "--expr",
-    ]
-    assert_nix_ast_equal(
-        args[5],
-        node_compatibility._nixpkgs_package_set_expr("aarch64-darwin"),
-    )
+    args = calls[0]
+    assert args[:5] == ["nix", "eval", "--impure", "--json", "--expr"]
     assert args[6] == "--apply"
-    assert_nix_ast_equal(
-        args[-1], node_compatibility._nodejs_attribute_names_apply_expr()
-    )
-    assert timeout == 29
-    assert check is False
+    assert_nix_ast_equal(args[7], node_compatibility._nodejs_inventory_apply_expr())
 
 
 @pytest.mark.parametrize(
-    ("result", "error_type", "message"),
+    ("result", "message"),
     [
         (
-            SimpleNamespace(returncode=1, stdout="", stderr="attribute lookup failed"),
-            RuntimeError,
-            "attribute lookup failed",
+            SimpleNamespace(returncode=1, stdout="", stderr="lookup failed"),
+            "lookup failed",
         ),
         (
             SimpleNamespace(returncode=1, stdout="lookup output", stderr=""),
-            RuntimeError,
             "lookup output",
         ),
-        (
-            SimpleNamespace(returncode=1, stdout="", stderr=""),
-            RuntimeError,
-            "nix eval failed",
-        ),
+        (SimpleNamespace(returncode=1, stdout="", stderr=""), "nix eval failed"),
         (
             SimpleNamespace(returncode=0, stdout="not-json", stderr=""),
-            RuntimeError,
-            "invalid JSON",
+            "invalid JSON inventory",
         ),
         (
-            SimpleNamespace(returncode=0, stdout='{"nodejs_24": "24.19.0"}', stderr=""),
-            TypeError,
-            "expected a JSON list",
+            SimpleNamespace(returncode=0, stdout="[]", stderr=""),
+            "invalid JSON inventory",
         ),
         (
-            SimpleNamespace(returncode=0, stdout='["nodejs_latest"]', stderr=""),
-            RuntimeError,
-            "unexpected attribute 'nodejs_latest'",
+            SimpleNamespace(
+                returncode=0,
+                stdout='{"nodejs_24":{"success":true,"value":24}}',
+                stderr="",
+            ),
+            "invalid JSON inventory",
         ),
         (
-            SimpleNamespace(returncode=0, stdout="[24]", stderr=""),
-            RuntimeError,
-            "unexpected attribute 24",
+            SimpleNamespace(
+                returncode=0,
+                stdout='{"nodejs_24":{"success":false,"value":"24.0.0"}}',
+                stderr="",
+            ),
+            "invalid JSON inventory",
+        ),
+        (
+            SimpleNamespace(
+                returncode=0,
+                stdout='{"nodejs_latest":{"success":true,"value":"24.0.0"}}',
+                stderr="",
+            ),
+            "Unexpected nixpkgs Node.js attribute",
         ),
     ],
 )
-def test_nodejs_attribute_enumeration_fails_closed(
-    monkeypatch: pytest.MonkeyPatch,
-    result: SimpleNamespace,
-    error_type: type[Exception],
-    message: str,
+def test_nodejs_inventory_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, result: SimpleNamespace, message: str
 ) -> None:
-    """Evaluation failures and malformed discovery payloads cannot select a runtime."""
+    """Malformed candidates and a failed batch cannot produce a runtime selection."""
 
-    async def _run_nix(
-        _args: list[str],
-        *,
-        command_timeout: float,
-        check: bool,
-    ) -> SimpleNamespace:
-        assert command_timeout == 37
-        assert check is False
+    async def _run_nix(_args: list[str], **_kwargs: object) -> SimpleNamespace:
         return result
 
     monkeypatch.setattr(node_compatibility, "run_nix", _run_nix)
-
-    with pytest.raises(error_type, match=message):
-        run_async(
-            node_compatibility._evaluate_nodejs_attributes(
-                "x86_64-linux",
-                command_timeout=37,
-                source_name="Fixture",
-            )
-        )
-
-
-def test_nodejs_resolution_selects_first_satisfying_available_major(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A failed older candidate does not hide the next satisfying runtime."""
-    calls: list[tuple[str, str, float, str]] = []
-    monkeypatch.setattr(
-        node_compatibility.update_nix,
-        "get_current_nix_platform",
-        lambda: "aarch64-darwin",
-    )
-
-    async def _attributes(
-        platform: str,
-        *,
-        command_timeout: float,
-        source_name: str,
-    ) -> tuple[str, ...]:
-        assert (platform, command_timeout, source_name) == (
-            "aarch64-darwin",
-            41,
-            "Fixture",
-        )
-        return ("nodejs_20", "nodejs_22", "nodejs_24")
-
-    async def _version(
-        package_attr: str,
-        *,
-        platform: str,
-        command_timeout: float,
-        source_name: str,
-    ) -> str:
-        calls.append((package_attr, platform, command_timeout, source_name))
-        if package_attr == "nodejs_20":
-            raise RuntimeError("unsupported on this platform")
-        return {
-            "nodejs_22": "22.19.0",
-            "nodejs_24": "24.19.0",
-        }[package_attr]
-
-    monkeypatch.setattr(node_compatibility, "_evaluate_nodejs_attributes", _attributes)
-    monkeypatch.setattr(
-        node_compatibility,
-        "_resolve_nixpkgs_package_version_for_platform",
-        _version,
-    )
-
-    assert run_async(
-        node_compatibility.resolve_nixpkgs_nodejs_for_engine(
-            ">=24 <25",
-            command_timeout=41,
-            source_name="Fixture",
-        )
-    ) == node_compatibility.NodejsSelection(
-        engine=">=24 <25",
-        attribute="nodejs_24",
-        version="24.19.0",
-    )
-    assert calls == [
-        ("nodejs_20", "aarch64-darwin", 41, "Fixture"),
-        ("nodejs_22", "aarch64-darwin", 41, "Fixture"),
-        ("nodejs_24", "aarch64-darwin", 41, "Fixture"),
-    ]
-
-
-def test_nodejs_resolution_reports_available_and_invalid_candidates(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """No-match diagnostics distinguish usable versions from malformed ones."""
-    monkeypatch.setattr(
-        node_compatibility.update_nix,
-        "get_current_nix_platform",
-        lambda: "x86_64-linux",
-    )
-
-    async def _attributes(
-        _platform: str,
-        *,
-        command_timeout: float,
-        source_name: str,
-    ) -> tuple[str, ...]:
-        assert command_timeout == 43
-        assert source_name == "Fixture"
-        return ("nodejs_20", "nodejs_22")
-
-    async def _version(
-        package_attr: str,
-        *,
-        platform: str,
-        command_timeout: float,
-        source_name: str,
-    ) -> str:
-        assert (platform, command_timeout, source_name) == (
-            "x86_64-linux",
-            43,
-            "Fixture",
-        )
-        return "20.19.0" if package_attr == "nodejs_20" else "22.19"
-
-    monkeypatch.setattr(node_compatibility, "_evaluate_nodejs_attributes", _attributes)
-    monkeypatch.setattr(
-        node_compatibility,
-        "_resolve_nixpkgs_package_version_for_platform",
-        _version,
-    )
-
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(RuntimeError, match=message):
         run_async(
             node_compatibility.resolve_nixpkgs_nodejs_for_engine(
-                ">=24",
-                command_timeout=43,
-                source_name="Fixture",
+                ">=20", command_timeout=29, source_name="Fixture"
             )
         )
 
-    message = str(exc_info.value)
-    assert "available versions: nodejs_20=20.19.0" in message
-    assert "nodejs_22" in message
-    assert "exact semantic version" in message
 
-
-def test_nodejs_resolution_rejects_an_empty_candidate_set(
+@pytest.mark.parametrize(
+    ("inventory", "messages"),
+    [
+        ({}, ("available versions: none",)),
+        (
+            {
+                "nodejs_18": {"success": False, "value": False},
+                "nodejs_20": {"success": True, "value": "20.19.0"},
+                "nodejs_22": {"success": True, "value": "22.19"},
+            },
+            (
+                "nodejs_20=20.19.0",
+                "nodejs_18: version evaluation failed",
+                "exact semantic version",
+            ),
+        ),
+    ],
+)
+def test_nodejs_inventory_no_match_reports_usable_versions_and_failures(
     monkeypatch: pytest.MonkeyPatch,
+    inventory: dict[str, dict[str, str | bool]],
+    messages: tuple[str, ...],
 ) -> None:
-    """A pinned package set without versioned Node.js attributes fails explicitly."""
-    monkeypatch.setattr(
-        node_compatibility.update_nix,
-        "get_current_nix_platform",
-        lambda: "aarch64-darwin",
-    )
+    """Unsupported candidates, invalid semver, and absence remain distinguishable."""
 
-    async def _attributes(
-        _platform: str,
-        *,
-        command_timeout: float,
-        source_name: str,
-    ) -> tuple[str, ...]:
-        assert command_timeout == 47
-        assert source_name == "Fixture"
-        return ()
+    async def _run_nix(_args: list[str], **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(returncode=0, stdout=json.dumps(inventory), stderr="")
 
-    monkeypatch.setattr(node_compatibility, "_evaluate_nodejs_attributes", _attributes)
-
-    with pytest.raises(RuntimeError, match="available versions: none"):
+    monkeypatch.setattr(node_compatibility, "run_nix", _run_nix)
+    with pytest.raises(RuntimeError) as error:
         run_async(
             node_compatibility.resolve_nixpkgs_nodejs_for_engine(
-                ">=24",
-                command_timeout=47,
-                source_name="Fixture",
+                ">=24", command_timeout=29, source_name="Fixture"
             )
         )
+    assert all(message in str(error.value) for message in messages)
+
+
+def test_nodejs_inventory_does_not_cache_mutable_package_sets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later package overlay change within the run must remain visible."""
+    versions = iter(["24.0.0", "24.1.0"])
+
+    async def _run_nix(_args: list[str], **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            returncode=0,
+            stderr="",
+            stdout=json.dumps({
+                "nodejs_24": {"success": True, "value": next(versions)}
+            }),
+        )
+
+    monkeypatch.setattr(node_compatibility, "run_nix", _run_nix)
+
+    async def _run() -> tuple[str, str]:
+        async with runtime.runtime_scope(default_config()):
+            first = await node_compatibility.resolve_nixpkgs_nodejs_for_engine(
+                ">=24", command_timeout=29, source_name="Fixture"
+            )
+            second = await node_compatibility.resolve_nixpkgs_nodejs_for_engine(
+                ">=24", command_timeout=29, source_name="Fixture"
+            )
+            return first.version, second.version
+
+    assert run_async(_run()) == ("24.0.0", "24.1.0")
+
+
+@pytest.mark.parametrize("inventory", [False, True])
+@pytest.mark.parametrize("failed", [False, True])
+def test_node_evaluation_respects_workspace_and_resource_budgets(
+    monkeypatch: pytest.MonkeyPatch, *, inventory: bool, failed: bool
+) -> None:
+    """Direct version lookups wait for stable files and an available evaluator."""
+    calls: list[list[str]] = []
+    stdout = json.dumps({"nodejs_24": {"success": True, "value": "24.0.0"}})
+    if not inventory:
+        stdout = "24.0.0\n"
+    stderr = "échec" if failed else ""
+
+    async def evaluate(args: list[str], **_kwargs: object) -> SimpleNamespace:
+        owner = runtime.active_runtime()
+        assert owner is not None
+        assert asyncio.current_task() in owner.workspace_reader_owners
+        assert owner.slots["eval"].locked()
+        calls.append(args)
+        return SimpleNamespace(returncode=int(failed), stdout=stdout, stderr=stderr)
+
+    async def invoke() -> object:
+        if inventory:
+            return await node_compatibility._evaluate_nodejs_inventory(
+                "aarch64-darwin", command_timeout=10, source_name="Fixture"
+            )
+        return await node_compatibility._evaluate_version(
+            '"24.0.0"', command_timeout=10, selection="nodejs", source_name="Fixture"
+        )
+
+    monkeypatch.setattr(node_compatibility, "run_nix", evaluate)
+
+    async def run() -> None:
+        config = default_config()
+        async with runtime.runtime_scope(config) as owner:
+            async with runtime.resource_slot("eval", source="owner", config=config):
+                async with runtime.workspace_access(write=True):
+                    pending = asyncio.create_task(invoke())
+                    await asyncio.sleep(0)
+                    assert not calls
+                await asyncio.sleep(0)
+                assert not calls
+            if failed:
+                with pytest.raises(RuntimeError, match="échec"):
+                    await pending
+            else:
+                await pending
+            assert len(calls) == 1
+            timing = owner.timing("Fixture", "eval")
+            assert timing.stdout_bytes == len(stdout.encode())
+            assert timing.stderr_bytes == len(stderr.encode())
+            assert timing.nonzero_exits == int(failed)
+
+    run_async(run())
 
 
 def test_resolve_nixpkgs_package_version_rejects_invalid_attribute() -> None:
@@ -597,3 +567,39 @@ def test_resolve_package_passthru_version_fails_closed(
                 source_name="Fixture",
             )
         )
+
+
+def test_nodejs_inventory_nix_failure_isolation() -> None:
+    """A tiny evaluation proves tryEval/laziness semantics that AST equality cannot."""
+    from pathlib import Path
+
+    from nix_manipulator.expressions.function.call import FunctionCall
+    from nix_manipulator.expressions.identifier import Identifier
+    from nix_manipulator.expressions.parenthesis import Parenthesis
+    from nix_manipulator.expressions.path import NixPath
+    from nix_manipulator.parser import parse
+
+    fixture = Path(__file__).parents[2] / "tests/nix/node-inventory.nix"
+    expression = FunctionCall(
+        name=Parenthesis(
+            value=FunctionCall(
+                name=Identifier(name="import"), argument=NixPath(path=str(fixture))
+            )
+        ),
+        argument=Parenthesis(
+            value=parse(node_compatibility._nodejs_inventory_apply_expr()).expr
+        ),
+    )
+    result = run_async(
+        node_compatibility.run_nix(
+            ["nix", "eval", "--impure", "--json", "--expr", expression.rebuild()],
+            command_timeout=10,
+        )
+    )
+    assert json.loads(result.stdout) == {
+        "nodejs_18": {"success": False, "value": False},
+        "nodejs_20": {"success": False, "value": False},
+        "nodejs_22": {"success": True, "value": "22.19.0"},
+        "nodejs_24": {"success": False, "value": False},
+        "nodejs_26": {"success": False, "value": False},
+    }

@@ -233,7 +233,9 @@ def test_crate2nix_artifacts_mixin_streams_shared_materialization_events(
         _stream,
     )
 
-    class _Updater(materialization_mod.Crate2NixArtifactsMixin):
+    class _Updater(
+        materialization_mod.Crate2NixArtifactsMixin, FlakeInputMetadataUpdater
+    ):
         name = "demo"
 
     updater = _Updater()

@@ -43,7 +43,6 @@ from lib.update.planner import (
     source_prerequisites,
     source_update_waves,
 )
-from lib.update.platform_hashes import PlatformHashResult
 from lib.update.refs import FlakeInputRef
 from lib.update.source_runner import (
     SourcesPhaseContext,
@@ -548,7 +547,11 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
         await task()
 
     async def _update_input(
-        _input_name: str, *, source: str, emit: EventSink = ignore_event
+        _input_name: str,
+        *,
+        source: str,
+        emit: EventSink = ignore_event,
+        **_kwargs: object,
     ) -> object:
         await emit(UpdateEvent.status(source, "input refreshed"))
 
@@ -722,10 +725,10 @@ def test_update_source_task_collects_artifact_events(
     ]
 
 
-def test_run_sources_phase_serializes_when_max_nix_builds_is_one(
+def test_run_sources_phase_overlaps_metadata_when_builds_are_serialized(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Run source updates sequentially when nix builds are already serialized."""
+    """Allow cheap source work to overlap while Nix builds remain serialized."""
     active = 0
     max_active = 0
 
@@ -760,7 +763,7 @@ def test_run_sources_phase_serializes_when_max_nix_builds_is_one(
         )
     )
 
-    assert max_active == 1
+    assert max_active == 2
 
 
 def test_run_sources_phase_returns_authoritative_domain_result(
@@ -835,7 +838,7 @@ def test_run_sources_phase_bounds_concurrent_tasks_within_wave(
                 queue=asyncio.Queue(),
                 update_input=False,
                 native_only=False,
-                config=resolve_config(max_nix_builds=2),
+                config=resolve_config(max_source_tasks=2),
             )
         )
     )
@@ -884,7 +887,11 @@ def test_run_sources_phase_serializes_flake_input_refreshes(
     max_active_refreshes = 0
 
     async def _update_input(
-        _input_name: str, *, source: str, emit: EventSink = ignore_event
+        _input_name: str,
+        *,
+        source: str,
+        emit: EventSink = ignore_event,
+        **_kwargs: object,
     ) -> object:
         nonlocal active_refreshes, max_active_refreshes
         active_refreshes += 1
@@ -1205,7 +1212,11 @@ def test_update_source_task_dedupes_shared_input_refreshes(
     called = {"count": 0}
 
     async def _update_input(
-        _input_name: str, *, source: str, emit: EventSink = ignore_event
+        _input_name: str,
+        *,
+        source: str,
+        emit: EventSink = ignore_event,
+        **_kwargs: object,
     ) -> object:
         called["count"] += 1
         await asyncio.sleep(0)
@@ -1308,7 +1319,11 @@ def test_update_source_task_refreshes_additional_inputs_before_updater(
         await task()
 
     async def _update_input(
-        input_name: str, *, source: str, emit: EventSink = ignore_event
+        input_name: str,
+        *,
+        source: str,
+        emit: EventSink = ignore_event,
+        **_kwargs: object,
     ) -> object:
         _ = source
         calls.append(f"refresh:{input_name}")
@@ -1381,7 +1396,11 @@ def test_update_source_task_sets_native_only_for_deno_updater(
     called = {"count": 0, "input_name": "", "source": ""}
 
     async def _update_input(
-        _input_name: str, *, source: str, emit: EventSink = ignore_event
+        _input_name: str,
+        *,
+        source: str,
+        emit: EventSink = ignore_event,
+        **_kwargs: object,
     ) -> object:
         called["count"] += 1
         called["input_name"] = _input_name
@@ -1450,9 +1469,7 @@ def test_update_source_task_reports_incoherent_native_identity_change(
         assert source == "demo"
         assert input_name == "demo"
         assert native_only is True
-        return PlatformHashResult(
-            {"aarch64-darwin": "sha256-newDarwin"}, fully_computed=False
-        )
+        return {"aarch64-darwin": "sha256-newDarwin"}
 
     monkeypatch.setattr("lib.update.source_runner.UPDATERS", {"demo": _DenoUpdater})
     monkeypatch.setattr(
@@ -1549,7 +1566,11 @@ def test_update_source_task_skips_input_update_when_disabled(
     called = {"update_input": 0}
 
     async def _update_input(
-        _input_name: str, *, source: str, emit: EventSink = ignore_event
+        _input_name: str,
+        *,
+        source: str,
+        emit: EventSink = ignore_event,
+        **_kwargs: object,
     ) -> object:
         _ = source
         called["update_input"] += 1
@@ -1666,3 +1687,185 @@ def test_required_tool_check_source_ref_selection(
     seen.clear()
     assert _handle_required_tool_check(UpdateOptions(check=True)) is None
     assert seen["include_flake_edit"] is True
+
+
+@pytest.mark.parametrize("eager", [False, True])
+def test_ready_companion_does_not_wait_for_unrelated_source(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    eager: bool,
+) -> None:
+    """Published prerequisites release children without a global wave barrier."""
+
+    class Parent:
+        pass
+
+    class Child:
+        companion_of = "parent"
+
+    async def run() -> None:
+        if eager:
+            asyncio.get_running_loop().set_task_factory(asyncio.eager_task_factory)
+        child_started = asyncio.Event()
+        order: list[str] = []
+
+        async def update(name: str, *, context: SourceTaskContext) -> SourceTaskResult:
+            if name == "slow":
+                await child_started.wait()
+            if name == "child":
+                assert context.effective_sources["parent"].version == "new"
+                child_started.set()
+            order.append(name)
+            return SourceTaskResult(
+                completed=True, source_update=SourceEntry(version="new", hashes={})
+            )
+
+        monkeypatch.setattr(
+            "lib.update.source_runner.UPDATERS",
+            {"parent": Parent, "child": Child, "slow": Parent},
+        )
+        monkeypatch.setattr("lib.update.source_runner.update_source_task", update)
+        async with asyncio.timeout(1):
+            result = await run_sources_phase(
+                SourcesPhaseContext(
+                    source_names=["slow", "child", "parent"],
+                    sources=SourcesFile(entries={}),
+                    queue=asyncio.Queue(),
+                    update_input=False,
+                    native_only=False,
+                    config=resolve_config(max_source_tasks=2),
+                )
+            )
+        assert result.errors == 0
+        assert order == ["parent", "child", "slow"]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("refresh_fails", [False, True])
+def test_input_refresh_finishes_before_probe_admission(
+    monkeypatch: pytest.MonkeyPatch, *, refresh_fails: bool
+) -> None:
+    """Freeze lock state first and block dependents of failed refreshes."""
+
+    class Parent:
+        additional_input_names = ("auxiliary",)
+
+    class Child:
+        companion_of = "parent"
+
+    class Independent:
+        pass
+
+    refreshes: list[str] = []
+    started: list[str] = []
+
+    async def refresh(
+        name: str, input_name: str, *, context: SourceTaskContext
+    ) -> None:
+        _ = (name, context)
+        refreshes.append(input_name)
+        await asyncio.sleep(0)
+        if refresh_fails:
+            raise RuntimeError("input failed")
+
+    async def update(name: str, *, context: SourceTaskContext) -> SourceTaskResult:
+        assert context.update_input is False
+        assert refreshes == (
+            ["fallback"] if refresh_fails else ["fallback", "auxiliary"]
+        )
+        started.append(name)
+        return SourceTaskResult(completed=True)
+
+    monkeypatch.setattr(
+        "lib.update.source_runner.UPDATERS",
+        {"parent": Parent, "child": Child, "independent": Independent},
+    )
+    monkeypatch.setattr("lib.update.source_runner._ensure_input_refreshed", refresh)
+    monkeypatch.setattr("lib.update.source_runner.update_source_task", update)
+    result = asyncio.run(
+        run_sources_phase(
+            SourcesPhaseContext(
+                source_names=["independent", "parent", "child"],
+                sources=SourcesFile(
+                    entries={"parent": SourceEntry(input="fallback", hashes={})}
+                ),
+                queue=asyncio.Queue(),
+                update_input=True,
+                native_only=False,
+                config=resolve_config(),
+            )
+        )
+    )
+    assert set(started) == (
+        {"independent"} if refresh_fails else {"independent", "parent", "child"}
+    )
+    assert result.errors == (2 if refresh_fails else 0)
+
+
+def test_cancelled_source_phase_reaps_shared_producer_before_workspace_teardown(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A shielded producer restores its files before the source phase returns."""
+    from lib.update.runtime import memoize, runtime_scope
+
+    class Source:
+        pass
+
+    async def run() -> None:
+        started = asyncio.Event()
+        cleaning = asyncio.Event()
+        finish = asyncio.Event()
+        config = resolve_config()
+        artifact = tmp_path / "generated.txt"
+        artifact.write_text("original")
+
+        async def produce() -> str:
+            artifact.write_text("temporary")
+            started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                cleaning.set()
+                await finish.wait()
+                artifact.write_text("original")
+            return "unused"
+
+        async def update(_name: str, *, context: SourceTaskContext) -> SourceTaskResult:
+            _ = context
+            await memoize("artifact", "exact-input", produce)
+            return SourceTaskResult(completed=True)
+
+        monkeypatch.setattr("lib.update.source_runner.UPDATERS", {"source": Source})
+        monkeypatch.setattr("lib.update.source_runner.update_source_task", update)
+        async with runtime_scope(config) as runtime:
+            phase = asyncio.create_task(
+                run_sources_phase(
+                    SourcesPhaseContext(
+                        source_names=["source"],
+                        sources=SourcesFile(entries={}),
+                        queue=asyncio.Queue(),
+                        update_input=False,
+                        native_only=False,
+                        config=config,
+                    )
+                )
+            )
+            await started.wait()
+            phase.cancel()
+            await cleaning.wait()
+            try:
+                for _ in range(3):
+                    phase.cancel()
+                    await asyncio.sleep(0)
+                assert not phase.done()
+            finally:
+                finish.set()
+            with pytest.raises(asyncio.CancelledError):
+                await phase
+            # The CLI may now destroy the disposable workspace safely, even
+            # though its outer telemetry runtime has not exited yet.
+            assert artifact.read_text() == "original"
+            assert all(task.done() for task in runtime.pending.values())
+
+    asyncio.run(run())

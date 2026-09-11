@@ -6,13 +6,14 @@ import posixpath
 import re
 import shlex
 from collections import deque
-from contextlib import aclosing
+from contextlib import AsyncExitStack, aclosing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlparse
 
 from rich.text import Text
 
+from lib.diagnostics import redact_urls
 from lib.update.events import EventSink, ignore_event
 
 if TYPE_CHECKING:
@@ -37,6 +38,13 @@ from lib.update.events import (
     UpdateEventKind,
     gather_results,
     is_nix_build_command,
+)
+from lib.update.runtime import (
+    command_resource,
+    measure,
+    resource_slot,
+    runtime_scope,
+    workspace_access,
 )
 
 _TASK_ERROR_TYPES: tuple[type[Exception], ...] = (
@@ -77,6 +85,8 @@ class RunCommandOptions:
     allow_failure: bool = False
     suppress_patterns: tuple[str, ...] | None = None
     config: UpdateConfig | None = None
+    uses_workspace: bool = True
+    output_limit: int | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +94,7 @@ class NixBuildOptions:
     """Options controlling fixed-output ``nix build`` execution."""
 
     source: str
+    derivation_path: str | None = None
     allow_failure: bool = False
     suppress_patterns: tuple[str, ...] | None = None
     env: Mapping[str, str] | None = None
@@ -105,16 +116,24 @@ async def run_queue_task(
         raise
     except Exception as exc:
         if not isinstance(exc, _TASK_ERROR_TYPES):
-            _LOG.exception("Unexpected task failure for %s", source)
+            _LOG.error(
+                "Unexpected task failure for %s:\n%s",
+                source,
+                format_exception(exc, include_traceback=True),
+            )
             raise
-        _LOG.debug("Handled task failure for %s", source, exc_info=exc)
+        _LOG.debug(
+            "Handled task failure for %s:\n%s",
+            source,
+            format_exception(exc, include_traceback=True),
+        )
         await queue.put(UpdateEvent.error(source, format_exception(exc)))
 
 
 def _sanitize_log_line(line: str) -> str:
     """Strip control characters and ANSI styling from a process line."""
     line = line.replace("\r", "")
-    return Text.from_ansi(line).plain
+    return Text.from_ansi(line).plain if "\x1b" in line else line
 
 
 def _truncate_command(text: str, max_len: int = 80) -> str:
@@ -138,7 +157,7 @@ def _resolve_timeout_alias(
     )
 
 
-async def run_command(
+async def _run_command(
     args: list[str],
     *,
     options: RunCommandOptions,
@@ -153,7 +172,7 @@ async def run_command(
     config = resolve_active_config(options.config)
     if command_timeout is None:
         command_timeout = config.default_subprocess_timeout
-    command_text = _truncate_command(shlex.join(args))
+    command_text = _truncate_command(redact_urls(shlex.join(args)))
     await emit(
         UpdateEvent(
             source=options.source,
@@ -173,6 +192,7 @@ async def run_command(
                 args,
                 timeout=command_timeout,
                 env=options.env,
+                output_limit=options.output_limit,
             )
         ) as process_events:
             async for event in process_events:
@@ -201,11 +221,11 @@ async def run_command(
                     result = event
     except TimeoutError:
         msg = f"Command timed out after {command_timeout}s: {shlex.join(args)}"
-        raise RuntimeError(msg) from None
+        raise RuntimeError(redact_urls(msg)) from None
 
     if result is None:
         msg = f"Command exited without result: {shlex.join(args)}"
-        raise RuntimeError(msg)
+        raise RuntimeError(redact_urls(msg))
 
     payload = CommandResult(
         args=args,
@@ -225,6 +245,34 @@ async def run_command(
     return payload
 
 
+async def run_command(
+    args: list[str],
+    *,
+    options: RunCommandOptions,
+    emit: EventSink = ignore_event,
+    **kwargs: object,
+) -> CommandResult:
+    """Apply run-owned budgets at the process boundary, not around source work."""
+    config = resolve_active_config(options.config)
+    kind = command_resource(args)
+    async with runtime_scope(config), AsyncExitStack() as stack:
+        # Workspace admission must precede resource admission: an artifact owner
+        # may need an evaluation slot while unrelated readers wait for its files.
+        if kind is not None and options.uses_workspace:
+            await stack.enter_async_context(workspace_access())
+        if kind is None:
+            timing = stack.enter_context(measure(options.source, "command"))
+        else:
+            timing = await stack.enter_async_context(
+                resource_slot(kind, source=options.source, config=config)
+            )
+        result = await _run_command(args, options=options, emit=emit, **kwargs)
+    timing.stdout_bytes += len(result.stdout.encode())
+    timing.stderr_bytes += len(result.stderr.encode())
+    timing.nonzero_exits += result.returncode != 0
+    return result
+
+
 async def run_nix_build(
     expr: str, *, options: NixBuildOptions, emit: EventSink = ignore_event
 ) -> CommandResult:
@@ -232,13 +280,18 @@ async def run_nix_build(
     args = ["nix", "build", "-L"]
     if options.verbose:
         args.append("--verbose")
-    args.extend(["--no-link", "--impure", "--expr", expr])
+    args.append("--no-link")
+    if options.derivation_path is None:
+        args.extend(["--impure", "--expr", expr])
+    else:
+        args.append(f"{options.derivation_path}^out")
     run_options = RunCommandOptions(
         source=options.source,
         env=options.env,
         allow_failure=options.allow_failure,
         suppress_patterns=options.suppress_patterns,
         config=options.config,
+        uses_workspace=options.derivation_path is None,
     )
     return await run_command(args, options=run_options, emit=emit)
 
@@ -321,7 +374,7 @@ async def compute_sri_hash(
     source: str, url: str, *, config: UpdateConfig, emit: EventSink = ignore_event
 ) -> str:
     """Prefetch a URL and return its SRI hash via :func:`lib.nix.commands.hash.nix_prefetch_url`."""
-    args = ["nix-prefetch-url", "--type", "sha256"]
+    args = ["nix", "store", "prefetch-file", "--json", "--hash-type", "sha256"]
     prefetch_name = _nix_prefetch_name(url)
     if prefetch_name is not None:
         args.extend(["--name", prefetch_name])
@@ -330,17 +383,18 @@ async def compute_sri_hash(
     attempt = 1
     while True:
         try:
-            return await _emit_successful_command(
-                source=source,
-                args=args,
-                message=shlex.join(args),
-                runner=lambda: libnix_prefetch_url(
-                    url,
-                    name=prefetch_name,
-                    command_timeout=config.default_subprocess_timeout,
-                ),
-                emit=emit,
-            )
+            async with resource_slot("download", source=source, config=config):
+                return await _emit_successful_command(
+                    source=source,
+                    args=args,
+                    message=shlex.join(args),
+                    runner=lambda: libnix_prefetch_url(
+                        url,
+                        name=prefetch_name,
+                        command_timeout=config.default_subprocess_timeout,
+                    ),
+                    emit=emit,
+                )
         except NixCommandError as exc:
             if attempt >= attempts or not _is_retryable_prefetch_error(exc):
                 raise
@@ -361,7 +415,7 @@ async def compute_sri_hash(
             await emit(
                 UpdateEvent.status(
                     source,
-                    "nix-prefetch-url hit a transient failure; retrying...",
+                    "URL prefetch hit a transient failure; retrying...",
                     operation="compute_hash",
                     status=StatusInfo(
                         kind=StatusKind.RETRY,
@@ -381,7 +435,8 @@ async def compute_url_hashes(
     emit: EventSink = ignore_event,
 ) -> dict[str, str]:
     """Compute SRI hashes for URLs and emit a final URL-to-hash mapping."""
-    return await gather_results({
-        url: compute_sri_hash(source, url, config=config, emit=emit)
-        for url in dict.fromkeys(urls)
-    })
+    async with runtime_scope(config):
+        return await gather_results({
+            url: compute_sri_hash(source, url, config=config, emit=emit)
+            for url in dict.fromkeys(urls)
+        })

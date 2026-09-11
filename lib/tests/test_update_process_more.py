@@ -63,9 +63,11 @@ def test_run_command_success_and_tail_capture(
         *,
         timeout: float,
         env: object,
+        output_limit: int | None,
     ) -> AsyncIterator[ProcessLine | ProcessDone]:
         assert args == ["nix", "build", "demo"]
         assert timeout == 5
+        assert output_limit is None
         assert env == {"NIX_CONFIG": "accept-flake-config = true"}
         yield ProcessLine("stderr", "line-one\n")
         yield ProcessLine("stderr", "noise line\n")
@@ -99,7 +101,7 @@ def test_run_command_success_and_tail_capture(
         UpdateEventKind.LINE,
         UpdateEventKind.COMMAND_END,
     ]
-    assert events[-1].payload is events.result
+    assert events[-1].payload == events.result
     assert events.result == CommandResult(
         args=["nix", "build", "demo"],
         returncode=0,
@@ -303,7 +305,7 @@ def test_compute_sri_hash_retries_transient_prefetch_failure(
     assert retry_end.returncode == 1
     assert retry_end.allow_failure
     assert any(
-        event.message == "nix-prefetch-url hit a transient failure; retrying..."
+        event.message == "URL prefetch hit a transient failure; retrying..."
         and isinstance(event.payload, StatusPayload)
         and event.payload.info == StatusInfo(kind=StatusKind.RETRY, value="attempt 2/2")
         for event in events

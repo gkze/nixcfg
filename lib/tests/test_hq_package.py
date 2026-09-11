@@ -459,10 +459,10 @@ _CURRENT_AUTOMATIC_MUTATION_PATHS = (
         "e8 04 d6 0d 01 84 c0 0f 84 7e 01 00 00 "
         "48 8d 83 61 01 00 00"
     ),
-    # Captured from HQ 0.10.198: the guarded state address now uses x25.
+    # Captured from HQ 0.10.222: the guarded state address now uses x26.
     bytes.fromhex(
-        "ed 64 1a 94 60 86 4d a9 e8 3e 39 94 e0 04 00 36 "
-        "79 86 05 91 7f 86 05 39 76 62 05 91 39 00 00 14"
+        "00 03 19 94 60 86 4d a9 0d 63 3d 94 a0 03 00 36 "
+        "7a 86 05 91 7f 86 05 39 76 62 05 91 2c 00 00 14"
     ),
     bytes.fromhex(
         "48 8d bb 40 01 00 00 e8 5f 96 51 00 "
@@ -496,8 +496,8 @@ _CURRENT_DISABLED_MUTATION_PATHS = (
         "48 8d 83 61 01 00 00"
     ),
     bytes.fromhex(
-        "ed 64 1a 94 60 86 4d a9 e8 3e 39 94 27 00 00 14 "
-        "79 86 05 91 7f 86 05 39 76 62 05 91 39 00 00 14"
+        "00 03 19 94 60 86 4d a9 0d 63 3d 94 1d 00 00 14 "
+        "7a 86 05 91 7f 86 05 39 76 62 05 91 2c 00 00 14"
     ),
     bytes.fromhex(
         "48 8d bb 40 01 00 00 e8 5f 96 51 00 "
@@ -524,7 +524,7 @@ _REBASED_AUTOMATIC_MUTATION_PATHS = (
     ),
     bytes.fromhex(
         "b2 18 16 94 60 86 4c a9 c0 a0 37 94 40 03 00 36 "
-        "79 86 04 91 7f 86 05 39 76 62 05 91 2d 00 00 14"
+        "7a 86 04 91 7f 86 05 39 76 62 05 91 2d 00 00 14"
     ),
     bytes.fromhex(
         "48 8d bb 38 01 00 00 e8 6f 96 51 00 "
@@ -586,7 +586,7 @@ def test_hq_binary_patch_accepts_rebased_machine_code() -> None:
     ("patch_index", "opcode_index", "drifted_opcode"),
     [
         (2, 34, 0x85),
-        (3, 16, 0x7A),
+        (3, 16, 0x79),
         (7, 35, 0x94),
     ],
 )

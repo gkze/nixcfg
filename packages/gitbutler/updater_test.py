@@ -10,9 +10,10 @@ from lib.tests._updater_helpers import (
     load_repo_module,
 )
 from lib.tests._updater_helpers import run_async as _run
+from lib.update import nix as update_nix
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
-from lib.update.nix import _build_package_path_attr_expr
+from lib.update.nix import PreparedProbe, _build_package_path_attr_expr
 from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import FlakeInputMetadata
 from lib.update.updaters.node_compatibility import NodejsSelection
@@ -32,6 +33,27 @@ TOOLCHAIN_PINS = {
     "pnpmAttr": "pnpm_10",
     "pnpmVersion": PNPM_VERSION,
 }
+
+
+@pytest.fixture(autouse=True)
+def _prepared_probe_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fingerprint(*_args, **_kwargs):
+        return "probe-drv"
+
+    async def prepare(source, expressions, *, config, **_kwargs):
+        return {
+            key: PreparedProbe(
+                "/nix/store/gitbutler.drv",
+                await update_nix.compute_expr_drv_fingerprint(
+                    source, expression, config=config
+                ),
+                expression,
+            )
+            for key, expression in expressions.items()
+        }
+
+    monkeypatch.setattr(update_nix, "compute_expr_drv_fingerprint", fingerprint)
+    monkeypatch.setattr(update_nix, "prepare_fixed_output_probes", prepare)
 
 
 def _load_module(module_name: str):

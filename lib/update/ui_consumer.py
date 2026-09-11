@@ -312,9 +312,7 @@ class EventConsumer:
     def _handle_error(self, event: UpdateEvent, item: ItemState) -> None:
         full_message = event.message or "Unknown error"
         message_lines = full_message.splitlines()
-        message = full_message
-        if message_lines:
-            message = message_lines[0]
+        message = message_lines[0]
         error_op: OperationState | None = None
         if item.active_command_op:
             error_op = item.operations.get(item.active_command_op)

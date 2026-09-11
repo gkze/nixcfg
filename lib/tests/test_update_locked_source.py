@@ -256,3 +256,110 @@ def test_locked_source_wraps_read_and_decode_failures(
                 description="manifest",
             )
         )
+
+
+def test_locked_source_reuses_exact_immutable_resolution_within_one_run(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Concurrent consumers share realization but retain their own diagnostic context."""
+    import asyncio
+
+    from lib.update.config import default_config
+    from lib.update.runtime import runtime_scope
+
+    calls: list[str] = []
+
+    async def evaluate(expr: str, *, command_timeout: float) -> str:
+        calls.append(expr)
+        assert command_timeout == 17
+        await asyncio.sleep(0)
+        return str(tmp_path)
+
+    monkeypatch.setattr(locked_source, "nix_eval_raw", evaluate)
+
+    async def run() -> None:
+        async with runtime_scope(default_config()):
+            first, second = await asyncio.gather(
+                locked_source.resolve_locked_source(
+                    _node(), context="First", command_timeout=17
+                ),
+                locked_source.resolve_locked_source(
+                    _node(), context="Second", command_timeout=17
+                ),
+            )
+            assert first.root == second.root == tmp_path
+            assert (first.context, second.context) == ("First", "Second")
+        async with runtime_scope(default_config()):
+            await locked_source.resolve_locked_source(
+                _node(), context="Third", command_timeout=17
+            )
+
+    _run(run())
+    assert len(calls) == 2
+
+
+def test_locked_source_memo_identity_changes_with_locked_content(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A new locked revision cannot reuse an earlier source realization."""
+    from lib.update.config import default_config
+    from lib.update.runtime import runtime_scope
+
+    calls: list[str] = []
+
+    async def evaluate(expr: str, *, command_timeout: float) -> str:
+        calls.append(expr)
+        assert command_timeout == 17
+        return str(tmp_path)
+
+    monkeypatch.setattr(locked_source, "nix_eval_raw", evaluate)
+
+    async def run() -> None:
+        async with runtime_scope(default_config()):
+            node = _node()
+            await locked_source.resolve_locked_source(
+                node, context="First", command_timeout=17
+            )
+            assert node.locked is not None
+            changed = node.model_copy(
+                update={"locked": node.locked.model_copy(update={"rev": "b" * 40})}
+            )
+            await locked_source.resolve_locked_source(
+                changed, context="Second", command_timeout=17
+            )
+
+    _run(run())
+    assert len(calls) == 2
+    assert calls[0] != calls[1]
+
+
+def test_locked_source_does_not_memoize_unusable_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A failed realization can succeed on a later attempt in the same run."""
+    from lib.update.config import default_config
+    from lib.update.runtime import runtime_scope
+
+    paths = iter(["", str(tmp_path)])
+
+    async def evaluate(_expr: str, *, command_timeout: float) -> str:
+        assert command_timeout == 17
+        return next(paths)
+
+    monkeypatch.setattr(locked_source, "nix_eval_raw", evaluate)
+
+    async def run() -> None:
+        async with runtime_scope(default_config()):
+            with pytest.raises(RuntimeError, match="empty path"):
+                await locked_source.resolve_locked_source(
+                    _node(), context="First", command_timeout=17
+                )
+            source = await locked_source.resolve_locked_source(
+                _node(), context="Second", command_timeout=17
+            )
+            assert source.root == tmp_path
+
+    _run(run())

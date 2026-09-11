@@ -1,6 +1,16 @@
 """Nix hash conversion and URL prefetching utilities."""
 
+from pydantic import BaseModel
+
+from lib.nix.models.hash import (
+    NixHash,  # noqa: TC001 -- Pydantic resolves this at runtime
+)
+
 from .base import _resolve_timeout_alias, run_nix
+
+
+class _PrefetchResult(BaseModel):
+    hash: NixHash
 
 
 async def nix_hash_convert(
@@ -36,7 +46,7 @@ async def nix_prefetch_url(
         command_timeout=command_timeout,
         kwargs=kwargs,
     )
-    args = ["nix-prefetch-url", "--type", hash_type]
+    args = ["nix", "store", "prefetch-file", "--json", "--hash-type", hash_type]
     if name is not None:
         args.extend(["--name", name])
     args.append(url)
@@ -44,5 +54,4 @@ async def nix_prefetch_url(
         args,
         timeout=timeout_seconds,
     )
-    raw_hash = result.stdout.strip().split("\n")[-1]
-    return await nix_hash_convert(raw_hash)
+    return _PrefetchResult.model_validate_json(result.stdout).hash

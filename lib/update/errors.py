@@ -2,6 +2,8 @@
 
 import traceback
 
+from lib.diagnostics import redact_urls
+
 
 def format_exception(exc: Exception, *, include_traceback: bool = False) -> str:
     """Return an exception message with optional traceback details."""
@@ -10,9 +12,9 @@ def format_exception(exc: Exception, *, include_traceback: bool = False) -> str:
         message = exc.__class__.__name__
 
     if not include_traceback:
-        return message
+        return redact_urls(message)
 
     traceback_lines = "".join(
         traceback.format_exception(type(exc), exc, exc.__traceback__)
     )
-    return f"{message}\n{traceback_lines}"
+    return redact_urls(f"{message}\n{traceback_lines}")

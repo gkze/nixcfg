@@ -22,7 +22,7 @@ class McpRuntimeToolsUpdater(Updater):
     name = "mcp-runtime-tools"
     required_tools: ClassVar[tuple[str, ...]] = ()
     _NPM_PACKAGES: ClassVar[tuple[str, ...]] = (
-        "@padenot/firefox-devtools-mcp",
+        "@mozilla/firefox-devtools-mcp",
         "@steipete/macos-automator-mcp",
         "@vantasdk/vanta-mcp-server",
         "chrome-devtools-mcp",

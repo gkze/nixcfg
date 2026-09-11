@@ -19,6 +19,7 @@ from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.config import default_config
 from lib.update.electron_manifest import ElectronManifestMetadata
+from lib.update.nix import _build_package_path_attr_expr
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
 
@@ -26,6 +27,35 @@ _COMMIT = "a" * 40
 _MANIFEST_VERSION = "1.2.3"
 _ELECTRON_SPEC = "^42.0.0"
 _ELECTRON_VERSION = "42.3.3"
+
+
+def test_dependency_probe_targets_only_the_desktop_node_modules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The hash probe must not realize the Electron consumer or its other inputs."""
+    module = _load_updater_module()
+    updater = module.OpencodeDesktopUpdater()
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
+    )
+    candidate = SourceEntry(
+        hashes=[],
+        pins={"desktopWorkspace": "packages/desktop"},
+        electron_version=_ELECTRON_VERSION,
+    )
+    expressions = updater._probe_expressions(candidate)
+    assert expressions
+    for system, expression in expressions.items():
+        assert_nix_ast_equal(
+            expression,
+            _build_package_path_attr_expr(
+                "opencode-desktop",
+                ".node_modules",
+                system=system,
+                source_overrides={"opencode-desktop": candidate},
+                fake_hashes=True,
+            ),
+        )
 
 
 def _load_updater_module() -> ModuleType:
@@ -91,6 +121,15 @@ def _lock_payload(
             "electron": [resolution, "", {}],
         },
     }).encode()
+
+
+def test_desktop_workspace_identity_must_be_unambiguous() -> None:
+    """A transition lockfile containing both desktop identities is rejected."""
+    module = _load_updater_module()
+    payload = json.loads(_lock_payload())
+    payload["workspaces"]["apps/desktop"] = _manifest(name="@opencode/desktop")
+    with pytest.raises(RuntimeError, match="exactly one .* workspace, found 2"):
+        module._lock_contract(json.dumps(payload).encode())
 
 
 def _mock_locked_source(
@@ -164,8 +203,10 @@ def _fetch_latest(
     )
 
 
+@pytest.mark.parametrize("name", ["@opencode-ai/desktop", "@opencode/desktop"])
 def test_opencode_desktop_uses_the_lockfiles_exact_electron_version(
     monkeypatch: pytest.MonkeyPatch,
+    name: str,
 ) -> None:
     """A manifest range must not be mistaken for the installed runtime."""
     module = _load_updater_module()
@@ -180,8 +221,8 @@ def test_opencode_desktop_uses_the_lockfiles_exact_electron_version(
     reads = _mock_locked_source(
         module,
         monkeypatch,
-        manifest=_manifest(),
-        lock_payload=_lock_payload(workspace_path=workspace_path),
+        manifest=_manifest(name=name),
+        lock_payload=_lock_payload(workspace_path=workspace_path, name=name),
     )
 
     updater = module.OpencodeDesktopUpdater()

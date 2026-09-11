@@ -158,7 +158,7 @@ export interface UpdateApplyState {
         "apps/desktop/src/store/updates.ts",
         """    const status = await bridge.check()
     $updateStatus.set(status)
-    maybeNotifyUpdateAvailable(status)
+    maybeNotifyUpdateAvailable(status, 'client')
     void refreshDesktopVersion()
 
     return status
@@ -175,7 +175,7 @@ export interface UpdateApplyState {
       : status
 
     $updateStatus.set(effectiveStatus)
-    maybeNotifyUpdateAvailable(effectiveStatus)
+    maybeNotifyUpdateAvailable(effectiveStatus, 'client')
     void refreshDesktopVersion()
 
     return effectiveStatus

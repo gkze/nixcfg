@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     import aiohttp
 
     from lib.update.derivation_validation import DerivationValidation
+    from lib.update.nix import PreparedProbe
     from lib.update.updaters.metadata import VersionInfo
 
 
@@ -116,6 +117,8 @@ class UpdateContext:
 
     current: SourceEntry | None
     drv_fingerprint: str | None = None
+    drv_fingerprints: dict[str, str] = field(default_factory=dict)
+    prepared_probes: dict[str, PreparedProbe] = field(default_factory=dict)
     generated_artifacts: dict[Path, str] = field(default_factory=dict)
     hashes_fully_computed: bool = True
     effective_sources: dict[str, SourceEntry] = field(default_factory=dict)

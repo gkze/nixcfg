@@ -14,6 +14,65 @@ let
     ;
 
   cfg = config.nixcfg.zen;
+  debugging = cfg.remoteDebugging;
+  debuggingEnabled =
+    debugging.bidi.enable || debugging.marionette.enable || debugging.devtools.enable;
+  protocolOption = description: port: {
+    enable = mkEnableOption description;
+    port = mkOption {
+      type = types.port;
+      default = port;
+      description = "Local TCP port for ${description}.";
+    };
+  };
+  debuggingPorts =
+    lib.optional debugging.bidi.enable debugging.bidi.port
+    ++ lib.optional debugging.marionette.enable debugging.marionette.port
+    ++ lib.optional debugging.devtools.enable debugging.devtools.port;
+  debuggingArgs =
+    lib.optionals debugging.bidi.enable [
+      "--remote-debugging-port"
+      (toString debugging.bidi.port)
+    ]
+    ++ lib.optional debugging.marionette.enable "--marionette"
+    ++ lib.optionals debugging.devtools.enable [
+      "--start-debugger-server"
+      (toString debugging.devtools.port)
+    ];
+  debuggingPrefs = {
+    "devtools.debugger.remote-enabled" = debugging.devtools.enable;
+    "devtools.chrome.enabled" = debugging.devtools.enable;
+    "devtools.debugger.force-local" = true;
+    "devtools.debugger.prompt-connection" = !debugging.devtools.allowUnattended;
+    "marionette.port" = debugging.marionette.port;
+    # This is a daily browser, not an automation-owned disposable profile.
+    "remote.prefs.recommended" = false;
+  };
+  debuggingUserJs = pkgs.writeText "zen-user.js" (
+    lib.optionalString (cfg.userJsSource != null) (builtins.readFile cfg.userJsSource)
+    + "\n// Managed by nixcfg.zen.remoteDebugging.\n"
+    + lib.concatStringsSep "\n" (
+      lib.mapAttrsToList (
+        name: value: "user_pref(${builtins.toJSON name}, ${builtins.toJSON value});"
+      ) debuggingPrefs
+    )
+    + "\n"
+  );
+  configuredPackage = cfg.package.overrideAttrs (old: {
+    postInstall = (old.postInstall or "") + ''
+      app="$out/${cfg.package.passthru.macApp.bundleRelPath}"
+      mv "$app/Contents/MacOS/zen" "$app/Contents/MacOS/zen-bin"
+      cat > "$app/Contents/MacOS/zen" <<'EOF'
+      #!/bin/sh
+      if [ "$HOME" = ${lib.escapeShellArg config.home.homeDirectory} ]; then
+        exec "$(dirname "$0")/zen-bin" ${lib.escapeShellArgs debuggingArgs} "$@"
+      fi
+      exec "$(dirname "$0")/zen-bin" "$@"
+      EOF
+      chmod +x "$app/Contents/MacOS/zen"
+      /usr/bin/codesign --force --deep --sign - "$app"
+    '';
+  });
   managedConfigDir = "${config.xdg.configHome}/zen";
   zenPython = pkgs.python3.withPackages (
     ps: with ps; [
@@ -38,6 +97,34 @@ in
 {
   options.nixcfg.zen = {
     enable = mkEnableOption "Zen/Twilight profile sync and declarative customizations";
+
+    package = mkOption {
+      type = types.nullOr types.package;
+      default = if pkgs.stdenv.hostPlatform.isDarwin then pkgs.zen-twilight else null;
+      description = "Base Zen app package. Remote debugging currently supports the macOS Zen bundle.";
+    };
+
+    finalPackage = mkOption {
+      type = types.nullOr types.package;
+      readOnly = true;
+      description = ''
+        Zen package with this user's launch configuration. Use this package in
+        the app installation routing so Dock, Finder, and CLI launches agree.
+        With remote debugging disabled, this is the unmodified base package.
+      '';
+    };
+
+    remoteDebugging = {
+      bidi = protocolOption "WebDriver BiDi" 9222;
+      marionette = protocolOption "Marionette" 2828;
+      devtools = protocolOption "Firefox DevTools RDP" 6000 // {
+        allowUnattended = mkOption {
+          type = types.bool;
+          default = false;
+          description = "Accept local DevTools connections without a confirmation dialog.";
+        };
+      };
+    };
 
     profile = mkOption {
       type = types.nullOr types.str;
@@ -128,7 +215,21 @@ in
   };
 
   config = mkIf cfg.enable {
+    nixcfg.zen.finalPackage = if debuggingEnabled then configuredPackage else cfg.package;
+
     assertions = [
+      {
+        assertion = debuggingEnabled -> (pkgs.stdenv.hostPlatform.isDarwin && cfg.package != null);
+        message = "nixcfg.zen.remoteDebugging requires a macOS Zen package.";
+      }
+      {
+        assertion = builtins.length debuggingPorts == builtins.length (lib.unique debuggingPorts);
+        message = "nixcfg.zen.remoteDebugging protocols must use distinct ports.";
+      }
+      {
+        assertion = debuggingEnabled -> (cfg.syncOnActivation && cfg.applyAssetsOnActivation);
+        message = "nixcfg.zen.remoteDebugging requires profile asset sync for its companion preferences.";
+      }
       {
         assertion = cfg.syncOnActivation -> cfg.toolCommand != "";
         message = "nixcfg.zen.toolCommand must be non-empty when syncOnActivation is enabled.";
@@ -146,8 +247,8 @@ in
           recursive = true;
         };
       })
-      (mkIf (cfg.userJsSource != null) {
-        "zen/user.js".source = cfg.userJsSource;
+      (mkIf (cfg.userJsSource != null || debuggingEnabled) {
+        "zen/user.js".source = if debuggingEnabled then debuggingUserJs else cfg.userJsSource;
       })
       (mkIf (cfg.foldersSource != null) {
         "zen/folders.yaml".source = cfg.foldersSource;

@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from nix_manipulator.expressions.set import AttributeSet
 
+from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode, LockedRef
 from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.update import flake, refs, source_runner
 from lib.update.config import resolve_config
@@ -16,6 +18,7 @@ from lib.update.source_runner import SourcesPhaseContext, UpdatePhaseResult
 if TYPE_CHECKING:
     import aiohttp
 
+    from lib.update.config import UpdateConfig
     from lib.update.updaters import UpdateContext
 
 
@@ -37,6 +40,39 @@ class _InputUpdater:
         await emit(UpdateEvent.result("demo"))
 
 
+def _write_input_files(
+    root: Path, *, input_ref: str = "v1", other_ref: str = "v1", shared_ref: str = "v1"
+) -> None:
+    versions = {"input": input_ref, "other": other_ref, "shared": shared_ref}
+    declarations = AttributeSet.from_dict({
+        "inputs": {
+            name: {"url": f"github:owner/{name}/{version}"}
+            for name, version in versions.items()
+        }
+    })
+    lock = FlakeLock(
+        version=7,
+        nodes={
+            "root": FlakeLockNode(inputs={name: name for name in versions}),
+            **{
+                name: FlakeLockNode(
+                    locked=LockedRef(
+                        type="github",
+                        owner="owner",
+                        repo=name,
+                        rev=version,
+                        narHash="sha256-test",
+                    ),
+                    inputs={"dependency": ["shared"]} if name == "input" else None,
+                )
+                for name, version in versions.items()
+            },
+        },
+    )
+    (root / "flake.nix").write_text(declarations.rebuild())
+    (root / "flake.lock").write_text(lock.model_dump_json())
+
+
 @pytest.mark.parametrize(
     ("ref_status", "changed_file", "expected_refreshes"),
     [
@@ -56,8 +92,7 @@ def test_sources_reuse_only_successful_unchanged_ref_refreshes(
     expected_refreshes: int,
 ) -> None:
     """Keep ref and source execution real while substituting the network boundary."""
-    (tmp_path / "flake.nix").write_bytes(b"original declarations")
-    (tmp_path / "flake.lock").write_bytes(b"original lock")
+    _write_input_files(tmp_path)
     monkeypatch.setattr(flake, "get_repo_root", lambda: tmp_path)
     monkeypatch.setattr(source_runner, "UPDATERS", {"demo": _InputUpdater})
     source_refreshes: list[str] = []
@@ -73,15 +108,16 @@ def test_sources_reuse_only_successful_unchanged_ref_refreshes(
     async def _update_ref(*_args: object, **_kwargs: object) -> None:
         if ref_status == "update_error":
             raise RuntimeError("lock refresh failed")
-        (tmp_path / "flake.nix").write_bytes(b"candidate declarations")
-        (tmp_path / "flake.lock").write_bytes(b"candidate lock")
+        _write_input_files(tmp_path, input_ref="v2")
 
     async def _update_input(
         input_name: str,
         *,
         source: str,
         emit: EventSink = ignore_event,
+        config: UpdateConfig,
     ) -> None:
+        assert config.default_subprocess_timeout == 17
         source_refreshes.append(input_name)
         await emit(UpdateEvent.status(source, "lock refreshed"))
 
@@ -91,7 +127,7 @@ def test_sources_reuse_only_successful_unchanged_ref_refreshes(
 
     async def _run() -> list[UpdateEvent | None]:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
-        config = resolve_config()
+        config = resolve_config(subprocess_timeout=17)
         result = await source_runner.run_ref_phase(
             ref_inputs=[FlakeInputRef("input", "owner", "repo", "v1", "github")],
             queue=queue,
@@ -101,7 +137,7 @@ def test_sources_reuse_only_successful_unchanged_ref_refreshes(
             "input": "error" if ref_status == "update_error" else ref_status
         }
         assert result.input_refreshes == (
-            {"input": (b"candidate declarations", b"candidate lock")}
+            {"input": flake.read_flake_input_state("input")}
             if ref_status == "updated"
             else {}
         )
@@ -136,13 +172,15 @@ def test_sources_reuse_only_successful_unchanged_ref_refreshes(
     )
 
 
-def test_later_ref_cannot_recapture_an_earlier_inputs_refresh(
+@pytest.mark.parametrize("changes_dependency", [False, True])
+def test_later_ref_reuses_only_independent_earlier_refreshes(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    *,
+    changes_dependency: bool,
 ) -> None:
-    """A later lock rewrite invalidates A's receipt even if both refs succeeded."""
-    (tmp_path / "flake.nix").write_bytes(b"declarations")
-    (tmp_path / "flake.lock").write_bytes(b"initial")
+    """Updating B preserves A's receipt only when A's dependencies stay unchanged."""
+    _write_input_files(tmp_path)
     monkeypatch.setattr(flake, "get_repo_root", lambda: tmp_path)
     monkeypatch.setattr(source_runner, "UPDATERS", {"demo": _InputUpdater})
     refreshes: list[str] = []
@@ -156,10 +194,14 @@ def test_later_ref_cannot_recapture_an_earlier_inputs_refresh(
         input_ref: FlakeInputRef, *_args: object, **_kwargs: object
     ) -> None:
         if input_ref.name == "input":
-            (tmp_path / "flake.lock").write_bytes(b"A refreshed")
+            _write_input_files(tmp_path, input_ref="v2")
         else:
-            assert (tmp_path / "flake.lock").read_bytes() == b"A refreshed"
-            (tmp_path / "flake.lock").write_bytes(b"B rewrote A and shared topology")
+            _write_input_files(
+                tmp_path,
+                input_ref="v2",
+                other_ref="v2",
+                shared_ref="v2" if changes_dependency else "v1",
+            )
 
     async def _update_input(input_name: str, **_kwargs: object) -> None:
         refreshes.append(input_name)
@@ -180,10 +222,10 @@ def test_later_ref_cannot_recapture_an_earlier_inputs_refresh(
             config=config,
         )
         assert result.details == {"input": "updated", "other": "updated"}
-        assert result.input_refreshes == {
-            "input": (b"declarations", b"A refreshed"),
-            "other": (b"declarations", b"B rewrote A and shared topology"),
-        }
+        assert set(result.input_refreshes) == {"input", "other"}
+        assert (
+            result.input_refreshes["input"] == flake.read_flake_input_state("input")
+        ) is not changes_dependency
         result = await source_runner.run_sources_phase(
             SourcesPhaseContext(
                 source_names=["demo"],
@@ -198,7 +240,7 @@ def test_later_ref_cannot_recapture_an_earlier_inputs_refresh(
         assert result.details == {"demo": "no_change"}
 
     asyncio.run(_run())
-    assert refreshes == ["input"]
+    assert refreshes == (["input"] if changes_dependency else [])
 
 
 @pytest.mark.parametrize("cancel", [False, True])
@@ -209,8 +251,7 @@ def test_ref_result_failure_never_publishes_a_refresh_receipt(
     cancel: bool,
 ) -> None:
     """A cancelled or failed ref task cannot seed a later successful source phase."""
-    (tmp_path / "flake.nix").write_bytes(b"declarations")
-    (tmp_path / "flake.lock").write_bytes(b"initial")
+    _write_input_files(tmp_path)
     monkeypatch.setattr(flake, "get_repo_root", lambda: tmp_path)
     monkeypatch.setattr(source_runner, "UPDATERS", {"demo": _InputUpdater})
     refreshes: list[str] = []
@@ -231,7 +272,7 @@ def test_ref_result_failure_never_publishes_a_refresh_receipt(
         return RefUpdateResult("input", "v1", "v2")
 
     async def _update_ref(*_args: object, **_kwargs: object) -> None:
-        (tmp_path / "flake.lock").write_bytes(b"candidate")
+        _write_input_files(tmp_path, input_ref="v2")
 
     async def _update_input(input_name: str, **_kwargs: object) -> None:
         refreshes.append(input_name)

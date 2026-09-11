@@ -15,8 +15,6 @@ from lib.update.events import EventSink, ignore_event
 if TYPE_CHECKING:
     import aiohttp
 
-    from lib.nix.models.sources import SourceEntry
-
 from lib.nix.models.sources import HashEntry, SourceHashes
 from lib.update import net as update_net
 from lib.update import nix as update_nix
@@ -293,12 +291,6 @@ class NeutilsUpdater(GitHubReleaseUpdater):
     def _is_transient_zon2nix_failure(cls, result: CommandResult) -> bool:
         return cls._is_transient_zon2nix_text(f"{result.stderr}\n{result.stdout}")
 
-    @staticmethod
-    def _current_context_source(
-        context: UpdateContext,
-    ) -> SourceEntry | None:
-        return context.current
-
     async def _run_zon2nix(
         self,
         *,
@@ -445,6 +437,7 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         emit: EventSink = ignore_event,
     ) -> SourceHashes:
         """Generate ``build.zig.zon.nix`` and compute the pinned source hash."""
+        _ = context
         pkg_dir = update_paths.updater_dir_for(self.name)
         if pkg_dir is None:
             msg = f"Package directory not found for {self.name}"
@@ -458,37 +451,9 @@ class NeutilsUpdater(GitHubReleaseUpdater):
                 operation="compute_hash",
             )
         )
-        try:
-            artifact_content = await self._render_build_zig_zon_nix(
-                info, session, emit=emit
-            )
-        except RuntimeError as exc:
-            current = self._current_context_source(context)
-            if (
-                current is not None
-                and current.version == info.version
-                and current.commit == info.commit
-                and self._is_transient_zon2nix_text(str(exc))
-                and artifact_path.exists()
-            ):
-                await emit(
-                    UpdateEvent.status(
-                        self.name,
-                        f"Preserving existing {artifact_path.name} "
-                        "after transient zon2nix failure.",
-                        operation="compute_hash",
-                        status=StatusInfo(
-                            kind=StatusKind.PRESERVED_ARTIFACT,
-                            value=str(artifact_path),
-                        ),
-                    )
-                )
-                artifact_content = await asyncio.to_thread(
-                    artifact_path.read_text,
-                    encoding="utf-8",
-                )
-            else:
-                raise
+        artifact_content = await self._render_build_zig_zon_nix(
+            info, session, emit=emit
+        )
         await emit(
             UpdateEvent.artifact(
                 self.name,

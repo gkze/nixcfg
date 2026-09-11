@@ -1,20 +1,27 @@
 """Compatibility checks for packages built with nixpkgs Node.js toolchains."""
 
-import asyncio
-import json
 import re
 from dataclasses import dataclass
+from typing import Annotated, Literal
 
 from nix_manipulator.expressions.binary import BinaryExpression
+from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.if_expression import IfExpression
+from nix_manipulator.expressions.let import LetExpression
 from nix_manipulator.expressions.operator import Operator
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
+from nix_manipulator.expressions.select import Select
+from nix_manipulator.expressions.set import AttributeSet
+from nix_manipulator.parser import parse
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from lib.nix.commands.base import run_nix
 from lib.update import nix as update_nix
+from lib.update.config import default_config
 from lib.update.nix import _build_flake_attr_expr
 from lib.update.nix_expr import compact_nix_expr, select_attrs
 from lib.update.npm_semver import (
@@ -23,6 +30,7 @@ from lib.update.npm_semver import (
     require_valid_npm_range,
 )
 from lib.update.paths import local_flake_url
+from lib.update.runtime import resource_slot, runtime_scope, workspace_access
 
 _NIX_ATTRIBUTE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_'-]*$")
 _NODEJS_ATTRIBUTE_PATTERN = re.compile(r"^nodejs_(?P<major>0|[1-9][0-9]*)$")
@@ -155,18 +163,26 @@ async def _evaluate_version(
     selection: str,
     source_name: str,
 ) -> str:
-    result = await run_nix(
-        [
-            "nix",
-            "eval",
-            "--impure",
-            "--raw",
-            "--expr",
-            expression,
-        ],
-        command_timeout=command_timeout,
-        check=False,
-    )
+    async with (
+        runtime_scope(default_config()),
+        workspace_access(),
+        resource_slot("eval", source=source_name, config=default_config()) as timing,
+    ):
+        result = await run_nix(
+            [
+                "nix",
+                "eval",
+                "--impure",
+                "--raw",
+                "--expr",
+                expression,
+            ],
+            command_timeout=command_timeout,
+            check=False,
+        )
+        timing.stdout_bytes += len(result.stdout.encode())
+        timing.stderr_bytes += len(result.stderr.encode())
+        timing.nonzero_exits += int(result.returncode != 0)
     version = result.stdout.strip()
     if result.returncode != 0 or not version:
         details = result.stderr.strip() or result.stdout.strip() or "nix eval failed"
@@ -175,66 +191,149 @@ async def _evaluate_version(
     return version
 
 
-async def _evaluate_nodejs_attributes(
+class _AvailableNodeVersion(BaseModel):
+    success: Literal[True]
+    value: str
+
+
+class _UnavailableNodeVersion(BaseModel):
+    success: Literal[False]
+    value: Literal[False]
+
+
+_NodeVersionResult = Annotated[
+    _AvailableNodeVersion | _UnavailableNodeVersion, Field(discriminator="success")
+]
+_NODE_INVENTORY = TypeAdapter(dict[str, _NodeVersionResult])
+
+
+def _nodejs_inventory_apply_expr() -> str:
+    """Inspect every candidate in one evaluation, isolating unsupported aliases."""
+    name = Identifier(name="name")
+    pkgs = Identifier(name="pkgs")
+    version = Identifier(name="version")
+    package = FunctionCall(
+        name=FunctionCall(
+            name=select_attrs(Identifier(name="builtins"), "getAttr"),
+            argument=name,
+        ),
+        argument=pkgs,
+    )
+    checked_version = LetExpression(
+        local_variables=[
+            Binding(name="package", value=package),
+            Binding(
+                name="version",
+                value=IfExpression(
+                    condition=FunctionCall(
+                        name=select_attrs(Identifier(name="builtins"), "isAttrs"),
+                        argument=Identifier(name="package"),
+                    ),
+                    consequence=Select(
+                        expression=Identifier(name="package"),
+                        attribute="version",
+                        default=Primitive(value=None),
+                    ),
+                    alternative=Primitive(value=None),
+                ),
+            ),
+        ],
+        value=IfExpression(
+            condition=FunctionCall(
+                name=select_attrs(Identifier(name="builtins"), "isString"),
+                argument=version,
+            ),
+            consequence=version,
+            alternative=FunctionCall(
+                name=Identifier(name="throw"),
+                argument=StringPrimitive(value="Node.js version is not a string"),
+            ),
+        ),
+    )
+    candidate = FunctionDefinition(
+        argument_set=name,
+        output=AttributeSet.from_dict({
+            "name": name,
+            "value": FunctionCall(
+                name=select_attrs(Identifier(name="builtins"), "tryEval"),
+                argument=Parenthesis(value=checked_version),
+            ),
+        }),
+    )
+    names = FunctionCall(
+        name=Parenthesis(value=parse(_nodejs_attribute_names_apply_expr()).expr),
+        argument=pkgs,
+    )
+    entries = FunctionCall(
+        name=FunctionCall(
+            name=select_attrs(Identifier(name="builtins"), "map"),
+            argument=Parenthesis(value=candidate),
+        ),
+        argument=Parenthesis(value=names),
+    )
+    return compact_nix_expr(
+        FunctionDefinition(
+            argument_set=pkgs,
+            output=FunctionCall(
+                name=select_attrs(Identifier(name="builtins"), "listToAttrs"),
+                argument=Parenthesis(value=entries),
+            ),
+        ).rebuild()
+    )
+
+
+async def _evaluate_nodejs_inventory(
     platform: str,
     *,
     command_timeout: float,
     source_name: str,
-) -> tuple[str, ...]:
-    """Return the versioned Node.js attributes present in the pinned package set."""
-    result = await run_nix(
-        [
-            "nix",
-            "eval",
-            "--impure",
-            "--json",
-            "--expr",
-            _nixpkgs_package_set_expr(platform),
-            "--apply",
-            _nodejs_attribute_names_apply_expr(),
-        ],
-        command_timeout=command_timeout,
-        check=False,
-    )
+) -> dict[str, _AvailableNodeVersion | _UnavailableNodeVersion]:
+    """Evaluate candidate versions together without caching mutable flake state.
+
+    A lockfile alone cannot key this inventory: the package set also observes
+    local overlays and generated files, which can change within an update run.
+    """
+    async with (
+        runtime_scope(default_config()),
+        workspace_access(),
+        resource_slot("eval", source=source_name, config=default_config()) as timing,
+    ):
+        result = await run_nix(
+            [
+                "nix",
+                "eval",
+                "--impure",
+                "--json",
+                "--expr",
+                _nixpkgs_package_set_expr(platform),
+                "--apply",
+                _nodejs_inventory_apply_expr(),
+            ],
+            command_timeout=command_timeout,
+            check=False,
+        )
+        timing.stdout_bytes += len(result.stdout.encode())
+        timing.stderr_bytes += len(result.stderr.encode())
+        timing.nonzero_exits += int(result.returncode != 0)
     if result.returncode != 0:
         details = result.stderr.strip() or result.stdout.strip() or "nix eval failed"
-        msg = (
-            f"Failed to enumerate nixpkgs Node.js packages for {source_name}: {details}"
-        )
+        msg = f"Failed to inspect nixpkgs Node.js packages for {source_name}: {details}"
         raise RuntimeError(msg)
     try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as error:
+        inventory = _NODE_INVENTORY.validate_json(result.stdout)
+    except ValidationError as error:
         msg = (
-            f"Failed to enumerate nixpkgs Node.js packages for {source_name}: "
-            "nix eval returned invalid JSON"
+            f"Failed to inspect nixpkgs Node.js packages for {source_name}: "
+            "nix eval returned an invalid JSON inventory"
         )
         raise RuntimeError(msg) from error
-    if not isinstance(payload, list):
-        msg = (
-            f"Failed to enumerate nixpkgs Node.js packages for {source_name}: "
-            "expected a JSON list"
-        )
-        raise TypeError(msg)
-
-    attributes: set[str] = set()
-    for value in payload:
-        if (
-            not isinstance(value, str)
-            or _NODEJS_ATTRIBUTE_PATTERN.fullmatch(value) is None
-        ):
+    for attribute in inventory:
+        if _NODEJS_ATTRIBUTE_PATTERN.fullmatch(attribute) is None:
             msg = (
-                f"Failed to enumerate nixpkgs Node.js packages for {source_name}: "
-                f"unexpected attribute {value!r}"
+                f"Unexpected nixpkgs Node.js attribute for {source_name}: {attribute!r}"
             )
             raise RuntimeError(msg)
-        attributes.add(value)
-    return tuple(
-        sorted(
-            attributes,
-            key=lambda attribute: int(attribute.removeprefix("nodejs_")),
-        )
-    )
+    return inventory
 
 
 async def _resolve_nixpkgs_package_version_for_platform(
@@ -271,25 +370,6 @@ async def resolve_nixpkgs_package_version(
     )
 
 
-async def _resolve_nodejs_candidate(
-    attribute: str,
-    *,
-    platform: str,
-    command_timeout: float,
-    source_name: str,
-) -> tuple[str, str | None, str | None]:
-    try:
-        version = await _resolve_nixpkgs_package_version_for_platform(
-            attribute,
-            platform=platform,
-            command_timeout=command_timeout,
-            source_name=source_name,
-        )
-    except RuntimeError as error:
-        return attribute, None, str(error)
-    return attribute, version, None
-
-
 async def resolve_nixpkgs_nodejs_for_engine(
     engine: object,
     *,
@@ -299,34 +379,22 @@ async def resolve_nixpkgs_nodejs_for_engine(
     """Select the lowest available nixpkgs Node.js satisfying an npm engine."""
     node_engine = _require_node_engine(engine, source_name=source_name)
     platform = update_nix.get_current_nix_platform()
-    attributes = await _evaluate_nodejs_attributes(
+    inventory = await _evaluate_nodejs_inventory(
         platform,
         command_timeout=command_timeout,
         source_name=source_name,
     )
-    candidates = await asyncio.gather(
-        *(
-            _resolve_nodejs_candidate(
-                attribute,
-                platform=platform,
-                command_timeout=command_timeout,
-                source_name=source_name,
-            )
-            for attribute in attributes
-        )
-    )
 
     available: list[str] = []
     failures: list[str] = []
-    for attribute, version, failure in candidates:
-        if failure is not None:
-            failures.append(f"{attribute}: {failure}")
+    for attribute in sorted(
+        inventory, key=lambda name: int(name.removeprefix("nodejs_"))
+    ):
+        candidate = inventory[attribute]
+        if not candidate.success:
+            failures.append(f"{attribute}: version evaluation failed")
             continue
-        if version is None:  # pragma: no cover -- tuple invariant owned above
-            msg = (
-                f"Missing version and failure for nixpkgs Node.js candidate {attribute}"
-            )
-            raise AssertionError(msg)
+        version = candidate.value
         try:
             satisfies = npm_version_matches_spec(
                 version,

@@ -1,5 +1,5 @@
 {
-  "drvHash": "d3aizqg2af2024lj3h0ryqbplbgyfj8b",
+  "drvHash": "platforms-v1:bfefd57d2ed52f664c6c45fbd0f5b78b8c17ca5e722f4a07e99022ea6a1b797c",
   "electronVersion": "40.10.2",
   "hashes": [
     {
@@ -28,5 +28,5 @@
     "pnpmEngine": ">=10.28.0",
     "pnpmVersion": "10.34.5"
   },
-  "version": "v1.2.3"
+  "version": "v1.2.4"
 }

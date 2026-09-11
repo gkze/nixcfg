@@ -20,6 +20,7 @@ from lib.update.events import (
 )
 from lib.update.outcomes import SummaryStatus, merge_statuses
 from lib.update.refs import FlakeInputRef, RefTaskOptions
+from lib.update.runtime import join_shared_work, measure, resource_slot, runtime_scope
 from lib.update.updaters import UPDATERS, ensure_updaters_loaded
 from lib.update.updaters.core import UpdateContext
 from lib.update.updaters.flake_backed import FlakeInputHashUpdater
@@ -154,6 +155,7 @@ async def _refresh_input_task(
     input_name: str,
     source: str,
     put: EventPut,
+    config: UpdateConfig,
 ) -> None:
     await put(
         UpdateEvent.status(
@@ -163,7 +165,9 @@ async def _refresh_input_task(
             status=StatusInfo(kind=StatusKind.REFRESH_LOCK, value=input_name),
         )
     )
-    await update_flake.update_flake_input(input_name, source=source, emit=put)
+    await update_flake.update_flake_input(
+        input_name, source=source, emit=put, config=config
+    )
 
 
 async def _ensure_input_refreshed(
@@ -179,7 +183,7 @@ async def _ensure_input_refreshed(
         reused_ref_phase = (
             task is None
             and receipt is not None
-            and receipt == update_flake.read_flake_input_state()
+            and receipt == update_flake.read_flake_input_state(input_name)
         )
         if task is None and not reused_ref_phase:
             task = asyncio.create_task(
@@ -187,6 +191,7 @@ async def _ensure_input_refreshed(
                     input_name=input_name,
                     source=name,
                     put=put,
+                    config=context.config,
                 )
             )
             context.update_input_tasks[input_name] = task
@@ -231,7 +236,7 @@ async def update_source_task(
         input_name = getattr(updater, "input_name", None)
         input_names = (
             *((input_name,) if input_name else ()),
-            *getattr(updater, "additional_input_names", ()),
+            *update_planner.source_additional_input_names(type(updater)),
         )
         put = context.queue.put
         update_context = UpdateContext(
@@ -317,94 +322,106 @@ async def run_ref_phase(
         )
 
 
-async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
-    """Run source update tasks in dependency-respecting waves."""
-    async with aiohttp.ClientSession(
-        max_field_size=_AIOHTTP_MAX_FIELD_SIZE,
-    ) as session:
-        update_input_lock = asyncio.Lock()
-        update_input_tasks: dict[str, asyncio.Task[None]] = {}
-        generated_artifacts: dict[Path, str] = {}
-        effective_sources = dict(context.sources.entries)
-        updaters = _get_updaters()
-        source_waves = update_planner.source_update_waves(
-            context.source_names, updaters
+async def _refresh_source_inputs(name: str, context: SourceTaskContext) -> bool:
+    """Finish selected lock writes before any concurrent candidate evaluation."""
+    completed = False
+
+    async def refresh() -> None:
+        nonlocal completed
+        updater = _get_updaters()[name]
+        input_name = update_planner.source_backing_input_name(
+            name, updater, context.sources.entries.get(name)
         )
-        source_task_slots = asyncio.Semaphore(context.config.max_nix_builds)
+        inputs = (
+            *((input_name,) if input_name else ()),
+            *update_planner.source_additional_input_names(updater),
+        )
+        for input_name in dict.fromkeys(inputs):
+            await _ensure_input_refreshed(name, input_name, context=context)
+        completed = True
 
-        def _source_task_context() -> SourceTaskContext:
-            return SourceTaskContext(
-                sources=context.sources,
-                update_input=context.update_input,
-                native_only=context.native_only,
-                session=session,
-                update_input_lock=update_input_lock,
-                update_input_tasks=update_input_tasks,
-                queue=context.queue,
-                generated_artifacts=generated_artifacts,
-                effective_sources=effective_sources,
-                input_refreshes=context.input_refreshes,
-                config=context.config,
-            )
+    await update_process.run_queue_task(source=name, queue=context.queue, task=refresh)
+    return completed
 
-        async def _run_source_with_limit(name: str) -> SourceTaskResult:
-            async with source_task_slots:
-                return await update_source_task(
-                    name,
-                    context=_source_task_context(),
-                )
 
-        all_results: dict[str, SourceTaskResult] = {}
-        for wave in source_waves:
-            runnable: list[str] = []
-            for name in wave:
-                failed_prerequisites = [
+async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
+    """Release dependencies after publication, independently of unrelated work."""
+    async with (
+        runtime_scope(context.config),
+        aiohttp.ClientSession(max_field_size=_AIOHTTP_MAX_FIELD_SIZE) as session,
+    ):
+        updaters = _get_updaters()
+        selected = set(context.source_names)
+        prerequisites = {
+            name: update_planner.source_prerequisites(updaters, name, selected=selected)
+            for name in context.source_names
+        }
+        source_order = update_planner.source_dependency_order(prerequisites)
+        shared = SourceTaskContext(
+            sources=context.sources,
+            update_input=False,
+            native_only=context.native_only,
+            session=session,
+            update_input_lock=asyncio.Lock(),
+            update_input_tasks={},
+            queue=context.queue,
+            generated_artifacts={},
+            effective_sources=dict(context.sources.entries),
+            input_refreshes=context.input_refreshes,
+            config=context.config,
+        )
+        refresh_failures: set[str] = set()
+        if context.update_input:
+            for name in context.source_names:
+                if not await _refresh_source_inputs(name, shared):
+                    refresh_failures.add(name)
+
+        tasks: dict[str, asyncio.Task[SourceTaskResult]] = {}
+
+        async def run_ready(name: str) -> SourceTaskResult:
+            with measure(name, "dependencies"):
+                failed = [
                     prerequisite
-                    for prerequisite in update_planner.source_prerequisites(
-                        updaters,
-                        name,
-                        selected=set(context.source_names),
-                    )
-                    if prerequisite in all_results
-                    and not all_results[prerequisite].completed
+                    for prerequisite in prerequisites[name]
+                    if not (await tasks[prerequisite]).completed
                 ]
-                if failed_prerequisites:
-                    prerequisites = ", ".join(failed_prerequisites)
-                    await context.queue.put(
-                        UpdateEvent.error(
-                            name,
-                            f"Prerequisite update failed: {prerequisites}",
-                        )
+            if failed:
+                await context.queue.put(
+                    UpdateEvent.error(
+                        name, f"Prerequisite update failed: {', '.join(failed)}"
                     )
-                    all_results[name] = SourceTaskResult(completed=False)
-                    continue
-                runnable.append(name)
-
-            if not runnable:
-                continue
-
-            async with asyncio.TaskGroup() as group:
-                tasks = {
-                    name: group.create_task(_run_source_with_limit(name))
-                    for name in runnable
-                }
-
-            for name in runnable:
-                result = tasks[name].result()
-                all_results[name] = result
-                if not result.completed:
-                    continue
+                )
+            if failed or name in refresh_failures:
+                return SourceTaskResult(completed=False)
+            async with resource_slot("source", source=name, config=context.config):
+                result = await update_source_task(name, context=shared)
+            if result.completed:
+                # No suspension between publishing an immutable result and
+                # completing this task: children observe the complete result.
                 for artifact in result.artifacts:
-                    generated_artifacts[artifact.path] = artifact.content
+                    shared.generated_artifacts[artifact.path] = artifact.content
                 if result.source_update is not None:
-                    current = effective_sources.get(name)
-                    effective_sources[name] = (
+                    current = shared.effective_sources.get(name)
+                    shared.effective_sources[name] = (
                         current.merge_native_update(result.source_update)
                         if context.native_only and current is not None
                         else result.source_update
                     )
+            return result
 
-        return _summarize_source_results(context.source_names, all_results)
+        try:
+            async with asyncio.TaskGroup() as group:
+                # Parents must exist even when the loop starts tasks eagerly.
+                for name in source_order:
+                    tasks[name] = group.create_task(run_ready(name))
+        finally:
+            # Shared artifact producers can outlive one cancelled consumer. Reap
+            # them while the disposable workspace still exists, before CLI
+            # teardown restores cwd/REPO_ROOT or removes temporary files.
+            await join_shared_work()
+        return _summarize_source_results(
+            context.source_names, {name: task.result() for name, task in tasks.items()}
+        )
 
 
 __all__ = [

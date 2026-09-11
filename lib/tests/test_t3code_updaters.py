@@ -30,8 +30,9 @@ from lib.update.events import (
     ignore_event,
 )
 from lib.update.generated_artifact_commands import stream_command_materialized_artifacts
-from lib.update.nix import _build_package_path_attr_expr
+from lib.update.nix import PreparedProbe, _build_package_path_attr_expr
 from lib.update.persistence import persist_generated_artifacts
+from lib.update.runtime import runtime_scope
 from lib.update.source_runner import (
     SourcesPhaseContext,
     SourceTaskContext,
@@ -42,10 +43,26 @@ from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
     from lib.update.process import RunCommandOptions
-    from lib.update.updaters.t3_runtime import T3RuntimeUpdater
 
 HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 NEW_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+
+
+def _mock_probe_preparation(
+    monkeypatch: pytest.MonkeyPatch,
+    fingerprint: Callable[[str, str], str],
+) -> None:
+    async def prepare(
+        source: str, expressions: dict[str, str], **_kwargs: object
+    ) -> dict[str, PreparedProbe]:
+        return {
+            system: PreparedProbe(
+                "/nix/store/probe.drv", fingerprint(source, expression), expression
+            )
+            for system, expression in expressions.items()
+        }
+
+    monkeypatch.setattr("lib.update.nix.prepare_fixed_output_probes", prepare)
 
 
 def _version_info(updater: object) -> VersionInfo:
@@ -183,11 +200,8 @@ def test_shared_runtime_locks_use_one_candidate_view_during_desktop_pin_bump(
     ) -> bool:
         return False
 
-    async def _fingerprint(
-        self: T3RuntimeUpdater,
-        _source_override: SourceEntry | None = None,
-    ) -> str:
-        return f"{self.name}-candidate-drv"
+    def _fingerprint(source: str, _expr: str) -> str:
+        return f"{source}-candidate-drv"
 
     async def _hash(
         source: str,
@@ -208,9 +222,10 @@ def test_shared_runtime_locks_use_one_candidate_view_during_desktop_pin_bump(
         inner: Callable[[], Awaitable[object]],
         config: object | None = None,
         detail: str,
+        materialization_key: Callable[[], Awaitable[str]],
         emit: EventSink = ignore_event,
     ) -> object:
-        _ = (config, detail)
+        _ = (config, detail, materialization_key)
         overrides = _source_overrides_from_package_expr(args[4])
         desktop = overrides.get("t3code-desktop")
         pins = desktop.get("pins") if isinstance(desktop, dict) else None
@@ -245,7 +260,7 @@ def test_shared_runtime_locks_use_one_candidate_view_during_desktop_pin_bump(
     for updater_class in updater_classes.values():
         monkeypatch.setattr(updater_class, "fetch_latest", _fetch_latest)
         monkeypatch.setattr(updater_class, "_is_latest", _not_latest)
-        monkeypatch.setattr(updater_class, "_compute_drv_fingerprint", _fingerprint)
+    _mock_probe_preparation(monkeypatch, _fingerprint)
     monkeypatch.setattr(
         "lib.update.source_runner._get_updaters", lambda: updater_classes
     )
@@ -293,6 +308,107 @@ def test_shared_runtime_locks_use_one_candidate_view_during_desktop_pin_bump(
     } == {'{"electronBuilderVersion": "26.15.7"}'}
 
 
+def test_t3_pair_generates_once_for_changed_version_and_desktop_pin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Both real consumer flows reuse one coherent generated pair on an update."""
+    from lib.update.updaters import t3_runtime
+
+    standalone = load_repo_module("packages/t3code/updater.py", "t3_pair_standalone")
+    desktop = load_repo_module("packages/t3code-desktop/updater.py", "t3_pair_desktop")
+    classes = {
+        "t3code": standalone.T3CodeUpdater,
+        "t3code-desktop": desktop.T3CodeDesktopUpdater,
+    }
+    paths = tuple(tmp_path / path for path in t3_runtime._RUNTIME_LOCK_ARTIFACTS)
+    for path in paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("original", encoding="utf-8")
+    renderer = tmp_path / "packages/t3code-desktop/render_runtime_package_json.py"
+    renderer.write_text("renderer", encoding="utf-8")
+    evaluated_pins: list[str] = []
+    generated: list[str] = []
+    hashed: list[str] = []
+
+    async def fetch_latest(
+        self: object, _session: object, **_kwargs: object
+    ) -> VersionInfo:
+        return _version_info(self)
+
+    async def evaluate(args: list[str], **_kwargs: object) -> CommandResult:
+        overrides = _source_overrides_from_package_expr(args[-1])
+        candidate = overrides["t3code-desktop"]
+        assert isinstance(candidate, dict)
+        pins = candidate["pins"]
+        assert isinstance(pins, dict)
+        pin = str(pins["electronBuilderVersion"])
+        evaluated_pins.append(pin)
+        # This derivation consumes only common source/toolchain and desktop pins;
+        # standalone source/hash metadata is not an input to updateRuntimeLocks.
+        return CommandResult(
+            args=args, returncode=0, stdout=f"/nix/store/{pin}-generator.drv", stderr=""
+        )
+
+    async def generate(args: list[str], **_kwargs: object) -> CommandResult:
+        generated.append(args[0])
+        for path in paths:
+            path.write_text("candidate", encoding="utf-8")
+        return CommandResult(args=args, returncode=0, stdout="", stderr="")
+
+    async def materialize(source: str, **kwargs: object) -> object:
+        return await stream_command_materialized_artifacts(
+            source, repo_root=tmp_path, **kwargs
+        )
+
+    async def hash_candidate(
+        source: str, _probe: PreparedProbe, **_kwargs: object
+    ) -> str:
+        assert all(path.read_text(encoding="utf-8") == "candidate" for path in paths)
+        hashed.append(source)
+        return NEW_HASH
+
+    for cls in classes.values():
+        monkeypatch.setattr(cls, "fetch_latest", fetch_latest)
+    monkeypatch.setattr("lib.update.source_runner._get_updaters", lambda: classes)
+    monkeypatch.setattr(t3_runtime.update_paths, "get_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(t3_runtime.update_process, "run_command", evaluate)
+    monkeypatch.setattr(
+        t3_runtime, "stream_command_materialized_artifacts", materialize
+    )
+    monkeypatch.setattr("lib.update.generated_artifact_commands._run_command", generate)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", hash_candidate)
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
+    )
+    _mock_probe_preparation(monkeypatch, lambda source, _expr: f"{source}-candidate")
+    current = _current_entry().model_copy(update={"version": "old"})
+    old_desktop = current.model_copy(
+        update={"pins": {"electronBuilderVersion": "26.8.1"}}
+    )
+    result = _run(
+        run_sources_phase(
+            SourcesPhaseContext(
+                source_names=["t3code", "t3code-desktop"],
+                sources=SourcesFile(
+                    entries={"t3code": current, "t3code-desktop": old_desktop}
+                ),
+                queue=asyncio.Queue(),
+                update_input=False,
+                native_only=False,
+                config=resolve_config(),
+            )
+        )
+    )
+    assert generated == ["nix"]
+    assert evaluated_pins == ["26.15.7", "26.15.7"]
+    assert hashed == ["t3code-desktop", "t3code"]
+    assert set(result.artifact_updates) == {"t3code", "t3code-desktop"}
+    assert {
+        item.content for items in result.artifact_updates.values() for item in items
+    } == {"candidate"}
+    assert all(path.read_text(encoding="utf-8") == "original" for path in paths)
+
+
 @pytest.mark.parametrize(
     ("module_path", "module_name", "class_name", "package_name"),
     [
@@ -324,13 +440,18 @@ def test_t3code_updaters_hash_only_their_node_modules_attr(
 
     async def _fake_compute_fixed_output_hash(
         source: str,
-        expr: str,
+        expr: str | PreparedProbe,
         *,
         env: dict[str, str] | None = None,
         config: object | None = None,
         emit: EventSink = ignore_event,
     ) -> object:
-        captured.update({"source": source, "expr": expr, "env": env, "config": config})
+        captured.update({
+            "source": source,
+            "expr": expr.expression if isinstance(expr, PreparedProbe) else expr,
+            "env": env,
+            "config": config,
+        })
         return HASH
 
     monkeypatch.setattr(
@@ -412,8 +533,10 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
         inner: Callable[[], Awaitable[object]],
         config: object | None = None,
         detail: str,
+        materialization_key: Callable[[], Awaitable[str]],
         emit: EventSink = ignore_event,
     ) -> object:
+        _ = materialization_key
         captured.update({
             "materialize_source": source,
             "materialize_args": args,
@@ -423,34 +546,30 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
         })
         return await inner()
 
-    async def _fake_compute_expr_drv_fingerprint(
-        source: str,
-        expr: str,
-        *,
-        config: object | None = None,
-    ) -> str:
+    def _fake_compute_expr_drv_fingerprint(source: str, expr: str) -> str:
         captured.update({
             "fingerprint_source": source,
             "fingerprint_expr": expr,
-            "fingerprint_config": config,
         })
         return "drv"
 
     async def _fake_compute_fixed_output_hash(
         source: str,
-        expr: str,
+        expr: str | PreparedProbe,
         *,
         env: dict[str, str] | None = None,
         config: object | None = None,
         emit: EventSink = ignore_event,
     ) -> object:
-        captured.update({"source": source, "expr": expr, "env": env, "config": config})
+        captured.update({
+            "source": source,
+            "expr": expr.expression if isinstance(expr, PreparedProbe) else expr,
+            "env": env,
+            "config": config,
+        })
         return NEW_HASH
 
-    monkeypatch.setattr(
-        "lib.update.nix.compute_expr_drv_fingerprint",
-        _fake_compute_expr_drv_fingerprint,
-    )
+    _mock_probe_preparation(monkeypatch, _fake_compute_expr_drv_fingerprint)
     monkeypatch.setattr(
         "lib.update.nix.compute_fixed_output_hash",
         _fake_compute_fixed_output_hash,
@@ -491,6 +610,7 @@ def test_t3code_updaters_recheck_node_modules_when_drv_fingerprint_matches(
         _build_package_path_attr_expr(
             package_name,
             ".node_modules",
+            system="aarch64-darwin",
             source_overrides=(
                 {package_name: fingerprint_override}
                 if fingerprint_override is not None
@@ -540,7 +660,7 @@ def test_t3code_fingerprints_materialized_locks_and_is_idempotent(
         _ = context
         return _version_info(updater)
 
-    async def _fingerprint(_source_override: SourceEntry | None = None) -> str:
+    def _fingerprint(_source: str, _expr: str) -> str:
         fingerprint_states.append(checked_in_lock)
         return f"drv-{checked_in_lock}"
 
@@ -563,10 +683,11 @@ def test_t3code_fingerprints_materialized_locks_and_is_idempotent(
         inner: Callable[[], Awaitable[object]],
         config: object | None = None,
         detail: str,
+        materialization_key: Callable[[], Awaitable[str]],
         emit: EventSink = ignore_event,
     ) -> object:
         nonlocal checked_in_lock
-        _ = (args, config, detail)
+        _ = (args, config, detail, materialization_key)
         previous = checked_in_lock
         checked_in_lock = candidate_lock
         try:
@@ -588,7 +709,7 @@ def test_t3code_fingerprints_materialized_locks_and_is_idempotent(
             checked_in_lock = previous
 
     monkeypatch.setattr(updater, "fetch_latest", _fetch_latest)
-    monkeypatch.setattr(updater, "_compute_drv_fingerprint", _fingerprint)
+    _mock_probe_preparation(monkeypatch, _fingerprint)
     monkeypatch.setattr(
         "lib.update.updaters.t3_runtime.stream_command_materialized_artifacts",
         _materialize,
@@ -697,6 +818,7 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
         inner: Callable[[], Awaitable[object]],
         config: object | None = None,
         detail: str,
+        materialization_key: Callable[[], Awaitable[str]],
         emit: EventSink = ignore_event,
     ) -> object:
         captured.update({
@@ -711,20 +833,24 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
 
     async def _fake_compute_fixed_output_hash(
         source: str,
-        expr: str,
+        expr: str | PreparedProbe,
         *,
         env: dict[str, str] | None = None,
         config: object | None = None,
         emit: EventSink = ignore_event,
     ) -> object:
-        captured.update({"hash_source": source, "expr": expr, "env": env})
+        captured.update({
+            "hash_source": source,
+            "expr": expr.expression if isinstance(expr, PreparedProbe) else expr,
+            "env": env,
+        })
         return NEW_HASH
 
     async def _fetch_latest(_session: object, *, context=None) -> VersionInfo:
         _ = context
         return info
 
-    async def _fingerprint(_source_override: SourceEntry | None = None) -> str:
+    def _fingerprint(_source: str, _expr: str) -> str:
         return "candidate-drv"
 
     monkeypatch.setattr(
@@ -742,7 +868,7 @@ def test_t3code_updaters_refresh_runtime_locks_before_hashing(
 
     info = _version_info(updater)
     monkeypatch.setattr(updater, "fetch_latest", _fetch_latest)
-    monkeypatch.setattr(updater, "_compute_drv_fingerprint", _fingerprint)
+    _mock_probe_preparation(monkeypatch, _fingerprint)
     events = _run(
         _collect(
             lambda emit: updater.update_stream(
@@ -826,6 +952,180 @@ def test_command_materialized_artifacts_restore_when_hashing_raises(
     assert lock_file.is_file()
     assert not lock_file.is_symlink()
     assert lock_file.stat().st_mode & 0o777 == 0o640
+
+
+def test_cancelled_consumer_does_not_release_shared_producers_workspace(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A joined shared producer restores its mutation before another consumer runs."""
+    path = tmp_path / "lock"
+    path.write_text("original", encoding="utf-8")
+    generated = 0
+
+    async def scenario() -> None:
+        started = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def generate(args: list[str], **_kwargs: object) -> CommandResult:
+            nonlocal generated
+            generated += 1
+            path.write_text("candidate", encoding="utf-8")
+            started.set()
+            await finish.wait()
+            return CommandResult(args=args, returncode=0, stdout="", stderr="")
+
+        async def key() -> str:
+            assert path.read_text(encoding="utf-8") == "original"
+            return "same-complete-inputs"
+
+        async def consume() -> str:
+            return path.read_text(encoding="utf-8")
+
+        monkeypatch.setattr(
+            "lib.update.generated_artifact_commands._run_command", generate
+        )
+        async with runtime_scope(resolve_config()):
+            first = asyncio.create_task(
+                stream_command_materialized_artifacts(
+                    "first",
+                    args=["generate"],
+                    artifact_paths=("lock",),
+                    inner=consume,
+                    repo_root=tmp_path,
+                    materialization_key=key,
+                )
+            )
+            await started.wait()
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first
+            assert path.read_text(encoding="utf-8") == "candidate"
+            second = asyncio.create_task(
+                stream_command_materialized_artifacts(
+                    "second",
+                    args=["generate"],
+                    artifact_paths=("lock",),
+                    inner=consume,
+                    repo_root=tmp_path,
+                    materialization_key=key,
+                )
+            )
+            finish.set()
+            assert await second == "candidate"
+        assert path.read_text(encoding="utf-8") == "original"
+
+    asyncio.run(scenario())
+    assert generated == 1
+
+
+def test_shared_materialization_retries_failure_and_invalidates_changed_inputs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Failed producers are not cached, while a changed exact identity regenerates."""
+    path = tmp_path / "lock"
+    path.write_text("original", encoding="utf-8")
+    attempts = 0
+    identity = "first-inputs"
+
+    async def generate(args: list[str], **_kwargs: object) -> CommandResult:
+        nonlocal attempts
+        attempts += 1
+        path.write_text(identity, encoding="utf-8")
+        return CommandResult(
+            args=args, returncode=int(attempts == 1), stdout="", stderr="failed"
+        )
+
+    async def key() -> str:
+        return identity
+
+    async def consume() -> str:
+        return path.read_text(encoding="utf-8")
+
+    async def materialize() -> str:
+        return await stream_command_materialized_artifacts(
+            "source",
+            args=["generate"],
+            artifact_paths=("lock",),
+            inner=consume,
+            repo_root=tmp_path,
+            materialization_key=key,
+        )
+
+    async def scenario() -> None:
+        nonlocal identity
+        async with runtime_scope(resolve_config()):
+            with pytest.raises(RuntimeError, match="failed"):
+                await materialize()
+            assert path.read_text(encoding="utf-8") == "original"
+            assert await materialize() == "first-inputs"
+            assert await materialize() == "first-inputs"
+            identity = "second-inputs"
+            assert await materialize() == "second-inputs"
+
+    monkeypatch.setattr("lib.update.generated_artifact_commands._run_command", generate)
+    asyncio.run(scenario())
+    assert attempts == 3
+    assert path.read_text(encoding="utf-8") == "original"
+
+
+def test_runtime_lock_key_rejects_empty_generator_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty evaluator response cannot collapse unrelated materializations."""
+    from lib.update.updaters import t3_runtime
+
+    async def evaluate(args: list[str], **_kwargs: object) -> CommandResult:
+        return CommandResult(args=args, returncode=0, stdout="\n", stderr="")
+
+    monkeypatch.setattr(t3_runtime.update_process, "run_command", evaluate)
+    with pytest.raises(RuntimeError, match="empty derivation path"):
+        asyncio.run(
+            t3_runtime._runtime_lock_key(None, source="t3code", config=resolve_config())
+        )
+
+
+def test_shared_materialization_normalizes_once_before_caching(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Repeated consumers receive the same normalized artifact without new generation."""
+    path = tmp_path / "lock"
+    path.write_text("old", encoding="utf-8")
+    normalized: list[str] = []
+
+    async def generate(args: list[str], **_kwargs: object) -> CommandResult:
+        path.write_text("RAW", encoding="utf-8")
+        return CommandResult(args=args, returncode=0, stdout="", stderr="")
+
+    def normalize(content: str) -> str:
+        normalized.append(content)
+        return content.lower()
+
+    async def key() -> str:
+        return "generator-and-normalizer"
+
+    async def consume() -> str:
+        return path.read_text(encoding="utf-8")
+
+    async def scenario() -> None:
+        async with runtime_scope(resolve_config()):
+            for source in ("one", "two"):
+                assert (
+                    await stream_command_materialized_artifacts(
+                        source,
+                        args=["generate"],
+                        artifact_paths=("lock",),
+                        inner=consume,
+                        repo_root=tmp_path,
+                        materialization_key=key,
+                        artifact_normalizers={"lock": normalize},
+                    )
+                    == "raw"
+                )
+
+    monkeypatch.setattr("lib.update.generated_artifact_commands._run_command", generate)
+    asyncio.run(scenario())
+    assert normalized == ["RAW"]
+    assert path.read_text(encoding="utf-8") == "old"
 
 
 def test_command_materializer_does_not_rewrite_an_unchanged_artifact(

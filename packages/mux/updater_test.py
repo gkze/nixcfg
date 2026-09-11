@@ -9,9 +9,10 @@ from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events, load_repo_module, run_async
+from lib.update.config import resolve_config
 from lib.update.events import EventSink, UpdateEvent, ignore_event
 from lib.update.net import github_raw_url
-from lib.update.nix import _build_package_path_attr_expr
+from lib.update.nix import PreparedProbe, _build_package_path_attr_expr
 from lib.update.updaters import UpdateContext, VersionInfo
 
 _VERSION = "2.3.4"
@@ -226,11 +227,19 @@ def test_fetch_hashes_uses_exact_bun_sources_for_node_modules_probes(
         url_list = list(urls)
         return dict(zip(url_list, (_HASH_A, _HASH_B, _HASH_C), strict=True))
 
-    async def compute_node_hash(self, candidate_info, *, system, emit=ignore_event):
-        candidate = self.build_result(candidate_info, [])
-        seen_candidates[system] = candidate
+    def candidate_expressions(self, candidate):
+        for system in self._platform_targets("aarch64-darwin"):
+            seen_candidates[system] = candidate
+        return {system: system for system in seen_candidates}
 
-        return _NODE_HASHES[system]
+    async def prepare(_source, expressions, **_kwargs):
+        return {
+            key: PreparedProbe("/nix/store/mux.drv", "fingerprint", expression)
+            for key, expression in expressions.items()
+        }
+
+    async def build(_source, probe, **_kwargs):
+        return _NODE_HASHES[probe.expression]
 
     monkeypatch.setattr(
         updater_module.update_process,
@@ -239,14 +248,16 @@ def test_fetch_hashes_uses_exact_bun_sources_for_node_modules_probes(
     )
     monkeypatch.setattr(
         updater_module.MuxUpdater,
-        "_compute_hash_for_system",
-        compute_node_hash,
+        "_probe_expressions",
+        candidate_expressions,
     )
     monkeypatch.setattr(
         "lib.update.nix.get_current_nix_platform",
         lambda: "aarch64-darwin",
     )
 
+    monkeypatch.setattr("lib.update.nix.prepare_fixed_output_probes", prepare)
+    monkeypatch.setattr("lib.update.nix.compute_fixed_output_hash", build)
     events = run_async(
         collect_events(
             lambda emit: updater_module.MuxUpdater().fetch_hashes(
@@ -370,7 +381,12 @@ def test_reusable_fingerprint_preserves_runtime_sources_and_normalizes_cache_has
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An unchanged exact Bun runtime remains available to fingerprint evaluation."""
-    updater = updater_module.MuxUpdater()
+    updater = updater_module.MuxUpdater(
+        config=resolve_config(hash_build_platforms=("aarch64-darwin",))
+    )
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
+    )
     info = _release_info(updater_module)
     runtime_hashes = _runtime_hashes(updater_module)
     current = updater.build_result(
@@ -393,12 +409,25 @@ def test_reusable_fingerprint_preserves_runtime_sources_and_normalizes_cache_has
             _build_package_path_attr_expr(
                 "mux",
                 ".offlineCache",
+                system="aarch64-darwin",
                 source_overrides={"mux": normalized},
                 fake_hashes=True,
             ),
         )
         return "current-fingerprint"
 
+    async def prepare(source, expressions, **kwargs):
+        kwargs.pop("emit", None)
+        return {
+            key: PreparedProbe(
+                "/nix/store/mux.drv",
+                await _fingerprint(source, expression, **kwargs),
+                expression,
+            )
+            for key, expression in expressions.items()
+        }
+
+    monkeypatch.setattr("lib.update.nix.prepare_fixed_output_probes", prepare)
     monkeypatch.setattr("lib.update.nix.compute_expr_drv_fingerprint", _fingerprint)
     assert run_async(updater._is_latest(UpdateContext(current=current), info)) is True
     assert run_async(updater._compute_drv_fingerprint(current)) == "current-fingerprint"

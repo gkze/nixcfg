@@ -9,6 +9,8 @@ import aiohttp
 import pytest
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.nix.commands.base import CommandResult as ProcessResult
+from lib.nix.commands.base import ProcessDone, ProcessLine
 from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode, LockedRef, OriginalRef
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
@@ -59,6 +61,9 @@ from lib.update.refs import (
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from lib.update.config import UpdateConfig
+    from lib.update.process import RunCommandOptions
 
 
 def _run_async[T](
@@ -159,29 +164,58 @@ def test_flake_helpers_and_fetch_expr_error_paths(
         )
 
 
-def test_update_flake_input_stream(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Emit command lifecycle events around flake lock update."""
-    calls: list[str] = []
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_update_flake_input_stream(
+    monkeypatch: pytest.MonkeyPatch, returncode: int
+) -> None:
+    """Expose lock diagnostics before exit and invalidate only successful refreshes."""
     invalidated: list[bool] = []
+    events: list[UpdateEvent] = []
+    args = ["nix", "flake", "lock", "--update-input", "demo"]
 
-    async def _fake_update(input_name: str) -> None:
-        calls.append(input_name)
+    async def stream(
+        command: list[str], *, timeout: float, **_kwargs: object
+    ) -> AsyncIterator[ProcessLine | ProcessDone]:
+        assert command == args
+        assert timeout == 17
+        yield ProcessLine("stderr", "fetching upstream archive\n")
+        assert events[-1].kind is UpdateEventKind.LINE
+        assert events[-1].message == "fetching upstream archive"
+        assert not invalidated
+        yield ProcessDone(
+            ProcessResult(args, returncode, "", "fetching upstream archive\n")
+        )
 
-    monkeypatch.setattr("lib.update.flake.nix_flake_lock_update", _fake_update)
+    monkeypatch.setattr("lib.update.process.stream_process", stream)
     monkeypatch.setattr(
         "lib.update.flake.invalidate_flake_lock", lambda: invalidated.append(True)
     )
-    events = _run_async(
-        collect_events(
-            lambda emit: update_flake_input("demo", source="demo-source", emit=emit)
+
+    async def emit(event: UpdateEvent) -> None:
+        events.append(event)
+
+    async def run() -> None:
+        await update_flake_input(
+            "demo",
+            source="demo-source",
+            emit=emit,
+            config=resolve_config(subprocess_timeout=17),
         )
-    )
-    event_list = cast("list[UpdateEvent]", events)
-    assert len(event_list) == 2
-    assert event_list[0].kind == UpdateEventKind.COMMAND_START
-    assert event_list[1].kind == UpdateEventKind.COMMAND_END
-    assert calls == ["demo"]
-    assert invalidated == [True]
+
+    if returncode:
+        with pytest.raises(RuntimeError, match=r"nix flake lock failed \(exit 1\)"):
+            asyncio.run(run())
+    else:
+        asyncio.run(run())
+    assert [event.kind for event in events] == [
+        UpdateEventKind.COMMAND_START,
+        UpdateEventKind.LINE,
+        UpdateEventKind.COMMAND_END,
+    ]
+    result = expect_instance(events[-1].payload, CommandResult)
+    assert result.returncode == returncode
+    assert result.stderr == "fetching upstream archive\n"
+    assert invalidated == ([] if returncode else [True])
 
 
 def test_resolve_root_input_node_handles_incomplete_follows_paths(
@@ -934,18 +968,18 @@ def test_run_checked_command_and_update_flake_ref_paths(
 
     called_args: list[list[str]] = []
 
-    async def _record_run_checked(
+    async def _record_command(
         args: list[str],
         *,
-        source: str,
-        error_prefix: str,
         emit: EventSink = ignore_event,
-    ) -> object:
-        _ = (source, error_prefix)
+        **_kwargs: object,
+    ) -> CommandResult:
         called_args.append(args)
         await emit(UpdateEvent.status("demo", "ok"))
+        return CommandResult(args=args, returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("lib.update.refs._run_checked_command", _record_run_checked)
+    monkeypatch.setattr("lib.update.refs.run_command", _record_command)
+    monkeypatch.setattr("lib.update.flake.run_command", _record_command)
     rewritten_refs: list[tuple[str, str]] = []
     monkeypatch.setattr(
         "lib.update.refs._update_git_input_ref_in_flake",
@@ -953,8 +987,10 @@ def test_run_checked_command_and_update_flake_ref_paths(
     )
     github_ref = FlakeInputRef("demo", "owner", "repo", "v1", "github")
     _run_async(update_flake_ref(github_ref, "v2", source="demo"))
-    assert called_args[0][:3] == ["flake-edit", "change", "demo"]
-    assert called_args[1][:4] == ["nix", "flake", "lock", "--update-input"]
+    assert called_args == [
+        ["flake-edit", "--no-lock", "change", "demo", "github:owner/repo/v2"],
+        ["nix", "flake", "lock", "--update-input", "demo"],
+    ]
 
     called_args.clear()
     gitlab_ref = FlakeInputRef("demo", "owner", "repo", "v1", "gitlab")
@@ -994,13 +1030,15 @@ def test_update_flake_ref_invalidates_cached_lock_after_success(
         *,
         emit: EventSink = ignore_event,
         **_kwargs: object,
-    ) -> object:
+    ) -> CommandResult:
         calls.append(args)
         await emit(UpdateEvent.status("demo", "ok"))
+        return CommandResult(args=args, returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("lib.update.refs._run_checked_command", _record_run_checked)
+    monkeypatch.setattr("lib.update.refs.run_command", _record_run_checked)
+    monkeypatch.setattr("lib.update.flake.run_command", _record_run_checked)
     monkeypatch.setattr(
-        "lib.update.refs.invalidate_flake_lock",
+        "lib.update.flake.invalidate_flake_lock",
         lambda: invalidated_after.append(len(calls)),
     )
 
@@ -1042,12 +1080,13 @@ def test_update_flake_ref_rewrites_split_github_input(
         *,
         emit: EventSink = ignore_event,
         **_kwargs: object,
-    ) -> object:
+    ) -> CommandResult:
         commands.append(args)
         await emit(UpdateEvent.status("goose", "ok"))
+        return CommandResult(args=args, returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr("lib.update.refs.get_repo_root", lambda: tmp_path)
-    monkeypatch.setattr("lib.update.refs._run_checked_command", _record_run_checked)
+    monkeypatch.setattr("lib.update.flake.run_command", _record_run_checked)
 
     _run_async(
         update_flake_ref(
@@ -1084,7 +1123,9 @@ def test_update_refs_task_flow_variants(monkeypatch: pytest.MonkeyPatch) -> None
         *,
         source: str,
         emit: EventSink = ignore_event,
+        config: UpdateConfig | None = None,
     ) -> object:
+        _ = config
         await emit(UpdateEvent.status(source, "updated"))
 
     monkeypatch.setattr("lib.update.refs.update_flake_ref", _fake_update_flake_ref)
@@ -1168,3 +1209,80 @@ def test_update_refs_task_flow_variants(monkeypatch: pytest.MonkeyPatch) -> None
         )
     )
     assert any((event.message or "") == "updated" for event in events_real_no_lock)
+
+
+@pytest.mark.parametrize("failure_command", [None, "flake-edit", "nix"])
+def test_ref_task_owns_one_lock_and_preserves_subprocess_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    failure_command: str | None,
+) -> None:
+    """Ref commands use the requested timeout and stop at the first failed effect."""
+    (tmp_path / "flake.nix").write_text(
+        '{ inputs.demo.url = "github:owner/repo/v1"; }\n', encoding="utf-8"
+    )
+    monkeypatch.setattr("lib.update.refs.get_repo_root", lambda: tmp_path)
+    config = resolve_config(subprocess_timeout=17)
+    commands: list[list[str]] = []
+    invalidated_after: list[int] = []
+
+    async def check_ref(*_args: object, **_kwargs: object) -> RefUpdateResult:
+        return RefUpdateResult("demo", "v1", "v2")
+
+    async def run(
+        args: list[str],
+        *,
+        options: RunCommandOptions,
+        emit: EventSink = ignore_event,
+    ) -> CommandResult:
+        _ = emit
+        commands.append(args)
+        assert options.config is config
+        assert options.source == "demo"
+        failed = args[0] == failure_command
+        return CommandResult(
+            args=args,
+            returncode=1 if failed else 0,
+            stdout="",
+            stderr="lock unavailable" if failed else "",
+        )
+
+    monkeypatch.setattr("lib.update.refs.check_flake_ref_update", check_ref)
+    monkeypatch.setattr("lib.update.refs.run_command", run)
+    monkeypatch.setattr("lib.update.flake.run_command", run)
+    monkeypatch.setattr(
+        "lib.update.flake.invalidate_flake_lock",
+        lambda: invalidated_after.append(len(commands)),
+    )
+
+    async def run_task() -> list[UpdateEvent | None]:
+        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+        async with aiohttp.ClientSession() as session:
+            status = await update_refs_task(
+                FlakeInputRef("demo", "owner", "repo", "v1", "github"),
+                session,
+                queue,
+                options=RefTaskOptions(config=config),
+            )
+        assert status == ("updated" if failure_command is None else "error")
+        return [queue.get_nowait() for _ in range(queue.qsize())]
+
+    events = asyncio.run(run_task())
+    expected = [
+        ["flake-edit", "--no-lock", "change", "demo", "github:owner/repo/v2"],
+        ["nix", "flake", "lock", "--update-input", "demo"],
+    ]
+    assert commands == (expected[:1] if failure_command == "flake-edit" else expected)
+    assert invalidated_after == ([2] if failure_command is None else [])
+    assert [
+        event.message
+        for event in events
+        if event is not None and event.kind is UpdateEventKind.ERROR
+    ] == (
+        [
+            f"{'flake-edit change' if failure_command == 'flake-edit' else 'nix flake lock'}"
+            " failed (exit 1): lock unavailable"
+        ]
+        if failure_command is not None
+        else []
+    )

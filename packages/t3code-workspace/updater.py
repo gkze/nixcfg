@@ -2,31 +2,22 @@
 
 from typing import TYPE_CHECKING, Literal
 
-from lib.nix.models.sources import HashEntry, SourceEntry, SourceHashes
-from lib.update.events import (
-    EventSink,
-    StatusInfo,
-    StatusKind,
-    UpdateEvent,
-    ignore_event,
-)
-from lib.update.nix import (
-    _build_repo_package_attr_expr,
-    compute_expr_drv_fingerprint,
-    compute_fixed_output_hash,
-)
-from lib.update.updaters import UpdateContext, VersionInfo, register_updater
+from lib.update.nix import _build_repo_package_attr_expr
+from lib.update.updaters import register_updater
 from lib.update.updaters.flake_backed import FlakeInputHashUpdater
 
 if TYPE_CHECKING:
-    import aiohttp
-
-_FINGERPRINT_STABILITY_EVALUATIONS = 3
+    from lib.nix.models.sources import SourceEntry
 
 
 @register_updater
 class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
-    """Compute the shared T3 Code workspace dependency cache hash."""
+    """Build and certify the same prepared workspace dependency derivation.
+
+    Re-evaluating after a build can observe different mutable checkout/store
+    state and attach a certificate to a derivation that was never probed. The
+    shared prepared-probe flow retains the evaluated build identity instead.
+    """
 
     DARWIN_PLATFORM = "aarch64-darwin"
 
@@ -46,91 +37,6 @@ class T3CodeWorkspaceUpdater(FlakeInputHashUpdater):
             system=cls.DARWIN_PLATFORM,
         )
 
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        entry = context.current
-        if entry is None or entry.version != info.version or entry.drv_hash is None:
-            return False
-
-        fingerprint = await compute_expr_drv_fingerprint(
-            self.name,
-            self._workspace_expr(),
-            config=self.config,
-        )
-        context.drv_fingerprint = fingerprint
-        return entry.drv_hash == fingerprint
-
-    async def fetch_hashes(
-        self,
-        info: VersionInfo,
-        session: aiohttp.ClientSession,
-        *,
-        context: UpdateContext,
-        emit: EventSink = ignore_event,
-    ) -> SourceHashes:
-        """Compute the fixed-output workspace dependency cache hash."""
-        _ = (info, session, context)
-        hash_value = await compute_fixed_output_hash(
-            self.name, self._workspace_expr(), config=self.config, emit=emit
-        )
-
-        hashes: SourceHashes = [
-            HashEntry.create(self.hash_type, hash_value, platform=self.DARWIN_PLATFORM)
-        ]
-        return hashes
-
-    async def _finalize_result(
-        self,
-        result: SourceEntry,
-        *,
-        info: VersionInfo | None = None,
-        context: UpdateContext,
-        emit: EventSink = ignore_event,
-    ) -> SourceEntry:
-        _ = (info, context)
-
-        await emit(
-            UpdateEvent.status(
-                self.name,
-                "Computing derivation fingerprint...",
-                operation="compute_hash",
-                status=StatusInfo(
-                    kind=StatusKind.COMPUTING_HASH,
-                    value="derivation fingerprint",
-                ),
-            )
-        )
-        try:
-            previous_drv_hash: str | None = None
-            drv_hash: str | None = None
-            for _evaluation in range(_FINGERPRINT_STABILITY_EVALUATIONS):
-                current_drv_hash = await compute_expr_drv_fingerprint(
-                    self.name,
-                    self._workspace_expr(),
-                    config=self.config,
-                )
-                if current_drv_hash == previous_drv_hash:
-                    drv_hash = current_drv_hash
-                    break
-                previous_drv_hash = current_drv_hash
-        except RuntimeError as exc:
-            await emit(
-                UpdateEvent.status(
-                    self.name,
-                    f"Warning: derivation fingerprint unavailable ({exc})",
-                    operation="compute_hash",
-                )
-            )
-        else:
-            if drv_hash is None:
-                msg = (
-                    "Derivation fingerprint did not stabilize after "
-                    f"{_FINGERPRINT_STABILITY_EVALUATIONS} evaluations"
-                )
-                raise RuntimeError(msg)
-            result = result.model_copy(update={"drv_hash": drv_hash})
-
-        return result
+    def _probe_expressions(self, source: SourceEntry) -> dict[str, str]:
+        _ = source
+        return {self.DARWIN_PLATFORM: self._workspace_expr()}

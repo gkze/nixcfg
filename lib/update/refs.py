@@ -26,9 +26,9 @@ from lib.update.events import (
     UpdateEvent,
 )
 from lib.update.flake import (
-    invalidate_flake_lock,
     load_flake_lock,
     read_flake_input_state,
+    update_flake_input,
 )
 from lib.update.net import fetch_github_api_paginated
 from lib.update.paths import get_repo_root
@@ -503,6 +503,7 @@ async def update_flake_ref(
     *,
     source: str,
     emit: EventSink = ignore_event,
+    config: UpdateConfig | None = None,
 ) -> None:
     await emit(
         UpdateEvent.status(
@@ -546,28 +547,35 @@ async def update_flake_ref(
         msg = f"Unsupported input type: {input_ref.input_type}"
         raise RuntimeError(msg)
     if new_url is not None:
+        # Own the lock subprocess here so it runs once and uses the updater's
+        # progress reporting, cancellation, and configured timeout.
         await _run_checked_command(
-            ["flake-edit", "change", input_ref.name, new_url],
+            ["flake-edit", "--no-lock", "change", input_ref.name, new_url],
             source=source,
             error_prefix="flake-edit change failed",
             emit=emit,
+            config=config,
         )
 
-    await _run_checked_command(
-        ["nix", "flake", "lock", "--update-input", input_ref.name],
+    await update_flake_input(
+        input_ref.name,
         source=source,
-        error_prefix="nix flake lock failed",
         emit=emit,
+        config=config,
     )
-    invalidate_flake_lock()
 
 
 async def _run_checked_command(
-    args: list[str], *, source: str, error_prefix: str, emit: EventSink = ignore_event
+    args: list[str],
+    *,
+    source: str,
+    error_prefix: str,
+    emit: EventSink = ignore_event,
+    config: UpdateConfig | None = None,
 ) -> None:
     result = await run_command(
         args,
-        options=RunCommandOptions(source=source),
+        options=RunCommandOptions(source=source, config=config),
         emit=emit,
     )
     if result.returncode == 0:
@@ -646,11 +654,17 @@ async def update_refs_task(
         }
 
         async def do_update() -> None:
-            await update_flake_ref(input_ref, latest_ref, source=source, emit=put)
+            await update_flake_ref(
+                input_ref,
+                latest_ref,
+                source=source,
+                emit=put,
+                config=resolved_config,
+            )
             if task_options.input_refreshes is not None:
                 # Record the successful refresh before another ref task can
                 # acquire the lock and change declarations or graph topology.
-                task_options.input_refreshes[source] = read_flake_input_state()
+                task_options.input_refreshes[source] = read_flake_input_state(source)
 
         if task_options.flake_edit_lock:
             async with task_options.flake_edit_lock:

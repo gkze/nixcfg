@@ -5,6 +5,7 @@ import base64
 import hashlib
 import io
 import json
+import subprocess
 import sys
 import tarfile
 import textwrap
@@ -19,6 +20,7 @@ import pytest
 from nix_manipulator.expressions.assertion import Assertion
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
+from packaging.markers import Marker
 
 from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
@@ -544,11 +546,13 @@ def _backend_sdist_bytes(source_payloads: dict[str, bytes]) -> bytes:
 
 def _backend_sdist_with_members(
     members: Iterable[tuple[str, bytes | None]],
+    *,
+    source_root: str = f"unsloth-{_BACKEND_VERSION}",
 ) -> bytes:
     sdist_buffer = io.BytesIO()
     with tarfile.open(fileobj=sdist_buffer, mode="w:gz") as archive:
         for path, payload in members:
-            member = tarfile.TarInfo(f"unsloth-{_BACKEND_VERSION}/{path}")
+            member = tarfile.TarInfo(f"{source_root}/{path}")
             if payload is None:
                 member.type = tarfile.DIRTYPE
             else:
@@ -692,7 +696,12 @@ def test_unsloth_static_closures_and_export_truth_are_current() -> None:
     assert plan["backend"]["sourceTagVersion"]
     assert plan["status"] == "exported-and-validated"
     assert plan["packageExported"] is True
-    assert backend_url.endswith(f"/unsloth-{plan['backend']['version']}.tar.gz")
+    module.UnslothUpdater._validate_backend_source_url(
+        backend_url=backend_url,
+        backend_version=plan["backend"]["version"],
+        source_python_version=plan["backend"]["sourceTagVersion"],
+        commit=source.commit,
+    )
     assert module._PYPI_VERSION_PATTERN.fullmatch(plan["backend"]["sourceTagVersion"])
     assert plan["closurePolicy"] == {
         "allowPlaceholderHashes": False,
@@ -1193,7 +1202,20 @@ def test_unsloth_python_lock_is_exactly_scoped_to_darwin_arm64() -> None:
     }
     assert packages["unsloth"]["dependencies"]
     assert packages["unsloth"]["optional-dependencies"]["studio"]
-    assert {"torch", "torchvision", "unsloth-zoo"} <= packages.keys()
+    environment = {
+        "sys_platform": "darwin",
+        "platform_machine": "arm64",
+        "python_version": "3.12",
+        "python_full_version": "3.12.0",
+        "extra": "studio",
+    }
+    required = {
+        requirement["name"]
+        for requirement in packages["unsloth"]["metadata"]["requires-dist"]
+        if "marker" not in requirement
+        or Marker(requirement["marker"]).evaluate(environment)
+    }
+    assert required <= packages.keys()
     assert {"fastapi", "fastmcp", "pymupdf", "sqlite-vec", "uvicorn"} <= (
         packages.keys()
     )
@@ -1841,6 +1863,18 @@ def test_unsloth_rejects_re_pinned_oxc_non_sha512_integrity(
         )
 
 
+def test_unsloth_accepts_removed_oxc_windows_comment() -> None:
+    """Release 0.1.807-beta removed an explanation without changing npm behavior."""
+    module = _load_updater_module()
+    source_payloads = _oxc_source_payloads()
+    source_payloads[_SETUP_PS1_PATH] = source_payloads[_SETUP_PS1_PATH].replace(
+        b"    # No npm on PATH (e.g. a pip install with no system Node and no isolated Node\n",
+        b"",
+    )
+
+    module._audit_oxc_runtime_sources(source_payloads)
+
+
 def test_unsloth_rejects_re_pinned_oxc_setup_mutation_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1921,15 +1955,30 @@ def test_unsloth_rejects_re_pinned_quoted_oxc_setup_mutation(
         )
 
 
+@pytest.mark.parametrize("prefix", [b"printf '#';", b"printf '\n#';"])
 def test_unsloth_rejects_re_pinned_quoted_hash_oxc_setup_mutation(
     monkeypatch: pytest.MonkeyPatch,
+    prefix: bytes,
 ) -> None:
     """A quoted hash must not make later executable npm text look commented."""
+    mutation = prefix + b" npm install unexpected-runtime-package\n"
+    executed = subprocess.run(  # noqa: S603 -- executes a fixed fixture with an inert npm stub
+        [  # noqa: S607 -- resolves Bash from the test environment
+            "bash",
+            "-c",
+            "npm() { printf 'npm was invoked\\n'; }\n" + mutation.decode(),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert executed.stdout.endswith("npm was invoked\n")
+
     module = _load_updater_module()
     source_payloads = _oxc_source_payloads()
     source_payloads[_SETUP_SH_PATH] = source_payloads[_SETUP_SH_PATH].replace(
         b"\n",
-        b"\nprintf '#'; npm install unexpected-runtime-package\n",
+        b"\n" + mutation,
         1,
     )
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
@@ -2025,15 +2074,17 @@ def test_unsloth_rejects_re_pinned_quoted_oxc_windows_setup_mutation(
         )
 
 
+@pytest.mark.parametrize("prefix", [b"Write-Output '#';", b"Write-Output '\n#';"])
 def test_unsloth_rejects_re_pinned_quoted_hash_oxc_windows_setup_mutation(
     monkeypatch: pytest.MonkeyPatch,
+    prefix: bytes,
 ) -> None:
     """PowerShell must not treat a quoted hash as a source comment."""
     module = _load_updater_module()
     source_payloads = _oxc_source_payloads()
     source_payloads[_SETUP_PS1_PATH] = source_payloads[_SETUP_PS1_PATH].replace(
         b"\n",
-        b"\nWrite-Output '#'; NPM install unexpected-runtime-package\n",
+        b"\n" + prefix + b" NPM install unexpected-runtime-package\n",
         1,
     )
     _install_oxc_discovery_fakes(monkeypatch, module, source_payloads)
@@ -2539,7 +2590,7 @@ def test_unsloth_rejects_incoherent_release_manifest(
 
 
 def test_unsloth_selects_exact_public_backend_sdist() -> None:
-    """Only the versioned PyPI source distribution is an admissible backend input."""
+    """Prefer the exact versioned PyPI source distribution when it is published."""
     assert _load_updater_module().UnslothUpdater._backend_sdist(
         _pypi_payload(),
         version=_BACKEND_VERSION,
@@ -2558,7 +2609,13 @@ def test_unsloth_selects_exact_public_backend_sdist() -> None:
         ({"info": [], "urls": []}, "PyPI info"),
         (_pypi_payload(version="other"), "does not describe"),
         ({"info": {"version": _BACKEND_VERSION}, "urls": {}}, "no file list"),
-        ({"info": {"version": _BACKEND_VERSION}, "urls": []}, "exactly one"),
+        (
+            {
+                "info": {"version": _BACKEND_VERSION},
+                "urls": [{"packagetype": "sdist", "filename": "unexpected.tar.gz"}],
+            },
+            "exactly one",
+        ),
         (
             _pypi_payload(url="https://example.invalid/backend.tgz"),
             "not hosted by PyPI",
@@ -4305,7 +4362,6 @@ def test_unsloth_nix_policy_guards_low_level_backend_installers() -> None:
         ("studio/backend/core/training/worker.py", "_uninstall_package"),
         ("studio/backend/core/training/worker.py", "_install_package_wheel_first"),
         ("studio/backend/core/training/worker.py", "_attempt_package_install"),
-        ("studio/backend/core/training/worker.py", "_run_pip"),
         ("studio/backend/utils/ssm_runtime.py", "_install_kernel"),
         ("studio/backend/utils/transformers_version.py", "_install_to_dir"),
         ("studio/backend/utils/wheel_utils.py", "install_wheel"),
@@ -4460,3 +4516,258 @@ def test_unsloth_policy_patch_refuses_existing_unowned_module(
 
     with pytest.raises(RuntimeError, match="refusing to replace"):
         module.patch_tree(tmp_path)
+
+
+def _published_backend_wheel() -> dict[str, object]:
+    return {
+        "filename": f"unsloth-{_BACKEND_VERSION}-py3-none-any.whl",
+        "packagetype": "bdist_wheel",
+        "upload_time_iso_8601": _BACKEND_UPLOAD_TIME,
+        "url": "https://files.pythonhosted.org/unused-wheel.whl",
+        "yanked": False,
+    }
+
+
+def _github_backend_archive(*, version: str = _BACKEND_VERSION) -> bytes:
+    return _backend_sdist_with_members(
+        [
+            *_oxc_source_payloads().items(),
+            ("unsloth/_version.py", f'__version__ = "{version}"\n'.encode()),
+        ],
+        source_root=f"unsloth-{_COMMIT}",
+    )
+
+
+def _install_github_backend_discovery_fakes(
+    monkeypatch: pytest.MonkeyPatch,
+    module: ModuleType,
+    *,
+    archive: bytes | None = None,
+    source_version: str = _BACKEND_VERSION,
+    files: list[object] | None = None,
+) -> list[str]:
+    """Provide wheel-only publication metadata and a source archive at HTTP boundaries."""
+    _install_oxc_discovery_fakes(monkeypatch, module, _oxc_source_payloads())
+    original_fetch = module.fetch_url
+    archive_bytes = _github_backend_archive() if archive is None else archive
+    requests: list[str] = []
+
+    async def fetch_bytes(session: object, url: str, **kwargs: object) -> bytes:
+        requests.append(url)
+        if url == f"https://github.com/unslothai/unsloth/archive/{_COMMIT}.tar.gz":
+            return archive_bytes
+        if url.endswith("/unsloth/_version.py"):
+            return f'__version__ = "{source_version}"\n'.encode()
+        return await original_fetch(session, url, **kwargs)
+
+    async def fetch_pypi(
+        _session: object, _url: str, **_kwargs: object
+    ) -> dict[str, object]:
+        return {
+            "info": {"version": _BACKEND_VERSION},
+            "urls": [_published_backend_wheel()] if files is None else files,
+        }
+
+    monkeypatch.setattr(module, "fetch_url", fetch_bytes)
+    monkeypatch.setattr(module, "fetch_json", fetch_pypi)
+    return requests
+
+
+def test_unsloth_uses_selected_commit_source_when_pypi_has_only_a_wheel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Wheel-only publication must retain a source build at the exact selected commit."""
+    module = _load_updater_module()
+    archive = _github_backend_archive()
+    requests = _install_github_backend_discovery_fakes(
+        monkeypatch, module, archive=archive
+    )
+    info = run_async(
+        module.UnslothUpdater().fetch_latest(
+            object(), context=UpdateContext(current=None)
+        )
+    )
+    metadata = module.UnslothUpdater._required_metadata(info)
+    url = f"https://github.com/unslothai/unsloth/archive/{_COMMIT}.tar.gz"
+    assert metadata["backendUrl"] == url
+    assert metadata["backendDigestHex"] == hashlib.sha256(archive).hexdigest()
+    assert metadata["backendSize"] == len(archive)
+    assert (
+        metadata["backendVersion"]
+        == metadata["sourcePythonVersion"]
+        == _BACKEND_VERSION
+    )
+    assert metadata["backendUploadTime"] == _BACKEND_UPLOAD_TIME
+    assert requests.count(url) == 1
+    assert _published_backend_wheel()["url"] not in requests
+    assert _BACKEND_URL not in requests
+    project = tomllib.loads(module._render_python_project(url))
+    assert f"unsloth[studio] @ {url}" in project["project"]["dependencies"]
+    result = module.UnslothUpdater().build_result(
+        info,
+        [
+            HashEntry.create("srcHash", _SRC_HASH),
+            *[
+                HashEntry.create(
+                    "sha256",
+                    "sha256-"
+                    + base64.b64encode(hashlib.sha256(payload).digest()).decode(),
+                    url=source_url,
+                )
+                for source_url, payload in (
+                    (_MANIFEST_URL, _manifest_bytes()),
+                    (url, archive),
+                )
+            ],
+        ],
+    )
+    assert result.commit == _COMMIT
+    assert result.urls is not None
+    assert result.urls["backendSdist"] == url
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        [],
+        [_published_backend_wheel()],
+        [None, {"packagetype": "bdist_wheel", "filename": "other.whl"}],
+    ],
+)
+def test_unsloth_reports_absent_sdist_for_separate_source_selection(
+    files: list[object],
+) -> None:
+    """Absence of an sdist allows the caller to validate source-commit eligibility."""
+    assert (
+        _load_updater_module().UnslothUpdater._backend_sdist(
+            {"info": {"version": _BACKEND_VERSION}, "urls": files},
+            version=_BACKEND_VERSION,
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        [],
+        [_published_backend_wheel(), _published_backend_wheel()],
+        [{**_published_backend_wheel(), "yanked": True}],
+        [{**_published_backend_wheel(), "filename": "unsloth-other-py3-none-any.whl"}],
+        [None, {"packagetype": "other"}],
+    ],
+)
+def test_unsloth_rejects_missing_or_ambiguous_backend_publication(
+    monkeypatch: pytest.MonkeyPatch, files: list[object]
+) -> None:
+    """An unidentifiable backend publication cannot define the Python closure cutoff."""
+    module = _load_updater_module()
+    requests = _install_github_backend_discovery_fakes(monkeypatch, module, files=files)
+    with pytest.raises(RuntimeError, match="no unique published release timestamp"):
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
+    assert not any("/archive/" in url for url in requests)
+
+
+def test_unsloth_requires_matching_source_version_before_github_download(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The historical one-day sdist tolerance cannot admit a different source version."""
+    module = _load_updater_module()
+    requests = _install_github_backend_discovery_fakes(
+        monkeypatch, module, source_version="2026.8.21"
+    )
+    with pytest.raises(RuntimeError, match="source version does not match"):
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
+    assert not any("/archive/" in url for url in requests)
+
+
+def test_unsloth_requires_github_archive_version_to_match_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fetched archive bytes must independently attest the published backend version."""
+    module = _load_updater_module()
+    _install_github_backend_discovery_fakes(
+        monkeypatch, module, archive=_github_backend_archive(version="2026.8.21")
+    )
+    with pytest.raises(RuntimeError, match="source version does not match"):
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
+
+
+@pytest.mark.parametrize("archive", [b"", b"too large"])
+def test_unsloth_rejects_empty_or_oversized_github_archive(
+    monkeypatch: pytest.MonkeyPatch, archive: bytes
+) -> None:
+    """The source fallback obeys the same bounded artifact policy as published sdists."""
+    module = _load_updater_module()
+    _install_github_backend_discovery_fakes(monkeypatch, module, archive=archive)
+    monkeypatch.setattr(module, "_MAX_BACKEND_SDIST_BYTES", 1)
+    with pytest.raises(RuntimeError, match="audit size limit or is empty"):
+        run_async(
+            module.UnslothUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "version_member",
+    [
+        [],
+        [("unsloth/_version.py", None)],
+        [("./unsloth/_version.py", b'__version__ = "2026.8.22"')],
+        [("unsloth/_version.py", b'__version__ = "2026.8.22"')] * 2,
+    ],
+)
+def test_unsloth_github_version_member_preserves_archive_identity_checks(
+    version_member: list[tuple[str, bytes | None]],
+) -> None:
+    """Version evidence cannot be missing, aliased, duplicated, or a non-file member."""
+    archive = _backend_sdist_with_members(
+        [*_oxc_source_payloads().items(), *version_member],
+        source_root=f"unsloth-{_COMMIT}",
+    )
+    with pytest.raises(RuntimeError, match="missing|ambiguous"):
+        _load_updater_module()._oxc_sources_from_backend_sdist(
+            archive, version=_BACKEND_VERSION, source_commit=_COMMIT
+        )
+
+
+@pytest.mark.parametrize(
+    ("url", "source_version"),
+    [
+        (
+            f"https://github.com/unslothai/unsloth/archive/{'0' * 40}.tar.gz",
+            _BACKEND_VERSION,
+        ),
+        ("https://github.com/unslothai/unsloth/archive/main.tar.gz", _BACKEND_VERSION),
+        (
+            f"https://github.com/unslothai/unsloth/archive/{_COMMIT}.tar.gz?x=1",
+            _BACKEND_VERSION,
+        ),
+        (f"https://github.com/unslothai/unsloth/archive/{_COMMIT}.tar.gz", "2026.8.21"),
+    ],
+)
+def test_unsloth_metadata_rejects_incoherent_github_backend_source(
+    url: str, source_version: str
+) -> None:
+    """Only the selected immutable commit with an exactly matching version is admissible."""
+    info = VersionInfo(
+        _VERSION,
+        _metadata(backend_url=url, source_python_version=source_version),
+    )
+    with pytest.raises(
+        RuntimeError, match="canonical PyPI|source version does not match"
+    ):
+        _load_updater_module().UnslothUpdater._required_metadata(info)

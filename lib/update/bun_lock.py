@@ -9,6 +9,7 @@ import tarfile
 import tempfile
 import urllib.parse
 from dataclasses import dataclass
+from functools import cache
 from typing import TYPE_CHECKING
 
 from lib import http_utils, json_utils
@@ -350,11 +351,16 @@ def _collect_source_package_mismatches(
     }
 
     manifest_cache: dict[str, SourcePackageManifest] = {}
+    manifests_by_url: dict[str, SourcePackageManifest] = {}
     errors: list[str] = []
     mismatches: list[SourcePackageExactVersionMismatch] = []
 
     for override_name, url in sorted(source_overrides.items()):
-        manifest = _read_source_package_manifest(url, fetch_bytes=fetch_bytes)
+        if url not in manifests_by_url:
+            manifests_by_url[url] = _read_source_package_manifest(
+                url, fetch_bytes=fetch_bytes
+            )
+        manifest = manifests_by_url[url]
         manifest_cache[override_name] = manifest
         if manifest.name != override_name:
             errors.append(
@@ -574,11 +580,19 @@ def prepare_source_package_lock(
     bun_executable: str = "bun",
     validate: Callable[[Path], None] | None = None,
     relock: Callable[[Path, str], None] | None = None,
+    fetch_bytes: Callable[[str], bytes] = _fetch_url_bytes,
 ) -> bool:
     """Validate *lock_file* and relock once when source overrides disagree."""
-    validate_lock = (
-        validate if validate is not None else validate_source_package_exact_versions
-    )
+    # One repair attempt observes one payload per URL. A later invocation must
+    # fetch again because source-package URLs need not be immutable.
+    cached_fetch = cache(fetch_bytes)
+
+    def validate_lock(path: Path) -> None:
+        if validate is not None:
+            validate(path)
+        else:
+            validate_source_package_exact_versions(path, fetch_bytes=cached_fetch)
+
     relock_lock = relock if relock is not None else _run_bun_lockfile_refresh
 
     try:
@@ -594,6 +608,7 @@ def prepare_source_package_lock(
                 or not _heal_package_json_source_resolutions(
                     package_json_path,
                     lock_file,
+                    fetch_bytes=cached_fetch,
                 )
             ):
                 raise

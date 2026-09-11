@@ -1,5 +1,6 @@
 """Focused process, cancellation, and retry tests for crate2nix regeneration."""
 
+import asyncio
 import errno
 import signal
 import subprocess
@@ -10,6 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from lib.update import crate2nix
+from lib.update.config import resolve_config
+from lib.update.runtime import runtime_scope
 
 
 class _StubbornProcess:
@@ -266,6 +269,114 @@ def test_process_collection_reports_a_deterministic_idle_heartbeat(
     assert stdout.closed
     assert stderr.closed
     assert selector.closed
+
+
+@pytest.mark.parametrize("command", ["eval", "path-info", "build", "run", "shell"])
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_worker_nix_commands_share_admission_and_record_process_results(
+    monkeypatch: pytest.MonkeyPatch, command: str, returncode: int
+) -> None:
+    """Worker processes use the same bounded pool and output accounting as async work."""
+    stdout = _Pipe()
+    stderr = _Pipe()
+    selector = _Selector(stdout, stderr)
+    captures = {
+        "stdout": crate2nix._BoundedCapture(),
+        "stderr": crate2nix._BoundedCapture(),
+    }
+    monkeypatch.setattr(
+        crate2nix,
+        "_prepare_process_collection",
+        lambda _process: (selector, captures, stdout, stderr),
+    )
+    chunks = {
+        "stdout": iter(("résult\n".encode(), b"")),
+        "stderr": iter((b"error\n", b"")),
+    }
+    monkeypatch.setattr(crate2nix.os, "read", lambda fd, _size: next(chunks[fd]))
+    process = SimpleNamespace(poll=lambda: returncode, wait=lambda: returncode)
+    started: list[str] = []
+
+    def start(*_args: object, **_kwargs: object) -> object:
+        started.append(command)
+        return process
+
+    monkeypatch.setattr(crate2nix.subprocess, "Popen", start)
+
+    async def exercise() -> None:
+        config = resolve_config()
+        async with runtime_scope(config) as runtime:
+            kind = "eval" if command in {"eval", "path-info"} else "build"
+            # Exhaust the actual pool before starting the worker. Admission must
+            # wait until the async owner returns capacity.
+            semaphore = runtime.slots[kind]
+            capacity = (
+                config.max_nix_evaluations if kind == "eval" else config.max_nix_builds
+            )
+            for _ in range(capacity):
+                await semaphore.acquire()
+            worker = asyncio.create_task(
+                asyncio.to_thread(crate2nix._run, ["nix", command])
+            )
+            await asyncio.sleep(0)
+            assert started == []
+            for _ in range(capacity):
+                semaphore.release()
+            if returncode:
+                with pytest.raises(RuntimeError, match="error"):
+                    await worker
+            else:
+                result = await worker
+                assert result.stdout == "résult\n"
+            timing = runtime.timing("shared", kind)
+            assert timing.count == 1
+            assert timing.failed == returncode
+            assert timing.nonzero_exits == returncode
+            assert timing.stdout_bytes == len("résult\n".encode())
+            assert timing.stderr_bytes == len(b"error\n")
+            assert not semaphore.locked()
+
+    asyncio.run(exercise())
+    assert started == [command]
+
+
+def test_worker_cancellation_during_nix_admission_starts_no_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation while queued releases the pending lease before worker cleanup."""
+    cancel_event = threading.Event()
+    entered = threading.Event()
+    original = crate2nix.update_runtime.thread_resource_slot
+
+    def admission(*args: object, **kwargs: object) -> object:
+        entered.set()
+        return original(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(crate2nix.update_runtime, "thread_resource_slot", admission)
+    monkeypatch.setattr(
+        crate2nix.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: pytest.fail("Queued cancellation must not spawn"),
+    )
+
+    async def exercise() -> None:
+        config = resolve_config()
+        async with runtime_scope(config) as runtime:
+            for _ in range(config.max_nix_builds):
+                await runtime.slots["build"].acquire()
+            worker = asyncio.create_task(
+                asyncio.to_thread(
+                    crate2nix._run, ["nix", "build"], cancel_event=cancel_event
+                )
+            )
+            assert await asyncio.to_thread(entered.wait, 1)
+            cancel_event.set()
+            with pytest.raises(crate2nix.Crate2NixCommandCancelledError, match="slot"):
+                await worker
+            for _ in range(config.max_nix_builds):
+                runtime.slots["build"].release()
+
+    asyncio.run(exercise())
 
 
 def test_run_honors_cancellation_before_start(
