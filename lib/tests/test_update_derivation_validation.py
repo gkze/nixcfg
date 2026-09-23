@@ -1,6 +1,8 @@
 """Behavioral tests for target-aware update derivation validation."""
 
 import subprocess
+import threading
+import time
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -321,6 +323,7 @@ def test_validate_derivations_can_build_an_installable() -> None:
             "build",
             "--no-update-lock-file",
             "--no-link",
+            "--keep-going",
             "path:.#portable",
         ]
     ]
@@ -441,6 +444,7 @@ def test_validate_root_closures_builds_flake_owned_aggregate(
                 "build",
                 "--no-update-lock-file",
                 "--no-link",
+                "--keep-going",
                 f"path:{snapshot_root}#checks.aarch64-darwin.root-closures",
                 f"path:{snapshot_root}#checks.x86_64-linux.root-closures",
             ],
@@ -1136,3 +1140,64 @@ def test_systemic_validation_failure_bounds_subdivision(tmp_path: Path) -> None:
         str(index) for index in range(26)
     ]
     assert len(calls) == 29
+
+
+def test_concurrent_eval_groups_serialize_progress_and_attribute_failures(
+    tmp_path: Path,
+) -> None:
+    """Threaded group execution overlaps groups without racing the progress channel.
+
+    The CLI's default budget runs eval groups concurrently; no test exercised
+    that path, so this pins failure attribution, per-command events, and the
+    caller-progress serialization the group lock promises. The barrier makes a
+    serialized execution fail by construction instead of relying on timing.
+    """
+    requests = [
+        DerivationValidationRequest("a", ".#pkgs.system.a.outPath"),
+        DerivationValidationRequest("b", ".#pkgs.system.b.version"),
+    ]
+    barrier = threading.Barrier(2, timeout=10)
+    progress_lock = threading.Lock()
+    events: list[validation.ValidationProgressEvent] = []
+    concurrent_entries = 0
+
+    def progress(event: validation.ValidationProgressEvent) -> None:
+        nonlocal concurrent_entries
+        with progress_lock:
+            concurrent_entries += 1
+            assert concurrent_entries == 1
+        events.append(event)
+        time.sleep(0.005)
+        with progress_lock:
+            concurrent_entries -= 1
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        barrier.wait()
+        return subprocess.CompletedProcess(
+            args, 1, stdout="", stderr=f"boom {args[-1]}"
+        )
+
+    failures = validation.validate_derivation_requests(
+        requests,
+        flake_root=tmp_path,
+        run=run,
+        progress=progress,
+        max_eval_workers=2,
+    )
+    assert [failure.source for failure in failures] == ["a", "b"]
+    for failure, request in zip(failures, requests, strict=True):
+        assert failure.message.startswith("boom path:")
+        assert failure.message.endswith(f"#{request.installable.removeprefix('.#')}")
+    started = [
+        event.command
+        for event in events
+        if isinstance(event, validation.ValidationCommandStarted)
+    ]
+    finished = sorted(
+        (event.command, event.succeeded)
+        for event in events
+        if isinstance(event, validation.ValidationCommandFinished)
+    )
+    assert len(started) == 2
+    assert len(set(started)) == 2
+    assert finished == [(started[0], False), (started[1], False)]

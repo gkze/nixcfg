@@ -201,16 +201,14 @@ def test_task_debug_logs_and_tracebacks_are_redacted(
 
     queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
     with caplog.at_level(logging.DEBUG, logger="lib.update.process"):
-        if unexpected:
-            with pytest.raises(UnexpectedError):
-                asyncio.run(
-                    process.run_queue_task(source="demo", queue=queue, task=task)
-                )
-        else:
-            asyncio.run(process.run_queue_task(source="demo", queue=queue, task=task))
-            event = queue.get_nowait()
-            assert isinstance(event, UpdateEvent)
-            assert event.message == _SAFE
+        asyncio.run(process.run_queue_task(source="demo", queue=queue, task=task))
+    event = queue.get_nowait()
+    assert isinstance(event, UpdateEvent)
+    expected = f"UnexpectedError: {_SAFE}" if unexpected else _SAFE
+    assert event.message == expected
+    assert event.detail is not None
+    assert _SAFE in event.detail
+    assert "SYNTHETIC" not in event.detail
     assert _SAFE in caplog.text
     assert "SYNTHETIC" not in caplog.text
     assert "SYNTHETIC" not in format_exception(

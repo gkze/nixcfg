@@ -1,15 +1,17 @@
 """CLI entry point for update workflows."""
 
 import asyncio
+import copy
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tomllib
-from dataclasses import dataclass, field
+from contextlib import nullcontext
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Unpack, cast
+from typing import TYPE_CHECKING, Annotated, Any, Unpack, cast
 
 import click
 import typer
@@ -19,6 +21,7 @@ from typer import _click as typer_click
 
 from lib.cli import HELP_CONTEXT_SETTINGS
 from lib.diagnostics import redact_urls
+from lib.nix.models.flake_lock import FlakeLock
 from lib.nix.models.sources import SourcesFile
 from lib.update import derivation_validation as update_derivation_validation
 from lib.update import flake as update_flake
@@ -43,6 +46,11 @@ from lib.update.config import (
     resolve_config,
 )
 from lib.update.constants import ALL_TOOLS, NIX_BUILD_FAILURE_TAIL_LINES, REQUIRED_TOOLS
+from lib.update.derivation_validation import (
+    ValidationCommandFinished,
+    ValidationCommandOutput,
+    ValidationCommandStarted,
+)
 from lib.update.errors import format_exception
 from lib.update.event_queue import EVENT_QUEUE_SIZE, run_event_pipeline
 from lib.update.outcomes import SummaryStatus, merge_statuses
@@ -51,17 +59,30 @@ from lib.update.refs import (
     FlakeInputRef,
     get_flake_inputs_with_refs,
 )
+from lib.update.run_monitor import (
+    RunMonitor,
+    default_run_log_root,
+    format_run_status,
+    load_run_status,
+    seconds_since,
+)
 from lib.update.runtime import active_runtime, runtime_scope
 from lib.update.sources import load_all_sources
 from lib.update.ui_consumer import ConsumeEventsOptions, consume_events
+from lib.update.ui_render import ValidationDisplay
 from lib.update.ui_state import ItemMeta, OperationKind
 from lib.update.updaters import UPDATERS, UpdaterClass, ensure_updaters_loaded
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
 
+    from lib.nix.models.flake_lock import FlakeLockNode
     from lib.update.events import UpdateEvent
     from lib.update.updaters.core import Updater
+
+_RUN_PHASE_COUNT = 4
+_MAX_VALIDATION_ROUNDS = 3
+_FLAKE_FILES = (Path("flake.nix"), Path("flake.lock"))
 
 _TRAILING_TARGET_FLAG_OPTIONS: dict[str, tuple[str, bool]] = {
     "--check": ("check", True),
@@ -82,6 +103,8 @@ _TRAILING_TARGET_FLAG_OPTIONS: dict[str, tuple[str, bool]] = {
     "-q": ("quiet", True),
     "--schema": ("schema", True),
     "-s": ("schema", True),
+    "--status": ("status", True),
+    "--strict": ("strict", True),
     "--validate": ("validate", True),
     "-v": ("validate", True),
     "--timings": ("timings", True),
@@ -608,10 +631,14 @@ class OutputOptions:
         style: str | None = None,
         stderr: bool = False,
     ) -> None:
-        """Print a message unless quiet or json mode is enabled."""
+        """Print a message unless quiet or json mode is enabled.
+
+        Lines are never hard-wrapped: status lines and paths must survive
+        intact in logs and pipes, so wrapping is left to the terminal.
+        """
         if not self.quiet and not self.json_output:
             target = self.err_console if stderr else self.console
-            target.print(redact_urls(message), style=style)
+            target.print(redact_urls(message), style=style, soft_wrap=True)
 
     def print_error(self, message: str) -> None:
         """Print an error message to stderr when not in json mode."""
@@ -641,6 +668,11 @@ class UpdateSummary:
         return [name for name, status in self.statuses.items() if status == "error"]
 
     @property
+    def dropped(self) -> list[str]:
+        """Targets whose candidate was withheld because a coupled target failed."""
+        return [name for name, status in self.statuses.items() if status == "dropped"]
+
+    @property
     def no_change(self) -> list[str]:
         """Targets that completed without a candidate change."""
         return [name for name, status in self.statuses.items() if status == "no_change"]
@@ -649,6 +681,7 @@ class UpdateSummary:
         """Return the stable JSON summary projection."""
         return {
             "updated": [redact_urls(name) for name in self.updated],
+            "dropped": [redact_urls(name) for name in self.dropped],
             "errors": [redact_urls(name) for name in self.errors],
             "noChange": [redact_urls(name) for name in self.no_change],
             "success": not self.errors,
@@ -758,10 +791,15 @@ def _emit_summary(
     dry_run: bool,
     discarded_updates: tuple[str, ...] = (),
     indeterminate_updates: tuple[str, ...] = (),
+    dropped: Mapping[str, str] | None = None,
 ) -> int:
+    dropped = dropped or {}
     if out.json_output:
-        payload = summary.to_dict()
+        payload = cast("dict[str, object]", summary.to_dict())
         payload["success"] = not had_errors
+        payload["withheld"] = {
+            redact_urls(k): redact_urls(v) for k, v in dropped.items()
+        }
         sys.stdout.write(f"{json.dumps(payload)}\n")
         return 1 if had_errors else 0
 
@@ -789,8 +827,14 @@ def _emit_summary(
             f"\nUpdated: {', '.join(summary.updated)}",
             style="green",
         )
+    elif had_errors:
+        out.print("\nNo updates promoted.", style="yellow")
     else:
         out.print("\nNo updates needed.", style="dim")
+
+    if dropped:
+        rendered = ", ".join(f"{name} ({reason})" for name, reason in dropped.items())
+        out.print(f"\nWithheld from promotion: {rendered}", style="yellow")
 
     if summary.errors:
         out.print_error(f"\nFailed: {', '.join(summary.errors)}")
@@ -820,26 +864,15 @@ def _handle_schema_request(opts: UpdateOptions) -> int | None:
     return 0
 
 
-def _resolve_tty_settings(
-    opts: UpdateOptions,
-    resolved: ResolvedTargets,
-) -> tuple[bool, bool]:
+def _resolve_tty_settings(opts: UpdateOptions) -> tuple[bool, bool]:
     tty_enabled = _is_tty(
         force_tty=True if opts.tty in ("force", "full") else None,
         no_tty=True if opts.tty == "off" else None,
         zellij_guard=opts.zellij_guard,
     )
-    show_phase_headers = all(
-        (
-            not opts.json,
-            not opts.quiet,
-            not tty_enabled,
-            resolved.do_refs,
-            resolved.do_sources,
-            bool(resolved.ref_inputs),
-            bool(resolved.source_names),
-        ),
-    )
+    # Plain output always names the phase it is in; the live panel shows it
+    # in the status line instead.
+    show_phase_headers = not opts.json and not opts.quiet and not tty_enabled
     return tty_enabled, show_phase_headers
 
 
@@ -889,6 +922,10 @@ class _RunOutcome:
     promotion_state: update_persistence.UpdatePromotionState | None = None
     plan_error: _RunPlanError | None = None
     workspace_error: str | None = None
+    # Candidates withheld because a coupled target failed, with the reason.
+    dropped: dict[str, str] = field(default_factory=dict)
+    written_paths: tuple[Path, ...] = ()
+    run_dir: Path | None = None
 
 
 def _record_workspace_failure(
@@ -904,7 +941,51 @@ def _record_workspace_failure(
     outcome.workspace_error = str(error)
 
 
-def _handle_preflight_requests(opts: UpdateOptions, out: OutputOptions) -> int | None:
+def _run_log_root(config: UpdateConfig) -> Path | None:
+    """Return where new run directories go, or ``None`` when logging is off."""
+    if not config.run_log:
+        return None
+    return config.run_log_dir or default_run_log_root()
+
+
+def _handle_status_request(
+    opts: UpdateOptions,
+    out: OutputOptions,
+    config: UpdateConfig,
+) -> int | None:
+    """Handle ``--status [RUN_ID]`` from the persisted run state."""
+    if not opts.status:
+        return None
+    run_id = opts.target_names[0] if opts.target_names else None
+    run_root = config.run_log_dir or default_run_log_root()
+    try:
+        run_dir, status, updated_at = load_run_status(run_root, run_id)
+    except FileNotFoundError as error:
+        if opts.json:
+            sys.stdout.write(f"{json.dumps({'success': False, 'error': str(error)})}\n")
+        else:
+            out.print_error(f"Error: {error}")
+        return 1
+    age = seconds_since(updated_at)
+    if opts.json:
+        payload = {
+            "success": True,
+            "runDir": str(run_dir),
+            "updatedAt": updated_at,
+            "status": asdict(status),
+        }
+        sys.stdout.write(f"{json.dumps(payload)}\n")
+        return 0
+    out.print(format_run_status(status, updated_seconds_ago=age))
+    out.print(f"Run log: {run_dir}", style="dim")
+    return 0
+
+
+def _handle_preflight_requests(
+    opts: UpdateOptions,
+    out: OutputOptions,
+    config: UpdateConfig,
+) -> int | None:
     sort_validation = validate_list_sort_option(opts, out)
     if sort_validation is not None:
         return sort_validation
@@ -912,6 +993,10 @@ def _handle_preflight_requests(opts: UpdateOptions, out: OutputOptions) -> int |
     schema_result = _handle_schema_request(opts)
     if schema_result is not None:
         return schema_result
+
+    status_result = _handle_status_request(opts, out, config)
+    if status_result is not None:
+        return status_result
 
     list_result = handle_list_targets_request(opts)
     if list_result is not None:
@@ -922,7 +1007,7 @@ def _handle_preflight_requests(opts: UpdateOptions, out: OutputOptions) -> int |
 
 def _build_run_plan(opts: UpdateOptions) -> _RunPlan | _RunPlanError | None:
     resolved = ResolvedTargets.from_options(opts)
-    tty_enabled, show_phase_headers = _resolve_tty_settings(opts, resolved)
+    tty_enabled, show_phase_headers = _resolve_tty_settings(opts)
 
     unknown_targets = [
         target for target in opts.target_names if target not in resolved.all_known_names
@@ -977,16 +1062,60 @@ def _record_derivation_validation_failures(
     return True
 
 
+def _live_ui_enabled(plan: _RunPlan, opts: UpdateOptions) -> bool:
+    """Return whether the live terminal panel owns progress output."""
+    return plan.tty_enabled and not opts.quiet and not opts.json
+
+
+def _start_run_monitor(
+    plan: _RunPlan,
+    opts: UpdateOptions,
+    out: OutputOptions,
+    config: UpdateConfig,
+) -> RunMonitor:
+    """Create the run monitor, its run directory, and the heartbeat."""
+    run_root = _run_log_root(config)
+    try:
+        monitor = RunMonitor.start(
+            targets=plan.order,
+            phase_count=_RUN_PHASE_COUNT,
+            run_root=run_root,
+            inactivity_warning_seconds=config.inactivity_warning_seconds,
+        )
+    except OSError as error:
+        out.print_error(
+            f"Warning: run log unavailable under {run_root} ({error}); "
+            "continuing without it"
+        )
+        monitor = RunMonitor.start(
+            targets=plan.order,
+            phase_count=_RUN_PHASE_COUNT,
+            run_root=None,
+            inactivity_warning_seconds=config.inactivity_warning_seconds,
+        )
+    printer = None
+    if not _live_ui_enabled(plan, opts) and not opts.quiet and not opts.json:
+
+        def printer(line: str) -> None:
+            out.print(line, style="dim")
+
+    monitor.start_heartbeat(config.heartbeat_interval, printer)
+    if monitor.run_dir is not None:
+        out.print(f"Run log: {monitor.run_dir}", style="dim")
+    return monitor
+
+
 async def _execute_run_plan_result(
     opts: UpdateOptions,
     out: OutputOptions,
     config: UpdateConfig,
     plan: _RunPlan,
+    monitor: RunMonitor | None = None,
 ) -> _RunExecutionResult:
     # Every plan runs in a disposable workspace. ``resolved.dry_run`` controls
     # reporting and live promotion, not whether the candidate is materialized.
     queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue(maxsize=EVENT_QUEUE_SIZE)
-    is_tty = plan.tty_enabled and not opts.quiet and not opts.json
+    is_tty = _live_ui_enabled(plan, opts)
     full_output = _resolve_full_output(
         full_output=True if opts.tty == "full" else None,
     )
@@ -1005,6 +1134,7 @@ async def _execute_run_plan_result(
                 render_interval=config.default_render_interval,
                 build_failure_tail_lines=NIX_BUILD_FAILURE_TAIL_LINES,
                 quiet=opts.quiet or opts.json,
+                monitor=monitor,
             ),
         )
 
@@ -1013,6 +1143,8 @@ async def _execute_run_plan_result(
         if plan.resolved.do_refs and plan.resolved.ref_inputs:
             if plan.show_phase_headers:
                 out.print("\nPhase 1: flake input refs", style="dim")
+            if monitor is not None:
+                monitor.begin_phase("flake input refs", 1)
             ref_result = await update_source_runner.run_ref_phase(
                 ref_inputs=plan.resolved.ref_inputs,
                 queue=queue,
@@ -1023,6 +1155,8 @@ async def _execute_run_plan_result(
         if plan.resolved.do_sources and plan.resolved.source_names:
             if plan.show_phase_headers:
                 out.print("\nPhase 2: sources.json updates", style="dim")
+            if monitor is not None:
+                monitor.begin_phase("sources", 2)
             source_result = await update_source_runner.run_sources_phase(
                 update_source_runner.SourcesPhaseContext(
                     source_names=plan.resolved.source_names,
@@ -1108,12 +1242,13 @@ def _sources_refresh_flake_lock(
     )
 
 
-def _requires_root_closure_validation(
-    opts: UpdateOptions,
-    changed_paths: Iterable[Path],
-) -> bool:
-    """Return whether this transaction can affect configured root closures."""
-    return not opts.target_names or bool(tuple(changed_paths))
+def _requires_root_closure_validation(changed_paths: Iterable[Path]) -> bool:
+    """Return whether this transaction can affect configured root closures.
+
+    Root closures gate changes to the checkout; a candidate identical to the
+    baseline cannot change what the roots build, so it skips the gate.
+    """
+    return bool(tuple(changed_paths))
 
 
 def _emit_run_outcome(
@@ -1153,6 +1288,12 @@ def _emit_run_outcome(
         if timings is not None:
             payload["timings"] = timings
         payload["success"] = not outcome.had_errors
+        payload["withheld"] = {
+            redact_urls(name): redact_urls(reason)
+            for name, reason in outcome.dropped.items()
+        }
+        if outcome.run_dir is not None:
+            payload["runLog"] = str(outcome.run_dir)
         if discarded_updates:
             payload["candidateUpdatesDiscarded"] = [
                 redact_urls(name) for name in discarded_updates
@@ -1200,72 +1341,367 @@ def _emit_run_outcome(
         out.print_error(f"Error: {workspace_error}")
     if plan_error is not None:
         return 1
-    return _emit_summary(
+    exit_code = _emit_summary(
         outcome.summary,
         had_errors=outcome.had_errors,
         out=out,
         dry_run=dry_run,
         discarded_updates=discarded_updates,
         indeterminate_updates=indeterminate_updates,
+        dropped=outcome.dropped,
     )
+    if outcome.run_dir is not None:
+        out.print(f"Run log: {outcome.run_dir}", style="dim")
+    return exit_code
 
 
 def _validation_progress_output(
-    opts: UpdateOptions, out: OutputOptions, source: str
+    opts: UpdateOptions,
+    out: OutputOptions,
+    source: str,
+    monitor: RunMonitor | None = None,
 ) -> update_derivation_validation.ValidationProgress | None:
-    """Keep streamed validation text out of quiet and machine-readable output."""
-    if not opts.verbose or out.quiet or out.json_output:
+    """Feed validation output to the run monitor and, when verbose, the console."""
+    verbose = opts.verbose and not out.quiet and not out.json_output
+    if monitor is None and not verbose:
         return None
 
-    def progress(message: str) -> None:
-        line = Text(f"[{source}] ")
-        line.append_text(Text.from_ansi(redact_urls(message).replace("\r", "")))
-        out.console.print(line, soft_wrap=True)
-        out.console.file.flush()
+    def progress(
+        message: update_derivation_validation.ValidationProgressEvent,
+    ) -> None:
+        if monitor is not None:
+            match message:
+                case ValidationCommandStarted(command=command):
+                    monitor.validation_started(f"{source}: {command}")
+                case ValidationCommandOutput(command=command, line=line):
+                    monitor.validation_output(f"{source}: {command}", line)
+                case ValidationCommandFinished(command=command, succeeded=succeeded):
+                    monitor.validation_finished(
+                        f"{source}: {command}", succeeded=succeeded
+                    )
+                case _:
+                    monitor.validation_output(None, message)
+        if verbose:
+            match message:
+                case ValidationCommandStarted(command=command):
+                    text = f"$ {command}"
+                case ValidationCommandOutput(line=line):
+                    text = line
+                case ValidationCommandFinished():
+                    return
+                case _:
+                    text = message
+            rendered = Text(f"[{source}] ")
+            rendered.append_text(Text.from_ansi(redact_urls(text).replace("\r", "")))
+            out.console.print(rendered, soft_wrap=True)
+            out.console.file.flush()
 
     return progress
 
 
-def _validate_run_snapshot(
+def _validation_display(
     plan: _RunPlan | _RunPlanError | None,
-    snapshot: update_persistence.UpdateValidationSnapshot,
-    summary: UpdateSummary,
     opts: UpdateOptions,
-    out: OutputOptions,
     config: UpdateConfig,
-    *,
-    check_cancelled: update_derivation_validation.ValidationCancellationCheck,
-) -> bool:
-    """Validate packages and root closures against the same captured source tree."""
-    if isinstance(plan, _RunPlan):
-        out.print("\nPhase 3: derivation validation", style="dim")
-        if _record_derivation_validation_failures(
-            summary,
-            out,
-            update_derivation_validation.validate_derivations(
-                plan.order,
-                updaters=_get_updaters(),
-                flake_root=snapshot.root,
-                timeout=config.default_subprocess_timeout,
-                all_declared_systems=True,
-                progress=_validation_progress_output(opts, out, "derivations"),
-                check_cancelled=check_cancelled,
-            ),
-        ):
-            return True
-    if not _requires_root_closure_validation(opts, snapshot.changed_paths):
-        return False
-    out.print("\nPhase 4: root closure builds", style="dim")
-    return _record_derivation_validation_failures(
-        summary,
-        out,
-        update_derivation_validation.validate_root_closures(
-            flake_root=snapshot.root,
-            timeout=config.subprocess_timeout_override,
-            progress=_validation_progress_output(opts, out, "root-closures"),
-            check_cancelled=check_cancelled,
-        ),
+    monitor: RunMonitor | None,
+) -> ValidationDisplay | nullcontext[None]:
+    """Show a live status block for validation only where the panel was live."""
+    if monitor is None or not isinstance(plan, _RunPlan):
+        return nullcontext()
+    if not _live_ui_enabled(plan, opts):
+        return nullcontext()
+
+    def tail() -> tuple[str, ...]:
+        validations = monitor.snapshot().validations
+        return () if not validations else validations[-1].tail
+
+    return ValidationDisplay(
+        status_line=monitor.status_line,
+        tail=tail,
+        render_interval=config.default_render_interval,
     )
+
+
+def _flake_input_lock_node(
+    lock_bytes: bytes | None,
+    input_name: str,
+) -> FlakeLockNode | None:
+    """Resolve one root input's locked node from raw lock bytes."""
+    if lock_bytes is None:
+        return None
+    lock = FlakeLock.from_dict(json.loads(lock_bytes))
+    node, _follows = update_flake.resolve_root_input_node(lock, input_name)
+    return node
+
+
+def _target_input_names(
+    name: str,
+    plan: _RunPlan,
+    updaters: Mapping[str, UpdaterClass],
+) -> set[str]:
+    """Return every flake input whose state one target's files depend on."""
+    inputs: set[str] = set()
+    if name in {ref.name for ref in plan.resolved.all_ref_inputs}:
+        inputs.add(name)
+    updater_cls = updaters.get(name)
+    backing = update_planner.source_backing_input_name(
+        name, updater_cls, plan.sources.entries.get(name)
+    )
+    if backing is not None:
+        inputs.add(backing)
+    inputs.update(update_planner.source_additional_input_names(updater_cls))
+    return inputs
+
+
+def _failed_targets_touched_flake(
+    workspace: update_persistence.IsolatedUpdateWorkspace,
+    plan: _RunPlan,
+    failed: Iterable[str],
+    updaters: Mapping[str, UpdaterClass],
+) -> tuple[str, ...]:
+    """Return failed targets whose flake input moved during this run.
+
+    Such a target's files still describe the baseline input while flake.nix or
+    flake.lock already describe the new one, so the two cannot be promoted apart.
+    """
+    baseline_refs = {ref.name: ref.ref for ref in plan.resolved.all_ref_inputs}
+    current_refs: dict[str, str] | None = None
+    baseline_lock = workspace.baseline_content(Path("flake.lock"))
+    lock_path = workspace.root / "flake.lock"
+    current_lock = lock_path.read_bytes() if lock_path.is_file() else None
+    touched: list[str] = []
+    for name in failed:
+        for input_name in sorted(_target_input_names(name, plan, updaters)):
+            if input_name in baseline_refs:
+                if current_refs is None:
+                    current_refs = {
+                        ref.name: ref.ref for ref in get_flake_inputs_with_refs()
+                    }
+                if current_refs.get(input_name) != baseline_refs[input_name]:
+                    touched.append(name)
+                    break
+            if _flake_input_lock_node(
+                baseline_lock, input_name
+            ) != _flake_input_lock_node(current_lock, input_name):
+                touched.append(name)
+                break
+    return tuple(touched)
+
+
+def _rollback_failed_input_locks(
+    workspace: update_persistence.IsolatedUpdateWorkspace,
+    plan: _RunPlan,
+    failed: Iterable[str],
+    updaters: Mapping[str, UpdaterClass],
+) -> tuple[str, ...]:
+    """Restore failed targets' lock-only input nodes in flake.lock.
+
+    Each failed target's root input edge is pointed back at the baseline node
+    and the node content is restored, so the rest of the lock — including
+    inputs updated by still-promoted targets — keeps describing the candidate.
+    Ref-backed inputs are pinned by a URL in flake.nix, which cannot be rolled
+    back per-input, so those stay on the whole-file revert path. Returns the
+    names of inputs that were rolled back.
+    """
+    ref_names = {ref.name for ref in plan.resolved.all_ref_inputs}
+    candidates: set[str] = set()
+    for name in failed:
+        candidates.update(_target_input_names(name, plan, updaters))
+    candidates -= ref_names
+    if not candidates:
+        return ()
+    baseline_lock = workspace.baseline_content(Path("flake.lock"))
+    if baseline_lock is None:
+        return ()
+    try:
+        baseline = json.loads(baseline_lock)
+        lock_path = workspace.root / "flake.lock"
+        current = json.loads(lock_path.read_text(encoding="utf-8"))
+    except OSError, json.JSONDecodeError:
+        return ()
+    baseline_nodes = baseline.get("nodes")
+    current_nodes = current.get("nodes")
+    baseline_root = baseline.get("root")
+    current_root = current.get("root")
+    if not (
+        isinstance(baseline_nodes, dict)
+        and isinstance(current_nodes, dict)
+        and isinstance(baseline_root, str)
+        and isinstance(current_root, str)
+    ):
+        return ()
+    baseline_root_inputs = baseline_nodes.get(baseline_root, {}).get("inputs", {})
+    current_root_inputs = current_nodes.get(current_root, {}).get("inputs", {})
+    if not isinstance(baseline_root_inputs, dict) or not isinstance(
+        current_root_inputs, dict
+    ):
+        return ()
+    rolled: list[str] = []
+    for input_name in sorted(candidates):
+        base_edge = baseline_root_inputs.get(input_name)
+        if not isinstance(base_edge, str):
+            continue
+        base_node = baseline_nodes.get(base_edge)
+        if not isinstance(base_node, dict):
+            continue
+        if (
+            current_root_inputs.get(input_name) == base_edge
+            and current_nodes.get(base_edge) == base_node
+        ):
+            continue
+        current_root_inputs[input_name] = base_edge
+        current_nodes[base_edge] = copy.deepcopy(base_node)
+        rolled.append(input_name)
+    if not rolled:
+        return ()
+    _prune_unreachable_lock_nodes(current)
+    lock_path.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
+    return tuple(rolled)
+
+
+def _prune_unreachable_lock_nodes(lock: dict[str, Any]) -> None:
+    """Drop flake.lock nodes that no longer participate in the input graph."""
+    nodes = lock.get("nodes")
+    root = lock.get("root")
+    if not isinstance(nodes, dict) or not isinstance(root, str):
+        return
+    reachable: set[str] = set()
+    stack = [root]
+    while stack:
+        node_id = stack.pop()
+        if node_id in reachable or node_id not in nodes:
+            continue
+        reachable.add(node_id)
+        node = nodes[node_id]
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        stack.extend(edge for edge in inputs.values() if isinstance(edge, str))
+    for node_id in [key for key in nodes if key not in reachable]:
+        del nodes[node_id]
+
+
+def _input_backed_targets(
+    plan: _RunPlan,
+    updaters: Mapping[str, UpdaterClass],
+) -> frozenset[str]:
+    """Return every ref target and every source that hashes against an input."""
+    return frozenset(
+        name for name in plan.order if _target_input_names(name, plan, updaters)
+    )
+
+
+def _withhold_failed_clusters(
+    workspace: update_persistence.IsolatedUpdateWorkspace,
+    plan: _RunPlan,
+    outcome: _RunOutcome,
+    updaters: Mapping[str, UpdaterClass],
+    out: OutputOptions,
+    monitor: RunMonitor | None,
+) -> None:
+    """Revert candidates coupled to failed targets so the rest can be promoted.
+
+    Coupling follows companion, aggregate, and flake-input edges. When a failure
+    left flake.lock changed, the failed targets' lock-only input nodes are
+    rolled back per-input so unrelated input-backed candidates survive. Ref
+    inputs pinned in flake.nix cannot be rolled back per-input; a failure on
+    one of those still reverts every input-backed candidate together with the
+    flake files.
+    """
+    statuses = outcome.summary.statuses
+    failed = [name for name, status in statuses.items() if status == "error"]
+    if not failed:
+        return
+    clusters = update_planner.dependency_clusters(
+        plan.order,
+        updaters=updaters,
+        entries=plan.sources.entries,
+        input_names=[ref.name for ref in plan.resolved.ref_inputs],
+    )
+    closure = set(update_planner.failure_closure(failed, clusters))
+    touched = _failed_targets_touched_flake(workspace, plan, failed, updaters)
+    rolled_back_inputs: frozenset[str] = frozenset()
+    global_flake_revert = False
+    if touched:
+        rolled_back_inputs = frozenset(
+            _rollback_failed_input_locks(workspace, plan, failed, updaters)
+        )
+        global_flake_revert = any(
+            bool(_target_input_names(name, plan, updaters) - rolled_back_inputs)
+            for name in touched
+        )
+        if global_flake_revert:
+            closure.update(_input_backed_targets(plan, updaters))
+    dropped: dict[str, str] = {}
+    for name in plan.order:
+        if name in failed or statuses.get(name) != "updated":
+            continue
+        if name in closure:
+            culprit = next(
+                (item for item in failed if item in clusters.get(name, ())), None
+            )
+            dropped[name] = (
+                f"coupled to failed target {culprit}"
+                if culprit is not None
+                else f"flake inputs reverted after {touched[0]} failed"
+            )
+        elif rolled_back_inputs and (
+            _target_input_names(name, plan, updaters) & rolled_back_inputs
+        ):
+            culprit = next(
+                (item for item in failed if item in clusters.get(name, ())), None
+            )
+            dropped[name] = f"input rolled back after {culprit or touched[0]} failed"
+    outcome.summary.accumulate(dict.fromkeys(dropped, "dropped"))
+    outcome.dropped.update(dropped)
+
+    # Only files owned by a target that is still being promoted may change.
+    # Everything else written during the run, including the declared paths of
+    # failed and withheld sources, returns to baseline.
+    source_names = set(plan.resolved.source_names)
+    kept_sources = [
+        name for name in plan.resolved.source_names if statuses.get(name) == "updated"
+    ]
+    owned: set[Path] = set()
+    if kept_sources:
+        owned.update(
+            _workspace_relative_paths(
+                workspace.root,
+                update_persistence.planned_update_paths(kept_sources, updaters),
+            )
+        )
+    if not global_flake_revert:
+        owned.update(_FLAKE_FILES)
+    restore: set[Path] = {
+        path
+        for path in _workspace_relative_paths(workspace.root, outcome.written_paths)
+        if path not in owned
+    }
+    revert_sources = [name for name in (*dropped, *failed) if name in source_names]
+    if revert_sources:
+        restore.update(
+            _workspace_relative_paths(
+                workspace.root,
+                update_persistence.planned_update_paths(revert_sources, updaters),
+            )
+        )
+    if touched and global_flake_revert:
+        restore.update(_FLAKE_FILES)
+    if restore:
+        workspace.restore_baseline(sorted(restore))
+        update_flake.invalidate_flake_lock()
+    if dropped:
+        rendered = ", ".join(f"{name} ({reason})" for name, reason in dropped.items())
+        out.print(f"Continuing without: {rendered}", style="yellow")
+    if monitor is not None:
+        monitor.note(
+            "withheld coupled candidates",
+            failed=failed,
+            withheld=sorted(dropped),
+            flakeReverted=bool(touched),
+        )
 
 
 def _update_cancellation_check() -> (
@@ -1281,30 +1717,156 @@ def _update_cancellation_check() -> (
     return check_cancelled
 
 
-async def _validate_run_snapshot_for_task(
+@dataclass(frozen=True)
+class _ValidationContext:
+    """Everything the validation rounds need besides the workspace and plan."""
+
+    opts: UpdateOptions
+    out: OutputOptions
+    config: UpdateConfig
+    updaters: Mapping[str, UpdaterClass]
+    check_cancelled: update_derivation_validation.ValidationCancellationCheck
+    monitor: RunMonitor | None = None
+
+
+def _validate_round(
+    plan: _RunPlan | _RunPlanError | None,
+    snapshot: update_persistence.UpdateValidationSnapshot,
+    outcome: _RunOutcome,
+    context: _ValidationContext,
+    *,
+    round_index: int,
+) -> tuple[bool, bool]:
+    """Run one derivation round and, when clean, the root closure gate.
+
+    Returns ``(derivations_failed, roots_failed)``.
+    """
+    opts, out, config = context.opts, context.out, context.config
+    verbose = opts.verbose and not out.quiet and not out.json_output
+    if isinstance(plan, _RunPlan):
+        kept = [
+            name
+            for name in plan.order
+            if outcome.summary.statuses.get(name) not in {"error", "dropped"}
+        ]
+        suffix = f" (round {round_index + 1})" if round_index else ""
+        out.print(f"\nPhase 3: derivation validation{suffix}", style="dim")
+        if context.monitor is not None:
+            context.monitor.begin_phase("derivation validation", 3)
+        failures = update_derivation_validation.validate_derivations(
+            kept,
+            updaters=context.updaters,
+            flake_root=snapshot.root,
+            timeout=config.default_subprocess_timeout,
+            all_declared_systems=True,
+            progress=_validation_progress_output(
+                opts, out, "derivations", context.monitor
+            ),
+            check_cancelled=context.check_cancelled,
+            print_build_logs=verbose,
+            max_eval_workers=config.max_nix_evaluations,
+            max_build_workers=config.max_nix_builds,
+        )
+        if _record_derivation_validation_failures(outcome.summary, out, failures):
+            return True, False
+    if not _requires_root_closure_validation(snapshot.changed_paths):
+        return False, False
+    out.print("\nPhase 4: root closure builds", style="dim")
+    if context.monitor is not None:
+        context.monitor.begin_phase("root closures", 4)
+    root_failures = update_derivation_validation.validate_root_closures(
+        flake_root=snapshot.root,
+        timeout=config.subprocess_timeout_override,
+        progress=_validation_progress_output(
+            opts, out, "root-closures", context.monitor
+        ),
+        check_cancelled=context.check_cancelled,
+        print_build_logs=verbose,
+    )
+    return False, _record_derivation_validation_failures(
+        outcome.summary, out, root_failures
+    )
+
+
+async def _validate_and_gate(
     workspace: update_persistence.IsolatedUpdateWorkspace,
     plan: _RunPlan | _RunPlanError | None,
-    summary: UpdateSummary,
-    opts: UpdateOptions,
-    out: OutputOptions,
-    config: UpdateConfig,
-    check_cancelled: update_derivation_validation.ValidationCancellationCheck,
+    outcome: _RunOutcome,
+    context: _ValidationContext,
 ) -> bool:
-    """Finish cancellation and snapshot cleanup before promotion can begin."""
-    check_cancelled()
-    with workspace.validation_snapshot() as snapshot:
-        had_errors = _validate_run_snapshot(
-            plan,
-            snapshot,
-            summary,
-            opts,
-            out,
-            config,
-            check_cancelled=check_cancelled,
+    """Validate the candidate, withholding coupled failures, then gate on roots.
+
+    Each round validates the derivations still in the candidate. Failures are
+    withheld with their coupled targets and the smaller candidate is validated
+    again, bounded by a few rounds. Root closures build once, on the candidate
+    that will actually be promoted. Returns ``True`` when nothing may be
+    promoted.
+    """
+    check_cancelled = context.check_cancelled
+    for round_index in range(_MAX_VALIDATION_ROUNDS):
+        check_cancelled()
+        with (
+            _validation_display(plan, context.opts, context.config, context.monitor),
+            workspace.validation_snapshot() as snapshot,
+        ):
+            derivations_failed, roots_failed = _validate_round(
+                plan,
+                snapshot,
+                outcome,
+                context,
+                round_index=round_index,
+            )
+        await asyncio.sleep(0)
+        check_cancelled()
+        if not derivations_failed:
+            return roots_failed
+        if context.opts.strict or not isinstance(plan, _RunPlan):
+            return True
+        _withhold_failed_clusters(
+            workspace, plan, outcome, context.updaters, context.out, context.monitor
         )
-    await asyncio.sleep(0)
-    check_cancelled()
-    return had_errors
+    context.out.print_error(
+        "Error: derivation validation kept failing after "
+        f"{_MAX_VALIDATION_ROUNDS} rounds; no changes were applied"
+    )
+    return True
+
+
+async def _gate_candidate(
+    workspace: update_persistence.IsolatedUpdateWorkspace,
+    run_plan: _RunPlan | _RunPlanError | None,
+    outcome: _RunOutcome,
+    context: _ValidationContext,
+    *,
+    allowed_paths: tuple[Path, ...],
+) -> None:
+    """Withhold coupled failures, validate what remains, then promote or check.
+
+    Strict mode keeps the whole run as one unit: any failure discards every
+    candidate. A plan error never reaches validation.
+    """
+    opts = context.opts
+    if outcome.plan_error is not None or (opts.strict and outcome.had_errors):
+        return
+    if outcome.had_errors and isinstance(run_plan, _RunPlan):
+        _withhold_failed_clusters(
+            workspace,
+            run_plan,
+            outcome,
+            context.updaters,
+            context.out,
+            context.monitor,
+        )
+    blocked = await _validate_and_gate(workspace, run_plan, outcome, context)
+    # Withheld failures still fail the run; promotion of the remainder does
+    # not hide them from the exit status.
+    outcome.had_errors = outcome.had_errors or blocked or bool(outcome.summary.errors)
+    if blocked:
+        return
+    if opts.check:
+        workspace.validate_changes(allowed_paths)
+    else:
+        outcome.promoted = bool(workspace.promote(allowed_paths))
 
 
 async def _run_updates(
@@ -1317,11 +1879,13 @@ async def _run_updates(
     config = _resolve_runtime_config(opts)
     check_cancelled = _update_cancellation_check()
 
-    preflight_result = _handle_preflight_requests(opts, out)
+    preflight_result = _handle_preflight_requests(opts, out, config)
     if preflight_result is not None:
         return preflight_result
 
     outcome = _RunOutcome()
+    monitor: RunMonitor | None = None
+    updaters: Mapping[str, UpdaterClass] = {}
     try:
         with update_persistence.IsolatedUpdateWorkspace(
             get_repo_root(),
@@ -1342,6 +1906,8 @@ async def _run_updates(
                 outcome.had_errors = True
             elif run_plan is not None:
                 updaters = _get_updaters()
+                monitor = _start_run_monitor(run_plan, opts, out, config)
+                outcome.run_dir = monitor.run_dir
                 declared_paths = list(
                     update_persistence.planned_update_paths(
                         run_plan.resolved.source_names,
@@ -1369,36 +1935,45 @@ async def _run_updates(
                     flake_lock = workspace.root / "flake.lock"
                     declared_paths.append(flake_lock)
                     explicit_phase_outputs.append(flake_lock)
-                result = await _execute_run_plan_result(opts, out, config, run_plan)
+                result = await _execute_run_plan_result(
+                    opts, out, config, run_plan, monitor
+                )
                 outcome.summary = result.summary
                 outcome.candidate_updates = result.candidate_updates
                 outcome.had_errors = result.had_errors
+                outcome.written_paths = tuple(result.written_paths)
                 allowed_paths = _workspace_allowed_paths(
                     workspace.root,
                     declared_paths,
                     result.written_paths,
                     explicit_phase_outputs,
                 )
-            if not outcome.had_errors:
-                outcome.had_errors = await _validate_run_snapshot_for_task(
-                    workspace,
-                    run_plan,
-                    outcome.summary,
-                    opts,
-                    out,
-                    config,
-                    check_cancelled,
-                )
-                if not outcome.had_errors:
-                    if opts.check:
-                        workspace.validate_changes(allowed_paths)
-                    else:
-                        workspace.promote(allowed_paths)
-                        outcome.promoted = True
+            await _gate_candidate(
+                workspace,
+                run_plan,
+                outcome,
+                _ValidationContext(
+                    opts=opts,
+                    out=out,
+                    config=config,
+                    updaters=updaters,
+                    check_cancelled=check_cancelled,
+                    monitor=monitor,
+                ),
+                allowed_paths=allowed_paths,
+            )
     except update_persistence.UpdateWorkspaceError as error:
         _record_workspace_failure(outcome, error)
     finally:
         update_flake.invalidate_flake_lock()
+        if monitor is not None:
+            monitor.close(
+                summary={
+                    **outcome.summary.to_dict(),
+                    "promoted": outcome.promoted,
+                    "withheld": dict(outcome.dropped),
+                }
+            )
 
     return _emit_run_outcome(
         outcome,
@@ -1542,6 +2117,26 @@ def cli(  # noqa: PLR0913 -- Typer requires an explicit parameter for each publi
     schema: Annotated[
         bool,
         typer.Option("--schema", "-s", help="Output JSON schema for sources.json."),
+    ] = False,
+    status: Annotated[
+        bool,
+        typer.Option(
+            "--status",
+            help=(
+                "Show the recorded state of the latest run, or of the run id "
+                "given as the first target, and exit."
+            ),
+        ),
+    ] = False,
+    strict: Annotated[
+        bool,
+        typer.Option(
+            "--strict",
+            help=(
+                "Treat the run as one unit: any failed target discards every "
+                "candidate instead of promoting the unaffected ones."
+            ),
+        ),
     ] = False,
     sort_by: Annotated[
         UpdateSortBy,

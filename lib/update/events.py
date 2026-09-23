@@ -165,11 +165,14 @@ class UpdateEvent:
     message: str | None = None
     stream: str | None = None
     payload: UpdateEventPayload | None = None
+    detail: str | None = None
 
     def __post_init__(self) -> None:
         """Redact diagnostic projections, retaining functional results separately."""
         if self.message is not None:
             object.__setattr__(self, "message", redact_urls(self.message))
+        if self.detail is not None:
+            object.__setattr__(self, "detail", redact_urls(self.detail))
         payload = self.payload
         if isinstance(payload, CommandResult):
             object.__setattr__(
@@ -209,9 +212,20 @@ class UpdateEvent:
         )
 
     @classmethod
-    def error(cls, source: str, message: str) -> UpdateEvent:
-        """Create an error event."""
-        return cls(source=source, kind=UpdateEventKind.ERROR, message=message)
+    def error(
+        cls,
+        source: str,
+        message: str,
+        *,
+        detail: str | None = None,
+    ) -> UpdateEvent:
+        """Create an error event; *detail* carries diagnostics for the run log only."""
+        return cls(
+            source=source,
+            kind=UpdateEventKind.ERROR,
+            message=message,
+            detail=detail,
+        )
 
     @classmethod
     def result(

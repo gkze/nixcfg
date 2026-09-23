@@ -5,8 +5,11 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-type SummaryStatus = Literal["updated", "error", "no_change"]
-_STATUS_PRIORITY = {"no_change": 0, "updated": 1, "error": 2}
+# ``dropped`` marks a candidate that was computed but withheld from promotion
+# because a related target failed; it outranks ``updated`` and never hides an
+# ``error``.
+type SummaryStatus = Literal["updated", "dropped", "error", "no_change"]
+_STATUS_PRIORITY = {"no_change": 0, "updated": 1, "dropped": 2, "error": 3}
 
 
 def merge_statuses(

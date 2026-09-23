@@ -2,7 +2,8 @@
 
 import asyncio
 import io
-import time
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -36,7 +37,7 @@ from lib.update.events import (
     UpdateEventKind,
 )
 from lib.update.ui_consumer import ConsumeEventsOptions, EventConsumer, consume_events
-from lib.update.ui_render import Renderer
+from lib.update.ui_render import Renderer, ValidationDisplay, _refresh_rate
 from lib.update.ui_state import (
     ItemMeta,
     ItemState,
@@ -178,7 +179,7 @@ def test_ui_state_from_meta_and_command_mappers() -> None:
     assert operation_for_command([]) == OperationKind.COMPUTE_HASH
     assert operation_for_command(["flake-edit"]) == OperationKind.UPDATE_REF
     assert (
-        operation_for_command(["nix", "flake", "lock", "--update-input", "demo"])
+        operation_for_command(["nix", "flake", "update", "demo"])
         == OperationKind.REFRESH_LOCK
     )
     assert operation_for_command(["echo", "ok"]) == OperationKind.COMPUTE_HASH
@@ -586,19 +587,29 @@ class _LiveStub:
 
     def __init__(
         self,
-        _renderable: object,
+        _renderable: object = None,
         *,
         console: object,
         auto_refresh: bool,
         transient: bool,
+        get_renderable: Callable[[], object] | None = None,
+        refresh_per_second: float = 4.0,
     ) -> None:
         self.console = console
         self.auto_refresh = auto_refresh
         self.transient = transient
+        self.refresh_per_second = refresh_per_second
+        self._renderable = _renderable
+        self._get_renderable = get_renderable
         self.started = False
         self.stopped = False
-        self.updated: list[tuple[object, bool]] = []
         self.__class__.instances.append(self)
+
+    def get_renderable(self) -> object:
+        """Return what Rich's refresh thread would draw."""
+        if self._get_renderable is not None:
+            return self._get_renderable()
+        return self._renderable
 
     def start(self) -> None:
         """Run this test case."""
@@ -608,9 +619,14 @@ class _LiveStub:
         """Run this test case."""
         self.stopped = True
 
-    def update(self, renderable: object, *, refresh: bool) -> None:
-        """Run this test case."""
-        self.updated.append((renderable, refresh))
+
+def _render_text(renderable: object) -> str:
+    """Render a Rich renderable to plain text for assertions."""
+    buffer = io.StringIO()
+    Console(file=buffer, width=120, force_terminal=False, color_system=None).print(
+        cast("Any", renderable)
+    )
+    return buffer.getvalue()
 
 
 def test_install_resize_aware_live_render_replaces_rich_live_render() -> None:
@@ -717,8 +733,11 @@ def test_resize_aware_live_render_clears_wrapped_rows_after_width_shrink() -> No
     ]
 
 
-def test_renderer_lifecycle_and_render_if_due(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run this test case."""
+def test_renderer_lifecycle_and_item_completion(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The live panel shows started items plus the status line and retires them."""
     monkeypatch.setattr(ui_render_module, "Live", _LiveStub)
     _LiveStub.instances.clear()
 
@@ -726,50 +745,52 @@ def test_renderer_lifecycle_and_render_if_due(monkeypatch: pytest.MonkeyPatch) -
     op = item.operations[OperationKind.CHECK_VERSION]
     op.status = "running"
     op.message = "current 1.0"
+    idle = _item()
 
     renderer = Renderer(
-        {"demo": item},
-        ["demo"],
+        {"demo": item, "idle": idle},
+        ["demo", "idle"],
         is_tty=True,
         render_interval=0.1,
+        status_line=lambda: "Phase 2/4 sources · 0/2 done",
     )
+    live = _LiveStub.instances[0]
+    assert object.__getattribute__(renderer, "_live") is live
+    assert live.started
+    assert live.auto_refresh
+    assert live.transient
+    assert live.refresh_per_second == 10.0
 
-    assert object.__getattribute__(renderer, "_live") is not None
-    assert _LiveStub.instances[0].started
-    assert not _LiveStub.instances[0].transient
+    # Rich's refresh thread asks the renderer for the current display.
+    panel = _render_text(live.get_renderable())
+    assert "demo" in panel
+    assert "current 1.0" in panel
+    assert "Phase 2/4 sources" in panel
+    assert "idle" not in panel
+    everything = _render_text(
+        object.__getattribute__(renderer, "_build_display")(full_output=True)
+    )
+    assert "idle" in everything
 
-    renderer.render()
-    assert _LiveStub.instances[0].updated
+    renderer.item_completed("demo")
+    renderer.item_completed("demo")
+    renderer.item_completed("unknown")
+    assert renderer.completed == {"demo"}
+    assert capsys.readouterr().out.count("current 1.0") == 1
+    assert "demo" not in _render_text(live.get_renderable())
 
-    renderer.request_render()
-    renderer.render_if_due(now=0.05)
-    assert renderer.needs_render
-
-    renderer.render_if_due(now=1.0)
-    assert not renderer.needs_render
-    assert renderer.last_render == 1.0
-
-    called: list[bool] = []
-    monkeypatch.setattr(renderer, "_print_final_status", lambda: called.append(True))
-    update_count = len(_LiveStub.instances[0].updated)
+    idle.operations[OperationKind.CHECK_VERSION].status = "running"
+    renderer.finalize()
+    assert live.stopped
+    assert renderer.completed == {"demo", "idle"}
+    assert "idle" in capsys.readouterr().out
+    assert object.__getattribute__(renderer, "_live") is None
     renderer.finalize()
 
-    assert _LiveStub.instances[0].stopped
-    assert called == []
-    assert len(_LiveStub.instances[0].updated) == update_count + 1
-    assert _LiveStub.instances[0].updated[-1][1] is False
-    assert object.__getattribute__(renderer, "_live") is None
-
-    fallback = Renderer(
-        {"demo": _item()},
-        ["demo"],
-        is_tty=False,
-        render_interval=0.1,
-    )
-    fallback.is_tty = True
-    monkeypatch.setattr(fallback, "_print_final_status", lambda: called.append(True))
-    fallback.finalize()
-    assert called == [True]
+    quiet = Renderer({"demo": _item()}, ["demo"], is_tty=False, render_interval=0.1)
+    quiet.item_completed("demo")
+    assert quiet.completed == {"demo"}
+    assert capsys.readouterr().out == ""
 
 
 def test_renderer_formatting_symbols_and_spinner_updates() -> None:
@@ -835,6 +856,18 @@ def test_renderer_build_display_with_and_without_console(
     assert full is not None
     clipped = object.__getattribute__(renderer, "_build_display")(full_output=False)
     assert clipped is not None
+    assert object.__getattribute__(renderer, "_status_text")() is None
+
+    blank_status = Renderer(
+        {"demo": _item()},
+        ["demo"],
+        is_tty=True,
+        render_interval=0.1,
+        status_line=lambda: "",
+    )
+    assert object.__getattribute__(blank_status, "_status_text")() is None
+    blank_panel = object.__getattribute__(blank_status, "_build_display")()
+    assert _render_text(blank_panel).strip() == ""
 
     object.__setattr__(renderer, "_console", None)
     no_console = object.__getattribute__(renderer, "_build_display")()
@@ -898,7 +931,7 @@ def test_renderer_non_tty_output_and_quiet(capsys: pytest.CaptureFixture[str]) -
     verbose_renderer.log("demo", "info")
     verbose_renderer.log_error("demo", "boom")
     verbose_renderer.log_error("demo", "multi\ndetail")
-    verbose_renderer.render()
+    verbose_renderer.finalize()
 
     captured = capsys.readouterr()
     assert "[demo] line" in captured.out
@@ -948,19 +981,10 @@ def test_renderer_private_branch_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     item.operations.pop(OperationKind.CHECK_VERSION)
     assert not object.__getattribute__(renderer, "_append_detail_line")("demo", "x")
 
-    # render_if_due early-return when needs_render is false.
-    renderer.render_if_due(now=1.0)
-    assert not renderer.needs_render
-
-    # request_render false branch for non-tty renderer.
-    non_tty_renderer = Renderer(
-        {"demo": _item()},
-        ["demo"],
-        is_tty=False,
-        render_interval=0.1,
-    )
-    non_tty_renderer.request_render()
-    assert not non_tty_renderer.needs_render
+    # A quiet TTY renderer has no live panel, so finalize is a no-op.
+    assert object.__getattribute__(renderer, "_live") is None
+    renderer.finalize()
+    assert _LiveStub.instances == []
 
     # _compact_lines branch where segment.text is empty.
     active_renderer = Renderer(
@@ -984,44 +1008,6 @@ def test_renderer_private_branch_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     assert compact_active is not None
     active_renderer.finalize()
 
-    # finalize with quiet=True should not print final status.
-    called: list[bool] = []
-    monkeypatch.setattr(renderer, "_print_final_status", lambda: called.append(True))
-    renderer.finalize()
-    assert called == []
-
-
-def test_renderer_print_final_status_uses_stdout_tty(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Run this test case."""
-    captured: dict[str, object] = {}
-
-    class _ConsoleCapture:
-        def __init__(self, *, no_color: bool, highlight: bool) -> None:
-            captured["no_color"] = no_color
-            captured["highlight"] = highlight
-
-        def print(self, renderable: object) -> None:
-            """Run this test case."""
-            captured["renderable"] = renderable
-
-    class _StdoutCapture(io.StringIO):
-        def isatty(self) -> bool:
-            """Run this test case."""
-            return False
-
-    monkeypatch.setattr(ui_render_module, "Console", _ConsoleCapture)
-    monkeypatch.setattr(ui_render_module.sys, "stdout", _StdoutCapture())
-
-    item = _item()
-    renderer = Renderer({"demo": item}, ["demo"], is_tty=False, render_interval=0.1)
-    object.__getattribute__(renderer, "_print_final_status")()
-
-    assert captured["no_color"] is True
-    assert captured["highlight"] is False
-    assert "renderable" in captured
-
 
 @pytest.mark.parametrize(
     ("kwargs", "message"),
@@ -1030,6 +1016,7 @@ def test_renderer_print_final_status_uses_stdout_tty(
         ({"verbose": "yes"}, "verbose must be a boolean"),
         ({"panel_height": "10"}, "panel_height must be an integer"),
         ({"quiet": "yes"}, "quiet must be a boolean"),
+        ({"status_line": "status"}, "status_line must be callable"),
         ({"extra": True}, "Unexpected keyword argument"),
     ],
 )
@@ -1059,14 +1046,13 @@ class _RendererStub:
     verbose: bool
     render_interval: float
     quiet: bool
+    status_line: Callable[[], str | None] | None = None
     line_logs: list[tuple[str, str]] = field(default_factory=list)
     logs: list[tuple[str, str]] = field(default_factory=list)
     errors: list[tuple[str, str]] = field(default_factory=list)
-    request_calls: int = 0
-    render_due_calls: list[float] = field(default_factory=list)
+    completed: list[str] = field(default_factory=list)
     finalized: bool = False
-    last_render: float = 0.0
-    needs_render: bool = False
+    lock: threading.RLock = field(default_factory=threading.RLock)
 
     def log_line(self, source: str, message: str) -> None:
         """Run this test case."""
@@ -1080,22 +1066,28 @@ class _RendererStub:
         """Run this test case."""
         self.errors.append((source, message))
 
-    def request_render(self) -> None:
+    def item_completed(self, name: str) -> None:
         """Run this test case."""
-        self.request_calls += 1
-        if self.is_tty:
-            self.needs_render = True
-
-    def render_if_due(self, now: float) -> None:
-        """Run this test case."""
-        self.render_due_calls.append(now)
-        if self.is_tty and now - self.last_render >= self.render_interval:
-            self.last_render = now
-            self.needs_render = False
+        self.completed.append(name)
 
     def finalize(self) -> None:
         """Run this test case."""
         self.finalized = True
+
+
+class _MonitorStub:
+    """Record what the consumer forwards to the run monitor."""
+
+    def __init__(self) -> None:
+        self.events: list[UpdateEvent] = []
+
+    def record(self, event: UpdateEvent) -> None:
+        """Run this test case."""
+        self.events.append(event)
+
+    def status_line(self) -> str:
+        """Run this test case."""
+        return f"{len(self.events)} events"
 
 
 def _consumer(
@@ -1106,6 +1098,7 @@ def _consumer(
     op_order: tuple[OperationKind, ...] = DEFAULT_OP_ORDER,
     sources: SourcesFile | None = None,
     render_interval: float = 0.0,
+    monitor: _MonitorStub | None = None,
 ) -> tuple[EventConsumer, asyncio.Queue[UpdateEvent | None]]:
     monkeypatch.setattr(ui_consumer_module, "Renderer", _RendererStub)
     queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
@@ -1125,6 +1118,7 @@ def _consumer(
             render_interval=render_interval,
             build_failure_tail_lines=2,
             quiet=False,
+            monitor=cast("Any", monitor),
         ),
     )
     return consumer, queue
@@ -1686,20 +1680,31 @@ def test_event_consumer_dispatch_routes_and_skip(
 
 
 def test_event_consumer_run_non_tty(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run this test case."""
-    consumer, queue = _consumer(monkeypatch, is_tty=False)
+    """Every event reaches the monitor; terminal events retire their item."""
+    monitor = _MonitorStub()
+    consumer, queue = _consumer(monkeypatch, is_tty=False, monitor=monitor)
+    renderer = _renderer(consumer)
+    assert renderer.status_line is not None
+    assert renderer.status_line() == "0 events"
 
     async def _run() -> None:
         await queue.put(UpdateEvent.status("demo", "Checking demo (current: 1.0)"))
         await queue.put(UpdateEvent.status("missing", "ignored"))
         await queue.put(UpdateEvent.status("demo", "v"))
+        await queue.put(UpdateEvent.result("demo"))
+        await queue.put(UpdateEvent.error("demo", "late failure"))
         await queue.put(None)
         return await consumer.run()
 
     assert asyncio.run(_run()) is None
-    renderer = _renderer(consumer)
-    assert renderer.request_calls >= TWO
-    assert len(renderer.render_due_calls) >= TWO
+    assert [event.source for event in monitor.events] == [
+        "demo",
+        "missing",
+        "demo",
+        "demo",
+        "demo",
+    ]
+    assert renderer.completed == ["demo", "demo"]
     assert renderer.finalized
 
 
@@ -1718,8 +1723,8 @@ def test_event_consumer_run_tty_and_wrapper(
 
     assert asyncio.run(_run_consumer()) is None
     renderer = _renderer(consumer)
-    assert renderer.request_calls == 1
-    assert len(renderer.render_due_calls) == 1
+    assert renderer.status_line is None
+    assert renderer.completed == []
     assert renderer.finalized
 
     async def _run_wrapper() -> None:
@@ -1766,17 +1771,17 @@ def test_event_consumer_run_skip_render_and_result_map_guard(
     )
     assert check_op.status == "success"
 
-    # run loop skip-render path: _dispatch returns True, request_render not called.
+    # run loop skip path: a skipped RESULT must not retire the item.
     monkeypatch.setattr(consumer, "_dispatch", lambda _event, _item: True)
 
     async def _run() -> None:
-        await queue.put(UpdateEvent.status("demo", "ignored"))
+        await queue.put(UpdateEvent.result("demo", payload=bad_payload))
         await queue.put(None)
         _ = await consumer.run()
 
     asyncio.run(_run())
     renderer = _renderer(consumer)
-    assert renderer.request_calls == 0
+    assert renderer.completed == []
 
 
 def test_event_consumer_internal_branch_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1871,32 +1876,79 @@ def test_event_consumer_internal_branch_paths(monkeypatch: pytest.MonkeyPatch) -
     assert hash_op.status == "error"
 
 
-def test_event_consumer_schedules_one_delayed_render_for_pending_tty_refresh(
+def test_event_consumer_progress_line_outside_command_updates_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Avoid continuous idle redraws while still flushing pending state changes."""
-    consumer, queue = _consumer(monkeypatch, is_tty=True, render_interval=999.0)
-    renderer = _renderer(consumer)
-    renderer.last_render = time.monotonic()
+    """Heartbeat and lock-wait lines show on a running operation without a command."""
+    consumer, _queue = _consumer(monkeypatch, is_tty=True)
+    item = consumer.items["demo"]
+    operation = item.operations[OperationKind.COMPUTE_HASH]
+    item.last_operation = OperationKind.COMPUTE_HASH
+    handle_line = object.__getattribute__(consumer, "_handle_line")
 
-    original_sleep = asyncio.sleep
-    sleep_calls: list[float] = []
+    # Not running yet: the line is only logged, never shown as progress.
+    handle_line(
+        UpdateEvent(
+            source="demo",
+            kind=UpdateEventKind.LINE,
+            message="crate2nix command still running (30s elapsed)",
+            stream="crate2nix",
+        ),
+        item,
+    )
+    assert operation.message is None
 
-    async def _patched_sleep(_delay: float) -> None:
-        sleep_calls.append(_delay)
-        await original_sleep(0)
+    operation.status = "running"
+    handle_line(
+        UpdateEvent(
+            source="demo",
+            kind=UpdateEventKind.LINE,
+            message="Waiting for the shared crate2nix Cargo cache",
+            stream="crate2nix",
+        ),
+        item,
+    )
+    assert operation.message == "Waiting for the shared crate2nix Cargo cache"
+    assert not operation.tail
 
-    monkeypatch.setattr(ui_consumer_module.asyncio, "sleep", _patched_sleep)
+    handle_line(
+        UpdateEvent(source="demo", kind=UpdateEventKind.LINE, message=""),
+        item,
+    )
+    assert operation.message == "Waiting for the shared crate2nix Cargo cache"
 
-    async def _run() -> None:
-        task = asyncio.create_task(consumer.run())
-        await queue.put(UpdateEvent.status("demo", "Checking demo (current: 1.0)"))
-        await original_sleep(0)
-        await original_sleep(0)
-        await queue.put(None)
-        _ = await task
 
-    asyncio.run(_run())
-    assert renderer.request_calls == 1
-    assert len(sleep_calls) == 1
-    assert len(renderer.render_due_calls) == TWO
+def test_refresh_rate_translates_intervals() -> None:
+    """Rich wants refreshes per second, floored at once per second."""
+    assert _refresh_rate(0.1) == 10.0
+    assert _refresh_rate(5.0) == 1.0
+    assert _refresh_rate(0.0) == 4.0
+
+
+def test_validation_display_renders_status_and_tail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The validation block shows the status line and the latest output lines."""
+    monkeypatch.setattr(ui_render_module, "Live", _LiveStub)
+    _LiveStub.instances.clear()
+    status = ["Phase 3/4 derivation validation"]
+    tail = [("building foo", "copying bar")]
+
+    with ValidationDisplay(
+        status_line=lambda: status[0],
+        tail=lambda: tail[0],
+        render_interval=0.5,
+    ):
+        live = _LiveStub.instances[0]
+        assert live.started
+        assert live.transient
+        assert live.refresh_per_second == TWO
+        rendered = _render_text(live.get_renderable())
+        assert "Phase 3/4 derivation validation" in rendered
+        assert "> building foo" in rendered
+        assert "> copying bar" in rendered
+
+        status[0] = ""
+        tail[0] = ()
+        assert isinstance(live.get_renderable(), Text)
+    assert live.stopped

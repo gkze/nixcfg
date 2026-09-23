@@ -30,6 +30,8 @@ class _UpdateOptionsInitKwargs(TypedDict, total=False):
     no_sources: bool
     no_input: bool
     check: bool
+    strict: bool
+    status: bool
     validate: bool
     schema: bool
     sort_by: UpdateSortBy
@@ -69,6 +71,8 @@ class UpdateOptions:
     no_sources: bool = False
     no_input: bool = False
     check: bool = False
+    strict: bool = False
+    status: bool = False
     validate: bool = False
     schema: bool = False
     sort_by: UpdateSortBy = "name"

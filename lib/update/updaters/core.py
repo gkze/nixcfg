@@ -359,6 +359,8 @@ class Updater(ABC):
     name: str
     config: UpdateConfig
     required_tools: ClassVar[tuple[str, ...]] = ("nix",)
+    # A non-empty reason opts this source out of untargeted update runs.
+    bulk_update_hold: ClassVar[str | None] = None
     materialize_when_current: ClassVar[bool] = False
     shows_materialize_artifacts_phase: ClassVar[bool] = False
     generated_artifact_files: ClassVar[tuple[str, ...]] = ()

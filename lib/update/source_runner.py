@@ -1,8 +1,8 @@
 """Source and ref phase execution helpers for update runs."""
 
 import asyncio
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
 import aiohttp
 
@@ -28,7 +28,7 @@ from lib.update.updaters.flake_backed import FlakeInputHashUpdater
 _AIOHTTP_MAX_FIELD_SIZE = 64 * 1024
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable
+    from collections.abc import Mapping
     from pathlib import Path
 
     from lib.nix.models.sources import SourceEntry, SourcesFile
@@ -38,29 +38,25 @@ if TYPE_CHECKING:
     from lib.update.updaters import UpdaterClass
 
 
-class EventPut(Protocol):
-    def __call__(self, event: UpdateEvent | None, /) -> Awaitable[None]: ...
-
-
 def _get_updaters() -> dict[str, UpdaterClass]:
     return updater_module.resolve_registry_alias(UPDATERS, ensure_updaters_loaded)
 
 
 @dataclass(frozen=True)
 class SourceTaskContext:
-    """Context shared by one source update task."""
+    """Context shared by one source update task.
+
+    Input refreshes finish before any task starts (see
+    :func:`_refresh_source_inputs`), so tasks never refresh locks themselves.
+    """
 
     sources: SourcesFile
-    update_input: bool
     native_only: bool
     session: aiohttp.ClientSession
-    update_input_lock: asyncio.Lock
-    update_input_tasks: dict[str, asyncio.Task[None]]
     queue: asyncio.Queue[UpdateEvent | None]
     generated_artifacts: dict[Path, str]
     config: UpdateConfig
     effective_sources: dict[str, SourceEntry] = field(default_factory=dict)
-    input_refreshes: dict[str, FlakeInputState] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -150,71 +146,94 @@ def _summarize_source_results(
     )
 
 
-async def _refresh_input_task(
-    *,
-    input_name: str,
-    source: str,
-    put: EventPut,
-    config: UpdateConfig,
-) -> None:
-    await put(
-        UpdateEvent.status(
-            source,
-            f"Updating flake input '{input_name}'...",
+def _source_input_requests(
+    source_names: list[str],
+    source_entries: Mapping[str, SourceEntry],
+) -> tuple[dict[str, str], dict[str, tuple[str, ...]]]:
+    """Map each distinct backing input to its first requester.
+
+    Also return each source's own input closure for failure attribution.
+    """
+    updaters = _get_updaters()
+    requested: dict[str, str] = {}
+    closures: dict[str, tuple[str, ...]] = {}
+    for name in source_names:
+        updater = updaters[name]
+        backing = update_planner.source_backing_input_name(
+            name, updater, source_entries.get(name)
+        )
+        inputs = tuple(
+            dict.fromkeys((
+                *((backing,) if backing else ()),
+                *update_planner.source_additional_input_names(updater),
+            ))
+        )
+        for input_name in inputs:
+            requested.setdefault(input_name, name)
+        closures[name] = inputs
+    return requested, closures
+
+
+async def _refresh_source_inputs(context: SourcesPhaseContext) -> set[str]:
+    """Resolve every selected source's input closure before any task starts.
+
+    Inputs already covered by a matching receipt are skipped; the rest refresh
+    in one ``nix flake update`` so N lock evaluations become one. A failed
+    resolution fails every source whose closure includes a pending input;
+    independent sources continue.
+    """
+    put = context.queue.put
+    requested, closures = _source_input_requests(
+        context.source_names, context.sources.entries
+    )
+    covered = tuple(
+        input_name
+        for input_name in requested
+        if context.input_refreshes.get(input_name)
+        == update_flake.read_flake_input_state(input_name)
+    )
+    pending = tuple(name for name in requested if name not in covered)
+
+    def refresh_status(input_name: str, message: str) -> UpdateEvent:
+        return UpdateEvent.status(
+            requested[input_name],
+            message,
             operation="refresh_lock",
             status=StatusInfo(kind=StatusKind.REFRESH_LOCK, value=input_name),
         )
-    )
-    await update_flake.update_flake_input(
-        input_name, source=source, emit=put, config=config
-    )
 
-
-async def _ensure_input_refreshed(
-    name: str,
-    input_name: str,
-    *,
-    context: SourceTaskContext,
-) -> None:
-    put = context.queue.put
-    async with context.update_input_lock:
-        task = context.update_input_tasks.get(input_name)
-        receipt = context.input_refreshes.get(input_name)
-        reused_ref_phase = (
-            task is None
-            and receipt is not None
-            and receipt == update_flake.read_flake_input_state(input_name)
+    for input_name in covered:
+        await put(
+            refresh_status(input_name, f"Reusing flake input '{input_name}' refresh...")
         )
-        if task is None and not reused_ref_phase:
-            task = asyncio.create_task(
-                _refresh_input_task(
-                    input_name=input_name,
-                    source=name,
-                    put=put,
-                    config=context.config,
-                )
-            )
-            context.update_input_tasks[input_name] = task
-            reuse_existing = False
-        else:
-            reuse_existing = True
-        if reuse_existing:
-            await put(
-                UpdateEvent.status(
-                    name,
-                    f"Reusing flake input '{input_name}' refresh...",
-                    operation="refresh_lock",
-                    status=StatusInfo(
-                        kind=StatusKind.REFRESH_LOCK,
-                        value=input_name,
-                    ),
-                )
-            )
-        # Every refresh rewrites the shared flake.lock. Keep the lock held
-        # until the command finishes so different inputs cannot race and lose
-        # each other's updates.
-        if task is not None:
-            await task
+    for input_name in pending:
+        await put(refresh_status(input_name, f"Updating flake input '{input_name}'..."))
+    if not pending:
+        return set()
+
+    try:
+        await update_flake.update_flake_inputs(
+            pending,
+            source=requested[pending[0]],
+            emit=put,
+            config=context.config,
+        )
+    except Exception as exc:  # noqa: BLE001 -- a failed resolution fails every dependent source
+        message = f"{type(exc).__name__}: {exc}"
+        pending_set = set(pending)
+        failed = {
+            name
+            for name, inputs in closures.items()
+            if pending_set.intersection(inputs)
+        }
+        for name in sorted(failed):
+            await put(UpdateEvent.error(name, message))
+        return failed
+    for input_name in pending:
+        context.input_refreshes[input_name] = update_flake.read_flake_input_state(
+            input_name
+        )
+    return set()
 
 
 async def update_source_task(
@@ -233,11 +252,6 @@ async def update_source_task(
         updater = _get_updaters()[name](config=context.config)
         if isinstance(updater, FlakeInputHashUpdater):
             updater.native_only = context.native_only
-        input_name = getattr(updater, "input_name", None)
-        input_names = (
-            *((input_name,) if input_name else ()),
-            *update_planner.source_additional_input_names(type(updater)),
-        )
         put = context.queue.put
         update_context = UpdateContext(
             current=current,
@@ -252,13 +266,6 @@ async def update_source_task(
                 operation="check_version",
             )
         )
-        if context.update_input:
-            for refresh_input_name in dict.fromkeys(input_names):
-                await _ensure_input_refreshed(
-                    name,
-                    refresh_input_name,
-                    context=context,
-                )
 
         async def emit(event: UpdateEvent) -> None:
             if event.kind is UpdateEventKind.ARTIFACT and event.payload is not None:
@@ -314,34 +321,15 @@ async def run_ref_phase(
         details = {name: task.result() for name, task in tasks.items()}
         return UpdatePhaseResult(
             details=details,
+            # Receipts exist only for tasks that completed a verified refresh
+            # or remote check; failed tasks keep their receipts local so they
+            # can never seed a later source phase.
             input_refreshes={
                 name: state
                 for name, state in input_refreshes.items()
-                if details[name] == "updated"
+                if details.get(name) != "error"
             },
         )
-
-
-async def _refresh_source_inputs(name: str, context: SourceTaskContext) -> bool:
-    """Finish selected lock writes before any concurrent candidate evaluation."""
-    completed = False
-
-    async def refresh() -> None:
-        nonlocal completed
-        updater = _get_updaters()[name]
-        input_name = update_planner.source_backing_input_name(
-            name, updater, context.sources.entries.get(name)
-        )
-        inputs = (
-            *((input_name,) if input_name else ()),
-            *update_planner.source_additional_input_names(updater),
-        )
-        for input_name in dict.fromkeys(inputs):
-            await _ensure_input_refreshed(name, input_name, context=context)
-        completed = True
-
-    await update_process.run_queue_task(source=name, queue=context.queue, task=refresh)
-    return completed
 
 
 async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
@@ -359,22 +347,16 @@ async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
         source_order = update_planner.source_dependency_order(prerequisites)
         shared = SourceTaskContext(
             sources=context.sources,
-            update_input=False,
             native_only=context.native_only,
             session=session,
-            update_input_lock=asyncio.Lock(),
-            update_input_tasks={},
             queue=context.queue,
             generated_artifacts={},
             effective_sources=dict(context.sources.entries),
-            input_refreshes=context.input_refreshes,
             config=context.config,
         )
-        refresh_failures: set[str] = set()
-        if context.update_input:
-            for name in context.source_names:
-                if not await _refresh_source_inputs(name, shared):
-                    refresh_failures.add(name)
+        refresh_failures: set[str] = (
+            await _refresh_source_inputs(context) if context.update_input else set()
+        )
 
         tasks: dict[str, asyncio.Task[SourceTaskResult]] = {}
 
@@ -419,9 +401,10 @@ async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
             # them while the disposable workspace still exists, before CLI
             # teardown restores cwd/REPO_ROOT or removes temporary files.
             await join_shared_work()
-        return _summarize_source_results(
+        summary = _summarize_source_results(
             context.source_names, {name: task.result() for name, task in tasks.items()}
         )
+        return replace(summary, input_refreshes=dict(context.input_refreshes))
 
 
 __all__ = [

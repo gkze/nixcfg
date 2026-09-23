@@ -150,10 +150,15 @@ def test_retry_builds_the_same_prepared_derivation(
     assert calls == [("", _DRV), ("", _DRV)]
 
 
-def test_prepared_probe_rejects_a_dependency_hash_mismatch(
+def test_prepared_probe_accepts_a_dependency_hash_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A nested dependency failure cannot certify the selected fixed-output target."""
+    """A nested FOD mismatch supplies the probe hash.
+
+    Nix builds the probe by building its nested fake-hash derivation first,
+    and the mismatch output names the nested drv. The got-hash is the probe
+    expression's real content hash.
+    """
 
     async def build(_source, _expr, **_kwargs):
         return CommandResult(
@@ -167,8 +172,10 @@ def test_prepared_probe_rejects_a_dependency_hash_mismatch(
         )
 
     monkeypatch.setattr("lib.update.nix._run_fixed_output_build", build)
-    with pytest.raises(RuntimeError, match="not the prepared probe"):
-        asyncio.run(compute_fixed_output_hash("probe", PreparedProbe(_DRV, "cert")))
+    result = asyncio.run(
+        compute_fixed_output_hash("probe", PreparedProbe(_DRV, "cert"))
+    )
+    assert result == _NEW_HASH
 
 
 class _Updater(FlakeInputHashUpdater):

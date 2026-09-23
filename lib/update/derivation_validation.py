@@ -69,8 +69,36 @@ class DerivationValidationFailure:
 type _RunResult = subprocess.CompletedProcess[str]
 type _Runner = Callable[..., _RunResult]
 type _Sleeper = Callable[[float], None]
-type ValidationProgress = Callable[[str], None]
 type ValidationCancellationCheck = Callable[[], None]
+
+
+@dataclass(frozen=True)
+class ValidationCommandStarted:
+    """One validation command attempt began."""
+
+    command: str
+
+
+@dataclass(frozen=True)
+class ValidationCommandOutput:
+    """One raw output line from a specific validation command."""
+
+    command: str
+    line: str
+
+
+@dataclass(frozen=True)
+class ValidationCommandFinished:
+    """One validation command attempt completed."""
+
+    command: str
+    succeeded: bool
+
+
+type ValidationProgressEvent = (
+    str | ValidationCommandStarted | ValidationCommandOutput | ValidationCommandFinished
+)
+type ValidationProgress = Callable[[ValidationProgressEvent], None]
 
 _ROOT_CLOSURE_VALIDATION_SOURCE = "root-closures"
 _ROOT_CLOSURE_MANIFEST_INSTALLABLE = "path:.#lib.rootClosureManifest"
@@ -208,7 +236,7 @@ def _ignore_validation_cancellation() -> None:
 def _stream_validation_output(
     streams: tuple[BufferedRandom, BufferedRandom],
     stopped: threading.Event,
-    progress: ValidationProgress,
+    progress: Callable[[str], None],
 ) -> None:
     """Read independent file offsets without moving the child writer's position."""
     offsets = [0, 0]
@@ -241,19 +269,31 @@ def _run_with_validation_progress(
     check_cancelled: ValidationCancellationCheck = _ignore_validation_cancellation,
 ) -> _RunResult:
     """Tee captured output while retaining synchronous ownership of the child."""
+    command = shlex.join(args)
+    attributed_progress: Callable[[str], None] | None
+    if progress is None:
+        attributed_progress = None
+    else:
+
+        def attributed_progress(line: str) -> None:
+            progress(ValidationCommandOutput(command, line))
+
     with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
         stopped = threading.Event()
         reader_context = (
             ThreadPoolExecutor(max_workers=1, thread_name_prefix="validation-output")
-            if progress is not None
+            if attributed_progress is not None
             else nullcontext()
         )
         with reader_context as executor:
             reader = (
                 executor.submit(
-                    _stream_validation_output, (stdout, stderr), stopped, progress
+                    _stream_validation_output,
+                    (stdout, stderr),
+                    stopped,
+                    attributed_progress,
                 )
-                if executor is not None and progress is not None
+                if executor is not None and attributed_progress is not None
                 else None
             )
             try:
@@ -277,6 +317,15 @@ def _run_with_validation_progress(
                         check=False,
                         timeout=timeout,
                     )
+                    # A runner that returns captured text instead of writing
+                    # to the provided streams is still observed and retained.
+                    for stream, text in (
+                        (stdout, result.stdout),
+                        (stderr, result.stderr),
+                    ):
+                        if isinstance(text, str) and text:
+                            stream.write(text.encode())
+                            stream.flush()
             finally:
                 # The child has completed or been reaped after an error. Join
                 # before the snapshot/files can be removed.
@@ -343,10 +392,11 @@ def _run_validation_command_impl(
     check_cancelled: ValidationCancellationCheck = _ignore_validation_cancellation,
 ) -> _RunResult:
     """Run once for deterministic failures and retry transient Nix I/O failures."""
+    command = shlex.join(args)
     for attempt in range(max_attempts):
         check_cancelled()
         if progress is not None:
-            progress(f"$ {shlex.join(args)}")
+            progress(ValidationCommandStarted(command))
         if run is not None and progress is None:
             result = run(
                 args,
@@ -374,6 +424,8 @@ def _run_validation_command_impl(
                 stderr=result.stderr,
             )
         ):
+            if progress is not None:
+                progress(ValidationCommandFinished(command, result.returncode == 0))
             return result
         if progress is not None:
             progress(
@@ -482,7 +534,9 @@ def _validation_args(
             else []
         ),
         *(
-            ["--no-link", *(["-L"] if print_build_logs else [])]
+            # keep-going lets one batch report every failing derivation instead
+            # of stopping at the first, so later isolation rounds are cheap.
+            ["--no-link", "--keep-going", *(["-L"] if print_build_logs else [])]
             if request.mode == "build"
             else ["--option", "allow-import-from-derivation", "false", "--raw"]
         ),
@@ -560,12 +614,19 @@ def validate_derivation_requests(
     sleep: _Sleeper | None = None,
     progress: ValidationProgress | None = None,
     check_cancelled: ValidationCancellationCheck = _ignore_validation_cancellation,
+    print_build_logs: bool = False,
+    max_eval_workers: int = 1,
+    max_build_workers: int = 1,
 ) -> tuple[DerivationValidationFailure, ...]:
     """Batch snapshot validations, retaining individual failure diagnostics.
 
     Failed batches isolate sparse failures by subdivision. If both halves
     fail, fall back to individual diagnostics and the original retry policy.
-    Every requested target remains required.
+    Every requested target remains required. *progress* observes output as it
+    streams; *print_build_logs* additionally asks Nix for per-derivation logs.
+    Groups are independent read-only commands over one immutable snapshot, so
+    eval groups run up to *max_eval_workers* at a time and build groups up to
+    *max_build_workers*; one worker keeps the historical sequential behavior.
     """
     runner = run
     sleeper = time.sleep if sleep is None else sleep
@@ -579,6 +640,16 @@ def validate_derivation_requests(
         groups.setdefault(index if key is None else key, []).append((index, request))
 
     failures: dict[int, DerivationValidationFailure] = {}
+    progress_lock = threading.Lock()
+
+    guarded_progress: ValidationProgress | None
+    if progress is None:
+        guarded_progress = None
+    else:
+
+        def guarded_progress(event: ValidationProgressEvent) -> None:
+            with progress_lock:
+                progress(event)
 
     def batch(group: list[tuple[int, DerivationValidationRequest]]) -> bool:
         try:
@@ -586,14 +657,14 @@ def validate_derivation_requests(
                 _batch_validation_args(
                     [request for _, request in group],
                     flake_root=flake_root,
-                    print_build_logs=progress is not None,
+                    print_build_logs=print_build_logs,
                 ),
                 cwd=command_root,
                 timeout=timeout,
                 run=runner,
                 sleep=sleeper,
                 max_attempts=1,
-                progress=progress,
+                progress=guarded_progress,
                 check_cancelled=check_cancelled,
             )
         except OSError, subprocess.TimeoutExpired:
@@ -602,39 +673,28 @@ def validate_derivation_requests(
 
     def individually(group: list[tuple[int, DerivationValidationRequest]]) -> None:
         for index, request in group:
-            try:
-                result = _run_validation_command(
-                    _validation_args(
-                        request,
-                        flake_root=flake_root,
-                        print_build_logs=progress is not None,
-                    ),
-                    cwd=command_root,
-                    timeout=timeout,
-                    run=runner,
-                    sleep=sleeper,
-                    progress=progress,
-                    check_cancelled=check_cancelled,
-                )
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                message = str(exc)
-            else:
-                if result.returncode == 0:
-                    continue
-                message = (
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or f"nix {request.mode} failed"
-                )
-            failures[index] = DerivationValidationFailure(
-                source=request.source,
-                installable=request.installable,
-                message=message,
+            failure = _run_single_validation(
+                request,
+                command_root=command_root,
+                flake_root=flake_root,
+                timeout=timeout,
+                run=runner,
+                sleep=sleeper,
+                progress=guarded_progress,
+                check_cancelled=check_cancelled,
+                print_build_logs=print_build_logs,
             )
+            if failure is not None:
+                failures[index] = failure
 
     def isolate(group: list[tuple[int, DerivationValidationRequest]]) -> None:
         # Probe both halves once. If neither succeeds, stop subdividing so a
         # systemic failure adds at most two attempts at this boundary.
+        # Bisection compensates for Nix's evaluator: per-request failures are
+        # not attributable inside one batched eval (missing-attribute errors
+        # escape builtins.tryEval on supported Nix), and a single command
+        # cannot report which requests failed. lib/tests/
+        # test_update_tryeval_contract.py pins that property.
         if len(group) <= _VALIDATION_INDIVIDUAL_THRESHOLD:
             individually(group)
             return
@@ -648,15 +708,98 @@ def validate_derivation_requests(
         elif not right_ok:
             isolate(right)
 
-    for group in groups.values():
+    def run_group(group: list[tuple[int, DerivationValidationRequest]]) -> None:
         if len(group) == 1:
             individually(group)
         elif not batch(group):
-            if progress is not None:
-                progress("Batch validation did not succeed; isolating failing targets")
+            if guarded_progress is not None:
+                guarded_progress(
+                    "Batch validation did not succeed; isolating failing targets"
+                )
             isolate(group)
 
+    eval_groups, build_groups = _split_groups_by_mode(groups)
+    _execute_groups(eval_groups, run_group=run_group, max_workers=max_eval_workers)
+    _execute_groups(build_groups, run_group=run_group, max_workers=max_build_workers)
+
     return tuple(failures[index] for index in sorted(failures))
+
+
+def _run_single_validation(
+    request: DerivationValidationRequest,
+    *,
+    command_root: Path,
+    flake_root: Path | None,
+    timeout: float | None,
+    run: _Runner | None,
+    sleep: _Sleeper,
+    progress: ValidationProgress | None,
+    check_cancelled: ValidationCancellationCheck,
+    print_build_logs: bool,
+) -> DerivationValidationFailure | None:
+    """Validate one request individually and return its failure, if any."""
+    try:
+        result = _run_validation_command(
+            _validation_args(
+                request,
+                flake_root=flake_root,
+                print_build_logs=print_build_logs,
+            ),
+            cwd=command_root,
+            timeout=timeout,
+            run=run,
+            sleep=sleep,
+            progress=progress,
+            check_cancelled=check_cancelled,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        message = str(exc)
+    else:
+        if result.returncode == 0:
+            return None
+        message = (
+            result.stderr.strip()
+            or result.stdout.strip()
+            or f"nix {request.mode} failed"
+        )
+    return DerivationValidationFailure(
+        source=request.source,
+        installable=request.installable,
+        message=message,
+    )
+
+
+def _split_groups_by_mode(
+    groups: Mapping[
+        tuple[DerivationValidationMode, str] | int,
+        list[tuple[int, DerivationValidationRequest]],
+    ],
+) -> tuple[
+    list[list[tuple[int, DerivationValidationRequest]]],
+    list[list[tuple[int, DerivationValidationRequest]]],
+]:
+    """Partition validation groups into eval-mode and build-mode work."""
+    eval_groups: list[list[tuple[int, DerivationValidationRequest]]] = []
+    build_groups: list[list[tuple[int, DerivationValidationRequest]]] = []
+    for key, group in groups.items():
+        mode = key[0] if isinstance(key, tuple) else group[0][1].mode
+        (eval_groups if mode == "eval" else build_groups).append(group)
+    return eval_groups, build_groups
+
+
+def _execute_groups(
+    groups: Sequence[list[tuple[int, DerivationValidationRequest]]],
+    *,
+    run_group: Callable[[list[tuple[int, DerivationValidationRequest]]], None],
+    max_workers: int,
+) -> None:
+    """Run independent groups concurrently up to the caller's budget."""
+    if max_workers <= 1 or len(groups) <= 1:
+        for group in groups:
+            run_group(group)
+        return
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(groups))) as pool:
+        list(pool.map(run_group, groups))
 
 
 def validate_derivations(
@@ -670,6 +813,9 @@ def validate_derivations(
     sleep: _Sleeper | None = None,
     progress: ValidationProgress | None = None,
     check_cancelled: ValidationCancellationCheck = _ignore_validation_cancellation,
+    print_build_logs: bool = False,
+    max_eval_workers: int = 1,
+    max_build_workers: int = 1,
 ) -> tuple[DerivationValidationFailure, ...]:
     """Validate updater-declared derivations."""
     requests = resolve_derivation_validations(
@@ -685,6 +831,9 @@ def validate_derivations(
         sleep=sleep,
         progress=progress,
         check_cancelled=check_cancelled,
+        print_build_logs=print_build_logs,
+        max_eval_workers=max_eval_workers,
+        max_build_workers=max_build_workers,
     )
 
 
@@ -741,6 +890,7 @@ def validate_root_closures(
     sleep: _Sleeper | None = None,
     progress: ValidationProgress | None = None,
     check_cancelled: ValidationCancellationCheck = _ignore_validation_cancellation,
+    print_build_logs: bool = False,
 ) -> tuple[DerivationValidationFailure, ...]:
     """Build roots with a six-hour default or the caller's per-process bound."""
     runner = run
@@ -789,6 +939,7 @@ def validate_root_closures(
             sleep=sleeper,
             progress=progress,
             check_cancelled=check_cancelled,
+            print_build_logs=print_build_logs,
         )
 
 

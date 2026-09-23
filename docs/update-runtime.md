@@ -1,10 +1,23 @@
 # Update runtime efficiency
 
 Updates prepare and validate one disposable candidate before atomic promotion.
-Runtime optimizations preserve that boundary, platform requirements, cancellation
-cleanup, and per-target failure ownership. They do not activate configurations.
+The safety invariants this preserves are enumerated in
+[update-safety.md](update-safety.md). Runtime optimizations preserve that
+boundary, platform requirements, cancellation cleanup, and per-target failure
+ownership. They do not activate configurations.
 
 ## Admission and scheduling
+
+An updater can declare `bulk_update_hold` with a reason to keep its source and
+generated artifacts out of untargeted `nixcfg update` runs (including `--check`).
+Coupled companion and aggregate sources are held together. Explicit target
+selection still allows updates. This does not freeze shared flake dependencies.
+
+Unsloth is temporarily held at the existing source pin because desktop
+`v0.1.811-beta` requests backend `2026.9.7`, its GitHub source declares
+`2026.9.6`, and PyPI publishes no source archive. Use `nixcfg update unsloth`
+to retry explicitly; remove `UnslothUpdater.bulk_update_hold` once matching
+source is published and the candidate passes validation.
 
 Each update invocation owns its concurrency limits, shared work, and timings.
 There are no process-global build semaphores tied to a previous event loop.
@@ -12,7 +25,7 @@ There are no process-global build semaphores tied to a previous event loop.
 | Environment variable          | Default | Controls                                 |
 | ----------------------------- | ------: | ---------------------------------------- |
 | `UPDATE_MAX_SOURCE_TASKS`     |       8 | Active source updater tasks              |
-| `UPDATE_MAX_NIX_EVALUATIONS`  |       1 | Concurrent Nix evaluation processes      |
+| `UPDATE_MAX_NIX_EVALUATIONS`  |       4 | Concurrent Nix evaluation processes      |
 | `UPDATE_MAX_NIX_BUILDS`       |       1 | Concurrent Nix build/run/shell processes |
 | `UPDATE_MAX_DOWNLOADS`        |       8 | HTTP requests and URL prefetch processes |
 | `UPDATE_MAX_MATERIALIZATIONS` |       1 | Active crate2nix materialization workers |
@@ -23,7 +36,9 @@ These limits control updater processes; Nix daemon job/core settings and remote
 builder capacity still control work inside each process.
 
 All selected flake input refreshes finish before concurrent source evaluation
-starts. A source waits only for its declared prerequisites. Its completed source
+starts: every selected input resolves in one `nix flake update` batch, so N
+lock evaluations become one. A source waits only for its declared
+prerequisites. Its completed source
 and artifact results become visible before dependent tasks start. A failed
 prerequisite prevents dependent work, while independent sources continue.
 Waiting for a prerequisite does not consume a source-task slot.
@@ -126,11 +141,33 @@ immutable content identity.
 
 ## Validation and observability
 
-Successful validation retains existing grouping. Failed groups are split in
-half to isolate sparse failures; small groups use individual checks with the
-original retry policy. When both halves fail, subdivision stops and individual
-diagnostics cover the whole group. This bounds extra work for systemic failures
-while preserving every required target and the root-closure build gate.
+Successful validation retains existing grouping. Batched builds pass
+`--keep-going`, so one Nix invocation builds everything that can build and
+reports every failing derivation, and later isolation rounds mostly hit the
+store. Failed groups are split in half to isolate sparse failures; small groups
+use individual checks with the original retry policy. When both halves fail,
+subdivision stops and individual diagnostics cover the whole group. This bounds
+extra work for systemic failures while preserving every required target and
+the root-closure build gate.
+
+Validation failures do not discard the run. Each failing target is withheld
+with its coupled targets (see the README), the smaller candidate is validated
+again, and root closures build once on the candidate that will be promoted.
+The rounds are bounded at three; a candidate still failing after that is
+discarded as a whole. A failed target's own declared paths and every written
+path not owned by a target still being promoted return to the captured
+baseline before the next round.
+
+Progress state is owned by one run monitor shared by the asynchronous phases
+and the synchronous validation phases. Producers record events from any
+thread; the live panel, the plain-output heartbeat, and `--status` all read
+snapshots of it. The run directory holds `events.jsonl` (structured events,
+no subprocess lines), `output.log` (every subprocess line, line-buffered so it
+can be tailed), `run.json` (plan and final summary), and `state.json` (the
+latest snapshot, rewritten on every heartbeat). Both log files pass the same
+URL redaction as terminal output. A failure inside an updater task, of any
+exception class, is confined to that target; its traceback lands in
+`events.jsonl` as the error event's `detail`.
 
 Use `--timings` for per-source operation counts, active time, admission wait,
 cache hits, failures/cancellations, and captured byte counts. Combine it with
@@ -149,7 +186,8 @@ at 512 items. Consumer failure wakes blocked producers and joins both sides.
 Diagnostic-only generators retain bounded output tails; JSON and hash parsers
 retain complete output. Plain log lines bypass ANSI parsing. Input declaration
 and lock-graph caches are bounded and keyed by exact input bytes. Snapshot
-instrumentation records bytes/time while retaining both reads and race checks.
+instrumentation records bytes/time: one content read plus a stat-fingerprint
+race check instead of a second content read.
 
 ## Validation evidence and remaining costs
 

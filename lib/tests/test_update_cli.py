@@ -7,7 +7,7 @@ from contextlib import nullcontext
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Protocol
+from typing import Protocol, cast
 
 import pytest
 
@@ -64,6 +64,15 @@ class _PassthroughUpdateWorkspace:
 
     def promote(self, _allowed: object) -> tuple[Path, ...]:
         return ()
+
+    def validate_changes(self, _allowed: object) -> tuple[Path, ...]:
+        return ()
+
+    def baseline_content(self, _path: object) -> bytes | None:
+        return None
+
+    def restore_baseline(self, paths: object) -> tuple[Path, ...]:
+        return tuple(Path(str(path)) for path in cast("list[object]", list(paths)))
 
 
 def _use_passthrough_workspace(monkeypatch: _MonkeyPatchLike) -> None:
@@ -348,7 +357,11 @@ def test_run_updates_persists_before_derivation_validation_failure(
     monkeypatch: _MonkeyPatchLike,
     capsys: _CaptureLike,
 ) -> None:
-    """Report a same-source candidate as discarded after broken evaluation."""
+    """Report a same-source candidate as discarded after broken evaluation.
+
+    The failing target is withheld and validation runs once more on the empty
+    remainder, which evaluates nothing, so nothing is promoted.
+    """
     _use_passthrough_workspace(monkeypatch)
 
     class _ValidatingUpdater(Updater):
@@ -414,7 +427,7 @@ def test_run_updates_persists_before_derivation_validation_failure(
 def test_run_updates_skips_derivation_validation_after_phase_errors(
     monkeypatch: _MonkeyPatchLike,
 ) -> None:
-    """Do not evaluate a candidate tree left incomplete by update errors."""
+    """A failed target is withheld from validation instead of blocking the run."""
     _use_passthrough_workspace(monkeypatch)
 
     class _ValidatingUpdater(Updater):
@@ -422,8 +435,13 @@ def test_run_updates_skips_derivation_validation_after_phase_errors(
             DerivationValidation(installable=".#packages.demo.drvPath"),
         )
 
-    def _unexpected_eval(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("incomplete update must not evaluate derivations")
+    validated: list[list[str]] = []
+
+    def _unexpected_eval(
+        source_names: list[str], *_args: object, **_kwargs: object
+    ) -> tuple[object, ...]:
+        validated.append(list(source_names))
+        return ()
 
     plan = make_run_plan(source_names=("demo",))
     monkeypatch.setattr("lib.update.cli._build_run_plan", lambda _opts: plan)
@@ -451,13 +469,18 @@ def test_run_updates_skips_derivation_validation_after_phase_errors(
     )
 
     assert asyncio.run(run_updates(UpdateOptions(targets=("demo",)))) == 1
+    assert validated == [[]]
+
+    validated.clear()
+    assert asyncio.run(run_updates(UpdateOptions(targets=("demo",), strict=True))) == 1
+    assert validated == []
 
 
 def test_run_updates_preserves_phase_error_priority_and_skips_validation(
     monkeypatch: _MonkeyPatchLike,
     tmp_path: Path,
 ) -> None:
-    """A later source success cannot hide a ref error or trigger validation."""
+    """A later source success cannot hide a ref error; strict mode skips validation."""
     _use_passthrough_workspace(monkeypatch)
     flake_nix = tmp_path / "flake.nix"
     flake_lock = tmp_path / "flake.lock"
@@ -513,7 +536,10 @@ def test_run_updates_preserves_phase_error_priority_and_skips_validation(
         _unexpected_validation,
     )
 
-    assert asyncio.run(run_updates(UpdateOptions(targets=("demo", "good")))) == 1
+    assert (
+        asyncio.run(run_updates(UpdateOptions(targets=("demo", "good"), strict=True)))
+        == 1
+    )
 
 
 def test_run_updates_closes_consumer_when_phase_raises(
@@ -621,9 +647,11 @@ def test_run_updates_json_validation_failure_is_machine_readable(
     assert exit_code == 1
     assert json.loads(captured.out) == {
         "updated": [],
+        "dropped": [],
         "errors": ["demo"],
         "noChange": [],
         "success": False,
+        "withheld": {},
         "candidateUpdatesDiscarded": ["demo"],
     }
     assert captured.err == ""
@@ -644,9 +672,11 @@ def test_emit_summary_json_outputs_payload(capsys: _CaptureLike) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload == {
         "updated": ["demo"],
+        "dropped": [],
         "errors": [],
         "noChange": ["stable"],
         "success": True,
+        "withheld": {},
     }
 
 

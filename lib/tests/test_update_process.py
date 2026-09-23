@@ -90,14 +90,20 @@ def test_run_queue_task_reports_cancelled_as_error_event() -> None:
     assert event.message == "Operation cancelled"
 
 
-def test_run_queue_task_re_raises_unknown_exceptions() -> None:
-    """Propagate unexpected exceptions so bug-level failures stay visible."""
+def test_run_queue_task_confines_unknown_exceptions_to_their_target() -> None:
+    """Bug-level failures name their class and keep the traceback for the log."""
 
     async def _task() -> None:
         await _raise_unexpected()
 
     queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
-    with pytest.raises(_CustomProcessError):
-        asyncio.run(run_queue_task(source="demo", queue=queue, task=_task))
+    asyncio.run(run_queue_task(source="demo", queue=queue, task=_task))
 
+    event = queue.get_nowait()
+    assert isinstance(event, UpdateEvent)
+    assert event.kind == UpdateEventKind.ERROR
+    assert event.message == "_CustomProcessError: unexpected"
+    assert event.detail is not None
+    assert "Traceback" in event.detail
+    assert "_CustomProcessError" in event.detail
     assert queue.empty()

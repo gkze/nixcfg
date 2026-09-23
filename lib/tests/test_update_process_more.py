@@ -376,3 +376,24 @@ def test_run_command_closes_process_before_sink_failure_returns(
 
     monkeypatch.setattr("lib.update.process.stream_process", _process)
     asyncio.run(_run())
+
+
+def test_prefetch_retry_never_repeats_the_runner_timeout() -> None:
+    """A command timeout is bounded work, not a transient transfer failure."""
+    from lib.nix.commands.base import CommandResult as ProcessResult
+    from lib.nix.commands.base import NixCommandError
+    from lib.update.process import _is_retryable_prefetch_error
+
+    args = ["nix", "store", "prefetch-file", "https://example.test/a.tgz"]
+    timed_out = NixCommandError(
+        ProcessResult(args=args, returncode=-1, stdout="", stderr=""),
+        message="command timed out after 2400.0s",
+    )
+    assert not _is_retryable_prefetch_error(timed_out)
+
+    slow_peer = NixCommandError(
+        ProcessResult(
+            args=args, returncode=1, stdout="", stderr="curl: Operation timed out"
+        )
+    )
+    assert _is_retryable_prefetch_error(slow_peer)

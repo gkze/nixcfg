@@ -1,6 +1,7 @@
 """Flake input ref discovery and version-tag update helpers."""
 
 import re
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -11,7 +12,7 @@ from lib.update.events import EventSink, ignore_event
 
 if TYPE_CHECKING:
     import asyncio
-    from collections.abc import Iterable, Mapping
+    from collections.abc import AsyncIterator, Iterable, Mapping
 
     import aiohttp
 
@@ -606,6 +607,20 @@ async def update_refs_task(
         source = input_ref.name
         put = queue.put
 
+        @asynccontextmanager
+        async def edit_lock() -> AsyncIterator[None]:
+            """Serialize flake edits and receipt capture across ref tasks."""
+            if task_options.flake_edit_lock is None:
+                yield
+            else:
+                async with task_options.flake_edit_lock:
+                    yield
+
+        def record_refresh_receipt() -> None:
+            """Bind the run-local receipt to verified declarations and lock."""
+            if task_options.input_refreshes is not None:
+                task_options.input_refreshes[source] = read_flake_input_state(source)
+
         await put(
             UpdateEvent.status(
                 source,
@@ -641,6 +656,10 @@ async def update_refs_task(
                 ),
             )
             await put(UpdateEvent.result(source))
+            async with edit_lock():
+                # The remote check just verified the ref is current, so a
+                # receipt lets source tasks skip an equivalent lock refresh.
+                record_refresh_receipt()
             detail = "no_change"
             return
 
@@ -653,7 +672,7 @@ async def update_refs_task(
             "latest": latest_ref,
         }
 
-        async def do_update() -> None:
+        async with edit_lock():
             await update_flake_ref(
                 input_ref,
                 latest_ref,
@@ -661,16 +680,9 @@ async def update_refs_task(
                 emit=put,
                 config=resolved_config,
             )
-            if task_options.input_refreshes is not None:
-                # Record the successful refresh before another ref task can
-                # acquire the lock and change declarations or graph topology.
-                task_options.input_refreshes[source] = read_flake_input_state(source)
-
-        if task_options.flake_edit_lock:
-            async with task_options.flake_edit_lock:
-                await do_update()
-        else:
-            await do_update()
+            # Record the successful refresh before another ref task can
+            # acquire the lock and change declarations or graph topology.
+            record_refresh_receipt()
 
         await put(UpdateEvent.result(source, update_payload))
         detail = "updated"

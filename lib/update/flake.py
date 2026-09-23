@@ -27,6 +27,8 @@ from lib.update.paths import get_repo_root
 from lib.update.process import RunCommandOptions, run_command
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from nix_manipulator.expressions.expression import NixExpression
     from nix_manipulator.expressions.inherit import Inherit
 
@@ -219,6 +221,30 @@ def nixpkgs_expression() -> NixExpression:
     )
 
 
+async def update_flake_inputs(
+    input_names: Sequence[str],
+    *,
+    source: str,
+    emit: EventSink = ignore_event,
+    config: UpdateConfig | None = None,
+) -> None:
+    """Refresh one or more lock inputs in a single lock resolution.
+
+    Nix resolves every requested input against the same starting lock, so a
+    batch is the graph-native operation: one lock evaluation instead of one
+    per input, with the same resulting lock state for independent inputs.
+    """
+    if not input_names:
+        return
+    result = await run_command(
+        ["nix", "flake", "update", *input_names],
+        options=RunCommandOptions(source=source, config=config),
+        emit=emit,
+    )
+    raise_failed_command("nix flake update", result)
+    invalidate_flake_lock()
+
+
 async def update_flake_input(
     input_name: str,
     *,
@@ -226,11 +252,5 @@ async def update_flake_input(
     emit: EventSink = ignore_event,
     config: UpdateConfig | None = None,
 ) -> None:
-    """Refresh a lock input with streamed diagnostics and the update run's timeout."""
-    result = await run_command(
-        ["nix", "flake", "lock", "--update-input", input_name],
-        options=RunCommandOptions(source=source, config=config),
-        emit=emit,
-    )
-    raise_failed_command("nix flake lock", result)
-    invalidate_flake_lock()
+    """Refresh a single lock input."""
+    await update_flake_inputs([input_name], source=source, emit=emit, config=config)

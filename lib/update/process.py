@@ -47,6 +47,9 @@ from lib.update.runtime import (
     workspace_access,
 )
 
+# Failure classes an updater is expected to raise for its own target. Anything
+# else is still confined to that target, but is reported with its class name
+# and logged with a traceback because it usually indicates an updater bug.
 _TASK_ERROR_TYPES: tuple[type[Exception], ...] = (
     RuntimeError,
     ValueError,
@@ -55,6 +58,7 @@ _TASK_ERROR_TYPES: tuple[type[Exception], ...] = (
     KeyError,
     NixCommandError,
 )
+_TIMEOUT_MESSAGE_PREFIX = "command timed out after"
 _LOG = logging.getLogger(__name__)
 _NIX_STORE_NAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9+._?=-]+")
 _NIX_PREFETCH_TRANSIENT_MARKERS = (
@@ -108,26 +112,26 @@ async def run_queue_task(
     queue: asyncio.Queue[UpdateEvent | None],
     task: Callable[[], Awaitable[None]],
 ) -> None:
-    """Run ``task`` and translate failures into queued error events."""
+    """Run ``task`` and confine every failure to its own target as an error event.
+
+    A failure never cancels sibling targets: the run reports it by name, keeps
+    the traceback in the run log through the event's ``detail``, and continues.
+    Cancellation is the only exception that propagates.
+    """
     try:
         await task()
     except asyncio.CancelledError:
         await queue.put(UpdateEvent.error(source, "Operation cancelled"))
         raise
-    except Exception as exc:
-        if not isinstance(exc, _TASK_ERROR_TYPES):
-            _LOG.error(
-                "Unexpected task failure for %s:\n%s",
-                source,
-                format_exception(exc, include_traceback=True),
-            )
-            raise
-        _LOG.debug(
-            "Handled task failure for %s:\n%s",
-            source,
-            format_exception(exc, include_traceback=True),
-        )
-        await queue.put(UpdateEvent.error(source, format_exception(exc)))
+    except Exception as exc:  # noqa: BLE001 -- confine any updater failure to its target
+        detail = format_exception(exc, include_traceback=True)
+        if isinstance(exc, _TASK_ERROR_TYPES):
+            _LOG.debug("Handled task failure for %s:\n%s", source, detail)
+            message = format_exception(exc)
+        else:
+            _LOG.debug("Unexpected task failure for %s:\n%s", source, detail)
+            message = f"{type(exc).__name__}: {format_exception(exc)}"
+        await queue.put(UpdateEvent.error(source, message, detail=detail))
 
 
 def _sanitize_log_line(line: str) -> str:
@@ -364,6 +368,13 @@ def _nix_prefetch_name(url: str) -> str | None:
 
 
 def _is_retryable_prefetch_error(exc: NixCommandError) -> bool:
+    """Retry transient transfer failures, never the runner's own timeout.
+
+    The command timeout already bounds one attempt at the configured budget;
+    repeating it would multiply that budget without any new signal.
+    """
+    if exc.message.startswith(_TIMEOUT_MESSAGE_PREFIX):
+        return False
     output = str(exc).casefold()
     return any(
         marker.casefold() in output for marker in _NIX_PREFETCH_TRANSIENT_MARKERS

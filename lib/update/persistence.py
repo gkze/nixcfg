@@ -13,7 +13,7 @@ import subprocess
 import sys
 import tempfile
 from contextlib import ExitStack, contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from threading import Lock
@@ -41,6 +41,12 @@ class _WorkspaceFileState:
     content: bytes
     mode: int
     symlink: bool = False
+    # Stat identity captured with the content read, excluded from equality:
+    # cross-snapshot change detection compares contents, while the stability
+    # recheck compares fingerprints (st_ctime_ns changes on any write or
+    # metadata change and st_ino changes on replacement, so equal fingerprints
+    # imply equal contents without rereading bytes).
+    fingerprint: tuple[int, ...] = field(default=(), compare=False)
 
 
 type _WorkspacePathState = _WorkspaceFileState | None
@@ -262,7 +268,9 @@ def _snapshot_leaf(
                 raise _WorkspaceSnapshotError(display_path)
         finally:
             os.close(descriptor)
-        return _WorkspaceFileState(content, mode)
+        return _WorkspaceFileState(
+            content, mode, fingerprint=_stat_fingerprint(opened)
+        )
     if stat.S_ISLNK(before.st_mode):
         try:
             target = os.readlink(name, dir_fd=parent_descriptor)
@@ -271,7 +279,9 @@ def _snapshot_leaf(
             raise _WorkspaceSnapshotError(display_path) from error
         if _stat_fingerprint(after) != _stat_fingerprint(before):
             raise _WorkspaceSnapshotError(display_path)
-        return _WorkspaceFileState(os.fsencode(target), mode, symlink=True)
+        return _WorkspaceFileState(
+            os.fsencode(target), mode, symlink=True, fingerprint=_stat_fingerprint(after)
+        )
     msg = f"Update workspace path is not a regular file or symlink: {display_path}"
     raise UpdateWorkspaceError(msg)
 
@@ -341,24 +351,73 @@ def _read_source_view(
     }
 
 
+def _reread_source_fingerprints(
+    root: Path,
+    root_descriptor: int,
+) -> dict[Path, tuple[int, ...] | None]:
+    """Re-stat every visible path; ``None`` marks a path that disappeared."""
+    fingerprints: dict[Path, tuple[int, ...] | None] = {}
+    paths = _git_paths(
+        root,
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+    )
+    for path in paths:
+        try:
+            with _open_parent_descriptor(root_descriptor, path) as parent_descriptor:
+                try:
+                    metadata = os.lstat(path.name, dir_fd=parent_descriptor)
+                except FileNotFoundError:
+                    fingerprints[path] = None
+                else:
+                    fingerprints[path] = _stat_fingerprint(metadata)
+        except NotADirectoryError as error:
+            msg = f"Update workspace path traverses a non-directory: {root / path}"
+            raise UpdateWorkspaceError(msg) from error
+        except FileNotFoundError:
+            # A tracked parent directory disappeared; the path was deleted.
+            fingerprints[path] = None
+    return fingerprints
+
+
+def _source_view_is_stable(
+    root: Path,
+    root_descriptor: int,
+    view: dict[Path, _WorkspacePathState],
+) -> bool:
+    """Verify a read view with a stat-only second pass instead of rereading bytes."""
+    fingerprints = _reread_source_fingerprints(root, root_descriptor)
+    if fingerprints.keys() != view.keys():
+        return False
+    for path, state in view.items():
+        current = fingerprints[path]
+        if state is None and current is None:
+            continue
+        if state is None or current is None or current != state.fingerprint:
+            return False
+    return True
+
+
 def _snapshot_source_view(
     root: Path,
     root_descriptor: int,
 ) -> dict[Path, _WorkspacePathState]:
-    """Capture two identical source views or reject a moving working tree."""
+    """Capture one stable source view: read once, then verify stat identity."""
     with measure("workspace", "snapshot") as timing:
         for _attempt in range(_SNAPSHOT_ATTEMPTS):
             try:
                 first = _read_source_view(root, root_descriptor)
-                second = _read_source_view(root, root_descriptor)
                 timing.input_bytes += sum(
-                    len(state.content) for view in (first, second)
-                    for state in view.values() if state is not None
+                    len(state.content)
+                    for state in first.values()
+                    if state is not None
                 )
+                if _source_view_is_stable(root, root_descriptor, first):
+                    return first
             except _WorkspaceSnapshotError:
                 continue
-            if first == second:
-                return second
         msg = f"Update source changed while creating a stable snapshot: {root}"
         raise UpdateWorkspaceError(msg)
 
@@ -1266,6 +1325,37 @@ class IsolatedUpdateWorkspace:
     def changed_paths(self) -> tuple[Path, ...]:
         """Return changed tracked and untracked, non-ignored relative paths."""
         return tuple(self._workspace_changes())
+
+    def baseline_content(self, path: str | Path) -> bytes | None:
+        """Return the captured baseline bytes of one regular file, if it existed."""
+        (normalized,) = _normalize_workspace_paths((path,))
+        state = self._start.get(normalized)
+        if state is None or state.symlink:
+            return None
+        return state.content
+
+    def restore_baseline(self, paths: Iterable[str | Path]) -> tuple[Path, ...]:
+        """Reset the given workspace paths to their captured baseline state.
+
+        Paths absent at baseline are removed. Any earlier validation snapshot
+        is forgotten, so the candidate must be validated again before promotion.
+        """
+        root = self.root
+        restored: list[Path] = []
+        # Forget the validation snapshot before touching the tree: a failure
+        # mid-restore must not leave the workspace advertising a snapshot that
+        # no longer matches it.
+        self._validated_source_view = None
+        for path in _normalize_workspace_paths(paths):
+            target = root / path
+            if target.is_dir() and not target.is_symlink():
+                msg = f"Update workspace path is a directory: {path}"
+                raise UpdateWorkspaceError(msg)
+            if target.is_symlink() or target.exists():
+                target.unlink()
+            _install_workspace_state(target, self._start.get(path))
+            restored.append(path)
+        return tuple(restored)
 
     @contextmanager
     def validation_snapshot(self) -> Iterator[UpdateValidationSnapshot]:

@@ -76,12 +76,18 @@ def _write_input_files(
 @pytest.mark.parametrize(
     ("ref_status", "changed_file", "expected_refreshes"),
     [
+        # An updated ref refreshes the lock and publishes a receipt.
         ("updated", None, 0),
-        ("no_change", None, 1),
+        # An up-to-date ref publishes a receipt for the verified state too,
+        # so the source phase skips an equivalent lock refresh.
+        ("no_change", None, 0),
+        # Failed ref tasks publish no receipt.
         ("error", None, 1),
         ("update_error", None, 1),
+        # Receipts cover proven lock state: any later file change invalidates.
         ("updated", "flake.nix", 1),
         ("updated", "flake.lock", 1),
+        ("no_change", "flake.lock", 1),
     ],
 )
 def test_sources_reuse_only_successful_unchanged_ref_refreshes(
@@ -110,20 +116,20 @@ def test_sources_reuse_only_successful_unchanged_ref_refreshes(
             raise RuntimeError("lock refresh failed")
         _write_input_files(tmp_path, input_ref="v2")
 
-    async def _update_input(
-        input_name: str,
+    async def _update_inputs(
+        input_names: list[str],
         *,
         source: str,
         emit: EventSink = ignore_event,
         config: UpdateConfig,
     ) -> None:
         assert config.default_subprocess_timeout == 17
-        source_refreshes.append(input_name)
+        source_refreshes.extend(input_names)
         await emit(UpdateEvent.status(source, "lock refreshed"))
 
     monkeypatch.setattr(refs, "check_flake_ref_update", _check_ref)
     monkeypatch.setattr(refs, "update_flake_ref", _update_ref)
-    monkeypatch.setattr(flake, "update_flake_input", _update_input)
+    monkeypatch.setattr(flake, "update_flake_inputs", _update_inputs)
 
     async def _run() -> list[UpdateEvent | None]:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
@@ -138,7 +144,7 @@ def test_sources_reuse_only_successful_unchanged_ref_refreshes(
         }
         assert result.input_refreshes == (
             {"input": flake.read_flake_input_state("input")}
-            if ref_status == "updated"
+            if ref_status in {"updated", "no_change"}
             else {}
         )
         if changed_file is not None:
@@ -203,12 +209,12 @@ def test_later_ref_reuses_only_independent_earlier_refreshes(
                 shared_ref="v2" if changes_dependency else "v1",
             )
 
-    async def _update_input(input_name: str, **_kwargs: object) -> None:
-        refreshes.append(input_name)
+    async def _update_inputs(input_names: list[str], **_kwargs: object) -> None:
+        refreshes.extend(input_names)
 
     monkeypatch.setattr(refs, "check_flake_ref_update", _check)
     monkeypatch.setattr(refs, "update_flake_ref", _update_ref)
-    monkeypatch.setattr(flake, "update_flake_input", _update_input)
+    monkeypatch.setattr(flake, "update_flake_inputs", _update_inputs)
 
     async def _run() -> None:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
@@ -274,12 +280,12 @@ def test_ref_result_failure_never_publishes_a_refresh_receipt(
     async def _update_ref(*_args: object, **_kwargs: object) -> None:
         _write_input_files(tmp_path, input_ref="v2")
 
-    async def _update_input(input_name: str, **_kwargs: object) -> None:
-        refreshes.append(input_name)
+    async def _update_inputs(input_names: list[str], **_kwargs: object) -> None:
+        refreshes.extend(input_names)
 
     monkeypatch.setattr(refs, "check_flake_ref_update", _check)
     monkeypatch.setattr(refs, "update_flake_ref", _update_ref)
-    monkeypatch.setattr(flake, "update_flake_input", _update_input)
+    monkeypatch.setattr(flake, "update_flake_inputs", _update_inputs)
 
     async def _run() -> None:
         queue = _RejectRefResult()
@@ -313,3 +319,102 @@ def test_ref_result_failure_never_publishes_a_refresh_receipt(
 
     asyncio.run(_run())
     assert refreshes == ["input"]
+
+
+def test_batched_input_refresh_resolves_once_and_fails_dependents_together(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """All selected inputs resolve in one command; a failure fails their sources."""
+    _write_input_files(tmp_path)
+    monkeypatch.setattr(flake, "get_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(source_runner, "UPDATERS", {"demo": _InputUpdater})
+    resolutions: list[list[str]] = []
+
+    async def _update_inputs(
+        input_names: list[str],
+        *,
+        source: str,
+        emit: EventSink = ignore_event,
+        config: UpdateConfig,
+    ) -> None:
+        _ = source, config
+        resolutions.append(list(input_names))
+        await emit(UpdateEvent.status(source, "lock refreshed"))
+
+    monkeypatch.setattr(flake, "update_flake_inputs", _update_inputs)
+
+    async def _run() -> list[UpdateEvent | None]:
+        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+        config = resolve_config()
+        result = await source_runner.run_sources_phase(
+            SourcesPhaseContext(
+                source_names=["demo"],
+                sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
+                queue=queue,
+                update_input=True,
+                native_only=False,
+                config=config,
+                input_refreshes={},
+            )
+        )
+        assert result.details == {"demo": "no_change"}
+        assert result.input_refreshes == {
+            "input": flake.read_flake_input_state("input")
+        }
+        return [queue.get_nowait() for _ in range(queue.qsize())]
+
+    events = asyncio.run(_run())
+    assert resolutions == [["input"]]
+    reuse_messages = [
+        event.message
+        for event in events
+        if event is not None
+        and event.source == "demo"
+        and "Reusing" in (event.message or "")
+    ]
+    assert reuse_messages == []
+
+
+def test_failed_input_refresh_fails_dependents_and_keeps_independents(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A failed batched resolution confines errors to sources needing it."""
+    _write_input_files(tmp_path)
+    monkeypatch.setattr(flake, "get_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(source_runner, "UPDATERS", {"demo": _InputUpdater})
+    error_events: list[str] = []
+
+    class _FailingQueue(asyncio.Queue[UpdateEvent | None]):
+        async def put(self, event: UpdateEvent | None) -> None:
+            if event is not None and event.kind is UpdateEventKind.ERROR:
+                error_events.append(event.message)
+            await super().put(event)
+
+    async def _update_inputs(
+        input_names: list[str],
+        **_kwargs: object,
+    ) -> None:
+        raise RuntimeError("lock refresh failed")
+
+    monkeypatch.setattr(flake, "update_flake_inputs", _update_inputs)
+
+    async def _run() -> UpdatePhaseResult:
+        queue = _FailingQueue()
+        config = resolve_config()
+        return await source_runner.run_sources_phase(
+            SourcesPhaseContext(
+                source_names=["demo"],
+                sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
+                queue=queue,
+                update_input=True,
+                native_only=False,
+                config=config,
+                input_refreshes={},
+            )
+        )
+
+    result = asyncio.run(_run())
+    assert result.details == {"demo": "error"}
+    assert error_events == ["RuntimeError: lock refresh failed"]

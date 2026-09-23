@@ -171,7 +171,7 @@ def test_update_flake_input_stream(
     """Expose lock diagnostics before exit and invalidate only successful refreshes."""
     invalidated: list[bool] = []
     events: list[UpdateEvent] = []
-    args = ["nix", "flake", "lock", "--update-input", "demo"]
+    args = ["nix", "flake", "update", "demo"]
 
     async def stream(
         command: list[str], *, timeout: float, **_kwargs: object
@@ -203,7 +203,7 @@ def test_update_flake_input_stream(
         )
 
     if returncode:
-        with pytest.raises(RuntimeError, match=r"nix flake lock failed \(exit 1\)"):
+        with pytest.raises(RuntimeError, match=r"nix flake update failed \(exit 1\)"):
             asyncio.run(run())
     else:
         asyncio.run(run())
@@ -989,7 +989,7 @@ def test_run_checked_command_and_update_flake_ref_paths(
     _run_async(update_flake_ref(github_ref, "v2", source="demo"))
     assert called_args == [
         ["flake-edit", "--no-lock", "change", "demo", "github:owner/repo/v2"],
-        ["nix", "flake", "lock", "--update-input", "demo"],
+        ["nix", "flake", "update", "demo"],
     ]
 
     called_args.clear()
@@ -1008,7 +1008,7 @@ def test_run_checked_command_and_update_flake_ref_paths(
     )
     _run_async(update_flake_ref(git_ref, "release-3.5.9-beta2", source="demo"))
     assert rewritten_refs == [("demo", "refs/tags/release-3.5.9-beta2")]
-    assert called_args[0][:4] == ["nix", "flake", "lock", "--update-input"]
+    assert called_args[0][:3] == ["nix", "flake", "update"]
 
     with pytest.raises(RuntimeError, match="Unsupported input type"):
         _run_async(
@@ -1096,7 +1096,7 @@ def test_update_flake_ref_rewrites_split_github_input(
         )
     )
 
-    assert commands == [["nix", "flake", "lock", "--update-input", "goose"]]
+    assert commands == [["nix", "flake", "update", "goose"]]
     root = expect_instance(parse_nix_expr(flake_path.read_text()), AttributeSet)
     inputs = expect_instance(expect_binding(root.values, "inputs").value, AttributeSet)
     goose = expect_instance(expect_binding(inputs.values, "goose").value, AttributeSet)
@@ -1270,7 +1270,7 @@ def test_ref_task_owns_one_lock_and_preserves_subprocess_config(
     events = asyncio.run(run_task())
     expected = [
         ["flake-edit", "--no-lock", "change", "demo", "github:owner/repo/v2"],
-        ["nix", "flake", "lock", "--update-input", "demo"],
+        ["nix", "flake", "update", "demo"],
     ]
     assert commands == (expected[:1] if failure_command == "flake-edit" else expected)
     assert invalidated_after == ([2] if failure_command is None else [])
@@ -1280,7 +1280,7 @@ def test_ref_task_owns_one_lock_and_preserves_subprocess_config(
         if event is not None and event.kind is UpdateEventKind.ERROR
     ] == (
         [
-            f"{'flake-edit change' if failure_command == 'flake-edit' else 'nix flake lock'}"
+            f"{'flake-edit change' if failure_command == 'flake-edit' else 'nix flake update'}"
             " failed (exit 1): lock unavailable"
         ]
         if failure_command is not None

@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TypedDict, Unpack
 
 from pydantic import field_validator
@@ -38,9 +39,17 @@ class UpdateConfig:
     # Preserve explicit CLI/env bounds for operations with a longer default.
     subprocess_timeout_override: int | None = None
     max_source_tasks: int = 8
-    max_nix_evaluations: int = 1
+    # Evaluations are read-only probes; they fan out independently of the
+    # build budget, whose rationale (shared remote-builder memory) does not
+    # apply to local evaluation processes.
+    max_nix_evaluations: int = 4
     max_downloads: int = 8
     max_materializations: int = 1
+    # Progress reporting: heartbeat cadence, stall threshold, and run log root.
+    heartbeat_interval: float = 30.0
+    inactivity_warning_seconds: float = 300.0
+    run_log: bool = True
+    run_log_dir: Path | None = None
 
     @property
     def deno_deps_platforms(self) -> tuple[str, ...]:
@@ -61,9 +70,13 @@ class UpdateSettings(BaseSettings):
     fake_hash: str = FAKE_HASH
     max_nix_builds: int = default_max_nix_builds()
     max_source_tasks: int = 8
-    max_nix_evaluations: int = 1
+    max_nix_evaluations: int = 4
     max_downloads: int = 8
     max_materializations: int = 1
+    heartbeat_interval: float = 30.0
+    inactivity_warning_seconds: float = 300.0
+    run_log: bool = True
+    run_log_dir: str | None = None
     hash_build_platforms: tuple[str, ...] = supported_systems()
     deno_deps_platforms: tuple[str, ...] | None = None
 
@@ -106,6 +119,12 @@ def _settings_to_config(settings: UpdateSettings) -> UpdateConfig:
             settings.subprocess_timeout
             if "subprocess_timeout" in settings.model_fields_set
             else None
+        ),
+        heartbeat_interval=max(1.0, settings.heartbeat_interval),
+        inactivity_warning_seconds=max(1.0, settings.inactivity_warning_seconds),
+        run_log=settings.run_log,
+        run_log_dir=(
+            Path(settings.run_log_dir).expanduser() if settings.run_log_dir else None
         ),
     )
 
@@ -151,6 +170,10 @@ class _ResolveConfigOverrides(TypedDict, total=False):
     max_nix_evaluations: int | None
     max_downloads: int | None
     max_materializations: int | None
+    heartbeat_interval: float | None
+    inactivity_warning_seconds: float | None
+    run_log: bool | None
+    run_log_dir: str | None
     hash_build_platforms: str | tuple[str, ...] | None
     deno_platforms: str | None
     deno_deps_platforms: str | tuple[str, ...] | None

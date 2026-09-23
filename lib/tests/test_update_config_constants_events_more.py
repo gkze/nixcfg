@@ -134,8 +134,11 @@ def test_hash_build_platforms_for_rejects_invalid_legacy_shapes() -> None:
         hash_build_platforms_for(bad_item_cfg)
 
 
-def test_resolve_active_config_and_default_config_reference() -> None:
+def test_resolve_active_config_and_default_config_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Prefer explicit config and otherwise return the global default."""
+    monkeypatch.delenv("UPDATE_RUN_LOG", raising=False)
     custom = UpdateConfig(
         default_timeout=1,
         default_subprocess_timeout=2,
@@ -161,8 +164,11 @@ def test_resolve_active_config_reloads_when_env_changes(
     monkeypatch.delenv("UPDATE_HTTP_TIMEOUT", raising=False)
 
 
-def test_resolve_config_ignores_none_overrides() -> None:
+def test_resolve_config_ignores_none_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Keep environment defaults when explicit overrides are None."""
+    monkeypatch.delenv("UPDATE_RUN_LOG", raising=False)
     cfg = resolve_config(http_timeout=None, retries=None, hash_build_platforms=None)
     assert cfg == DEFAULT_CONFIG
 
@@ -343,3 +349,41 @@ def test_update_event_status_includes_structured_fields() -> None:
         info=StatusInfo(kind=StatusKind.UPDATED, value="1.2.3"),
     )
     assert UpdateEvent.status("demo", "plain").payload is None
+
+
+def test_error_event_detail_is_redacted_like_messages() -> None:
+    """Traceback detail destined for the run log passes the redaction boundary."""
+    from lib.update.events import UpdateEvent
+
+    event = UpdateEvent.error(
+        "demo",
+        "failed",
+        detail="Traceback: request https://user:pw@example.test/path?token=abc#frag",
+    )
+    assert event.detail is not None
+    assert event.detail.startswith("Traceback: request https://")
+    assert "pw" not in event.detail
+    assert "token=abc" not in event.detail
+    assert UpdateEvent.error("demo", "failed").detail is None
+
+
+def test_run_log_settings_resolve_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Heartbeat, stall, and run-log settings clamp and expand like the others."""
+    from pathlib import Path
+
+    from lib.update.config import resolve_config
+
+    monkeypatch.setenv("UPDATE_HEARTBEAT_INTERVAL", "0.2")
+    monkeypatch.setenv("UPDATE_INACTIVITY_WARNING_SECONDS", "-5")
+    monkeypatch.setenv("UPDATE_RUN_LOG", "1")
+    monkeypatch.setenv("UPDATE_RUN_LOG_DIR", "~/runs")
+    cfg = resolve_config()
+    assert cfg.heartbeat_interval == 1.0
+    assert cfg.inactivity_warning_seconds == 1.0
+    assert cfg.run_log is True
+    assert cfg.run_log_dir == Path("~/runs").expanduser()
+
+    monkeypatch.setenv("UPDATE_RUN_LOG_DIR", "")
+    assert resolve_config(run_log=False).run_log_dir is None

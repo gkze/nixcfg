@@ -546,17 +546,7 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
         _ = (source, queue)
         await task()
 
-    async def _update_input(
-        _input_name: str,
-        *,
-        source: str,
-        emit: EventSink = ignore_event,
-        **_kwargs: object,
-    ) -> object:
-        await emit(UpdateEvent.status(source, "input refreshed"))
-
     monkeypatch.setattr("lib.update.process.run_queue_task", _run_queue_task)
-    monkeypatch.setattr("lib.update.flake.update_flake_input", _update_input)
 
     async def _run_source_task() -> list[UpdateEvent]:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
@@ -565,11 +555,8 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
                 "demo",
                 context=SourceTaskContext(
                     sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
-                    update_input=True,
                     native_only=False,
                     session=session,
-                    update_input_lock=asyncio.Lock(),
-                    update_input_tasks={},
                     queue=queue,
                     generated_artifacts={},
                     config=resolve_config(),
@@ -584,7 +571,7 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
 
     source_events = _run(_run_source_task())
     assert any(event.message == "Starting update" for event in source_events)
-    assert any(event.message == "input refreshed" for event in source_events)
+    assert any(event.message == "updated" for event in source_events)
 
     async def _update_ref(
         input_ref: FlakeInputRef,
@@ -625,7 +612,7 @@ def test_update_source_task_and_phase_runners(monkeypatch: pytest.MonkeyPatch) -
     async def _update_source(
         name: str, *, context: SourceTaskContext
     ) -> SourceTaskResult:
-        calls.append((name, id(context.update_input_tasks)))
+        calls.append((name, id(context)))
         return SourceTaskResult(completed=True)
 
     monkeypatch.setattr("lib.update.source_runner.update_source_task", _update_source)
@@ -702,11 +689,8 @@ def test_update_source_task_collects_artifact_events(
                 "demo",
                 context=SourceTaskContext(
                     sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
-                    update_input=False,
                     native_only=False,
                     session=session,
-                    update_input_lock=asyncio.Lock(),
-                    update_input_tasks={},
                     queue=queue,
                     generated_artifacts={},
                     effective_sources=effective_sources,
@@ -847,10 +831,10 @@ def test_run_sources_phase_bounds_concurrent_tasks_within_wave(
     assert sorted(completed) == sorted(source_names)
 
 
-def test_run_sources_phase_serializes_flake_input_refreshes(
+def test_run_sources_phase_resolves_flake_input_refreshes_in_one_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Do not let concurrent lock refreshes overwrite each other's flake.lock."""
+    """Resolve every selected input in one lock update, not per-source commands."""
 
     class _FirstUpdater:
         input_name = "first-input"
@@ -883,17 +867,19 @@ def test_run_sources_phase_serializes_flake_input_refreshes(
             _ = (current, session, context)
             await emit(UpdateEvent.result("second"))
 
+    resolutions: list[list[str]] = []
     active_refreshes = 0
     max_active_refreshes = 0
 
-    async def _update_input(
-        _input_name: str,
+    async def _update_inputs(
+        input_names: list[str],
         *,
         source: str,
         emit: EventSink = ignore_event,
         **_kwargs: object,
-    ) -> object:
+    ) -> None:
         nonlocal active_refreshes, max_active_refreshes
+        resolutions.append(list(input_names))
         active_refreshes += 1
         max_active_refreshes = max(max_active_refreshes, active_refreshes)
         try:
@@ -906,7 +892,7 @@ def test_run_sources_phase_serializes_flake_input_refreshes(
         "lib.update.source_runner.UPDATERS",
         {"first": _FirstUpdater, "second": _SecondUpdater},
     )
-    monkeypatch.setattr("lib.update.flake.update_flake_input", _update_input)
+    monkeypatch.setattr("lib.update.flake.update_flake_inputs", _update_inputs)
 
     _run(
         run_sources_phase(
@@ -926,6 +912,7 @@ def test_run_sources_phase_serializes_flake_input_refreshes(
         )
     )
 
+    assert resolutions == [["first-input", "second-input"]]
     assert max_active_refreshes == 1
 
 
@@ -1209,66 +1196,45 @@ def test_update_source_task_dedupes_shared_input_refreshes(
         _ = (source, queue)
         await task()
 
-    called = {"count": 0}
+    resolutions: list[list[str]] = []
 
-    async def _update_input(
-        _input_name: str,
+    async def _update_inputs(
+        input_names: list[str],
         *,
         source: str,
         emit: EventSink = ignore_event,
         **_kwargs: object,
-    ) -> object:
-        called["count"] += 1
+    ) -> None:
+        _ = source
+        resolutions.append(list(input_names))
         await asyncio.sleep(0)
-        await emit(UpdateEvent.status(source, f"input refreshed for {_input_name}"))
+        await emit(UpdateEvent.status(source, f"input refreshed for {input_names}"))
 
     monkeypatch.setattr(
         "lib.update.source_runner.UPDATERS", {"one": _Updater, "two": _Updater}
     )
     monkeypatch.setattr("lib.update.process.run_queue_task", _run_queue_task)
-    monkeypatch.setattr("lib.update.flake.update_flake_input", _update_input)
+    monkeypatch.setattr("lib.update.flake.update_flake_inputs", _update_inputs)
 
     async def _run_case() -> list[UpdateEvent]:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
-        shared_lock = asyncio.Lock()
-        shared_tasks: dict[str, asyncio.Task[None]] = {}
         shared_sources = SourcesFile(
             entries={
                 "one": SourceEntry(hashes={}),
                 "two": SourceEntry(hashes={}),
             }
         )
-        async with aiohttp.ClientSession() as session:
-            await asyncio.gather(
-                update_source_task(
-                    "one",
-                    context=SourceTaskContext(
-                        sources=shared_sources,
-                        update_input=True,
-                        native_only=False,
-                        session=session,
-                        update_input_lock=shared_lock,
-                        update_input_tasks=shared_tasks,
-                        queue=queue,
-                        generated_artifacts={},
-                        config=resolve_config(),
-                    ),
-                ),
-                update_source_task(
-                    "two",
-                    context=SourceTaskContext(
-                        sources=shared_sources,
-                        update_input=True,
-                        native_only=False,
-                        session=session,
-                        update_input_lock=shared_lock,
-                        update_input_tasks=shared_tasks,
-                        queue=queue,
-                        generated_artifacts={},
-                        config=resolve_config(),
-                    ),
-                ),
+        result = await run_sources_phase(
+            SourcesPhaseContext(
+                source_names=["one", "two"],
+                sources=shared_sources,
+                queue=queue,
+                update_input=True,
+                native_only=False,
+                config=resolve_config(),
             )
+        )
+        assert result.details == {"one": "no_change", "two": "no_change"}
         events: list[UpdateEvent] = []
         while not queue.empty():
             item = queue.get_nowait()
@@ -1277,17 +1243,13 @@ def test_update_source_task_dedupes_shared_input_refreshes(
         return events
 
     events = _run(_run_case())
-    assert called["count"] == 1
+    assert resolutions == [["shared-input"]]
     assert any(
         event.message == "Updating flake input 'shared-input'..." for event in events
     )
-    assert any(
-        event.message == "Reusing flake input 'shared-input' refresh..."
-        for event in events
-    )
 
 
-def test_update_source_task_refreshes_additional_inputs_before_updater(
+def test_run_sources_phase_refreshes_additional_inputs_before_updater(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Refresh every declared flake input before resolving source metadata."""
@@ -1318,44 +1280,39 @@ def test_update_source_task_refreshes_additional_inputs_before_updater(
         _ = (source, queue)
         await task()
 
-    async def _update_input(
-        input_name: str,
+    async def _update_inputs(
+        input_names: list[str],
         *,
         source: str,
         emit: EventSink = ignore_event,
         **_kwargs: object,
-    ) -> object:
+    ) -> None:
         _ = source
-        calls.append(f"refresh:{input_name}")
-        if False:
-            await emit(UpdateEvent.status("zed-editor-nightly", "unused"))
+        calls.extend(f"refresh:{input_name}" for input_name in input_names)
+        await emit(UpdateEvent.status(source, "input refreshed"))
 
     monkeypatch.setattr(
         "lib.update.source_runner.UPDATERS",
         {"zed-editor-nightly": _Updater},
     )
     monkeypatch.setattr("lib.update.process.run_queue_task", _run_queue_task)
-    monkeypatch.setattr("lib.update.flake.update_flake_input", _update_input)
+    monkeypatch.setattr("lib.update.flake.update_flake_inputs", _update_inputs)
 
     async def _run_case() -> None:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
-        async with aiohttp.ClientSession() as session:
-            await update_source_task(
-                "zed-editor-nightly",
-                context=SourceTaskContext(
-                    sources=SourcesFile(
-                        entries={"zed-editor-nightly": SourceEntry(hashes={})}
-                    ),
-                    update_input=True,
-                    native_only=False,
-                    session=session,
-                    update_input_lock=asyncio.Lock(),
-                    update_input_tasks={},
-                    queue=queue,
-                    generated_artifacts={},
-                    config=resolve_config(),
+        result = await run_sources_phase(
+            SourcesPhaseContext(
+                source_names=["zed-editor-nightly"],
+                sources=SourcesFile(
+                    entries={"zed-editor-nightly": SourceEntry(hashes={})}
                 ),
+                queue=queue,
+                update_input=True,
+                native_only=False,
+                config=resolve_config(),
             )
+        )
+        assert result.details == {"zed-editor-nightly": "no_change"}
 
     _run(_run_case())
 
@@ -1393,24 +1350,8 @@ def test_update_source_task_sets_native_only_for_deno_updater(
         _ = (source, queue)
         await task()
 
-    called = {"count": 0, "input_name": "", "source": ""}
-
-    async def _update_input(
-        _input_name: str,
-        *,
-        source: str,
-        emit: EventSink = ignore_event,
-        **_kwargs: object,
-    ) -> object:
-        called["count"] += 1
-        called["input_name"] = _input_name
-        called["source"] = source
-        if False:
-            await emit(UpdateEvent.status("demo", "unused"))
-
     monkeypatch.setattr("lib.update.source_runner.UPDATERS", {"demo": _DenoUpdater})
     monkeypatch.setattr("lib.update.process.run_queue_task", _run_queue_task)
-    monkeypatch.setattr("lib.update.flake.update_flake_input", _update_input)
 
     async def _run_case() -> None:
         queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
@@ -1419,11 +1360,8 @@ def test_update_source_task_sets_native_only_for_deno_updater(
                 "demo",
                 context=SourceTaskContext(
                     sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
-                    update_input=True,
                     native_only=True,
                     session=session,
-                    update_input_lock=asyncio.Lock(),
-                    update_input_tasks={},
                     queue=queue,
                     generated_artifacts={},
                     config=resolve_config(),
@@ -1433,9 +1371,6 @@ def test_update_source_task_sets_native_only_for_deno_updater(
     _run(_run_case())
     assert len(created) == 1
     assert created[0].native_only is True
-    assert called["count"] == 1
-    assert called["input_name"] == "demo"
-    assert called["source"] == "demo"
 
 
 def test_update_source_task_reports_incoherent_native_identity_change(
@@ -1506,11 +1441,8 @@ def test_update_source_task_reports_incoherent_native_identity_change(
                 "demo",
                 context=SourceTaskContext(
                     sources=SourcesFile(entries={"demo": current}),
-                    update_input=False,
                     native_only=True,
                     session=session,
-                    update_input_lock=asyncio.Lock(),
-                    update_input_tasks={},
                     queue=queue,
                     generated_artifacts={},
                     config=resolve_config(
@@ -1533,74 +1465,6 @@ def test_update_source_task_reports_incoherent_native_identity_change(
         "changed (pins) while foreign-platform hashes would be preserved; rerun "
         "without --native-only"
     ]
-
-
-def test_update_source_task_skips_input_update_when_disabled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Skip update_flake_input branch when update_input is false."""
-
-    class _Updater:
-        input_name = "demo-input"
-
-        def __init__(self, *, config: object | None = None) -> None:
-            _ = config
-
-        async def update_stream(
-            self,
-            current: SourceEntry | None,
-            session: aiohttp.ClientSession,
-            *,
-            context: UpdateContext,
-            emit: EventSink = ignore_event,
-        ) -> object:
-            _ = (current, session, context)
-            await emit(UpdateEvent.result("demo"))
-
-    async def _run_queue_task(
-        *, source: str, queue: asyncio.Queue[UpdateEvent | None], task
-    ) -> None:
-        _ = (source, queue)
-        await task()
-
-    called = {"update_input": 0}
-
-    async def _update_input(
-        _input_name: str,
-        *,
-        source: str,
-        emit: EventSink = ignore_event,
-        **_kwargs: object,
-    ) -> object:
-        _ = source
-        called["update_input"] += 1
-        if False:
-            await emit(UpdateEvent.status("demo", "unused"))
-
-    monkeypatch.setattr("lib.update.source_runner.UPDATERS", {"demo": _Updater})
-    monkeypatch.setattr("lib.update.process.run_queue_task", _run_queue_task)
-    monkeypatch.setattr("lib.update.flake.update_flake_input", _update_input)
-
-    async def _run_case() -> None:
-        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
-        async with aiohttp.ClientSession() as session:
-            await update_source_task(
-                "demo",
-                context=SourceTaskContext(
-                    sources=SourcesFile(entries={"demo": SourceEntry(hashes={})}),
-                    update_input=False,
-                    native_only=False,
-                    session=session,
-                    update_input_lock=asyncio.Lock(),
-                    update_input_tasks={},
-                    queue=queue,
-                    generated_artifacts={},
-                    config=resolve_config(),
-                ),
-            )
-
-    _run(_run_case())
-    assert called["update_input"] == 0
 
 
 def test_persist_updates_and_build_plan_edge_paths(
@@ -1757,23 +1621,26 @@ def test_input_refresh_finishes_before_probe_admission(
     class Independent:
         pass
 
-    refreshes: list[str] = []
+    resolutions: list[list[str]] = []
     started: list[str] = []
 
     async def refresh(
-        name: str, input_name: str, *, context: SourceTaskContext
+        input_names: list[str],
+        *,
+        source: str,
+        emit: EventSink = ignore_event,
+        **_kwargs: object,
     ) -> None:
-        _ = (name, context)
-        refreshes.append(input_name)
+        _ = (source, emit)
+        resolutions.append(list(input_names))
         await asyncio.sleep(0)
         if refresh_fails:
             raise RuntimeError("input failed")
 
     async def update(name: str, *, context: SourceTaskContext) -> SourceTaskResult:
-        assert context.update_input is False
-        assert refreshes == (
-            ["fallback"] if refresh_fails else ["fallback", "auxiliary"]
-        )
+        _ = context
+        # Every refresh finished before any source task was admitted.
+        assert resolutions == [["fallback", "auxiliary"]]
         started.append(name)
         return SourceTaskResult(completed=True)
 
@@ -1781,7 +1648,7 @@ def test_input_refresh_finishes_before_probe_admission(
         "lib.update.source_runner.UPDATERS",
         {"parent": Parent, "child": Child, "independent": Independent},
     )
-    monkeypatch.setattr("lib.update.source_runner._ensure_input_refreshed", refresh)
+    monkeypatch.setattr("lib.update.flake.update_flake_inputs", refresh)
     monkeypatch.setattr("lib.update.source_runner.update_source_task", update)
     result = asyncio.run(
         run_sources_phase(

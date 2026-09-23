@@ -684,7 +684,7 @@ def test_thread_resource_contends_with_async_commands_and_joins_release() -> Non
     """A worker waits behind ordinary probes and returns only after releasing its slot."""
     entering = threading.Event()
     admitted = threading.Event()
-    config = default_config()
+    config = replace(default_config(), max_nix_evaluations=1)
 
     def command() -> str:
         entering.set()
@@ -771,7 +771,7 @@ def test_thread_resource_cancels_queued_admission_without_releasing_owner() -> N
     """A cancelled worker leaves the async owner's slot occupied and joins its waiter."""
     entering = threading.Event()
     cancel_event = threading.Event()
-    config = default_config()
+    config = replace(default_config(), max_nix_evaluations=1)
 
     def command() -> None:
         entering.set()

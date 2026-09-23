@@ -1120,3 +1120,52 @@ def test_source_only_update_preserves_generated_artifacts(
     assert generated.read_text() == "retained artifact\n"
     after = generated.stat()
     assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
+
+
+def test_workspace_restore_baseline_and_baseline_content(tmp_path: Path) -> None:
+    """Restoring paths returns them to the captured baseline or removes them."""
+    from lib.tests._update_workspace_helpers import init_update_workspace_repo
+    from lib.update.persistence import IsolatedUpdateWorkspace, UpdateWorkspaceError
+
+    live = tmp_path / "live"
+    init_update_workspace_repo(live, tracked_files={"a.txt": "one\n"})
+    (live / "link").symlink_to("a.txt")
+    with IsolatedUpdateWorkspace(live) as workspace:
+        root = workspace.root
+        assert workspace.baseline_content("a.txt") == b"one\n"
+        assert workspace.baseline_content(Path("link")) is None
+        assert workspace.baseline_content("absent.txt") is None
+
+        (root / "a.txt").write_text("two\n", encoding="utf-8")
+        (root / "new.txt").write_text("new\n", encoding="utf-8")
+        (root / "link").unlink()
+        (root / "link").write_text("not a link\n", encoding="utf-8")
+        with workspace.validation_snapshot():
+            pass
+        assert object.__getattribute__(workspace, "_validated_source_view") is not None
+
+        restored = workspace.restore_baseline([
+            "new.txt",
+            Path("a.txt"),
+            "absent.txt",
+            "link",
+        ])
+
+        assert restored == (
+            Path("a.txt"),
+            Path("absent.txt"),
+            Path("link"),
+            Path("new.txt"),
+        )
+        assert (root / "a.txt").read_text(encoding="utf-8") == "one\n"
+        assert not (root / "new.txt").exists()
+        assert not (root / "absent.txt").exists()
+        assert (root / "link").is_symlink()
+        assert (root / "link").readlink() == Path("a.txt")
+        assert object.__getattribute__(workspace, "_validated_source_view") is None
+
+        (root / "dir").mkdir()
+        with pytest.raises(UpdateWorkspaceError, match="is a directory"):
+            workspace.restore_baseline(["dir"])
+        with pytest.raises(ValueError, match="repository-relative"):
+            workspace.restore_baseline(["/etc/passwd"])

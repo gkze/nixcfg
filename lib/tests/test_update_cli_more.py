@@ -1150,19 +1150,24 @@ def test_handle_preflight_requests_checks_schema_list_then_validate(
         lambda _opts: calls.append("list") or None,
     )
     monkeypatch.setattr(
+        "lib.update.cli._handle_status_request",
+        lambda _opts, _out, _config: calls.append("status") or None,
+    )
+    monkeypatch.setattr(
         "lib.update.cli.handle_validate_request",
         lambda _opts, _out: calls.append("validate") or 9,
     )
+    config = resolve_config()
 
-    assert _handle_preflight_requests(UpdateOptions(), OutputOptions()) == 9
-    assert calls == ["sort", "schema", "list", "validate"]
+    assert _handle_preflight_requests(UpdateOptions(), OutputOptions(), config) == 9
+    assert calls == ["sort", "schema", "status", "list", "validate"]
 
     calls.clear()
     monkeypatch.setattr(
         "lib.update.cli._handle_schema_request",
         lambda _opts: calls.append("schema") or 4,
     )
-    assert _handle_preflight_requests(UpdateOptions(), OutputOptions()) == 4
+    assert _handle_preflight_requests(UpdateOptions(), OutputOptions(), config) == 4
     assert calls == ["sort", "schema"]
 
     calls.clear()
@@ -1171,11 +1176,23 @@ def test_handle_preflight_requests_checks_schema_list_then_validate(
         lambda _opts: calls.append("schema") or None,
     )
     monkeypatch.setattr(
+        "lib.update.cli._handle_status_request",
+        lambda _opts, _out, _config: calls.append("status") or 6,
+    )
+    assert _handle_preflight_requests(UpdateOptions(), OutputOptions(), config) == 6
+    assert calls == ["sort", "schema", "status"]
+
+    calls.clear()
+    monkeypatch.setattr(
+        "lib.update.cli._handle_status_request",
+        lambda _opts, _out, _config: calls.append("status") or None,
+    )
+    monkeypatch.setattr(
         "lib.update.cli.handle_list_targets_request",
         lambda _opts: calls.append("list") or 5,
     )
-    assert _handle_preflight_requests(UpdateOptions(), OutputOptions()) == 5
-    assert calls == ["sort", "schema", "list"]
+    assert _handle_preflight_requests(UpdateOptions(), OutputOptions(), config) == 5
+    assert calls == ["sort", "schema", "status", "list"]
 
 
 def test_list_helpers_resolve_root_input_node() -> None:
@@ -1953,23 +1970,9 @@ def test_runtime_config_and_tty_settings(monkeypatch: pytest.MonkeyPatch) -> Non
     assert captured["http_timeout"] == 3
     assert captured["retries"] == 2
 
-    resolved = ResolvedTargets(
-        all_source_names=set(),
-        all_ref_inputs=[],
-        all_ref_names=set(),
-        all_known_names=set(),
-        do_refs=True,
-        do_sources=True,
-        do_input_refresh=True,
-        dry_run=False,
-        native_only=False,
-        ref_inputs=[SimpleNamespace(name="inp", owner="o", repo="r", ref="v1")],
-        source_names=["src"],
-    )
-
     monkeypatch.setattr("lib.update.cli._is_tty", lambda **_kwargs: False)
     tty_enabled, show_headers = _resolve_tty_settings(
-        UpdateOptions(json=False, quiet=False), resolved
+        UpdateOptions(json=False, quiet=False)
     )
     assert tty_enabled is False
     assert show_headers is True
@@ -2358,7 +2361,7 @@ def test_run_plan_building(
         lambda: [SimpleNamespace(name="inp", owner="o", repo="r", ref="v1")],
     )
     monkeypatch.setattr(
-        "lib.update.cli._resolve_tty_settings", lambda opts, resolved: (False, False)
+        "lib.update.cli._resolve_tty_settings", lambda _opts: (False, False)
     )
     monkeypatch.setattr(
         "lib.update.cli._load_sources_for_run", lambda resolved: SourcesFile(entries={})
@@ -2388,12 +2391,13 @@ def test_top_level_entrypoints(
     cfg = resolve_config(log_tail_lines=10, render_interval=0.1, subprocess_timeout=30)
     monkeypatch.setattr("lib.update.cli._resolve_runtime_config", lambda _opts: cfg)
     monkeypatch.setattr(
-        "lib.update.cli._handle_preflight_requests", lambda _opts, _out: 7
+        "lib.update.cli._handle_preflight_requests", lambda _opts, _out, _config: 7
     )
     assert _run_async(run_updates(UpdateOptions(), check_tools=True)) == 7
 
     monkeypatch.setattr(
-        "lib.update.cli._handle_preflight_requests", lambda _opts, _out: None
+        "lib.update.cli._handle_preflight_requests",
+        lambda _opts, _out, _config: None,
     )
 
     # run_update_command delegates tool-checked execution.
@@ -3752,7 +3756,8 @@ def test_run_updates_promotes_only_after_isolated_execution(
 @pytest.mark.parametrize(
     ("targets", "changed_paths", "expected"),
     [
-        ((), (), True),
+        ((), (), False),
+        ((), (Path("flake.lock"),), True),
         (("demo",), (), False),
         (("demo",), (Path("flake.lock"),), True),
         (("demo",), (Path("packages/demo/sources.json"),), True),
@@ -3763,14 +3768,8 @@ def test_root_closure_validation_trigger_is_transaction_scoped(
     changed_paths: tuple[Path, ...],
     expected: bool,
 ) -> None:
-    """Validate full runs and every targeted transaction that changed files."""
-    assert (
-        _requires_root_closure_validation(
-            UpdateOptions(targets=targets),
-            changed_paths,
-        )
-        is expected
-    )
+    """Gate every transaction that changed files, whether full or targeted."""
+    assert _requires_root_closure_validation(changed_paths) is expected
 
 
 @pytest.mark.parametrize("targets", [(), ("demo",)])
@@ -3831,9 +3830,11 @@ def test_root_closure_failure_prevents_atomic_promotion(
         assert captured.err == ""
         assert json.loads(captured.out) == {
             "updated": [],
+            "dropped": [],
             "errors": ["root-closures"],
             "noChange": [],
             "success": False,
+            "withheld": {},
             "candidateUpdatesDiscarded": ["demo"],
         }
     else:
@@ -4128,10 +4129,8 @@ def test_targeted_noop_rejects_changes_after_its_validation_decision(
         planned_paths=("tracked.txt",),
     )
 
-    def _decide_then_change(
-        opts: UpdateOptions, changed_paths: tuple[Path, ...]
-    ) -> bool:
-        assert not _requires_root_closure_validation(opts, changed_paths)
+    def _decide_then_change(changed_paths: tuple[Path, ...]) -> bool:
+        assert not _requires_root_closure_validation(changed_paths)
         (Path.cwd() / "tracked.txt").write_text("late update\n", encoding="utf-8")
         return False
 
@@ -4589,9 +4588,11 @@ def test_run_updates_emits_plan_failure_once_after_workspace_cleanup(
     assert len(lines) == 1
     assert json.loads(lines[0]) == {
         "updated": [],
+        "dropped": [],
         "errors": ["missing", "workspace"],
         "noChange": [],
         "success": False,
+        "withheld": {},
         "error": "workspace cleanup failed",
         "planError": "Unknown source or input 'missing'",
         "unknownTargets": ["missing"],
@@ -4604,7 +4605,7 @@ def test_run_updates_emits_empty_result_only_after_workspace_cleanup(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Gate a full empty plan and emit its no-op only after workspace cleanup."""
+    """Finish a full empty plan without building roots, reporting after cleanup."""
     events: list[str] = []
 
     class _ObservedWorkspace:
@@ -4630,8 +4631,7 @@ def test_run_updates_emits_empty_result_only_after_workspace_cleanup(
             events.append("promote")
             return ()
 
-    def _validate_roots(**kwargs: object) -> tuple[object, ...]:
-        assert kwargs["flake_root"] == tmp_path
+    def _validate_roots(**_kwargs: object) -> tuple[object, ...]:
         events.append("roots")
         return ()
 
@@ -4647,12 +4647,14 @@ def test_run_updates_emits_empty_result_only_after_workspace_cleanup(
     )
 
     assert _run_async(run_updates(UpdateOptions(json=True))) == 0
-    assert events == ["enter", "snapshot", "roots", "promote", "close"]
+    assert events == ["enter", "snapshot", "promote", "close"]
     assert json.loads(capsys.readouterr().out) == {
         "updated": [],
+        "dropped": [],
         "errors": [],
         "noChange": [],
         "success": True,
+        "withheld": {},
     }
 
 
@@ -4661,45 +4663,41 @@ def test_run_updates_empty_full_plan_root_failure_prevents_finalization(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Fail an empty full update when its discovered roots do not build."""
+    """An empty full update changes nothing, so its roots are never rebuilt."""
     live = tmp_path / "live"
     _init_update_workspace_repo(live)
-    promoted = False
+    promoted: list[tuple[Path, ...]] = []
     original_promote = IsolatedUpdateWorkspace.promote
 
-    def _fail_roots(**_kwargs: object) -> tuple[DerivationValidationFailure]:
-        return (
-            DerivationValidationFailure(
-                source="root-closures",
-                installable="path:.#checks.aarch64-darwin.root-closures",
-                message="closure failed",
-            ),
-        )
+    def _unexpected_roots(**_kwargs: object) -> tuple[DerivationValidationFailure]:
+        pytest.fail("an unchanged candidate must not build root closures")
 
     def _observe_promote(
         workspace: IsolatedUpdateWorkspace,
         allowed_paths: tuple[Path, ...],
     ) -> tuple[Path, ...]:
-        nonlocal promoted
-        promoted = True
-        return original_promote(workspace, allowed_paths)
+        changed = original_promote(workspace, allowed_paths)
+        promoted.append(changed)
+        return changed
 
     monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: live)
     monkeypatch.setattr("lib.update.cli._build_run_plan", lambda _opts: None)
     monkeypatch.setattr(
         "lib.update.derivation_validation.validate_root_closures",
-        _fail_roots,
+        _unexpected_roots,
     )
     monkeypatch.setattr(IsolatedUpdateWorkspace, "promote", _observe_promote)
 
-    assert _run_async(run_updates(UpdateOptions(json=True))) == 1
-    assert not promoted
+    assert _run_async(run_updates(UpdateOptions(json=True))) == 0
+    assert promoted == [()]
     assert (live / "tracked.txt").read_text(encoding="utf-8") == "committed\n"
     assert json.loads(capsys.readouterr().out) == {
         "updated": [],
-        "errors": ["root-closures"],
+        "dropped": [],
+        "errors": [],
         "noChange": [],
-        "success": False,
+        "success": True,
+        "withheld": {},
     }
 
 
@@ -4707,7 +4705,7 @@ def test_run_updates_empty_full_plan_check_preserves_live_tree(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Validate an empty full check through a snapshot without promoting."""
+    """Check an empty full plan through a snapshot without roots or promotion."""
     live = tmp_path / "live"
     _init_update_workspace_repo(live)
     live_output = live / "tracked.txt"
@@ -4715,13 +4713,7 @@ def test_run_updates_empty_full_plan_check_preserves_live_tree(
     events: list[str] = []
     original_validate = IsolatedUpdateWorkspace.validate_changes
 
-    def _validate_roots(**kwargs: object) -> tuple[object, ...]:
-        snapshot_root = kwargs["flake_root"]
-        assert isinstance(snapshot_root, Path)
-        assert snapshot_root != live
-        assert (snapshot_root / "tracked.txt").read_text(encoding="utf-8") == (
-            "working tree\n"
-        )
+    def _validate_roots(**_kwargs: object) -> tuple[object, ...]:
         events.append("roots")
         return ()
 
@@ -4750,7 +4742,7 @@ def test_run_updates_empty_full_plan_check_preserves_live_tree(
     monkeypatch.setattr(IsolatedUpdateWorkspace, "promote", _unexpected_promote)
 
     assert _run_async(run_updates(UpdateOptions(check=True, json=True))) == 0
-    assert events == ["roots", "validate"]
+    assert events == ["validate"]
     assert live_output.read_text(encoding="utf-8") == "working tree\n"
 
 
@@ -4766,11 +4758,10 @@ def test_run_updates_targeted_empty_plan_skips_roots_and_finalizes_noop(
     original_promote = IsolatedUpdateWorkspace.promote
 
     def _observe_decision(
-        opts: UpdateOptions,
         changed_paths: tuple[Path, ...],
     ) -> bool:
         assert changed_paths == ()
-        decision = original_decision(opts, changed_paths)
+        decision = original_decision(changed_paths)
         assert not decision
         events.append("decision")
         return decision
@@ -4857,9 +4848,11 @@ def test_run_updates_reports_unknown_targets_as_json(
     assert len(lines) == 1
     assert json.loads(lines[0]) == {
         "updated": [],
+        "dropped": [],
         "errors": list(targets),
         "noChange": [],
         "success": False,
+        "withheld": {},
         "error": message,
         "unknownTargets": list(targets),
         "availableTargets": ["known"],

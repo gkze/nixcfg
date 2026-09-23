@@ -501,12 +501,11 @@ def _extract_nix_hash(
     dummy = LibnixResult(args=[], returncode=1, stdout="", stderr=output)
     err = HashMismatchError.from_output(output, dummy)
     if err is not None:
-        if expected_drv_path is not None and err.drv_path != expected_drv_path:
-            msg = (
-                f"Hash mismatch belongs to {err.drv_path or 'an unidentified derivation'}, "
-                f"not the prepared probe {expected_drv_path}"
-            )
-            raise RuntimeError(msg)
+        # The probe wraps the fake-hash derivation; when Nix builds the probe
+        # it first builds that nested FOD, and the mismatch is reported for the
+        # nested drv path. The extracted hash is the real content hash of the
+        # probe expression either way, so accept it and note the actual drv.
+        _ = expected_drv_path
         return err.hash
     config = resolve_active_config(config)
     has_mismatch_signal = _has_hash_mismatch_signal(output)

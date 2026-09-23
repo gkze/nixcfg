@@ -1,7 +1,15 @@
-"""Renderer implementation for update UI output."""
+"""Renderer implementation for update UI output.
+
+The live panel shows only what is in flight: items that have started and not
+yet finished, followed by the run status line. Finished items are printed once,
+above the panel, so the terminal scrollback is the record and the panel never
+outgrows the screen. Rich's own refresh thread redraws the panel, so spinners
+and elapsed times keep moving while a quiet command runs.
+"""
 
 import sys
-from typing import TYPE_CHECKING
+import threading
+from typing import TYPE_CHECKING, Self, cast
 
 from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
 from rich.control import Control, ControlType
@@ -13,7 +21,11 @@ from rich.text import Text
 from rich.tree import Tree
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from lib.update.ui_state import ItemState, OperationState
+
+type StatusLineSource = Callable[[], str | None]
 
 
 class _ResizeAwareLiveRender(LiveRender):
@@ -122,6 +134,11 @@ def _install_resize_aware_live_render(live: Live) -> Live:
     return live
 
 
+def _refresh_rate(render_interval: float) -> float:
+    """Translate a render interval into Rich's refreshes-per-second unit."""
+    return max(1.0, 1.0 / render_interval) if render_interval > 0 else 4.0
+
+
 class Renderer:
     """Render update progress to TTY and collect non-TTY details."""
 
@@ -155,6 +172,14 @@ class Renderer:
             msg = "quiet must be a boolean"
             raise TypeError(msg)
 
+        status_line_obj = kwargs.pop("status_line", None)
+        status_line: StatusLineSource | None = None
+        if status_line_obj is not None:
+            if not callable(status_line_obj):
+                msg = "status_line must be callable"
+                raise TypeError(msg)
+            status_line = cast("StatusLineSource", status_line_obj)
+
         if kwargs:
             unknown = ", ".join(sorted(kwargs))
             msg = f"Unexpected keyword argument(s): {unknown}"
@@ -168,8 +193,10 @@ class Renderer:
         self.quiet = quiet_obj
         self._initial_panel_height = panel_height_obj
         self.render_interval = render_interval
-        self.last_render = 0.0
-        self.needs_render = False
+        self._status_line = status_line
+        # Serializes item mutation on the event loop against Rich's refresh thread.
+        self.lock = threading.RLock()
+        self.completed: set[str] = set()
 
         self._console: Console | None = None
         self._live: Live | None = None
@@ -177,10 +204,11 @@ class Renderer:
             self._console = Console(force_terminal=True)
             self._live = _install_resize_aware_live_render(
                 Live(
-                    Text(""),
+                    get_renderable=self._build_display,
                     console=self._console,
-                    auto_refresh=False,
-                    transient=False,
+                    auto_refresh=True,
+                    refresh_per_second=_refresh_rate(render_interval),
+                    transient=True,
                 )
             )
             self._live.start()
@@ -270,6 +298,26 @@ class Renderer:
         line.append(text, style=style)
         return line
 
+    def _is_started(self, name: str) -> bool:
+        item = self.items[name]
+        return any(operation.visible() for operation in item.operations.values())
+
+    def _panel_names(self, *, full_output: bool) -> list[str]:
+        """Return items shown in the panel: started and unfinished, or all."""
+        return [
+            name
+            for name in self.order
+            if name not in self.completed and (full_output or self._is_started(name))
+        ]
+
+    def _status_text(self) -> Text | None:
+        if self._status_line is None:
+            return None
+        status = self._status_line()
+        if not status:
+            return None
+        return Text(status, style="bold")
+
     def _build_display(
         self,
         *,
@@ -285,13 +333,32 @@ class Renderer:
         if full_output is None:
             full_output = self.full_output
 
-        trees = [self._build_item_tree(name) for name in self.order]
+        with self.lock:
+            trees = [
+                self._build_item_tree(name)
+                for name in self._panel_names(full_output=full_output)
+            ]
+            status = self._status_text()
 
-        renderable: RenderableType = Group(*trees) if trees else Text("")
+        parts: list[RenderableType] = list(trees)
+        if status is not None:
+            parts.append(status)
+        renderable: RenderableType = Group(*parts) if parts else Text("")
         if full_output:
             return renderable
 
         return self._compact_lines(renderable, width=width, max_visible=max_visible)
+
+    def item_completed(self, name: str) -> None:
+        """Print a finished item once, above the live panel, and retire it."""
+        with self.lock:
+            if name in self.completed or name not in self.items:
+                return
+            self.completed.add(name)
+            if self._console is None:
+                return
+            tree = self._build_item_tree(name)
+        self._console.print(tree)
 
     def log_line(self, source: str, message: str) -> None:
         """Print a build log line in verbose non-TTY mode."""
@@ -328,41 +395,60 @@ class Renderer:
             for line in lines[1:]:
                 sys.stderr.write(f"[{source}]       {line}\n")
 
-    def request_render(self) -> None:
-        """Mark the live panel as needing refresh."""
-        if self.is_tty:
-            self.needs_render = True
-
-    def render_if_due(self, now: float) -> None:
-        """Render when the configured interval has elapsed."""
-        if not self.is_tty or not self.needs_render:
-            return
-        if now - self.last_render >= self.render_interval:
-            self.render()
-            self.last_render = now
-            self.needs_render = False
-
     def finalize(self) -> None:
-        """Stop live rendering and print final status when enabled."""
-        if self._live:
-            self._live.update(self._build_display(full_output=True), refresh=False)
-            self._live.stop()
-            self._live = None
+        """Print any item that never finished, then stop live rendering."""
+        if self._live is None:
             return
-        if self.is_tty and not self.quiet:
-            self._print_final_status()
-
-    def _print_final_status(self) -> None:
-        """Render the final full output snapshot to stdout."""
-        no_color = not sys.stdout.isatty()
-        console = Console(no_color=no_color, highlight=not no_color)
-        console.print(self._build_display(full_output=True))
-
-    def render(self) -> None:
-        """Force one live panel render."""
-        if not self._live:
-            return
-        self._live.update(self._build_display(), refresh=True)
+        with self.lock:
+            unfinished = [
+                name
+                for name in self.order
+                if name not in self.completed and self._is_started(name)
+            ]
+        for name in unfinished:
+            self.item_completed(name)
+        self._live.stop()
+        self._live = None
 
 
-__all__ = ["Renderer"]
+class ValidationDisplay:
+    """Transient live block for the synchronous validation phases."""
+
+    def __init__(
+        self,
+        *,
+        status_line: StatusLineSource,
+        tail: Callable[[], tuple[str, ...]],
+        render_interval: float,
+    ) -> None:
+        """Prepare a live block driven by run status and validation output."""
+        self._status_line = status_line
+        self._tail = tail
+        self._console = Console(force_terminal=True)
+        self._live = Live(
+            get_renderable=self._build,
+            console=self._console,
+            auto_refresh=True,
+            refresh_per_second=_refresh_rate(render_interval),
+            transient=True,
+        )
+
+    def _build(self) -> RenderableType:
+        parts: list[RenderableType] = []
+        status = self._status_line()
+        if status:
+            parts.append(Text(status, style="bold"))
+        parts.extend(Text(f"> {line}", style="dim") for line in self._tail())
+        return Group(*parts) if parts else Text("")
+
+    def __enter__(self) -> Self:
+        """Start refreshing the block."""
+        self._live.start()
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        """Stop and clear the block."""
+        self._live.stop()
+
+
+__all__ = ["Renderer", "ValidationDisplay"]

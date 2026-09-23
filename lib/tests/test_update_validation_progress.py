@@ -18,12 +18,14 @@ from lib.update import derivation_validation as validation
 from lib.update.cli import (
     OutputOptions,
     UpdateOptions,
-    UpdateSummary,
+    _RunOutcome,
     _update_cancellation_check,
-    _validate_run_snapshot,
+    _validate_round,
+    _ValidationContext,
 )
 from lib.update.config import resolve_config
 from lib.update.persistence import UpdateValidationSnapshot
+from lib.update.run_monitor import EVENTS_FILE, RunMonitor
 
 
 def _assert_reader_stopped() -> None:
@@ -52,11 +54,14 @@ sys.stdout.buffer.write("last ü".encode())
 sys.stdout.flush()
 raise SystemExit(int(sys.argv[2]))
 """
-    seen: list[str] = []
+    events: list[validation.ValidationProgressEvent] = []
 
-    def progress(line: str) -> None:
-        seen.append(line)
-        if line == "first":
+    def progress(event: validation.ValidationProgressEvent) -> None:
+        events.append(event)
+        if (
+            isinstance(event, validation.ValidationCommandOutput)
+            and event.line == "first"
+        ):
             gate.touch()
 
     args = [sys.executable, "-c", script, str(gate), str(returncode)]
@@ -72,14 +77,28 @@ raise SystemExit(int(sys.argv[2]))
     assert result.returncode == returncode
     assert result.stdout == "first\nlast ü"
     assert result.stderr == "diagnostic\n"
-    assert seen[1] == "first"
-    assert set(seen[1:]) == {"first", "diagnostic", "last ü"}
+    lines = [
+        event.line
+        for event in events
+        if isinstance(event, validation.ValidationCommandOutput)
+    ]
+    assert lines[0] == "first"
+    assert set(lines) == {"first", "diagnostic", "last ü"}
+    assert isinstance(events[0], validation.ValidationCommandStarted)
+    assert events[-1] == validation.ValidationCommandFinished(
+        events[0].command, returncode == 0
+    )
     _assert_reader_stopped()
 
 
 def test_validation_timeout_reaps_child_and_drains_progress(tmp_path: Path) -> None:
     """A timed out real child and its output reader both finish before return."""
     seen: list[str] = []
+
+    def progress(event: validation.ValidationProgressEvent) -> None:
+        if isinstance(event, validation.ValidationCommandOutput):
+            seen.append(event.line)
+
     with pytest.raises(subprocess.TimeoutExpired):
         validation._run_with_validation_progress(
             [
@@ -90,7 +109,7 @@ def test_validation_timeout_reaps_child_and_drains_progress(tmp_path: Path) -> N
             cwd=tmp_path,
             timeout=0.3,
             run=None,
-            progress=seen.append,
+            progress=progress,
         )
     assert len(seen) == 1
     with pytest.raises(ProcessLookupError):
@@ -121,11 +140,15 @@ def test_validation_interrupt_reaps_child_and_reader() -> None:
     """Deliver a real SIGINT in an isolated interpreter, leaving pytest untouched."""
     script = """
 import json, os, pathlib, signal, subprocess, sys, threading
-from lib.update.derivation_validation import _run_with_validation_progress
+from lib.update.derivation_validation import (
+    ValidationCommandOutput,
+    _run_with_validation_progress,
+)
 seen = []
-def progress(line):
-    seen.append(line)
-    os.kill(os.getpid(), signal.SIGINT)
+def progress(event):
+    if isinstance(event, ValidationCommandOutput):
+        seen.append(event.line)
+        os.kill(os.getpid(), signal.SIGINT)
 try:
     _run_with_validation_progress(
         [sys.executable, "-c", "import os,time; print(os.getpid(),flush=True); time.sleep(30)"],
@@ -262,8 +285,9 @@ def test_validation_progress_reader_failure_is_propagated(tmp_path: Path) -> Non
     """A failed observer promptly kills a long-running child and joins the reader."""
     seen: list[str] = []
 
-    def broken_progress(line: str) -> None:
-        seen.append(line)
+    def broken_progress(event: validation.ValidationProgressEvent) -> None:
+        if isinstance(event, validation.ValidationCommandOutput):
+            seen.append(event.line)
         raise BrokenPipeError("observer failed")
 
     started = time.monotonic()
@@ -298,7 +322,7 @@ if not marker.exists():
     raise SystemExit(1)
 print("complete")
 """
-    seen: list[str] = []
+    seen: list[validation.ValidationProgressEvent] = []
     sleeps: list[float] = []
     result = validation._run_validation_command(
         [sys.executable, "-c", script, str(marker)],
@@ -312,6 +336,10 @@ print("complete")
     assert result.stdout == "complete\n"
     assert sleeps == [1.0]
     assert "Retrying transient Nix failure (attempt 2/3)" in seen
+    assert any(
+        isinstance(event, validation.ValidationCommandFinished) and event.succeeded
+        for event in seen
+    )
     _assert_reader_stopped()
 
 
@@ -350,13 +378,14 @@ def test_root_validation_streams_manifest_and_failed_batch_fallback(
             args, 1 if "aarch64-linux" in args[-1] else 0
         )
 
-    seen: list[str] = []
+    seen: list[validation.ValidationProgressEvent] = []
     failures = validation.validate_root_closures(
         flake_root=tmp_path,
         timeout=17,
         run=run,
         progress=seen.append,
         sleep=lambda _: pytest.fail("deterministic outcomes must not retry"),
+        print_build_logs=True,
     )
     assert len(calls) == 4
     assert calls[0][1] == "eval"
@@ -365,7 +394,14 @@ def test_root_validation_streams_manifest_and_failed_batch_fallback(
     assert failures[0].installable == "path:.#checks.aarch64-linux.root-closures"
     assert failures[0].message == "builder diagnostic"
     assert "Batch validation did not succeed; isolating failing targets" in seen
-    assert seen.count("builder diagnostic") == 3
+    assert (
+        sum(
+            isinstance(event, validation.ValidationCommandOutput)
+            and event.line == "builder diagnostic"
+            for event in seen
+        )
+        == 3
+    )
     _assert_reader_stopped()
 
 
@@ -393,7 +429,7 @@ def test_validation_phase_output_modes(
         progress = kwargs["progress"]
         if callable(progress):
             emit = cast("validation.ValidationProgress", progress)
-            emit("$ nix build -L [literal]")
+            emit(validation.ValidationCommandStarted("nix build -L [literal]"))
             emit("\x1b[31mbuilding dependency\x1b[0m")
             emit("https://example.test/archive?signature=fixture-signature")
         calls.append("validate")
@@ -405,15 +441,21 @@ def test_validation_phase_output_modes(
     monkeypatch.setattr(
         "lib.update.cli._requires_root_closure_validation", lambda *_: True
     )
-    assert not _validate_run_snapshot(
+    assert _validate_round(
         make_run_plan(source_names=("demo",)),
         UpdateValidationSnapshot(root=tmp_path, changed_paths=()),
-        UpdateSummary(),
-        UpdateOptions(verbose=verbose, quiet=quiet, json=json_output, tty="off"),
-        OutputOptions(quiet=quiet, json_output=json_output),
-        resolve_config(),
-        check_cancelled=lambda: None,
-    )
+        _RunOutcome(),
+        _ValidationContext(
+            opts=UpdateOptions(
+                verbose=verbose, quiet=quiet, json=json_output, tty="off"
+            ),
+            out=OutputOptions(quiet=quiet, json_output=json_output),
+            config=resolve_config(),
+            updaters={},
+            check_cancelled=lambda: None,
+        ),
+        round_index=0,
+    ) == (False, False)
     captured = capsys.readouterr()
     assert calls == ["validate", "validate"]
     assert "fixture-signature" not in captured.out
@@ -427,3 +469,96 @@ def test_validation_phase_output_modes(
         assert ("building dependency" in captured.out) == verbose
         assert ("https://example.test/archive?REDACTED" in captured.out) == verbose
         assert "\x1b" not in captured.out
+
+
+def test_validation_round_reports_phases_to_the_monitor(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Validation rounds feed phase and validation events to the run monitor."""
+    monitor = RunMonitor(targets=("demo",), phase_count=4)
+
+    def validate(*_args: object, **kwargs: object) -> tuple[object, ...]:
+        progress = kwargs["progress"]
+        if callable(progress):
+            emit = cast("validation.ValidationProgress", progress)
+            emit(validation.ValidationCommandStarted("nix build -L [literal]"))
+        return ()
+
+    monkeypatch.setattr("lib.update.cli._get_updaters", dict)
+    monkeypatch.setattr(validation, "validate_derivations", validate)
+    monkeypatch.setattr(validation, "validate_root_closures", validate)
+    monkeypatch.setattr(
+        "lib.update.cli._requires_root_closure_validation", lambda *_: True
+    )
+    assert _validate_round(
+        make_run_plan(source_names=("demo",)),
+        UpdateValidationSnapshot(root=tmp_path, changed_paths=()),
+        _RunOutcome(),
+        _ValidationContext(
+            opts=UpdateOptions(tty="off"),
+            out=OutputOptions(),
+            config=resolve_config(),
+            updaters={},
+            check_cancelled=lambda: None,
+            monitor=monitor,
+        ),
+        round_index=1,
+    ) == (False, False)
+    monitor.close()
+    status = monitor.snapshot()
+    assert status.phase == "root closures"
+    assert (status.phase_index, status.phase_count) == (4, 4)
+
+
+def test_validation_round_records_events_for_the_run_log(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """A run-log-backed monitor records validation events durably."""
+    monitor = RunMonitor.start(
+        targets=("demo",),
+        phase_count=4,
+        run_root=tmp_path_factory.mktemp("runs"),
+        inactivity_warning_seconds=300.0,
+    )
+
+    def validate(*_args: object, **kwargs: object) -> tuple[object, ...]:
+        progress = kwargs["progress"]
+        if callable(progress):
+            emit = cast("validation.ValidationProgress", progress)
+            emit(validation.ValidationCommandStarted("nix build -L roots"))
+            emit(
+                validation.ValidationCommandFinished(
+                    "nix build -L roots", succeeded=True
+                )
+            )
+        return ()
+
+    monkeypatch.setattr("lib.update.cli._get_updaters", dict)
+    monkeypatch.setattr(validation, "validate_derivations", validate)
+    monkeypatch.setattr(validation, "validate_root_closures", validate)
+    monkeypatch.setattr(
+        "lib.update.cli._requires_root_closure_validation", lambda *_: True
+    )
+    assert _validate_round(
+        make_run_plan(source_names=("demo",)),
+        UpdateValidationSnapshot(root=tmp_path, changed_paths=()),
+        _RunOutcome(),
+        _ValidationContext(
+            opts=UpdateOptions(tty="off"),
+            out=OutputOptions(),
+            config=resolve_config(),
+            updaters={},
+            check_cancelled=lambda: None,
+            monitor=monitor,
+        ),
+        round_index=0,
+    ) == (False, False)
+    monitor.close()
+    assert monitor.run_dir is not None
+    events = (monitor.run_dir / EVENTS_FILE).read_text(encoding="utf-8")
+    assert '"phase": "derivation validation"' in events
+    assert '"phase": "root closures"' in events
+    assert '"succeeded": true' in events

@@ -1,11 +1,8 @@
 """Observation-only event consumer driving update UI rendering."""
 
-import asyncio
-import contextlib
 import shlex
-import time
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.sources import SourceEntry, SourcesFile
 from lib.update.events import (
@@ -15,6 +12,11 @@ from lib.update.events import (
     expect_artifact_updates,
 )
 from lib.update.ui_render import Renderer
+
+if TYPE_CHECKING:
+    import asyncio
+
+    from lib.update.run_monitor import RunMonitor
 from lib.update.ui_state import (
     ItemMeta,
     ItemState,
@@ -40,6 +42,10 @@ class ConsumeEventsOptions:
     render_interval: float = 0.05
     build_failure_tail_lines: int = 20
     quiet: bool = False
+    monitor: RunMonitor | None = None
+
+
+_TERMINAL_EVENT_KINDS = frozenset({UpdateEventKind.RESULT, UpdateEventKind.ERROR})
 
 
 class EventConsumer:
@@ -59,9 +65,9 @@ class EventConsumer:
         """Initialize consumer state, item map, and renderer."""
         self._queue = queue
         self._is_tty = options.is_tty
-        self._render_interval = options.render_interval
         self.build_failure_tail_lines = options.build_failure_tail_lines
         self._sources = sources
+        self._monitor = options.monitor
 
         self.items: dict[str, ItemState] = {
             name: ItemState.from_meta(
@@ -78,6 +84,7 @@ class EventConsumer:
             verbose=options.verbose,
             render_interval=options.render_interval,
             quiet=options.quiet,
+            status_line=(None if self._monitor is None else self._monitor.status_line),
         )
 
     def _handle_status(self, event: UpdateEvent, item: ItemState) -> None:
@@ -112,12 +119,13 @@ class EventConsumer:
         if op_kind is None:
             op_kind = OperationKind.COMPUTE_HASH
         operation = item.operations.get(op_kind)
-        if (
-            operation
-            and operation.active_commands > 0
-            and (not operation.tail or operation.tail[-1] != line_text)
-        ):
-            operation.tail.append(line_text)
+        if operation and operation.active_commands > 0:
+            if not operation.tail or operation.tail[-1] != line_text:
+                operation.tail.append(line_text)
+        elif operation and operation.status == "running" and message:
+            # Progress lines outside a command (heartbeats, lock waits, retries)
+            # replace the operation's message so the panel shows them.
+            operation.message = message
         self.renderer.log_line(event.source, message)
 
     @staticmethod
@@ -350,45 +358,29 @@ class EventConsumer:
         return False
 
     async def run(self) -> None:
-        """Consume and render events until the sentinel arrives."""
+        """Consume and render events until the sentinel arrives.
+
+        Every event also reaches the run monitor, which owns counts, the status
+        line, and the run log. Rendering itself is driven by Rich's refresh
+        thread, so this loop only mutates item state under the renderer lock.
+        """
         renderer = self.renderer
-        delayed_render: asyncio.Task[None] | None = None
-
-        async def _render_after_interval() -> None:
-            delay = max(
-                0.0,
-                self._render_interval - (time.monotonic() - renderer.last_render),
-            )
-            if delay:
-                await asyncio.sleep(delay)
-            renderer.render_if_due(time.monotonic())
-
-        def _schedule_delayed_render() -> None:
-            nonlocal delayed_render
-            if not self._is_tty or not renderer.needs_render:
-                return
-            if delayed_render is None or delayed_render.done():
-                delayed_render = asyncio.create_task(_render_after_interval())
-
+        monitor = self._monitor
         try:
             while True:
                 event = await self._queue.get()
                 if event is None:
                     break
+                if monitor is not None:
+                    monitor.record(event)
                 item = self.items.get(event.source)
                 if item is None:
                     continue
-                if self._dispatch(event, item):
-                    continue
-
-                renderer.request_render()
-                renderer.render_if_due(time.monotonic())
-                _schedule_delayed_render()
+                with renderer.lock:
+                    skipped = self._dispatch(event, item)
+                if not skipped and event.kind in _TERMINAL_EVENT_KINDS:
+                    renderer.item_completed(event.source)
         finally:
-            if delayed_render is not None and not delayed_render.done():
-                delayed_render.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await delayed_render
             renderer.finalize()
 
 

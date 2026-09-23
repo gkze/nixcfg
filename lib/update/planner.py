@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Protocol
 from lib.update.updaters.flake_backed import FlakeInputUpdater
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Iterable, Mapping, Sequence
 
     from lib.nix.models.sources import SourceEntry
     from lib.update.refs import FlakeInputRef
@@ -254,6 +254,17 @@ def select_target_source_names(
     add_companion_source_children(selected, roots=roots, updaters=updaters)
     add_aggregate_sources(selected, updaters)
 
+    if not target_names:
+        held = {
+            name
+            for name in selected
+            if getattr(updaters[name], "bulk_update_hold", None)
+        }
+        # Keep companion and aggregate artifacts coherent when a source is held.
+        selected.difference_update(
+            failure_closure(held, dependency_clusters(selected, updaters=updaters))
+        )
+
     depths = companion_source_depths(selected, updaters)
     return sorted(
         selected,
@@ -263,6 +274,67 @@ def select_target_source_names(
             name,
         ),
     )
+
+
+def dependency_clusters(
+    names: Iterable[str],
+    *,
+    updaters: Mapping[str, type[object]],
+    entries: Mapping[str, SourceEntry] | None = None,
+    input_names: Iterable[str] = (),
+) -> dict[str, frozenset[str]]:
+    """Group targets that must be promoted together or withheld together.
+
+    Companion and aggregate edges couple sources in both directions, because
+    each side's files are derived from the other's result. A flake input
+    couples with every source that hashes against it. The result maps every
+    name, including the given input names, to its cluster.
+    """
+    members = list(dict.fromkeys((*names, *input_names)))
+    known = set(members)
+    parent = {name: name for name in members}
+
+    def find(name: str) -> str:
+        while parent[name] != name:
+            parent[name] = parent[parent[name]]
+            name = parent[name]
+        return name
+
+    def union(left: str, right: str) -> None:
+        if right in known:
+            parent[find(left)] = find(right)
+
+    for name in members:
+        updater_cls = updaters.get(name)
+        if updater_cls is None:
+            continue
+        companion_parent = companion_source_name(updater_cls)
+        if companion_parent is not None:
+            union(name, companion_parent)
+        for destination in aggregate_destination_names(updater_cls):
+            union(name, destination)
+        entry = None if entries is None else entries.get(name)
+        backing_input = source_backing_input_name(name, updater_cls, entry)
+        if backing_input is not None:
+            union(name, backing_input)
+        for input_name in source_additional_input_names(updater_cls):
+            union(name, input_name)
+
+    clusters: dict[str, set[str]] = {}
+    for name in members:
+        clusters.setdefault(find(name), set()).add(name)
+    return {name: frozenset(clusters[find(name)]) for name in members}
+
+
+def failure_closure(
+    failed: Iterable[str],
+    clusters: Mapping[str, frozenset[str]],
+) -> frozenset[str]:
+    """Return every target coupled to a failed one, including the failures."""
+    closure: set[str] = set()
+    for name in failed:
+        closure.update(clusters.get(name, frozenset({name})))
+    return frozenset(closure)
 
 
 def source_update_waves(
@@ -344,6 +416,8 @@ __all__ = [
     "companion_source_depths",
     "companion_source_name",
     "companion_source_parent",
+    "dependency_clusters",
+    "failure_closure",
     "resolve_update_targets",
     "select_target_source_names",
     "source_additional_input_names",
