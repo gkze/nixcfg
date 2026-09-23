@@ -15,7 +15,7 @@
   sourceHashPackageName ? "opencode-desktop",
   selfSource ? outputs.lib.sourceEntry sourceHashPackageName,
   opencodeChannel ? "prod",
-  appName ? if opencodeChannel == "prod" then "OpenCode" else "OpenCode Desktop Dev",
+  appName ? if opencodeChannel == "prod" then "OpenCode" else "OpenCode Dev",
   appId ? if opencodeChannel == "prod" then "ai.opencode.desktop" else "ai.opencode.desktop.dev",
   appProtocolName ? appName,
   appProtocolScheme ? "opencode",

@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-smbsPnbBGCefEKFyrnQN1v6uGmkUICXESmWTRMayc2c=",
-    "x86_64-darwin": "sha256-smbsPnbBGCefEKFyrnQN1v6uGmkUICXESmWTRMayc2c="
+    "aarch64-darwin": "sha256-qw0gGxiNA/2idZB5APMgwy5/1Wlcnfi6JB/2tF8iWqc=",
+    "x86_64-darwin": "sha256-qw0gGxiNA/2idZB5APMgwy5/1Wlcnfi6JB/2tF8iWqc="
   },
   "urls": {
-    "aarch64-darwin": "https://github.com/Ranchero-Software/NetNewsWire/releases/download/mac-7.1.3/NetNewsWire7.1.3.zip",
-    "x86_64-darwin": "https://github.com/Ranchero-Software/NetNewsWire/releases/download/mac-7.1.3/NetNewsWire7.1.3.zip"
+    "aarch64-darwin": "https://github.com/Ranchero-Software/NetNewsWire/releases/download/mac-7.1.4/NetNewsWire7.1.4.zip",
+    "x86_64-darwin": "https://github.com/Ranchero-Software/NetNewsWire/releases/download/mac-7.1.4/NetNewsWire7.1.4.zip"
   },
-  "version": "7.1.3"
+  "version": "7.1.4"
 }

@@ -60,6 +60,7 @@ class ExecutorUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
     """Track immutable Executor releases and their exact source toolchain."""
 
     name = "executor"
+    required_tools = ("nix", "nix-prefetch-url", "deadnix", "nixfmt")
     aggregate_into = ("electron-runtimes",)
     GITHUB_OWNER = "UsefulSoftwareCo"
     GITHUB_REPO = "executor"

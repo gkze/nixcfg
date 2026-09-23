@@ -1,5 +1,5 @@
 {
-  "drvHash": "platforms-v1:de36cd9722c168ba3b7a32d3331020a2b8a33dd69f9e4d95cba4384bca7b0e7f",
+  "drvHash": "platforms-v1:846c63b06705dc3ef98e49fa754193e699762c166a2aaa12cc7f81aed5edbd0c",
   "hashes": [
     {
       "hash": "sha256-llSqPk7coKEobIJaLYu/dxFLAwNT9g96FeG3IO+55q0=",
@@ -19,9 +19,9 @@
   ],
   "input": "opencode",
   "platformDrvHashes": {
-    "aarch64-darwin": "sasl82fpr6nj10i9ly3xn21ljhxjhpmv",
-    "aarch64-linux": "xx5l670zf0sphy81j1p5m0bdn4yv7p7p",
-    "x86_64-linux": "1hg6npwsq3x4xyz83a8bkgaqcj1nm74j"
+    "aarch64-darwin": "jx3q5pqpalc23hbdk0hf5bkdsq4x0hzl",
+    "aarch64-linux": "q2jmdhg64p1mhcy5iz051dvxmjqkphsr",
+    "x86_64-linux": "07yscnpqlwp9fjaam9c08j36bf6nwm9y"
   },
   "version": "gkze/fixes"
 }

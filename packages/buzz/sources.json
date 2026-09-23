@@ -1,30 +1,30 @@
 {
-  "commit": "b9392d9d78744df365f9276e1ffe8c1baa5ea903",
+  "commit": "3befaf16002d802a97aa79007be29b23623ceb3f",
   "hashes": [
     {
-      "hash": "sha256-N377BmrUPqkne0kCmD7ESO8FqtzUMSzulRahCsCVSXk=",
+      "hash": "sha256-bWAD8t4T2r7Ks686FSwU9oNwDLTQ8oZ1qoFgzCHTrTU=",
       "hashType": "cargoHash",
-      "url": "https://github.com/block/buzz/archive/b9392d9d78744df365f9276e1ffe8c1baa5ea903.tar.gz"
+      "url": "https://github.com/block/buzz/archive/3befaf16002d802a97aa79007be29b23623ceb3f.tar.gz"
     },
     {
       "hash": "sha256-qxtgbCeivfpAQg2+JOUGCQo7agf0GAARvLle89jFzu4=",
       "hashType": "npmDepsHash",
-      "url": "https://github.com/block/buzz/archive/b9392d9d78744df365f9276e1ffe8c1baa5ea903.tar.gz"
+      "url": "https://github.com/block/buzz/archive/3befaf16002d802a97aa79007be29b23623ceb3f.tar.gz"
     },
     {
-      "hash": "sha256-RXjmM66u40cxnacbvTtCFJShMK4BM+MHOyJ2vQ7Gw60=",
+      "hash": "sha256-Lv0szQN+l5pxi8xjbt3v3iqaFN+eRTtNSeogP4JoCuc=",
       "hashType": "srcHash",
-      "url": "https://github.com/Mesh-LLM/mesh-llm/archive/3295c902d4c4f859aaadf9240042ffdaf06dd07e.tar.gz"
+      "url": "https://github.com/Mesh-LLM/mesh-llm/archive/9f192c9d821991ba43d79bb15fd2f2f12e597571.tar.gz"
     },
     {
-      "hash": "sha256-Mw8NXYLbLy9idH+doY287Mm3WuEXvAeO1B3H162rE70=",
+      "hash": "sha256-swBon8daznDgTYK1PH7DoCW3/r4kJiD19/3stpZlRSQ=",
       "hashType": "srcHash",
-      "url": "https://github.com/block/buzz/archive/b9392d9d78744df365f9276e1ffe8c1baa5ea903.tar.gz"
+      "url": "https://github.com/block/buzz/archive/3befaf16002d802a97aa79007be29b23623ceb3f.tar.gz"
     },
     {
-      "hash": "sha256-cN+27Zi0dGo30D08CxwpPwb2hY4NgkGNaWgkmz8I0f8=",
+      "hash": "sha256-B/3SMW8q8GFflkWMjxuLM/lzZcC0Uc6ZI/9G+GSWih8=",
       "hashType": "srcHash",
-      "url": "https://github.com/ggml-org/llama.cpp/archive/8190848bb36c7df4251db4352bd81bc07d0a4385.tar.gz"
+      "url": "https://github.com/ggml-org/llama.cpp/archive/cc83d7b4824f73cfdda4dfbb47ee39804f71b328.tar.gz"
     },
     {
       "hash": "sha256-vzrc2Vn5IwORsA++UqN8UN3LkcqyPRO05qj7u8kyGkI=",
@@ -37,20 +37,20 @@
       "url": "https://github.com/microsoft/onnxruntime/archive/8f0278c77bf44b0cc83c098c6c722b92a36ac4b5.tar.gz"
     },
     {
-      "hash": "sha256-MFCN0LRVbqaRmCK5VgWgF58luvuJNTlpHwV+ULqXx2U=",
+      "hash": "sha256-6VZHMhy6oCK6Lw9VxvF1Yejq4AZ/qBJtBU6BChPFmfk=",
       "hashType": "vendorHash",
-      "url": "https://github.com/block/buzz/archive/b9392d9d78744df365f9276e1ffe8c1baa5ea903.tar.gz"
+      "url": "https://github.com/block/buzz/archive/3befaf16002d802a97aa79007be29b23623ceb3f.tar.gz"
     }
   ],
   "pins": {
     "onnxruntimeVersion": "1.27.0"
   },
   "urls": {
-    "buzz": "https://github.com/block/buzz/archive/b9392d9d78744df365f9276e1ffe8c1baa5ea903.tar.gz",
-    "llamaCpp": "https://github.com/ggml-org/llama.cpp/archive/8190848bb36c7df4251db4352bd81bc07d0a4385.tar.gz",
-    "meshLlm": "https://github.com/Mesh-LLM/mesh-llm/archive/3295c902d4c4f859aaadf9240042ffdaf06dd07e.tar.gz",
+    "buzz": "https://github.com/block/buzz/archive/3befaf16002d802a97aa79007be29b23623ceb3f.tar.gz",
+    "llamaCpp": "https://github.com/ggml-org/llama.cpp/archive/cc83d7b4824f73cfdda4dfbb47ee39804f71b328.tar.gz",
+    "meshLlm": "https://github.com/Mesh-LLM/mesh-llm/archive/9f192c9d821991ba43d79bb15fd2f2f12e597571.tar.gz",
     "onnxruntime": "https://github.com/microsoft/onnxruntime/archive/8f0278c77bf44b0cc83c098c6c722b92a36ac4b5.tar.gz",
     "sherpaOnnx": "https://github.com/k2-fsa/sherpa-onnx/archive/142807252687d81b40d6315f23470a1512a00de3.tar.gz"
   },
-  "version": "0.5.23"
+  "version": "0.5.24"
 }

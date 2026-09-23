@@ -1,14 +1,13 @@
 {
   mkSimpleDarwinApp,
-  mkDmgApp,
+  mkCrx3DmgApp,
   selfSource,
   ...
 }:
 mkSimpleDarwinApp {
-  builder = mkDmgApp;
+  builder = mkCrx3DmgApp;
   pname = "gemini";
   appName = "Gemini";
-  sourceName = "Gemini.dmg";
   info = selfSource;
   dontFixup = true;
   postInstallApp = ''
@@ -21,6 +20,6 @@ mkSimpleDarwinApp {
       "${selfSource.version}"
   '';
   description = "Native Gemini assistant with screen context and macOS automation";
-  homepage = "https://gemini.google/mac/";
+  homepage = "https://gemini.google/desktop/";
   platforms = [ "aarch64-darwin" ];
 }

@@ -224,7 +224,7 @@ def test_inventory_is_sorted_complete_and_deterministic(
             {
                 "path": "third_party/llama.cpp/upstream.txt",
                 "sha256": (
-                    "bac5d6f06e193dff7866055e4c25daf800d33b46964870cf942659f478e2042f"
+                    "e8dd7a7216c315fe252fcda95842648ac90a64d357e6367bf1b9ec4423acb0ac"
                 ),
             },
         ],

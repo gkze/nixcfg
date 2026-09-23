@@ -325,8 +325,9 @@ _ANCHORS = (
         "root-postinstall-download",
         "openchamber",
         "package.json",
-        '    "postinstall": "node ./fix-deprecation.js && patch-package && node '
-        './packages/electron/scripts/ensure-electron.mjs --best-effort",\n',
+        '    "postinstall": "node ./fix-deprecation.js && bun run --cwd packages/sdk '
+        "build && bun run extensions:build && "
+        'node ./packages/electron/scripts/ensure-electron.mjs --best-effort",\n',
     ),
     _SourceAnchor(
         "electron-prepare-opencode-cli",

@@ -87,12 +87,13 @@
     "appBuilderLibBackportCommit": "2ff9190aadc791503a6e62cdcbfa975448bc49bf",
     "appBuilderLibVersion": "26.8.1",
     "claudeAgentSdkVersion": "0.3.246",
-    "commit": "9400a49af670fdb5db4af58e73f8df98588dbea9",
-    "electronVersion": "41.2.0",
+    "commit": "81865852011df86aa0ad0ae411cb2f5e4078153f",
+    "electronVersion": "44.2.0",
     "esbuildVersion": "0.25.12",
+    "nodeAbiVersion": "4.28.0",
     "nodeAddonApiVersion": "8.3.0",
     "npmFetcherVersion": 2,
-    "version": "0.7.2"
+    "version": "0.9.1"
   },
   "schemaVersion": 1,
   "sherpaOnnx": {

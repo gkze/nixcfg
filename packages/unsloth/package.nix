@@ -413,6 +413,8 @@ let
   validatedPackage = appCandidate.overrideAttrs (old: {
     passthru = (old.passthru or { }) // closurePassthru;
   });
+  # Isolated from appCandidate on purpose: inheriting its inputs would realize
+  # the vendor FODs (which fail on fakeHash) before the gate message is shown.
   blockedPackage = stdenvNoCC.mkDerivation {
     pname = "unsloth-unvalidated";
     inherit version;
@@ -423,11 +425,14 @@ let
       exit 1
     '';
     installPhase = "mkdir -p $out";
-    passthru = closurePassthru;
+    passthru = closurePassthru // {
+      macApp = appCandidate.passthru.macApp or null;
+    };
     meta = {
       description = "Build-gated Unsloth Studio source migration";
       platforms = [ "aarch64-darwin" ];
     };
   };
+
 in
 if exportReady then validatedPackage else blockedPackage

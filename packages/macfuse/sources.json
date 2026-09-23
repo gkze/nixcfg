@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-egt7ZsDn+JMnB9EhXcnPSG4XjQl64KLc3xfYUwVmqhU="
+    "aarch64-darwin": "sha256-hhgU8Kx/qPZUfqQM3UmjashLzH0084ofp06M9osEAcU="
   },
   "urls": {
-    "aarch64-darwin": "https://github.com/macfuse/macfuse/releases/download/macfuse-5.3.3/macfuse-5.3.3.dmg"
+    "aarch64-darwin": "https://github.com/macfuse/macfuse/releases/download/macfuse-5.4.0/macfuse-5.4.0.dmg"
   },
-  "version": "5.3.3"
+  "version": "5.4.0"
 }

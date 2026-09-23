@@ -77,6 +77,7 @@ class _OpenChamberManifestContract:
 
 @dataclass(frozen=True, slots=True)
 class _CompanionManifestContract:
+    companion_bun_version: str
     node_addon_api_version: str
     opencode_node_modules_hash: str
 
@@ -352,15 +353,18 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
     def _validate_companion_manifests(
         cls,
         *,
-        bun_version: str,
         opencode_payload: object,
         opencode_hashes_payload: object,
         sherpa_payload: object,
     ) -> _CompanionManifestContract:
         opencode = _require_object(opencode_payload, context="OpenCode manifest")
-        _require_exact(
+        # OpenCode and OpenChamber release their own bun requirements on
+        # independent schedules. Record the companion's declared bun version so
+        # each component builds with the bun its own manifest pins, rather than
+        # forcing one shared version across both.
+        companion_bun_version = _require_prefixed_version(
             _require_string(opencode, "packageManager", context="OpenCode manifest"),
-            f"bun@{bun_version}",
+            "bun@",
             context="OpenCode package manager",
         )
         hashes = _require_object(opencode_hashes_payload, context="OpenCode hashes")
@@ -383,6 +387,7 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             context="sherpa node-addon-api dependency",
         )
         return _CompanionManifestContract(
+            companion_bun_version=companion_bun_version,
             node_addon_api_version=node_addon_api_version,
             opencode_node_modules_hash=opencode_node_modules_hash,
         )
@@ -495,7 +500,6 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             config=self.config,
         )
         companion_contract = self._validate_companion_manifests(
-            bun_version=manifest_contract.bun_version,
             opencode_payload=opencode_payload,
             opencode_hashes_payload=opencode_hashes_payload,
             sherpa_payload=sherpa_payload,
@@ -520,6 +524,10 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
                 ),
                 "nodeAddonApiVersion": companion_contract.node_addon_api_version,
                 "openchamberUrl": openchamber_url,
+                "opencodeBunUrl": self._bun_url(
+                    companion_contract.companion_bun_version
+                ),
+                "opencodeBunVersion": companion_contract.companion_bun_version,
                 "opencodeCommit": opencode_commit,
                 "opencodeNodeModulesHash": (
                     companion_contract.opencode_node_modules_hash
@@ -660,6 +668,8 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             "nodeAddonApiUrl",
             "nodeAddonApiVersion",
             "openchamberUrl",
+            "opencodeBunUrl",
+            "opencodeBunVersion",
             "opencodeCommit",
             "opencodeNodeModulesHash",
             "opencodeUrl",
@@ -680,6 +690,7 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             "bunVersion",
             "electronVersion",
             "nodeAddonApiVersion",
+            "opencodeBunVersion",
             "opencodeVersion",
             "sherpaVersion",
             "sherpaWrapperVersion",
@@ -701,6 +712,7 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
                 cls.GITHUB_REPO,
                 result["commit"],
             ),
+            "opencodeBunUrl": cls._bun_url(result["opencodeBunVersion"]),
             "opencodeUrl": cls._archive_url(
                 "anomalyco",
                 "opencode",
@@ -771,7 +783,12 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             )
             for owner, repo, commit, url_key in source_specs
         ]
-        for url_key in ("bunUrl", "nodeAddonApiUrl", "sherpaOnnxNodeUrl"):
+        for url_key in (
+            "bunUrl",
+            "nodeAddonApiUrl",
+            "opencodeBunUrl",
+            "sherpaOnnxNodeUrl",
+        ):
             url = metadata[url_key]
             requests.append(
                 _HashRequest(
@@ -845,6 +862,7 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             ("srcHash", None, metadata["sherpaOnnxUrl"]),
             ("sha256", None, metadata["bunUrl"]),
             ("sha256", None, metadata["nodeAddonApiUrl"]),
+            ("sha256", None, metadata["opencodeBunUrl"]),
             ("sha256", None, metadata["sherpaOnnxNodeUrl"]),
             ("nodeModulesHash", self.DARWIN_PLATFORM, metadata["opencodeUrl"]),
             (
@@ -874,6 +892,7 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             "electronVersion": metadata["electronVersion"],
             "pins": {
                 "bunVersion": metadata["bunVersion"],
+                "opencodeBunVersion": metadata["opencodeBunVersion"],
                 "opencodeCommit": metadata["opencodeCommit"],
                 "opencodeVersion": metadata["opencodeVersion"],
                 "sherpaCommit": metadata["sherpaCommit"],
@@ -885,6 +904,7 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
                 "nodeAddonApi": metadata["nodeAddonApiUrl"],
                 "openchamber": metadata["openchamberUrl"],
                 "opencode": metadata["opencodeUrl"],
+                "opencodeBun": metadata["opencodeBunUrl"],
                 "sherpaOnnx": metadata["sherpaOnnxUrl"],
                 "sherpaOnnxNode": metadata["sherpaOnnxNodeUrl"],
             },

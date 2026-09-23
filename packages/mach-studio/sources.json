@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-btsz4tcvQcBuegC6O/CYkPv8zFOiVbHhwq+4yJLoyXk="
+    "aarch64-darwin": "sha256-l+ukI+zT48BUG4C/Zv+7VW6516P2g02D1Q0P4hHvodw="
   },
   "urls": {
-    "aarch64-darwin": "https://api.maniac.ai/storage/v1/object/public/desktop-releases/stable/mac-arm64/Mach-Studio-0.1.147-arm64.dmg"
+    "aarch64-darwin": "https://api.maniac.ai/storage/v1/object/public/desktop-releases/stable/mac-arm64/Mach-Studio-0.1.163-arm64.dmg"
   },
-  "version": "0.1.147"
+  "version": "0.1.163"
 }

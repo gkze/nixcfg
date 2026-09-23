@@ -17,6 +17,7 @@ let
     baseten-switch = systemApp pkgs.baseten-switch;
     bb = systemApp pkgs.bb;
     buzz = systemApp pkgs.buzz;
+    capy-nightly = systemApp pkgs.capy-nightly;
     "claude-code-url-handler".package = pkgs.claude-code-url-handler;
     cleanshot.package = pkgs.cleanshot;
     clearly = systemApp pkgs.clearly;
@@ -43,6 +44,7 @@ let
     reflect = systemApp pkgs.reflect-open;
     screen-studio = systemApp pkgs.screen-studio;
     tailscale.package = pkgs.tailscale-app;
+    thorium = systemApp pkgs.thorium;
     "town-assistant".package = pkgs.town-assistant-nightly;
     unsloth = systemApp pkgs.unsloth;
     voiceos = systemApp pkgs.voiceos;

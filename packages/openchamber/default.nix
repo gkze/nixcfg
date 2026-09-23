@@ -33,12 +33,14 @@ let
   inherit (selfSource) electronVersion version;
 
   bunVersion = selfSource.pins.bunVersion;
+  opencodeBunVersion = selfSource.pins.opencodeBunVersion;
   openCodeCommit = selfSource.pins.opencodeCommit;
   openCodeVersion = selfSource.pins.opencodeVersion;
   sherpaCommit = selfSource.pins.sherpaCommit;
   sherpaVersion = selfSource.pins.sherpaVersion;
   sherpaWrapperVersion = selfSource.pins.sherpaWrapperVersion;
   expectedBunUrl = "https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/bun-darwin-aarch64.zip";
+  expectedOpencodeBunUrl = "https://github.com/oven-sh/bun/releases/download/bun-v${opencodeBunVersion}/bun-darwin-aarch64.zip";
   electronBuilderExecutable = "./node_modules/.bin/electron-builder";
   asarExecutable = "node_modules/.bun/node_modules/@electron/asar/bin/asar.js";
   electronExcludedRuntimePackages = [ "bun-pty" ];
@@ -53,6 +55,7 @@ let
 
   urls = selfSource.urls or { };
   bunUrl = urls.bun or "";
+  opencodeBunUrl = urls.opencodeBun or "";
   openChamberUrl = urls.openchamber or "";
   openCodeUrl = urls.opencode or "";
   sherpaUrl = urls.sherpaOnnx or "";
@@ -73,6 +76,7 @@ let
   openCodeSourceHash = hashEntryFor "srcHash" openCodeUrl null;
   sherpaSourceHash = hashEntryFor "srcHash" sherpaUrl null;
   bunHash = hashEntryFor "sha256" bunUrl null;
+  opencodeBunHash = hashEntryFor "sha256" opencodeBunUrl null;
   openCodeNodeModulesHash = hashEntryFor "nodeModulesHash" openCodeUrl "aarch64-darwin";
   openChamberNodeModulesHash = hashEntryFor "nodeModulesHash" openChamberUrl "aarch64-darwin";
   sherpaWrapperHash = hashEntryFor "sha256" sherpaWrapperUrl null;
@@ -110,12 +114,16 @@ let
     ) "Electron runtime and headers must match"
     ++ lib.optional (bunUrl != expectedBunUrl) "Bun asset URL must be ${expectedBunUrl}"
     ++ lib.optional (
+      opencodeBunUrl != expectedOpencodeBunUrl
+    ) "OpenCode Bun asset URL must be ${expectedOpencodeBunUrl}"
+    ++ lib.optional (
       sherpa-onnx.version != sherpaVersion
     ) "nixpkgs sherpa-onnx must be exactly ${sherpaVersion}"
     ++ lib.optional (openChamberSourceHash == null) "OpenChamber srcHash is missing"
     ++ lib.optional (openCodeSourceHash == null) "OpenCode srcHash is missing"
     ++ lib.optional (sherpaSourceHash == null) "sherpa-onnx srcHash is missing"
     ++ lib.optional (bunHash == null) "Bun ${bunVersion} asset hash is missing"
+    ++ lib.optional (opencodeBunHash == null) "OpenCode Bun ${opencodeBunVersion} asset hash is missing"
     ++ lib.optional (
       openCodeNodeModulesHash == null
     ) "OpenCode aarch64-darwin nodeModulesHash is missing"
@@ -208,6 +216,16 @@ let
     version = bunVersion;
   };
 
+  opencodeBunSource = fetchurl {
+    url = opencodeBunUrl;
+    inherit (opencodeBunHash) hash;
+  };
+
+  opencodeBunExact = callPackage ./bun.nix {
+    bunSource = opencodeBunSource;
+    version = opencodeBunVersion;
+  };
+
   openChamberNodeModules = callPackage ./node-modules.nix {
     inherit bunVersion cacert version;
     bun = bunExact;
@@ -216,8 +234,8 @@ let
   };
 
   openCodeNodeModules = callPackage ./opencode-node-modules.nix {
-    inherit bunVersion;
-    bun = bunExact;
+    bunVersion = opencodeBunVersion;
+    bun = opencodeBunExact;
     src = openCodeSrc;
     version = openCodeVersion;
     inherit (openCodeNodeModulesHash) hash;
@@ -230,7 +248,7 @@ let
       ripgrep
       sysctl
       ;
-    bun = bunExact;
+    bun = opencodeBunExact;
     src = openCodeSrc;
     version = openCodeVersion;
     nodeModules = openCodeNodeModules;

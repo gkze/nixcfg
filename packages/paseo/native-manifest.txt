@@ -1,8 +1,6 @@
 1	Contents/Frameworks/Electron Framework.framework/Electron Framework
 1	Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework
 1	Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/chrome_crashpad_handler
-1	Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libEGL.dylib
-1	Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libGLESv2.dylib
 1	Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libffmpeg.dylib
 1	Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libvk_swiftshader.dylib
 1	Contents/Frameworks/Mantle.framework/Mantle
@@ -18,7 +16,7 @@
 1	Contents/Frameworks/Squirrel.framework/Versions/A/Squirrel
 1	Contents/MacOS/Paseo
 1	Contents/Resources/app.asar.unpacked/node_modules/@esbuild/darwin-arm64/bin/esbuild
-1	Contents/Resources/app.asar.unpacked/node_modules/node-pty/bin/darwin-arm64-145/node-pty.node
+1	Contents/Resources/app.asar.unpacked/node_modules/node-pty/bin/darwin-arm64-149/node-pty.node
 1	Contents/Resources/app.asar.unpacked/node_modules/node-pty/build/Release/pty.node
 1	Contents/Resources/app.asar.unpacked/node_modules/node-pty/build/Release/spawn-helper
 1	Contents/Resources/app.asar.unpacked/node_modules/sherpa-onnx-darwin-arm64/libabsl_base.2601.0.0.dylib
@@ -109,7 +107,7 @@
 1	Contents/Resources/app.asar.unpacked/node_modules/sherpa-onnx-darwin-arm64/libutf8_validity.32.1.0.dylib
 1	Contents/Resources/app.asar.unpacked/node_modules/sherpa-onnx-darwin-arm64/sherpa-onnx.node
 1	app.asar/node_modules/@esbuild/darwin-arm64/bin/esbuild
-1	app.asar/node_modules/node-pty/bin/darwin-arm64-145/node-pty.node
+1	app.asar/node_modules/node-pty/bin/darwin-arm64-149/node-pty.node
 1	app.asar/node_modules/node-pty/build/Release/pty.node
 1	app.asar/node_modules/node-pty/build/Release/spawn-helper
 1	app.asar/node_modules/sherpa-onnx-darwin-arm64/libabsl_base.2601.0.0.dylib

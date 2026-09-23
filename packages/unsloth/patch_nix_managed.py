@@ -446,6 +446,7 @@ _PATCHES = (
     app: AppHandle,
     state: tauri::State<'_, install::InstallState>,
     backend_state: tauri::State<'_, BackendState>,
+    update_state: tauri::State<'_, update::UpdateState>,
     diagnostics: tauri::State<'_, DiagnosticsState>,
 ) -> Result<(), String> {
     if has_owned_backend(&backend_state)? {
@@ -454,6 +455,7 @@ _PATCHES = (
     app: AppHandle,
     state: tauri::State<'_, install::InstallState>,
     backend_state: tauri::State<'_, BackendState>,
+    update_state: tauri::State<'_, update::UpdateState>,
     diagnostics: tauri::State<'_, DiagnosticsState>,
 ) -> Result<(), String> {
     crate::nix_managed::require_mutable("install the backend")?;
@@ -652,6 +654,32 @@ _PATCHES = (
 
 
 _MANAGED_ERROR = "this Unsloth installation is managed by Nix"
+
+# The 0.1.808-beta install() docstring is one upstream line long enough that the
+# anchor text must be assembled from adjacent literals to stay under line lint.
+_SD_CPP_INSTALL_DOCSTRING = (
+    '    """Download and extract the prebuilt for this host, returning the sd-cli path. '
+    "Resolves against the Unsloth mirror (``DEFAULT_REPO``) first; if the mirror cannot "
+    "serve this host AND the default repo is in use, falls back to leejet upstream so "
+    "native install still works. Raises ``RuntimeError`` only when neither source has an "
+    'asset for the host, or the archive has no ``sd-cli``."""\n'
+)
+
+# Same lint constraint for the reflowed 2026.9.4 worker/ssm docstrings: the
+# upstream text keeps its exact line breaks, so over-long lines are joined from
+# adjacent fragments with no newline between them.
+_WHEEL_FIRST_DOC = (
+    '    \"\"\"Install a fast-path package, wheel first, and never leave an unusable one behind. The two\n'
+    '    \"touch nothing\" guards run here, outside the cleanup: an already-working package returns\n'
+    "    before any subprocess, and offline changes nothing. Everything after them is an install\n"
+    "    attempt, so ANY unsuccessful exit -- timeout, failed install, bad import -- discards what is\n"
+    "    left rather than leaving metadata the in-process import would pick up. Enforced here rather\n"
+    '    than at each return because four separate exits have now been found that forgot to clean up.\"\"\"\n'
+)
+_SSM_KERNEL_DOC = (
+    '    \"\"\"Install one kernel wheel-first, then a HIP-aware PyPI source build. Returns True iff '
+    'importable afterwards; idempotent (no-op when already installed).\"\"\"\n'
+)
 # Release discovery imports this exact patch contract instead of pinning whole files.
 OXC_VALIDATOR_PATH = Path("studio/backend/core/data_recipe/oxc-validator/validate.mjs")
 OXC_VALIDATOR_PATCH_SEAM = (
@@ -751,40 +779,24 @@ _BACKEND_PATCHES = (
     ),
     _SourcePatch(
         Path("studio/install_sd_cpp_prebuilt.py"),
-        '''def install(
+        f"""def install(
     *,
     install_dir: Optional[Path] = None,
     accelerator: str = "auto",
     token: Optional[str] = None,
 ) -> Path:
-    """Download + extract the prebuilt for this host. Returns the sd-cli path.
-
-    Resolves against the Unsloth mirror (``DEFAULT_REPO``) first; if the mirror can't
-    serve this host (release missing, or a host we don't build) AND the default repo is
-    in use, falls back to leejet upstream so native install still works. Raises
-    ``RuntimeError`` only when neither source has an asset for the host, or the archive
-    has no ``sd-cli``.
-    """
-    target = install_dir or default_install_dir()
-''',
-        f'''def install(
+{_SD_CPP_INSTALL_DOCSTRING}    target = install_dir or default_install_dir()
+""",
+        f"""def install(
     *,
     install_dir: Optional[Path] = None,
     accelerator: str = "auto",
     token: Optional[str] = None,
 ) -> Path:
-    """Download + extract the prebuilt for this host. Returns the sd-cli path.
-
-    Resolves against the Unsloth mirror (``DEFAULT_REPO``) first; if the mirror can't
-    serve this host (release missing, or a host we don't build) AND the default repo is
-    in use, falls back to leejet upstream so native install still works. Raises
-    ``RuntimeError`` only when neither source has an asset for the host, or the archive
-    has no ``sd-cli``.
-    """
-    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+{_SD_CPP_INSTALL_DOCSTRING}    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
         raise RuntimeError("Cannot install package-owned stable-diffusion.cpp: {_MANAGED_ERROR}.")
     target = install_dir or default_install_dir()
-''',
+""",
     ),
     _SourcePatch(
         Path("studio/install_node_prebuilt.py"),
@@ -914,13 +926,11 @@ _BACKEND_PATCHES = (
     _SourcePatch(
         Path("unsloth_cli/commands/studio.py"),
         """    \"\"\"Update Unsloth Studio dependencies and rebuild.\"\"\"
-    # Re-export UNSLOTH_STUDIO_HOME for env-mode installs so the refresh
 """,
         f"""    \"\"\"Update Unsloth Studio dependencies and rebuild.\"\"\"
     if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
         typer.echo("Cannot update Studio dependencies: {_MANAGED_ERROR}.", err = True)
         raise typer.Exit(1)
-    # Re-export UNSLOTH_STUDIO_HOME for env-mode installs so the refresh
 """,
     ),
     _SourcePatch(
@@ -939,37 +949,19 @@ _BACKEND_PATCHES = (
     ),
     _SourcePatch(
         Path("studio/backend/core/training/worker.py"),
-        """def _install_package_wheel_first(
+        f"""def _install_package_wheel_first(
     *, event_queue: Any, import_name: str, display_name: str, pypi_name: str, **kwargs: Any
 ) -> bool:
-    \"\"\"Install a fast-path package, wheel first, and never leave an unusable one behind.
-
-    The two "touch nothing" guards run here, outside the cleanup: an already-working
-    package returns before any subprocess, and offline changes nothing. Everything after
-    them is an install attempt, so ANY unsuccessful exit -- timeout, failed install, bad
-    import -- discards what is left rather than leaving metadata the in-process import
-    would pick up. Enforced here rather than at each return because four separate exits
-    have now been found that forgot to clean up.
-    \"\"\"
-    if _is_importable(import_name):
+{_WHEEL_FIRST_DOC}    if _is_importable(import_name):
         logger.info("%s already installed", display_name)
         return True
 
     if _model_offline_mode_enabled():
 """,
-        """def _install_package_wheel_first(
+        f"""def _install_package_wheel_first(
     *, event_queue: Any, import_name: str, display_name: str, pypi_name: str, **kwargs: Any
 ) -> bool:
-    \"\"\"Install a fast-path package, wheel first, and never leave an unusable one behind.
-
-    The two "touch nothing" guards run here, outside the cleanup: an already-working
-    package returns before any subprocess, and offline changes nothing. Everything after
-    them is an install attempt, so ANY unsuccessful exit -- timeout, failed install, bad
-    import -- discards what is left rather than leaving metadata the in-process import
-    would pick up. Enforced here rather than at each return because four separate exits
-    have now been found that forgot to clean up.
-    \"\"\"
-    if _is_importable(import_name):
+{_WHEEL_FIRST_DOC}    if _is_importable(import_name):
         logger.info("%s already installed", display_name)
         return True
 
@@ -1036,18 +1028,22 @@ _BACKEND_PATCHES = (
     ),
     _SourcePatch(
         Path("studio/backend/utils/transformers_version.py"),
-        """    if _venv_dir_is_valid_and_undamaged(venv_dir, packages):
-        return True
-
-    logger.warning("%s not found or incomplete at %s -- installing at runtime", label, venv_dir)
+        """def _ensure_venv_dir(venv_dir: str, packages: tuple[str, ...], label: str) -> bool:
+    \"\"\"Ensure *venv_dir* exists with all *packages*. Install if missing.\"\"\"
+    if _venv_dir_is_valid_and_undamaged(venv_dir, packages):
+        # A live tree with content makes retired copies leftovers to sweep.
+        _recover_retired_sidecar(venv_dir)
+        return _top_up_optional_packages(venv_dir, packages)
 """,
-        """    if _venv_dir_is_valid_and_undamaged(venv_dir, packages):
-        return True
-    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
-        logger.warning("%s is absent from the Nix closure; runtime repair is disabled", label)
+        """def _ensure_venv_dir(venv_dir: str, packages: tuple[str, ...], label: str) -> bool:
+    \"\"\"Ensure *venv_dir* exists with all *packages*. Install if missing.\"\"\"
+    if _venv_dir_is_valid_and_undamaged(venv_dir, packages):
+        # A live tree with content makes retired copies leftovers to sweep.
+        _recover_retired_sidecar(venv_dir)
+        return _top_up_optional_packages(venv_dir, packages)
+    if os.environ.get(\"UNSLOTH_NIX_MANAGED\") == \"1\":
+        logger.warning(\"%s is absent from the Nix closure; runtime repair is disabled\", label)
         return False
-
-    logger.warning("%s not found or incomplete at %s -- installing at runtime", label, venv_dir)
 """,
     ),
     _SourcePatch(
@@ -1078,7 +1074,7 @@ _BACKEND_PATCHES = (
     ),
     _SourcePatch(
         Path("studio/backend/utils/ssm_runtime.py"),
-        """def _install_kernel(
+        f"""def _install_kernel(
     *,
     import_name: str,
     display_name: str,
@@ -1089,15 +1085,13 @@ _BACKEND_PATCHES = (
     status_cb: StatusCb,
     run: Callable[..., Any],
 ) -> bool:
-    \"\"\"Install one kernel wheel-first, then a HIP-aware PyPI source build. Returns True iff
-    importable afterwards; idempotent (no-op when already installed).\"\"\"
-    if _is_importable(import_name):
+{_SSM_KERNEL_DOC}    if _is_importable(import_name):
         logger.info("%s already installed", display_name)
         return True
 
     from utils.utils import hf_env_offline
 """,
-        """def _install_kernel(
+        f"""def _install_kernel(
     *,
     import_name: str,
     display_name: str,
@@ -1108,9 +1102,7 @@ _BACKEND_PATCHES = (
     status_cb: StatusCb,
     run: Callable[..., Any],
 ) -> bool:
-    \"\"\"Install one kernel wheel-first, then a HIP-aware PyPI source build. Returns True iff
-    importable afterwards; idempotent (no-op when already installed).\"\"\"
-    if _is_importable(import_name):
+{_SSM_KERNEL_DOC}    if _is_importable(import_name):
         logger.info("%s already installed", display_name)
         return True
     if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":

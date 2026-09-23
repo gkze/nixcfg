@@ -42,17 +42,18 @@ async def nix_flake_lock_update(
 ) -> None:
     """Update a single flake input in the lock file.
 
-    Runs ``nix flake lock --update-input <input_name>`` inside the flake
-    directory indicated by *flake_ref*.  This is a side-effect-only
+    Runs ``nix flake update <input_name>`` (optionally with
+    ``--flake <flake_ref>``) inside the flake directory indicated by
+    *flake_ref*.  This is a side-effect-only
     operation; the lock file is modified in place.
     """
     timeout_seconds = _resolve_timeout_alias(
         command_timeout=command_timeout,
         kwargs=kwargs,
     )
-    cmd = ["nix", "flake", "lock", "--update-input", input_name]
+    cmd = ["nix", "flake", "update", input_name]
     if flake_ref != ".":
-        cmd.append(flake_ref)
+        cmd.extend(["--flake", flake_ref])
     await run_nix(cmd, timeout=timeout_seconds)
 
 

@@ -18,7 +18,7 @@ let
 
   devIdentity = {
     opencodeChannel = "dev";
-    appName = "OpenCode Desktop Dev";
+    appName = "OpenCode Dev";
     appId = "ai.opencode.desktop.dev";
     appProtocolScheme = "opencode";
   };

@@ -5,7 +5,7 @@ import ../opencode-desktop/default.nix (
     pname = "opencode-desktop-dev";
     sourceHashPackageName = "opencode-desktop";
     opencodeChannel = "dev";
-    appName = "OpenCode Desktop Dev";
+    appName = "OpenCode Dev";
     appId = "ai.opencode.desktop.dev";
     appProtocolScheme = "opencode";
     packageDescription = "OpenCode Desktop local dev app";

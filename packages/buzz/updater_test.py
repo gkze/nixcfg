@@ -454,8 +454,13 @@ impl InstalledNativeRuntime {
 }
 """,
         "crates/mesh-llm-runtime-install/src/lib.rs": b"""
-const MESH_LLM_NATIVE_RUNTIME_MANIFEST_URL_ENV: &str =
-    "MESH_LLM_NATIVE_RUNTIME_MANIFEST_URL";
+pub use install::install_native_runtime;
+pub use types::{
+    NativeRuntimeInstallOptions, NativeRuntimeManifestOptions,
+};
+""",
+        "crates/mesh-llm-runtime-install/src/types.rs": b"""
+pub const NATIVE_RUNTIME_MANIFEST_URL_ENV: &str = "MESH_LLM_NATIVE_RUNTIME_MANIFEST_URL";
 impl Default for NativeRuntimeManifestOptions {
     fn default() -> Self {
         Self {
@@ -471,10 +476,10 @@ impl Default for NativeRuntimeInstallOptions {
         }
     }
 }
+""",
+        "crates/mesh-llm-runtime-install/src/install.rs": b"""
 pub async fn install_native_runtime() {
-    let manifest_url = std::env::var(MESH_LLM_NATIVE_RUNTIME_MANIFEST_URL_ENV).ok();
     let manifest_options = NativeRuntimeManifestOptions {
-        manifest_url,
         allow_default_manifest_url: true,
     };
 }
@@ -2077,37 +2082,31 @@ def test_buzz_source_audit_fails_closed_on_build_topology_drift(
             "crates/mesh-llm-sdk/Cargo.toml"
         ].replace(b'"dep:reqwest", ', b"")
     elif drift == "runtime-manifest-default":
-        mesh_payloads["crates/mesh-llm-runtime-install/src/lib.rs"] = mesh_payloads[
-            "crates/mesh-llm-runtime-install/src/lib.rs"
+        mesh_payloads["crates/mesh-llm-runtime-install/src/types.rs"] = mesh_payloads[
+            "crates/mesh-llm-runtime-install/src/types.rs"
         ].replace(
             b"allow_default_manifest_url: true",
             b"allow_default_manifest_url: false",
             1,
         )
     elif drift == "runtime-download":
-        mesh_payloads["crates/mesh-llm-runtime-install/src/lib.rs"] = mesh_payloads[
-            "crates/mesh-llm-runtime-install/src/lib.rs"
+        mesh_payloads["crates/mesh-llm-runtime-install/src/types.rs"] = mesh_payloads[
+            "crates/mesh-llm-runtime-install/src/types.rs"
         ].replace(b"allow_download: true", b"allow_download: false")
     elif drift == "runtime-install-manifest":
-        mesh_payloads["crates/mesh-llm-runtime-install/src/lib.rs"] = mesh_payloads[
-            "crates/mesh-llm-runtime-install/src/lib.rs"
+        mesh_payloads["crates/mesh-llm-runtime-install/src/install.rs"] = mesh_payloads[
+            "crates/mesh-llm-runtime-install/src/install.rs"
         ].replace(
             b"pub async fn install_native_runtime() {\n"
-            b"    let manifest_url = "
-            b"std::env::var(MESH_LLM_NATIVE_RUNTIME_MANIFEST_URL_ENV).ok();\n"
             b"    let manifest_options = NativeRuntimeManifestOptions {\n"
-            b"        manifest_url,\n"
             b"        allow_default_manifest_url: true",
             b"pub async fn install_native_runtime() {\n"
-            b"    let manifest_url = "
-            b"std::env::var(MESH_LLM_NATIVE_RUNTIME_MANIFEST_URL_ENV).ok();\n"
             b"    let manifest_options = NativeRuntimeManifestOptions {\n"
-            b"        manifest_url,\n"
             b"        allow_default_manifest_url: false",
         )
     elif drift == "runtime-manifest-env":
-        mesh_payloads["crates/mesh-llm-runtime-install/src/lib.rs"] = mesh_payloads[
-            "crates/mesh-llm-runtime-install/src/lib.rs"
+        mesh_payloads["crates/mesh-llm-runtime-install/src/types.rs"] = mesh_payloads[
+            "crates/mesh-llm-runtime-install/src/types.rs"
         ].replace(
             b"MESH_LLM_NATIVE_RUNTIME_MANIFEST_URL",
             b"MESH_LLM_UNAUDITED_MANIFEST_URL",
@@ -2673,7 +2672,8 @@ def test_buzz_updater_owns_the_complete_native_lock() -> None:
     assert mesh["commit"] == source_commit("meshLlm")
     for key in ("version", "skippyAbi"):
         assert re.fullmatch(
-            r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)",
+            r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+            r"(?:-[0-9A-Za-z.-]+)?",
             expect_instance(mesh[key], str),
         )
     assert native_lock["llamaCpp"] == {"commit": source_commit("llamaCpp")}

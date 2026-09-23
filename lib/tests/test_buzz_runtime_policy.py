@@ -38,7 +38,9 @@ _BUZZ_E2E_BRIDGE = Path("desktop/src/testing/e2eBridge.ts")
 _BUZZ_IDENTITY_E2E = Path("desktop/tests/e2e/identity-lost.spec.ts")
 _MESH_VERSION = buzz_native_lock_string("meshLlm", "version")
 _SHERPA_VERSION = buzz_native_lock_string("sherpaOnnx", "version")
-_MESH_RUNTIME_INSTALL = Path(f"mesh-llm-runtime-install-{_MESH_VERSION}/src/lib.rs")
+_MESH_RUNTIME_INSTALL = Path(f"mesh-llm-runtime-install-{_MESH_VERSION}")
+_MESH_TYPES = _MESH_RUNTIME_INSTALL / "src" / "types.rs"
+_MESH_INSTALL = _MESH_RUNTIME_INSTALL / "src" / "install.rs"
 _SHERPA_ONNX_SYS_BUILD = Path(f"sherpa-onnx-sys-{_SHERPA_VERSION}/build.rs")
 
 _BUZZ_UPSTREAM = """use std::sync::Arc;
@@ -847,10 +849,7 @@ mod tests {
 _KEYCHAIN_STORE_UPSTREAM += _KEYRING_STORE_TESTS_UPSTREAM
 _KEYCHAIN_STORE_FAIL_CLOSED += _KEYRING_STORE_TESTS_UPSTREAM
 
-_MESH_UPSTREAM = """const MESH_LLM_NATIVE_RUNTIME_MANIFEST_URL_ENV: &str =
-    "MESH_LLM_NATIVE_RUNTIME_MANIFEST_URL";
-
-impl Default for NativeRuntimeManifestOptions {
+_MESH_TYPES_UPSTREAM = """impl Default for NativeRuntimeManifestOptions {
     fn default() -> Self {
         Self {
             mesh_version: CURRENT_MESH_VERSION.to_string(),
@@ -880,7 +879,14 @@ impl Default for NativeRuntimeInstallOptions {
     }
 }
 
-pub async fn install_native_runtime(
+fn unrelated_policy_example() -> NativeRuntimeInstallOptions {
+    NativeRuntimeInstallOptions {
+        allow_download: true,
+        ..Default::default()
+    }
+}
+"""
+_MESH_INSTALL_UPSTREAM = """pub async fn install_native_runtime(
     options: NativeRuntimeInstallOptions,
 ) -> Result<NativeRuntimeInstallOutcome> {
     let (manifest, bundle_dirs) =
@@ -911,31 +917,20 @@ pub async fn install_native_runtime(
     .resolve(&options.selection)?;
     install_resolved_runtime(&cache, resolution, &options).await
 }
-
-fn unrelated_policy_example() -> NativeRuntimeInstallOptions {
-    NativeRuntimeInstallOptions {
-        allow_download: true,
-        ..Default::default()
-    }
-}
 """
-_MESH_PATCHED = (
-    _MESH_UPSTREAM
-    .replace(
-        "allow_default_manifest_url: true,",
-        "allow_default_manifest_url: false,",
-        1,
-    )
-    .replace(
-        "allow_download: true,",
-        "allow_download: false,",
-        1,
-    )
-    .replace(
-        "allow_default_manifest_url: true,",
-        "allow_default_manifest_url: false,",
-        1,
-    )
+_MESH_TYPES_PATCHED = _MESH_TYPES_UPSTREAM.replace(
+    "allow_default_manifest_url: true,",
+    "allow_default_manifest_url: false,",
+    1,
+).replace(
+    "allow_download: true,",
+    "allow_download: false,",
+    1,
+)
+_MESH_INSTALL_PATCHED = _MESH_INSTALL_UPSTREAM.replace(
+    "allow_default_manifest_url: true,",
+    "allow_default_manifest_url: false,",
+    1,
 )
 
 _MANIFEST_DEFAULT_COMMENT_DECOY = """/*
@@ -1079,14 +1074,17 @@ def _write_buzz_secret_store(
 
 def _write_mesh_vendor(
     root: Path,
-    source: str = _MESH_UPSTREAM,
     *,
+    types: str = _MESH_TYPES_UPSTREAM,
+    install: str = _MESH_INSTALL_UPSTREAM,
     prefix: str = "vendor",
-) -> Path:
-    path = root / prefix / _MESH_RUNTIME_INSTALL
-    path.parent.mkdir(parents=True)
-    path.write_text(source, encoding="utf-8")
-    return path
+) -> tuple[Path, Path]:
+    types_path = root / prefix / _MESH_TYPES
+    install_path = root / prefix / _MESH_INSTALL
+    types_path.parent.mkdir(parents=True, exist_ok=True)
+    types_path.write_text(types, encoding="utf-8")
+    install_path.write_text(install, encoding="utf-8")
+    return types_path, install_path
 
 
 def _write_sherpa_vendor(
@@ -1446,12 +1444,13 @@ def test_desktop_vendor_patch_disables_mesh_network_and_sherpa_tts_links(
     tmp_path: Path,
 ) -> None:
     """The copied vendor must apply both independently reviewed runtime policies."""
-    mesh_path = _write_mesh_vendor(tmp_path)
+    types_path, install_path = _write_mesh_vendor(tmp_path)
     sherpa_path = _write_sherpa_vendor(tmp_path)
 
     _patcher().main(["desktop-cargo-deps", str(tmp_path)])
 
-    assert mesh_path.read_text(encoding="utf-8") == _MESH_PATCHED
+    assert types_path.read_text(encoding="utf-8") == _MESH_TYPES_PATCHED
+    assert install_path.read_text(encoding="utf-8") == _MESH_INSTALL_PATCHED
     assert sherpa_path.read_text(encoding="utf-8") == _SHERPA_BUILD_TTS_OFF
 
 
@@ -1479,13 +1478,14 @@ def test_desktop_vendor_patch_requires_exactly_one_sherpa_sys_crate(
     tmp_path: Path,
 ) -> None:
     """A missing or duplicated updater-pinned Sherpa crate must fail closed."""
-    mesh_path = _write_mesh_vendor(tmp_path)
+    types_path, install_path = _write_mesh_vendor(tmp_path)
     with pytest.raises(
         _patcher().RuntimePolicyPatchError,
         match=rf"sherpa-onnx-sys-{_SHERPA_VERSION}/build\.rs.*found 0",
     ):
         _patcher().patch_desktop_cargo_deps(tmp_path)
-    assert mesh_path.read_text(encoding="utf-8") == _MESH_UPSTREAM
+    assert types_path.read_text(encoding="utf-8") == _MESH_TYPES_UPSTREAM
+    assert install_path.read_text(encoding="utf-8") == _MESH_INSTALL_UPSTREAM
 
     _write_sherpa_vendor(tmp_path, prefix="first")
     _write_sherpa_vendor(tmp_path, prefix="second")
@@ -1494,19 +1494,20 @@ def test_desktop_vendor_patch_requires_exactly_one_sherpa_sys_crate(
         match=rf"sherpa-onnx-sys-{_SHERPA_VERSION}/build\.rs.*found 2",
     ):
         _patcher().patch_desktop_cargo_deps(tmp_path)
-    assert mesh_path.read_text(encoding="utf-8") == _MESH_UPSTREAM
+    assert types_path.read_text(encoding="utf-8") == _MESH_TYPES_UPSTREAM
+    assert install_path.read_text(encoding="utf-8") == _MESH_INSTALL_UPSTREAM
 
 
 def test_desktop_vendor_patch_rejects_reviewed_literal_drift(
     tmp_path: Path,
 ) -> None:
     """All three reviewed true literals are mandatory and patched atomically."""
-    drifted = _MESH_UPSTREAM.replace(
+    drifted = _MESH_TYPES_UPSTREAM.replace(
         "allow_download: true,",
         "allow_download: false,",
         1,
     )
-    source_path = _write_mesh_vendor(tmp_path, drifted)
+    types_path, install_path = _write_mesh_vendor(tmp_path, types=drifted)
     sherpa_path = _write_sherpa_vendor(tmp_path)
 
     with pytest.raises(
@@ -1515,7 +1516,8 @@ def test_desktop_vendor_patch_rejects_reviewed_literal_drift(
     ):
         _patcher().patch_desktop_cargo_deps(tmp_path)
 
-    assert source_path.read_text(encoding="utf-8") == drifted
+    assert types_path.read_text(encoding="utf-8") == drifted
+    assert install_path.read_text(encoding="utf-8") == _MESH_INSTALL_UPSTREAM
     assert sherpa_path.read_text(encoding="utf-8") == _SHERPA_BUILD_UPSTREAM
 
 
@@ -1529,7 +1531,7 @@ def test_desktop_vendor_patch_rejects_non_code_sherpa_list_decoy(
         + _SHERPA_STATIC_LIBS_UPSTREAM
         + "\n*/\n"
     )
-    mesh_path = _write_mesh_vendor(tmp_path)
+    types_path, install_path = _write_mesh_vendor(tmp_path)
     sherpa_path = _write_sherpa_vendor(tmp_path, source)
 
     with pytest.raises(
@@ -1538,34 +1540,40 @@ def test_desktop_vendor_patch_rejects_non_code_sherpa_list_decoy(
     ):
         _patcher().patch_desktop_cargo_deps(tmp_path)
 
-    assert mesh_path.read_text(encoding="utf-8") == _MESH_UPSTREAM
+    assert types_path.read_text(encoding="utf-8") == _MESH_TYPES_UPSTREAM
+    assert install_path.read_text(encoding="utf-8") == _MESH_INSTALL_UPSTREAM
     assert sherpa_path.read_text(encoding="utf-8") == source
 
 
 @pytest.mark.parametrize(
-    ("source", "context"),
+    ("drifted_types", "drifted_install", "context"),
     [
         (
-            _MESH_UPSTREAM.replace(
+            _MESH_TYPES_UPSTREAM.replace(
                 "allow_default_manifest_url: true,",
                 "allow_default_manifest_url: bool::from(true),",
                 1,
             )
             + _MANIFEST_DEFAULT_COMMENT_DECOY,
+            _MESH_INSTALL_UPSTREAM,
             "ManifestOptions allow_default_manifest_url default",
         ),
         (
-            _MESH_UPSTREAM.replace(
+            _MESH_TYPES_UPSTREAM.replace(
                 "allow_download: true,",
                 "allow_download: bool::from(true),",
                 1,
             )
             + _INSTALL_DEFAULT_COMMENT_DECOY,
+            _MESH_INSTALL_UPSTREAM,
             "InstallOptions allow_download default",
         ),
         (
-            "allow_default_manifest_url: bool::from(true),".join(
-                _MESH_UPSTREAM.rsplit("allow_default_manifest_url: true,", 1)
+            _MESH_TYPES_UPSTREAM,
+            _MESH_INSTALL_UPSTREAM.replace(
+                "allow_default_manifest_url: true,",
+                "allow_default_manifest_url: bool::from(true),",
+                1,
             )
             + _INSTALL_MANIFEST_COMMENT_DECOY,
             "install_native_runtime allow_default_manifest_url hardcode",
@@ -1575,34 +1583,43 @@ def test_desktop_vendor_patch_rejects_non_code_sherpa_list_decoy(
 )
 def test_desktop_vendor_patch_rejects_policy_matches_hidden_in_comments(
     tmp_path: Path,
-    source: str,
+    drifted_types: str,
+    drifted_install: str,
     context: str,
 ) -> None:
     """Commented decoys cannot make an active network policy look patched."""
-    mesh_path = _write_mesh_vendor(tmp_path, source)
+    types_path, install_path = _write_mesh_vendor(
+        tmp_path,
+        types=drifted_types,
+        install=drifted_install,
+    )
     sherpa_path = _write_sherpa_vendor(tmp_path)
 
     with pytest.raises(_patcher().RuntimePolicyPatchError, match=context):
         _patcher().patch_desktop_cargo_deps(tmp_path)
 
-    assert mesh_path.read_text(encoding="utf-8") == source
+    assert types_path.read_text(encoding="utf-8") == drifted_types
+    assert install_path.read_text(encoding="utf-8") == drifted_install
     assert sherpa_path.read_text(encoding="utf-8") == _SHERPA_BUILD_UPSTREAM
 
 
 @pytest.mark.parametrize(
-    ("header", "context"),
+    ("header", "context", "drifted_file"),
     [
         (
             "impl Default for NativeRuntimeManifestOptions {",
             "ManifestOptions allow_default_manifest_url default",
+            "types",
         ),
         (
             "impl Default for NativeRuntimeInstallOptions {",
             "InstallOptions allow_download default",
+            "types",
         ),
         (
             "pub async fn install_native_runtime(",
             "install_native_runtime allow_default_manifest_url hardcode",
+            "install",
         ),
     ],
     ids=["manifest-default", "install-default", "install-entrypoint"],
@@ -1611,16 +1628,27 @@ def test_desktop_vendor_patch_rejects_disabled_reviewed_policy_items(
     tmp_path: Path,
     header: str,
     context: str,
+    drifted_file: str,
 ) -> None:
     """A cfg-disabled policy item cannot attest the compiled vendor behavior."""
-    source = _MESH_UPSTREAM.replace(header, f"#[cfg(any())]\n{header}", 1)
-    mesh_path = _write_mesh_vendor(tmp_path, source)
+    types = _MESH_TYPES_UPSTREAM
+    install = _MESH_INSTALL_UPSTREAM
+    if drifted_file == "types":
+        types = types.replace(header, f"#[cfg(any())]\n{header}", 1)
+    else:
+        install = install.replace(header, f"#[cfg(any())]\n{header}", 1)
+    types_path, install_path = _write_mesh_vendor(
+        tmp_path,
+        types=types,
+        install=install,
+    )
     sherpa_path = _write_sherpa_vendor(tmp_path)
 
     with pytest.raises(_patcher().RuntimePolicyPatchError, match=context):
         _patcher().patch_desktop_cargo_deps(tmp_path)
 
-    assert mesh_path.read_text(encoding="utf-8") == source
+    assert types_path.read_text(encoding="utf-8") == types
+    assert install_path.read_text(encoding="utf-8") == install
     assert sherpa_path.read_text(encoding="utf-8") == _SHERPA_BUILD_UPSTREAM
 
 
@@ -1629,19 +1657,17 @@ def test_desktop_vendor_patch_rejects_policy_items_in_disabled_module(
 ) -> None:
     """Exact policy items nested in disabled code cannot attest active defaults."""
     patcher = _patcher()
-    source = (
-        _MESH_UPSTREAM
-        .replace(
-            "impl Default for NativeRuntimeManifestOptions {",
-            "impl  Default for NativeRuntimeManifestOptions {",
-            1,
-        )
-        .replace(
-            "impl Default for NativeRuntimeInstallOptions {",
-            "impl  Default for NativeRuntimeInstallOptions {",
-            1,
-        )
-        .replace(
+    drifted_types = _MESH_TYPES_UPSTREAM.replace(
+        "impl Default for NativeRuntimeManifestOptions {",
+        "impl  Default for NativeRuntimeManifestOptions {",
+        1,
+    ).replace(
+        "impl Default for NativeRuntimeInstallOptions {",
+        "impl  Default for NativeRuntimeInstallOptions {",
+        1,
+    )
+    drifted_install = (
+        _MESH_INSTALL_UPSTREAM.replace(
             "pub async fn install_native_runtime(",
             "pub async  fn install_native_runtime(",
             1,
@@ -1654,7 +1680,11 @@ def test_desktop_vendor_patch_rejects_policy_items_in_disabled_module(
         + patcher._INSTALL_NATIVE_RUNTIME_UPSTREAM
         + "\n}\n"
     )
-    mesh_path = _write_mesh_vendor(tmp_path, source)
+    types_path, install_path = _write_mesh_vendor(
+        tmp_path,
+        types=drifted_types,
+        install=drifted_install,
+    )
     sherpa_path = _write_sherpa_vendor(tmp_path)
 
     with pytest.raises(
@@ -1663,7 +1693,8 @@ def test_desktop_vendor_patch_rejects_policy_items_in_disabled_module(
     ):
         patcher.patch_desktop_cargo_deps(tmp_path)
 
-    assert mesh_path.read_text(encoding="utf-8") == source
+    assert types_path.read_text(encoding="utf-8") == drifted_types
+    assert install_path.read_text(encoding="utf-8") == drifted_install
     assert sherpa_path.read_text(encoding="utf-8") == _SHERPA_BUILD_UPSTREAM
 
 
@@ -1677,8 +1708,8 @@ def test_desktop_vendor_patch_rejects_file_level_disable_attribute(
     source_prefix: str,
 ) -> None:
     """A file-level cfg cannot make reviewed policy items non-executable."""
-    source = source_prefix + _MESH_UPSTREAM
-    mesh_path = _write_mesh_vendor(tmp_path, source)
+    source = source_prefix + _MESH_TYPES_UPSTREAM
+    types_path, install_path = _write_mesh_vendor(tmp_path, types=source)
     sherpa_path = _write_sherpa_vendor(tmp_path)
 
     with pytest.raises(
@@ -1687,7 +1718,8 @@ def test_desktop_vendor_patch_rejects_file_level_disable_attribute(
     ):
         _patcher().patch_desktop_cargo_deps(tmp_path)
 
-    assert mesh_path.read_text(encoding="utf-8") == source
+    assert types_path.read_text(encoding="utf-8") == source
+    assert install_path.read_text(encoding="utf-8") == _MESH_INSTALL_UPSTREAM
     assert sherpa_path.read_text(encoding="utf-8") == _SHERPA_BUILD_UPSTREAM
 
 
@@ -1713,8 +1745,8 @@ def test_desktop_vendor_patch_rejects_later_policy_reenable(
         options.allow_default_manifest_url = true;
         options
 """
-    source = _MESH_UPSTREAM.replace(reviewed_return, drifted_return, 1)
-    mesh_path = _write_mesh_vendor(tmp_path, source)
+    source = _MESH_TYPES_UPSTREAM.replace(reviewed_return, drifted_return, 1)
+    types_path, install_path = _write_mesh_vendor(tmp_path, types=source)
     sherpa_path = _write_sherpa_vendor(tmp_path)
 
     with pytest.raises(
@@ -1723,7 +1755,8 @@ def test_desktop_vendor_patch_rejects_later_policy_reenable(
     ):
         _patcher().patch_desktop_cargo_deps(tmp_path)
 
-    assert mesh_path.read_text(encoding="utf-8") == source
+    assert types_path.read_text(encoding="utf-8") == source
+    assert install_path.read_text(encoding="utf-8") == _MESH_INSTALL_UPSTREAM
     assert sherpa_path.read_text(encoding="utf-8") == _SHERPA_BUILD_UPSTREAM
 
 
@@ -1740,7 +1773,7 @@ def test_desktop_vendor_patch_rejects_sherpa_static_link_list_drift_atomically(
     source: str,
 ) -> None:
     """Sherpa list drift must leave both copied vendor crates byte-identical."""
-    mesh_path = _write_mesh_vendor(tmp_path)
+    types_path, install_path = _write_mesh_vendor(tmp_path)
     sherpa_path = _write_sherpa_vendor(tmp_path, source)
 
     with pytest.raises(
@@ -1749,7 +1782,8 @@ def test_desktop_vendor_patch_rejects_sherpa_static_link_list_drift_atomically(
     ):
         _patcher().patch_desktop_cargo_deps(tmp_path)
 
-    assert mesh_path.read_text(encoding="utf-8") == _MESH_UPSTREAM
+    assert types_path.read_text(encoding="utf-8") == _MESH_TYPES_UPSTREAM
+    assert install_path.read_text(encoding="utf-8") == _MESH_INSTALL_UPSTREAM
     assert sherpa_path.read_text(encoding="utf-8") == source
 
 

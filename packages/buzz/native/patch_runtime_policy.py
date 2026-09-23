@@ -16,7 +16,10 @@ _BUZZ_KEYRING_LOCKED_SCREEN = Path(
 )
 _BUZZ_E2E_BRIDGE = Path("desktop/src/testing/e2eBridge.ts")
 _BUZZ_IDENTITY_E2E = Path("desktop/tests/e2e/identity-lost.spec.ts")
-_MESH_RUNTIME_INSTALL_GLOB = "**/mesh-llm-runtime-install-0.75.1/src/lib.rs"
+_MESH_RUNTIME_INSTALL_VERSION = "0.76.0-rc9"
+_MESH_RUNTIME_INSTALL_GLOB = (
+    f"**/mesh-llm-runtime-install-{_MESH_RUNTIME_INSTALL_VERSION}"
+)
 _SHERPA_ONNX_SYS_BUILD_GLOB = "**/sherpa-onnx-sys-1.13.4/build.rs"
 _RUST_INNER_ATTRIBUTE = re.compile(r"(?m)^(?:\ufeff)?[ \t]*#\s*!\s*\[")
 _BUZZ_APP_INNER_ATTRIBUTE = (
@@ -1476,7 +1479,7 @@ def patch_desktop_cargo_deps(root: Path) -> None:
     if len(mesh_matches) != 1:
         message = (
             "desktop Cargo vendor must contain exactly one "
-            "mesh-llm-runtime-install-0.75.1/src/lib.rs; "
+            f"mesh-llm-runtime-install-{_MESH_RUNTIME_INSTALL_VERSION} crate; "
             f"found {len(mesh_matches)}"
         )
         raise RuntimePolicyPatchError(message)
@@ -1490,22 +1493,36 @@ def patch_desktop_cargo_deps(root: Path) -> None:
         )
         raise RuntimePolicyPatchError(message)
 
-    mesh_path = mesh_matches[0]
-    mesh_source = mesh_path.read_text(encoding="utf-8")
-    patched_mesh = _replace_reviewed_rust_item(
-        mesh_source,
+    # Mesh 0.76.0-rc9 splits the reviewed policy items across the crate's
+    # generated sources: both Default impls live in types.rs and the
+    # install_native_runtime entrypoint lives in install.rs.
+    mesh_crate = mesh_matches[0]
+    mesh_types_path = mesh_crate / "src" / "types.rs"
+    mesh_install_path = mesh_crate / "src" / "install.rs"
+    for required in (mesh_types_path, mesh_install_path):
+        if not required.is_file():
+            message = (
+                "desktop Cargo vendor is missing the reviewed Mesh source file: "
+                f"{required}"
+            )
+            raise RuntimePolicyPatchError(message)
+
+    mesh_types_source = mesh_types_path.read_text(encoding="utf-8")
+    patched_mesh_types = _replace_reviewed_rust_item(
+        mesh_types_source,
         _MANIFEST_DEFAULT_UPSTREAM,
         _MANIFEST_DEFAULT_PATCHED,
         context="ManifestOptions allow_default_manifest_url default",
     )
-    patched_mesh = _replace_reviewed_rust_item(
-        patched_mesh,
+    patched_mesh_types = _replace_reviewed_rust_item(
+        patched_mesh_types,
         _INSTALL_DEFAULT_UPSTREAM,
         _INSTALL_DEFAULT_PATCHED,
         context="InstallOptions allow_download default",
     )
-    patched_mesh = _replace_reviewed_rust_item(
-        patched_mesh,
+    mesh_install_source = mesh_install_path.read_text(encoding="utf-8")
+    patched_mesh_install = _replace_reviewed_rust_item(
+        mesh_install_source,
         _INSTALL_NATIVE_RUNTIME_UPSTREAM,
         _INSTALL_NATIVE_RUNTIME_PATCHED,
         context="install_native_runtime allow_default_manifest_url hardcode",
@@ -1520,7 +1537,8 @@ def patch_desktop_cargo_deps(root: Path) -> None:
         context="sherpa-onnx-sys static link list",
     )
 
-    mesh_path.write_text(patched_mesh, encoding="utf-8")
+    mesh_types_path.write_text(patched_mesh_types, encoding="utf-8")
+    mesh_install_path.write_text(patched_mesh_install, encoding="utf-8")
     sherpa_path.write_text(patched_sherpa, encoding="utf-8")
 
 

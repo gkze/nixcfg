@@ -218,36 +218,37 @@ _BUZZ_SOURCE_PATHS = (
 # These digests belong only to the explicitly supported native foundation.
 # Buzz release files are validated semantically so a routine desktop release
 # does not require copying new byte digests into the updater.
+# Current audit revision: Mesh-LLM v0.76.0-rc9 (9f192c9d821991ba43d79bb15fd2f2f12e597571).
 _MESH_SOURCE_DIGESTS: dict[str, str] = {
     "crates/mesh-llm-sdk/Cargo.toml": (
-        "b575570e2400cac09ca86197453826a94da143c104a93d6c30e3af33d3a92ed1"
+        "7c5af7ade9b4fa1347b49494c8e06e1ec699364048739130bf0531bc7a5b232a"
     ),
     "crates/mesh-llm-embedded-runtime/Cargo.toml": (
-        "0238f31c785e812097d68c1d8c729f947c13ed6386528a231dff4f75d93aa040"
+        "89fff7ee66df8f508be34005a6e1f5670ccb4f029194973c2fe94aa96b45e1f7"
     ),
     "crates/mesh-llm-host-runtime/Cargo.toml": (
-        "fdad576eb5ec818a5d66220d63b60aa1ee1cc01733876e144e00cb8d12e57a03"
+        "66fa887fd8a87f688685b589aebf2ace0f1b7e099e941eb5a9615af2275077d1"
     ),
     "crates/mesh-llm-system/Cargo.toml": (
-        "d59ed62184fee33789ddd5d9b867328bf5a54e318bc4155d9b6a9dae9fd22463"
+        "ed22067f364458b32079a53cac2c45f4c63d80e09633fcd9abd6ddec88ad6fb0"
     ),
     "crates/skippy-runtime/Cargo.toml": (
-        "96bfa6b6ff30aa7e3a2c7ef65e12414a2ea2a65b69932784990a1eac1663aea7"
+        "f146996a31b75fa8a3e31eded347d64fd6796510b7d71c1b61ef79760f244258"
     ),
     "crates/skippy-server/Cargo.toml": (
-        "1d4774d9711ee92442bfa8b1a92081aec52f7aa6623528933f337baaf0e141ab"
+        "7c50f52b53f0838a59de5f9044ca57c7008d6b5d9ff16c25d7bacdde337688bf"
     ),
     "crates/skippy-ffi/Cargo.toml": (
         "b1319982c9651cb9d0e5d3b1ceadedde696a4f42ebbcaa8c6fa50a2bb6476a40"
     ),
     "crates/skippy-ffi/build.rs": (
-        "cd4f7efc4953832c145ca82b4a4aa93ee9ef0c1685fb816f6606b94fca54d07b"
+        "2446ebcb59be88844f023ea11afd134ed63f39ea678ebed7279ba935148bf408"
     ),
     "crates/skippy-ffi/src/lib.rs": (
-        "a2f8f672ce6bcd161c127ebc63465e9090abdfe866b17834d4463d224f02f07f"
+        "ac1d3ec7507591fa910bde259c875782381cb7d64f9e18e3f869b72188e8b954"
     ),
     "crates/mesh-llm-host-runtime/src/lib.rs": (
-        "a5546d3aec12830c3a5ef391a9da14a60a8010dedd8bf4b2005861d6607368bb"
+        "9917afb2d9989a9441389dfbfb909747731b2e9d86a55b262f0371074a59eb12"
     ),
     "crates/mesh-llm-host-runtime/src/system/native_runtime.rs": (
         "d869c1c42e3112a9f1afd3c35d959ea8bb44bff913a34331cd365c41ecca028d"
@@ -262,22 +263,28 @@ _MESH_SOURCE_DIGESTS: dict[str, str] = {
         "75b2616f429e59a13a5b202ff8373b832360c5b6e91b4d5bd4130b17c8f6941b"
     ),
     "crates/mesh-llm-runtime-install/src/lib.rs": (
-        "941c1363c0af2e10b631994924077ef5bf56430af6f5270b8db9d04afce6031d"
+        "ebc35bc8ffe8c21ca9b888957086ed1ecfefd674869fa02add2a8b5eed2cf4bb"
+    ),
+    "crates/mesh-llm-runtime-install/src/types.rs": (
+        "f1ce1b30f0985aee28a9eb7c8c57ac1f9888d98f60a7be156044449a4db15423"
+    ),
+    "crates/mesh-llm-runtime-install/src/install.rs": (
+        "98a99861af7ce1db3e1cde599fa7eb7551fa2bef5c9a29c32d2a2465df0bf60f"
     ),
     "crates/mesh-llm-runtime-install/src/discovery.rs": (
         "f241c1a5fdae0d6f5898fb97d91dda04c600c67654fb3bb5e4bccf515191be55"
     ),
     "scripts/build-llama.sh": (
-        "94b0ee9f8d902e7e1ff7fd5050137eec4c956886ad780766d1209a7b0beceba2"
+        "151b5e2b832d771c3618b443da891b0a1cecfe6fe131e9293f3570aed6fddca1"
     ),
     "scripts/package-native-runtime.sh": (
-        "5baea3d467630eb4235a717583ea89ed5aab328c2e7fc94789188f44bc3229ed"
+        "c951e34386dffd7fc3934081a62e2e983eb042e9156b02ea88341cde41e8222e"
     ),
     "scripts/prepare-llama.sh": (
-        "caab15f2f9680c5493ca2a4a302d5c9674fe04aa6d0ab3540a19ef7acc2c2b0d"
+        "0f7fbba71f62a0ff64c942e8e80d57cac2abe6debfae8a4ee19845dfe0dcefc7"
     ),
     "third_party/llama.cpp/upstream.txt": (
-        "bac5d6f06e193dff7866055e4c25daf800d33b46964870cf942659f478e2042f"
+        "e8dd7a7216c315fe252fcda95842648ac90a64d357e6367bf1b9ec4423acb0ac"
     ),
 }
 _ONNX_SOURCE_DIGESTS: dict[str, str] = {
@@ -774,7 +781,7 @@ pub struct NativeRuntimeManifest {
             r"fn default_install_options\(\).*?\.\.Default::default\(\)",
         ),
         "installer defaults to checksum-only downloads": (
-            "crates/mesh-llm-runtime-install/src/lib.rs",
+            "crates/mesh-llm-runtime-install/src/types.rs",
             r"(?m)^impl\s+Default\s+for\s+NativeRuntimeInstallOptions\s*\{"
             r"(?:(?!^\}).)*?fn\s+default\(\)\s*->\s*Self\s*\{"
             r"(?:(?!^\}).)*?"
@@ -783,24 +790,24 @@ pub struct NativeRuntimeManifest {
             r"allow_download:\s*true,",
         ),
         "manifest options default to the release manifest URL": (
-            "crates/mesh-llm-runtime-install/src/lib.rs",
+            "crates/mesh-llm-runtime-install/src/types.rs",
             r"(?m)^impl\s+Default\s+for\s+NativeRuntimeManifestOptions\s*\{"
             r"(?:(?!^\}).)*?fn\s+default\(\)\s*->\s*Self\s*\{"
             r"(?:(?!^\}).)*?allow_default_manifest_url:\s*true,",
         ),
         "installer entrypoint explicitly permits the default manifest URL": (
-            "crates/mesh-llm-runtime-install/src/lib.rs",
+            "crates/mesh-llm-runtime-install/src/install.rs",
             r"(?m)^(?:pub(?:\([^)]*\))?\s+)?async\s+fn\s+"
             r"install_native_runtime\s*\([^)]*\)[^\{]*\{"
             r"(?:(?!^\}).)*?NativeRuntimeManifestOptions\s*\{"
             r"(?:(?!^\}).)*?allow_default_manifest_url:\s*true,",
         ),
         "runtime manifest URL keeps its explicit environment hook": (
-            "crates/mesh-llm-runtime-install/src/lib.rs",
+            "crates/mesh-llm-runtime-install/src/types.rs",
             r'"MESH_LLM_NATIVE_RUNTIME_MANIFEST_URL"',
         ),
         "signature verification remains unimplemented": (
-            "crates/mesh-llm-runtime-install/src/lib.rs",
+            "crates/mesh-llm-runtime-install/src/install.rs",
             r'bail!\("native runtime signature verification is not implemented yet"\)',
         ),
         "runtime bundles have an explicit discovery environment": (

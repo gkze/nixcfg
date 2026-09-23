@@ -16,7 +16,9 @@ EXPECTED_ENTITLEMENTS = {
     "com.apple.security.cs.disable-library-validation": True,
     "com.apple.security.device.audio-input": True,
 }
-EXPECTED_NONEXECUTABLE_COUNT = 97
+# Paseo 0.9.0 dropped the Electron Framework libEGL/libGLESv2 fallback
+# dylibs, so the app-bundle non-executable Mach-O count shrank by two.
+EXPECTED_NONEXECUTABLE_COUNT = 95
 EXPECTED_FRAMEWORKS = (
     "Contents/Frameworks/Electron Framework.framework",
     "Contents/Frameworks/Mantle.framework",

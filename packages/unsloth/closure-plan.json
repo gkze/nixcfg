@@ -1,15 +1,15 @@
 {
   "app": {
-    "commit": "cedbb58e4a49befe12d4f28f385abc4393c763e5",
+    "commit": "7cfb9227ae507ec046630dc60377354c657a88c3",
     "rustToolchainVersion": "1.89.0",
-    "sourceHash": "sha256-SLTKjfaBkmM3gfEz/zqrwmL5SKuf0LPYrgwmOe9k2ok=",
-    "tag": "v0.1.807-beta",
-    "version": "0.1.807-beta"
+    "sourceHash": "sha256-/E8QbfJP1m+AFeIWCBUIu3kycEUNut5NNcj0k8SEh7M=",
+    "tag": "v0.1.813-beta",
+    "version": "0.1.813-beta"
   },
   "backend": {
-    "sdistHash": "sha256-NTh6fcWpGnV1i+zDJns5MWBN45lIXB7Hje0N2LQL9TA=",
-    "sourceTagVersion": "2026.9.3",
-    "version": "2026.9.3"
+    "sdistHash": "sha256-cJXj8RUinWH1a2rVJ9JY5Qp5+KR9j92cfUv2Mb88hiw=",
+    "sourceTagVersion": "2026.9.9",
+    "version": "2026.9.9"
   },
   "blockers": [],
   "closurePolicy": {
@@ -33,9 +33,9 @@
     "verificationStatus": "exact-source-replay-and-behavior-tests-passed"
   },
   "releaseManifest": {
-    "hash": "sha256-7LsMLbgGoOo3hsaYgAtNxPSGcGlrHtIj+dHH3Io5wpw=",
-    "pypiVersion": "2026.9.3",
-    "version": "0.1.807-beta"
+    "hash": "sha256-KB4wkNWuqj/7YNM/5Tb3AfTEGCprsY1Do2GrKDwBH80=",
+    "pypiVersion": "2026.9.9",
+    "version": "0.1.813-beta"
   },
   "status": "exported-and-validated"
 }

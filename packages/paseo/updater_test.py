@@ -79,6 +79,7 @@ _NPM_FETCHER_VERSION = 2
 _ESBUILD_VERSION = "0.25.12"
 _CLAUDE_AGENT_SDK_VERSION = "0.3.220"
 _APP_BUILDER_LIB_VERSION = "26.8.1"
+_NODE_ABI_VERSION = "4.28.0"
 _APP_BUILDER_LIB_BACKPORT_COMMIT = "2ff9190aadc791503a6e62cdcbfa975448bc49bf"
 _ONNX_DEPENDENCIES = {
     "abseilCpp": {
@@ -291,6 +292,7 @@ _REQUIRED_ANCHOR_COUNTS = {
 
 class _ManifestContractLike(Protocol):
     app_builder_lib_version: str
+    node_abi_version: str
     esbuild_version: str
     node_addon_api_version: str
     onnxruntime_version: str
@@ -499,6 +501,7 @@ def _version_info(
 ) -> VersionInfo:
     metadata = {
         "appBuilderLibVersion": _APP_BUILDER_LIB_VERSION,
+        "nodeAbiVersion": _NODE_ABI_VERSION,
         "claudeAgentSdkVersion": claude_sdk_version,
         "commit": release_commit,
         "electronVersion": _ELECTRON_VERSION,
@@ -569,6 +572,7 @@ def _lock_manifest(
             "node_modules/app-builder-lib": {
                 "version": _APP_BUILDER_LIB_VERSION,
             },
+            "node_modules/node-abi": {"version": _NODE_ABI_VERSION},
             sdk_path: {
                 "version": claude_sdk_version,
                 "resolved": (
@@ -1388,6 +1392,7 @@ def test_paseo_hashes_sources_then_npm_closure(
         "esbuildVersion": _ESBUILD_VERSION,
         "claudeAgentSdkVersion": _CLAUDE_AGENT_SDK_VERSION,
         "appBuilderLibVersion": _APP_BUILDER_LIB_VERSION,
+        "nodeAbiVersion": _NODE_ABI_VERSION,
         "appBuilderLibBackportCommit": _APP_BUILDER_LIB_BACKPORT_COMMIT,
     }
     assert expect_artifact_updates(artifact_event.payload) == [
@@ -1451,6 +1456,7 @@ def test_paseo_updater_owns_the_complete_native_lock() -> None:
         "commit",
         "electronVersion",
         "esbuildVersion",
+        "nodeAbiVersion",
         "nodeAddonApiVersion",
         "npmFetcherVersion",
         "version",
@@ -1469,6 +1475,7 @@ def test_paseo_updater_owns_the_complete_native_lock() -> None:
             version=source.version,
             metadata={
                 "appBuilderLibVersion": paseo_lock["appBuilderLibVersion"],
+                "nodeAbiVersion": paseo_lock["nodeAbiVersion"],
                 "claudeAgentSdkVersion": paseo_lock["claudeAgentSdkVersion"],
                 "commit": source.commit,
                 "electronVersion": source.electron_version,
@@ -1618,11 +1625,11 @@ def test_paseo_derivations_consume_only_the_updater_owned_native_lock() -> None:
         """,
     )
     assert_nix_ast_equal(
-        completeness_terms[17],
+        completeness_terms[18],
         "builtins.length (builtins.attrValues onnxruntimeDependencies) == 7",
     )
     assert_nix_ast_equal(
-        completeness_terms[18],
+        completeness_terms[19],
         "builtins.all completeGitHubDependency (builtins.attrValues onnxruntimeDependencies)",
     )
     assert_nix_ast_equal(
@@ -1726,6 +1733,11 @@ def test_paseo_build_result_rejects_unpinned_release_tag() -> None:
             "appBuilderLibVersion",
             "26.9.0",
             "supported appBuilderLibVersion must be",
+        ),
+        (
+            "nodeAbiVersion",
+            "4.29.0",
+            "supported nodeAbiVersion must be",
         ),
         (
             "nodeAddonApiVersion",
@@ -2254,10 +2266,10 @@ def test_paseo_reviewed_native_manifest_matches_the_realized_inventory() -> None
     assert manifest.endswith(b"\n")
     assert not manifest.endswith(b"\n\n")
     assert sha256(manifest).hexdigest() == (
-        "841ed05049fdf6919d1c8124fcb00dfb22403be4b9c16bf59bee440ecc51e0ad"
+        "c95f41c50d4b47704abcfa91a9f52b3bda6a288bd085c43cf0d82cfe6d22a4d0"
     )
     rows = manifest.decode("utf-8").splitlines()
-    assert len(rows) == 201
+    assert len(rows) == 199
     assert rows == sorted(rows, key=str.encode)
     assert len(rows) == len(set(rows))
     assert all(
@@ -3376,9 +3388,7 @@ def test_paseo_applies_the_cycle_guard_after_npm_materialization() -> None:
         'patch --dry-run "__NIX_INTERP__"',
         'patch "__NIX_INTERP__"',
     ]
-    assert command_texts(post_configure_shell)[-1] == (
-        '__NIX_INTERP__ --check "$appBuilderLibCollector"'
-    )
+    assert command_texts(post_configure_shell)[-1] == "exit 1"
     assignments = {
         node_text(node, post_configure_shell.sanitized)
         for node in iter_nodes(
@@ -3386,6 +3396,15 @@ def test_paseo_applies_the_cycle_guard_after_npm_materialization() -> None:
             "variable_assignment",
         )
     }
+    assert 'nodeAbiRegistry="$nodeAbiPackage/abi_registry.json"' in (assignments)
+    assert any(
+        assignment.startswith("installedNodeAbiVersion=")
+        and '"$nodeAbiManifest"' in assignment
+        for assignment in assignments
+    )
+    assert '[ "$installedNodeAbiVersion" != __NIX_INTERP__ ]' in command_texts(
+        post_configure_shell
+    )
     assert "appBuilderLibPatch=__NIX_INTERP__" in assignments
     assert (
         """appBuilderLibPatchOptions=(

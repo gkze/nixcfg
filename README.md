@@ -151,17 +151,27 @@ nix run .#nixcfg -- ci --help
 nix run .#nixcfg -- schema --help
 ```
 
-`nixcfg update` prepares changes in an isolated copy of the checkout. Every full
-update must build all configured root closures before it changes the checkout.
+`nixcfg update` prepares changes in an isolated copy of the checkout. Every run
+that would change the checkout must first build all configured root closures.
 A root closure contains a system or Home Manager configuration and all its
-dependencies. Targeted updates use the same build gate when they change files.
-Root discovery follows `darwin/*.nix`, `nixos/*.nix`, and `home/*/default.nix`.
-It does not require a separate list of host names.
+dependencies. A candidate identical to the checkout changes nothing, so it
+skips the build gate. Root discovery follows `darwin/*.nix`, `nixos/*.nix`, and
+`home/*/default.nix`. It does not require a separate list of host names.
 
 If a root build fails, the updater leaves the candidate changes outside the
 checkout. The updater also rejects source changes that invalidate the tested
 snapshot. It preserves existing user edits and does not activate a system or
 Home Manager configuration.
+
+Targets are promoted individually. A target that fails, whether while
+resolving, hashing, or validating its derivations, is withheld together with
+the targets coupled to it: companion and aggregate sources, and every target
+hashed against the same flake input when that input moved during the run,
+since flake.nix and flake.lock revert as a unit. The remaining candidate is
+validated again, at most three rounds, and then promoted. Any failure still
+sets a non-zero exit status, and the summary lists updated, withheld, and
+failed targets separately. `--strict` restores the all-or-nothing behavior in
+which any failure discards every candidate.
 
 Updater coroutines return their typed results directly and send progress through
 an awaited `emit` callback. Hooks receive an explicit `UpdateContext`.
@@ -181,12 +191,29 @@ Use `--timings` (optionally with `--json`) to inspect operation time, admission
 waits, and cache reuse. See [update runtime efficiency](docs/update-runtime.md)
 for independent resource limits, cache invalidation, and validation behavior.
 
-Use `nixcfg update --verbose --tty off` to stream progress into a terminal or
-log file, including package and root closure build output. Human-readable
-output identifies each validation phase. Diagnostics redact URL credentials,
-query strings, and fragments. Flake edits refresh the lockfile once, through
-the same streaming command runner as source refreshes. `--subprocess-timeout`
-applies to these commands as well as package and root validation.
+Progress is visible by default. On a terminal the live panel shows only the
+targets currently in flight, with finished targets printed above it, and ends
+with a status line naming the phase, done/running/failed counts, and the
+longest-running target with its idle time. Plain output (pipes, `--tty off`,
+Zellij) prints phase headers, per-target results, and that status line every
+30 seconds (`UPDATE_HEARTBEAT_INTERVAL`). A target that produces no output for
+five minutes (`UPDATE_INACTIVITY_WARNING_SECONDS`) is flagged as stalled. The
+derivation and root closure validation phases report the running command, the
+derivation being built, and idle time through the same status line; add
+`--verbose` to stream the underlying build logs.
+
+Every run also writes a run directory under
+`$XDG_STATE_HOME/nixcfg/update/runs/<run-id>/` (`UPDATE_RUN_LOG_DIR` overrides
+the root, `UPDATE_RUN_LOG=0` disables it) containing `events.jsonl`,
+`output.log` with every subprocess line, `run.json` with the plan and final
+summary, and `state.json`. The path is printed
+at the start and end of the run, and `nixcfg update --status [RUN_ID]` reports
+the latest or a named run from any terminal, including while it is running or
+after it was killed. Diagnostics redact URL credentials, query strings, and
+fragments. Flake edits refresh the lockfile once, through the same streaming
+command runner as source refreshes. `--subprocess-timeout` applies to these
+commands as well as package and root validation; a command that hits it is not
+retried.
 
 Source-derived toolchain metadata comes from the pinned upstream manifests and
 locks. Node and pnpm selection must satisfy upstream requirements through the

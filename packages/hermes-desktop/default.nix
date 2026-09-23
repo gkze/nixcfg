@@ -168,7 +168,10 @@ hermesNpmLib.buildNpmPackage {
     executable="$app/Contents/MacOS/${appExecutableName}"
     resources="$app/Contents/Resources"
     mainBundle="$resources/app.asar.unpacked/dist/electron-main.mjs"
-    managedVersionDeclaration=${lib.escapeShellArg "var NIX_MANAGED_HERMES_VERSION = ${builtins.toJSON hermesVersion};"}
+    # 0.17.6 loads main.ts through a dynamic import, so esbuild hoists the
+    # injected declaration's binding and emits a bare assignment inside the
+    # lazy-init wrapper; the keyword-free assignment is the stable match.
+    managedVersionDeclaration=${lib.escapeShellArg "NIX_MANAGED_HERMES_VERSION = ${builtins.toJSON hermesVersion};"}
     plist="$app/Contents/Info.plist"
 
     for path in \
@@ -193,9 +196,15 @@ hermesNpmLib.buildNpmPackage {
     /usr/bin/codesign --verify --deep --strict "$app"
 
     grep -R -Fq ${lib.escapeShellArg hermesExecutable} "$resources"
-    managedVersionCount="$(grep -Fxc -- "$managedVersionDeclaration" "$mainBundle" || true)"
+    # 0.17.6's electron/entry.ts loads main.ts via a dynamic import, so
+    # esbuild scopes its top-level declarations inside a lazy-init wrapper.
+    # The injected declaration is indented there; match it as a substring.
+    managedVersionCount="$(grep -Fc -- "$managedVersionDeclaration" "$mainBundle" || true)"
     if [ "$managedVersionCount" -ne 1 ]; then
       echo "expected one exact Nix-managed Hermes version declaration, found $managedVersionCount" >&2
+      grep -n 'NIX_MANAGED_HERMES_VERSION' "$mainBundle" |
+        head -5 | cut -c1-200 >&2
+      grep -c 'NIX_MANAGED_HERMES' "$mainBundle" >&2
       exit 1
     fi
     grep -R -Fq 'Updates are managed by Nix.' "$resources"

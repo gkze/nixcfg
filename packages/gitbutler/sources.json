@@ -1,5 +1,5 @@
 {
-  "drvHash": "vpl060jnrarpn6ni48l1ssrwfavcqqjf",
+  "drvHash": "9q0m77ahpjpc2q008cq8m2gli2h0k0l6",
   "hashes": [
     {
       "hash": "sha256-CZZOZ+ox4kE5hq/W82UrpJ4I9al9TFBiN+K4XUhxnDE=",
@@ -10,7 +10,7 @@
   "pins": {
     "nodeEngine": ">=24",
     "nodejsAttr": "nodejs_24",
-    "nodejsVersion": "24.19.0",
+    "nodejsVersion": "24.20.0",
     "packageManager": "pnpm@10.20.0",
     "pnpmAttr": "pnpm_10",
     "pnpmVersion": "10.34.5"

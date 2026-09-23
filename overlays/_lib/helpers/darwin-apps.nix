@@ -45,11 +45,11 @@ let
         description
         homepage
         license
-        mainProgram
         platforms
         sourceProvenance
         ;
     }
+    // prev.lib.optionalAttrs (mainProgram != null) { inherit mainProgram; }
     // meta;
 
   resolveExecutableName =
@@ -247,7 +247,7 @@ in
       macApp ? { },
       description,
       homepage,
-      mainProgram ? pname,
+      mainProgram ? if createBin then pname else null,
       license ? prev.lib.licenses.unfree,
       platforms ? prev.lib.platforms.darwin,
       sourceProvenance ? with prev.lib.sourceTypes; [ binaryNativeCode ],
@@ -295,7 +295,8 @@ in
           runHook preInstall
 
           unpack_dir="$TMPDIR/${pname}-unpack"
-          mkdir -p "$unpack_dir" "$out/Applications" "$out/bin"
+          mkdir -p "$unpack_dir" "$out/Applications"
+          ${prev.lib.optionalString createBin ''mkdir -p "$out/bin"''}
           7zz x -sns- -snld -y "$src" -o"$unpack_dir"
           ${findAppBundle}
           if [ -z "''${app_bundle:-}" ] || [ ! -d "$app_bundle" ]; then
@@ -318,6 +319,122 @@ in
       };
     };
 
+  # CRX3 container layout: "Cr24" magic, LE32 version, LE32 header length,
+  # protobuf header, then a zip whose first entry is the inner DMG. Google
+  # distributes Gemini for macOS this way through its Omaha update service.
+  mkCrx3DmgApp =
+    {
+      pname,
+      info,
+      appName ? pname,
+      executableName ? null,
+      bundleName ? null,
+      binaryName ? pname,
+      makeBinary ? true,
+      postInstallApp ? "",
+      codesignApp ? false,
+      dontFixup ? true,
+      macApp ? { },
+      meta ? { },
+      sourceName ? null,
+      stdenv ? prev.stdenvNoCC,
+    }:
+    let
+      arch = if system == "aarch64-darwin" then "aarch64" else "x86_64";
+      inherit
+        (mkAppNames {
+          inherit
+            pname
+            appName
+            executableName
+            bundleName
+            ;
+        })
+        capitalizedAppName
+        resolvedBundleName
+        resolvedExecutableName
+        ;
+      containerName = "${capitalizedAppName}_${info.version}_${arch}.crx3";
+      # The Gemini updater (packages/gemini/updater.py) rejects Omaha payloads
+      # whose inner artifact is not "<CapitalizedAppName>-<version>.dmg";
+      # test_gemini_inner_dmg_name_contract_is_pinned_by_the_helper pins it.
+      innerDmgName =
+        if sourceName == null then "${capitalizedAppName}-${info.version}.dmg" else sourceName;
+    in
+    mkUnpackedApp {
+      inherit
+        pname
+        info
+        dontFixup
+        macApp
+        meta
+        stdenv
+        ;
+      bundleName = resolvedBundleName;
+      srcName = containerName;
+
+      unpack = {
+        nativeBuildInputs = [
+          prev.darwin.xattr
+          prev.undmg
+          prev.unzip
+        ];
+
+        drvAttrs = {
+          dontUnpack = true;
+
+          installPhase = ''
+            runHook preInstall
+
+            unpack_dir="$TMPDIR/${pname}-unpack"
+            mkdir -p "$unpack_dir" "$out/Applications"
+            ${prev.lib.optionalString makeBinary ''mkdir -p "$out/bin"''}
+
+            magic="$(head -c 4 "$src")"
+            if [ "$magic" != "Cr24" ]; then
+              echo "Expected a CRX3 container for ${pname}, got magic: $magic" >&2
+              exit 1
+            fi
+            header_len="$(od -An -tu4 -j8 -N4 "$src" | tr -d '[:space:]')"
+            inner_zip="$TMPDIR/${pname}-inner.zip"
+            tail -c +"$((13 + header_len))" "$src" > "$inner_zip"
+
+            inner_dmg="$unpack_dir/${innerDmgName}"
+            if ! unzip -qq -j "$inner_zip" "${innerDmgName}" -d "$unpack_dir"; then
+              echo "Expected ${innerDmgName} in ${pname} CRX3 container" >&2
+              unzip -l "$inner_zip" >&2
+              exit 1
+            fi
+
+            dmg_dir="$TMPDIR/${pname}-dmg"
+            mkdir -p "$dmg_dir"
+            (
+              cd "$dmg_dir"
+              undmg "$inner_dmg"
+            )
+            if [ ! -d "$dmg_dir/${resolvedBundleName}" ]; then
+              echo "Expected ${resolvedBundleName} in ${pname} DMG" >&2
+              find "$dmg_dir" -maxdepth 2 -type d >&2
+              exit 1
+            fi
+
+            cp -R "$dmg_dir/${resolvedBundleName}" "$out/Applications/${resolvedBundleName}"
+            ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${resolvedBundleName}"
+            ${postInstallApp}
+            ${prev.lib.optionalString codesignApp ''
+              /usr/bin/codesign --force --deep --sign - "$out/Applications/${resolvedBundleName}"
+            ''}
+            ${prev.lib.optionalString makeBinary (guardedBinLink {
+              bundleName = resolvedBundleName;
+              executableName = resolvedExecutableName;
+              inherit binaryName;
+            })}
+
+            runHook postInstall
+          '';
+        };
+      };
+    };
   mkZipApp =
     {
       pname,
@@ -414,7 +531,7 @@ in
       macApp ? { },
       description,
       homepage,
-      mainProgram ? pname,
+      mainProgram ? if createBin then pname else null,
       license ? prev.lib.licenses.unfree,
       platforms ? prev.lib.platforms.darwin,
       sourceProvenance ? with prev.lib.sourceTypes; [ binaryNativeCode ],
@@ -532,7 +649,8 @@ in
           runHook preInstall
 
           unpack_dir="$TMPDIR/${pname}-unpack"
-          mkdir -p "$unpack_dir" "$out/Applications" "$out/bin"
+          mkdir -p "$unpack_dir" "$out/Applications"
+          ${prev.lib.optionalString createBin ''mkdir -p "$out/bin"''}
           tar -xzf "$src" -C "$unpack_dir"
 
           app_bundle="$(find "$unpack_dir" -maxdepth 4 -type d -name "${bundleName}" -print -quit)"

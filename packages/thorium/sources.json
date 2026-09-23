@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-L9nTtHy84EIDng1MsiydrV+bMo4T8OhCcLWNjfBHGrg=",
+    "x86_64-darwin": "sha256-uZP+H5JRsyWxLzcF2mNYy4qSHToGU+6TAzL09T8pwr4="
+  },
+  "urls": {
+    "aarch64-darwin": "https://github.com/gz83/thorium/releases/download/M152.0.7977.55/Thorium_MacOS_ARM64.dmg",
+    "x86_64-darwin": "https://github.com/gz83/thorium/releases/download/M152.0.7977.55/Thorium_MacOS_x64.dmg"
+  },
+  "version": "152.0.7977.55"
+}

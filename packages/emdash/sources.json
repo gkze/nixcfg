@@ -1,19 +1,19 @@
 {
-  "drvHash": "platforms-v1:bfefd57d2ed52f664c6c45fbd0f5b78b8c17ca5e722f4a07e99022ea6a1b797c",
+  "drvHash": "platforms-v1:c88583abc2494d0253245717e6366c69c0531fa26111861db56cd572bdc92205",
   "electronVersion": "40.10.2",
   "hashes": [
     {
-      "hash": "sha256-QK1QD7Ph2bGU0wJ9MbSmAlQufBsNW8S6atn6+alO8Hw=",
+      "hash": "sha256-7G0Iu0+miYTgpEJqmtYJik764btSpwwFklCOUck4M7U=",
       "hashType": "npmDepsHash",
       "platform": "aarch64-darwin"
     },
     {
-      "hash": "sha256-x4zMf1wVexApj2u+ySASM0iSDxiGREh3iDrFi8wvVtc=",
+      "hash": "sha256-6uhwPkZCQtIEglBUVN6FJMEk+C62aCWgyrsZb07Bkmo=",
       "hashType": "npmDepsHash",
       "platform": "aarch64-linux"
     },
     {
-      "hash": "sha256-Qrv+dXlYDxYhBtJGnQiqjfKr/qFphtD+JIOLlIFkA6E=",
+      "hash": "sha256-WKLJoxuNu673pqNc70Dz+xf9aMFMnxXb6wj3GXG13u8=",
       "hashType": "npmDepsHash",
       "platform": "x86_64-linux"
     }
@@ -22,11 +22,16 @@
   "pins": {
     "nodeEngine": ">=24.0.0",
     "nodejsAttr": "nodejs_24",
-    "nodejsVersion": "24.19.0",
+    "nodejsVersion": "24.20.0",
     "packageManager": "pnpm@10.28.2",
     "pnpmAttr": "pnpm_10",
     "pnpmEngine": ">=10.28.0",
     "pnpmVersion": "10.34.5"
   },
-  "version": "v1.2.4"
+  "platformDrvHashes": {
+    "aarch64-darwin": "bcykhfb3asn6ymvgx406fkr2z9srqq77",
+    "aarch64-linux": "0cf8dbkn05ac2bgvmv9s9vk5aq5pmkvd",
+    "x86_64-linux": "xwm6ydsy61y2b5a37l5cag8sdr62v99d"
+  },
+  "version": "v1.2.6"
 }

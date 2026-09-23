@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -459,7 +460,7 @@ def test_node_evaluation_respects_workspace_and_resource_budgets(
     monkeypatch.setattr(node_compatibility, "run_nix", evaluate)
 
     async def run() -> None:
-        config = default_config()
+        config = replace(default_config(), max_nix_evaluations=1)
         async with runtime.runtime_scope(config) as owner:
             async with runtime.resource_slot("eval", source="owner", config=config):
                 async with runtime.workspace_access(write=True):

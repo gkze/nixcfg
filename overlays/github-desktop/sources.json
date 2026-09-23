@@ -1,5 +1,5 @@
 {
-  "drvHash": "jg5kjqf99h71bdb890ql6xfpy4g54s3l",
+  "drvHash": "653x0jwvyw74x0rncscc0jq7ar3dqkif",
   "electronVersion": "42.0.1",
   "hashes": [
     {
@@ -12,5 +12,5 @@
     }
   ],
   "input": "github-desktop",
-  "version": "3.6.5"
+  "version": "3.6.6"
 }

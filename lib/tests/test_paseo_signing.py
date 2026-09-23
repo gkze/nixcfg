@@ -103,7 +103,7 @@ def _materialize_reviewed_bundle(tmp_path: Path) -> tuple[Path, set[str], set[st
         candidate.write_bytes(b"fixture executable Mach-O\n")
     native_root = app / "Contents/Resources/reviewed-native"
     native_root.mkdir(parents=True)
-    for index in range(97):
+    for index in range(95):
         candidate = native_root / f"native-{index:03d}"
         candidate.write_bytes(b"fixture Mach-O\n")
     return app, executable_paths, entitled_paths
@@ -285,7 +285,7 @@ def test_paseo_signature_validator_accepts_only_the_reviewed_bundle_inventory(
 
     file_calls = [call for call in calls if call[0] == "/usr/bin/file"]
     codesign_calls = [call for call in calls if call[0] == "/usr/bin/codesign"]
-    assert len(file_calls) == 106
+    assert len(file_calls) == 104
     macho_paths = {call[-1] for call in file_calls}
     assert macho_paths & entitled_paths == {
         str(app / path) for path in _EXPECTED_ENTITLED_MACHOS
@@ -346,18 +346,18 @@ def test_paseo_signature_cli_uses_system_tools_and_ignores_non_macho_resources(
 def test_paseo_signature_validator_rejects_wrong_counts_and_nested_inventories(
     tmp_path: Path,
 ) -> None:
-    """The audited 106/9/97 and 4/4 shapes are exact, not lower bounds."""
+    """The audited 104/9/95 and 4/4 shapes are exact, not lower bounds."""
     module = _load_signature_validator()
 
     count_app, count_executable, count_entitled = _materialize_reviewed_bundle(
         tmp_path / "count"
     )
-    (count_app / "Contents/Resources/reviewed-native/native-096").unlink()
+    (count_app / "Contents/Resources/reviewed-native/native-094").unlink()
     count_runner, _ = _successful_codesign_runner(
         executable_paths=count_executable,
         entitled_paths=count_entitled,
     )
-    with pytest.raises(ValueError, match="expected 106/9/97, got 105/9/96"):
+    with pytest.raises(ValueError, match="expected 104/9/95, got 103/9/94"):
         module.validate_bundle(count_app, runner=count_runner)
 
     entitlement_app, entitlement_executable, entitlement_paths = (
@@ -376,7 +376,7 @@ def test_paseo_signature_validator_rejects_wrong_counts_and_nested_inventories(
         entitled_paths=entitlement_paths,
     )
     with pytest.raises(
-        ValueError, match="entitlement inventory expected 5/101, got 4/102"
+        ValueError, match="entitlement inventory expected 5/99, got 4/100"
     ):
         module.validate_bundle(entitlement_app, runner=entitlement_runner)
 

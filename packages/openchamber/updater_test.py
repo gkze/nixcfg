@@ -49,8 +49,17 @@ _SHERPA_VERSION = "1.13.3"
 _SHERPA_COMMIT = "330609dab49be6ee8b30702918ca7abbbad1286a"
 _SHERPA_WRAPPER_VERSION = "1.12.28"
 _NODE_ADDON_API_VERSION = "8.3.0"
+# Upstream OpenChamber and OpenCode declare their bun requirements on
+# independent schedules; the contract records both instead of forcing one.
+_OPENCODE_BUN_VERSION = "1.3.13"
+_OPENCODE_BUN_HASH = "sha256-GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG="
+_OPENCODE_BUN_URL = (
+    "https://github.com/oven-sh/bun/releases/download/"
+    f"bun-v{_OPENCODE_BUN_VERSION}/bun-darwin-aarch64.zip"
+)
 _SOURCE_PINS = {
     "bunVersion": _BUN_VERSION,
+    "opencodeBunVersion": _OPENCODE_BUN_VERSION,
     "opencodeCommit": _OPENCODE_COMMIT,
     "opencodeVersion": _OPENCODE_VERSION,
     "sherpaCommit": _SHERPA_COMMIT,
@@ -71,6 +80,7 @@ _SOURCE_HASHES = (
 _URL_HASHES = (
     _BUN_HASH,
     "sha256-DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD=",
+    _OPENCODE_BUN_HASH,
     "sha256-EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE=",
 )
 _OPENCHAMBER_NODE_MODULES_HASH = "sha256-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF="
@@ -244,6 +254,7 @@ def _write_patcher_fixture(module: ModuleType, root: Path) -> dict[str, Path]:
 def _urls() -> dict[str, str]:
     return {
         "bunUrl": _BUN_URL,
+        "opencodeBunUrl": _OPENCODE_BUN_URL,
         "nodeAddonApiUrl": (
             "https://registry.npmjs.org/node-addon-api/-/"
             f"node-addon-api-{_NODE_ADDON_API_VERSION}.tgz"
@@ -272,6 +283,8 @@ def _version_info() -> VersionInfo:
             "commit": _COMMIT,
             "electronVersion": _ELECTRON_VERSION,
             "nodeAddonApiVersion": _NODE_ADDON_API_VERSION,
+            "opencodeBunUrl": _OPENCODE_BUN_URL,
+            "opencodeBunVersion": _OPENCODE_BUN_VERSION,
             "opencodeCommit": _OPENCODE_COMMIT,
             "opencodeNodeModulesHash": _OPENCODE_NODE_MODULES_HASH,
             "opencodeVersion": _OPENCODE_VERSION,
@@ -437,7 +450,7 @@ def test_openchamber_resolves_one_exact_release_and_companion_graph(
                 },
             }
         if url.endswith(f"/{_OPENCODE_COMMIT}/package.json"):
-            return {"packageManager": f"bun@{_BUN_VERSION}"}
+            return {"packageManager": f"bun@{_OPENCODE_BUN_VERSION}"}
         if url.endswith("/nix/hashes.json"):
             return {
                 "nodeModules": {
@@ -624,9 +637,9 @@ def test_openchamber_hashes_every_source_and_closure_in_order(
     hashes = events.result
     entries = cast("list[HashEntry]", hashes)
 
-    assert len(calls) == 7
+    assert len(calls) == 8
     assert [event.message for event in status_events] == [
-        f"hash-step-{index}" for index in range(7)
+        f"hash-step-{index}" for index in range(8)
     ]
     assert_nix_ast_equal(
         str(calls[0]["expr"]),
@@ -685,6 +698,7 @@ def test_openchamber_build_result_requires_and_persists_complete_closure() -> No
             (
                 urls["bunUrl"],
                 urls["nodeAddonApiUrl"],
+                urls["opencodeBunUrl"],
                 urls["sherpaOnnxNodeUrl"],
             ),
             strict=True,
@@ -733,6 +747,7 @@ def test_openchamber_build_result_requires_and_persists_complete_closure() -> No
             "nodeAddonApi": urls["nodeAddonApiUrl"],
             "openchamber": urls["openchamberUrl"],
             "opencode": urls["opencodeUrl"],
+            "opencodeBun": urls["opencodeBunUrl"],
             "sherpaOnnx": urls["sherpaOnnxUrl"],
             "sherpaOnnxNode": urls["sherpaOnnxNodeUrl"],
         },
@@ -893,6 +908,7 @@ def test_openchamber_source_metadata_has_complete_provenance_graph() -> None:
     entries = source.hashes.entries
     assert set(pins) == {
         "bunVersion",
+        "opencodeBunVersion",
         "opencodeCommit",
         "opencodeVersion",
         "sherpaCommit",
@@ -904,6 +920,7 @@ def test_openchamber_source_metadata_has_complete_provenance_graph() -> None:
         "nodeAddonApi",
         "openchamber",
         "opencode",
+        "opencodeBun",
         "sherpaOnnx",
         "sherpaOnnxNode",
     }
@@ -913,6 +930,7 @@ def test_openchamber_source_metadata_has_complete_provenance_graph() -> None:
         ("srcHash", None, urls["sherpaOnnx"]),
         ("sha256", None, urls["bun"]),
         ("sha256", None, urls["nodeAddonApi"]),
+        ("sha256", None, urls["opencodeBun"]),
         ("sha256", None, urls["sherpaOnnxNode"]),
         ("nodeModulesHash", "aarch64-darwin", urls["opencode"]),
         ("nodeModulesHash", "aarch64-darwin", urls["openchamber"]),
@@ -945,6 +963,8 @@ def test_openchamber_source_metadata_has_complete_provenance_graph() -> None:
                 "nodeAddonApiUrl": node_addon_url,
                 "nodeAddonApiVersion": node_addon_version,
                 "openchamberUrl": urls["openchamber"],
+                "opencodeBunUrl": urls["opencodeBun"],
+                "opencodeBunVersion": pins["opencodeBunVersion"],
                 "opencodeCommit": pins["opencodeCommit"],
                 "opencodeNodeModulesHash": opencode_node_hashes[0],
                 "opencodeUrl": urls["opencode"],
@@ -981,6 +1001,7 @@ def test_openchamber_derivations_consume_updater_owned_source_pins() -> None:
     final = expect_instance(package.output, IfExpression)
     for name, expression in {
         "bunVersion": "selfSource.pins.bunVersion",
+        "opencodeBunVersion": "selfSource.pins.opencodeBunVersion",
         "openCodeCommit": "selfSource.pins.opencodeCommit",
         "openCodeVersion": "selfSource.pins.opencodeVersion",
         "sherpaCommit": "selfSource.pins.sherpaCommit",
@@ -1006,9 +1027,10 @@ def test_openchamber_derivations_consume_updater_owned_source_pins() -> None:
 
     helper_contracts = {
         "bunExact": {"version": "bunVersion"},
+        "opencodeBunExact": {"version": "opencodeBunVersion"},
         "openChamberNodeModules": {"bunVersion": "bunVersion"},
         "openCodeNodeModules": {
-            "bunVersion": "bunVersion",
+            "bunVersion": "opencodeBunVersion",
             "version": "openCodeVersion",
         },
         "sherpaNodeAddon": {

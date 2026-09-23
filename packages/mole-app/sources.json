@@ -1,5 +1,5 @@
 {
-  "commit": "df905bd082c8e2e94cd765c5968e15161dbc1ff7",
+  "commit": "5d02d5d378163f3f167c96b6be2b40bebde66b69",
   "hashes": [
     {
       "hash": "sha256-mVeDNRw7iUYZHvQPKIr7MUdimvEDJjhf23wFmoeh/UY=",
@@ -12,9 +12,9 @@
       "platform": "x86_64-darwin"
     },
     {
-      "hash": "sha256-Ce2+wdRbKrcMii4eRpD/dqSUBMNFvdggU1kNDBG7Y1E=",
+      "hash": "sha256-ft/JTWXj+IhdKEPZhsUsxGRyrYoPmuR2vCgoFQYs738=",
       "hashType": "srcHash",
-      "url": "https://github.com/tw93/Mole/archive/df905bd082c8e2e94cd765c5968e15161dbc1ff7.tar.gz"
+      "url": "https://github.com/tw93/Mole/archive/5d02d5d378163f3f167c96b6be2b40bebde66b69.tar.gz"
     }
   ],
   "urls": {

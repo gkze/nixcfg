@@ -1,11 +1,11 @@
 {
-  "commit": "9400a49af670fdb5db4af58e73f8df98588dbea9",
-  "electronVersion": "41.2.0",
+  "commit": "81865852011df86aa0ad0ae411cb2f5e4078153f",
+  "electronVersion": "44.2.0",
   "hashes": [
     {
-      "hash": "sha256-xYp+cGChDn57nX/+mmvt0HD++kjnQcNzASr6kUByAMY=",
+      "hash": "sha256-90d/l3zZXNWJy8IPceW4K0W43I5LWbOGkpWzATUS+Fg=",
       "hashType": "npmDepsHash",
-      "url": "https://github.com/getpaseo/paseo/archive/9400a49af670fdb5db4af58e73f8df98588dbea9.tar.gz"
+      "url": "https://github.com/getpaseo/paseo/archive/81865852011df86aa0ad0ae411cb2f5e4078153f.tar.gz"
     },
     {
       "hash": "sha256-oM5nZTolH1bqQNLqsIeXk0ts/J201IdmeV2Xu5tNlg0=",
@@ -18,9 +18,9 @@
       "url": "https://registry.npmjs.org/sherpa-onnx-node/-/sherpa-onnx-node-1.12.28.tgz"
     },
     {
-      "hash": "sha256-JUVjE32qS29ZNh1tSOLy9YtyPD3+qjhz+W30lWtVqaw=",
+      "hash": "sha256-5pjFV28DmKsptnAajWEWeOAvkur3QkJAHSJZyfiqRh4=",
       "hashType": "srcHash",
-      "url": "https://github.com/getpaseo/paseo/archive/9400a49af670fdb5db4af58e73f8df98588dbea9.tar.gz"
+      "url": "https://github.com/getpaseo/paseo/archive/81865852011df86aa0ad0ae411cb2f5e4078153f.tar.gz"
     },
     {
       "hash": "sha256-FMMosDbucp/T+Ny4VWDF5fQtWbynzo2Sd0F6JBIlTug=",
@@ -36,6 +36,7 @@
   "pins": {
     "appBuilderLibBackportCommit": "2ff9190aadc791503a6e62cdcbfa975448bc49bf",
     "appBuilderLibVersion": "26.8.1",
+    "nodeAbiVersion": "4.28.0",
     "nodeAddonApiVersion": "8.3.0",
     "npmFetcherVersion": "2",
     "onnxruntimeVersion": "1.23.2",
@@ -44,9 +45,9 @@
   "urls": {
     "nodeAddonApi": "https://registry.npmjs.org/node-addon-api/-/node-addon-api-8.3.0.tgz",
     "onnxruntime": "https://github.com/microsoft/onnxruntime/archive/a83fc4d58cb48eb68890dd689f94f28288cf2278.tar.gz",
-    "paseo": "https://github.com/getpaseo/paseo/archive/9400a49af670fdb5db4af58e73f8df98588dbea9.tar.gz",
+    "paseo": "https://github.com/getpaseo/paseo/archive/81865852011df86aa0ad0ae411cb2f5e4078153f.tar.gz",
     "sherpaOnnx": "https://github.com/k2-fsa/sherpa-onnx/archive/86d3d00e28c22c102fb7d01c7b62fdc4e7a69f1b.tar.gz",
     "sherpaOnnxNode": "https://registry.npmjs.org/sherpa-onnx-node/-/sherpa-onnx-node-1.12.28.tgz"
   },
-  "version": "0.7.2"
+  "version": "0.9.1"
 }

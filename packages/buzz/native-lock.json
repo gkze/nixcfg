@@ -1,16 +1,16 @@
 {
   "buzz": {
-    "commit": "b9392d9d78744df365f9276e1ffe8c1baa5ea903",
+    "commit": "3befaf16002d802a97aa79007be29b23623ceb3f",
     "rustVersion": "1.95.0",
-    "version": "0.5.23"
+    "version": "0.5.24"
   },
   "llamaCpp": {
-    "commit": "8190848bb36c7df4251db4352bd81bc07d0a4385"
+    "commit": "cc83d7b4824f73cfdda4dfbb47ee39804f71b328"
   },
   "meshLlm": {
-    "commit": "3295c902d4c4f859aaadf9240042ffdaf06dd07e",
-    "skippyAbi": "0.1.35",
-    "version": "0.75.1"
+    "commit": "9f192c9d821991ba43d79bb15fd2f2f12e597571",
+    "skippyAbi": "0.1.44",
+    "version": "0.76.0-rc9"
   },
   "onnxruntime": {
     "commit": "8f0278c77bf44b0cc83c098c6c722b92a36ac4b5",

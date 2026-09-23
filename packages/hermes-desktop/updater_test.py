@@ -61,7 +61,7 @@ function resolveHermesBackend(backendArgs) {
   }
 }
 
-async function checkUpdates() {
+async function checkUpdates({ force = false }: { force?: boolean } = {}) {
   return null
 }
 
@@ -149,7 +149,7 @@ export async function checkUpdates(): Promise<DesktopUpdateStatus | null> {
   $updateChecking.set(true)
 
   try {
-    const status = await bridge.check()
+    const status = await bridge.check({ force })
     $updateStatus.set(status)
     maybeNotifyUpdateAvailable(status, 'client')
     void refreshDesktopVersion()
@@ -240,7 +240,7 @@ export function startUpdatePoller(): void {
           title={a.automaticUpdates}
         />
 
-        <UninstallSection />
+        {includeUninstall && <UninstallSection />}
     </>
   )
 }
@@ -1058,7 +1058,7 @@ def test_hermes_desktop_package_is_a_source_built_managed_mac_app() -> None:
         "      -c.npmRebuild=true \\\n"
         "      __NIX_INTERP__",
     ]
-    assert 'grep -Fxc -- "$managedVersionDeclaration" "$mainBundle"' in command_texts(
+    assert 'grep -Fc -- "$managedVersionDeclaration" "$mainBundle"' in command_texts(
         install_check_shell,
         "grep",
     )

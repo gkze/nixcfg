@@ -51,6 +51,7 @@ class SupersetUpdater(MaterializesArtifactsMixin, GitHubReleaseAssetURLsUpdater)
     """Track Superset Desktop AppImage URL and hash for Linux."""
 
     name = "superset"
+    required_tools = ("nix", "nix-prefetch-url", "deadnix", "nixfmt")
     aggregate_into = ("electron-runtimes",)
     input_name = "superset"
     generated_artifact_files = ("bun.lock", "bun.nix")

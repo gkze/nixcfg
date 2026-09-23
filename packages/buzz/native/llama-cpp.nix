@@ -84,8 +84,20 @@ stdenv.mkDerivation {
         echo "Mesh llama.cpp patch is empty: $meshPatch" >&2
         exit 1
       fi
-      git apply --check "$meshPatch"
-      git apply "$meshPatch"
+      if [ -z "''${buzzLlamaCppBaseReady:-}" ]; then
+        # Mirror Mesh's prepare-llama.sh: the queue is a format-patch series
+        # whose later hunks rely on three-way merges against blobs recorded by
+        # earlier entries, so it must be applied with `git am --3way` on a
+        # committed base instead of strict `git apply` on a bare tarball.
+        export HOME="$TMPDIR"
+        git init --quiet .
+        git config user.name "Buzz Nix Build"
+        git config user.email "buzz-llama-cpp@nix-managed.invalid"
+        git add --all --force
+        git commit --quiet -m "buzz-llama-cpp upstream base"
+        buzzLlamaCppBaseReady=1
+      fi
+      git -c core.hooksPath=/dev/null am --3way --committer-date-is-author-date --no-gpg-sign "$meshPatch"
     done < "$patchQueue"
 
     runHook postPatch

@@ -212,6 +212,7 @@ class _HashRequest:
 @dataclass(frozen=True, slots=True)
 class _ManifestContract:
     app_builder_lib_version: str
+    node_abi_version: str
     claude_agent_sdk_version: str
     electron_version: str
     esbuild_version: str
@@ -334,6 +335,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
     compatibility_pins: ClassVar[dict[str, str]] = {
         "appBuilderLibBackportCommit": "2ff9190aadc791503a6e62cdcbfa975448bc49bf",
         "appBuilderLibVersion": "26.8.1",
+        "nodeAbiVersion": "4.28.0",
         "nodeAddonApiVersion": "8.3.0",
         "npmFetcherVersion": "2",
         "onnxruntimeVersion": "1.23.2",
@@ -643,6 +645,22 @@ class PaseoUpdater(GitHubReleaseUpdater):
             cls.get_compatibility_pin("appBuilderLibVersion"),
             context="supported app-builder-lib version",
         )
+        node_abi_version = _require_exact_version(
+            _require_string(
+                _require_object(
+                    lock_packages.get("node_modules/node-abi"),
+                    context="locked node-abi",
+                ),
+                "version",
+                context="locked node-abi",
+            ),
+            context="locked node-abi version",
+        )
+        _require_exact(
+            node_abi_version,
+            cls.get_compatibility_pin("nodeAbiVersion"),
+            context="supported node-abi version",
+        )
         sherpa_version = _candidate_sherpa_version(server)
         _require_exact(
             sherpa_version,
@@ -717,6 +735,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
         )
         return _ManifestContract(
             app_builder_lib_version=app_builder_lib_version,
+            node_abi_version=node_abi_version,
             claude_agent_sdk_version=claude_agent_sdk_version,
             electron_version=electron_version,
             esbuild_version=esbuild_version,
@@ -837,6 +856,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
             metadata={
                 "commit": commit,
                 "appBuilderLibVersion": contract.app_builder_lib_version,
+                "nodeAbiVersion": contract.node_abi_version,
                 "claudeAgentSdkVersion": contract.claude_agent_sdk_version,
                 "electronVersion": contract.electron_version,
                 "esbuildVersion": contract.esbuild_version,
@@ -934,6 +954,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
                 "esbuildVersion": metadata["esbuildVersion"],
                 "claudeAgentSdkVersion": metadata["claudeAgentSdkVersion"],
                 "appBuilderLibVersion": metadata["appBuilderLibVersion"],
+                "nodeAbiVersion": metadata["nodeAbiVersion"],
                 "appBuilderLibBackportCommit": (cls._app_builder_lib_backport_commit()),
             },
             "sherpaOnnx": {
@@ -1054,6 +1075,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
                 "commit",
                 "electronVersion",
                 "esbuildVersion",
+                "nodeAbiVersion",
                 "nodeAddonApiUrl",
                 "nodeAddonApiVersion",
                 "onnxruntimeCommit",
@@ -1074,6 +1096,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
             "claudeAgentSdkVersion",
             "electronVersion",
             "esbuildVersion",
+            "nodeAbiVersion",
             "nodeAddonApiVersion",
             "onnxruntimeVersion",
             "sherpaVersion",
@@ -1081,6 +1104,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
             _require_exact_version(result[key], context=key)
         for metadata_key, pin_key in (
             ("appBuilderLibVersion", "appBuilderLibVersion"),
+            ("nodeAbiVersion", "nodeAbiVersion"),
             ("nodeAddonApiVersion", "nodeAddonApiVersion"),
             ("onnxruntimeVersion", "onnxruntimeVersion"),
             ("sherpaVersion", "sherpaVersion"),

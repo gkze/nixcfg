@@ -113,13 +113,13 @@ _UPSTREAM_PATCH_SOURCES = {
 }
 """,
     "apps/desktop/src-tauri/Cargo.toml": """[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-updater = "2.10.1"
+tauri-plugin-updater = "2.11.0"
 tauri-plugin-process = "2.3.1"
 tauri-plugin-window-state = "2.4.1"
 trash = "5.2.6"
 """,
     "apps/desktop/src/providers/update-provider.tsx": """import { useMainWindowEffect } from '@/hooks/use-main-window-effect'
-import { isNativeShell } from '@/lib/platform'
+import { isNativeShell } from '@/lib/platform.ts'
 
 export function UpdateProvider({ children, autoCheck }: UpdateProviderProps): ReactElement {
   const supported = isNativeShell()

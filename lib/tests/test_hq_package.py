@@ -231,8 +231,8 @@ def test_hq_artifact_validator_accepts_only_reviewed_metadata_and_update_patch(
             expected_version=_VERSION,
         )
 
-    executable.write_bytes(module.DISABLED_UPDATER_URL * 7)
-    with pytest.raises(ValueError, match="disabled update URL expected 8, got 7"):
+    executable.write_bytes(module.DISABLED_UPDATER_URL * 3)
+    with pytest.raises(ValueError, match="disabled update URL expected 4, got 3"):
         module.validate_artifact(
             info_plist=info_plist,
             main_executable=executable,
@@ -336,7 +336,7 @@ def test_hq_artifact_validator_requires_secure_reserved_fail_closed_endpoints(
             legacy_releases_url,
         )
     )
-    with pytest.raises(ValueError, match="disabled update URL expected 8, got 0"):
+    with pytest.raises(ValueError, match="disabled update URL expected 4, got 0"):
         module.validate_artifact(
             info_plist=info_plist,
             main_executable=executable,
@@ -447,104 +447,142 @@ def test_hq_signature_inventory_accepts_executable_and_dylib_codesign_evidence(
 
 _CURRENT_AUTOMATIC_MUTATION_PATHS = (
     bytes.fromhex(
-        "55 48 89 e5 41 57 41 56 41 55 41 54 53 48 81 ec 98 00 00 00 48 8d 7d 90"
+        "55 48 89 e5 41 57 41 56 41 55 41 54 "
+        "53 48 81 ec 98 00 00 00 48 8d bd 40 "
+        "ff ff ff"
     ),
     bytes.fromhex(
-        "ff 43 03 d1 f8 5f 09 a9 f6 57 0a a9 f4 4f 0b a9 "
-        "fd 7b 0c a9 fd 03 03 91 e8 23 01 91"
+        "ff 43 03 d1 f8 5f 09 a9 f6 57 0a a9 "
+        "f4 4f 0b a9 fd 7b 0c a9 fd 03 03 91 "
+        "e8 23 01 91"
     ),
     bytes.fromhex(
-        "48 8d bb d0 00 00 00 e8 07 d8 51 00 "
-        "48 8b bb d8 00 00 00 48 8b b3 e0 00 00 00 "
-        "e8 04 d6 0d 01 84 c0 0f 84 7e 01 00 00 "
-        "48 8d 83 61 01 00 00"
-    ),
-    # Captured from HQ 0.10.222: the guarded state address now uses x26.
-    bytes.fromhex(
-        "00 03 19 94 60 86 4d a9 0d 63 3d 94 a0 03 00 36 "
-        "7a 86 05 91 7f 86 05 39 76 62 05 91 2c 00 00 14"
+        "48 8d bb 30 02 00 00 e8 3f 43 22 00 "
+        "48 8b bb 38 02 00 00 48 8b b3 40 02 "
+        "00 00 e8 6c e4 48 ff 84 c0 0f 84 39 "
+        "02 00 00 48 8b b3 38 02 00 00 48 8b "
+        "93 40 02 00 00 48 8d bb 00 01 00 00"
     ),
     bytes.fromhex(
-        "48 8d bb 40 01 00 00 e8 5f 96 51 00 "
-        "48 8b bb 48 01 00 00 48 8b b3 50 01 00 00 "
-        "e8 5c 94 0d 01 84 c0 0f 84 00 03 00 00 "
-        "48 8d bd 38 fc ff ff"
+        "51 5a 07 94 60 1e 41 f9 61 22 41 f9 "
+        "8d 59 d9 97 20 09 00 36 61 1e 41 f9 "
+        "62 22 41 f9 c3 59 00 90 63 18 39 91"
     ),
     bytes.fromhex(
-        "79 0c 16 94 60 86 54 a9 23 e7 3a 94 40 13 00 34 "
-        "e8 03 04 91 c0 de 56 94 f7 e3 50 a9 cd e0 56 94"
+        "48 8d bb 50 01 00 00 e8 aa c7 20 00 "
+        "48 8b bb 58 01 00 00 48 8b b3 60 01 "
+        "00 00 e8 d7 68 47 ff 84 c0 0f 84 86 "
+        "02 00 00 48 8b b3 58 01 00 00 48 8b "
+        "93 60 01 00 00 48 8b 8b 28 01 00 00"
     ),
     bytes.fromhex(
-        "48 8d 3d bc 1e d1 01 48 8d 15 bd 1f d1 01 "
-        "be 0d 00 00 00 b9 4d 00 00 00 e8 32 83 11 01 "
-        "e8 7d a8 52 00 eb 15"
+        "18 0f 07 94 60 86 55 a9 55 0e d9 97 "
+        "40 0e 00 36 61 8a 55 a9 63 92 52 a9 "
+        "e0 57 40 f9 f7 ef 06 94 e8 43 1d 91"
     ),
     bytes.fromhex(
-        "00 c4 00 d0 00 60 22 91 02 c4 00 d0 42 e0 26 91 "
-        "a1 01 80 52 a3 09 80 52 93 2f 38 94 97 3b 16 94 "
-        "07 00 00 14"
+        "48 8d 3d 7c 14 f9 00 48 8d 15 f0 9d "
+        "fa 00 be 0d 00 00 00 b9 4d 00 00 00 "
+        "e8 64 b4 4a ff e8 5f 36 23 00 eb 23"
+    ),
+    bytes.fromhex(
+        "00 5a 00 d0 00 88 3d 91 e2 5a 00 f0 "
+        "42 60 06 91 a1 01 80 52 a3 09 80 52 "
+        "0f ac d9 97 67 7b 07 94 07 00 00 14"
     ),
 )
 
 _CURRENT_DISABLED_MUTATION_PATHS = (
-    bytes.fromhex("31 c0 c3") + (b"\x90" * 21),
-    bytes.fromhex("00 00 80 52 c0 03 5f d6") + (bytes.fromhex("1f 20 03 d5") * 5),
     bytes.fromhex(
-        "48 8d bb d0 00 00 00 e8 07 d8 51 00 "
-        "48 8b bb d8 00 00 00 48 8b b3 e0 00 00 00 "
-        "e8 04 d6 0d 01 84 c0 e9 7f 01 00 00 90 "
-        "48 8d 83 61 01 00 00"
+        "31 c0 c3 90 90 90 90 90 90 90 90 90 "
+        "90 90 90 90 90 90 90 90 90 90 90 90 "
+        "90 90 90"
     ),
     bytes.fromhex(
-        "00 03 19 94 60 86 4d a9 0d 63 3d 94 1d 00 00 14 "
-        "7a 86 05 91 7f 86 05 39 76 62 05 91 2c 00 00 14"
+        "00 00 80 52 c0 03 5f d6 1f 20 03 d5 "
+        "1f 20 03 d5 1f 20 03 d5 1f 20 03 d5 "
+        "1f 20 03 d5"
     ),
     bytes.fromhex(
-        "48 8d bb 40 01 00 00 e8 5f 96 51 00 "
-        "48 8b bb 48 01 00 00 48 8b b3 50 01 00 00 "
-        "e8 5c 94 0d 01 84 c0 e9 01 03 00 00 90 "
-        "48 8d bd 38 fc ff ff"
+        "48 8d bb 30 02 00 00 e8 3f 43 22 00 "
+        "48 8b bb 38 02 00 00 48 8b b3 40 02 "
+        "00 00 e8 6c e4 48 ff 84 c0 e9 3a 02 "
+        "00 00 90 48 8b b3 38 02 00 00 48 8b "
+        "93 40 02 00 00 48 8d bb 00 01 00 00"
     ),
     bytes.fromhex(
-        "79 0c 16 94 60 86 54 a9 23 e7 3a 94 9a 00 00 14 "
-        "e8 03 04 91 c0 de 56 94 f7 e3 50 a9 cd e0 56 94"
+        "51 5a 07 94 60 1e 41 f9 61 22 41 f9 "
+        "8d 59 d9 97 49 00 00 14 61 1e 41 f9 "
+        "62 22 41 f9 c3 59 00 90 63 18 39 91"
     ),
-    bytes.fromhex("e9 34 00 00 00") + (b"\x90" * 31),
-    bytes.fromhex("0f 00 00 14") + (bytes.fromhex("1f 20 03 d5") * 8),
+    bytes.fromhex(
+        "48 8d bb 50 01 00 00 e8 aa c7 20 00 "
+        "48 8b bb 58 01 00 00 48 8b b3 60 01 "
+        "00 00 e8 d7 68 47 ff 84 c0 e9 87 02 "
+        "00 00 90 48 8b b3 58 01 00 00 48 8b "
+        "93 60 01 00 00 48 8b 8b 28 01 00 00"
+    ),
+    bytes.fromhex(
+        "18 0f 07 94 60 86 55 a9 55 0e d9 97 "
+        "72 00 00 14 61 8a 55 a9 63 92 52 a9 "
+        "e0 57 00 f9 f7 ef 06 94 e8 43 1d 91"
+    ),
+    bytes.fromhex(
+        "e9 42 00 00 00 90 90 90 90 90 90 90 "
+        "90 90 90 90 90 90 90 90 90 90 90 90 "
+        "90 90 90 90 90 90 90 90 90 90 90 90"
+    ),
+    bytes.fromhex(
+        "0f 00 00 14 1f 20 03 d5 1f 20 03 d5 "
+        "1f 20 03 d5 1f 20 03 d5 1f 20 03 d5 "
+        "1f 20 03 d5 1f 20 03 d5 1f 20 03 d5"
+    ),
 )
 
 _REBASED_AUTOMATIC_MUTATION_PATHS = (
-    _CURRENT_AUTOMATIC_MUTATION_PATHS[0],
-    _CURRENT_AUTOMATIC_MUTATION_PATHS[1],
     bytes.fromhex(
-        "48 8d bb c8 00 00 00 e8 17 d8 51 00 "
-        "48 8b bb d0 00 00 00 48 8b b3 d8 00 00 00 "
-        "e8 14 d6 0d 01 84 c0 0f 84 7d 01 00 00 "
-        "48 8d 83 59 01 00 00"
+        "55 48 89 e5 41 57 41 56 41 55 41 54 "
+        "53 48 81 ec 98 00 00 00 48 8d bd 40 "
+        "ff ff ff"
     ),
     bytes.fromhex(
-        "b2 18 16 94 60 86 4c a9 c0 a0 37 94 40 03 00 36 "
-        "7a 86 04 91 7f 86 05 39 76 62 05 91 2d 00 00 14"
+        "ff 43 03 d1 f8 5f 09 a9 f6 57 0a a9 "
+        "f4 4f 0b a9 fd 7b 0c a9 fd 03 03 91 "
+        "e8 23 01 91"
     ),
     bytes.fromhex(
-        "48 8d bb 38 01 00 00 e8 6f 96 51 00 "
-        "48 8b bb 40 01 00 00 48 8b b3 48 01 00 00 "
-        "e8 6c 94 0d 01 84 c0 0f 84 f4 04 00 00 "
-        "48 8d bd 98 fc ff ff"
+        "48 8d bb 41 13 11 11 e8 50 54 33 11 "
+        "48 8b bb 49 13 11 11 48 8b b3 51 13 "
+        "11 11 e8 7d f5 59 10 84 c0 0f 84 00 "
+        "03 00 00 48 8b b3 49 13 11 11 48 8b "
+        "93 51 13 11 11 48 8d bb 11 12 11 11"
     ),
     bytes.fromhex(
-        "89 0c 16 94 60 86 53 a9 5c 2a 3a 94 40 16 00 34 "
-        "e8 03 08 91 d0 de 56 94 f7 e3 4f a9 dd e0 56 94"
+        "85 6c 07 94 60 b6 4b f9 61 8a 4b f9 "
+        "c1 6b d9 97 00 08 00 36 61 b6 4b f9 "
+        "62 8a 4b f9 c3 f3 0a 90 60 b2 33 91"
     ),
     bytes.fromhex(
-        "48 8d 3d 10 5a c1 01 48 8d 15 11 5b c1 01 "
-        "be 0d 00 00 00 b9 4d 00 00 00 e8 a2 35 f7 00 "
-        "e8 7d e1 41 00 eb 15"
+        "48 8d bb 61 12 11 11 e8 bb d8 31 11 "
+        "48 8b bb 69 12 11 11 48 8b b3 71 12 "
+        "11 11 e8 e8 79 58 10 84 c0 0f 84 50 "
+        "03 00 00 48 8b b3 69 12 11 11 48 8b "
+        "93 71 12 11 11 48 8b 8b 39 12 11 11"
     ),
     bytes.fromhex(
-        "60 bd 00 d0 00 48 10 91 62 bd 00 d0 42 c8 14 91 "
-        "a1 01 80 52 a3 09 80 52 f0 e9 38 94 b3 86 0a 94 "
-        "07 00 00 14"
+        "4c 21 07 94 60 2e 5f a9 89 20 d9 97 "
+        "00 12 00 36 61 22 5f a9 63 3a 58 a9 "
+        "e0 ff 4a f9 2b 02 07 94 e0 eb 17 91"
+    ),
+    bytes.fromhex(
+        "48 8d 3d 7c 14 f9 00 48 8d 15 f0 9d "
+        "fa 00 be 0d 00 00 00 b9 4d 00 00 00 "
+        "e8 64 b4 4a ff e8 5f 36 23 00 eb 23"
+    ),
+    bytes.fromhex(
+        "00 5a 00 d0 00 88 3d 91 e2 5a 00 f0 "
+        "42 60 06 91 a1 01 80 52 a3 09 80 52 "
+        "0f ac d9 97 67 7b 07 94 07 00 00 14"
     ),
 )
 
@@ -586,7 +624,7 @@ def test_hq_binary_patch_accepts_rebased_machine_code() -> None:
     ("patch_index", "opcode_index", "drifted_opcode"),
     [
         (2, 34, 0x85),
-        (3, 16, 0x79),
+        (3, 16, 0x3A),
         (7, 35, 0x94),
     ],
 )
@@ -595,7 +633,7 @@ def test_hq_binary_patch_rejects_opcode_drift(
     opcode_index: int,
     drifted_opcode: int,
 ) -> None:
-    """A different opcode or reviewed AArch64 register must fail closed."""
+    """A different opcode or the reviewed state base register must fail closed."""
     module = _load_patch_module()
     paths = list(_CURRENT_AUTOMATIC_MUTATION_PATHS)
     drifted = bytearray(paths[patch_index])
@@ -617,9 +655,13 @@ def test_hq_binary_patch_rejects_control_flow_into_mutation_block(
     if patch_index == 2:
         drifted[35:39] = (-39).to_bytes(4, byteorder="little", signed=True)
     else:
-        word = int.from_bytes(drifted[12:16], byteorder="little")
+        branch_offset = 16 if patch_index == 3 else 12
+        word = int.from_bytes(
+            drifted[branch_offset : branch_offset + 4],
+            byteorder="little",
+        )
         word = (word & ~(0x3FFF << 5)) | (0x3FFD << 5)
-        drifted[12:16] = word.to_bytes(4, byteorder="little")
+        drifted[branch_offset : branch_offset + 4] = word.to_bytes(4, "little")
     paths[patch_index] = bytes(drifted)
 
     with pytest.raises(ValueError, match="control flow drifted"):
@@ -637,9 +679,13 @@ def test_hq_binary_patch_rejects_control_flow_past_executable(
     if patch_index == 2:
         drifted[35:39] = (0x7FFFFFFF).to_bytes(4, byteorder="little")
     else:
-        word = int.from_bytes(drifted[12:16], byteorder="little")
+        branch_offset = 16 if patch_index == 3 else 12
+        word = int.from_bytes(
+            drifted[branch_offset : branch_offset + 4],
+            byteorder="little",
+        )
         word = (word & ~(0x3FFF << 5)) | (0x1FFF << 5)
-        drifted[12:16] = word.to_bytes(4, byteorder="little")
+        drifted[branch_offset : branch_offset + 4] = word.to_bytes(4, "little")
     paths[patch_index] = bytes(drifted)
 
     with pytest.raises(ValueError, match="control flow drifted"):
@@ -782,19 +828,21 @@ def test_hq_disabled_branches_preserve_reviewed_control_flow_targets() -> None:
 
     for label, field_width in (
         ("arm64 hq-core install guard", 14),
-        ("arm64 staging hq-core install guard", 19),
+        ("arm64 staging hq-core install guard", 14),
     ):
         original, replacement = patches[label]
-        assert replacement[:12] == original[:12]
+        branch_offset = 16 if label == "arm64 hq-core install guard" else 12
+        prefix_length = branch_offset
+        assert replacement[:prefix_length] == original[:prefix_length]
         original_target = _aarch64_branch_target(
-            original[12:16],
-            pc=12,
+            original[branch_offset : branch_offset + 4],
+            pc=branch_offset,
             field_shift=5,
             field_width=field_width,
         )
         replacement_target = _aarch64_branch_target(
-            replacement[12:16],
-            pc=12,
+            replacement[branch_offset : branch_offset + 4],
+            pc=branch_offset,
             field_shift=0,
             field_width=26,
         )

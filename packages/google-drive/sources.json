@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-+2knBg+PIO+4rCAn0AqcB4fBEfpXwB/mopZ1r69cEXg="
+    "aarch64-darwin": "sha256-127TimP0GlCijXJtTvtacgaKXrLYb+ugsE4svDG8uxo="
   },
   "urls": {
     "aarch64-darwin": "https://dl.google.com/drive-file-stream/GoogleDrive.dmg"
   },
-  "version": "20260908"
+  "version": "20260921"
 }

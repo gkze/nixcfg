@@ -115,6 +115,12 @@ let
     expected = {
         "desktop_manageability_version": 2,
         "desktop_protocol_version": 1,
+        # 0.1.813-beta grades the llama runtime through the desktop-capabilities
+        # probe. The Nix runtime pins LLAMA_SERVER_PATH to the store closure, so
+        # the grader defers with a null verdict; managed.rs then declines to
+        # cache it, which is the correct posture for immutable store paths.
+        "llama_runtime_ok": None,
+        "llama_runtime_reason": "llama_runtime_not_managed",
         "studio_install_ok": True,
         "studio_install_reason": None,
         "supports_api_only": True,

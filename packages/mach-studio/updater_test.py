@@ -68,6 +68,8 @@ def _write_policy_bundle(
     *,
     renderer_name: str = _RENDERER_NAME,
     additional_assets: dict[str, bytes] | None = None,
+    main_name: str = "main.js",
+    additional_main_chunks: dict[str, bytes] | None = None,
 ) -> tuple[Path, Path]:
     block_size = 64
 
@@ -87,6 +89,10 @@ def _write_policy_bundle(
         }
 
     archive_payload = bytearray(main_payload)
+    main_entries: dict[str, object] = {main_name: _entry(main_payload, offset=0)}
+    for chunk_name, chunk_payload in (additional_main_chunks or {}).items():
+        main_entries[chunk_name] = _entry(chunk_payload, offset=len(archive_payload))
+        archive_payload.extend(chunk_payload)
     asset_entries: dict[str, object] = {}
     for name, payload in (
         (renderer_name, renderer_payload),
@@ -98,11 +104,7 @@ def _write_policy_bundle(
     header = json.dumps(
         {
             "files": {
-                "dist-electron": {
-                    "files": {
-                        "main.js": _entry(main_payload, offset=0),
-                    }
-                },
+                "dist-electron": {"files": main_entries},
                 "dist": {
                     "files": {
                         "assets": {
@@ -127,7 +129,11 @@ def test_mach_studio_policy_forces_the_existing_service_gate_disabled() -> None:
     """The packaged app-update service must initialize in its disabled state."""
     module = _load_policy_module()
     payload = (
-        b"before " + module._ENABLED_GATE + module._FAIL_OPEN_ENGINE_INSTALL + b" after"
+        b"before "
+        + module._ENABLED_GATE
+        + module._FAIL_OPEN_ENGINE_INSTALL_SOURCE
+        + module._FAIL_OPEN_ENGINE_INSTALL_WHEEL
+        + b" after"
     )
 
     patched = module.patch_main(payload)
@@ -141,18 +147,98 @@ def test_mach_studio_policy_fails_closed_and_validates_the_engine_source() -> No
     """Provisioning must propagate failures and import Mach from this bundle."""
     module = _load_policy_module()
     payload = (
-        b"before " + module._ENABLED_GATE + module._FAIL_OPEN_ENGINE_INSTALL + b" after"
+        b"before "
+        + module._ENABLED_GATE
+        + module._FAIL_OPEN_ENGINE_INSTALL_SOURCE
+        + module._FAIL_OPEN_ENGINE_INSTALL_WHEEL
+        + b" after"
     )
 
     patched = module.patch_main(payload)
 
     assert len(patched) == len(payload)
-    assert module._FAIL_OPEN_ENGINE_INSTALL not in patched
-    assert module._FAIL_CLOSED_ENGINE_INSTALL.rstrip() in patched
+    assert module._FAIL_OPEN_ENGINE_INSTALL_SOURCE not in patched
+    assert module._FAIL_OPEN_ENGINE_INSTALL_WHEEL not in patched
+    assert module._FAIL_CLOSED_ENGINE_INSTALL_SOURCE in patched
+    wheel_closed = module._FAIL_OPEN_ENGINE_INSTALL_WHEEL.replace(
+        b"uv to install bundled", b"uv install bundled", 1
+    ).replace(b";return}", b";throw e}", 1)
+    assert wheel_closed in patched
     assert b"catch(e){if(t8(e))throw e" not in patched
     assert (
         b"import mach,pathlib,sys;sys.exit(not pathlib.Path(mach.__file__)"
         b".resolve().is_relative_to(pathlib.Path(sys.argv[1]).resolve()))" in patched
+    )
+
+
+def test_mach_studio_policy_fails_closed_for_the_153_source_shape() -> None:
+    """The 1.53 layout is fail-closed even when the wheel anchor also matches."""
+    module = _load_policy_module()
+    payload = (
+        b"before "
+        + module._ENABLED_GATE
+        + module._FAIL_OPEN_ENGINE_INSTALL_SOURCE_153
+        + module._FAIL_OPEN_ENGINE_INSTALL_WHEEL_153
+        + b" after"
+    )
+
+    patched = module.patch_main(payload)
+
+    assert len(patched) == len(payload)
+    assert module._FAIL_OPEN_ENGINE_INSTALL_SOURCE_153 not in patched
+    assert module._FAIL_OPEN_ENGINE_INSTALL_WHEEL_153 not in patched
+    assert module._FAIL_CLOSED_ENGINE_INSTALL_SOURCE_153 in patched
+    wheel_closed = module._FAIL_OPEN_ENGINE_INSTALL_WHEEL_153.replace(
+        b"uv to install bundled", b"uv install bundled", 1
+    ).replace(b";return}", b";throw e}", 1)
+    assert wheel_closed in patched
+    assert b"if(tIt(e))throw e" not in patched
+    assert (
+        b"import mach,pathlib,sys;sys.exit(not pathlib.Path(mach.__file__)"
+        b".resolve().is_relative_to(pathlib.Path(sys.argv[1]).resolve()))" in patched
+    )
+
+
+def test_mach_studio_policy_fails_closed_for_the_163_source_shape() -> None:
+    """The 1.63 layout is fail-closed even when the wheel anchor also matches."""
+    module = _load_policy_module()
+    payload = (
+        b"before "
+        + module._ENABLED_GATE
+        + module._FAIL_OPEN_ENGINE_INSTALL_SOURCE_163
+        + module._FAIL_OPEN_ENGINE_INSTALL_WHEEL_163
+        + b" after"
+    )
+
+    patched = module.patch_main(payload)
+
+    assert len(patched) == len(payload)
+    assert module._FAIL_OPEN_ENGINE_INSTALL_SOURCE_163 not in patched
+    assert module._FAIL_OPEN_ENGINE_INSTALL_WHEEL_163 not in patched
+    assert module._FAIL_CLOSED_ENGINE_INSTALL_SOURCE_163 in patched
+    wheel_closed = module._FAIL_OPEN_ENGINE_INSTALL_WHEEL_163.replace(
+        b"uv to install bundled", b"uv install bundled", 1
+    ).replace(b";return}", b";throw e}", 1)
+    assert wheel_closed in patched
+    # The 1.63 wheel shape keeps its trailing catch, which already propagates.
+    assert patched.count(b"if(g8t(e))throw e") == 1
+    assert (
+        b"import mach,pathlib,sys;sys.exit(not pathlib.Path(mach.__file__)"
+        b".resolve().is_relative_to(pathlib.Path(sys.argv[1]).resolve()))" in patched
+    )
+
+
+def test_mach_studio_pins_the_audited_163_anchor_payload() -> None:
+    """The 0.1.163 anchors must stay byte-identical to the audited DMG payload."""
+    module = _load_policy_module()
+
+    assert (
+        hashlib.sha256(module._FAIL_OPEN_ENGINE_INSTALL_SOURCE_163).hexdigest()
+        == "734c56b621b6d57101acbc304ca8bc88ea69c8b0ee97662e031464e295e43c9c"
+    )
+    assert (
+        hashlib.sha256(module._FAIL_OPEN_ENGINE_INSTALL_WHEEL_163).hexdigest()
+        == "35d2c333e7c94902b829aa7df84491610f8e39b15e181e54317f384c4aac3d05"
     )
 
 
@@ -196,7 +282,11 @@ def test_mach_studio_resolves_the_renderer_by_semantic_inventory(
 ) -> None:
     """A release fingerprint may change without changing the patch contract."""
     module = _load_policy_module()
-    main_payload = module._ENABLED_GATE + module._FAIL_OPEN_ENGINE_INSTALL
+    main_payload = (
+        module._ENABLED_GATE
+        + module._FAIL_OPEN_ENGINE_INSTALL_SOURCE
+        + module._FAIL_OPEN_ENGINE_INSTALL_WHEEL
+    )
     renderer_payload = (
         module._WHEEL_REINSTALL_DESCRIPTION
         + module._WHEEL_MISSING_DESCRIPTION
@@ -223,7 +313,11 @@ def test_mach_studio_renderer_resolution_fails_closed_on_ambiguity(
 ) -> None:
     """The patch must reject a missing or ambiguous renderer policy owner."""
     module = _load_policy_module()
-    main_payload = module._ENABLED_GATE + module._FAIL_OPEN_ENGINE_INSTALL
+    main_payload = (
+        module._ENABLED_GATE
+        + module._FAIL_OPEN_ENGINE_INSTALL_SOURCE
+        + module._FAIL_OPEN_ENGINE_INSTALL_WHEEL
+    )
     renderer_payload = (
         module._WHEEL_REINSTALL_DESCRIPTION
         + module._WHEEL_MISSING_DESCRIPTION
@@ -244,6 +338,56 @@ def test_mach_studio_renderer_resolution_fails_closed_on_ambiguity(
         module.resolve_renderer_path(asar_path)
 
 
+def test_mach_studio_resolves_the_main_policy_chunk_by_gate_inventory(
+    tmp_path: Path,
+) -> None:
+    """The policy chunk may be fingerprint-renamed without breaking resolution."""
+    module = _load_policy_module()
+    main_payload = (
+        module._ENABLED_GATE
+        + module._FAIL_OPEN_ENGINE_INSTALL_SOURCE_163
+        + module._FAIL_OPEN_ENGINE_INSTALL_WHEEL_163
+    )
+    asar_path, _plist_path = _write_policy_bundle(
+        tmp_path,
+        main_payload,
+        b"unrelated renderer code",
+        main_name="chunk-D1stP0licy42.js",
+    )
+
+    assert (
+        module.resolve_main_policy_path(asar_path)
+        == "dist-electron/chunk-D1stP0licy42.js"
+    )
+
+
+@pytest.mark.parametrize("matching_chunks", [0, 2])
+def test_mach_studio_main_policy_resolution_fails_closed_on_ambiguity(
+    tmp_path: Path,
+    matching_chunks: int,
+) -> None:
+    """The patch must reject a missing or ambiguous main-policy owner."""
+    module = _load_policy_module()
+    gated = (
+        module._ENABLED_GATE
+        + module._FAIL_OPEN_ENGINE_INSTALL_SOURCE_163
+        + module._FAIL_OPEN_ENGINE_INSTALL_WHEEL_163
+    )
+    primary_payload = gated if matching_chunks else b"unrelated main code"
+    additional_main_chunks = (
+        {"chunk-SecondPolicy.js": gated} if matching_chunks == 2 else None
+    )
+    asar_path, _plist_path = _write_policy_bundle(
+        tmp_path,
+        primary_payload,
+        b"unrelated renderer code",
+        additional_main_chunks=additional_main_chunks,
+    )
+
+    with pytest.raises(module.PatchError, match=rf"found {matching_chunks}:"):
+        module.resolve_main_policy_path(asar_path)
+
+
 def test_mach_studio_patch_cli_updates_integrity_and_fails_on_drift(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -251,7 +395,11 @@ def test_mach_studio_patch_cli_updates_integrity_and_fails_on_drift(
     """The package CLI must patch policy, refresh integrity, and reject reuse."""
     module = _load_policy_module()
     main_payload = (
-        b"before " + module._ENABLED_GATE + module._FAIL_OPEN_ENGINE_INSTALL + b" after"
+        b"before "
+        + module._ENABLED_GATE
+        + module._FAIL_OPEN_ENGINE_INSTALL_SOURCE
+        + module._FAIL_OPEN_ENGINE_INSTALL_WHEEL
+        + b" after"
     )
     renderer_payload = (
         b"before "
@@ -267,10 +415,11 @@ def test_mach_studio_patch_cli_updates_integrity_and_fails_on_drift(
     )
     (tmp_path / "vendor/local_moe_engine").mkdir(parents=True)
     original_size = asar_path.stat().st_size
+    policy_path = module.resolve_main_policy_path(asar_path)
 
     assert module.main([str(asar_path), str(plist_path)]) == 0
 
-    patched_main = read_packed_file(asar_path, module.MAIN_PATH)
+    patched_main = read_packed_file(asar_path, policy_path)
     patched_renderer = read_packed_file(
         asar_path,
         f"dist/assets/{_RENDERER_NAME}",
@@ -279,8 +428,9 @@ def test_mach_studio_patch_cli_updates_integrity_and_fails_on_drift(
     assert asar_path.stat().st_size == original_size
     assert module._ENABLED_GATE not in patched_main
     assert module._DISABLED_GATE in patched_main
-    assert module._FAIL_OPEN_ENGINE_INSTALL not in patched_main
-    assert module._FAIL_CLOSED_ENGINE_INSTALL in patched_main
+    assert module._FAIL_OPEN_ENGINE_INSTALL_SOURCE not in patched_main
+    assert module._FAIL_OPEN_ENGINE_INSTALL_WHEEL not in patched_main
+    assert module._FAIL_CLOSED_ENGINE_INSTALL_SOURCE in patched_main
     assert module._WHEEL_MISSING_DESCRIPTION not in patched_renderer
     assert module._SOURCE_READY_DESCRIPTION in patched_renderer
     assert f"ASAR header SHA256 {digest}" in capsys.readouterr().out
@@ -295,7 +445,11 @@ def test_mach_studio_patch_rejects_a_missing_packaged_engine_source(
 ) -> None:
     """Source-aware diagnostics require the claimed packaged source to exist."""
     module = _load_policy_module()
-    main_payload = module._ENABLED_GATE + module._FAIL_OPEN_ENGINE_INSTALL
+    main_payload = (
+        module._ENABLED_GATE
+        + module._FAIL_OPEN_ENGINE_INSTALL_SOURCE
+        + module._FAIL_OPEN_ENGINE_INSTALL_WHEEL
+    )
     renderer_payload = (
         module._WHEEL_REINSTALL_DESCRIPTION
         + module._WHEEL_MISSING_DESCRIPTION

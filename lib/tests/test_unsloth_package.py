@@ -589,6 +589,8 @@ def test_unsloth_backend_requires_nix_managed_desktop_capabilities(
     expected = {
         "desktop_manageability_version": 2,
         "desktop_protocol_version": 1,
+        "llama_runtime_ok": None,
+        "llama_runtime_reason": "llama_runtime_not_managed",
         "studio_install_ok": True,
         "studio_install_reason": None,
         "supports_api_only": True,

@@ -53,6 +53,12 @@ codegen = ["datamodel-code-generator[http]>=0.54.0", "referencing>=0.37.0"]
 preview = true
 # Apply excludes even when editors or manual commands pass explicit file paths.
 force-exclude = true
+# Generated patchers embed upstream bytes verbatim (docstrings, TSX), so
+# hand-written line-length and quote rules cannot hold for them.
+extend-exclude = [
+  "packages/hermes-desktop/patch_nix_managed.py",
+  "packages/unsloth/patch_nix_managed.py",
+]
 # Treat these directories as namespace package roots during resolution.
 namespace-packages = ["overlays", "packages"]
 # Explicitly include all extensionless Python entrypoints in Ruff discovery.
@@ -70,7 +76,11 @@ exclude = [
   "lib/nix/schemas/_fetch.py",
   "lib/update/persistence.py",
   "lib/update/updaters/_sourcefile.py",
+  # Generated patchers embed upstream bytes verbatim (docstrings, TSX), so
+  # hand-written line-length and quote rules cannot hold for them.
+  "packages/hermes-desktop/patch_nix_managed.py",
   "packages/sculptor/updater.py",
+  "packages/unsloth/patch_nix_managed.py",
 ]
 
 [tool.ruff.lint]

@@ -16,10 +16,12 @@ class _SourcePatch:
     new: str
 
 
-_PATCHES = (
-    _SourcePatch(
-        "use tokio::sync::watch;\n",
-        """use tokio::sync::watch;
+# Ownership scaffolding shared by both supported updater layouts: the
+# sentinel header, the headless apply hook, and the relaunch, auto-update,
+# background-task, and install guards.
+_OWNERSHIP_HEADER = _SourcePatch(
+    "use tokio::sync::watch;\n",
+    """use tokio::sync::watch;
 
 const NIX_MANAGED: bool = option_env!("ZERON_NIX_MANAGED").is_some();
 const NIX_MANAGED_MESSAGE: &str = "updates are managed by Nix";
@@ -31,96 +33,17 @@ fn ensure_updates_mutable() -> anyhow::Result<()> {
     Ok(())
 }
 """,
-    ),
-    _SourcePatch(
-        """pub async fn fetch_latest(edge_url: &str) -> anyhow::Result<Manifest> {
-    let base = edge_url.trim_end_matches('/');
-""",
-        """pub async fn fetch_latest(edge_url: &str) -> anyhow::Result<Manifest> {
-    ensure_updates_mutable()?;
-    let base = edge_url.trim_end_matches('/');
-""",
-    ),
-    _SourcePatch(
-        """pub async fn download_release_file(
-    edge_url: &str,
-    manifest: &Manifest,
-    file: &str,
-    dest: &Path,
-) -> anyhow::Result<()> {
-    let url = format!("{}/releases/{file}", edge_url.trim_end_matches('/'));
-""",
-        """pub async fn download_release_file(
-    edge_url: &str,
-    manifest: &Manifest,
-    file: &str,
-    dest: &Path,
-) -> anyhow::Result<()> {
-    ensure_updates_mutable()?;
-    let url = format!("{}/releases/{file}", edge_url.trim_end_matches('/'));
-""",
-    ),
-    _SourcePatch(
-        """pub async fn stage_headless(
-    edge_url: &str,
-    manifest: &Manifest,
-    app_root: &Path,
-) -> anyhow::Result<PathBuf> {
-    let version = &manifest.version;
-""",
-        """pub async fn stage_headless(
-    edge_url: &str,
-    manifest: &Manifest,
-    app_root: &Path,
-) -> anyhow::Result<PathBuf> {
-    ensure_updates_mutable()?;
-    let version = &manifest.version;
-""",
-    ),
-    _SourcePatch(
-        """pub fn apply_headless(app_root: &Path, version: &str) -> anyhow::Result<()> {
+)
+_APPLY_HEADLESS = _SourcePatch(
+    """pub fn apply_headless(app_root: &Path, version: &str) -> anyhow::Result<()> {
     #[cfg(unix)]
 """,
-        """pub fn apply_headless(app_root: &Path, version: &str) -> anyhow::Result<()> {
+    """pub fn apply_headless(app_root: &Path, version: &str) -> anyhow::Result<()> {
     ensure_updates_mutable()?;
     #[cfg(unix)]
 """,
-    ),
-    _SourcePatch(
-        """pub fn restart_service() -> anyhow::Result<()> {
-    if cfg!(target_os = "macos") {
-""",
-        """pub fn restart_service() -> anyhow::Result<()> {
-    ensure_updates_mutable()?;
-    if cfg!(target_os = "macos") {
-""",
-    ),
-    _SourcePatch(
-        """pub async fn stage_mac_app(
-    edge_url: &str,
-    manifest: &Manifest,
-    data_dir: &Path,
-) -> anyhow::Result<PathBuf> {
-    let version = &manifest.version;
-""",
-        """pub async fn stage_mac_app(
-    edge_url: &str,
-    manifest: &Manifest,
-    data_dir: &Path,
-) -> anyhow::Result<PathBuf> {
-    ensure_updates_mutable()?;
-    let version = &manifest.version;
-""",
-    ),
-    _SourcePatch(
-        """pub fn apply_mac_app(staged: &Path, bundle: &Path) -> anyhow::Result<()> {
-    let parent = bundle
-""",
-        """pub fn apply_mac_app(staged: &Path, bundle: &Path) -> anyhow::Result<()> {
-    ensure_updates_mutable()?;
-    let parent = bundle
-""",
-    ),
+)
+_SHARED_TAIL = (
     _SourcePatch(
         """pub fn relaunch_app_after_exit(bundle: &Path) {
     #[cfg(unix)]
@@ -168,6 +91,207 @@ fn ensure_updates_mutable() -> anyhow::Result<()> {
     ),
 )
 
+# Primary layout: release_base() helper plus explicit platform-guard calls.
+_PATCHES = (
+    _OWNERSHIP_HEADER,
+    _SourcePatch(
+        """pub async fn fetch_latest(edge_url: &str) -> anyhow::Result<Manifest> {
+    let base = release_base(edge_url)?;
+""",
+        """pub async fn fetch_latest(edge_url: &str) -> anyhow::Result<Manifest> {
+    ensure_updates_mutable()?;
+    let base = release_base(edge_url)?;
+""",
+    ),
+    _SourcePatch(
+        """pub async fn download_release_file(
+    edge_url: &str,
+    manifest: &Manifest,
+    file: &str,
+    dest: &Path,
+) -> anyhow::Result<()> {
+    let url = format!("{}/{file}", release_base(edge_url)?);
+""",
+        """pub async fn download_release_file(
+    edge_url: &str,
+    manifest: &Manifest,
+    file: &str,
+    dest: &Path,
+) -> anyhow::Result<()> {
+    ensure_updates_mutable()?;
+    let url = format!("{}/{file}", release_base(edge_url)?);
+""",
+    ),
+    _SourcePatch(
+        """pub async fn stage_headless(
+    edge_url: &str,
+    manifest: &Manifest,
+    app_root: &Path,
+) -> anyhow::Result<PathBuf> {
+    // Reject unsupported targets before creating a stage or making a request.
+    require_managed_update_platform()?;
+    let version = &manifest.version;
+""",
+        """pub async fn stage_headless(
+    edge_url: &str,
+    manifest: &Manifest,
+    app_root: &Path,
+) -> anyhow::Result<PathBuf> {
+    // Reject unsupported targets before creating a stage or making a request.
+    require_managed_update_platform()?;
+    ensure_updates_mutable()?;
+    let version = &manifest.version;
+""",
+    ),
+    _APPLY_HEADLESS,
+    _SourcePatch(
+        """pub fn restart_service() -> anyhow::Result<()> {
+    require_managed_update_platform()?;
+    if cfg!(target_os = "macos") {
+""",
+        """pub fn restart_service() -> anyhow::Result<()> {
+    require_managed_update_platform()?;
+    ensure_updates_mutable()?;
+    if cfg!(target_os = "macos") {
+""",
+    ),
+    _SourcePatch(
+        """pub async fn stage_mac_app(
+    edge_url: &str,
+    manifest: &Manifest,
+    data_dir: &Path,
+) -> anyhow::Result<PathBuf> {
+    // Reject unsupported targets before creating a stage or making a request.
+    require_mac_app_update_platform()?;
+    let version = &manifest.version;
+""",
+        """pub async fn stage_mac_app(
+    edge_url: &str,
+    manifest: &Manifest,
+    data_dir: &Path,
+) -> anyhow::Result<PathBuf> {
+    // Reject unsupported targets before creating a stage or making a request.
+    require_mac_app_update_platform()?;
+    ensure_updates_mutable()?;
+    let version = &manifest.version;
+""",
+    ),
+    _SourcePatch(
+        """pub fn apply_mac_app(staged: &Path, bundle: &Path) -> anyhow::Result<()> {
+    require_mac_app_update_platform()?;
+    let parent = bundle
+""",
+        """pub fn apply_mac_app(staged: &Path, bundle: &Path) -> anyhow::Result<()> {
+    require_mac_app_update_platform()?;
+    ensure_updates_mutable()?;
+    let parent = bundle
+""",
+    ),
+    *_SHARED_TAIL,
+)
+
+# Fallback layout: inline URL trimming and no platform-guard calls to anchor.
+_PATCHES_FALLBACK = (
+    _OWNERSHIP_HEADER,
+    _SourcePatch(
+        """pub async fn fetch_latest(edge_url: &str) -> anyhow::Result<Manifest> {
+    let base = edge_url.trim_end_matches('/');
+""",
+        """pub async fn fetch_latest(edge_url: &str) -> anyhow::Result<Manifest> {
+    ensure_updates_mutable()?;
+    let base = edge_url.trim_end_matches('/');
+""",
+    ),
+    _SourcePatch(
+        """pub async fn download_release_file(
+    edge_url: &str,
+    manifest: &Manifest,
+    file: &str,
+    dest: &Path,
+) -> anyhow::Result<()> {
+    let url = format!("{}/releases/{file}", edge_url.trim_end_matches('/'));
+""",
+        """pub async fn download_release_file(
+    edge_url: &str,
+    manifest: &Manifest,
+    file: &str,
+    dest: &Path,
+) -> anyhow::Result<()> {
+    ensure_updates_mutable()?;
+    let url = format!("{}/releases/{file}", edge_url.trim_end_matches('/'));
+""",
+    ),
+    _SourcePatch(
+        """pub async fn stage_headless(
+    edge_url: &str,
+    manifest: &Manifest,
+    app_root: &Path,
+) -> anyhow::Result<PathBuf> {
+    let version = &manifest.version;
+""",
+        """pub async fn stage_headless(
+    edge_url: &str,
+    manifest: &Manifest,
+    app_root: &Path,
+) -> anyhow::Result<PathBuf> {
+    ensure_updates_mutable()?;
+    let version = &manifest.version;
+""",
+    ),
+    _APPLY_HEADLESS,
+    _SourcePatch(
+        """pub fn restart_service() -> anyhow::Result<()> {
+    if cfg!(target_os = "macos") {
+""",
+        """pub fn restart_service() -> anyhow::Result<()> {
+    ensure_updates_mutable()?;
+    if cfg!(target_os = "macos") {
+""",
+    ),
+    _SourcePatch(
+        """pub async fn stage_mac_app(
+    edge_url: &str,
+    manifest: &Manifest,
+    data_dir: &Path,
+) -> anyhow::Result<PathBuf> {
+    let version = &manifest.version;
+""",
+        """pub async fn stage_mac_app(
+    edge_url: &str,
+    manifest: &Manifest,
+    data_dir: &Path,
+) -> anyhow::Result<PathBuf> {
+    ensure_updates_mutable()?;
+    let version = &manifest.version;
+""",
+    ),
+    _SourcePatch(
+        """pub fn apply_mac_app(staged: &Path, bundle: &Path) -> anyhow::Result<()> {
+    let parent = bundle
+""",
+        """pub fn apply_mac_app(staged: &Path, bundle: &Path) -> anyhow::Result<()> {
+    ensure_updates_mutable()?;
+    let parent = bundle
+""",
+    ),
+    *_SHARED_TAIL,
+)
+
+
+def _matching_patch_group(
+    source: str,
+) -> tuple[str, tuple[_SourcePatch, ...]]:
+    """Return the first anchor group whose anchors each match exactly once."""
+    groups = (
+        ("primary", _PATCHES),
+        ("fallback", _PATCHES_FALLBACK),
+    )
+    for label, patches in groups:
+        if all(source.count(patch.old) == 1 for patch in patches):
+            return label, patches
+    msg = "no Zeron updater anchor set matches this source tree"
+    raise RuntimeError(msg)
+
 
 def patch_tree(source_root: Path) -> None:
     """Disable every update network, staging, apply, and relaunch surface."""
@@ -177,14 +301,9 @@ def patch_tree(source_root: Path) -> None:
         msg = "Zeron update ownership patch was already applied"
         raise RuntimeError(msg)
 
-    for patch in _PATCHES:
-        matches = source.count(patch.old)
-        if matches != 1:
-            msg = f"expected one Zeron updater anchor, found {matches}"
-            raise RuntimeError(msg)
-
+    _label, patches = _matching_patch_group(source)
     patched = source
-    for patch in _PATCHES:
+    for patch in patches:
         before, _, after = patched.partition(patch.old)
         patched = f"{before}{patch.new}{after}"
     update_path.write_text(patched, encoding="utf-8")

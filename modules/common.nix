@@ -91,6 +91,8 @@ in
 
     nix = {
       gc = {
+        # Scheduled GC stays on: the store-headroom policy below bounds free
+        # space, it does not replace time-based collection.
         automatic = true;
         options = "--delete-older-than 3d";
       }

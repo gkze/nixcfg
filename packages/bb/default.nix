@@ -152,6 +152,15 @@ stdenv.mkDerivation {
     # scripts. Rebuild the two native modules loaded by the packaged Electron
     # runtime against its exact ABI before electron-builder copies them.
     pushd apps/desktop
+
+    # better-sqlite3 12.10.0 predates Electron >= 44's tagged external-pointer
+    # V8 API. Apply the upstream 12.11.1 source fixes in place so
+    # electron-rebuild can compile the module against these headers. Resolve
+    # through node because the hoisted layout nests conflicting versions away
+    # from the workspace root when dependents disagree.
+    bs3dir=$(node -p "require('path').dirname(require.resolve('better-sqlite3/package.json', { paths: [process.cwd()] }))")
+    patch -d "$bs3dir" -p1 < ${./patches/better-sqlite3-electron-44-v8-abi.patch}
+
     pnpm exec electron-rebuild \
       -f \
       -v ${electronVersion} \

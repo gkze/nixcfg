@@ -14,6 +14,9 @@ mkDmgApp7zz {
       echo "Expected Coast CLI in Coast Local.app" >&2
       exit 1
     fi
+    # createBin stays false (no guarded app-binary link), so the CLI's own
+    # bin directory must exist before the symlink lands in it.
+    mkdir -p "$out/bin"
     ln -s "$coast_cli" "$out/bin/coast"
   '';
   description = "Always-on screen recorder with local inference and contextual search";

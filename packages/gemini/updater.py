@@ -1,6 +1,5 @@
 """Updater for Gemini for macOS releases."""
 
-import asyncio
 import json
 import re
 from typing import ClassVar
@@ -8,7 +7,7 @@ from typing import ClassVar
 import aiohttp
 
 from lib import json_utils
-from lib.update.net import HTTP_BAD_REQUEST, fetch_url
+from lib.update.net import HTTP_BAD_REQUEST
 from lib.update.updaters import (
     DownloadUrlMetadataUpdater,
     UpdateContext,
@@ -20,12 +19,10 @@ from lib.update.updaters.metadata import DownloadUrlMetadata
 _APP_ID = "com.google.geminimacos"
 _CHANNEL = "m1-prod"
 _ANTI_XSSI_PREFIX = b")]}'\n"
-_EMPTY_VERSION = "0.0.0.0"  # noqa: S104 - Omaha sentinel, not a bind address.
+_EMPTY_VERSION = "0.0.0.0"  # Omaha sentinel, not a bind address.  # noqa: S104
 _MAX_VERSION_COMPONENT = (1 << 32) - 1
 _VERSION_PATTERN = re.compile(r"[0-9]+(?:\.[0-9]+){0,3}")
-_DOWNLOAD_PATTERN = re.compile(
-    rb"https://dl\.google\.com/release2/[A-Za-z0-9_-]+/release/Gemini\.dmg"
-)
+_DL_GOOGLE_URL_PREFIX = "https://dl.google.com/"
 
 
 def _version_key(version: str) -> tuple[int, ...]:
@@ -59,15 +56,96 @@ def _effective_version_info(
     )
 
 
+def _response_updatecheck(payload_bytes: bytes) -> dict[str, object]:
+    """Parse the Omaha payload and return the app's updatecheck mapping."""
+    if not payload_bytes.startswith(_ANTI_XSSI_PREFIX):
+        msg = "Gemini Omaha response omitted its anti-XSSI prefix"
+        raise RuntimeError(msg)
+    try:
+        payload_value = json.loads(payload_bytes.removeprefix(_ANTI_XSSI_PREFIX))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        msg = "Gemini Omaha response was not valid JSON"
+        raise RuntimeError(msg) from exc
+    payload = json_utils.as_object_dict(
+        payload_value,
+        context="Gemini Omaha response",
+    )
+    response = json_utils.as_object_dict(
+        payload.get("response"),
+        context="Gemini Omaha response.response",
+    )
+    apps = json_utils.as_object_list(
+        response.get("apps"),
+        context="Gemini Omaha response.response.apps",
+    )
+    parsed_apps = [
+        json_utils.as_object_dict(
+            app,
+            context="Gemini Omaha response app",
+        )
+        for app in apps
+    ]
+    matching_apps = [app for app in parsed_apps if app.get("appid") == _APP_ID]
+    if len(matching_apps) != 1:
+        msg = f"Gemini Omaha response contained {len(matching_apps)} matching apps"
+        raise RuntimeError(msg)
+    app = matching_apps[0]
+    app_status = json_utils.get_required_str(
+        app,
+        "status",
+        context="Gemini Omaha app",
+    )
+    if app_status != "ok":
+        msg = f"Gemini Omaha app returned status {app_status!r}"
+        raise RuntimeError(msg)
+    return json_utils.as_object_dict(
+        app.get("updatecheck"),
+        context="Gemini Omaha updatecheck",
+    )
+
+
+def _inner_crx3_path(updatecheck: dict[str, object]) -> str:
+    """Return the CRX3 operation's declared inner artifact path."""
+    pipelines = json_utils.as_object_list(
+        updatecheck.get("pipelines"),
+        context="Gemini Omaha updatecheck.pipelines",
+    )
+    paths: list[str] = []
+    for pipeline in pipelines:
+        pipeline_obj = json_utils.as_object_dict(
+            pipeline,
+            context="Gemini Omaha pipeline",
+        )
+        operations = json_utils.as_object_list(
+            pipeline_obj.get("operations"),
+            context="Gemini Omaha pipeline.operations",
+        )
+        for operation in operations:
+            operation_obj = json_utils.as_object_dict(
+                operation,
+                context="Gemini Omaha operation",
+            )
+            if operation_obj.get("type") != "crx3":
+                continue
+            path = operation_obj.get("path")
+            if not isinstance(path, str):
+                msg = "Gemini Omaha crx3 operation omitted its inner artifact path"
+                raise TypeError(msg)
+            paths.append(path)
+    if len(paths) != 1:
+        msg = f"Gemini Omaha payload declared {len(paths)} crx3 inner artifacts"
+        raise RuntimeError(msg)
+    return paths[0]
+
+
 @register_updater
 class GeminiUpdater(DownloadUrlMetadataUpdater):
-    """Cross-check Gemini's Google Updater version and official download page."""
+    """Resolve Gemini releases from Google's Omaha update service."""
 
     name = "gemini"
     materialize_when_current = True
     supported_platforms = ("aarch64-darwin",)
     UPDATE_URL = "https://update.googleapis.com/service/update2/json"
-    DOWNLOAD_PAGE_URL = "https://gemini.google/mac/"
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "arm64",
     }
@@ -105,53 +183,9 @@ class GeminiUpdater(DownloadUrlMetadataUpdater):
             }
         }
 
-    @staticmethod
-    def _parse_version(payload_bytes: bytes) -> str:
-        if not payload_bytes.startswith(_ANTI_XSSI_PREFIX):
-            msg = "Gemini Omaha response omitted its anti-XSSI prefix"
-            raise RuntimeError(msg)
-        try:
-            payload_value = json.loads(payload_bytes.removeprefix(_ANTI_XSSI_PREFIX))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            msg = "Gemini Omaha response was not valid JSON"
-            raise RuntimeError(msg) from exc
-
-        payload = json_utils.as_object_dict(
-            payload_value,
-            context="Gemini Omaha response",
-        )
-        response = json_utils.as_object_dict(
-            payload.get("response"),
-            context="Gemini Omaha response.response",
-        )
-        apps = json_utils.as_object_list(
-            response.get("apps"),
-            context="Gemini Omaha response.response.apps",
-        )
-        parsed_apps = [
-            json_utils.as_object_dict(
-                app,
-                context="Gemini Omaha response app",
-            )
-            for app in apps
-        ]
-        matching_apps = [app for app in parsed_apps if app.get("appid") == _APP_ID]
-        if len(matching_apps) != 1:
-            msg = f"Gemini Omaha response contained {len(matching_apps)} matching apps"
-            raise RuntimeError(msg)
-        app = matching_apps[0]
-        app_status = json_utils.get_required_str(
-            app,
-            "status",
-            context="Gemini Omaha app",
-        )
-        if app_status != "ok":
-            msg = f"Gemini Omaha app returned status {app_status!r}"
-            raise RuntimeError(msg)
-        updatecheck = json_utils.as_object_dict(
-            app.get("updatecheck"),
-            context="Gemini Omaha updatecheck",
-        )
+    @classmethod
+    def _parse_version(cls, payload_bytes: bytes) -> str:
+        updatecheck = _response_updatecheck(payload_bytes)
         update_status = json_utils.get_required_str(
             updatecheck,
             "status",
@@ -174,17 +208,81 @@ class GeminiUpdater(DownloadUrlMetadataUpdater):
         return version
 
     @staticmethod
-    def _parse_download_url(page_bytes: bytes) -> str:
-        urls = {
-            match.group(0).decode("ascii")
-            for match in _DOWNLOAD_PATTERN.finditer(page_bytes)
-        }
-        if len(urls) != 1:
-            msg = f"Gemini download page contained {len(urls)} official DMG URLs"
-            raise RuntimeError(msg)
-        return urls.pop()
+    def _parse_payload_urls(updatecheck: dict[str, object]) -> set[str]:
+        """Return the official first-party download URLs in the payload."""
+        pipelines = json_utils.as_object_list(
+            updatecheck.get("pipelines"),
+            context="Gemini Omaha updatecheck.pipelines",
+        )
+        urls: set[str] = set()
+        for pipeline in pipelines:
+            pipeline_obj = json_utils.as_object_dict(
+                pipeline,
+                context="Gemini Omaha pipeline",
+            )
+            operations = json_utils.as_object_list(
+                pipeline_obj.get("operations"),
+                context="Gemini Omaha pipeline.operations",
+            )
+            for operation in operations:
+                operation_obj = json_utils.as_object_dict(
+                    operation,
+                    context="Gemini Omaha operation",
+                )
+                if operation_obj.get("type") != "download":
+                    continue
+                operation_urls = json_utils.as_object_list(
+                    operation_obj.get("urls"),
+                    context="Gemini Omaha download operation.urls",
+                )
+                for url_value in operation_urls:
+                    raw_url = (
+                        url_value.get("url")
+                        if isinstance(url_value, dict)
+                        else url_value
+                    )
+                    if not isinstance(raw_url, str):
+                        msg = "Gemini Omaha download URL must be a string"
+                        raise TypeError(msg)
+                    if raw_url.startswith(_DL_GOOGLE_URL_PREFIX):
+                        urls.add(raw_url)
+        return urls
 
-    async def _fetch_version(self, session: aiohttp.ClientSession) -> str:
+    @classmethod
+    def _parse_download_url(cls, payload_bytes: bytes, *, version: str) -> str:
+        """Return the pinned URL for the Omaha-served CRX3 container."""
+        updatecheck = _response_updatecheck(payload_bytes)
+        update_status = json_utils.get_required_str(
+            updatecheck,
+            "status",
+            context="Gemini Omaha updatecheck",
+        )
+        if update_status != "ok":
+            msg = f"Gemini Omaha updatecheck returned status {update_status!r}"
+            raise RuntimeError(msg)
+        urls = cls._parse_payload_urls(updatecheck)
+        if len(urls) != 1:
+            msg = f"Gemini Omaha payload contained {len(urls)} official download URLs"
+            raise RuntimeError(msg)
+        container_url = urls.pop()
+        if not container_url.endswith(".crx3"):
+            msg = f"Gemini Omaha download URL is not a CRX3 container: {container_url}"
+            raise RuntimeError(msg)
+        inner_path = _inner_crx3_path(updatecheck)
+        # Mirrors mkCrx3DmgApp's default innerDmgName in
+        # overlays/_lib/helpers/darwin-apps.nix:
+        # "${capitalizedAppName}-${info.version}.dmg".
+        # test_gemini_inner_dmg_name_contract_is_pinned_by_the_helper pins it.
+        expected_inner = f"Gemini-{version}.dmg"
+        if inner_path != expected_inner:
+            msg = (
+                "Gemini Omaha payload named inner artifact "
+                f"{inner_path!r}, expected {expected_inner!r}"
+            )
+            raise RuntimeError(msg)
+        return container_url
+
+    async def _fetch_payload(self, session: aiohttp.ClientSession) -> bytes:
         headers = {
             "User-Agent": self.config.default_user_agent,
             "Content-Type": "application/json",
@@ -208,7 +306,10 @@ class GeminiUpdater(DownloadUrlMetadataUpdater):
                     f"HTTP {response.status} {response.reason}"
                 )
                 raise RuntimeError(msg)
-        return self._parse_version(payload_bytes)
+        return payload_bytes
+
+    async def _fetch_version(self, session: aiohttp.ClientSession) -> str:
+        return self._parse_version(await self._fetch_payload(session))
 
     async def fetch_latest(
         self,
@@ -216,20 +317,15 @@ class GeminiUpdater(DownloadUrlMetadataUpdater):
         *,
         context: UpdateContext,
     ) -> VersionInfo:
-        """Resolve one release from Google's updater and public download page."""
-        version, page_bytes = await asyncio.gather(
-            self._fetch_version(session),
-            fetch_url(
-                session,
-                self.DOWNLOAD_PAGE_URL,
-                request_timeout=self.config.default_timeout,
-                config=self.config,
-            ),
-        )
+        """Resolve one release from Google's Omaha update service."""
+        payload_bytes = await self._fetch_payload(session)
+        version = self._parse_version(payload_bytes)
         return _effective_version_info(
             context,
             VersionInfo(
                 version=version,
-                metadata=DownloadUrlMetadata(url=self._parse_download_url(page_bytes)),
+                metadata=DownloadUrlMetadata(
+                    url=self._parse_download_url(payload_bytes, version=version),
+                ),
             ),
         )

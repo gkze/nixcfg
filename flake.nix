@@ -40,7 +40,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     emdash = {
-      url = "github:generalaction/emdash/v1.2.4";
+      url = "github:generalaction/emdash/v1.2.6";
       flake = false;
     };
     git-hooks = {
@@ -84,7 +84,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v2026.9.7";
+      url = "github:NousResearch/hermes-agent/v2026.9.21";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         pyproject-build-systems.follows = "pyproject-build-systems";
@@ -134,15 +134,15 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.77.0";
+      url = "github:max-sixty/worktrunk/v0.79.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
-      url = "github:axiomhq/cli/v0.19.1";
+      url = "github:axiomhq/cli/v0.20.0";
       flake = false;
     };
     anthropic-cli = {
-      url = "github:anthropics/anthropic-cli/v1.31.0";
+      url = "github:anthropics/anthropic-cli/v1.35.0";
       flake = false;
     };
     base16-schemes-src = {
@@ -173,8 +173,16 @@
       url = "github:gkze/zen-browser?ref=fix/frappe-zen-twilight-acrylic-gap";
       flake = false;
     };
+    # helix 25.07 points the gotmpl grammar at the deleted
+    # dannylongeuay/tree-sitter-go-template repo, which breaks
+    # `hx --grammar fetch`. Pin the replacement adopted in helix PR #14746;
+    # remove once nixpkgs ships a helix release with the fixed grammar source.
+    tree-sitter-go-template = {
+      url = "github:ngalaiko/tree-sitter-go-template/aa71f63de226c5592dfbfc1f29949522d7c95fac";
+      flake = false;
+    };
     codex = {
-      url = "github:openai/codex/rust-v0.153.4";
+      url = "github:openai/codex/rust-v0.156.1";
       flake = false;
     };
     curator = {
@@ -189,17 +197,17 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.39.1";
+      url = "github:steipete/gogcli/v0.41.0";
       flake = false;
     };
     openai-cli = {
-      url = "github:openai/openai-cli/v1.13.0";
+      url = "github:openai/openai-cli/v1.16.3";
       flake = false;
     };
     github-desktop = {
       type = "git";
       url = "https://github.com/desktop/desktop.git";
-      ref = "refs/tags/release-3.6.5";
+      ref = "refs/tags/release-3.6.6";
       submodules = true;
       flake = false;
     };
@@ -207,7 +215,7 @@
       type = "github";
       owner = "aaif-goose";
       repo = "goose";
-      ref = "v1.50.0";
+      ref = "v1.51.0";
       flake = false;
     };
     goose-v8 = {
@@ -249,7 +257,7 @@
       flake = false;
     };
     mux = {
-      url = "github:coder/mux/v0.28.4";
+      url = "github:coder/mux/v0.30.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     mountpoint-s3 = {
@@ -271,7 +279,7 @@
     superset = {
       # Keep the source-built Darwin package on the same immutable desktop
       # release as the binary asset. `nixcfg update` advances version-like refs.
-      url = "github:superset-sh/superset/desktop-v1.27.0";
+      url = "github:superset-sh/superset/desktop-v1.30.2";
       flake = false;
     };
     nix-manipulator = {
@@ -544,7 +552,7 @@
                   ${lib.getExe pkgs.git} init -q .
                   ${lib.getExe pkgs.git} add -A .
                   mkdir -p node_modules
-                  ln -s ${pkgs.typescript}/lib/node_modules/typescript node_modules/typescript
+                  ln -s ${pkgs.typescript_5}/lib/node_modules/typescript node_modules/typescript
                   ${nixcfgVenv}/bin/coverage run -m pytest
                   ${nixcfgVenv}/bin/coverage report
                 '';

@@ -991,7 +991,7 @@ def test_install_check_rejects_a_launcher_that_cannot_start(tmp_path: Path) -> N
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Mach-O dlopen is Darwin-only")
-@pytest.mark.parametrize(("abi_patch", "accepted"), [(35, True), (36, False)])
+@pytest.mark.parametrize(("abi_patch", "accepted"), [(44, True), (45, False)])
 def test_runtime_load_validator_dlopens_the_manifest_and_attests_skippy_abi(
     tmp_path: Path,
     abi_patch: int,

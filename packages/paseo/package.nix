@@ -45,6 +45,7 @@ let
   esbuildVersion = paseoLock.esbuildVersion or "";
   claudeAgentSdkVersion = paseoLock.claudeAgentSdkVersion or "";
   appBuilderLibVersion = paseoLock.appBuilderLibVersion or "";
+  nodeAbiVersion = paseoLock.nodeAbiVersion or "";
   appBuilderLibPatch = ./. + "/app-builder-lib-${appBuilderLibVersion}-cycle-guard.patch";
   claudeCodeExecutable = lib.getExe claude-code;
   paseoEntitlements = ./Entitlements.plist;
@@ -109,6 +110,7 @@ let
     && nonEmptyString (paseoLock.esbuildVersion or null)
     && nonEmptyString (paseoLock.claudeAgentSdkVersion or null)
     && nonEmptyString (paseoLock.appBuilderLibVersion or null)
+    && nonEmptyString nodeAbiVersion
     && commitString (paseoLock.appBuilderLibBackportCommit or null)
     && nonEmptyString (sherpaClosure.version or null)
     && commitString (sherpaClosure.commit or null)
@@ -365,6 +367,83 @@ let
       patch --dry-run "''${appBuilderLibPatchOptions[@]}"
       patch "''${appBuilderLibPatchOptions[@]}"
       ${lib.getExe nodejs_24} --check "$appBuilderLibCollector"
+
+      # Backport the reviewed Electron 44 ABI mapping to the locked node-abi.
+      # Upstream node-abi 4.28.0 stops at the 42 future boundary, so
+      # electron-rebuild cannot resolve ABI 149 for Electron 44.2.0 and fails
+      # closed before rebuilding node-pty. The boundary entry mirrors upstream
+      # node-abi 4.35.0 (45.0.0-alpha.1 -> ABI 150).
+      nodeAbiPackage="$PWD/node_modules/node-abi"
+      nodeAbiManifest="$nodeAbiPackage/package.json"
+      nodeAbiRegistry="$nodeAbiPackage/abi_registry.json"
+      for required in "$nodeAbiManifest" "$nodeAbiRegistry"; do
+        if [ ! -f "$required" ]; then
+          echo "missing required node-abi electron-44 backport input: $required" >&2
+          exit 1
+        fi
+      done
+
+      installedNodeAbiVersion="$(${lib.getExe nodejs_24} -e '
+        const fs = require("fs");
+        const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+        process.stdout.write(String(manifest.version ?? ""));
+      ' "$nodeAbiManifest")"
+      if [ "$installedNodeAbiVersion" != ${lib.escapeShellArg nodeAbiVersion} ]; then
+        echo \
+          "node-abi electron-44 backport expected ${nodeAbiVersion}, found $installedNodeAbiVersion" \
+          >&2
+        exit 1
+      fi
+
+      ${lib.getExe nodejs_24} -e '
+        const fs = require("fs");
+        const registryPath = process.argv[1];
+        const registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
+        const backport = [
+          { abi: "149", future: false, lts: false, runtime: "electron", target: "44.2.0" },
+          { abi: "150", future: true, lts: false, runtime: "electron", target: "45.0.0-alpha.1" },
+        ];
+        for (const entry of backport) {
+          const clash = registry.find(
+            (item) => item.runtime === entry.runtime && item.target === entry.target,
+          );
+          if (clash) {
+            if (clash.abi === entry.abi && Boolean(clash.future) === entry.future) continue;
+            console.error(
+              "node-abi registry already has a conflicting "
+                + entry.runtime + " " + entry.target + " entry",
+            );
+            process.exit(1);
+          }
+          const abiOwner = registry.find(
+            (item) =>
+              item.runtime === entry.runtime && String(item.abi) === entry.abi,
+          );
+          if (abiOwner) {
+            console.error(
+              "node-abi registry already maps " + entry.runtime + " ABI "
+                + entry.abi + " to " + abiOwner.target,
+            );
+            process.exit(1);
+          }
+          registry.push(entry);
+        }
+        fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2) + "\n");
+      ' "$nodeAbiRegistry"
+
+      resolvedNodeAbi="$(${lib.getExe nodejs_24} -e '
+        process.chdir(process.argv[1]);
+        const nodeAbi = require("node-abi");
+        process.stdout.write(String(nodeAbi.getAbi(process.argv[2], "electron")));
+      ' "$PWD" ${lib.escapeShellArg electronVersion})"
+      case "$resolvedNodeAbi" in
+        "" | *[!0-9]*)
+          echo \
+            "node-abi electron-44 backport did not resolve a numeric ABI for ${electronVersion}: got '$resolvedNodeAbi'" \
+            >&2
+          exit 1
+          ;;
+      esac
     '';
 
     configurePhase = ''

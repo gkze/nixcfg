@@ -215,8 +215,12 @@ def test_llama_cpp_applies_the_complete_mesh_patch_queue_in_bytewise_order() -> 
     )
     assert command_texts(shell, "sort") == ["LC_ALL=C sort -z"]
     assert command_texts(shell, "git") == [
-        'git apply --check "$meshPatch"',
-        'git apply "$meshPatch"',
+        "git init --quiet .",
+        'git config user.name "Buzz Nix Build"',
+        'git config user.email "buzz-llama-cpp@nix-managed.invalid"',
+        "git add --all --force",
+        'git commit --quiet -m "buzz-llama-cpp upstream base"',
+        'git -c core.hooksPath=/dev/null am --3way --committer-date-is-author-date --no-gpg-sign "$meshPatch"',
     ]
     assert command_texts(shell, "patch") == []
     assert (

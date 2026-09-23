@@ -12,12 +12,19 @@ if TYPE_CHECKING:
 
 
 def _run_tool(args: list[str], *, runner: CommandRunner) -> None:
-    result = runner(
-        args,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = runner(
+            args,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        msg = (
+            f"{args[0]} is required to canonicalize generated bun.nix files but "
+            "was not found on PATH; run updates through the packaged nixcfg CLI"
+        )
+        raise RuntimeError(msg) from exc
     if result.returncode == 0:
         return
     detail = result.stderr.strip() or result.stdout.strip()

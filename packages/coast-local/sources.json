@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-A6Vu/7pi5NpoB7jGhS0w89U501QjBf9HpRev94n1mpY="
+    "aarch64-darwin": "sha256-8glnCIlg7ruc3bfm8ZKvc1lh/tFq97+2yHCeHos4z2s="
   },
   "urls": {
     "aarch64-darwin": "https://dmg.cdn-coast.app/Coast%20Local.dmg"
   },
-  "version": "sha256-03a56effba62e4da6807b8c6852d30f3d539d3542305ff47a517aff789f59a96"
+  "version": "sha256-f20967088960eebb9cddb7e6f192af735961fed16af7bfb6c8709e1e8b38cf6b"
 }

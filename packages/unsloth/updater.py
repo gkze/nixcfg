@@ -965,6 +965,10 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
     """Track exact public desktop and backend sources behind closure gates."""
 
     name = "unsloth"
+    bulk_update_hold = (
+        "v0.1.811-beta requires backend 2026.9.7, but its source declares "
+        "2026.9.6 and PyPI has no sdist. Remove after matching source is published."
+    )
     GITHUB_OWNER = "unslothai"
     GITHUB_REPO = "unsloth"
     DARWIN_PLATFORM: ClassVar[str] = "aarch64-darwin"

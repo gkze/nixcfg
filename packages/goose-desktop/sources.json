@@ -2,10 +2,10 @@
   "electronVersion": "43.4.0",
   "hashes": [
     {
-      "hash": "sha256-FpnWCJsytxJ5w9yqWayU2ZNDCm7RgubU34ouIeNWqfA=",
+      "hash": "sha256-RNKI32hiUaG3JcDi1b0yeDkLAT7nIJqf3zjTFdrc3/Q=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin"
     }
   ],
-  "version": "1.50.0"
+  "version": "1.51.0"
 }

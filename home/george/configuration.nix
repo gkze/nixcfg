@@ -465,6 +465,21 @@
         { name = "python"; }
         { name = "bash"; }
       ];
+      # helix 25.07 pins the gotmpl grammar to a deleted repo
+      # (dannylongeuay/tree-sitter-go-template), which breaks
+      # `hx --grammar fetch`. Override with the replacement upstream adopted
+      # in helix PR #14746. The commit lives in flake.lock
+      # (tree-sitter-go-template input), not handwritten Nix. Remove once
+      # nixpkgs ships a fixed helix release.
+      languages.grammar = [
+        {
+          name = "gotmpl";
+          source = {
+            git = "https://github.com/ngalaiko/tree-sitter-go-template";
+            rev = outputs.lib.flakeLock."tree-sitter-go-template".locked.rev;
+          };
+        }
+      ];
     };
     man = {
       enable = true;

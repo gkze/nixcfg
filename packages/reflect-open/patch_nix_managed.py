@@ -84,9 +84,7 @@ _PATCHES = (
     ),
     SourcePatch(
         "apps/desktop/src-tauri/Cargo.toml",
-        """tauri-plugin-updater = "2.10.1"
-tauri-plugin-process = "2.3.1"
-""",
+        'tauri-plugin-updater = "2.11.0"\ntauri-plugin-process = "2.3.1"\n',
         "",
     ),
     SourcePatch(
@@ -101,7 +99,7 @@ tauri-plugin-process = "2.3.1"
     ),
     SourcePatch(
         "apps/desktop/src/providers/update-provider.tsx",
-        "import { isNativeShell } from '@/lib/platform'\n",
+        "import { isNativeShell } from '@/lib/platform.ts'\n",
         "",
     ),
     SourcePatch(

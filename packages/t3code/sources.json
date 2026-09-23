@@ -1,12 +1,15 @@
 {
-  "drvHash": "2ci7xlcs52yn1kd0i8k69qwysjrl36xs",
+  "drvHash": "p58ah1cmlhvhwrvazzz1irlm9pax6agj",
   "hashes": [
     {
-      "hash": "sha256-cEK3b0xzlRgsyZUjR89uVsZs3kTgURsDGL9WIBG1wYA=",
+      "hash": "sha256-C7PLg18aIDgveytnE9fLAVBKUstQISrF5Ex27Y+Yk+Y=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin"
     }
   ],
   "input": "t3code",
+  "platformDrvHashes": {
+    "aarch64-darwin": "p58ah1cmlhvhwrvazzz1irlm9pax6agj"
+  },
   "version": "main"
 }

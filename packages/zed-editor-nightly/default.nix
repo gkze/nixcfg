@@ -163,10 +163,6 @@ let
         --replace-fail 'println!("cargo:rerun-if-changed=../zed/Cargo.toml");' 'println!("cargo:rerun-if-changed=./zed-Cargo.toml");'
     '';
 
-    extension = ''
-      (cd "$crateRoot" && patch -p3 < ${./stable-wasi-sdk-asset-selection.patch})
-    '';
-
     extension_host = ''
       cp -r ${src}/crates/extension_api/wit "$crateRoot/workspace-extension-api-wit"
       substituteInPlace "$crateRoot/build.rs" \

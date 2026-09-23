@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-b0U18il+6RZu19V9cBDK6XQXiVJWq0OpZIdqRfkpRlE=",
-    "x86_64-darwin": "sha256-b0U18il+6RZu19V9cBDK6XQXiVJWq0OpZIdqRfkpRlE="
+    "aarch64-darwin": "sha256-hauVyKS+T7ZQqU7Ah6fn2J9Oa9qcGGEc3USraj7bHPE=",
+    "x86_64-darwin": "sha256-hauVyKS+T7ZQqU7Ah6fn2J9Oa9qcGGEc3USraj7bHPE="
   },
   "urls": {
-    "aarch64-darwin": "https://updates.getcleanshot.com/v3/CleanShot-X-5.0.dmg",
-    "x86_64-darwin": "https://updates.getcleanshot.com/v3/CleanShot-X-5.0.dmg"
+    "aarch64-darwin": "https://updates.getcleanshot.com/v3/CleanShot-X-5.0.1.dmg",
+    "x86_64-darwin": "https://updates.getcleanshot.com/v3/CleanShot-X-5.0.1.dmg"
   },
-  "version": "5.0"
+  "version": "5.0.1"
 }

@@ -9,6 +9,7 @@ import pytest
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.if_expression import IfExpression
 from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
@@ -36,11 +37,15 @@ from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import DownloadUrlMetadata
 
 _VERSION = "1.99.2.791"
-_URL = "https://dl.google.com/release2/j33ro/release/Gemini.dmg"
+_CRX3_URL = (
+    "https://dl.google.com/release2/gemini/immutable/gemini_1.99.2.791_all_test123.crx3"
+)
+_URL = _CRX3_URL
 _HASH = "sha256-79JM4YYzTSCdfXeSIzItva+kffynOfpawClzJ5a1oEw="
 _APP_ID = "com.google.geminimacos"
 _PREFIX = b")]}'\n"
 _EMPTY_VERSION = "0.0.0.0"  # Omaha sentinel, not a bind address.  # noqa: S104
+_UNSET = object()
 
 
 def _load_module() -> ModuleType:
@@ -79,7 +84,20 @@ def _omaha_response(
     app_status: object = "ok",
     update_status: object = "ok",
     appid: object = _APP_ID,
+    download_urls: tuple[object, ...] | None = None,
+    crx3_path: object = _UNSET,
 ) -> bytes:
+    resolved_urls = (
+        (
+            {
+                "url": "http://edgedl.me.gvt1.com/edgedl/release2/gemini/immutable/gemini_1.99.2.791_all_test123.crx3"
+            },
+            {"url": _CRX3_URL},
+        )
+        if download_urls is None
+        else [{"url": url} for url in download_urls]
+    )
+    resolved_crx3_path = f"Gemini-{version}.dmg" if crx3_path is _UNSET else crx3_path
     return (
         _PREFIX
         + json.dumps({
@@ -100,14 +118,11 @@ def _omaha_response(
                                         {
                                             "type": "download",
                                             "out": {"sha256": "ab" * 32},
-                                            "urls": [
-                                                "https://dl.google.com/release2/gemini/"
-                                                "immutable/current.crx3"
-                                            ],
+                                            "urls": resolved_urls,
                                         },
                                         {
                                             "type": "crx3",
-                                            "path": f"Gemini-{version}.dmg",
+                                            "path": resolved_crx3_path,
                                         },
                                     ],
                                 }
@@ -120,24 +135,11 @@ def _omaha_response(
     )
 
 
-def test_gemini_cross_checks_omaha_version_and_official_download_page(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The updater should persist one release-scoped Google DMG URL and hash."""
+def test_gemini_resolves_the_omaha_served_crx3_container() -> None:
+    """The updater should pin one first-party CRX3 container URL and hash."""
     module = _load_module()
     updater = module.GeminiUpdater()
     session = _FakeSession(_FakeResponse(_omaha_response()))
-    page_calls: list[tuple[object, str, dict[str, object]]] = []
-
-    async def _fetch_url(
-        passed_session: object,
-        url: str,
-        **kwargs: object,
-    ) -> bytes:
-        page_calls.append((passed_session, url, kwargs))
-        return f'<a href="{_URL}">Download</a><a href="{_URL}">Again</a>'.encode()
-
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
 
     info = _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
     result = updater.build_result(info, {"aarch64-darwin": _HASH})
@@ -151,16 +153,6 @@ def test_gemini_cross_checks_omaha_version_and_official_download_page(
     assert result.hashes.to_json() == {"aarch64-darwin": _HASH}
     assert updater.materialize_when_current is True
     assert updater.supported_platforms == ("aarch64-darwin",)
-    assert page_calls == [
-        (
-            session,
-            updater.DOWNLOAD_PAGE_URL,
-            {
-                "request_timeout": updater.config.default_timeout,
-                "config": updater.config,
-            },
-        )
-    ]
     assert len(session.calls) == 1
     method, url, kwargs = session.calls[0]
     assert method == "POST"
@@ -213,7 +205,6 @@ def test_gemini_rehashes_the_current_pin_during_a_stale_omaha_rollout(
     module = _load_module()
     updater = module.GeminiUpdater()
     stale_version = "1.96.4.775"
-    stale_url = "https://dl.google.com/release2/stale/release/Gemini.dmg"
     stale_hash = "sha256-jBct4+g6lLdXW4CL9d+hlaY7UB5V69nqKlaIGpse9dQ="
     refreshed_hash = _HASH
     current = SourceEntry(
@@ -223,9 +214,6 @@ def test_gemini_rehashes_the_current_pin_during_a_stale_omaha_rollout(
     )
     session = _FakeSession(_FakeResponse(_omaha_response(version=stale_version)))
     hashed_infos: list[VersionInfo] = []
-
-    async def _fetch_url(*_args: object, **_kwargs: object) -> bytes:
-        return f'<a href="{stale_url}">Download</a>'.encode()
 
     async def _fetch_hashes(
         _self: object,
@@ -238,7 +226,6 @@ def test_gemini_rehashes_the_current_pin_during_a_stale_omaha_rollout(
         hashed_infos.append(info)
         return {"aarch64-darwin": refreshed_hash}
 
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
     monkeypatch.setattr(module.GeminiUpdater, "fetch_hashes", _fetch_hashes)
     monkeypatch.setattr(
         "lib.update.nix.get_current_nix_platform",
@@ -318,11 +305,6 @@ def test_gemini_reports_omaha_http_failure(
     module = _load_module()
     updater = module.GeminiUpdater()
     response = _FakeResponse(b"unavailable", status=503, reason="Service Unavailable")
-
-    async def _fetch_url(*_args: object, **_kwargs: object) -> bytes:
-        return _URL.encode()
-
-    monkeypatch.setattr(module, "fetch_url", _fetch_url)
 
     with pytest.raises(
         RuntimeError,
@@ -412,25 +394,60 @@ def test_gemini_rejects_malformed_or_unsuccessful_omaha_responses(
 
 
 @pytest.mark.parametrize(
-    "page",
+    ("kwargs", "match"),
     [
-        b"no download",
-        b"https://example.test/release2/j33ro/release/Gemini.dmg",
-        b"http://dl.google.com/release2/j33ro/release/Gemini.dmg",
+        ({"download_urls": ()}, "contained 0 official download URLs"),
         (
-            b"https://dl.google.com/release2/first/release/Gemini.dmg "
-            b"https://dl.google.com/release2/second/release/Gemini.dmg"
+            {"download_urls": ("https://example.com/x.crx3",)},
+            "contained 0 official download URLs",
         ),
+        (
+            {
+                "download_urls": (
+                    _CRX3_URL,
+                    "https://dl.google.com/release2/gemini/other.crx3",
+                )
+            },
+            "contained 2 official download URLs",
+        ),
+        (
+            {"download_urls": ("https://dl.google.com/release2/gemini/gemini.dmg",)},
+            "is not a CRX3 container",
+        ),
+        ({"crx3_path": "Gemini-9.9.9.9.dmg"}, "named inner artifact"),
+        ({"crx3_path": None}, "omitted its inner artifact path"),
     ],
 )
-def test_gemini_rejects_missing_or_ambiguous_official_downloads(
-    page: bytes,
+def test_gemini_rejects_ambiguous_or_mismatched_crx3_payloads(
+    kwargs: dict[str, object],
+    match: str,
 ) -> None:
-    """Only one strict first-party release-scoped Gemini DMG may be pinned."""
+    """Only one first-party CRX3 naming this version's DMG may be pinned."""
     module = _load_module()
 
-    with pytest.raises(RuntimeError, match="official DMG URLs"):
-        module.GeminiUpdater._parse_download_url(page)
+    with pytest.raises((RuntimeError, TypeError), match=match):
+        module.GeminiUpdater._parse_download_url(
+            _omaha_response(**kwargs),
+            version=_VERSION,
+        )
+
+
+def test_gemini_inner_dmg_name_contract_is_pinned_by_the_helper() -> None:
+    """Updater and helper share one rule: the inner artifact is Gemini-<version>.dmg."""
+    inner_dmg_name = expect_instance(
+        nix_source_fragment_expr(
+            "overlays/_lib/helpers/darwin-apps.nix",
+            "      innerDmgName =\n",
+            "    in\n",
+        ),
+        IfExpression,
+    )
+    assert_nix_ast_equal(inner_dmg_name.condition, "sourceName == null")
+    assert_nix_ast_equal(
+        inner_dmg_name.consequence,
+        '"${capitalizedAppName}-${info.version}.dmg"',
+    )
+    assert_nix_ast_equal(inner_dmg_name.alternative, Identifier(name="sourceName"))
 
 
 def test_gemini_package_preserves_the_vendor_bundle() -> None:
@@ -444,7 +461,7 @@ def test_gemini_package_preserves_the_vendor_bundle() -> None:
     assert_nix_ast_equal(derivation.name, Identifier(name="mkSimpleDarwinApp"))
     assert_nix_ast_equal(
         expect_binding(arguments.values, "builder").value,
-        Identifier(name="mkDmgApp"),
+        Identifier(name="mkCrx3DmgApp"),
     )
     assert_nix_ast_equal(
         expect_binding(arguments.values, "pname").value,
@@ -454,10 +471,7 @@ def test_gemini_package_preserves_the_vendor_bundle() -> None:
         expect_binding(arguments.values, "appName").value,
         StringPrimitive(value="Gemini"),
     )
-    assert_nix_ast_equal(
-        expect_binding(arguments.values, "sourceName").value,
-        StringPrimitive(value="Gemini.dmg"),
-    )
+    assert "sourceName" not in bindings
     assert_nix_ast_equal(
         expect_binding(arguments.values, "dontFixup").value,
         Primitive(value=True),
@@ -524,8 +538,8 @@ def test_gemini_system_route_refuses_future_downgrades() -> None:
     )
 
 
-def test_gemini_sources_pin_the_official_release_dmg() -> None:
-    """Checked-in metadata must remain a complete official Omaha-selected DMG."""
+def test_gemini_sources_pin_the_official_release_artifact() -> None:
+    """Checked-in metadata must remain a complete official Omaha-selected pin."""
     source = SourceEntry.model_validate_json(
         (REPO_ROOT / "packages/gemini/sources.json").read_text(encoding="utf-8")
     )
@@ -537,4 +551,4 @@ def test_gemini_sources_pin_the_official_release_dmg() -> None:
     url = urls["aarch64-darwin"]
     assert_https_url(url, host="dl.google.com")
     assert "/release2/" in url
-    assert url.endswith("/Gemini.dmg")
+    assert url.endswith(".crx3")

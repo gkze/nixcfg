@@ -101,6 +101,10 @@ pkgs.devshell.mkShell {
   packages =
     with pkgs;
     [
+      # Update-time source canonicalization (lib/bun_nix_normalizer) requires
+      # this on PATH even when the unwrapped .venv nixcfg entry shadows the
+      # packaged wrapper inside the devshell.
+      deadnix
       flake-edit
       go
       nh
@@ -127,6 +131,8 @@ pkgs.devshell.mkShell {
   devshell.startup.commitlint-node-modules.text = ''
     mkdir -p node_modules
     ln -sfn "${pkgs.commitlint}/lib/node_modules/@commitlint/root/node_modules/@commitlint" node_modules/@commitlint
-    ln -sfn "${pkgs.typescript}/lib/node_modules/typescript" node_modules/typescript
+    # TypeScript 7 (the Go rewrite) no longer ships the JS compiler API at
+    # lib/node_modules/typescript; the hermes-desktop fixture tests require it.
+    ln -sfn "${pkgs.typescript_5}/lib/node_modules/typescript" node_modules/typescript
   '';
 }

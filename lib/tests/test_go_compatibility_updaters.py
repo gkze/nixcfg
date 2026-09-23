@@ -457,6 +457,7 @@ def test_selected_go_resolution_waits_for_workspace_and_evaluator(
 ) -> None:
     """Go toolchain discovery shares the same file stability and evaluation budget."""
     updater = _updater(suffix=f"guarded_go_{failed}")
+    updater.config = resolve_config(max_nix_evaluations=1)
     calls: list[list[str]] = []
     stdout = "1.28.0\n"
     stderr = "échec" if failed else ""

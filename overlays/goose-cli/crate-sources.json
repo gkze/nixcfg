@@ -1,7 +1,7 @@
 {
   "slices": {
     "crates/goose": {
-      "hash": "sha256-3GtudQcSW+1z8rWCveLwkzxiquGkSTwbdyISb86BlvQ=",
+      "hash": "sha256-fKQ8N23Wv9t0vLsEnmBzx73QIPXoZJMjKb8Bz9+r+8k=",
       "name": "goose"
     },
     "crates/goose-acp-macros": {
@@ -9,35 +9,35 @@
       "name": "goose-acp-macros"
     },
     "crates/goose-agent": {
-      "hash": "sha256-pzbH9QPG3fhLA1glvl7T4qi8XXt2J0z+5NN9ENz07EI=",
+      "hash": "sha256-mO6UY3Lpla04ZyQT/kcV12K8ojICxpUh9kAkbH/tf5E=",
       "name": "goose-agent"
     },
     "crates/goose-cli": {
-      "hash": "sha256-fPYkqEsBDXaU9rkL2t+nXi9eUYPgaFIl8/XG8kGq4NA=",
+      "hash": "sha256-LlNiDE/p9dk3n0j5m1nylWG2N0qyqAFphmAU8bJtuMc=",
       "name": "goose-cli"
     },
     "crates/goose-context-management": {
-      "hash": "sha256-l2ZmrWnx9d67EoC30NScFd4nZDvMtdsMsHzl0eQQLsc=",
+      "hash": "sha256-4m58HTNvs/Tazz72X2hj92iYTz+AhpsawPdvwPDEntI=",
       "name": "goose-context-management"
     },
     "crates/goose-download-manager": {
-      "hash": "sha256-/VspSwU/QD09qtgd9W9LPFxYyOA5/bu7FZzalb9ILC4=",
+      "hash": "sha256-L3Hk5AyGuNtBNcuXykjscVWUFYVD+XLqlA7APEEmmH4=",
       "name": "goose-download-manager"
     },
     "crates/goose-local-inference": {
-      "hash": "sha256-qoOgHJSvj0uhx598vUeILWeJkeethKFDXs+V9LZnvhI=",
+      "hash": "sha256-/rpq4vfp9x35qTi3NZkN+w1pSUc4khFL+FP9LizNJJc=",
       "name": "goose-local-inference"
     },
     "crates/goose-mcp": {
-      "hash": "sha256-ep0us6Bh0tw4F68NaDmRflJ+C0UqpL4ksGs9SkYf6DI=",
+      "hash": "sha256-d6EFVl8X1qj74umhkRn11QCwLQcwnQ26XNaD43iLgCg=",
       "name": "goose-mcp"
     },
     "crates/goose-provider-types": {
-      "hash": "sha256-H39MmXGEkwLm01iZ7PlHoS0ddWT79OPYuQmIMgUGSF8=",
+      "hash": "sha256-bP6zvp5BKjBr1Zx/1Cb/4pn3ZUuP3j/s3ZHhJ86zOpM=",
       "name": "goose-provider-types"
     },
     "crates/goose-providers": {
-      "hash": "sha256-9jCEcEiUI4YWCHmRo6YUBcdSTR8nDaJHSzPh+Lz5kUA=",
+      "hash": "sha256-K3iRnMop7GvLv7PgCkQ6aOb4ROjV9DByHzujbLygVVQ=",
       "name": "goose-providers"
     },
     "crates/goose-roaming": {
@@ -45,15 +45,15 @@
       "name": "goose-roaming"
     },
     "crates/goose-sdk": {
-      "hash": "sha256-IxCLJ8PeY+AwYuolTUyZcTceI84vGAZ5drFYxnL0DkM=",
+      "hash": "sha256-l/k5aob2PFvblmRZHW6AXbK8Wn+oCOARWUJKaJxZQ6M=",
       "name": "goose-sdk"
     },
     "crates/goose-sdk-types": {
-      "hash": "sha256-Lcdz9rvtHzXdvZ4pHbe7H/lXHQuUdozIeFJOpcO2KsM=",
+      "hash": "sha256-/mE6CLycQNTsvd4Fm4WDD0kKVW9Zdu7EbNyF8b/TBcU=",
       "name": "goose-sdk-types"
     },
     "crates/goose-test": {
-      "hash": "sha256-gX6a3pvEf2xnCexz19yHLBVL/8kgSv42ncYjjzSnjB0=",
+      "hash": "sha256-BJ7y2/O1qbZ9YIipf42Yt54xKmi371pPUVnDQIMsjmA=",
       "name": "goose-test"
     },
     "crates/goose-test-support": {
@@ -66,9 +66,9 @@
     }
   },
   "source": {
-    "cargoNixSha256": "dc87d685390eb25d252176921f9cc9d711b3f0aed9809323f58891162c4375ae",
+    "cargoNixSha256": "1ca4fc836e675edcd9b8d45c277f650174732f90b08c58456f85f5019896a78f",
     "input": "goose",
-    "narHash": "sha256-KWwLuyJjmuHuCVIBmCHRvkTc93NOHmyr6F+TGokTc9I=",
+    "narHash": "sha256-S4GPCEbcCsDyI+P8tCuc4/5WNQDGjqjmi1atOdScsxE=",
     "subdir": "."
   }
 }

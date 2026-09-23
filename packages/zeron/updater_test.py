@@ -235,13 +235,22 @@ def test_zeron_validates_the_materialized_bootstrap_source() -> None:
     )
 
 
-def test_zeron_nix_policy_patch_disables_every_update_path(tmp_path: Path) -> None:
-    """One fail-closed patch must cover checks, downloads, installs, and relaunch."""
+@pytest.mark.parametrize(
+    ("group_name", "group_attr"),
+    [("primary", "_PATCHES"), ("fallback", "_PATCHES_FALLBACK")],
+)
+def test_zeron_nix_policy_patch_disables_every_update_path(
+    tmp_path: Path,
+    group_name: str,
+    group_attr: str,
+) -> None:
+    """One fail-closed patch set must cover checks, downloads, installs, relaunch."""
     module = _load_patch_module()
-    update_path = _write_patch_fixture(tmp_path, module._PATCHES)
+    patches: tuple[_Patch, ...] = getattr(module, group_attr)
+    update_path = _write_patch_fixture(tmp_path, patches)
     original = update_path.read_text(encoding="utf-8")
     expected = original
-    for patch in module._PATCHES:
+    for patch in patches:
         expected = expected.replace(patch.old, patch.new)
 
     assert module.main([str(tmp_path)]) == 0
@@ -266,7 +275,7 @@ def test_zeron_nix_policy_patch_rejects_source_drift_atomically(
 
     with pytest.raises(
         RuntimeError,
-        match=f"expected one Zeron updater anchor, found {copies}",
+        match="no Zeron updater anchor set matches this source tree",
     ):
         module.patch_tree(tmp_path)
 

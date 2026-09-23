@@ -1067,6 +1067,27 @@ def test_dmg_app_helper_supports_an_explicit_source_name() -> None:
     assert_nix_ast_equal(source_name.alternative, Identifier(name="sourceName"))
 
 
+def test_dmg_app7zz_helper_ties_main_program_default_to_bin_creation() -> None:
+    """A default mainProgram is only advertised when the builder creates a bin."""
+    helper = expect_instance(
+        nix_source_fragment_expr(
+            "overlays/_lib/helpers/darwin-apps.nix",
+            "  mkDmgApp7zz =\n",
+            ";\n\n  # CRX3 container layout",
+        ),
+        FunctionDefinition,
+    )
+    main_program_default = next(
+        argument
+        for argument in helper.argument_set
+        if isinstance(argument, Identifier) and argument.name == "mainProgram"
+    ).default_value
+    conditional = expect_instance(main_program_default, IfExpression)
+    assert_nix_ast_equal(conditional.condition, Identifier(name="createBin"))
+    assert_nix_ast_equal(conditional.consequence, Identifier(name="pname"))
+    assert_nix_ast_equal(conditional.alternative, "null")
+
+
 @pytest.mark.parametrize(
     ("name", "next_name"),
     [
@@ -1197,7 +1218,7 @@ def test_pkg_app_helper_expands_pkg_into_fresh_destination() -> None:
             "overlays/_lib/helpers/darwin-apps.nix",
             "        installPhase = ",
             ";\n      };",
-            occurrence=3,
+            occurrence=4,
         ),
         IndentedString,
     )
@@ -3455,6 +3476,7 @@ def test_work_mac_app_routes_preserve_system_and_user_scopes() -> None:
         "baseten-switch": "pkgs.baseten-switch",
         "bb": "pkgs.bb",
         "buzz": "pkgs.buzz",
+        "capy-nightly": "pkgs.capy-nightly",
         "clearly": "pkgs.clearly",
         "coast-local": "pkgs.coast-local",
         "energy": "pkgs.energy",
@@ -3472,6 +3494,7 @@ def test_work_mac_app_routes_preserve_system_and_user_scopes() -> None:
         "paseo": "pkgs.paseo",
         "reflect": "pkgs.reflect-open",
         "screen-studio": "pkgs.screen-studio",
+        "thorium": "pkgs.thorium",
         "unsloth": "pkgs.unsloth",
         "voiceos": "pkgs.voiceos",
         "waku": "pkgs.waku",
@@ -4091,14 +4114,16 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
           "/System/Applications/Messages.app"
           (appPath "slack" "Slack.app")
           (appPath "onepassword" "1Password.app")
-          (appPath "google-chrome" "Google Chrome.app")
-          (appPath "town-assistant" "Town Assistant.app")
           (appPath "zen-twilight" "Twilight.app")
+          (appPath "thorium" "Thorium.app")
+          (appPath "google-chrome" "Google Chrome.app")
           (appPath "claude" "Claude.app")
           (appPath "codex" "ChatGPT.app")
           (appPath "capy" "Capy.app")
-          (appPath "grok-bot" "Grok Bot.app")
+          (appPath "capy-nightly" "Capy Nightly.app")
           (appPath "code-cursor" "Cursor.app")
+          (appPath "town-assistant" "Town Assistant.app")
+          (appPath "grok-bot" "Grok Bot.app")
           (appPath "zed" "Zed Nightly.app")
           (appPath "linear" "Linear.app")
           (appPath "ghostty" "Ghostty.app")

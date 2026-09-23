@@ -89,8 +89,8 @@ const NIX_MANAGED_HERMES_VERSION = @HERMES_VERSION@
     ),
     _SourcePatch(
         "apps/desktop/electron/main.ts",
-        "async function checkUpdates() {\n",
-        f"""async function checkUpdates() {{
+        "async function checkUpdates({ force = false }: { force?: boolean } = {}) {\n",
+        f"""async function checkUpdates({{ force = false }}: {{ force?: boolean }} = {{}}) {{
   if (IS_PACKAGED) {{
     return {{
       supported: false,
@@ -156,14 +156,14 @@ export interface UpdateApplyState {
     ),
     _SourcePatch(
         "apps/desktop/src/store/updates.ts",
-        """    const status = await bridge.check()
+        """    const status = await bridge.check({ force })
     $updateStatus.set(status)
     maybeNotifyUpdateAvailable(status, 'client')
     void refreshDesktopVersion()
 
     return status
 """,
-        f"""    const status = await bridge.check()
+        f"""    const status = await bridge.check({{ force }})
     const effectiveStatus: DesktopUpdateStatus = NIX_MANAGED_CLIENT
       ? {{
           ...status,
@@ -204,19 +204,16 @@ export interface UpdateApplyState {
             "status?.currentSha?.slice(0, 7) ?? 'unknown')}\n"
             "          title={a.automaticUpdates}\n"
             "        />\n\n"
-            "        <UninstallSection />\n"
+            "        {includeUninstall && <UninstallSection />}\n"
         ),
         """        {!import.meta.env.PROD && (
           <>
             <ListRow
               description={a.automaticUpdatesDesc}
-              hint={a.branchCommit(
-                status?.branch ?? 'unknown',
-                status?.currentSha?.slice(0, 7) ?? 'unknown'
-              )}
+              hint={a.branchCommit(status?.branch ?? 'unknown', status?.currentSha?.slice(0, 7) ?? 'unknown')}
               title={a.automaticUpdates}
             />
-            <UninstallSection />
+            {includeUninstall && <UninstallSection />}
           </>
         )}
 """,

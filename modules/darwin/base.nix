@@ -171,6 +171,8 @@ in
       );
     };
 
+    environment.shells = [ pkgs.zsh ];
+
     users.users.${primaryUser} = {
       inherit (cfg.user) uid;
       shell = pkgs.zsh;

@@ -7,7 +7,7 @@ name = "nixcfg-unsloth-runtime"
 version = "0.0.0"
 requires-python = "==3.12.*"
 dependencies = [
-  "unsloth[studio] @ https://github.com/unslothai/unsloth/archive/cedbb58e4a49befe12d4f28f385abc4393c763e5.tar.gz",
+  "unsloth[studio] @ https://github.com/unslothai/unsloth/archive/7cfb9227ae507ec046630dc60377354c657a88c3.tar.gz",
 ]
 
 [tool.uv]
