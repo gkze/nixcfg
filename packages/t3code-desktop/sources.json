@@ -1,9 +1,9 @@
 {
-  "drvHash": "l4ihr1f5f5fdk1flhp6wm3ghcn6vxa8c",
+  "drvHash": "hkd34yzyl2aa36rlvmpnylfgp9qwdza3",
   "electronVersion": "44.4.2",
   "hashes": [
     {
-      "hash": "sha256-xmqDdbx4eoP/00xzI3ZfEM7QfjJHqXWcKxPxZxaOgow=",
+      "hash": "sha256-mC4HbYJQU6u7UqwnRDPB412Nqm3rmLjXVnx34/Fca5c=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin"
     }
@@ -13,7 +13,7 @@
     "electronBuilderVersion": "26.15.7"
   },
   "platformDrvHashes": {
-    "aarch64-darwin": "l4ihr1f5f5fdk1flhp6wm3ghcn6vxa8c"
+    "aarch64-darwin": "hkd34yzyl2aa36rlvmpnylfgp9qwdza3"
   },
   "version": "main"
 }

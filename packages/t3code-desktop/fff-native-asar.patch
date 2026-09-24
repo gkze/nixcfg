@@ -1,0 +1,14 @@
+diff --git a/node_modules/@ff-labs/fff-node/dist/src/binary.js b/node_modules/@ff-labs/fff-node/dist/src/binary.js
+--- a/node_modules/@ff-labs/fff-node/dist/src/binary.js
++++ b/node_modules/@ff-labs/fff-node/dist/src/binary.js
+@@ -68,7 +68,9 @@
+         const packageDir = dirname(packageJsonPath);
+         const binaryPath = join(packageDir, getLibFilename());
+         if (existsSync(binaryPath)) {
+-            return binaryPath;
++            // ffi-rs dlopen needs the real file outside Electron's ASAR archive.
++            // The desktop packager unpacks dylibs alongside native Node addons.
++            return binaryPath.replace(/\.asar\//, ".asar.unpacked/");
+         }
+     }
+     catch {

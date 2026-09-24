@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-A/KYG16okJ0OiFryZ4C8NDtwewg01zJno4M6dyBwllk="
+    "aarch64-darwin": "sha256-p3YqOIj/c51FYguvq6Bnjk6quTqvsGtKI7WUic+5vCU="
   },
   "urls": {
-    "aarch64-darwin": "https://github.com/indigoai-us/hq-desktop-app/releases/download/v0.10.307/HQ_0.10.307_universal.app.tar.gz"
+    "aarch64-darwin": "https://github.com/indigoai-us/hq-desktop-app/releases/download/v0.10.317/HQ_0.10.317_universal.app.tar.gz"
   },
-  "version": "0.10.307"
+  "version": "0.10.317"
 }

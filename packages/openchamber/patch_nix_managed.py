@@ -283,40 +283,14 @@ const NIX_MANAGED_MESSAGE = 'Updates are managed by Nix.';
     _SourcePatch(
         "opencode-cli-upgrade",
         "opencode",
-        "packages/opencode/src/cli/cmd/upgrade.ts",
-        """  handler: async (args: { target?: string; method?: string }) => {
-    UI.empty()
-""",
-        f"""  handler: async (args: {{ target?: string; method?: string }}) => {{
-    if (process.env.OPENCODE_NIX_MANAGED === "1") {{
-      throw new Error("{_MANAGED_MESSAGE}")
-    }}
-
-    UI.empty()
-""",
-    ),
-    _SourcePatch(
-        "opencode-global-http-upgrade",
-        "opencode",
-        "packages/opencode/src/server/routes/instance/httpapi/handlers/global.ts",
-        (
-            '    const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* '
-            "(ctx: { payload: typeof GlobalUpgradeInput.Type }) {\n"
-            "      const method = yield* installation.method()\n"
-        ),
-        (
-            '    const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* '
-            f"(ctx: {{ payload: typeof GlobalUpgradeInput.Type }}) {{\n"
-            f"""      if (process.env.OPENCODE_NIX_MANAGED === "1") {{
-        return {{
-          status: 403,
-          body: {{ success: false as const, error: "{_MANAGED_MESSAGE}" }},
-        }}
+        "packages/cli/src/commands/handlers/upgrade.ts",
+        "      log.info(`Using method: ${method}`)\n",
+        f"""      if (process.env.OPENCODE_NIX_MANAGED === "1") {{
+        throw new Error("{_MANAGED_MESSAGE}")
       }}
 
-      const method = yield* installation.method()
-"""
-        ),
+      log.info(`Using method: ${{method}}`)
+""",
     ),
 )
 
@@ -344,8 +318,9 @@ _ANCHORS = (
     _SourceAnchor(
         "opencode-auto-updater",
         "opencode",
-        "packages/opencode/src/cli/upgrade.ts",
-        "  if (config.autoupdate === false || Flag.OPENCODE_DISABLE_AUTOUPDATE) return\n",
+        "packages/cli/src/services/updater.ts",
+        "    if (OPENCODE_LOCAL || "
+        '["1", "true"].includes(process.env.OPENCODE_DISABLE_AUTOUPDATE?.toLowerCase() ?? "")) {\n',
     ),
 )
 

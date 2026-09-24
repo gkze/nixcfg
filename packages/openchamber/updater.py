@@ -2,6 +2,7 @@
 
 import re
 import urllib.parse
+from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, cast
 
@@ -250,10 +251,6 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             "bun@",
             context="package manager",
         )
-        opencode_version = _require_exact_version(
-            _dependency(root, "@opencode-ai/sdk", context="root dependencies"),
-            context="root OpenCode SDK dependency",
-        )
         engines = _require_object(root.get("engines"), context="root engines")
         require_supported_node_engine(
             _require_string(engines, "node", context="root engines"),
@@ -269,6 +266,18 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
         )
 
         electron = _require_object(electron_payload, context="Electron manifest")
+        electron_cli_manifest = _require_object(
+            electron.get("opencodeCli"),
+            context="Electron opencodeCli manifest",
+        )
+        opencode_version = _require_exact_version(
+            _require_string(
+                electron_cli_manifest,
+                "version",
+                context="Electron opencodeCli version",
+            ),
+            context="bundled OpenCode CLI version",
+        )
         _require_exact(
             _require_exact_version(
                 _require_string(electron, "version", context="Electron manifest"),
@@ -315,22 +324,9 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             release_version,
             context="web package version",
         )
-        _require_exact(
-            _require_exact_version(
-                _dependency(web, "@opencode-ai/sdk", context="web dependencies"),
-                context="web OpenCode SDK dependency",
-            ),
-            opencode_version,
-            context="web OpenCode SDK dependency",
-        )
         sherpa_wrapper_version = _require_exact_version(
             _dependency(web, "sherpa-onnx-node", context="web dependencies"),
             context="sherpa wrapper dependency",
-        )
-        _require_exact(
-            _locked_package_version(lock_packages, "@opencode-ai/sdk"),
-            opencode_version,
-            context="locked @opencode-ai/sdk",
         )
         _require_exact(
             _locked_package_version(lock_packages, "sherpa-onnx-node"),
@@ -849,14 +845,14 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
         return entries
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
-        """Persist only the complete eight-entry exact-source closure."""
+        """Persist only the complete nine-entry exact-source closure."""
         metadata = self._required_metadata(info)
         collection = HashCollection.from_value(hashes)
         entries = collection.entries
         if entries is None:
             msg = "OpenChamber updater requires structured hash entries"
             raise TypeError(msg)
-        expected_keys = {
+        expected_keys = [
             ("srcHash", None, metadata["openchamberUrl"]),
             ("srcHash", None, metadata["opencodeUrl"]),
             ("srcHash", None, metadata["sherpaOnnxUrl"]),
@@ -870,11 +866,15 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
                 self.DARWIN_PLATFORM,
                 metadata["openchamberUrl"],
             ),
-        }
-        actual_keys = {
+        ]
+        # Closure roles are probed independently, so coincident URLs (OpenCode
+        # and OpenChamber pinning the same bun release) must survive as one
+        # row per role. Compare multisets so duplicate keys persist instead of
+        # collapsing into the expected set.
+        actual_keys = [
             (entry.hash_type, entry.platform, entry.url) for entry in entries
-        }
-        if len(entries) != len(expected_keys) or actual_keys != expected_keys:
+        ]
+        if Counter(actual_keys) != Counter(expected_keys):
             msg = "OpenChamber updater requires its complete exact-source hash closure"
             raise RuntimeError(msg)
         opencode_hash = next(

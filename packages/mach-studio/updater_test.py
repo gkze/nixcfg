@@ -242,6 +242,20 @@ def test_mach_studio_pins_the_audited_163_anchor_payload() -> None:
     )
 
 
+def test_mach_studio_pins_the_audited_167_anchor_payload() -> None:
+    """The 0.1.167 anchors must stay byte-identical to the audited DMG payload."""
+    module = _load_policy_module()
+
+    assert (
+        hashlib.sha256(module._FAIL_OPEN_ENGINE_INSTALL_SOURCE_167).hexdigest()
+        == "a7fcdab2bbe88cf37a7cb0aa0d61de40067376abacb0add469dd63c7114b36b1"
+    )
+    assert (
+        hashlib.sha256(module._FAIL_OPEN_ENGINE_INSTALL_WHEEL_167).hexdigest()
+        == "9599d27a314cdf5584ef4cd9548abe842f776dfda384d3370ac992faea43d6a8"
+    )
+
+
 def test_mach_studio_policy_reports_the_packaged_engine_source() -> None:
     """Engine maintenance must describe this release's bundled source."""
     module = _load_policy_module()

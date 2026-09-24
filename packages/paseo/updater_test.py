@@ -240,6 +240,7 @@ class ClaudeAgentSession implements AgentSession {
   constructor(options: ClaudeAgentSessionOptions) {
     this.queryFactory = options.queryFactory;
     this.resolveBinary = options.resolveBinary;
+    this.rewindSdk = options.rewindSdk ?? realClaudeRewindSdk;
     this.contextUsage = new ClaudeContextUsageState(
       200_000,
     );

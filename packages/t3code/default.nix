@@ -117,10 +117,18 @@ stdenvNoCC.mkDerivation {
     cp -R ${workspaceBuild}/apps/server/dist "$out/libexec/${pname}/dist"
     cp -R ${node_modules}/node_modules "$out/libexec/${pname}/node_modules"
 
-    makeWrapper ${lib.getExe bun} "$out/bin/t3" \
+    makeWrapper ${lib.getExe nodejs} "$out/bin/t3" \
       --add-flags "$out/libexec/${pname}/dist/bin.mjs"
 
     runHook postInstall
+  '';
+
+  doInstallCheck = true;
+  installCheckPhase = ''
+    runHook preInstallCheck
+    "$out/bin/t3" --version
+    "$out/bin/t3" --help
+    runHook postInstallCheck
   '';
 
   passthru = {

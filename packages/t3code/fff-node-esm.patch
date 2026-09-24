@@ -1,0 +1,24 @@
+diff --git a/apps/server/src/workspace/WorkspaceSearchIndex.ts b/apps/server/src/workspace/WorkspaceSearchIndex.ts
+--- a/apps/server/src/workspace/WorkspaceSearchIndex.ts
++++ b/apps/server/src/workspace/WorkspaceSearchIndex.ts
+@@ -1,5 +1,4 @@
+-import * as NodeModule from "node:module";
+-
++import { FileFinder } from "@ff-labs/fff-node";
+ import type {
+   DirItem,
+   DirSearchResult,
+@@ -27,13 +26,6 @@
+ } from "@t3tools/contracts";
+ import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
+ 
+-// fff-node stays external to the CLI bundle because it dlopens a native
+-// library. A static `import` of an external package is a hard error inside a
+-// Node single-executable (only built-ins resolve there), so load it through
+-// `require`, which reads from the real filesystem in every runtime.
+-const requireForFff = NodeModule.createRequire(import.meta.url);
+-const { FileFinder } = requireForFff("@ff-labs/fff-node") as typeof import("@ff-labs/fff-node");
+-
+ const WORKSPACE_INDEX_MAX_ENTRIES = 25_000;
+ const WORKSPACE_INDEX_PAGE_SIZE = WORKSPACE_INDEX_MAX_ENTRIES + 2;
+ const WORKSPACE_INDEX_SCAN_TIMEOUT = "15 seconds";

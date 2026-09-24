@@ -51,7 +51,10 @@ class SuperconductorUpdater(AssetURLsMetadataUpdater):
     @staticmethod
     def _version_from_url(url: str, last_modified: str | None) -> str:
         filename = urllib.parse.urlsplit(url).path.rsplit("/", maxsplit=1)[-1]
-        match = re.fullmatch(r"Superconductor-nightly-([^-]+)-[^.]+\.dmg", filename)
+        match = re.fullmatch(
+            r"(?:Superconductor|super\.engineering)-nightly-([^-]+)-[^.]+\.dmg",
+            filename,
+        )
         if not match:
             msg = f"Could not parse Superconductor nightly version from {url}"
             raise RuntimeError(msg)

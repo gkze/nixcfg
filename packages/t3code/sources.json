@@ -1,5 +1,5 @@
 {
-  "drvHash": "p58ah1cmlhvhwrvazzz1irlm9pax6agj",
+  "drvHash": "b03n79amk7qb6danr3k1a6ivc49lgiha",
   "hashes": [
     {
       "hash": "sha256-C7PLg18aIDgveytnE9fLAVBKUstQISrF5Ex27Y+Yk+Y=",
@@ -9,7 +9,7 @@
   ],
   "input": "t3code",
   "platformDrvHashes": {
-    "aarch64-darwin": "p58ah1cmlhvhwrvazzz1irlm9pax6agj"
+    "aarch64-darwin": "b03n79amk7qb6danr3k1a6ivc49lgiha"
   },
   "version": "main"
 }

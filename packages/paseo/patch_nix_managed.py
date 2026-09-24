@@ -68,6 +68,7 @@ _CLAUDE_SESSION_CLASS = "\n\nclass ClaudeAgentSession implements AgentSession {"
 _CLAUDE_SESSION_RESOLVER_WIRING = """\
     this.queryFactory = options.queryFactory;
     this.resolveBinary = options.resolveBinary;
+    this.rewindSdk = options.rewindSdk ?? realClaudeRewindSdk;
     this.contextUsage = new ClaudeContextUsageState(
 """
 _CLAUDE_RESOLVER_FORWARDING = "      resolveBinary: this.resolveBinary,\n"

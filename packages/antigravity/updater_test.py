@@ -200,6 +200,13 @@ _SOURCE_EXPECTED_ENTITLEMENTS = {
 
 def _write_signing_bundle(tmp_path: Path) -> Path:
     app = tmp_path / "Antigravity.app"
+    info_plist = app / "Contents/Info.plist"
+    info_plist.parent.mkdir(parents=True, exist_ok=True)
+    with info_plist.open("wb") as plist_handle:
+        plistlib.dump(
+            {"CFBundleShortVersionString": _VERSION.split("-", maxsplit=1)[0]},
+            plist_handle,
+        )
     for relative_path in _EXPECTED_MACHOS:
         candidate = app / relative_path
         candidate.parent.mkdir(parents=True, exist_ok=True)
@@ -609,7 +616,7 @@ def test_signer_rejects_the_mixed_team_identity_that_crashed_dyld(
     calls, _explicit_entitlements, runner = _signature_runner(
         app,
         details_overrides={
-            "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libEGL.dylib": (
+            "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libvk_swiftshader.dylib": (
                 "CodeDirectory v=20500 size=1 flags=0x10000(runtime) "
                 "hashes=1+0 location=embedded\n"
                 "Signature size=9012\n"
@@ -628,9 +635,41 @@ def test_signer_rejects_the_mixed_team_identity_that_crashed_dyld(
         "--strict",
         str(
             app
-            / "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libEGL.dylib"
+            / "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libvk_swiftshader.dylib"
         ),
     ] in calls
+
+
+def test_signer_tracks_the_electron_44_inventory_cutover(tmp_path: Path) -> None:
+    """2.15-class bundles keep the OpenGL dylibs; 2.17-class bundles drop them."""
+    module = _load_signing_module()
+    app = _write_signing_bundle(tmp_path)
+    opengl = module._ELECTRON_44_REMOVED_MACHOS
+    info_path = app / "Contents/Info.plist"
+
+    machos, _bundles = module.discover_inventory(app)
+    labels = tuple(path.relative_to(app).as_posix() for path in machos)
+    assert (
+        tuple(
+            label
+            for label in labels
+            if label.endswith(("libEGL.dylib", "libGLESv2.dylib"))
+        )
+        == opengl
+    )
+
+    for label in opengl:
+        (app / label).unlink()
+    with info_path.open("rb") as info_handle:
+        info = plistlib.load(info_handle)
+    info["CFBundleShortVersionString"] = "2.17.0"
+    with info_path.open("wb") as info_handle:
+        plistlib.dump(info, info_handle)
+
+    machos, _bundles = module.discover_inventory(app)
+    assert tuple(path.relative_to(app).as_posix() for path in machos) == tuple(
+        label for label in module.EXPECTED_MACHOS if label not in opengl
+    )
 
 
 @pytest.mark.parametrize(

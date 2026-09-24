@@ -13,6 +13,26 @@ from pathlib import Path
 type CommandRunner = Callable[[list[str]], subprocess.CompletedProcess[bytes]]
 type BundleInventory = tuple[tuple[Path, ...], tuple[Path, ...]]
 
+# Electron 44 dropped the OpenGL-backed libEGL/libGLESv2 dylibs from the
+# framework; 2.17.0 is the first Antigravity release built on it.
+_ELECTRON_44_REMOVED_MACHOS = (
+    "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libEGL.dylib",
+    "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libGLESv2.dylib",
+)
+
+
+def _expected_machos(app_version: str) -> tuple[str, ...]:
+    """Pin the audited Mach-O inventory for the release generation at hand."""
+    version_parts = tuple(int(part) for part in app_version.split("."))
+    if version_parts >= (2, 17, 0):
+        return tuple(
+            label
+            for label in EXPECTED_MACHOS
+            if label not in _ELECTRON_44_REMOVED_MACHOS
+        )
+    return EXPECTED_MACHOS
+
+
 EXPECTED_MACHOS = (
     "Contents/Frameworks/Antigravity Helper (GPU).app/Contents/MacOS/Antigravity Helper (GPU)",
     "Contents/Frameworks/Antigravity Helper (Plugin).app/Contents/MacOS/"
@@ -219,11 +239,18 @@ def discover_inventory(app: Path) -> BundleInventory:
         msg = f"Antigravity app is not a directory: {app}"
         raise SigningError(msg)
 
+    info_plist = app / "Contents/Info.plist"
+    with info_plist.open("rb") as info_handle:
+        info = plistlib.load(info_handle)
+    app_version = info.get("CFBundleShortVersionString", "")
+    if not isinstance(app_version, str):
+        msg = "Antigravity Info.plist CFBundleShortVersionString is not a string"
+        raise SigningError(msg)
     machos = tuple(
         candidate for candidate in _sorted_regular_files(app) if _is_macho(candidate)
     )
     macho_labels = tuple(_relative_label(app, candidate) for candidate in machos)
-    if macho_labels != EXPECTED_MACHOS:
+    if macho_labels != _expected_machos(app_version):
         msg = f"unexpected Antigravity Mach-O inventory: {macho_labels!r}"
         raise SigningError(msg)
 

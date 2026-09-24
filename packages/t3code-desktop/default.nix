@@ -227,6 +227,9 @@ stdenv.mkDerivation {
 
     patchShebangs node_modules
 
+    # ffi-rs calls dlopen directly, outside Electron's virtual ASAR filesystem.
+    patch -p1 < ${./fff-native-asar.patch}
+
     ${electronBuild.copyDist}
 
     T3CODE_APP_ID=${lib.escapeShellArg appId} \
@@ -344,7 +347,7 @@ stdenv.mkDerivation {
         nextAsar,
         filenames,
         {},
-        { unpack: "*.node" },
+        { unpack: "*.{node,dylib}" },
       );
       fs.rmSync(appUnpacked, { recursive: true, force: true });
       if (fs.existsSync(nextUnpacked)) {
@@ -426,7 +429,38 @@ stdenv.mkDerivation {
         + "/Applications/${appBundleName}/Contents/Resources/app.asar/node_modules/node-pty",
     );
     console.log("node-pty ok");
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const path = require("node:path");
+    const { pathToFileURL } = require("node:url");
+    const root = process.env.out + "/Applications/${appBundleName}/Contents/Resources/app.asar";
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "t3code-native-check-"));
+    (async () => {
+      try {
+        const { FileFinder } = await import(pathToFileURL(
+          root + "/node_modules/@ff-labs/fff-node/dist/src/index.js",
+        ).href);
+        const result = FileFinder.create({
+          basePath: temporary,
+          watch: false,
+          frecencyDbPath: path.join(temporary, "frecency"),
+          historyDbPath: path.join(temporary, "history"),
+        });
+        if (!result.ok) throw new Error(result.error);
+        result.value.destroy();
+        console.log("fff native library ok");
+      } finally {
+        fs.rmSync(temporary, { recursive: true, force: true });
+      }
+    })().catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    });
     NODE
+
+    ELECTRON_RUN_AS_NODE=1 "$out/Applications/${appBundleName}/Contents/MacOS/${appName}" \
+      "$out/Applications/${appBundleName}/Contents/Resources/app.asar/apps/server/dist/bin.mjs" \
+      --help
 
     runHook postInstallCheck
   '';

@@ -73,6 +73,10 @@ let
       chmod -R u+w source
     '';
 
+    # fff-node 0.9.4 exposes only an ESM import entry. These builds run under
+    # Node/Electron, not the upstream single-executable runtime.
+    patches = [ ./fff-node-esm.patch ];
+
     buildPhase = ''
       runHook preBuild
 

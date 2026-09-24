@@ -1,16 +1,16 @@
 {
-  "commit": "9cc2a44bf20ac6f4badef53bc9f33dfdb5803378",
+  "commit": "c718b461a175300ec6f4949c808291d2149f3f8d",
   "hashes": {
-    "aarch64-darwin": "sha256-mehdBbbQOjxvrhMcTjC7A6NyvYyD+T17ahhecs6kaUQ=",
-    "aarch64-linux": "sha256-9x4UA3Z/HrBAt7iaN5aPYio8K6sLz8LgO6L344MouSQ=",
-    "x86_64-darwin": "sha256-9bh08HyCcmZxPmAi4KlnM1dTJToSpCtGe3yIQcYHavw=",
-    "x86_64-linux": "sha256-PpHNIQLZAbyyzJaxkehk3dEqTCFHEVHi2vPICcMGuVI="
+    "aarch64-darwin": "sha256-bO0hOau9gBT2eT67jrXUkJ/cwnNgHX6cJ7RnTc2L+o0=",
+    "aarch64-linux": "sha256-F5QgRsfDmANd96y1tbBPhVkFvjwOc0lLtvqxI5NrZ9s=",
+    "x86_64-darwin": "sha256-dezlhWGnp6Ibvv6JfADNYfptSnkp4O+7ED+1vNuamDU=",
+    "x86_64-linux": "sha256-JT5Ny1xkzuQMJGYF0RlvA7MP+XzKNNyRmCSQ0bkMuy8="
   },
   "urls": {
-    "aarch64-darwin": "https://vscode.download.prss.microsoft.com/dbazure/download/insider/9cc2a44bf20ac6f4badef53bc9f33dfdb5803378/VSCode-darwin-arm64.zip",
-    "aarch64-linux": "https://vscode.download.prss.microsoft.com/dbazure/download/insider/9cc2a44bf20ac6f4badef53bc9f33dfdb5803378/code-insider-arm64-1790140399.tar.gz",
-    "x86_64-darwin": "https://vscode.download.prss.microsoft.com/dbazure/download/insider/9cc2a44bf20ac6f4badef53bc9f33dfdb5803378/VSCode-darwin.zip",
-    "x86_64-linux": "https://vscode.download.prss.microsoft.com/dbazure/download/insider/9cc2a44bf20ac6f4badef53bc9f33dfdb5803378/code-insider-x64-1790140251.tar.gz"
+    "aarch64-darwin": "https://vscode.download.prss.microsoft.com/dbazure/download/insider/c718b461a175300ec6f4949c808291d2149f3f8d/VSCode-darwin-arm64.zip",
+    "aarch64-linux": "https://vscode.download.prss.microsoft.com/dbazure/download/insider/c718b461a175300ec6f4949c808291d2149f3f8d/code-insider-arm64-1790227137.tar.gz",
+    "x86_64-darwin": "https://vscode.download.prss.microsoft.com/dbazure/download/insider/c718b461a175300ec6f4949c808291d2149f3f8d/VSCode-darwin.zip",
+    "x86_64-linux": "https://vscode.download.prss.microsoft.com/dbazure/download/insider/c718b461a175300ec6f4949c808291d2149f3f8d/code-insider-x64-1790227120.tar.gz"
   },
   "version": "1.140.0-insider"
 }

@@ -449,6 +449,18 @@ def test_superconductor_updater_resolves_nightly_redirect(
     assert session.calls[0]["url"] == updater.DISCOVERY_URL
     assert session.calls[0]["allow_redirects"] is True
 
+    renamed_url = (
+        "https://releases.superconductor.so/nightly/"
+        "super.engineering-nightly-b4ff1a8d-arm64.dmg"
+    )
+    assert (
+        updater._version_from_url(
+            renamed_url,
+            "Fri, 12 Jun 2026 16:42:50 GMT",
+        )
+        == "2026-06-12-b4ff1a8d"
+    )
+
 
 def test_superconductor_updater_rejects_bad_metadata(
     superconductor_module: ModuleType, monkeypatch: pytest.MonkeyPatch

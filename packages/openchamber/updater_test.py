@@ -190,13 +190,7 @@ _REQUIRED_SUPPRESSION_SURFACES = {
     "opencode-cli-upgrade": (
         "patch",
         "opencode",
-        "packages/opencode/src/cli/cmd/upgrade.ts",
-        1,
-    ),
-    "opencode-global-http-upgrade": (
-        "patch",
-        "opencode",
-        "packages/opencode/src/server/routes/instance/httpapi/handlers/global.ts",
+        "packages/cli/src/commands/handlers/upgrade.ts",
         1,
     ),
     "root-postinstall-download": ("anchor", "openchamber", "package.json", 1),
@@ -215,7 +209,7 @@ _REQUIRED_SUPPRESSION_SURFACES = {
     "opencode-auto-updater": (
         "anchor",
         "opencode",
-        "packages/opencode/src/cli/upgrade.ts",
+        "packages/cli/src/services/updater.ts",
         1,
     ),
 }
@@ -357,7 +351,6 @@ def _lock_text() -> str:
     return f"""{{
   "lockfileVersion": 1,
   "packages": {{
-    "@opencode-ai/sdk": ["@opencode-ai/sdk@{_OPENCODE_VERSION}", ""],
     "electron": ["electron@{_ELECTRON_VERSION}", ""],
     "sherpa-onnx-node": ["sherpa-onnx-node@{_SHERPA_WRAPPER_VERSION}", ""],
     "sherpa-onnx-darwin-arm64": ["sherpa-onnx-darwin-arm64@{_SHERPA_VERSION}", ""],
@@ -430,11 +423,11 @@ def test_openchamber_resolves_one_exact_release_and_companion_graph(
                 "version": _VERSION,
                 "packageManager": f"bun@{_BUN_VERSION}",
                 "engines": {"node": ">=22.0.0"},
-                "dependencies": {"@opencode-ai/sdk": _OPENCODE_VERSION},
             }
         if url.endswith("/packages/electron/package.json"):
             return {
                 "version": _VERSION,
+                "opencodeCli": {"version": _OPENCODE_VERSION},
                 "build": {
                     "appId": "dev.openchamber.desktop",
                     "productName": "OpenChamber",
@@ -445,7 +438,6 @@ def test_openchamber_resolves_one_exact_release_and_companion_graph(
             return {
                 "version": _VERSION,
                 "dependencies": {
-                    "@opencode-ai/sdk": _OPENCODE_VERSION,
                     "sherpa-onnx-node": _SHERPA_WRAPPER_VERSION,
                 },
             }
@@ -755,6 +747,82 @@ def test_openchamber_build_result_requires_and_persists_complete_closure() -> No
     })
 
 
+def test_openchamber_build_result_accepts_coincident_bun_urls() -> None:
+    """Coincident closure URLs must persist one row per probed role."""
+    module = _load_updater_module()
+    updater = module.OpenChamberUpdater()
+    urls = _urls()
+    shared_bun_url = urls["bunUrl"]
+    metadata = _version_info().metadata
+    assert metadata is not None
+    metadata["opencodeBunUrl"] = shared_bun_url
+    metadata["opencodeBunVersion"] = metadata["bunVersion"]
+    coincident = VersionInfo(
+        version=_VERSION,
+        metadata=metadata,
+    )
+    bun_hash = "sha256-2LliIYKK1vl6x6wKt+lYcjQa92MAHogD6CZ2UsJlJiA="
+    entries = [
+        HashEntry.create("srcHash", digest, url=url)
+        for digest, url in zip(
+            _SOURCE_HASHES,
+            (urls["openchamberUrl"], urls["opencodeUrl"], urls["sherpaOnnxUrl"]),
+            strict=True,
+        )
+    ]
+    entries.extend(
+        HashEntry.create("sha256", bun_hash, url=shared_bun_url) for _ in range(2)
+    )
+    entries.append(
+        HashEntry.create("sha256", _URL_HASHES[1], url=urls["nodeAddonApiUrl"]),
+    )
+    entries.append(
+        HashEntry.create("sha256", _URL_HASHES[3], url=urls["sherpaOnnxNodeUrl"]),
+    )
+    entries.extend((
+        HashEntry.create(
+            "nodeModulesHash",
+            _OPENCODE_NODE_MODULES_HASH,
+            platform="aarch64-darwin",
+            url=urls["opencodeUrl"],
+        ),
+        HashEntry.create(
+            "nodeModulesHash",
+            _OPENCHAMBER_NODE_MODULES_HASH,
+            platform="aarch64-darwin",
+            url=urls["openchamberUrl"],
+        ),
+    ))
+
+    result = updater.build_result(coincident, entries)
+    bun_rows = [
+        entry
+        for entry in (result.hashes.entries or [])
+        if entry.hash_type == "sha256" and entry.url == shared_bun_url
+    ]
+    assert len(bun_rows) == 2
+    assert result.urls is not None
+    assert result.urls["opencodeBun"] == shared_bun_url
+
+    missing_bun_role = [
+        entry
+        for entry in entries
+        if not (
+            entry.hash_type == "sha256"
+            and entry.url == shared_bun_url
+            and entry.hash == bun_hash
+        )
+    ]
+    # Dropping one of the two identical bun rows must still fail the gate:
+    # each probed role must be persisted even when URLs coincide.
+    missing_bun_role.append(
+        HashEntry.create("sha256", bun_hash, url=shared_bun_url),
+    )
+    assert len(missing_bun_role) == len(entries) - 1
+    with pytest.raises(RuntimeError, match="complete exact-source hash closure"):
+        updater.build_result(coincident, missing_bun_role)
+
+
 @pytest.mark.parametrize(
     ("helper", "args", "message"),
     [
@@ -805,7 +873,7 @@ def test_openchamber_required_suppression_surface_manifest_is_complete() -> None
 
     assert len(records) == len({surface for surface, _record in records})
     assert dict(records) == _REQUIRED_SUPPRESSION_SURFACES
-    assert sum(record[3] for _surface, record in records) == 24
+    assert sum(record[3] for _surface, record in records) == 23
 
 
 def test_openchamber_patcher_is_transactional_and_component_scoped(
@@ -1429,10 +1497,10 @@ def test_openchamber_manifest_validation_rejects_projection_drift() -> None:
                 "version": _VERSION,
                 "packageManager": f"bun@{_BUN_VERSION}",
                 "engines": {"node": ">=22.0.0"},
-                "dependencies": {"@opencode-ai/sdk": _OPENCODE_VERSION},
             },
             electron_payload={
                 "version": _VERSION,
+                "opencodeCli": {"version": _OPENCODE_VERSION},
                 "build": {
                     "appId": "dev.openchamber.desktop",
                     "productName": "OpenChamber",
@@ -1442,7 +1510,6 @@ def test_openchamber_manifest_validation_rejects_projection_drift() -> None:
             web_payload={
                 "version": _VERSION,
                 "dependencies": {
-                    "@opencode-ai/sdk": _OPENCODE_VERSION,
                     "sherpa-onnx-node": _SHERPA_WRAPPER_VERSION,
                 },
             },
@@ -1466,10 +1533,10 @@ def test_openchamber_accepts_semantically_equivalent_electron_ranges(
             "version": _VERSION,
             "packageManager": f"bun@{_BUN_VERSION}",
             "engines": {"node": ">=22.0.0"},
-            "dependencies": {"@opencode-ai/sdk": _OPENCODE_VERSION},
         },
         electron_payload={
             "version": _VERSION,
+            "opencodeCli": {"version": _OPENCODE_VERSION},
             "build": {
                 "appId": "dev.openchamber.desktop",
                 "productName": "OpenChamber",
@@ -1479,7 +1546,6 @@ def test_openchamber_accepts_semantically_equivalent_electron_ranges(
         web_payload={
             "version": _VERSION,
             "dependencies": {
-                "@opencode-ai/sdk": _OPENCODE_VERSION,
                 "sherpa-onnx-node": _SHERPA_WRAPPER_VERSION,
             },
         },
