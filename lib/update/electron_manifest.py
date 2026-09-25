@@ -5,13 +5,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
 
 from lib import json_utils
+from lib.nix.models.flake_lock import (
+    FlakeLockNode,  # noqa: TC001 -- candidate metadata is validated at runtime
+)
 from lib.update.locked_source import resolve_locked_source
 from lib.update.updaters.metadata import MappingMetadata
 
 if TYPE_CHECKING:
     import aiohttp
 
-    from lib.nix.models.flake_lock import FlakeLockNode
     from lib.update.config import UpdateConfig
 
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")

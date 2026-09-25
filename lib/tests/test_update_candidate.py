@@ -7,9 +7,11 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import SourceEntry
 from lib.tests._run_updates_helpers import drain_events, make_run_plan
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
+from lib.tests._updater_helpers import load_repo_module_for_test
 from lib.update import cli, source_runner
 from lib.update.candidate import Candidate, Preparation, ResolvedVersion, git
 from lib.update.ci import candidate as pipeline
@@ -52,6 +54,60 @@ def test_resolution_rejects_executable_or_unknown_metadata() -> None:
         ResolvedVersion.capture(VersionInfo(version="2", metadata=object()))
     with pytest.raises(ValueError, match="Unknown updater metadata"):
         ResolvedVersion(version="2", metadata_type="os.system").restore()
+
+
+@pytest.mark.parametrize(
+    ("module_path", "class_name", "extra"),
+    [
+        (
+            "packages/emdash/updater.py",
+            "EmdashSourceMetadata",
+            {
+                "shell_env_capture_path": "src/env.ts",
+                "toolchain": {
+                    "node_engine": ">=24.0.0",
+                    "nodejs_attr": "nodejs_24",
+                    "nodejs_version": "24.20.0",
+                    "package_manager": "pnpm@10.28.2",
+                    "pnpm_engine": ">=10.28.0",
+                    "pnpm_attr": "pnpm_10",
+                    "pnpm_version": "10.34.5",
+                },
+            },
+        ),
+        ("packages/mux/updater.py", "MuxSourceMetadata", {"bun_version": "1.3.0"}),
+        (
+            "lib/update/electron_manifest.py",
+            "ElectronManifestMetadata",
+            {"manifest_path": "package.json", "manifest_version": "1.2.3"},
+        ),
+    ],
+)
+def test_package_metadata_survives_native_candidate_handoff(
+    module_path, class_name, extra
+) -> None:
+    """Real dynamic metadata must resolve nested model types at runtime."""
+    module = load_repo_module_for_test(module_path, prefix="candidate_metadata")
+    saved = ResolvedVersion(
+        version="1.2.3",
+        metadata_type=f"{module.__name__}.{class_name}",
+        metadata={
+            "node": {"locked": {"type": "github", "rev": "a" * 40, "narHash": _HASH}},
+            "commit": "a" * 40,
+            "electron_version": "40.10.2",
+            **extra,
+        },
+    )
+    restored = saved.restore()
+    captured = ResolvedVersion.capture(restored)
+    assert ResolvedVersion.model_validate_json(
+        captured.model_dump_json()
+    ).restore() == (restored)
+    assert isinstance(restored.metadata, MappingMetadata)
+    node = restored.metadata["node"]
+    assert isinstance(node, FlakeLockNode)
+    assert node.locked is not None
+    assert node.locked.rev == "a" * 40
 
 
 @pytest.fixture

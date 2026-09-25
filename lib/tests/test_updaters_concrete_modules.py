@@ -446,7 +446,7 @@ def test_superconductor_updater_resolves_nightly_redirect(
     assert latest.version == "2026-06-12-9bd387bf"
     assert latest.metadata["asset_urls"] == {"aarch64-darwin": resolved_url}
     assert updater.get_download_url("aarch64-darwin", latest) == resolved_url
-    assert session.calls[0]["url"] == updater.DISCOVERY_URL
+    assert session.calls[0]["url"] == f"{updater.DISCOVERY_URL}?arch=arm64"
     assert session.calls[0]["allow_redirects"] is True
 
     renamed_url = (
