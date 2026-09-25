@@ -954,7 +954,12 @@ def test_paseo_accepts_unrelated_claude_provider_source_changes() -> None:
     """Immutable source provenance must not pin unrelated provider bytes."""
     module = _load_updater_module()
     module.PaseoUpdater._validate_claude_provider_source(
-        b"// unrelated compatible upstream change\n" + _CLAUDE_PROVIDER_FIXTURE
+        b"// unrelated compatible upstream change\n"
+        + _CLAUDE_PROVIDER_FIXTURE.replace(
+            b"    this.resolveBinary = options.resolveBinary;\n",
+            b"    this.resolveBinary = options.resolveBinary;\n"
+            b"    this.rewindSdk = options.rewindSdk ?? realClaudeRewindSdk;\n",
+        )
     )
 
 
@@ -967,7 +972,12 @@ def test_paseo_patcher_accepts_unrelated_claude_provider_source_changes(
     _write_patcher_fixture(root)
     provider = root / _CLAUDE_PROVIDER_PATH
     provider.write_bytes(
-        b"// unrelated compatible upstream change\n" + provider.read_bytes()
+        b"// unrelated compatible upstream change\n"
+        + provider.read_bytes().replace(
+            b"    this.resolveBinary = options.resolveBinary;\n",
+            b"    this.resolveBinary = options.resolveBinary;\n"
+            b"    this.rewindSdk = options.rewindSdk ?? realClaudeRewindSdk;\n",
+        )
     )
 
     module.patch_tree(
