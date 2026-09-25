@@ -38,6 +38,7 @@ jobs:
         with:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cache-generators: ${{ inputs.stage == 'prepare' }}
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: inputs.previous != ''
         with:

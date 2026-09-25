@@ -8,6 +8,9 @@ inputs:
   cachix-token:
     description: Cachix upload credential (empty uses the cache read-only)
     required: false
+  cache-generators:
+    description: Restore generator downloads for preparation or repair
+    default: "false"
 outputs:
   runtime:
     description: Pinned nixcfg package
@@ -40,6 +43,19 @@ runs:
         extraPullNames: zed
         authToken: ${{ inputs.cachix-token }}
         useDaemon: true
+    - name: Restore generator downloads and verified receipts
+      if: inputs.cache-generators == 'true'
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+      with:
+        path: |
+          ~/.cache/nixcfg/crate2nix-cargo-home/registry
+          ~/.cache/nixcfg/crate2nix-cargo-home/git
+          ~/.cache/nixcfg/generation-receipts
+        key: |-
+          ${{ format('nixcfg-gen-v1-{0}-{1}-{2}-{3}-{4}',
+          runner.os, runner.arch, github.run_id, github.run_attempt, github.job) }}
+        restore-keys: |
+          nixcfg-gen-v1-${{ runner.os }}-${{ runner.arch }}-
     - name: Build pinned runtime
       id: runtime
       shell: python

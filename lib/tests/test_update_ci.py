@@ -35,9 +35,17 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "from pathlib import Path\n"
         "name = Path(sys.argv[0]).name\n"
         "args = sys.argv[1:]\n"
+        "if name == 'nix' and args[0] == 'path-info':\n"
+        "    phase = 'AFTER' if Path(os.environ['TEST_LOG']).exists() else 'BEFORE'\n"
+        "    info = json.loads(os.environ.get('TEST_STORE_' + phase, '{}'))\n"
+        "    print(json.dumps({'version': 2, 'storeDir': '/nix/store', 'info': info}))\n"
+        "    sys.exit(0)\n"
         "if name == 'nix':\n"
         "    print('devshell startup', flush=True)\n"
         "    sys.exit(subprocess.call(args[args.index('--command') + 1:]))\n"
+        "if name == 'cachix':\n"
+        "    Path(os.environ['TEST_CACHE_LOG']).write_text(json.dumps(args))\n"
+        "    sys.exit(int(os.environ.get('TEST_CACHE_EXIT', '0')))\n"
         "Path(os.environ['TEST_LOG']).write_text(json.dumps(args))\n"
         "Path(args[args.index('--output') + 1]).write_text('candidate or evidence')\n"
         "print(json.dumps({'success': int(os.environ.get('TEST_EXIT', '0')) == 0}))\n"
@@ -46,12 +54,14 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
     )
     boundary.chmod(0o755)
     (tools / "nix").symlink_to(boundary)
+    (tools / "cachix").symlink_to(boundary)
     runtime = tmp_path / "runtime"
     (runtime / "bin").mkdir(parents=True)
     (runtime / "bin/nixcfg").symlink_to(boundary)
     env = os.environ | {
         "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
         "TEST_LOG": str(tmp_path / "command.json"),
+        "TEST_CACHE_LOG": str(tmp_path / "cache.json"),
         "RUNNER_TEMP": str(tmp_path / "runner temp"),
         "NIXCFG_RUNTIME": str(runtime),
         "NIXCFG_DEVSHELL": str(tmp_path / "devshell"),
@@ -98,6 +108,58 @@ def test_native_job_keeps_evidence_and_propagates_failure(
     }
     assert (artifacts / "stderr.log").read_text() == "diagnostic evidence\n"
     assert (checkout / "flake.lock").read_text() == "baseline"
+
+
+@pytest.mark.parametrize("update_exit", [0, 17])
+@pytest.mark.parametrize("cache_exit", [0, 19])
+def test_preparation_publishes_only_new_verified_raw_imports(
+    native_job, monkeypatch, update_exit: int, cache_exit: int
+) -> None:
+    """Prefetch imports need explicit publication; derived and old paths do not."""
+    env, checkout = native_job
+    raw = {"deriver": None, "ca": {"method": "flat", "hash": "sha256-example"}}
+    before = {"old.zip": raw}
+    after = before | {
+        "new.zip": raw,
+        "built.zip": raw | {"deriver": "fetch.drv"},
+        "source": {"deriver": None, "ca": {"method": "nar"}},
+        "text": {"deriver": None, "ca": {"method": "text"}},
+        "input-addressed": {"deriver": None, "ca": None},
+    }
+    for key, value in (
+        env
+        | {
+            "TEST_STORE_BEFORE": json.dumps(before),
+            "TEST_STORE_AFTER": json.dumps(after),
+            "TEST_EXIT": str(update_exit),
+            "TEST_CACHE_EXIT": str(cache_exit),
+        }
+    ).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    if cache_exit and not update_exit:
+        with pytest.raises(subprocess.CalledProcessError) as error:
+            jobs.native("prepare")
+        assert error.value.returncode == cache_exit
+    else:
+        assert jobs.native("prepare") == update_exit
+    log = Path(env["TEST_CACHE_LOG"])
+    if update_exit:
+        assert not log.exists()
+    else:
+        assert json.loads(log.read_text()) == ["push", "gkze", "/nix/store/new.zip"]
+
+
+def test_source_cache_rejects_an_unknown_store_inventory(monkeypatch) -> None:
+    monkeypatch.setattr(
+        jobs,
+        "_run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [], 0, stdout='{"version":3}'
+        ),
+    )
+    with pytest.raises(ValueError, match="Unsupported Nix store inventory"):
+        jobs._prefetched_paths()
 
 
 @pytest.mark.parametrize(
@@ -182,6 +244,56 @@ def test_all_authored_actions_commands_are_python() -> None:
                 if "run" in step:
                     assert step["shell"] == "python"
                     compile(step["run"], str(path), "exec")
+
+
+def test_generator_cache_is_scoped_to_disposable_accelerators() -> None:
+    """Downloads/receipts are portable accelerators; credentials and DBOS are not."""
+    action = yaml.load(
+        (ROOT / ".github/actions/update-runtime/action.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    steps = action["runs"]["steps"]
+    cache = next(
+        step for step in steps if step.get("uses", "").startswith("actions/cache@")
+    )
+    assert cache["if"] == "inputs.cache-generators == 'true'"
+    assert action["inputs"]["cache-generators"]["default"] == "false"
+    assert set(cache["with"]["path"].splitlines()) == {
+        "~/.cache/nixcfg/crate2nix-cargo-home/registry",
+        "~/.cache/nixcfg/crate2nix-cargo-home/git",
+        "~/.cache/nixcfg/generation-receipts",
+    }
+    prefix = "nixcfg-gen-v1-${{ runner.os }}-${{ runner.arch }}-"
+    assert cache["with"]["restore-keys"].strip() == prefix
+    assert " ".join(cache["with"]["key"].split()) == (
+        "${{ format('nixcfg-gen-v1-{0}-{1}-{2}-{3}-{4}', runner.os, runner.arch, "
+        "github.run_id, github.run_attempt, github.job) }}"
+    )
+    cachix = next(
+        step
+        for step in steps
+        if step.get("uses", "").startswith("cachix/cachix-action@")
+    )
+    assert cachix["with"]["name"] == jobs._BINARY_CACHE
+    native = yaml.load(
+        (ROOT / ".github/workflows/update-native.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    setup = next(
+        step
+        for step in native["jobs"]["native"]["steps"]
+        if step.get("id") == "runtime"
+    )
+    assert setup["with"]["cache-generators"] == "${{ inputs.stage == 'prepare' }}"
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    repair = next(
+        step
+        for step in workflow["jobs"]["repair"]["steps"]
+        if step.get("id") == "runtime"
+    )
+    assert repair["with"]["cache-generators"] == "true"
 
 
 @pytest.mark.parametrize("stage", ["prepare", "validate"])

@@ -36,6 +36,20 @@ validation jobs consistent with that inventory. Actions declares the job graph a
 publication; every authored command step runs Python, with no shell glue. The updater
 core owns source discovery, declared output authority, candidate identity and validation. Nix owns derivations, dependency ordering, builds and cache reuse.
 
+Cachix's daemon uploads built outputs continuously. Successful preparation also
+publishes newly imported flat, content-addressed files: URL prefetches enter the
+store directly and do not trigger Nix's post-build hook. Encoded path basenames use
+nixpkgs' fetchurl spelling instead of URL-decoded spelling for matching store identities;
+explicit package-specific source names remain independent overrides. This scan is
+confined to the disposable preparation job, not a developer's whole local store.
+
+Preparation and repair restore Cargo registry/Git downloads and verified generator
+receipts through the Actions cache. Each platform uses a fresh key per run/attempt
+and can restore its latest prior cache. Receipts still require exact generator
+input and output identities; restoring a cache does not authorize stale output.
+Validation and publication do not download these generator-only caches. Cargo
+credentials, configuration, DBOS state and mutable workspaces are excluded.
+
 The same updater implementation serves local and CI execution. Local `nixcfg update`
 uses DBOS/SQLite for recovery on the same filesystem and the existing filesystem
 journal for atomic promotion. CI runs the preparation core without that local

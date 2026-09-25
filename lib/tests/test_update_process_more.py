@@ -217,7 +217,7 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
     )
     start_message = prefetch_events[0].message
     assert start_message is not None
-    assert "--name Town-Assistant-1.8-33.dmg" in start_message
+    assert "--name Town-20Assistant-1.8-33.dmg" in start_message
     assert prefetch_events.result == "sha256-BBB="
 
     _collect_stream(
@@ -232,11 +232,27 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
     assert prefetch_calls == [
         (
             "https://example.com/releases/Town%20Assistant-1.8-33.dmg",
-            "Town-Assistant-1.8-33.dmg",
+            "Town-20Assistant-1.8-33.dmg",
             12,
         ),
         ("https://example.com/app.dmg", None, 12),
     ]
+
+
+@pytest.mark.parametrize(
+    ("basename", "expected"),
+    [
+        ("Coast%20Local.dmg", "Coast-20Local.dmg"),
+        ("file%2Fpart.zip", "file-2Fpart.zip"),
+        ("...archive.zip", "archive.zip"),
+        ("...", "unknown"),
+        ("%%", "-"),
+        ("a" * 211, "a" * 207),
+    ],
+)
+def test_prefetch_names_match_fetchurl_store_identity(basename, expected) -> None:
+    """Percent escapes remain encoded; sanitization follows nixpkgs' name rules."""
+    assert _nix_prefetch_name(f"https://example.com/{basename}") == expected
 
 
 @pytest.mark.parametrize(

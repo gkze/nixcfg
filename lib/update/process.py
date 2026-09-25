@@ -9,7 +9,7 @@ from collections import deque
 from contextlib import AsyncExitStack, aclosing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 from rich.text import Text
 
@@ -359,13 +359,15 @@ async def convert_nix_hash_to_sri(
 
 
 def _nix_prefetch_name(url: str) -> str | None:
-    """Return a safe override name when ``nix-prefetch-url`` would infer a bad one."""
+    """Return Nix-compatible explicit names for unsafe URL path basenames."""
     basename = posixpath.basename(urlparse(url).path)
     if not basename:
         return None
-    decoded = unquote(basename)
-    safe_name = _NIX_STORE_NAME_UNSAFE_RE.sub("-", decoded).strip("-")
-    if not safe_name or safe_name == decoded:
+    # fetchurl sanitizes the encoded URL basename, not its decoded spelling.
+    # Keep nixpkgs' leading-dot and 207-character derivation-name rules too.
+    safe_name = _NIX_STORE_NAME_UNSAFE_RE.sub("-", basename.lstrip("."))[-207:]
+    safe_name = safe_name or "unknown"
+    if safe_name == basename:
         return None
     return safe_name
 

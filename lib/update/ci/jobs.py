@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+_BINARY_CACHE = "gkze"
+_STORE_INFO_VERSION = 2
 _APPLICATIONS = Path("/Applications")
 _UNUSED_IMAGE_PATHS = {
     "darwin": (Path("/usr/local/share/dotnet"),),
@@ -131,6 +133,30 @@ def quality() -> None:
         raise RuntimeError(msg)
 
 
+def _prefetched_paths() -> set[str]:
+    """Find verified raw imports, which do not trigger Nix's post-build hook."""
+    result = _run(
+        "nix",
+        "path-info",
+        "--all",
+        "--json",
+        "--json-format",
+        str(_STORE_INFO_VERSION),
+        capture=True,
+    )
+    inventory = json.loads(result.stdout)
+    if inventory["version"] != _STORE_INFO_VERSION:
+        msg = "Unsupported Nix store inventory version"
+        raise ValueError(msg)
+    return {
+        str(Path(inventory["storeDir"]) / name)
+        for name, info in inventory["info"].items()
+        if info["deriver"] is None
+        and info.get("ca") is not None
+        and info["ca"]["method"] == "flat"
+    }
+
+
 def native(stage: str) -> int:
     """Prepare or validate with immutable inputs and retained failure evidence."""
     artifacts = _temp() / "update-artifacts"
@@ -162,6 +188,7 @@ def native(stage: str) -> int:
             "--output",
             str(artifacts / "validation.json"),
         ))
+    before = _prefetched_paths() if stage == "prepare" else set()
     with (
         (artifacts / "result.json").open("w") as output,
         (artifacts / "stderr.log").open("w") as log,
@@ -174,6 +201,10 @@ def native(stage: str) -> int:
             check=False,
         )
     sys.stderr.write((artifacts / "stderr.log").read_text())
+    if stage == "prepare" and result.returncode == 0:
+        paths = sorted(_prefetched_paths() - before)
+        if paths:
+            _run("cachix", "push", _BINARY_CACHE, *paths)
     return result.returncode
 
 
