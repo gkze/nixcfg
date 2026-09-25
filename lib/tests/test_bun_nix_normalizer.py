@@ -100,6 +100,18 @@ def test_normalize_bun_nix_rejects_a_missing_artifact(tmp_path: Path) -> None:
         normalize_bun_nix_path(tmp_path / "missing.nix", runner=lambda *_a, **_k: None)
 
 
+def test_normalizer_reports_missing_packaged_tools(tmp_path: Path) -> None:
+    """A missing formatter reports the executable and how to obtain it."""
+    path = tmp_path / "bun.nix"
+    path.write_text("{}")
+
+    def missing(*_args, **_kwargs):
+        raise FileNotFoundError
+
+    with pytest.raises(RuntimeError, match="deadnix.*packaged nixcfg CLI"):
+        normalize_bun_nix_path(path, runner=missing)
+
+
 def test_nixcfg_runtime_includes_bun_nix_formatters() -> None:
     """Packaged updates must not depend on formatter tools from the user profile."""
     assert_nix_ast_equal(

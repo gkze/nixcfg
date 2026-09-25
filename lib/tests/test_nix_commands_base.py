@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import pickle
 import sys
 import types
 
@@ -141,6 +142,41 @@ def test_nix_command_error_str_shows_full_stderr_when_short() -> None:
 
     assert "stderr:" in text
     assert "last 20 lines" not in text
+
+
+@pytest.mark.parametrize("hash_mismatch", [False, True])
+@pytest.mark.parametrize("with_details", [False, True])
+def test_command_errors_preserve_diagnostics_through_pickle(
+    *, hash_mismatch: bool, with_details: bool
+) -> None:
+    """Durable steps preserve typed errors, including within exception groups."""
+    result = CommandResult(["nix", "build"], 1, "build output", "transfer failed")
+    error = (
+        HashMismatchError(
+            result,
+            got_hash="sha256:abc",
+            specified="sha256:def" if with_details else None,
+            drv_path="/nix/store/fixture.drv" if with_details else None,
+        )
+        if hash_mismatch
+        else NixCommandError(result, "prefetch failed" if with_details else None)
+    )
+    error.add_note("while hashing the candidate")
+    group = ExceptionGroup("platform hashes", [error])
+    restored_group = pickle.loads(pickle.dumps(group))  # noqa: S301 -- local fixture
+    (restored,) = restored_group.exceptions
+    assert type(restored) is type(error)
+    assert restored.result == result
+    assert restored.args == error.args
+    assert restored.message == error.message
+    assert restored.__notes__ == error.__notes__
+    if isinstance(error, HashMismatchError):
+        assert (restored.hash, restored.specified, restored.drv_path) == (
+            error.hash,
+            error.specified,
+            error.drv_path,
+        )
+    assert str(restored) == str(error)
 
 
 def test_resolve_timeout_alias_validates_kwargs() -> None:

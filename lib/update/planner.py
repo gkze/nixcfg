@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Protocol
 from lib.update.updaters.flake_backed import FlakeInputUpdater
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping, Sequence
+    from collections.abc import Callable, Iterable, Mapping
 
     from lib.nix.models.sources import SourceEntry
     from lib.update.refs import FlakeInputRef
@@ -337,22 +337,6 @@ def failure_closure(
     return frozenset(closure)
 
 
-def source_update_waves(
-    source_names: Sequence[str],
-    updaters: Mapping[str, type[object]],
-) -> list[list[str]]:
-    """Group source updates into dependency-respecting execution waves."""
-    if not source_names:
-        return []
-
-    depths = companion_source_depths(set(source_names), updaters)
-    max_depth = max(depths.values(), default=0)
-    return [
-        [name for name in source_names if depths[name] == depth]
-        for depth in range(max_depth + 1)
-    ]
-
-
 def resolve_update_targets[ResolvedTargetsT](
     opts: _UpdateOptionsLike,
     *,
@@ -424,5 +408,4 @@ __all__ = [
     "source_backing_input_name",
     "source_dependency_order",
     "source_prerequisites",
-    "source_update_waves",
 ]

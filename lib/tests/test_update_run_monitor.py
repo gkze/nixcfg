@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from lib.update.events import (
     CommandResult,
@@ -15,11 +16,8 @@ from lib.update.events import (
     UpdateEventKind,
 )
 from lib.update.run_monitor import (
-    EVENTS_FILE,
     LATEST_LINK,
     OUTPUT_FILE,
-    RUN_FILE,
-    STATE_FILE,
     RunMonitor,
     RunStatus,
     TargetActivity,
@@ -32,6 +30,7 @@ from lib.update.run_monitor import (
     seconds_since,
     target_names_for,
 )
+from lib.update.run_store import DATABASE_FILE, RunStore
 
 RUN_ID = "20260913-190800-ab12"
 WALL = datetime(2026, 9, 13, 19, 8, tzinfo=UTC)
@@ -95,6 +94,36 @@ def test_format_duration_units() -> None:
     assert format_duration(65) == "1m05s"
     assert format_duration(3725) == "1h02m"
     assert format_duration(-3) == "0s"
+
+
+def test_diagnostics_disabled_retains_status_without_output_or_events(
+    tmp_path: Path,
+) -> None:
+    """Disabling optional logs does not disable the operational status projection."""
+    monitor = RunMonitor(
+        targets=("alpha",),
+        phase_count=4,
+        run_dir=tmp_path,
+        run_id=RUN_ID,
+        diagnostics=False,
+    )
+    monitor.record(UpdateEvent.result("alpha"))
+    monitor.close()
+    monitor.write_state()
+    store = RunStore(tmp_path, readonly=True)
+    assert store.events() == []
+    assert store.read("status")["finished"]
+    assert not (tmp_path / OUTPUT_FILE).exists()
+
+
+def test_execution_status_is_distinct_from_finished_projection() -> None:
+    """A stale final heartbeat must not conceal a still-pending workflow."""
+    line = format_status_line(
+        _status(execution_status="PENDING", finished=True),
+        inactivity_warning_seconds=60,
+    )
+    assert "execution pending" in line
+    assert "finished" not in line
 
 
 def test_status_line_reports_counts_and_longest_running() -> None:
@@ -192,17 +221,27 @@ def test_format_run_status_lists_active_targets_and_tail() -> None:
                     current_build=None,
                     tail=("line one",),
                 ),
+                ValidationActivity(
+                    label="derivations",
+                    running_seconds=20,
+                    idle_seconds=3,
+                    builds_started=1,
+                    current_build=None,
+                    tail=("line two",),
+                ),
             ),
         ),
         updated_seconds_ago=42.0,
     )
     assert report.splitlines() == [
         f"Run {RUN_ID} started {WALL.isoformat()}",
-        "Phase 2/4 sources · roots 10s · idle 1s · elapsed 12m34s",
+        "Phase 2/4 sources · 2 running · derivations 20s (1 started) · idle 3s · elapsed 12m34s",
         "State written 42s ago",
         "  mux: 1m01s running, idle 2s — Computing hash",
         "  zo: 5s running, idle 5s",
         "  > line one",
+        "  derivations · 20s running, idle 3s",
+        "  > line two",
     ]
     assert "State written" not in format_run_status(_status(), updated_seconds_ago=None)
 
@@ -307,17 +346,14 @@ def test_run_directory_files_and_latest_link(tmp_path: Path) -> None:
     monitor.record(UpdateEvent.error("alpha", "failed", detail="Traceback ..."))
 
     run_dir = root / RUN_ID
-    run = json.loads((run_dir / RUN_FILE).read_text(encoding="utf-8"))
+    run = RunStore(run_dir, readonly=True).read("run")
     assert run == {
         "runId": RUN_ID,
         "startedAt": WALL.isoformat(),
         "targets": ["alpha", "beta"],
         "phaseCount": 4,
     }
-    events = [
-        json.loads(line)
-        for line in (run_dir / EVENTS_FILE).read_text(encoding="utf-8").splitlines()
-    ]
+    events = RunStore(run_dir, readonly=True).events()
     assert [event["kind"] for event in events] == [
         "phase",
         "note",
@@ -333,11 +369,11 @@ def test_run_directory_files_and_latest_link(tmp_path: Path) -> None:
     }
     assert events[3]["returncode"] == 1
     assert events[4]["detail"] == "Traceback ..."
-    assert "pw" not in (run_dir / EVENTS_FILE).read_text(encoding="utf-8")
+    assert "pw" not in json.dumps(RunStore(run_dir, readonly=True).events())
     output = (run_dir / OUTPUT_FILE).read_text(encoding="utf-8").splitlines()
     assert output[0].startswith("[alpha] $ git fetch https://")
     assert output[1:] == ["[alpha] ok", "[alpha] exit 1: git fetch"]
-    state = json.loads((run_dir / STATE_FILE).read_text(encoding="utf-8"))
+    state = RunStore(run_dir, readonly=True).read("status")
     assert state["phase"] == "sources"
     assert state["updatedAt"] == WALL.isoformat()
     assert (root / LATEST_LINK).resolve() == run_dir.resolve()
@@ -394,12 +430,7 @@ def test_validation_tracking_parses_builds_and_bounds_the_tail(tmp_path: Path) -
     monitor.validation_finished(command, succeeded=False)
     assert monitor.snapshot().validations == ()
     monitor.validation_finished(command, succeeded=True)
-    events = [
-        json.loads(line)
-        for line in (root / RUN_ID / EVENTS_FILE)
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
+    events = RunStore(root / RUN_ID, readonly=True).events()
     assert [(event["kind"], event.get("succeeded")) for event in events] == [
         ("validation_start", None),
         ("validation_end", False),
@@ -453,7 +484,7 @@ def test_heartbeat_tick_prints_status_and_stall_warnings_once(tmp_path: Path) ->
 
     monitor.heartbeat_tick(None)
     assert printed == []
-    assert (root / RUN_ID / STATE_FILE).exists()
+    assert (root / RUN_ID / DATABASE_FILE).exists()
 
     monitor.record(UpdateEvent.status("alpha", "Fetching hashes"))
     monitor.record(UpdateEvent.status("beta", "Starting"))
@@ -492,18 +523,20 @@ def test_heartbeat_thread_runs_until_close(tmp_path: Path) -> None:
     monitor.close(summary={"updated": ["alpha"]})
     assert printed
     assert monitor.snapshot().finished
-    run = json.loads((tmp_path / RUN_ID / RUN_FILE).read_text(encoding="utf-8"))
+    run = RunStore(tmp_path / RUN_ID, readonly=True).read("run")
     assert run["finishedAt"] == WALL.isoformat()
     assert run["summary"] == {"updated": ["alpha"]}
-    events = (tmp_path / RUN_ID / EVENTS_FILE).read_text(encoding="utf-8")
+    events = json.dumps(RunStore(tmp_path / RUN_ID, readonly=True).events())
     assert '"kind": "summary"' in events
-    state = json.loads((tmp_path / RUN_ID / STATE_FILE).read_text(encoding="utf-8"))
+    state = RunStore(tmp_path / RUN_ID, readonly=True).read("status")
     assert state["finished"] is True
 
     # After close, recording is inert and does not reopen the files.
     monitor.record(UpdateEvent.status("alpha", "late"))
     monitor.note("late")
-    assert '"late"' not in (tmp_path / RUN_ID / EVENTS_FILE).read_text(encoding="utf-8")
+    assert '"late"' not in json.dumps(
+        RunStore(tmp_path / RUN_ID, readonly=True).events()
+    )
 
 
 def test_in_memory_monitor_has_no_files(tmp_path: Path) -> None:
@@ -594,13 +627,13 @@ def test_load_run_status_rejects_malformed_state(tmp_path: Path) -> None:
     """A state file that is not a status object fails closed."""
     run_dir = tmp_path / "runs" / RUN_ID
     run_dir.mkdir(parents=True)
-    (run_dir / STATE_FILE).write_text("[]\n", encoding="utf-8")
-    with pytest.raises(TypeError, match="Malformed update run state"):
+    RunStore(run_dir).write("status", [])
+    with pytest.raises(ValidationError, match="valid dictionary"):
         load_run_status(tmp_path / "runs", RUN_ID)
 
     monitor, _clock = _monitor(None)
     payload = json.loads(json.dumps(monitor.snapshot().__dict__, default=list))
-    (run_dir / STATE_FILE).write_text(json.dumps(payload), encoding="utf-8")
+    RunStore(run_dir).write("status", payload)
     _, status, updated_at = load_run_status(tmp_path / "runs", RUN_ID)
     assert updated_at is None
     assert status.run_id == RUN_ID

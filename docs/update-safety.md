@@ -7,8 +7,9 @@ safety argument from scattered modules; authors of a change that weakens one
 of these invariants must call it out explicitly.
 
 The pipeline shape: Python owns the update graph (feeds, reviews, file
-rewrites), Nix owns the build graph below the file boundary, git owns the
-baseline store, and the UI is a pure consumer of run events.
+rewrites), DBOS owns workflow/step recovery, SQLite retains immutable baselines and
+candidate contents, Nix owns the build graph below the file boundary, and the UI
+is a pure consumer of run events.
 
 ## Candidate isolation and write authority
 
@@ -40,16 +41,21 @@ baseline store, and the UI is a pure consumer of run events.
    return to the captured baseline before the next validation round.
    (`persistence.IsolatedUpdateWorkspace.validation_snapshot`)
 
-7. **Promotion is the only durable commit, and it is journaled.** The
-   recovery journal exists to guard the promote step's crash window; the
-   candidate tree itself is disposable. (`persistence` promotion + journal)
+7. **Promotion is the only live-checkout commit, and it is journaled.** SQLite
+   checkpoints candidate bytes and DBOS checkpoints execution results. The
+   filesystem journal guards the separate promotion crash window. Replay after
+   a committed promotion accepts only the exact full candidate, and otherwise
+   preserves external edits. The scratch tree is disposable.
+   (`persistence`, `durable`, `tests/test_update_durable.py`)
 
 ## Validation gating
 
 8. **A candidate is never promoted unvalidated.** Derivations declared by
    selected updaters evaluate on all declared systems; root closures build on
    the exact candidate that would be promoted, for every configured system,
-   whenever any path changed. (`derivation_validation`,
+   whenever any path changed. Cached validation is keyed by the exact source view
+   materialized for that validation, not a prior or later mutable tree.
+   (`derivation_validation`,
    `cli._validate_round`, `cli._requires_root_closure_validation`)
 
 9. **Failure attribution is bounded, not silent.** Batched validations pass
@@ -117,3 +123,24 @@ baseline store, and the UI is a pure consumer of run events.
     and tool identities, and all output digests to match; only digests are
     persisted. (`generated_artifact_commands`,
     `generation_receipts`)
+
+## Disposable builders and repair
+
+20. **Preparation cannot authorize publication.** Native stages may temporarily
+    carry incomplete platform hashes. They extend one pinned candidate serially;
+    validation requires every configured preparation platform and checks the exact
+    final tree. Certification requires one successful report from every native
+    builder, with no duplicate or mismatched identities.
+    (`candidate.Preparation`, `ci.candidate`, `tests/test_update_candidate.py`)
+
+21. **Quality checks cannot inherit evidence after changing a candidate.** The
+    publication job verifies the baseline, applied tree and post-check tree.
+    Formatter or generator drift requires a new validation attempt.
+    (`ci.jobs.certify`, `tests/test_update_ci.py`)
+
+22. **Repair is bounded and has no validation authority.** One isolated agent
+    proposal may change packaging and flake references. A repaired attempt starts
+    fresh execution, passes the existing quality gates and builds, and cannot
+    recursively repair itself. CI gives publication credentials only to the later
+    publication step. Local repair retains the same atomic promotion boundary.
+    (`repair`, `ci.jobs.start_repair`, `tests/test_update_repair.py`)

@@ -1,10 +1,88 @@
-# Update runtime efficiency
+# Update runtime and durable execution
 
 Updates prepare and validate one disposable candidate before atomic promotion.
 The safety invariants this preserves are enumerated in
 [update-safety.md](update-safety.md). Runtime optimizations preserve that
 boundary, platform requirements, cancellation cleanup, and per-target failure
 ownership. They do not activate configurations.
+
+## Durable ownership and recovery
+
+The CLI uses [DBOS workflows and steps](https://docs.dbos.dev/python/tutorials/workflow-tutorial)
+with a SQLite system database per run. No daemon or external database is required.
+DBOS owns execution identity, completed step results, exceptions, workflow outcomes
+and restart recovery. SQLite also stores the original request, immutable candidate
+manifests, deduplicated file contents and diagnostic projections. This replaces the
+separate JSON status/metadata files and JSONL event stream. The plain subprocess
+log is retained for `tail -f`.
+
+| Existing updater concept | Explicit contract |
+| --- | --- |
+| Selected targets and captured dirty checkout | Immutable workflow request and SQLite baseline |
+| Latest-version discovery | Checkpointed resolution step; replay reuses the resolved version |
+| Hashing and artifact generation | Checkpointed materialization step, including declared artifact bytes |
+| Source dependency graph | Independent source workflows with serializable prerequisite results |
+| Ref/input refresh and source persistence | Steps returning a verified candidate snapshot |
+| Derivation/root validation | Checkpoint keyed by the exact immutable validation snapshot |
+| Live promotion | Idempotent filesystem transaction reconciled until the root completes |
+| Progress and heartbeat | Diagnostic projections; DBOS remains execution authority |
+
+`nixcfg update --resume RUN_ID` starts DBOS against the existing database. Native
+recovery resumes pending root/source workflows; completed workflows return their
+recorded outcomes. Domain failures remain completed failures, so a new run is
+required after correcting them. Normal source failures remain isolated to their
+promotion clusters; they do not fail unrelated source workflows.
+
+Recovery restores the original baseline into a new isolated workspace. Root
+steps restore completed ref/input and materialization snapshots; source workflows
+receive source metadata, generated artifacts and effective prerequisite results as
+serializable inputs. Source recovery waits until the root restores resolved inputs
+and admits the shared resource environment. Dynamic updater modules have stable
+import identities so their checkpointed metadata and typed retry errors can be
+reconstructed. Replayed ref outcomes and input-refresh errors rebuild the same
+terminal progress state; original failures remain available in the run database.
+
+The execution fingerprint covers Python, DBOS, platform and the repository's
+packaged runtime source policy, including `uv.lock` and dynamic updater code.
+Changing these rejects resume. Target selection, update policy and timeouts come
+from the recorded request; only presentation options may be overridden. Each
+invocation resolves terminal layout and phase headings from its current presentation
+options and terminal, independently of the checkpointed update plan. Nix command
+and hash-mismatch errors retain their types, command results and notes on replay.
+
+A resumed completed run reports its historical result, not a fresh check of current
+upstream or live checkout state. Direct `run_updates` library calls remain ephemeral; the
+CLI's `run_update_command` owns the durable service lifecycle.
+
+Completed steps are skipped. An interrupted step may run again, so network reads,
+Nix builds and generators must tolerate repetition; generated artifacts must be
+returned through the artifact contract. SQLite cannot atomically commit Git worktree
+files. The existing descriptor-based filesystem journal therefore remains the
+promotion authority, including rollback, interference detection and post-commit
+cleanup. If promotion commits before DBOS records root completion, replay accepts
+only the exact complete promoted candidate. A later external edit blocks promotion.
+
+Candidate snapshots are content-addressed and verified before restoration. The run
+directory is private and contains repository bytes and Python-serialized execution
+state; it is local trusted state, not an import format for remote workers. Recovery
+requires retaining its database on durable local storage. Deleting a run retires
+its execution history. The [Actions integration](update-ci.md) instead uses
+disposable native jobs and immutable JSON/Git candidates. It shares updater and
+validation logic with local execution; SQLite histories never cross machines.
+
+`--run-id ID` starts or resumes one named history under an exclusive run lock.
+Repeated invocations must supply the same execution options; `--resume ID` instead
+loads those options without restating them. Both retain the original configuration
+and reject repository, platform or runtime drift. `--patch PATH` exports the exact
+successful candidate stored in the DBOS result, including additions, deletions and
+binary changes. Failed runs export an empty patch. Export is repeatable after a
+crash without incorporating later checkout edits.
+
+The deliberate retained mechanics are dependency/promotion policy, exact validation,
+resource limits, subprocess cleanup and filesystem commit recovery. Replacing them
+with generic workflow status would erase domain invariants. SQLite was chosen over
+a shared Postgres service for the existing single CLI owner and per-run lifetime;
+that deployment choice must change before sharing this database across hosts.
 
 ## Admission and scheduling
 
@@ -48,8 +126,8 @@ Dependency edges come from `companion_of` and `aggregate_into`. Python's
 the planner translates cycle errors into updater diagnostics. Tasks are created
 in that order, so prerequisites exist even with an eager task factory, and each
 task awaits its own prerequisites within an `asyncio.TaskGroup`. The order does
-not impose execution waves. Dependency depths remain only for target ordering
-and the existing wave-planning helper.
+not impose execution waves. Dependency depths remain only for target ordering; obsolete wave scheduling has
+been removed.
 
 A workspace read/write gate protects temporary generated files. Ordinary
 readers can overlap; a temporary artifact writer excludes unrelated readers
@@ -161,13 +239,13 @@ baseline before the next round.
 Progress state is owned by one run monitor shared by the asynchronous phases
 and the synchronous validation phases. Producers record events from any
 thread; the live panel, the plain-output heartbeat, and `--status` all read
-snapshots of it. The run directory holds `events.jsonl` (structured events,
-no subprocess lines), `output.log` (every subprocess line, line-buffered so it
-can be tailed), `run.json` (plan and final summary), and `state.json` (the
-latest snapshot, rewritten on every heartbeat). Both log files pass the same
-URL redaction as terminal output. A failure inside an updater task, of any
-exception class, is confined to that target; its traceback lands in
-`events.jsonl` as the error event's `detail`.
+snapshots of it. SQLite stores structured events and the heartbeat snapshot;
+`output.log` contains subprocess lines and remains line-buffered. Both diagnostic
+paths apply the same URL redaction as terminal output. A failure inside an updater
+task is confined to that target and its traceback is stored in the error event's
+`detail`. `--status` reads DBOS status without starting workers or deserializing
+workflow inputs/results. Heartbeat age and execution status remain distinct.
+
 
 Use `--timings` for per-source operation counts, active time, admission wait,
 cache hits, failures/cancellations, and captured byte counts. Combine it with
@@ -191,7 +269,7 @@ race check instead of a second content read.
 
 ## Validation evidence and remaining costs
 
-Local component measurements during this change:
+Existing runtime optimization measurements:
 
 - A tiny local fixed-output fixture completed with exactly one `nix eval` and
   one `nix build`; its SHA-256 matched Python's independently computed digest.

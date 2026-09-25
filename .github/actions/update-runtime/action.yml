@@ -1,0 +1,43 @@
+---
+name: Update runtime
+description: Pin the updater and tools to this checkout for one disposable job.
+inputs:
+  github-token:
+    description: Token for public upstream API requests
+    required: true
+  cachix-token:
+    description: Cachix upload credential (empty uses the cache read-only)
+    required: false
+outputs:
+  runtime:
+    description: Pinned nixcfg package
+    value: ${{ steps.runtime.outputs.runtime }}
+  devshell:
+    description: Pinned development environment
+    value: ${{ steps.runtime.outputs.devshell }}
+runs:
+  using: composite
+  steps:
+    # Determinate Nix v3.22.5
+    - uses: DeterminateSystems/determinate-nix-action@8d87e8d5e5b8a8309d4281094560f127d9a265f1
+      with:
+        github-token: ${{ inputs.github-token }}
+        extra-conf: |
+          max-jobs = 2
+          cores = 2
+          min-free = 1073741824
+          max-free = 4294967296
+    - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
+      with:
+        name: gkze
+        extraPullNames: zed
+        authToken: ${{ inputs.cachix-token }}
+        useDaemon: true
+    - name: Build pinned runtime
+      id: runtime
+      shell: python
+      run: |
+        import runpy
+        runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+      env:
+        NIXCFG_CI_STAGE: bootstrap

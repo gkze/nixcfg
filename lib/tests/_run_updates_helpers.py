@@ -28,7 +28,6 @@ def make_run_plan(
     ref_inputs: tuple[FlakeInputRef, ...] = (),
     dry_run: bool = False,
     do_input_refresh: bool = False,
-    show_phase_headers: bool = False,
 ) -> _RunPlan:
     """Build a complete plan from the targets relevant to a test."""
     ref_names = tuple(ref.name for ref in ref_inputs)
@@ -47,8 +46,6 @@ def make_run_plan(
             ref_inputs=list(ref_inputs),
             source_names=list(source_names),
         ),
-        tty_enabled=False,
-        show_phase_headers=show_phase_headers,
         sources=SourcesFile(
             entries={name: SourceEntry(hashes={}) for name in source_names}
         ),

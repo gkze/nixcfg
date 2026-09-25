@@ -4,6 +4,7 @@ import typer
 
 from lib.cli import HELP_CONTEXT_SETTINGS, make_main
 from lib.update.ci.bun_lock import app as bun_lock_app
+from lib.update.ci.candidate import app as candidate_app
 from lib.update.ci.crate2nix import app as crate2nix_app
 
 app = typer.Typer(
@@ -20,6 +21,7 @@ pipeline_app = typer.Typer(
 )
 
 app.add_typer(pipeline_app, name="pipeline")
+app.add_typer(candidate_app, name="update")
 
 pipeline_app.add_typer(crate2nix_app, name="crate2nix")
 pipeline_app.add_typer(bun_lock_app, name="bun-lock")

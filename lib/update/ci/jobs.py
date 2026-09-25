@@ -1,0 +1,310 @@
+"""Python entrypoint for disposable Actions jobs.
+
+This file also bootstraps Nix before the packaged CLI exists, so its imports are
+standard-library only. Invoke the file directly; Actions owns the job graph.
+"""
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def _run(
+    *args: str, capture: bool = False, check: bool = True
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 -- argv boundaries, never a shell
+        args,
+        text=True,
+        capture_output=capture,
+        check=check,
+    )
+
+
+def _temp() -> Path:
+    return Path(os.environ["RUNNER_TEMP"])
+
+
+def _runtime() -> str:
+    return str(Path(os.environ["NIXCFG_RUNTIME"]) / "bin/nixcfg")
+
+
+def _outputs(**values: str) -> None:
+    with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+        output.writelines(f"{name}={value}\n" for name, value in values.items())
+
+
+def bootstrap() -> None:
+    """Keep the baseline executable and tools as GC roots for this job."""
+    runtime, devshell = _temp() / "nixcfg-runtime", _temp() / "nixcfg-devshell"
+    _run("nix", "build", "--no-write-lock-file", "--out-link", str(runtime), ".#nixcfg")
+    _run(
+        "nix",
+        "develop",
+        "--no-write-lock-file",
+        "--profile",
+        str(devshell),
+        "--command",
+        "python",
+        "-c",
+        "pass",
+    )
+    _outputs(runtime=str(runtime), devshell=str(devshell))
+
+
+def matrix() -> None:
+    """Project canonical policy through the checked updater runtime."""
+    result = _run(_runtime(), "ci", "update", "matrix", capture=True)
+    _outputs(matrix=json.dumps(json.loads(result.stdout)))
+
+
+def _develop(*args: str) -> tuple[str, ...]:
+    return "nix", "develop", os.environ["NIXCFG_DEVSHELL"], "--command", *args
+
+
+def _quality_command() -> tuple[str, ...]:
+    return _develop("python", "lib/update/ci/jobs.py", "quality")
+
+
+def quality() -> None:
+    """Apply existing gates and reject any generated or formatter drift."""
+    _run("prek", "run", "-a")
+    _run("coverage", "run", "-m", "pytest")
+    _run("coverage", "report")
+    _run("git", "diff", "--exit-code")
+    if _run("git", "ls-files", "--others", "--exclude-standard", capture=True).stdout:
+        msg = "Quality checks introduced untracked source files"
+        raise RuntimeError(msg)
+
+
+def native(stage: str) -> int:
+    """Prepare or validate with immutable inputs and retained failure evidence."""
+    artifacts = _temp() / "update-artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    args = [_runtime(), "ci", "update", stage]
+    previous = os.environ.get("NIXCFG_PREVIOUS_CANDIDATE", "")
+    if stage == "prepare":
+        args.extend(("--output", str(artifacts / "candidate.json")))
+        if previous:
+            args.extend(("--previous", previous))
+        raw_targets = os.environ.get("NIXCFG_UPDATE_TARGETS", "")
+        targets = raw_targets.split()
+        if (
+            "\n" in raw_targets
+            or "\r" in raw_targets
+            or any(target.startswith("-") for target in targets)
+        ):
+            msg = "Targets must be space-separated names, not updater options"
+            raise ValueError(msg)
+        if targets:
+            args.extend(("--", *targets))
+    else:
+        if not previous:
+            msg = "Validation requires a previous candidate"
+            raise ValueError(msg)
+        args.extend((
+            "--candidate",
+            previous,
+            "--output",
+            str(artifacts / "validation.json"),
+        ))
+    with (
+        (artifacts / "result.json").open("w") as output,
+        (artifacts / "stderr.log").open("w") as log,
+    ):
+        result = subprocess.run(  # noqa: S603 -- fixed executable and separate target arguments
+            args,
+            stdout=output,
+            stderr=log,
+            env=os.environ | {"REPO_ROOT": str(Path.cwd()), "UPDATE_RUN_LOG": "0"},
+            check=False,
+        )
+    sys.stderr.write((artifacts / "stderr.log").read_text())
+    return result.returncode
+
+
+def certify() -> None:
+    """Require native evidence and quality checks for the exact published tree."""
+    evidence = _temp() / "evidence"
+    candidate = evidence / "prepare-x86_64-linux/candidate.json"
+    patch = _temp() / "update.patch"
+    reports = [
+        arg
+        for report in sorted(evidence.glob("validate-*/validation.json"))
+        for arg in ("--report", str(report))
+    ]
+    _run(
+        _runtime(),
+        "ci",
+        "update",
+        "certify",
+        "--candidate",
+        str(candidate),
+        *reports,
+        "--output",
+        str(patch),
+    )
+    if not patch.stat().st_size and not os.environ["GITHUB_REF_NAME"].startswith(
+        "codex/update-repair-"
+    ):
+        _outputs(changed="false")
+        return
+    identity = json.loads(candidate.read_bytes())
+    if _run("git", "write-tree", capture=True).stdout.strip() != identity["base_tree"]:
+        msg = "Publication checkout does not match the candidate baseline"
+        raise ValueError(msg)
+    if patch.stat().st_size:
+        _run("git", "apply", "--index", "--binary", str(patch))
+    if _run("git", "write-tree", capture=True).stdout.strip() != identity["tree"]:
+        msg = "Applied patch does not match the certified candidate"
+        raise ValueError(msg)
+    _run(*_quality_command())
+    if _run("git", "write-tree", capture=True).stdout.strip() != identity["tree"]:
+        msg = "Quality checks changed the certified candidate"
+        raise ValueError(msg)
+    _outputs(changed="true")
+
+
+def _commit_and_push(kind: str, message: str) -> str:
+    branch = f"codex/update-{kind}{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
+    _run("git", "switch", "-c", branch)
+    if _run("git", "diff", "--cached", "--quiet", check=False).returncode:
+        _run(*_develop("git", "commit", "-S", "-m", message))
+    _run("gh", "auth", "setup-git")
+    _run("git", "push", "--set-upstream", "origin", branch)
+    return branch
+
+
+def publish() -> None:
+    """Open the verified update as a reviewable PR without merging it."""
+    branch = _commit_and_push("", "chore(update): refresh validated sources")
+    base = os.environ["GITHUB_REF_NAME"]
+    if base.startswith("codex/update-repair-"):
+        base = os.environ["UPDATE_BASE_BRANCH"]
+    body = _temp() / "update-body.md"
+    run_url = (
+        f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+        f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+    )
+    body.write_text(
+        "Prepared and validated against one Git tree on three native platforms.\n\n"
+        f"Evidence: {run_url}\n"
+    )
+    _run(
+        "gh",
+        "pr",
+        "create",
+        "--base",
+        base,
+        "--head",
+        branch,
+        "--title",
+        "chore(update): refresh validated sources",
+        "--body-file",
+        str(body),
+    )
+
+
+def collect_evidence() -> None:
+    """Fetch completed failed-job logs even while the overall run is unfinished."""
+    evidence = _temp() / "repair-evidence"
+    evidence.mkdir(parents=True, exist_ok=True)
+    repository = os.environ["GITHUB_REPOSITORY"]
+    result = _run(
+        "gh",
+        "api",
+        f"repos/{repository}/actions/runs/{os.environ['GITHUB_RUN_ID']}/jobs",
+        "--paginate",
+        "--jq",
+        '.jobs[] | select(.conclusion == "failure") | .id',
+        capture=True,
+    )
+    for job in result.stdout.splitlines():
+        identity = int(job)
+        log = _run(
+            "gh",
+            "api",
+            f"repos/{repository}/actions/jobs/{identity}/logs",
+            capture=True,
+        )
+        (evidence / f"job-{identity}.log").write_text(log.stdout)
+
+
+def install_agent() -> None:
+    """Install the explicitly pinned agent CLI, independently of package updates."""
+    _run("npm", "install", "--global", "@github/copilot@1.0.88")
+
+
+def repair() -> None:
+    """Check one isolated repair proposal before the new attempt can be admitted."""
+    patch = _temp() / "repair.patch"
+    _run(
+        *_develop(
+            _runtime(),
+            "ci",
+            "update",
+            "repair",
+            "--agent",
+            "copilot",
+            "--evidence",
+            str(_temp() / "repair-evidence"),
+            "--output",
+            str(patch),
+        )
+    )
+    _run("git", "apply", "--index", "--binary", str(patch))
+    _run(*_quality_command())
+
+
+def start_repair() -> None:
+    """Start fresh execution with repair disabled, bounding automatic retries."""
+    branch = _commit_and_push("repair-", "fix(update): repair packaging failure")
+    _run(
+        "gh",
+        "workflow",
+        "run",
+        "update.yml",
+        "--ref",
+        branch,
+        "-f",
+        "repair=false",
+        "-f",
+        f"targets={os.environ.get('NIXCFG_UPDATE_TARGETS', '')}",
+    )
+
+
+def main(stage: str) -> int:
+    """Dispatch the finite set of Actions operations, preserving process failures."""
+    if stage in {"prepare", "validate"}:
+        # Capture CLI JSON inside the environment, after any devshell startup output.
+        return _run(
+            *_develop("python", str(Path(__file__).resolve()), f"native-{stage}"),
+            check=False,
+        ).returncode
+    if stage in {"native-prepare", "native-validate"}:
+        return native(stage.removeprefix("native-"))
+    operations = {
+        "bootstrap": bootstrap,
+        "matrix": matrix,
+        "quality": quality,
+        "certify": certify,
+        "publish": publish,
+        "collect-evidence": collect_evidence,
+        "install-agent": install_agent,
+        "repair": repair,
+        "start-repair": start_repair,
+    }
+    operations[stage]()
+    return 0
+
+
+if (
+    __name__ == "__main__"
+):  # pragma: no cover -- entrypoint delegates to tested operations
+    try:
+        sys.exit(
+            main(sys.argv[1] if len(sys.argv) > 1 else os.environ["NIXCFG_CI_STAGE"])
+        )
+    except subprocess.CalledProcessError as error:
+        sys.exit(error.returncode)

@@ -2000,3 +2000,19 @@ def test_build_plan_exposes_launch_policy_without_claiming_a_wrapper() -> None:
         expect_binding(replacement.values, "launchEnvironment").value,
         "buzzRuntimePolicySource.passthru.requiredLaunchEnvironment",
     )
+
+
+@pytest.mark.parametrize("missing", [0, 1])
+def test_vendor_policy_requires_both_reviewed_mesh_sources(
+    tmp_path: Path, missing: int
+) -> None:
+    """Incomplete vendor layouts fail before changing any surviving source file."""
+    files = _write_mesh_vendor(tmp_path)
+    sherpa = _write_sherpa_vendor(tmp_path)
+    before = files[1 - missing].read_bytes(), sherpa.read_bytes()
+    files[missing].unlink()
+    with pytest.raises(
+        _patcher().RuntimePolicyPatchError, match="missing the reviewed Mesh source"
+    ):
+        _patcher().patch_desktop_cargo_deps(tmp_path)
+    assert (files[1 - missing].read_bytes(), sherpa.read_bytes()) == before

@@ -15,12 +15,14 @@ import shlex
 from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING
 
 from lib.diagnostics import redact_urls
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator, Mapping
+    from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
+    from typing import Self
 
 # ---------------------------------------------------------------------------
 # Result / error types
@@ -87,6 +89,10 @@ class NixCommandError(Exception):
         self.message = message or f"command failed with exit code {result.returncode}"
         super().__init__(self.message)
 
+    def __reduce__(self) -> tuple[Callable[[], Self], tuple[()], dict[str, object]]:
+        """Preserve command diagnostics and exception notes across step replay."""
+        return partial(type(self), self.result, self.message), (), self.__dict__
+
     def __str__(self) -> str:
         """Render a readable error message with command context."""
         cmd = shlex.join(self.result.args)
@@ -136,6 +142,20 @@ class HashMismatchError(NixCommandError):
         if drv_path:
             msg += f" (derivation: {drv_path})"
         super().__init__(result, msg)
+
+    def __reduce__(self) -> tuple[Callable[[], Self], tuple[()], dict[str, object]]:
+        """Reconstruct the keyword-only hash contract before restoring error state."""
+        return (
+            partial(
+                type(self),
+                self.result,
+                got_hash=self.hash,
+                specified=self.specified,
+                drv_path=self.drv_path,
+            ),
+            (),
+            self.__dict__,
+        )
 
     @property
     def is_sri(self) -> bool:

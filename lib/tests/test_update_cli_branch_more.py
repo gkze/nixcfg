@@ -41,7 +41,6 @@ from lib.update.planner import (
     select_target_source_names,
     source_additional_input_names,
     source_prerequisites,
-    source_update_waves,
 )
 from lib.update.refs import FlakeInputRef
 from lib.update.source_runner import (
@@ -149,8 +148,8 @@ def test_resolved_targets_ref_source_and_item_meta_variants(
     assert meta["src-no-input"].origin.endswith("sources.json)")
 
 
-def test_source_selection_detects_companion_cycles_and_empty_waves() -> None:
-    """Reject cyclic companion source graphs before scheduling update waves."""
+def test_source_selection_detects_companion_cycles() -> None:
+    """Reject cyclic companion source graphs before scheduling source workflows."""
 
     class _A:
         companion_of = "b"
@@ -160,8 +159,6 @@ def test_source_selection_detects_companion_cycles_and_empty_waves() -> None:
 
     with pytest.raises(RuntimeError, match="Companion source cycle"):
         select_target_source_names((), {"a": _A, "b": _B})
-
-    assert source_update_waves([], {}) == []
 
 
 def test_explicit_additional_input_selects_its_consumer(
@@ -296,10 +293,6 @@ def test_aggregate_sources_follow_selected_consumers_without_refreshing_siblings
         "aggregate",
     ]
     assert select_target_source_names(("aggregate",), updaters) == ["aggregate"]
-    assert source_update_waves(["consumer", "aggregate"], updaters) == [
-        ["consumer"],
-        ["aggregate"],
-    ]
     assert source_prerequisites(
         updaters,
         "aggregate",

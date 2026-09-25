@@ -614,3 +614,22 @@ def test_mach_studio_package_patches_updates_and_resigns_the_bundle() -> None:
         '      "$app_bundle"',
         '/usr/bin/codesign --verify --deep --strict "$app_bundle"',
     ]
+
+
+@pytest.mark.parametrize("kind", ["source", "wheel", "neither"])
+def test_policy_handles_independent_engine_provisioning_shapes(kind: str) -> None:
+    """Releases can ship either provisioner, but unknown shapes must fail closed."""
+    module = _load_policy_module()
+    engines = {
+        "source": module._FAIL_OPEN_ENGINE_INSTALL_SOURCE,
+        "wheel": module._FAIL_OPEN_ENGINE_INSTALL_WHEEL,
+        "neither": b"unknown engine",
+    }
+    payload = module._ENABLED_GATE + engines[kind]
+    if kind == "neither":
+        with pytest.raises(module.PatchError, match="local-engine provisioning anchor"):
+            module.patch_main(payload)
+    else:
+        patched = module.patch_main(payload)
+        assert len(patched) == len(payload)
+        assert patched != payload

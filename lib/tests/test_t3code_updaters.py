@@ -1306,10 +1306,6 @@ def test_shared_materialized_artifact_keeps_each_successful_source_owner(
 
     monkeypatch.setattr("lib.update.source_runner.update_source_task", _update_source)
     monkeypatch.setattr(
-        "lib.update.source_runner.update_planner.source_update_waves",
-        lambda *_args: [source_names],
-    )
-    monkeypatch.setattr(
         "lib.update.source_runner._get_updaters",
         lambda: dict.fromkeys(source_names, object),
     )
@@ -1377,10 +1373,6 @@ def test_shared_materialized_artifact_rejects_conflicting_successful_snapshots(
         return SourceTaskResult(completed=True, artifacts=(artifact,))
 
     monkeypatch.setattr("lib.update.source_runner.update_source_task", _update_source)
-    monkeypatch.setattr(
-        "lib.update.source_runner.update_planner.source_update_waves",
-        lambda *_args: [source_names],
-    )
     monkeypatch.setattr(
         "lib.update.source_runner._get_updaters",
         lambda: dict.fromkeys(source_names, object),

@@ -1286,3 +1286,16 @@ def test_ref_task_owns_one_lock_and_preserves_subprocess_config(
         if failure_command is not None
         else []
     )
+
+
+def test_empty_flake_refresh_does_not_start_nix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty batch is a no-op, not an instruction to refresh every input."""
+    from lib.update import flake
+
+    async def unexpected(*_args, **_kwargs):
+        pytest.fail("empty batch must not execute nix flake update")
+
+    monkeypatch.setattr(flake, "run_command", unexpected)
+    asyncio.run(flake.update_flake_inputs((), source="test"))

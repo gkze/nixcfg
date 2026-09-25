@@ -32,7 +32,7 @@ stdenvNoCC.mkDerivation {
       --cpu=${lib.escapeShellArg bunCpu} \
       --os=${lib.escapeShellArg bunOs} \
       --filter '!./' \
-      --filter './packages/cli' \
+      --filter './packages/opencode' \
       --filter './packages/desktop' \
       --filter './packages/app' \
       --frozen-lockfile \

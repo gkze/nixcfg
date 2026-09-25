@@ -345,7 +345,8 @@ For source-backed packages, make sure the full pattern is coherent:
 The update pipeline is phase-structured: flake reference refresh, source discovery and hashing,
 generated-artifact materialization, derivation validation, then atomic promotion. Make changes
 phase-consciously. Platform-specific updater guards and crate2nix refreshes run locally through the
-CLI; no GitHub Actions workflows are tracked.
+CLI. The GitHub Actions Update workflow uses disposable native builders;
+see `docs/update-ci.md`. Keep execution and promotion semantics in the CLI.
 
 ### Working on OpenCode / MCP / profile setup
 

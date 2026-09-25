@@ -25,7 +25,8 @@ from lib.update.cli import (
 )
 from lib.update.config import resolve_config
 from lib.update.persistence import UpdateValidationSnapshot
-from lib.update.run_monitor import EVENTS_FILE, RunMonitor
+from lib.update.run_monitor import RunMonitor
+from lib.update.run_store import RunStore
 
 
 def _assert_reader_stopped() -> None:
@@ -430,6 +431,16 @@ def test_validation_phase_output_modes(
         if callable(progress):
             emit = cast("validation.ValidationProgress", progress)
             emit(validation.ValidationCommandStarted("nix build -L [literal]"))
+            emit(
+                validation.ValidationCommandOutput(
+                    "nix build -L [literal]", "build output"
+                )
+            )
+            emit(
+                validation.ValidationCommandFinished(
+                    "nix build -L [literal]", succeeded=True
+                )
+            )
             emit("\x1b[31mbuilding dependency\x1b[0m")
             emit("https://example.test/archive?signature=fixture-signature")
         calls.append("validate")
@@ -483,6 +494,8 @@ def test_validation_round_reports_phases_to_the_monitor(
         if callable(progress):
             emit = cast("validation.ValidationProgress", progress)
             emit(validation.ValidationCommandStarted("nix build -L [literal]"))
+            emit(validation.ValidationCommandOutput("nix build -L [literal]", "output"))
+            emit("plain validation progress")
         return ()
 
     monkeypatch.setattr("lib.update.cli._get_updaters", dict)
@@ -558,7 +571,7 @@ def test_validation_round_records_events_for_the_run_log(
     ) == (False, False)
     monitor.close()
     assert monitor.run_dir is not None
-    events = (monitor.run_dir / EVENTS_FILE).read_text(encoding="utf-8")
-    assert '"phase": "derivation validation"' in events
-    assert '"phase": "root closures"' in events
-    assert '"succeeded": true' in events
+    events = RunStore(monitor.run_dir, readonly=True).events()
+    assert any(event.get("phase") == "derivation validation" for event in events)
+    assert any(event.get("phase") == "root closures" for event in events)
+    assert any(event.get("succeeded") is True for event in events)

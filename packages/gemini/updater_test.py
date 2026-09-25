@@ -416,6 +416,8 @@ def test_gemini_rejects_malformed_or_unsuccessful_omaha_responses(
         ),
         ({"crx3_path": "Gemini-9.9.9.9.dmg"}, "named inner artifact"),
         ({"crx3_path": None}, "omitted its inner artifact path"),
+        ({"download_urls": (None,)}, "URL must be a string"),
+        ({"update_status": "noupdate"}, "updatecheck returned status"),
     ],
 )
 def test_gemini_rejects_ambiguous_or_mismatched_crx3_payloads(
@@ -552,3 +554,31 @@ def test_gemini_sources_pin_the_official_release_artifact() -> None:
     assert_https_url(url, host="dl.google.com")
     assert "/release2/" in url
     assert url.endswith(".crx3")
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_gemini_requires_one_inner_artifact(count: int) -> None:
+    """Omaha must identify exactly one DMG to extract from the CRX3 container."""
+    module = _load_module()
+    payload = json.loads(_omaha_response()[len(_PREFIX) :])
+    operations = payload["response"]["apps"][0]["updatecheck"]["pipelines"][0][
+        "operations"
+    ]
+    operations[:] = [operations[0], *([operations[1]] * count)]
+    with pytest.raises(RuntimeError, match=f"declared {count} crx3 inner artifacts"):
+        module.GeminiUpdater._parse_download_url(
+            _PREFIX + json.dumps(payload).encode(), version=_VERSION
+        )
+
+
+def test_gemini_version_probe_uses_omaha() -> None:
+    """The metadata strategy's standalone version probe shares the Omaha contract."""
+    module = _load_module()
+    assert (
+        _run(
+            module.GeminiUpdater()._fetch_version(
+                _FakeSession(_FakeResponse(_omaha_response()))
+            )
+        )
+        == _VERSION
+    )

@@ -4,7 +4,6 @@ import asyncio
 import json
 from collections.abc import Callable
 from contextlib import nullcontext
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -39,6 +38,7 @@ from lib.update.events import UpdateEvent
 from lib.update.persistence import UpdateValidationSnapshot
 from lib.update.refs import FlakeInputRef
 from lib.update.run_monitor import RunMonitor
+from lib.update.run_store import DATABASE_FILE, RunStore
 from lib.update.source_runner import UpdatePhaseResult
 from lib.update.ui_render import ValidationDisplay
 from lib.update.updaters import Updater
@@ -128,7 +128,7 @@ def _execution(
     writes: dict[str, str],
     flake: tuple[str, str] | None = None,
 ) -> object:
-    async def _execute_result(*_args: object) -> SimpleNamespace:
+    async def _execute_result(*_args: object, **_kwargs: object) -> SimpleNamespace:
         written: list[Path] = []
         for name, content in writes.items():
             path = _source_path(name)
@@ -311,7 +311,9 @@ def test_failed_lock_only_input_rolls_back_and_promotes_the_rest(
         "stable": _Stable,
     }
 
-    async def _execute_with_moved_lock(*_args: object) -> SimpleNamespace:
+    async def _execute_with_moved_lock(
+        *_args: object, **_kwargs: object
+    ) -> SimpleNamespace:
         (Path.cwd() / "flake.lock").write_text(
             _lock_json(tool_rev="c" * 40), encoding="utf-8"
         )
@@ -867,16 +869,13 @@ def test_run_log_records_the_run_and_is_reported(
     payload = json.loads(capsys.readouterr().out)
     run_dir = Path(payload["runLog"])
     assert run_dir.parent == tmp_path / "runs"
-    events = [
-        json.loads(line)
-        for line in (run_dir / "events.jsonl").read_text("utf-8").splitlines()
-    ]
+    events = RunStore(run_dir, readonly=True).events()
     assert {"kind": "phase", "phase": "sources", "index": 2}.items() <= events[
         0
     ].items()
     assert events[-1]["kind"] == "summary"
     assert events[-1]["promoted"] is False
-    assert (run_dir / "state.json").exists()
+    assert (run_dir / DATABASE_FILE).exists()
     assert (tmp_path / "runs" / "latest").resolve() == run_dir.resolve()
 
 
@@ -938,7 +937,7 @@ def test_run_log_line_is_printed_for_text_check_runs(
     out = capsys.readouterr().out
     assert "Run log: " in out
     run_dir = Path(out.split("Run log: ")[1].splitlines()[0].strip())
-    assert (run_dir / "events.jsonl").exists()
+    assert (run_dir / DATABASE_FILE).exists()
 
 
 def test_execute_run_plan_reports_phases_without_a_monitor(
@@ -1080,12 +1079,10 @@ def test_run_log_root_and_live_ui_gating(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("UPDATE_RUN_LOG_DIR", "/tmp/nixcfg-runs")
     assert _run_log_root(resolve_config()) == Path("/tmp/nixcfg-runs")
 
-    plan = make_run_plan(source_names=("demo",))
-    assert not _live_ui_enabled(plan, UpdateOptions())
-    live_plan = SimpleNamespace(tty_enabled=True)
-    assert _live_ui_enabled(cast("Any", live_plan), UpdateOptions())
-    assert not _live_ui_enabled(cast("Any", live_plan), UpdateOptions(quiet=True))
-    assert not _live_ui_enabled(cast("Any", live_plan), UpdateOptions(json=True))
+    assert not _live_ui_enabled(UpdateOptions(tty="off"))
+    assert _live_ui_enabled(UpdateOptions(tty="force"))
+    assert not _live_ui_enabled(UpdateOptions(tty="force", quiet=True))
+    assert not _live_ui_enabled(UpdateOptions(tty="force", json=True))
 
 
 def test_validation_display_only_for_the_live_panel(
@@ -1106,12 +1103,11 @@ def test_validation_display_only_for_the_live_panel(
         _validation_display(plan, UpdateOptions(), config, monitor), nullcontext
     )
 
-    live_plan = replace(plan, tty_enabled=True)
     monkeypatch.setattr(
         "lib.update.ui_render.Live",
         lambda **_kwargs: SimpleNamespace(start=lambda: None, stop=lambda: None),
     )
-    display = _validation_display(live_plan, UpdateOptions(), config, monitor)
+    display = _validation_display(plan, UpdateOptions(tty="force"), config, monitor)
     assert isinstance(display, ValidationDisplay)
     tail = object.__getattribute__(display, "_tail")
     assert tail() == ()
@@ -1157,3 +1153,91 @@ def test_emit_summary_reports_withheld_and_unpromoted_runs(
         "success": False,
         "withheld": {"child": "coupled to failed target bad"},
     }
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "no-input",
+        "no-baseline",
+        "missing",
+        "invalid-json",
+        "bad-nodes",
+        "bad-root",
+        "bad-inputs",
+        "follow-edge",
+        "bad-node",
+        "unchanged",
+    ],
+)
+def test_failed_input_rollback_preserves_unusable_or_unchanged_locks(
+    tmp_path: Path, case: str
+) -> None:
+    """Incomplete lock graphs must not cause a speculative partial rewrite."""
+    from lib.update.cli import _rollback_failed_input_locks
+
+    class Tool(Updater):
+        input_name = "tool"
+
+    baseline = json.loads(_lock_json())
+    current = json.loads(_lock_json(tool_rev="c" * 40))
+    if case == "bad-nodes":
+        baseline["nodes"] = []
+    elif case == "bad-root":
+        current["root"] = None
+    elif case == "bad-inputs":
+        baseline["nodes"]["root"]["inputs"] = []
+    elif case == "follow-edge":
+        baseline["nodes"]["root"]["inputs"]["tool"] = ["other"]
+    elif case == "bad-node":
+        baseline["nodes"]["tool"] = "invalid"
+    elif case == "unchanged":
+        current = baseline
+    encoded = json.dumps(baseline).encode()
+    if case == "invalid-json":
+        encoded = b"{"
+    path = tmp_path / "flake.lock"
+    if case != "missing":
+        path.write_text(json.dumps(current))
+    before = path.read_bytes() if path.exists() else None
+    workspace = SimpleNamespace(
+        root=tmp_path,
+        baseline_content=lambda _: None if case == "no-baseline" else encoded,
+    )
+    result = _rollback_failed_input_locks(
+        workspace,
+        make_run_plan(source_names=("tool",)),
+        ("tool",),
+        {"tool": Updater if case == "no-input" else Tool},
+    )
+    assert result == ()
+    assert (path.read_bytes() if path.exists() else None) == before
+
+
+def test_prune_lock_graph_preserves_reachable_leaves_cycles_and_follows() -> None:
+    """Garbage collection terminates on cycles and removes only unreachable nodes."""
+    from lib.update.cli import _prune_unreachable_lock_nodes
+
+    for invalid in ({"nodes": []}, {"nodes": {}, "root": None}):
+        before = json.loads(json.dumps(invalid))
+        _prune_unreachable_lock_nodes(invalid)
+        assert invalid == before
+    lock = {
+        "root": "root",
+        "nodes": {
+            "root": {
+                "inputs": {
+                    "self": "root",
+                    "leaf": "leaf",
+                    "opaque": "opaque",
+                    "missing": "missing",
+                    "follows": ["leaf"],
+                }
+            },
+            "leaf": {},
+            "opaque": None,
+            "unreachable": {},
+        },
+    }
+    _prune_unreachable_lock_nodes(lock)
+    assert set(lock["nodes"]) == {"root", "leaf", "opaque"}

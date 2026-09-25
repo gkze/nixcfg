@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Unpack, cast
 
 import click
 import typer
+from dbos import DBOS
 from rich.console import Console
 from rich.text import Text
 from typer import _click as typer_click
@@ -24,6 +25,7 @@ from lib.diagnostics import redact_urls
 from lib.nix.models.flake_lock import FlakeLock
 from lib.nix.models.sources import SourcesFile
 from lib.update import derivation_validation as update_derivation_validation
+from lib.update import durable
 from lib.update import flake as update_flake
 from lib.update import persistence as update_persistence
 from lib.update import planner as update_planner
@@ -31,6 +33,7 @@ from lib.update import source_runner as update_source_runner
 from lib.update import updaters as updater_module
 from lib.update.cli_inventory import handle_list_targets_request
 from lib.update.cli_options import (
+    RepairAgent,
     UpdateOptions,
     UpdateOptionsKwargs,
     UpdateSortBy,
@@ -77,6 +80,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
     from lib.nix.models.flake_lock import FlakeLockNode
+    from lib.update.candidate import Preparation
     from lib.update.events import UpdateEvent
     from lib.update.updaters.core import Updater
 
@@ -130,6 +134,9 @@ _TRAILING_TARGET_VALUE_OPTIONS: dict[str, tuple[str, str]] = {
     "-r": ("render_interval", "float"),
     "--retries": ("retries", "int"),
     "-N": ("retries", "int"),
+    "--resume": ("resume", "str"),
+    "--run-id": ("run_id", "str"),
+    "--patch": ("patch", "str"),
     "--retry-backoff": ("retry_backoff", "float"),
     "-b": ("retry_backoff", "float"),
     "--sort": ("sort_by", "str"),
@@ -843,6 +850,8 @@ def _emit_summary(
 
 
 def _resolve_runtime_config(opts: UpdateOptions) -> UpdateConfig:
+    if (run := durable.current_run()) is not None:
+        return run.config
     return resolve_config(
         http_timeout=opts.http_timeout,
         subprocess_timeout=opts.subprocess_timeout,
@@ -885,8 +894,6 @@ def _load_sources_for_run(resolved: ResolvedTargets) -> SourcesFile:
 @dataclass(frozen=True)
 class _RunPlan:
     resolved: ResolvedTargets
-    tty_enabled: bool
-    show_phase_headers: bool
     sources: SourcesFile
     item_meta: dict[str, ItemMeta]
     order: list[str]
@@ -926,6 +933,8 @@ class _RunOutcome:
     dropped: dict[str, str] = field(default_factory=dict)
     written_paths: tuple[Path, ...] = ()
     run_dir: Path | None = None
+    timings: list[dict[str, str | int | float]] | None = None
+    patch: bytes = b""
 
 
 def _record_workspace_failure(
@@ -1007,7 +1016,6 @@ def _handle_preflight_requests(
 
 def _build_run_plan(opts: UpdateOptions) -> _RunPlan | _RunPlanError | None:
     resolved = ResolvedTargets.from_options(opts)
-    tty_enabled, show_phase_headers = _resolve_tty_settings(opts)
 
     unknown_targets = [
         target for target in opts.target_names if target not in resolved.all_known_names
@@ -1036,8 +1044,6 @@ def _build_run_plan(opts: UpdateOptions) -> _RunPlan | _RunPlanError | None:
 
     return _RunPlan(
         resolved=resolved,
-        tty_enabled=tty_enabled,
-        show_phase_headers=show_phase_headers,
         sources=sources,
         item_meta=item_meta,
         order=order,
@@ -1062,9 +1068,10 @@ def _record_derivation_validation_failures(
     return True
 
 
-def _live_ui_enabled(plan: _RunPlan, opts: UpdateOptions) -> bool:
+def _live_ui_enabled(opts: UpdateOptions) -> bool:
     """Return whether the live terminal panel owns progress output."""
-    return plan.tty_enabled and not opts.quiet and not opts.json
+    tty_enabled, _ = _resolve_tty_settings(opts)
+    return tty_enabled and not opts.quiet and not opts.json
 
 
 def _start_run_monitor(
@@ -1076,13 +1083,27 @@ def _start_run_monitor(
     """Create the run monitor, its run directory, and the heartbeat."""
     run_root = _run_log_root(config)
     try:
-        monitor = RunMonitor.start(
-            targets=plan.order,
-            phase_count=_RUN_PHASE_COUNT,
-            run_root=run_root,
-            inactivity_warning_seconds=config.inactivity_warning_seconds,
+        run = durable.current_run()
+        monitor = (
+            RunMonitor(
+                targets=plan.order,
+                phase_count=_RUN_PHASE_COUNT,
+                run_dir=run.store.path.parent,
+                run_id=run.store.path.parent.name,
+                diagnostics=config.run_log,
+                inactivity_warning_seconds=config.inactivity_warning_seconds,
+            )
+            if run is not None
+            else RunMonitor.start(
+                targets=plan.order,
+                phase_count=_RUN_PHASE_COUNT,
+                run_root=run_root,
+                inactivity_warning_seconds=config.inactivity_warning_seconds,
+            )
         )
     except OSError as error:
+        if durable.current_run() is not None:
+            raise
         out.print_error(
             f"Warning: run log unavailable under {run_root} ({error}); "
             "continuing without it"
@@ -1094,7 +1115,7 @@ def _start_run_monitor(
             inactivity_warning_seconds=config.inactivity_warning_seconds,
         )
     printer = None
-    if not _live_ui_enabled(plan, opts) and not opts.quiet and not opts.json:
+    if not _live_ui_enabled(opts) and not opts.quiet and not opts.json:
 
         def printer(line: str) -> None:
             out.print(line, style="dim")
@@ -1111,11 +1132,14 @@ async def _execute_run_plan_result(
     config: UpdateConfig,
     plan: _RunPlan,
     monitor: RunMonitor | None = None,
+    *,
+    preparation: Preparation | None = None,
 ) -> _RunExecutionResult:
     # Every plan runs in a disposable workspace. ``resolved.dry_run`` controls
     # reporting and live promotion, not whether the candidate is materialized.
     queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue(maxsize=EVENT_QUEUE_SIZE)
-    is_tty = _live_ui_enabled(plan, opts)
+    is_tty = _live_ui_enabled(opts)
+    _, show_phase_headers = _resolve_tty_settings(opts)
     full_output = _resolve_full_output(
         full_output=True if opts.tty == "full" else None,
     )
@@ -1141,19 +1165,28 @@ async def _execute_run_plan_result(
     async def produce() -> update_source_runner.UpdatePhaseResult:
         phase_result = update_source_runner.UpdatePhaseResult()
         if plan.resolved.do_refs and plan.resolved.ref_inputs:
-            if plan.show_phase_headers:
+            if show_phase_headers:
                 out.print("\nPhase 1: flake input refs", style="dim")
             if monitor is not None:
                 monitor.begin_phase("flake input refs", 1)
-            ref_result = await update_source_runner.run_ref_phase(
-                ref_inputs=plan.resolved.ref_inputs,
-                queue=queue,
-                config=config,
+
+            async def replay_refs(
+                result: update_source_runner.UpdatePhaseResult,
+            ) -> None:
+                for event in result.terminal_events:
+                    await queue.put(event)
+
+            ref_result = await durable.phase(
+                "refs",
+                lambda: update_source_runner.run_ref_phase(
+                    ref_inputs=plan.resolved.ref_inputs, queue=queue, config=config
+                ),
+                replay=replay_refs,
             )
             phase_result = phase_result.merged(ref_result)
 
         if plan.resolved.do_sources and plan.resolved.source_names:
-            if plan.show_phase_headers:
+            if show_phase_headers:
                 out.print("\nPhase 2: sources.json updates", style="dim")
             if monitor is not None:
                 monitor.begin_phase("sources", 2)
@@ -1163,9 +1196,10 @@ async def _execute_run_plan_result(
                     sources=plan.sources,
                     queue=queue,
                     update_input=plan.resolved.do_input_refresh,
-                    native_only=plan.resolved.native_only,
+                    native_only=plan.resolved.native_only or preparation is not None,
                     config=config,
                     input_refreshes=phase_result.input_refreshes,
+                    preparation=preparation,
                 ),
             )
             phase_result = phase_result.merged(source_result)
@@ -1173,15 +1207,28 @@ async def _execute_run_plan_result(
         return phase_result
 
     phase_result = await run_event_pipeline(queue, produce=produce, consume=consume)
-    written_paths = update_persistence.persist_materialized_updates(
-        do_sources=plan.resolved.do_sources,
-        source_names=plan.resolved.source_names,
-        native_only=plan.resolved.native_only,
-        sources=plan.sources,
-        source_updates=phase_result.source_updates,
-        artifact_updates=phase_result.artifact_updates,
-        details=phase_result.details,
-    )
+
+    async def persist() -> tuple[Path, ...]:
+        paths = (
+            update_persistence.persist_materialized_updates(
+                do_sources=plan.resolved.do_sources,
+                source_names=plan.resolved.source_names,
+                native_only=plan.resolved.native_only or preparation is not None,
+                sources=plan.sources,
+                source_updates=phase_result.source_updates,
+                artifact_updates=phase_result.artifact_updates,
+                details=phase_result.details,
+            )
+            or ()
+        )
+        return tuple(
+            path.relative_to(get_repo_root())
+            if durable.current_run() is not None and path.is_absolute()
+            else path
+            for path in paths
+        )
+
+    written_paths = await durable.phase("materialized", persist)
 
     summary = UpdateSummary()
     summary.accumulate(phase_result.details)
@@ -1232,7 +1279,7 @@ def _workspace_allowed_paths(
 
 def _sources_refresh_flake_lock(
     source_names: Iterable[str],
-    updaters: dict[str, UpdaterClass],
+    updaters: Mapping[str, UpdaterClass],
 ) -> bool:
     """Return whether selected source tasks invoke any input refresh."""
     return any(
@@ -1282,7 +1329,9 @@ def _emit_run_outcome(
     )
     candidate_state_known = not dry_run and outcome.promotion_state is not None
     runtime = active_runtime()
-    timings = runtime.report() if out.timings and runtime is not None else None
+    timings = outcome.timings
+    if out.timings and runtime is not None:
+        timings = runtime.report()
     if out.json_output:
         payload = cast("dict[str, object]", outcome.summary.to_dict())
         if timings is not None:
@@ -1408,7 +1457,7 @@ def _validation_display(
     """Show a live status block for validation only where the panel was live."""
     if monitor is None or not isinstance(plan, _RunPlan):
         return nullcontext()
-    if not _live_ui_enabled(plan, opts):
+    if not _live_ui_enabled(opts):
         return nullcontext()
 
     def tail() -> tuple[str, ...]:
@@ -1809,12 +1858,20 @@ async def _validate_and_gate(
             _validation_display(plan, context.opts, context.config, context.monitor),
             workspace.validation_snapshot() as snapshot,
         ):
-            derivations_failed, roots_failed = _validate_round(
-                plan,
-                snapshot,
-                outcome,
-                context,
-                round_index=round_index,
+
+            def validate(
+                index: int = round_index,
+            ) -> tuple[tuple[bool, bool], UpdateSummary]:
+                result = _validate_round(
+                    plan, snapshot, outcome, context, round_index=index
+                )
+                return result, outcome.summary
+
+            (derivations_failed, roots_failed), outcome.summary = (
+                durable.checkpoint_sync(
+                    f"validation:{round_index}:{snapshot.identity or 'ephemeral'}",
+                    validate,
+                )
             )
         await asyncio.sleep(0)
         check_cancelled()
@@ -1839,6 +1896,7 @@ async def _gate_candidate(
     context: _ValidationContext,
     *,
     allowed_paths: tuple[Path, ...],
+    preparation: Preparation | None = None,
 ) -> None:
     """Withhold coupled failures, validate what remains, then promote or check.
 
@@ -1846,6 +1904,20 @@ async def _gate_candidate(
     candidate. A plan error never reaches validation.
     """
     opts = context.opts
+    if preparation is not None:
+        # Preparation exports even failed bytes, but cannot promote. Native CI
+        # jobs validate the final assembled tree in a separate command.
+        preparation.capture(
+            workspace,
+            sources=(
+                tuple(run_plan.resolved.source_names)
+                if isinstance(run_plan, _RunPlan)
+                else ()
+            ),
+            allowed_paths=tuple(dict.fromkeys((*allowed_paths, *_FLAKE_FILES))),
+            succeeded=not outcome.had_errors,
+        )
+        return
     if outcome.plan_error is not None or (opts.strict and outcome.had_errors):
         return
     if outcome.had_errors and isinstance(run_plan, _RunPlan):
@@ -1866,14 +1938,67 @@ async def _gate_candidate(
     if opts.check:
         workspace.validate_changes(allowed_paths)
     else:
+        # Store the validated diff with DBOS's result. Re-exporting a completed
+        # run must never pick up later edits from the live checkout.
+        patch = (
+            workspace.patch(allowed_paths)
+            if not outcome.had_errors and durable.current_run() is not None
+            else b""
+        )
+        # Reconcile the filesystem on every replay until the workflow commits.
+        # SQLite cannot atomically acknowledge an external multi-file write.
         outcome.promoted = bool(workspace.promote(allowed_paths))
+        outcome.patch = patch
+
+
+def _restore_preparation(
+    workspace: update_persistence.IsolatedUpdateWorkspace,
+    preparation: Preparation | None,
+) -> None:
+    """Import only declared candidate outputs before any updater reads them."""
+    if preparation is None or preparation.previous is None:
+        return
+    previous = preparation.previous
+    previous.apply(workspace.root)
+    prior_paths = update_persistence.planned_update_paths(
+        list(previous.sources), _get_updaters()
+    )
+    workspace.validate_changes((
+        *_workspace_relative_paths(workspace.root, prior_paths),
+        *_FLAKE_FILES,
+    ))
+
+
+def _declared_phase_outputs(
+    plan: _RunPlan,
+    updaters: Mapping[str, UpdaterClass],
+    root: Path,
+) -> tuple[list[Path], list[Path]]:
+    """Declare source ownership and the flake writes this plan can perform."""
+    declared = list(
+        update_persistence.planned_update_paths(plan.resolved.source_names, updaters)
+    )
+    phase_outputs: list[Path] = []
+    updates_refs = bool(plan.resolved.do_refs and plan.resolved.ref_inputs)
+    refreshes_inputs = bool(
+        plan.resolved.do_sources
+        and plan.resolved.source_names
+        and plan.resolved.do_input_refresh
+        and _sources_refresh_flake_lock(plan.resolved.source_names, updaters)
+    )
+    if updates_refs:
+        phase_outputs.append(root / "flake.nix")
+    if updates_refs or refreshes_inputs:
+        phase_outputs.append(root / "flake.lock")
+    return [*declared, *phase_outputs], phase_outputs
 
 
 async def _run_updates(
     opts: UpdateOptions,
     *,
     check_tools: bool = False,
-) -> int:
+    preparation: Preparation | None = None,
+) -> _RunOutcome | int:
     """Core update workflow — accepts typed UpdateOptions, returns exit code."""
     out = OutputOptions(json_output=opts.json, quiet=opts.quiet, timings=opts.timings)
     config = _resolve_runtime_config(opts)
@@ -1887,9 +2012,8 @@ async def _run_updates(
     monitor: RunMonitor | None = None
     updaters: Mapping[str, UpdaterClass] = {}
     try:
-        with update_persistence.IsolatedUpdateWorkspace(
-            get_repo_root(),
-        ) as workspace:
+        with durable.workspace(get_repo_root()) as workspace:
+            _restore_preparation(workspace, preparation)
             _revalidate_runtime_source_snapshot(workspace.root)
             if (
                 check_tools
@@ -1898,7 +2022,8 @@ async def _run_updates(
                 return tool_check
             update_flake.invalidate_flake_lock()
             allowed_paths: tuple[Path, ...] = ()
-            if isinstance(run_plan := _build_run_plan(opts), _RunPlanError):
+            run_plan = durable.checkpoint_sync("plan", lambda: _build_run_plan(opts))
+            if isinstance(run_plan, _RunPlanError):
                 outcome.plan_error = run_plan
                 outcome.summary.accumulate(
                     dict.fromkeys(run_plan.unknown_targets, "error")
@@ -1908,35 +2033,11 @@ async def _run_updates(
                 updaters = _get_updaters()
                 monitor = _start_run_monitor(run_plan, opts, out, config)
                 outcome.run_dir = monitor.run_dir
-                declared_paths = list(
-                    update_persistence.planned_update_paths(
-                        run_plan.resolved.source_names,
-                        updaters,
-                    )
+                declared_paths, explicit_phase_outputs = _declared_phase_outputs(
+                    run_plan, updaters, workspace.root
                 )
-                explicit_phase_outputs: list[Path] = []
-                updates_refs = bool(
-                    run_plan.resolved.do_refs and run_plan.resolved.ref_inputs
-                )
-                refreshes_source_inputs = bool(
-                    run_plan.resolved.do_sources
-                    and run_plan.resolved.source_names
-                    and run_plan.resolved.do_input_refresh
-                    and _sources_refresh_flake_lock(
-                        run_plan.resolved.source_names,
-                        updaters,
-                    )
-                )
-                if updates_refs:
-                    flake_nix = workspace.root / "flake.nix"
-                    declared_paths.append(flake_nix)
-                    explicit_phase_outputs.append(flake_nix)
-                if updates_refs or refreshes_source_inputs:
-                    flake_lock = workspace.root / "flake.lock"
-                    declared_paths.append(flake_lock)
-                    explicit_phase_outputs.append(flake_lock)
                 result = await _execute_run_plan_result(
-                    opts, out, config, run_plan, monitor
+                    opts, out, config, run_plan, monitor, preparation=preparation
                 )
                 outcome.summary = result.summary
                 outcome.candidate_updates = result.candidate_updates
@@ -1961,6 +2062,7 @@ async def _run_updates(
                     monitor=monitor,
                 ),
                 allowed_paths=allowed_paths,
+                preparation=preparation,
             )
     except update_persistence.UpdateWorkspaceError as error:
         _record_workspace_failure(outcome, error)
@@ -1975,17 +2077,57 @@ async def _run_updates(
                 }
             )
 
+    return outcome
+
+
+async def collect_run_outcome(
+    opts: UpdateOptions,
+    *,
+    check_tools: bool = False,
+    preparation: Preparation | None = None,
+) -> _RunOutcome | int:
+    """Own shared resources and return the serializable domain result."""
+    async with runtime_scope(_resolve_runtime_config(opts)) as runtime:
+        result = await _run_updates(
+            opts, check_tools=check_tools, preparation=preparation
+        )
+        if isinstance(result, _RunOutcome) and opts.timings:
+            result.timings = runtime.report()
+        return result
+
+
+@DBOS.workflow(name="nixcfg.update")
+async def _durable_update() -> _RunOutcome | int:
+    """Execute the admitted SQLite request under DBOS recovery supervision."""
+
+    async def collect() -> _RunOutcome | int:
+        run = durable.current_run()
+        assert run is not None  # noqa: S101 -- supervise admits an active session
+        return await collect_run_outcome(run.options, check_tools=True)
+
+    return await durable.supervise(collect)
+
+
+def emit_run_result(result: _RunOutcome | int, opts: UpdateOptions) -> int:
+    """Render original and recovered results after workspace teardown."""
+    if isinstance(result, int):
+        return result
+    if opts.patch is not None:
+        Path(opts.patch).write_bytes(result.patch)
     return _emit_run_outcome(
-        outcome,
-        out=out,
+        result,
+        out=OutputOptions(
+            json_output=opts.json, quiet=opts.quiet, timings=opts.timings
+        ),
         dry_run=opts.check,
     )
 
 
 async def run_updates(opts: UpdateOptions, *, check_tools: bool = False) -> int:
-    """Own shared resources through preparation, validation, and final reporting."""
-    async with runtime_scope(_resolve_runtime_config(opts)):
-        return await _run_updates(opts, check_tools=check_tools)
+    """Run a library-owned update without starting a DBOS service."""
+    return emit_run_result(
+        await collect_run_outcome(opts, check_tools=check_tools), opts
+    )
 
 
 def run_update_command(
@@ -2008,7 +2150,31 @@ def run_update_command(
         msg = f"Expected UpdateOptions, got {type(opts)!r}"
         raise TypeError(msg)
 
-    return asyncio.run(run_updates(opts, check_tools=True))
+    config = _resolve_runtime_config(opts)
+    out = OutputOptions(json_output=opts.json, quiet=opts.quiet, timings=opts.timings)
+    if (
+        opts.resume is None
+        and (result := _handle_preflight_requests(opts, out, config)) is not None
+    ):
+        return result
+    try:
+        if opts.repair is not None:
+            from lib.update.repair import (  # noqa: PLC0415 -- optional supervisor avoids import cycle
+                run_repairing_update,
+            )
+
+            return run_repairing_update(opts, get_repo_root())
+        return asyncio.run(durable.execute(opts, get_repo_root(), config))
+    except (
+        durable.ResumeError,
+        update_persistence.UpdateWorkspaceError,
+        OSError,
+    ) as error:
+        if opts.json:
+            sys.stdout.write(json.dumps({"success": False, "error": str(error)}) + "\n")
+        else:
+            out.print_error(f"Error: {error}")
+        return 1
 
 
 app = typer.Typer(
@@ -2128,6 +2294,32 @@ def cli(  # noqa: PLR0913 -- Typer requires an explicit parameter for each publi
             ),
         ),
     ] = False,
+    resume: Annotated[
+        str | None,
+        typer.Option(
+            "--resume", help="Resume an interrupted run using its original inputs."
+        ),
+    ] = None,
+    run_id: Annotated[
+        str | None,
+        typer.Option(
+            "--run-id",
+            help="Start or resume a named run; repeated invocations must use the same inputs.",
+        ),
+    ] = None,
+    patch: Annotated[
+        str | None,
+        typer.Option(
+            "--patch", help="Export the successful run's validated Git patch."
+        ),
+    ] = None,
+    repair: Annotated[
+        RepairAgent | None,
+        typer.Option(
+            "--repair",
+            help="Allow one isolated agent repair and a fresh validated attempt.",
+        ),
+    ] = None,
     strict: Annotated[
         bool,
         typer.Option(

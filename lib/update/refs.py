@@ -25,6 +25,7 @@ from lib.update.events import (
     StatusInfo,
     StatusKind,
     UpdateEvent,
+    UpdateEventKind,
 )
 from lib.update.flake import (
     load_flake_lock,
@@ -438,6 +439,7 @@ class RefTaskOptions:
     flake_edit_lock: asyncio.Lock | None = None
     config: UpdateConfig | None = None
     input_refreshes: dict[str, FlakeInputState] | None = None
+    terminal_events: list[UpdateEvent] | None = None
 
 
 async def check_flake_ref_update(
@@ -601,11 +603,18 @@ async def update_refs_task(
     task_options = options or RefTaskOptions()
     detail: SummaryStatus = "error"
 
+    async def put(event: UpdateEvent) -> None:
+        if task_options.terminal_events is not None and event.kind in {
+            UpdateEventKind.ERROR,
+            UpdateEventKind.RESULT,
+        }:
+            task_options.terminal_events.append(event)
+        await queue.put(event)
+
     async def _run() -> None:
         nonlocal detail
         resolved_config = resolve_active_config(task_options.config)
         source = input_ref.name
-        put = queue.put
 
         @asynccontextmanager
         async def edit_lock() -> AsyncIterator[None]:
@@ -687,7 +696,9 @@ async def update_refs_task(
         await put(UpdateEvent.result(source, update_payload))
         detail = "updated"
 
-    await run_queue_task(source=input_ref.name, queue=queue, task=_run)
+    failure = await run_queue_task(source=input_ref.name, queue=queue, task=_run)
+    if failure is not None and task_options.terminal_events is not None:
+        task_options.terminal_events.append(failure)
     return detail
 
 

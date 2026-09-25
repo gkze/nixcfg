@@ -139,6 +139,7 @@ def test_resolve_active_config_and_default_config_reference(
 ) -> None:
     """Prefer explicit config and otherwise return the global default."""
     monkeypatch.delenv("UPDATE_RUN_LOG", raising=False)
+    monkeypatch.delenv("UPDATE_RUN_LOG_DIR", raising=False)
     custom = UpdateConfig(
         default_timeout=1,
         default_subprocess_timeout=2,
@@ -169,6 +170,7 @@ def test_resolve_config_ignores_none_overrides(
 ) -> None:
     """Keep environment defaults when explicit overrides are None."""
     monkeypatch.delenv("UPDATE_RUN_LOG", raising=False)
+    monkeypatch.delenv("UPDATE_RUN_LOG_DIR", raising=False)
     cfg = resolve_config(http_timeout=None, retries=None, hash_build_platforms=None)
     assert cfg == DEFAULT_CONFIG
 

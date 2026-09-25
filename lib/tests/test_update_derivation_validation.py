@@ -374,11 +374,13 @@ def test_validate_derivation_requests_preserves_external_installables() -> None:
         (30000, 30000),
     ],
 )
+@pytest.mark.parametrize("systems", [None, ("aarch64-darwin",), ("aarch64-linux",)])
 def test_validate_root_closures_builds_flake_owned_aggregate(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     timeout: float | None,
     expected_timeout: float,
+    systems: tuple[str, ...] | None,
 ) -> None:
     """Discover and build only nonempty systems from the candidate manifest."""
     calls: list[tuple[list[str], dict[str, object]]] = []
@@ -419,7 +421,10 @@ def test_validate_root_closures_builds_flake_owned_aggregate(
         _snapshot,
     )
 
-    assert validation.validate_root_closures(timeout=timeout, run=_run) == ()
+    assert (
+        validation.validate_root_closures(timeout=timeout, run=_run, systems=systems)
+        == ()
+    )
     expected_kwargs = {
         "cwd": snapshot_root,
         "text": True,
@@ -438,19 +443,27 @@ def test_validate_root_closures_builds_flake_owned_aggregate(
             ],
             expected_kwargs,
         ),
-        (
-            [
-                "nix",
-                "build",
-                "--no-update-lock-file",
-                "--no-link",
-                "--keep-going",
-                f"path:{snapshot_root}#checks.aarch64-darwin.root-closures",
-                f"path:{snapshot_root}#checks.x86_64-linux.root-closures",
-            ],
-            expected_kwargs,
-        ),
-    ]
+    ] + (
+        [
+            (
+                [
+                    "nix",
+                    "build",
+                    "--no-update-lock-file",
+                    "--no-link",
+                    "--keep-going",
+                    *(
+                        f"path:{snapshot_root}#checks.{system}.root-closures"
+                        for system in ("aarch64-darwin", "x86_64-linux")
+                        if systems is None or system in systems
+                    ),
+                ],
+                expected_kwargs,
+            ),
+        ]
+        if systems != ("aarch64-linux",)
+        else []
+    )
 
 
 def test_validate_root_closures_rejects_an_empty_candidate_manifest(
@@ -1201,3 +1214,36 @@ def test_concurrent_eval_groups_serialize_progress_and_attribute_failures(
     assert len(started) == 2
     assert len(set(started)) == 2
     assert finished == [(started[0], False), (started[1], False)]
+
+
+def test_native_builder_still_evaluates_every_declared_platform(monkeypatch) -> None:
+    """CI splits native builds without erasing foreign evaluation contracts."""
+
+    class MultiPlatform:
+        derivation_validations = (
+            DerivationValidation(
+                installable=".#pkgs.{system}.{name}",
+                mode="build",
+                systems=("aarch64-darwin", "x86_64-linux"),
+            ),
+            DerivationValidation(
+                installable=".#pkgs.{system}.{name}.drvPath",
+                systems=("aarch64-darwin", "x86_64-darwin", "x86_64-linux"),
+            ),
+        )
+
+    monkeypatch.setattr(
+        validation, "get_current_nix_platform", lambda: "aarch64-darwin"
+    )
+    requests = validation.resolve_derivation_validations(
+        ("example",),
+        updaters={"example": MultiPlatform},
+        all_declared_systems=True,
+        native_builds_only=True,
+    )
+    assert [(request.mode, request.installable) for request in requests] == [
+        ("build", ".#pkgs.aarch64-darwin.example"),
+        ("eval", ".#pkgs.aarch64-darwin.example.drvPath"),
+        ("eval", ".#pkgs.x86_64-darwin.example.drvPath"),
+        ("eval", ".#pkgs.x86_64-linux.example.drvPath"),
+    ]

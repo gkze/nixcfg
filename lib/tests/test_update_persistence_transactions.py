@@ -1169,3 +1169,54 @@ def test_workspace_restore_baseline_and_baseline_content(tmp_path: Path) -> None
             workspace.restore_baseline(["dir"])
         with pytest.raises(ValueError, match="repository-relative"):
             workspace.restore_baseline(["/etc/passwd"])
+
+
+def test_source_stability_accepts_deleted_paths_and_rejects_non_directory_parents(
+    tmp_path: Path,
+) -> None:
+    """Deleted tracked files are stable absence; parent topology changes are conflicts."""
+    from lib.tests._update_workspace_helpers import init_update_workspace_repo
+
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files={"nested/file": "content"})
+    (root / "nested/file").unlink()
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        view = persistence_module._read_source_view(root, descriptor)
+        assert persistence_module._source_view_is_stable(root, descriptor, view)
+        (root / "arrived.txt").write_text("concurrent untracked file")
+        assert not persistence_module._source_view_is_stable(root, descriptor, view)
+        (root / "nested").rmdir()
+        (root / "nested").write_text("unexpected parent file")
+        with pytest.raises(UpdateWorkspaceError, match="non-directory"):
+            persistence_module._reread_source_fingerprints(root, descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def test_candidate_patch_roundtrips_binary_additions_deletions_and_modes(
+    tmp_path: Path,
+) -> None:
+    """The CI artifact can reproduce the exact validated tree in a fresh checkout."""
+    root = tmp_path / "repo"
+    _init_repo(root)
+    with IsolatedUpdateWorkspace(root) as workspace:
+        (workspace.root / "a.txt").write_bytes(b"\x00\xffbinary")
+        (workspace.root / "b.txt").unlink()
+        new = workspace.root / "new.sh"
+        new.write_bytes(b"#!/bin/sh\nexit 0\n")
+        new.chmod(0o755)
+        (workspace.root / "link").symlink_to("new.sh")
+        with workspace.validation_snapshot():
+            pass
+        patch = workspace.patch(("a.txt", "b.txt", "new.sh", "link"))
+    subprocess.run(  # noqa: S603 -- local test repository
+        [persistence_module._git_binary(), "apply", "-"],
+        cwd=root,
+        input=patch,
+        check=True,
+    )
+    assert (root / "a.txt").read_bytes() == b"\x00\xffbinary"
+    assert not (root / "b.txt").exists()
+    assert (root / "new.sh").stat().st_mode & 0o777 == 0o755
+    assert (root / "link").readlink() == Path("new.sh")

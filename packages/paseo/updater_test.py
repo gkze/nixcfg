@@ -177,6 +177,8 @@ _CLAUDE_BUILD_OPTIONS_TAIL_FIXTURE = b"""\
   private buildSettingsOptions(
 """
 _CLAUDE_PROVIDER_FIXTURE = (
+    # The 0.9.1 constructor wires resolveBinary directly into contextUsage;
+    # it has no intervening rewindSdk assignment.
     _CLAUDE_RESOLVER_FIXTURE
     + b"""\
 
@@ -240,7 +242,6 @@ class ClaudeAgentSession implements AgentSession {
   constructor(options: ClaudeAgentSessionOptions) {
     this.queryFactory = options.queryFactory;
     this.resolveBinary = options.resolveBinary;
-    this.rewindSdk = options.rewindSdk ?? realClaudeRewindSdk;
     this.contextUsage = new ClaudeContextUsageState(
       200_000,
     );
@@ -1948,6 +1949,10 @@ async function unreviewedLaunch(): Promise<void> {
             b"if (false)\n      " + _CLAUDE_RESOLVE_ASSIGNMENT,
         ),
         (
+            b"this.resolveBinary = options.resolveBinary;",
+            b"this.resolveBinary = () => bundledSdkBinary;",
+        ),
+        (
             _CLAUDE_BINARY_RESOLUTION,
             b"return bundledOptions;\n    " + _CLAUDE_BINARY_RESOLUTION,
         ),
@@ -1972,6 +1977,7 @@ async function unreviewedLaunch(): Promise<void> {
     ids=(
         "short-circuited-client-owner",
         "unbraced-dead-constructor",
+        "session-resolver-overridden",
         "unreachable-build-chain",
         "post-resolution-early-return",
         "later-spread-override",
