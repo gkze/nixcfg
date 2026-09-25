@@ -1,5 +1,6 @@
 """Behavioral tests for target-aware update derivation validation."""
 
+import json
 import subprocess
 import threading
 import time
@@ -464,6 +465,148 @@ def test_validate_root_closures_builds_flake_owned_aggregate(
         if systems != ("aarch64-linux",)
         else []
     )
+
+
+@pytest.fixture
+def native_root_graph(tmp_path) -> tuple:
+    """Model the actual Darwin -> Linux VM boundary at the Nix process seam."""
+
+    def node(system, *dependencies):
+        return {
+            "version": 4,
+            "system": system,
+            "inputs": {
+                "drvs": {
+                    path: {"outputs": ["out"], "dynamicOutputs": {}}
+                    for path in dependencies
+                }
+            },
+        }
+
+    graph = {
+        "version": 4,
+        "derivations": {
+            "root.drv": node("aarch64-darwin", "middle.drv", "vm.drv"),
+            "middle.drv": node("aarch64-darwin", "vm.drv"),
+            "vm.drv": node("aarch64-linux", "linux-leaf.drv", "fetch.drv"),
+            "linux-leaf.drv": node("aarch64-linux"),
+            "fetch.drv": node("builtin"),
+        },
+    }
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        assert kwargs["cwd"] == tmp_path
+        assert kwargs["timeout"] == 42
+        stdout = ""
+        if args[1] == "eval":
+            stdout = json.dumps({
+                "schemaVersion": 2,
+                "requiredKinds": ["darwin", "home"],
+                "requiredRoots": [],
+                "roots": [
+                    {"kind": "darwin", "name": "argus", "system": "aarch64-darwin"},
+                    {"kind": "home", "name": "george", "system": "aarch64-darwin"},
+                ],
+            })
+        if args[1:3] == ["derivation", "show"]:
+            stdout = json.dumps(graph)
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+
+    return graph, calls, run
+
+
+@pytest.mark.parametrize("system", ["aarch64-linux", "x86_64-linux", "aarch64-darwin"])
+def test_native_validator_builds_the_foreign_root_dependency_boundary(
+    native_root_graph,
+    tmp_path,
+    system,
+) -> None:
+    """An ARM Linux runner must build the VM even though every root is Darwin."""
+    _, calls, run = native_root_graph
+    assert (
+        validation.validate_root_closures(
+            flake_root=tmp_path,
+            systems=(system,),
+            include_dependencies=True,
+            timeout=42,
+            run=run,
+        )
+        == ()
+    )
+    graph_command = next(args for args in calls if args[1] == "derivation")
+    assert graph_command == [
+        "nix",
+        "derivation",
+        "show",
+        "--recursive",
+        "--no-update-lock-file",
+        f"path:{tmp_path}#checks.aarch64-darwin.root-closures",
+    ]
+    builds = [args[-1] for args in calls if args[1] == "build"]
+    assert (
+        builds
+        == {
+            "aarch64-linux": ["/nix/store/vm.drv^*"],
+            "aarch64-darwin": [f"path:{tmp_path}#checks.aarch64-darwin.root-closures"],
+            "x86_64-linux": [],
+        }[system]
+    )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ["missing", "version", "json", "command", "empty", "os", "timeout", "build"],
+)
+def test_native_dependency_failure_never_issues_success(
+    native_root_graph,
+    tmp_path,
+    failure,
+) -> None:
+    graph, calls, run = native_root_graph
+    if failure == "missing":
+        del graph["derivations"]["vm.drv"]
+    elif failure == "version":
+        graph["version"] = 5
+
+    def fail(args, **kwargs):
+        result = run(args, **kwargs)
+        if args[1] == "build" and failure == "build":
+            return subprocess.CompletedProcess(
+                args, 1, stdout="", stderr="VM build failed"
+            )
+        if args[1] == "derivation":
+            if failure == "os":
+                raise OSError("Nix unavailable")
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(args, 42)
+            if failure == "json":
+                return subprocess.CompletedProcess(args, 0, stdout="invalid", stderr="")
+            if failure in {"command", "empty"}:
+                return subprocess.CompletedProcess(
+                    args,
+                    1,
+                    stdout="",
+                    stderr="graph unavailable" if failure == "command" else "",
+                )
+        return result
+
+    failures = validation.validate_root_closures(
+        flake_root=tmp_path,
+        systems=("aarch64-linux",),
+        include_dependencies=True,
+        timeout=42,
+        run=fail,
+    )
+    assert len(failures) == 1
+    assert failures[0].source == "root-closures"
+    assert failures[0].message
+    if failure == "build":
+        assert failures[0].installable == "/nix/store/vm.drv^*"
+        assert failures[0].message == "VM build failed"
+    else:
+        assert not any(args[1] == "build" for args in calls)
 
 
 def test_validate_root_closures_rejects_an_empty_candidate_manifest(

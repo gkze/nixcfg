@@ -2442,10 +2442,17 @@ def test_run_update_command_rejects_invalid_option_inputs() -> None:
         run_update_command(cast("UpdateOptions", object()))
 
 
+@pytest.mark.parametrize("repo_root", [None, "previous-root"])
 def test_update_workspace_copies_and_promotes_explicit_changes(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    repo_root: str | None,
 ) -> None:
     """Run against an exact non-ignored source copy and promote allowed files."""
+    if repo_root is None:
+        monkeypatch.delenv("REPO_ROOT", raising=False)
+    else:
+        monkeypatch.setenv("REPO_ROOT", repo_root)
     live = tmp_path / "live"
     _init_update_workspace_repo(live)
     (live / "tracked.txt").write_text("working tree\n", encoding="utf-8")

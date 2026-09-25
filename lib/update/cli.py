@@ -1935,20 +1935,20 @@ async def _gate_candidate(
     outcome.had_errors = outcome.had_errors or blocked or bool(outcome.summary.errors)
     if blocked:
         return
+    # Store the validated diff with DBOS's result, including checks. Re-exporting
+    # a completed run must never pick up later edits from the live checkout.
+    patch = (
+        workspace.patch(allowed_paths)
+        if not outcome.had_errors and durable.current_run() is not None
+        else b""
+    )
     if opts.check:
         workspace.validate_changes(allowed_paths)
     else:
-        # Store the validated diff with DBOS's result. Re-exporting a completed
-        # run must never pick up later edits from the live checkout.
-        patch = (
-            workspace.patch(allowed_paths)
-            if not outcome.had_errors and durable.current_run() is not None
-            else b""
-        )
         # Reconcile the filesystem on every replay until the workflow commits.
         # SQLite cannot atomically acknowledge an external multi-file write.
         outcome.promoted = bool(workspace.promote(allowed_paths))
-        outcome.patch = patch
+    outcome.patch = patch
 
 
 def _restore_preparation(

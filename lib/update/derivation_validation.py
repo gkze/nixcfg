@@ -19,6 +19,7 @@ from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.primitive import StringPrimitive
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from lib.nix.models.derivation import DerivationInputs  # noqa: TC001 -- Pydantic field
 from lib.system_policy import RootClosureKind, required_root_kinds
 from lib.update import persistence as update_persistence
 from lib.update.nix import (
@@ -172,6 +173,40 @@ class RootClosureManifest(BaseModel):
 
 class _RootClosureManifestError(RuntimeError):
     """The candidate flake could not provide a valid root manifest."""
+
+
+class _RootDerivation(BaseModel):
+    """Only the dependency boundary is needed from Nix's derivation-v4 schema."""
+
+    version: Literal[4]
+    system: str
+    inputs: DerivationInputs
+
+
+class _RootDerivationGraph(BaseModel):
+    """Nix owns graph discovery; CI only selects the native boundary outputs."""
+
+    version: Literal[4]
+    derivations: dict[str, _RootDerivation]
+
+    @classmethod
+    def from_result(cls, result: _RunResult) -> _RootDerivationGraph:
+        if result.returncode:
+            msg = result.stderr.strip() or "Root graph discovery failed"
+            raise ValueError(msg)
+        return cls.model_validate_json(result.stdout)
+
+    def dependencies(self, systems: tuple[str, ...]) -> tuple[str, ...]:
+        selected = set()
+        for parent in self.derivations.values():
+            for path in parent.inputs.drvs:
+                if path not in self.derivations:
+                    msg = f"Incomplete root derivation graph: {path}"
+                    raise ValueError(msg)
+                child = self.derivations[path]
+                if child.system in systems and child.system != parent.system:
+                    selected.add(f"/nix/store/{path}^*")
+        return tuple(sorted(selected))
 
 
 def _source_required_roots(
@@ -895,6 +930,7 @@ def validate_root_closures(
     *,
     flake_root: Path | None = None,
     systems: tuple[str, ...] | None = None,
+    include_dependencies: bool = False,
     timeout: float | None = None,
     run: _Runner | None = None,
     sleep: _Sleeper | None = None,
@@ -947,6 +983,51 @@ def validate_root_closures(
             )
             for system in root_systems
         )
+        if include_dependencies:
+            # A Darwin root may contain a Linux VM image. Build the native
+            # boundary of every root's graph, even on a runner with no roots.
+            args = [
+                "nix",
+                "derivation",
+                "show",
+                "--recursive",
+                "--no-update-lock-file",
+                *(
+                    f"path:{snapshot_root}#checks.{system}.root-closures"
+                    for system in sorted({root.system for root in manifest.roots})
+                ),
+            ]
+            try:
+                result = _run_validation_command(
+                    args,
+                    cwd=snapshot_root,
+                    timeout=root_timeout,
+                    run=runner,
+                    sleep=sleeper,
+                    progress=progress,
+                    check_cancelled=check_cancelled,
+                )
+                graph = _RootDerivationGraph.from_result(result)
+                dependencies = graph.dependencies(systems or root_systems)
+            except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+                return (
+                    DerivationValidationFailure(
+                        source=_ROOT_CLOSURE_VALIDATION_SOURCE,
+                        installable=_ROOT_CLOSURE_MANIFEST_INSTALLABLE,
+                        message=str(exc),
+                    ),
+                )
+            requests = (
+                tuple(
+                    DerivationValidationRequest(
+                        source=_ROOT_CLOSURE_VALIDATION_SOURCE,
+                        installable=installable,
+                        mode="build",
+                    )
+                    for installable in dependencies
+                )
+                + requests
+            )
         return validate_derivation_requests(
             requests,
             timeout=root_timeout,

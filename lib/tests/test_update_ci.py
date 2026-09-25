@@ -128,8 +128,8 @@ def test_job_rejects_unknown_stage_or_missing_candidate(native_job, stage: str) 
     assert not Path(env["TEST_LOG"]).exists()
 
 
-def test_workflow_prepares_each_required_platform_before_parallel_validation() -> None:
-    """The serial shared-file writers and parallel validators cover system policy."""
+def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
+    """All writers finish before native validation; cached VM outputs precede macOS."""
     workflow = yaml.load(
         (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
     )
@@ -149,10 +149,20 @@ def test_workflow_prepares_each_required_platform_before_parallel_validation() -
     for (name, previous), (_, job) in pairwise(preparation):
         assert job["needs"] == name
         assert job["with"]["previous"] == f"prepare-{previous['with']['system']}"
-    assert preparation[-1][0] in jobs["validate"]["needs"]
-    assert jobs["validate"]["with"]["previous"] == "prepare-x86_64-linux"
-    assert jobs["validate"]["strategy"]["fail-fast"] == "false"
-    assert jobs["publish"]["needs"] == "validate"
+    validators = {
+        name: job for name, job in jobs.items() if name.startswith("validate-")
+    }
+    assert {
+        job["with"]["system"]: job["with"]["runner"] for job in validators.values()
+    } == {row["system"]: row["runner"] for row in matrix}
+    for job in validators.values():
+        assert job["with"]["previous"] == "prepare-x86_64-linux"
+        assert job["with"]["stage"] == "validate"
+    assert jobs["validate-arm"]["needs"] == preparation[-1][0]
+    assert jobs["validate-x86"]["needs"] == preparation[-1][0]
+    assert set(jobs["validate-darwin"]["needs"]) == {"validate-arm", "validate-x86"}
+    assert set(jobs["publish"]["needs"]) == set(validators)
+    assert set(validators) <= set(jobs["repair"]["needs"])
 
 
 def test_all_authored_actions_commands_are_python() -> None:
@@ -386,9 +396,7 @@ def test_publication_uses_signed_commit_and_bounded_repair(
         assert "targets=example" in calls[-1]
 
 
-def test_bootstrap_matrix_and_failure_evidence(
-    job_repository, tmp_path, monkeypatch
-) -> None:
+def test_bootstrap_and_failure_evidence(job_repository, tmp_path, monkeypatch) -> None:
     calls = []
 
     def run(*args, capture=False, check=True):
@@ -405,14 +413,13 @@ def test_bootstrap_matrix_and_failure_evidence(
         return subprocess.CompletedProcess(args, 0, stdout=stdout)
 
     monkeypatch.setattr(jobs, "_run", run)
-    for stage in ("bootstrap", "matrix", "collect-evidence", "install-agent", "repair"):
+    for stage in ("bootstrap", "collect-evidence", "install-agent", "repair"):
         assert jobs.main(stage) == 0
     outputs = dict(
         line.split("=", 1) for line in (tmp_path / "outputs").read_text().splitlines()
     )
     assert Path(outputs["runtime"]).parent == tmp_path
     assert Path(outputs["devshell"]).parent == tmp_path
-    assert json.loads(outputs["matrix"]) == {"include": []}
     assert {p.name for p in (tmp_path / "repair-evidence").iterdir()} == {
         "job-10.log",
         "job-11.log",

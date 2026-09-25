@@ -131,6 +131,7 @@ def validate_candidate(candidate: Candidate) -> ValidationReport:
             failures += validation.validate_root_closures(
                 flake_root=snapshot.root,
                 systems=(system,),
+                include_dependencies=True,
                 print_build_logs=True,
             )
         workspace.validate_changes(allowed)

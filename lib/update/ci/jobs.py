@@ -111,12 +111,6 @@ def clean_runner_image() -> None:
     )
 
 
-def matrix() -> None:
-    """Project canonical policy through the checked updater runtime."""
-    result = _run(_runtime(), "ci", "update", "matrix", capture=True)
-    _outputs(matrix=json.dumps(json.loads(result.stdout)))
-
-
 def _develop(*args: str) -> tuple[str, ...]:
     return "nix", "develop", os.environ["NIXCFG_DEVSHELL"], "--command", *args
 
@@ -347,7 +341,6 @@ def main(stage: str) -> int:
     operations = {
         "clean-image": clean_runner_image,
         "bootstrap": bootstrap,
-        "matrix": matrix,
         "quality": quality,
         "certify": certify,
         "publish": publish,

@@ -508,13 +508,18 @@ rec {
         # Linux builder for cross-platform Nix builds on Apple Silicon.
         # nix-rosetta-builder provides aarch64-linux and x86_64-linux builders
         # via Rosetta 2. Requires initial bootstrap with nix.linux-builder.
-        # CI callers without a Linux builder must disable this explicitly.
+        # Native Linux CI builds the image before Darwin consumes it.
       ]
       ++ optionals (brewAppsModule != null) [ brewAppsModule ]
       ++ optionals enableRosettaBuilder (
         [
           inputs.nix-rosetta-builder.darwinModules.default
-          { nix-rosetta-builder.onDemand = true; }
+          {
+            nix-rosetta-builder.onDemand = true;
+            nix-rosetta-builder.potentiallyInsecureExtraNixosModule.nixpkgs.overlays = [
+              (import ./rosetta-builder-image.nix { inherit lib; })
+            ];
+          }
         ]
         ++ optionals (rosettaBuilderMemory != null) [
           { nix-rosetta-builder.memory = rosettaBuilderMemory; }

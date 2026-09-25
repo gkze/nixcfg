@@ -211,7 +211,8 @@ def test_native_validation_and_certification(
         )
         return ()
 
-    def validate_roots(*, systems, **_kwargs):
+    def validate_roots(*, systems, include_dependencies, **_kwargs):
+        assert include_dependencies
         roots.append(systems)
         return ()
 

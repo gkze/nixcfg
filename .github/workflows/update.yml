@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   # Generated artifacts can be shared between platforms. Extend one pinned
-  # candidate serially, then build the final identical tree in parallel.
+  # candidate serially. Linux builds the VM dependencies before Darwin roots.
   prepare-darwin:
     uses: ./.github/workflows/update-native.yml
     with:
@@ -47,20 +47,35 @@ jobs:
       stage: prepare
       previous: prepare-aarch64-linux
     secrets: inherit
-  validate:
-    needs: [prepare-darwin, prepare-x86]
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.prepare-darwin.outputs.matrix) }}
+  validate-arm:
+    needs: prepare-x86
     uses: ./.github/workflows/update-native.yml
     with:
-      runner: ${{ matrix.runner }}
-      system: ${{ matrix.system }}
+      runner: ubuntu-24.04-arm
+      system: aarch64-linux
+      stage: validate
+      previous: prepare-x86_64-linux
+    secrets: inherit
+  validate-x86:
+    needs: prepare-x86
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: validate
+      previous: prepare-x86_64-linux
+    secrets: inherit
+  validate-darwin:
+    needs: [validate-arm, validate-x86]
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
       stage: validate
       previous: prepare-x86_64-linux
     secrets: inherit
   publish:
-    needs: validate
+    needs: [validate-arm, validate-x86, validate-darwin]
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:
@@ -107,7 +122,14 @@ jobs:
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
         shell: python
   repair:
-    needs: [prepare-darwin, prepare-arm, prepare-x86, validate, publish]
+    needs:
+      - prepare-darwin
+      - prepare-arm
+      - prepare-x86
+      - validate-arm
+      - validate-x86
+      - validate-darwin
+      - publish
     if: |-
       always() && !cancelled() && contains(needs.*.result, 'failure') &&
       (github.event_name == 'schedule' || inputs.repair)

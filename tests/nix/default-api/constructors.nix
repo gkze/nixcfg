@@ -38,6 +38,7 @@ let
     mkDefault = x: x;
     mkForce = x: x;
     mkImageMediaOverride = x: x;
+    overrideDerivation = drv: change: drv // change drv;
 
     genAttrs =
       names: f:
@@ -98,6 +99,32 @@ let
       includeDefaultUserModule = false;
       rosettaBuilderLingerMinutes = 30;
     }).modules;
+  imageModule = builtins.head (
+    builtins.filter (
+      module: builtins.isAttrs module && module ? nix-rosetta-builder.potentiallyInsecureExtraNixosModule
+    ) defaultDarwinModules
+  );
+  imageOverlay = builtins.head imageModule.nix-rosetta-builder.potentiallyInsecureExtraNixosModule.nixpkgs.overlays;
+  imageTools =
+    (imageOverlay { } {
+      vmTools = {
+        retainedHelper = "unchanged";
+        runInLinuxVM =
+          drv:
+          drv
+          // {
+            requiredSystemFeatures = [
+              "kvm"
+              "benchmark"
+            ];
+            wrappedInVM = true;
+          };
+      };
+    }).vmTools;
+  portableImage = imageTools.runInLinuxVM {
+    builder = "original";
+    args = [ "image" ];
+  };
 in
 if expected != actual then
   throw "default.nix constructors mismatch: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}"
@@ -119,5 +146,15 @@ else if
   } shortLingerDarwinModules)
 then
   throw "mkDarwinHost must forward the Rosetta builder idle linger policy"
+else if
+  portableImage != {
+    builder = "original";
+    args = [ "image" ];
+    requiredSystemFeatures = [ "benchmark" ];
+    wrappedInVM = true;
+  }
+  || imageTools.retainedHelper != "unchanged"
+then
+  throw "Builder image portability must retain VM execution, other features and helpers"
 else
   true
