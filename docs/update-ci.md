@@ -76,7 +76,14 @@ Repository secrets used by the workflow:
 - `CACHIX_AUTH_TOKEN`: populate the existing `gkze` binary cache; `zed` is also read.
 - `GH_TOKEN_FOR_UPDATES`: push the update branch and open its PR.
 - `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`: sign the update commit.
-- `COPILOT_GITHUB_TOKEN`: authenticate the bounded CI repair agent.
+
+The repair agent uses the short-lived Actions `GITHUB_TOKEN` with job-scoped
+`copilot-requests: write`, and explicitly selects `gpt-6-astra`. No stored Copilot
+token is supplied: `COPILOT_GITHUB_TOKEN` would override the built-in token.
+See [GitHub's Actions authentication documentation](https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli-in-actions).
+The independent `Update agent check` workflow exercises that token and model with
+a single tool-free response before a real repair run. It shares the pinned CLI
+installer and can also be dispatched manually.
 
 Checkout never persists Git credentials. Write credentials are supplied only to
 publication steps. No persistent-runner registration or state-root variables are

@@ -1,0 +1,45 @@
+---
+name: Update agent check
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/update-agent-check.yml
+permissions:
+  contents: read
+jobs:
+  authenticate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      copilot-requests: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pinned repair agent
+        shell: python
+        env:
+          NIXCFG_CI_STAGE: install-agent
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+      - name: Verify token and selected model
+        shell: python
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          COPILOT_MODEL: gpt-6-astra
+          COPILOT_AUTO_UPDATE: 'false'
+        run: |-
+          import subprocess
+          result = subprocess.run(
+              ["copilot", "-p", "Reply exactly AUTH_OK. Do not use tools.",
+               "--silent", "--deny-tool", "shell", "--deny-tool", "write"],
+              check=False, text=True, capture_output=True, timeout=120,
+          )
+          print(result.stdout)
+          print(result.stderr)
+          result.check_returncode()
+          if result.stdout.strip() != "AUTH_OK":
+              raise SystemExit("Agent did not return the expected authentication probe response")

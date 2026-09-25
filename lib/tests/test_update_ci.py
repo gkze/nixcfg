@@ -225,6 +225,36 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     assert set(jobs["validate-darwin"]["needs"]) == {"validate-arm", "validate-x86"}
     assert set(jobs["publish"]["needs"]) == set(validators)
     assert set(validators) <= set(jobs["repair"]["needs"])
+    assert jobs["repair"]["permissions"] == {
+        "actions": "read",
+        "contents": "read",
+        "copilot-requests": "write",
+    }
+    agent = next(
+        step
+        for step in jobs["repair"]["steps"]
+        if step.get("name") == "Propose one repair"
+    )
+    assert agent["env"]["GITHUB_TOKEN"] == "${{ github.token }}"  # noqa: S105 -- Actions expression, not a credential.
+    assert agent["env"]["COPILOT_MODEL"] == "gpt-6-astra"
+    assert not {"COPILOT_GITHUB_TOKEN", "GH_TOKEN"} & agent["env"].keys()
+
+
+def test_agent_check_limits_permissions_and_uses_selected_model() -> None:
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/update-agent-check.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    assert set(workflow["on"]) == {"push", "workflow_dispatch"}
+    assert workflow["permissions"] == {"contents": "read"}
+    job = workflow["jobs"]["authenticate"]
+    assert job["permissions"] == {"contents": "read", "copilot-requests": "write"}
+    probe = job["steps"][-1]
+    assert probe["env"] == {
+        "GITHUB_TOKEN": "${{ github.token }}",
+        "COPILOT_MODEL": "gpt-6-astra",
+        "COPILOT_AUTO_UPDATE": "false",
+    }
 
 
 def test_all_authored_actions_commands_are_python() -> None:
