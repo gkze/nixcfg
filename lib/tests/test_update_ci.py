@@ -407,3 +407,78 @@ def test_bootstrap_matrix_and_failure_evidence(
         str(tmp_path / "repair.patch"),
     )
     assert calls[-1][-3:] == ("python", "lib/update/ci/jobs.py", "quality")
+
+
+@pytest.mark.parametrize(
+    ("actions", "environment"),
+    [("false", "github-hosted"), ("true", "self-hosted")],
+)
+def test_image_cleanup_refuses_developer_and_self_hosted_machines(
+    monkeypatch, actions: str, environment: str
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", actions)
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", environment)
+    with pytest.raises(RuntimeError, match="disposable GitHub-hosted"):
+        jobs.main("clean-image")
+
+
+@pytest.mark.parametrize("system", ["darwin", "linux"])
+@pytest.mark.parametrize("active_xcode", ["selected", "missing", "relative"])
+def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
+    tmp_path, monkeypatch, system, active_xcode
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(jobs.sys, "platform", system)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    apps = tmp_path / "Applications"
+    selected = apps / "Xcode_active.app/Contents/Developer"
+    selected.mkdir(parents=True)
+    old = apps / "Xcode_old.app"
+    old.mkdir()
+    alias = apps / "Xcode.app"
+    alias.symlink_to(apps / "Xcode_active.app")
+    other = apps / "Unrelated.app"
+    other.mkdir()
+    unused = tmp_path / "unused-tool"
+    unused.mkdir()
+    android = tmp_path / "Library/Android/sdk"
+    android.mkdir(parents=True)
+    link = tmp_path / "external-link"
+    link.symlink_to(other)
+    monkeypatch.setattr(jobs, "_APPLICATIONS", apps)
+    monkeypatch.setattr(
+        jobs, "_UNUSED_IMAGE_PATHS", {system: (unused, link, tmp_path / "absent")}
+    )
+    calls = []
+    real_run = jobs._run
+
+    def run(*args, capture=False, check=True):
+        calls.append(args)
+        if args[0] == "sudo":
+            # Exercise actual Python deletion, confined to this test's directories.
+            assert Path(args[-1]).is_relative_to(tmp_path)
+            return real_run(*args[1:], capture=capture, check=check)
+        value = {
+            "selected": str(selected),
+            "missing": str(tmp_path / "missing"),
+            "relative": "relative/path",
+        }[active_xcode]
+        return subprocess.CompletedProcess(args, 0, stdout=value)
+
+    monkeypatch.setattr(jobs, "_run", run)
+    rejected = system == "darwin" and active_xcode != "selected"
+    if rejected:
+        with pytest.raises(ValueError, match="active Xcode"):
+            jobs.main("clean-image")
+    else:
+        assert jobs.main("clean-image") == 0
+    assert unused.exists() == rejected
+    assert selected.is_dir()
+    assert alias.is_symlink()
+    assert other.is_dir()
+    assert link.is_symlink()
+    assert old.exists() == (system != "darwin" or rejected)
+    assert android.exists() == (system != "darwin" or rejected)
+    if system == "darwin" and not rejected:
+        assert ("xcrun", "simctl", "runtime", "delete", "all") in calls

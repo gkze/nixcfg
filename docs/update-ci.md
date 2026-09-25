@@ -39,6 +39,13 @@ Actions are pinned to commits. Each job builds the packaged updater and developm
 environment from the triggering checkout, retaining them as Nix roots for that job.
 Candidate changes do not silently change the code executing the job.
 
+Before installing Nix, a Python step reclaims unused preinstalled image tools.
+On macOS it retains the selected Xcode and removes other Xcodes and mobile
+simulator runtimes. Android, .NET and unused Linux compiler libraries are removed
+where present. The step refuses local or self-hosted execution and logs available
+space before and after cleanup. This matters because the measured Darwin root
+closure alone occupies about 73.5 GB; runner capacity remains an acceptance check.
+
 Repository secrets used by the workflow:
 
 - `UPDATE_SELF_HEAL_GITHUB_TOKEN`: public upstream API access for Nix and updaters.

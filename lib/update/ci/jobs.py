@@ -6,9 +6,21 @@ standard-library only. Invoke the file directly; Actions owns the job graph.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+_APPLICATIONS = Path("/Applications")
+_UNUSED_IMAGE_PATHS = {
+    "darwin": (Path("/usr/local/share/dotnet"),),
+    "linux": (
+        Path("/usr/share/dotnet"),
+        Path("/usr/local/lib/android"),
+        Path("/opt/ghc"),
+        Path("/usr/local/share/boost"),
+    ),
+}
 
 
 def _run(
@@ -51,6 +63,52 @@ def bootstrap() -> None:
         "pass",
     )
     _outputs(runtime=str(runtime), devshell=str(devshell))
+
+
+def clean_runner_image() -> None:
+    """Reclaim unused image tools, exclusively on disposable hosted runners."""
+    if (
+        os.environ.get("GITHUB_ACTIONS") != "true"
+        or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
+    ):
+        msg = "Image cleanup requires a disposable GitHub-hosted runner"
+        raise RuntimeError(msg)
+    paths = list(_UNUSED_IMAGE_PATHS[sys.platform])
+    sys.stdout.write(
+        f"Available before image cleanup: {shutil.disk_usage('/').free} bytes\n"
+    )
+    if sys.platform == "darwin":
+        selected = Path(
+            _run("xcode-select", "--print-path", capture=True).stdout.strip()
+        )
+        if not selected.is_absolute() or not selected.is_dir():
+            msg = "Cannot identify the active Xcode; refusing image cleanup"
+            raise ValueError(msg)
+        selected = selected.resolve()
+        # Keep the active developer tools and their aliases. Nix supplies its
+        # language toolchains; these jobs never use mobile simulator runtimes.
+        paths.extend(
+            path
+            for path in _APPLICATIONS.glob("Xcode*.app")
+            if not path.is_symlink() and not selected.is_relative_to(path.resolve())
+        )
+        paths.append(Path.home() / "Library/Android/sdk")
+        _run("xcrun", "simctl", "delete", "all")
+        _run("xcrun", "simctl", "runtime", "delete", "all")
+    for path in paths:
+        if path.is_dir() and not path.is_symlink():
+            sys.stdout.write(f"Removing unused runner image tool: {path}\n")
+            sys.stdout.flush()
+            _run(
+                "sudo",
+                sys.executable,
+                "-c",
+                "import shutil, sys; shutil.rmtree(sys.argv[1])",
+                str(path),
+            )
+    sys.stdout.write(
+        f"Available after image cleanup: {shutil.disk_usage('/').free} bytes\n"
+    )
 
 
 def matrix() -> None:
@@ -285,6 +343,7 @@ def main(stage: str) -> int:
     if stage in {"native-prepare", "native-validate"}:
         return native(stage.removeprefix("native-"))
     operations = {
+        "clean-image": clean_runner_image,
         "bootstrap": bootstrap,
         "matrix": matrix,
         "quality": quality,

@@ -18,6 +18,13 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Reclaim unused hosted image tools
+      shell: python
+      env:
+        NIXCFG_CI_STAGE: clean-image
+      run: |
+        import runpy
+        runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
     # Determinate Nix v3.22.5
     - uses: DeterminateSystems/determinate-nix-action@8d87e8d5e5b8a8309d4281094560f127d9a265f1
       with:
