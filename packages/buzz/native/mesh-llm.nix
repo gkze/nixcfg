@@ -11,20 +11,23 @@ let
   commit = nativeLock.meshLlm.commit or null;
   sourceSubdir = "share/mesh-llm/source";
   provenanceSubpath = "share/mesh-llm/provenance.json";
+  patchTools = lib.fileset.toSource {
+    root = ../../..;
+    fileset = ./llama_patches.py;
+  };
   inventoryScript = ''
     import hashlib
     import json
     import sys
     from pathlib import Path
+    from packages.buzz.native.llama_patches import patch_queue
 
     source_root = Path(sys.argv[1])
     output_path = Path(sys.argv[2])
     version = sys.argv[3]
     commit = sys.argv[4]
     patch_directory = source_root / "third_party/llama.cpp/patches"
-    patch_paths = sorted(patch_directory.glob("*.patch"), key=lambda path: path.name)
-    if not patch_paths:
-        raise SystemExit("Mesh source contains no llama.cpp patches")
+    patch_paths = patch_queue(source_root)
     packaging_paths = (
         "scripts/build-llama.sh",
         "scripts/package-native-runtime.sh",
@@ -45,7 +48,7 @@ let
         "llamaCpp": {
             "upstreamPin": upstream_path.read_text(encoding="utf-8").strip(),
             "patches": [
-                {"name": path.name, "sha256": sha256(path)} for path in patch_paths
+                {"name": path.relative_to(patch_directory).as_posix(), "sha256": sha256(path)} for path in patch_paths
             ],
         },
         "packagingInputs": [
@@ -83,7 +86,7 @@ stdenvNoCC.mkDerivation {
     provenanceOutput="$out/${provenanceSubpath}"
     mkdir -p "$sourceOutput"
     cp -R "$src"/. "$sourceOutput"
-    ${lib.getExe python3} -c ${lib.escapeShellArg inventoryScript} "$sourceOutput" "$provenanceOutput" ${lib.escapeShellArg version} ${lib.escapeShellArg commit}
+    PYTHONPATH=${patchTools} ${lib.getExe python3} -c ${lib.escapeShellArg inventoryScript} "$sourceOutput" "$provenanceOutput" ${lib.escapeShellArg version} ${lib.escapeShellArg commit}
   '';
   passthru = {
     inherit sourceSubdir;

@@ -252,7 +252,9 @@ def test_inventory_fails_closed_when_mesh_has_no_llama_patches(
     ):
         _write_fixture(source, relative_path, f"fixture for {relative_path}\n")
 
-    with pytest.raises(SystemExit, match="Mesh source contains no llama.cpp patches"):
+    with pytest.raises(
+        SystemExit, match="Mesh source has no regular llama.cpp patch directory"
+    ):
         _run_inventory(monkeypatch, inventory_program, source, output)
 
     assert not output.exists()
@@ -290,7 +292,7 @@ def test_install_phase_only_copies_pristine_source_and_writes_provenance() -> No
     assert command_texts(shell, "cp") == ['cp -R "$src"/. "$sourceOutput"']
     assert command_texts(shell, "mkdir") == ['mkdir -p "$sourceOutput"']
     assert command_texts(shell, "__NIX_INTERP__") == [
-        '__NIX_INTERP__ -c __NIX_INTERP__ "$sourceOutput" '
+        'PYTHONPATH=__NIX_INTERP__ __NIX_INTERP__ -c __NIX_INTERP__ "$sourceOutput" '
         '"$provenanceOutput" __NIX_INTERP__ __NIX_INTERP__'
     ]
     for prohibited_command in ("curl", "git", "make", "cmake", "patch"):

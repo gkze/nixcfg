@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Never
 
 from lib.macho import read_macho
+from packages.buzz.native.llama_patches import patch_queue
 
 RUNTIME_ID = "meshllm-native-runtime-darwin-aarch64-metal"
 PACKAGING_PATHS = (
@@ -91,19 +92,12 @@ def validate_mesh_provenance(
         fail("Mesh source llama.cpp upstream pin is not one exact line")
 
     patch_directory = source_root / "third_party/llama.cpp/patches"
-    if patch_directory.is_symlink() or not patch_directory.is_dir():
-        fail("Mesh source has no regular llama.cpp patch directory")
-    patch_paths = sorted(patch_directory.iterdir(), key=lambda path: path.name)
-    if not patch_paths:
-        fail("Mesh source contains no llama.cpp patches")
-    if any(
-        path.is_symlink() or not path.is_file() or path.suffix != ".patch"
-        for path in patch_paths
-    ):
-        fail("Mesh source patch inventory contains an unsupported entry")
+    patch_paths = patch_queue(source_root)
 
     patch_records = llama.get("patches")
-    expected_patch_names = [path.name for path in patch_paths]
+    expected_patch_names = [
+        path.relative_to(patch_directory).as_posix() for path in patch_paths
+    ]
     if (
         not isinstance(patch_records, list)
         or [
