@@ -48,6 +48,10 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "    sys.exit(int(os.environ.get('TEST_CACHE_EXIT', '0')))\n"
         "Path(os.environ['TEST_LOG']).write_text(json.dumps(args))\n"
         "Path(args[args.index('--output') + 1]).write_text('candidate or evidence')\n"
+        "if os.environ.get('UPDATE_RUN_LOG') == '1':\n"
+        "    logs = Path(os.environ['UPDATE_RUN_LOG_DIR']) / 'test-run'\n"
+        "    logs.mkdir(parents=True, exist_ok=True)\n"
+        "    (logs / 'output.log').write_text('source failure detail\\n')\n"
         "print(json.dumps({'success': int(os.environ.get('TEST_EXIT', '0')) == 0}))\n"
         "print('diagnostic evidence', file=sys.stderr)\n"
         "sys.exit(int(os.environ.get('TEST_EXIT', '0')))\n"
@@ -107,6 +111,9 @@ def test_native_job_keeps_evidence_and_propagates_failure(
         "success": exit_code == 0
     }
     assert (artifacts / "stderr.log").read_text() == "diagnostic evidence\n"
+    assert (artifacts / "runs/test-run/output.log").read_text() == (
+        "source failure detail\n"
+    )
     assert (checkout / "flake.lock").read_text() == "baseline"
 
 

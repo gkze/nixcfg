@@ -93,7 +93,9 @@ runner capacity; tests of workflow wiring do not establish either.
 ## Failure and retry
 
 Each native job uploads its candidate or validation report, structured result and
-stderr diagnostics, including on failure. Artifacts expire after 30 days. An
+stderr diagnostics, including on failure. Preparation also retains the updater's
+redacted run logs under `runs/`, including source error details suppressed by JSON
+console output. Artifacts expire after 30 days. An
 interrupted job may need to repeat work; completed upstream artifacts can be reused
 by Actions reruns. A failed preparation cannot advance to another platform, and a
 missing or mismatched validation report cannot authorize publication.

@@ -197,7 +197,12 @@ def native(stage: str) -> int:
             args,
             stdout=output,
             stderr=log,
-            env=os.environ | {"REPO_ROOT": str(Path.cwd()), "UPDATE_RUN_LOG": "0"},
+            env=os.environ
+            | {
+                "REPO_ROOT": str(Path.cwd()),
+                "UPDATE_RUN_LOG": "1",
+                "UPDATE_RUN_LOG_DIR": str(artifacts / "runs"),
+            },
             check=False,
         )
     sys.stderr.write((artifacts / "stderr.log").read_text())
