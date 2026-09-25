@@ -128,8 +128,9 @@ def _quality_command() -> tuple[str, ...]:
 def quality() -> None:
     """Apply existing gates and reject any generated or formatter drift."""
     _run("prek", "run", "-a")
-    _run("coverage", "run", "-m", "pytest")
-    _run("coverage", "report")
+    # Module invocation keeps this checkout ahead of the packaged runtime's lib.
+    _run(sys.executable, "-m", "coverage", "run", "-m", "pytest")
+    _run(sys.executable, "-m", "coverage", "report")
     _run("git", "diff", "--exit-code")
     if _run("git", "ls-files", "--others", "--exclude-standard", capture=True).stdout:
         msg = "Quality checks introduced untracked source files"
@@ -284,6 +285,7 @@ def collect_evidence() -> None:
             "gh",
             "api",
             f"repos/{repository}/actions/jobs/{identity}/logs",
+            "--allow-escape-sequences",
             capture=True,
         )
         (evidence / f"job-{identity}.log").write_text(log.stdout)

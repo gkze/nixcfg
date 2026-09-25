@@ -33,6 +33,8 @@ def run_worker(
     coverage = Coverage.current()
     data_file = run_root.parent / "worker.coverage"
     if coverage is not None:
+        sources = coverage.get_option("run:source")
+        assert isinstance(sources, list)
         config = run_root.parent / "worker.coveragerc"
         # Save coverage even at os._exit, without changing DBOS or filesystem state.
         config.write_text("[run]\nbranch = true\npatch = _exit\n")
@@ -44,6 +46,10 @@ def run_worker(
             str(config),
             "--data-file",
             str(data_file),
+            # Nix dependencies live outside site-packages via symlinks. Preserve
+            # the parent scope instead of merging coverage for those libraries.
+            "--source",
+            ",".join(sources),
             *arguments,
         ]
     result = subprocess.run(  # noqa: S603 -- fixed local fixture process

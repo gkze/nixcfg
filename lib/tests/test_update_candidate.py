@@ -84,6 +84,8 @@ def prepared_run(
             context.hashes_fully_computed = False
             assert info.metadata == GitHubReleaseMetadata(tag="v2")
             operations.append(f"hash:{state['system']}")
+            if state.get("darwin_only") and state["system"] != "aarch64-darwin":
+                return {"aarch64-darwin": _HASH}
             if state["fail"]:
                 msg = "upstream packaging changed"
                 raise RuntimeError(msg)
@@ -110,11 +112,14 @@ def prepared_run(
     return root, operations, state
 
 
+@pytest.mark.parametrize("darwin_only", [False, True])
 def test_native_stages_pin_versions_preserve_hashes_and_never_promote(
     prepared_run,
+    darwin_only: bool,
 ) -> None:
     """Each runner reconstructs the candidate from the untouched original tree."""
     root, operations, state = prepared_run
+    state["darwin_only"] = darwin_only
     previous = None
     for system in pipeline.supported_systems():
         state["system"] = system
@@ -132,7 +137,9 @@ def test_native_stages_pin_versions_preserve_hashes_and_never_promote(
             (workspace.root / "packages/example/sources.json").read_bytes()
         )
         assert result.version == "2"
-        assert set(result.hashes.mapping) == set(pipeline.supported_systems())
+        assert set(result.hashes.mapping) == (
+            {"aarch64-darwin"} if darwin_only else set(pipeline.supported_systems())
+        )
 
 
 def test_failed_preparation_retains_resolution_and_is_not_a_completed_platform(

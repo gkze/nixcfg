@@ -1954,16 +1954,16 @@ async def _gate_candidate(
 def _restore_preparation(
     workspace: update_persistence.IsolatedUpdateWorkspace,
     preparation: Preparation | None,
-) -> None:
-    """Import only declared candidate outputs before any updater reads them."""
+) -> tuple[Path, ...]:
+    """Import declared outputs and retain their authority across native no-ops."""
     if preparation is None or preparation.previous is None:
-        return
+        return ()
     previous = preparation.previous
     previous.apply(workspace.root)
     prior_paths = update_persistence.planned_update_paths(
         list(previous.sources), _get_updaters()
     )
-    workspace.validate_changes((
+    return workspace.validate_changes((
         *_workspace_relative_paths(workspace.root, prior_paths),
         *_FLAKE_FILES,
     ))
@@ -2013,7 +2013,7 @@ async def _run_updates(
     updaters: Mapping[str, UpdaterClass] = {}
     try:
         with durable.workspace(get_repo_root()) as workspace:
-            _restore_preparation(workspace, preparation)
+            restored_paths = _restore_preparation(workspace, preparation)
             _revalidate_runtime_source_snapshot(workspace.root)
             if (
                 check_tools
@@ -2061,7 +2061,7 @@ async def _run_updates(
                     check_cancelled=check_cancelled,
                     monitor=monitor,
                 ),
-                allowed_paths=allowed_paths,
+                allowed_paths=(*restored_paths, *allowed_paths),
                 preparation=preparation,
             )
     except update_persistence.UpdateWorkspaceError as error:

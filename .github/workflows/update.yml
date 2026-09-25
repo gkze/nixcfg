@@ -98,6 +98,7 @@ jobs:
       - name: Propose validated update
         if: steps.candidate.outputs.changed == 'true'
         env:
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
           GH_TOKEN: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
           UPDATE_BASE_BRANCH: ${{ github.event.repository.default_branch }}
           NIXCFG_CI_STAGE: publish
@@ -172,6 +173,7 @@ jobs:
           git_commit_gpgsign: true
       - name: Start a fresh attempt with repair disabled
         env:
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
           GH_TOKEN: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
           NIXCFG_CI_STAGE: start-repair
           NIXCFG_UPDATE_TARGETS: ${{ inputs.targets || '' }}

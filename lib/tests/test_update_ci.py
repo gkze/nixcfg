@@ -244,7 +244,7 @@ def test_quality_stops_at_first_failed_gate(
 
     def run(*args, capture=False, check=True):
         calls.append(args)
-        if args[0] == failure:
+        if failure in args:
             raise subprocess.CalledProcessError(17, args)
         return subprocess.CompletedProcess(
             args,
@@ -261,10 +261,10 @@ def test_quality_stops_at_first_failed_gate(
     elif failure:
         with pytest.raises(subprocess.CalledProcessError):
             jobs.main("quality")
-        assert calls[-1][0] == failure
+        assert failure in calls[-1]
     else:
         assert jobs.main("quality") == 0
-        assert ("coverage", "report") in calls
+        assert (sys.executable, "-m", "coverage", "report") in calls
         assert ("git", "diff", "--exit-code") in calls
 
 
@@ -332,6 +332,21 @@ def test_certification_checks_the_applied_and_post_gate_tree(
 def test_publication_uses_signed_commit_and_bounded_repair(
     job_repository, tmp_path, monkeypatch, operation, changed
 ) -> None:
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    step = next(
+        step
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if step.get("env", {}).get("NIXCFG_CI_STAGE") == operation
+    )
+    monkeypatch.delenv("NIXCFG_DEVSHELL")
+    for name, value in step["env"].items():
+        if name.startswith("NIXCFG_"):
+            monkeypatch.setenv(
+                name, value.replace("${{ steps.runtime.outputs.devshell }}", "/tools")
+            )
     monkeypatch.setenv(
         "GITHUB_REF_NAME", "codex/update-repair-100-1" if changed else "main"
     )
@@ -382,7 +397,11 @@ def test_bootstrap_matrix_and_failure_evidence(
         if args[0] == "/runtime/bin/nixcfg":
             stdout = '{"include": []}'
         elif args[:2] == ("gh", "api"):
-            stdout = "10\n11\n" if "--paginate" in args else "upstream failure\n"
+            if "--paginate" in args:
+                stdout = "10\n11\n"
+            else:
+                assert "--allow-escape-sequences" in args
+                stdout = "\x1b[31mupstream failure\x1b[0m\n"
         return subprocess.CompletedProcess(args, 0, stdout=stdout)
 
     monkeypatch.setattr(jobs, "_run", run)
@@ -398,7 +417,9 @@ def test_bootstrap_matrix_and_failure_evidence(
         "job-10.log",
         "job-11.log",
     }
-    assert (tmp_path / "repair-evidence/job-10.log").read_text() == "upstream failure\n"
+    assert (tmp_path / "repair-evidence/job-10.log").read_text() == (
+        "\x1b[31mupstream failure\x1b[0m\n"
+    )
     assert calls[-2] == (
         "git",
         "apply",
