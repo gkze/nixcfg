@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-i/owqXCBNle4I4u43eDHlk0cpp+NkRMkQhCLTtZGb8E="
+    "aarch64-darwin": "sha256-w+Pw7iAPPpBPJkYvInO17aMJ6UWGjAN4KPUpvhlK52w="
   },
   "urls": {
-    "aarch64-darwin": "https://db.ara.so/storage/v1/object/public/releases/Ara_0.1.109.zip"
+    "aarch64-darwin": "https://reasonmachines.com/api/desktop-download?arch=aarch64"
   },
-  "version": "0.1.109"
+  "version": "0.1.57"
 }
