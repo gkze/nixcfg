@@ -97,15 +97,14 @@ def test_nixcfg_update_parses_native_only(monkeypatch: _MonkeyPatchLike) -> None
 
     async def _fake_run_updates(
         opts: UpdateOptions,
-        *,
-        check_tools: bool = False,
+        _root: object,
+        _config: object,
     ) -> int:
-        assert check_tools is True
         called["opts"] = opts
         return 0
 
     monkeypatch.setattr("lib.update.cli.check_required_tools", lambda **_kw: [])
-    monkeypatch.setattr("lib.update.cli.run_updates", _fake_run_updates)
+    monkeypatch.setattr("lib.update.durable.execute", _fake_run_updates)
 
     runner = CliRunner()
     result = runner.invoke(nixcfg.app, ["update", "--native-only"])
@@ -120,15 +119,14 @@ def test_nixcfg_update_parses_multiple_targets(monkeypatch: _MonkeyPatchLike) ->
 
     async def _fake_run_updates(
         opts: UpdateOptions,
-        *,
-        check_tools: bool = False,
+        _root: object,
+        _config: object,
     ) -> int:
-        assert check_tools is True
         called["opts"] = opts
         return 0
 
     monkeypatch.setattr("lib.update.cli.check_required_tools", lambda **_kw: [])
-    monkeypatch.setattr("lib.update.cli.run_updates", _fake_run_updates)
+    monkeypatch.setattr("lib.update.durable.execute", _fake_run_updates)
 
     runner = CliRunner()
     result = runner.invoke(nixcfg.app, ["update", "--check", "emdash", "mux"])
@@ -146,15 +144,14 @@ def test_nixcfg_update_parses_options_after_target(
 
     async def _fake_run_updates(
         opts: UpdateOptions,
-        *,
-        check_tools: bool = False,
+        _root: object,
+        _config: object,
     ) -> int:
-        assert check_tools is True
         called["opts"] = opts
         return 0
 
     monkeypatch.setattr("lib.update.cli.check_required_tools", lambda **_kw: [])
-    monkeypatch.setattr("lib.update.cli.run_updates", _fake_run_updates)
+    monkeypatch.setattr("lib.update.durable.execute", _fake_run_updates)
 
     runner = CliRunner()
     result = runner.invoke(
@@ -1074,3 +1071,44 @@ def test_nixcfg_module_main_guard_executes_main(
     runpy.run_path(str(Path(nixcfg.__file__).resolve()), run_name="__main__")
 
     assert called["prog_name"] == "nixcfg"
+
+
+def test_ci_update_flags_preserve_idempotency_and_literal_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The workflow's argv reaches the updater without reinterpreting target text."""
+    from lib.update import cli
+
+    received = []
+
+    def run(**kwargs):
+        received.append(cli.UpdateOptions.from_mapping(kwargs))
+        return 0
+
+    monkeypatch.setattr(cli, "run_update_command", run)
+    result = CliRunner().invoke(
+        nixcfg.app,
+        [
+            "update",
+            "--run-id",
+            "update",
+            "--patch",
+            "result.patch",
+            "--strict",
+            "--json",
+            "--tty",
+            "off",
+            "--",
+            "alpha",
+            "beta",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert len(received) == 1
+    options = received[0]
+    assert options.run_id == "update"
+    assert options.patch == "result.patch"
+    assert options.target_names == ("alpha", "beta")
+    assert options.strict
+    assert options.json
+    assert options.tty == "off"

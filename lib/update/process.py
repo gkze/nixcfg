@@ -111,7 +111,7 @@ async def run_queue_task(
     source: str,
     queue: asyncio.Queue[UpdateEvent | None],
     task: Callable[[], Awaitable[None]],
-) -> None:
+) -> UpdateEvent | None:
     """Run ``task`` and confine every failure to its own target as an error event.
 
     A failure never cancels sibling targets: the run reports it by name, keeps
@@ -131,7 +131,10 @@ async def run_queue_task(
         else:
             _LOG.debug("Unexpected task failure for %s:\n%s", source, detail)
             message = f"{type(exc).__name__}: {format_exception(exc)}"
-        await queue.put(UpdateEvent.error(source, message, detail=detail))
+        failure = UpdateEvent.error(source, message, detail=detail)
+        await queue.put(failure)
+        return failure
+    return None
 
 
 def _sanitize_log_line(line: str) -> str:

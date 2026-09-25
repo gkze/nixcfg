@@ -3,7 +3,7 @@
 import asyncio
 import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, ClassVar
 
@@ -23,6 +23,8 @@ from lib.update.events import (
     StatusInfo,
     StatusKind,
     UpdateEvent,
+    UpdateEventKind,
+    expect_artifact_updates,
     gather_results,
     ignore_event,
 )
@@ -122,6 +124,8 @@ class UpdateContext:
     generated_artifacts: dict[Path, str] = field(default_factory=dict)
     hashes_fully_computed: bool = True
     effective_sources: dict[str, SourceEntry] = field(default_factory=dict)
+    resolved_version: VersionInfo | None = None
+    preparing: bool = False
 
 
 async def stream_url_hash_mapping(
@@ -536,6 +540,50 @@ class Updater(ABC):
         _ = (info, context, emit)
         return result
 
+    async def _checkpoint_candidate(
+        self,
+        info: VersionInfo,
+        session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceEntry | None:
+        """Persist materialization outputs and failed attempts for deterministic replay."""
+        from lib.update.durable import (  # noqa: PLC0415 -- avoids updater import cycle
+            checkpoint,
+        )
+
+        async def perform() -> tuple[SourceEntry | None, list[UpdateEvent]]:
+            outputs: list[UpdateEvent] = []
+
+            async def collect(event: UpdateEvent) -> None:
+                if event.kind is UpdateEventKind.ARTIFACT:
+                    outputs.append(
+                        replace(
+                            event,
+                            payload=[
+                                replace(artifact, path=artifact.repo_relative_path())
+                                for artifact in expect_artifact_updates(event.payload)
+                            ],
+                        )
+                    )
+                elif event.kind is UpdateEventKind.RESULT:
+                    outputs.append(event)
+                else:
+                    await emit(event)
+
+            result = await self._candidate_update_stream(
+                info, session, context=context, emit=collect
+            )
+            return result, outputs
+
+        result, outputs = await checkpoint(
+            f"materialize:{self.name}:{info.version}", perform
+        )
+        for event in outputs:
+            await emit(event)
+        return result
+
     async def _candidate_update_stream(
         self,
         info: VersionInfo,
@@ -545,6 +593,39 @@ class Updater(ABC):
         emit: EventSink = ignore_event,
     ) -> SourceEntry | None:
         """Hash and finalize one resolved candidate source."""
+        is_latest = await self._is_latest(context, info)
+        if is_latest and not self.materialize_when_current and not context.preparing:
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    f"Up to date (version: {info.version})",
+                    operation="check_version",
+                    status=StatusInfo(
+                        kind=StatusKind.UP_TO_DATE,
+                        scope="version",
+                        value=info.version,
+                    ),
+                )
+            )
+            await emit(UpdateEvent.result(self.name))
+            return None
+        if is_latest and self.materialize_when_current:
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    "Version up to date; refreshing generated artifacts...",
+                    operation="compute_hash",
+                )
+            )
+
+        await emit(
+            UpdateEvent.status(
+                self.name,
+                "Fetching hashes for all platforms...",
+                operation="compute_hash",
+                status=StatusInfo(kind=StatusKind.FETCHING_HASHES),
+            )
+        )
         hashes = await self.fetch_hashes(info, session, context=context, emit=emit)
         result = self.build_result(info, hashes)
         result = await self._finalize_result(
@@ -552,7 +633,11 @@ class Updater(ABC):
         )
 
         current = context.current
-        if current is not None and not context.hashes_fully_computed:
+        if (
+            current is not None
+            and not context.hashes_fully_computed
+            and not context.preparing
+        ):
             native_only = getattr(self, "native_only", False)
             effective_result = self._comparison_result(result, context=context)
             changed_fields = _changed_source_identity_fields(current, effective_result)
@@ -631,10 +716,17 @@ class Updater(ABC):
                 operation="check_version",
             )
         )
-        info = await self.fetch_latest(
-            session,
-            context=context,
+        from lib.update.durable import (  # noqa: PLC0415 -- avoids updater import cycle
+            checkpoint,
         )
+
+        info = context.resolved_version
+        if info is None:
+            info = await checkpoint(
+                f"resolve:{self.name}",
+                lambda: self.fetch_latest(session, context=context),
+            )
+        context.resolved_version = info
 
         await emit(
             UpdateEvent.status(
@@ -647,40 +739,7 @@ class Updater(ABC):
                 ),
             )
         )
-        is_latest = await self._is_latest(context, info)
-        if is_latest and not self.materialize_when_current:
-            await emit(
-                UpdateEvent.status(
-                    self.name,
-                    f"Up to date (version: {info.version})",
-                    operation="check_version",
-                    status=StatusInfo(
-                        kind=StatusKind.UP_TO_DATE,
-                        scope="version",
-                        value=info.version,
-                    ),
-                )
-            )
-            await emit(UpdateEvent.result(self.name))
-            return None
-        if is_latest and self.materialize_when_current:
-            await emit(
-                UpdateEvent.status(
-                    self.name,
-                    "Version up to date; refreshing generated artifacts...",
-                    operation="compute_hash",
-                )
-            )
-
-        await emit(
-            UpdateEvent.status(
-                self.name,
-                "Fetching hashes for all platforms...",
-                operation="compute_hash",
-                status=StatusInfo(kind=StatusKind.FETCHING_HASHES),
-            )
-        )
-        return await self._candidate_update_stream(
+        return await self._checkpoint_candidate(
             info, session, context=context, emit=emit
         )
 

@@ -2,21 +2,19 @@
 
 The monitor is the single owner of "what is happening right now" across the
 asynchronous source phases and the synchronous validation phases. Any thread may
-record events; readers take a consistent snapshot. Each run persists its files
-under one run directory so it can be inspected while it runs and after a crash:
-``events.jsonl`` (structured events), ``output.log`` (subprocess lines),
-``run.json`` (plan and final summary), and ``state.json`` (the latest snapshot,
-refreshed by the heartbeat).
+record events; readers take a consistent snapshot. SQLite holds structured
+observations and heartbeat projections beside DBOS execution history.
+``output.log`` remains a tail-able, redacted subprocess log. Execution status
+comes from DBOS; a stale heartbeat never proves that a worker is still alive.
 """
 
-import json
 import os
 import re
 import secrets
 import threading
 import time
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TextIO
@@ -30,7 +28,7 @@ from lib.update.events import (
     UpdateEvent,
     UpdateEventKind,
 )
-from lib.update.io import atomic_write_json
+from lib.update.run_store import DATABASE_FILE, RunStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -39,10 +37,7 @@ type TargetOutcome = Literal["pending", "running", "updated", "no_change", "erro
 type Clock = Callable[[], float]
 type WallClock = Callable[[], datetime]
 
-STATE_FILE = "state.json"
-EVENTS_FILE = "events.jsonl"
 OUTPUT_FILE = "output.log"
-RUN_FILE = "run.json"
 LATEST_LINK = "latest"
 VALIDATION_TAIL_LINES = 8
 _BUILDING_LINE = re.compile(r"building '/nix/store/[a-z0-9]{32}-(?P<name>[^']+)\.drv'")
@@ -120,6 +115,7 @@ class RunStatus:
     active: tuple[TargetActivity, ...]
     finished: bool
     validations: tuple[ValidationActivity, ...] = ()
+    execution_status: str | None = None
 
     @property
     def done(self) -> int:
@@ -136,7 +132,9 @@ def format_status_line(
     parts: list[str] = []
     if status.phase is not None:
         parts.append(f"Phase {status.phase_index}/{status.phase_count} {status.phase}")
-    if status.finished:
+    if status.execution_status is not None:
+        parts.append(f"execution {status.execution_status.lower()}")
+    elif status.finished:
         parts.append("finished")
     validations = status.validations
     if validations:
@@ -232,6 +230,7 @@ class RunMonitor:
         phase_count: int,
         run_dir: Path | None = None,
         run_id: str | None = None,
+        diagnostics: bool = True,
         inactivity_warning_seconds: float = 300.0,
         clock: Clock = time.monotonic,
         wall_clock: WallClock | None = None,
@@ -253,21 +252,21 @@ class RunMonitor:
         }
         self._validations: dict[str, _ValidationState] = {}
         self._finished = False
-        self._events: TextIO | None = None
+        self._diagnostics = diagnostics
+        self._store: RunStore | None = None
         self._output: TextIO | None = None
         self._stop = threading.Event()
         self._heartbeat: threading.Thread | None = None
         if run_dir is not None:
             run_dir.mkdir(parents=True, exist_ok=True)
-            # Line buffering keeps both files tail-able while the run is live.
-            self._events = (run_dir / EVENTS_FILE).open(
-                "a", encoding="utf-8", buffering=1
-            )
-            self._output = (run_dir / OUTPUT_FILE).open(
-                "a", encoding="utf-8", buffering=1
-            )
-            atomic_write_json(
-                run_dir / RUN_FILE,
+            # Line buffering keeps subprocess output tail-able while the run is live.
+            self._store = RunStore(run_dir)
+            if diagnostics:
+                self._output = (run_dir / OUTPUT_FILE).open(
+                    "a", encoding="utf-8", buffering=1
+                )
+            self._store.write(
+                "run",
                 {
                     "runId": self.run_id,
                     "startedAt": self._started_wall,
@@ -527,23 +526,19 @@ class RunMonitor:
 
     def write_state(self) -> None:
         """Persist the latest snapshot for ``--status`` and crash inspection."""
-        if self.run_dir is None:
+        if self._store is None:
             return
         payload = asdict(self.snapshot())
         payload["updatedAt"] = self._wall_clock().isoformat(timespec="seconds")
-        atomic_write_json(self.run_dir / STATE_FILE, payload)
+        self._store.write("status", payload)
 
     def _write_event(self, record: dict[str, object]) -> None:
         with self._lock:
-            stream = self._events
-            if stream is None:
-                return
-            stamped: dict[str, object] = {
-                "t": self._wall_clock().isoformat(timespec="milliseconds"),
-                **record,
-            }
-            stream.write(json.dumps(stamped, sort_keys=True) + "\n")
-            stream.flush()
+            if self._store is not None and self._diagnostics:
+                self._store.append({
+                    "t": self._wall_clock().isoformat(timespec="milliseconds"),
+                    **record,
+                })
 
     def _write_output(self, line: str) -> None:
         with self._lock:
@@ -558,7 +553,7 @@ class RunMonitor:
         interval: float,
         printer: Callable[[str], None] | None,
     ) -> None:
-        """Refresh ``state.json`` periodically and optionally print status lines."""
+        """Refresh the SQLite status projection periodically and optionally print status lines."""
         if self._heartbeat is not None:
             msg = "Heartbeat already started"
             raise RuntimeError(msg)
@@ -601,19 +596,19 @@ class RunMonitor:
             self._finished = True
         if summary is not None:
             self._write_event({"kind": "summary", **dict(summary)})
-        if self.run_dir is not None:
-            run_file = self.run_dir / RUN_FILE
-            run_payload = json.loads(run_file.read_text(encoding="utf-8"))
+        if self._store is not None:
+            run_payload = TypeAdapter(dict[str, object]).validate_python(
+                self._store.read("run")
+            )
             run_payload["finishedAt"] = self._wall_clock().isoformat(timespec="seconds")
             if summary is not None:
                 run_payload["summary"] = dict(summary)
-            atomic_write_json(run_file, run_payload)
+            self._store.write("run", run_payload)
         self.write_state()
         with self._lock:
-            for stream in (self._events, self._output):
-                if stream is not None:
-                    stream.close()
-            self._events = None
+            if self._output is not None:
+                self._output.close()
+            self._store = None
             self._output = None
 
 
@@ -623,21 +618,25 @@ def load_run_status(
 ) -> tuple[Path, RunStatus, str | None]:
     """Load the persisted status of one run, defaulting to the latest.
 
-    The state file is a trust transition: it is validated against the status
+    Stored state is a trust transition: it is validated against the status
     dataclasses rather than assumed to match the writer's schema.
     """
     run_dir = run_root / (run_id or LATEST_LINK)
-    state_file = run_dir / STATE_FILE
-    try:
-        payload = json.loads(state_file.read_text(encoding="utf-8"))
-    except FileNotFoundError as error:
+    if not (run_dir / DATABASE_FILE).is_file():
         msg = f"No recorded update run at {run_dir}"
-        raise FileNotFoundError(msg) from error
-    if not isinstance(payload, dict):
-        msg = f"Malformed update run state at {state_file}"
-        raise TypeError(msg)
+        raise FileNotFoundError(msg)
+    payload = TypeAdapter(dict[str, object]).validate_python(
+        RunStore(run_dir, readonly=True).read("status")
+    )
     updated_at = payload.pop("updatedAt", None)
     status = TypeAdapter(RunStatus).validate_python(payload)
+    execution = RunStore(run_dir, readonly=True).execution_status()
+    if execution is not None:
+        status = replace(
+            status,
+            execution_status=execution,
+            finished=execution in {"SUCCESS", "ERROR"},
+        )
     return run_dir.resolve(), status, None if updated_at is None else str(updated_at)
 
 
@@ -658,11 +657,8 @@ def target_names_for(*groups: Iterable[str]) -> tuple[str, ...]:
 
 
 __all__ = [
-    "EVENTS_FILE",
     "LATEST_LINK",
     "OUTPUT_FILE",
-    "RUN_FILE",
-    "STATE_FILE",
     "RunMonitor",
     "RunStatus",
     "TargetActivity",

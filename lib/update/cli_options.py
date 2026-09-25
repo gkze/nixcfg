@@ -1,6 +1,7 @@
 """Shared CLI option models for update commands."""
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Literal, TypedDict, cast
 
 UpdateSortBy = Literal[
@@ -18,6 +19,15 @@ UpdateSortBy = Literal[
 ]
 
 UpdateTTYMode = Literal["auto", "force", "off", "full"]
+
+
+class RepairAgent(StrEnum):
+    """Installed agents supported by the bounded packaging repair option."""
+
+    CODEX = "codex"
+    COPILOT = "copilot"
+
+
 type UpdateOptionValue = str | tuple[str, ...] | list[str] | int | float | bool | None
 type UpdateTargetsValue = str | tuple[str, ...] | list[str] | None
 
@@ -32,6 +42,10 @@ class _UpdateOptionsInitKwargs(TypedDict, total=False):
     check: bool
     strict: bool
     status: bool
+    resume: str | None
+    run_id: str | None
+    patch: str | None
+    repair: RepairAgent | None
     validate: bool
     schema: bool
     sort_by: UpdateSortBy
@@ -73,6 +87,10 @@ class UpdateOptions:
     check: bool = False
     strict: bool = False
     status: bool = False
+    resume: str | None = None
+    run_id: str | None = None
+    patch: str | None = None
+    repair: RepairAgent | None = None
     validate: bool = False
     schema: bool = False
     sort_by: UpdateSortBy = "name"

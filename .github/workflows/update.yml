@@ -1,0 +1,181 @@
+---
+name: Update
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: Space-separated targets (empty updates all eligible targets)
+        type: string
+        default: ""
+      repair:
+        description: Allow one agent repair and a fresh fully validated attempt
+        type: boolean
+        default: true
+  schedule:
+    - cron: "17 7 * * 1"
+permissions:
+  contents: read
+concurrency:
+  group: nixcfg-update-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  # Generated artifacts can be shared between platforms. Extend one pinned
+  # candidate serially, then build the final identical tree in parallel.
+  prepare-darwin:
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      targets: ${{ inputs.targets || '' }}
+    secrets: inherit
+  prepare-arm:
+    needs: prepare-darwin
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04-arm
+      system: aarch64-linux
+      stage: prepare
+      previous: prepare-aarch64-darwin
+    secrets: inherit
+  prepare-x86:
+    needs: prepare-arm
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: prepare
+      previous: prepare-aarch64-linux
+    secrets: inherit
+  validate:
+    needs: [prepare-darwin, prepare-x86]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare-darwin.outputs.matrix) }}
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ${{ matrix.runner }}
+      system: ${{ matrix.system }}
+      stage: validate
+      previous: prepare-x86_64-linux
+    secrets: inherit
+  publish:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/update-runtime
+        id: runtime
+        with:
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: ${{ runner.temp }}/evidence
+      - name: Certify and check final tree
+        id: candidate
+        env:
+          NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          NIXCFG_CI_STAGE: certify
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+      - uses: crazy-max/ghaction-import-gpg@e89d40939c28e39f97cf32126055eeae86ba74ec # v6
+        if: steps.candidate.outputs.changed == 'true'
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+      - name: Propose validated update
+        if: steps.candidate.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
+          UPDATE_BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          NIXCFG_CI_STAGE: publish
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  repair:
+    needs: [prepare-darwin, prepare-arm, prepare-x86, validate, publish]
+    if: |-
+      always() && !cancelled() && contains(needs.*.result, 'failure') &&
+      (github.event_name == 'schedule' || inputs.repair)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/update-runtime
+        id: runtime
+        with:
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: ${{ runner.temp }}/repair-evidence
+      - name: Collect failed job logs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIXCFG_CI_STAGE: collect-evidence
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+      - name: Install bounded repair agent
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+        env:
+          NIXCFG_CI_STAGE: install-agent
+      - name: Propose one repair
+        env:
+          NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          COPILOT_AUTO_UPDATE: 'false'
+          NIXCFG_CI_STAGE: repair
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+      - name: Retain repair evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: repair
+          path: |
+            ${{ runner.temp }}/repair.patch
+            ${{ runner.temp }}/repair-evidence/repair.log
+          if-no-files-found: warn
+          overwrite: true
+          retention-days: 30
+      - uses: crazy-max/ghaction-import-gpg@e89d40939c28e39f97cf32126055eeae86ba74ec # v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+      - name: Start a fresh attempt with repair disabled
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
+          NIXCFG_CI_STAGE: start-repair
+          NIXCFG_UPDATE_TARGETS: ${{ inputs.targets || '' }}
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python

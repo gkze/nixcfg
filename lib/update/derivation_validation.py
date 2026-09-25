@@ -470,6 +470,7 @@ def resolve_derivation_validations(
     *,
     updaters: Mapping[str, type[object]],
     all_declared_systems: bool = False,
+    native_builds_only: bool = False,
 ) -> tuple[DerivationValidationRequest, ...]:
     """Resolve concrete validation requests for selected updater targets."""
     current_system = get_current_nix_platform()
@@ -493,6 +494,12 @@ def resolve_derivation_validations(
                 else (current_system,)
             )
             for system in systems:
+                if (
+                    native_builds_only
+                    and validation.mode == "build"
+                    and system != current_system
+                ):
+                    continue
                 if (
                     not all_declared_systems
                     and validation.systems is not None
@@ -808,6 +815,7 @@ def validate_derivations(
     updaters: Mapping[str, type[object]],
     timeout: float | None = None,
     all_declared_systems: bool = False,
+    native_builds_only: bool = False,
     flake_root: Path | None = None,
     run: _Runner | None = None,
     sleep: _Sleeper | None = None,
@@ -822,6 +830,7 @@ def validate_derivations(
         source_names,
         updaters=updaters,
         all_declared_systems=all_declared_systems,
+        native_builds_only=native_builds_only,
     )
     return validate_derivation_requests(
         requests,
@@ -885,6 +894,7 @@ def _load_root_closure_manifest(
 def validate_root_closures(
     *,
     flake_root: Path | None = None,
+    systems: tuple[str, ...] | None = None,
     timeout: float | None = None,
     run: _Runner | None = None,
     sleep: _Sleeper | None = None,
@@ -922,7 +932,13 @@ def validate_root_closures(
                 ),
             )
 
-        root_systems = tuple(dict.fromkeys(root.system for root in manifest.roots))
+        root_systems = tuple(
+            dict.fromkeys(
+                root.system
+                for root in manifest.roots
+                if systems is None or root.system in systems
+            )
+        )
         requests = tuple(
             DerivationValidationRequest(
                 source=_ROOT_CLOSURE_VALIDATION_SOURCE,

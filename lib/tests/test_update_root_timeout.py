@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 
 from lib.tests._run_updates_helpers import configure_isolated_run, make_run_plan
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
-from lib.update.cli import UpdateSummary, app
+from lib.update.cli import UpdateSummary, app, run_updates
 from lib.update.config import resolve_active_config, resolve_config
 from lib.update.derivation_validation import (
     ROOT_CLOSURE_VALIDATION_TIMEOUT_SECONDS,
@@ -44,7 +44,7 @@ def test_cli_root_validation_honors_explicit_subprocess_bounds(
     live = tmp_path / "live"
     init_update_workspace_repo(live)
 
-    async def _execute_result(*_args: object) -> SimpleNamespace:
+    async def _execute_result(*_args: object, **_kwargs: object) -> SimpleNamespace:
         candidate = Path.cwd() / "tracked.txt"
         candidate.write_text("candidate\n", encoding="utf-8")
         return SimpleNamespace(
@@ -61,6 +61,11 @@ def test_cli_root_validation_honors_explicit_subprocess_bounds(
         execute_result=_execute_result,
         planned_paths=("tracked.txt",),
     )
+
+    async def execute(opts, _root, _config):
+        return await run_updates(opts)
+
+    monkeypatch.setattr("lib.update.durable.execute", execute)
     monkeypatch.setattr("lib.update.cli._maybe_reexec_checkout_update", lambda: None)
     monkeypatch.setattr("lib.update.cli._handle_required_tool_check", lambda _: None)
     calls: list[tuple[list[str], object]] = []

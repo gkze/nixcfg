@@ -11,6 +11,7 @@ from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import install_fixed_hash_stream
 from lib.tests._updater_helpers import load_repo_module as _load_module
 from lib.tests._updater_helpers import run_async as _run
+from lib.update.candidate import ResolvedVersion
 from lib.update.events import EventSink, UpdateEventKind, ignore_event
 from lib.update.updaters import VersionInfo
 from lib.update.updaters.core import UpdateContext
@@ -572,6 +573,10 @@ def test_google_chrome_fetch_latest_uses_platform_full_rollout_versions(
     monkeypatch.setattr(module.host_platform, "machine", lambda: "arm64")
 
     latest = _run(updater.fetch_latest(session, context=UpdateContext(current=None)))
+    # Native builders must consume the exact artifact identity discovered earlier.
+    latest = ResolvedVersion.model_validate_json(
+        ResolvedVersion.capture(latest).model_dump_json()
+    ).restore()
     assert isinstance(latest.metadata, module._ChromeReleaseMetadata)
     events = _run(
         _collect_events(

@@ -1,6 +1,7 @@
 """Updater for the Zen Twilight channel DMG."""
 
 import asyncio
+from functools import partial
 from typing import TYPE_CHECKING, ClassVar
 
 from defusedxml import ElementTree
@@ -39,6 +40,12 @@ class _TwilightSnapshotChangedError(RuntimeError):
             f"Twilight channel changed {phase} hashing: "
             f"expected {expected}, observed {observed}"
         )
+
+    def __reduce__(self) -> tuple[partial[_TwilightSnapshotChangedError], tuple[()]]:
+        """Retain the typed retry signal across DBOS step replay."""
+        return partial(
+            type(self), phase=self.phase, expected=self.expected, observed=self.observed
+        ), ()
 
 
 @register_updater

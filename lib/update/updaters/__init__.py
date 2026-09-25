@@ -9,6 +9,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from threading import Lock
+from types import ModuleType
 from typing import TYPE_CHECKING
 
 from lib.update.derivation_validation import DerivationValidation
@@ -110,6 +111,8 @@ def _prefer_repo_lib_paths() -> None:
 def _discover_updaters() -> None:
     """Import every discovered updater module to trigger registration."""
     _prefer_repo_lib_paths()
+    # Pickle resolves checkpointed metadata through this stable import namespace.
+    sys.modules.setdefault("_updater_pkg", ModuleType("_updater_pkg"))
     for name, updater_file in sorted(_updater_module_paths().items()):
         # Use a stable module name so re-imports are safe.
         mod_name = f"_updater_pkg.{name}"

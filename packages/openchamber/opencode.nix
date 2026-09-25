@@ -62,7 +62,7 @@ stdenvNoCC.mkDerivation {
     export HOME="$buildTmp/home"
     mkdir -p "$TMPDIR" "$HOME"
 
-    cd packages/cli
+    cd packages/opencode
     bun --bun ./script/build.ts --single --skip-install
 
     runHook postBuild
@@ -71,7 +71,7 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     runHook preInstall
 
-    install -Dm755 dist/cli-*/bin/opencode "$out/bin/opencode"
+    install -Dm755 dist/opencode-*/bin/opencode "$out/bin/opencode"
     wrapProgram "$out/bin/opencode" \
       --set OPENCODE_DISABLE_AUTOUPDATE true \
       --set OPENCODE_NIX_MANAGED 1 \

@@ -83,6 +83,7 @@ from lib.update.paths import REPO_ROOT
 from lib.update.persistence import (
     IsolatedUpdateWorkspace,
     UpdatePromotionState,
+    UpdateValidationSnapshot,
     UpdateWorkspaceConflictError,
     UpdateWorkspaceError,
     UpdateWorkspacePromotionError,
@@ -604,7 +605,7 @@ def test_run_update_command_discovers_updaters_only_after_snapshot_revalidation(
     events: list[str] = []
 
     class _ObservedWorkspace:
-        def __init__(self, _root: Path) -> None:
+        def __init__(self, _root: Path, **_kwargs: object) -> None:
             self.root = tmp_path / "candidate"
 
         def __enter__(self) -> _ObservedWorkspace:
@@ -622,6 +623,10 @@ def test_run_update_command_discovers_updaters_only_after_snapshot_revalidation(
         events.append("discover")
         return {}
 
+    async def execute(opts, _root, _config):
+        return await run_updates(opts, check_tools=True)
+
+    monkeypatch.setattr("lib.update.durable.execute", execute)
     monkeypatch.setattr("lib.update.cli.sys.argv", ["nixcfg"])
     monkeypatch.setenv("NIXCFG_UPDATE_EXECUTION_SOURCE", "/nix/store/runtime-source")
     monkeypatch.setattr("lib.update.cli.get_repo_root", lambda: tmp_path)
@@ -2361,9 +2366,6 @@ def test_run_plan_building(
         lambda: [SimpleNamespace(name="inp", owner="o", repo="r", ref="v1")],
     )
     monkeypatch.setattr(
-        "lib.update.cli._resolve_tty_settings", lambda _opts: (False, False)
-    )
-    monkeypatch.setattr(
         "lib.update.cli._load_sources_for_run", lambda resolved: SourcesFile(entries={})
     )
     monkeypatch.setattr(
@@ -2394,6 +2396,7 @@ def test_top_level_entrypoints(
         "lib.update.cli._handle_preflight_requests", lambda _opts, _out, _config: 7
     )
     assert _run_async(run_updates(UpdateOptions(), check_tools=True)) == 7
+    assert run_update_command(UpdateOptions(schema=True)) == 7
 
     monkeypatch.setattr(
         "lib.update.cli._handle_preflight_requests",
@@ -2403,14 +2406,13 @@ def test_top_level_entrypoints(
     # run_update_command delegates tool-checked execution.
     async def _run_command(
         _opts: UpdateOptions,
-        *,
-        check_tools: bool = False,
+        _root: Path,
+        _config: object,
     ) -> int:
-        assert check_tools is True
         return 5
 
     monkeypatch.setattr(
-        "lib.update.cli.run_updates",
+        "lib.update.durable.execute",
         _run_command,
     )
     assert run_update_command(list_targets=True) == 5
@@ -3726,7 +3728,7 @@ def test_run_updates_promotes_only_after_isolated_execution(
     execution_roots: list[Path] = []
     plan = make_run_plan()
 
-    async def _execute_result(*_args: object) -> SimpleNamespace:
+    async def _execute_result(*_args: object, **_kwargs: object) -> SimpleNamespace:
         isolated_root = Path.cwd()
         execution_roots.append(isolated_root)
         isolated_output = isolated_root / "tracked.txt"
@@ -3787,7 +3789,7 @@ def test_root_closure_failure_prevents_atomic_promotion(
     output = live / "tracked.txt"
     plan = make_run_plan(source_names=("demo",))
 
-    async def _execute_result(*_args: object) -> SimpleNamespace:
+    async def _execute_result(*_args: object, **_kwargs: object) -> SimpleNamespace:
         candidate = Path.cwd() / "tracked.txt"
         candidate.write_text("candidate\n", encoding="utf-8")
         summary = UpdateSummary()
@@ -3867,7 +3869,7 @@ def test_run_updates_reports_recovered_promotion_io_outcome(
     output = live / "tracked.txt"
     plan = make_run_plan(source_names=("demo",))
 
-    async def _execute_result(*_args: object) -> SimpleNamespace:
+    async def _execute_result(*_args: object, **_kwargs: object) -> SimpleNamespace:
         candidate = Path.cwd() / "tracked.txt"
         candidate.write_text("candidate\n", encoding="utf-8")
         summary = UpdateSummary()
@@ -3945,7 +3947,7 @@ def test_run_updates_exposes_unknown_promotion_state(
     _init_update_workspace_repo(live)
     plan = make_run_plan(source_names=("demo",))
 
-    async def _execute_result(*_args: object) -> SimpleNamespace:
+    async def _execute_result(*_args: object, **_kwargs: object) -> SimpleNamespace:
         candidate = Path.cwd() / "tracked.txt"
         candidate.write_text("candidate\n", encoding="utf-8")
         summary = UpdateSummary()
@@ -4041,7 +4043,7 @@ def test_narrow_update_validates_roots_only_when_candidate_changes(
         do_input_refresh=changes_lock,
     )
 
-    async def _execute_result(*_args: object) -> SimpleNamespace:
+    async def _execute_result(*_args: object, **_kwargs: object) -> SimpleNamespace:
         summary = UpdateSummary()
         summary.accumulate({
             "demo": "no_change" if candidate_name is None else "updated"
@@ -4113,7 +4115,7 @@ def test_targeted_noop_rejects_changes_after_its_validation_decision(
     live = tmp_path / "live"
     _init_update_workspace_repo(live)
 
-    async def _execute_result(*_args: object) -> SimpleNamespace:
+    async def _execute_result(*_args: object, **_kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(
             summary=UpdateSummary(statuses={"demo": "no_change"}),
             candidate_updates=(),
@@ -4158,7 +4160,6 @@ def test_run_updates_check_validates_the_candidate_in_isolation(
         ref_inputs=(ref,),
         dry_run=True,
         do_input_refresh=True,
-        show_phase_headers=True,
     )
     events: list[str] = []
     validated_snapshots: list[Path] = []
@@ -4290,7 +4291,7 @@ def test_run_updates_source_input_refresh_declares_flake_lock(
     live_flake_lock.write_text("current input\n", encoding="utf-8")
     plan = make_run_plan(source_names=("demo",), do_input_refresh=True)
 
-    async def _execute_result(*_args: object) -> SimpleNamespace:
+    async def _execute_result(*_args: object, **_kwargs: object) -> SimpleNamespace:
         candidate = Path.cwd() / "flake.lock"
         candidate.write_text("refreshed input\n", encoding="utf-8")
         return SimpleNamespace(
@@ -4339,7 +4340,7 @@ def test_run_updates_does_not_declare_lock_for_source_without_input(
         def get_generated_artifact_files() -> tuple[str, ...]:
             return ()
 
-    async def _execute_result(*_args: object) -> SimpleNamespace:
+    async def _execute_result(*_args: object, **_kwargs: object) -> SimpleNamespace:
         candidate = Path.cwd() / "flake.lock"
         candidate.write_text("unauthorized\n", encoding="utf-8")
         return SimpleNamespace(
@@ -4449,7 +4450,7 @@ def test_run_updates_enforces_isolated_output_authority(
     _init_update_workspace_repo(live)
     candidate: Path | None = None
 
-    async def _execute_result(*_args: object) -> SimpleNamespace:
+    async def _execute_result(*_args: object, **_kwargs: object) -> SimpleNamespace:
         nonlocal candidate
         if candidate_path is not None:
             candidate = Path.cwd() / candidate_path
@@ -4530,7 +4531,7 @@ def test_run_updates_emits_once_after_workspace_cleanup_failure(
             msg = "workspace cleanup failed"
             raise UpdateWorkspaceError(msg)
 
-    async def _execute_result(*_args: object) -> SimpleNamespace:
+    async def _execute_result(*_args: object, **_kwargs: object) -> SimpleNamespace:
         summary = UpdateSummary()
         summary.accumulate({"demo": "error"})
         return SimpleNamespace(
@@ -4620,10 +4621,10 @@ def test_run_updates_emits_empty_result_only_after_workspace_cleanup(
             assert capsys.readouterr().out == ""
             events.append("close")
 
-        def validation_snapshot(self) -> nullcontext[SimpleNamespace]:
+        def validation_snapshot(self) -> nullcontext[UpdateValidationSnapshot]:
             events.append("snapshot")
             return nullcontext(
-                SimpleNamespace(root=self.root, changed_paths=()),
+                UpdateValidationSnapshot(root=self.root, changed_paths=()),
             )
 
         def promote(self, allowed_paths: tuple[Path, ...]) -> tuple[Path, ...]:

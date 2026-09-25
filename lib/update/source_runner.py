@@ -5,7 +5,9 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 import aiohttp
+from dbos import DBOS
 
+from lib.update import durable
 from lib.update import flake as update_flake
 from lib.update import planner as update_planner
 from lib.update import process as update_process
@@ -20,7 +22,13 @@ from lib.update.events import (
 )
 from lib.update.outcomes import SummaryStatus, merge_statuses
 from lib.update.refs import FlakeInputRef, RefTaskOptions
-from lib.update.runtime import join_shared_work, measure, resource_slot, runtime_scope
+from lib.update.runtime import (
+    active_runtime,
+    join_shared_work,
+    measure,
+    resource_slot,
+    runtime_scope,
+)
 from lib.update.updaters import UPDATERS, ensure_updaters_loaded
 from lib.update.updaters.core import UpdateContext
 from lib.update.updaters.flake_backed import FlakeInputHashUpdater
@@ -33,6 +41,7 @@ if TYPE_CHECKING:
 
     from lib.nix.models.sources import SourceEntry, SourcesFile
     from lib.update.artifacts import GeneratedArtifact
+    from lib.update.candidate import Preparation
     from lib.update.config import UpdateConfig
     from lib.update.flake import FlakeInputState
     from lib.update.updaters import UpdaterClass
@@ -57,6 +66,7 @@ class SourceTaskContext:
     generated_artifacts: dict[Path, str]
     config: UpdateConfig
     effective_sources: dict[str, SourceEntry] = field(default_factory=dict)
+    preparation: Preparation | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +80,7 @@ class SourcesPhaseContext:
     native_only: bool
     config: UpdateConfig
     input_refreshes: dict[str, FlakeInputState] = field(default_factory=dict)
+    preparation: Preparation | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +90,7 @@ class SourceTaskResult:
     completed: bool
     artifacts: tuple[GeneratedArtifact, ...] = field(default_factory=tuple)
     source_update: SourceEntry | None = None
+    error: UpdateEvent | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +103,7 @@ class UpdatePhaseResult:
     artifact_updates: dict[str, tuple[GeneratedArtifact, ...]] = field(
         default_factory=dict
     )
+    terminal_events: tuple[UpdateEvent, ...] = ()
 
     @property
     def errors(self) -> int:
@@ -104,6 +117,7 @@ class UpdatePhaseResult:
             input_refreshes={**self.input_refreshes, **other.input_refreshes},
             source_updates={**self.source_updates, **other.source_updates},
             artifact_updates={**self.artifact_updates, **other.artifact_updates},
+            terminal_events=(*self.terminal_events, *other.terminal_events),
         )
 
 
@@ -174,7 +188,9 @@ def _source_input_requests(
     return requested, closures
 
 
-async def _refresh_source_inputs(context: SourcesPhaseContext) -> set[str]:
+async def _refresh_source_inputs(
+    context: SourcesPhaseContext,
+) -> dict[str, UpdateEvent]:
     """Resolve every selected source's input closure before any task starts.
 
     Inputs already covered by a matching receipt are skipped; the rest refresh
@@ -209,7 +225,7 @@ async def _refresh_source_inputs(context: SourcesPhaseContext) -> set[str]:
     for input_name in pending:
         await put(refresh_status(input_name, f"Updating flake input '{input_name}'..."))
     if not pending:
-        return set()
+        return {}
 
     try:
         await update_flake.update_flake_inputs(
@@ -226,14 +242,12 @@ async def _refresh_source_inputs(context: SourcesPhaseContext) -> set[str]:
             for name, inputs in closures.items()
             if pending_set.intersection(inputs)
         }
-        for name in sorted(failed):
-            await put(UpdateEvent.error(name, message))
-        return failed
+        return {name: UpdateEvent.error(name, message) for name in sorted(failed)}
     for input_name in pending:
         context.input_refreshes[input_name] = update_flake.read_flake_input_state(
             input_name
         )
-    return set()
+    return {}
 
 
 async def update_source_task(
@@ -257,6 +271,10 @@ async def update_source_task(
             current=current,
             generated_artifacts=context.generated_artifacts,
             effective_sources=context.effective_sources,
+            resolved_version=(
+                context.preparation.resolved(name) if context.preparation else None
+            ),
+            preparing=context.preparation is not None,
         )
 
         await put(
@@ -270,23 +288,31 @@ async def update_source_task(
         async def emit(event: UpdateEvent) -> None:
             if event.kind is UpdateEventKind.ARTIFACT and event.payload is not None:
                 for artifact in expect_artifact_updates(event.payload):
-                    artifacts_by_path[artifact.path] = artifact
+                    portable = replace(artifact, path=artifact.repo_relative_path())
+                    artifacts_by_path[portable.path] = portable
             await put(event)
 
-        source_update = await updater.update_stream(
-            current,
-            context.session,
-            context=update_context,
-            emit=emit,
-        )
+        try:
+            source_update = await updater.update_stream(
+                current,
+                context.session,
+                context=update_context,
+                emit=emit,
+            )
+        finally:
+            if context.preparation is not None:
+                context.preparation.record(name, update_context.resolved_version)
 
         completed = True
 
-    await update_process.run_queue_task(source=name, queue=context.queue, task=_run)
+    failure = await update_process.run_queue_task(
+        source=name, queue=context.queue, task=_run
+    )
     return SourceTaskResult(
         completed=completed,
         artifacts=tuple(artifacts_by_path[path] for path in sorted(artifacts_by_path)),
         source_update=source_update,
+        error=failure,
     )
 
 
@@ -302,6 +328,7 @@ async def run_ref_phase(
     ) as session:
         flake_edit_lock = asyncio.Lock()
         input_refreshes: dict[str, FlakeInputState] = {}
+        terminal_events: list[UpdateEvent] = []
         async with asyncio.TaskGroup() as group:
             tasks = {
                 inp.name: group.create_task(
@@ -313,6 +340,7 @@ async def run_ref_phase(
                             flake_edit_lock=flake_edit_lock,
                             config=config,
                             input_refreshes=input_refreshes,
+                            terminal_events=terminal_events,
                         ),
                     ),
                 )
@@ -321,6 +349,7 @@ async def run_ref_phase(
         details = {name: task.result() for name, task in tasks.items()}
         return UpdatePhaseResult(
             details=details,
+            terminal_events=tuple(terminal_events),
             # Receipts exist only for tasks that completed a verified refresh
             # or remote check; failed tasks keep their receipts local so they
             # can never seed a later source phase.
@@ -330,6 +359,46 @@ async def run_ref_phase(
                 if details.get(name) != "error"
             },
         )
+
+
+@dataclass(frozen=True)
+class SourceRequest:
+    """Immutable inputs needed to recover one source independently."""
+
+    name: str
+    sources: SourcesFile
+    native_only: bool
+    generated_artifacts: dict[Path, str]
+    effective_sources: dict[str, SourceEntry]
+
+
+@DBOS.workflow(name="nixcfg.source")
+async def _durable_source(request: SourceRequest) -> SourceTaskResult:
+    async def perform() -> SourceTaskResult:
+        run = durable.current_run()
+        assert run is not None  # noqa: S101 -- supervise requires an active session
+        environment = await asyncio.shield(run.sources_ready)
+        async with (
+            runtime_scope(run.config, existing=environment.resources),
+            resource_slot("source", source=request.name, config=run.config),
+            aiohttp.ClientSession(max_field_size=_AIOHTTP_MAX_FIELD_SIZE) as session,
+        ):
+            result = await update_source_task(
+                request.name,
+                context=SourceTaskContext(
+                    sources=request.sources,
+                    native_only=request.native_only,
+                    session=session,
+                    queue=environment.queue,
+                    generated_artifacts=request.generated_artifacts,
+                    effective_sources=request.effective_sources,
+                    config=run.config,
+                ),
+            )
+            environment.reported_sources.add(request.name)
+            return result
+
+    return await durable.supervise(perform)
 
 
 async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
@@ -345,6 +414,10 @@ async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
             for name in context.source_names
         }
         source_order = update_planner.source_dependency_order(prerequisites)
+        if context.preparation is not None:
+            context.preparation.dependent_sources.update(
+                name for name, parents in prerequisites.items() if parents
+            )
         shared = SourceTaskContext(
             sources=context.sources,
             native_only=context.native_only,
@@ -352,11 +425,27 @@ async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
             queue=context.queue,
             generated_artifacts={},
             effective_sources=dict(context.sources.entries),
+            preparation=context.preparation,
             config=context.config,
         )
-        refresh_failures: set[str] = (
-            await _refresh_source_inputs(context) if context.update_input else set()
-        )
+
+        async def refresh() -> tuple[
+            dict[str, UpdateEvent], dict[str, FlakeInputState]
+        ]:
+            failed = await _refresh_source_inputs(context)
+            return failed, dict(context.input_refreshes)
+
+        refresh_failures: dict[str, UpdateEvent] = {}
+        if context.update_input:
+            refresh_failures, receipts = await durable.phase("input-refresh", refresh)
+            context.input_refreshes.update(receipts)
+            for error in refresh_failures.values():
+                await context.queue.put(error)
+
+        if (run := durable.current_run()) is not None:
+            run.sources_ready.set_result(
+                durable.SourceEnvironment(context.queue, active_runtime())
+            )
 
         tasks: dict[str, asyncio.Task[SourceTaskResult]] = {}
 
@@ -375,8 +464,28 @@ async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
                 )
             if failed or name in refresh_failures:
                 return SourceTaskResult(completed=False)
-            async with resource_slot("source", source=name, config=context.config):
-                result = await update_source_task(name, context=shared)
+            if run is None:
+                async with resource_slot("source", source=name, config=context.config):
+                    result = await update_source_task(name, context=shared)
+            else:
+                request = SourceRequest(
+                    name=name,
+                    sources=context.sources,
+                    native_only=context.native_only,
+                    generated_artifacts=dict(shared.generated_artifacts),
+                    effective_sources=dict(shared.effective_sources),
+                )
+                result = await durable.source_task(
+                    name, lambda: _durable_source(request), group
+                )
+                # Replay needs terminal presentation; live execution already emitted it.
+                if name not in run.sources_ready.result().reported_sources:
+                    await context.queue.put(
+                        UpdateEvent.result(name, result.source_update)
+                        if result.completed
+                        else result.error
+                        or UpdateEvent.error(name, "Source update failed")
+                    )
             if result.completed:
                 # No suspension between publishing an immutable result and
                 # completing this task: children observe the complete result.

@@ -38,6 +38,7 @@ dependencies = [
   "typer>=0.24.1",
   "githubkit>=0.15.1",
   "macholib>=1.16.4",
+  "dbos>=3.1.0,<4",
 ]
 
 [project.scripts]

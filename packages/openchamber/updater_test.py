@@ -1,6 +1,9 @@
 """Focused contracts for the exact-source OpenChamber foundation."""
 
 import asyncio
+import shlex
+import shutil
+import subprocess
 from pathlib import Path
 from types import ModuleType
 from typing import cast
@@ -190,7 +193,7 @@ _REQUIRED_SUPPRESSION_SURFACES = {
     "opencode-cli-upgrade": (
         "patch",
         "opencode",
-        "packages/cli/src/commands/handlers/upgrade.ts",
+        "packages/opencode/src/cli/cmd/upgrade.ts",
         1,
     ),
     "root-postinstall-download": ("anchor", "openchamber", "package.json", 1),
@@ -209,7 +212,13 @@ _REQUIRED_SUPPRESSION_SURFACES = {
     "opencode-auto-updater": (
         "anchor",
         "opencode",
-        "packages/cli/src/services/updater.ts",
+        "packages/opencode/src/cli/upgrade.ts",
+        1,
+    ),
+    "opencode-auto-updater-flag": (
+        "anchor",
+        "opencode",
+        "packages/core/src/flag/flag.ts",
         1,
     ),
 }
@@ -873,7 +882,7 @@ def test_openchamber_required_suppression_surface_manifest_is_complete() -> None
 
     assert len(records) == len({surface for surface, _record in records})
     assert dict(records) == _REQUIRED_SUPPRESSION_SURFACES
-    assert sum(record[3] for _surface, record in records) == 23
+    assert sum(record[3] for _surface, record in records) == 24
 
 
 def test_openchamber_patcher_is_transactional_and_component_scoped(
@@ -922,6 +931,54 @@ def test_openchamber_patcher_is_transactional_and_component_scoped(
     assert {
         path: path.read_text(encoding="utf-8") for path in opencode_before
     } == opencode_before
+
+
+def test_openchamber_patches_v1_upgrade_before_any_side_effect(tmp_path: Path) -> None:
+    """The companion uses the pinned 1.x layout and rejects managed upgrades."""
+    module = _load_patcher_module()
+    sources = {
+        "packages/opencode/src/cli/upgrade.ts": (
+            "export async function upgrade() {\n"
+            "  if (config.autoupdate === false || Flag.OPENCODE_DISABLE_AUTOUPDATE) return\n"
+            "}\n"
+        ),
+        "packages/core/src/flag/flag.ts": (
+            '  OPENCODE_DISABLE_AUTOUPDATE: truthy("OPENCODE_DISABLE_AUTOUPDATE"),\n'
+        ),
+        "packages/opencode/src/cli/cmd/upgrade.ts": (
+            "export const UpgradeCommand = {\n"
+            "  handler: async (args: { target?: string; method?: string }) => {\n"
+            "    calls.push(args)\n"
+            "  },\n"
+            "}\n"
+        ),
+    }
+    for relative_path, source in sources.items():
+        path = tmp_path / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+    module.patch_component("opencode", tmp_path, check=True)
+    module.patch_component("opencode", tmp_path)
+    handler = tmp_path / "packages/opencode/src/cli/cmd/upgrade.ts"
+    harness = tmp_path / "upgrade.mts"
+    harness.write_text(
+        'import assert from "node:assert/strict"\n'
+        "const calls = []\n"
+        + handler.read_text(encoding="utf-8")
+        + 'process.env.OPENCODE_NIX_MANAGED = "1"\n'
+        'await assert.rejects(UpgradeCommand.handler({method: "curl"}), '
+        '{message: "Updates are managed by Nix."})\n'
+        "assert.equal(calls.length, 0)\n"
+        "delete process.env.OPENCODE_NIX_MANAGED\n"
+        'await UpgradeCommand.handler({method: "curl"})\n'
+        'assert.deepEqual(calls, [{method: "curl"}])\n',
+        encoding="utf-8",
+    )
+    node = shutil.which("node")
+    assert node is not None
+    subprocess.run(  # noqa: S603 -- executes only the test-owned local harness
+        [node, str(harness)], check=True, capture_output=True, text=True, timeout=30
+    )
 
 
 def test_openchamber_patcher_cli_validates_root_arity(tmp_path: Path) -> None:
@@ -1249,6 +1306,53 @@ def test_openchamber_node_modules_normalizes_bun_private_bin_links() -> None:
     assert command_texts(shell, "find") == [normalization]
     commands = command_texts(shell)
     assert commands.index(normalization) < commands.index("runHook postBuild")
+
+
+def test_openchamber_companion_build_and_dependencies_use_the_v1_workspace() -> None:
+    """Dependency selection, compilation and installation must agree on 1.x."""
+    package = expect_instance(
+        parse_nix_expr((_PACKAGE_DIR / "opencode.nix").read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+    derivation = expect_instance(package.output, FunctionCall)
+    arguments = expect_instance(derivation.argument, AttributeSet)
+    for phase, command, expected in (
+        ("buildPhase", "cd", "cd packages/opencode"),
+        (
+            "installPhase",
+            "install",
+            'install -Dm755 dist/opencode-*/bin/opencode "$out/bin/opencode"',
+        ),
+    ):
+        body = expect_instance(
+            expect_binding(arguments.values, phase).value, IndentedString
+        )
+        assert command_texts(
+            parse_shell(indented_string_body(body.rebuild())), command
+        ) == [expected]
+
+    dependencies = expect_instance(
+        parse_nix_expr(
+            (_PACKAGE_DIR / "opencode-node-modules.nix").read_text(encoding="utf-8")
+        ),
+        FunctionDefinition,
+    )
+    assertion = expect_instance(dependencies.output, Assertion)
+    derivation = expect_instance(assertion.body, FunctionCall)
+    arguments = expect_instance(derivation.argument, AttributeSet)
+    body = expect_instance(
+        expect_binding(arguments.values, "buildPhase").value, IndentedString
+    )
+    install, *_ = command_texts(
+        parse_shell(indented_string_body(body.rebuild())), "bun"
+    )
+    args = shlex.split(install.replace("\\\n", ""))
+    assert [args[index + 1] for index, arg in enumerate(args) if arg == "--filter"] == [
+        "!./",
+        "./packages/opencode",
+        "./packages/desktop",
+        "./packages/app",
+    ]
 
 
 def test_openchamber_opencode_resigns_its_final_bun_executable() -> None:

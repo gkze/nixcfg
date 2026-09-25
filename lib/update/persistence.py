@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     from lib.nix.models.sources import SourceEntry
     from lib.update.artifacts import GeneratedArtifact
     from lib.update.outcomes import SummaryStatus
+    from lib.update.run_store import RunStore
     from lib.update.updaters import UpdaterClass
 
 
@@ -95,6 +96,7 @@ class UpdateValidationSnapshot:
 
     root: Path
     changed_paths: tuple[Path, ...]
+    identity: str | None = None
 
 
 class UpdateWorkspaceError(RuntimeError):
@@ -175,14 +177,15 @@ def _git_paths(root: Path, *args: str) -> tuple[Path, ...]:
     )
 
 
-def _run_git(root: Path, *args: str) -> None:
+def _run_git(root: Path, *args: str) -> bytes:
     git = _git_binary()
-    subprocess.run(  # noqa: S603 -- fixed local Git operation
+    result = subprocess.run(  # noqa: S603 -- fixed local Git operation
         [git, *args],
         cwd=root,
         check=True,
         capture_output=True,
     )
+    return result.stdout
 
 
 def _git_metadata_dir(root: Path, option: str) -> Path:
@@ -1209,7 +1212,9 @@ def _promote_path(
 class IsolatedUpdateWorkspace:
     """Run an update in a disposable Git tree and promote declared outputs."""
 
-    def __init__(self, repo_root: Path | None = None) -> None:
+    def __init__(
+        self, repo_root: Path | None = None, *, run_store: RunStore | None = None
+    ) -> None:
         """Capture the live root used for copying and eventual promotion."""
         self._live_root = (
             get_repo_root() if repo_root is None else repo_root.expanduser().resolve()
@@ -1222,6 +1227,7 @@ class IsolatedUpdateWorkspace:
         self._workspace_descriptor: int | None = None
         self._journal: Path | None = None
         self._validated_source_view: dict[Path, _WorkspacePathState] | None = None
+        self._run_store = run_store
 
     @property
     def root(self) -> Path:
@@ -1265,7 +1271,7 @@ class IsolatedUpdateWorkspace:
             root.mkdir()
             workspace_descriptor = os.open(root, _OPEN_DIRECTORY_FLAGS)
             cleanup.callback(os.close, workspace_descriptor)
-            self._start = _snapshot_source_view(self._live_root, live_descriptor)
+            self._start = self._baseline(live_descriptor)
             for path, state in self._start.items():
                 _validate_workspace_symlink(self._live_root, path, state)
                 _install_workspace_state(root / path, state)
@@ -1326,6 +1332,71 @@ class IsolatedUpdateWorkspace:
         """Return changed tracked and untracked, non-ignored relative paths."""
         return tuple(self._workspace_changes())
 
+    def _baseline(self, descriptor: int) -> dict[Path, _WorkspacePathState]:
+        current = _snapshot_source_view(self._live_root, descriptor)
+        if self._run_store is None:
+            return current
+        try:
+            baseline = self._run_store.read("baseline")
+        except FileNotFoundError:
+            baseline = self._save_snapshot(current)
+            self._run_store.write("baseline", baseline)
+        if not isinstance(baseline, str):
+            msg = "Invalid durable update baseline"
+            raise UpdateWorkspaceError(msg)
+        return self._load_snapshot(baseline)
+
+    def _save_snapshot(self, view: Mapping[Path, _WorkspacePathState]) -> str:
+        if self._run_store is None:
+            msg = "Workspace has no durable run store"
+            raise UpdateWorkspaceError(msg)
+        return self._run_store.save_snapshot({
+            str(path): None if state is None else (state.content, state.mode, state.symlink)
+            for path, state in view.items()
+        })
+
+    def _load_snapshot(self, identity: str) -> dict[Path, _WorkspacePathState]:
+        if self._run_store is None:
+            msg = "Workspace has no durable run store"
+            raise UpdateWorkspaceError(msg)
+        files = self._run_store.load_snapshot(identity)
+        _normalize_workspace_paths(files)
+        view = {
+            Path(path): None if state is None else _WorkspaceFileState(*state)
+            for path, state in files.items()
+        }
+        for path, state in view.items():
+            _validate_workspace_symlink(self._live_root, path, state)
+        return view
+
+    def checkpoint(self) -> str:
+        """Persist exact candidate bytes before DBOS acknowledges a phase."""
+        view = _snapshot_source_view(self.root, cast("int", self._workspace_descriptor))
+        return self._save_snapshot(view)
+
+    def patch(self, allowed_paths: Iterable[str | Path]) -> bytes:
+        """Export the exact validated candidate, including new files and modes."""
+        self._validated_changes(allowed_paths)
+        _run_git(self.root, "add", "--all")
+        return _run_git(
+            self.root, "diff", "--cached", "--binary", "--full-index",
+            "--no-ext-diff", "--no-textconv", "HEAD", "--"
+        )
+
+    def restore_checkpoint(self, identity: str) -> None:
+        """Rehydrate a checkpoint in a fresh workspace when DBOS replays it."""
+        view = self._load_snapshot(identity)
+        current = _snapshot_source_view(self.root, cast("int", self._workspace_descriptor))
+        self._validated_source_view = None
+        for path in sorted(current.keys() | view.keys()):
+            if current.get(path) == view.get(path):
+                continue
+            target = self.root / path
+            if target.exists() or target.is_symlink():
+                target.unlink()
+            _install_workspace_state(target, view.get(path))
+        update_flake.invalidate_flake_lock()
+
     def baseline_content(self, path: str | Path) -> bytes | None:
         """Return the captured baseline bytes of one regular file, if it existed."""
         (normalized,) = _normalize_workspace_paths((path,))
@@ -1367,6 +1438,7 @@ class IsolatedUpdateWorkspace:
             yield UpdateValidationSnapshot(
                 root=snapshot_root,
                 changed_paths=tuple(self._changes_from_source_view(source_view)),
+                identity=self._save_snapshot(source_view) if self._run_store else None,
             )
         self._validated_source_view = source_view
 
@@ -1420,6 +1492,14 @@ class IsolatedUpdateWorkspace:
             self._start,
         )
         if conflicts:
+            # A previous attempt may have committed the filesystem transaction
+            # and crashed before DBOS acknowledged the promotion step. Only the
+            # exact complete candidate authorizes treating that replay as done.
+            if self._run_store is not None and not _source_conflicts(
+                self._live_root, live_descriptor, {**self._start, **produced}
+            ):
+                self._committed = True
+                return changed
             raise UpdateWorkspaceConflictError(conflicts)
 
         transaction = _Transaction(

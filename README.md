@@ -141,8 +141,17 @@ does not establish conformance of the public models.
 
 ## Update tooling
 
-Updates and package-artifact maintenance are explicit CLI operations; the
-repository does not track GitHub Actions workflows.
+Updates and package-artifact maintenance are explicit CLI operations. The
+[Update workflow](.github/workflows/update.yml) prepares and validates one candidate
+on hosted macOS ARM64, Linux ARM64 and Linux x86_64 builders, then proposes the
+validated changes in a pull request. See [CI operation](docs/update-ci.md).
+
+For one bounded local repair attempt, use `nixcfg update --repair codex TARGET`
+(or `--repair copilot` with that CLI installed and authenticated). Both attempts run
+in isolation; a repair starts fresh execution and must pass updater validation,
+repository quality gates, and root builds before atomic promotion. `--check` keeps
+the result unapplied and `--patch PATH` exports it. Normal updates retain DBOS resume;
+repair mode requires a fresh run and cannot be combined with `--resume` or `--run-id`.
 
 ```bash
 nix run .#nixcfg -- --help
@@ -188,7 +197,7 @@ Existing multi-platform sources with a native-only fingerprint are refreshed
 once to establish this complete fingerprint.
 
 Use `--timings` (optionally with `--json`) to inspect operation time, admission
-waits, and cache reuse. See [update runtime efficiency](docs/update-runtime.md)
+waits, and cache reuse. See [update runtime and durability](docs/update-runtime.md)
 for independent resource limits, cache invalidation, and validation behavior.
 
 Progress is visible by default. On a terminal the live panel shows only the
@@ -202,15 +211,25 @@ derivation and root closure validation phases report the running command, the
 derivation being built, and idle time through the same status line; add
 `--verbose` to stream the underlying build logs.
 
-Every run also writes a run directory under
-`$XDG_STATE_HOME/nixcfg/update/runs/<run-id>/` (`UPDATE_RUN_LOG_DIR` overrides
-the root, `UPDATE_RUN_LOG=0` disables it) containing `events.jsonl`,
-`output.log` with every subprocess line, `run.json` with the plan and final
-summary, and `state.json`. The path is printed
-at the start and end of the run, and `nixcfg update --status [RUN_ID]` reports
-the latest or a named run from any terminal, including while it is running or
-after it was killed. Diagnostics redact URL credentials, query strings, and
-fragments. Flake edits refresh the lockfile once, through the same streaming
+Every CLI update is a DBOS workflow backed by one SQLite database at
+`$XDG_STATE_HOME/nixcfg/update/runs/<run-id>/run.sqlite`
+(`UPDATE_RUN_LOG_DIR` overrides the root). Resume an interrupted run with
+`nixcfg update --resume RUN_ID`: it reuses the original inputs, completed source
+work and validation results, and reconstructs candidate files from SQLite.
+The original repository, platform and updater runtime must still match.
+Use a new invocation to retry a completed failure or discover newer releases.
+
+`nixcfg update --status [RUN_ID]` reports the latest or a named run, including
+DBOS execution status and heartbeat freshness. A pending workflow with stale
+activity may be interrupted; it is not evidence of a live worker. SQLite also
+holds structured diagnostics and status snapshots, replacing `events.jsonl`,
+`run.json` and `state.json`. `output.log` remains available for tailing subprocess
+output. `UPDATE_RUN_LOG=0` disables detailed diagnostic events and subprocess
+logging; execution checkpoints and status remain durable. Diagnostics redact URL
+credentials, query strings and fragments. Legacy JSON logs remain historical
+files and cannot be resumed. Retain the run directory to retain recovery state.
+
+Flake edits refresh the lockfile once, through the same streaming
 command runner as source refreshes. `--subprocess-timeout` applies to these
 commands as well as package and root validation; a command that hits it is not
 retried.

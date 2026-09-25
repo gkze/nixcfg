@@ -228,10 +228,7 @@ def patch_main(payload: bytes) -> bytes:
     for wheel_open in _ENGINE_WHEEL_SHAPES:
         if wheel_open not in patched:
             continue
-        wheel_closed = _engine_wheel_closed(wheel_open)
-        pad = len(wheel_open) - len(wheel_closed)
-        if pad > 0:
-            wheel_closed = wheel_closed + b" " * pad
+        wheel_closed = _engine_wheel_closed(wheel_open).ljust(len(wheel_open), b" ")
         patched = _replace_exact(
             patched,
             wheel_open,

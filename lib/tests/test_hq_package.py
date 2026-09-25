@@ -1335,3 +1335,27 @@ def test_hq_overlay_and_system_route_replace_the_unmanaged_app() -> None:
     assert_nix_ast_equal(hq_route.name, "systemApp")
     assert hq_route.argument is not None
     assert_nix_ast_equal(hq_route.argument, "pkgs.hq")
+
+
+@pytest.mark.parametrize(
+    ("encoding", "instruction", "target"),
+    [
+        ("aarch64-tbz-imm14", 0x36000040, 108),
+        ("aarch64-tbz-imm14", 0x3607FFC0, 92),
+        ("aarch64-cbz-imm19", 0x34000040, 108),
+        ("aarch64-cbz-imm19", 0x34FFFFC0, 92),
+    ],
+)
+def test_hq_conditional_readback_sign_extends_branch_displacement(
+    encoding: str, instruction: int, target: int
+) -> None:
+    """Readback must retain forward and backward targets at both operand widths."""
+    module = _load_patch_module()
+    assert (
+        module._decode_branch(
+            instruction.to_bytes(4, "little"),
+            100,
+            module.RelativeBranch(0, encoding),
+        )
+        == target
+    )

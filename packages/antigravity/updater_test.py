@@ -855,3 +855,17 @@ def test_derivation_patches_then_resigns_the_managed_bundle() -> None:
         '__NIX_INTERP__ __NIX_INTERP__ --check "$app_bundle"',
     ]
     assert command_texts(shell, "/usr/bin/codesign") == []
+
+
+def test_signer_rejects_non_string_bundle_version(tmp_path: Path) -> None:
+    """Version-dependent Mach-O inventories require a valid vendor bundle version."""
+    module = _load_signing_module()
+    app = _write_signing_bundle(tmp_path)
+    info_path = app / "Contents/Info.plist"
+    info = plistlib.loads(info_path.read_bytes())
+    info["CFBundleShortVersionString"] = 123
+    info_path.write_bytes(plistlib.dumps(info))
+    with pytest.raises(
+        module.SigningError, match="CFBundleShortVersionString is not a string"
+    ):
+        module.discover_inventory(app)

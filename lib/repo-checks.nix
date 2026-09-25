@@ -111,6 +111,15 @@ let
 in
 {
   checks = {
+    "lint-update-ci" = {
+      source = mkCheckSource (src + "/.github");
+      command =
+        { lib, pkgs, ... }:
+        ''
+          ${lib.getExe pkgs.actionlint} .github/workflows/*.yml
+        '';
+    };
+
     "lint-editorconfig" = {
       source = mkCheckSource src;
       command =

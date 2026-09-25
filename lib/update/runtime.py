@@ -114,10 +114,16 @@ def active_runtime() -> UpdateRuntime | None:
 
 
 @asynccontextmanager
-async def runtime_scope(config: UpdateConfig) -> AsyncIterator[UpdateRuntime]:
+async def runtime_scope(
+    config: UpdateConfig, *, existing: UpdateRuntime | None = None
+) -> AsyncIterator[UpdateRuntime]:
     """Share nested scopes and reap memoized work before disposing run state."""
-    if (existing := active_runtime()) is not None:
-        yield existing
+    if (shared := existing or active_runtime()) is not None:
+        token = _ACTIVE_RUNTIME.set(shared)
+        try:
+            yield shared
+        finally:
+            _ACTIVE_RUNTIME.reset(token)
         return
     runtime = UpdateRuntime(config)
     token = _ACTIVE_RUNTIME.set(runtime)

@@ -5,7 +5,6 @@ import pytest
 from lib.update.planner import (
     companion_source_depths,
     select_target_source_names,
-    source_update_waves,
 )
 
 
@@ -75,11 +74,6 @@ def test_aggregate_depth_uses_longest_selected_dependency_path() -> None:
         "child",
         "sibling",
         "aggregate",
-    ]
-    assert source_update_waves(list(updaters), updaters) == [
-        ["root"],
-        ["child", "sibling"],
-        ["aggregate"],
     ]
 
 

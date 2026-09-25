@@ -283,13 +283,12 @@ const NIX_MANAGED_MESSAGE = 'Updates are managed by Nix.';
     _SourcePatch(
         "opencode-cli-upgrade",
         "opencode",
-        "packages/cli/src/commands/handlers/upgrade.ts",
-        "      log.info(`Using method: ${method}`)\n",
-        f"""      if (process.env.OPENCODE_NIX_MANAGED === "1") {{
-        throw new Error("{_MANAGED_MESSAGE}")
-      }}
-
-      log.info(`Using method: ${{method}}`)
+        "packages/opencode/src/cli/cmd/upgrade.ts",
+        "  handler: async (args: { target?: string; method?: string }) => {\n",
+        f"""  handler: async (args: {{ target?: string; method?: string }}) => {{
+    if (process.env.OPENCODE_NIX_MANAGED === "1") {{
+      throw new Error("{_MANAGED_MESSAGE}")
+    }}
 """,
     ),
 )
@@ -318,9 +317,14 @@ _ANCHORS = (
     _SourceAnchor(
         "opencode-auto-updater",
         "opencode",
-        "packages/cli/src/services/updater.ts",
-        "    if (OPENCODE_LOCAL || "
-        '["1", "true"].includes(process.env.OPENCODE_DISABLE_AUTOUPDATE?.toLowerCase() ?? "")) {\n',
+        "packages/opencode/src/cli/upgrade.ts",
+        "  if (config.autoupdate === false || Flag.OPENCODE_DISABLE_AUTOUPDATE) return\n",
+    ),
+    _SourceAnchor(
+        "opencode-auto-updater-flag",
+        "opencode",
+        "packages/core/src/flag/flag.ts",
+        '  OPENCODE_DISABLE_AUTOUPDATE: truthy("OPENCODE_DISABLE_AUTOUPDATE"),\n',
     ),
 )
 

@@ -20,6 +20,7 @@ from lib.update.updaters import (
     VersionInfo,
     register_updater,
 )
+from lib.update.updaters.metadata import MappingMetadata
 
 if TYPE_CHECKING:
     from lib.nix.models.sources import SourceEntry, SourceHashes
@@ -56,7 +57,7 @@ _API_PLATFORM_SYSTEMS = {
 
 
 @dataclass(frozen=True, slots=True)
-class _ChromeReleaseMetadata:
+class _ChromeReleaseMetadata(MappingMetadata):
     """Artifact URLs and their platform-specific package versions."""
 
     asset_urls: dict[str, str]
