@@ -31,7 +31,7 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
     boundary = tools / "boundary"
     boundary.write_text(
         f"#!{sys.executable}\n"
-        "import json, os, subprocess, sys\n"
+        "import json, os, subprocess, sys, time\n"
         "from pathlib import Path\n"
         "name = Path(sys.argv[0]).name\n"
         "args = sys.argv[1:]\n"
@@ -54,6 +54,8 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "    (logs / 'output.log').write_text('source failure detail\\n')\n"
         "print(json.dumps({'success': int(os.environ.get('TEST_EXIT', '0')) == 0}))\n"
         "print('diagnostic evidence', file=sys.stderr)\n"
+        "if os.environ.get('TEST_SLEEP_AFTER_DIAGNOSTIC') == '1':\n"
+        "    time.sleep(1)\n"
         "sys.exit(int(os.environ.get('TEST_EXIT', '0')))\n"
     )
     boundary.chmod(0o755)
@@ -111,6 +113,7 @@ def test_native_job_keeps_evidence_and_propagates_failure(
         "success": exit_code == 0
     }
     assert (artifacts / "stderr.log").read_text() == "diagnostic evidence\n"
+    assert "diagnostic evidence\n" in result.stderr
     assert (artifacts / "runs/test-run/output.log").read_text() == (
         "source failure detail\n"
     )
@@ -121,6 +124,24 @@ def test_native_job_keeps_evidence_and_propagates_failure(
     else:
         assert "Updater failed" not in result.stderr
     assert (checkout / "flake.lock").read_text() == "baseline"
+
+
+def test_native_job_forwards_diagnostics_before_the_updater_exits(native_job) -> None:
+    env, checkout = native_job
+    process = subprocess.Popen(  # noqa: S603 -- tests the Actions entrypoint process boundary.
+        [sys.executable, str(SCRIPT)],
+        cwd=checkout,
+        env=env | {"TEST_SLEEP_AFTER_DIAGNOSTIC": "1"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert process.stderr is not None
+    assert process.stderr.readline() == "diagnostic evidence\n"
+    stdout, stderr = process.communicate()
+    assert process.returncode == 0, stdout + stderr
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    assert (artifacts / "stderr.log").read_text() == "diagnostic evidence\n"
 
 
 def test_failure_summary_names_failed_sources(tmp_path: Path) -> None:

@@ -207,27 +207,36 @@ def native(stage: str) -> int:
     with (
         (artifacts / "result.json").open("w") as output,
         (artifacts / "stderr.log").open("w") as log,
-    ):
-        result = subprocess.run(  # noqa: S603 -- fixed executable and separate target arguments
+        subprocess.Popen(  # noqa: S603 -- fixed executable and separate target arguments
             args,
             stdout=output,
-            stderr=log,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
             env=os.environ
             | {
                 "REPO_ROOT": str(Path.cwd()),
                 "UPDATE_RUN_LOG": "1",
                 "UPDATE_RUN_LOG_DIR": str(artifacts / "runs"),
             },
-            check=False,
-        )
-    sys.stderr.write((artifacts / "stderr.log").read_text())
+        ) as process,
+    ):
+        if process.stderr is None:  # pragma: no cover -- PIPE above guarantees stderr.
+            msg = "Cannot collect updater diagnostics"
+            raise RuntimeError(msg)
+        for diagnostic in process.stderr:
+            log.write(diagnostic)
+            log.flush()
+            sys.stderr.write(diagnostic)
+            sys.stderr.flush()
+        returncode = process.wait()
     if summary := _failure_summary(artifacts / "result.json"):
         sys.stderr.write(summary + "\n")
-    if stage == "prepare" and result.returncode == 0:
+    if stage == "prepare" and returncode == 0:
         paths = sorted(_prefetched_paths() - before)
         if paths:
             _run("cachix", "push", _BINARY_CACHE, *paths)
-    return result.returncode
+    return returncode
 
 
 def certify() -> None:
