@@ -683,4 +683,4 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
     assert old.exists() == (system != "darwin" or rejected)
     assert android.exists() == (system != "darwin" or rejected)
     if system == "darwin" and not rejected:
-        assert ("xcrun", "simctl", "runtime", "delete", "all") in calls
+        assert not any(call[:2] == ("xcrun", "simctl") for call in calls)

@@ -88,15 +88,13 @@ def clean_runner_image() -> None:
             raise ValueError(msg)
         selected = selected.resolve()
         # Keep the active developer tools and their aliases. Nix supplies its
-        # language toolchains; these jobs never use mobile simulator runtimes.
+        # language toolchains; the updater does not need mobile SDKs.
         paths.extend(
             path
             for path in _APPLICATIONS.glob("Xcode*.app")
             if not path.is_symlink() and not selected.is_relative_to(path.resolve())
         )
         paths.append(Path.home() / "Library/Android/sdk")
-        _run("xcrun", "simctl", "delete", "all")
-        _run("xcrun", "simctl", "runtime", "delete", "all")
     for path in paths:
         if path.is_dir() and not path.is_symlink():
             sys.stdout.write(f"Removing unused runner image tool: {path}\n")
