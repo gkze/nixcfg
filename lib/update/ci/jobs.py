@@ -157,6 +157,23 @@ def _prefetched_paths() -> set[str]:
     }
 
 
+def _failure_summary(result_path: Path) -> str | None:
+    """Return the concise source failure identity for a hosted job log."""
+    try:
+        result = json.loads(result_path.read_text())
+    except OSError, json.JSONDecodeError:
+        return None
+    if not isinstance(result, dict) or result.get("success") is not False:
+        return None
+    errors = result.get("errors")
+    if not isinstance(errors, list) or not all(
+        isinstance(error, str) for error in errors
+    ):
+        return "Updater failed; inspect the retained result and run-log artifacts."
+    sources = ", ".join(errors)
+    return f"Updater failed for: {sources}. Inspect the retained result and run-log artifacts."
+
+
 def native(stage: str) -> int:
     """Prepare or validate with immutable inputs and retained failure evidence."""
     artifacts = _temp() / "update-artifacts"
@@ -206,6 +223,8 @@ def native(stage: str) -> int:
             check=False,
         )
     sys.stderr.write((artifacts / "stderr.log").read_text())
+    if summary := _failure_summary(artifacts / "result.json"):
+        sys.stderr.write(summary + "\n")
     if stage == "prepare" and result.returncode == 0:
         paths = sorted(_prefetched_paths() - before)
         if paths:

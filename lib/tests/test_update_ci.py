@@ -114,7 +114,21 @@ def test_native_job_keeps_evidence_and_propagates_failure(
     assert (artifacts / "runs/test-run/output.log").read_text() == (
         "source failure detail\n"
     )
+    if exit_code:
+        assert result.stderr.endswith(
+            "Updater failed; inspect the retained result and run-log artifacts.\n"
+        )
+    else:
+        assert "Updater failed" not in result.stderr
     assert (checkout / "flake.lock").read_text() == "baseline"
+
+
+def test_failure_summary_names_failed_sources(tmp_path: Path) -> None:
+    result = tmp_path / "result.json"
+    result.write_text(json.dumps({"success": False, "errors": ["ara", "buzz"]}))
+    assert jobs._failure_summary(result) == (
+        "Updater failed for: ara, buzz. Inspect the retained result and run-log artifacts."
+    )
 
 
 @pytest.mark.parametrize("update_exit", [0, 17])
