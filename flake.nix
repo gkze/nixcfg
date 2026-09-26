@@ -59,7 +59,11 @@
       url = "github:hraban/mac-app-util";
       # TODO: re-enable once SBCL on Darwin is fixed
       # gitlab.common-lisp.net returns HTML (bot protection) instead of tar.gz
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        # Avoid resolving this indirect input through a runner-specific registry.
+        flake-utils.url = "github:numtide/flake-utils";
+      };
     };
     nixvim = {
       # Nixvim constructs its own package set; keep its tested Nixpkgs pin

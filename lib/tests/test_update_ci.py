@@ -131,6 +131,17 @@ def test_failure_summary_names_failed_sources(tmp_path: Path) -> None:
     )
 
 
+def test_flake_lock_has_no_registry_dependent_inputs() -> None:
+    """Source refresh must not resolve flake inputs through a runner registry."""
+    lock = json.loads((ROOT / "flake.lock").read_text(encoding="utf-8"))
+    indirect = {
+        name: node["original"]
+        for name, node in lock["nodes"].items()
+        if node.get("original", {}).get("type") == "indirect"
+    }
+    assert not indirect
+
+
 @pytest.mark.parametrize("update_exit", [0, 17])
 @pytest.mark.parametrize("cache_exit", [0, 19])
 def test_preparation_publishes_only_new_verified_raw_imports(
