@@ -1517,15 +1517,26 @@ def _generation_identity(target: Crate2NixTarget, patched_src: Path) -> str | No
         ):
             continue
         if name == "NIX_USER_CONF_FILES":
-            environment[name] = [
-                (
-                    {"digest": generation_receipts.content_digest(path.read_bytes())}
-                    if path.is_file()
-                    else {"missing": entry}
-                )
-                for entry in value.split(os.pathsep)
-                for path in [Path(entry)]
-            ]
+            entries: list[dict[str, str]] = []
+            for entry in value.split(os.pathsep):
+                if not entry:
+                    continue
+                path = Path(entry)
+                try:
+                    if path.is_file():
+                        entries.append(
+                            {
+                                "digest": generation_receipts.content_digest(
+                                    path.read_bytes()
+                                )
+                            }
+                        )
+                    else:
+                        entries.append({"missing": entry})
+                except OSError:
+                    # Uninspectable config paths cannot authorize reuse.
+                    return None
+            environment[name] = entries
             continue
         environment[name] = value
     return generation_receipts.identity_digest({
@@ -1559,7 +1570,7 @@ def _cached_refresh(
             str(path): (REPO_ROOT / path).read_text(encoding="utf-8")
             for path in target.artifact_paths
         }
-    except OSError, UnicodeError:
+    except (OSError, UnicodeError):
         return None
     if not generation_receipts.matches(
         _generation_receipt_path(target), identity=identity, outputs=outputs
@@ -1778,7 +1789,7 @@ async def _cancel_artifact_worker(
         await update_runtime.await_cleanup(future)
     except Crate2NixCommandCancelledError:
         pass
-    except OSError, RuntimeError, TypeError, ValueError:
+    except (OSError, RuntimeError, TypeError, ValueError):
         pass
 
 

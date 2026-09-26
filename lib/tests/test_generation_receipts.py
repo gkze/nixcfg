@@ -169,6 +169,43 @@ def test_generation_identity_normalizes_nix_user_conf_files_by_content(
     assert crate2nix._generation_identity(generation_target, source) != baseline
 
 
+
+
+def test_generation_identity_fails_closed_for_unreadable_nix_user_conf(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    generation_target: crate2nix.Crate2NixTarget,
+) -> None:
+    """Unreadable nix user config files must not authorize receipt reuse."""
+    source = Path("/nix/store/source")
+    conf = tmp_path / "nix.conf"
+    conf.write_text("substituters = https://cache.nixos.org\n", encoding="utf-8")
+    monkeypatch.setenv("NIX_USER_CONF_FILES", str(conf))
+    original = Path.read_bytes
+
+    def boom(self: Path) -> bytes:
+        if self == conf:
+            raise PermissionError("denied")
+        return original(self)
+
+    monkeypatch.setattr(Path, "read_bytes", boom)
+    assert crate2nix._generation_identity(generation_target, source) is None
+
+
+def test_generation_identity_ignores_empty_nix_user_conf_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    generation_target: crate2nix.Crate2NixTarget,
+) -> None:
+    """Trailing path separators must not invent missing-path identity noise."""
+    source = Path("/nix/store/source")
+    conf = tmp_path / "nix.conf"
+    conf.write_text("substituters = https://cache.nixos.org\n", encoding="utf-8")
+    monkeypatch.setenv("NIX_USER_CONF_FILES", f"{conf}{os.pathsep}")
+    baseline = crate2nix._generation_identity(generation_target, source)
+    monkeypatch.setenv("NIX_USER_CONF_FILES", str(conf))
+    assert crate2nix._generation_identity(generation_target, source) == baseline
+
 def test_generation_identity_fails_closed_for_uninspectable_inputs(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

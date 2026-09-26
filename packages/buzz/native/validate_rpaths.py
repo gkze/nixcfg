@@ -27,7 +27,7 @@ class _AppPaths:
         try:
             resolved = path.resolve(strict=True)
             resolved.relative_to(self.app)
-        except OSError, ValueError:
+        except (OSError, ValueError):
             fail(f"{label} escapes Buzz.app: {self.executable} -> {edge}")
         if require_directory:
             if not resolved.is_dir():
