@@ -56,14 +56,28 @@ let
   manifestRoots = map (root: {
     inherit (root) kind name system;
   }) roots;
-  mismatchedSystems = builtins.filter (root: root.system != root.closure.system) roots;
   mismatchedNames = builtins.filter (
     kind:
     declaredSystems != null
     && builtins.attrNames configurations.${kind} != builtins.attrNames (declaredSystems.${kind} or { })
   ) supportedKinds;
-  validateClosures =
+  # Keep system/closure consistency checks scoped to the roots being realized.
+  # Evaluating lib.rootClosureManifest on Linux must not force Darwin closures
+  # (those can IFD/build aarch64-darwin sources and fail with platform mismatch).
+  mismatchedSystemsFor =
+    rootsToCheck:
+    builtins.filter (root: root.system != root.closure.system) rootsToCheck;
+  validateManifest =
     value:
+    assert lib.assertMsg (mismatchedNames == [ ]) (
+      "root closure names differ from their declarations: " + lib.concatStringsSep ", " mismatchedNames
+    );
+    value;
+  validateClosures =
+    rootsToCheck: value:
+    let
+      mismatchedSystems = mismatchedSystemsFor rootsToCheck;
+    in
     assert lib.assertMsg (mismatchedNames == [ ]) (
       "root closure names differ from their declarations: " + lib.concatStringsSep ", " mismatchedNames
     );
@@ -92,22 +106,27 @@ assert lib.assertMsg (unsupportedSystems == [ ]) (
   + lib.concatStringsSep ", " unsupportedSystems
 );
 {
-  manifest = validateClosures {
+  # Manifest is discovery-only: kind/name/system from declaredSystems (or
+  # closure.system when undeclared). Do not force foreign-system closures here.
+  manifest = validateManifest {
     schemaVersion = 2;
     inherit requiredKinds requiredRoots;
     roots = manifestRoots;
   };
 
   # Discovery uses constructor metadata. Actual closure validation remains at
-  # the manifest and root-check boundaries, where those closures are needed.
+  # the per-system root-check boundary, where those closures are needed.
   rootSystems = lib.unique (map (root: root.system) roots);
 
   forSystem =
     system:
-    validateClosures (
+    let
+      systemRoots = builtins.filter (root: root.system == system) roots;
+    in
+    validateClosures systemRoots (
       map (root: {
         name = "${root.kind}-${root.name}";
         path = root.closure;
-      }) (builtins.filter (root: root.system == system) roots)
+      }) systemRoots
     );
 }
