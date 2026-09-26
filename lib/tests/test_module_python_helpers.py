@@ -4,8 +4,12 @@ import os
 import runpy
 import stat
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
+
+import pytest
 
 from lib.import_utils import load_module_from_path
 from lib.update.paths import REPO_ROOT
@@ -29,11 +33,16 @@ def test_ptpython_build_style_and_configure(monkeypatch) -> None:
 
     class _FakeStylesModule:
         @staticmethod
+        def DynamicStyle(get_style: Callable[[], object]) -> Callable[[], object]:  # noqa: N802
+            return get_style
+
+        @staticmethod
         def style_from_pygments_cls(style_cls: object) -> object:
             style_calls.append(style_cls)
             return {"style": style_cls}
 
     class _FakePygmentsModule:
+        LatteStyle = object()
         FrappeStyle = object()
 
     def _fake_import_module(name: str) -> object:
@@ -48,6 +57,7 @@ def test_ptpython_build_style_and_configure(monkeypatch) -> None:
             self.show_docstring = False
             self.enable_auto_suggest = False
             self.vi_mode = False
+            self.app = SimpleNamespace(refresh_interval=None)
             self.calls: list[tuple[str, str, object | None]] = []
 
         def install_ui_colorscheme(self, name: str, style: object) -> None:
@@ -63,16 +73,22 @@ def test_ptpython_build_style_and_configure(monkeypatch) -> None:
             self.calls.append(("use_code", name, None))
 
     monkeypatch.setattr(module.importlib, "import_module", _fake_import_module)
+    mode = {"value": "light"}
+    monkeypatch.setattr(module, "_appearance", lambda: mode["value"])
     repl = _FakeRepl()
 
-    style = module._build_style()
     module.configure(repl)
 
-    assert style == {"style": _FakePygmentsModule.FrappeStyle}
+    style = cast("Callable[[], object]", repl.calls[0][2])
+    assert callable(style)
+    assert style() == {"style": _FakePygmentsModule.LatteStyle}
+    mode["value"] = "dark"
+    assert style() == {"style": _FakePygmentsModule.FrappeStyle}
     assert style_calls == [
-        _FakePygmentsModule.FrappeStyle,
+        _FakePygmentsModule.LatteStyle,
         _FakePygmentsModule.FrappeStyle,
     ]
+    assert repl.app.refresh_interval == 1.0
     assert repl.show_signature is True
     assert repl.show_docstring is True
     assert repl.enable_auto_suggest is True
@@ -83,6 +99,27 @@ def test_ptpython_build_style_and_configure(monkeypatch) -> None:
         ("install_code", module.STYLE_NAME, style),
         ("use_code", module.STYLE_NAME, None),
     ]
+
+
+def test_ptpython_appearance_reads_current_state(monkeypatch, tmp_path: Path) -> None:
+    """Mode changes are visible without restarting, with an explicit missing-file fallback."""
+    module = _load_module("modules/home/languages/ptpython.py", "ptpython_modes_test")
+    monkeypatch.delenv("NIXCFG_APPEARANCE_FILE", raising=False)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    assert module._appearance() == "dark"
+    mode_file = tmp_path / "nixcfg/appearance/mode"
+    mode_file.parent.mkdir(parents=True)
+    mode_file.write_text("light\n")
+    assert module._appearance() == "light"
+    mode_file.write_text("dark")
+    assert module._appearance() == "dark"
+    override = tmp_path / "override"
+    override.write_text("light")
+    monkeypatch.setenv("NIXCFG_APPEARANCE_FILE", str(override))
+    assert module._appearance() == "light"
+    override.write_text("invalid")
+    with pytest.raises(ValueError, match="Invalid appearance mode"):
+        module._appearance()
 
 
 def test_git_delta_cache_helpers_cover_env_and_tree_edge_cases(

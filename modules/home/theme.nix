@@ -38,6 +38,32 @@ in
       default = "dark";
       description = "Light or dark mode.";
     };
+    appearances = mkOption {
+      type = types.attrsOf (
+        types.submodule {
+          options = lib.genAttrs [
+            "variant"
+            "slug"
+            "displayName"
+            "displayNameAccented"
+          ] (_: mkOption { type = types.str; });
+        }
+      );
+      readOnly = true;
+      default =
+        lib.mapAttrs
+          (_: variant: {
+            inherit variant;
+            slug = "${lib.toLower cfg.name}-${variant}";
+            displayName = "${capitalize cfg.name} ${capitalize variant}";
+            displayNameAccented = "${capitalize cfg.name} ${accentedVariants.${variant}}";
+          })
+          {
+            light = "latte";
+            dark = "frappe";
+          };
+      description = "Paired palettes for applications that follow system appearance; static-only targets retain theme.variant.";
+    };
     accentColor = mkOption {
       type = types.str;
       default = "blue";

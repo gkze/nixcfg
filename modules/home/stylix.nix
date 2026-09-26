@@ -80,6 +80,9 @@ in
           vscode.enable = false;
           opencode.enable = false;
           zed.enable = false;
+          # Zellij selects its built-in Latte/Frappé pair at runtime.
+          zellij.enable = false;
+          yazi.enable = false;
           ghostty.enable = cfg.enableGhosttyTarget;
           gnome.enable = cfg.enableLinuxDesktopTargets;
           gtk.enable = cfg.enableLinuxDesktopTargets;

@@ -340,6 +340,13 @@
       stylix.wallpaper = ./wallpaper.jpeg;
     };
 
+  # OpenChamber's built-in Catppuccin dark theme is Mocha, so provide Frappé.
+  xdg.configFile."openchamber/themes/catppuccin-frappe.json" =
+    lib.mkIf (config.theme.name == "catppuccin")
+      {
+        source = ./openchamber-frappe.json;
+      };
+
   catppuccin = lib.mkIf (config.theme.name == "catppuccin") {
     # catppuccin/nix now gates every per-program module on the global enable;
     # keep autoEnable off so only the explicit opt-ins below are themed and
@@ -365,7 +372,8 @@
       ) "catppuccin-bottom-src is out of sync with catppuccin/nix's Bottom source.";
       "${inputSource}/themes";
     eza.enable = true;
-    element-desktop.enable = true;
+    # System matching in Element selects built-in light/dark, not custom themes.
+    element-desktop.enable = false;
     # The upstream module imports this JSON during evaluation, so override only
     # its source while leaving flavor/accent selection and settings ownership upstream.
     sources.element =
@@ -404,11 +412,20 @@
         src = pkgs.sublime-kdl;
         file = "KDL1.sublime-syntax";
       };
-      themes.${config.theme.displayName} = {
-        src = inputs.catppuccin-bat;
-        file = "themes/${config.theme.displayName}.tmTheme";
+      themes = lib.listToAttrs (
+        map (appearance: {
+          name = appearance.displayName;
+          value = {
+            src = inputs.catppuccin-bat;
+            file = "themes/${appearance.displayName}.tmTheme";
+          };
+        }) (builtins.attrValues config.theme.appearances ++ [ config.theme ])
+      );
+      config = {
+        theme = if pkgs.stdenv.hostPlatform.isDarwin then "auto:system" else "auto";
+        theme-light = config.theme.appearances.light.displayName;
+        theme-dark = config.theme.appearances.dark.displayName;
       };
-      config.theme = config.theme.displayName;
     };
     direnv = {
       enable = true;
@@ -441,7 +458,7 @@
         font-size = 12;
         macos-option-as-alt = "left";
         keybind = "alt+left=unbind";
-        theme = config.theme.displayName;
+        theme = "light:${config.theme.appearances.light.displayName},dark:${config.theme.appearances.dark.displayName}";
         window-height = 80;
         window-width = 220;
       };
@@ -545,6 +562,12 @@
     vscode = {
       enable = true;
       package = null;
+      profiles.default.userSettings = {
+        "window.autoDetectColorScheme" = true;
+        "workbench.preferredLightColorTheme" = config.theme.appearances.light.displayNameAccented;
+        "workbench.preferredDarkColorTheme" = config.theme.appearances.dark.displayNameAccented;
+        "catppuccin.syncWithIconPack" = true;
+      };
     }
     // lib.optionalAttrs (options.programs.vscode ? nameShort) {
       pname = "vscode-insiders";
@@ -554,19 +577,28 @@
       enableZshIntegration = true;
       shellWrapperName = "y";
       settings.manager.sort_by = "alphabetical";
+      theme.flavor = lib.mapAttrs (_: appearance: appearance.slug) config.theme.appearances;
+      flavors = lib.listToAttrs (
+        map (appearance: {
+          name = appearance.slug;
+          value = pkgs.runCommand "yazi-${appearance.slug}" { } ''
+            mkdir -p "$out"
+            substitute \
+              "${config.catppuccin.sources.yazi}/${appearance.variant}/${appearance.slug}-${config.theme.accentColor}.toml" \
+              "$out/flavor.toml" \
+              --replace-fail '~/.config/yazi/Catppuccin-${appearance.variant}.tmTheme' "$out/tmtheme.xml"
+            cp "${inputs.catppuccin-bat}/themes/${appearance.displayName}.tmTheme" "$out/tmtheme.xml"
+          '';
+        }) (builtins.attrValues config.theme.appearances)
+      );
     };
     zellij = {
       enable = true;
       # Disabled: auto-attach behavior is disruptive; prefer manual invocation
       enableZshIntegration = false;
-      # Stylix PR #2257 changed inactive Zellij ribbons to base05 text on
-      # base02, but left emphasis_1 as base05. Zellij uses emphasis_1 as
-      # the alternating inactive-tab background, which makes alternate tabs
-      # render base05 text on base05 background. Keep alternating inactive
-      # tabs visually disabled until Stylix adjusts it upstream.
-      themes.stylix.themes.default.ribbon_unselected.emphasis_1 =
-        lib.mkForce config.lib.stylix.colors.withHashtag.base02;
       settings = {
+        theme_light = config.theme.appearances.light.slug;
+        theme_dark = config.theme.appearances.dark.slug;
         keybinds = {
           normal = {
             "bind \"Alt b\"".TogglePaneFrames = { };
@@ -621,6 +653,16 @@
     element-desktop = {
       enable = true;
       package = null;
+      settings = {
+        default_theme = "light";
+        setting_defaults = {
+          use_system_theme = true;
+          custom_themes = map (
+            appearance:
+            lib.importJSON "${config.catppuccin.sources.element}/${appearance.variant}/${config.theme.accentColor}.json"
+          ) (builtins.attrValues config.theme.appearances);
+        };
+      };
     };
     eza.enable = true;
     fd.enable = true;

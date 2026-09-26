@@ -130,6 +130,7 @@ in
       defaults = {
         NSGlobalDomain = {
           AppleEnableSwipeNavigateWithScrolls = true;
+          AppleInterfaceStyleSwitchesAutomatically = true;
           "com.apple.mouse.tapBehavior" = 1;
           "com.apple.sound.beep.feedback" = 0;
           "com.apple.trackpad.enableSecondaryClick" = true;

@@ -84,15 +84,19 @@ in
       };
       format_on_save = "on";
       git_panel.dock = "right";
-      icon_theme = config.theme.displayNameAccented;
+      icon_theme = {
+        mode = "system";
+        light = config.theme.appearances.light.displayNameAccented;
+        dark = config.theme.appearances.dark.displayNameAccented;
+      };
       minimap.show = "always";
       outline_panel.dock = "right";
       project_panel.dock = "right";
       session.trust_all_worktrees = true;
       show_whitespaces = "all";
       theme = {
-        dark = config.theme.displayNameAccented;
-        light = "One Light";
+        dark = config.theme.appearances.dark.displayNameAccented;
+        light = config.theme.appearances.light.displayNameAccented;
         mode = "system";
       };
       ui_font_family = config.fonts.sansSerif.name;

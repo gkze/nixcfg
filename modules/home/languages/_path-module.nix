@@ -6,6 +6,8 @@
   pathDefault,
   pathDescription,
   extraConfig ? { },
+  # Additional static PATH entries appended after the primary path option.
+  extraPaths ? [ ],
 }:
 let
   cfg = lib.getAttrFromPath optionPath config;
@@ -20,5 +22,7 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable (extraConfig // { home.sessionPath = [ cfg.${pathOptionName} ]; });
+  config = lib.mkIf cfg.enable (
+    extraConfig // { home.sessionPath = [ cfg.${pathOptionName} ] ++ extraPaths; }
+  );
 }

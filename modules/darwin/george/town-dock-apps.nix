@@ -37,7 +37,6 @@ dock.mkDockModule {
     (appPath "slack" "Slack.app")
     (appPath "onepassword" "1Password.app")
     (appPath "zen-twilight" "Twilight.app")
-    (appPath "thorium" "Thorium.app")
     (appPath "google-chrome" "Google Chrome.app")
     (appPath "claude" "Claude.app")
     (appPath "codex" "ChatGPT.app")

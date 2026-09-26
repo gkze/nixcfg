@@ -1,0 +1,39 @@
+{
+  "metadata": {
+    "id": "catppuccin-frappe",
+    "name": "Catppuccin Frappé",
+    "variant": "dark",
+    "description": "Catppuccin Frappé; remaining roles are derived by OpenChamber.",
+    "version": "1.0.0",
+    "tags": ["catppuccin", "dark"]
+  },
+  "colors": {
+    "primary": { "base": "#8caaee" },
+    "surface": {
+      "background": "#303446",
+      "foreground": "#c6d0f5",
+      "muted": "#292c3c",
+      "mutedForeground": "#a5adce",
+      "elevated": "#414559"
+    },
+    "interactive": { "border": "#626880" },
+    "status": {
+      "error": "#e78284",
+      "warning": "#e5c890",
+      "success": "#a6d189",
+      "info": "#8caaee"
+    },
+    "syntax": {
+      "base": {
+        "keyword": "#ca9ee6",
+        "string": "#a6d189",
+        "number": "#ef9f76",
+        "function": "#8caaee",
+        "variable": "#c6d0f5",
+        "type": "#e5c890",
+        "comment": "#838ba7",
+        "operator": "#99d1db"
+      }
+    }
+  }
+}

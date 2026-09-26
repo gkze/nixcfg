@@ -1,6 +1,7 @@
 {
   config,
   lib,
+  pkgs,
   ...
 }:
 let
@@ -37,9 +38,22 @@ let
     profileMcpServers: opencodeMcpLib.resolveSparseMcpServerOverrides cfg.mcpServers profileMcpServers;
 
   baseOpencodeTui = {
-    theme = config.theme.slug;
+    theme = if config.theme.name == "catppuccin" then "catppuccin-system" else config.theme.slug;
     scroll_acceleration.enabled = true;
   };
+
+  # OpenCode 2 ships standalone, single-mode palettes. Pair their native
+  # version-2 mode trees so system appearance selects Latte or Frappé.
+  catppuccinTheme =
+    let
+      themeDir = "${config.programs.opencode.package.src}/packages/tui/src/theme/assets";
+      light = lib.importJSON "${themeDir}/catppuccin-latte.json";
+      dark = lib.importJSON "${themeDir}/catppuccin-frappe.json";
+    in
+    dark
+    // {
+      inherit (light) light;
+    };
 
   baseOpencodeSettings = optionalAttrs (cfg.plugins != [ ]) {
     plugin = cfg.plugins;
@@ -119,6 +133,25 @@ in
           map (path: "run rm -f ${lib.escapeShellArg path}") staleProfileJsonPaths
         )}
       '';
+      # OpenCode 2 reads cli.json; tui.json is only imported during migration.
+      # Merge appearance into the mutable file so unrelated CLI preferences survive.
+      activation.opencodeSystemAppearance = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+        run ${pkgs.writeShellScript "opencode-system-appearance" ''
+          set -eu
+          appearance_config=${lib.escapeShellArg "${config.xdg.configHome}/opencode/cli.json"}
+          # Leave first-run migration to OpenCode so it can import all legacy settings.
+          if [ ! -f "$appearance_config" ]; then
+            exit 0
+          fi
+          appearance_tmp=$(mktemp "$appearance_config.XXXXXX")
+          trap 'rm -f "$appearance_tmp"' EXIT
+          ${lib.getExe pkgs.jq} --arg name ${lib.escapeShellArg baseOpencodeTui.theme} \
+            '.theme = {name: $name, mode: "system"}' \
+            "$appearance_config" > "$appearance_tmp"
+          chmod 600 "$appearance_tmp"
+          mv "$appearance_tmp" "$appearance_config"
+        ''}
+      '';
       sessionVariables.OPENCODE_CONFIG = selectedProfilePath;
     };
 
@@ -133,5 +166,8 @@ in
     xdg.configFile."opencode/${cfg.activeProfile}.json".text = builtins.toJSON (
       mkProfileOverlayConfig selectedProfileConfig
     );
+    xdg.configFile."opencode/themes/catppuccin-system.json" = mkIf (config.theme.name == "catppuccin") {
+      text = builtins.toJSON catppuccinTheme;
+    };
   };
 }

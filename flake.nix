@@ -897,6 +897,14 @@
               }
             );
 
+            "test-nix-language-path-modules" = mkEvalOnlyCheck "test-nix-language-path-modules" (
+              { pkgs, ... }:
+              import ./tests/nix/language-path-modules.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
+
             "test-nix-common-maintenance" = mkEvalOnlyCheck "test-nix-common-maintenance" (
               { pkgs, ... }:
               import ./tests/nix/common-maintenance.nix {

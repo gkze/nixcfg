@@ -96,6 +96,11 @@ in
       default = true;
       description = "Include the catppuccin delta theme snippet.";
     };
+    deltaTheme = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = config.theme.slug;
+      description = "Delta theme feature; null leaves selection to a runtime Git include.";
+    };
 
     ignores = lib.mkOption {
       type = lib.types.listOf lib.types.str;
@@ -215,7 +220,7 @@ in
             praise = "blame";
           };
           commit.gpgsign = cfg.signCommitsByDefault;
-          delta.features = config.theme.slug;
+          delta.features = lib.mkIf (cfg.deltaTheme != null) cfg.deltaTheme;
           diff.colorMoved = "default";
           fetch.prune = true;
           init.defaultBranch = "main";

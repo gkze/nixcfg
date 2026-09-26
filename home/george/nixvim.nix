@@ -349,7 +349,8 @@ in
       colorschemes.catppuccin = {
         enable = true;
         settings = {
-          flavour = config.theme.variant;
+          flavour = "auto";
+          background = lib.mapAttrs (_: appearance: appearance.variant) config.theme.appearances;
           integrations = {
             aerial = true;
             alpha = true;

@@ -188,6 +188,14 @@ let
   };
 in
 {
+  imports = [ ./appearance.nix ];
+  targets.darwin.defaults = {
+    "com.ampcode.amp.macos".appearancePreference = "system";
+    "com.cogito.app"."appearance.preference" = "system";
+    "com.town.TownAssistantMac".appTheme = "system";
+    "com.meta.endo".endo_appearance_mode = "system";
+  };
+
   # Run after Home Manager removes the previous generation's store-backed link.
   home.activation.codexBundledCli =
     lib.hm.dag.entryAfter
