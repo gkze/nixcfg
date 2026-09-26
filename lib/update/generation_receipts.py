@@ -38,7 +38,7 @@ def matches(path: Path, *, identity: str, outputs: Mapping[str, str]) -> bool:
     """Accept only an exact complete output set from the same generator inputs."""
     try:
         saved = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except OSError, ValueError:
         # Receipts are disposable accelerators, never authoritative artifacts.
         return False
     return saved == _receipt(identity, outputs)

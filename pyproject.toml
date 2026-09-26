@@ -86,6 +86,13 @@ exclude = [
   "packages/hermes-desktop/patch_nix_managed.py",
   "packages/sculptor/updater.py",
   "packages/unsloth/patch_nix_managed.py",
+  # Build-time validators run under nixpkgs' default python3, which predates
+  # unparenthesized multi-exception handlers.
+  "packages/buzz/native/mesh_runtime_bundle.py",
+  "packages/buzz/native/validate_rpaths.py",
+  "packages/buzz/native/validate_runtime.py",
+  "packages/buzz/native/validate_runtime_load.py",
+  "packages/unsloth/validate_store_runtime.py",
 ]
 
 [tool.ruff.lint]

@@ -163,6 +163,11 @@
       url = "github:catppuccin/element/f8236600302ef016c7366b96414a09e086996b71";
       flake = false;
     };
+    catppuccin-starship-src = {
+      # Match catppuccin/nix's Starship port without realizing its derivation at eval time.
+      url = "github:catppuccin/starship/5906cc369dd8207e063c0e6e2d27bd0c0b567cb8";
+      flake = false;
+    };
     catppuccin-bat = {
       url = "github:catppuccin/bat";
       flake = false;

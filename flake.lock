@@ -245,6 +245,22 @@
         "type": "github"
       }
     },
+    "catppuccin-starship-src": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-FLHjbClpTqaK4n2qmepCPkb8rocaAo3qeV4Zp1hia0g=",
+        "owner": "catppuccin",
+        "repo": "starship",
+        "rev": "5906cc369dd8207e063c0e6e2d27bd0c0b567cb8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "catppuccin",
+        "repo": "starship",
+        "rev": "5906cc369dd8207e063c0e6e2d27bd0c0b567cb8",
+        "type": "github"
+      }
+    },
     "catppuccin-zen-browser": {
       "flake": false,
       "locked": {
@@ -2032,6 +2048,7 @@
         "catppuccin-bottom-src": "catppuccin-bottom-src",
         "catppuccin-delta": "catppuccin-delta",
         "catppuccin-element-src": "catppuccin-element-src",
+        "catppuccin-starship-src": "catppuccin-starship-src",
         "catppuccin-zen-browser": "catppuccin-zen-browser",
         "codex": "codex",
         "crane": "crane",

@@ -169,8 +169,6 @@ def test_generation_identity_normalizes_nix_user_conf_files_by_content(
     assert crate2nix._generation_identity(generation_target, source) != baseline
 
 
-
-
 def test_generation_identity_fails_closed_for_unreadable_nix_user_conf(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -205,6 +203,7 @@ def test_generation_identity_ignores_empty_nix_user_conf_entries(
     baseline = crate2nix._generation_identity(generation_target, source)
     monkeypatch.setenv("NIX_USER_CONF_FILES", str(conf))
     assert crate2nix._generation_identity(generation_target, source) == baseline
+
 
 def test_generation_identity_fails_closed_for_uninspectable_inputs(
     monkeypatch: pytest.MonkeyPatch,
