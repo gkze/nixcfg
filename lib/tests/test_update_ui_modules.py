@@ -179,7 +179,7 @@ def test_ui_state_from_meta_and_command_mappers() -> None:
     assert operation_for_command([]) == OperationKind.COMPUTE_HASH
     assert operation_for_command(["flake-edit"]) == OperationKind.UPDATE_REF
     assert (
-        operation_for_command(["nix", "flake", "update", "demo"])
+        operation_for_command(["nix", "--no-use-registries", "flake", "update", "demo"])
         == OperationKind.REFRESH_LOCK
     )
     assert operation_for_command(["echo", "ok"]) == OperationKind.COMPUTE_HASH
