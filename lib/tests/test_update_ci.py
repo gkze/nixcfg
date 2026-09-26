@@ -1,5 +1,6 @@
 """Exercise Python Actions jobs with real processes and Git boundaries."""
 
+import ast
 import json
 import os
 import subprocess
@@ -20,6 +21,11 @@ from lib.update.ci.candidate import app
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "lib/update/ci/jobs.py"
+
+
+def test_job_launcher_supports_hosted_runner_python() -> None:
+    """Bootstrap must parse before Nix supplies the project's Python runtime."""
+    ast.parse(SCRIPT.read_text(), filename=str(SCRIPT), feature_version=(3, 12))
 
 
 @pytest.fixture
@@ -405,7 +411,7 @@ def test_all_authored_actions_commands_are_python() -> None:
             for step in group.get("steps", []):
                 if "run" in step:
                     assert step["shell"] == "python"
-                    compile(step["run"], str(path), "exec")
+                    ast.parse(step["run"], filename=str(path), feature_version=(3, 12))
 
 
 def test_generator_cache_is_scoped_to_disposable_accelerators() -> None:

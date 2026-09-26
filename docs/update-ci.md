@@ -66,6 +66,8 @@ environment from the triggering checkout, retaining them as Nix roots for that j
 Candidate changes do not silently change the code executing the job.
 
 Before installing Nix, a Python step reclaims unused preinstalled image tools.
+The job launcher uses Python 3.12 syntax and standard-library imports so it can
+run with the hosted image's interpreter before the Python 3.14 runtime exists.
 On macOS it retains the selected Xcode and removes other Xcodes.
 Android, .NET and unused Linux compiler libraries are removed
 where present. The step refuses local or self-hosted execution and logs available

@@ -1,7 +1,8 @@
 """Python entrypoint for disposable Actions jobs.
 
-This file also bootstraps Nix before the packaged CLI exists, so its imports are
-standard-library only. Invoke the file directly; Actions owns the job graph.
+This file also bootstraps Nix before the packaged CLI exists, so it supports the
+hosted runners' Python 3.12 with standard-library imports only. Invoke the file
+directly; Actions owns the job graph.
 """
 
 import json
@@ -165,7 +166,7 @@ def _failure_summary(result_path: Path) -> str | None:
     """Return the concise source failure identity for a hosted job log."""
     try:
         result = json.loads(result_path.read_text())
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         return None
     if not isinstance(result, dict) or result.get("success") is not False:
         return None
