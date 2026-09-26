@@ -136,18 +136,11 @@ def quality() -> None:
         raise RuntimeError(msg)
 
 
-def _prefetched_paths() -> set[str]:
-    """Find verified raw imports, which do not trigger Nix's post-build hook."""
-    result = _run(
-        "nix",
-        "path-info",
-        "--all",
-        "--json",
-        "--json-format",
-        str(_STORE_INFO_VERSION),
-        capture=True,
-    )
-    inventory = json.loads(result.stdout)
+def _prefetched_paths_from_inventory(inventory: object) -> set[str]:
+    """Extract verified raw imports, which do not trigger Nix's post-build hook."""
+    if not isinstance(inventory, dict):
+        msg = "Nix store inventory must be an object"
+        raise TypeError(msg)
     if inventory["version"] != _STORE_INFO_VERSION:
         msg = "Unsupported Nix store inventory version"
         raise ValueError(msg)
@@ -158,6 +151,20 @@ def _prefetched_paths() -> set[str]:
         and info.get("ca") is not None
         and info["ca"]["method"] == "flat"
     }
+
+
+def _prefetched_paths() -> set[str]:
+    """Find verified raw imports without CI-specific diagnostics."""
+    result = _run(
+        "nix",
+        "path-info",
+        "--all",
+        "--json",
+        "--json-format",
+        str(_STORE_INFO_VERSION),
+        capture=True,
+    )
+    return _prefetched_paths_from_inventory(json.loads(result.stdout))
 
 
 def _failure_summary(result_path: Path) -> str | None:
@@ -243,6 +250,65 @@ def _wait_for_diagnostics(
     return returncode
 
 
+def _push_prefetched_paths(paths: list[str], log: TextIO, artifacts: Path) -> None:
+    """Publish raw imports while retaining liveness evidence for quiet Cachix uploads."""
+    args = ["cachix", "push", _BINARY_CACHE, *paths]
+    started = time.monotonic()
+    _write_diagnostic(
+        log,
+        f"Publishing {len(paths)} prefetched paths cache={_BINARY_CACHE} "
+        f"artifacts={artifacts}",
+    )
+    with subprocess.Popen(args) as process:  # noqa: S603 -- fixed Cachix invocation.
+        while True:
+            try:
+                returncode = process.wait(timeout=_HEARTBEAT_INTERVAL_SECONDS)
+            except subprocess.TimeoutExpired:
+                _write_diagnostic(
+                    log,
+                    f"Cachix publication still running pid={process.pid} "
+                    f"elapsed={time.monotonic() - started:.0f}s paths={len(paths)} "
+                    f"artifacts={artifacts}",
+                )
+            else:
+                break
+    if returncode:
+        raise subprocess.CalledProcessError(returncode, args)
+
+
+def _new_prefetched_paths(before: set[str], log: TextIO, artifacts: Path) -> list[str]:
+    """Inventory raw imports with liveness evidence on the native runner."""
+    args = (
+        "nix",
+        "path-info",
+        "--all",
+        "--json",
+        "--json-format",
+        str(_STORE_INFO_VERSION),
+    )
+    started = time.monotonic()
+    _write_diagnostic(log, "Collecting newly prefetched raw store paths")
+    with subprocess.Popen(  # noqa: S603 -- fixed Nix invocation.
+        args, stdout=subprocess.PIPE, text=True
+    ) as process:
+        while True:
+            try:
+                stdout, _ = process.communicate(timeout=_HEARTBEAT_INTERVAL_SECONDS)
+            except subprocess.TimeoutExpired:
+                _write_diagnostic(
+                    log,
+                    f"Store inventory still running pid={process.pid} "
+                    f"elapsed={time.monotonic() - started:.0f}s artifacts={artifacts}",
+                )
+            else:
+                break
+    if process.returncode:
+        raise subprocess.CalledProcessError(process.returncode, args)
+    paths = sorted(_prefetched_paths_from_inventory(json.loads(stdout)) - before)
+    _write_diagnostic(log, f"Collected {len(paths)} new prefetched store paths")
+    return paths
+
+
 def native(stage: str) -> int:
     """Prepare or validate with immutable inputs and retained failure evidence."""
     artifacts = _temp() / "update-artifacts"
@@ -278,7 +344,9 @@ def native(stage: str) -> int:
     with (
         (artifacts / "result.json").open("w") as output,
         (artifacts / "stderr.log").open("w") as log,
-        subprocess.Popen(  # noqa: S603 -- fixed executable and separate target arguments
+    ):
+        _write_diagnostic(log, f"Starting native stage={stage} artifacts={artifacts}")
+        with subprocess.Popen(  # noqa: S603 -- fixed executable and separate target arguments
             args,
             stdout=output,
             stderr=subprocess.PIPE,
@@ -290,15 +358,17 @@ def native(stage: str) -> int:
                 "UPDATE_RUN_LOG": "1",
                 "UPDATE_RUN_LOG_DIR": str(artifacts / "runs"),
             },
-        ) as process,
-    ):
-        returncode = _wait_for_diagnostics(process, log, stage, artifacts, args)
-    if summary := _failure_summary(artifacts / "result.json"):
-        sys.stderr.write(summary + "\n")
-    if stage == "prepare" and returncode == 0:
-        paths = sorted(_prefetched_paths() - before)
-        if paths:
-            _run("cachix", "push", _BINARY_CACHE, *paths)
+        ) as process:
+            returncode = _wait_for_diagnostics(process, log, stage, artifacts, args)
+        _write_diagnostic(
+            log, f"Updater finished stage={stage} returncode={returncode}"
+        )
+        if summary := _failure_summary(artifacts / "result.json"):
+            _write_diagnostic(log, summary)
+        if stage == "prepare" and returncode == 0:
+            paths = _new_prefetched_paths(before, log, artifacts)
+            if paths:
+                _push_prefetched_paths(paths, log, artifacts)
     return returncode
 
 

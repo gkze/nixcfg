@@ -36,6 +36,8 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "name = Path(sys.argv[0]).name\n"
         "args = sys.argv[1:]\n"
         "if name == 'nix' and args[0] == 'path-info':\n"
+        "    if seconds := os.environ.get('TEST_NIX_SLEEP_SECONDS'):\n"
+        "        time.sleep(float(seconds))\n"
         "    phase = 'AFTER' if Path(os.environ['TEST_LOG']).exists() else 'BEFORE'\n"
         "    info = json.loads(os.environ.get('TEST_STORE_' + phase, '{}'))\n"
         "    print(json.dumps({'version': 2, 'storeDir': '/nix/store', 'info': info}))\n"
@@ -45,6 +47,8 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "    sys.exit(subprocess.call(args[args.index('--command') + 1:]))\n"
         "if name == 'cachix':\n"
         "    Path(os.environ['TEST_CACHE_LOG']).write_text(json.dumps(args))\n"
+        "    if seconds := os.environ.get('TEST_CACHE_SLEEP_SECONDS'):\n"
+        "        time.sleep(float(seconds))\n"
         "    sys.exit(int(os.environ.get('TEST_CACHE_EXIT', '0')))\n"
         "Path(os.environ['TEST_LOG']).write_text(json.dumps(args))\n"
         "Path(args[args.index('--output') + 1]).write_text('candidate or evidence')\n"
@@ -114,7 +118,7 @@ def test_native_job_keeps_evidence_and_propagates_failure(
     }
     stderr_log = (artifacts / "stderr.log").read_text()
     assert "Starting updater stage=" + stage in stderr_log
-    assert stderr_log.endswith("diagnostic evidence\n")
+    assert "diagnostic evidence\n" in stderr_log
     assert "diagnostic evidence\n" in result.stderr
     assert (artifacts / "runs/test-run/output.log").read_text() == (
         "source failure detail\n"
@@ -139,6 +143,7 @@ def test_native_job_forwards_diagnostics_before_the_updater_exits(native_job) ->
         text=True,
     )
     assert process.stderr is not None
+    assert "Starting native stage=prepare" in process.stderr.readline()
     assert "Starting updater stage=prepare" in process.stderr.readline()
     assert process.stderr.readline() == "diagnostic evidence\n"
     stdout, stderr = process.communicate()
@@ -163,6 +168,46 @@ def test_native_job_heartbeats_while_the_updater_is_quiet(
     assert "Updater still running stage=prepare pid=" in captured.err
     assert "Updater still running stage=prepare pid=" in stderr_log
     assert json.loads((artifacts / "result.json").read_bytes()) == {"success": True}
+
+
+def test_native_job_heartbeats_while_publishing_prefetched_paths(
+    native_job, monkeypatch, capsys
+) -> None:
+    env, checkout = native_job
+    raw = {"deriver": None, "ca": {"method": "flat", "hash": "sha256-example"}}
+    monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    monkeypatch.chdir(checkout)
+    for key, value in (
+        env
+        | {
+            "TEST_STORE_BEFORE": "{}",
+            "TEST_STORE_AFTER": json.dumps({"new.zip": raw}),
+            "TEST_CACHE_SLEEP_SECONDS": "0.05",
+        }
+    ).items():
+        monkeypatch.setenv(key, value)
+    assert jobs.native("prepare") == 0
+    captured = capsys.readouterr()
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    stderr_log = (artifacts / "stderr.log").read_text()
+    assert "Cachix publication still running pid=" in captured.err
+    assert "Cachix publication still running pid=" in stderr_log
+
+
+def test_native_job_heartbeats_while_inventorying_prefetched_paths(
+    native_job, monkeypatch, capsys
+) -> None:
+    env, checkout = native_job
+    monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    monkeypatch.chdir(checkout)
+    for key, value in (env | {"TEST_NIX_SLEEP_SECONDS": "0.05"}).items():
+        monkeypatch.setenv(key, value)
+    assert jobs.native("prepare") == 0
+    captured = capsys.readouterr()
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    stderr_log = (artifacts / "stderr.log").read_text()
+    assert "Store inventory still running pid=" in captured.err
+    assert "Store inventory still running pid=" in stderr_log
 
 
 def test_failure_summary_names_failed_sources(tmp_path: Path) -> None:
