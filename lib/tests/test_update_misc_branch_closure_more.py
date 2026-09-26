@@ -495,7 +495,7 @@ def test_compute_sri_hash_reraises_non_retryable_prefetch_failure(
             "permanent failure",
         )
 
-    monkeypatch.setattr(update_process, "libnix_prefetch_url", _prefetch_url)
+    monkeypatch.setattr(update_process, "libnix_prefetch_url_result", _prefetch_url)
     with pytest.raises(NixCommandError, match="permanent failure"):
         _collect(
             lambda emit: update_process.compute_sri_hash(

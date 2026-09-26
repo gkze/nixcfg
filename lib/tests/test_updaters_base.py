@@ -1,6 +1,7 @@
 """Tests for shared updater base behavior."""
 
 import asyncio
+from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import patch
 
@@ -236,7 +237,7 @@ def test_download_updater_applies_explicit_retry_and_timeout_config() -> None:
         *,
         name: str | None = None,
         command_timeout: float,
-    ) -> str:
+    ) -> SimpleNamespace:
         _ = name
         calls.append(command_timeout)
         if len(calls) == 1:
@@ -249,7 +250,10 @@ def test_download_updater_applies_explicit_retry_and_timeout_config() -> None:
                 ),
                 "transient prefetch failure",
             )
-        return "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo="
+        return SimpleNamespace(
+            hash="sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo=",
+            storePath="/nix/store/example",
+        )
 
     async def _run() -> list[UpdateEvent]:
         config = resolve_config(
@@ -258,7 +262,7 @@ def test_download_updater_applies_explicit_retry_and_timeout_config() -> None:
             subprocess_timeout=17,
         )
         updater = _ConfiguredDownloadUpdater(config=config)
-        with patch("lib.update.process.libnix_prefetch_url", _prefetch):
+        with patch("lib.update.process.libnix_prefetch_url_result", _prefetch):
             async with aiohttp.ClientSession() as session:
                 return await collect_events(
                     lambda emit: updater.update_stream(None, session, emit=emit)

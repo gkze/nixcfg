@@ -35,13 +35,6 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "from pathlib import Path\n"
         "name = Path(sys.argv[0]).name\n"
         "args = sys.argv[1:]\n"
-        "if name == 'nix' and args[0] == 'path-info':\n"
-        "    if seconds := os.environ.get('TEST_NIX_SLEEP_SECONDS'):\n"
-        "        time.sleep(float(seconds))\n"
-        "    phase = 'AFTER' if Path(os.environ['TEST_LOG']).exists() else 'BEFORE'\n"
-        "    info = json.loads(os.environ.get('TEST_STORE_' + phase, '{}'))\n"
-        "    print(json.dumps({'version': 2, 'storeDir': '/nix/store', 'info': info}))\n"
-        "    sys.exit(0)\n"
         "if name == 'nix':\n"
         "    print('devshell startup', flush=True)\n"
         "    sys.exit(subprocess.call(args[args.index('--command') + 1:]))\n"
@@ -56,6 +49,8 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "    logs = Path(os.environ['UPDATE_RUN_LOG_DIR']) / 'test-run'\n"
         "    logs.mkdir(parents=True, exist_ok=True)\n"
         "    (logs / 'output.log').write_text('source failure detail\\n')\n"
+        "if receipts := os.environ.get('TEST_PREFETCH_RECEIPTS'):\n"
+        "    Path(os.environ['UPDATE_PREFETCH_RECEIPTS']).write_text(receipts)\n"
         "print(json.dumps({'success': int(os.environ.get('TEST_EXIT', '0')) == 0}))\n"
         "print('diagnostic evidence', file=sys.stderr)\n"
         "if seconds := os.environ.get('TEST_QUIET_SLEEP_SECONDS'):\n"
@@ -174,14 +169,12 @@ def test_native_job_heartbeats_while_publishing_prefetched_paths(
     native_job, monkeypatch, capsys
 ) -> None:
     env, checkout = native_job
-    raw = {"deriver": None, "ca": {"method": "flat", "hash": "sha256-example"}}
     monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.01)
     monkeypatch.chdir(checkout)
     for key, value in (
         env
         | {
-            "TEST_STORE_BEFORE": "{}",
-            "TEST_STORE_AFTER": json.dumps({"new.zip": raw}),
+            "TEST_PREFETCH_RECEIPTS": '{"storePath": "/nix/store/new.zip"}\n',
             "TEST_CACHE_SLEEP_SECONDS": "0.05",
         }
     ).items():
@@ -192,22 +185,6 @@ def test_native_job_heartbeats_while_publishing_prefetched_paths(
     stderr_log = (artifacts / "stderr.log").read_text()
     assert "Cachix publication still running pid=" in captured.err
     assert "Cachix publication still running pid=" in stderr_log
-
-
-def test_native_job_heartbeats_while_inventorying_prefetched_paths(
-    native_job, monkeypatch, capsys
-) -> None:
-    env, checkout = native_job
-    monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.01)
-    monkeypatch.chdir(checkout)
-    for key, value in (env | {"TEST_NIX_SLEEP_SECONDS": "0.05"}).items():
-        monkeypatch.setenv(key, value)
-    assert jobs.native("prepare") == 0
-    captured = capsys.readouterr()
-    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
-    stderr_log = (artifacts / "stderr.log").read_text()
-    assert "Store inventory still running pid=" in captured.err
-    assert "Store inventory still running pid=" in stderr_log
 
 
 def test_failure_summary_names_failed_sources(tmp_path: Path) -> None:
@@ -231,25 +208,18 @@ def test_flake_lock_has_no_registry_dependent_inputs() -> None:
 
 @pytest.mark.parametrize("update_exit", [0, 17])
 @pytest.mark.parametrize("cache_exit", [0, 19])
-def test_preparation_publishes_only_new_verified_raw_imports(
+def test_preparation_publishes_only_exact_prefetch_receipts(
     native_job, monkeypatch, update_exit: int, cache_exit: int
 ) -> None:
-    """Prefetch imports need explicit publication; derived and old paths do not."""
+    """Only exact direct-prefetch receipts reach the raw-import cache upload."""
     env, checkout = native_job
-    raw = {"deriver": None, "ca": {"method": "flat", "hash": "sha256-example"}}
-    before = {"old.zip": raw}
-    after = before | {
-        "new.zip": raw,
-        "built.zip": raw | {"deriver": "fetch.drv"},
-        "source": {"deriver": None, "ca": {"method": "nar"}},
-        "text": {"deriver": None, "ca": {"method": "text"}},
-        "input-addressed": {"deriver": None, "ca": None},
-    }
     for key, value in (
         env
         | {
-            "TEST_STORE_BEFORE": json.dumps(before),
-            "TEST_STORE_AFTER": json.dumps(after),
+            "TEST_PREFETCH_RECEIPTS": (
+                '{"storePath": "/nix/store/new.zip"}\n'
+                '{"storePath": "/nix/store/new.zip"}\n'
+            ),
             "TEST_EXIT": str(update_exit),
             "TEST_CACHE_EXIT": str(cache_exit),
         }
@@ -269,16 +239,22 @@ def test_preparation_publishes_only_new_verified_raw_imports(
         assert json.loads(log.read_text()) == ["push", "gkze", "/nix/store/new.zip"]
 
 
-def test_source_cache_rejects_an_unknown_store_inventory(monkeypatch) -> None:
-    monkeypatch.setattr(
-        jobs,
-        "_run",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess(
-            [], 0, stdout='{"version":3}'
-        ),
-    )
-    with pytest.raises(ValueError, match="Unsupported Nix store inventory"):
-        jobs._prefetched_paths()
+@pytest.mark.parametrize(
+    "receipt",
+    [
+        "not-json\n",
+        "{}\n",
+        '{"storePath": "relative"}\n',
+        '{"storePath": "/tmp/path"}\n',
+    ],
+)
+def test_source_cache_rejects_malformed_or_unsafe_prefetch_receipts(
+    tmp_path: Path, receipt: str
+) -> None:
+    receipts = tmp_path / "prefetch-receipts.jsonl"
+    receipts.write_text(receipt)
+    with pytest.raises(ValueError, match="[Pp]refetch receipt"):
+        jobs._prefetched_paths_from_receipts(receipts)
 
 
 @pytest.mark.parametrize(

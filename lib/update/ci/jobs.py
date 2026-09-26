@@ -16,9 +16,9 @@ from pathlib import Path
 from typing import TextIO
 
 _BINARY_CACHE = "gkze"
-_STORE_INFO_VERSION = 2
 _HEARTBEAT_INTERVAL_SECONDS = 60
 _APPLICATIONS = Path("/Applications")
+_STORE_PATH_PREFIX = Path("/nix/store")
 _UNUSED_IMAGE_PATHS = {
     "darwin": (Path("/usr/local/share/dotnet"),),
     "linux": (
@@ -136,35 +136,29 @@ def quality() -> None:
         raise RuntimeError(msg)
 
 
-def _prefetched_paths_from_inventory(inventory: object) -> set[str]:
-    """Extract verified raw imports, which do not trigger Nix's post-build hook."""
-    if not isinstance(inventory, dict):
-        msg = "Nix store inventory must be an object"
-        raise TypeError(msg)
-    if inventory["version"] != _STORE_INFO_VERSION:
-        msg = "Unsupported Nix store inventory version"
-        raise ValueError(msg)
-    return {
-        str(Path(inventory["storeDir"]) / name)
-        for name, info in inventory["info"].items()
-        if info["deriver"] is None
-        and info.get("ca") is not None
-        and info["ca"]["method"] == "flat"
-    }
-
-
-def _prefetched_paths() -> set[str]:
-    """Find verified raw imports without CI-specific diagnostics."""
-    result = _run(
-        "nix",
-        "path-info",
-        "--all",
-        "--json",
-        "--json-format",
-        str(_STORE_INFO_VERSION),
-        capture=True,
-    )
-    return _prefetched_paths_from_inventory(json.loads(result.stdout))
+def _prefetched_paths_from_receipts(receipts: Path) -> list[str]:
+    """Read exact direct-prefetch imports, rejecting malformed cache handoffs."""
+    if not receipts.exists():
+        return []
+    paths: set[str] = set()
+    for line in receipts.read_text().splitlines():
+        try:
+            receipt = json.loads(line)
+            store_path = receipt["storePath"]
+        except (TypeError, KeyError, json.JSONDecodeError) as error:
+            msg = "Invalid prefetch receipt"
+            raise ValueError(msg) from error
+        path = Path(store_path) if isinstance(store_path, str) else None
+        if (
+            path is None
+            or not path.is_absolute()
+            or path.parent != _STORE_PATH_PREFIX
+            or path.name in {"", ".", ".."}
+        ):
+            msg = "Prefetch receipt contains an unsafe store path"
+            raise ValueError(msg)
+        paths.add(str(path))
+    return sorted(paths)
 
 
 def _failure_summary(result_path: Path) -> str | None:
@@ -276,39 +270,6 @@ def _push_prefetched_paths(paths: list[str], log: TextIO, artifacts: Path) -> No
         raise subprocess.CalledProcessError(returncode, args)
 
 
-def _new_prefetched_paths(before: set[str], log: TextIO, artifacts: Path) -> list[str]:
-    """Inventory raw imports with liveness evidence on the native runner."""
-    args = (
-        "nix",
-        "path-info",
-        "--all",
-        "--json",
-        "--json-format",
-        str(_STORE_INFO_VERSION),
-    )
-    started = time.monotonic()
-    _write_diagnostic(log, "Collecting newly prefetched raw store paths")
-    with subprocess.Popen(  # noqa: S603 -- fixed Nix invocation.
-        args, stdout=subprocess.PIPE, text=True
-    ) as process:
-        while True:
-            try:
-                stdout, _ = process.communicate(timeout=_HEARTBEAT_INTERVAL_SECONDS)
-            except subprocess.TimeoutExpired:
-                _write_diagnostic(
-                    log,
-                    f"Store inventory still running pid={process.pid} "
-                    f"elapsed={time.monotonic() - started:.0f}s artifacts={artifacts}",
-                )
-            else:
-                break
-    if process.returncode:
-        raise subprocess.CalledProcessError(process.returncode, args)
-    paths = sorted(_prefetched_paths_from_inventory(json.loads(stdout)) - before)
-    _write_diagnostic(log, f"Collected {len(paths)} new prefetched store paths")
-    return paths
-
-
 def native(stage: str) -> int:
     """Prepare or validate with immutable inputs and retained failure evidence."""
     artifacts = _temp() / "update-artifacts"
@@ -340,7 +301,7 @@ def native(stage: str) -> int:
             "--output",
             str(artifacts / "validation.json"),
         ))
-    before = _prefetched_paths() if stage == "prepare" else set()
+    receipts = artifacts / "prefetch-receipts.jsonl"
     with (
         (artifacts / "result.json").open("w") as output,
         (artifacts / "stderr.log").open("w") as log,
@@ -357,6 +318,7 @@ def native(stage: str) -> int:
                 "REPO_ROOT": str(Path.cwd()),
                 "UPDATE_RUN_LOG": "1",
                 "UPDATE_RUN_LOG_DIR": str(artifacts / "runs"),
+                "UPDATE_PREFETCH_RECEIPTS": str(receipts),
             },
         ) as process:
             returncode = _wait_for_diagnostics(process, log, stage, artifacts, args)
@@ -366,7 +328,8 @@ def native(stage: str) -> int:
         if summary := _failure_summary(artifacts / "result.json"):
             _write_diagnostic(log, summary)
         if stage == "prepare" and returncode == 0:
-            paths = _new_prefetched_paths(before, log, artifacts)
+            paths = _prefetched_paths_from_receipts(receipts)
+            _write_diagnostic(log, f"Collected {len(paths)} prefetched store paths")
             if paths:
                 _push_prefetched_paths(paths, log, artifacts)
     return returncode

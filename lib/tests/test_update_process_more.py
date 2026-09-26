@@ -1,6 +1,7 @@
 """Additional tests for subprocess/process helpers in update flows."""
 
 import asyncio
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -202,11 +203,11 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
         *,
         name: str | None = None,
         command_timeout: float | None = None,
-    ) -> str:
+    ) -> SimpleNamespace:
         prefetch_calls.append((url, name, command_timeout))
-        return "sha256-BBB="
+        return SimpleNamespace(hash="sha256-BBB=", storePath="/nix/store/example")
 
-    monkeypatch.setattr("lib.update.process.libnix_prefetch_url", _prefetch_url)
+    monkeypatch.setattr("lib.update.process.libnix_prefetch_url_result", _prefetch_url)
     prefetch_events = _collect_stream(
         lambda emit: compute_sri_hash(
             "demo",
@@ -276,7 +277,7 @@ def test_compute_sri_hash_retries_transient_prefetch_failure(
         *,
         name: str | None = None,
         command_timeout: float | None = None,
-    ) -> str:
+    ) -> SimpleNamespace:
         nonlocal calls
         calls += 1
         assert url == "https://example.com/archive.tar.gz"
@@ -292,9 +293,9 @@ def test_compute_sri_hash_retries_transient_prefetch_failure(
                 ),
                 "prefetch failed",
             )
-        return "sha256-CCC="
+        return SimpleNamespace(hash="sha256-CCC=", storePath="/nix/store/example")
 
-    monkeypatch.setattr("lib.update.process.libnix_prefetch_url", _prefetch_url)
+    monkeypatch.setattr("lib.update.process.libnix_prefetch_url_result", _prefetch_url)
 
     events = _collect_stream(
         lambda emit: compute_sri_hash(
