@@ -391,7 +391,11 @@ def _commit_and_push(kind: str, message: str) -> str:
 
 
 def publish() -> None:
-    """Open the verified update as a reviewable PR without merging it."""
+    """Open the verified update as a PR and queue it to merge into the default branch.
+
+    Runs dispatched from other branches only open the PR, so exercising the
+    workflow never lands an update on a branch under review.
+    """
     branch = _commit_and_push("", "chore(update): refresh validated sources")
     base = os.environ["GITHUB_REF_NAME"]
     if base.startswith("codex/update-repair-"):
@@ -418,6 +422,8 @@ def publish() -> None:
         "--body-file",
         str(body),
     )
+    if base == os.environ["UPDATE_BASE_BRANCH"]:
+        _run("gh", "pr", "merge", branch, "--auto", "--squash")
 
 
 def collect_evidence() -> None:

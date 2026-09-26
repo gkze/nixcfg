@@ -711,8 +711,10 @@ def test_publication_uses_signed_commit_and_bounded_repair(
             "-S",
         )
     if operation == "publish":
-        assert calls[-1][:3] == ("gh", "pr", "create")
-        assert calls[-1][calls[-1].index("--base") + 1] == "main"
+        create = next(args for args in calls if args[:3] == ("gh", "pr", "create"))
+        assert create[create.index("--base") + 1] == "main"
+        branch = create[create.index("--head") + 1]
+        assert calls[-1] == ("gh", "pr", "merge", branch, "--auto", "--squash")
         assert (
             "https://github.com/example/repo/actions/runs/123"
             in (tmp_path / "update-body.md").read_text()
@@ -722,6 +724,24 @@ def test_publication_uses_signed_commit_and_bounded_repair(
         assert "repair=false" in calls[-1]
         assert "validate_all_packages=true" in calls[-1]
         assert "targets=example" in calls[-1]
+
+
+def test_publication_from_a_feature_branch_is_never_auto_merged(
+    job_repository, monkeypatch
+) -> None:
+    """Exercising the workflow on a branch must not land updates on that branch."""
+    monkeypatch.setenv("GITHUB_REF_NAME", "feature")
+    calls = []
+
+    def run(*args, capture=False, check=True):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs.main("publish") == 0
+    assert calls[-1][:3] == ("gh", "pr", "create")
+    assert calls[-1][calls[-1].index("--base") + 1] == "feature"
+    assert not any(args[:3] == ("gh", "pr", "merge") for args in calls)
 
 
 def test_bootstrap_and_failure_evidence(job_repository, tmp_path, monkeypatch) -> None:

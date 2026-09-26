@@ -101,6 +101,8 @@ pkgs.devshell.mkShell {
   packages =
     with pkgs;
     [
+      # TypeScript AST fixture tests for patched Bun/Electron sources run under Bun.
+      bun
       # Update-time source canonicalization (lib/bun_nix_normalizer) requires
       # this on PATH even when the unwrapped .venv nixcfg entry shadows the
       # packaged wrapper inside the devshell.

@@ -81,7 +81,8 @@ jobs:
     secrets: inherit
   publish:
     needs: [validate-arm, validate-x86, validate-darwin]
-    runs-on: ubuntu-24.04
+    # The Python suite and its 100% coverage floor are maintained on Darwin.
+    runs-on: macos-15
     timeout-minutes: 120
     permissions:
       contents: write
