@@ -96,6 +96,7 @@ def test_llama_cpp_fetch_is_exact_and_does_not_fetch_submodules() -> None:
         "meshSrcHash",
         "nativeLock",
         "ninja",
+        "python3",
         "srcHash",
         "stdenv",
     }
@@ -196,45 +197,14 @@ def test_llama_cpp_builds_only_the_arm64_metal_shared_runtime() -> None:
     assert_nix_ast_equal(expect_binding(attrs.values, "doCheck").value, "false")
 
 
-def test_llama_cpp_applies_the_complete_mesh_patch_queue_in_bytewise_order() -> None:
-    """Patch drift, an empty queue, or preparation-script reuse must stop the build."""
+def test_llama_cpp_uses_python_patch_queue_owner() -> None:
+    """The build invokes the same inventory policy as provenance validation."""
     shell = _phase_shell("patchPhase")
-
-    find_commands = command_texts(shell, "find")
-    assert any(
-        "-mindepth 1 -maxdepth 1 ! -type f -print -quit" in command
-        for command in find_commands
-    )
-    assert any(
-        "-mindepth 1 -maxdepth 1 -type f ! -name '*.patch' -print -quit" in command
-        for command in find_commands
-    )
-    assert any(
-        "-mindepth 1 -maxdepth 1 -type f -name '*.patch' -print0" in command
-        for command in find_commands
-    )
-    assert command_texts(shell, "sort") == ["LC_ALL=C sort -z"]
-    assert command_texts(shell, "git") == [
-        "git init --quiet .",
-        'git config user.name "Buzz Nix Build"',
-        'git config user.email "buzz-llama-cpp@nix-managed.invalid"',
-        "git add --all --force",
-        'git commit --quiet -m "buzz-llama-cpp upstream base"',
-        'git -c core.hooksPath=/dev/null am --3way --committer-date-is-author-date --no-gpg-sign "$meshPatch"',
+    assert command_texts(shell) == [
+        "runHook prePatch",
+        "__NIX_INTERP__ __NIX_INTERP__ __NIX_INTERP__ __NIX_INTERP__ .",
+        "runHook postPatch",
     ]
-    assert command_texts(shell, "patch") == []
-    assert (
-        sum(node.type == "while_statement" for node in iter_nodes(shell.tree.root_node))
-        == 1
-    )
-
-    forbidden_commands = {"curl", "patch", "sh", "wget"}
-    invoked_commands = {
-        name
-        for node in iter_nodes(shell.tree.root_node)
-        if (name := command_name(node, shell.sanitized)) is not None
-    }
-    assert invoked_commands.isdisjoint(forbidden_commands)
 
 
 def test_llama_cpp_normalizes_compiler_paths_before_building() -> None:

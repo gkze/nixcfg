@@ -886,36 +886,11 @@ fn unrelated_policy_example() -> NativeRuntimeInstallOptions {
     }
 }
 """
-_MESH_INSTALL_UPSTREAM = """pub async fn install_native_runtime(
-    options: NativeRuntimeInstallOptions,
-) -> Result<NativeRuntimeInstallOutcome> {
-    let (manifest, bundle_dirs) =
-        load_release_manifest_with_bundle_dirs(NativeRuntimeManifestOptions {
-            mesh_version: options.mesh_version.clone(),
-            manifest_path: options.manifest_path.clone(),
-            manifest_url: options.manifest_url.clone(),
-            bundle_dirs: options.bundle_dirs.clone(),
-            allow_default_manifest_url: true,
-        })
-        .await?;
-    if manifest.artifacts.is_empty() {
-        bail!("no native runtime manifest entries found");
-    }
-    let skippy_abi_version = options
-        .skippy_abi_version
-        .clone()
-        .unwrap_or_else(|| manifest.skippy_abi.clone());
-    let cache = native_runtime_cache(options.cache_dir.as_deref())?;
-    let resolution = NativeRuntimeResolver::new(
-        &options.mesh_version,
-        host_runtime_profile(),
-        manifest,
-        cache.clone(),
-    )
-    .with_skippy_abi_version(skippy_abi_version)
-    .with_bundle_dirs(bundle_dirs)
-    .resolve(&options.selection)?;
-    install_resolved_runtime(&cache, resolution, &options).await
+_MESH_INSTALL_UPSTREAM = """pub async fn install_native_runtime(options: NativeRuntimeInstallOptions) {
+    load_release_manifest_with_sources(NativeRuntimeManifestOptions {
+        allow_default_manifest_url: options.allow_download,
+        ..Default::default()
+    }).await
 }
 """
 _MESH_TYPES_PATCHED = _MESH_TYPES_UPSTREAM.replace(
@@ -927,12 +902,6 @@ _MESH_TYPES_PATCHED = _MESH_TYPES_UPSTREAM.replace(
     "allow_download: false,",
     1,
 )
-_MESH_INSTALL_PATCHED = _MESH_INSTALL_UPSTREAM.replace(
-    "allow_default_manifest_url: true,",
-    "allow_default_manifest_url: false,",
-    1,
-)
-
 _MANIFEST_DEFAULT_COMMENT_DECOY = """/*
 impl Default for NativeRuntimeManifestOptions {
     fn default() -> Self {
@@ -954,16 +923,7 @@ impl Default for NativeRuntimeInstallOptions {
 }
 */
 """
-_INSTALL_MANIFEST_COMMENT_DECOY = """/*
-pub async fn install_native_runtime(
-    options: NativeRuntimeInstallOptions,
-) -> anyhow::Result<InstalledNativeRuntime> {
-    let manifest = load_release_manifest_with_bundle_dirs(NativeRuntimeManifestOptions {
-        allow_default_manifest_url: true,
-    });
-}
-*/
-"""
+
 
 _SHERPA_STATIC_LIBS_UPSTREAM = """const SHERPA_ONNX_STATIC_LIBS: &[&str] = &[
     "sherpa-onnx-c-api",
@@ -1450,7 +1410,7 @@ def test_desktop_vendor_patch_disables_mesh_network_and_sherpa_tts_links(
     _patcher().main(["desktop-cargo-deps", str(tmp_path)])
 
     assert types_path.read_text(encoding="utf-8") == _MESH_TYPES_PATCHED
-    assert install_path.read_text(encoding="utf-8") == _MESH_INSTALL_PATCHED
+    assert install_path.read_text(encoding="utf-8") == _MESH_INSTALL_UPSTREAM
     assert sherpa_path.read_text(encoding="utf-8") == _SHERPA_BUILD_TTS_OFF
 
 
@@ -1501,7 +1461,7 @@ def test_desktop_vendor_patch_requires_exactly_one_sherpa_sys_crate(
 def test_desktop_vendor_patch_rejects_reviewed_literal_drift(
     tmp_path: Path,
 ) -> None:
-    """All three reviewed true literals are mandatory and patched atomically."""
+    """Both reviewed default literals are mandatory and patched atomically."""
     drifted = _MESH_TYPES_UPSTREAM.replace(
         "allow_download: true,",
         "allow_download: false,",
@@ -1568,18 +1528,8 @@ def test_desktop_vendor_patch_rejects_non_code_sherpa_list_decoy(
             _MESH_INSTALL_UPSTREAM,
             "InstallOptions allow_download default",
         ),
-        (
-            _MESH_TYPES_UPSTREAM,
-            _MESH_INSTALL_UPSTREAM.replace(
-                "allow_default_manifest_url: true,",
-                "allow_default_manifest_url: bool::from(true),",
-                1,
-            )
-            + _INSTALL_MANIFEST_COMMENT_DECOY,
-            "install_native_runtime allow_default_manifest_url hardcode",
-        ),
     ],
-    ids=["manifest-default", "install-default", "install-manifest"],
+    ids=["manifest-default", "install-default"],
 )
 def test_desktop_vendor_patch_rejects_policy_matches_hidden_in_comments(
     tmp_path: Path,
@@ -1604,39 +1554,28 @@ def test_desktop_vendor_patch_rejects_policy_matches_hidden_in_comments(
 
 
 @pytest.mark.parametrize(
-    ("header", "context", "drifted_file"),
+    ("header", "context"),
     [
         (
             "impl Default for NativeRuntimeManifestOptions {",
             "ManifestOptions allow_default_manifest_url default",
-            "types",
         ),
         (
             "impl Default for NativeRuntimeInstallOptions {",
             "InstallOptions allow_download default",
-            "types",
-        ),
-        (
-            "pub async fn install_native_runtime(",
-            "install_native_runtime allow_default_manifest_url hardcode",
-            "install",
         ),
     ],
-    ids=["manifest-default", "install-default", "install-entrypoint"],
+    ids=["manifest-default", "install-default"],
 )
 def test_desktop_vendor_patch_rejects_disabled_reviewed_policy_items(
     tmp_path: Path,
     header: str,
     context: str,
-    drifted_file: str,
 ) -> None:
     """A cfg-disabled policy item cannot attest the compiled vendor behavior."""
     types = _MESH_TYPES_UPSTREAM
     install = _MESH_INSTALL_UPSTREAM
-    if drifted_file == "types":
-        types = types.replace(header, f"#[cfg(any())]\n{header}", 1)
-    else:
-        install = install.replace(header, f"#[cfg(any())]\n{header}", 1)
+    types = types.replace(header, f"#[cfg(any())]\n{header}", 1)
     types_path, install_path = _write_mesh_vendor(
         tmp_path,
         types=types,
@@ -1677,7 +1616,7 @@ def test_desktop_vendor_patch_rejects_policy_items_in_disabled_module(
         + "\n"
         + patcher._INSTALL_DEFAULT_UPSTREAM
         + "\n"
-        + patcher._INSTALL_NATIVE_RUNTIME_UPSTREAM
+        + _MESH_INSTALL_UPSTREAM
         + "\n}\n"
     )
     types_path, install_path = _write_mesh_vendor(
@@ -2002,17 +1941,14 @@ def test_build_plan_exposes_launch_policy_without_claiming_a_wrapper() -> None:
     )
 
 
-@pytest.mark.parametrize("missing", [0, 1])
-def test_vendor_policy_requires_both_reviewed_mesh_sources(
-    tmp_path: Path, missing: int
-) -> None:
+def test_vendor_policy_requires_reviewed_mesh_types(tmp_path: Path) -> None:
     """Incomplete vendor layouts fail before changing any surviving source file."""
     files = _write_mesh_vendor(tmp_path)
     sherpa = _write_sherpa_vendor(tmp_path)
-    before = files[1 - missing].read_bytes(), sherpa.read_bytes()
-    files[missing].unlink()
+    before = files[1].read_bytes(), sherpa.read_bytes()
+    files[0].unlink()
     with pytest.raises(
         _patcher().RuntimePolicyPatchError, match="missing the reviewed Mesh source"
     ):
         _patcher().patch_desktop_cargo_deps(tmp_path)
-    assert (files[1 - missing].read_bytes(), sherpa.read_bytes()) == before
+    assert (files[1].read_bytes(), sherpa.read_bytes()) == before

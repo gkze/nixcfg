@@ -318,6 +318,7 @@ def test_current_superset_still_materializes_bun_artifacts_before_hashing(
     bun_lock.write_text("old lock\n", encoding="utf-8")
     bun_nix.write_text("old nix\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REPO_ROOT", str(tmp_path))
     seen_commands: list[list[str]] = []
     asset_url = _ASSET_URL
     asset_hash = _ASSET_HASH

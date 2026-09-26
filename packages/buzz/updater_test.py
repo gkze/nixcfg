@@ -480,7 +480,7 @@ impl Default for NativeRuntimeInstallOptions {
         "crates/mesh-llm-runtime-install/src/install.rs": b"""
 pub async fn install_native_runtime() {
     let manifest_options = NativeRuntimeManifestOptions {
-        allow_default_manifest_url: true,
+        allow_default_manifest_url: options.allow_download,
     };
 }
 bail!("native runtime signature verification is not implemented yet");
@@ -937,7 +937,7 @@ def test_buzz_mesh_runtime_schema_pins_the_exact_audited_sources() -> None:
     module = _load_updater_module()
     expected = {
         "crates/mesh-llm-native-runtime/src/manifest.rs": (
-            "db91c4ef173269900f6bfd37af8906f37f6d4785f4113c918ad5873b8f1c324c"
+            "f9b9a175f912a0399f35b896b38f267be28b3cdfb714e281715952a0f11c17d9"
         ),
         "crates/mesh-llm-native-runtime/src/flavor.rs": (
             "64de68e348eff4fbb46f9105568a3d39d5b22c276fcdc927e639fb790a66f437"
@@ -2099,7 +2099,7 @@ def test_buzz_source_audit_fails_closed_on_build_topology_drift(
         ].replace(
             b"pub async fn install_native_runtime() {\n"
             b"    let manifest_options = NativeRuntimeManifestOptions {\n"
-            b"        allow_default_manifest_url: true",
+            b"        allow_default_manifest_url: options.allow_download",
             b"pub async fn install_native_runtime() {\n"
             b"    let manifest_options = NativeRuntimeManifestOptions {\n"
             b"        allow_default_manifest_url: false",

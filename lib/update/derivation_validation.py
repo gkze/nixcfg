@@ -7,9 +7,10 @@ import subprocess
 import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, CancelledError, ThreadPoolExecutor, wait
 from contextlib import nullcontext
 from dataclasses import dataclass
+from io import BufferedRandom
 from typing import TYPE_CHECKING, Literal, cast
 
 from nix_manipulator.expressions.function.call import FunctionCall
@@ -19,6 +20,8 @@ from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.primitive import StringPrimitive
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from lib.diagnostics import redact_urls
+from lib.nix.models.derivation import DerivationInputs  # noqa: TC001 -- Pydantic field
 from lib.system_policy import RootClosureKind, required_root_kinds
 from lib.update import persistence as update_persistence
 from lib.update.nix import (
@@ -32,7 +35,6 @@ from lib.update.runtime import measure
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
     from concurrent.futures import Future
-    from io import BufferedRandom
     from pathlib import Path
 
 
@@ -64,6 +66,10 @@ class DerivationValidationFailure:
     source: str
     installable: str
     message: str
+
+
+class ValidationIncompleteError(RuntimeError):
+    """A command could not finish; no target failure or acceptance can be inferred."""
 
 
 type _RunResult = subprocess.CompletedProcess[str]
@@ -106,6 +112,7 @@ ROOT_CLOSURE_VALIDATION_TIMEOUT_SECONDS = 6 * 60 * 60
 _VALIDATION_MAX_ATTEMPTS = 3
 _VALIDATION_INDIVIDUAL_THRESHOLD = 4
 _VALIDATION_RETRY_BACKOFF_SECONDS = 1.0
+_VALIDATION_DIAGNOSTIC_LIMIT = 16 * 1024
 _SIMPLE_ATTRIBUTE_PATH = re.compile(
     r"[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)+"
 )
@@ -172,6 +179,40 @@ class RootClosureManifest(BaseModel):
 
 class _RootClosureManifestError(RuntimeError):
     """The candidate flake could not provide a valid root manifest."""
+
+
+class _RootDerivation(BaseModel):
+    """Only the dependency boundary is needed from Nix's derivation-v4 schema."""
+
+    version: Literal[4]
+    system: str
+    inputs: DerivationInputs
+
+
+class _RootDerivationGraph(BaseModel):
+    """Nix owns graph discovery; CI only selects the native boundary outputs."""
+
+    version: Literal[4]
+    derivations: dict[str, _RootDerivation]
+
+    @classmethod
+    def from_result(cls, result: _RunResult) -> _RootDerivationGraph:
+        if result.returncode:
+            msg = result.stderr.strip() or "Root graph discovery failed"
+            raise ValueError(msg)
+        return cls.model_validate_json(result.stdout)
+
+    def dependencies(self, systems: tuple[str, ...]) -> tuple[str, ...]:
+        selected = set()
+        for parent in self.derivations.values():
+            for path in parent.inputs.drvs:
+                if path not in self.derivations:
+                    msg = f"Incomplete root derivation graph: {path}"
+                    raise ValueError(msg)
+                child = self.derivations[path]
+                if child.system in systems and child.system != parent.system:
+                    selected.add(f"/nix/store/{path}^*")
+        return tuple(sorted(selected))
 
 
 def _source_required_roots(
@@ -285,61 +326,74 @@ def _run_with_validation_progress(
             if attributed_progress is not None
             else nullcontext()
         )
-        with reader_context as executor:
-            reader = (
-                executor.submit(
-                    _stream_validation_output,
-                    (stdout, stderr),
-                    stopped,
-                    attributed_progress,
+        try:
+            with reader_context as executor:
+                reader = (
+                    executor.submit(
+                        _stream_validation_output,
+                        (stdout, stderr),
+                        stopped,
+                        attributed_progress,
+                    )
+                    if executor is not None and attributed_progress is not None
+                    else None
                 )
-                if executor is not None and attributed_progress is not None
-                else None
+                try:
+                    if run is None:
+                        result = _run_owned_validation_process(
+                            args,
+                            cwd=cwd,
+                            stdout=stdout,
+                            stderr=stderr,
+                            timeout=timeout,
+                            reader=reader,
+                            check_cancelled=check_cancelled,
+                        )
+                    else:
+                        result = run(
+                            args,
+                            cwd=cwd,
+                            text=True,
+                            stdout=stdout,
+                            stderr=stderr,
+                            check=False,
+                            timeout=timeout,
+                        )
+                        # A runner that returns captured text instead of writing
+                        # to the provided streams is still observed and retained.
+                        for stream, text in (
+                            (stdout, result.stdout),
+                            (stderr, result.stderr),
+                        ):
+                            if isinstance(text, str) and text:
+                                stream.write(text.encode())
+                                stream.flush()
+                finally:
+                    # The child has completed or been reaped after an error. Join
+                    # before the snapshot/files can be removed.
+                    stopped.set()
+                    if reader is not None:
+                        reader.result()
+        except subprocess.TimeoutExpired as exc:
+            error = _incomplete_validation_error(
+                args,
+                str(exc),
+                stdout=stdout,
+                stderr=stderr,
+                fallback_stdout=exc.stdout,
+                fallback_stderr=exc.stderr,
             )
-            try:
-                if run is None:
-                    result = _run_owned_validation_process(
-                        args,
-                        cwd=cwd,
-                        stdout=stdout,
-                        stderr=stderr,
-                        timeout=timeout,
-                        reader=reader,
-                        check_cancelled=check_cancelled,
-                    )
-                else:
-                    result = run(
-                        args,
-                        cwd=cwd,
-                        text=True,
-                        stdout=stdout,
-                        stderr=stderr,
-                        check=False,
-                        timeout=timeout,
-                    )
-                    # A runner that returns captured text instead of writing
-                    # to the provided streams is still observed and retained.
-                    for stream, text in (
-                        (stdout, result.stdout),
-                        (stderr, result.stderr),
-                    ):
-                        if isinstance(text, str) and text:
-                            stream.write(text.encode())
-                            stream.flush()
-            finally:
-                # The child has completed or been reaped after an error. Join
-                # before the snapshot/files can be removed.
-                stopped.set()
-                if reader is not None:
-                    reader.result()
-        stdout.seek(0)
-        stderr.seek(0)
-        return subprocess.CompletedProcess(
-            args,
-            result.returncode,
-            stdout=stdout.read().decode(errors="replace"),
-            stderr=stderr.read().decode(errors="replace"),
-        )
+        else:
+            stdout.seek(0)
+            stderr.seek(0)
+            return subprocess.CompletedProcess(
+                args,
+                result.returncode,
+                stdout=stdout.read().decode(errors="replace"),
+                stderr=stderr.read().decode(errors="replace"),
+            )
+        # Raise outside the handler so the raw exception is not chained.
+        raise error
 
 
 def _run_owned_validation_process(
@@ -380,6 +434,45 @@ def _run_owned_validation_process(
     return subprocess.CompletedProcess(args, returncode)
 
 
+def _diagnostic_tail(output: str | bytes | BufferedRandom | None) -> str:
+    """Bound retained diagnostics without exposing a severed URL suffix."""
+    if isinstance(output, BufferedRandom):
+        size = output.seek(0, os.SEEK_END)
+        output.seek(max(0, size - _VALIDATION_DIAGNOSTIC_LIMIT - 1))
+        output = output.read()
+    if not output:
+        return ""
+    truncated = len(output) > _VALIDATION_DIAGNOSTIC_LIMIT
+    tail = output[-_VALIDATION_DIAGNOSTIC_LIMIT:]
+    if isinstance(tail, bytes):
+        tail = tail.decode(errors="replace")
+    if truncated:
+        # A partial line may have lost its URL scheme and credential boundary.
+        tail = "[earlier output omitted]\n" + tail.partition("\n")[2]
+    return redact_urls(tail).rstrip()
+
+
+def _incomplete_validation_error(
+    args: list[str],
+    reason: str,
+    *,
+    stdout: str | bytes | BufferedRandom | None = None,
+    stderr: str | bytes | BufferedRandom | None = None,
+    fallback_stdout: str | bytes | None = None,
+    fallback_stderr: str | bytes | None = None,
+) -> ValidationIncompleteError:
+    """Own safe diagnostics for incomplete commands across all consumers."""
+    message = redact_urls(f"Validation incomplete: {shlex.join(args)}: {reason}")
+    for label, output, fallback in (
+        ("stdout", stdout, fallback_stdout),
+        ("stderr", stderr, fallback_stderr),
+    ):
+        tail = _diagnostic_tail(output) or _diagnostic_tail(fallback)
+        if tail:
+            message += f"\n{label}:\n{tail}"
+    return ValidationIncompleteError(message)
+
+
 def _run_validation_command_impl(
     args: list[str],
     *,
@@ -397,25 +490,38 @@ def _run_validation_command_impl(
         check_cancelled()
         if progress is not None:
             progress(ValidationCommandStarted(command))
-        if run is not None and progress is None:
-            result = run(
-                args,
-                cwd=cwd,
-                text=True,
-                capture_output=True,
-                check=False,
-                timeout=timeout,
-            )
-        else:
-            result = _run_with_validation_progress(
-                args,
-                cwd=cwd,
-                timeout=timeout,
-                run=run,
-                progress=progress,
-                check_cancelled=check_cancelled,
-            )
-        check_cancelled()
+        succeeded = False
+        try:
+            if run is not None and progress is None:
+                result = run(
+                    args,
+                    cwd=cwd,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=timeout,
+                )
+            else:
+                result = _run_with_validation_progress(
+                    args,
+                    cwd=cwd,
+                    timeout=timeout,
+                    run=run,
+                    progress=progress,
+                    check_cancelled=check_cancelled,
+                )
+            check_cancelled()
+            if result.returncode < 0:
+                raise _incomplete_validation_error(
+                    args,
+                    f"terminated by signal {-result.returncode}",
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                )
+            succeeded = result.returncode == 0
+        finally:
+            if progress is not None:
+                progress(ValidationCommandFinished(command, succeeded))
         if (
             result.returncode == 0
             or attempt + 1 == max_attempts
@@ -424,8 +530,6 @@ def _run_validation_command_impl(
                 stderr=result.stderr,
             )
         ):
-            if progress is not None:
-                progress(ValidationCommandFinished(command, result.returncode == 0))
             return result
         if progress is not None:
             progress(
@@ -448,21 +552,36 @@ def _run_validation_command(
 ) -> _RunResult:
     """Measure validation independently from candidate hash preparation."""
     with measure("validation", args[1]) as timing:
-        result = _run_validation_command_impl(
-            args,
-            cwd=cwd,
-            timeout=timeout,
-            run=run,
-            sleep=sleep,
-            max_attempts=max_attempts,
-            progress=progress,
-            check_cancelled=check_cancelled,
-        )
-        timing.stdout_bytes += len((result.stdout or "").encode())
-        timing.stderr_bytes += len((result.stderr or "").encode())
-        if result.returncode:
-            timing.failed += 1
-        return result
+        try:
+            result = _run_validation_command_impl(
+                args,
+                cwd=cwd,
+                timeout=timeout,
+                run=run,
+                sleep=sleep,
+                max_attempts=max_attempts,
+                progress=progress,
+                check_cancelled=check_cancelled,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            error = _incomplete_validation_error(
+                args,
+                str(exc),
+                stdout=exc.stdout
+                if isinstance(exc, subprocess.TimeoutExpired)
+                else None,
+                stderr=exc.stderr
+                if isinstance(exc, subprocess.TimeoutExpired)
+                else None,
+            )
+        else:
+            timing.stdout_bytes += len((result.stdout or "").encode())
+            timing.stderr_bytes += len((result.stderr or "").encode())
+            if result.returncode:
+                timing.failed += 1
+            return result
+        # No raw command/error survives in an implicit exception context.
+        raise error
 
 
 def resolve_derivation_validations(
@@ -627,8 +746,9 @@ def validate_derivation_requests(
 ) -> tuple[DerivationValidationFailure, ...]:
     """Batch snapshot validations, retaining individual failure diagnostics.
 
-    Failed batches isolate sparse failures by subdivision. If both halves
-    fail, fall back to individual diagnostics and the original retry policy.
+    Completed failed batches isolate sparse failures by subdivision.
+    Timeouts, signals and launch errors raise ValidationIncompleteError without attribution.
+    If both halves fail, fall back to individual diagnostics and the original retry policy.
     Every requested target remains required. *progress* observes output as it
     streams; *print_build_logs* additionally asks Nix for per-derivation logs.
     Groups are independent read-only commands over one immutable snapshot, so
@@ -648,6 +768,12 @@ def validate_derivation_requests(
 
     failures: dict[int, DerivationValidationFailure] = {}
     progress_lock = threading.Lock()
+    cancelled = threading.Event()
+
+    def check_group_cancelled() -> None:
+        check_cancelled()
+        if cancelled.is_set():
+            raise CancelledError
 
     guarded_progress: ValidationProgress | None
     if progress is None:
@@ -659,23 +785,20 @@ def validate_derivation_requests(
                 progress(event)
 
     def batch(group: list[tuple[int, DerivationValidationRequest]]) -> bool:
-        try:
-            result = _run_validation_command(
-                _batch_validation_args(
-                    [request for _, request in group],
-                    flake_root=flake_root,
-                    print_build_logs=print_build_logs,
-                ),
-                cwd=command_root,
-                timeout=timeout,
-                run=runner,
-                sleep=sleeper,
-                max_attempts=1,
-                progress=guarded_progress,
-                check_cancelled=check_cancelled,
-            )
-        except OSError, subprocess.TimeoutExpired:
-            return False
+        result = _run_validation_command(
+            _batch_validation_args(
+                [request for _, request in group],
+                flake_root=flake_root,
+                print_build_logs=print_build_logs,
+            ),
+            cwd=command_root,
+            timeout=timeout,
+            run=runner,
+            sleep=sleeper,
+            max_attempts=1,
+            progress=guarded_progress,
+            check_cancelled=check_group_cancelled,
+        )
         return result.returncode == 0
 
     def individually(group: list[tuple[int, DerivationValidationRequest]]) -> None:
@@ -688,7 +811,7 @@ def validate_derivation_requests(
                 run=runner,
                 sleep=sleeper,
                 progress=guarded_progress,
-                check_cancelled=check_cancelled,
+                check_cancelled=check_group_cancelled,
                 print_build_logs=print_build_logs,
             )
             if failure is not None:
@@ -726,8 +849,18 @@ def validate_derivation_requests(
             isolate(group)
 
     eval_groups, build_groups = _split_groups_by_mode(groups)
-    _execute_groups(eval_groups, run_group=run_group, max_workers=max_eval_workers)
-    _execute_groups(build_groups, run_group=run_group, max_workers=max_build_workers)
+    _execute_groups(
+        eval_groups,
+        run_group=run_group,
+        max_workers=max_eval_workers,
+        cancelled=cancelled,
+    )
+    _execute_groups(
+        build_groups,
+        run_group=run_group,
+        max_workers=max_build_workers,
+        cancelled=cancelled,
+    )
 
     return tuple(failures[index] for index in sorted(failures))
 
@@ -745,30 +878,24 @@ def _run_single_validation(
     print_build_logs: bool,
 ) -> DerivationValidationFailure | None:
     """Validate one request individually and return its failure, if any."""
-    try:
-        result = _run_validation_command(
-            _validation_args(
-                request,
-                flake_root=flake_root,
-                print_build_logs=print_build_logs,
-            ),
-            cwd=command_root,
-            timeout=timeout,
-            run=run,
-            sleep=sleep,
-            progress=progress,
-            check_cancelled=check_cancelled,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        message = str(exc)
-    else:
-        if result.returncode == 0:
-            return None
-        message = (
-            result.stderr.strip()
-            or result.stdout.strip()
-            or f"nix {request.mode} failed"
-        )
+    result = _run_validation_command(
+        _validation_args(
+            request,
+            flake_root=flake_root,
+            print_build_logs=print_build_logs,
+        ),
+        cwd=command_root,
+        timeout=timeout,
+        run=run,
+        sleep=sleep,
+        progress=progress,
+        check_cancelled=check_cancelled,
+    )
+    if result.returncode == 0:
+        return None
+    message = (
+        result.stderr.strip() or result.stdout.strip() or f"nix {request.mode} failed"
+    )
     return DerivationValidationFailure(
         source=request.source,
         installable=request.installable,
@@ -799,6 +926,7 @@ def _execute_groups(
     *,
     run_group: Callable[[list[tuple[int, DerivationValidationRequest]]], None],
     max_workers: int,
+    cancelled: threading.Event,
 ) -> None:
     """Run independent groups concurrently up to the caller's budget."""
     if max_workers <= 1 or len(groups) <= 1:
@@ -806,11 +934,29 @@ def _execute_groups(
             run_group(group)
         return
     with ThreadPoolExecutor(max_workers=min(max_workers, len(groups))) as pool:
-        list(pool.map(run_group, groups))
+        remaining = iter(groups)
+        pending = {
+            pool.submit(run_group, next(remaining))
+            for _ in range(min(max_workers, len(groups)))
+        }
+        try:
+            while pending:
+                done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                for future in done:
+                    future.result()
+                for _ in done:
+                    group = next(remaining, None)
+                    if group is not None:
+                        pending.add(pool.submit(run_group, group))
+        except BaseException:
+            cancelled.set()
+            for future in pending:
+                future.cancel()
+            raise
 
 
 def validate_derivations(
-    source_names: Iterable[str],
+    source_names: Iterable[str] | None,
     *,
     updaters: Mapping[str, type[object]],
     timeout: float | None = None,
@@ -825,9 +971,12 @@ def validate_derivations(
     max_eval_workers: int = 1,
     max_build_workers: int = 1,
 ) -> tuple[DerivationValidationFailure, ...]:
-    """Validate updater-declared derivations."""
+    """Validate selected declarations, or the complete registry when names are None.
+
+    Validation inventory is independent of update eligibility and bulk holds.
+    """
     requests = resolve_derivation_validations(
-        source_names,
+        updaters if source_names is None else source_names,
         updaters=updaters,
         all_declared_systems=all_declared_systems,
         native_builds_only=native_builds_only,
@@ -860,18 +1009,15 @@ def _load_root_closure_manifest(
         flake_root=snapshot_root,
     )
     args = ["nix", "eval", "--no-update-lock-file", "--json", installable]
-    try:
-        result = _run_validation_command(
-            args,
-            cwd=snapshot_root,
-            timeout=timeout,
-            run=run,
-            sleep=sleep,
-            progress=progress,
-            check_cancelled=check_cancelled,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise _RootClosureManifestError(str(exc)) from exc
+    result = _run_validation_command(
+        args,
+        cwd=snapshot_root,
+        timeout=timeout,
+        run=run,
+        sleep=sleep,
+        progress=progress,
+        check_cancelled=check_cancelled,
+    )
     if result.returncode != 0:
         message = result.stderr.strip() or result.stdout.strip() or "nix eval failed"
         raise _RootClosureManifestError(message)
@@ -895,6 +1041,7 @@ def validate_root_closures(
     *,
     flake_root: Path | None = None,
     systems: tuple[str, ...] | None = None,
+    include_dependencies: bool = False,
     timeout: float | None = None,
     run: _Runner | None = None,
     sleep: _Sleeper | None = None,
@@ -947,6 +1094,51 @@ def validate_root_closures(
             )
             for system in root_systems
         )
+        if include_dependencies:
+            # A Darwin root may contain a Linux VM image. Build the native
+            # boundary of every root's graph, even on a runner with no roots.
+            args = [
+                "nix",
+                "derivation",
+                "show",
+                "--recursive",
+                "--no-update-lock-file",
+                *(
+                    f"path:{snapshot_root}#checks.{system}.root-closures"
+                    for system in sorted({root.system for root in manifest.roots})
+                ),
+            ]
+            try:
+                result = _run_validation_command(
+                    args,
+                    cwd=snapshot_root,
+                    timeout=root_timeout,
+                    run=runner,
+                    sleep=sleeper,
+                    progress=progress,
+                    check_cancelled=check_cancelled,
+                )
+                graph = _RootDerivationGraph.from_result(result)
+                dependencies = graph.dependencies(systems or root_systems)
+            except ValueError as exc:
+                return (
+                    DerivationValidationFailure(
+                        source=_ROOT_CLOSURE_VALIDATION_SOURCE,
+                        installable=_ROOT_CLOSURE_MANIFEST_INSTALLABLE,
+                        message=str(exc),
+                    ),
+                )
+            requests = (
+                tuple(
+                    DerivationValidationRequest(
+                        source=_ROOT_CLOSURE_VALIDATION_SOURCE,
+                        installable=installable,
+                        mode="build",
+                    )
+                    for installable in dependencies
+                )
+                + requests
+            )
         return validate_derivation_requests(
             requests,
             timeout=root_timeout,
@@ -968,6 +1160,7 @@ __all__ = [
     "RootClosureManifest",
     "RootClosureManifestIdentity",
     "RootClosureManifestRoot",
+    "ValidationIncompleteError",
     "resolve_derivation_validations",
     "validate_derivation_requests",
     "validate_derivations",

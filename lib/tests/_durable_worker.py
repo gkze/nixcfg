@@ -210,6 +210,7 @@ async def run_fixture(
         if resume
         else cli.UpdateOptions(
             targets=("alpha", "beta"),
+            check=scenario == "check",
             no_refs=scenario != "phases",
             no_input=scenario != "phases",
             tty=tty,

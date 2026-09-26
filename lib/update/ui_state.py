@@ -202,7 +202,7 @@ def operation_for_command(args: list[str] | None) -> OperationKind:
         return OperationKind.COMPUTE_HASH
     if args[0] == "flake-edit":
         return OperationKind.UPDATE_REF
-    if args[:2] == ["nix", "flake"] and "update" in args[2:]:
+    if args[0] == "nix" and "flake" in args[1:] and "update" in args[1:]:
         return OperationKind.REFRESH_LOCK
     return OperationKind.COMPUTE_HASH
 

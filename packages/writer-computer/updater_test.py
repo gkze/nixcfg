@@ -143,6 +143,7 @@ def test_writer_hashes_source_pnpm_and_cargo_in_dependency_order(
         DerivationValidation(
             installable=".#pkgs.{system}.{name}",
             mode="build",
+            systems=("aarch64-darwin",),
         ),
     )
     assert_nix_ast_equal(

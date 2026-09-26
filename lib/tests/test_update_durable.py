@@ -33,6 +33,8 @@ def run_worker(
     coverage = Coverage.current()
     data_file = run_root.parent / "worker.coverage"
     if coverage is not None:
+        sources = coverage.get_option("run:source")
+        assert isinstance(sources, list)
         config = run_root.parent / "worker.coveragerc"
         # Save coverage even at os._exit, without changing DBOS or filesystem state.
         config.write_text("[run]\nbranch = true\npatch = _exit\n")
@@ -44,6 +46,10 @@ def run_worker(
             str(config),
             "--data-file",
             str(data_file),
+            # Nix dependencies live outside site-packages via symlinks. Preserve
+            # the parent scope instead of merging coverage for those libraries.
+            "--source",
+            ",".join(sources),
             *arguments,
         ]
     result = subprocess.run(  # noqa: S603 -- fixed local fixture process
@@ -70,7 +76,12 @@ def run_worker(
     return result
 
 
-def test_ci_rerun_recovers_and_exports_the_recorded_candidate(tmp_path: Path) -> None:
+@pytest.mark.parametrize("check", [False, True])
+def test_ci_rerun_recovers_and_exports_the_recorded_candidate(
+    tmp_path: Path,
+    *,
+    check: bool,
+) -> None:
     """A stable job ID resumes, then re-exports only validated bytes after completion."""
     root = tmp_path / "repo"
     init_update_workspace_repo(
@@ -86,21 +97,39 @@ def test_ci_rerun_recovers_and_exports_the_recorded_candidate(tmp_path: Path) ->
     # Also covers death between creating SQLite and saving the initial request.
     RunStore(run_root / "update")
     patch_path = tmp_path / "update.patch"
+    scenario = "check" if check else ""
     first = run_worker(
-        root, run_root, operations, run_id="update", crash="acknowledgement"
+        root,
+        run_root,
+        operations,
+        run_id="update",
+        scenario=scenario,
+        crash="validation" if check else "acknowledgement",
     )
     assert first.returncode == 42, first.stdout + first.stderr
     resumed = run_worker(
-        root, run_root, operations, run_id="update", patch_path=patch_path
+        root,
+        run_root,
+        operations,
+        run_id="update",
+        patch_path=patch_path,
+        scenario=scenario,
     )
     assert resumed.returncode == 0, resumed.stdout + resumed.stderr
     original_patch = patch_path.read_bytes()
+    assert original_patch
+    assert (root / "packages/alpha/generated.txt").exists() is not check
     original_operations = operations.read_text()
     (root / "notes").write_text("later unvalidated edit")
     (root / "packages/alpha/generated.txt").write_text("unvalidated")
     patch_path.unlink()
     repeated = run_worker(
-        root, run_root, operations, run_id="update", patch_path=patch_path
+        root,
+        run_root,
+        operations,
+        run_id="update",
+        patch_path=patch_path,
+        scenario=scenario,
     )
     assert repeated.returncode == 0, repeated.stdout + repeated.stderr
     assert patch_path.read_bytes() == original_patch

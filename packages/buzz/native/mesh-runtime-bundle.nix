@@ -20,6 +20,7 @@ let
     fileset = lib.fileset.unions [
       ../../../lib/__init__.py
       ../../../lib/macho.py
+      ./llama_patches.py
     ];
   };
   meshLlmLock = nativeLock.meshLlm or { };
@@ -47,6 +48,7 @@ let
       lib
       nativeLock
       ninja
+      python3
       stdenv
       ;
     meshSrcHash = meshLlmSrcHash;

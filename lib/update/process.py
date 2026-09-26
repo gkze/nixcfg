@@ -1,7 +1,9 @@
 """Subprocess execution and hash conversion helpers for updates."""
 
 import asyncio
+import json
 import logging
+import os
 import posixpath
 import re
 import shlex
@@ -9,7 +11,7 @@ from collections import deque
 from contextlib import AsyncExitStack, aclosing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 from rich.text import Text
 
@@ -26,7 +28,7 @@ from lib.nix.commands.base import (
     stream_process,
 )
 from lib.nix.commands.hash import nix_hash_convert as libnix_hash_convert
-from lib.nix.commands.hash import nix_prefetch_url as libnix_prefetch_url
+from lib.nix.commands.hash import nix_prefetch_url_result as libnix_prefetch_url_result
 from lib.update.config import UpdateConfig, resolve_active_config
 from lib.update.constants import NIX_BUILD_FAILURE_TAIL_LINES, resolve_timeout_alias
 from lib.update.errors import format_exception
@@ -359,13 +361,15 @@ async def convert_nix_hash_to_sri(
 
 
 def _nix_prefetch_name(url: str) -> str | None:
-    """Return a safe override name when ``nix-prefetch-url`` would infer a bad one."""
+    """Return Nix-compatible explicit names for unsafe URL path basenames."""
     basename = posixpath.basename(urlparse(url).path)
     if not basename:
         return None
-    decoded = unquote(basename)
-    safe_name = _NIX_STORE_NAME_UNSAFE_RE.sub("-", decoded).strip("-")
-    if not safe_name or safe_name == decoded:
+    # fetchurl sanitizes the encoded URL basename, not its decoded spelling.
+    # Keep nixpkgs' leading-dot and 207-character derivation-name rules too.
+    safe_name = _NIX_STORE_NAME_UNSAFE_RE.sub("-", basename.lstrip("."))[-207:]
+    safe_name = safe_name or "unknown"
+    if safe_name == basename:
         return None
     return safe_name
 
@@ -384,6 +388,19 @@ def _is_retryable_prefetch_error(exc: NixCommandError) -> bool:
     )
 
 
+def _record_prefetch_receipt(store_path: str) -> None:
+    """Append one CI-local cache receipt after a successful direct prefetch."""
+    receipt_path = os.environ.get("UPDATE_PREFETCH_RECEIPTS")
+    if receipt_path is None:
+        return
+    payload = (json.dumps({"storePath": store_path}) + "\n").encode()
+    descriptor = os.open(receipt_path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+    try:
+        os.write(descriptor, payload)
+    finally:
+        os.close(descriptor)
+
+
 async def compute_sri_hash(
     source: str, url: str, *, config: UpdateConfig, emit: EventSink = ignore_event
 ) -> str:
@@ -395,6 +412,16 @@ async def compute_sri_hash(
     args.append(url)
     attempts = max(1, config.default_retries)
     attempt = 1
+
+    async def prefetch_hash() -> str:
+        result = await libnix_prefetch_url_result(
+            url,
+            name=prefetch_name,
+            command_timeout=config.default_subprocess_timeout,
+        )
+        _record_prefetch_receipt(result.storePath)
+        return result.hash
+
     while True:
         try:
             async with resource_slot("download", source=source, config=config):
@@ -402,11 +429,7 @@ async def compute_sri_hash(
                     source=source,
                     args=args,
                     message=shlex.join(args),
-                    runner=lambda: libnix_prefetch_url(
-                        url,
-                        name=prefetch_name,
-                        command_timeout=config.default_subprocess_timeout,
-                    ),
+                    runner=prefetch_hash,
                     emit=emit,
                 )
         except NixCommandError as exc:

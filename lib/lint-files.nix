@@ -5,6 +5,8 @@ let
   ];
   pythonPyupgradeExcludes = [
     "lib/exact_text_patch.py"
+    # Actions bootstraps Nix with the hosted image's Python 3.12.
+    "lib/update/ci/jobs.py"
   ];
   ruffMutationExcludes =
     (builtins.fromTOML (builtins.readFile ../pyproject.toml)).tool.ruff.format.exclude;

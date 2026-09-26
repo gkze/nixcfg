@@ -7,6 +7,10 @@ on:
         description: Space-separated targets (empty updates all eligible targets)
         type: string
         default: ""
+      validate_all_packages:
+        description: Validate all declared packages (required for repaired candidates)
+        type: boolean
+        default: false
       repair:
         description: Allow one agent repair and a fresh fully validated attempt
         type: boolean
@@ -20,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   # Generated artifacts can be shared between platforms. Extend one pinned
-  # candidate serially, then build the final identical tree in parallel.
+  # candidate serially. Linux builds the VM dependencies before Darwin roots.
   prepare-darwin:
     uses: ./.github/workflows/update-native.yml
     with:
@@ -28,6 +32,7 @@ jobs:
       system: aarch64-darwin
       stage: prepare
       targets: ${{ inputs.targets || '' }}
+      validate_all_packages: ${{ inputs.validate_all_packages || false }}
     secrets: inherit
   prepare-arm:
     needs: prepare-darwin
@@ -47,20 +52,35 @@ jobs:
       stage: prepare
       previous: prepare-aarch64-linux
     secrets: inherit
-  validate:
-    needs: [prepare-darwin, prepare-x86]
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.prepare-darwin.outputs.matrix) }}
+  validate-arm:
+    needs: prepare-x86
     uses: ./.github/workflows/update-native.yml
     with:
-      runner: ${{ matrix.runner }}
-      system: ${{ matrix.system }}
+      runner: ubuntu-24.04-arm
+      system: aarch64-linux
+      stage: validate
+      previous: prepare-x86_64-linux
+    secrets: inherit
+  validate-x86:
+    needs: prepare-x86
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: validate
+      previous: prepare-x86_64-linux
+    secrets: inherit
+  validate-darwin:
+    needs: [validate-arm, validate-x86]
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
       stage: validate
       previous: prepare-x86_64-linux
     secrets: inherit
   publish:
-    needs: validate
+    needs: [validate-arm, validate-x86, validate-darwin]
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:
@@ -98,6 +118,7 @@ jobs:
       - name: Propose validated update
         if: steps.candidate.outputs.changed == 'true'
         env:
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
           GH_TOKEN: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
           UPDATE_BASE_BRANCH: ${{ github.event.repository.default_branch }}
           NIXCFG_CI_STAGE: publish
@@ -106,7 +127,14 @@ jobs:
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
         shell: python
   repair:
-    needs: [prepare-darwin, prepare-arm, prepare-x86, validate, publish]
+    needs:
+      - prepare-darwin
+      - prepare-arm
+      - prepare-x86
+      - validate-arm
+      - validate-x86
+      - validate-darwin
+      - publish
     if: |-
       always() && !cancelled() && contains(needs.*.result, 'failure') &&
       (github.event_name == 'schedule' || inputs.repair)
@@ -115,6 +143,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      copilot-requests: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -124,6 +153,7 @@ jobs:
         with:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cache-generators: "true"
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           path: ${{ runner.temp }}/repair-evidence
@@ -146,7 +176,8 @@ jobs:
         env:
           NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
-          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          COPILOT_MODEL: gpt-6-astra
           COPILOT_AUTO_UPDATE: 'false'
           NIXCFG_CI_STAGE: repair
         run: |
@@ -172,6 +203,7 @@ jobs:
           git_commit_gpgsign: true
       - name: Start a fresh attempt with repair disabled
         env:
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
           GH_TOKEN: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
           NIXCFG_CI_STAGE: start-repair
           NIXCFG_UPDATE_TARGETS: ${{ inputs.targets || '' }}

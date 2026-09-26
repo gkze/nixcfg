@@ -218,43 +218,43 @@ _BUZZ_SOURCE_PATHS = (
 # These digests belong only to the explicitly supported native foundation.
 # Buzz release files are validated semantically so a routine desktop release
 # does not require copying new byte digests into the updater.
-# Current audit revision: Mesh-LLM v0.76.0-rc9 (9f192c9d821991ba43d79bb15fd2f2f12e597571).
+# Current audit revision: Mesh-LLM v0.76.2 (a0c1e66b0ac037dd56544b9e2d94969ea43d694f).
 _MESH_SOURCE_DIGESTS: dict[str, str] = {
     "crates/mesh-llm-sdk/Cargo.toml": (
-        "7c5af7ade9b4fa1347b49494c8e06e1ec699364048739130bf0531bc7a5b232a"
+        "baf9b124e130ea2d5d5f314ecc199812e198dfdb2886d51335534462b8f1d9e9"
     ),
     "crates/mesh-llm-embedded-runtime/Cargo.toml": (
-        "89fff7ee66df8f508be34005a6e1f5670ccb4f029194973c2fe94aa96b45e1f7"
+        "ab93b08a35e16eb1efbd8893ccad8289afe7aada2e3e35e374aa8912cfd9ab53"
     ),
     "crates/mesh-llm-host-runtime/Cargo.toml": (
-        "66fa887fd8a87f688685b589aebf2ace0f1b7e099e941eb5a9615af2275077d1"
+        "e56c988c1a484c5fe4797dccb256e7c7b8228de65e8110a6ce1950d6ca2cfd30"
     ),
     "crates/mesh-llm-system/Cargo.toml": (
-        "ed22067f364458b32079a53cac2c45f4c63d80e09633fcd9abd6ddec88ad6fb0"
+        "88653feaa29a9a5bd435c17b865a23a447cfc70161a522f455d5bac091609ef6"
     ),
     "crates/skippy-runtime/Cargo.toml": (
-        "f146996a31b75fa8a3e31eded347d64fd6796510b7d71c1b61ef79760f244258"
+        "de2e748b2b9622d64aaf6ef8db9800254b304b7a0571172e1fa3be6f184d399a"
     ),
     "crates/skippy-server/Cargo.toml": (
-        "7c50f52b53f0838a59de5f9044ca57c7008d6b5d9ff16c25d7bacdde337688bf"
+        "4c2fee296b162e97265f1c0cb4121292468e57709f244abcd9f93ad683e7d6e1"
     ),
     "crates/skippy-ffi/Cargo.toml": (
-        "b1319982c9651cb9d0e5d3b1ceadedde696a4f42ebbcaa8c6fa50a2bb6476a40"
+        "93d75459a31d5635ceb5525c9eba3f32a065d0fc2607b63ba58fef6bff4868d8"
     ),
     "crates/skippy-ffi/build.rs": (
-        "2446ebcb59be88844f023ea11afd134ed63f39ea678ebed7279ba935148bf408"
+        "a8569d226edc73765ad0d8bbdf4725cd566b698a30ca953fdfd3cd86dcea54f0"
     ),
     "crates/skippy-ffi/src/lib.rs": (
-        "ac1d3ec7507591fa910bde259c875782381cb7d64f9e18e3f869b72188e8b954"
+        "3b8e39dfd2d492e6f4498e87df6ff39aabb2c76c1eda1b24c26dc5406dfbb4a1"
     ),
     "crates/mesh-llm-host-runtime/src/lib.rs": (
-        "9917afb2d9989a9441389dfbfb909747731b2e9d86a55b262f0371074a59eb12"
+        "c24fc29f98d38bb28318b4aabc70a16a45bf72ec8704111325f5de6a0cee0304"
     ),
     "crates/mesh-llm-host-runtime/src/system/native_runtime.rs": (
-        "d869c1c42e3112a9f1afd3c35d959ea8bb44bff913a34331cd365c41ecca028d"
+        "8435e2f1105b87b40b299c0446576e49b26e98bd765d92cc138839fe2490b389"
     ),
     "crates/mesh-llm-native-runtime/src/manifest.rs": (
-        "db91c4ef173269900f6bfd37af8906f37f6d4785f4113c918ad5873b8f1c324c"
+        "f9b9a175f912a0399f35b896b38f267be28b3cdfb714e281715952a0f11c17d9"
     ),
     "crates/mesh-llm-native-runtime/src/flavor.rs": (
         "64de68e348eff4fbb46f9105568a3d39d5b22c276fcdc927e639fb790a66f437"
@@ -263,28 +263,28 @@ _MESH_SOURCE_DIGESTS: dict[str, str] = {
         "75b2616f429e59a13a5b202ff8373b832360c5b6e91b4d5bd4130b17c8f6941b"
     ),
     "crates/mesh-llm-runtime-install/src/lib.rs": (
-        "ebc35bc8ffe8c21ca9b888957086ed1ecfefd674869fa02add2a8b5eed2cf4bb"
+        "61ac5eb154dc83f5ff2bce76f0e6a3e8dfbaa40b3bc48618be9691f08f866f08"
     ),
     "crates/mesh-llm-runtime-install/src/types.rs": (
-        "f1ce1b30f0985aee28a9eb7c8c57ac1f9888d98f60a7be156044449a4db15423"
+        "8dc3184cdc3d91a2a80bbce5e25ed47bf3a36fddfc7cd875ed8d4f794684e37e"
     ),
     "crates/mesh-llm-runtime-install/src/install.rs": (
-        "98a99861af7ce1db3e1cde599fa7eb7551fa2bef5c9a29c32d2a2465df0bf60f"
+        "76887c770482527a840df978106c0a70b740d0533d45153cd1404244d50afc96"
     ),
     "crates/mesh-llm-runtime-install/src/discovery.rs": (
         "f241c1a5fdae0d6f5898fb97d91dda04c600c67654fb3bb5e4bccf515191be55"
     ),
     "scripts/build-llama.sh": (
-        "151b5e2b832d771c3618b443da891b0a1cecfe6fe131e9293f3570aed6fddca1"
+        "c3682ce3318259415780136de9451c226b42d3c04f2c3e55d0f1e0e8f82a8313"
     ),
     "scripts/package-native-runtime.sh": (
-        "c951e34386dffd7fc3934081a62e2e983eb042e9156b02ea88341cde41e8222e"
+        "5a6a74d314f137f67d0d864bace41cab1161d39d08fc21fe8009b16bc21ab521"
     ),
     "scripts/prepare-llama.sh": (
-        "0f7fbba71f62a0ff64c942e8e80d57cac2abe6debfae8a4ee19845dfe0dcefc7"
+        "0dbc2b1b95f55d66c25218f53d2236df5a5c5daffcebfc4987bc94e6d5055a79"
     ),
     "third_party/llama.cpp/upstream.txt": (
-        "e8dd7a7216c315fe252fcda95842648ac90a64d357e6367bf1b9ec4423acb0ac"
+        "3bafc39ebc117295f524b9a27a969537b6949ac9b6f4904215700e2cf9cf4fd4"
     ),
 }
 _ONNX_SOURCE_DIGESTS: dict[str, str] = {
@@ -795,12 +795,12 @@ pub struct NativeRuntimeManifest {
             r"(?:(?!^\}).)*?fn\s+default\(\)\s*->\s*Self\s*\{"
             r"(?:(?!^\}).)*?allow_default_manifest_url:\s*true,",
         ),
-        "installer entrypoint explicitly permits the default manifest URL": (
+        "installer catalog access follows its download policy": (
             "crates/mesh-llm-runtime-install/src/install.rs",
             r"(?m)^(?:pub(?:\([^)]*\))?\s+)?async\s+fn\s+"
             r"install_native_runtime\s*\([^)]*\)[^\{]*\{"
             r"(?:(?!^\}).)*?NativeRuntimeManifestOptions\s*\{"
-            r"(?:(?!^\}).)*?allow_default_manifest_url:\s*true,",
+            r"(?:(?!^\}).)*?allow_default_manifest_url:\s*options\.allow_download,",
         ),
         "runtime manifest URL keeps its explicit environment hook": (
             "crates/mesh-llm-runtime-install/src/types.rs",

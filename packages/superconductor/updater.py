@@ -69,10 +69,10 @@ class SuperconductorUpdater(AssetURLsMetadataUpdater):
         session: aiohttp.ClientSession,
         platform: str,
     ) -> _ResolvedArtifact:
-        _ = self.PLATFORMS[platform]
+        query = urllib.parse.urlencode({"arch": self.PLATFORMS[platform]})
         timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
         async with session.head(
-            self.DISCOVERY_URL,
+            f"{self.DISCOVERY_URL}?{query}",
             allow_redirects=True,
             timeout=timeout,
         ) as response:

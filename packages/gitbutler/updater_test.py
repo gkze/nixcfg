@@ -12,10 +12,10 @@ from lib.tests._updater_helpers import (
 from lib.tests._updater_helpers import run_async as _run
 from lib.update import nix as update_nix
 from lib.update.artifacts import GeneratedArtifact
+from lib.update.candidate import ResolvedVersion
 from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
 from lib.update.nix import PreparedProbe, _build_package_path_attr_expr
 from lib.update.updaters import UpdateContext, VersionInfo
-from lib.update.updaters.metadata import FlakeInputMetadata
 from lib.update.updaters.node_compatibility import NodejsSelection
 
 HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -186,10 +186,17 @@ def test_gitbutler_updater_tracks_release_ref_and_metadata(
     assert info.version == "0.19.9"
     assert info.commit == "b" * 40
     assert info.metadata == {
-        **FlakeInputMetadata(node=node, commit="b" * 40).to_dict(),
+        "node": node.model_dump(mode="json"),
+        "commit": "b" * 40,
         **TOOLCHAIN_PINS,
     }
     assert updater.source_pins_for(info) == TOOLCHAIN_PINS
+    restored = ResolvedVersion.model_validate_json(
+        ResolvedVersion.capture(info).model_dump_json()
+    ).restore()
+    assert restored == info
+    assert updater.source_pins_for(restored) == TOOLCHAIN_PINS
+    assert module.GitButlerUpdater._resolve_flake_node(updater, restored) == node
     assert resolved_nodes == [node]
     assert source_reads == [
         (

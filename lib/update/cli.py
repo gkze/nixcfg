@@ -929,6 +929,7 @@ class _RunOutcome:
     promotion_state: update_persistence.UpdatePromotionState | None = None
     plan_error: _RunPlanError | None = None
     workspace_error: str | None = None
+    validation_error: str | None = None
     # Candidates withheld because a coupled target failed, with the reason.
     dropped: dict[str, str] = field(default_factory=dict)
     written_paths: tuple[Path, ...] = ()
@@ -1366,6 +1367,8 @@ def _emit_run_outcome(
             })
             error_key = "planError" if workspace_error is not None else "error"
             payload[error_key] = redact_urls(plan_error.message)
+        if outcome.validation_error is not None:
+            payload["validationIncomplete"] = redact_urls(outcome.validation_error)
         if workspace_error is not None:
             payload["error"] = redact_urls(workspace_error)
         sys.stdout.write(f"{json.dumps(payload)}\n")
@@ -1386,6 +1389,8 @@ def _emit_run_outcome(
         out.print_error(
             f"Available: {', '.join(plan_error.available_targets)}",
         )
+    if outcome.validation_error is not None:
+        out.print_error(outcome.validation_error)
     if workspace_error is not None:
         out.print_error(f"Error: {workspace_error}")
     if plan_error is not None:
@@ -1792,12 +1797,14 @@ def _validate_round(
     """
     opts, out, config = context.opts, context.out, context.config
     verbose = opts.verbose and not out.quiet and not out.json_output
-    if isinstance(plan, _RunPlan):
-        kept = [
-            name
-            for name in plan.order
-            if outcome.summary.statuses.get(name) not in {"error", "dropped"}
-        ]
+    if isinstance(plan, _RunPlan) or opts.validate_all_packages:
+        kept = None
+        if not opts.validate_all_packages and isinstance(plan, _RunPlan):
+            kept = [
+                name
+                for name in plan.order
+                if outcome.summary.statuses.get(name) not in {"error", "dropped"}
+            ]
         suffix = f" (round {round_index + 1})" if round_index else ""
         out.print(f"\nPhase 3: derivation validation{suffix}", style="dim")
         if context.monitor is not None:
@@ -1818,7 +1825,9 @@ def _validate_round(
         )
         if _record_derivation_validation_failures(outcome.summary, out, failures):
             return True, False
-    if not _requires_root_closure_validation(snapshot.changed_paths):
+    if not opts.validate_all_packages and not _requires_root_closure_validation(
+        snapshot.changed_paths
+    ):
         return False, False
     out.print("\nPhase 4: root closure builds", style="dim")
     if context.monitor is not None:
@@ -1877,7 +1886,11 @@ async def _validate_and_gate(
         check_cancelled()
         if not derivations_failed:
             return roots_failed
-        if context.opts.strict or not isinstance(plan, _RunPlan):
+        if (
+            context.opts.strict
+            or context.opts.validate_all_packages
+            or not isinstance(plan, _RunPlan)
+        ):
             return True
         _withhold_failed_clusters(
             workspace, plan, outcome, context.updaters, context.out, context.monitor
@@ -1935,35 +1948,35 @@ async def _gate_candidate(
     outcome.had_errors = outcome.had_errors or blocked or bool(outcome.summary.errors)
     if blocked:
         return
+    # Store the validated diff with DBOS's result, including checks. Re-exporting
+    # a completed run must never pick up later edits from the live checkout.
+    patch = (
+        workspace.patch(allowed_paths)
+        if not outcome.had_errors and durable.current_run() is not None
+        else b""
+    )
     if opts.check:
         workspace.validate_changes(allowed_paths)
     else:
-        # Store the validated diff with DBOS's result. Re-exporting a completed
-        # run must never pick up later edits from the live checkout.
-        patch = (
-            workspace.patch(allowed_paths)
-            if not outcome.had_errors and durable.current_run() is not None
-            else b""
-        )
         # Reconcile the filesystem on every replay until the workflow commits.
         # SQLite cannot atomically acknowledge an external multi-file write.
         outcome.promoted = bool(workspace.promote(allowed_paths))
-        outcome.patch = patch
+    outcome.patch = patch
 
 
 def _restore_preparation(
     workspace: update_persistence.IsolatedUpdateWorkspace,
     preparation: Preparation | None,
-) -> None:
-    """Import only declared candidate outputs before any updater reads them."""
+) -> tuple[Path, ...]:
+    """Import declared outputs and retain their authority across native no-ops."""
     if preparation is None or preparation.previous is None:
-        return
+        return ()
     previous = preparation.previous
     previous.apply(workspace.root)
     prior_paths = update_persistence.planned_update_paths(
         list(previous.sources), _get_updaters()
     )
-    workspace.validate_changes((
+    return workspace.validate_changes((
         *_workspace_relative_paths(workspace.root, prior_paths),
         *_FLAKE_FILES,
     ))
@@ -2013,13 +2026,15 @@ async def _run_updates(
     updaters: Mapping[str, UpdaterClass] = {}
     try:
         with durable.workspace(get_repo_root()) as workspace:
-            _restore_preparation(workspace, preparation)
+            restored_paths = _restore_preparation(workspace, preparation)
             _revalidate_runtime_source_snapshot(workspace.root)
             if (
                 check_tools
                 and (tool_check := _handle_required_tool_check(opts)) is not None
             ):
                 return tool_check
+            if opts.validate_all_packages:
+                updaters = _get_updaters()
             update_flake.invalidate_flake_lock()
             allowed_paths: tuple[Path, ...] = ()
             run_plan = durable.checkpoint_sync("plan", lambda: _build_run_plan(opts))
@@ -2061,9 +2076,15 @@ async def _run_updates(
                     check_cancelled=check_cancelled,
                     monitor=monitor,
                 ),
-                allowed_paths=allowed_paths,
+                allowed_paths=(*restored_paths, *allowed_paths),
                 preparation=preparation,
             )
+    except update_derivation_validation.ValidationIncompleteError as error:
+        outcome.had_errors = True
+        outcome.validation_error = redact_urls(str(error))
+        outcome.summary.accumulate({"validation": "error"})
+        if monitor is not None:
+            monitor.validation_output(None, outcome.validation_error)
     except update_persistence.UpdateWorkspaceError as error:
         _record_workspace_failure(outcome, error)
     finally:
@@ -2074,6 +2095,11 @@ async def _run_updates(
                     **outcome.summary.to_dict(),
                     "promoted": outcome.promoted,
                     "withheld": dict(outcome.dropped),
+                    **(
+                        {"validationIncomplete": outcome.validation_error}
+                        if outcome.validation_error is not None
+                        else {}
+                    ),
                 }
             )
 

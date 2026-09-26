@@ -5,6 +5,7 @@ import json
 import logging
 from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import click
@@ -132,11 +133,11 @@ def test_prefetch_keeps_signed_request_and_hash(
 ) -> None:
     """The signed redirect still reaches Nix verbatim and returns its real hash."""
 
-    async def prefetch(url: str, **_kwargs: object) -> str:
+    async def prefetch(url: str, **_kwargs: object) -> SimpleNamespace:
         assert url == _URL
-        return _HASH
+        return SimpleNamespace(hash=_HASH, storePath="/nix/store/example")
 
-    monkeypatch.setattr(process, "libnix_prefetch_url", prefetch)
+    monkeypatch.setattr(process, "libnix_prefetch_url_result", prefetch)
     events: list[UpdateEvent] = []
 
     async def emit(event: UpdateEvent) -> None:

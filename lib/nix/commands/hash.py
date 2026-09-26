@@ -9,8 +9,11 @@ from lib.nix.models.hash import (
 from .base import _resolve_timeout_alias, run_nix
 
 
-class _PrefetchResult(BaseModel):
+class PrefetchResult(BaseModel):
+    """The exact Nix store import produced by a URL prefetch."""
+
     hash: NixHash
+    storePath: str  # noqa: N815 -- Nix's JSON protocol uses camelCase.
 
 
 async def nix_hash_convert(
@@ -42,6 +45,26 @@ async def nix_prefetch_url(
     **kwargs: object,
 ) -> str:
     """Download a URL and return its SRI hash."""
+    return (
+        await nix_prefetch_url_result(
+            url,
+            hash_type=hash_type,
+            name=name,
+            command_timeout=command_timeout,
+            **kwargs,
+        )
+    ).hash
+
+
+async def nix_prefetch_url_result(
+    url: str,
+    *,
+    hash_type: str = "sha256",
+    name: str | None = None,
+    command_timeout: float = 1200.0,
+    **kwargs: object,
+) -> PrefetchResult:
+    """Download a URL and return its SRI hash and exact store import."""
     timeout_seconds = _resolve_timeout_alias(
         command_timeout=command_timeout,
         kwargs=kwargs,
@@ -54,4 +77,4 @@ async def nix_prefetch_url(
         args,
         timeout=timeout_seconds,
     )
-    return _PrefetchResult.model_validate_json(result.stdout).hash
+    return PrefetchResult.model_validate_json(result.stdout)

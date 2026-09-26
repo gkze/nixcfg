@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from lib.update import derivation_validation
 from lib.update.cli_options import RepairAgent
 from lib.update.events import UpdateEventKind
 from lib.update.persistence import IsolatedUpdateWorkspace
@@ -224,24 +223,19 @@ def run_repairing_update(options: UpdateOptions, root: Path) -> int:
             (evidence / "repair.patch").write_bytes(workspace.patch(paths))
             attempt = evidence / "attempt-2"
             attempt.mkdir()
-            status = asyncio.run(_attempt(attempt_options, workspace.root, attempt))
+            status = asyncio.run(
+                _attempt(
+                    replace(attempt_options, validate_all_packages=True),
+                    workspace.root,
+                    attempt,
+                )
+            )
             if not status:
                 workspace.patch(workspace.changed_paths())
                 # Freeze the already built tree before hooks; formatter changes
                 # cannot inherit successful build evidence.
-                with workspace.validation_snapshot() as snapshot:
+                with workspace.validation_snapshot():
                     status = asyncio.run(_quality(evidence))
-                    if not status:
-                        # The repaired code is already in the child's baseline.
-                        # Even a no-op update must validate the repair's root impact.
-                        failures = derivation_validation.validate_root_closures(
-                            flake_root=snapshot.root,
-                            print_build_logs=True,
-                        )
-                        (evidence / "roots.json").write_text(
-                            json.dumps([asdict(failure) for failure in failures]) + "\n"
-                        )
-                        status = int(bool(failures))
         if not status:
             paths = workspace.changed_paths()
             patch = workspace.patch(paths)

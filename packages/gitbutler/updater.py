@@ -18,7 +18,7 @@ from lib.update.updaters import (
     register_updater,
 )
 from lib.update.updaters.flake_backed import FlakeInputHashUpdater
-from lib.update.updaters.metadata import FlakeInputMetadata, require_metadata_str
+from lib.update.updaters.metadata import require_metadata_str
 from lib.update.updaters.node_compatibility import (
     resolve_nixpkgs_nodejs_for_engine,
     resolve_nixpkgs_package_version,
@@ -169,7 +169,8 @@ class GitButlerUpdater(Crate2NixArtifactsMixin, FlakeInputHashUpdater):
         return VersionInfo(
             version=ref.removeprefix("release/"),
             metadata={
-                **FlakeInputMetadata(node=node, commit=commit).to_dict(),
+                "node": node.model_dump(mode="json"),
+                "commit": commit,
                 **toolchain_pins,
             },
         )

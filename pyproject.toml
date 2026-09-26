@@ -65,6 +65,10 @@ namespace-packages = ["overlays", "packages"]
 # Explicitly include all extensionless Python entrypoints in Ruff discovery.
 extend-include = ["home/george/bin/git-ignore", "home/george/bin/zentool"]
 
+[tool.ruff.per-file-target-version]
+# Actions invokes this bootstrap before Nix supplies the Python 3.14 runtime.
+"lib/update/ci/jobs.py" = "py312"
+
 [tool.ruff.format]
 # Ruff 0.15.x can de-parenthesize multi-exception handlers into invalid Python
 # 2-era syntax on these entrypoints and helper modules. lib/lint-files.nix

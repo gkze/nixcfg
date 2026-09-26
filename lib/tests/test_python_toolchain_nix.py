@@ -82,10 +82,10 @@ def test_dev_shell_preserves_unified_diff_payload_whitespace() -> None:
 
 
 def test_pyupgrade_exclusion_inventory_is_narrow_and_explicit() -> None:
-    """Only the shared Python 3.12 patch helper needs pyupgrade immunity."""
+    """Helpers executed before the project runtime retain Python 3.12 syntax."""
     assert_nix_ast_equal(
         nix_file_binding_expr("lib/lint-files.nix", "pythonPyupgradeExcludes"),
-        '[ "lib/exact_text_patch.py" ]',
+        '[ "lib/exact_text_patch.py" "lib/update/ci/jobs.py" ]',
     )
 
 

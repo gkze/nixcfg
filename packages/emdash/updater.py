@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, override
 import yaml
 
 from lib import json_utils
+from lib.nix.models.flake_lock import (
+    FlakeLockNode,  # noqa: TC001 -- candidate metadata is validated at runtime
+)
 from lib.system_policy import supported_systems
 from lib.update.locked_source import resolve_locked_source
 from lib.update.npm_semver import (
@@ -28,7 +31,6 @@ if TYPE_CHECKING:
 
     import aiohttp
 
-    from lib.nix.models.flake_lock import FlakeLockNode
     from lib.nix.models.sources import SourceEntry, SourceHashes
     from lib.update.updaters.core import UpdateContext
 

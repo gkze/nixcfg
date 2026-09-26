@@ -1,20 +1,28 @@
 """Portable candidate behavior through real Git workspaces and updater phases."""
 
 import json
+import subprocess
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
+from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import SourceEntry
 from lib.tests._run_updates_helpers import drain_events, make_run_plan
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
+from lib.tests._updater_helpers import load_repo_module_for_test
 from lib.update import cli, source_runner
 from lib.update.candidate import Candidate, Preparation, ResolvedVersion, git
 from lib.update.ci import candidate as pipeline
-from lib.update.derivation_validation import DerivationValidationFailure
+from lib.update.derivation_validation import (
+    DerivationValidation,
+    DerivationValidationFailure,
+)
 from lib.update.persistence import IsolatedUpdateWorkspace
+from lib.update.ui_consumer import consume_events
 from lib.update.updaters import Updater, VersionInfo
 from lib.update.updaters.metadata import GitHubReleaseMetadata, MappingMetadata
 
@@ -54,6 +62,60 @@ def test_resolution_rejects_executable_or_unknown_metadata() -> None:
         ResolvedVersion(version="2", metadata_type="os.system").restore()
 
 
+@pytest.mark.parametrize(
+    ("module_path", "class_name", "extra"),
+    [
+        (
+            "packages/emdash/updater.py",
+            "EmdashSourceMetadata",
+            {
+                "shell_env_capture_path": "src/env.ts",
+                "toolchain": {
+                    "node_engine": ">=24.0.0",
+                    "nodejs_attr": "nodejs_24",
+                    "nodejs_version": "24.20.0",
+                    "package_manager": "pnpm@10.28.2",
+                    "pnpm_engine": ">=10.28.0",
+                    "pnpm_attr": "pnpm_10",
+                    "pnpm_version": "10.34.5",
+                },
+            },
+        ),
+        ("packages/mux/updater.py", "MuxSourceMetadata", {"bun_version": "1.3.0"}),
+        (
+            "lib/update/electron_manifest.py",
+            "ElectronManifestMetadata",
+            {"manifest_path": "package.json", "manifest_version": "1.2.3"},
+        ),
+    ],
+)
+def test_package_metadata_survives_native_candidate_handoff(
+    module_path, class_name, extra
+) -> None:
+    """Real dynamic metadata must resolve nested model types at runtime."""
+    module = load_repo_module_for_test(module_path, prefix="candidate_metadata")
+    saved = ResolvedVersion(
+        version="1.2.3",
+        metadata_type=f"{module.__name__}.{class_name}",
+        metadata={
+            "node": {"locked": {"type": "github", "rev": "a" * 40, "narHash": _HASH}},
+            "commit": "a" * 40,
+            "electron_version": "40.10.2",
+            **extra,
+        },
+    )
+    restored = saved.restore()
+    captured = ResolvedVersion.capture(restored)
+    assert ResolvedVersion.model_validate_json(
+        captured.model_dump_json()
+    ).restore() == (restored)
+    assert isinstance(restored.metadata, MappingMetadata)
+    node = restored.metadata["node"]
+    assert isinstance(node, FlakeLockNode)
+    assert node.locked is not None
+    assert node.locked.rev == "a" * 40
+
+
 @pytest.fixture
 def prepared_run(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -84,6 +146,8 @@ def prepared_run(
             context.hashes_fully_computed = False
             assert info.metadata == GitHubReleaseMetadata(tag="v2")
             operations.append(f"hash:{state['system']}")
+            if state.get("darwin_only") and state["system"] != "aarch64-darwin":
+                return {"aarch64-darwin": _HASH}
             if state["fail"]:
                 msg = "upstream packaging changed"
                 raise RuntimeError(msg)
@@ -110,11 +174,14 @@ def prepared_run(
     return root, operations, state
 
 
+@pytest.mark.parametrize("darwin_only", [False, True])
 def test_native_stages_pin_versions_preserve_hashes_and_never_promote(
     prepared_run,
+    darwin_only: bool,
 ) -> None:
     """Each runner reconstructs the candidate from the untouched original tree."""
     root, operations, state = prepared_run
+    state["darwin_only"] = darwin_only
     previous = None
     for system in pipeline.supported_systems():
         state["system"] = system
@@ -132,7 +199,22 @@ def test_native_stages_pin_versions_preserve_hashes_and_never_promote(
             (workspace.root / "packages/example/sources.json").read_bytes()
         )
         assert result.version == "2"
-        assert set(result.hashes.mapping) == set(pipeline.supported_systems())
+        assert set(result.hashes.mapping) == (
+            {"aarch64-darwin"} if darwin_only else set(pipeline.supported_systems())
+        )
+
+
+def test_preparation_streams_progress_separately_from_json(
+    prepared_run, monkeypatch, capsys
+) -> None:
+    """The CI consumer gets useful progress and a parseable result separately."""
+    monkeypatch.setattr(cli, "consume_events", consume_events)
+    _, status = pipeline.prepare_candidate(("example",))
+    captured = capsys.readouterr()
+    assert status == 0
+    assert json.loads(captured.out)["success"] is True
+    assert "Phase" in captured.err
+    assert "example" in captured.err
 
 
 def test_failed_preparation_retains_resolution_and_is_not_a_completed_platform(
@@ -171,6 +253,99 @@ def test_candidate_identity_and_stage_admission(prepared_run) -> None:
         Preparation(system="x86_64-linux", targets=("other",), previous=candidate)
 
 
+@pytest.mark.parametrize("validate_all_packages", [False, True])
+@pytest.mark.parametrize("no_change", [False, True])
+def test_repair_inventory_blocks_unselected_package_failure(
+    prepared_run, monkeypatch, validate_all_packages, no_change
+) -> None:
+    """Repair admission includes held declarations even without update changes."""
+    _, operations, state = prepared_run
+    registry = pipeline.ensure_updaters_loaded()
+
+    class Held(Updater):
+        name = "held"
+        bulk_update_hold = "Keep the pinned release"
+        derivation_validations = (
+            DerivationValidation(
+                installable=".#pkgs.{system}.held",
+                systems=pipeline.supported_systems(),
+                mode="build",
+            ),
+        )
+
+    registry["held"] = Held
+    candidate = None
+    for system in pipeline.supported_systems():
+        state["system"] = system
+        candidate, status = pipeline.prepare_candidate(
+            ("example",),
+            previous=candidate,
+            validate_all_packages=validate_all_packages if candidate is None else False,
+        )
+        assert status == 0
+        candidate = Candidate.model_validate_json(candidate.model_dump_json())
+        assert candidate.sources == ("example",)
+        assert candidate.targets == ("example",)
+        assert candidate.validate_all_packages == validate_all_packages
+    assert candidate is not None
+    assert operations.count("resolve") == 1
+    if no_change:
+        candidate = candidate.model_copy(
+            update={
+                "tree": candidate.base_tree,
+                "patch": b"",
+                "sources": (),
+            }
+        )
+    checked = []
+
+    def validate_requests(requests, **_kwargs):
+        checked.extend(requests)
+        return tuple(
+            DerivationValidationFailure(
+                request.source, request.installable, "broken repair"
+            )
+            for request in requests
+        )
+
+    monkeypatch.setattr(
+        pipeline.validation, "get_current_nix_platform", lambda: state["system"]
+    )
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivation_requests", validate_requests
+    )
+    monkeypatch.setattr(
+        pipeline.validation, "validate_root_closures", lambda **_kwargs: ()
+    )
+    reports = []
+    for system in pipeline.supported_systems():
+        state["system"] = system
+        report = pipeline.validate_candidate(candidate)
+        reports.append(report)
+        assert report.validate_all_packages == validate_all_packages
+        assert bool(report.failures) == validate_all_packages
+    if validate_all_packages:
+        assert [request.installable for request in checked] == [
+            f".#pkgs.{system}.held" for system in pipeline.supported_systems()
+        ]
+        with pytest.raises(ValueError, match="Validation reports"):
+            pipeline.certified_patch(candidate, reports)
+        targeted_reports = [
+            report.model_copy(
+                update={
+                    "failures": (),
+                    "validate_all_packages": False,
+                }
+            )
+            for report in reports
+        ]
+        with pytest.raises(ValueError, match="Validation reports"):
+            pipeline.certified_patch(candidate, targeted_reports)
+    else:
+        assert checked == []
+        assert pipeline.certified_patch(candidate, reports) == candidate.patch
+
+
 def test_dependent_resolution_is_recomputed() -> None:
     """A companion consumes current prerequisite outputs instead of old metadata."""
     preparation = Preparation(system="aarch64-darwin", targets=())
@@ -204,7 +379,8 @@ def test_native_validation_and_certification(
         )
         return ()
 
-    def validate_roots(*, systems, **_kwargs):
+    def validate_roots(*, systems, include_dependencies, **_kwargs):
+        assert include_dependencies
         roots.append(systems)
         return ()
 
@@ -260,7 +436,9 @@ def test_prepare_command_exports_failure_evidence_outside_checkout(
     assert not (root / "candidate.json").exists()
 
 
+@pytest.mark.parametrize("validate_all_packages", [False, True])
 def test_candidate_commands_transfer_the_pinned_selection_and_native_reports(
+    validate_all_packages,
     prepared_run,
     tmp_path: Path,
     monkeypatch,
@@ -275,6 +453,8 @@ def test_candidate_commands_transfer_the_pinned_selection_and_native_reports(
         output = tmp_path / f"candidate-{index}.json"
         args = ["prepare", "--output", str(output)]
         if previous is None:
+            if validate_all_packages:
+                args.append("--validate-all-packages")
             args.append("example")
         else:
             args += ["--previous", str(previous)]
@@ -284,6 +464,10 @@ def test_candidate_commands_transfer_the_pinned_selection_and_native_reports(
             "example",
         )
         previous = output
+        assert (
+            Candidate.model_validate_json(output.read_bytes()).validate_all_packages
+            == validate_all_packages
+        )
     assert previous is not None
     monkeypatch.setattr(
         pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
@@ -390,3 +574,64 @@ def test_unsupported_builder_and_early_preparation_failure_are_explicit(
     monkeypatch.setattr(pipeline.update_cli, "collect_run_outcome", fail)
     with pytest.raises(RuntimeError, match="before a candidate could be captured"):
         pipeline.prepare_candidate(())
+
+
+@pytest.mark.parametrize("phase", ["packages", "roots"])
+def test_incomplete_native_validation_cannot_issue_report(
+    prepared_run, monkeypatch, tmp_path, phase
+) -> None:
+    """The CI command fails before writing certification evidence on incompleteness."""
+    root, _, _state = prepared_run
+    tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
+    candidate = Candidate(
+        base_tree=tree,
+        tree=tree,
+        targets=(),
+        sources=(),
+        systems=pipeline.supported_systems(),
+        resolutions={},
+        prepared=True,
+        patch=b"",
+    )
+
+    def incomplete(*_args, **_kwargs):
+        def run(args, **_kwargs):
+            raise subprocess.TimeoutExpired(
+                args, 1, stderr="https://example.test/?token=synthetic-ci-secret"
+            )
+
+        return pipeline.validation._run_validation_command(
+            ["nix", "build", ".#demo"],
+            cwd=root,
+            timeout=1,
+            run=run,
+            sleep=lambda _: pytest.fail("incomplete execution must not retry"),
+        )
+
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        incomplete if phase == "packages" else lambda *_args, **_kwargs: (),
+    )
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", incomplete)
+    source = tmp_path / "candidate.json"
+    source.write_text(candidate.model_dump_json())
+    report = tmp_path / "report.json"
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "validate",
+            "--candidate",
+            str(source),
+            "--output",
+            str(report),
+        ],
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, pipeline.validation.ValidationIncompleteError)
+    assert "synthetic-ci-secret" not in "".join(
+        traceback.format_exception(result.exception)
+    )
+    assert not report.exists()
+    with pytest.raises(ValueError, match="Validation reports"):
+        pipeline.certified_patch(candidate, [])

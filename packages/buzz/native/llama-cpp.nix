@@ -7,6 +7,7 @@
   meshSrcHash,
   nativeLock ? builtins.fromJSON (builtins.readFile ../native-lock.json),
   ninja,
+  python3,
   srcHash,
   stdenv,
 }:
@@ -46,59 +47,7 @@ stdenv.mkDerivation {
   patchPhase = ''
     runHook prePatch
 
-    meshPatchSource=${lib.escapeShellArg "${meshSource}"}
-    upstreamPin="$meshPatchSource/third_party/llama.cpp/upstream.txt"
-    patchDirectory="$meshPatchSource/third_party/llama.cpp/patches"
-    if [ ! -f "$upstreamPin" ]; then
-      echo "missing Mesh llama.cpp upstream pin: $upstreamPin" >&2
-      exit 1
-    fi
-    upstreamLineCount="$(LC_ALL=C awk 'END { print NR }' "$upstreamPin")"
-    upstreamCommit="$(LC_ALL=C sed -n '1p' "$upstreamPin")"
-    if [ "$upstreamLineCount" -ne 1 ] || [ "$upstreamCommit" != ${lib.escapeShellArg commit} ]; then
-      echo "Mesh llama.cpp upstream pin does not match ${commit}" >&2
-      exit 1
-    fi
-    if [ ! -d "$patchDirectory" ]; then
-      echo "missing Mesh llama.cpp patch directory: $patchDirectory" >&2
-      exit 1
-    fi
-    if find "$patchDirectory" -mindepth 1 -maxdepth 1 ! -type f -print -quit | grep -q .; then
-      echo "Mesh llama.cpp patch queue contains a non-regular entry" >&2
-      exit 1
-    fi
-    if find "$patchDirectory" -mindepth 1 -maxdepth 1 -type f ! -name '*.patch' -print -quit | grep -q .; then
-      echo "Mesh llama.cpp patch queue contains a non-patch file" >&2
-      exit 1
-    fi
-
-    patchQueue="$TMPDIR/buzz-llama-cpp-patches"
-    find "$patchDirectory" -mindepth 1 -maxdepth 1 -type f -name '*.patch' -print0 |
-      LC_ALL=C sort -z > "$patchQueue"
-    if [ ! -s "$patchQueue" ]; then
-      echo "Mesh source contains no llama.cpp patches" >&2
-      exit 1
-    fi
-    while IFS= read -r -d "" meshPatch; do
-      if [ ! -s "$meshPatch" ]; then
-        echo "Mesh llama.cpp patch is empty: $meshPatch" >&2
-        exit 1
-      fi
-      if [ -z "''${buzzLlamaCppBaseReady:-}" ]; then
-        # Mirror Mesh's prepare-llama.sh: the queue is a format-patch series
-        # whose later hunks rely on three-way merges against blobs recorded by
-        # earlier entries, so it must be applied with `git am --3way` on a
-        # committed base instead of strict `git apply` on a bare tarball.
-        export HOME="$TMPDIR"
-        git init --quiet .
-        git config user.name "Buzz Nix Build"
-        git config user.email "buzz-llama-cpp@nix-managed.invalid"
-        git add --all --force
-        git commit --quiet -m "buzz-llama-cpp upstream base"
-        buzzLlamaCppBaseReady=1
-      fi
-      git -c core.hooksPath=/dev/null am --3way --committer-date-is-author-date --no-gpg-sign "$meshPatch"
-    done < "$patchQueue"
+    ${lib.getExe python3} ${./llama_patches.py} ${lib.escapeShellArg "${meshSource}"} ${lib.escapeShellArg commit} .
 
     runHook postPatch
   '';

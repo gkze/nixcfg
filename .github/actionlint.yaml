@@ -1,0 +1,9 @@
+---
+# GitHub documents this scope, but actionlint 1.7.12 and upstream main omit it.
+# Remove this narrow exception when actionlint supports copilot-requests.
+# https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli-in-actions
+# test_update_ci.py checks the permitted value and the jobs that receive it.
+paths:
+  .github/workflows/{update,update-agent-check}.yml:
+    ignore:
+      - '^unknown permission scope "copilot-requests"\.'

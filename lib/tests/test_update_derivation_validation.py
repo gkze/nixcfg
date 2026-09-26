@@ -1,5 +1,6 @@
 """Behavioral tests for target-aware update derivation validation."""
 
+import json
 import subprocess
 import threading
 import time
@@ -466,6 +467,160 @@ def test_validate_root_closures_builds_flake_owned_aggregate(
     )
 
 
+@pytest.fixture
+def native_root_graph(tmp_path) -> tuple:
+    """Model the actual Darwin -> Linux VM boundary at the Nix process seam."""
+
+    def node(system, *dependencies):
+        return {
+            "version": 4,
+            "system": system,
+            "inputs": {
+                "drvs": {
+                    path: {"outputs": ["out"], "dynamicOutputs": {}}
+                    for path in dependencies
+                }
+            },
+        }
+
+    graph = {
+        "version": 4,
+        "derivations": {
+            "root.drv": node("aarch64-darwin", "middle.drv", "vm.drv"),
+            "middle.drv": node("aarch64-darwin", "vm.drv"),
+            "vm.drv": node("aarch64-linux", "linux-leaf.drv", "fetch.drv"),
+            "linux-leaf.drv": node("aarch64-linux"),
+            "fetch.drv": node("builtin"),
+        },
+    }
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        assert kwargs["cwd"] == tmp_path
+        assert kwargs["timeout"] == 42
+        stdout = ""
+        if args[1] == "eval":
+            stdout = json.dumps({
+                "schemaVersion": 2,
+                "requiredKinds": ["darwin", "home"],
+                "requiredRoots": [],
+                "roots": [
+                    {"kind": "darwin", "name": "argus", "system": "aarch64-darwin"},
+                    {"kind": "home", "name": "george", "system": "aarch64-darwin"},
+                ],
+            })
+        if args[1:3] == ["derivation", "show"]:
+            stdout = json.dumps(graph)
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+
+    return graph, calls, run
+
+
+@pytest.mark.parametrize("system", ["aarch64-linux", "x86_64-linux", "aarch64-darwin"])
+def test_native_validator_builds_the_foreign_root_dependency_boundary(
+    native_root_graph,
+    tmp_path,
+    system,
+) -> None:
+    """An ARM Linux runner must build the VM even though every root is Darwin."""
+    _, calls, run = native_root_graph
+    assert (
+        validation.validate_root_closures(
+            flake_root=tmp_path,
+            systems=(system,),
+            include_dependencies=True,
+            timeout=42,
+            run=run,
+        )
+        == ()
+    )
+    graph_command = next(args for args in calls if args[1] == "derivation")
+    assert graph_command == [
+        "nix",
+        "derivation",
+        "show",
+        "--recursive",
+        "--no-update-lock-file",
+        f"path:{tmp_path}#checks.aarch64-darwin.root-closures",
+    ]
+    builds = [args[-1] for args in calls if args[1] == "build"]
+    assert (
+        builds
+        == {
+            "aarch64-linux": ["/nix/store/vm.drv^*"],
+            "aarch64-darwin": [f"path:{tmp_path}#checks.aarch64-darwin.root-closures"],
+            "x86_64-linux": [],
+        }[system]
+    )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ["missing", "version", "json", "command", "empty", "os", "timeout", "build"],
+)
+def test_native_dependency_failure_never_issues_success(
+    native_root_graph,
+    tmp_path,
+    failure,
+) -> None:
+    graph, calls, run = native_root_graph
+    if failure == "missing":
+        del graph["derivations"]["vm.drv"]
+    elif failure == "version":
+        graph["version"] = 5
+
+    def fail(args, **kwargs):
+        result = run(args, **kwargs)
+        if args[1] == "build" and failure == "build":
+            return subprocess.CompletedProcess(
+                args, 1, stdout="", stderr="VM build failed"
+            )
+        if args[1] == "derivation":
+            if failure == "os":
+                raise OSError("Nix unavailable")
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(args, 42)
+            if failure == "json":
+                return subprocess.CompletedProcess(args, 0, stdout="invalid", stderr="")
+            if failure in {"command", "empty"}:
+                return subprocess.CompletedProcess(
+                    args,
+                    1,
+                    stdout="",
+                    stderr="graph unavailable" if failure == "command" else "",
+                )
+        return result
+
+    if failure in {"os", "timeout"}:
+        with pytest.raises(validation.ValidationIncompleteError):
+            validation.validate_root_closures(
+                flake_root=tmp_path,
+                systems=("aarch64-linux",),
+                include_dependencies=True,
+                timeout=42,
+                run=fail,
+            )
+        assert not any(args[1] == "build" for args in calls)
+        return
+
+    failures = validation.validate_root_closures(
+        flake_root=tmp_path,
+        systems=("aarch64-linux",),
+        include_dependencies=True,
+        timeout=42,
+        run=fail,
+    )
+    assert len(failures) == 1
+    assert failures[0].source == "root-closures"
+    assert failures[0].message
+    if failure == "build":
+        assert failures[0].installable == "/nix/store/vm.drv^*"
+        assert failures[0].message == "VM build failed"
+    else:
+        assert not any(args[1] == "build" for args in calls)
+
+
 def test_validate_root_closures_rejects_an_empty_candidate_manifest(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -688,13 +843,8 @@ def test_validate_root_closures_reports_manifest_process_failure(
         lambda _root: nullcontext(tmp_path),
     )
 
-    assert validation.validate_root_closures(run=_run) == (
-        DerivationValidationFailure(
-            source="root-closures",
-            installable="path:.#lib.rootClosureManifest",
-            message="nix unavailable",
-        ),
-    )
+    with pytest.raises(validation.ValidationIncompleteError, match="nix unavailable"):
+        validation.validate_root_closures(run=_run)
 
 
 def test_validate_derivations_applies_timeout_to_each_request() -> None:
@@ -916,20 +1066,19 @@ def test_validate_derivations_reports_process_errors(
     error: OSError | subprocess.TimeoutExpired,
     expected: str,
 ) -> None:
-    """Convert process startup and timeout errors into target failures."""
+    """Incomplete execution cannot attribute a failure to a package."""
 
     def _run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         raise error
 
-    failures = validation.validate_derivations(
-        ["portable"],
-        updaters={"portable": _PortableUpdater},
-        run=_run,
-    )
-
-    assert len(failures) == 1
-    assert failures[0].source == "portable"
-    assert expected in failures[0].message
+    with pytest.raises(validation.ValidationIncompleteError, match=expected) as raised:
+        validation.validate_derivations(
+            ["portable"],
+            updaters={"portable": _PortableUpdater},
+            run=_run,
+        )
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
 
 
 def test_snapshot_evaluations_share_one_flake_output(tmp_path: Path) -> None:
@@ -984,10 +1133,8 @@ def test_snapshot_evaluations_share_one_flake_output(tmp_path: Path) -> None:
     }
 
 
-@pytest.mark.parametrize("batch_failure", ["evaluation", "timeout", "os_error"])
 def test_failed_batch_rechecks_each_target_with_original_retry_policy(
     tmp_path: Path,
-    batch_failure: str,
 ) -> None:
     """A batch failure neither blames healthy peers nor loses per-target retries."""
     requests = [
@@ -1004,10 +1151,6 @@ def test_failed_batch_rechecks_each_target_with_original_retry_policy(
         attempts.append(args)
         assert kwargs["timeout"] == 7
         if "--apply" in args:
-            if batch_failure == "timeout":
-                raise subprocess.TimeoutExpired(args, 7)
-            if batch_failure == "os_error":
-                raise OSError("batch could not start")
             return subprocess.CompletedProcess(
                 args, 1, stdout="", stderr="batch failed"
             )
@@ -1073,26 +1216,47 @@ def test_snapshot_validation_preserves_mixed_modes_and_failure_order(
     assert [args[1] for args in calls].count("build") == 1
 
 
-def test_failed_build_batch_attributes_individual_timeouts(tmp_path: Path) -> None:
-    """A slow aggregate does not make a healthy build inherit another timeout."""
+@pytest.mark.parametrize("mode", ["eval", "build"])
+@pytest.mark.parametrize("size", [1, 3, 24])
+@pytest.mark.parametrize("failure", ["timeout", "launch", "signal"])
+def test_incomplete_validation_never_subdivides_or_blames_targets(
+    tmp_path, mode, size, failure
+) -> None:
+    """A large timeout and a singleton launch error both abort without retry."""
     requests = [
-        DerivationValidationRequest("a", ".#checks.system.a", mode="build"),
-        DerivationValidationRequest("b", ".#checks.system.b", mode="build"),
+        DerivationValidationRequest(
+            str(i),
+            f".#pkgs.system.target{i}" + (".drvPath" if mode == "eval" else ""),
+            mode=mode,
+        )
+        for i in range(size)
     ]
-    calls: list[list[str]] = []
+    calls = []
 
-    def _run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def run(args, **_kwargs):
         calls.append(args)
-        if len(calls) != 2:
-            raise subprocess.TimeoutExpired(args, 3)
-        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(
+                args, 3, output=b"build output", stderr="diagnostic"
+            )
+        if failure == "signal":
+            return subprocess.CompletedProcess(
+                args, -9, stdout="", stderr="error: unable to download: HTTP error 503"
+            )
+        raise OSError("Nix unavailable")
 
-    failures = validation.validate_derivation_requests(
-        requests, flake_root=tmp_path, timeout=3, run=_run
-    )
-    assert len(calls) == 3
-    assert [failure.source for failure in failures] == ["b"]
-    assert "timed out after 3 seconds" in failures[0].message
+    with pytest.raises(validation.ValidationIncompleteError) as raised:
+        validation.validate_derivation_requests(
+            requests,
+            flake_root=tmp_path,
+            timeout=3,
+            run=run,
+            sleep=lambda _: pytest.fail("incomplete validation must not retry"),
+        )
+    assert len(calls) == 1
+    if failure == "timeout":
+        assert "build output" in str(raised.value)
+        assert "diagnostic" in str(raised.value)
 
 
 @pytest.mark.parametrize("failed_index", [0, 25, None])
@@ -1247,3 +1411,31 @@ def test_native_builder_still_evaluates_every_declared_platform(monkeypatch) -> 
         ("eval", ".#pkgs.x86_64-darwin.example.drvPath"),
         ("eval", ".#pkgs.x86_64-linux.example.drvPath"),
     ]
+
+
+@pytest.mark.parametrize("mode", ["eval", "build"])
+def test_parallel_groups_continue_after_completed_target_failures(
+    tmp_path, mode
+) -> None:
+    """Completion-order scheduling replenishes work and preserves request ordering."""
+    requests = [
+        DerivationValidationRequest(str(i), f"github:owner/repo#target{i}", mode=mode)
+        for i in range(5)
+    ]
+    calls = []
+    lock = threading.Lock()
+
+    def run(args, **_kwargs):
+        with lock:
+            calls.append(args[-1])
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="invalid target")
+
+    failures = validation.validate_derivation_requests(
+        requests,
+        flake_root=tmp_path,
+        run=run,
+        max_eval_workers=2,
+        max_build_workers=2,
+    )
+    assert [failure.source for failure in failures] == [str(i) for i in range(5)]
+    assert sorted(calls) == [request.installable for request in requests]

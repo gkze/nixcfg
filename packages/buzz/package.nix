@@ -433,6 +433,7 @@ let
           fetchFromGitHub
           lib
           nativeLock
+          python3
           stdenv
           ;
         inherit (pkgs) cmake gitMinimal ninja;

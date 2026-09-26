@@ -90,6 +90,7 @@ class ExecutorUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         DerivationValidation(
             installable="path:.#pkgs.{system}.{name}",
             mode="build",
+            systems=("aarch64-darwin",),
         ),
     )
 

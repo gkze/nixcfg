@@ -31,6 +31,8 @@ class BasetenSwitchUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
         DerivationValidation(
             installable=".#pkgs.{system}.{name}",
             mode="build",
+            # Validate the exported Darwin target, independently of update hosts.
+            systems=("aarch64-darwin",),
         ),
     )
 

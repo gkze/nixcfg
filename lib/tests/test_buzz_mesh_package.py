@@ -163,7 +163,7 @@ def test_mesh_and_llama_native_builders_are_hash_gated_and_repo_owned() -> None:
           null
         else
           import ./native/llama-cpp.nix {
-            inherit cctools fetchFromGitHub lib nativeLock stdenv;
+            inherit cctools fetchFromGitHub lib nativeLock python3 stdenv;
             inherit (pkgs) cmake gitMinimal ninja;
             meshSrcHash = meshLlmSrcHashEntry.hash;
             srcHash = llamaCppSrcHashEntry.hash;

@@ -1,14 +1,34 @@
 """Python entrypoint for disposable Actions jobs.
 
-This file also bootstraps Nix before the packaged CLI exists, so its imports are
-standard-library only. Invoke the file directly; Actions owns the job graph.
+This file also bootstraps Nix before the packaged CLI exists, so it supports the
+hosted runners' Python 3.12 with standard-library imports only. Invoke the file
+directly; Actions owns the job graph.
 """
 
 import json
 import os
+import queue
+import shutil
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
+from typing import TextIO
+
+_BINARY_CACHE = "gkze"
+_HEARTBEAT_INTERVAL_SECONDS = 60
+_APPLICATIONS = Path("/Applications")
+_STORE_PATH_PREFIX = Path("/nix/store")
+_UNUSED_IMAGE_PATHS = {
+    "darwin": (Path("/usr/local/share/dotnet"),),
+    "linux": (
+        Path("/usr/share/dotnet"),
+        Path("/usr/local/lib/android"),
+        Path("/opt/ghc"),
+        Path("/usr/local/share/boost"),
+    ),
+}
 
 
 def _run(
@@ -53,10 +73,48 @@ def bootstrap() -> None:
     _outputs(runtime=str(runtime), devshell=str(devshell))
 
 
-def matrix() -> None:
-    """Project canonical policy through the checked updater runtime."""
-    result = _run(_runtime(), "ci", "update", "matrix", capture=True)
-    _outputs(matrix=json.dumps(json.loads(result.stdout)))
+def clean_runner_image() -> None:
+    """Reclaim unused image tools, exclusively on disposable hosted runners."""
+    if (
+        os.environ.get("GITHUB_ACTIONS") != "true"
+        or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
+    ):
+        msg = "Image cleanup requires a disposable GitHub-hosted runner"
+        raise RuntimeError(msg)
+    paths = list(_UNUSED_IMAGE_PATHS[sys.platform])
+    sys.stdout.write(
+        f"Available before image cleanup: {shutil.disk_usage('/').free} bytes\n"
+    )
+    if sys.platform == "darwin":
+        selected = Path(
+            _run("xcode-select", "--print-path", capture=True).stdout.strip()
+        )
+        if not selected.is_absolute() or not selected.is_dir():
+            msg = "Cannot identify the active Xcode; refusing image cleanup"
+            raise ValueError(msg)
+        selected = selected.resolve()
+        # Keep the active developer tools and their aliases. Nix supplies its
+        # language toolchains; the updater does not need mobile SDKs.
+        paths.extend(
+            path
+            for path in _APPLICATIONS.glob("Xcode*.app")
+            if not path.is_symlink() and not selected.is_relative_to(path.resolve())
+        )
+        paths.append(Path.home() / "Library/Android/sdk")
+    for path in paths:
+        if path.is_dir() and not path.is_symlink():
+            sys.stdout.write(f"Removing unused runner image tool: {path}\n")
+            sys.stdout.flush()
+            _run(
+                "sudo",
+                sys.executable,
+                "-c",
+                "import shutil, sys; shutil.rmtree(sys.argv[1])",
+                str(path),
+            )
+    sys.stdout.write(
+        f"Available after image cleanup: {shutil.disk_usage('/').free} bytes\n"
+    )
 
 
 def _develop(*args: str) -> tuple[str, ...]:
@@ -70,12 +128,147 @@ def _quality_command() -> tuple[str, ...]:
 def quality() -> None:
     """Apply existing gates and reject any generated or formatter drift."""
     _run("prek", "run", "-a")
-    _run("coverage", "run", "-m", "pytest")
-    _run("coverage", "report")
+    # Module invocation keeps this checkout ahead of the packaged runtime's lib.
+    _run(sys.executable, "-m", "coverage", "run", "-m", "pytest")
+    _run(sys.executable, "-m", "coverage", "report")
     _run("git", "diff", "--exit-code")
     if _run("git", "ls-files", "--others", "--exclude-standard", capture=True).stdout:
         msg = "Quality checks introduced untracked source files"
         raise RuntimeError(msg)
+
+
+def _prefetched_paths_from_receipts(receipts: Path) -> list[str]:
+    """Read exact direct-prefetch imports, rejecting malformed cache handoffs."""
+    if not receipts.exists():
+        return []
+    paths: set[str] = set()
+    for line in receipts.read_text().splitlines():
+        try:
+            receipt = json.loads(line)
+            store_path = receipt["storePath"]
+        except (TypeError, KeyError, json.JSONDecodeError) as error:
+            msg = "Invalid prefetch receipt"
+            raise ValueError(msg) from error
+        path = Path(store_path) if isinstance(store_path, str) else None
+        if (
+            path is None
+            or not path.is_absolute()
+            or path.parent != _STORE_PATH_PREFIX
+            or path.name in {"", ".", ".."}
+        ):
+            msg = "Prefetch receipt contains an unsafe store path"
+            raise ValueError(msg)
+        paths.add(str(path))
+    return sorted(paths)
+
+
+def _failure_summary(result_path: Path) -> str | None:
+    """Return the concise source failure identity for a hosted job log."""
+    try:
+        result = json.loads(result_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(result, dict) or result.get("success") is not False:
+        return None
+    errors = result.get("errors")
+    if not isinstance(errors, list) or not all(
+        isinstance(error, str) for error in errors
+    ):
+        return "Updater failed; inspect the retained result and run-log artifacts."
+    sources = ", ".join(errors)
+    return f"Updater failed for: {sources}. Inspect the retained result and run-log artifacts."
+
+
+def _write_diagnostic(log: TextIO, message: str) -> None:
+    """Retain a CI diagnostic and mirror it to the live Actions log."""
+    line = message + "\n"
+    log.write(line)
+    log.flush()
+    sys.stderr.write(line)
+    sys.stderr.flush()
+
+
+def _drain_stderr(stderr: TextIO, diagnostics: queue.SimpleQueue[str | None]) -> None:
+    """Transfer child diagnostics without making liveness depend on its output."""
+    try:
+        for diagnostic in stderr:
+            diagnostics.put(diagnostic)
+    finally:
+        diagnostics.put(None)
+
+
+def _wait_for_diagnostics(
+    process: subprocess.Popen[str],
+    log: TextIO,
+    stage: str,
+    artifacts: Path,
+    command: list[str],
+) -> int:
+    """Forward output promptly and prove liveness when the child is quiet."""
+    if process.stderr is None:  # pragma: no cover -- PIPE above guarantees stderr.
+        msg = "Cannot collect updater diagnostics"
+        raise RuntimeError(msg)
+    diagnostics: queue.SimpleQueue[str | None] = queue.SimpleQueue()
+    started = time.monotonic()
+    _write_diagnostic(
+        log,
+        "Starting updater "
+        f"stage={stage} pid={process.pid} command={command!r} "
+        f"artifacts={artifacts} run_logs={artifacts / 'runs'}",
+    )
+    reader = threading.Thread(
+        target=_drain_stderr,
+        args=(process.stderr, diagnostics),
+        name="nixcfg-update-stderr",
+    )
+    reader.start()
+    while True:
+        try:
+            diagnostic = diagnostics.get(timeout=_HEARTBEAT_INTERVAL_SECONDS)
+        except queue.Empty:
+            if process.poll() is None:
+                _write_diagnostic(
+                    log,
+                    f"Updater still running stage={stage} pid={process.pid} "
+                    f"elapsed={time.monotonic() - started:.0f}s artifacts={artifacts} "
+                    f"run_logs={artifacts / 'runs'}",
+                )
+            continue
+        if diagnostic is None:
+            break
+        log.write(diagnostic)
+        log.flush()
+        sys.stderr.write(diagnostic)
+        sys.stderr.flush()
+    returncode = process.wait()
+    reader.join()
+    return returncode
+
+
+def _push_prefetched_paths(paths: list[str], log: TextIO, artifacts: Path) -> None:
+    """Publish raw imports while retaining liveness evidence for quiet Cachix uploads."""
+    args = ["cachix", "push", _BINARY_CACHE, *paths]
+    started = time.monotonic()
+    _write_diagnostic(
+        log,
+        f"Publishing {len(paths)} prefetched paths cache={_BINARY_CACHE} "
+        f"artifacts={artifacts}",
+    )
+    with subprocess.Popen(args) as process:  # noqa: S603 -- fixed Cachix invocation.
+        while True:
+            try:
+                returncode = process.wait(timeout=_HEARTBEAT_INTERVAL_SECONDS)
+            except subprocess.TimeoutExpired:
+                _write_diagnostic(
+                    log,
+                    f"Cachix publication still running pid={process.pid} "
+                    f"elapsed={time.monotonic() - started:.0f}s paths={len(paths)} "
+                    f"artifacts={artifacts}",
+                )
+            else:
+                break
+    if returncode:
+        raise subprocess.CalledProcessError(returncode, args)
 
 
 def native(stage: str) -> int:
@@ -88,6 +281,8 @@ def native(stage: str) -> int:
         args.extend(("--output", str(artifacts / "candidate.json")))
         if previous:
             args.extend(("--previous", previous))
+        if os.environ.get("NIXCFG_VALIDATE_ALL_PACKAGES") == "true":
+            args.append("--validate-all-packages")
         raw_targets = os.environ.get("NIXCFG_UPDATE_TARGETS", "")
         targets = raw_targets.split()
         if (
@@ -109,19 +304,38 @@ def native(stage: str) -> int:
             "--output",
             str(artifacts / "validation.json"),
         ))
+    receipts = artifacts / "prefetch-receipts.jsonl"
     with (
         (artifacts / "result.json").open("w") as output,
         (artifacts / "stderr.log").open("w") as log,
     ):
-        result = subprocess.run(  # noqa: S603 -- fixed executable and separate target arguments
+        _write_diagnostic(log, f"Starting native stage={stage} artifacts={artifacts}")
+        with subprocess.Popen(  # noqa: S603 -- fixed executable and separate target arguments
             args,
             stdout=output,
-            stderr=log,
-            env=os.environ | {"REPO_ROOT": str(Path.cwd()), "UPDATE_RUN_LOG": "0"},
-            check=False,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            env=os.environ
+            | {
+                "REPO_ROOT": str(Path.cwd()),
+                "UPDATE_RUN_LOG": "1",
+                "UPDATE_RUN_LOG_DIR": str(artifacts / "runs"),
+                "UPDATE_PREFETCH_RECEIPTS": str(receipts),
+            },
+        ) as process:
+            returncode = _wait_for_diagnostics(process, log, stage, artifacts, args)
+        _write_diagnostic(
+            log, f"Updater finished stage={stage} returncode={returncode}"
         )
-    sys.stderr.write((artifacts / "stderr.log").read_text())
-    return result.returncode
+        if summary := _failure_summary(artifacts / "result.json"):
+            _write_diagnostic(log, summary)
+        if stage == "prepare" and returncode == 0:
+            paths = _prefetched_paths_from_receipts(receipts)
+            _write_diagnostic(log, f"Collected {len(paths)} prefetched store paths")
+            if paths:
+                _push_prefetched_paths(paths, log, artifacts)
+    return returncode
 
 
 def certify() -> None:
@@ -226,6 +440,7 @@ def collect_evidence() -> None:
             "gh",
             "api",
             f"repos/{repository}/actions/jobs/{identity}/logs",
+            "--allow-escape-sequences",
             capture=True,
         )
         (evidence / f"job-{identity}.log").write_text(log.stdout)
@@ -270,6 +485,8 @@ def start_repair() -> None:
         "-f",
         "repair=false",
         "-f",
+        "validate_all_packages=true",
+        "-f",
         f"targets={os.environ.get('NIXCFG_UPDATE_TARGETS', '')}",
     )
 
@@ -285,8 +502,8 @@ def main(stage: str) -> int:
     if stage in {"native-prepare", "native-validate"}:
         return native(stage.removeprefix("native-"))
     operations = {
+        "clean-image": clean_runner_image,
         "bootstrap": bootstrap,
-        "matrix": matrix,
         "quality": quality,
         "certify": certify,
         "publish": publish,

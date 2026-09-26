@@ -991,13 +991,15 @@ def test_install_check_rejects_a_launcher_that_cannot_start(tmp_path: Path) -> N
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Mach-O dlopen is Darwin-only")
-@pytest.mark.parametrize(("abi_patch", "accepted"), [(44, True), (45, False)])
+@pytest.mark.parametrize("accepted", [True, False])
 def test_runtime_load_validator_dlopens_the_manifest_and_attests_skippy_abi(
     tmp_path: Path,
-    abi_patch: int,
+    *,
     accepted: bool,
 ) -> None:
     """AST checks cannot prove that the signed Mach-O runtime really loads."""
+    major, minor, patch = (int(part) for part in _SKIPPY_ABI.split("."))
+    abi_patch = patch if accepted else patch + 1
     runtime = _runtime_fixture(tmp_path)
     library = runtime / "lib/libmesh.dylib"
     source = tmp_path / "runtime.c"
@@ -1006,7 +1008,7 @@ def test_runtime_load_validator_dlopens_the_manifest_and_attests_skippy_abi(
 struct AbiVersion {{ uint32_t major; uint32_t minor; uint32_t patch; }};
 __attribute__((visibility("default")))
 struct AbiVersion skippy_abi_version(void) {{
-  return (struct AbiVersion){{0, 1, {abi_patch}}};
+  return (struct AbiVersion){{{major}, {minor}, {abi_patch}}};
 }}
 """,
         encoding="utf-8",

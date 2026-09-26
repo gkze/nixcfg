@@ -10,6 +10,7 @@ from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
+from lib.update.candidate import ResolvedVersion
 from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
@@ -76,6 +77,12 @@ def test_github_desktop_fetch_latest_reads_locked_release_ref(
     assert info.version == "3.5.9-beta2"
     assert info.commit == "a" * 40
     assert info.metadata["electronVersion"] == ELECTRON_VERSION
+    restored = ResolvedVersion.model_validate_json(
+        ResolvedVersion.capture(info).model_dump_json()
+    ).restore()
+    assert restored == info
+    assert updater._resolve_flake_node(restored) == _locked_node()
+    assert updater.build_result(restored, []).electron_version == ELECTRON_VERSION
     assert fetch_calls == [
         (
             session,

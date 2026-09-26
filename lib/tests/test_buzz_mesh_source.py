@@ -1,5 +1,6 @@
 """Semantic contracts for Buzz's pristine Mesh source derivation."""
 
+import hashlib
 import json
 import runpy
 import sys
@@ -84,6 +85,8 @@ def _run_inventory(
     source: Path,
     output: Path,
 ) -> None:
+    # Match the derivation's PYTHONPATH for its shared packaging helpers.
+    monkeypatch.syspath_prepend(str(REPO_ROOT))
     monkeypatch.setattr(
         sys,
         "argv",
@@ -223,9 +226,7 @@ def test_inventory_is_sorted_complete_and_deterministic(
             },
             {
                 "path": "third_party/llama.cpp/upstream.txt",
-                "sha256": (
-                    "e8dd7a7216c315fe252fcda95842648ac90a64d357e6367bf1b9ec4423acb0ac"
-                ),
+                "sha256": hashlib.sha256(f"{_LLAMA_COMMIT}\n".encode()).hexdigest(),
             },
         ],
         "schemaVersion": 1,
@@ -252,7 +253,9 @@ def test_inventory_fails_closed_when_mesh_has_no_llama_patches(
     ):
         _write_fixture(source, relative_path, f"fixture for {relative_path}\n")
 
-    with pytest.raises(SystemExit, match="Mesh source contains no llama.cpp patches"):
+    with pytest.raises(
+        SystemExit, match="Mesh source has no regular llama.cpp patch directory"
+    ):
         _run_inventory(monkeypatch, inventory_program, source, output)
 
     assert not output.exists()
@@ -290,7 +293,7 @@ def test_install_phase_only_copies_pristine_source_and_writes_provenance() -> No
     assert command_texts(shell, "cp") == ['cp -R "$src"/. "$sourceOutput"']
     assert command_texts(shell, "mkdir") == ['mkdir -p "$sourceOutput"']
     assert command_texts(shell, "__NIX_INTERP__") == [
-        '__NIX_INTERP__ -c __NIX_INTERP__ "$sourceOutput" '
+        'PYTHONPATH=__NIX_INTERP__ __NIX_INTERP__ -c __NIX_INTERP__ "$sourceOutput" '
         '"$provenanceOutput" __NIX_INTERP__ __NIX_INTERP__'
     ]
     for prohibited_command in ("curl", "git", "make", "cmake", "patch"):

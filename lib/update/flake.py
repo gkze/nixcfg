@@ -237,7 +237,7 @@ async def update_flake_inputs(
     if not input_names:
         return
     result = await run_command(
-        ["nix", "flake", "update", *input_names],
+        ["nix", "--no-use-registries", "flake", "update", *input_names],
         options=RunCommandOptions(source=source, config=config),
         emit=emit,
     )

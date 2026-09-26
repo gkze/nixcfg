@@ -107,7 +107,7 @@ class GitHubDesktopUpdater(FlakeInputUpdater):
         return VersionInfo(
             version=version,
             metadata={
-                "node": node,
+                "node": node.model_dump(mode="json"),
                 "commit": commit,
                 "electronVersion": self._electron_version(manifest),
             },

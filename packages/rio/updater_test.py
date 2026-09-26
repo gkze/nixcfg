@@ -32,6 +32,7 @@ def test_rio_update_uses_latest_source_when_release_has_no_rio_dmg(
         DerivationValidation(
             installable=".#pkgs.{system}.{name}",
             mode="build",
+            systems=("aarch64-darwin",),
         ),
     )
     current = SourceEntry(

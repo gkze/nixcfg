@@ -392,7 +392,7 @@ def test_bundle_constructs_exact_sources_from_url_qualified_hashes() -> None:
     assert_nix_ast_equal(
         expect_binding(scope, "llamaCpp").value,
         """import ./llama-cpp.nix {
-          inherit cctools cmake fetchFromGitHub gitMinimal lib nativeLock ninja stdenv;
+          inherit cctools cmake fetchFromGitHub gitMinimal lib nativeLock ninja python3 stdenv;
           meshSrcHash = meshLlmSrcHash;
           srcHash = llamaCppSrcHash;
         }""",

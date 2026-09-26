@@ -47,6 +47,7 @@ class _UpdateOptionsInitKwargs(TypedDict, total=False):
     patch: str | None
     repair: RepairAgent | None
     validate: bool
+    validate_all_packages: bool
     schema: bool
     sort_by: UpdateSortBy
     json: bool
@@ -92,6 +93,7 @@ class UpdateOptions:
     patch: str | None = None
     repair: RepairAgent | None = None
     validate: bool = False
+    validate_all_packages: bool = False
     schema: bool = False
     sort_by: UpdateSortBy = "name"
     json: bool = False
@@ -114,6 +116,9 @@ class UpdateOptions:
 
     def __post_init__(self) -> None:
         """Normalize target aliases while preserving the legacy ``source`` field."""
+        if self.validate and (self.repair is not None or self.validate_all_packages):
+            msg = "Metadata-only --validate cannot be combined with repair validation"
+            raise ValueError(msg)
         raw_targets = self.targets
         if raw_targets is None:
             normalized_targets: tuple[str, ...] = ()

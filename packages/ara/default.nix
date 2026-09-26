@@ -1,15 +1,19 @@
 {
-  mkSimpleDarwinApp,
-  mkZipApp,
+  mkDmgApp7zz,
+  python3,
   selfSource,
   ...
 }:
-mkSimpleDarwinApp {
-  builder = mkZipApp;
+mkDmgApp7zz {
   pname = "ara";
-  appName = "Ara";
+  bundleName = "Reason.app";
+  sourceName = "Reason_${selfSource.version}_aarch64.dmg";
+  executableName = "Ara";
   info = selfSource;
   description = "AI-native desktop workspace";
-  homepage = "https://ara.so/";
+  homepage = "https://reasonmachines.com/";
+  postInstallApp = ''
+    ${python3}/bin/python ${./validate_artifact.py} "$out/Applications/Reason.app/Contents/Info.plist" "${selfSource.version}"
+  '';
   platforms = [ "aarch64-darwin" ];
 }

@@ -86,6 +86,7 @@ class Candidate(BaseModel):
     tree: GitTree
     targets: tuple[str, ...]
     sources: tuple[str, ...]
+    validate_all_packages: bool = False
     systems: tuple[str, ...]
     resolutions: dict[str, ResolvedVersion]
     prepared: bool
@@ -110,6 +111,7 @@ class Preparation:
     system: str
     targets: tuple[str, ...]
     previous: Candidate | None = None
+    validate_all_packages: bool = False
     resolutions: dict[str, ResolvedVersion] = field(default_factory=dict)
     dependent_sources: set[str] = field(default_factory=set)
     candidate: Candidate | None = None
@@ -117,6 +119,7 @@ class Preparation:
     def __post_init__(self) -> None:
         """Require each native stage to extend the same successful request."""
         if self.previous is not None:
+            self.validate_all_packages |= self.previous.validate_all_packages
             if not self.previous.prepared:
                 msg = "A failed preparation requires repair before another platform"
                 raise ValueError(msg)
@@ -155,6 +158,7 @@ class Preparation:
             tree=git(workspace.root, "write-tree").decode().strip(),
             targets=self.targets,
             sources=sources,
+            validate_all_packages=self.validate_all_packages,
             systems=(
                 *(() if self.previous is None else self.previous.systems),
                 *((self.system,) if succeeded else ()),

@@ -296,7 +296,10 @@ def test_hash_and_path_info_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
         if args[:3] == ["nix", "store", "prefetch-file"]:
             prefetch_args.append(args)
             return CommandResult(
-                args=args, returncode=0, stdout='{"hash":"sha256-AAA="}', stderr=""
+                args=args,
+                returncode=0,
+                stdout='{"hash":"sha256-AAA=","storePath":"/nix/store/example"}',
+                stderr="",
             )
         return CommandResult(args=args, returncode=0, stdout="", stderr="")
 
@@ -455,7 +458,14 @@ def test_store_deriver_wrapper_handles_unknown_and_failure(
 
 
 @pytest.mark.parametrize(
-    "payload", ["not-json", "{}", '{"hash":"bad"}', '{"hash":123}']
+    "payload",
+    [
+        "not-json",
+        "{}",
+        '{"hash":"bad"}',
+        '{"hash":123,"storePath":"/nix/store/example"}',
+        '{"hash":"sha256-AAA="}',
+    ],
 )
 def test_prefetch_rejects_malformed_hash_result(
     monkeypatch: pytest.MonkeyPatch, payload: str

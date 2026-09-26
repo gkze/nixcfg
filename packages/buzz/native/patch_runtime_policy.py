@@ -16,7 +16,7 @@ _BUZZ_KEYRING_LOCKED_SCREEN = Path(
 )
 _BUZZ_E2E_BRIDGE = Path("desktop/src/testing/e2eBridge.ts")
 _BUZZ_IDENTITY_E2E = Path("desktop/tests/e2e/identity-lost.spec.ts")
-_MESH_RUNTIME_INSTALL_VERSION = "0.76.0-rc9"
+_MESH_RUNTIME_INSTALL_VERSION = "0.76.2"
 _MESH_RUNTIME_INSTALL_GLOB = (
     f"**/mesh-llm-runtime-install-{_MESH_RUNTIME_INSTALL_VERSION}"
 )
@@ -999,42 +999,6 @@ _INSTALL_DEFAULT_PATCHED = _INSTALL_DEFAULT_UPSTREAM.replace(
     "allow_download: false,",
 )
 
-_INSTALL_NATIVE_RUNTIME_UPSTREAM = """pub async fn install_native_runtime(
-    options: NativeRuntimeInstallOptions,
-) -> Result<NativeRuntimeInstallOutcome> {
-    let (manifest, bundle_dirs) =
-        load_release_manifest_with_bundle_dirs(NativeRuntimeManifestOptions {
-            mesh_version: options.mesh_version.clone(),
-            manifest_path: options.manifest_path.clone(),
-            manifest_url: options.manifest_url.clone(),
-            bundle_dirs: options.bundle_dirs.clone(),
-            allow_default_manifest_url: true,
-        })
-        .await?;
-    if manifest.artifacts.is_empty() {
-        bail!("no native runtime manifest entries found");
-    }
-    let skippy_abi_version = options
-        .skippy_abi_version
-        .clone()
-        .unwrap_or_else(|| manifest.skippy_abi.clone());
-    let cache = native_runtime_cache(options.cache_dir.as_deref())?;
-    let resolution = NativeRuntimeResolver::new(
-        &options.mesh_version,
-        host_runtime_profile(),
-        manifest,
-        cache.clone(),
-    )
-    .with_skippy_abi_version(skippy_abi_version)
-    .with_bundle_dirs(bundle_dirs)
-    .resolve(&options.selection)?;
-    install_resolved_runtime(&cache, resolution, &options).await
-}"""
-_INSTALL_NATIVE_RUNTIME_PATCHED = _INSTALL_NATIVE_RUNTIME_UPSTREAM.replace(
-    "allow_default_manifest_url: true,",
-    "allow_default_manifest_url: false,",
-)
-
 _SHERPA_STATIC_LIBS_UPSTREAM = """const SHERPA_ONNX_STATIC_LIBS: &[&str] = &[
     "sherpa-onnx-c-api",
     "sherpa-onnx-core",
@@ -1493,19 +1457,15 @@ def patch_desktop_cargo_deps(root: Path) -> None:
         )
         raise RuntimePolicyPatchError(message)
 
-    # Mesh 0.76.0-rc9 splits the reviewed policy items across the crate's
-    # generated sources: both Default impls live in types.rs and the
-    # install_native_runtime entrypoint lives in install.rs.
-    mesh_crate = mesh_matches[0]
-    mesh_types_path = mesh_crate / "src" / "types.rs"
-    mesh_install_path = mesh_crate / "src" / "install.rs"
-    for required in (mesh_types_path, mesh_install_path):
-        if not required.is_file():
-            message = (
-                "desktop Cargo vendor is missing the reviewed Mesh source file: "
-                f"{required}"
-            )
-            raise RuntimePolicyPatchError(message)
+    # Mesh now derives catalog access from allow_download. Change the defaults
+    # only; the updater pins and verifies that upstream installer behavior.
+    mesh_types_path = mesh_matches[0] / "src" / "types.rs"
+    if not mesh_types_path.is_file():
+        message = (
+            "desktop Cargo vendor is missing the reviewed Mesh source file: "
+            f"{mesh_types_path}"
+        )
+        raise RuntimePolicyPatchError(message)
 
     mesh_types_source = mesh_types_path.read_text(encoding="utf-8")
     patched_mesh_types = _replace_reviewed_rust_item(
@@ -1520,14 +1480,6 @@ def patch_desktop_cargo_deps(root: Path) -> None:
         _INSTALL_DEFAULT_PATCHED,
         context="InstallOptions allow_download default",
     )
-    mesh_install_source = mesh_install_path.read_text(encoding="utf-8")
-    patched_mesh_install = _replace_reviewed_rust_item(
-        mesh_install_source,
-        _INSTALL_NATIVE_RUNTIME_UPSTREAM,
-        _INSTALL_NATIVE_RUNTIME_PATCHED,
-        context="install_native_runtime allow_default_manifest_url hardcode",
-    )
-
     sherpa_path = sherpa_matches[0]
     sherpa_source = sherpa_path.read_text(encoding="utf-8")
     patched_sherpa = _replace_reviewed_rust_item(
@@ -1538,7 +1490,6 @@ def patch_desktop_cargo_deps(root: Path) -> None:
     )
 
     mesh_types_path.write_text(patched_mesh_types, encoding="utf-8")
-    mesh_install_path.write_text(patched_mesh_install, encoding="utf-8")
     sherpa_path.write_text(patched_sherpa, encoding="utf-8")
 
 

@@ -450,6 +450,13 @@ async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
         tasks: dict[str, asyncio.Task[SourceTaskResult]] = {}
 
         async def run_ready(name: str) -> SourceTaskResult:
+            if prerequisites[name]:
+                await context.queue.put(
+                    UpdateEvent.status(
+                        name,
+                        f"Waiting for prerequisites: {', '.join(prerequisites[name])}",
+                    )
+                )
             with measure(name, "dependencies"):
                 failed = [
                     prerequisite
@@ -464,6 +471,9 @@ async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
                 )
             if failed or name in refresh_failures:
                 return SourceTaskResult(completed=False)
+            await context.queue.put(
+                UpdateEvent.status(name, "Waiting for source worker")
+            )
             if run is None:
                 async with resource_slot("source", source=name, config=context.config):
                     result = await update_source_task(name, context=shared)

@@ -1,6 +1,9 @@
 """Additional tests for subprocess/process helpers in update flows."""
 
 import asyncio
+import json
+from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -171,7 +174,9 @@ def test_run_nix_build(monkeypatch: pytest.MonkeyPatch) -> None:
     assert args[:4] == ["nix", "build", "-L", "--verbose"]
 
 
-def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_emit_successful_command_hash_helpers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Emit command lifecycle events and return converted hashes."""
     events = _collect_stream(
         lambda emit: _emit_successful_command(
@@ -202,11 +207,13 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
         *,
         name: str | None = None,
         command_timeout: float | None = None,
-    ) -> str:
+    ) -> SimpleNamespace:
         prefetch_calls.append((url, name, command_timeout))
-        return "sha256-BBB="
+        return SimpleNamespace(hash="sha256-BBB=", storePath="/nix/store/example")
 
-    monkeypatch.setattr("lib.update.process.libnix_prefetch_url", _prefetch_url)
+    monkeypatch.setattr("lib.update.process.libnix_prefetch_url_result", _prefetch_url)
+    receipts = tmp_path / "prefetch.jsonl"
+    monkeypatch.setenv("UPDATE_PREFETCH_RECEIPTS", str(receipts))
     prefetch_events = _collect_stream(
         lambda emit: compute_sri_hash(
             "demo",
@@ -217,7 +224,7 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
     )
     start_message = prefetch_events[0].message
     assert start_message is not None
-    assert "--name Town-Assistant-1.8-33.dmg" in start_message
+    assert "--name Town-20Assistant-1.8-33.dmg" in start_message
     assert prefetch_events.result == "sha256-BBB="
 
     _collect_stream(
@@ -232,11 +239,31 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
     assert prefetch_calls == [
         (
             "https://example.com/releases/Town%20Assistant-1.8-33.dmg",
-            "Town-Assistant-1.8-33.dmg",
+            "Town-20Assistant-1.8-33.dmg",
             12,
         ),
         ("https://example.com/app.dmg", None, 12),
     ]
+    assert [json.loads(line) for line in receipts.read_text().splitlines()] == [
+        {"storePath": "/nix/store/example"},
+        {"storePath": "/nix/store/example"},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("basename", "expected"),
+    [
+        ("Coast%20Local.dmg", "Coast-20Local.dmg"),
+        ("file%2Fpart.zip", "file-2Fpart.zip"),
+        ("...archive.zip", "archive.zip"),
+        ("...", "unknown"),
+        ("%%", "-"),
+        ("a" * 211, "a" * 207),
+    ],
+)
+def test_prefetch_names_match_fetchurl_store_identity(basename, expected) -> None:
+    """Percent escapes remain encoded; sanitization follows nixpkgs' name rules."""
+    assert _nix_prefetch_name(f"https://example.com/{basename}") == expected
 
 
 @pytest.mark.parametrize(
@@ -251,16 +278,19 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
 def test_compute_sri_hash_retries_transient_prefetch_failure(
     monkeypatch: pytest.MonkeyPatch,
     transient_error: str,
+    tmp_path: Path,
 ) -> None:
     """Retry transient nix-prefetch-url failures before surfacing an error."""
     calls = 0
+    receipts = tmp_path / "prefetch.jsonl"
+    monkeypatch.setenv("UPDATE_PREFETCH_RECEIPTS", str(receipts))
 
     async def _prefetch_url(
         url: str,
         *,
         name: str | None = None,
         command_timeout: float | None = None,
-    ) -> str:
+    ) -> SimpleNamespace:
         nonlocal calls
         calls += 1
         assert url == "https://example.com/archive.tar.gz"
@@ -276,9 +306,9 @@ def test_compute_sri_hash_retries_transient_prefetch_failure(
                 ),
                 "prefetch failed",
             )
-        return "sha256-CCC="
+        return SimpleNamespace(hash="sha256-CCC=", storePath="/nix/store/example")
 
-    monkeypatch.setattr("lib.update.process.libnix_prefetch_url", _prefetch_url)
+    monkeypatch.setattr("lib.update.process.libnix_prefetch_url_result", _prefetch_url)
 
     events = _collect_stream(
         lambda emit: compute_sri_hash(
@@ -294,6 +324,9 @@ def test_compute_sri_hash_retries_transient_prefetch_failure(
     )
 
     assert calls == 2
+    assert [json.loads(line) for line in receipts.read_text().splitlines()] == [
+        {"storePath": "/nix/store/example"}
+    ]
     command_starts = [
         event for event in events if event.kind is UpdateEventKind.COMMAND_START
     ]
