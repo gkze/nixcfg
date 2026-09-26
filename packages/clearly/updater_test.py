@@ -115,6 +115,7 @@ def test_clearly_update_pins_source_and_swift_dependency_closure(
         DerivationValidation(
             installable=".#pkgs.{system}.{name}",
             mode="build",
+            systems=("aarch64-darwin",),
         ),
     )
 

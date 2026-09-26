@@ -15,7 +15,10 @@ from lib.tests._updater_helpers import load_repo_module_for_test
 from lib.update import cli, source_runner
 from lib.update.candidate import Candidate, Preparation, ResolvedVersion, git
 from lib.update.ci import candidate as pipeline
-from lib.update.derivation_validation import DerivationValidationFailure
+from lib.update.derivation_validation import (
+    DerivationValidation,
+    DerivationValidationFailure,
+)
 from lib.update.persistence import IsolatedUpdateWorkspace
 from lib.update.ui_consumer import consume_events
 from lib.update.updaters import Updater, VersionInfo
@@ -248,6 +251,99 @@ def test_candidate_identity_and_stage_admission(prepared_run) -> None:
         Preparation(system="x86_64-linux", targets=("other",), previous=candidate)
 
 
+@pytest.mark.parametrize("validate_all_packages", [False, True])
+@pytest.mark.parametrize("no_change", [False, True])
+def test_repair_inventory_blocks_unselected_package_failure(
+    prepared_run, monkeypatch, validate_all_packages, no_change
+) -> None:
+    """Repair admission includes held declarations even without update changes."""
+    _, operations, state = prepared_run
+    registry = pipeline.ensure_updaters_loaded()
+
+    class Held(Updater):
+        name = "held"
+        bulk_update_hold = "Keep the pinned release"
+        derivation_validations = (
+            DerivationValidation(
+                installable=".#pkgs.{system}.held",
+                systems=pipeline.supported_systems(),
+                mode="build",
+            ),
+        )
+
+    registry["held"] = Held
+    candidate = None
+    for system in pipeline.supported_systems():
+        state["system"] = system
+        candidate, status = pipeline.prepare_candidate(
+            ("example",),
+            previous=candidate,
+            validate_all_packages=validate_all_packages if candidate is None else False,
+        )
+        assert status == 0
+        candidate = Candidate.model_validate_json(candidate.model_dump_json())
+        assert candidate.sources == ("example",)
+        assert candidate.targets == ("example",)
+        assert candidate.validate_all_packages == validate_all_packages
+    assert candidate is not None
+    assert operations.count("resolve") == 1
+    if no_change:
+        candidate = candidate.model_copy(
+            update={
+                "tree": candidate.base_tree,
+                "patch": b"",
+                "sources": (),
+            }
+        )
+    checked = []
+
+    def validate_requests(requests, **_kwargs):
+        checked.extend(requests)
+        return tuple(
+            DerivationValidationFailure(
+                request.source, request.installable, "broken repair"
+            )
+            for request in requests
+        )
+
+    monkeypatch.setattr(
+        pipeline.validation, "get_current_nix_platform", lambda: state["system"]
+    )
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivation_requests", validate_requests
+    )
+    monkeypatch.setattr(
+        pipeline.validation, "validate_root_closures", lambda **_kwargs: ()
+    )
+    reports = []
+    for system in pipeline.supported_systems():
+        state["system"] = system
+        report = pipeline.validate_candidate(candidate)
+        reports.append(report)
+        assert report.validate_all_packages == validate_all_packages
+        assert bool(report.failures) == validate_all_packages
+    if validate_all_packages:
+        assert [request.installable for request in checked] == [
+            f".#pkgs.{system}.held" for system in pipeline.supported_systems()
+        ]
+        with pytest.raises(ValueError, match="Validation reports"):
+            pipeline.certified_patch(candidate, reports)
+        targeted_reports = [
+            report.model_copy(
+                update={
+                    "failures": (),
+                    "validate_all_packages": False,
+                }
+            )
+            for report in reports
+        ]
+        with pytest.raises(ValueError, match="Validation reports"):
+            pipeline.certified_patch(candidate, targeted_reports)
+    else:
+        assert checked == []
+        assert pipeline.certified_patch(candidate, reports) == candidate.patch
+
+
 def test_dependent_resolution_is_recomputed() -> None:
     """A companion consumes current prerequisite outputs instead of old metadata."""
     preparation = Preparation(system="aarch64-darwin", targets=())
@@ -338,7 +434,9 @@ def test_prepare_command_exports_failure_evidence_outside_checkout(
     assert not (root / "candidate.json").exists()
 
 
+@pytest.mark.parametrize("validate_all_packages", [False, True])
 def test_candidate_commands_transfer_the_pinned_selection_and_native_reports(
+    validate_all_packages,
     prepared_run,
     tmp_path: Path,
     monkeypatch,
@@ -353,6 +451,8 @@ def test_candidate_commands_transfer_the_pinned_selection_and_native_reports(
         output = tmp_path / f"candidate-{index}.json"
         args = ["prepare", "--output", str(output)]
         if previous is None:
+            if validate_all_packages:
+                args.append("--validate-all-packages")
             args.append("example")
         else:
             args += ["--previous", str(previous)]
@@ -362,6 +462,10 @@ def test_candidate_commands_transfer_the_pinned_selection_and_native_reports(
             "example",
         )
         previous = output
+        assert (
+            Candidate.model_validate_json(output.read_bytes()).validate_all_packages
+            == validate_all_packages
+        )
     assert previous is not None
     monkeypatch.setattr(
         pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()

@@ -144,8 +144,12 @@ def repair_commands(repair_root, tmp_path, monkeypatch) -> dict[str, int | bool]
         "agent_calls": 0,
     }
     monkeypatch.setattr(repair, "default_run_log_root", lambda: tmp_path / "state/runs")
+
+    def unexpected_roots(**_kwargs):
+        pytest.fail("The retry owns root validation; the supervisor must not repeat it")
+
     monkeypatch.setattr(
-        repair.derivation_validation, "validate_root_closures", lambda **_kwargs: ()
+        "lib.update.derivation_validation.validate_root_closures", unexpected_roots
     )
 
     async def command(args, *, options, emit):
@@ -158,6 +162,7 @@ def repair_commands(repair_root, tmp_path, monkeypatch) -> dict[str, int | bool]
             assert opts["run_id"] is None
             assert opts["resume"] is None
             assert opts["strict"]
+            assert opts["validate_all_packages"] == (state["attempts"] == 2)
             assert not opts["check"]
             assert Path(options.env["REPO_ROOT"]) == Path.cwd()
             assert Path.cwd() != repair_root
@@ -278,6 +283,17 @@ def test_quality_mutation_invalidates_build_evidence(
 def test_repair_cannot_reuse_old_execution_history(repair_root, options) -> None:
     with pytest.raises(ValueError, match="requires a fresh update"):
         repair.run_repairing_update(options, repair_root)
+
+
+@pytest.mark.parametrize("mode", ["repair", "retry"])
+def test_metadata_only_validation_cannot_claim_repair_acceptance(mode) -> None:
+    """Reject the preflight-only options path before any acceptance can run."""
+    with pytest.raises(ValueError, match="Metadata-only --validate"):
+        UpdateOptions(
+            validate=True,
+            repair=RepairAgent.CODEX if mode == "repair" else None,
+            validate_all_packages=mode == "retry",
+        )
 
 
 @pytest.mark.parametrize("status", [0, 1])

@@ -96,8 +96,9 @@ def invoke(env: dict[str, str], checkout: Path) -> subprocess.CompletedProcess[s
 
 @pytest.mark.parametrize("exit_code", [0, 17])
 @pytest.mark.parametrize("stage", ["prepare", "validate"])
+@pytest.mark.parametrize("validate_all_packages", [False, True])
 def test_native_job_keeps_evidence_and_propagates_failure(
-    native_job, exit_code: int, stage: str
+    native_job, exit_code: int, stage: str, validate_all_packages: bool
 ) -> None:
     env, checkout = native_job
     env |= {
@@ -105,11 +106,15 @@ def test_native_job_keeps_evidence_and_propagates_failure(
         "NIXCFG_CI_STAGE": stage,
         "NIXCFG_PREVIOUS_CANDIDATE": "/candidate from previous job.json",
         "NIXCFG_UPDATE_TARGETS": "alpha beta",
+        "NIXCFG_VALIDATE_ALL_PACKAGES": str(validate_all_packages).lower(),
     }
     result = invoke(env, checkout)
     assert result.returncode == exit_code, result.stdout + result.stderr
     args = json.loads(Path(env["TEST_LOG"]).read_text())
     assert args[:3] == ["ci", "update", stage]
+    assert ("--validate-all-packages" in args) == (
+        validate_all_packages and stage == "prepare"
+    )
     previous_flag = "--previous" if stage == "prepare" else "--candidate"
     assert args[args.index(previous_flag) + 1] == env["NIXCFG_PREVIOUS_CANDIDATE"]
     if stage == "prepare":
@@ -328,6 +333,40 @@ def test_job_rejects_unknown_stage_or_missing_candidate(native_job, stage: str) 
     assert not Path(env["TEST_LOG"]).exists()
 
 
+def test_repair_validation_mode_reaches_first_native_preparation() -> None:
+    """Explicit dispatch scope enters the candidate once; later stages inherit it."""
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    assert (
+        workflow["on"]["workflow_dispatch"]["inputs"]["validate_all_packages"][
+            "default"
+        ]
+        == "false"
+    )
+    assert (
+        workflow["jobs"]["prepare-darwin"]["with"]["validate_all_packages"]
+        == "${{ inputs.validate_all_packages || false }}"
+    )
+    native = yaml.load(
+        (ROOT / ".github/workflows/update-native.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    assert (
+        native["on"]["workflow_call"]["inputs"]["validate_all_packages"]["default"]
+        == "false"
+    )
+    step = next(
+        step
+        for step in native["jobs"]["native"]["steps"]
+        if step.get("name") == "Prepare or validate candidate"
+    )
+    assert (
+        step["env"]["NIXCFG_VALIDATE_ALL_PACKAGES"]
+        == "${{ inputs.validate_all_packages }}"
+    )
+
+
 def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     """All writers finish before native validation; cached VM outputs precede macOS."""
     workflow = yaml.load(
@@ -466,14 +505,18 @@ def test_generator_cache_is_scoped_to_disposable_accelerators() -> None:
 
 @pytest.mark.parametrize("stage", ["prepare", "validate"])
 @pytest.mark.parametrize("targets", ["", "alpha beta", "--force", "alpha\nbeta"])
+@pytest.mark.parametrize("validate_all_packages", [False, True])
 def test_native_adapter_captures_only_cli_output(
-    native_job, monkeypatch, stage, targets
+    native_job, monkeypatch, stage, targets, validate_all_packages
 ) -> None:
     env, checkout = native_job
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     monkeypatch.chdir(checkout)
     monkeypatch.setenv("NIXCFG_UPDATE_TARGETS", targets)
+    monkeypatch.setenv(
+        "NIXCFG_VALIDATE_ALL_PACKAGES", str(validate_all_packages).lower()
+    )
     if stage == "validate":
         with pytest.raises(ValueError, match="requires a previous"):
             jobs.main("native-validate")
@@ -483,6 +526,10 @@ def test_native_adapter_captures_only_cli_output(
             jobs.main("native-prepare")
     else:
         assert jobs.main(f"native-{stage}") == 0
+        args = json.loads(Path(env["TEST_LOG"]).read_text())
+        assert ("--validate-all-packages" in args) == (
+            validate_all_packages and stage == "prepare"
+        )
         assert json.loads(
             (Path(env["RUNNER_TEMP"]) / "update-artifacts/result.json").read_text()
         ) == {"success": True}
@@ -673,6 +720,7 @@ def test_publication_uses_signed_commit_and_bounded_repair(
     else:
         assert calls[-1][:3] == ("gh", "workflow", "run")
         assert "repair=false" in calls[-1]
+        assert "validate_all_packages=true" in calls[-1]
         assert "targets=example" in calls[-1]
 
 

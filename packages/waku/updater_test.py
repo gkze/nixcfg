@@ -515,6 +515,7 @@ def test_waku_validates_the_materialized_bootstrap_source() -> None:
         DerivationValidation(
             installable="path:.#pkgs.{system}.{name}",
             mode="build",
+            systems=("aarch64-darwin",),
         ),
     )
 

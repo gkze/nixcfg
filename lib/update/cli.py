@@ -1792,12 +1792,14 @@ def _validate_round(
     """
     opts, out, config = context.opts, context.out, context.config
     verbose = opts.verbose and not out.quiet and not out.json_output
-    if isinstance(plan, _RunPlan):
-        kept = [
-            name
-            for name in plan.order
-            if outcome.summary.statuses.get(name) not in {"error", "dropped"}
-        ]
+    if isinstance(plan, _RunPlan) or opts.validate_all_packages:
+        kept = None
+        if not opts.validate_all_packages and isinstance(plan, _RunPlan):
+            kept = [
+                name
+                for name in plan.order
+                if outcome.summary.statuses.get(name) not in {"error", "dropped"}
+            ]
         suffix = f" (round {round_index + 1})" if round_index else ""
         out.print(f"\nPhase 3: derivation validation{suffix}", style="dim")
         if context.monitor is not None:
@@ -1818,7 +1820,9 @@ def _validate_round(
         )
         if _record_derivation_validation_failures(outcome.summary, out, failures):
             return True, False
-    if not _requires_root_closure_validation(snapshot.changed_paths):
+    if not opts.validate_all_packages and not _requires_root_closure_validation(
+        snapshot.changed_paths
+    ):
         return False, False
     out.print("\nPhase 4: root closure builds", style="dim")
     if context.monitor is not None:
@@ -1877,7 +1881,11 @@ async def _validate_and_gate(
         check_cancelled()
         if not derivations_failed:
             return roots_failed
-        if context.opts.strict or not isinstance(plan, _RunPlan):
+        if (
+            context.opts.strict
+            or context.opts.validate_all_packages
+            or not isinstance(plan, _RunPlan)
+        ):
             return True
         _withhold_failed_clusters(
             workspace, plan, outcome, context.updaters, context.out, context.monitor
@@ -2020,6 +2028,8 @@ async def _run_updates(
                 and (tool_check := _handle_required_tool_check(opts)) is not None
             ):
                 return tool_check
+            if opts.validate_all_packages:
+                updaters = _get_updaters()
             update_flake.invalidate_flake_lock()
             allowed_paths: tuple[Path, ...] = ()
             run_plan = durable.checkpoint_sync("plan", lambda: _build_run_plan(opts))

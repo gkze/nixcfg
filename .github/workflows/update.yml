@@ -7,6 +7,10 @@ on:
         description: Space-separated targets (empty updates all eligible targets)
         type: string
         default: ""
+      validate_all_packages:
+        description: Validate all declared packages (required for repaired candidates)
+        type: boolean
+        default: false
       repair:
         description: Allow one agent repair and a fresh fully validated attempt
         type: boolean
@@ -28,6 +32,7 @@ jobs:
       system: aarch64-darwin
       stage: prepare
       targets: ${{ inputs.targets || '' }}
+      validate_all_packages: ${{ inputs.validate_all_packages || false }}
     secrets: inherit
   prepare-arm:
     needs: prepare-darwin

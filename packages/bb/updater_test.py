@@ -431,6 +431,7 @@ def test_bb_update_pins_release_source_and_pnpm_closure(
         DerivationValidation(
             installable=".#pkgs.{system}.{name}",
             mode="build",
+            systems=("aarch64-darwin",),
         ),
     )
     current = SourceEntry(

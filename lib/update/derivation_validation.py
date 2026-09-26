@@ -845,7 +845,7 @@ def _execute_groups(
 
 
 def validate_derivations(
-    source_names: Iterable[str],
+    source_names: Iterable[str] | None,
     *,
     updaters: Mapping[str, type[object]],
     timeout: float | None = None,
@@ -860,9 +860,12 @@ def validate_derivations(
     max_eval_workers: int = 1,
     max_build_workers: int = 1,
 ) -> tuple[DerivationValidationFailure, ...]:
-    """Validate updater-declared derivations."""
+    """Validate selected declarations, or the complete registry when names are None.
+
+    Validation inventory is independent of update eligibility and bulk holds.
+    """
     requests = resolve_derivation_validations(
-        source_names,
+        updaters if source_names is None else source_names,
         updaters=updaters,
         all_declared_systems=all_declared_systems,
         native_builds_only=native_builds_only,

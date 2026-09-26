@@ -143,4 +143,16 @@ is a pure consumer of run events.
     fresh execution, passes the existing quality gates and builds, and cannot
     recursively repair itself. CI gives publication credentials only to the later
     publication step. Local repair retains the same atomic promotion boundary.
+    After an agent proposal, both the local retry and CI candidate validate the
+    complete registered updater declaration inventory, independent of update
+    targets and bulk holds, including when the retry has no update changes.
+    Failed declarations block acceptance; they cannot be withheld to accept a
+    partial repair. The shared derivation validator supplies this inventory,
+    preserving platform guards without mapping changed files to package owners.
+    Existing root and quality gates still apply. Packages without validation
+    declarations gain no new coverage from this rule.
+    Locally the fresh retry owns both package and root validation, even when
+    repaired bytes are already its baseline. The supervisor freezes that result
+    around quality hooks and rejects mutations before promotion; it does not
+    repeat root builds. Metadata-only `--validate` cannot be combined with repair.
     (`repair`, `ci.jobs.start_repair`, `tests/test_update_repair.py`)

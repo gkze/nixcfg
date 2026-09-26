@@ -47,6 +47,7 @@ class ValidationReport(BaseModel):
 
     tree: str
     system: str
+    validate_all_packages: bool = False
     failures: tuple[validation.DerivationValidationFailure, ...]
 
 
@@ -61,14 +62,22 @@ def _output_path(output: Path, root: Path) -> Path:
 
 
 def prepare_candidate(
-    targets: tuple[str, ...], *, previous: Candidate | None = None
+    targets: tuple[str, ...],
+    *,
+    previous: Candidate | None = None,
+    validate_all_packages: bool = False,
 ) -> tuple[Candidate, int]:
     """Extend one pinned candidate on the current system without live writes."""
     system = get_current_nix_platform()
     if system not in supported_systems():
         msg = f"No configured builder policy for {system}"
         raise ValueError(msg)
-    preparation = Preparation(system=system, targets=targets, previous=previous)
+    preparation = Preparation(
+        system=system,
+        targets=targets,
+        previous=previous,
+        validate_all_packages=validate_all_packages,
+    )
     options = UpdateOptions(
         targets=targets,
         check=True,
@@ -124,7 +133,7 @@ def validate_candidate(candidate: Candidate) -> ValidationReport:
         workspace.validate_changes(allowed)
         with workspace.validation_snapshot() as snapshot:
             failures = validation.validate_derivations(
-                candidate.sources,
+                None if candidate.validate_all_packages else candidate.sources,
                 updaters=updaters,
                 flake_root=snapshot.root,
                 print_build_logs=True,
@@ -140,7 +149,12 @@ def validate_candidate(candidate: Candidate) -> ValidationReport:
                 print_build_logs=True,
             )
         workspace.validate_changes(allowed)
-    return ValidationReport(tree=candidate.tree, system=system, failures=failures)
+    return ValidationReport(
+        tree=candidate.tree,
+        system=system,
+        failures=failures,
+        validate_all_packages=candidate.validate_all_packages,
+    )
 
 
 def certified_patch(candidate: Candidate, reports: list[ValidationReport]) -> bytes:
@@ -150,9 +164,17 @@ def certified_patch(candidate: Candidate, reports: list[ValidationReport]) -> by
     if (
         len(systems) != len(set(systems))
         or set(systems) != set(candidate.systems)
-        or any(report.tree != candidate.tree or report.failures for report in reports)
+        or any(
+            report.tree != candidate.tree
+            or report.validate_all_packages != candidate.validate_all_packages
+            or report.failures
+            for report in reports
+        )
     ):
-        msg = "Validation reports are missing, duplicated, failed, or for another tree"
+        msg = (
+            "Validation reports are missing, duplicated, failed, "
+            "or for another tree or validation scope"
+        )
         raise ValueError(msg)
     return candidate.patch
 
@@ -164,6 +186,12 @@ def prepare(
     output: Annotated[
         Path, typer.Option(help="Candidate JSON outside the repository.")
     ],
+    validate_all_packages: Annotated[
+        bool,
+        typer.Option(
+            help="Validate every package declaration after repair; keep update targets."
+        ),
+    ] = False,
     previous: Annotated[
         Path | None, typer.Option(help="Previous native candidate.")
     ] = None,
@@ -178,7 +206,9 @@ def prepare(
     selected = tuple(targets or ())
     if prior is not None and not selected:
         selected = prior.targets
-    candidate, status = prepare_candidate(selected, previous=prior)
+    candidate, status = prepare_candidate(
+        selected, previous=prior, validate_all_packages=validate_all_packages
+    )
     atomic_write_text(output, candidate.model_dump_json(indent=2) + "\n")
     raise typer.Exit(status)
 

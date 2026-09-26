@@ -741,6 +741,7 @@ def test_executor_validates_the_materialized_source_package() -> None:
         DerivationValidation(
             installable="path:.#pkgs.{system}.{name}",
             mode="build",
+            systems=("aarch64-darwin",),
         ),
     )
 

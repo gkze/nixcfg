@@ -39,6 +39,7 @@ class BbUpdater(GitHubReleaseUpdater):
         DerivationValidation(
             installable=".#pkgs.{system}.{name}",
             mode="build",
+            systems=("aarch64-darwin",),
         ),
     )
 

@@ -15,6 +15,9 @@ on:
       previous:
         default: ""
         type: string
+      validate_all_packages:
+        default: false
+        type: boolean
       targets:
         default: ""
         type: string
@@ -49,6 +52,7 @@ jobs:
           NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
           NIXCFG_UPDATE_TARGETS: ${{ inputs.targets }}
+          NIXCFG_VALIDATE_ALL_PACKAGES: ${{ inputs.validate_all_packages }}
           NIXCFG_PREVIOUS_CANDIDATE: |-
             ${{ inputs.previous != '' &&
             format('{0}/previous/candidate.json', runner.temp) || '' }}

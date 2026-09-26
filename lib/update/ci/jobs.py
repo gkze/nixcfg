@@ -281,6 +281,8 @@ def native(stage: str) -> int:
         args.extend(("--output", str(artifacts / "candidate.json")))
         if previous:
             args.extend(("--previous", previous))
+        if os.environ.get("NIXCFG_VALIDATE_ALL_PACKAGES") == "true":
+            args.append("--validate-all-packages")
         raw_targets = os.environ.get("NIXCFG_UPDATE_TARGETS", "")
         targets = raw_targets.split()
         if (
@@ -482,6 +484,8 @@ def start_repair() -> None:
         branch,
         "-f",
         "repair=false",
+        "-f",
+        "validate_all_packages=true",
         "-f",
         f"targets={os.environ.get('NIXCFG_UPDATE_TARGETS', '')}",
     )
