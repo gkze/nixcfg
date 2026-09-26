@@ -2,6 +2,9 @@
 
 import asyncio
 import json
+import sys
+from contextlib import redirect_stdout
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
 
@@ -73,15 +76,17 @@ def prepare_candidate(
         no_refs=previous is not None,
         no_input=previous is not None,
         tty="off",
-        json=True,
         timings=True,
     )
-    result = asyncio.run(
-        update_cli.collect_run_outcome(
-            options, check_tools=True, preparation=preparation
+    # This synchronous CLI boundary owns stdout: progress goes to the live job
+    # log, while stdout remains one machine-readable result.
+    with redirect_stdout(sys.stderr):
+        result = asyncio.run(
+            update_cli.collect_run_outcome(
+                options, check_tools=True, preparation=preparation
+            )
         )
-    )
-    status = update_cli.emit_run_result(result, options)
+    status = update_cli.emit_run_result(result, replace(options, json=True))
     if preparation.candidate is None:
         msg = "Preparation failed before a candidate could be captured"
         raise RuntimeError(msg)

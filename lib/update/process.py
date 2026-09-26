@@ -27,7 +27,6 @@ from lib.nix.commands.base import (
     ProcessLine,
     stream_process,
 )
-from lib.nix.commands.hash import PrefetchResult
 from lib.nix.commands.hash import nix_hash_convert as libnix_hash_convert
 from lib.nix.commands.hash import nix_prefetch_url_result as libnix_prefetch_url_result
 from lib.update.config import UpdateConfig, resolve_active_config
@@ -413,23 +412,20 @@ async def compute_sri_hash(
     args.append(url)
     attempts = max(1, config.default_retries)
     attempt = 1
-    result: list[PrefetchResult] = []
 
     async def prefetch_hash() -> str:
-        result.append(
-            await libnix_prefetch_url_result(
-                url,
-                name=prefetch_name,
-                command_timeout=config.default_subprocess_timeout,
-            )
+        result = await libnix_prefetch_url_result(
+            url,
+            name=prefetch_name,
+            command_timeout=config.default_subprocess_timeout,
         )
-        return result[0].hash
+        _record_prefetch_receipt(result.storePath)
+        return result.hash
 
     while True:
-        result.clear()
         try:
             async with resource_slot("download", source=source, config=config):
-                hash_value = await _emit_successful_command(
+                return await _emit_successful_command(
                     source=source,
                     args=args,
                     message=shlex.join(args),
@@ -466,9 +462,6 @@ async def compute_sri_hash(
             )
             await asyncio.sleep(max(0.0, config.default_retry_backoff))
             attempt += 1
-        else:
-            _record_prefetch_receipt(result[0].storePath)
-            return hash_value
 
 
 async def compute_url_hashes(

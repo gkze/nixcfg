@@ -1,5 +1,6 @@
 """Semantic contracts for Buzz's pristine Mesh source derivation."""
 
+import hashlib
 import json
 import runpy
 import sys
@@ -84,6 +85,8 @@ def _run_inventory(
     source: Path,
     output: Path,
 ) -> None:
+    # Match the derivation's PYTHONPATH for its shared packaging helpers.
+    monkeypatch.syspath_prepend(str(REPO_ROOT))
     monkeypatch.setattr(
         sys,
         "argv",
@@ -223,9 +226,7 @@ def test_inventory_is_sorted_complete_and_deterministic(
             },
             {
                 "path": "third_party/llama.cpp/upstream.txt",
-                "sha256": (
-                    "e8dd7a7216c315fe252fcda95842648ac90a64d357e6367bf1b9ec4423acb0ac"
-                ),
+                "sha256": hashlib.sha256(f"{_LLAMA_COMMIT}\n".encode()).hexdigest(),
             },
         ],
         "schemaVersion": 1,

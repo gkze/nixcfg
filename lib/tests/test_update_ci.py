@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from io import StringIO
 from itertools import pairwise
 from pathlib import Path
 
@@ -195,6 +196,38 @@ def test_failure_summary_names_failed_sources(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize("content", [None, "incomplete JSON", "[]"])
+def test_failure_summary_tolerates_missing_or_incomplete_result(
+    tmp_path: Path, content: str | None
+) -> None:
+    """A child crash must retain its diagnostics even without a valid result."""
+    result = tmp_path / "result.json"
+    if content is not None:
+        result.write_text(content)
+    assert jobs._failure_summary(result) is None
+
+
+def test_diagnostics_drain_after_child_exit(tmp_path, monkeypatch) -> None:
+    """Inherited stderr may outlive the child; retain its final diagnostic."""
+    monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    descendant = (
+        "import sys, time; time.sleep(0.2); print('final diagnostic', file=sys.stderr)"
+    )
+    command = [
+        sys.executable,
+        "-c",
+        f"import subprocess, sys; subprocess.Popen([sys.executable, '-c', {descendant!r}])",
+    ]
+    with subprocess.Popen(command, stderr=subprocess.PIPE, text=True) as process:  # noqa: S603 -- controlled Python fixture.
+        assert process.wait() == 0
+        log = StringIO()
+        assert (
+            jobs._wait_for_diagnostics(process, log, "prepare", tmp_path, command) == 0
+        )
+    assert "final diagnostic\n" in log.getvalue()
+    assert "Updater still running" not in log.getvalue()
+
+
 def test_flake_lock_has_no_registry_dependent_inputs() -> None:
     """Source refresh must not resolve flake inputs through a runner registry."""
     lock = json.loads((ROOT / "flake.lock").read_text(encoding="utf-8"))
@@ -244,6 +277,10 @@ def test_preparation_publishes_only_exact_prefetch_receipts(
     [
         "not-json\n",
         "{}\n",
+        "[]\n",
+        '{"storePath": null}\n',
+        '{"storePath": "/nix/store/.."}\n',
+        '{"storePath": "/nix/store/path/nested"}\n',
         '{"storePath": "relative"}\n',
         '{"storePath": "/tmp/path"}\n',
     ],

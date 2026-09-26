@@ -1,6 +1,8 @@
 """Additional tests for subprocess/process helpers in update flows."""
 
 import asyncio
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -172,7 +174,9 @@ def test_run_nix_build(monkeypatch: pytest.MonkeyPatch) -> None:
     assert args[:4] == ["nix", "build", "-L", "--verbose"]
 
 
-def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_emit_successful_command_hash_helpers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Emit command lifecycle events and return converted hashes."""
     events = _collect_stream(
         lambda emit: _emit_successful_command(
@@ -208,6 +212,8 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
         return SimpleNamespace(hash="sha256-BBB=", storePath="/nix/store/example")
 
     monkeypatch.setattr("lib.update.process.libnix_prefetch_url_result", _prefetch_url)
+    receipts = tmp_path / "prefetch.jsonl"
+    monkeypatch.setenv("UPDATE_PREFETCH_RECEIPTS", str(receipts))
     prefetch_events = _collect_stream(
         lambda emit: compute_sri_hash(
             "demo",
@@ -237,6 +243,10 @@ def test_emit_successful_command_hash_helpers(monkeypatch: pytest.MonkeyPatch) -
             12,
         ),
         ("https://example.com/app.dmg", None, 12),
+    ]
+    assert [json.loads(line) for line in receipts.read_text().splitlines()] == [
+        {"storePath": "/nix/store/example"},
+        {"storePath": "/nix/store/example"},
     ]
 
 
@@ -268,9 +278,12 @@ def test_prefetch_names_match_fetchurl_store_identity(basename, expected) -> Non
 def test_compute_sri_hash_retries_transient_prefetch_failure(
     monkeypatch: pytest.MonkeyPatch,
     transient_error: str,
+    tmp_path: Path,
 ) -> None:
     """Retry transient nix-prefetch-url failures before surfacing an error."""
     calls = 0
+    receipts = tmp_path / "prefetch.jsonl"
+    monkeypatch.setenv("UPDATE_PREFETCH_RECEIPTS", str(receipts))
 
     async def _prefetch_url(
         url: str,
@@ -311,6 +324,9 @@ def test_compute_sri_hash_retries_transient_prefetch_failure(
     )
 
     assert calls == 2
+    assert [json.loads(line) for line in receipts.read_text().splitlines()] == [
+        {"storePath": "/nix/store/example"}
+    ]
     command_starts = [
         event for event in events if event.kind is UpdateEventKind.COMMAND_START
     ]

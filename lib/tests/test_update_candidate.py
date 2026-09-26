@@ -17,6 +17,7 @@ from lib.update.candidate import Candidate, Preparation, ResolvedVersion, git
 from lib.update.ci import candidate as pipeline
 from lib.update.derivation_validation import DerivationValidationFailure
 from lib.update.persistence import IsolatedUpdateWorkspace
+from lib.update.ui_consumer import consume_events
 from lib.update.updaters import Updater, VersionInfo
 from lib.update.updaters.metadata import GitHubReleaseMetadata, MappingMetadata
 
@@ -196,6 +197,19 @@ def test_native_stages_pin_versions_preserve_hashes_and_never_promote(
         assert set(result.hashes.mapping) == (
             {"aarch64-darwin"} if darwin_only else set(pipeline.supported_systems())
         )
+
+
+def test_preparation_streams_progress_separately_from_json(
+    prepared_run, monkeypatch, capsys
+) -> None:
+    """The CI consumer gets useful progress and a parseable result separately."""
+    monkeypatch.setattr(cli, "consume_events", consume_events)
+    _, status = pipeline.prepare_candidate(("example",))
+    captured = capsys.readouterr()
+    assert status == 0
+    assert json.loads(captured.out)["success"] is True
+    assert "Phase" in captured.err
+    assert "example" in captured.err
 
 
 def test_failed_preparation_retains_resolution_and_is_not_a_completed_platform(

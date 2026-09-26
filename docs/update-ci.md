@@ -37,11 +37,13 @@ publication; every authored command step runs Python, with no shell glue. The up
 core owns source discovery, declared output authority, candidate identity and validation. Nix owns derivations, dependency ordering, builds and cache reuse.
 
 Cachix's daemon uploads built outputs continuously. Successful preparation also
-publishes newly imported flat, content-addressed files: URL prefetches enter the
+publishes the exact files recorded by successful URL prefetches, which enter the
 store directly and do not trigger Nix's post-build hook. Encoded path basenames use
 nixpkgs' fetchurl spelling instead of URL-decoded spelling for matching store identities;
-explicit package-specific source names remain independent overrides. This scan is
-confined to the disposable preparation job, not a developer's whole local store.
+explicit package-specific source names remain independent overrides. Prefetches
+append store paths to an invocation-local JSONL receipt retained with the job
+artifacts. Publication validates and deduplicates these paths without scanning
+the runner's store.
 
 Preparation and repair restore Cargo registry/Git downloads and verified generator
 receipts through the Actions cache. Each platform uses a fresh key per run/attempt
@@ -64,8 +66,8 @@ environment from the triggering checkout, retaining them as Nix roots for that j
 Candidate changes do not silently change the code executing the job.
 
 Before installing Nix, a Python step reclaims unused preinstalled image tools.
-On macOS it retains the selected Xcode and removes other Xcodes and mobile
-simulator runtimes. Android, .NET and unused Linux compiler libraries are removed
+On macOS it retains the selected Xcode and removes other Xcodes.
+Android, .NET and unused Linux compiler libraries are removed
 where present. The step refuses local or self-hosted execution and logs available
 space before and after cleanup. This matters because the measured Darwin root
 closure alone occupies about 73.5 GB; runner capacity remains an acceptance check.
@@ -93,9 +95,10 @@ runner capacity; tests of workflow wiring do not establish either.
 ## Failure and retry
 
 Each native job uploads its candidate or validation report, structured result and
-stderr diagnostics, including on failure. Preparation also retains the updater's
-redacted run logs under `runs/`, including source error details suppressed by JSON
-console output. Artifacts expire after 30 days. An
+stderr diagnostics, including on failure. Preparation streams phase and target
+progress to stderr while keeping stdout as one machine-readable JSON result. It
+also retains the updater's redacted run logs under `runs/` for detailed source
+errors. Artifacts expire after 30 days. An
 interrupted job may need to repeat work; completed upstream artifacts can be reused
 by Actions reruns. A failed preparation cannot advance to another platform, and a
 missing or mismatched validation report cannot authorize publication.
