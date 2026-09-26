@@ -6,13 +6,18 @@ standard-library only. Invoke the file directly; Actions owns the job graph.
 
 import json
 import os
+import queue
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
+from typing import TextIO
 
 _BINARY_CACHE = "gkze"
 _STORE_INFO_VERSION = 2
+_HEARTBEAT_INTERVAL_SECONDS = 60
 _APPLICATIONS = Path("/Applications")
 _UNUSED_IMAGE_PATHS = {
     "darwin": (Path("/usr/local/share/dotnet"),),
@@ -172,6 +177,72 @@ def _failure_summary(result_path: Path) -> str | None:
     return f"Updater failed for: {sources}. Inspect the retained result and run-log artifacts."
 
 
+def _write_diagnostic(log: TextIO, message: str) -> None:
+    """Retain a CI diagnostic and mirror it to the live Actions log."""
+    line = message + "\n"
+    log.write(line)
+    log.flush()
+    sys.stderr.write(line)
+    sys.stderr.flush()
+
+
+def _drain_stderr(stderr: TextIO, diagnostics: queue.SimpleQueue[str | None]) -> None:
+    """Transfer child diagnostics without making liveness depend on its output."""
+    try:
+        for diagnostic in stderr:
+            diagnostics.put(diagnostic)
+    finally:
+        diagnostics.put(None)
+
+
+def _wait_for_diagnostics(
+    process: subprocess.Popen[str],
+    log: TextIO,
+    stage: str,
+    artifacts: Path,
+    command: list[str],
+) -> int:
+    """Forward output promptly and prove liveness when the child is quiet."""
+    if process.stderr is None:  # pragma: no cover -- PIPE above guarantees stderr.
+        msg = "Cannot collect updater diagnostics"
+        raise RuntimeError(msg)
+    diagnostics: queue.SimpleQueue[str | None] = queue.SimpleQueue()
+    started = time.monotonic()
+    _write_diagnostic(
+        log,
+        "Starting updater "
+        f"stage={stage} pid={process.pid} command={command!r} "
+        f"artifacts={artifacts} run_logs={artifacts / 'runs'}",
+    )
+    reader = threading.Thread(
+        target=_drain_stderr,
+        args=(process.stderr, diagnostics),
+        name="nixcfg-update-stderr",
+    )
+    reader.start()
+    while True:
+        try:
+            diagnostic = diagnostics.get(timeout=_HEARTBEAT_INTERVAL_SECONDS)
+        except queue.Empty:
+            if process.poll() is None:
+                _write_diagnostic(
+                    log,
+                    f"Updater still running stage={stage} pid={process.pid} "
+                    f"elapsed={time.monotonic() - started:.0f}s artifacts={artifacts} "
+                    f"run_logs={artifacts / 'runs'}",
+                )
+            continue
+        if diagnostic is None:
+            break
+        log.write(diagnostic)
+        log.flush()
+        sys.stderr.write(diagnostic)
+        sys.stderr.flush()
+    returncode = process.wait()
+    reader.join()
+    return returncode
+
+
 def native(stage: str) -> int:
     """Prepare or validate with immutable inputs and retained failure evidence."""
     artifacts = _temp() / "update-artifacts"
@@ -221,15 +292,7 @@ def native(stage: str) -> int:
             },
         ) as process,
     ):
-        if process.stderr is None:  # pragma: no cover -- PIPE above guarantees stderr.
-            msg = "Cannot collect updater diagnostics"
-            raise RuntimeError(msg)
-        for diagnostic in process.stderr:
-            log.write(diagnostic)
-            log.flush()
-            sys.stderr.write(diagnostic)
-            sys.stderr.flush()
-        returncode = process.wait()
+        returncode = _wait_for_diagnostics(process, log, stage, artifacts, args)
     if summary := _failure_summary(artifacts / "result.json"):
         sys.stderr.write(summary + "\n")
     if stage == "prepare" and returncode == 0:

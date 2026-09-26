@@ -54,8 +54,8 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "    (logs / 'output.log').write_text('source failure detail\\n')\n"
         "print(json.dumps({'success': int(os.environ.get('TEST_EXIT', '0')) == 0}))\n"
         "print('diagnostic evidence', file=sys.stderr)\n"
-        "if os.environ.get('TEST_SLEEP_AFTER_DIAGNOSTIC') == '1':\n"
-        "    time.sleep(1)\n"
+        "if seconds := os.environ.get('TEST_QUIET_SLEEP_SECONDS'):\n"
+        "    time.sleep(float(seconds))\n"
         "sys.exit(int(os.environ.get('TEST_EXIT', '0')))\n"
     )
     boundary.chmod(0o755)
@@ -112,7 +112,9 @@ def test_native_job_keeps_evidence_and_propagates_failure(
     assert json.loads((artifacts / "result.json").read_bytes()) == {
         "success": exit_code == 0
     }
-    assert (artifacts / "stderr.log").read_text() == "diagnostic evidence\n"
+    stderr_log = (artifacts / "stderr.log").read_text()
+    assert "Starting updater stage=" + stage in stderr_log
+    assert stderr_log.endswith("diagnostic evidence\n")
     assert "diagnostic evidence\n" in result.stderr
     assert (artifacts / "runs/test-run/output.log").read_text() == (
         "source failure detail\n"
@@ -131,17 +133,36 @@ def test_native_job_forwards_diagnostics_before_the_updater_exits(native_job) ->
     process = subprocess.Popen(  # noqa: S603 -- tests the Actions entrypoint process boundary.
         [sys.executable, str(SCRIPT)],
         cwd=checkout,
-        env=env | {"TEST_SLEEP_AFTER_DIAGNOSTIC": "1"},
+        env=env | {"TEST_QUIET_SLEEP_SECONDS": "1"},
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
     assert process.stderr is not None
+    assert "Starting updater stage=prepare" in process.stderr.readline()
     assert process.stderr.readline() == "diagnostic evidence\n"
     stdout, stderr = process.communicate()
     assert process.returncode == 0, stdout + stderr
     artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
-    assert (artifacts / "stderr.log").read_text() == "diagnostic evidence\n"
+    assert "diagnostic evidence\n" in (artifacts / "stderr.log").read_text()
+
+
+def test_native_job_heartbeats_while_the_updater_is_quiet(
+    native_job, monkeypatch, capsys
+) -> None:
+    env, checkout = native_job
+    monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    monkeypatch.chdir(checkout)
+    for key, value in (env | {"TEST_QUIET_SLEEP_SECONDS": "0.05"}).items():
+        monkeypatch.setenv(key, value)
+    assert jobs.native("prepare") == 0
+    captured = capsys.readouterr()
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    stderr_log = (artifacts / "stderr.log").read_text()
+    assert "Starting updater stage=prepare pid=" in captured.err
+    assert "Updater still running stage=prepare pid=" in captured.err
+    assert "Updater still running stage=prepare pid=" in stderr_log
+    assert json.loads((artifacts / "result.json").read_bytes()) == {"success": True}
 
 
 def test_failure_summary_names_failed_sources(tmp_path: Path) -> None:
