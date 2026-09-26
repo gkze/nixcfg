@@ -121,12 +121,22 @@ assert lib.assertMsg (unsupportedSystems == [ ]) (
   forSystem =
     system:
     let
+      # Flakelight may instantiate checks for every configured system while
+      # evaluating an unrelated output (e.g. lib.rootClosureManifest) on a
+      # Linux runner. Creating linkFarm entries forces path = root.closure via
+      # derivationStrict, which realizes Darwin configs and fails with
+      # aarch64-darwin platform mismatch. Only force closures when the check is
+      # being realized for the evaluating system.
+      currentSystem = builtins.currentSystem or null;
       systemRoots = builtins.filter (root: root.system == system) roots;
     in
-    validateClosures systemRoots (
-      map (root: {
-        name = "${root.kind}-${root.name}";
-        path = root.closure;
-      }) systemRoots
-    );
+    if currentSystem != null && currentSystem != system then
+      [ ]
+    else
+      validateClosures systemRoots (
+        map (root: {
+          name = "${root.kind}-${root.name}";
+          path = root.closure;
+        }) systemRoots
+      );
 }
