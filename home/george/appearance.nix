@@ -1,5 +1,6 @@
 {
   config,
+  inputs,
   lib,
   pkgs,
   ...
@@ -7,6 +8,18 @@
 let
   state = "${config.xdg.stateHome}/nixcfg/appearance";
   toml = pkgs.formats.toml { };
+  # Read Starship palettes from an evaluator-visible input, not catppuccin/nix's
+  # port derivation: importing a derivation output would force a native build
+  # at evaluation time and break cross-platform evaluation of Darwin roots.
+  starshipThemes =
+    let
+      inputSource = inputs.catppuccin-starship-src;
+      moduleSource = (lib.importJSON "${inputs.catppuccin}/pkgs/sources.json").starship;
+    in
+    assert lib.assertMsg (
+      inputSource.rev == moduleSource.rev && inputSource.narHash == moduleSource.hash
+    ) "catppuccin-starship-src is out of sync with catppuccin/nix's Starship source.";
+    "${inputSource}/themes";
   templates = lib.mapAttrs (
     mode: appearance:
     pkgs.linkFarm "appearance-${mode}" [
@@ -33,8 +46,7 @@ let
           let
             paletteName = "catppuccin_${appearance.variant}";
             palette =
-              (lib.importTOML "${config.catppuccin.sources.starship}/${appearance.variant}.toml")
-              .palettes.${paletteName};
+              (lib.importTOML "${starshipThemes}/${appearance.variant}.toml").palettes.${paletteName};
             # Preserve Starship's default styles, which use ANSI color names.
             colors = palette // {
               purple = palette.mauve;

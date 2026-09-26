@@ -1097,15 +1097,21 @@ def validate_root_closures(
         if include_dependencies:
             # A Darwin root may contain a Linux VM image. Build the native
             # boundary of every root's graph, even on a runner with no roots.
+            # Foreign roots must evaluate without import-from-derivation: a
+            # Linux runner cannot realize a Darwin derivation during eval.
+            graph_systems = sorted({root.system for root in manifest.roots})
             args = [
                 "nix",
                 "derivation",
                 "show",
                 "--recursive",
                 "--no-update-lock-file",
+                "--option",
+                "allow-import-from-derivation",
+                "false",
                 *(
                     f"path:{snapshot_root}#checks.{system}.root-closures"
-                    for system in sorted({root.system for root in manifest.roots})
+                    for system in graph_systems
                 ),
             ]
             try:
@@ -1124,7 +1130,10 @@ def validate_root_closures(
                 return (
                     DerivationValidationFailure(
                         source=_ROOT_CLOSURE_VALIDATION_SOURCE,
-                        installable=_ROOT_CLOSURE_MANIFEST_INSTALLABLE,
+                        installable=" ".join(
+                            f"path:.#checks.{system}.root-closures"
+                            for system in graph_systems
+                        ),
                         message=str(exc),
                     ),
                 )

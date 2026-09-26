@@ -18,7 +18,10 @@ signed commit and a pull request; the workflow does not apply a system configura
    Nix's recursive derivation graph supplies native dependencies of foreign roots,
    including the Linux Rosetta builder image embedded in the Darwin configurations.
    These exact outputs are built natively and handed off through the binary cache;
-   no VM configuration or dependency list is duplicated in CI.
+   no VM configuration or dependency list is duplicated in CI. That graph is
+   evaluated with import-from-derivation disabled: a Linux runner cannot realize a
+   Darwin derivation during evaluation, so Darwin roots must read theme files and
+   other evaluation inputs from flake inputs rather than from built port outputs.
    Hosted ARM runners do not expose KVM. The builder-image overlay permits Nix's
    existing QEMU TCG fallback by removing the image builder's KVM scheduling
    requirement. The full image, bootloader installation and guest configuration
@@ -27,7 +30,8 @@ signed commit and a pull request; the workflow does not apply a system configura
 3. Certify that every required platform reported success for that exact Git tree.
    Apply the certified patch, run repository hooks and the full Python/coverage
    gates, and check that validation did not alter the candidate. Only then create
-   the signed update commit and PR.
+   the signed update commit and PR. A PR against the default branch is queued for
+   squash auto-merge; runs dispatched from other branches only open the PR.
 
 The system inventory comes from `lib/system-policy.json`. `nixcfg ci update matrix`
 projects it to hosted runner labels. A conformance test keeps preparation and

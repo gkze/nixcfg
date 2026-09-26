@@ -3629,6 +3629,12 @@ def test_george_config_manages_mutable_gui_apps_via_scoped_applications() -> Non
 {
   enable = true;
   package = null;
+  profiles.default.userSettings = {
+    "window.autoDetectColorScheme" = true;
+    "workbench.preferredLightColorTheme" = config.theme.appearances.light.displayNameAccented;
+    "workbench.preferredDarkColorTheme" = config.theme.appearances.dark.displayNameAccented;
+    "catppuccin.syncWithIconPack" = true;
+  };
 }
 // lib.optionalAttrs (options.programs.vscode ? nameShort) {
   pname = "vscode-insiders";
@@ -4115,7 +4121,6 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
           (appPath "slack" "Slack.app")
           (appPath "onepassword" "1Password.app")
           (appPath "zen-twilight" "Twilight.app")
-          (appPath "thorium" "Thorium.app")
           (appPath "google-chrome" "Google Chrome.app")
           (appPath "claude" "Claude.app")
           (appPath "codex" "ChatGPT.app")
