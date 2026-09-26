@@ -137,7 +137,7 @@ jobs:
       - publish
     if: |-
       always() && !cancelled() && contains(needs.*.result, 'failure') &&
-      (github.event_name == 'schedule' || inputs.repair)
+      (github.event_name == 'schedule' || inputs.repair != false)
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:

@@ -148,7 +148,7 @@ def validate_library_symlink(path: Path, library_root: Path) -> None:
     try:
         resolved = (path.parent / target).resolve(strict=True)
         resolved.relative_to(library_root.resolve(strict=True))
-    except (OSError, ValueError):
+    except OSError, ValueError:
         fail(f"unsafe library symlink: {path.name} -> {target}")
     if not resolved.is_file() or not is_dylib_name(resolved.name):
         fail(f"unsafe library symlink: {path.name} -> {target}")
@@ -324,7 +324,7 @@ def resolve_dependency(
     try:
         resolved = candidate.resolve(strict=True)
         resolved.relative_to(library_root.resolve(strict=True))
-    except (OSError, ValueError):
+    except OSError, ValueError:
         fail(f"unresolved local dependency for {library.name}: {dependency}")
     canonical = physical_by_path.get(resolved)
     if (

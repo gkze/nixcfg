@@ -402,8 +402,11 @@ def publish() -> None:
         f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
     )
     body.write_text(
-        "Prepared and validated against one Git tree on three native platforms.\n\n"
-        f"Evidence: {run_url}\n"
+        "## Summary\n"
+        "- Prepared and validated one update candidate on three native platforms.\n"
+        f"- Evidence: {run_url}\n\n"
+        "## Test plan\n"
+        "- [x] Native Update workflow prepare/validate/certify stages passed for this tree.\n"
     )
     _run(
         "gh",

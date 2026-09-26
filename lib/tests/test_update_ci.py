@@ -374,6 +374,7 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     )
     assert set(workflow["on"]) == {"workflow_dispatch", "schedule"}
     assert workflow["permissions"] == {"contents": "read"}
+    assert workflow["on"]["workflow_dispatch"]["inputs"]["repair"]["default"] == "true"
     jobs = workflow["jobs"]
     preparation = [
         (name, job) for name, job in jobs.items() if name.startswith("prepare-")
@@ -407,6 +408,7 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         "contents": "read",
         "copilot-requests": "write",
     }
+    assert "inputs.repair != false" in jobs["repair"]["if"]
     agent = next(
         step
         for step in jobs["repair"]["steps"]
@@ -713,10 +715,10 @@ def test_publication_uses_signed_commit_and_bounded_repair(
     if operation == "publish":
         assert calls[-1][:3] == ("gh", "pr", "create")
         assert calls[-1][calls[-1].index("--base") + 1] == "main"
-        assert (
-            "https://github.com/example/repo/actions/runs/123"
-            in (tmp_path / "update-body.md").read_text()
-        )
+        body = (tmp_path / "update-body.md").read_text()
+        assert "## Summary" in body
+        assert "## Test plan" in body
+        assert "https://github.com/example/repo/actions/runs/123" in body
     else:
         assert calls[-1][:3] == ("gh", "workflow", "run")
         assert "repair=false" in calls[-1]

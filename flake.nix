@@ -585,12 +585,6 @@
 
           outputs.lib.rootClosureManifest = rootClosureData.manifest;
 
-          outputs.checks = lib.genAttrs rootClosureData.rootSystems (system: {
-            root-closures = baseOutputs.legacyPackages.${system}.linkFarm "nixcfg-root-closures" (
-              rootClosureData.forSystem system
-            );
-          });
-
           nixpkgs.config = nixpkgsConfig;
 
           apps.nixcfg =
@@ -839,6 +833,12 @@
             );
 
           checks = {
+            "root-closures" =
+              { pkgs, ... }:
+              pkgs.linkFarm "nixcfg-root-closures" (
+                rootClosureData.forSystem pkgs.stdenv.hostPlatform.system
+              );
+
             "format-repo" = lib.mkForce (
               { lib, outputs', ... }:
               ''

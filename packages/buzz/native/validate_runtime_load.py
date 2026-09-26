@@ -57,7 +57,7 @@ def validate(root_path: Path, skippy_abi: str) -> None:
         try:
             resolved = candidate.resolve(strict=True)
             resolved.relative_to(root)
-        except (OSError, ValueError):
+        except OSError, ValueError:
             fail(f"runtime library escapes the bundle: {relative}")
         if not resolved.is_file():
             fail(f"runtime library is not a file: {relative}")
