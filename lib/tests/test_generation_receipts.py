@@ -2,6 +2,7 @@
 
 import asyncio
 import dataclasses
+import os
 import subprocess
 from pathlib import Path
 
@@ -135,6 +136,37 @@ def test_generation_identity_tracks_options_config_and_environment(
     assert configured != before
     monkeypatch.setenv("CARGO_BUILD_TARGET", "different-platform")
     assert crate2nix._generation_identity(generation_target, source) != configured
+
+
+def test_generation_identity_normalizes_nix_user_conf_files_by_content(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    generation_target: crate2nix.Crate2NixTarget,
+) -> None:
+    """Runner-local nix config paths should only matter through their file contents."""
+    source = Path("/nix/store/source")
+    first = tmp_path / "runner-a" / "nix.conf"
+    second = tmp_path / "runner-b" / "nix.conf"
+    for path in (first, second):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("substituters = https://cache.nixos.org\n", encoding="utf-8")
+    monkeypatch.setenv("NIX_USER_CONF_FILES", f"{first}{os.pathsep}{second}")
+    baseline = crate2nix._generation_identity(generation_target, source)
+    assert baseline is not None
+    moved_first = tmp_path / "runner-c" / "nix.conf"
+    moved_second = tmp_path / "runner-d" / "nix.conf"
+    for path in (moved_first, moved_second):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("substituters = https://cache.nixos.org\n", encoding="utf-8")
+    monkeypatch.setenv(
+        "NIX_USER_CONF_FILES", f"{moved_first}{os.pathsep}{moved_second}"
+    )
+    assert crate2nix._generation_identity(generation_target, source) == baseline
+    moved_second.write_text(
+        "substituters = https://cache.nixos.org https://gkze.cachix.org\n",
+        encoding="utf-8",
+    )
+    assert crate2nix._generation_identity(generation_target, source) != baseline
 
 
 def test_generation_identity_fails_closed_for_uninspectable_inputs(

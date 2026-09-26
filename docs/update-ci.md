@@ -53,9 +53,9 @@ Validation and publication do not download these generator-only caches. Cargo
 credentials, configuration, DBOS state and mutable workspaces are excluded.
 Restoring this cache proves download availability, not skipped generation. Receipts
 contain output digests rather than generated files, so the checkout must already
-contain matching outputs. The current receipt identity also includes the full
-lockfile and environment, including temporary Nix configuration paths; fresh
-runners can therefore regenerate even after restoring receipts. Cargo downloads
+contain matching outputs. The receipt identity still includes the full lockfile
+and environment, but normalizes `NIX_USER_CONF_FILES` by config file contents so
+temporary runner-local paths alone do not force regeneration. Cargo downloads
 remain reusable independently.
 
 Copilot Cloud uses `.github/workflows/copilot-setup-steps.yml` on the default

@@ -1509,12 +1509,25 @@ def _generation_identity(target: Crate2NixTarget, patched_src: Path) -> str | No
         # Uninspectable inputs cannot authorize reuse. Normal generation reports
         # any required-input error through its usual diagnostic boundary.
         return None
-    environment = {
-        name: value
-        for name, value in os.environ.items()
-        if name.startswith(("CARGO_", "RUST", "NIX_"))
-        or name in {"PATH", "SSL_CERT_FILE", "NIX_PATH"}
-    }
+    environment = {}
+    for name, value in os.environ.items():
+        if not (
+            name.startswith(("CARGO_", "RUST", "NIX_"))
+            or name in {"PATH", "SSL_CERT_FILE", "NIX_PATH"}
+        ):
+            continue
+        if name == "NIX_USER_CONF_FILES":
+            environment[name] = [
+                (
+                    {"digest": generation_receipts.content_digest(path.read_bytes())}
+                    if path.is_file()
+                    else {"missing": entry}
+                )
+                for entry in value.split(os.pathsep)
+                for path in [Path(entry)]
+            ]
+            continue
+        environment[name] = value
     return generation_receipts.identity_digest({
         "source": str(patched_src),
         "target": {
