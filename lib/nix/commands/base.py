@@ -51,6 +51,12 @@ _HASH_VALUE = (
 )
 _RE_GOT = re.compile(r"got:\s*(" + _HASH_VALUE + r")")
 _RE_SPECIFIED = re.compile(r"specified:\s*(" + _HASH_VALUE + r")")
+# prefetch-yarn-deps / Node yarn FOD probes:
+#   Error: hash mismatch, expected <hex>, got <hex> for <url>
+_RE_EXPECTED_GOT = re.compile(
+    r"hash mismatch,\s*expected\s+(" + _HASH_VALUE + r"),\s*got\s+(" + _HASH_VALUE + r")",
+    re.IGNORECASE,
+)
 
 # --- Derivation path extraction ---
 # Matches both "hash mismatch in fixed-output derivation" and
@@ -211,27 +217,37 @@ class HashMismatchError(NixCommandError):
         - ``derivation-check.cc``:  FOD hash mismatch (SRI format)
         - ``local-store.cc``:       NAR import hash mismatch (Nix32 or hex)
         - ``local-store.cc``:       CA hash mismatch importing path (Nix32 or hex)
+        - ``prefetch-yarn-deps``:   ``hash mismatch, expected …, got …``
 
         """
         got_matches = list(_RE_GOT.finditer(output))
-        if not got_matches:
-            return None
-        got = got_matches[-1]
-        block_start = got_matches[-2].end() if len(got_matches) > 1 else 0
-        paths = list(_RE_DRV_PATH.finditer(output, block_start, got.start()))
-        drv_path = paths[-1].group(1) if paths else None
-        if paths:
-            block_start = paths[-1].end()
-        specified_matches = list(
-            _RE_SPECIFIED.finditer(output, block_start, got.start())
-        )
-        specified = specified_matches[-1].group(1) if specified_matches else None
+        if got_matches:
+            got = got_matches[-1]
+            block_start = got_matches[-2].end() if len(got_matches) > 1 else 0
+            paths = list(_RE_DRV_PATH.finditer(output, block_start, got.start()))
+            drv_path = paths[-1].group(1) if paths else None
+            if paths:
+                block_start = paths[-1].end()
+            specified_matches = list(
+                _RE_SPECIFIED.finditer(output, block_start, got.start())
+            )
+            specified = specified_matches[-1].group(1) if specified_matches else None
+            return cls(
+                result,
+                got_hash=got.group(1),
+                specified=specified,
+                drv_path=drv_path,
+            )
 
+        yarn_matches = list(_RE_EXPECTED_GOT.finditer(output))
+        if not yarn_matches:
+            return None
+        yarn = yarn_matches[-1]
         return cls(
             result,
-            got_hash=got.group(1),
-            specified=specified,
-            drv_path=drv_path,
+            got_hash=yarn.group(2),
+            specified=yarn.group(1),
+            drv_path=None,
         )
 
     @classmethod

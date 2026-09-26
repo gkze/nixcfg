@@ -161,7 +161,7 @@ def _parse_retry_after(value: str | None, *, now: datetime) -> float | None:
         return float(min(int(normalized), max_seconds))
     try:
         retry_at = parsedate_to_datetime(candidate)
-    except TypeError, ValueError, OverflowError:
+    except (TypeError, ValueError, OverflowError):
         return None
     if retry_at.tzinfo is None:
         return None

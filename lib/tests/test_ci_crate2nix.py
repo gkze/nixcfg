@@ -1159,15 +1159,23 @@ def test_codex_crate2nix_companion_forwards_flake_context() -> None:
     )
 
 
-def test_zed_crate2nix_companion_reuses_the_package_source() -> None:
-    """The source wrapper must inherit every dependency from the real package."""
+def test_zed_crate2nix_companion_builds_source_only_workspace() -> None:
+    """The source wrapper must call the package with crate2nixSourceOnly.
+
+    Depending on zed-editor-nightly.patchedSrc fails under materialization with
+    sourceOverrides: the injected package may not expose passthru.patchedSrc.
+    Match codex/gitbutler and return patchedSrc directly via crate2nixSourceOnly.
+    """
     assert_nix_ast_equal(
         (
             crate2nix.REPO_ROOT / "packages/zed-editor-nightly/crate2nix-src.nix"
         ).read_text(encoding="utf-8"),
         """
-        { zed-editor-nightly, ... }:
-        zed-editor-nightly.patchedSrc
+        { callPackage, inputs, ... }:
+        callPackage ./default.nix {
+          inherit inputs;
+          crate2nixSourceOnly = true;
+        }
         """,
     )
 

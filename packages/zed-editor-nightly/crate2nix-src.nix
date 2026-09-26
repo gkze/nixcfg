@@ -1,2 +1,9 @@
-{ zed-editor-nightly, ... }:
-zed-editor-nightly.patchedSrc
+{
+  callPackage,
+  inputs,
+  ...
+}:
+callPackage ./default.nix {
+  inherit inputs;
+  crate2nixSourceOnly = true;
+}

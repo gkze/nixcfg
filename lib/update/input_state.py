@@ -192,7 +192,7 @@ def flake_input_state(
                 for name, node in nodes.items()
             },
         }
-    except KeyError, ValueError:
+    except (KeyError, ValueError):
         return declarations, lock_contents
     return (
         json.dumps(input_declarations, sort_keys=True).encode(),

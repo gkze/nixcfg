@@ -94,10 +94,24 @@ assert lazyConfigurationsInventory.rootSystems == [ "aarch64-darwin" ];
 assert !(builtins.tryEval lazyConfigurationsInventory.manifest).success;
 assert !(builtins.tryEval missingDeclaredRootInventory.manifest).success;
 assert !(builtins.tryEval (missingDeclaredRootInventory.forSystem "aarch64-darwin")).success;
-assert !(builtins.tryEval lazyInventory.manifest).success;
+assert
+  lazyInventory.manifest.roots == [
+    {
+      kind = "darwin";
+      name = "workstation";
+      system = "aarch64-darwin";
+    }
+  ];
 assert !(builtins.tryEval (lazyInventory.forSystem "aarch64-darwin")).success;
 assert mismatchedInventory.rootSystems == [ "aarch64-darwin" ];
-assert !(builtins.tryEval mismatchedInventory.manifest).success;
+assert
+  mismatchedInventory.manifest.roots == [
+    {
+      kind = "darwin";
+      name = "workstation";
+      system = "aarch64-darwin";
+    }
+  ];
 assert !(builtins.tryEval (mismatchedInventory.forSystem "aarch64-darwin")).success;
 assert !(builtins.tryEval (mismatchedInventory.forSystem "x86_64-linux")).success;
 assert

@@ -403,7 +403,7 @@ def _update_library_matches_checkout(
     try:
         repo_policy = _runtime_source_policy(checkout_root)
         runtime_policy = _runtime_source_policy(runtime_root)
-    except KeyError, OSError, RuntimeError, TypeError, tomllib.TOMLDecodeError:
+    except (KeyError, OSError, RuntimeError, TypeError, tomllib.TOMLDecodeError):
         return False
     if repo_policy != runtime_policy:
         return False
@@ -411,7 +411,7 @@ def _update_library_matches_checkout(
     try:
         repo_files = _runtime_source_relpaths(checkout_root, repo_policy)
         runtime_files = _runtime_source_relpaths(runtime_root, runtime_policy)
-    except OSError, RuntimeError:
+    except (OSError, RuntimeError):
         return False
     try:
         return repo_files == runtime_files and all(
@@ -1571,7 +1571,7 @@ def _rollback_failed_input_locks(
         baseline = json.loads(baseline_lock)
         lock_path = workspace.root / "flake.lock"
         current = json.loads(lock_path.read_text(encoding="utf-8"))
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         return ()
     baseline_nodes = baseline.get("nodes")
     current_nodes = current.get("nodes")
