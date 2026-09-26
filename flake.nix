@@ -585,11 +585,10 @@
 
           outputs.lib.rootClosureManifest = rootClosureData.manifest;
 
-          outputs.checks = lib.genAttrs rootClosureData.rootSystems (system: {
-            root-closures = baseOutputs.legacyPackages.${system}.linkFarm "nixcfg-root-closures" (
-              rootClosureData.forSystem system
-            );
-          });
+          # Root-closure checks must live in per-system `checks` below. A top-level
+          # outputs.checks genAttrs over every root system instantiates each
+          # linkFarm during flake eval, which forces Darwin closures on Linux
+          # runners (platform mismatch on aarch64-darwin sources).
 
           nixpkgs.config = nixpkgsConfig;
 
@@ -839,6 +838,14 @@
             );
 
           checks = {
+            # Realized only for the current system — keep foreign-system
+            # closures out of Linux validate's nix eval of the manifest.
+            "root-closures" =
+              { pkgs, ... }:
+              pkgs.linkFarm "nixcfg-root-closures" (
+                rootClosureData.forSystem pkgs.stdenv.hostPlatform.system
+              );
+
             "format-repo" = lib.mkForce (
               { lib, outputs', ... }:
               ''
