@@ -1048,7 +1048,11 @@ def test_run_sources_phase_skips_companions_after_failed_parent(
 
     events = _run(_run_case())
 
-    assert [event.message for event in events] == ["Prerequisite update failed: parent"]
+    assert [
+        (event.source, event.message)
+        for event in events
+        if event.kind is UpdateEventKind.ERROR
+    ] == [("child", "Prerequisite update failed: parent")]
 
 
 def test_run_sources_phase_skips_aggregate_after_failed_consumer(
@@ -1104,9 +1108,11 @@ def test_run_sources_phase_skips_aggregate_after_failed_consumer(
         return events
 
     events = _run(_run_case())
-    assert [event.message for event in events] == [
-        "Prerequisite update failed: consumer"
-    ]
+    assert [
+        (event.source, event.message)
+        for event in events
+        if event.kind is UpdateEventKind.ERROR
+    ] == [("aggregate", "Prerequisite update failed: consumer")]
 
 
 def test_run_sources_phase_feeds_same_run_consumer_result_to_aggregate(
@@ -1595,6 +1601,68 @@ def test_ready_companion_does_not_wait_for_unrelated_source(
             )
         assert result.errors == 0
         assert order == ["parent", "child", "slow"]
+
+    asyncio.run(run())
+
+
+def test_source_waits_replace_completed_refresh_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Blocked sources report their actual wait before a worker can admit them."""
+
+    class Parent:
+        pass
+
+    class Child:
+        companion_of = "parent"
+
+    async def run() -> None:
+        queue: asyncio.Queue[UpdateEvent | None] = asyncio.Queue()
+        release = asyncio.Event()
+        parent_started = asyncio.Event()
+        started: list[str] = []
+
+        async def update(name: str, *, context: SourceTaskContext) -> SourceTaskResult:
+            _ = context
+            started.append(name)
+            if name == "parent":
+                parent_started.set()
+            await release.wait()
+            return SourceTaskResult(completed=True)
+
+        monkeypatch.setattr(
+            "lib.update.source_runner.UPDATERS",
+            {"parent": Parent, "child": Child, "other": Parent},
+        )
+        monkeypatch.setattr("lib.update.source_runner.update_source_task", update)
+        async with asyncio.timeout(1), asyncio.TaskGroup() as group:
+            task = group.create_task(
+                run_sources_phase(
+                    SourcesPhaseContext(
+                        source_names=["parent", "child", "other"],
+                        sources=SourcesFile(entries={}),
+                        queue=queue,
+                        update_input=False,
+                        native_only=False,
+                        config=resolve_config(max_source_tasks=1),
+                    )
+                )
+            )
+            waiting: dict[str, str | None] = {}
+            while len(waiting) < 3:
+                event = await queue.get()
+                assert event is not None
+                waiting[event.source] = event.message
+            assert waiting == {
+                "parent": "Waiting for source worker",
+                "child": "Waiting for prerequisites: parent",
+                "other": "Waiting for source worker",
+            }
+            await parent_started.wait()
+            assert started == ["parent"]
+            release.set()
+        assert task.result().errors == 0
+        assert set(started) == {"parent", "child", "other"}
 
     asyncio.run(run())
 

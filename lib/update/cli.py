@@ -929,6 +929,7 @@ class _RunOutcome:
     promotion_state: update_persistence.UpdatePromotionState | None = None
     plan_error: _RunPlanError | None = None
     workspace_error: str | None = None
+    validation_error: str | None = None
     # Candidates withheld because a coupled target failed, with the reason.
     dropped: dict[str, str] = field(default_factory=dict)
     written_paths: tuple[Path, ...] = ()
@@ -1366,6 +1367,8 @@ def _emit_run_outcome(
             })
             error_key = "planError" if workspace_error is not None else "error"
             payload[error_key] = redact_urls(plan_error.message)
+        if outcome.validation_error is not None:
+            payload["validationIncomplete"] = redact_urls(outcome.validation_error)
         if workspace_error is not None:
             payload["error"] = redact_urls(workspace_error)
         sys.stdout.write(f"{json.dumps(payload)}\n")
@@ -1386,6 +1389,8 @@ def _emit_run_outcome(
         out.print_error(
             f"Available: {', '.join(plan_error.available_targets)}",
         )
+    if outcome.validation_error is not None:
+        out.print_error(outcome.validation_error)
     if workspace_error is not None:
         out.print_error(f"Error: {workspace_error}")
     if plan_error is not None:
@@ -2074,6 +2079,12 @@ async def _run_updates(
                 allowed_paths=(*restored_paths, *allowed_paths),
                 preparation=preparation,
             )
+    except update_derivation_validation.ValidationIncompleteError as error:
+        outcome.had_errors = True
+        outcome.validation_error = redact_urls(str(error))
+        outcome.summary.accumulate({"validation": "error"})
+        if monitor is not None:
+            monitor.validation_output(None, outcome.validation_error)
     except update_persistence.UpdateWorkspaceError as error:
         _record_workspace_failure(outcome, error)
     finally:
@@ -2084,6 +2095,11 @@ async def _run_updates(
                     **outcome.summary.to_dict(),
                     "promoted": outcome.promoted,
                     "withheld": dict(outcome.dropped),
+                    **(
+                        {"validationIncomplete": outcome.validation_error}
+                        if outcome.validation_error is not None
+                        else {}
+                    ),
                 }
             )
 

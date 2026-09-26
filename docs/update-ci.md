@@ -51,6 +51,22 @@ and can restore its latest prior cache. Receipts still require exact generator
 input and output identities; restoring a cache does not authorize stale output.
 Validation and publication do not download these generator-only caches. Cargo
 credentials, configuration, DBOS state and mutable workspaces are excluded.
+Restoring this cache proves download availability, not skipped generation. Receipts
+contain output digests rather than generated files, so the checkout must already
+contain matching outputs. The current receipt identity also includes the full
+lockfile and environment, including temporary Nix configuration paths; fresh
+runners can therefore regenerate even after restoring receipts. Cargo downloads
+remain reusable independently.
+
+Copilot Cloud uses `.github/workflows/copilot-setup-steps.yml` on the default
+branch to prepare the same Nix runtime, development shell and read-only binary
+caches before an agent starts. Setup verifies Python 3.14, the updater's imports,
+the packaged CLI and GitHub repository reads. Agent commands should run through
+`nix develop --command ...` (or the retained `NIXCFG_DEVSHELL` profile) so checks
+use the pinned tools. No upload credential is required for setup. Native platform
+builds still belong to the Update workflow. Setup's read token does not establish
+that the agent can dispatch workflows or sign and publish repair branches; those
+operations need separate verification with the agent's own GitHub permissions.
 
 The same updater implementation serves local and CI execution. Local `nixcfg update`
 uses DBOS/SQLite for recovery on the same filesystem and the existing filesystem
@@ -104,6 +120,34 @@ errors. Artifacts expire after 30 days. An
 interrupted job may need to repeat work; completed upstream artifacts can be reused
 by Actions reruns. A failed preparation cannot advance to another platform, and a
 missing or mismatched validation report cannot authorize publication.
+
+Validation distinguishes completed target failures from incomplete execution.
+Only completed failures can trigger batch subdivision and package withholding.
+A command timeout, signal termination, or OS error (including failure to launch
+Nix) aborts validation without blaming individual packages or restarting the batch
+in smaller groups.
+Parallel validation cancels sibling commands and reaps owned children before returning
+the original failure; pending groups do not start after the failure is observed.
+Local execution returns a run-level validation error with `validationIncomplete`
+diagnostics in JSON and retained run evidence, discards the candidate and exports
+no accepted patch. Native CI
+validation exits without issuing a report, so certification cannot proceed.
+The repair supervisor still permits its one bounded proposal/retry; an incomplete
+retry cannot reach quality acceptance or promotion.
+
+The local package timeout remains 40 minutes per command, including the whole
+batch; roots default to six hours. CI package validation has no subprocess timeout
+and remains bounded by the native job deadline. Completed Nix outputs remain
+reusable. Each started command attempt closes its progress state on failure,
+cancellation or retry. Timeout errors retain the last 16 KiB of each captured
+stream (or 16 Ki characters for runner-supplied text), with an omission marker
+when truncated. The partial first line is discarded before URL redaction so a
+truncated credential cannot escape detection. The shared owner sanitizes retained
+diagnostics and removes the original exception chain; observed output remains in
+the redacted run log.
+This policy belongs to the shared command owner, not package attribution. Nix's
+per-builder timeout/silence controls have different semantics and are not silently
+substituted for the existing command deadline.
 
 By default, a failed run collects job logs and artifacts for one Copilot CLI repair
 attempt. The agent works in an isolated checkout and may change packaging under

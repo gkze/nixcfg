@@ -592,6 +592,18 @@ def test_native_dependency_failure_never_issues_success(
                 )
         return result
 
+    if failure in {"os", "timeout"}:
+        with pytest.raises(validation.ValidationIncompleteError):
+            validation.validate_root_closures(
+                flake_root=tmp_path,
+                systems=("aarch64-linux",),
+                include_dependencies=True,
+                timeout=42,
+                run=fail,
+            )
+        assert not any(args[1] == "build" for args in calls)
+        return
+
     failures = validation.validate_root_closures(
         flake_root=tmp_path,
         systems=("aarch64-linux",),
@@ -831,13 +843,8 @@ def test_validate_root_closures_reports_manifest_process_failure(
         lambda _root: nullcontext(tmp_path),
     )
 
-    assert validation.validate_root_closures(run=_run) == (
-        DerivationValidationFailure(
-            source="root-closures",
-            installable="path:.#lib.rootClosureManifest",
-            message="nix unavailable",
-        ),
-    )
+    with pytest.raises(validation.ValidationIncompleteError, match="nix unavailable"):
+        validation.validate_root_closures(run=_run)
 
 
 def test_validate_derivations_applies_timeout_to_each_request() -> None:
@@ -1059,20 +1066,19 @@ def test_validate_derivations_reports_process_errors(
     error: OSError | subprocess.TimeoutExpired,
     expected: str,
 ) -> None:
-    """Convert process startup and timeout errors into target failures."""
+    """Incomplete execution cannot attribute a failure to a package."""
 
     def _run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         raise error
 
-    failures = validation.validate_derivations(
-        ["portable"],
-        updaters={"portable": _PortableUpdater},
-        run=_run,
-    )
-
-    assert len(failures) == 1
-    assert failures[0].source == "portable"
-    assert expected in failures[0].message
+    with pytest.raises(validation.ValidationIncompleteError, match=expected) as raised:
+        validation.validate_derivations(
+            ["portable"],
+            updaters={"portable": _PortableUpdater},
+            run=_run,
+        )
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
 
 
 def test_snapshot_evaluations_share_one_flake_output(tmp_path: Path) -> None:
@@ -1127,10 +1133,8 @@ def test_snapshot_evaluations_share_one_flake_output(tmp_path: Path) -> None:
     }
 
 
-@pytest.mark.parametrize("batch_failure", ["evaluation", "timeout", "os_error"])
 def test_failed_batch_rechecks_each_target_with_original_retry_policy(
     tmp_path: Path,
-    batch_failure: str,
 ) -> None:
     """A batch failure neither blames healthy peers nor loses per-target retries."""
     requests = [
@@ -1147,10 +1151,6 @@ def test_failed_batch_rechecks_each_target_with_original_retry_policy(
         attempts.append(args)
         assert kwargs["timeout"] == 7
         if "--apply" in args:
-            if batch_failure == "timeout":
-                raise subprocess.TimeoutExpired(args, 7)
-            if batch_failure == "os_error":
-                raise OSError("batch could not start")
             return subprocess.CompletedProcess(
                 args, 1, stdout="", stderr="batch failed"
             )
@@ -1216,26 +1216,47 @@ def test_snapshot_validation_preserves_mixed_modes_and_failure_order(
     assert [args[1] for args in calls].count("build") == 1
 
 
-def test_failed_build_batch_attributes_individual_timeouts(tmp_path: Path) -> None:
-    """A slow aggregate does not make a healthy build inherit another timeout."""
+@pytest.mark.parametrize("mode", ["eval", "build"])
+@pytest.mark.parametrize("size", [1, 3, 24])
+@pytest.mark.parametrize("failure", ["timeout", "launch", "signal"])
+def test_incomplete_validation_never_subdivides_or_blames_targets(
+    tmp_path, mode, size, failure
+) -> None:
+    """A large timeout and a singleton launch error both abort without retry."""
     requests = [
-        DerivationValidationRequest("a", ".#checks.system.a", mode="build"),
-        DerivationValidationRequest("b", ".#checks.system.b", mode="build"),
+        DerivationValidationRequest(
+            str(i),
+            f".#pkgs.system.target{i}" + (".drvPath" if mode == "eval" else ""),
+            mode=mode,
+        )
+        for i in range(size)
     ]
-    calls: list[list[str]] = []
+    calls = []
 
-    def _run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def run(args, **_kwargs):
         calls.append(args)
-        if len(calls) != 2:
-            raise subprocess.TimeoutExpired(args, 3)
-        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(
+                args, 3, output=b"build output", stderr="diagnostic"
+            )
+        if failure == "signal":
+            return subprocess.CompletedProcess(
+                args, -9, stdout="", stderr="error: unable to download: HTTP error 503"
+            )
+        raise OSError("Nix unavailable")
 
-    failures = validation.validate_derivation_requests(
-        requests, flake_root=tmp_path, timeout=3, run=_run
-    )
-    assert len(calls) == 3
-    assert [failure.source for failure in failures] == ["b"]
-    assert "timed out after 3 seconds" in failures[0].message
+    with pytest.raises(validation.ValidationIncompleteError) as raised:
+        validation.validate_derivation_requests(
+            requests,
+            flake_root=tmp_path,
+            timeout=3,
+            run=run,
+            sleep=lambda _: pytest.fail("incomplete validation must not retry"),
+        )
+    assert len(calls) == 1
+    if failure == "timeout":
+        assert "build output" in str(raised.value)
+        assert "diagnostic" in str(raised.value)
 
 
 @pytest.mark.parametrize("failed_index", [0, 25, None])
@@ -1390,3 +1411,31 @@ def test_native_builder_still_evaluates_every_declared_platform(monkeypatch) -> 
         ("eval", ".#pkgs.x86_64-darwin.example.drvPath"),
         ("eval", ".#pkgs.x86_64-linux.example.drvPath"),
     ]
+
+
+@pytest.mark.parametrize("mode", ["eval", "build"])
+def test_parallel_groups_continue_after_completed_target_failures(
+    tmp_path, mode
+) -> None:
+    """Completion-order scheduling replenishes work and preserves request ordering."""
+    requests = [
+        DerivationValidationRequest(str(i), f"github:owner/repo#target{i}", mode=mode)
+        for i in range(5)
+    ]
+    calls = []
+    lock = threading.Lock()
+
+    def run(args, **_kwargs):
+        with lock:
+            calls.append(args[-1])
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="invalid target")
+
+    failures = validation.validate_derivation_requests(
+        requests,
+        flake_root=tmp_path,
+        run=run,
+        max_eval_workers=2,
+        max_build_workers=2,
+    )
+    assert [failure.source for failure in failures] == [str(i) for i in range(5)]
+    assert sorted(calls) == [request.installable for request in requests]

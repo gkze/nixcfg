@@ -1,6 +1,8 @@
 """Portable candidate behavior through real Git workspaces and updater phases."""
 
 import json
+import subprocess
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -572,3 +574,64 @@ def test_unsupported_builder_and_early_preparation_failure_are_explicit(
     monkeypatch.setattr(pipeline.update_cli, "collect_run_outcome", fail)
     with pytest.raises(RuntimeError, match="before a candidate could be captured"):
         pipeline.prepare_candidate(())
+
+
+@pytest.mark.parametrize("phase", ["packages", "roots"])
+def test_incomplete_native_validation_cannot_issue_report(
+    prepared_run, monkeypatch, tmp_path, phase
+) -> None:
+    """The CI command fails before writing certification evidence on incompleteness."""
+    root, _, _state = prepared_run
+    tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
+    candidate = Candidate(
+        base_tree=tree,
+        tree=tree,
+        targets=(),
+        sources=(),
+        systems=pipeline.supported_systems(),
+        resolutions={},
+        prepared=True,
+        patch=b"",
+    )
+
+    def incomplete(*_args, **_kwargs):
+        def run(args, **_kwargs):
+            raise subprocess.TimeoutExpired(
+                args, 1, stderr="https://example.test/?token=synthetic-ci-secret"
+            )
+
+        return pipeline.validation._run_validation_command(
+            ["nix", "build", ".#demo"],
+            cwd=root,
+            timeout=1,
+            run=run,
+            sleep=lambda _: pytest.fail("incomplete execution must not retry"),
+        )
+
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        incomplete if phase == "packages" else lambda *_args, **_kwargs: (),
+    )
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", incomplete)
+    source = tmp_path / "candidate.json"
+    source.write_text(candidate.model_dump_json())
+    report = tmp_path / "report.json"
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "validate",
+            "--candidate",
+            str(source),
+            "--output",
+            str(report),
+        ],
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, pipeline.validation.ValidationIncompleteError)
+    assert "synthetic-ci-secret" not in "".join(
+        traceback.format_exception(result.exception)
+    )
+    assert not report.exists()
+    with pytest.raises(ValueError, match="Validation reports"):
+        pipeline.certified_patch(candidate, [])

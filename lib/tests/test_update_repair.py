@@ -139,7 +139,9 @@ def repair_commands(repair_root, tmp_path, monkeypatch) -> dict[str, int | bool]
         "attempts": 0,
         "fail_first": True,
         "fail_retry": False,
+        "incomplete_retry": False,
         "quality": 0,
+        "quality_calls": 0,
         "drift": False,
         "agent_calls": 0,
     }
@@ -171,12 +173,15 @@ def repair_commands(repair_root, tmp_path, monkeypatch) -> dict[str, int | bool]
             )
             if not code:
                 Path("packages/example/sources.json").write_text("updated\n")
+            payload = {"success": not code}
+            if state["incomplete_retry"] and state["attempts"] == 2:
+                payload["validationIncomplete"] = "Validation incomplete: deadline"
             lines.extend([
                 UpdateEvent(
                     source="test",
                     kind=UpdateEventKind.LINE,
                     stream="stdout",
-                    message=json.dumps({"success": not code}),
+                    message=json.dumps(payload),
                 ),
                 UpdateEvent(
                     source="test",
@@ -186,6 +191,7 @@ def repair_commands(repair_root, tmp_path, monkeypatch) -> dict[str, int | bool]
                 ),
             ])
         elif args[0] == "nix":
+            state["quality_calls"] += 1
             code = state["quality"]
             lines.append(
                 UpdateEvent(
@@ -270,6 +276,34 @@ def test_quality_mutation_invalidates_build_evidence(
             UpdateOptions(repair=RepairAgent.CODEX), repair_root
         )
     assert (repair_root / "packages/example/updater.py").read_text() == "# broken\n"
+
+
+def test_incomplete_retry_preserves_json_evidence_without_quality_or_promotion(
+    repair_root, repair_commands, tmp_path, capsys
+) -> None:
+    """A failed child result survives the bounded supervisor as valid JSON."""
+    repair_commands["fail_retry"] = True
+    repair_commands["incomplete_retry"] = True
+    patch = tmp_path / "update.patch"
+    assert (
+        repair.run_repairing_update(
+            UpdateOptions(repair=RepairAgent.CODEX, json=True, patch=str(patch)),
+            repair_root,
+        )
+        == 1
+    )
+    assert repair_commands["attempts"] == 2
+    assert repair_commands["agent_calls"] == 1
+    assert repair_commands["quality_calls"] == 0
+    assert patch.read_bytes() == b""
+    assert (repair_root / "packages/example/updater.py").read_text() == "# broken\n"
+    result = json.loads(capsys.readouterr().out)
+    assert result["success"] is False
+    assert result["validationIncomplete"] == "Validation incomplete: deadline"
+    retained = json.loads(
+        (Path(result["repair_evidence"]) / "attempt-2" / "result.json").read_text()
+    )
+    assert retained["validationIncomplete"] == result["validationIncomplete"]
 
 
 @pytest.mark.parametrize(
