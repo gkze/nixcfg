@@ -17,6 +17,13 @@ on:
         default: true
   schedule:
     - cron: "17 7 * * 1"
+  # workflow_dispatch is unavailable to the cloud-agent token. Touching
+  # .github/update-kick on this WIP branch queues one Update run.
+  push:
+    branches:
+      - copilot/gkzenixcfg-update-automation
+    paths:
+      - .github/update-kick
 permissions:
   contents: read
 concurrency:
@@ -138,8 +145,8 @@ jobs:
       - publish
     if: |-
       always() && !cancelled() && contains(needs.*.result, 'failure') &&
-      (github.event_name == 'schedule' || inputs.repair == true ||
-      inputs.repair == 'true')
+      (github.event_name == 'schedule' || github.event_name == 'push' ||
+      inputs.repair == true || inputs.repair == 'true')
     # The repair gate runs the Darwin-maintained Python suite, as publish does.
     runs-on: macos-15
     timeout-minutes: 120

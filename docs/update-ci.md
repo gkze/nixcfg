@@ -183,7 +183,10 @@ Only successful native validation permits a PR against the default branch.
 
 `gh workflow run` does not apply YAML boolean defaults, so a manual dispatch
 must pass `-f repair=true` when repair should run. The job condition accepts
-only an explicit true, matching that CLI behavior. Set `repair=false` to retain
+only an explicit true, matching that CLI behavior. Push events that touch
+`.github/update-kick` on `copilot/gkzenixcfg-update-automation` also enable
+repair; that path exists because some tokens cannot create `workflow_dispatch`
+events. Set `repair=false` to retain
 failure evidence without invoking an agent. Agent output is a proposal, never validation evidence. CI does
 not reuse a DBOS history after changing code. This repair scope intentionally leaves
 framework defects and unavailable credentials for a maintainer to resolve.

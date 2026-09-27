@@ -496,7 +496,11 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     workflow = yaml.load(
         (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
     )
-    assert set(workflow["on"]) == {"workflow_dispatch", "schedule"}
+    assert set(workflow["on"]) == {"workflow_dispatch", "schedule", "push"}
+    assert workflow["on"]["push"]["branches"] == [
+        "copilot/gkzenixcfg-update-automation"
+    ]
+    assert workflow["on"]["push"]["paths"] == [".github/update-kick"]
     assert workflow["permissions"] == {"contents": "read"}
     jobs = workflow["jobs"]
     preparation = [
@@ -543,6 +547,7 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     repair_if = " ".join(workflow["jobs"]["repair"]["if"].split())
     assert "inputs.repair == true" in repair_if
     assert "inputs.repair == 'true'" in repair_if
+    assert "github.event_name == 'push'" in repair_if
 
 
 def test_agent_check_limits_permissions_and_uses_selected_model() -> None:
