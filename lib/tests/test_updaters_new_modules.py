@@ -138,6 +138,8 @@ def test_goose_cli_updater_materializes_crate2nix_from_locked_input(
 ) -> None:
     """Goose should refresh crate2nix artifacts from its locked flake input."""
     updater = goose_cli_module.GooseCliUpdater()
+    assert updater.bulk_update_hold is not None
+    assert "macos-15" in updater.bulk_update_hold
     assert updater.materialize_when_current is True
     assert updater.shows_materialize_artifacts_phase is True
     assert updater.input_name == "goose"

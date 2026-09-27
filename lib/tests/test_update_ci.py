@@ -937,15 +937,7 @@ def test_image_cleanup_refuses_developer_and_self_hosted_machines(
         jobs.main("clean-image")
 
 
-@pytest.mark.parametrize("system", ["darwin", "linux"])
-@pytest.mark.parametrize("active_xcode", ["selected", "missing", "relative"])
-def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
-    tmp_path, monkeypatch, system, active_xcode
-) -> None:
-    monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
-    monkeypatch.setattr(jobs.sys, "platform", system)
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+def _cleanup_image_tree(tmp_path: Path) -> dict[str, Path]:
     apps = tmp_path / "Applications"
     selected = apps / "Xcode_active.app/Contents/Developer"
     selected.mkdir(parents=True)
@@ -957,15 +949,48 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
     other.mkdir()
     unused = tmp_path / "unused-tool"
     unused.mkdir()
-    android = tmp_path / "Library/Android/sdk"
-    android.mkdir(parents=True)
-    simulators = tmp_path / "Library/Developer/CoreSimulator"
-    simulators.mkdir(parents=True)
+    reclaimable = {
+        "android": tmp_path / "Library/Android/sdk",
+        "simulators": tmp_path / "Library/Developer/CoreSimulator",
+        "system_simulators": tmp_path / "system-core-simulators",
+        "device_support": tmp_path / "Library/Developer/Xcode/iOS DeviceSupport",
+        "caches": tmp_path / "Library/Caches",
+        "hosted": tmp_path / "hostedtoolcache",
+        "tool_cache": tmp_path / "runner-tool-cache",
+    }
+    for path in reclaimable.values():
+        path.mkdir(parents=True)
     link = tmp_path / "external-link"
     link.symlink_to(other)
-    monkeypatch.setattr(jobs, "_APPLICATIONS", apps)
+    return {
+        "apps": apps,
+        "selected": selected,
+        "old": old,
+        "alias": alias,
+        "other": other,
+        "unused": unused,
+        "link": link,
+        **reclaimable,
+    }
+
+
+@pytest.mark.parametrize("system", ["darwin", "linux"])
+@pytest.mark.parametrize("active_xcode", ["selected", "missing", "relative"])
+def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
+    tmp_path, monkeypatch, system, active_xcode
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(jobs.sys, "platform", system)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    tree = _cleanup_image_tree(tmp_path)
+    monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
+    monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
+    monkeypatch.setattr(jobs, "_DARWIN_SYSTEM_SIMULATORS", tree["system_simulators"])
     monkeypatch.setattr(
-        jobs, "_UNUSED_IMAGE_PATHS", {system: (unused, link, tmp_path / "absent")}
+        jobs,
+        "_UNUSED_IMAGE_PATHS",
+        {system: (tree["unused"], tree["link"], tmp_path / "absent")},
     )
     calls = []
     real_run = jobs._run
@@ -977,7 +1002,7 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
             assert Path(args[-1]).is_relative_to(tmp_path)
             return real_run(*args[1:], capture=capture, check=check)
         value = {
-            "selected": str(selected),
+            "selected": str(tree["selected"]),
             "missing": str(tmp_path / "missing"),
             "relative": "relative/path",
         }[active_xcode]
@@ -990,13 +1015,22 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
             jobs.main("clean-image")
     else:
         assert jobs.main("clean-image") == 0
-    assert unused.exists() == rejected
-    assert selected.is_dir()
-    assert alias.is_symlink()
-    assert other.is_dir()
-    assert link.is_symlink()
-    assert old.exists() == (system != "darwin" or rejected)
-    assert android.exists() == (system != "darwin" or rejected)
-    assert simulators.exists() == (system != "darwin" or rejected)
+    kept_unless_darwin_cleanup = system != "darwin" or rejected
+    assert tree["unused"].exists() == rejected
+    assert tree["selected"].is_dir()
+    assert tree["alias"].is_symlink()
+    assert tree["other"].is_dir()
+    assert tree["link"].is_symlink()
+    assert tree["old"].exists() == kept_unless_darwin_cleanup
+    for name in (
+        "android",
+        "simulators",
+        "system_simulators",
+        "device_support",
+        "caches",
+        "hosted",
+        "tool_cache",
+    ):
+        assert tree[name].exists() == kept_unless_darwin_cleanup
     if system == "darwin" and not rejected:
         assert not any(call[:2] == ("xcrun", "simctl") for call in calls)

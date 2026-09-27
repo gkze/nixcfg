@@ -20,6 +20,7 @@ _BINARY_CACHE = "gkze"
 _HEARTBEAT_INTERVAL_SECONDS = 60
 _OUTPUT_LOG_NAME = "output.log"
 _APPLICATIONS = Path("/Applications")
+_DARWIN_SYSTEM_SIMULATORS = Path("/Library/Developer/CoreSimulator")
 _STORE_PATH_PREFIX = Path("/nix/store")
 _UNUSED_IMAGE_PATHS = {
     "darwin": (Path("/usr/local/share/dotnet"),),
@@ -104,6 +105,19 @@ def clean_runner_image() -> None:
         paths.append(Path.home() / "Library/Android/sdk")
         # iOS simulators are unused by Nix Darwin roots and occupy tens of GB.
         paths.append(Path.home() / "Library/Developer/CoreSimulator")
+        paths.append(_DARWIN_SYSTEM_SIMULATORS)
+        xcode = Path.home() / "Library/Developer/Xcode"
+        paths.extend((
+            xcode / "iOS DeviceSupport",
+            xcode / "watchOS DeviceSupport",
+            xcode / "tvOS DeviceSupport",
+            xcode / "DerivedData",
+        ))
+        paths.append(Path.home() / "Library/Caches")
+        paths.append(Path.home() / "hostedtoolcache")
+        tool_cache = os.environ.get("RUNNER_TOOL_CACHE")
+        if tool_cache:
+            paths.append(Path(tool_cache))
     for path in paths:
         if path.is_dir() and not path.is_symlink():
             sys.stdout.write(f"Removing unused runner image tool: {path}\n")

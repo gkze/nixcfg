@@ -1,4 +1,4 @@
 # Touch this file to queue one Update run on copilot/gkzenixcfg-update-automation.
 # The cloud-agent token cannot call workflow_dispatch (HTTP 403).
 # Remove this kick path after E2E prepare → validate → publish is proven.
-2026-09-27T05:51:00Z cancel-stale-then-run-b971ba18
+2026-09-27T10:20:00Z darwin-enospc-goose-hold

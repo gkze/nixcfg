@@ -97,6 +97,12 @@ Unsloth is temporarily held at the existing source pin because desktop
 to retry explicitly; remove `UnslothUpdater.bulk_update_hold` once matching
 source is published and the candidate passes validation.
 
+Goose CLI, desktop, and V8 are held at the existing pins because an untargeted
+goose bump rebuilds `goose-cli-v8-native` from source on hosted macos-15
+(~2300 CXX units) and exhausts the runner after image cleanup (~100 GB free).
+Use `nixcfg update goose-cli` to retry explicitly; remove the holds once that
+derivation is in the `gkze` cache.
+
 Each update invocation owns its concurrency limits, shared work, and timings.
 There are no process-global build semaphores tied to a previous event loop.
 
