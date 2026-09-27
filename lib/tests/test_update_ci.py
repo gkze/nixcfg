@@ -1097,6 +1097,7 @@ def test_hosted_darwin_store_gc_is_gated_to_disposable_runners(
     )
     assert jobs.main("reclaim-store") == 0
     assert calls == ([("nix", "store", "gc")] if runs else [])
+    assert jobs.hosted_darwin_skips_root_closures() is runs
 
 
 def test_hosted_update_runtime_reserves_store_headroom_for_root_closures() -> None:

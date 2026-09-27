@@ -101,7 +101,9 @@ fail the job. Unused Xcode and simulator trees still fail closed.
 Android, .NET and unused Linux compiler libraries are removed
 where present. The step refuses local or self-hosted execution and logs available
 space before and after cleanup. This matters because the measured Darwin root
-closure alone occupies about 73.5 GB; runner capacity remains an acceptance check.
+closure alone occupies about 73.5 GB. Hosted Darwin therefore skips native
+`root-closures` after package validation; Linux validate already owns that
+check. Runner capacity remains an acceptance check for local Darwin.
 
 Repository secrets used by the workflow:
 

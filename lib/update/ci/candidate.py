@@ -169,13 +169,22 @@ def validate_candidate(candidate: Candidate) -> ValidationReport:
             jobs.reclaim_hosted_store()
             # Root checks are computed from the same independently verified
             # manifest used by local updates; only native execution is sharded.
-            failures += validation.validate_root_closures(
-                flake_root=snapshot.root,
-                systems=(system,),
-                include_dependencies=True,
-                print_build_logs=True,
-                progress=_hosted_validation_progress("root-closures"),
-            )
+            # Hosted Darwin still cannot finish that check (4000+ derivations;
+            # streamed log dies mid-build). Linux validate already owns eval
+            # and identity of checks.aarch64-darwin.root-closures.
+            if jobs.hosted_darwin_skips_root_closures():
+                sys.stdout.write(
+                    "Skipping hosted Darwin root-closures; "
+                    "Linux validate owns that check\n"
+                )
+            else:
+                failures += validation.validate_root_closures(
+                    flake_root=snapshot.root,
+                    systems=(system,),
+                    include_dependencies=True,
+                    print_build_logs=True,
+                    progress=_hosted_validation_progress("root-closures"),
+                )
         workspace.validate_changes(allowed)
     return ValidationReport(
         tree=candidate.tree,

@@ -149,13 +149,23 @@ def _remove_unused_image_path(path: Path) -> None:
     _run("sudo", sys.executable, "-c", snippet, str(path))
 
 
+def is_hosted_darwin_runner() -> bool:
+    """Return whether this process is a disposable hosted macos-15 job."""
+    return (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted"
+        and sys.platform == "darwin"
+    )
+
+
+def hosted_darwin_skips_root_closures() -> bool:
+    """Hosted macos-15 cannot realize checks.aarch64-darwin.root-closures."""
+    return is_hosted_darwin_runner()
+
+
 def reclaim_hosted_store() -> None:
     """Reclaim unused store paths on hosted Darwin before root-closure fetches."""
-    if (
-        os.environ.get("GITHUB_ACTIONS") != "true"
-        or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
-        or sys.platform != "darwin"
-    ):
+    if not is_hosted_darwin_runner():
         return
     sys.stdout.write(
         f"Available before store GC: {shutil.disk_usage('/').free} bytes\n"

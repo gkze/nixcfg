@@ -425,6 +425,39 @@ def test_native_validation_and_certification(
         pipeline.certified_patch(candidate.model_copy(update={"systems": ()}), reports)
 
 
+def test_hosted_darwin_validation_skips_root_closures(
+    prepared_run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hosted macos-15 dies mid-build of 4000+ Darwin root-closure derivations."""
+    _, _, state = prepared_run
+    candidate = None
+    for system in pipeline.supported_systems():
+        state["system"] = system
+        candidate, _ = pipeline.prepare_candidate(("example",), previous=candidate)
+    assert candidate is not None
+    order: list[str] = []
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(pipeline.jobs.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        pipeline.jobs, "reclaim_hosted_store", lambda: order.append("reclaim")
+    )
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_root_closures",
+        lambda **_kwargs: order.append("roots") or (),
+    )
+    state["system"] = "aarch64-darwin"
+    report = pipeline.validate_candidate(candidate)
+    assert report.failures == ()
+    assert order == ["reclaim"]
+
+
 def test_prepare_command_exports_failure_evidence_outside_checkout(
     prepared_run, tmp_path: Path
 ) -> None:
