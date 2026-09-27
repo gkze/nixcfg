@@ -825,6 +825,8 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
     unused.mkdir()
     android = tmp_path / "Library/Android/sdk"
     android.mkdir(parents=True)
+    simulators = tmp_path / "Library/Developer/CoreSimulator"
+    simulators.mkdir(parents=True)
     link = tmp_path / "external-link"
     link.symlink_to(other)
     monkeypatch.setattr(jobs, "_APPLICATIONS", apps)
@@ -861,5 +863,6 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
     assert link.is_symlink()
     assert old.exists() == (system != "darwin" or rejected)
     assert android.exists() == (system != "darwin" or rejected)
+    assert simulators.exists() == (system != "darwin" or rejected)
     if system == "darwin" and not rejected:
         assert not any(call[:2] == ("xcrun", "simctl") for call in calls)

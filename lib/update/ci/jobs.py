@@ -101,6 +101,8 @@ def clean_runner_image() -> None:
             if not path.is_symlink() and not selected.is_relative_to(path.resolve())
         )
         paths.append(Path.home() / "Library/Android/sdk")
+        # iOS simulators are unused by Nix Darwin roots and occupy tens of GB.
+        paths.append(Path.home() / "Library/Developer/CoreSimulator")
     for path in paths:
         if path.is_dir() and not path.is_symlink():
             sys.stdout.write(f"Removing unused runner image tool: {path}\n")
