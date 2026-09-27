@@ -30,8 +30,10 @@ signed commit and a pull request; the workflow does not apply a system configura
 3. Certify that every required platform reported success for that exact Git tree.
    Apply the certified patch, run repository hooks and the full Python/coverage
    gates, and check that validation did not alter the candidate. Only then create
-   the signed update commit and PR. A PR against the default branch is queued for
-   squash auto-merge; runs dispatched from other branches only open the PR.
+   the signed update commit and PR. Publication always opens that PR against the
+   default branch and queues squash auto-merge, including when Update was
+   dispatched from a feature or repair ref. Exercise runs therefore never merge
+   into the branch under review.
 
 The system inventory comes from `lib/system-policy.json`. `nixcfg ci update matrix`
 projects it to hosted runner labels. A conformance test keeps preparation and
@@ -176,8 +178,10 @@ validation by default. Manual repaired candidates must opt in with the workflow'
 `validate_all_packages` input or `ci update prepare --validate-all-packages`.
 Only successful native validation permits a PR against the default branch.
 
-Set the manual workflow's `repair` input to false to retain failure evidence without
-invoking an agent. Agent output is a proposal, never validation evidence. CI does
+`gh workflow run` does not apply YAML boolean defaults, so a manual dispatch
+must pass `-f repair=true` when repair should run. The job condition accepts
+only an explicit true, matching that CLI behavior. Set `repair=false` to retain
+failure evidence without invoking an agent. Agent output is a proposal, never validation evidence. CI does
 not reuse a DBOS history after changing code. This repair scope intentionally leaves
 framework defects and unavailable credentials for a maintainer to resolve.
 

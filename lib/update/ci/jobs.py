@@ -391,15 +391,14 @@ def _commit_and_push(kind: str, message: str) -> str:
 
 
 def publish() -> None:
-    """Open the verified update as a PR and queue it to merge into the default branch.
+    """Open the verified update as a PR against the default branch and queue squash auto-merge.
 
-    Runs dispatched from other branches only open the PR, so exercising the
-    workflow never lands an update on a branch under review.
+    The product PR always targets the repository default branch, including when
+    Update was exercised from a feature or repair ref. That keeps validated
+    source refreshes off the branch under review and makes the PR auto-mergeable.
     """
     branch = _commit_and_push("", "chore(update): refresh validated sources")
-    base = os.environ["GITHUB_REF_NAME"]
-    if base.startswith("codex/update-repair-"):
-        base = os.environ["UPDATE_BASE_BRANCH"]
+    base = os.environ["UPDATE_BASE_BRANCH"]
     body = _temp() / "update-body.md"
     run_url = (
         f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
@@ -422,8 +421,7 @@ def publish() -> None:
         "--body-file",
         str(body),
     )
-    if base == os.environ["UPDATE_BASE_BRANCH"]:
-        _run("gh", "pr", "merge", branch, "--auto", "--squash")
+    _run("gh", "pr", "merge", branch, "--auto", "--squash")
 
 
 def collect_evidence() -> None:
