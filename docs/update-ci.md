@@ -95,6 +95,9 @@ run with the hosted image's interpreter before the Python 3.14 runtime exists.
 On macOS it retains the selected Xcode and removes other Xcodes, the
 Android SDK, unused iOS simulators, Xcode device-support caches, the
 hosted tool cache, and `~/Library/Caches`.
+Those last cache trees are deleted best-effort: hosted macOS can rewrite
+`~/Library/Caches` during `rmtree` and fail with `ENOTEMPTY`; that must not
+fail the job. Unused Xcode and simulator trees still fail closed.
 Android, .NET and unused Linux compiler libraries are removed
 where present. The step refuses local or self-hosted execution and logs available
 space before and after cleanup. This matters because the measured Darwin root

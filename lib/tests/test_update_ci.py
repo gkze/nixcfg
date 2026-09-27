@@ -1036,6 +1036,45 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
         assert not any(call[:2] == ("xcrun", "simctl") for call in calls)
 
 
+def test_image_cleanup_tolerates_live_cache_directory_races(
+    tmp_path, monkeypatch
+) -> None:
+    """Hosted macOS can rewrite ~/Library/Caches while sudo rmtree runs."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    tree = _cleanup_image_tree(tmp_path)
+    monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
+    monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
+    monkeypatch.setattr(jobs, "_DARWIN_SYSTEM_SIMULATORS", tree["system_simulators"])
+    monkeypatch.setattr(jobs, "_UNUSED_IMAGE_PATHS", {"darwin": (tree["unused"],)})
+    leftover = tree["caches"] / "writer"
+    leftover.mkdir()
+    real_run = jobs._run
+
+    def run(*args, capture=False, check=True):
+        if args[0] == "sudo":
+            snippet = args[args.index("-c") + 1]
+            target = Path(args[-1])
+            assert Path(target).is_relative_to(tmp_path)
+            if target == tree["caches"]:
+                assert "ignore_errors=True" in snippet
+                return subprocess.CompletedProcess(args, 0, stdout="")
+            assert "ignore_errors=True" not in snippet or target in {
+                tree["hosted"],
+                tree["tool_cache"],
+            }
+            return real_run(*args[1:], capture=capture, check=check)
+        return subprocess.CompletedProcess(args, 0, stdout=str(tree["selected"]))
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs.main("clean-image") == 0
+    assert leftover.is_dir()
+    assert not tree["old"].exists()
+    assert not tree["unused"].exists()
+
+
 @pytest.mark.parametrize(
     ("actions", "environment", "platform", "runs"),
     [

@@ -22,6 +22,9 @@ _OUTPUT_LOG_NAME = "output.log"
 _APPLICATIONS = Path("/Applications")
 _DARWIN_SYSTEM_SIMULATORS = Path("/Library/Developer/CoreSimulator")
 _STORE_PATH_PREFIX = Path("/nix/store")
+# Live-written on hosted macOS; rmtree can lose a race (ENOTEMPTY) after children
+# are gone. Cleanup is disk reclaim, not a correctness gate for these trees.
+_VOLATILE_IMAGE_LEAVES = frozenset({"Caches", "hostedtoolcache"})
 _UNUSED_IMAGE_PATHS = {
     "darwin": (Path("/usr/local/share/dotnet"),),
     "linux": (
@@ -122,16 +125,28 @@ def clean_runner_image() -> None:
         if path.is_dir() and not path.is_symlink():
             sys.stdout.write(f"Removing unused runner image tool: {path}\n")
             sys.stdout.flush()
-            _run(
-                "sudo",
-                sys.executable,
-                "-c",
-                "import shutil, sys; shutil.rmtree(sys.argv[1])",
-                str(path),
-            )
+            _remove_unused_image_path(path)
     sys.stdout.write(
         f"Available after image cleanup: {shutil.disk_usage('/').free} bytes\n"
     )
+
+
+def _image_cleanup_best_effort(path: Path) -> bool:
+    """Return whether a live-written cache tree may race with sudo rmtree."""
+    tool_cache = os.environ.get("RUNNER_TOOL_CACHE")
+    return path.name in _VOLATILE_IMAGE_LEAVES or (
+        tool_cache is not None and path == Path(tool_cache)
+    )
+
+
+def _remove_unused_image_path(path: Path) -> None:
+    """Delete one unused image tree; ignore leftover writers in cache dirs."""
+    snippet = (
+        "import shutil, sys; shutil.rmtree(sys.argv[1], ignore_errors=True)"
+        if _image_cleanup_best_effort(path)
+        else "import shutil, sys; shutil.rmtree(sys.argv[1])"
+    )
+    _run("sudo", sys.executable, "-c", snippet, str(path))
 
 
 def reclaim_hosted_store() -> None:
