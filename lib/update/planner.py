@@ -276,6 +276,26 @@ def select_target_source_names(
     )
 
 
+def held_bulk_update_input_names(
+    updaters: Mapping[str, type[object]],
+) -> frozenset[str]:
+    """Return flake inputs that must stay pinned while their sources are held.
+
+    Untargeted bulk runs refresh every version-like flake ref first. A held
+    source whose overlay asserts against that input (Goose CLI vs ``goose``)
+    must keep the input on the existing pin, or validate fails at eval.
+    """
+    held: set[str] = set()
+    for name, updater_cls in updaters.items():
+        if not getattr(updater_cls, "bulk_update_hold", None):
+            continue
+        backing = source_backing_input_name(name, updater_cls)
+        if backing is not None:
+            held.add(backing)
+        held.update(source_additional_input_names(updater_cls))
+    return frozenset(held)
+
+
 def dependency_clusters(
     names: Iterable[str],
     *,
@@ -371,6 +391,11 @@ def resolve_update_targets[ResolvedTargetsT](
         if target_names
         else ref_inputs
     )
+    if not target_names:
+        held_inputs = held_bulk_update_input_names(updaters)
+        selected_ref_inputs = [
+            item for item in selected_ref_inputs if item.name not in held_inputs
+        ]
     if not do_refs:
         selected_ref_inputs = []
     if not do_sources:
@@ -402,6 +427,7 @@ __all__ = [
     "companion_source_parent",
     "dependency_clusters",
     "failure_closure",
+    "held_bulk_update_input_names",
     "resolve_update_targets",
     "select_target_source_names",
     "source_additional_input_names",

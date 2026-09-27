@@ -88,8 +88,9 @@ that deployment choice must change before sharing this database across hosts.
 
 An updater can declare `bulk_update_hold` with a reason to keep its source and
 generated artifacts out of untargeted `nixcfg update` runs (including `--check`).
-Coupled companion and aggregate sources are held together. Explicit target
-selection still allows updates. This does not freeze shared flake dependencies.
+Coupled companion and aggregate sources are held together. Untargeted flake-ref
+refresh also skips each held source's backing input so overlays that assert
+input identity stay coherent. Explicit target selection still allows updates.
 
 Unsloth is temporarily held at the existing source pin because desktop
 `v0.1.811-beta` requests backend `2026.9.7`, its GitHub source declares
