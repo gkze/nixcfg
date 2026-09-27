@@ -18,6 +18,7 @@ from typing import TextIO
 
 _BINARY_CACHE = "gkze"
 _HEARTBEAT_INTERVAL_SECONDS = 60
+_OUTPUT_LOG_NAME = "output.log"
 _APPLICATIONS = Path("/Applications")
 _STORE_PATH_PREFIX = Path("/nix/store")
 _UNUSED_IMAGE_PATHS = {
@@ -183,11 +184,48 @@ def _failure_summary(result_path: Path) -> str | None:
 
 def _write_diagnostic(log: TextIO, message: str) -> None:
     """Retain a CI diagnostic and mirror it to the live Actions log."""
-    line = message + "\n"
-    log.write(line)
+    _forward_text(log, message + "\n")
+
+
+def _forward_text(log: TextIO, text: str) -> None:
+    """Retain already-terminated updater output and mirror it to the live log."""
+    if not text:
+        return
+    log.write(text)
     log.flush()
-    sys.stderr.write(line)
+    sys.stderr.write(text)
     sys.stderr.flush()
+
+
+def _read_new_run_log_text(run_logs: Path, offsets: dict[str, int]) -> str:
+    """Return unread run-log bytes and advance *offsets* past them."""
+    if not run_logs.is_dir():
+        return ""
+    chunks: list[str] = []
+    seen: set[Path] = set()
+    for path in sorted(run_logs.rglob(_OUTPUT_LOG_NAME)):
+        if not path.is_file():
+            continue
+        try:
+            resolved = path.resolve()
+        except OSError:
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        key = str(resolved)
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        previous = offsets.get(key, 0)
+        if len(data) < previous:
+            previous = 0
+        if len(data) == previous:
+            continue
+        offsets[key] = len(data)
+        chunks.append(data[previous:].decode("utf-8", errors="replace"))
+    return "".join(chunks)
 
 
 def _drain_stderr(stderr: TextIO, diagnostics: queue.SimpleQueue[str | None]) -> None:
@@ -206,17 +244,19 @@ def _wait_for_diagnostics(
     artifacts: Path,
     command: list[str],
 ) -> int:
-    """Forward output promptly and prove liveness when the child is quiet."""
+    """Forward updater output promptly and prove liveness when every stream is quiet."""
     if process.stderr is None:  # pragma: no cover -- PIPE above guarantees stderr.
         msg = "Cannot collect updater diagnostics"
         raise RuntimeError(msg)
     diagnostics: queue.SimpleQueue[str | None] = queue.SimpleQueue()
+    offsets: dict[str, int] = {}
+    run_logs = artifacts / "runs"
     started = time.monotonic()
     _write_diagnostic(
         log,
         "Starting updater "
         f"stage={stage} pid={process.pid} command={command!r} "
-        f"artifacts={artifacts} run_logs={artifacts / 'runs'}",
+        f"artifacts={artifacts} run_logs={run_logs}",
     )
     reader = threading.Thread(
         target=_drain_stderr,
@@ -228,20 +268,20 @@ def _wait_for_diagnostics(
         try:
             diagnostic = diagnostics.get(timeout=_HEARTBEAT_INTERVAL_SECONDS)
         except queue.Empty:
-            if process.poll() is None:
+            if text := _read_new_run_log_text(run_logs, offsets):
+                _forward_text(log, text)
+            elif process.poll() is None:
                 _write_diagnostic(
                     log,
                     f"Updater still running stage={stage} pid={process.pid} "
                     f"elapsed={time.monotonic() - started:.0f}s artifacts={artifacts} "
-                    f"run_logs={artifacts / 'runs'}",
+                    f"run_logs={run_logs}",
                 )
             continue
         if diagnostic is None:
             break
-        log.write(diagnostic)
-        log.flush()
-        sys.stderr.write(diagnostic)
-        sys.stderr.flush()
+        _forward_text(log, diagnostic)
+    _forward_text(log, _read_new_run_log_text(run_logs, offsets))
     returncode = process.wait()
     reader.join()
     return returncode

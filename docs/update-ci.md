@@ -121,9 +121,11 @@ runner capacity; tests of workflow wiring do not establish either.
 
 Each native job uploads its candidate or validation report, structured result and
 stderr diagnostics, including on failure. Preparation streams phase and target
-progress to stderr while keeping stdout as one machine-readable JSON result. It
-also retains the updater's redacted run logs under `runs/` for detailed source
-errors. Artifacts expire after 30 days. An
+progress to stderr while keeping stdout as one machine-readable JSON result.
+Validation streams Nix command and build lines (`nix build -L`) to the live job
+log as they arrive. The job wrapper also tails redacted `runs/*/output.log`
+files into that same log and only emits a liveness heartbeat when both the child
+and those run logs are quiet. Artifacts expire after 30 days. An
 interrupted job may need to repeat work; completed upstream artifacts can be reused
 by Actions reruns. A failed preparation cannot advance to another platform, and a
 missing or mismatched validation report cannot authorize publication.

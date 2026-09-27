@@ -11,6 +11,7 @@ from typing import Annotated
 import typer
 from pydantic import BaseModel, ConfigDict
 
+from lib.diagnostics import redact_urls
 from lib.system_policy import supported_systems
 from lib.update import cli as update_cli
 from lib.update import derivation_validation as validation
@@ -102,6 +103,26 @@ def prepare_candidate(
     return preparation.candidate, status
 
 
+def _hosted_validation_progress(source: str) -> validation.ValidationProgress:
+    """Stream Nix validation output to the live hosted job log."""
+
+    def emit(event: validation.ValidationProgressEvent) -> None:
+        if isinstance(event, validation.ValidationCommandFinished):
+            return
+        if isinstance(event, validation.ValidationCommandStarted):
+            text = f"$ {event.command}"
+        elif isinstance(event, validation.ValidationCommandOutput):
+            text = event.line.replace("\r", "")
+        else:
+            text = event.replace("\r", "")
+        if not text:
+            return
+        sys.stderr.write(f"[{source}] {redact_urls(text)}\n")
+        sys.stderr.flush()
+
+    return emit
+
+
 def require_complete_candidate(candidate: Candidate) -> None:
     """Reject failed or incomplete preparation before issuing validation evidence."""
     if not candidate.prepared or (
@@ -139,6 +160,7 @@ def validate_candidate(candidate: Candidate) -> ValidationReport:
                 print_build_logs=True,
                 all_declared_systems=True,
                 native_builds_only=True,
+                progress=_hosted_validation_progress("derivations"),
             )
             # Root checks are computed from the same independently verified
             # manifest used by local updates; only native execution is sharded.
@@ -147,6 +169,7 @@ def validate_candidate(candidate: Candidate) -> ValidationReport:
                 systems=(system,),
                 include_dependencies=True,
                 print_build_logs=True,
+                progress=_hosted_validation_progress("root-closures"),
             )
         workspace.validate_changes(allowed)
     return ValidationReport(

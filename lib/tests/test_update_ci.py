@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from io import StringIO
 from itertools import pairwise
 from pathlib import Path
@@ -61,7 +62,17 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "print(json.dumps({'success': int(os.environ.get('TEST_EXIT', '0')) == 0}))\n"
         "print('diagnostic evidence', file=sys.stderr)\n"
         "if seconds := os.environ.get('TEST_QUIET_SLEEP_SECONDS'):\n"
-        "    time.sleep(float(seconds))\n"
+        "    logs = Path(os.environ.get('UPDATE_RUN_LOG_DIR', '')) / 'test-run'\n"
+        "    output = logs / 'output.log'\n"
+        "    end = time.time() + float(seconds)\n"
+        "    n = 0\n"
+        "    while time.time() < end:\n"
+        "        if os.environ.get('TEST_APPEND_RUN_LOG') == '1':\n"
+        "            logs.mkdir(parents=True, exist_ok=True)\n"
+        "            with output.open('a') as fh:\n"
+        "                fh.write(f'live build line {n}\\n')\n"
+        "            n += 1\n"
+        "        time.sleep(0.01)\n"
         "sys.exit(int(os.environ.get('TEST_EXIT', '0')))\n"
     )
     boundary.chmod(0o755)
@@ -127,6 +138,8 @@ def test_native_job_keeps_evidence_and_propagates_failure(
     assert "Starting updater stage=" + stage in stderr_log
     assert "diagnostic evidence\n" in stderr_log
     assert "diagnostic evidence\n" in result.stderr
+    assert "source failure detail\n" in stderr_log
+    assert "source failure detail\n" in result.stderr
     assert (artifacts / "runs/test-run/output.log").read_text() == (
         "source failure detail\n"
     )
@@ -172,9 +185,33 @@ def test_native_job_heartbeats_while_the_updater_is_quiet(
     artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
     stderr_log = (artifacts / "stderr.log").read_text()
     assert "Starting updater stage=prepare pid=" in captured.err
+    assert "source failure detail\n" in captured.err
     assert "Updater still running stage=prepare pid=" in captured.err
     assert "Updater still running stage=prepare pid=" in stderr_log
     assert json.loads((artifacts / "result.json").read_bytes()) == {"success": True}
+
+
+def test_native_job_forwards_run_logs_instead_of_quiet_heartbeats(
+    native_job, monkeypatch, capsys
+) -> None:
+    """Growing output.log is the live job log; a meta heartbeat is only a fallback."""
+    env, checkout = native_job
+    monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    monkeypatch.chdir(checkout)
+    for key, value in (
+        env
+        | {
+            "TEST_QUIET_SLEEP_SECONDS": "0.08",
+            "TEST_APPEND_RUN_LOG": "1",
+        }
+    ).items():
+        monkeypatch.setenv(key, value)
+    assert jobs.native("prepare") == 0
+    captured = capsys.readouterr()
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    stderr_log = (artifacts / "stderr.log").read_text()
+    assert "live build line 0\n" in captured.err
+    assert "live build line 0\n" in stderr_log
 
 
 def test_native_job_heartbeats_while_publishing_prefetched_paths(
@@ -218,6 +255,40 @@ def test_failure_summary_tolerates_missing_or_incomplete_result(
     assert jobs._failure_summary(result) is None
 
 
+def test_wait_for_diagnostics_prefers_run_logs_to_heartbeat(
+    tmp_path, monkeypatch
+) -> None:
+    """A growing output.log is forwarded instead of the meta liveness line."""
+    monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    output = tmp_path / "runs" / "test-run" / "output.log"
+    output.parent.mkdir(parents=True)
+    output.write_text("live 0\n")
+    stop = threading.Event()
+
+    def writer() -> None:
+        n = 1
+        while not stop.wait(0.005):
+            with output.open("a") as handle:
+                handle.write(f"live {n}\n")
+            n += 1
+
+    writer_thread = threading.Thread(target=writer)
+    writer_thread.start()
+    command = [sys.executable, "-c", "import time; time.sleep(0.08)"]
+    try:
+        with subprocess.Popen(command, stderr=subprocess.PIPE, text=True) as process:  # noqa: S603 -- controlled Python fixture.
+            log = StringIO()
+            assert (
+                jobs._wait_for_diagnostics(process, log, "validate", tmp_path, command)
+                == 0
+            )
+    finally:
+        stop.set()
+        writer_thread.join()
+    assert "live 0\n" in log.getvalue()
+    assert "Updater still running" not in log.getvalue()
+
+
 def test_diagnostics_drain_after_child_exit(tmp_path, monkeypatch) -> None:
     """Inherited stderr may outlive the child; retain its final diagnostic."""
     monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.01)
@@ -237,6 +308,59 @@ def test_diagnostics_drain_after_child_exit(tmp_path, monkeypatch) -> None:
         )
     assert "final diagnostic\n" in log.getvalue()
     assert "Updater still running" not in log.getvalue()
+
+
+def test_run_log_tail_reads_only_new_bytes_and_skips_duplicates(tmp_path: Path) -> None:
+    """The live tail follows output.log once, including through latest/."""
+    run_logs = tmp_path / "runs"
+    run_dir = run_logs / "20260101-run"
+    run_dir.mkdir(parents=True)
+    output = run_dir / "output.log"
+    output.write_text("one\n")
+    alias = run_logs / "alias"
+    alias.mkdir()
+    (alias / "output.log").symlink_to(output)
+    (run_logs / "latest").symlink_to(run_dir.name)
+    (run_logs / "output.log").mkdir()
+    offsets: dict[str, int] = {}
+    assert jobs._read_new_run_log_text(run_logs, offsets) == "one\n"
+    assert jobs._read_new_run_log_text(run_logs, offsets) == ""
+    output.write_text("one\ntwo\n")
+    assert jobs._read_new_run_log_text(run_logs, offsets) == "two\n"
+    output.write_text("short\n")
+    assert jobs._read_new_run_log_text(run_logs, offsets) == "short\n"
+    assert jobs._read_new_run_log_text(tmp_path / "absent", {}) == ""
+
+
+def test_run_log_tail_skips_unreadable_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A disappearing run log must not take down the live job log."""
+    run_logs = tmp_path / "runs"
+    readable = run_logs / "ok"
+    unreadable = run_logs / "gone"
+    readable.mkdir(parents=True)
+    unreadable.mkdir()
+    (readable / "output.log").write_text("kept\n")
+    (unreadable / "output.log").write_text("lost\n")
+    real_read = Path.read_bytes
+    real_resolve = Path.resolve
+
+    def read_bytes(self: Path) -> bytes:
+        if self.parent.name == "gone":
+            raise OSError("gone")
+        return real_read(self)
+
+    def resolve(self: Path, **kwargs: object) -> Path:
+        if self.parent.name == "gone":
+            raise OSError("gone")
+        return real_resolve(self, **kwargs)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    assert jobs._read_new_run_log_text(run_logs, {}) == "kept\n"
+    monkeypatch.setattr(Path, "read_bytes", real_read)
+    monkeypatch.setattr(Path, "resolve", resolve)
+    assert jobs._read_new_run_log_text(run_logs, {}) == "kept\n"
 
 
 def test_flake_lock_has_no_registry_dependent_inputs() -> None:

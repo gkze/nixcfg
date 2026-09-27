@@ -20,6 +20,9 @@ from lib.update.ci import candidate as pipeline
 from lib.update.derivation_validation import (
     DerivationValidation,
     DerivationValidationFailure,
+    ValidationCommandFinished,
+    ValidationCommandOutput,
+    ValidationCommandStarted,
 )
 from lib.update.persistence import IsolatedUpdateWorkspace
 from lib.update.ui_consumer import consume_events
@@ -495,6 +498,102 @@ def test_candidate_commands_transfer_the_pinned_selection_and_native_reports(
     )
     reports[0].unlink()
     assert runner.invoke(pipeline.app, args).exit_code != 0
+
+
+def test_hosted_validation_streams_nix_logs_to_stderr(
+    prepared_run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Hosted validate must print Nix output on the live job log, not only artifacts."""
+    root, _, _state = prepared_run
+    tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
+    candidate = Candidate(
+        base_tree=tree,
+        tree=tree,
+        targets=(),
+        sources=(),
+        systems=pipeline.supported_systems(),
+        resolutions={},
+        prepared=True,
+        patch=b"",
+    )
+
+    def validate_derivations(*_args, progress, **_kwargs):
+        progress(
+            ValidationCommandStarted("nix build path:.#pkgs.aarch64-darwin.example")
+        )
+        progress(
+            ValidationCommandOutput(
+                "nix build path:.#pkgs.aarch64-darwin.example",
+                "building '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-example.drv'",
+            )
+        )
+        progress(
+            ValidationCommandOutput(
+                "nix build path:.#pkgs.aarch64-darwin.example",
+                "fetching https://example.com/file?token=secret",
+            )
+        )
+        progress(
+            ValidationCommandOutput(
+                "nix build path:.#pkgs.aarch64-darwin.example", "\r"
+            )
+        )
+        progress("")
+        progress("\r")
+        progress("Batch validation did not succeed; isolating failing targets")
+        progress(
+            ValidationCommandFinished(
+                "nix build path:.#pkgs.aarch64-darwin.example", succeeded=True
+            )
+        )
+        return ()
+
+    def validate_roots(*_args, progress, **_kwargs):
+        progress(
+            ValidationCommandStarted(
+                "nix build path:.#checks.aarch64-darwin.root-closures"
+            )
+        )
+        progress(
+            ValidationCommandOutput(
+                "nix build path:.#checks.aarch64-darwin.root-closures",
+                "building '/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-root-closures.drv'",
+            )
+        )
+        progress(
+            ValidationCommandFinished(
+                "nix build path:.#checks.aarch64-darwin.root-closures",
+                succeeded=True,
+            )
+        )
+        return ()
+
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", validate_derivations
+    )
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", validate_roots)
+    assert pipeline.validate_candidate(candidate).failures == ()
+    err = capsys.readouterr().err
+    assert "[derivations] $ nix build path:.#pkgs.aarch64-darwin.example\n" in err
+    assert (
+        "[derivations] building '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-example.drv'\n"
+        in err
+    )
+    assert "token=secret" not in err
+    assert "[derivations] fetching https://example.com/file?REDACTED\n" in err
+    assert (
+        "[derivations] Batch validation did not succeed; isolating failing targets\n"
+        in err
+    )
+    assert (
+        "[root-closures] $ nix build path:.#checks.aarch64-darwin.root-closures\n"
+        in err
+    )
+    assert (
+        "[root-closures] building '/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-root-closures.drv'\n"
+        in err
+    )
+    assert "[derivations] \n" not in err
 
 
 def test_noop_candidate_still_validates_repaired_baseline_roots(
