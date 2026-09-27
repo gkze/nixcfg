@@ -384,9 +384,14 @@ def test_native_validation_and_certification(
 
     def validate_roots(*, systems, include_dependencies, **_kwargs):
         assert include_dependencies
+        order.append("roots")
         roots.append(systems)
         return ()
 
+    order: list[str] = []
+    monkeypatch.setattr(
+        pipeline.jobs, "reclaim_hosted_store", lambda: order.append("reclaim")
+    )
     monkeypatch.setattr(pipeline.validation, "validate_derivations", validate_sources)
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", validate_roots)
     reports = []
@@ -394,6 +399,7 @@ def test_native_validation_and_certification(
         state["system"] = system
         reports.append(pipeline.validate_candidate(candidate))
     assert roots == [(system,) for system in pipeline.supported_systems()]
+    assert order == ["reclaim", "roots"] * len(pipeline.supported_systems())
     assert pipeline.certified_patch(candidate, reports) == candidate.patch
     assert not git(root, "status", "--porcelain")
     for bad in (

@@ -1034,3 +1034,44 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
         assert tree[name].exists() == kept_unless_darwin_cleanup
     if system == "darwin" and not rejected:
         assert not any(call[:2] == ("xcrun", "simctl") for call in calls)
+
+
+@pytest.mark.parametrize(
+    ("actions", "environment", "platform", "runs"),
+    [
+        ("true", "github-hosted", "darwin", True),
+        ("true", "github-hosted", "linux", False),
+        ("true", "self-hosted", "darwin", False),
+        ("false", "github-hosted", "darwin", False),
+    ],
+)
+def test_hosted_darwin_store_gc_is_gated_to_disposable_runners(
+    monkeypatch, actions: str, environment: str, platform: str, runs: bool
+) -> None:
+    """A 62 GiB Darwin root-closure fetch must not inherit a full package store."""
+    monkeypatch.setenv("GITHUB_ACTIONS", actions)
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", environment)
+    monkeypatch.setattr(jobs.sys, "platform", platform)
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        jobs, "_run", lambda *args, **_kwargs: calls.append(args) or None
+    )
+    assert jobs.main("reclaim-store") == 0
+    assert calls == ([("nix", "store", "gc")] if runs else [])
+
+
+def test_hosted_update_runtime_reserves_store_headroom_for_root_closures() -> None:
+    """Nix must GC before unpacking a Darwin root that can exceed 60 GiB."""
+    action = yaml.load(
+        (ROOT / ".github/actions/update-runtime/action.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    extra_conf = next(
+        step["with"]["extra-conf"]
+        for step in action["runs"]["steps"]
+        if str(step.get("uses", "")).startswith(
+            "DeterminateSystems/determinate-nix-action@"
+        )
+    )
+    assert "min-free = 34359738368" in extra_conf
+    assert "max-free = 68719476736" in extra_conf

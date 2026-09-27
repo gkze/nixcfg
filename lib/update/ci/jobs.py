@@ -134,6 +134,24 @@ def clean_runner_image() -> None:
     )
 
 
+def reclaim_hosted_store() -> None:
+    """Reclaim unused store paths on hosted Darwin before root-closure fetches."""
+    if (
+        os.environ.get("GITHUB_ACTIONS") != "true"
+        or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
+        or sys.platform != "darwin"
+    ):
+        return
+    sys.stdout.write(
+        f"Available before store GC: {shutil.disk_usage('/').free} bytes\n"
+    )
+    sys.stdout.flush()
+    _run("nix", "store", "gc")
+    sys.stdout.write(
+        f"Available after store GC: {shutil.disk_usage('/').free} bytes\n"
+    )
+
+
 def _develop(*args: str) -> tuple[str, ...]:
     return "nix", "develop", os.environ["NIXCFG_DEVSHELL"], "--command", *args
 
@@ -563,6 +581,7 @@ def main(stage: str) -> int:
         return native(stage.removeprefix("native-"))
     operations = {
         "clean-image": clean_runner_image,
+        "reclaim-store": reclaim_hosted_store,
         "bootstrap": bootstrap,
         "quality": quality,
         "certify": certify,

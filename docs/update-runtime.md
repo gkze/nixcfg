@@ -105,6 +105,11 @@ goose bump rebuilds `goose-cli-v8-native` from source on hosted macos-15
 Use `nixcfg update goose-cli` to retry explicitly; remove the holds once that
 derivation is in the `gkze` cache.
 
+Hosted Darwin validation then GCs the Nix store before `root-closures` and
+keeps `min-free` / `max-free` at 32 / 64 GiB. A prior run fetched 62.3 GiB of
+root paths after package validation had already filled the store, and the Nix
+daemon disconnected mid-unpack.
+
 Each update invocation owns its concurrency limits, shared work, and timings.
 There are no process-global build semaphores tied to a previous event loop.
 

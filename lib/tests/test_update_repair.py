@@ -25,7 +25,9 @@ def repair_root(tmp_path: Path) -> Path:
             ".root": "",
             "packages/example/updater.py": "# broken\n",
             "packages/example/sources.json": "baseline\n",
+            "lib/update/planner.py": "# planner\n",
             "lib/update/validator.py": "# gate\n",
+            "lib/tests/test_update_planner.py": "# planner test\n",
         },
     )
     (root / "unrelated.txt").write_text("keep my work\n")
@@ -49,7 +51,14 @@ def test_agent_invocation_is_noninteractive_and_cannot_choose_evidence_command(
 
 
 @pytest.mark.parametrize(
-    "changed", ["packages/example/updater.py", "lib/update/validator.py", None]
+    "changed",
+    [
+        "packages/example/updater.py",
+        "lib/update/planner.py",
+        "lib/tests/test_update_planner.py",
+        "lib/update/validator.py",
+        None,
+    ],
 )
 def test_proposal_runs_in_isolation_and_rejects_gate_edits(
     repair_root: Path,
@@ -57,7 +66,7 @@ def test_proposal_runs_in_isolation_and_rejects_gate_edits(
     monkeypatch,
     changed: str | None,
 ) -> None:
-    """An actual child process can propose packaging changes, never alter live files."""
+    """Packaging and planner selection may change; gates and live files may not."""
     evidence = tmp_path / "evidence"
     evidence.mkdir()
     (evidence / "failure.log").write_text("upstream changed\n")
@@ -83,7 +92,11 @@ def test_proposal_runs_in_isolation_and_rejects_gate_edits(
             str(output),
         ],
     )
-    if changed == "packages/example/updater.py":
+    if changed in {
+        "packages/example/updater.py",
+        "lib/update/planner.py",
+        "lib/tests/test_update_planner.py",
+    }:
         assert result.exit_code == 0, result.exception
         assert b"+# repaired" in output.read_bytes()
     else:
@@ -91,6 +104,10 @@ def test_proposal_runs_in_isolation_and_rejects_gate_edits(
         assert not output.exists()
     assert (evidence / "repair.log").read_text() == "investigated failure\n"
     assert (repair_root / "packages/example/updater.py").read_text() == "# broken\n"
+    assert (repair_root / "lib/update/planner.py").read_text() == "# planner\n"
+    assert (repair_root / "lib/tests/test_update_planner.py").read_text() == (
+        "# planner test\n"
+    )
     assert (repair_root / "lib/update/validator.py").read_text() == "# gate\n"
     assert git(repair_root, "status", "--porcelain").decode() == "?? unrelated.txt\n"
 

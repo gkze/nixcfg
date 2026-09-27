@@ -163,8 +163,10 @@ substituted for the existing command deadline.
 
 By default, a failed run collects job logs and artifacts for one Copilot CLI repair
 attempt. The agent works in an isolated checkout and may change packaging under
-`packages/` and `overlays/`, plus `flake.nix` and `flake.lock`. Changes outside that
-scope are rejected. The agent receives no publication credentials. Repair runs on
+`packages/` and `overlays/`, plus `flake.nix`, `flake.lock`, and planner/selection
+coherence in `lib/update/planner.py` (with `lib/tests/test_update_planner.py`).
+Changes outside that scope are rejected, including CI, acceptance gates, and
+persistence. The agent receives no publication credentials. Repair runs on
 the Darwin runner, where repository hooks and the Python/coverage gates are
 maintained; they must pass before the repair is committed to a separate
 branch. A fresh Update run then prepares and validates it on every native builder.
@@ -191,8 +193,10 @@ only an explicit true, matching that CLI behavior. Push events that touch
 repair; that path exists because some tokens cannot create `workflow_dispatch`
 events. Set `repair=false` to retain
 failure evidence without invoking an agent. Agent output is a proposal, never validation evidence. CI does
-not reuse a DBOS history after changing code. This repair scope intentionally leaves
-framework defects and unavailable credentials for a maintainer to resolve.
+not reuse a DBOS history after changing code. This repair scope includes planner
+and target-selection defects that leave packaging and flake pins incoherent.
+It still leaves acceptance-gate, CI, persistence, and credential failures for a
+maintainer to resolve.
 
 Commands can be exercised outside Actions, with artifacts outside the repository:
 

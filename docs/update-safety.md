@@ -139,8 +139,9 @@ is a pure consumer of run events.
     (`ci.jobs.certify`, `tests/test_update_ci.py`)
 
 22. **Repair is bounded and has no validation authority.** One isolated agent
-    proposal may change packaging and flake references. A repaired attempt starts
-    fresh execution, passes the existing quality gates and builds, and cannot
+    proposal may change packaging, flake references, and planner/selection
+    coherence. A repaired attempt starts fresh execution, passes the existing
+    quality gates and builds, and cannot
     recursively repair itself. CI gives publication credentials only to the later
     publication step. Local repair retains the same atomic promotion boundary.
     After an agent proposal, both the local retry and CI candidate validate the
