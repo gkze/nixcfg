@@ -356,6 +356,71 @@ def _expected_node_modules_fake_hash_expr() -> str:
     return compact_nix_expr(package_call.rebuild())
 
 
+def _expected_opencode_node_modules_fake_hash_expr() -> str:
+    """Build the OpenCode closure expression from this repo's recipe."""
+    bun_source = FunctionCall(
+        name=identifier_attr_path("pkgs", "fetchurl"),
+        argument=AttributeSet(
+            values=[
+                Binding(name="url", value=StringPrimitive(value=_OPENCODE_BUN_URL)),
+                Binding(
+                    name="hash",
+                    value=StringPrimitive(value=_OPENCODE_BUN_HASH),
+                ),
+            ]
+        ),
+    )
+    bun = FunctionCall(
+        name=FunctionCall(
+            name=identifier_attr_path("pkgs", "callPackage"),
+            argument=NixPath(path=str(_PACKAGE_DIR / "bun.nix")),
+        ),
+        argument=AttributeSet(
+            values=[
+                Binding(name="bunSource", value=bun_source),
+                Binding(
+                    name="version",
+                    value=StringPrimitive(value=_OPENCODE_BUN_VERSION),
+                ),
+            ],
+        ),
+    )
+    package_call = FunctionCall(
+        name=FunctionCall(
+            name=identifier_attr_path("pkgs", "callPackage"),
+            argument=NixPath(path=str(_PACKAGE_DIR / "opencode-node-modules.nix")),
+        ),
+        argument=AttributeSet(
+            values=[
+                Binding(name="bun", value=bun),
+                Binding(
+                    name="bunVersion",
+                    value=StringPrimitive(value=_OPENCODE_BUN_VERSION),
+                ),
+                Binding(
+                    name="src",
+                    value=_build_fetch_from_github_call(
+                        "anomalyco",
+                        "opencode",
+                        rev=_OPENCODE_COMMIT,
+                        hash_value=_SOURCE_HASHES[1],
+                        fetch_submodules=False,
+                    ),
+                ),
+                Binding(
+                    name="version",
+                    value=StringPrimitive(value=_OPENCODE_VERSION),
+                ),
+                Binding(
+                    name="hash",
+                    value=identifier_attr_path("pkgs", "lib", "fakeHash"),
+                ),
+            ]
+        ),
+    )
+    return compact_nix_expr(package_call.rebuild())
+
+
 def _lock_text() -> str:
     return f"""{{
   "lockfileVersion": 1,
@@ -615,10 +680,15 @@ def test_openchamber_rejects_node_engine_range_above_selected_version() -> None:
 def test_openchamber_hashes_every_source_and_closure_in_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Hashing must include sources, npm inputs, upstream OpenCode, and Bun graph."""
+    """Hashing must include sources, npm inputs, and both local Bun graphs."""
     module = _load_updater_module()
     updater = module.OpenChamberUpdater()
-    outputs = (*_SOURCE_HASHES, *_URL_HASHES, _OPENCHAMBER_NODE_MODULES_HASH)
+    outputs = (
+        *_SOURCE_HASHES,
+        *_URL_HASHES,
+        _OPENCODE_NODE_MODULES_HASH,
+        _OPENCHAMBER_NODE_MODULES_HASH,
+    )
     calls = install_fixed_hash_stream(
         monkeypatch,
         tuple((f"hash-step-{index}", value) for index, value in enumerate(outputs)),
@@ -638,9 +708,9 @@ def test_openchamber_hashes_every_source_and_closure_in_order(
     hashes = events.result
     entries = cast("list[HashEntry]", hashes)
 
-    assert len(calls) == 8
+    assert len(calls) == 9
     assert [event.message for event in status_events] == [
-        f"hash-step-{index}" for index in range(8)
+        f"hash-step-{index}" for index in range(9)
     ]
     assert_nix_ast_equal(
         str(calls[0]["expr"]),
@@ -650,6 +720,10 @@ def test_openchamber_hashes_every_source_and_closure_in_order(
             rev=_COMMIT,
             fetch_submodules=False,
         ),
+    )
+    assert_nix_ast_equal(
+        str(calls[-2]["expr"]),
+        _expected_opencode_node_modules_fake_hash_expr(),
     )
     assert_nix_ast_equal(
         str(calls[-1]["expr"]),
@@ -729,13 +803,19 @@ def test_openchamber_build_result_requires_and_persists_complete_closure() -> No
             {"aarch64-darwin": _OPENCHAMBER_NODE_MODULES_HASH},
         )
 
-    mismatched = [
+    local_recipe_hash = [
         *entries[:-2],
         entries[-2].model_copy(update={"hash": _SOURCE_HASHES[0]}),
         entries[-1],
     ]
-    with pytest.raises(RuntimeError, match="differs from exact upstream"):
-        updater.build_result(_version_info(), mismatched)
+    local_result = updater.build_result(_version_info(), local_recipe_hash)
+    assert local_result.hashes is not None
+    persisted = next(
+        entry.hash
+        for entry in (local_result.hashes.entries or [])
+        if entry.hash_type == "nodeModulesHash" and entry.url == urls["opencodeUrl"]
+    )
+    assert persisted == _SOURCE_HASHES[0]
 
     result = updater.build_result(_version_info(), entries)
     assert result == SourceEntry.model_validate({
