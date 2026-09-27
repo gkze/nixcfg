@@ -4,6 +4,8 @@ The `Update` workflow uses disposable GitHub-hosted builders. It runs weekly on
 Monday at 07:17 UTC and supports manual target selection. An empty selection uses
 the CLI's eligible inventory, including bulk holds. Successful changes become a
 signed commit and a pull request; the workflow does not apply a system configuration.
+Concurrency is per Git ref. Default-branch runs stay queued; feature-branch
+exercise runs cancel an older in-progress run so a newer HEAD can start.
 
 ## Execution and ownership
 

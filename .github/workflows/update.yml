@@ -28,7 +28,9 @@ permissions:
   contents: read
 concurrency:
   group: nixcfg-update-${{ github.ref }}
-  cancel-in-progress: false
+  # Keep overlapping default-branch runs. Feature-branch exercise runs cancel
+  # so a newer HEAD can start instead of waiting on a doomed older SHA.
+  cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
 jobs:
   # Generated artifacts can be shared between platforms. Extend one pinned
   # candidate serially. Linux builds the VM dependencies before Darwin roots.

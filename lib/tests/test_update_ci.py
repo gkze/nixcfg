@@ -497,6 +497,11 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
     )
     assert set(workflow["on"]) == {"workflow_dispatch", "schedule", "push"}
+    assert workflow["concurrency"]["group"] == "nixcfg-update-${{ github.ref }}"
+    assert (
+        workflow["concurrency"]["cancel-in-progress"]
+        == "${{ github.ref_name != github.event.repository.default_branch }}"
+    )
     assert workflow["on"]["push"]["branches"] == [
         "copilot/gkzenixcfg-update-automation"
     ]
