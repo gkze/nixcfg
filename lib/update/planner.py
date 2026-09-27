@@ -255,15 +255,8 @@ def select_target_source_names(
     add_aggregate_sources(selected, updaters)
 
     if not target_names:
-        held = {
-            name
-            for name in selected
-            if getattr(updaters[name], "bulk_update_hold", None)
-        }
         # Keep companion and aggregate artifacts coherent when a source is held.
-        selected.difference_update(
-            failure_closure(held, dependency_clusters(selected, updaters=updaters))
-        )
+        selected.difference_update(bulk_hold_closure(updaters))
 
     depths = companion_source_depths(selected, updaters)
     return sorted(
@@ -276,24 +269,40 @@ def select_target_source_names(
     )
 
 
+def bulk_hold_closure(
+    updaters: Mapping[str, type[object]],
+) -> frozenset[str]:
+    """Return every source withheld by an untargeted bulk hold."""
+    selected = set(updaters)
+    add_companion_source_parents(selected, updaters)
+    add_companion_source_children(selected, roots=set(selected), updaters=updaters)
+    add_aggregate_sources(selected, updaters)
+    held = {
+        name
+        for name in selected
+        if getattr(updaters[name], "bulk_update_hold", None)
+    }
+    return failure_closure(held, dependency_clusters(selected, updaters=updaters))
+
+
 def held_bulk_update_input_names(
     updaters: Mapping[str, type[object]],
 ) -> frozenset[str]:
     """Return flake inputs that must stay pinned while their sources are held.
 
     Untargeted bulk runs refresh every version-like flake ref first. A held
-    source whose overlay asserts against that input (Goose CLI vs ``goose``)
-    must keep the input on the existing pin, or validate fails at eval.
+    source, or one coupled to it, whose overlay asserts against an input
+    (Goose CLI vs ``goose``, Hermes Desktop vs ``hermes-agent``) must keep
+    that input on the existing pin, or validate fails at eval.
     """
-    held: set[str] = set()
-    for name, updater_cls in updaters.items():
-        if not getattr(updater_cls, "bulk_update_hold", None):
-            continue
+    held_inputs: set[str] = set()
+    for name in bulk_hold_closure(updaters):
+        updater_cls = updaters.get(name)
         backing = source_backing_input_name(name, updater_cls)
         if backing is not None:
-            held.add(backing)
-        held.update(source_additional_input_names(updater_cls))
-    return frozenset(held)
+            held_inputs.add(backing)
+        held_inputs.update(source_additional_input_names(updater_cls))
+    return frozenset(held_inputs)
 
 
 def dependency_clusters(
@@ -422,6 +431,7 @@ __all__ = [
     "add_companion_source_parents",
     "aggregate_destination_names",
     "aggregate_source_members",
+    "bulk_hold_closure",
     "companion_source_depths",
     "companion_source_name",
     "companion_source_parent",

@@ -85,6 +85,57 @@ def test_bulk_hold_skips_backing_flake_inputs_on_untargeted_runs() -> None:
     assert [item.name for item in explicit["ref_inputs"]] == ["goose"]
 
 
+def test_bulk_hold_skips_inputs_of_coupled_aggregate_members() -> None:
+    """A hold must pin flake inputs of sources pulled into the hold closure."""
+
+    class Held:
+        bulk_update_hold = "Hosted macos-15 cannot rebuild this from source"
+
+    class Desktop:
+        companion_of = "held"
+        aggregate_into = ("electron-runtimes",)
+        input_name = "hermes-agent"
+
+    class Agent:
+        pass
+
+    class ElectronRuntimes:
+        pass
+
+    class Other:
+        pass
+
+    class Opts:
+        target_names: tuple[str, ...] = ()
+        no_refs = False
+        native_only = False
+        no_sources = False
+        no_input = False
+        check = False
+
+    updaters = {
+        "held": Held,
+        "desktop": Desktop,
+        "hermes-agent": Agent,
+        "electron-runtimes": ElectronRuntimes,
+        "other": Other,
+    }
+    refs = [
+        FlakeInputRef("hermes-agent", "NousResearch", "hermes-agent", "v1", "github"),
+        FlakeInputRef("nixpkgs", "NixOS", "nixpkgs", "nixos-unstable", "github"),
+    ]
+    assert "hermes-agent" in held_bulk_update_input_names(updaters)
+    resolved = resolve_update_targets(
+        Opts(),
+        updaters=updaters,
+        ref_inputs=refs,
+        result_type=lambda **kwargs: kwargs,
+    )
+    assert [item.name for item in resolved["ref_inputs"]] == ["nixpkgs"]
+    assert "hermes-agent" not in resolved["source_names"]
+    assert resolved["source_names"] == ["other"]
+
+
 def test_deep_companion_chain_has_no_python_recursion_limit() -> None:
     """Selecting a leaf must include and order every transitive parent."""
     names = [f"source-{index}" for index in range(1500)]
