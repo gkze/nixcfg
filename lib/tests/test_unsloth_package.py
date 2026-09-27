@@ -28,6 +28,7 @@ from nix_manipulator.expressions.set import AttributeSet
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
+    binary_darwin_self_source_app_names,
     binding_map,
     expect_binding,
     parse_nix_expr,
@@ -417,12 +418,7 @@ def test_unsloth_binary_darwin_overlay_exports_the_audited_package() -> None:
         nix_file_expr("overlays/binary-darwin-apps.nix"),
         FunctionDefinition,
     )
-    exports = expect_instance(overlay.output, AttributeSet)
-
-    assert_nix_ast_equal(
-        expect_binding(exports.values, "unsloth").value,
-        'callDarwinAppPackage "unsloth"',
-    )
+    assert "unsloth" in binary_darwin_self_source_app_names(overlay)
 
 
 def test_unsloth_is_routed_as_a_system_application() -> None:

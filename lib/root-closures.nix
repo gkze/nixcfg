@@ -65,8 +65,7 @@ let
   # Evaluating lib.rootClosureManifest on Linux must not force Darwin closures
   # (those can IFD/build aarch64-darwin sources and fail with platform mismatch).
   mismatchedSystemsFor =
-    rootsToCheck:
-    builtins.filter (root: root.system != root.closure.system) rootsToCheck;
+    rootsToCheck: builtins.filter (root: root.system != root.closure.system) rootsToCheck;
   validateManifest =
     value:
     assert lib.assertMsg (mismatchedNames == [ ]) (

@@ -183,7 +183,12 @@ in
 
     security.pam.services.sudo_local.touchIdAuth = cfg.security.touchIdSudo;
 
-    programs.zsh = lib.mkIf cfg.zsh.deferCompletionInitToHomeManager {
+    programs.zsh = {
+      # Starship (home-manager) owns the prompt; skip nix-darwin's default
+      # `promptinit` + `prompt suse` shell init (~12ms per interactive shell).
+      promptInit = lib.mkDefault "";
+    }
+    // lib.optionalAttrs cfg.zsh.deferCompletionInitToHomeManager {
       enableGlobalCompInit = false;
       enableBashCompletion = false;
     };

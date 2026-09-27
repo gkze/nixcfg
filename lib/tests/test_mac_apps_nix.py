@@ -3280,9 +3280,9 @@ def test_netnewswire_package_exposes_copy_mode_mac_app_metadata() -> None:
     )
 
 
-def test_codex_desktop_package_ships_the_unified_chatgpt_bundle() -> None:
-    """Codex Desktop should install the merged app under its upstream ChatGPT name."""
-    package_source = Path(REPO_ROOT / "packages/codex-desktop/default.nix").read_text(
+def test_chatgpt_package_ships_the_unified_chatgpt_bundle() -> None:
+    """The chatgpt package should install the merged app under its upstream name."""
+    package_source = Path(REPO_ROOT / "packages/chatgpt/default.nix").read_text(
         encoding="utf-8"
     )
     package = expect_instance(parse_nix_expr(package_source), FunctionDefinition)
@@ -3494,6 +3494,7 @@ def test_work_mac_app_routes_preserve_system_and_user_scopes() -> None:
         "paseo": "pkgs.paseo",
         "reflect": "pkgs.reflect-open",
         "screen-studio": "pkgs.screen-studio",
+        "tailscale": "pkgs.tailscale-app",
         "thorium": "pkgs.thorium",
         "unsloth": "pkgs.unsloth",
         "voiceos": "pkgs.voiceos",
@@ -3509,19 +3510,19 @@ def test_work_mac_app_routes_preserve_system_and_user_scopes() -> None:
             StringPrimitive(value="system"),
         )
 
-    gemini = expect_instance(_routing_entry(routing, "gemini"), AttributeSet)
-    assert_nix_ast_equal(
-        expect_binding(gemini.values, "preventDowngrade").value,
-        Primitive(value=True),
-    )
+    for name in ("gemini", "tailscale"):
+        protected_app = expect_instance(_routing_entry(routing, name), AttributeSet)
+        assert_nix_ast_equal(
+            expect_binding(protected_app.values, "preventDowngrade").value,
+            Primitive(value=True),
+        )
 
     expected_user_routes = {
         "claude-code-url-handler": "pkgs.claude-code-url-handler",
         "cleanshot": "pkgs.cleanshot",
         "freelens": "pkgs.freelens",
         "grok-build": "pkgs.grok-build",
-        "tailscale": "pkgs.tailscale-app",
-        "town-assistant": "pkgs.town-assistant-nightly",
+        "town-assistant": "pkgs.town-assistant-internal",
         "warp-preview": "pkgs.warp-preview",
     }
     for name, package in expected_user_routes.items():
@@ -3629,6 +3630,12 @@ def test_george_config_manages_mutable_gui_apps_via_scoped_applications() -> Non
 {
   enable = true;
   package = null;
+  profiles.default.userSettings = {
+    "window.autoDetectColorScheme" = true;
+    "workbench.preferredLightColorTheme" = config.theme.appearances.light.displayNameAccented;
+    "workbench.preferredDarkColorTheme" = config.theme.appearances.dark.displayNameAccented;
+    "catppuccin.syncWithIconPack" = true;
+  };
 }
 // lib.optionalAttrs (options.programs.vscode ? nameShort) {
   pname = "vscode-insiders";
@@ -3956,12 +3963,12 @@ def test_george_config_routes_only_the_unified_chatgpt_app() -> None:
         AttributeSet,
     )
 
-    assert "chatgpt" not in binding_map(routing.values)
+    assert "codex-desktop" not in binding_map(routing.values)
 
     codex = expect_instance(expect_binding(routing.values, "codex").value, AttributeSet)
     assert_nix_ast_equal(
         expect_binding(codex.values, "package").value,
-        identifier_attr_path("pkgs", "codex-desktop"),
+        identifier_attr_path("pkgs", "chatgpt"),
     )
     assert "bundleName" not in binding_map(codex.values)
 
@@ -3995,10 +4002,10 @@ def test_darwin_gui_package_set_retains_only_unified_chatgpt_app() -> None:
     }
 
     assert_nix_ast_equal(
-        packages_by_name["codex-desktop"],
-        Identifier(name="codex-desktop"),
+        packages_by_name["chatgpt"],
+        Identifier(name="chatgpt"),
     )
-    assert "chatgpt" not in packages_by_name
+    assert "codex-desktop" not in packages_by_name
 
 
 def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
@@ -4115,7 +4122,6 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
           (appPath "slack" "Slack.app")
           (appPath "onepassword" "1Password.app")
           (appPath "zen-twilight" "Twilight.app")
-          (appPath "thorium" "Thorium.app")
           (appPath "google-chrome" "Google Chrome.app")
           (appPath "claude" "Claude.app")
           (appPath "codex" "ChatGPT.app")
@@ -4129,7 +4135,6 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
           (appPath "ghostty" "Ghostty.app")
           (appPath "datagrip" "DataGrip.app")
           (appPath "notion" "Notion.app")
-          "/System/Applications/Notes.app"
           (appPath "spotify" "Spotify.app")
           "/System/Applications/System Settings.app"
         ]

@@ -182,7 +182,7 @@
         claude.package = pkgs.claude;
         codeedit.package = pkgs.codeedit;
         "code-cursor".package = pkgs.code-cursor;
-        codex.package = pkgs.codex-desktop;
+        codex.package = pkgs.chatgpt;
         cogito.package = pkgs.cogito;
         comet.package = pkgs.comet;
         commander.package = pkgs.commander;
@@ -422,7 +422,11 @@
         }) (builtins.attrValues config.theme.appearances ++ [ config.theme ])
       );
       config = {
-        theme = if pkgs.stdenv.hostPlatform.isDarwin then "auto:system" else "auto";
+        # auto:system reads the persisted macOS preference, which does not track
+        # live appearance events under Auto scheduling; darwin bridges bat config
+        # through home/george/appearance.nix instead. Non-darwin relies on
+        # terminal background detection.
+        theme = "auto";
         theme-light = config.theme.appearances.light.displayName;
         theme-dark = config.theme.appearances.dark.displayName;
       };
@@ -438,7 +442,11 @@
     };
     fzf = {
       enable = true;
-      enableZshIntegration = true;
+      # HM's integration guard ([[ $options[zle] = on ]]) also matches `zsh -i -c`
+      # sessions, where the zle option is locked. fzf's option-restore eval then
+      # fails with "can't change option: zle" twice per shell. A proper guard
+      # lives in modules/home/zsh.nix.
+      enableZshIntegration = false;
     };
     gh = {
       enable = true;

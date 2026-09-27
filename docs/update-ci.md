@@ -11,7 +11,7 @@ signed commit and a pull request; the workflow does not apply a system configura
    one candidate, retaining previously selected release metadata and native hashes.
    Preparation is sequential because updaters can share generated files. Dependent
    updaters recompute metadata from their pinned prerequisites.
-2. Validate the final identical tree on all three native builders. The two Linux
+1. Validate the final identical tree on all three native builders. The two Linux
    validators run in parallel and finish their Cachix uploads before Darwin starts.
    Each builder evaluates every declared package platform, builds native package
    validations, and builds its roots from the independently checked root manifest.
@@ -24,7 +24,7 @@ signed commit and a pull request; the workflow does not apply a system configura
    requirement. The full image, bootloader installation and guest configuration
    remain required; this does not advertise nonexistent runner hardware or disable
    the configured builder VM.
-3. Certify that every required platform reported success for that exact Git tree.
+1. Certify that every required platform reported success for that exact Git tree.
    Apply the certified patch, run repository hooks and the full Python/coverage
    gates, and check that validation did not alter the candidate. Only then create
    the signed update commit and PR.

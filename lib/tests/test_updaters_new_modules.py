@@ -35,9 +35,9 @@ def commander_module() -> ModuleType:
 
 
 @pytest.fixture(scope="module")
-def codex_desktop_module() -> ModuleType:
-    """Load the codex-desktop updater module."""
-    return _load_module("packages/codex-desktop/updater.py", prefix="codex_desktop")
+def chatgpt_module() -> ModuleType:
+    """Load the chatgpt updater module."""
+    return _load_module("packages/chatgpt/updater.py", prefix="chatgpt")
 
 
 @pytest.fixture(scope="module")
@@ -429,12 +429,12 @@ def test_commander_rejects_changelog_without_release_heading(
         _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
-def test_codex_desktop_reads_platform_appcasts(
-    codex_desktop_module: ModuleType,
+def test_chatgpt_reads_platform_appcasts(
+    chatgpt_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Resolve the newest common Codex release and immutable ZIP URLs."""
-    updater = codex_desktop_module.CodexDesktopUpdater()
+    updater = chatgpt_module.ChatGPTUpdater()
     newer_arm_url = "https://example.invalid/ChatGPT-darwin-arm64-26.429.61741.zip"
     arm_url = "https://example.invalid/ChatGPT-darwin-arm64-26.429.20946.zip"
     x64_url = "https://example.invalid/ChatGPT-darwin-x64-26.429.20946.zip"
@@ -469,7 +469,7 @@ def test_codex_desktop_reads_platform_appcasts(
             return _appcast(x64_url)
         raise AssertionError(url)
 
-    monkeypatch.setattr(codex_desktop_module, "fetch_url", _fetch_url)
+    monkeypatch.setattr(chatgpt_module, "fetch_url", _fetch_url)
 
     latest = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
@@ -478,12 +478,12 @@ def test_codex_desktop_reads_platform_appcasts(
     assert updater.get_download_url("x86_64-darwin", latest) == x64_url
 
 
-def test_codex_desktop_rejects_appcasts_without_common_release(
-    codex_desktop_module: ModuleType,
+def test_chatgpt_rejects_appcasts_without_common_release(
+    chatgpt_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Fail if the architecture appcasts have no release in common."""
-    updater = codex_desktop_module.CodexDesktopUpdater()
+    updater = chatgpt_module.ChatGPTUpdater()
 
     async def _fetch_url(_session: object, url: str, **_kwargs: object) -> bytes:
         version = "26.429.20946" if url.endswith("appcast.xml") else "26.430.1"
@@ -497,25 +497,25 @@ def test_codex_desktop_rejects_appcasts_without_common_release(
             </rss>
         """.encode()
 
-    monkeypatch.setattr(codex_desktop_module, "fetch_url", _fetch_url)
+    monkeypatch.setattr(chatgpt_module, "fetch_url", _fetch_url)
 
-    with pytest.raises(RuntimeError, match="No common Codex desktop release"):
+    with pytest.raises(RuntimeError, match="No common ChatGPT desktop release"):
         _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
-def test_codex_desktop_rejects_invalid_appcast_shape(
-    codex_desktop_module: ModuleType,
+def test_chatgpt_rejects_invalid_appcast_shape(
+    chatgpt_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Surface appcast parsing errors with Codex-specific messages."""
-    updater = codex_desktop_module.CodexDesktopUpdater()
+    updater = chatgpt_module.ChatGPTUpdater()
     monkeypatch.setattr(
-        codex_desktop_module,
+        chatgpt_module,
         "fetch_url",
         lambda *_a, **_k: asyncio.sleep(0, result=b"<rss><channel /></rss>"),
     )
 
-    with pytest.raises(RuntimeError, match="No items found in Codex appcast"):
+    with pytest.raises(RuntimeError, match="No items found in ChatGPT appcast"):
         _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
@@ -528,7 +528,7 @@ def test_codex_desktop_rejects_invalid_appcast_shape(
             <sparkle:shortVersionString />
             <enclosure url="https://example.invalid/Codex.zip" />
             """,
-            "Blank short version found in Codex appcast",
+            "Blank short version found in ChatGPT appcast",
         ),
         (
             """
@@ -536,25 +536,25 @@ def test_codex_desktop_rejects_invalid_appcast_shape(
             <sparkle:shortVersionString>26.429.20946</sparkle:shortVersionString>
             <enclosure />
             """,
-            "No URL found in Codex appcast enclosure",
+            "No URL found in ChatGPT appcast enclosure",
         ),
     ],
 )
-def test_codex_desktop_rejects_blank_appcast_fields(
-    codex_desktop_module: ModuleType,
+def test_chatgpt_rejects_blank_appcast_fields(
+    chatgpt_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     item_xml: str,
     message: str,
 ) -> None:
     """Reject appcast items whose required fields are present but blank."""
-    updater = codex_desktop_module.CodexDesktopUpdater()
+    updater = chatgpt_module.ChatGPTUpdater()
     payload = f"""
         <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
           <channel><item>{item_xml}</item></channel>
         </rss>
     """.encode()
     monkeypatch.setattr(
-        codex_desktop_module,
+        chatgpt_module,
         "fetch_url",
         lambda *_a, **_k: asyncio.sleep(0, result=payload),
     )
@@ -569,28 +569,28 @@ def test_codex_desktop_rejects_blank_appcast_fields(
         (
             {"asset_urls": "https://example.invalid/Codex.zip"},
             TypeError,
-            "Invalid Codex desktop asset URLs in metadata",
+            "Invalid ChatGPT desktop asset URLs in metadata",
         ),
         (
             {"asset_urls": {}},
             RuntimeError,
-            "Missing Codex desktop URL for platform 'aarch64-darwin'",
+            "Missing ChatGPT desktop URL for platform 'aarch64-darwin'",
         ),
         (
             {"asset_urls": {"aarch64-darwin": " "}},
             RuntimeError,
-            "Missing Codex desktop URL for platform 'aarch64-darwin'",
+            "Missing ChatGPT desktop URL for platform 'aarch64-darwin'",
         ),
     ],
 )
-def test_codex_desktop_rejects_invalid_asset_url_metadata(
-    codex_desktop_module: ModuleType,
+def test_chatgpt_rejects_invalid_asset_url_metadata(
+    chatgpt_module: ModuleType,
     metadata: object,
     expected_error: type[Exception],
     message: str,
 ) -> None:
     """Reject malformed appcast URL metadata instead of fabricating a bad URL."""
-    updater = codex_desktop_module.CodexDesktopUpdater()
+    updater = chatgpt_module.ChatGPTUpdater()
 
     with pytest.raises(expected_error, match=message):
         updater.get_download_url(

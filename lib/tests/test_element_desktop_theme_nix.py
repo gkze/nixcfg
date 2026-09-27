@@ -56,7 +56,10 @@ def test_element_desktop_uses_guarded_evaluator_visible_source() -> None:
         "    element-desktop.enable = ",
         ";\n",
     )
-    assert_nix_ast_equal(catppuccin_element_enable, "true")
+    # Element's built-in system light/dark selection wins over the Catppuccin
+    # module, so the integration is disabled while its pinned source still
+    # backs the appearance-bridged custom themes wired through the settings.
+    assert_nix_ast_equal(catppuccin_element_enable, "false")
 
     module = expect_instance(
         nix_file_expr("home/george/configuration.nix"),
@@ -78,6 +81,16 @@ def test_element_desktop_uses_guarded_evaluator_visible_source() -> None:
         {
           enable = true;
           package = null;
+          settings = {
+            default_theme = "light";
+            setting_defaults = {
+              use_system_theme = true;
+              custom_themes = map (
+                appearance:
+                lib.importJSON "${config.catppuccin.sources.element}/${appearance.variant}/${config.theme.accentColor}.json"
+              ) (builtins.attrValues config.theme.appearances);
+            };
+          };
         }
         """,
     )

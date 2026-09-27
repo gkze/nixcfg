@@ -16,16 +16,16 @@ manifests, deduplicated file contents and diagnostic projections. This replaces 
 separate JSON status/metadata files and JSONL event stream. The plain subprocess
 log is retained for `tail -f`.
 
-| Existing updater concept | Explicit contract |
-| --- | --- |
-| Selected targets and captured dirty checkout | Immutable workflow request and SQLite baseline |
-| Latest-version discovery | Checkpointed resolution step; replay reuses the resolved version |
-| Hashing and artifact generation | Checkpointed materialization step, including declared artifact bytes |
-| Source dependency graph | Independent source workflows with serializable prerequisite results |
-| Ref/input refresh and source persistence | Steps returning a verified candidate snapshot |
-| Derivation/root validation | Checkpoint keyed by the exact immutable validation snapshot |
-| Live promotion | Idempotent filesystem transaction reconciled until the root completes |
-| Progress and heartbeat | Diagnostic projections; DBOS remains execution authority |
+| Existing updater concept                     | Explicit contract                                                     |
+| -------------------------------------------- | --------------------------------------------------------------------- |
+| Selected targets and captured dirty checkout | Immutable workflow request and SQLite baseline                        |
+| Latest-version discovery                     | Checkpointed resolution step; replay reuses the resolved version      |
+| Hashing and artifact generation              | Checkpointed materialization step, including declared artifact bytes  |
+| Source dependency graph                      | Independent source workflows with serializable prerequisite results   |
+| Ref/input refresh and source persistence     | Steps returning a verified candidate snapshot                         |
+| Derivation/root validation                   | Checkpoint keyed by the exact immutable validation snapshot           |
+| Live promotion                               | Idempotent filesystem transaction reconciled until the root completes |
+| Progress and heartbeat                       | Diagnostic projections; DBOS remains execution authority              |
 
 `nixcfg update --resume RUN_ID` starts DBOS against the existing database. Native
 recovery resumes pending root/source workflows; completed workflows return their
@@ -245,7 +245,6 @@ paths apply the same URL redaction as terminal output. A failure inside an updat
 task is confined to that target and its traceback is stored in the error event's
 `detail`. `--status` reads DBOS status without starting workers or deserializing
 workflow inputs/results. Heartbeat age and execution status remain distinct.
-
 
 Use `--timings` for per-source operation counts, active time, admission wait,
 cache hits, failures/cancellations, and captured byte counts. Combine it with

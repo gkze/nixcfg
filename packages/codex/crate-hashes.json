@@ -12,7 +12,7 @@
   "git+https://github.com/microsoft/mxc?rev=6cd3d58f05d3447e67109cfb75e042803b843ca4#process_security_environment_spec@0.8.0": "0z4wndc2z43rb0drxjlk2gimc0va01i9w2m849b4yqli3zci6jax",
   "git+https://github.com/microsoft/mxc?rev=6cd3d58f05d3447e67109cfb75e042803b843ca4#sandbox_spec@0.8.0": "0z4wndc2z43rb0drxjlk2gimc0va01i9w2m849b4yqli3zci6jax",
   "git+https://github.com/microsoft/mxc?rev=6cd3d58f05d3447e67109cfb75e042803b843ca4#wxc_common@0.8.0": "0z4wndc2z43rb0drxjlk2gimc0va01i9w2m849b4yqli3zci6jax",
-  "git+https://github.com/openai-oss-forks/crossterm?rev=45fecb9508105988f42fe6ff0441783ed3717f92#0.29.0": "0ah9057kvfd7y8j23g3xzwbvlai1snsvm3q8p6nlnq3ywm15033i",
+  "git+https://github.com/openai-oss-forks/crossterm?rev=efa177859fd9623d57b9fe7ae9bf491ae1ac6ec4#0.29.0": "0m4jqnmcd5xv78s6yh2ic06xydp7xrrpbw2b6rjxwfcr681ngqfh",
   "git+https://github.com/openai-oss-forks/tokio-tungstenite?rev=0e5b2d73aa18dd9f0a50ee9ff199d5aef7594186#0.28.0": "00i879a84zqfak3jgh4s7lrg5yz2028ra7l8cqcyfn6inyg6cp2p",
   "git+https://github.com/openai-oss-forks/tungstenite-rs?rev=4fffad30fe373adbdcffab9545e9e9bf4f2fc19f#tungstenite@0.27.0": "1z1jvg5wp4p9pswnmcn6wxzkgi7yjm5zvskdk02gn9vxp69y2lam"
 }

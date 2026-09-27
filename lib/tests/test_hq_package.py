@@ -21,6 +21,7 @@ from nix_manipulator.expressions.set import AttributeSet
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
+    binary_darwin_self_source_app_names,
     binding_map,
     expect_binding,
     parse_nix_expr,
@@ -1314,11 +1315,7 @@ def test_hq_overlay_and_system_route_replace_the_unmanaged_app() -> None:
         nix_file_expr("overlays/binary-darwin-apps.nix"),
         FunctionDefinition,
     )
-    exports = expect_instance(overlay.output, AttributeSet)
-    assert_nix_ast_equal(
-        expect_binding(exports.values, "hq").value,
-        'callDarwinAppPackage "hq"',
-    )
+    assert "hq" in binary_darwin_self_source_app_names(overlay)
 
     routing = expect_instance(
         nix_source_fragment_expr(

@@ -186,7 +186,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.156.1";
+      url = "github:openai/codex/rust-v0.157.1";
       flake = false;
     };
     curator = {
@@ -868,6 +868,10 @@
                 src = ./.;
               };
 
+            "test-nix-build-rust-crate-unique" = mkEvalOnlyCheck "test-nix-build-rust-crate-unique" (
+              { pkgs, ... }: import ./tests/nix/build-rust-crate-unique.nix { inherit pkgs; }
+            );
+
             "test-nix-crate-cache-boundaries" = mkEvalOnlyCheck "test-nix-crate-cache-boundaries" (
               { pkgs, ... }:
               import ./tests/nix/crate-cache-boundaries.nix {
@@ -917,12 +921,19 @@
               _: import ./tests/nix/gpg-session { inherit self; }
             );
 
+            # Standalone Home Manager gates every attribute, including
+            # `options`, behind all assertions, which evaluates the complete
+            # home closure. The hosts' embedded user configs render the same
+            # files from the same user module without forcing packages.
             "test-nix-nvim-keymaps" = mkEvalOnlyCheck "test-nix-nvim-keymaps" (
               _:
-              import ./tests/nix/nvim-keymaps.nix {
-                config = self.homeConfigurations.george.config;
-                src = ./.;
-              }
+              builtins.all (
+                host:
+                import ./tests/nix/nvim-keymaps.nix {
+                  config = self.darwinConfigurations.${host}.config.home-manager.users.george;
+                  src = ./.;
+                }
+              ) (builtins.attrNames self.darwinConfigurations)
             );
 
             "test-nix-opencode-desktop" = mkEvalOnlyCheck "test-nix-opencode-desktop" (
@@ -1041,6 +1052,13 @@
             "test-zsh-gpg-tty" =
               { pkgs, ... }:
               import ./tests/nix/zsh-gpg-tty {
+                inherit pkgs;
+                src = ./.;
+              };
+
+            "test-zsh-completion-gate" =
+              { pkgs, ... }:
+              import ./tests/nix/zsh-completion-gate {
                 inherit pkgs;
                 src = ./.;
               };

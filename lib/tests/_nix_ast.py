@@ -10,12 +10,14 @@ from nix_manipulator.expressions.expression import NixExpression
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.inherit import Inherit
+from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.parenthesis import Parenthesis
+from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 from nix_manipulator.expressions.source_code import NixSourceCode
 
-from lib.tests._assertions import expect_not_none
+from lib.tests._assertions import expect_instance, expect_not_none
 
 _NON_SEMANTIC_FIELD_NAMES = {
     "after",
@@ -314,3 +316,12 @@ def expect_binding(bindings: Iterable[Binding | Inherit], name: str) -> Binding:
 def expect_scope_binding(expr: NixExpression, name: str) -> Binding:
     """Return the scoped let-binding named *name* from *expr*."""
     return expect_binding(expr.scope, name)
+
+
+def binary_darwin_self_source_app_names(overlay: NixExpression) -> set[str]:
+    """Return the names routed through the shared callDarwinAppPackage helper."""
+    names = expect_instance(
+        expect_scope_binding(overlay.output, "selfSourceDarwinAppNames").value,
+        NixList,
+    )
+    return {expect_instance(entry, StringPrimitive).value for entry in names.value}

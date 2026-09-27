@@ -193,14 +193,12 @@ def test_wispr_flow_platform_urls_and_required_tools(
     )
 
 
-def test_codex_desktop_fetch_latest_and_download_urls(
+def test_chatgpt_fetch_latest_and_download_urls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Pick the newest common Codex appcast release and preserve ZIP URLs."""
-    module = _load_updater(
-        "packages/codex-desktop/updater.py", "codex_desktop_updater_test"
-    )
-    updater = module.CodexDesktopUpdater()
+    """Pick the newest common ChatGPT appcast release and preserve ZIP URLs."""
+    module = _load_updater("packages/chatgpt/updater.py", "chatgpt_updater_test")
+    updater = module.ChatGPTUpdater()
     newer_arm_url = "https://example.invalid/ChatGPT-darwin-arm64-26.429.61741.zip"
     urls = {
         "aarch64-darwin": "https://example.invalid/ChatGPT-darwin-arm64-26.429.20946.zip",
@@ -257,29 +255,27 @@ def test_codex_desktop_fetch_latest_and_download_urls(
 @pytest.mark.parametrize(
     ("xml", "match"),
     [
-        ("<", "Invalid Codex appcast XML"),
-        ("<rss><channel /></rss>", "No items found in Codex appcast"),
+        ("<", "Invalid ChatGPT appcast XML"),
+        ("<rss><channel /></rss>", "No items found in ChatGPT appcast"),
         (
             "<rss><channel><item /></channel></rss>",
-            "No enclosure found in Codex appcast",
+            "No enclosure found in ChatGPT appcast",
         ),
         (
             '<rss><channel><item><enclosure url="https://example.invalid" />'
             "</item></channel></rss>",
-            "No short version found in Codex appcast",
+            "No short version found in ChatGPT appcast",
         ),
     ],
 )
-def test_codex_desktop_rejects_invalid_appcast_shapes(
+def test_chatgpt_rejects_invalid_appcast_shapes(
     monkeypatch: pytest.MonkeyPatch,
     xml: str,
     match: str,
 ) -> None:
-    """Raise clear errors for malformed Codex appcast payloads."""
-    module = _load_updater(
-        "packages/codex-desktop/updater.py", "codex_desktop_updater_test_errors"
-    )
-    updater = module.CodexDesktopUpdater()
+    """Raise clear errors for malformed ChatGPT appcast payloads."""
+    module = _load_updater("packages/chatgpt/updater.py", "chatgpt_updater_test_errors")
+    updater = module.ChatGPTUpdater()
     monkeypatch.setattr(
         module,
         "fetch_url",

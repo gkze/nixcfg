@@ -1,4 +1,4 @@
-"""Updater for Codex desktop Sparkle releases."""
+"""Updater for ChatGPT desktop Sparkle releases."""
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, cast
@@ -26,17 +26,17 @@ _SPARKLE_BUILD_VERSION = f"{{{_SPARKLE_NS}}}version"
 
 
 @dataclass(frozen=True, slots=True)
-class _CodexAppcastItem:
+class _ChatGPTAppcastItem:
     short_version: str
     build_version: str
     url: str
 
 
 @register_updater
-class CodexDesktopUpdater(DownloadHashUpdater):
-    """Track immutable Codex desktop archives from the Sparkle appcasts."""
+class ChatGPTUpdater(DownloadHashUpdater):
+    """Track immutable ChatGPT desktop archives from the Sparkle appcasts."""
 
-    name = "codex-desktop"
+    name = "chatgpt"
     ARCHIVE_BASE_URL = "https://persistent.oaistatic.com/codex-app-prod"
     APPCASTS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "https://persistent.oaistatic.com/codex-app-prod/appcast.xml",
@@ -53,14 +53,14 @@ class CodexDesktopUpdater(DownloadHashUpdater):
             return ElementTree.fromstring(xml_data)
         except ElementTree.ParseError as exc:
             snippet = xml_data[:200].replace("\n", " ").strip()
-            msg = f"Invalid Codex appcast XML from {appcast_url}; snippet: {snippet}"
+            msg = f"Invalid ChatGPT appcast XML from {appcast_url}; snippet: {snippet}"
             raise RuntimeError(msg) from exc
 
     @staticmethod
     def _extract_items(root: Element, *, appcast_url: str) -> tuple[Element, ...]:
         items = tuple(root.findall("./channel/item"))
         if not items:
-            msg = f"No items found in Codex appcast {appcast_url}"
+            msg = f"No items found in ChatGPT appcast {appcast_url}"
             raise RuntimeError(msg)
         return items
 
@@ -68,11 +68,11 @@ class CodexDesktopUpdater(DownloadHashUpdater):
     def _required_text(item: Element, tag: str, label: str) -> str:
         node = item.find(tag)
         if node is None:
-            msg = f"No {label} found in Codex appcast"
+            msg = f"No {label} found in ChatGPT appcast"
             raise RuntimeError(msg)
         value = (node.text or "").strip()
         if not value:
-            msg = f"Blank {label} found in Codex appcast"
+            msg = f"Blank {label} found in ChatGPT appcast"
             raise RuntimeError(msg)
         return value
 
@@ -80,7 +80,7 @@ class CodexDesktopUpdater(DownloadHashUpdater):
     def _extract_enclosure(item: Element) -> Element:
         enclosure = item.find("enclosure")
         if enclosure is None:
-            msg = "No enclosure found in Codex appcast"
+            msg = "No enclosure found in ChatGPT appcast"
             raise RuntimeError(msg)
         return enclosure
 
@@ -88,13 +88,13 @@ class CodexDesktopUpdater(DownloadHashUpdater):
     def _extract_download_url(enclosure: Element) -> str:
         value = (enclosure.get("url") or "").strip()
         if not value:
-            msg = "No URL found in Codex appcast enclosure"
+            msg = "No URL found in ChatGPT appcast enclosure"
             raise RuntimeError(msg)
         return value
 
-    def _extract_appcast_item(self, item: Element) -> _CodexAppcastItem:
+    def _extract_appcast_item(self, item: Element) -> _ChatGPTAppcastItem:
         enclosure = self._extract_enclosure(item)
-        return _CodexAppcastItem(
+        return _ChatGPTAppcastItem(
             short_version=self._required_text(
                 item,
                 _SPARKLE_SHORT_VERSION,
@@ -113,28 +113,28 @@ class CodexDesktopUpdater(DownloadHashUpdater):
         root: Element,
         *,
         appcast_url: str,
-    ) -> tuple[_CodexAppcastItem, ...]:
+    ) -> tuple[_ChatGPTAppcastItem, ...]:
         return tuple(
             self._extract_appcast_item(item)
             for item in self._extract_items(root, appcast_url=appcast_url)
         )
 
     @staticmethod
-    def _release_key(item: _CodexAppcastItem) -> tuple[str, str]:
+    def _release_key(item: _ChatGPTAppcastItem) -> tuple[str, str]:
         return item.short_version, item.build_version
 
     @classmethod
-    def _format_version(cls, item: _CodexAppcastItem) -> str:
+    def _format_version(cls, item: _ChatGPTAppcastItem) -> str:
         short_version, build_version = cls._release_key(item)
         return f"{short_version}-{build_version}"
 
     def _select_common_items(
         self,
-        items_by_platform: dict[str, tuple[_CodexAppcastItem, ...]],
-    ) -> dict[str, _CodexAppcastItem]:
-        keyed_items: dict[str, dict[tuple[str, str], _CodexAppcastItem]] = {}
+        items_by_platform: dict[str, tuple[_ChatGPTAppcastItem, ...]],
+    ) -> dict[str, _ChatGPTAppcastItem]:
+        keyed_items: dict[str, dict[tuple[str, str], _ChatGPTAppcastItem]] = {}
         for platform, items in items_by_platform.items():
-            platform_items: dict[tuple[str, str], _CodexAppcastItem] = {}
+            platform_items: dict[tuple[str, str], _ChatGPTAppcastItem] = {}
             for item in items:
                 platform_items.setdefault(self._release_key(item), item)
             keyed_items[platform] = platform_items
@@ -152,14 +152,14 @@ class CodexDesktopUpdater(DownloadHashUpdater):
             platform: [self._format_version(item) for item in items]
             for platform, items in items_by_platform.items()
         }
-        msg = f"No common Codex desktop release across platform appcasts: {versions}"
+        msg = f"No common ChatGPT desktop release across platform appcasts: {versions}"
         raise RuntimeError(msg)
 
     async def _fetch_appcast_items(
         self,
         session: aiohttp.ClientSession,
         platform: str,
-    ) -> tuple[_CodexAppcastItem, ...]:
+    ) -> tuple[_ChatGPTAppcastItem, ...]:
         appcast_url = self.APPCASTS[platform]
         xml_payload = await fetch_url(
             session,
@@ -194,18 +194,18 @@ class CodexDesktopUpdater(DownloadHashUpdater):
         asset_urls = metadata_get(
             info.metadata,
             "asset_urls",
-            context="Codex desktop metadata",
+            context="ChatGPT desktop metadata",
         )
         if asset_urls is None:
             short_version = info.version.rsplit("-", maxsplit=1)[0]
             arch = self.PLATFORMS[platform]
             return f"{self.ARCHIVE_BASE_URL}/ChatGPT-darwin-{arch}-{short_version}.zip"
         if not isinstance(asset_urls, dict):
-            msg = f"Invalid Codex desktop asset URLs in metadata: {info.metadata!r}"
+            msg = f"Invalid ChatGPT desktop asset URLs in metadata: {info.metadata!r}"
             raise TypeError(msg)
         asset_urls_map = cast("dict[str, object]", asset_urls)
         url = asset_urls_map.get(platform)
         if not isinstance(url, str) or not url.strip():
-            msg = f"Missing Codex desktop URL for platform {platform!r}"
+            msg = f"Missing ChatGPT desktop URL for platform {platform!r}"
             raise RuntimeError(msg)
         return url

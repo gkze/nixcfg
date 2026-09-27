@@ -516,9 +516,12 @@ rec {
           inputs.nix-rosetta-builder.darwinModules.default
           {
             nix-rosetta-builder.onDemand = true;
-            nix-rosetta-builder.potentiallyInsecureExtraNixosModule.nixpkgs.overlays = [
-              (import ./rosetta-builder-image.nix { inherit lib; })
-            ];
+            nix-rosetta-builder.potentiallyInsecureExtraNixosModule = {
+              nixpkgs.overlays = [
+                (import ./rosetta-builder-image.nix { inherit lib; })
+              ];
+              image.modules.qemu-efi = ./rosetta-builder-disk-image.nix;
+            };
           }
         ]
         ++ optionals (rosettaBuilderMemory != null) [

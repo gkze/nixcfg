@@ -6,8 +6,7 @@
 }:
 let
   localZshSiteFuncsPath = "zsh/site-functions";
-  codexBundledCliPath = "${config.nixcfg.macApps.resolved.codex.targetPath}/Contents/Resources/codex";
-  codexBundledResPath = "${config.nixcfg.macApps.resolved.codex.targetPath}/Contents/Resources";
+  codexBundledCliPath = "${config.nixcfg.macApps.resolved.codex.targetPath}/Contents/Resources/codex-cli/bin";
   codexBundledPluginRepair = pkgs.writeShellApplication {
     name = "codex-bundled-plugin-repair";
     runtimeInputs = [
@@ -192,7 +191,12 @@ in
   targets.darwin.defaults = {
     "com.ampcode.amp.macos".appearancePreference = "system";
     "com.cogito.app"."appearance.preference" = "system";
-    "com.town.TownAssistantMac".appTheme = "system";
+    "com.town.TownAssistantMac" = {
+      appTheme = "system";
+      # Keep the updater aligned with the Internal package selected in work.nix.
+      updateChannel = "internal";
+      hasSetUpdateChannel = true;
+    };
     "com.meta.endo".endo_appearance_mode = "system";
   };
 
@@ -204,7 +208,7 @@ in
         "nixcfgUserApplications"
       ]
       ''
-        codex_res_dir=${lib.escapeShellArg codexBundledResPath}
+        codex_res_dir=${lib.escapeShellArg codexBundledCliPath}
         codex_bin_dir=${lib.escapeShellArg "${config.home.homeDirectory}/.local/bin"}
         for codex_link_name in codex codex-code-mode-host; do
           codex_target="$codex_res_dir/$codex_link_name"

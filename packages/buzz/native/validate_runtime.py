@@ -84,7 +84,7 @@ def _validate_files(root: Path, files: dict[object, object]) -> set[str]:
             fail(f"runtime file is missing: {relative}")
         try:
             candidate.resolve(strict=True).relative_to(root)
-        except (OSError, ValueError):
+        except OSError, ValueError:
             fail(f"runtime file escapes the bundle: {relative}")
         actual_digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
         if actual_digest != expected_digest:

@@ -33,7 +33,7 @@ into reusable framework primitives and a standalone library of modules.
   [`nixos`](modules/nixos/), [`home`](modules/home/)).
 - [`packages/`](packages/): custom package outputs
   ([`axiom-cli`](packages/axiom-cli/),
-  [`codex-desktop`](packages/codex-desktop/),
+  [`chatgpt`](packages/chatgpt/),
   [`conductor`](packages/conductor/), [`droid`](packages/droid/),
   [`gogcli`](packages/gogcli/),
   [`homebrew-zsh-completion`](packages/homebrew-zsh-completion/),
@@ -251,7 +251,9 @@ profile modules and, when needed, the `sops-nix` Home Manager module explicitly.
 Cache policy is now opt-in: the common substituter and trusted-key options
 default to empty lists. `mkDarwinHost` also enables the Rosetta builder by
 default without consulting ambient CI state; CI and other callers without a
-Linux builder must pass `enableRosettaBuilder = false` explicitly.
+Linux builder must pass `enableRosettaBuilder = false` explicitly. The builder
+image follows its disabled `nix.channel.enable` setting and does not embed a
+Nixpkgs channel.
 
 - Exported `darwinModules`, `nixosModules`, and `homeModules` are declared in
   [`lib/exports.nix`](lib/exports.nix), the canonical module inventory.

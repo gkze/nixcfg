@@ -28,50 +28,16 @@ let
         path = "${config.programs.superfile.package.src}/src/superfile_config/theme/catppuccin-${appearance.variant}.toml";
       }
       {
-        name = "starship.toml";
-        path =
-          let
-            paletteName = "catppuccin_${appearance.variant}";
-            palette =
-              (lib.importTOML "${config.catppuccin.sources.starship}/${appearance.variant}.toml")
-              .palettes.${paletteName};
-            # Preserve Starship's default styles, which use ANSI color names.
-            colors = palette // {
-              purple = palette.mauve;
-              magenta = palette.mauve;
-              cyan = palette.teal;
-              white = palette.text;
-              black = palette.crust;
-              orange = palette.peach;
-              brown = palette.flamingo;
-            };
-          in
-          toml.generate "starship-${mode}.toml" (
-            lib.recursiveUpdate config.programs.starship.settings {
-              palette = paletteName;
-              palettes.${paletteName} =
-                colors
-                // lib.listToAttrs (
-                  map (name: lib.nameValuePair "bright-${name}" colors.${name}) [
-                    "black"
-                    "red"
-                    "green"
-                    "yellow"
-                    "blue"
-                    "purple"
-                    "magenta"
-                    "cyan"
-                    "white"
-                  ]
-                );
-            }
-          );
-      }
-      {
         name = "delta.gitconfig";
         path = pkgs.writeText "delta-${mode}.gitconfig" ''
           [delta]
             features = ${appearance.slug}
+        '';
+      }
+      {
+        name = "bat-config";
+        path = pkgs.writeText "bat-${mode}.config" ''
+          --theme='${appearance.displayName}'
         '';
       }
       {
@@ -89,7 +55,14 @@ let
         0) source_dir=${templates.light} ;;
         1) source_dir=${templates.dark} ;;
         "")
-          if [ "$(/usr/bin/defaults read -g AppleInterfaceStyle 2>/dev/null || true)" = Dark ]; then
+          # Manual appearance overrides change the live appearance without
+          # updating the persisted AppleInterfaceStyle preference, so detect
+          # the live state instead of reading the defaults key.
+          dark=$(
+            /usr/bin/osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode' 2>/dev/null ||
+              echo false
+          )
+          if [ "$dark" = "true" ]; then
             source_dir=${templates.dark}
           else
             source_dir=${templates.light}
@@ -102,7 +75,7 @@ let
       appearance_tmp=""
       trap 'if [ -n "$appearance_tmp" ]; then rm -f "$appearance_tmp"; fi' EXIT
       helix_changed=0
-      for name in alacritty.toml helix.toml superfile.toml starship.toml delta.gitconfig mode; do
+      for name in alacritty.toml helix.toml superfile.toml delta.gitconfig bat-config mode; do
         if cmp -s "$source_dir/$name" "$state/$name"; then continue; fi
         appearance_tmp=$(mktemp "$state/.$name.XXXXXX")
         cp "$source_dir/$name" "$appearance_tmp"
@@ -122,10 +95,8 @@ in
   # Prefer app-native switching; bridge only the installed tools without it.
   stylix.targets.alacritty.enable = false;
   stylix.targets.helix.enable = false;
-  stylix.targets.starship.enable = false;
   catppuccin.alacritty.enable = false;
   catppuccin.helix.enable = false;
-  catppuccin.starship.enable = false;
   programs.alacritty.settings = {
     general.import = [ "${state}/alacritty.toml" ];
     font = {
@@ -136,8 +107,11 @@ in
   xdg.configFile."helix/config.toml".source = lib.mkForce (
     config.lib.file.mkOutOfStoreSymlink "${state}/helix.toml"
   );
-  home.file.${config.programs.starship.configPath}.source = lib.mkForce (
-    config.lib.file.mkOutOfStoreSymlink "${state}/starship.toml"
+  # bat re-reads its config on every invocation, so no reload signal is needed.
+  # Its native auto:system mode tracks the persisted macOS preference, which
+  # does not follow live appearance events under Auto scheduling.
+  xdg.configFile."bat/config".source = lib.mkForce (
+    config.lib.file.mkOutOfStoreSymlink "${state}/bat-config"
   );
   programs.superfile = {
     settings.theme = "nixcfg-system";
@@ -163,6 +137,20 @@ in
       RunAtLoad = true;
       KeepAlive = true;
       StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/nixcfg-appearance.log";
+    };
+  };
+  # dark-mode-notify only fires on events that update the persisted macOS
+  # preference. Manual appearance overrides (for example from Control Center
+  # while Auto scheduling is active) change the live appearance without either
+  # writing the preference or raising that event, so poll the live state.
+  launchd.agents.nixcfg-appearance-poll = {
+    enable = true;
+    config = {
+      Label = "dev.george.nixcfg-appearance-poll";
+      ProgramArguments = [ (lib.getExe sync) ];
+      RunAtLoad = true;
+      StartInterval = 30;
+      StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/nixcfg-appearance-poll.log";
     };
   };
 }

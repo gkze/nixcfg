@@ -54,7 +54,11 @@ _RE_SPECIFIED = re.compile(r"specified:\s*(" + _HASH_VALUE + r")")
 # prefetch-yarn-deps / Node yarn FOD probes:
 #   Error: hash mismatch, expected <hex>, got <hex> for <url>
 _RE_EXPECTED_GOT = re.compile(
-    r"hash mismatch,\s*expected\s+(" + _HASH_VALUE + r"),\s*got\s+(" + _HASH_VALUE + r")",
+    r"hash mismatch,\s*expected\s+("
+    + _HASH_VALUE
+    + r"),\s*got\s+("
+    + _HASH_VALUE
+    + r")",
     re.IGNORECASE,
 )
 

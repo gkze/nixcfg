@@ -84,12 +84,21 @@ let
       typer
     ]
   );
+  # Copy only the script file into the store. Coercing the path with toString
+  # would embed a context-free path into the whole flake source, which is
+  # neither a registered runtime reference nor stable across unrelated edits.
   mkZenWrapper =
     name: script:
+    let
+      scriptInStore = builtins.path {
+        path = script;
+        inherit name;
+      };
+    in
     pkgs.writeShellApplication {
       inherit name;
       text = ''
-        exec ${lib.getExe zenPython} ${lib.escapeShellArg script} "$@"
+        exec ${lib.getExe zenPython} ${lib.escapeShellArg scriptInStore} "$@"
       '';
     };
   zenTool = mkZenWrapper "zentool" ../../home/george/bin/zentool;

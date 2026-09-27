@@ -3,6 +3,7 @@
 from functools import cache
 from typing import TYPE_CHECKING
 
+from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.inherit import Inherit
@@ -13,7 +14,13 @@ from nix_manipulator.expressions.set import AttributeSet
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, binding_map, expect_binding
 from lib.tests._nix_source import nix_file_expr
-from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
+from lib.tests._shell_ast import (
+    command_texts,
+    indented_string_body,
+    iter_nodes,
+    node_text,
+    parse_zsh,
+)
 
 if TYPE_CHECKING:
     from nix_manipulator.expressions.expression import NixExpression
@@ -104,16 +111,23 @@ def test_zsh_completion_deferral_is_conservative_and_host_scoped() -> None:
     )
 
     darwin_config = _nested_attrset(darwin_module, "config")
-    deferral = expect_instance(
+    merge = expect_instance(
         expect_binding(
             _nested_attrset(darwin_config, "programs").values,
             "zsh",
         ).value,
-        FunctionCall,
+        BinaryExpression,
     )
+    assert merge.operator.name == "//"
+    base_zsh = expect_instance(merge.left, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(base_zsh.values, "promptInit").value,
+        'lib.mkDefault ""',
+    )
+    deferral = expect_instance(merge.right, FunctionCall)
     assert_nix_ast_equal(
         deferral.name,
-        "lib.mkIf cfg.zsh.deferCompletionInitToHomeManager",
+        "lib.optionalAttrs cfg.zsh.deferCompletionInitToHomeManager",
     )
     deferred_zsh = expect_instance(deferral.argument, AttributeSet)
     assert_nix_ast_equal(
@@ -142,14 +156,24 @@ def test_zsh_completion_deferral_is_conservative_and_host_scoped() -> None:
         home_manager_zsh.values,
         "completionInit",
     ).value.rebuild()
-    commands = command_texts(parse_shell(indented_string_body(completion_init)))
+    shell = parse_zsh(indented_string_body(completion_init))
+    commands = command_texts(shell)
 
-    assert commands[:3] == [
-        "autoload -U compinit bashcompinit",
-        "compinit",
-        "bashcompinit",
-    ]
+    assert commands[0] == "autoload -Uz compinit bashcompinit"
+    # The content gate pays for full compinit exactly once on a cold start and
+    # trusts the dump via `compinit -C` when the fingerprint is unchanged.
     assert commands.count("compinit") == 1
+    assert commands.count("compinit -C") == 1
+    # The warm guard reads the fingerprint; only the cold path rewrites it.
+    fingerprint_redirects = [
+        node_text(node, shell.sanitized)
+        for node in iter_nodes(shell.tree.root_node, "file_redirect")
+        if ".zcompdump.fingerprint" in node_text(node, shell.sanitized)
+    ]
+    assert [redirect.split(maxsplit=1)[0] for redirect in fingerprint_redirects] == [
+        "<",
+        ">|",
+    ]
     assert commands.count("bashcompinit") == 1
 
 

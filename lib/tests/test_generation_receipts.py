@@ -169,8 +169,6 @@ def test_generation_identity_normalizes_nix_user_conf_files_by_content(
     assert crate2nix._generation_identity(generation_target, source) != baseline
 
 
-
-
 def test_generation_identity_fails_closed_for_unreadable_nix_user_conf(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -192,6 +190,26 @@ def test_generation_identity_fails_closed_for_unreadable_nix_user_conf(
     assert crate2nix._generation_identity(generation_target, source) is None
 
 
+def test_generation_identity_records_missing_nix_user_conf_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    generation_target: crate2nix.Crate2NixTarget,
+) -> None:
+    """Missing nix user config paths stay part of identity instead of vanishing."""
+    source = Path("/nix/store/source")
+    conf = tmp_path / "nix.conf"
+    conf.write_text("substituters = https://cache.nixos.org\n", encoding="utf-8")
+    missing = tmp_path / "absent" / "nix.conf"
+    monkeypatch.setenv("NIX_USER_CONF_FILES", str(conf))
+    baseline = crate2nix._generation_identity(generation_target, source)
+    assert baseline is not None
+    monkeypatch.setenv("NIX_USER_CONF_FILES", f"{conf}{os.pathsep}{missing}")
+    with_missing = crate2nix._generation_identity(generation_target, source)
+    assert with_missing is not None
+    assert with_missing != baseline
+    assert crate2nix._generation_identity(generation_target, source) == with_missing
+
+
 def test_generation_identity_ignores_empty_nix_user_conf_entries(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -205,6 +223,7 @@ def test_generation_identity_ignores_empty_nix_user_conf_entries(
     baseline = crate2nix._generation_identity(generation_target, source)
     monkeypatch.setenv("NIX_USER_CONF_FILES", str(conf))
     assert crate2nix._generation_identity(generation_target, source) == baseline
+
 
 def test_generation_identity_fails_closed_for_uninspectable_inputs(
     monkeypatch: pytest.MonkeyPatch,
