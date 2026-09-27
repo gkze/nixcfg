@@ -156,8 +156,9 @@ substituted for the existing command deadline.
 By default, a failed run collects job logs and artifacts for one Copilot CLI repair
 attempt. The agent works in an isolated checkout and may change packaging under
 `packages/` and `overlays/`, plus `flake.nix` and `flake.lock`. Changes outside that
-scope are rejected. The agent receives no publication credentials. Repository hooks
-and Python/coverage gates must pass before the repair is committed to a separate
+scope are rejected. The agent receives no publication credentials. Repair runs on
+the Darwin runner, where repository hooks and the Python/coverage gates are
+maintained; they must pass before the repair is committed to a separate
 branch. A fresh Update run then prepares and validates it on every native builder.
 That run has repair disabled, so failures cannot create an unbounded retry loop.
 It explicitly sets `validate_all_packages=true`: every registered updater's

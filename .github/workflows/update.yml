@@ -139,7 +139,8 @@ jobs:
     if: |-
       always() && !cancelled() && contains(needs.*.result, 'failure') &&
       (github.event_name == 'schedule' || inputs.repair)
-    runs-on: ubuntu-24.04
+    # The repair gate runs the Darwin-maintained Python suite, as publish does.
+    runs-on: macos-15
     timeout-minutes: 120
     permissions:
       actions: read
