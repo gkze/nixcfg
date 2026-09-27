@@ -30,7 +30,11 @@ def _validate_constants() -> None:
     if len(RELEASES_URL) != len(DISABLED_RELEASES_URL):
         msg = "HQ release-index replacement length does not match its reviewed URL"
         raise RuntimeError(msg)
-    for patch in AUTOMATIC_MUTATION_PATCHES:
+    for patch in (
+        variant
+        for group in AUTOMATIC_MUTATION_PATCHES
+        for variant in (group, *group.alternatives)
+    ):
         lengths = {
             len(patch.original.pattern),
             len(patch.original.mask),
@@ -210,12 +214,16 @@ def patch_payload(payload: bytes) -> bytes:
 
     resolved: list[tuple[int, MachinePatch, bytes]] = []
     for patch in AUTOMATIC_MUTATION_PATCHES:
-        offsets = _matching_offsets(payload, patch.original)
-        if len(offsets) != 1:
-            msg = f"HQ {patch.label} inventory drifted: expected 1, got {len(offsets)}"
+        matches = [
+            (offset, variant)
+            for variant in (patch, *patch.alternatives)
+            for offset in _matching_offsets(payload, variant.original)
+        ]
+        if len(matches) != 1:
+            msg = f"HQ {patch.label} inventory drifted: expected 1, got {len(matches)}"
             raise ValueError(msg)
-        offset = offsets[0]
-        resolved.append((offset, patch, _build_replacement(payload, offset, patch)))
+        offset, variant = matches[0]
+        resolved.append((offset, variant, _build_replacement(payload, offset, variant)))
 
     ordered_ranges = sorted(
         (offset, offset + len(replacement), patch.label)
@@ -244,13 +252,17 @@ def patch_payload(payload: bytes) -> bytes:
         msg = "HQ updater patch left an app-owned endpoint behind"
         raise AssertionError(msg)
     for patch in AUTOMATIC_MUTATION_PATCHES:
-        if _matching_offsets(  # pragma: no cover -- replacement opcode postcondition
-            result,
-            patch.original,
+        if any(  # pragma: no cover -- replacement opcode postcondition
+            _matching_offsets(result, variant.original)
+            for variant in (patch, *patch.alternatives)
         ):
             msg = f"HQ updater patch left an automatic mutation path behind: {patch.label}"
             raise AssertionError(msg)
-        disabled_offsets = _matching_offsets(result, patch.disabled)
+        disabled_offsets = [
+            offset
+            for variant in (patch, *patch.alternatives)
+            for offset in _matching_offsets(result, variant.disabled)
+        ]
         if (
             len(disabled_offsets) != 1
         ):  # pragma: no cover -- unique replacement invariant

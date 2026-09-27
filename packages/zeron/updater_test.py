@@ -238,7 +238,11 @@ def test_zeron_validates_the_materialized_bootstrap_source() -> None:
 
 @pytest.mark.parametrize(
     ("group_name", "group_attr"),
-    [("primary", "_PATCHES"), ("fallback", "_PATCHES_FALLBACK")],
+    [
+        ("primary", "_PATCHES"),
+        ("fallback", "_PATCHES_FALLBACK"),
+        ("0.2.94", "_PATCHES_094"),
+    ],
 )
 def test_zeron_nix_policy_patch_disables_every_update_path(
     tmp_path: Path,
@@ -263,14 +267,17 @@ def test_zeron_nix_policy_patch_disables_every_update_path(
 
 
 @pytest.mark.parametrize("copies", [0, 2])
+@pytest.mark.parametrize("group_attr", ["_PATCHES", "_PATCHES_094"])
 def test_zeron_nix_policy_patch_rejects_source_drift_atomically(
     tmp_path: Path,
     copies: int,
+    group_attr: str,
 ) -> None:
     """No source file may be partially patched when an upstream anchor drifts."""
     module = _load_patch_module()
-    target = module._PATCHES[-1]
-    patches = [*module._PATCHES[:-1], *([target] * copies)]
+    group = getattr(module, group_attr)
+    target = group[-1]
+    patches = [*group[:-1], *([target] * copies)]
     update_path = _write_patch_fixture(tmp_path, patches)
     original = update_path.read_text(encoding="utf-8")
 

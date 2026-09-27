@@ -16,7 +16,7 @@ class _SourcePatch:
     new: str
 
 
-# Ownership scaffolding shared by both supported updater layouts: the
+# Ownership scaffolding shared by the supported updater layouts: the
 # sentinel header, the headless apply hook, and the relaunch, auto-update,
 # background-task, and install guards.
 _OWNERSHIP_HEADER = _SourcePatch(
@@ -278,11 +278,47 @@ _PATCHES_FALLBACK = (
 )
 
 
+# 0.2.94 subscribes before spawning and shares manual/automatic apply admission.
+_PATCHES_094 = (
+    *_PATCHES[:-2],
+    _SourcePatch(
+        """        let checks = updater.check_tx.subscribe();
+        let for_loop = updater.clone();
+        let task = tokio::spawn(async move { for_loop.check_loop(checks).await });
+        *updater.check_task.lock().unwrap() = Some(task);
+        updater
+""",
+        """        if !NIX_MANAGED {
+            let checks = updater.check_tx.subscribe();
+            let for_loop = updater.clone();
+            let task = tokio::spawn(async move { for_loop.check_loop(checks).await });
+            *updater.check_task.lock().unwrap() = Some(task);
+        }
+        updater
+""",
+    ),
+    _SourcePatch(
+        (
+            "    async fn apply_inner(&self, require_quiescent: bool)"
+            " -> anyhow::Result<Option<String>> {\n"
+            "        let InstallKind::Managed { app_root } = detect_install() else {\n"
+        ),
+        (
+            "    async fn apply_inner(&self, require_quiescent: bool)"
+            " -> anyhow::Result<Option<String>> {\n"
+            "        ensure_updates_mutable()?;\n"
+            "        let InstallKind::Managed { app_root } = detect_install() else {\n"
+        ),
+    ),
+)
+
+
 def _matching_patch_group(
     source: str,
 ) -> tuple[str, tuple[_SourcePatch, ...]]:
     """Return the first anchor group whose anchors each match exactly once."""
     groups = (
+        ("0.2.94", _PATCHES_094),
         ("primary", _PATCHES),
         ("fallback", _PATCHES_FALLBACK),
     )

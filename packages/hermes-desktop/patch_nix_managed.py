@@ -200,20 +200,24 @@ export interface UpdateApplyState {
         (
             "        <ListRow\n"
             "          description={a.automaticUpdatesDesc}\n"
-            "          hint={a.branchCommit(status?.branch ?? 'unknown', "
-            "status?.currentSha?.slice(0, 7) ?? 'unknown')}\n"
+        ),
+        """        {!import.meta.env.PROD && (
+          <>
+        <ListRow
+          description={a.automaticUpdatesDesc}
+""",
+    ),
+    _SourcePatch(
+        "apps/desktop/src/app/settings/about-settings.tsx",
+        (
             "          title={a.automaticUpdates}\n"
             "        />\n\n"
             "        {includeUninstall && <UninstallSection />}\n"
         ),
-        """        {!import.meta.env.PROD && (
-          <>
-            <ListRow
-              description={a.automaticUpdatesDesc}
-              hint={a.branchCommit(status?.branch ?? 'unknown', status?.currentSha?.slice(0, 7) ?? 'unknown')}
-              title={a.automaticUpdates}
-            />
-            {includeUninstall && <UninstallSection />}
+        """          title={a.automaticUpdates}
+        />
+
+        {includeUninstall && <UninstallSection />}
           </>
         )}
 """,

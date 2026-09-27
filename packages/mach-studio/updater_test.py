@@ -256,6 +256,35 @@ def test_mach_studio_pins_the_audited_167_anchor_payload() -> None:
     )
 
 
+def test_mach_studio_policy_accepts_the_audited_168_provisioners() -> None:
+    """The renamed 0.1.168 helpers retain the same fail-closed transformation."""
+    module = _load_policy_module()
+    source = module._FAIL_OPEN_ENGINE_INSTALL_SOURCE_168
+    wheel = module._FAIL_OPEN_ENGINE_INSTALL_WHEEL_168
+    assert hashlib.sha256(source).hexdigest() == (
+        "0b11285e3a4d64aa0bd517bf9c99f97e96b6cbec971c171d99bd393e19d099db"
+    )
+    assert hashlib.sha256(wheel).hexdigest() == (
+        "ae72c871055a4e99df3e0dbeb282ae5e090edaa099dd47477832173c30b46519"
+    )
+    payload = module._ENABLED_GATE + source + wheel
+
+    patched = module.patch_main(payload)
+
+    assert len(patched) == len(payload)
+    assert source not in patched
+    assert wheel not in patched
+    assert module._FAIL_CLOSED_ENGINE_INSTALL_SOURCE_168 in patched
+    assert (
+        wheel.replace(b"uv to install bundled", b"uv install bundled", 1).replace(
+            b";return}", b";throw e}", 1
+        )
+        in patched
+    )
+    with pytest.raises(module.PatchError, match="local-engine provisioning"):
+        module.patch_main(payload.replace(b"HM(", b"unknown("))
+
+
 def test_mach_studio_policy_reports_the_packaged_engine_source() -> None:
     """Engine maintenance must describe this release's bundled source."""
     module = _load_policy_module()

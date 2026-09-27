@@ -981,6 +981,90 @@ def test_openchamber_patches_v1_upgrade_before_any_side_effect(tmp_path: Path) -
     )
 
 
+@pytest.mark.parametrize("service_copies", [0, 1, 2])
+def test_openchamber_v2_upgrade_policy_is_fail_closed(
+    tmp_path: Path, service_copies: int
+) -> None:
+    """Both Effect entrypoints reject mutation; drift leaves all files unchanged."""
+    module = _load_patcher_module()
+    service = (
+        "  const upgrade = Effect.fnUntraced(function* (method: Method, input: string) {\n"
+        '    calls.push("service")\n'
+        "  })\n"
+    )
+    sources = {
+        "packages/cli/package.json": '{"version": "2.0.16"}',
+        "packages/cli/src/commands/handlers/upgrade.ts": (
+            "const handler = (\n"
+            "    function* (input) {\n"
+            '      intro("Upgrade")\n'
+            '      calls.push("handler")\n'
+            "    }\n"
+            ")\n"
+        ),
+        "packages/cli/src/services/updater.ts": (
+            service * service_copies + "function inspect() {\n"
+            '    if (OPENCODE_LOCAL || ["1", "true"].includes('
+            'process.env.OPENCODE_DISABLE_AUTOUPDATE?.toLowerCase() ?? "")) {\n'
+            "      return undefined\n"
+            "    }\n"
+            '    calls.push("poll")\n'
+            "}\n"
+        ),
+    }
+    for relative_path, source in sources.items():
+        path = tmp_path / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+    if service_copies != 1:
+        with pytest.raises(RuntimeError, match="managed-source patch anchor"):
+            module.patch_component("opencode", tmp_path)
+        assert {
+            name: (tmp_path / name).read_text(encoding="utf-8") for name in sources
+        } == sources
+        return
+
+    module.patch_component("opencode", tmp_path, check=True)
+    module.patch_component("opencode", tmp_path)
+    harness = tmp_path / "upgrade.mts"
+    harness.write_text(
+        'import assert from "node:assert/strict"\n'
+        "const calls = []\n"
+        "type Method = string\n"
+        "const OPENCODE_LOCAL = false\n"
+        "const Effect = {\n"
+        "  fnUntraced: fn => fn,\n"
+        "  fail: function* (error) { throw error },\n"
+        "}\n"
+        'const intro = () => calls.push("intro")\n'
+        + (tmp_path / "packages/cli/src/commands/handlers/upgrade.ts").read_text(
+            encoding="utf-8"
+        )
+        + (tmp_path / "packages/cli/src/services/updater.ts").read_text(
+            encoding="utf-8"
+        )
+        + 'process.env.OPENCODE_NIX_MANAGED = "1"\n'
+        'process.env.OPENCODE_DISABLE_AUTOUPDATE = "true"\n'
+        'assert.throws(() => handler({}).next(), {message: "Updates are managed by Nix."})\n'
+        'assert.throws(() => upgrade("curl", "2.0.17").next(), '
+        '{message: "Updates are managed by Nix."})\n'
+        "inspect()\n"
+        "assert.deepEqual(calls, [])\n"
+        "delete process.env.OPENCODE_NIX_MANAGED\n"
+        "delete process.env.OPENCODE_DISABLE_AUTOUPDATE\n"
+        "handler({}).next()\n"
+        'upgrade("curl", "2.0.17").next()\n'
+        "inspect()\n"
+        'assert.deepEqual(calls, ["intro", "handler", "service", "poll"])\n',
+        encoding="utf-8",
+    )
+    node = shutil.which("node")
+    assert node is not None
+    subprocess.run(  # noqa: S603 -- executes only the test-owned local harness
+        [node, str(harness)], check=True, capture_output=True, text=True, timeout=30
+    )
+
+
 def test_openchamber_patcher_cli_validates_root_arity(tmp_path: Path) -> None:
     """The patch CLI must distinguish complete and component-scoped invocations."""
     module = _load_patcher_module()
@@ -1308,27 +1392,37 @@ def test_openchamber_node_modules_normalizes_bun_private_bin_links() -> None:
     assert commands.index(normalization) < commands.index("runHook postBuild")
 
 
-def test_openchamber_companion_build_and_dependencies_use_the_v1_workspace() -> None:
-    """Dependency selection, compilation and installation must agree on 1.x."""
+@pytest.mark.parametrize("workspace", ["opencode", "cli"])
+def test_openchamber_companion_build_and_dependencies_use_the_same_workspace(
+    workspace: str,
+) -> None:
+    """Dependency selection, compilation and output names agree for 1.x and 2.x."""
     package = expect_instance(
         parse_nix_expr((_PACKAGE_DIR / "opencode.nix").read_text(encoding="utf-8")),
         FunctionDefinition,
     )
     derivation = expect_instance(package.output, FunctionCall)
+    assert_nix_ast_equal(
+        expect_binding(derivation.scope, "cliPackage").value,
+        'if lib.versionAtLeast version "2.0.0" then "cli" else "opencode"',
+    )
     arguments = expect_instance(derivation.argument, AttributeSet)
     for phase, command, expected in (
-        ("buildPhase", "cd", "cd packages/opencode"),
+        ("buildPhase", "cd", f"cd packages/{workspace}"),
         (
             "installPhase",
             "install",
-            'install -Dm755 dist/opencode-*/bin/opencode "$out/bin/opencode"',
+            f'install -Dm755 dist/{workspace}-*/bin/opencode "$out/bin/opencode"',
         ),
     ):
         body = expect_instance(
             expect_binding(arguments.values, phase).value, IndentedString
         )
         assert command_texts(
-            parse_shell(indented_string_body(body.rebuild())), command
+            parse_shell(
+                indented_string_body(body.rebuild()).replace("${cliPackage}", workspace)
+            ),
+            command,
         ) == [expected]
 
     dependencies = expect_instance(
@@ -1339,17 +1433,24 @@ def test_openchamber_companion_build_and_dependencies_use_the_v1_workspace() -> 
     )
     assertion = expect_instance(dependencies.output, Assertion)
     derivation = expect_instance(assertion.body, FunctionCall)
+    assert_nix_ast_equal(
+        expect_binding(derivation.scope, "cliPackage").value,
+        'if lib.versionAtLeast version "2.0.0" then "cli" else "opencode"',
+    )
     arguments = expect_instance(derivation.argument, AttributeSet)
     body = expect_instance(
         expect_binding(arguments.values, "buildPhase").value, IndentedString
     )
     install, *_ = command_texts(
-        parse_shell(indented_string_body(body.rebuild())), "bun"
+        parse_shell(
+            indented_string_body(body.rebuild()).replace("${cliPackage}", workspace)
+        ),
+        "bun",
     )
     args = shlex.split(install.replace("\\\n", ""))
     assert [args[index + 1] for index, arg in enumerate(args) if arg == "--filter"] == [
         "!./",
-        "./packages/opencode",
+        f"./packages/{workspace}",
         "./packages/desktop",
         "./packages/app",
     ]
