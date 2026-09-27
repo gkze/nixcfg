@@ -278,9 +278,7 @@ def bulk_hold_closure(
     add_companion_source_children(selected, roots=set(selected), updaters=updaters)
     add_aggregate_sources(selected, updaters)
     held = {
-        name
-        for name in selected
-        if getattr(updaters[name], "bulk_update_hold", None)
+        name for name in selected if getattr(updaters[name], "bulk_update_hold", None)
     }
     return failure_closure(held, dependency_clusters(selected, updaters=updaters))
 

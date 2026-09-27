@@ -172,9 +172,7 @@ def reclaim_hosted_store() -> None:
     )
     sys.stdout.flush()
     _run("nix", "store", "gc")
-    sys.stdout.write(
-        f"Available after store GC: {shutil.disk_usage('/').free} bytes\n"
-    )
+    sys.stdout.write(f"Available after store GC: {shutil.disk_usage('/').free} bytes\n")
 
 
 def _develop(*args: str) -> tuple[str, ...]:
