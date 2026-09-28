@@ -1,4 +1,4 @@
 # Touch this file to queue one Update run on copilot/gkzenixcfg-update-automation.
 # The cloud-agent token cannot call workflow_dispatch (HTTP 403).
 # Remove this kick path after E2E prepare → validate → publish is proven.
-2026-09-28T06:01:00Z zeron-097-baseten-switch-headed-skip
+2026-09-28T08:22:00Z hold-baseten-switch-0.6.0-xctest-sigtrap
