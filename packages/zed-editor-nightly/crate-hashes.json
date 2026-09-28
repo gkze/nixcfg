@@ -67,6 +67,5 @@
   "git+https://github.com/zed-industries/wprcontrol?rev=cd811f7#0.1.0": "0bgvky8ckymv9ncr0irjb7n4cmywmg8havax74zzmfv6jrv8h8w2",
   "git+https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#xim-ctext@0.3.0": "14cyxxdgjpbkf8ny4c46cfqjinavi2cyxzwfngldlls97m5zh555",
   "git+https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#xim-parser@0.2.1": "14cyxxdgjpbkf8ny4c46cfqjinavi2cyxzwfngldlls97m5zh555",
-  "git+https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#zed-xim@0.4.0-zed": "14cyxxdgjpbkf8ny4c46cfqjinavi2cyxzwfngldlls97m5zh555",
-  "git+https://github.com/zed-industries/yawc?rev=71a452f551cac178367eaac5d7418a09afa1f3a2#0.3.3": "0x9jag12b0v5mvyn0nzdgbhylyjg4i3hqf98pz65wblp5qpfwsg3"
+  "git+https://github.com/zed-industries/xim-rs.git?rev=16f35a2c881b815a2b6cdfd6687988e84f8447d8#zed-xim@0.4.0-zed": "14cyxxdgjpbkf8ny4c46cfqjinavi2cyxzwfngldlls97m5zh555"
 }

@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-biZJyW4aWiaJzFcRXyRBper+++prR7hfsxZ/Q70oc/c="
+    "aarch64-darwin": "sha256-1tcjZT3FwY2tZoev+L+yskTDrmAL3h3cu8rOwJbm1zc="
   },
   "urls": {
-    "aarch64-darwin": "https://static.getenergy.com/desktop/beta/arm64/0.7.269/arm64.dmg"
+    "aarch64-darwin": "https://static.getenergy.com/desktop/beta/arm64/0.7.284/arm64.dmg"
   },
-  "version": "0.7.269"
+  "version": "0.7.284"
 }

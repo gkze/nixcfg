@@ -138,7 +138,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.79.0";
+      url = "github:max-sixty/worktrunk/v0.80.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -146,7 +146,7 @@
       flake = false;
     };
     anthropic-cli = {
-      url = "github:anthropics/anthropic-cli/v1.35.0";
+      url = "github:anthropics/anthropic-cli/v1.36.0";
       flake = false;
     };
     base16-schemes-src = {
@@ -191,7 +191,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.156.1";
+      url = "github:openai/codex/rust-v0.158.0";
       flake = false;
     };
     curator = {
@@ -206,11 +206,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.41.0";
+      url = "github:steipete/gogcli/v0.42.0";
       flake = false;
     };
     openai-cli = {
-      url = "github:openai/openai-cli/v1.16.3";
+      url = "github:openai/openai-cli/v1.28.2";
       flake = false;
     };
     github-desktop = {
