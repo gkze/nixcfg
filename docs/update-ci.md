@@ -103,7 +103,10 @@ where present. The step refuses local or self-hosted execution and logs availabl
 space before and after cleanup. This matters because the measured Darwin root
 closure alone occupies about 73.5 GB. Hosted Darwin therefore skips native
 `root-closures` after package validation; Linux validate already owns that
-check. Runner capacity remains an acceptance check for local Darwin.
+check. Publish quality also runs on macos-15, so tests that require
+root-closures must disable that skip, and CLI help assertions must survive
+Rich's hosted TTY geometry. Runner capacity remains an acceptance check for
+local Darwin.
 
 Repository secrets used by the workflow:
 

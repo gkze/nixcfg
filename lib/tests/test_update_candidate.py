@@ -177,6 +177,13 @@ def prepared_run(
     return root, operations, state
 
 
+def _run_root_closures(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise the Linux/local root-closure path even on hosted Darwin quality."""
+    monkeypatch.setattr(
+        pipeline.jobs, "hosted_darwin_skips_root_closures", lambda: False
+    )
+
+
 @pytest.mark.parametrize("darwin_only", [False, True])
 def test_native_stages_pin_versions_preserve_hashes_and_never_promote(
     prepared_run,
@@ -389,6 +396,7 @@ def test_native_validation_and_certification(
         return ()
 
     order: list[str] = []
+    _run_root_closures(monkeypatch)
     monkeypatch.setattr(
         pipeline.jobs, "reclaim_hosted_store", lambda: order.append("reclaim")
     )
@@ -607,6 +615,7 @@ def test_hosted_validation_streams_nix_logs_to_stderr(
         )
         return ()
 
+    _run_root_closures(monkeypatch)
     monkeypatch.setattr(
         pipeline.validation, "validate_derivations", validate_derivations
     )
@@ -653,6 +662,7 @@ def test_noop_candidate_still_validates_repaired_baseline_roots(
         patch=b"",
     )
     checked = []
+    _run_root_closures(monkeypatch)
     monkeypatch.setattr(
         pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
     )
@@ -746,6 +756,7 @@ def test_incomplete_native_validation_cannot_issue_report(
             sleep=lambda _: pytest.fail("incomplete execution must not retry"),
         )
 
+    _run_root_closures(monkeypatch)
     monkeypatch.setattr(
         pipeline.validation,
         "validate_derivations",
