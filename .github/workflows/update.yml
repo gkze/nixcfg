@@ -129,7 +129,9 @@ jobs:
         if: steps.candidate.outputs.changed == 'true'
         env:
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
+          # The dedicated update PAT is rejected by Git (empty or expired).
+          # This job already has contents:write and pull-requests:write.
+          GH_TOKEN: ${{ github.token }}
           UPDATE_BASE_BRANCH: ${{ github.event.repository.default_branch }}
           NIXCFG_CI_STAGE: publish
         run: |
@@ -154,7 +156,7 @@ jobs:
     timeout-minutes: 120
     permissions:
       actions: read
-      contents: read
+      contents: write
       copilot-requests: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -216,7 +218,7 @@ jobs:
       - name: Start a fresh attempt with repair disabled
         env:
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
+          GH_TOKEN: ${{ github.token }}
           NIXCFG_CI_STAGE: start-repair
           NIXCFG_UPDATE_TARGETS: ${{ inputs.targets || '' }}
         run: |

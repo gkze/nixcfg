@@ -112,7 +112,9 @@ Repository secrets used by the workflow:
 
 - `UPDATE_SELF_HEAL_GITHUB_TOKEN`: public upstream API access for Nix and updaters.
 - `CACHIX_AUTH_TOKEN`: populate the existing `gkze` binary cache; `zed` is also read.
-- `GH_TOKEN_FOR_UPDATES`: push the update branch and open its PR.
+- Job `GITHUB_TOKEN` on `publish` / `start-repair` (`contents: write`,
+  `pull-requests: write`): push the update or repair branch and open the PR.
+  `GH_TOKEN_FOR_UPDATES` is unused until it can authenticate `git push`.
 - `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`: sign the update commit.
 
 The repair agent uses the short-lived Actions `GITHUB_TOKEN` with job-scoped

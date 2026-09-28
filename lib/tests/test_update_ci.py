@@ -541,7 +541,7 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     assert set(validators) <= set(jobs["repair"]["needs"])
     assert jobs["repair"]["permissions"] == {
         "actions": "read",
-        "contents": "read",
+        "contents": "write",
         "copilot-requests": "write",
     }
     agent = next(
@@ -557,6 +557,14 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     assert "inputs.repair == true" in repair_if
     assert "inputs.repair == 'true'" in repair_if
     assert "github.event_name == 'push'" in repair_if
+    for stage in ("publish", "start-repair"):
+        step = next(
+            step
+            for job in jobs.values()
+            for step in job.get("steps", [])
+            if step.get("env", {}).get("NIXCFG_CI_STAGE") == stage
+        )
+        assert step["env"]["GH_TOKEN"] == "${{ github.token }}"  # noqa: S105 -- Actions expression, not a credential.
 
 
 def test_agent_check_limits_permissions_and_uses_selected_model() -> None:
