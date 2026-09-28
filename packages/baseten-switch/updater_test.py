@@ -115,9 +115,7 @@ def test_package_skips_headed_swift_layout_guide_check() -> None:
         if "/usr/bin/swift test" in command
     }
     assert any(
-        command.endswith(
-            "--skip testRouterWindowContentUsesNonObscuredLayoutGuide"
-        )
+        command.endswith("--skip testRouterWindowContentUsesNonObscuredLayoutGuide")
         for command in swift_tests
     )
 

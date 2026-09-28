@@ -6,8 +6,6 @@ type-checks those symbols against the 15.5 SDK and fails the build. Keep the
 macOS 15 fallback layout so Darwin validate can compile the current pin.
 """
 
-from __future__ import annotations
-
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
