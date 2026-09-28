@@ -285,20 +285,45 @@ def test_mach_studio_policy_accepts_the_audited_168_provisioners() -> None:
         module.patch_main(payload.replace(b"HM(", b"unknown("))
 
 
-def test_mach_studio_policy_accepts_the_audited_169_provisioners() -> None:
-    """The 0.1.169 DMG renames helpers without changing provisioning behavior."""
+@pytest.mark.parametrize(
+    ("resolve", "args", "error", "serve", "source_hash", "wheel_hash"),
+    [
+        (
+            b"HP",
+            b"W7t",
+            b"e9t",
+            b"_g",
+            "0d36e7abf3a58064ac13779e6b163ff5368aac40ca6afebae78061dc80383ded",
+            "051e397a87992e509abfbe9aa2655ca683d428cc827bf7dd2e81e48dd86022bd",
+        ),
+        (
+            b"UM",
+            b"M7t",
+            b"H7t",
+            b"dh",
+            "6d4bdd61ce92613c1d362577171396eb96a73745b86aeeebde137a316d3ce567",
+            "5e0f86e7506bb01fecb3af547acb2fb509753e503b797ec7ebde7189018017ce",
+        ),
+    ],
+    ids=["0.1.169", "0.1.170"],
+)
+def test_mach_studio_policy_accepts_the_audited_provisioners(
+    resolve: bytes,
+    args: bytes,
+    error: bytes,
+    serve: bytes,
+    source_hash: str,
+    wheel_hash: str,
+) -> None:
+    """Audited DMGs rename helpers without changing provisioning behavior."""
     module = _load_policy_module()
     generation = module._EngineGeneration(
-        resolve=b"HP", args=b"W7t", error=b"e9t", serve=b"_g"
+        resolve=resolve, args=args, error=error, serve=serve
     )
     source = module._engine_source_open(generation)
     wheel = module._engine_wheel_open(generation)
-    assert hashlib.sha256(source).hexdigest() == (
-        "0d36e7abf3a58064ac13779e6b163ff5368aac40ca6afebae78061dc80383ded"
-    )
-    assert hashlib.sha256(wheel).hexdigest() == (
-        "051e397a87992e509abfbe9aa2655ca683d428cc827bf7dd2e81e48dd86022bd"
-    )
+    assert hashlib.sha256(source).hexdigest() == source_hash
+    assert hashlib.sha256(wheel).hexdigest() == wheel_hash
     payload = module._ENABLED_GATE + source + wheel
 
     patched = module.patch_main(payload)
@@ -315,7 +340,7 @@ def test_mach_studio_policy_accepts_the_audited_169_provisioners() -> None:
         in patched
     )
     with pytest.raises(module.PatchError, match="local-engine provisioning"):
-        module.patch_main(payload.replace(b"HP(", b"unknown("))
+        module.patch_main(payload.replace(resolve + b"(", b"unknown("))
 
 
 def test_mach_studio_policy_reports_the_packaged_engine_source() -> None:
