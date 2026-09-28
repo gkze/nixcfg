@@ -1,4 +1,4 @@
 # Touch this file to queue one Update run on copilot/gkzenixcfg-update-automation.
 # The cloud-agent token cannot call workflow_dispatch (HTTP 403).
 # Remove this kick path after E2E prepare → validate → publish is proven.
-2026-09-28T08:22:00Z hold-baseten-switch-0.6.0-xctest-sigtrap
+2026-09-28T15:39:00Z clearly-3.3.0-hosted-xcode-16.4-liquid-glass
