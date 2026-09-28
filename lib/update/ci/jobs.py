@@ -427,11 +427,23 @@ def native(stage: str) -> int:
         )
         if summary := _failure_summary(artifacts / "result.json"):
             _write_diagnostic(log, summary)
-        if stage == "prepare" and returncode == 0:
-            paths = _prefetched_paths_from_receipts(receipts)
+        # Prefetch-file imports never hit Nix's post-build hook, so receipts
+        # are the only upload set. Built outputs are pushed by the Cachix
+        # daemon as they complete. A later target failure must not withhold
+        # either subset from the cache.
+        paths = _prefetched_paths_from_receipts(receipts)
+        if paths:
             _write_diagnostic(log, f"Collected {len(paths)} prefetched store paths")
-            if paths:
+            try:
                 _push_prefetched_paths(paths, log, artifacts)
+            except subprocess.CalledProcessError as error:
+                if returncode == 0:
+                    raise
+                _write_diagnostic(
+                    log,
+                    "Cachix publication failed after updater failure "
+                    f"cache_returncode={error.returncode} paths={len(paths)}",
+                )
     return returncode
 
 

@@ -378,16 +378,19 @@ def test_flake_lock_has_no_registry_dependent_inputs() -> None:
     assert not indirect
 
 
+@pytest.mark.parametrize("stage", ["prepare", "validate"])
 @pytest.mark.parametrize("update_exit", [0, 17])
 @pytest.mark.parametrize("cache_exit", [0, 19])
-def test_preparation_publishes_only_exact_prefetch_receipts(
-    native_job, monkeypatch, update_exit: int, cache_exit: int
+def test_native_job_publishes_partial_prefetch_receipts(
+    native_job, monkeypatch, capsys, stage: str, update_exit: int, cache_exit: int
 ) -> None:
-    """Only exact direct-prefetch receipts reach the raw-import cache upload."""
+    """Successful prefetch imports reach Cachix even when a later target fails."""
     env, checkout = native_job
     for key, value in (
         env
         | {
+            "NIXCFG_CI_STAGE": stage,
+            "NIXCFG_PREVIOUS_CANDIDATE": "/candidate from previous job.json",
             "TEST_PREFETCH_RECEIPTS": (
                 '{"storePath": "/nix/store/new.zip"}\n'
                 '{"storePath": "/nix/store/new.zip"}\n'
@@ -400,15 +403,20 @@ def test_preparation_publishes_only_exact_prefetch_receipts(
     monkeypatch.chdir(checkout)
     if cache_exit and not update_exit:
         with pytest.raises(subprocess.CalledProcessError) as error:
-            jobs.native("prepare")
+            jobs.native(stage)
         assert error.value.returncode == cache_exit
     else:
-        assert jobs.native("prepare") == update_exit
-    log = Path(env["TEST_CACHE_LOG"])
-    if update_exit:
-        assert not log.exists()
-    else:
-        assert json.loads(log.read_text()) == ["push", "gkze", "/nix/store/new.zip"]
+        assert jobs.native(stage) == update_exit
+    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
+        "push",
+        "gkze",
+        "/nix/store/new.zip",
+    ]
+    if update_exit and cache_exit:
+        assert (
+            "Cachix publication failed after updater failure cache_returncode=19"
+            in capsys.readouterr().err
+        )
 
 
 @pytest.mark.parametrize(

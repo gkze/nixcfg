@@ -44,9 +44,11 @@ validation jobs consistent with that inventory. Actions declares the job graph a
 publication; every authored command step runs Python, with no shell glue. The updater
 core owns source discovery, declared output authority, candidate identity and validation. Nix owns derivations, dependency ordering, builds and cache reuse.
 
-Cachix's daemon uploads built outputs continuously. Successful preparation also
-publishes the exact files recorded by successful URL prefetches, which enter the
-store directly and do not trigger Nix's post-build hook. Encoded path basenames use
+Cachix's daemon uploads built outputs as they complete, including when a later
+derivation fails. Preparation and validation also publish the exact files
+recorded by successful URL prefetches, even if a later prefetch or updater
+target fails. Those imports enter the store directly and do not trigger Nix's
+post-build hook. Encoded path basenames use
 nixpkgs' fetchurl spelling instead of URL-decoded spelling for matching store identities;
 explicit package-specific source names remain independent overrides. Prefetches
 append store paths to an invocation-local JSONL receipt retained with the job
