@@ -36,6 +36,15 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+def test_bulk_update_hold_keeps_the_last_hosted_darwin_green_release() -> None:
+    """0.6.0 XCTest SIGTRAPs on hosted macos-15; do not bump until a headed runner owns it."""
+    module = _load_module()
+    hold = module.BasetenSwitchUpdater.bulk_update_hold
+    assert hold is not None
+    assert "macos-15" in hold
+    assert "0.6.0" in hold
+
+
 def test_source_expression_tracks_the_immutable_upstream_commit() -> None:
     """Hash the resolved source commit rather than a mutable release tag."""
     module = _load_module()
