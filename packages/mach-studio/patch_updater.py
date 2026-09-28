@@ -42,6 +42,7 @@ _ENGINE_GENERATIONS: tuple[_EngineGeneration, ...] = (
     _EngineGeneration(resolve=b"yP", args=b"o8t", error=b"g8t", serve=b"yg"),
     _EngineGeneration(resolve=b"SM", args=b"A7t", error=b"B7t", serve=b"$m"),
     _EngineGeneration(resolve=b"HM", args=b"S7t", error=b"M7t", serve=b"mh"),
+    _EngineGeneration(resolve=b"HP", args=b"W7t", error=b"e9t", serve=b"_g"),
 )
 
 
@@ -137,6 +138,9 @@ def _engine_wheel_closed(wheel_open: bytes) -> bytes:
     _FAIL_OPEN_ENGINE_INSTALL_SOURCE_168,
     _FAIL_OPEN_ENGINE_INSTALL_WHEEL_168,
     _FAIL_CLOSED_ENGINE_INSTALL_SOURCE_168,
+    _FAIL_OPEN_ENGINE_INSTALL_SOURCE_169,
+    _FAIL_OPEN_ENGINE_INSTALL_WHEEL_169,
+    _FAIL_CLOSED_ENGINE_INSTALL_SOURCE_169,
 ) = tuple(
     anchor
     for generation in _ENGINE_GENERATIONS
@@ -154,6 +158,7 @@ _ENGINE_SOURCE_SHAPES = (
     (_FAIL_OPEN_ENGINE_INSTALL_SOURCE_163, _FAIL_CLOSED_ENGINE_INSTALL_SOURCE_163),
     (_FAIL_OPEN_ENGINE_INSTALL_SOURCE_167, _FAIL_CLOSED_ENGINE_INSTALL_SOURCE_167),
     (_FAIL_OPEN_ENGINE_INSTALL_SOURCE_168, _FAIL_CLOSED_ENGINE_INSTALL_SOURCE_168),
+    (_FAIL_OPEN_ENGINE_INSTALL_SOURCE_169, _FAIL_CLOSED_ENGINE_INSTALL_SOURCE_169),
 )
 _ENGINE_WHEEL_SHAPES = (
     _FAIL_OPEN_ENGINE_INSTALL_WHEEL,
@@ -162,6 +167,7 @@ _ENGINE_WHEEL_SHAPES = (
     _FAIL_OPEN_ENGINE_INSTALL_WHEEL_163,
     _FAIL_OPEN_ENGINE_INSTALL_WHEEL_167,
     _FAIL_OPEN_ENGINE_INSTALL_WHEEL_168,
+    _FAIL_OPEN_ENGINE_INSTALL_WHEEL_169,
 )
 
 _WHEEL_REINSTALL_DESCRIPTION = (

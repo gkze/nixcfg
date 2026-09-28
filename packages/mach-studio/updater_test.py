@@ -285,6 +285,39 @@ def test_mach_studio_policy_accepts_the_audited_168_provisioners() -> None:
         module.patch_main(payload.replace(b"HM(", b"unknown("))
 
 
+def test_mach_studio_policy_accepts_the_audited_169_provisioners() -> None:
+    """The 0.1.169 DMG renames helpers without changing provisioning behavior."""
+    module = _load_policy_module()
+    generation = module._EngineGeneration(
+        resolve=b"HP", args=b"W7t", error=b"e9t", serve=b"_g"
+    )
+    source = module._engine_source_open(generation)
+    wheel = module._engine_wheel_open(generation)
+    assert hashlib.sha256(source).hexdigest() == (
+        "0d36e7abf3a58064ac13779e6b163ff5368aac40ca6afebae78061dc80383ded"
+    )
+    assert hashlib.sha256(wheel).hexdigest() == (
+        "051e397a87992e509abfbe9aa2655ca683d428cc827bf7dd2e81e48dd86022bd"
+    )
+    payload = module._ENABLED_GATE + source + wheel
+
+    patched = module.patch_main(payload)
+
+    assert len(patched) == len(payload)
+    assert module._DISABLED_GATE in patched
+    assert source not in patched
+    assert wheel not in patched
+    assert module._engine_source_closed(generation) in patched
+    assert (
+        wheel.replace(b"uv to install bundled", b"uv install bundled", 1).replace(
+            b";return}", b";throw e}", 1
+        )
+        in patched
+    )
+    with pytest.raises(module.PatchError, match="local-engine provisioning"):
+        module.patch_main(payload.replace(b"HP(", b"unknown("))
+
+
 def test_mach_studio_policy_reports_the_packaged_engine_source() -> None:
     """Engine maintenance must describe this release's bundled source."""
     module = _load_policy_module()
