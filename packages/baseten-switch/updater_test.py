@@ -77,6 +77,42 @@ def test_package_serializes_go_packages_with_timing_sensitive_probe_tests() -> N
     assert command_texts(shell, "go") == ["go test -p 1 ./..."]
 
 
+def test_package_skips_headed_swift_layout_guide_check() -> None:
+    """0.6.0's window-layout XCTest SIGTRAPs on hosted Darwin with no window server."""
+    package = expect_instance(
+        parse_nix_expr(
+            (REPO_ROOT / "packages/baseten-switch/default.nix").read_text(
+                encoding="utf-8"
+            )
+        ),
+        FunctionDefinition,
+    )
+    derivation = expect_instance(
+        expect_scope_binding(package.output, "package").value,
+        FunctionCall,
+    )
+    check_phase = expect_instance(
+        expect_binding(
+            expect_instance(derivation.argument, AttributeSet).values,
+            "checkPhase",
+        ).value,
+        IndentedString,
+    )
+
+    shell = parse_shell(indented_string_body(check_phase.rebuild()))
+    swift_tests = {
+        " ".join(command.replace("\\\n", " ").split())
+        for command in command_texts(shell, "env")
+        if "/usr/bin/swift test" in command
+    }
+    assert any(
+        command.endswith(
+            "--skip testRouterWindowContentUsesNonObscuredLayoutGuide"
+        )
+        for command in swift_tests
+    )
+
+
 def test_package_applies_the_reviewed_nix_integration_patch() -> None:
     """Retain Nix integration without patches for fixes already shipped upstream."""
     package = expect_instance(

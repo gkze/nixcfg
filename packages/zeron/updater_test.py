@@ -242,6 +242,7 @@ def test_zeron_validates_the_materialized_bootstrap_source() -> None:
         ("primary", "_PATCHES"),
         ("fallback", "_PATCHES_FALLBACK"),
         ("0.2.94", "_PATCHES_094"),
+        ("0.2.97", "_PATCHES_097"),
     ],
 )
 def test_zeron_nix_policy_patch_disables_every_update_path(
@@ -258,6 +259,7 @@ def test_zeron_nix_policy_patch_disables_every_update_path(
     for patch in patches:
         expected = expected.replace(patch.old, patch.new)
 
+    assert module._matching_patch_group(original)[0] == group_name
     assert module.main([str(tmp_path)]) == 0
     assert update_path.read_text(encoding="utf-8") == expected
     assert module._PATCH_SENTINEL in expected
@@ -278,6 +280,35 @@ def test_zeron_nix_policy_patch_rejects_source_drift_atomically(
     group = getattr(module, group_attr)
     target = group[-1]
     patches = [*group[:-1], *([target] * copies)]
+    update_path = _write_patch_fixture(tmp_path, patches)
+    original = update_path.read_text(encoding="utf-8")
+
+    with pytest.raises(
+        RuntimeError,
+        match="no Zeron updater anchor set matches this source tree",
+    ):
+        module.patch_tree(tmp_path)
+
+    assert update_path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("copies", [0, 2])
+@pytest.mark.parametrize("anchor_index", range(13))
+def test_zeron_097_rejects_drift_in_every_ownership_guard(
+    tmp_path: Path,
+    copies: int,
+    anchor_index: int,
+) -> None:
+    """New desktop and shared-checker paths must not escape atomic admission."""
+    module = _load_patch_module()
+    group = module._PATCHES_097
+    assert len(group) == 13
+    target = group[anchor_index]
+    patches = [
+        *group[:anchor_index],
+        *([target] * copies),
+        *group[anchor_index + 1 :],
+    ]
     update_path = _write_patch_fixture(tmp_path, patches)
     original = update_path.read_text(encoding="utf-8")
 
