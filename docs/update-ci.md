@@ -33,9 +33,11 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    Apply the certified patch, run repository hooks and the full Python/coverage
    gates, and check that validation did not alter the candidate. Only then create
    the signed update commit and PR. Publication always opens that PR against the
-   default branch and queues squash auto-merge, including when Update was
-   dispatched from a feature or repair ref. Exercise runs therefore never merge
-   into the branch under review.
+   default branch from `origin/<default>` with the certified tree as one commit,
+   then queues squash auto-merge, including when Update was dispatched from a
+   feature or repair ref. Exercise runs therefore never merge into the branch
+   under review. Queuing auto-merge requires a ruleset or classic protection
+   rule on the default branch; `allow_auto_merge` alone is not enough.
 
 The system inventory comes from `lib/system-policy.json`. `nixcfg ci update matrix`
 projects it to hosted runner labels. A conformance test keeps preparation and
@@ -112,8 +114,9 @@ Repository secrets used by the workflow:
 
 - `UPDATE_SELF_HEAL_GITHUB_TOKEN`: public upstream API access for Nix and updaters.
 - `CACHIX_AUTH_TOKEN`: populate the existing `gkze` binary cache; `zed` is also read.
-- Job `GITHUB_TOKEN` on `publish` / `start-repair` (`contents: write`,
-  `pull-requests: write`): push the update or repair branch and open the PR.
+- Job `GITHUB_TOKEN` on `publish` (`contents: write`, `pull-requests: write`):
+  push the update branch and open the PR. `start-repair` also needs
+  `actions: write` so `gh workflow run` can create the follow-up dispatch.
   `GH_TOKEN_FOR_UPDATES` is unused until it can authenticate `git push`.
 - `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`: sign the update commit.
 

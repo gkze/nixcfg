@@ -477,9 +477,21 @@ def certify() -> None:
     _outputs(changed="true")
 
 
-def _commit_and_push(kind: str, message: str) -> str:
+def _commit_and_push(
+    kind: str,
+    message: str,
+    *,
+    base: str | None = None,
+    tree: str | None = None,
+) -> str:
     branch = f"codex/update-{kind}{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
-    _run("git", "switch", "-c", branch)
+    if base is None:
+        _run("git", "switch", "-c", branch)
+    else:
+        _run("git", "fetch", "origin", base)
+        _run("git", "switch", "-c", branch, f"origin/{base}")
+        if tree is not None:
+            _run("git", "restore", "--source", tree, "--worktree", "--staged", ".")
     if _run("git", "diff", "--cached", "--quiet", check=False).returncode:
         _run(*_develop("git", "commit", "-S", "-m", message))
     _run("gh", "auth", "setup-git")
@@ -494,8 +506,14 @@ def publish() -> None:
     Update was exercised from a feature or repair ref. That keeps validated
     source refreshes off the branch under review and makes the PR auto-mergeable.
     """
-    branch = _commit_and_push("", "chore(update): refresh validated sources")
     base = os.environ["UPDATE_BASE_BRANCH"]
+    tree = _run("git", "write-tree", capture=True).stdout.strip()
+    branch = _commit_and_push(
+        "",
+        "chore(update): refresh validated sources",
+        base=base,
+        tree=tree,
+    )
     body = _temp() / "update-body.md"
     run_url = (
         f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"

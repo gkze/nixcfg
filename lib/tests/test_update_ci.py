@@ -540,7 +540,7 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     assert set(jobs["publish"]["needs"]) == set(validators)
     assert set(validators) <= set(jobs["repair"]["needs"])
     assert jobs["repair"]["permissions"] == {
-        "actions": "read",
+        "actions": "write",
         "contents": "write",
         "copilot-requests": "write",
     }
@@ -842,8 +842,11 @@ def test_publication_uses_signed_commit_and_bounded_repair(
 
     def run(*args, capture=False, check=True):
         calls.append(args)
+        stdout = "certified-tree\n" if args[:2] == ("git", "write-tree") else ""
         return subprocess.CompletedProcess(
-            args, int(changed) if args[:2] == ("git", "diff") else 0
+            args,
+            int(changed) if args[:2] == ("git", "diff") else 0,
+            stdout=stdout,
         )
 
     monkeypatch.setattr(jobs, "_run", run)
@@ -861,6 +864,19 @@ def test_publication_uses_signed_commit_and_bounded_repair(
             "-S",
         )
     if operation == "publish":
+        assert ("git", "fetch", "origin", "main") in calls
+        switch = next(args for args in calls if args[:3] == ("git", "switch", "-c"))
+        assert switch[3].startswith("codex/update-")
+        assert switch[4] == "origin/main"
+        assert (
+            "git",
+            "restore",
+            "--source",
+            "certified-tree",
+            "--worktree",
+            "--staged",
+            ".",
+        ) in calls
         create = next(args for args in calls if args[:3] == ("gh", "pr", "create"))
         assert create[create.index("--base") + 1] == "main"
         branch = create[create.index("--head") + 1]
@@ -870,6 +886,7 @@ def test_publication_uses_signed_commit_and_bounded_repair(
             in (tmp_path / "update-body.md").read_text()
         )
     else:
+        assert ("git", "fetch", "origin", "main") not in calls
         assert calls[-1][:3] == ("gh", "workflow", "run")
         assert "repair=false" in calls[-1]
         assert "validate_all_packages=true" in calls[-1]
@@ -885,10 +902,14 @@ def test_publication_from_a_feature_branch_still_targets_default_branch(
 
     def run(*args, capture=False, check=True):
         calls.append(args)
-        return subprocess.CompletedProcess(args, 0)
+        stdout = "certified-tree\n" if args[:2] == ("git", "write-tree") else ""
+        return subprocess.CompletedProcess(args, 0, stdout=stdout)
 
     monkeypatch.setattr(jobs, "_run", run)
     assert jobs.main("publish") == 0
+    assert ("git", "fetch", "origin", "main") in calls
+    switch = next(args for args in calls if args[:3] == ("git", "switch", "-c"))
+    assert switch[-1] == "origin/main"
     create = next(args for args in calls if args[:3] == ("gh", "pr", "create"))
     assert create[create.index("--base") + 1] == "main"
     branch = create[create.index("--head") + 1]

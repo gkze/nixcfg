@@ -155,7 +155,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 120
     permissions:
-      actions: read
+      actions: write
       contents: write
       copilot-requests: write
     steps:
