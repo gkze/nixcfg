@@ -259,7 +259,7 @@ def test_wait_for_diagnostics_prefers_run_logs_to_heartbeat(
     tmp_path, monkeypatch
 ) -> None:
     """A growing output.log is forwarded instead of the meta liveness line."""
-    monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.1)
     output = tmp_path / "runs" / "test-run" / "output.log"
     output.parent.mkdir(parents=True)
     output.write_text("live 0\n")
@@ -267,14 +267,18 @@ def test_wait_for_diagnostics_prefers_run_logs_to_heartbeat(
 
     def writer() -> None:
         n = 1
-        while not stop.wait(0.005):
+        # Tight appends so a loaded Darwin quality runner cannot insert a
+        # heartbeat-sized gap between live lines. Production uses 60s; this
+        # only needs new bytes before each Empty timeout.
+        while not stop.is_set():
             with output.open("a") as handle:
                 handle.write(f"live {n}\n")
             n += 1
+            stop.wait(0.001)
 
     writer_thread = threading.Thread(target=writer)
     writer_thread.start()
-    command = [sys.executable, "-c", "import time; time.sleep(0.08)"]
+    command = [sys.executable, "-c", "import time; time.sleep(0.35)"]
     try:
         with subprocess.Popen(command, stderr=subprocess.PIPE, text=True) as process:  # noqa: S603 -- controlled Python fixture.
             log = StringIO()
