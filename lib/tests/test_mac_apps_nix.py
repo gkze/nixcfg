@@ -4283,3 +4283,46 @@ def test_george_config_does_not_install_repo_managed_editor_cli_wrappers() -> No
     assert not (REPO_ROOT / "home/george/bin/_managed-app-cli-wrapper").exists()
     assert not (REPO_ROOT / "home/george/bin/code-insiders").exists()
     assert not (REPO_ROOT / "home/george/bin/cursor").exists()
+
+
+@pytest.mark.parametrize("writable", [True, False])
+def test_copy_preserves_custom_icon_and_prunes_stale_contents(
+    tmp_path: Path,
+    writable: bool,
+) -> None:
+    """A bundle replacement must not orphan Finder's custom-icon flag."""
+    source = _fake_app_bundle(tmp_path / "source")
+    destination = _fake_app_bundle(tmp_path / "Applications")
+    (source / "Contents" / "current").write_text("new version")
+    (destination / "Contents" / "stale").write_text("old version")
+    (destination / "Contents" / "Icon\r").write_bytes(b"stale nested resource")
+    custom_icon = destination / "Icon\r"
+    custom_icon.write_bytes(b"custom icon resource")
+
+    mac_apps_helper._rsync_copy(
+        source, destination, rsync_path=_rsync_path(), writable=writable
+    )
+
+    assert custom_icon.read_bytes() == b"custom icon resource"
+    assert (destination / "Contents" / "current").read_text() == "new version"
+    assert not (destination / "Contents" / "stale").exists()
+    assert not (destination / "Contents" / "Icon\r").exists()
+
+
+@pytest.mark.parametrize("writable", [True, False])
+def test_fresh_copy_does_not_create_custom_icon(
+    tmp_path: Path,
+    writable: bool,
+) -> None:
+    """Apps without a customization retain their packaged icon resources."""
+    source = _fake_app_bundle(tmp_path / "source")
+    destination = tmp_path / "Applications" / source.name
+    destination.mkdir(parents=True)
+    (source / "Contents" / "AppIcon.icns").write_bytes(b"bundled logo")
+
+    mac_apps_helper._rsync_copy(
+        source, destination, rsync_path=_rsync_path(), writable=writable
+    )
+
+    assert (destination / "Contents" / "AppIcon.icns").read_bytes() == b"bundled logo"
+    assert not (destination / "Icon\r").exists()
