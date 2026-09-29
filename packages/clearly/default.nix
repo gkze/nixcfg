@@ -4,6 +4,7 @@
   fetchFromGitHub,
   lib,
   outputs,
+  python3,
   selfSource,
   stdenvNoCC,
   xcodegen,
@@ -96,7 +97,10 @@ stdenvNoCC.mkDerivation {
     version
     ;
 
-  nativeBuildInputs = [ xcodegen ];
+  nativeBuildInputs = [
+    python3
+    xcodegen
+  ];
   strictDeps = true;
 
   # Clearly's App Store release path is the upstream-supported build without
@@ -104,6 +108,8 @@ stdenvNoCC.mkDerivation {
   patches = [ ./nix-managed.patch ];
 
   postPatch = ''
+    ${lib.getExe python3} ${./patch_hosted_sdk.py} "$PWD"
+
     ln -s ${swiftDeps} nix-swift-deps
 
     for key in SUFeedURL SUPublicEDKey SUEnableInstallerLauncherService; do

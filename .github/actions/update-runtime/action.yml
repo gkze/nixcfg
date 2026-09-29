@@ -35,8 +35,8 @@ runs:
         extra-conf: |
           max-jobs = 2
           cores = 2
-          min-free = 1073741824
-          max-free = 4294967296
+          min-free = 34359738368
+          max-free = 68719476736
     - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
       with:
         name: gkze

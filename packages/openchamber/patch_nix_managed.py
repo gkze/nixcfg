@@ -329,6 +329,42 @@ _ANCHORS = (
 )
 
 
+_OPENCODE_V2_PATCHES = (
+    _SourcePatch(
+        "opencode-cli-upgrade",
+        "opencode",
+        "packages/cli/src/commands/handlers/upgrade.ts",
+        '    function* (input) {\n      intro("Upgrade")\n',
+        f"""    function* (input) {{
+      if (process.env.OPENCODE_NIX_MANAGED === "1") {{
+        return yield* Effect.fail(new Error("{_MANAGED_MESSAGE}"))
+      }}
+      intro("Upgrade")
+""",
+    ),
+    _SourcePatch(
+        "opencode-service-upgrade",
+        "opencode",
+        "packages/cli/src/services/updater.ts",
+        "  const upgrade = Effect.fnUntraced(function* (method: Method, input: string) {\n",
+        f"""  const upgrade = Effect.fnUntraced(function* (method: Method, input: string) {{
+    if (process.env.OPENCODE_NIX_MANAGED === "1") {{
+      return yield* Effect.fail(new Error("{_MANAGED_MESSAGE}"))
+    }}
+""",
+    ),
+)
+_OPENCODE_V2_ANCHORS = (
+    _SourceAnchor(
+        "opencode-auto-updater",
+        "opencode",
+        "packages/cli/src/services/updater.ts",
+        '    if (OPENCODE_LOCAL || ["1", "true"].includes('
+        'process.env.OPENCODE_DISABLE_AUTOUPDATE?.toLowerCase() ?? "")) {\n',
+    ),
+)
+
+
 def _roots(openchamber_root: Path, opencode_root: Path) -> dict[str, Path]:
     return {"openchamber": openchamber_root, "opencode": opencode_root}
 
@@ -346,7 +382,22 @@ def _patch_selected(
     *,
     check: bool,
 ) -> None:
-    for anchor in (item for item in _ANCHORS if item.component in components):
+    patches = _PATCHES
+    anchors = _ANCHORS
+    if (
+        "opencode" in components
+        and (roots["opencode"] / "packages/cli/package.json").is_file()
+    ):
+        patches = (
+            tuple(patch for patch in _PATCHES if patch.component != "opencode")
+            + _OPENCODE_V2_PATCHES
+        )
+        anchors = (
+            tuple(anchor for anchor in _ANCHORS if anchor.component != "opencode")
+            + _OPENCODE_V2_ANCHORS
+        )
+
+    for anchor in (item for item in anchors if item.component in components):
         path = roots[anchor.component] / anchor.relative_path
         _validate_anchor(path, anchor.text, anchor.expected_count)
 
@@ -357,7 +408,7 @@ def _patch_selected(
             patch.new,
             patch.expected_count,
         )
-        for patch in _PATCHES
+        for patch in patches
         if patch.component in components
     )
     originals = {

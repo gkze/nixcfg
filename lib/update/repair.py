@@ -19,16 +19,28 @@ if TYPE_CHECKING:
     from lib.update.events import UpdateEvent
 
 
+_PACKAGING_ROOTS = frozenset({"packages", "overlays"})
+_ALLOWED_EXACT = frozenset({
+    Path("flake.nix"),
+    Path("flake.lock"),
+    Path("lib/update/planner.py"),
+    Path("lib/tests/test_update_planner.py"),
+})
+
+
+def _repair_allowed(path: Path) -> bool:
+    """Return whether a changed path is inside the repair allow-list."""
+    return path.parts[0] in _PACKAGING_ROOTS or path in _ALLOWED_EXACT
+
+
 def repair_paths(paths: tuple[Path, ...]) -> tuple[Path, ...]:
-    """Repairs may change packaging and references, never the acceptance gates."""
-    rejected = [
-        path
-        for path in paths
-        if path.parts[0] not in {"packages", "overlays"}
-        and path not in {Path("flake.nix"), Path("flake.lock")}
-    ]
+    """Repairs may change packaging, pins, and planner selection, never gates."""
+    rejected = [path for path in paths if not _repair_allowed(path)]
     if rejected:
-        msg = f"Repair changed files outside packaging: {', '.join(map(str, rejected))}"
+        msg = (
+            "Repair changed files outside packaging and planner selection: "
+            f"{', '.join(map(str, rejected))}"
+        )
         raise ValueError(msg)
     if not paths:
         msg = "Agent produced no repair"
@@ -42,14 +54,17 @@ def agent_command(agent: RepairAgent, evidence: Path) -> list[str]:
         f"Fix the updater or package failure recorded in {evidence}. "
         "Work in this isolated repository. Read AGENTS.md and inspect the causal "
         "failure before editing. Make the smallest coherent fix in packages/, "
-        "overlays/, flake.nix or flake.lock. Preserve platform support, discovery, "
-        "validation declarations, upstream pin intent, and generated-file ownership. "
-        "Do not bypass validation, weaken tests, add holds, suppress errors, change "
-        "CI or the updater framework, commit, push, or contact anyone. Regenerate "
-        "outputs through their generators. Add a focused package regression test "
-        "when behavior changes. This is one bounded repair attempt; explain an "
-        "unfixable infrastructure or credential failure instead of masking it. "
-        "The caller will independently rerun quality and native build gates."
+        "overlays/, flake.nix, flake.lock, or planner/selection coherence in "
+        "lib/update/planner.py (and lib/tests/test_update_planner.py). Preserve "
+        "platform support, discovery, validation declarations, upstream pin "
+        "intent, and generated-file ownership. Do not bypass validation, weaken "
+        "tests, add holds, suppress errors, change CI, acceptance gates, "
+        "persistence, or other updater-framework files, commit, push, or contact "
+        "anyone. Regenerate outputs through their generators. Add a focused "
+        "package or planner regression test when behavior changes. This is one "
+        "bounded repair attempt; explain an unfixable infrastructure or "
+        "credential failure instead of masking it. The caller will independently "
+        "rerun quality and native build gates."
     )
     match agent:
         case RepairAgent.CODEX:

@@ -42,6 +42,12 @@ class CometUpdater(DownloadHashUpdater):
 
     name = "comet"
     materialize_when_current = True
+    bulk_update_hold = (
+        "Hosted ubuntu-24.04-arm nix store prefetch-file of the Cloudflare R2 "
+        "DMG stalls for the full 2400s timeout with 0 bytes after Darwin hashed "
+        "the same version in 8s (Update 36552692235). Keep the current pin "
+        "until Linux ARM can prefetch that artifact."
+    )
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": (
             "https://www.perplexity.ai/rest/browser/download?"

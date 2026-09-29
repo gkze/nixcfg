@@ -608,13 +608,14 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
         commit: str,
         src_hash: str,
         version: str,
+        recipe: str = "node-modules.nix",
+        owner: str | None = None,
+        repo: str | None = None,
     ) -> str:
         package_call = FunctionCall(
             name=FunctionCall(
                 name=identifier_attr_path("pkgs", "callPackage"),
-                argument=NixPath(
-                    path=str(REPO_ROOT / "packages/openchamber/node-modules.nix")
-                ),
+                argument=NixPath(path=str(REPO_ROOT / "packages/openchamber" / recipe)),
             ),
             argument=AttributeSet(
                 values=[
@@ -633,8 +634,8 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
                     Binding(
                         name="src",
                         value=_build_fetch_from_github_call(
-                            cls.GITHUB_OWNER,
-                            cls.GITHUB_REPO,
+                            owner or cls.GITHUB_OWNER,
+                            repo or cls.GITHUB_REPO,
                             rev=commit,
                             hash_value=src_hash,
                             fetch_submodules=False,
@@ -743,7 +744,7 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
         context: UpdateContext,
         emit: EventSink = ignore_event,
     ) -> SourceHashes:
-        """Hash exact sources and URL inputs, then the OpenChamber Bun closure."""
+        """Hash exact sources, URL inputs, and both local Bun node-module closures."""
         _ = (session, context)
         metadata = self._required_metadata(info)
         source_specs = (
@@ -812,10 +813,26 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             source_hashes[request.url] = value
 
         opencode_url = metadata["opencodeUrl"]
+        opencode_node_modules_hash = await update_nix.compute_fixed_output_hash(
+            self.name,
+            self._node_modules_expr(
+                bun_hash=source_hashes[metadata["opencodeBunUrl"]],
+                bun_url=metadata["opencodeBunUrl"],
+                bun_version=metadata["opencodeBunVersion"],
+                commit=metadata["opencodeCommit"],
+                src_hash=source_hashes[opencode_url],
+                version=metadata["opencodeVersion"],
+                recipe="opencode-node-modules.nix",
+                owner="anomalyco",
+                repo="opencode",
+            ),
+            config=self.config,
+            emit=emit,
+        )
         entries.append(
             HashEntry.create(
                 "nodeModulesHash",
-                metadata["opencodeNodeModulesHash"],
+                opencode_node_modules_hash,
                 platform=self.DARWIN_PLATFORM,
                 url=opencode_url,
             )
@@ -876,15 +893,6 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
         ]
         if Counter(actual_keys) != Counter(expected_keys):
             msg = "OpenChamber updater requires its complete exact-source hash closure"
-            raise RuntimeError(msg)
-        opencode_hash = next(
-            entry.hash
-            for entry in entries
-            if entry.hash_type == "nodeModulesHash"
-            and entry.url == metadata["opencodeUrl"]
-        )
-        if opencode_hash != metadata["opencodeNodeModulesHash"]:
-            msg = "OpenChamber OpenCode nodeModulesHash differs from exact upstream"
             raise RuntimeError(msg)
         return SourceEntry.model_validate({
             "version": info.version,

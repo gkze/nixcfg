@@ -20,6 +20,9 @@ from lib.update.ci import candidate as pipeline
 from lib.update.derivation_validation import (
     DerivationValidation,
     DerivationValidationFailure,
+    ValidationCommandFinished,
+    ValidationCommandOutput,
+    ValidationCommandStarted,
 )
 from lib.update.persistence import IsolatedUpdateWorkspace
 from lib.update.ui_consumer import consume_events
@@ -172,6 +175,13 @@ def prepared_run(
     monkeypatch.setattr(pipeline, "get_repo_root", lambda: root)
     monkeypatch.setattr(pipeline, "ensure_updaters_loaded", lambda: registry)
     return root, operations, state
+
+
+def _run_root_closures(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise the Linux/local root-closure path even on hosted Darwin quality."""
+    monkeypatch.setattr(
+        pipeline.jobs, "hosted_darwin_skips_root_closures", lambda: False
+    )
 
 
 @pytest.mark.parametrize("darwin_only", [False, True])
@@ -381,9 +391,15 @@ def test_native_validation_and_certification(
 
     def validate_roots(*, systems, include_dependencies, **_kwargs):
         assert include_dependencies
+        order.append("roots")
         roots.append(systems)
         return ()
 
+    order: list[str] = []
+    _run_root_closures(monkeypatch)
+    monkeypatch.setattr(
+        pipeline.jobs, "reclaim_hosted_store", lambda: order.append("reclaim")
+    )
     monkeypatch.setattr(pipeline.validation, "validate_derivations", validate_sources)
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", validate_roots)
     reports = []
@@ -391,6 +407,7 @@ def test_native_validation_and_certification(
         state["system"] = system
         reports.append(pipeline.validate_candidate(candidate))
     assert roots == [(system,) for system in pipeline.supported_systems()]
+    assert order == ["reclaim", "roots"] * len(pipeline.supported_systems())
     assert pipeline.certified_patch(candidate, reports) == candidate.patch
     assert not git(root, "status", "--porcelain")
     for bad in (
@@ -414,6 +431,39 @@ def test_native_validation_and_certification(
             pipeline.certified_patch(candidate, bad)
     with pytest.raises(ValueError, match="every configured system"):
         pipeline.certified_patch(candidate.model_copy(update={"systems": ()}), reports)
+
+
+def test_hosted_darwin_validation_skips_root_closures(
+    prepared_run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hosted macos-15 dies mid-build of 4000+ Darwin root-closure derivations."""
+    _, _, state = prepared_run
+    candidate = None
+    for system in pipeline.supported_systems():
+        state["system"] = system
+        candidate, _ = pipeline.prepare_candidate(("example",), previous=candidate)
+    assert candidate is not None
+    order: list[str] = []
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(pipeline.jobs.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        pipeline.jobs, "reclaim_hosted_store", lambda: order.append("reclaim")
+    )
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_root_closures",
+        lambda **_kwargs: order.append("roots") or (),
+    )
+    state["system"] = "aarch64-darwin"
+    report = pipeline.validate_candidate(candidate)
+    assert report.failures == ()
+    assert order == ["reclaim"]
 
 
 def test_prepare_command_exports_failure_evidence_outside_checkout(
@@ -497,6 +547,103 @@ def test_candidate_commands_transfer_the_pinned_selection_and_native_reports(
     assert runner.invoke(pipeline.app, args).exit_code != 0
 
 
+def test_hosted_validation_streams_nix_logs_to_stderr(
+    prepared_run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Hosted validate must print Nix output on the live job log, not only artifacts."""
+    root, _, _state = prepared_run
+    tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
+    candidate = Candidate(
+        base_tree=tree,
+        tree=tree,
+        targets=(),
+        sources=(),
+        systems=pipeline.supported_systems(),
+        resolutions={},
+        prepared=True,
+        patch=b"",
+    )
+
+    def validate_derivations(*_args, progress, **_kwargs):
+        progress(
+            ValidationCommandStarted("nix build path:.#pkgs.aarch64-darwin.example")
+        )
+        progress(
+            ValidationCommandOutput(
+                "nix build path:.#pkgs.aarch64-darwin.example",
+                "building '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-example.drv'",
+            )
+        )
+        progress(
+            ValidationCommandOutput(
+                "nix build path:.#pkgs.aarch64-darwin.example",
+                "fetching https://example.com/file?token=secret",
+            )
+        )
+        progress(
+            ValidationCommandOutput(
+                "nix build path:.#pkgs.aarch64-darwin.example", "\r"
+            )
+        )
+        progress("")
+        progress("\r")
+        progress("Batch validation did not succeed; isolating failing targets")
+        progress(
+            ValidationCommandFinished(
+                "nix build path:.#pkgs.aarch64-darwin.example", succeeded=True
+            )
+        )
+        return ()
+
+    def validate_roots(*_args, progress, **_kwargs):
+        progress(
+            ValidationCommandStarted(
+                "nix build path:.#checks.aarch64-darwin.root-closures"
+            )
+        )
+        progress(
+            ValidationCommandOutput(
+                "nix build path:.#checks.aarch64-darwin.root-closures",
+                "building '/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-root-closures.drv'",
+            )
+        )
+        progress(
+            ValidationCommandFinished(
+                "nix build path:.#checks.aarch64-darwin.root-closures",
+                succeeded=True,
+            )
+        )
+        return ()
+
+    _run_root_closures(monkeypatch)
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", validate_derivations
+    )
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", validate_roots)
+    assert pipeline.validate_candidate(candidate).failures == ()
+    err = capsys.readouterr().err
+    assert "[derivations] $ nix build path:.#pkgs.aarch64-darwin.example\n" in err
+    assert (
+        "[derivations] building '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-example.drv'\n"
+        in err
+    )
+    assert "token=secret" not in err
+    assert "[derivations] fetching https://example.com/file?REDACTED\n" in err
+    assert (
+        "[derivations] Batch validation did not succeed; isolating failing targets\n"
+        in err
+    )
+    assert (
+        "[root-closures] $ nix build path:.#checks.aarch64-darwin.root-closures\n"
+        in err
+    )
+    assert (
+        "[root-closures] building '/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-root-closures.drv'\n"
+        in err
+    )
+    assert "[derivations] \n" not in err
+
+
 def test_noop_candidate_still_validates_repaired_baseline_roots(
     prepared_run,
     monkeypatch,
@@ -515,6 +662,7 @@ def test_noop_candidate_still_validates_repaired_baseline_roots(
         patch=b"",
     )
     checked = []
+    _run_root_closures(monkeypatch)
     monkeypatch.setattr(
         pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
     )
@@ -608,6 +756,7 @@ def test_incomplete_native_validation_cannot_issue_report(
             sleep=lambda _: pytest.fail("incomplete execution must not retry"),
         )
 
+    _run_root_closures(monkeypatch)
     monkeypatch.setattr(
         pipeline.validation,
         "validate_derivations",

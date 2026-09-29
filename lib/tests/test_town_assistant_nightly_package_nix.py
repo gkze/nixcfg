@@ -1,4 +1,4 @@
-"""Town Assistant distribution package and updater contracts."""
+"""Town Assistant nightly package and updater contracts."""
 
 import json
 from typing import Protocol, cast
@@ -17,7 +17,7 @@ from lib.tests._nix_ast import (
     expect_binding,
     parse_nix_expr,
 )
-from lib.tests._updater_helpers import load_repo_module, run_async, updater_from_module
+from lib.tests._updater_helpers import load_repo_module, run_async
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters import strategies as updater_strategies
@@ -29,7 +29,7 @@ class _UpdateConfig(Protocol):
     default_timeout: float
 
 
-class _TownAssistantUpdater(Protocol):
+class _TownAssistantNightlyUpdater(Protocol):
     APPCAST_URL: str
     config: _UpdateConfig
 
@@ -40,33 +40,33 @@ class _TownAssistantUpdater(Protocol):
     def get_download_url(self, platform: str, info: VersionInfo) -> str: ...
 
 
-@pytest.fixture(params=["nightly", "internal"])
-def channel(request: pytest.FixtureRequest) -> str:
-    """Exercise both supported distribution packages."""
-    return cast("str", request.param)
+class _TownAssistantNightlyUpdaterFactory(Protocol):
+    def __call__(self) -> _TownAssistantNightlyUpdater: ...
 
 
-def _load_updater(channel: str) -> _TownAssistantUpdater:
+class _TownAssistantNightlyUpdaterModule(Protocol):
+    TownAssistantNightlyUpdater: _TownAssistantNightlyUpdaterFactory
+
+
+def _load_updater() -> _TownAssistantNightlyUpdaterModule:
     return cast(
-        "_TownAssistantUpdater",
-        updater_from_module(
-            load_repo_module(
-                f"packages/town-assistant-{channel}/updater.py",
-                f"town_assistant_{channel}_updater_test",
-            )
+        "_TownAssistantNightlyUpdaterModule",
+        load_repo_module(
+            "packages/town-assistant-nightly/updater.py",
+            "town_assistant_nightly_updater_test",
         ),
     )
 
 
-def test_town_assistant_package_uses_dmg_app_copy_mode(channel: str) -> None:
-    """The package should expose Town's arm64 distribution DMG as a managed macOS app."""
+def test_town_assistant_nightly_package_uses_dmg_app_copy_mode() -> None:
+    """The package should expose Town's arm64 nightly DMG as a managed macOS app."""
     sources = json.loads(
-        (REPO_ROOT / f"packages/town-assistant-{channel}/sources.json").read_text(
+        (REPO_ROOT / "packages/town-assistant-nightly/sources.json").read_text(
             encoding="utf-8"
         )
     )
     package_source = (
-        REPO_ROOT / f"packages/town-assistant-{channel}/default.nix"
+        REPO_ROOT / "packages/town-assistant-nightly/default.nix"
     ).read_text(encoding="utf-8")
     package = expect_instance(parse_nix_expr(package_source), FunctionDefinition)
     derivation = expect_instance(package.output, FunctionCall)
@@ -77,15 +77,12 @@ def test_town_assistant_package_uses_dmg_app_copy_mode(channel: str) -> None:
     )
     meta_attrs = expect_instance(meta.body, AttributeSet)
 
-    assert sources["urls"]["aarch64-darwin"].startswith(
-        f"https://town-macos-app.s3.us-east-1.amazonaws.com/desktop/{channel}/releases/"
-    )
     assert list(sources["urls"]) == ["aarch64-darwin"]
     assert list(sources["hashes"]) == ["aarch64-darwin"]
     assert_nix_ast_equal(derivation.name, Identifier(name="mkDmgApp"))
     assert_nix_ast_equal(
         expect_binding(derivation_args.values, "pname").value,
-        StringPrimitive(value=f"town-assistant-{channel}"),
+        StringPrimitive(value="town-assistant-nightly"),
     )
     assert_nix_ast_equal(
         expect_binding(derivation_args.values, "appName").value,
@@ -101,24 +98,21 @@ def test_town_assistant_package_uses_dmg_app_copy_mode(channel: str) -> None:
     )
 
 
-def test_town_assistant_fetch_latest_and_download_url(
+def test_town_assistant_nightly_fetch_latest_and_download_url(
     monkeypatch: pytest.MonkeyPatch,
-    channel: str,
 ) -> None:
-    """Parse the selected Sparkle appcast and return the immutable DMG URL."""
-    updater = _load_updater(channel)
+    """Parse the nightly Sparkle appcast and return the immutable DMG URL."""
+    module = _load_updater()
+    updater = module.TownAssistantNightlyUpdater()
 
     async def _fetch_items(_session: object, url: str, *, config: object):
-        assert url == (
-            "https://town-macos-app.s3.us-east-1.amazonaws.com"
-            f"/desktop/{channel}/appcast.xml"
-        )
+        assert url == updater.APPCAST_URL
         assert config == updater.config
         return (
             SparkleAppcastItem(
-                "123.26.1",
-                "1.46",
-                "https://example.invalid/Town%20Assistant-1.46-123.26.1.dmg",
+                "32",
+                "1.8",
+                "https://example.invalid/Town%20Assistant-1.8-32.dmg",
             ),
         )
 
@@ -129,14 +123,14 @@ def test_town_assistant_fetch_latest_and_download_url(
     )
 
     assert latest == VersionInfo(
-        version="1.46-123.26.1",
+        version="1.8-32",
         metadata=DownloadUrlMetadata(
-            url="https://example.invalid/Town%20Assistant-1.46-123.26.1.dmg",
+            url="https://example.invalid/Town%20Assistant-1.8-32.dmg",
         ),
     )
     assert (
         updater.get_download_url("aarch64-darwin", latest)
-        == "https://example.invalid/Town%20Assistant-1.46-123.26.1.dmg"
+        == "https://example.invalid/Town%20Assistant-1.8-32.dmg"
     )
 
 
@@ -161,14 +155,14 @@ def test_town_assistant_fetch_latest_and_download_url(
         ),
     ],
 )
-def test_town_assistant_rejects_invalid_appcast_shapes(
+def test_town_assistant_nightly_rejects_invalid_appcast_shapes(
     monkeypatch: pytest.MonkeyPatch,
-    channel: str,
     item: SparkleAppcastItem,
     match: str,
 ) -> None:
     """Surface targeted appcast parsing errors."""
-    updater = _load_updater(channel)
+    module = _load_updater()
+    updater = module.TownAssistantNightlyUpdater()
 
     async def _fetch_items(*_args: object, **_kwargs: object):
         return (item,)

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from lib.tests._cli_text import visible_cli_text
 from lib.tests._zen_tooling import resolve_zen_script_path
 from lib.update.paths import REPO_ROOT
 
@@ -184,7 +185,7 @@ def test_zentool_main_guard_executes_help(
         runpy.run_path(str(ZENTOOL_PATH), run_name="__main__")
 
     assert exc.value.code == 0
-    assert "usage: zentool" in capsys.readouterr().out.lower()
+    assert "usage: zentool" in visible_cli_text(capsys.readouterr().out).lower()
 
 
 def test_python_314_quality_tools_preserve_zentool_semantics(

@@ -299,9 +299,6 @@ def _rsync_copy(src: Path, dst: Path, *, rsync_path: str, writable: bool) -> Non
         "--copy-unsafe-links",
         "--archive",
         "--delete",
-        # Finder stores a bundle's custom icon in Icon\r and marks the directory
-        # separately. Deleting only the resource leaves a generic folder icon.
-        "--filter=P /Icon\r",
         "--chmod=+w" if writable else "--chmod=-w",
         "--no-group",
         "--no-owner",

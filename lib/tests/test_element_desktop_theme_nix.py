@@ -56,9 +56,7 @@ def test_element_desktop_uses_guarded_evaluator_visible_source() -> None:
         "    element-desktop.enable = ",
         ";\n",
     )
-    # Element's built-in system light/dark selection wins over the Catppuccin
-    # module, so the integration is disabled while its pinned source still
-    # backs the appearance-bridged custom themes wired through the settings.
+    # Element system matching selects only built-in light/dark themes.
     assert_nix_ast_equal(catppuccin_element_enable, "false")
 
     module = expect_instance(

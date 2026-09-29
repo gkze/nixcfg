@@ -16,7 +16,6 @@ from nix_manipulator.expressions.set import AttributeSet
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
-    binary_darwin_self_source_app_names,
     binding_map,
     expect_binding,
     expect_scope_binding,
@@ -190,7 +189,6 @@ def test_baseten_switch_separates_the_cli_from_its_managed_app() -> None:
           pkgs.baseten-switch.cliPackage
           pkgs.executor.cliPackage
           pkgs.pants-preview
-          pkgs.zed-editor-nightly.cliPackage
           pkgs.writer-computer.cliPackage
         ]
         """,
@@ -259,8 +257,12 @@ def test_binary_darwin_overlay_exports_migrated_app(
         nix_file_expr("overlays/binary-darwin-apps.nix"),
         FunctionDefinition,
     )
+    exports = expect_instance(overlay.output, AttributeSet)
 
-    assert package_name in binary_darwin_self_source_app_names(overlay)
+    assert_nix_ast_equal(
+        expect_binding(exports.values, package_name).value,
+        f'callDarwinAppPackage "{package_name}"',
+    )
 
 
 @pytest.mark.parametrize(
@@ -316,26 +318,11 @@ def test_binary_darwin_overlay_forwards_flake_context_to_source_apps(
         if isinstance(argument, Identifier)
     }
     assert required_context <= package_arguments
+    exports = expect_instance(overlay.output, AttributeSet)
     assert_nix_ast_equal(
-        overlay.output.left,
-        """
-        builtins.listToAttrs (
-          map (name: {
-            inherit name;
-            value = callDarwinAppPackage name;
-          }) selfSourceDarwinAppNames
-        )
-        """,
+        expect_binding(exports.values, package_name).value,
+        f'callDarwinAppPackage "{package_name}"',
     )
-    assert_nix_ast_equal(
-        overlay.output.right,
-        """
-        {
-          claude-code-url-handler = final.callPackage ../packages/claude-code-url-handler { };
-        }
-        """,
-    )
-    assert package_name in binary_darwin_self_source_app_names(overlay)
 
 
 @pytest.mark.parametrize(

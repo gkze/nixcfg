@@ -4,8 +4,11 @@ import pytest
 
 from lib.update.planner import (
     companion_source_depths,
+    held_bulk_update_input_names,
+    resolve_update_targets,
     select_target_source_names,
 )
+from lib.update.refs import FlakeInputRef
 
 
 @pytest.mark.parametrize("relationship", ["companion", "aggregate"])
@@ -29,6 +32,108 @@ def test_bulk_hold_preserves_coupled_sources_and_allows_explicit_retry(
         "coupled",
     }
     assert select_target_source_names(("other",), updaters) == ["other"]
+
+
+def test_bulk_hold_skips_backing_flake_inputs_on_untargeted_runs() -> None:
+    """Held sources must keep their flake input pin during bulk ref refresh."""
+
+    class Held:
+        bulk_update_hold = "Hosted macos-15 cannot rebuild this from source"
+        input_name = "goose"
+
+    class ExtraHeld:
+        bulk_update_hold = "Companion pin"
+        additional_input_names = ("goose-v8",)
+
+    class Other:
+        pass
+
+    class Opts:
+        target_names: tuple[str, ...] = ()
+        no_refs = False
+        native_only = False
+        no_sources = False
+        no_input = False
+        check = False
+
+    updaters = {"goose-cli": Held, "goose-extra": ExtraHeld, "other": Other}
+    refs = [
+        FlakeInputRef("goose", "aaif-goose", "goose", "v1.51.0", "github"),
+        FlakeInputRef("goose-v8", "aaif-goose", "goose-v8", "v1.0.0", "github"),
+        FlakeInputRef("nixpkgs", "NixOS", "nixpkgs", "nixos-unstable", "github"),
+    ]
+    assert held_bulk_update_input_names(updaters) == {"goose", "goose-v8"}
+
+    resolved = resolve_update_targets(
+        Opts(),
+        updaters=updaters,
+        ref_inputs=refs,
+        result_type=lambda **kwargs: kwargs,
+    )
+    assert [item.name for item in resolved["ref_inputs"]] == ["nixpkgs"]
+    assert resolved["source_names"] == ["other"]
+
+    class Explicit(Opts):
+        target_names = ("goose",)
+
+    explicit = resolve_update_targets(
+        Explicit(),
+        updaters=updaters,
+        ref_inputs=refs,
+        result_type=lambda **kwargs: kwargs,
+    )
+    assert [item.name for item in explicit["ref_inputs"]] == ["goose"]
+
+
+def test_bulk_hold_skips_inputs_of_coupled_aggregate_members() -> None:
+    """A hold must pin flake inputs of sources pulled into the hold closure."""
+
+    class Held:
+        bulk_update_hold = "Hosted macos-15 cannot rebuild this from source"
+
+    class Desktop:
+        companion_of = "held"
+        aggregate_into = ("electron-runtimes",)
+        input_name = "hermes-agent"
+
+    class Agent:
+        pass
+
+    class ElectronRuntimes:
+        pass
+
+    class Other:
+        pass
+
+    class Opts:
+        target_names: tuple[str, ...] = ()
+        no_refs = False
+        native_only = False
+        no_sources = False
+        no_input = False
+        check = False
+
+    updaters = {
+        "held": Held,
+        "desktop": Desktop,
+        "hermes-agent": Agent,
+        "electron-runtimes": ElectronRuntimes,
+        "other": Other,
+    }
+    refs = [
+        FlakeInputRef("hermes-agent", "NousResearch", "hermes-agent", "v1", "github"),
+        FlakeInputRef("nixpkgs", "NixOS", "nixpkgs", "nixos-unstable", "github"),
+    ]
+    assert "hermes-agent" in held_bulk_update_input_names(updaters)
+    resolved = resolve_update_targets(
+        Opts(),
+        updaters=updaters,
+        ref_inputs=refs,
+        result_type=lambda **kwargs: kwargs,
+    )
+    assert [item.name for item in resolved["ref_inputs"]] == ["nixpkgs"]
+    assert "hermes-agent" not in resolved["source_names"]
+    assert resolved["source_names"] == ["other"]
 
 
 def test_deep_companion_chain_has_no_python_recursion_limit() -> None:

@@ -6,7 +6,7 @@
   ...
 }:
 mkZipApp {
-  pname = "chatgpt";
+  pname = "codex-desktop";
   appName = "ChatGPT";
   info = selfSource;
   dontFixup = true;
@@ -17,6 +17,6 @@ mkZipApp {
     license = licenses.unfree;
     platforms = platforms.darwin;
     sourceProvenance = with sourceTypes; [ binaryNativeCode ];
-    mainProgram = "chatgpt";
+    mainProgram = "codex-desktop";
   };
 }

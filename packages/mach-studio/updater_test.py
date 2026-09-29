@@ -54,6 +54,15 @@ def _load_module() -> ModuleType:
     )
 
 
+def test_bulk_update_hold_skips_unaudited_local_engine_generation() -> None:
+    """0.1.172 matched no audited anchors; do not bump until that DMG is reviewed."""
+    module = _load_module()
+    hold = module.MachStudioUpdater.bulk_update_hold
+    assert hold is not None
+    assert "0.1.172" in hold
+    assert "found 0" in hold
+
+
 def _load_policy_module() -> ModuleType:
     return load_repo_module(
         "packages/mach-studio/patch_updater.py",
@@ -254,6 +263,101 @@ def test_mach_studio_pins_the_audited_167_anchor_payload() -> None:
         hashlib.sha256(module._FAIL_OPEN_ENGINE_INSTALL_WHEEL_167).hexdigest()
         == "9599d27a314cdf5584ef4cd9548abe842f776dfda384d3370ac992faea43d6a8"
     )
+
+
+def test_mach_studio_policy_accepts_the_audited_168_provisioners() -> None:
+    """The renamed 0.1.168 helpers retain the same fail-closed transformation."""
+    module = _load_policy_module()
+    source = module._FAIL_OPEN_ENGINE_INSTALL_SOURCE_168
+    wheel = module._FAIL_OPEN_ENGINE_INSTALL_WHEEL_168
+    assert hashlib.sha256(source).hexdigest() == (
+        "0b11285e3a4d64aa0bd517bf9c99f97e96b6cbec971c171d99bd393e19d099db"
+    )
+    assert hashlib.sha256(wheel).hexdigest() == (
+        "ae72c871055a4e99df3e0dbeb282ae5e090edaa099dd47477832173c30b46519"
+    )
+    payload = module._ENABLED_GATE + source + wheel
+
+    patched = module.patch_main(payload)
+
+    assert len(patched) == len(payload)
+    assert source not in patched
+    assert wheel not in patched
+    assert module._FAIL_CLOSED_ENGINE_INSTALL_SOURCE_168 in patched
+    assert (
+        wheel.replace(b"uv to install bundled", b"uv install bundled", 1).replace(
+            b";return}", b";throw e}", 1
+        )
+        in patched
+    )
+    with pytest.raises(module.PatchError, match="local-engine provisioning"):
+        module.patch_main(payload.replace(b"HM(", b"unknown("))
+
+
+@pytest.mark.parametrize(
+    ("resolve", "args", "error", "serve", "source_hash", "wheel_hash"),
+    [
+        (
+            b"HP",
+            b"W7t",
+            b"e9t",
+            b"_g",
+            "0d36e7abf3a58064ac13779e6b163ff5368aac40ca6afebae78061dc80383ded",
+            "051e397a87992e509abfbe9aa2655ca683d428cc827bf7dd2e81e48dd86022bd",
+        ),
+        (
+            b"UM",
+            b"M7t",
+            b"H7t",
+            b"dh",
+            "6d4bdd61ce92613c1d362577171396eb96a73745b86aeeebde137a316d3ce567",
+            "5e0f86e7506bb01fecb3af547acb2fb509753e503b797ec7ebde7189018017ce",
+        ),
+        (
+            b"hF",
+            b"A5t",
+            b"B5t",
+            b"Mg",
+            "e08dc29e433c07c352beedf220704315c69bcde9b569fb1c4c51ece0425fd3e1",
+            "06d377894e90ff066ecc1b16330467fce665fea1192dc97cd8e72910200da0cc",
+        ),
+    ],
+    ids=["0.1.169", "0.1.170", "0.1.171"],
+)
+def test_mach_studio_policy_accepts_the_audited_provisioners(
+    resolve: bytes,
+    args: bytes,
+    error: bytes,
+    serve: bytes,
+    source_hash: str,
+    wheel_hash: str,
+) -> None:
+    """Audited DMGs rename helpers without changing provisioning behavior."""
+    module = _load_policy_module()
+    generation = module._EngineGeneration(
+        resolve=resolve, args=args, error=error, serve=serve
+    )
+    source = module._engine_source_open(generation)
+    wheel = module._engine_wheel_open(generation)
+    assert hashlib.sha256(source).hexdigest() == source_hash
+    assert hashlib.sha256(wheel).hexdigest() == wheel_hash
+    payload = module._ENABLED_GATE + source + wheel
+
+    patched = module.patch_main(payload)
+
+    assert len(patched) == len(payload)
+    assert module._DISABLED_GATE in patched
+    assert source not in patched
+    assert wheel not in patched
+    assert module._engine_source_closed(generation) in patched
+    assert (
+        wheel.replace(b"uv to install bundled", b"uv install bundled", 1).replace(
+            b";return}", b";throw e}", 1
+        )
+        in patched
+    )
+    with pytest.raises(module.PatchError, match="local-engine provisioning"):
+        module.patch_main(payload.replace(resolve + b"(", b"unknown("))
 
 
 def test_mach_studio_policy_reports_the_packaged_engine_source() -> None:

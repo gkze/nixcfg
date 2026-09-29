@@ -865,6 +865,33 @@ def test_nix_policy_patch_hides_only_client_owned_affordances(
     assert backend_status == before_backend_status
 
 
+def test_nix_policy_preserves_the_0176_settings_deep_link(tmp_path: Path) -> None:
+    """The new row ID must survive while client-owned controls remain hidden."""
+    module = _load_patch_module()
+    _write_pinned_source_fixture(tmp_path)
+    relative_path = "apps/desktop/src/app/settings/about-settings.tsx"
+    path = tmp_path / relative_path
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "          title={a.automaticUpdates}\n",
+            "          id={settingElementId(SETTING_IDS.about.automaticUpdates)}\n"
+            "          title={a.automaticUpdates}\n",
+        ),
+        encoding="utf-8",
+    )
+
+    module.patch_tree(tmp_path, _HERMES_EXECUTABLE, _HERMES_VERSION)
+
+    facts = _typescript_ast_facts({
+        relative_path: path.read_text(encoding="utf-8"),
+    })[relative_path]
+    assert facts["diagnostics"] == []
+    calls = cast("dict[str, list[list[str]]]", facts["callArguments"])
+    assert calls["settingElementId"] == [["SETTING_IDS.about.automaticUpdates"]]
+    assert "!import.meta.env.PROD" in cast("list[str]", facts["logicalAndLeftOperands"])
+    assert cast("list[str]", facts["jsxTags"]).count("UninstallSection") == 1
+
+
 def test_nix_policy_patch_rejects_late_drift_without_writing_any_file(
     tmp_path: Path,
 ) -> None:

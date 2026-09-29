@@ -41,6 +41,11 @@ class ReflectOpenUpdater(GitHubReleaseUpdater):
     """Resolve Reflect releases to immutable public source revisions."""
 
     name = "reflect-open"
+    bulk_update_hold = (
+        "0.14.0's package.json is pnpm@11.27.1 but Darwin validate still "
+        "patched with pnpm@11.24.0 (Update 36562737373). Keep 0.13.0 until "
+        "the pnpm FOD and packageManager stay in lockstep."
+    )
     GITHUB_OWNER = "team-reflect"
     GITHUB_REPO = "reflect-open"
     RELEASE_DISPLAY_NAME = "Reflect"

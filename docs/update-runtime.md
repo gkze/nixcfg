@@ -16,16 +16,16 @@ manifests, deduplicated file contents and diagnostic projections. This replaces 
 separate JSON status/metadata files and JSONL event stream. The plain subprocess
 log is retained for `tail -f`.
 
-| Existing updater concept                     | Explicit contract                                                     |
-| -------------------------------------------- | --------------------------------------------------------------------- |
-| Selected targets and captured dirty checkout | Immutable workflow request and SQLite baseline                        |
-| Latest-version discovery                     | Checkpointed resolution step; replay reuses the resolved version      |
-| Hashing and artifact generation              | Checkpointed materialization step, including declared artifact bytes  |
-| Source dependency graph                      | Independent source workflows with serializable prerequisite results   |
-| Ref/input refresh and source persistence     | Steps returning a verified candidate snapshot                         |
-| Derivation/root validation                   | Checkpoint keyed by the exact immutable validation snapshot           |
-| Live promotion                               | Idempotent filesystem transaction reconciled until the root completes |
-| Progress and heartbeat                       | Diagnostic projections; DBOS remains execution authority              |
+| Existing updater concept | Explicit contract |
+| --- | --- |
+| Selected targets and captured dirty checkout | Immutable workflow request and SQLite baseline |
+| Latest-version discovery | Checkpointed resolution step; replay reuses the resolved version |
+| Hashing and artifact generation | Checkpointed materialization step, including declared artifact bytes |
+| Source dependency graph | Independent source workflows with serializable prerequisite results |
+| Ref/input refresh and source persistence | Steps returning a verified candidate snapshot |
+| Derivation/root validation | Checkpoint keyed by the exact immutable validation snapshot |
+| Live promotion | Idempotent filesystem transaction reconciled until the root completes |
+| Progress and heartbeat | Diagnostic projections; DBOS remains execution authority |
 
 `nixcfg update --resume RUN_ID` starts DBOS against the existing database. Native
 recovery resumes pending root/source workflows; completed workflows return their
@@ -88,14 +88,29 @@ that deployment choice must change before sharing this database across hosts.
 
 An updater can declare `bulk_update_hold` with a reason to keep its source and
 generated artifacts out of untargeted `nixcfg update` runs (including `--check`).
-Coupled companion and aggregate sources are held together. Explicit target
-selection still allows updates. This does not freeze shared flake dependencies.
+Coupled companion and aggregate sources are held together. Untargeted flake-ref
+refresh also skips flake inputs backing that whole hold closure so overlays
+that assert input identity stay coherent. Explicit target selection still
+allows updates.
 
 Unsloth is temporarily held at the existing source pin because desktop
 `v0.1.811-beta` requests backend `2026.9.7`, its GitHub source declares
 `2026.9.6`, and PyPI publishes no source archive. Use `nixcfg update unsloth`
 to retry explicitly; remove `UnslothUpdater.bulk_update_hold` once matching
 source is published and the candidate passes validation.
+
+Goose CLI, desktop, and V8 are held at the existing pins because an untargeted
+goose bump rebuilds `goose-cli-v8-native` from source on hosted macos-15
+(~2300 CXX units) and exhausts the runner after image cleanup (~100 GB free).
+Use `nixcfg update goose-cli` to retry explicitly; remove the holds once that
+derivation is in the `gkze` cache.
+
+Hosted Darwin validation then GCs the Nix store and skips native
+`root-closures`. That check is 4000+ derivations and ~60 GiB; hosted macos-15
+dies mid-build even after image cleanup (~160 GB free) and store GC. Linux
+validate already owns eval and identity of `checks.aarch64-darwin.root-closures`.
+Hosted Darwin still validates native package derivations. `min-free` /
+`max-free` stay at 32 / 64 GiB.
 
 Each update invocation owns its concurrency limits, shared work, and timings.
 There are no process-global build semaphores tied to a previous event loop.
@@ -245,6 +260,7 @@ paths apply the same URL redaction as terminal output. A failure inside an updat
 task is confined to that target and its traceback is stored in the error event's
 `detail`. `--status` reads DBOS status without starting workers or deserializing
 workflow inputs/results. Heartbeat age and execution status remain distinct.
+
 
 Use `--timings` for per-source operation counts, active time, admission wait,
 cache hits, failures/cancellations, and captured byte counts. Combine it with

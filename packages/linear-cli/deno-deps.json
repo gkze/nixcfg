@@ -3233,7 +3233,7 @@
         {
           "cache_path": "remote/https/jsr.io/240bf5fc71a5ca7a5d8ff41a9adc4e29f138b1f12c604db1131dddad44bbe78f",
           "media_type": "application/json",
-          "sha256": "a7f4e8637c33b697114076e0e50257787cd17ff05b325cf0a3410c053da6f92f",
+          "sha256": "31259a6b24647b155e7cb50237d78b21737e4ba777a294413f62fad4e4c957e5",
           "url": "https://jsr.io/@std/async/meta.json"
         }
       ],
@@ -4165,7 +4165,7 @@
         {
           "cache_path": "remote/https/jsr.io/43b2b26241717c7e65e74a2e4cd7c36bc58e75765a37cc9b81d059df775f1ecf",
           "media_type": "application/json",
-          "sha256": "31275008c94554cba6cd354d9cfc408011867afc5accc27e875551a040d019fe",
+          "sha256": "b42f53d4dc440cc12fa4f31685f320cc6ee5db6d61fab10f1fee56f3dd49c67e",
           "url": "https://jsr.io/@std/collections/meta.json"
         }
       ],
@@ -4322,7 +4322,7 @@
         {
           "cache_path": "remote/https/jsr.io/88776d701a5322c48462df5f91ac6c8b7a21829e5028adaf550c980040633fb3",
           "media_type": "application/json",
-          "sha256": "f54b320b3b2e4b6aec05507c7ff92dc6ebb2c27cf4f992e49b652df81486c1e5",
+          "sha256": "bf3826a66d6d7062b77aa750a853c1be1ae4c7ba5abee9e245b74e0577f8c5c6",
           "url": "https://jsr.io/@std/data-structures/meta.json"
         }
       ],
@@ -7381,7 +7381,7 @@
         {
           "cache_path": "remote/https/jsr.io/74c61ee77cf3d5bd22bc1763e1946f7d9691ff3ad4370527c5e7b6ab9b4fea20",
           "media_type": "application/json",
-          "sha256": "35346674a58d89a6d4e94f5431fb0dfa28830e046007e167f3f3c6daf434cacf",
+          "sha256": "61434efd6dd177206a4fde6d84770ae2cc05d4411571a2bb35f2e61a901276a6",
           "url": "https://jsr.io/@std/testing/meta.json"
         }
       ],
@@ -7610,7 +7610,7 @@
         {
           "cache_path": "remote/https/jsr.io/74c61ee77cf3d5bd22bc1763e1946f7d9691ff3ad4370527c5e7b6ab9b4fea20",
           "media_type": "application/json",
-          "sha256": "35346674a58d89a6d4e94f5431fb0dfa28830e046007e167f3f3c6daf434cacf",
+          "sha256": "61434efd6dd177206a4fde6d84770ae2cc05d4411571a2bb35f2e61a901276a6",
           "url": "https://jsr.io/@std/testing/meta.json"
         }
       ],
@@ -7893,7 +7893,7 @@
         {
           "cache_path": "remote/https/jsr.io/c8ea18759d7155f7f10cb55ccba5f1069c3a1f859a015c15ec239caa398ee17d",
           "media_type": "application/json",
-          "sha256": "10dba928ee495bf0b77715fcbbe50d3b53f21008a2536edb86ed79850ecebfb1",
+          "sha256": "a279e28a0312fbca5936d13716503fccc0b2a1a6edbe5aa0c079dffb116a1aaf",
           "url": "https://jsr.io/@std/text/meta.json"
         }
       ],

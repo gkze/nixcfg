@@ -1,12 +1,8 @@
 --- a/apps/desktop/package.json
 +++ b/apps/desktop/package.json
-@@ -34,8 +34,11 @@
-     "@bb/connect-client": "workspace:*",
-     "@bb/host-daemon-contract": "workspace:*",
+@@ -36,6 +36,7 @@
      "bb-app": "workspace:*",
-+    "bindings": "1.5.0",
      "electron-updater": "^6.8.3",
-+    "file-uri-to-path": "1.0.0",
      "semver": "^7.7.0",
 +    "wrappy": "1.0.2",
      "ws": "^8.19.0",
@@ -14,19 +10,7 @@
    },
 --- a/pnpm-lock.yaml
 +++ b/pnpm-lock.yaml
-@@ -555,12 +555,21 @@
-       bb-app:
-         specifier: workspace:*
-         version: link:../../packages/bb-app
-+      bindings:
-+        specifier: 1.5.0
-+        version: 1.5.0
-       electron-updater:
-         specifier: ^6.8.3
-         version: 6.8.3
-+      file-uri-to-path:
-+        specifier: 1.0.0
-+        version: 1.0.0
+@@ -552,6 +552,9 @@
        semver:
          specifier: ^7.7.0
          version: 7.7.4

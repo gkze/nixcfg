@@ -94,12 +94,6 @@ def _patch_dependency(
             "0123456789abcdef0123456789abcdef01234567/Ghostty.dmg",
         ),
         (
-            "packages/macai/updater.py",
-            SparkleAppcastItem("10", "1.2.3", "https://example.com/macai.zip"),
-            "1.2.3",
-            "https://example.com/macai.zip",
-        ),
-        (
             "packages/nordvpn/updater.py",
             SparkleAppcastItem("9.1.0", None, None),
             "9.1.0",

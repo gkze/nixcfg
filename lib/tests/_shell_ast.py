@@ -1,6 +1,5 @@
 """Helpers for parsing shell bodies embedded in Nix strings."""
 
-import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import cache
@@ -72,19 +71,6 @@ def parse_shell(text: str) -> ParsedShell:
     error_nodes = list(iter_nodes(tree.root_node, "ERROR"))
     assert not error_nodes, "expected parseable shell source"
     return ParsedShell(source=text, sanitized=sanitized, tree=tree)
-
-
-_ZSH_GLOB_QUALIFIER = re.compile(r"\*\([^()]*\)")
-
-
-def parse_zsh(text: str) -> ParsedShell:
-    """Parse zsh sources by neutralizing zsh-only glob qualifiers first.
-
-    zsh glob qualifiers such as ``*(N-.)`` have no bash-grammar equivalent, so
-    they are stripped before the shared bash parse. The remaining zsh source
-    must still parse cleanly.
-    """
-    return parse_shell(_ZSH_GLOB_QUALIFIER.sub("*", text))
 
 
 def node_text(node: Node, text: str) -> str:

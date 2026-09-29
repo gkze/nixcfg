@@ -8,7 +8,5 @@
   (import ../overlays/_lib/neovim-nightly-overlay.nix { inherit inputs; })
   inputs.rust-overlay.overlays.default
   inputs.nh.overlays.default
-  # Precede package overlays so crate2nix users that read `prev` also get it.
-  (import ../overlays/_lib/build-rust-crate-unique.nix)
   outputs.overlays.default
 ]

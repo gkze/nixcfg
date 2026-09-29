@@ -77,8 +77,8 @@ def test_update_runtime_has_no_cross_job_version_transport_surface() -> None:
 def test_discover_update_surface_names_finds_repo_surfaces() -> None:
     """Discover logical update surfaces across directory and flat package layouts."""
     surfaces = discover_update_surface_names()
-    assert "chatgpt" in surfaces
-    assert "codex-desktop" not in surfaces
+    assert "codex-desktop" in surfaces
+    assert "chatgpt" not in surfaces
     assert "zed-editor-nightly" in surfaces
     assert "codex-v8" in surfaces
     assert "opencode-desktop-dev" in surfaces

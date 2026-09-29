@@ -681,13 +681,6 @@ else
         bundleRelPath = "Applications/Zed Nightly.app";
         installMode = "copy";
       };
-      # macApps routing intentionally keeps the app-bearing derivation out of
-      # home.packages. This app-free view exposes the bundled CLI without
-      # creating a duplicate managed application bundle.
-      cliPackage = pkgs.runCommand "${pname}-cli-${version}" { } ''
-        mkdir -p "$out/bin"
-        ln -s "${guardedZedDrv}/Applications/Zed Nightly.app/Contents/MacOS/cli" "$out/bin/zed"
-      '';
     };
 
     meta = {

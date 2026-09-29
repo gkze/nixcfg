@@ -22,6 +22,11 @@ class GooseCliUpdater(Crate2NixMetadataUpdater):
 
     name = "goose-cli"
     input_name = "goose"
+    bulk_update_hold = (
+        "Hosted macos-15 validate builds goose-cli-v8-native from source and "
+        "fills the runner after image cleanup. Remove after that derivation is "
+        "in gkze Cachix from a machine that can build it."
+    )
     # crate2nix omits package.rust-version. These are manifest-derived
     # compatibility values for the exact crate releases, and the package
     # override rejects any newly introduced version until it is reviewed.

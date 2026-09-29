@@ -38,6 +38,7 @@ class MachinePatch:
     disabled: MaskedBytes
     original_branch: RelativeBranch | None = None
     disabled_branch: RelativeBranch | None = None
+    alternatives: tuple[MachinePatch, ...] = ()
 
 
 def _exact(pattern: bytes) -> MaskedBytes:
@@ -329,6 +330,31 @@ _DISABLED_ARM64_CLI_LEGACY_MARKER_RECOVERY = _aarch64_words(
     *((0xD503201F, _AARCH64_EXACT_MASK),) * 8,
 )
 
+# 0.10.339 pairs the same x19-relative loads. Keep the bit-zero decision and
+# report-call neighborhood exact rather than relaxing instruction classes.
+_ARM64_CORE_INSTALL_GUARD_339 = _aarch64_words(
+    (0x94000000, _AARCH64_BRANCH26_MASK),
+    (0xA9400660, _AARCH64_PAIR_OFFSET_MASK),
+    (0x94000000, _AARCH64_BRANCH26_MASK),
+    (0x36000000, _AARCH64_TBZ_MASK),
+    (0xA9400A61, _AARCH64_PAIR_OFFSET_MASK),
+    (0x90000003, _AARCH64_ADRP_MASK),
+    (0x91000063, _AARCH64_ADD_IMMEDIATE_MASK),
+    (0xAA1303E0, _AARCH64_EXACT_MASK),
+    (0x52800264, _AARCH64_EXACT_MASK),
+)
+_DISABLED_ARM64_CORE_INSTALL_GUARD_339 = _aarch64_words(
+    (0x94000000, _AARCH64_BRANCH26_MASK),
+    (0xA9400660, _AARCH64_PAIR_OFFSET_MASK),
+    (0x94000000, _AARCH64_BRANCH26_MASK),
+    (0x14000000, _AARCH64_BRANCH26_MASK),
+    (0xA9400A61, _AARCH64_PAIR_OFFSET_MASK),
+    (0x90000003, _AARCH64_ADRP_MASK),
+    (0x91000063, _AARCH64_ADD_IMMEDIATE_MASK),
+    (0xAA1303E0, _AARCH64_EXACT_MASK),
+    (0x52800264, _AARCH64_EXACT_MASK),
+)
+
 AUTOMATIC_MUTATION_PATCHES = (
     MachinePatch(
         label="x86_64 automatic-update gate",
@@ -353,6 +379,15 @@ AUTOMATIC_MUTATION_PATCHES = (
         disabled=_DISABLED_ARM64_CORE_INSTALL_GUARD,
         original_branch=RelativeBranch(16, "aarch64-tbz-imm14"),
         disabled_branch=RelativeBranch(16, "aarch64-b-imm26"),
+        alternatives=(
+            MachinePatch(
+                label="arm64 hq-core install guard (0.10.339)",
+                original=_ARM64_CORE_INSTALL_GUARD_339,
+                disabled=_DISABLED_ARM64_CORE_INSTALL_GUARD_339,
+                original_branch=RelativeBranch(12, "aarch64-tbz-imm14"),
+                disabled_branch=RelativeBranch(12, "aarch64-b-imm26"),
+            ),
+        ),
     ),
     MachinePatch(
         label="x86_64 staging hq-core install guard",

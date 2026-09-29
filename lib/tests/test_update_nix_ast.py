@@ -29,6 +29,7 @@ from lib.update.flake import (
     flake_source_path_expr,
     flake_source_path_expression,
     nixpkgs_expression,
+    nixpkgs_lib_expression,
 )
 from lib.update.nix import (
     _build_fetch_from_github_call,
@@ -272,6 +273,61 @@ def test_nixpkgs_expression_honors_local_path_override(
                 "system": identifier_attr_path("builtins", "currentSystem")
             }),
         ),
+    )
+
+
+def _nixpkgs_lib_import(source: FunctionCall | NixPath | Parenthesis) -> FunctionCall:
+    return FunctionCall(
+        name=Identifier(name="import"),
+        argument=Parenthesis(
+            value=BinaryExpression(
+                operator=Operator(name="+"),
+                left=source,
+                right=StringPrimitive(value="/lib"),
+            )
+        ),
+    )
+
+
+def test_nixpkgs_lib_expression_uses_pinned_flake_input_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """nixpkgs_lib_expression should import lib from the pinned flake input."""
+    node = FlakeLockNode(
+        locked=LockedRef(
+            type="github",
+            owner="NixOS",
+            repo="nixpkgs",
+            rev="abc123",
+            narHash="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        ),
+    )
+    monkeypatch.delenv("NIXCFG_NIXPKGS_PATH", raising=False)
+    monkeypatch.setattr("lib.update.flake.get_root_input_name", lambda _name: "nixpkgs")
+    monkeypatch.setattr("lib.update.flake.get_flake_input_node", lambda _name: node)
+
+    assert_nix_ast_equal(
+        nixpkgs_lib_expression(),
+        _nixpkgs_lib_import(Parenthesis(value=flake_fetch_expression(node))),
+    )
+
+
+def test_nixpkgs_lib_expression_honors_local_path_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """nixpkgs_lib_expression should bypass flake lookups when a local path is set."""
+
+    def _unexpected(*_args: object, **_kwargs: object) -> object:
+        msg = "flake input lookup should not be used when NIXCFG_NIXPKGS_PATH is set"
+        raise AssertionError(msg)
+
+    monkeypatch.setenv("NIXCFG_NIXPKGS_PATH", "/tmp/nixpkgs")
+    monkeypatch.setattr("lib.update.flake.get_root_input_name", _unexpected)
+    monkeypatch.setattr("lib.update.flake.get_flake_input_node", _unexpected)
+
+    assert_nix_ast_equal(
+        nixpkgs_lib_expression(),
+        _nixpkgs_lib_import(NixPath(path="/tmp/nixpkgs")),
     )
 
 
