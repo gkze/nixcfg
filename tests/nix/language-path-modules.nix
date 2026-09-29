@@ -10,30 +10,32 @@ let
     else
       throw "${label}: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
 
-  stubOptions = _: {
-    options = {
-      home = {
-        homeDirectory = lib.mkOption {
-          type = lib.types.str;
-          default = "/Users/test";
+  stubOptions =
+    { ... }:
+    {
+      options = {
+        home = {
+          homeDirectory = lib.mkOption {
+            type = lib.types.str;
+            default = "/Users/test";
+          };
+          sessionPath = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+          };
         };
-        sessionPath = lib.mkOption {
-          type = lib.types.listOf lib.types.str;
-          default = [ ];
-        };
-      };
-      programs = {
-        bun.enable = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
-        };
-        go.enable = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
+        programs = {
+          bun.enable = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+          };
+          go.enable = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+          };
         };
       };
     };
-  };
 
   evalModule =
     module: settings:

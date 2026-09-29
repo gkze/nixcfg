@@ -43,13 +43,9 @@ let
     paseo = systemApp pkgs.paseo;
     reflect = systemApp pkgs.reflect-open;
     screen-studio = systemApp pkgs.screen-studio;
-    tailscale = {
-      package = pkgs.tailscale-app;
-      preventDowngrade = true;
-      scope = "system";
-    };
+    tailscale.package = pkgs.tailscale-app;
     thorium = systemApp pkgs.thorium;
-    "town-assistant".package = pkgs.town-assistant-internal;
+    "town-assistant".package = pkgs.town-assistant-nightly;
     unsloth = systemApp pkgs.unsloth;
     voiceos = systemApp pkgs.voiceos;
     waku = systemApp pkgs.waku;
@@ -80,7 +76,6 @@ in
         pkgs.baseten-switch.cliPackage
         pkgs.executor.cliPackage
         pkgs.pants-preview
-        pkgs.zed-editor-nightly.cliPackage
         pkgs.writer-computer.cliPackage
       ];
     };

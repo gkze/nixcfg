@@ -8,7 +8,7 @@ mkDmgApp7zz {
   pname = "ara";
   bundleName = "Reason.app";
   sourceName = "Reason_${selfSource.version}_aarch64.dmg";
-  executableName = "Reason";
+  executableName = "Ara";
   info = selfSource;
   description = "AI-native desktop workspace";
   homepage = "https://reasonmachines.com/";

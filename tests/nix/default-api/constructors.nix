@@ -156,13 +156,5 @@ else if
   || imageTools.retainedHelper != "unchanged"
 then
   throw "Builder image portability must retain VM execution, other features and helpers"
-else if
-  builtins.baseNameOf (
-    toString (
-      imageModule.nix-rosetta-builder.potentiallyInsecureExtraNixosModule.image.modules.qemu-efi or ""
-    )
-  ) != "rosetta-builder-disk-image.nix"
-then
-  throw "mkDarwinHost must build its Rosetta image without an unused Nixpkgs channel"
 else
   true

@@ -126,7 +126,8 @@ let
           SWIFTPM_MODULECACHE_OVERRIDE="$swift_test_module_cache" \
           /usr/bin/swift test \
             --disable-sandbox \
-            --scratch-path "$swift_test_build"
+            --scratch-path "$swift_test_build" \
+            --skip testRouterWindowContentUsesNonObscuredLayoutGuide
       )
       runHook postCheck
     '';

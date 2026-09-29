@@ -8,12 +8,16 @@
       "hash": "sha256-dlueIkmID/CUjgykZFVILO7JlYA7T7wTbhWFpjWmy8E=",
       "name": "agent-identity"
     },
+    "agent-message-board-client": {
+      "hash": "sha256-hSr3n2iLpFri01CmWKwR+C7uA3tJrUZ4QyhsxsXTaqQ=",
+      "name": "agent-message-board-client"
+    },
     "agent-roles": {
       "hash": "sha256-0I86WRvO4RJfkU93vbUesWeQDeX6op3HvazUDOBk9bU=",
       "name": "agent-roles"
     },
     "analytics": {
-      "hash": "sha256-TC2tGb14AQTSImymEKgJuIh86y5mDGpm4A0JCvOw4Qs=",
+      "hash": "sha256-m73ULix2kyvG7giZuOkt3t3lp9JZdt6zkHwAK5v/oZE=",
       "name": "analytics"
     },
     "ansi-escape": {
@@ -21,19 +25,19 @@
       "name": "ansi-escape"
     },
     "app-server": {
-      "hash": "sha256-4KJOJRg3VbfONQKyW4vdexbfS85MR+8QEm+DN8pdZwI=",
+      "hash": "sha256-3793YzuYSkGp5te4F4YxS7o+L4F7DwkFU7YhMeRRN1s=",
       "name": "app-server"
     },
     "app-server-client": {
-      "hash": "sha256-jF2imuXq+i6pyaLfjmVei+LS+Qng8U+nxLToyh34y2k=",
+      "hash": "sha256-k974iTCQ0Gyb3n0J6TbgUTbh+zqfN1pTSVwmKXjeohg=",
       "name": "app-server-client"
     },
     "app-server-daemon": {
-      "hash": "sha256-orWRaowZDgCiN8ybG534dJMPMrnsskJYwXiDxIDn8dA=",
+      "hash": "sha256-JfICr4Mt8qkxFY5e3NRW7M1qbG/+r9RfdcmZRDrOjcY=",
       "name": "app-server-daemon"
     },
     "app-server-protocol": {
-      "hash": "sha256-zsvIq2xzvisPyU20qfH8tB8ROFNneO6AySOK3yrHM6w=",
+      "hash": "sha256-NGsWk3kKYbGERO8dTEnAcBKE1jeIHfDfbBX1gS3yN08=",
       "name": "app-server-protocol"
     },
     "app-server-protocol-noop-macros": {
@@ -45,7 +49,7 @@
       "name": "app-server-test-client"
     },
     "app-server-transport": {
-      "hash": "sha256-TBP1MtjBQ/hYailalwcMeJBkaBnrUBeB+dqyWhF+tKM=",
+      "hash": "sha256-65t5wlmauu+q0uy3oiNjj6ySse0dz5Gj56YxtUlJRFY=",
       "name": "app-server-transport"
     },
     "app-server/tests/common": {
@@ -57,7 +61,7 @@
       "name": "apply-patch"
     },
     "arg0": {
-      "hash": "sha256-l+Jmg8QokCxUzh5F0K8rvitJgOEazCrIzAmxWgFTdm8=",
+      "hash": "sha256-uqTlXn/DtkPkeVADqTzlbTDyRNMntjvymIchgVtP6l8=",
       "name": "arg0"
     },
     "async-utils": {
@@ -73,7 +77,7 @@
       "name": "aws-auth"
     },
     "backend-client": {
-      "hash": "sha256-vwd91rgUpoWlCrSJ+IygY3gp7x9KgSJ1TnW311vCVyo=",
+      "hash": "sha256-rY4KQ52zkEEVCs+ic4vTZZK8WW0fUB9+DcMfWxGYSBU=",
       "name": "backend-client"
     },
     "build-info": {
@@ -85,15 +89,15 @@
       "name": "bwrap"
     },
     "chatgpt": {
-      "hash": "sha256-2c3POZzXPEMA1U82PYl+Gr5Hg0jqqbD8nVgOa1/c6BE=",
+      "hash": "sha256-WZaII4Hus9r1gMYFbwAQJC8i5H2gEQ2i4wHx5+MCM8w=",
       "name": "chatgpt"
     },
     "cli": {
-      "hash": "sha256-Ot3RfqfGiilteEXJkUjPzIumerEPLPlFIr0vQ3rlnyI=",
+      "hash": "sha256-pNUMbyS325IzXKeHuEmiaiAqbzmpC48KJ2fVFftyVn0=",
       "name": "cli"
     },
     "cloud-config": {
-      "hash": "sha256-j7JDfxBUihcHxzTIgtQNHSGYdYVsFE0nwHgqjLIAMNI=",
+      "hash": "sha256-+3ttvJmoC9rLONZceQ/euopp43Hg43rWX3QdmgjzQwE=",
       "name": "cloud-config"
     },
     "cloud-tasks": {
@@ -109,31 +113,31 @@
       "name": "cloud-tasks-mock-client"
     },
     "code-mode": {
-      "hash": "sha256-8iW2pZo/1BJoaaVYP/QS48fnE5Wa2Fx2eByzBzjfLsI=",
+      "hash": "sha256-XNKrrMyP3GSuWcjntXleaWV+HqMMwRqex9lvNZaRinc=",
       "name": "code-mode"
     },
     "code-mode-host": {
-      "hash": "sha256-T0XH66OFpQA24GAjz5Z1D2tz0d70q8mmJ8il3nesOnY=",
+      "hash": "sha256-EMOhWITC7W+zXYvajcb8K3D/lkYgrEOSs3xyhOJXJ4k=",
       "name": "code-mode-host"
     },
     "code-mode-protocol": {
-      "hash": "sha256-wV4hwOkgR1jwYaIpOPi7yFivYib7SKID/0RmxDYCrUs=",
+      "hash": "sha256-8G68jDoAcysDijPLdpL2ULt6pY1OM7wpmtpbnE1nIac=",
       "name": "code-mode-protocol"
     },
     "code-mode-runtime": {
-      "hash": "sha256-YmZzUYKQqnnRAmAzUd+gyP+lGLdVBzcgwvy75qUeO9E=",
+      "hash": "sha256-s9shyPMlfTDP2bhqIMQ6g2i0z27scqj5pB2c/jeYS2g=",
       "name": "code-mode-runtime"
     },
     "codex-api": {
-      "hash": "sha256-u+5BAhiaFyWutdYZ7GlqFS2wdykv4BCoadbKsnt2pYc=",
+      "hash": "sha256-ijXKuixPmAY0G550y/VDWJOs+hrFd0RyWdwGb4038Yw=",
       "name": "codex-api"
     },
     "codex-backend-openapi-models": {
-      "hash": "sha256-cQTQ2rqicj8tfsgt7oHMAFgJ5QQUuWDgFCKPSGWe/po=",
+      "hash": "sha256-fgBn48SBCZTjNw0U4Zez3BJ1U/qHzoqrlipdYhctt+4=",
       "name": "codex-backend-openapi-models"
     },
     "codex-client": {
-      "hash": "sha256-N++DjuZEiDNEWz/uB7iqoqbjDVlEQc4avRiHefyf/jE=",
+      "hash": "sha256-9+ptMBw8mFwfVtiIXAuGtoRRkOkpfZGV5UtrkVUiFt0=",
       "name": "codex-client"
     },
     "codex-experimental-api-macros": {
@@ -145,7 +149,7 @@
       "name": "codex-home"
     },
     "codex-mcp": {
-      "hash": "sha256-61RvD1YSyXE2EYXOy/6Y5KiGKxrjCNZlrs79M34pk5k=",
+      "hash": "sha256-Yk9IWTQnC7WdPI4pIaI6SO7pMn4o+YY4VLLCqevZbmM=",
       "name": "codex-mcp"
     },
     "collaboration-mode-templates": {
@@ -153,7 +157,7 @@
       "name": "collaboration-mode-templates"
     },
     "config": {
-      "hash": "sha256-W43WdQQbDOCjG2SLx32iNClQsG7orzuBXyrHJSsNeP8=",
+      "hash": "sha256-g5QAXWcVyKZuc/vNUXziwASV/NQAZwpcQMqK6cjrL+U=",
       "name": "config"
     },
     "config-schema": {
@@ -169,19 +173,23 @@
       "name": "context-fragments"
     },
     "core": {
-      "hash": "sha256-a1zBDBncvQ3yr9QbpMq7fm9MISkW2lYS3n9oc70+QeM=",
+      "hash": "sha256-cHmPNj5xkC7vtBy9Vu/hEgeeWFOIHY9D7/SLtZ5AI/8=",
       "name": "core"
     },
     "core-api": {
-      "hash": "sha256-NdO58/9Kb3GMIyQso/0hr097jfbEq03AHIrR0Lk22bo=",
+      "hash": "sha256-ODQXDHJsGSvGoLPcY15Td6lL9HcL9XPCDYn7N0fiGus=",
       "name": "core-api"
     },
+    "core-plugin-common": {
+      "hash": "sha256-LFtOA4eBBb5D4FMbGi0yYEuBBVRLPqnSVxvJkjMg5cQ=",
+      "name": "core-plugin-common"
+    },
     "core-plugins": {
-      "hash": "sha256-UfnsD0prNbU4zWER3vDrzae+RkjylvsP2irM0MB+hd4=",
+      "hash": "sha256-1Auur1s/DExej8sAeFYBhp+Uy1xE+31v4bk4nq0qfUE=",
       "name": "core-plugins"
     },
     "core/tests/common": {
-      "hash": "sha256-aJ2LLLB62vmX7tJJP+ZcslpZDvv7dxO40qAAjzolr9s=",
+      "hash": "sha256-Y46as7LWU5VQ2L7UBUIZn1nD42GkSLqrowrAImuKIPQ=",
       "name": "common"
     },
     "diagnostics": {
@@ -189,15 +197,15 @@
       "name": "diagnostics"
     },
     "exec": {
-      "hash": "sha256-s+5Fe0dldri704VIi8oXq9SbSHbl5rco0iIL7P6tSbw=",
+      "hash": "sha256-H7PTTVzv42d749sPeklHNmPRPuddOcRrHvIZfyXAviQ=",
       "name": "exec"
     },
     "exec-server": {
-      "hash": "sha256-XssHU1xDIyfZQoYRcTmqWOhZq6cVZfQHn1V98YaKOXM=",
+      "hash": "sha256-Sq070XfnD8TS/XezF/apCVVaBm8Pk07ZtiA2KgyV2To=",
       "name": "exec-server"
     },
     "exec-server-protocol": {
-      "hash": "sha256-kApPvc5DQ9nNb0kpcx4PKtJyu8TuQiusz3aaRFAbDys=",
+      "hash": "sha256-A8aPFBhg5tufIftfyJDIvahf0ZFVdOE8I+0N/0soZgs=",
       "name": "exec-server-protocol"
     },
     "exec-server/tests/support": {
@@ -209,11 +217,11 @@
       "name": "execpolicy"
     },
     "ext/agent": {
-      "hash": "sha256-U9C9Pi1oq7FlQ9Ba13IsCfTGFfOU2UACnd0Ua7Frf9c=",
+      "hash": "sha256-jsH555W0ssJ6kmmjvn8txEwsQWF8+dVD4r6G9Z9Gu2k=",
       "name": "agent"
     },
     "ext/agent-message-board": {
-      "hash": "sha256-kb/0Bn9EILloVI/CXpwiDovxoQ6SzA1RPRXZT49vGkw=",
+      "hash": "sha256-QGLCT8FkW63eEfnP6skERArpxS8chrPGO/MKpvvaf+4=",
       "name": "agent-message-board"
     },
     "ext/connectors": {
@@ -221,7 +229,7 @@
       "name": "connectors"
     },
     "ext/extension-api": {
-      "hash": "sha256-QflQj6m2VCxDIEZJktrxvHx1BMZlzh3lIexxZyF92K0=",
+      "hash": "sha256-CX1PHutuTs928Bkkz6BHXdHezLCNzUJby2dQi+E9HNM=",
       "name": "extension-api"
     },
     "ext/git-attribution": {
@@ -233,19 +241,19 @@
       "name": "goal"
     },
     "ext/guardian-reviewer": {
-      "hash": "sha256-r5BKfuo+rzxpdqT9JY7mOu7z2dWJGV6g+0csAVACZ0k=",
+      "hash": "sha256-DE+sR2hXzJgoQhs4HthLOBeOyv+lixc3puN08Pxscb4=",
       "name": "guardian-reviewer"
     },
     "ext/guardian-v2": {
-      "hash": "sha256-uUOGftl7x2Mj10OewP0DMPjoerzKtTnQDwv2N39vY+I=",
+      "hash": "sha256-TJIjyCf03+IHIN5kkQPsGesopuMZ0LEUiQGgWA6pT/8=",
       "name": "guardian-v2"
     },
     "ext/history-notes": {
-      "hash": "sha256-FOJSwyl4Z0E5QVrwlsyz5MB7BAUxunMYgHRHKLAP2fY=",
+      "hash": "sha256-Ff7Ef2XMcZhpKR43PWriTRwQW8KWWVvgNdQ11atinG0=",
       "name": "history-notes"
     },
     "ext/image-generation": {
-      "hash": "sha256-cOW06ZhqAGAA/I/7M5800q3K1JIq93XvZnlsWtlDPzY=",
+      "hash": "sha256-12MuriP6nQkvOdXtJBl56lwQKEmRAJ+SX/09xVUbkhI=",
       "name": "image-generation"
     },
     "ext/items": {
@@ -253,7 +261,7 @@
       "name": "items"
     },
     "ext/mcp": {
-      "hash": "sha256-uI+ZGcufN6hyK2Z5i0wBaCpxZImLGCpU1wqEx+d0tvQ=",
+      "hash": "sha256-51jVzxQjYgpZ6Y4lIDAavgFQdOny/zr0Q9GITb8zZ+w=",
       "name": "mcp"
     },
     "ext/memories": {
@@ -261,11 +269,11 @@
       "name": "memories"
     },
     "ext/queue": {
-      "hash": "sha256-B/n44/tn9m+dmzacRLUThUklo9tkv6C4r28iMmEjq/8=",
+      "hash": "sha256-NA4r+TAJBCg0E2Hm3JsLpxTEZYqqI4h2AMY/BBmSaCc=",
       "name": "queue"
     },
     "ext/skills": {
-      "hash": "sha256-BSsxa8YoFr2wfqDSZ4HaEZ8b0Pkb0LAhCmKYQShBguw=",
+      "hash": "sha256-uKlcEQgVCQC3HuMEeHUwDrBeigb1qeQJyuvYgA4XqJ0=",
       "name": "skills"
     },
     "ext/web-search": {
@@ -277,11 +285,11 @@
       "name": "external-agent-migration"
     },
     "features": {
-      "hash": "sha256-xqOfTFrKSW+fSIxnTO5m3S0d0giYONgRhZAKJGvlWOM=",
+      "hash": "sha256-Vsrfzb3gbxH88t3yZcjT8Kcpo6lMbI6VDUr4trpzobs=",
       "name": "features"
     },
     "feedback": {
-      "hash": "sha256-+xamR7uLwdbvRkuR5cgOtcfDIJSkKtGEWHgYtNYO7ik=",
+      "hash": "sha256-uPnqo5KtdYmRHXlJ+AEtdd3wxP0h5sVIiX8Iojtx468=",
       "name": "feedback"
     },
     "file-search": {
@@ -297,23 +305,23 @@
       "name": "file-watcher"
     },
     "git-utils": {
-      "hash": "sha256-cVFn78xIFZs3Q8qdjGT2PNA3s25SYIEPBe3E+UaRpdc=",
+      "hash": "sha256-eRi2bsEScULhqxiUeOOKZT9XV30k/POzPAtcCO7SR4g=",
       "name": "git-utils"
     },
     "guardian-context": {
-      "hash": "sha256-QXqhKVtjRZUF0N016jDW7l9NDFM8mGwwgeMXOtpE4b8=",
+      "hash": "sha256-vgxZnNuY4v5ROlHb63ZD5VGYGHJhd7p5nd34CWlwFZc=",
       "name": "guardian-context"
     },
     "history": {
-      "hash": "sha256-AaEcMyNmPx54gdV3oaO4L4wk5FrSF82c0aSIQE29O7U=",
+      "hash": "sha256-NUidubrlNlwxsj+q4t+YVlE7nbwHdsMJPiRZTloR9MI=",
       "name": "history"
     },
     "hooks": {
-      "hash": "sha256-Mw6wbN5pAAMp6b1ooL/cuaOqLj0IUA9sqEJNkqj+FQA=",
+      "hash": "sha256-nPqFq7edsbCcQanzHTC5Ope5uzd26jnnq4Hzvpsi9GQ=",
       "name": "hooks"
     },
     "http-client": {
-      "hash": "sha256-sCrARbnWRFcsYQ/cWZS9sHfviEM0CpHyxbIVJSeLeoY=",
+      "hash": "sha256-DXF8je7XdftPBrWL8QV0LIa74HtNRN7Y0odWFG9paMc=",
       "name": "http-client"
     },
     "install-context": {
@@ -321,11 +329,11 @@
       "name": "install-context"
     },
     "keyring-store": {
-      "hash": "sha256-QoEYa27cUgCLIPvMauC6FZJlg4Le+xHztSFQ3mbhUV0=",
+      "hash": "sha256-YaQj/sCrj9m9ffsORDLs7Bo8keleVcc6pJ8nwGns5bw=",
       "name": "keyring-store"
     },
     "linux-sandbox": {
-      "hash": "sha256-uGaKFe9/8ALkmMS3N/8JvqOjFCbQOdh/z5hRHSvL0iU=",
+      "hash": "sha256-loCWWD4109XABOzRvMhMfOHySwRxc2lSMlTZJ57iMCA=",
       "name": "linux-sandbox"
     },
     "lmstudio": {
@@ -333,7 +341,7 @@
       "name": "lmstudio"
     },
     "login": {
-      "hash": "sha256-oIvxYWGu8HxkZDWG/2BrzIKes5Pp4/NchBV9vjZBsYU=",
+      "hash": "sha256-kMtXgbHNwmTk+VvDqOJtH/gfIOEULXbHZ6uir9OVnIY=",
       "name": "login"
     },
     "memories/read": {
@@ -341,11 +349,11 @@
       "name": "read"
     },
     "memories/write": {
-      "hash": "sha256-otS652GNF0l/CyErUUxLR8pGpjWIJ8cDIpKT9inK6IU=",
+      "hash": "sha256-8Yax6qIuIPccxuBbaWww4lKuVe9cpyoXJbiv3xP/OZ4=",
       "name": "write"
     },
     "mermaid": {
-      "hash": "sha256-kIh5OsNg0lURbmFPiibpCBEXg4lpu3RDbolKFYVYr8I=",
+      "hash": "sha256-x8oI+CV/DFkXmvSOwxt5Yjex5GwcjuXXE3WK38QMzks=",
       "name": "mermaid"
     },
     "message-history": {
@@ -353,23 +361,23 @@
       "name": "message-history"
     },
     "model-provider": {
-      "hash": "sha256-z9fLopWwywi99TwjCadZbA/ddZGXDyjcvTtgRZ/Xzro=",
+      "hash": "sha256-rde86w/ScVFrX/aydDLdhficuBeOsXwQ74aiR8Tl95M=",
       "name": "model-provider"
     },
     "model-provider-info": {
-      "hash": "sha256-NzMFeoG0Q0LYFRfHDpLxJXNLWwCOAb3KxKzgl/POv+k=",
+      "hash": "sha256-XWMPKzeUwnDUyImWk8A88SsS29L3aOXsQ6YqY0FqXyU=",
       "name": "model-provider-info"
     },
     "models-manager": {
-      "hash": "sha256-boKP5/D2npNNzX+S7+K+6+04kj1Uqo/KcLqvlbHDJFY=",
+      "hash": "sha256-f/zgudrMzPXvKHrl5VRXjUxjQroyrKNfwI2k6xtCGGc=",
       "name": "models-manager"
     },
     "mxc-sandbox": {
-      "hash": "sha256-b1h9VU0mBGi1iqyFuDNcKyzXOS/MMgqIVp87nxHr7f4=",
+      "hash": "sha256-JEKRoAeCkEMeqv+pvbq+CBWBbHH2uAXh3QoKTQoDfis=",
       "name": "mxc-sandbox"
     },
     "network-proxy": {
-      "hash": "sha256-35mMDJaFiWOd8EUTQPlvXZyFnLwnqg1HpXMooiLx0W4=",
+      "hash": "sha256-1smjwrL1UGyP4CPmXQyj51O7un8yit9DFdx305kmb3Y=",
       "name": "network-proxy"
     },
     "ollama": {
@@ -377,7 +385,7 @@
       "name": "ollama"
     },
     "otel": {
-      "hash": "sha256-pCZqwWzLkMTEmMWzjiRkfxQ4plih3fEpz31Oi+0f33k=",
+      "hash": "sha256-aQiGnhxpHRVCngeXk3q9RelIBpXinc99OorpGXNsw28=",
       "name": "otel"
     },
     "otel-trace-websocket": {
@@ -385,7 +393,7 @@
       "name": "otel-trace-websocket"
     },
     "plugin": {
-      "hash": "sha256-H+RMmQmYlgoH1ShKWcFkze57FqhFxOhQRQ6dc5temxI=",
+      "hash": "sha256-ey0PzeUgiHV0JomvHGZNW6x/sIa747CBLti6BjXXAgg=",
       "name": "plugin"
     },
     "process-hardening": {
@@ -393,11 +401,11 @@
       "name": "process-hardening"
     },
     "prompts": {
-      "hash": "sha256-zymEcnCtVwSllo/HWui2cQmqze4VgEokWe/FpZXag0c=",
+      "hash": "sha256-38Y4O2Z3z2jIUK4Llz8UxTMwqCNhJdIDHaBPyvqGnsY=",
       "name": "prompts"
     },
     "protocol": {
-      "hash": "sha256-aepBwI8GqB5CF7AqI9OGJtUX3Dq42ic6aD4E4DKN27s=",
+      "hash": "sha256-C73oJBGQz+PqFwsP5lM0axlJ7pqtp3NhKS91b0Iuhj4=",
       "name": "protocol"
     },
     "realtime-webrtc": {
@@ -405,7 +413,7 @@
       "name": "realtime-webrtc"
     },
     "response-debug-context": {
-      "hash": "sha256-LWwN2MgsLXEyUInxMj8mPIIB9wzc8D9y73Fyuu6Nirw=",
+      "hash": "sha256-OootLpLiyaSp6rJS4asuIo80I5N1Tb7cE3gTN4maono=",
       "name": "response-debug-context"
     },
     "responses-api-proxy": {
@@ -413,11 +421,11 @@
       "name": "responses-api-proxy"
     },
     "rmcp-client": {
-      "hash": "sha256-Ao8nz+RdYb4cLK3ox+vWwArEIoV6cZOv6KgUi/Li5fY=",
+      "hash": "sha256-hIjsPTavIJg4+3vDm6b/ZMDAoNdGLpRzJX5V9oxM+E8=",
       "name": "rmcp-client"
     },
     "rollout": {
-      "hash": "sha256-W9WfA1I0VD1uLpdtbOliZxoRualm5RrNTWAOzZ8K+GQ=",
+      "hash": "sha256-ae9AuY4G8o1e0Tw6BiYcFALgErpNzQ0/JTZD3v/PHPc=",
       "name": "rollout"
     },
     "rollout-trace": {
@@ -425,15 +433,15 @@
       "name": "rollout-trace"
     },
     "sandboxing": {
-      "hash": "sha256-5IX3sklYBCnLxhETbAyfiR51fpRvMtIypJsOglbEkxU=",
+      "hash": "sha256-j+V46LIGAHgLQwk9vyC6aWIS5BGE77PFZtCMRaqCYSM=",
       "name": "sandboxing"
     },
     "secrets": {
-      "hash": "sha256-ATGAI4KGBPWW7ODvcFG4zfE5fM5jzyOl9nhbFkcUIH0=",
+      "hash": "sha256-g3dakjNPcmTLXjythVFsmgQtfNqjEq4MEWRvTEW+KEk=",
       "name": "secrets"
     },
     "shell-command": {
-      "hash": "sha256-vkU5y2V0FI/M9ONo79Pv6t8Apxl3JXYwwDY26xDory0=",
+      "hash": "sha256-XN0KaBlHnXb73/gmLVXzne/32uXMpyNllTlxneHFrEA=",
       "name": "shell-command"
     },
     "shell-escalation": {
@@ -441,11 +449,11 @@
       "name": "shell-escalation"
     },
     "skills": {
-      "hash": "sha256-tbitpJEEldXmFPMUjXFJu4E4+SaQR2WnD8BaBBSEgtQ=",
+      "hash": "sha256-UG7CCpWnef08p8p1jmKMJuTLce6auA1yIabVpjEybys=",
       "name": "skills"
     },
     "state": {
-      "hash": "sha256-dKi74j+GjvHyXNMZck6kv4c7fxFUO4LEWaGjx73f/Qo=",
+      "hash": "sha256-0q7jP844lPar4xjfvzXSXxIgmHqITNE+EvkfevLeDXw=",
       "name": "state"
     },
     "stdio-to-uds": {
@@ -465,23 +473,23 @@
       "name": "test-binary-support"
     },
     "thread-manager-sample": {
-      "hash": "sha256-Mgf5q0+ukkfg4x3wAP2gMoGGDrR+9FrzMRuFjDLt/+w=",
+      "hash": "sha256-FJyw/BPvSMAfbpUxP5Jzd3gWk6HW4oYLrykO9aWinfw=",
       "name": "thread-manager-sample"
     },
     "thread-store": {
-      "hash": "sha256-8+BRzbolWzn/+I70GxRDQ4Igg0Vr/euP3u40tnLLo9w=",
+      "hash": "sha256-hVuGcRm24VZLvbqn9xG47CU0oM7Mbcxe59x9BrKzSEc=",
       "name": "thread-store"
     },
     "tools": {
-      "hash": "sha256-xySmyEYcYtGkv9c2TMmjtSOvfOJ/fi35gkWx24b3Ge0=",
+      "hash": "sha256-Hwss7zmgCLdJB9bBMF0CUTju3GvylVXZjCmgIQX75qk=",
       "name": "tools"
     },
     "tui": {
-      "hash": "sha256-IyHNW0SsAuKRLwA1nG7lGgjApT7z6/EgwSmI+DmHYZs=",
+      "hash": "sha256-80aqozZPNcp7VMdJkBWaZ8+yIPIKVpRBgAIC2DLxYdM=",
       "name": "tui"
     },
     "uds": {
-      "hash": "sha256-8CBHLIUrBOt/UbY2tY7486b9VC8dFpcNBFHVIDtfeeM=",
+      "hash": "sha256-c8ebZx5S2nfG+sXD659lIpIY6PJWI6+b3XVJ3hV6PzY=",
       "name": "uds"
     },
     "user-verification": {
@@ -489,7 +497,7 @@
       "name": "user-verification"
     },
     "utils/absolute-path": {
-      "hash": "sha256-k2gIz1BQ26NKHWzMkFl79G4enIX4zxHyvtAT1L0KJuE=",
+      "hash": "sha256-Oe8hKlqJ+mcRvdhgGBlBGWxr6lF21YXJe29WOQnkA+0=",
       "name": "absolute-path"
     },
     "utils/approval-presets": {
@@ -497,15 +505,15 @@
       "name": "approval-presets"
     },
     "utils/audio": {
-      "hash": "sha256-b1sN9mA3KQSa4Z8CeCgJnuvUGTbog+dnEFaHHGHNa24=",
+      "hash": "sha256-yPprfSg+lXWU1ngPxozjuSOxKM1WczbN+nbXwVM1UJU=",
       "name": "audio"
     },
     "utils/cache": {
-      "hash": "sha256-T+IrG5d5jKc8jOUc5PkD0lgfVtZOMlkJWjUKS3vvZ64=",
+      "hash": "sha256-5GgUSNw0bkrNzO0/6DJ7oc5/7cizSA0XbBPgqLp36Qc=",
       "name": "cache"
     },
     "utils/cargo-bin": {
-      "hash": "sha256-0dT+okK/AhjjL2sIUPh9P305OrygeptmqXq8xNo3NIk=",
+      "hash": "sha256-FiQaP+6GK1lXpbNMGeAcvDffQjy0Buu8AR3hnjWN1kY=",
       "name": "cargo-bin"
     },
     "utils/cli": {
@@ -529,7 +537,7 @@
       "name": "home-dir"
     },
     "utils/image": {
-      "hash": "sha256-t4RVRKs+/eBsYiDkb4wmMGSzBxA4Pdkvp4LGKFHEc00=",
+      "hash": "sha256-E1TTdEczgOuF/HWZw0jW+ZfJR2eeYCFV3N42tx8Jb1I=",
       "name": "image"
     },
     "utils/json-to-toml": {
@@ -557,7 +565,7 @@
       "name": "plugins"
     },
     "utils/pty": {
-      "hash": "sha256-aa8QM/qInYLOcaKGp2aApa2BsY04Yr+jWngRC4P/Z5s=",
+      "hash": "sha256-raQXduOE3+aD7E15o6JK+4kIp3TbMdBwpSM2CWtj0eo=",
       "name": "pty"
     },
     "utils/readiness": {
@@ -597,19 +605,23 @@
       "name": "v8-poc"
     },
     "voice-host": {
-      "hash": "sha256-txDNrRblZa0vvidog/hx+WAWhLM+ketgct0HSQEyj+U=",
+      "hash": "sha256-5DyBxnJGmi50hNUw09QFnvvt3ftkWZdERZgg5lKk424=",
       "name": "voice-host"
+    },
+    "websocket-auth": {
+      "hash": "sha256-5AuWaaTA/K88RfJAa7cnxVVLuSsNysB+FiemNZZ/mAA=",
+      "name": "websocket-auth"
     },
     "websocket-client": {
       "hash": "sha256-S+/YsJ1j+ut7ziVGkK5ITDO09J2NqXusU46qKOaitLY=",
       "name": "websocket-client"
     },
     "windows-sandbox-rs": {
-      "hash": "sha256-Ii1IixUpYGH2tz/CNCAIt4lswPtLF9WH02hrX6iQvMM=",
+      "hash": "sha256-cHXxRmNiG9wWhFrW8mg56O/RdlbgFIhjsyLhSKEFLBI=",
       "name": "windows-sandbox-rs"
     },
     "windows-sandbox-service": {
-      "hash": "sha256-ZdGnnslx2Y/RMv+NzndNoXzOHddjzlv+fFEDoMvNWCA=",
+      "hash": "sha256-5eRqbGQQ8uceYgqc1Lmhr3aptPuAAiiIHj+SoV4MDR4=",
       "name": "windows-sandbox-service"
     },
     "workload-identity": {
@@ -622,9 +634,9 @@
     }
   },
   "source": {
-    "cargoNixSha256": "2c7bba0006c0e5254687f28cde93cade06e59c855902b92841ac59840de597ca",
+    "cargoNixSha256": "fd8acbecac14b1d50a308041b570ea1e87641a81cdbc95aafcdab28c40b1f28b",
     "input": "codex",
-    "narHash": "sha256-HuNL5VGd2LenhbCdcz0i8b6lRw3sicwXytyfXgCgy88=",
+    "narHash": "sha256-rtYsWjG56SagT5cWt22//vyqvD0QBKSHRdRhzHQB4CQ=",
     "subdir": "codex-rs"
   }
 }

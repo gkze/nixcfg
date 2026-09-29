@@ -50,6 +50,7 @@ dock.mkDockModule {
     (appPath "ghostty" "Ghostty.app")
     (appPath "datagrip" "DataGrip.app")
     (appPath "notion" "Notion.app")
+    "/System/Applications/Notes.app"
     (appPath "spotify" "Spotify.app")
     "/System/Applications/System Settings.app"
   ];

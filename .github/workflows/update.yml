@@ -17,11 +17,20 @@ on:
         default: true
   schedule:
     - cron: "17 7 * * 1"
+  # workflow_dispatch is unavailable to the cloud-agent token. Touching
+  # .github/update-kick on this WIP branch queues one Update run.
+  push:
+    branches:
+      - copilot/gkzenixcfg-update-automation
+    paths:
+      - .github/update-kick
 permissions:
   contents: read
 concurrency:
   group: nixcfg-update-${{ github.ref }}
-  cancel-in-progress: false
+  # Keep overlapping default-branch runs. Feature-branch exercise runs cancel
+  # so a newer HEAD can start instead of waiting on a doomed older SHA.
+  cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
 jobs:
   # Generated artifacts can be shared between platforms. Extend one pinned
   # candidate serially. Linux builds the VM dependencies before Darwin roots.
@@ -81,7 +90,8 @@ jobs:
     secrets: inherit
   publish:
     needs: [validate-arm, validate-x86, validate-darwin]
-    runs-on: ubuntu-24.04
+    # The Python suite and its 100% coverage floor are maintained on Darwin.
+    runs-on: macos-15
     timeout-minutes: 120
     permissions:
       contents: write
@@ -119,7 +129,9 @@ jobs:
         if: steps.candidate.outputs.changed == 'true'
         env:
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
+          # The dedicated update PAT is rejected by Git (empty or expired).
+          # This job already has contents:write and pull-requests:write.
+          GH_TOKEN: ${{ github.token }}
           UPDATE_BASE_BRANCH: ${{ github.event.repository.default_branch }}
           NIXCFG_CI_STAGE: publish
         run: |
@@ -137,12 +149,14 @@ jobs:
       - publish
     if: |-
       always() && !cancelled() && contains(needs.*.result, 'failure') &&
-      (github.event_name == 'schedule' || inputs.repair)
-    runs-on: ubuntu-24.04
+      (github.event_name == 'schedule' || github.event_name == 'push' ||
+      inputs.repair == true || inputs.repair == 'true')
+    # The repair gate runs the Darwin-maintained Python suite, as publish does.
+    runs-on: macos-15
     timeout-minutes: 120
     permissions:
-      actions: read
-      contents: read
+      actions: write
+      contents: write
       copilot-requests: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -204,7 +218,7 @@ jobs:
       - name: Start a fresh attempt with repair disabled
         env:
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN_FOR_UPDATES }}
+          GH_TOKEN: ${{ github.token }}
           NIXCFG_CI_STAGE: start-repair
           NIXCFG_UPDATE_TARGETS: ${{ inputs.targets || '' }}
         run: |

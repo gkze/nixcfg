@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-K0xMhaVdbH0avClljXaPy96y23AOOH5kcchpmDfPr0A=",
-    "x86_64-darwin": "sha256-Qf8QcFw57wKa+q0MuBve7UdhibBJZwCI2OYyXhZZyPk="
+    "aarch64-darwin": "sha256-f4WZJckzhH/wn/VkHuuPlmbwuaR7gE2vWdhNVCpzPiM=",
+    "x86_64-darwin": "sha256-5BtvItECw8jg2BjIOLRrc8+GxJrDvJU9rzkyJFrcgCQ="
   },
   "urls": {
-    "aarch64-darwin": "https://downloads.cursor.com/grokbot/stable/darwin-arm64/0.58.0/Grok_Bot_0.58.0.zip",
-    "x86_64-darwin": "https://downloads.cursor.com/grokbot/stable/darwin-x64/0.58.0/Grok_Bot_0.58.0_x64.zip"
+    "aarch64-darwin": "https://downloads.cursor.com/grokbot/stable/darwin-arm64/0.61.0/Grok_Bot_0.61.0.zip",
+    "x86_64-darwin": "https://downloads.cursor.com/grokbot/stable/darwin-x64/0.61.0/Grok_Bot_0.61.0_x64.zip"
   },
-  "version": "0.58.0"
+  "version": "0.61.0"
 }

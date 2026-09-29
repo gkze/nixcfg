@@ -1,11 +1,20 @@
 """Tests for the source-built Clearly updater."""
 
+from pathlib import Path
 from types import ModuleType
 
 import pytest
+from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.function.definition import FunctionDefinition
+from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.indented_string import IndentedString
+from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import HashEntry, SourceEntry
-from lib.tests._nix_ast import assert_nix_ast_equal
+from lib.tests._assertions import expect_instance
+from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding
+from lib.tests._nix_source import nix_file_expr
+from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
 from lib.tests._updater_helpers import (
     collect_events,
     install_fixed_hash_stream,
@@ -51,6 +60,35 @@ _DEPENDENCY_URLS = {
 
 def _load_module() -> ModuleType:
     return load_repo_module("packages/clearly/updater.py", "clearly_updater_test")
+
+
+def _load_patch_module() -> ModuleType:
+    return load_repo_module(
+        "packages/clearly/patch_hosted_sdk.py",
+        "clearly_hosted_sdk_patch_test",
+    )
+
+
+def _write_toolbar(root: Path, source: str) -> Path:
+    path = root / "Clearly" / "BottomToolbar.swift"
+    path.parent.mkdir(parents=True)
+    path.write_text(source, encoding="utf-8")
+    return path
+
+
+def _toolbar_with_liquid_glass(module: ModuleType) -> str:
+    body, glass_body, helpers, mode_pill = module._PATCHES
+    return (
+        "struct BottomToolbar: View {\n"
+        f"{body.old}"
+        f"{glass_body.old}"
+        "    private var legacyBody: some View { EmptyView() }\n"
+        f"{helpers.old}"
+        "}\n"
+        "private struct ModePill: View {\n"
+        f"{mode_pill.old}"
+        "}\n"
+    )
 
 
 async def _release_payload(*_args, **_kwargs):
@@ -327,3 +365,99 @@ def test_clearly_requires_complete_source_metadata(
             info,
             [HashEntry.create("srcHash", _SRC_HASH)],
         )
+
+
+def test_hosted_sdk_patch_keeps_the_macos_15_toolbar_layout(tmp_path: Path) -> None:
+    """Hosted Xcode 16.4 cannot type-check Liquid Glass; keep the 15.5 fallback."""
+    module = _load_patch_module()
+    toolbar = _write_toolbar(tmp_path, _toolbar_with_liquid_glass(module))
+
+    assert module.main([str(tmp_path)]) == 0
+
+    patched = toolbar.read_text(encoding="utf-8")
+    assert "GlassEffectContainer" not in patched
+    assert ".glassEffect(" not in patched
+    assert "macOS 26.0" not in patched
+    assert "legacyBody" in patched
+
+
+def test_hosted_sdk_patch_is_a_noop_without_liquid_glass_apis(tmp_path: Path) -> None:
+    """Older pins that already compile on macos-15 must not be rewritten."""
+    module = _load_patch_module()
+    original = "struct BottomToolbar: View { var body: some View { legacyBody } }\n"
+    toolbar = _write_toolbar(tmp_path, original)
+
+    module.patch_tree(tmp_path)
+
+    assert toolbar.read_text(encoding="utf-8") == original
+
+
+def test_hosted_sdk_patch_rejects_a_missing_toolbar(tmp_path: Path) -> None:
+    """Absence is distinct from a toolbar that still contains Liquid Glass."""
+    module = _load_patch_module()
+
+    with pytest.raises(RuntimeError, match="missing Clearly/BottomToolbar.swift"):
+        module.patch_tree(tmp_path)
+
+
+def test_hosted_sdk_patch_rejects_drifted_toolbar_anchors(tmp_path: Path) -> None:
+    """A new Liquid Glass layout must fail closed instead of compiling on 16.4."""
+    module = _load_patch_module()
+    toolbar = _write_toolbar(
+        tmp_path,
+        "struct BottomToolbar: View {\n"
+        "    var body: some View { GlassEffectContainer(spacing: 0) { EmptyView() } }\n"
+        "}\n",
+    )
+    original = toolbar.read_text(encoding="utf-8")
+
+    with pytest.raises(
+        RuntimeError, match="expected one Clearly hosted-SDK toolbar match"
+    ):
+        module.patch_tree(tmp_path)
+
+    assert toolbar.read_text(encoding="utf-8") == original
+
+
+def test_hosted_sdk_patch_rejects_remaining_liquid_glass_files(tmp_path: Path) -> None:
+    """Toolbar rewriting is not enough when another Swift file still uses glass APIs."""
+    module = _load_patch_module()
+    toolbar = _write_toolbar(tmp_path, _toolbar_with_liquid_glass(module))
+    extra = tmp_path / "Clearly" / "PreviewChrome.swift"
+    extra.write_text(".glassEffect(.regular, in: .capsule)\n", encoding="utf-8")
+    original = toolbar.read_text(encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="still references Liquid Glass APIs"):
+        module.patch_tree(tmp_path)
+
+    assert toolbar.read_text(encoding="utf-8") == original
+    assert extra.read_text(encoding="utf-8") == ".glassEffect(.regular, in: .capsule)\n"
+
+
+def test_clearly_package_rewrites_liquid_glass_before_xcodebuild() -> None:
+    """The Darwin derivation must run the hosted-SDK patcher on the unpacked tree."""
+    package = expect_instance(
+        nix_file_expr("packages/clearly/default.nix"),
+        FunctionDefinition,
+    )
+    formal_names = {
+        argument.name
+        for argument in package.argument_set
+        if isinstance(argument, Identifier)
+    }
+    assert "python3" in formal_names
+    derivation = expect_instance(package.output, FunctionCall)
+    arguments = expect_instance(derivation.argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(arguments.values, "nativeBuildInputs").value,
+        "[ python3 xcodegen ]",
+    )
+    post_patch = expect_instance(
+        expect_binding(arguments.values, "postPatch").value,
+        IndentedString,
+    )
+    shell = parse_shell(indented_string_body(post_patch.rebuild()))
+    assert command_texts(shell, "__NIX_INTERP__") == [
+        '__NIX_INTERP__ __NIX_INTERP__ "$PWD"',
+    ]
+    assert command_texts(shell, "ln") == ["ln -s __NIX_INTERP__ nix-swift-deps"]

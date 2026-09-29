@@ -18,8 +18,13 @@ from typing import TextIO
 
 _BINARY_CACHE = "gkze"
 _HEARTBEAT_INTERVAL_SECONDS = 60
+_OUTPUT_LOG_NAME = "output.log"
 _APPLICATIONS = Path("/Applications")
+_DARWIN_SYSTEM_SIMULATORS = Path("/Library/Developer/CoreSimulator")
 _STORE_PATH_PREFIX = Path("/nix/store")
+# Live-written on hosted macOS; rmtree can lose a race (ENOTEMPTY) after children
+# are gone. Cleanup is disk reclaim, not a correctness gate for these trees.
+_VOLATILE_IMAGE_LEAVES = frozenset({"Caches", "hostedtoolcache"})
 _UNUSED_IMAGE_PATHS = {
     "darwin": (Path("/usr/local/share/dotnet"),),
     "linux": (
@@ -101,20 +106,73 @@ def clean_runner_image() -> None:
             if not path.is_symlink() and not selected.is_relative_to(path.resolve())
         )
         paths.append(Path.home() / "Library/Android/sdk")
+        # iOS simulators are unused by Nix Darwin roots and occupy tens of GB.
+        paths.append(Path.home() / "Library/Developer/CoreSimulator")
+        paths.append(_DARWIN_SYSTEM_SIMULATORS)
+        xcode = Path.home() / "Library/Developer/Xcode"
+        paths.extend((
+            xcode / "iOS DeviceSupport",
+            xcode / "watchOS DeviceSupport",
+            xcode / "tvOS DeviceSupport",
+            xcode / "DerivedData",
+        ))
+        paths.append(Path.home() / "Library/Caches")
+        paths.append(Path.home() / "hostedtoolcache")
+        tool_cache = os.environ.get("RUNNER_TOOL_CACHE")
+        if tool_cache:
+            paths.append(Path(tool_cache))
     for path in paths:
         if path.is_dir() and not path.is_symlink():
             sys.stdout.write(f"Removing unused runner image tool: {path}\n")
             sys.stdout.flush()
-            _run(
-                "sudo",
-                sys.executable,
-                "-c",
-                "import shutil, sys; shutil.rmtree(sys.argv[1])",
-                str(path),
-            )
+            _remove_unused_image_path(path)
     sys.stdout.write(
         f"Available after image cleanup: {shutil.disk_usage('/').free} bytes\n"
     )
+
+
+def _image_cleanup_best_effort(path: Path) -> bool:
+    """Return whether a live-written cache tree may race with sudo rmtree."""
+    tool_cache = os.environ.get("RUNNER_TOOL_CACHE")
+    return path.name in _VOLATILE_IMAGE_LEAVES or (
+        tool_cache is not None and path == Path(tool_cache)
+    )
+
+
+def _remove_unused_image_path(path: Path) -> None:
+    """Delete one unused image tree; ignore leftover writers in cache dirs."""
+    snippet = (
+        "import shutil, sys; shutil.rmtree(sys.argv[1], ignore_errors=True)"
+        if _image_cleanup_best_effort(path)
+        else "import shutil, sys; shutil.rmtree(sys.argv[1])"
+    )
+    _run("sudo", sys.executable, "-c", snippet, str(path))
+
+
+def is_hosted_darwin_runner() -> bool:
+    """Return whether this process is a disposable hosted macos-15 job."""
+    return (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted"
+        and sys.platform == "darwin"
+    )
+
+
+def hosted_darwin_skips_root_closures() -> bool:
+    """Hosted macos-15 cannot realize checks.aarch64-darwin.root-closures."""
+    return is_hosted_darwin_runner()
+
+
+def reclaim_hosted_store() -> None:
+    """Reclaim unused store paths on hosted Darwin before root-closure fetches."""
+    if not is_hosted_darwin_runner():
+        return
+    sys.stdout.write(
+        f"Available before store GC: {shutil.disk_usage('/').free} bytes\n"
+    )
+    sys.stdout.flush()
+    _run("nix", "store", "gc")
+    sys.stdout.write(f"Available after store GC: {shutil.disk_usage('/').free} bytes\n")
 
 
 def _develop(*args: str) -> tuple[str, ...]:
@@ -181,11 +239,48 @@ def _failure_summary(result_path: Path) -> str | None:
 
 def _write_diagnostic(log: TextIO, message: str) -> None:
     """Retain a CI diagnostic and mirror it to the live Actions log."""
-    line = message + "\n"
-    log.write(line)
+    _forward_text(log, message + "\n")
+
+
+def _forward_text(log: TextIO, text: str) -> None:
+    """Retain already-terminated updater output and mirror it to the live log."""
+    if not text:
+        return
+    log.write(text)
     log.flush()
-    sys.stderr.write(line)
+    sys.stderr.write(text)
     sys.stderr.flush()
+
+
+def _read_new_run_log_text(run_logs: Path, offsets: dict[str, int]) -> str:
+    """Return unread run-log bytes and advance *offsets* past them."""
+    if not run_logs.is_dir():
+        return ""
+    chunks: list[str] = []
+    seen: set[Path] = set()
+    for path in sorted(run_logs.rglob(_OUTPUT_LOG_NAME)):
+        if not path.is_file():
+            continue
+        try:
+            resolved = path.resolve()
+        except OSError:
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        key = str(resolved)
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        previous = offsets.get(key, 0)
+        if len(data) < previous:
+            previous = 0
+        if len(data) == previous:
+            continue
+        offsets[key] = len(data)
+        chunks.append(data[previous:].decode("utf-8", errors="replace"))
+    return "".join(chunks)
 
 
 def _drain_stderr(stderr: TextIO, diagnostics: queue.SimpleQueue[str | None]) -> None:
@@ -204,17 +299,19 @@ def _wait_for_diagnostics(
     artifacts: Path,
     command: list[str],
 ) -> int:
-    """Forward output promptly and prove liveness when the child is quiet."""
+    """Forward updater output promptly and prove liveness when every stream is quiet."""
     if process.stderr is None:  # pragma: no cover -- PIPE above guarantees stderr.
         msg = "Cannot collect updater diagnostics"
         raise RuntimeError(msg)
     diagnostics: queue.SimpleQueue[str | None] = queue.SimpleQueue()
+    offsets: dict[str, int] = {}
+    run_logs = artifacts / "runs"
     started = time.monotonic()
     _write_diagnostic(
         log,
         "Starting updater "
         f"stage={stage} pid={process.pid} command={command!r} "
-        f"artifacts={artifacts} run_logs={artifacts / 'runs'}",
+        f"artifacts={artifacts} run_logs={run_logs}",
     )
     reader = threading.Thread(
         target=_drain_stderr,
@@ -226,20 +323,20 @@ def _wait_for_diagnostics(
         try:
             diagnostic = diagnostics.get(timeout=_HEARTBEAT_INTERVAL_SECONDS)
         except queue.Empty:
-            if process.poll() is None:
+            if text := _read_new_run_log_text(run_logs, offsets):
+                _forward_text(log, text)
+            elif process.poll() is None:
                 _write_diagnostic(
                     log,
                     f"Updater still running stage={stage} pid={process.pid} "
                     f"elapsed={time.monotonic() - started:.0f}s artifacts={artifacts} "
-                    f"run_logs={artifacts / 'runs'}",
+                    f"run_logs={run_logs}",
                 )
             continue
         if diagnostic is None:
             break
-        log.write(diagnostic)
-        log.flush()
-        sys.stderr.write(diagnostic)
-        sys.stderr.flush()
+        _forward_text(log, diagnostic)
+    _forward_text(log, _read_new_run_log_text(run_logs, offsets))
     returncode = process.wait()
     reader.join()
     return returncode
@@ -380,9 +477,30 @@ def certify() -> None:
     _outputs(changed="true")
 
 
-def _commit_and_push(kind: str, message: str) -> str:
+def _commit_and_push(
+    kind: str,
+    message: str,
+    *,
+    base: str | None = None,
+    tree: str | None = None,
+) -> str:
     branch = f"codex/update-{kind}{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
-    _run("git", "switch", "-c", branch)
+    if base is None:
+        _run("git", "switch", "-c", branch)
+    else:
+        if tree is None:
+            msg = "Publishing from a base requires a certified tree"
+            raise ValueError(msg)
+        _run("git", "fetch", "origin", base)
+        _run(
+            "git",
+            "switch",
+            "--discard-changes",
+            "-c",
+            branch,
+            f"origin/{base}",
+        )
+        _run("git", "restore", "--source", tree, "--worktree", "--staged", ".")
     if _run("git", "diff", "--cached", "--quiet", check=False).returncode:
         _run(*_develop("git", "commit", "-S", "-m", message))
     _run("gh", "auth", "setup-git")
@@ -391,11 +509,20 @@ def _commit_and_push(kind: str, message: str) -> str:
 
 
 def publish() -> None:
-    """Open the verified update as a reviewable PR without merging it."""
-    branch = _commit_and_push("", "chore(update): refresh validated sources")
-    base = os.environ["GITHUB_REF_NAME"]
-    if base.startswith("codex/update-repair-"):
-        base = os.environ["UPDATE_BASE_BRANCH"]
+    """Open the verified update as a PR against the default branch and queue squash auto-merge.
+
+    The product PR always targets the repository default branch, including when
+    Update was exercised from a feature or repair ref. That keeps validated
+    source refreshes off the branch under review and makes the PR auto-mergeable.
+    """
+    base = os.environ["UPDATE_BASE_BRANCH"]
+    tree = _run("git", "write-tree", capture=True).stdout.strip()
+    branch = _commit_and_push(
+        "",
+        "chore(update): refresh validated sources",
+        base=base,
+        tree=tree,
+    )
     body = _temp() / "update-body.md"
     run_url = (
         f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
@@ -418,6 +545,7 @@ def publish() -> None:
         "--body-file",
         str(body),
     )
+    _run("gh", "pr", "merge", branch, "--auto", "--squash")
 
 
 def collect_evidence() -> None:
@@ -503,6 +631,7 @@ def main(stage: str) -> int:
         return native(stage.removeprefix("native-"))
     operations = {
         "clean-image": clean_runner_image,
+        "reclaim-store": reclaim_hosted_store,
         "bootstrap": bootstrap,
         "quality": quality,
         "certify": certify,

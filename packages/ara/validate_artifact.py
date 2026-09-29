@@ -11,7 +11,7 @@ def validate(info_plist: Path, version: str) -> None:
         info = plistlib.load(stream)
     expected = {
         "CFBundleIdentifier": "so.ara.desktop",
-        "CFBundleExecutable": "Reason",
+        "CFBundleExecutable": "Ara",
         "CFBundleShortVersionString": version,
     }
     for key, value in expected.items():

@@ -356,6 +356,71 @@ def _expected_node_modules_fake_hash_expr() -> str:
     return compact_nix_expr(package_call.rebuild())
 
 
+def _expected_opencode_node_modules_fake_hash_expr() -> str:
+    """Build the OpenCode closure expression from this repo's recipe."""
+    bun_source = FunctionCall(
+        name=identifier_attr_path("pkgs", "fetchurl"),
+        argument=AttributeSet(
+            values=[
+                Binding(name="url", value=StringPrimitive(value=_OPENCODE_BUN_URL)),
+                Binding(
+                    name="hash",
+                    value=StringPrimitive(value=_OPENCODE_BUN_HASH),
+                ),
+            ]
+        ),
+    )
+    bun = FunctionCall(
+        name=FunctionCall(
+            name=identifier_attr_path("pkgs", "callPackage"),
+            argument=NixPath(path=str(_PACKAGE_DIR / "bun.nix")),
+        ),
+        argument=AttributeSet(
+            values=[
+                Binding(name="bunSource", value=bun_source),
+                Binding(
+                    name="version",
+                    value=StringPrimitive(value=_OPENCODE_BUN_VERSION),
+                ),
+            ],
+        ),
+    )
+    package_call = FunctionCall(
+        name=FunctionCall(
+            name=identifier_attr_path("pkgs", "callPackage"),
+            argument=NixPath(path=str(_PACKAGE_DIR / "opencode-node-modules.nix")),
+        ),
+        argument=AttributeSet(
+            values=[
+                Binding(name="bun", value=bun),
+                Binding(
+                    name="bunVersion",
+                    value=StringPrimitive(value=_OPENCODE_BUN_VERSION),
+                ),
+                Binding(
+                    name="src",
+                    value=_build_fetch_from_github_call(
+                        "anomalyco",
+                        "opencode",
+                        rev=_OPENCODE_COMMIT,
+                        hash_value=_SOURCE_HASHES[1],
+                        fetch_submodules=False,
+                    ),
+                ),
+                Binding(
+                    name="version",
+                    value=StringPrimitive(value=_OPENCODE_VERSION),
+                ),
+                Binding(
+                    name="hash",
+                    value=identifier_attr_path("pkgs", "lib", "fakeHash"),
+                ),
+            ]
+        ),
+    )
+    return compact_nix_expr(package_call.rebuild())
+
+
 def _lock_text() -> str:
     return f"""{{
   "lockfileVersion": 1,
@@ -615,10 +680,15 @@ def test_openchamber_rejects_node_engine_range_above_selected_version() -> None:
 def test_openchamber_hashes_every_source_and_closure_in_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Hashing must include sources, npm inputs, upstream OpenCode, and Bun graph."""
+    """Hashing must include sources, npm inputs, and both local Bun graphs."""
     module = _load_updater_module()
     updater = module.OpenChamberUpdater()
-    outputs = (*_SOURCE_HASHES, *_URL_HASHES, _OPENCHAMBER_NODE_MODULES_HASH)
+    outputs = (
+        *_SOURCE_HASHES,
+        *_URL_HASHES,
+        _OPENCODE_NODE_MODULES_HASH,
+        _OPENCHAMBER_NODE_MODULES_HASH,
+    )
     calls = install_fixed_hash_stream(
         monkeypatch,
         tuple((f"hash-step-{index}", value) for index, value in enumerate(outputs)),
@@ -638,9 +708,9 @@ def test_openchamber_hashes_every_source_and_closure_in_order(
     hashes = events.result
     entries = cast("list[HashEntry]", hashes)
 
-    assert len(calls) == 8
+    assert len(calls) == 9
     assert [event.message for event in status_events] == [
-        f"hash-step-{index}" for index in range(8)
+        f"hash-step-{index}" for index in range(9)
     ]
     assert_nix_ast_equal(
         str(calls[0]["expr"]),
@@ -650,6 +720,10 @@ def test_openchamber_hashes_every_source_and_closure_in_order(
             rev=_COMMIT,
             fetch_submodules=False,
         ),
+    )
+    assert_nix_ast_equal(
+        str(calls[-2]["expr"]),
+        _expected_opencode_node_modules_fake_hash_expr(),
     )
     assert_nix_ast_equal(
         str(calls[-1]["expr"]),
@@ -729,13 +803,19 @@ def test_openchamber_build_result_requires_and_persists_complete_closure() -> No
             {"aarch64-darwin": _OPENCHAMBER_NODE_MODULES_HASH},
         )
 
-    mismatched = [
+    local_recipe_hash = [
         *entries[:-2],
         entries[-2].model_copy(update={"hash": _SOURCE_HASHES[0]}),
         entries[-1],
     ]
-    with pytest.raises(RuntimeError, match="differs from exact upstream"):
-        updater.build_result(_version_info(), mismatched)
+    local_result = updater.build_result(_version_info(), local_recipe_hash)
+    assert local_result.hashes is not None
+    persisted = next(
+        entry.hash
+        for entry in (local_result.hashes.entries or [])
+        if entry.hash_type == "nodeModulesHash" and entry.url == urls["opencodeUrl"]
+    )
+    assert persisted == _SOURCE_HASHES[0]
 
     result = updater.build_result(_version_info(), entries)
     assert result == SourceEntry.model_validate({
@@ -972,6 +1052,90 @@ def test_openchamber_patches_v1_upgrade_before_any_side_effect(tmp_path: Path) -
         "delete process.env.OPENCODE_NIX_MANAGED\n"
         'await UpgradeCommand.handler({method: "curl"})\n'
         'assert.deepEqual(calls, [{method: "curl"}])\n',
+        encoding="utf-8",
+    )
+    node = shutil.which("node")
+    assert node is not None
+    subprocess.run(  # noqa: S603 -- executes only the test-owned local harness
+        [node, str(harness)], check=True, capture_output=True, text=True, timeout=30
+    )
+
+
+@pytest.mark.parametrize("service_copies", [0, 1, 2])
+def test_openchamber_v2_upgrade_policy_is_fail_closed(
+    tmp_path: Path, service_copies: int
+) -> None:
+    """Both Effect entrypoints reject mutation; drift leaves all files unchanged."""
+    module = _load_patcher_module()
+    service = (
+        "  const upgrade = Effect.fnUntraced(function* (method: Method, input: string) {\n"
+        '    calls.push("service")\n'
+        "  })\n"
+    )
+    sources = {
+        "packages/cli/package.json": '{"version": "2.0.16"}',
+        "packages/cli/src/commands/handlers/upgrade.ts": (
+            "const handler = (\n"
+            "    function* (input) {\n"
+            '      intro("Upgrade")\n'
+            '      calls.push("handler")\n'
+            "    }\n"
+            ")\n"
+        ),
+        "packages/cli/src/services/updater.ts": (
+            service * service_copies + "function inspect() {\n"
+            '    if (OPENCODE_LOCAL || ["1", "true"].includes('
+            'process.env.OPENCODE_DISABLE_AUTOUPDATE?.toLowerCase() ?? "")) {\n'
+            "      return undefined\n"
+            "    }\n"
+            '    calls.push("poll")\n'
+            "}\n"
+        ),
+    }
+    for relative_path, source in sources.items():
+        path = tmp_path / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+    if service_copies != 1:
+        with pytest.raises(RuntimeError, match="managed-source patch anchor"):
+            module.patch_component("opencode", tmp_path)
+        assert {
+            name: (tmp_path / name).read_text(encoding="utf-8") for name in sources
+        } == sources
+        return
+
+    module.patch_component("opencode", tmp_path, check=True)
+    module.patch_component("opencode", tmp_path)
+    harness = tmp_path / "upgrade.mts"
+    harness.write_text(
+        'import assert from "node:assert/strict"\n'
+        "const calls = []\n"
+        "type Method = string\n"
+        "const OPENCODE_LOCAL = false\n"
+        "const Effect = {\n"
+        "  fnUntraced: fn => fn,\n"
+        "  fail: function* (error) { throw error },\n"
+        "}\n"
+        'const intro = () => calls.push("intro")\n'
+        + (tmp_path / "packages/cli/src/commands/handlers/upgrade.ts").read_text(
+            encoding="utf-8"
+        )
+        + (tmp_path / "packages/cli/src/services/updater.ts").read_text(
+            encoding="utf-8"
+        )
+        + 'process.env.OPENCODE_NIX_MANAGED = "1"\n'
+        'process.env.OPENCODE_DISABLE_AUTOUPDATE = "true"\n'
+        'assert.throws(() => handler({}).next(), {message: "Updates are managed by Nix."})\n'
+        'assert.throws(() => upgrade("curl", "2.0.17").next(), '
+        '{message: "Updates are managed by Nix."})\n'
+        "inspect()\n"
+        "assert.deepEqual(calls, [])\n"
+        "delete process.env.OPENCODE_NIX_MANAGED\n"
+        "delete process.env.OPENCODE_DISABLE_AUTOUPDATE\n"
+        "handler({}).next()\n"
+        'upgrade("curl", "2.0.17").next()\n'
+        "inspect()\n"
+        'assert.deepEqual(calls, ["intro", "handler", "service", "poll"])\n',
         encoding="utf-8",
     )
     node = shutil.which("node")
@@ -1308,27 +1472,37 @@ def test_openchamber_node_modules_normalizes_bun_private_bin_links() -> None:
     assert commands.index(normalization) < commands.index("runHook postBuild")
 
 
-def test_openchamber_companion_build_and_dependencies_use_the_v1_workspace() -> None:
-    """Dependency selection, compilation and installation must agree on 1.x."""
+@pytest.mark.parametrize("workspace", ["opencode", "cli"])
+def test_openchamber_companion_build_and_dependencies_use_the_same_workspace(
+    workspace: str,
+) -> None:
+    """Dependency selection, compilation and output names agree for 1.x and 2.x."""
     package = expect_instance(
         parse_nix_expr((_PACKAGE_DIR / "opencode.nix").read_text(encoding="utf-8")),
         FunctionDefinition,
     )
     derivation = expect_instance(package.output, FunctionCall)
+    assert_nix_ast_equal(
+        expect_binding(derivation.scope, "cliPackage").value,
+        'if lib.versionAtLeast version "2.0.0" then "cli" else "opencode"',
+    )
     arguments = expect_instance(derivation.argument, AttributeSet)
     for phase, command, expected in (
-        ("buildPhase", "cd", "cd packages/opencode"),
+        ("buildPhase", "cd", f"cd packages/{workspace}"),
         (
             "installPhase",
             "install",
-            'install -Dm755 dist/opencode-*/bin/opencode "$out/bin/opencode"',
+            f'install -Dm755 dist/{workspace}-*/bin/opencode "$out/bin/opencode"',
         ),
     ):
         body = expect_instance(
             expect_binding(arguments.values, phase).value, IndentedString
         )
         assert command_texts(
-            parse_shell(indented_string_body(body.rebuild())), command
+            parse_shell(
+                indented_string_body(body.rebuild()).replace("${cliPackage}", workspace)
+            ),
+            command,
         ) == [expected]
 
     dependencies = expect_instance(
@@ -1339,17 +1513,24 @@ def test_openchamber_companion_build_and_dependencies_use_the_v1_workspace() -> 
     )
     assertion = expect_instance(dependencies.output, Assertion)
     derivation = expect_instance(assertion.body, FunctionCall)
+    assert_nix_ast_equal(
+        expect_binding(derivation.scope, "cliPackage").value,
+        'if lib.versionAtLeast version "2.0.0" then "cli" else "opencode"',
+    )
     arguments = expect_instance(derivation.argument, AttributeSet)
     body = expect_instance(
         expect_binding(arguments.values, "buildPhase").value, IndentedString
     )
     install, *_ = command_texts(
-        parse_shell(indented_string_body(body.rebuild())), "bun"
+        parse_shell(
+            indented_string_body(body.rebuild()).replace("${cliPackage}", workspace)
+        ),
+        "bun",
     )
     args = shlex.split(install.replace("\\\n", ""))
     assert [args[index + 1] for index, arg in enumerate(args) if arg == "--filter"] == [
         "!./",
-        "./packages/opencode",
+        f"./packages/{workspace}",
         "./packages/desktop",
         "./packages/app",
     ]

@@ -21,7 +21,6 @@ from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
-    binary_darwin_self_source_app_names,
     binding_map,
     expect_binding,
     nix_attrset_call,
@@ -4129,7 +4128,11 @@ def test_buzz_enters_the_effective_arm64_darwin_app_graph() -> None:
         nix_file_expr("overlays/binary-darwin-apps.nix"),
         FunctionDefinition,
     )
-    assert "buzz" in binary_darwin_self_source_app_names(overlay)
+    overlay_exports = expect_instance(overlay.output, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(overlay_exports.values, "buzz").value,
+        'callDarwinAppPackage "buzz"',
+    )
 
     routing = expect_instance(
         nix_source_fragment_expr(

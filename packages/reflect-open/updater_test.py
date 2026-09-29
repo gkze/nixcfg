@@ -137,6 +137,15 @@ def _load_updater_module() -> ModuleType:
     )
 
 
+def test_bulk_update_hold_skips_pnpm_fod_package_manager_drift() -> None:
+    """0.14.0's packageManager and pnpm FOD diverged; do not bump until they match."""
+    hold = _load_updater_module().ReflectOpenUpdater.bulk_update_hold
+    assert hold is not None
+    assert "0.14.0" in hold
+    assert "11.27.1" in hold
+    assert "11.24.0" in hold
+
+
 def _load_patch_module() -> ModuleType:
     return load_repo_module(
         "packages/reflect-open/patch_nix_managed.py",

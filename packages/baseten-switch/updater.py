@@ -27,6 +27,11 @@ class BasetenSwitchUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
     GITHUB_REPO = "baseten-switch"
     dependency_hash_type = "vendorHash"
     supported_platforms = ("aarch64-darwin", "x86_64-darwin")
+    bulk_update_hold = (
+        "0.6.0's Swift XCTest suite SIGTRAPs on hosted macos-15 after the "
+        "headed layout-guide skip (next: testUnsupportedStatusFallsBackWithoutRepeatedProbe). "
+        "Keep 0.5.1 until those tests run on Argus or another headed Darwin."
+    )
     derivation_validations = (
         DerivationValidation(
             installable=".#pkgs.{system}.{name}",

@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-Jb9Pm8/DjzrV2vkeGAvJXSMLg2B+iCkYV1yep4/luRQ=",
-    "x86_64-darwin": "sha256-Jb9Pm8/DjzrV2vkeGAvJXSMLg2B+iCkYV1yep4/luRQ="
+    "aarch64-darwin": "sha256-PsIoHe6T3cqGHKzhgQGXhZlfnQHbA4I8hyQta2W4bLc=",
+    "x86_64-darwin": "sha256-PsIoHe6T3cqGHKzhgQGXhZlfnQHbA4I8hyQta2W4bLc="
   },
   "urls": {
     "aarch64-darwin": "https://cdn.rogueamoeba.com/airfoil/mac/download/Airfoil.zip",
     "x86_64-darwin": "https://cdn.rogueamoeba.com/airfoil/mac/download/Airfoil.zip"
   },
-  "version": "5.12.8"
+  "version": "5.13.0"
 }

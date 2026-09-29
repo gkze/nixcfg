@@ -120,54 +120,24 @@ in
         size = cfg.historySize;
       };
       completionInit = ''
-        autoload -Uz compinit bashcompinit
-
-        # Content gate: pay the full compinit (security audit + dump rebuild)
-        # only when the completion content itself changed. The fingerprint is
-        # the sorted set of completion files visible in fpath plus fpath and
-        # the zsh version, so store-path changes and added/removed completion
-        # functions each trigger exactly one cold rebuild. No time-based
-        # expiry is involved anywhere.
-        typeset -ga _comp_files=( $fpath/_[^.]*(N-.) )
-        typeset -g _comp_sig="''${(j.,.)_comp_files}|$ZSH_VERSION"
-        typeset -g _comp_saved=""
-        if [[ -s $ZDOTDIR/.zcompdump ]] \
-          && IFS= read -r _comp_saved < "$ZDOTDIR/.zcompdump.fingerprint" \
-          && [[ $_comp_saved == "$_comp_sig" ]]; then
-          compinit -C
-        else
-          compinit
-          print -r -- "$_comp_sig" >| "$ZDOTDIR/.zcompdump.fingerprint"
-        fi
-        unset _comp_files _comp_sig _comp_saved
-        bashcompinit
+        autoload -U compinit bashcompinit
+        compinit && bashcompinit
         compdef _gpg gpg-sq
       '';
-      initContent = lib.mkMerge [
-        (lib.mkOrder 550 ''
-          unalias &>/dev/null run-help && autoload run-help
-          zmodload zsh/complist zsh/zle
-          zstyle ':completion:*' menu select
-          autoload -Uz +X select-word-style
-          select-word-style bash
-          bindkey -M menuselect '^[[Z' reverse-menu-complete
-          bindkey "^R" history-incremental-search-backward
-          typeset -U PATH MANPATH
+      initContent = lib.mkOrder 550 ''
+        unalias &>/dev/null run-help && autoload run-help
+        zmodload zsh/complist zsh/zle
+        zstyle ':completion:*' menu select
+        autoload -Uz +X select-word-style
+        select-word-style bash
+        bindkey -M menuselect '^[[Z' reverse-menu-complete
+        bindkey "^R" history-incremental-search-backward
+        typeset -U PATH MANPATH
 
-          source ${./gpg-tty.zsh}
+        source ${./gpg-tty.zsh}
 
-          ${cfg.extraInitContent}
-        '')
-        (lib.mkOrder 1200 ''
-          # fzf key bindings — replaces HM's integration guard, which also
-          # matched `zsh -i -c` (options[zle] reported on but locked there),
-          # making fzf's option restore spam "can't change option: zle".
-          # ZSH_EXECUTION_STRING is set exactly when zsh runs -c.
-          if [[ -z ''${ZSH_EXECUTION_STRING:-} && -o interactive ]]; then
-            source <(${config.programs.fzf.package}/bin/fzf --zsh)
-          fi
-        '')
-      ];
+        ${cfg.extraInitContent}
+      '';
       plugins = map mkPlugin (
         (with pkgs; [
           {

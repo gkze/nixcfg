@@ -4,14 +4,16 @@ import functools
 import os
 from typing import TYPE_CHECKING
 
+from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.if_expression import IfExpression
 from nix_manipulator.expressions.let import LetExpression
+from nix_manipulator.expressions.operator import Operator
 from nix_manipulator.expressions.parenthesis import Parenthesis
 from nix_manipulator.expressions.path import NixPath
-from nix_manipulator.expressions.primitive import Primitive
+from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
@@ -218,6 +220,20 @@ def nixpkgs_expression() -> NixExpression:
         argument=AttributeSet.from_dict(
             {"system": identifier_attr_path("builtins", "currentSystem")},
         ),
+    )
+
+
+def nixpkgs_lib_expression() -> NixExpression:
+    """Import nixpkgs ``lib`` without instantiating the package set."""
+    source = _nixpkgs_source_expression()
+    lib_path = BinaryExpression(
+        operator=Operator(name="+"),
+        left=source if isinstance(source, NixPath) else Parenthesis(value=source),
+        right=StringPrimitive(value="/lib"),
+    )
+    return FunctionCall(
+        name=Identifier(name="import"),
+        argument=Parenthesis(value=lib_path),
     )
 
 

@@ -138,7 +138,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.79.0";
+      url = "github:max-sixty/worktrunk/v0.80.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -146,7 +146,7 @@
       flake = false;
     };
     anthropic-cli = {
-      url = "github:anthropics/anthropic-cli/v1.35.0";
+      url = "github:anthropics/anthropic-cli/v1.36.0";
       flake = false;
     };
     base16-schemes-src = {
@@ -157,6 +157,11 @@
     catppuccin = {
       url = "github:catppuccin/nix";
       inputs.nixpkgs.follows = "nixpkgs";
+    };
+    catppuccin-starship-src = {
+      # Match catppuccin/nix's Starship port without realizing its derivation at eval time.
+      url = "github:catppuccin/starship/5906cc369dd8207e063c0e6e2d27bd0c0b567cb8";
+      flake = false;
     };
     catppuccin-element-src = {
       # Match catppuccin/nix's Element port without realizing its derivation at eval time.
@@ -186,7 +191,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.157.1";
+      url = "github:openai/codex/rust-v0.159.0";
       flake = false;
     };
     curator = {
@@ -201,11 +206,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.41.0";
+      url = "github:steipete/gogcli/v0.42.0";
       flake = false;
     };
     openai-cli = {
-      url = "github:openai/openai-cli/v1.16.3";
+      url = "github:openai/openai-cli/v1.29.2";
       flake = false;
     };
     github-desktop = {
@@ -868,10 +873,6 @@
                 src = ./.;
               };
 
-            "test-nix-build-rust-crate-unique" = mkEvalOnlyCheck "test-nix-build-rust-crate-unique" (
-              { pkgs, ... }: import ./tests/nix/build-rust-crate-unique.nix { inherit pkgs; }
-            );
-
             "test-nix-crate-cache-boundaries" = mkEvalOnlyCheck "test-nix-crate-cache-boundaries" (
               { pkgs, ... }:
               import ./tests/nix/crate-cache-boundaries.nix {
@@ -921,19 +922,12 @@
               _: import ./tests/nix/gpg-session { inherit self; }
             );
 
-            # Standalone Home Manager gates every attribute, including
-            # `options`, behind all assertions, which evaluates the complete
-            # home closure. The hosts' embedded user configs render the same
-            # files from the same user module without forcing packages.
             "test-nix-nvim-keymaps" = mkEvalOnlyCheck "test-nix-nvim-keymaps" (
               _:
-              builtins.all (
-                host:
-                import ./tests/nix/nvim-keymaps.nix {
-                  config = self.darwinConfigurations.${host}.config.home-manager.users.george;
-                  src = ./.;
-                }
-              ) (builtins.attrNames self.darwinConfigurations)
+              import ./tests/nix/nvim-keymaps.nix {
+                config = self.homeConfigurations.george.config;
+                src = ./.;
+              }
             );
 
             "test-nix-opencode-desktop" = mkEvalOnlyCheck "test-nix-opencode-desktop" (
@@ -1052,13 +1046,6 @@
             "test-zsh-gpg-tty" =
               { pkgs, ... }:
               import ./tests/nix/zsh-gpg-tty {
-                inherit pkgs;
-                src = ./.;
-              };
-
-            "test-zsh-completion-gate" =
-              { pkgs, ... }:
-              import ./tests/nix/zsh-completion-gate {
                 inherit pkgs;
                 src = ./.;
               };

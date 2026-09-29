@@ -473,7 +473,7 @@ def _processes() -> dict[int, Process]:
         try:
             pid = int(fields[0])
             session_id = os.getsid(pid)
-        except ProcessLookupError, ValueError:
+        except (ProcessLookupError, ValueError):
             continue
         rows.append(f"{fields[0]} {fields[1]} {fields[2]} {session_id} {fields[3]}")
     return parse_process_snapshot("\n".join(rows))
@@ -516,7 +516,7 @@ def request_candidate_health(port: int) -> object | None:
         connection.request("GET", HEALTH_PATH, headers={"Connection": "close"})
         response = connection.getresponse()
         payload = response.read()
-    except OSError, http.client.HTTPException:
+    except (OSError, http.client.HTTPException):
         return None
     finally:
         connection.close()
@@ -524,7 +524,7 @@ def request_candidate_health(port: int) -> object | None:
         return None
     try:
         return json.loads(payload)
-    except UnicodeDecodeError, json.JSONDecodeError:
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return None
 
 
