@@ -965,14 +965,16 @@ def test_publication_from_a_feature_branch_still_targets_default_branch(
     assert ("gh", "pr", "merge", branch, "--auto", "--squash") in calls
 
 
-def test_publish_accepts_an_already_mergeable_pull_request(
+def test_publish_merges_immediately_when_the_pull_request_is_already_clean(
     job_repository, monkeypatch
 ) -> None:
-    """Auto-merge cannot queue when the base has no pending required checks."""
+    """A clean certified PR must merge now; --auto cannot queue without checks."""
+    calls: list[tuple[str, ...]] = []
 
     def run(*args, capture=False, check=True):
+        calls.append(args)
         stdout = "certified-tree\n" if args[:2] == ("git", "write-tree") else ""
-        if args[:3] == ("gh", "pr", "merge"):
+        if args[:3] == ("gh", "pr", "merge") and "--auto" in args:
             return subprocess.CompletedProcess(
                 args,
                 1,
@@ -984,6 +986,10 @@ def test_publish_accepts_an_already_mergeable_pull_request(
 
     monkeypatch.setattr(jobs, "_run", run)
     assert jobs.main("publish") == 0
+    merges = [args for args in calls if args[:3] == ("gh", "pr", "merge")]
+    assert len(merges) == 2
+    assert merges[0][4:6] == ("--auto", "--squash")
+    assert merges[1][4:] == ("--squash",)
 
 
 def test_publish_raises_other_auto_merge_failures(job_repository, monkeypatch) -> None:
@@ -1244,7 +1250,7 @@ def test_hosted_darwin_store_gc_is_gated_to_disposable_runners(
     )
     assert jobs.main("reclaim-store") == 0
     assert calls == ([("nix", "store", "gc")] if runs else [])
-    assert jobs.hosted_darwin_skips_root_closures() is runs
+    assert jobs.is_hosted_darwin_runner() is runs
 
 
 def test_hosted_update_runtime_reserves_store_headroom_for_root_closures() -> None:

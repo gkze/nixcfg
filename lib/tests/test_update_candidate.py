@@ -177,13 +177,6 @@ def prepared_run(
     return root, operations, state
 
 
-def _run_root_closures(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Exercise the Linux/local root-closure path even on hosted Darwin quality."""
-    monkeypatch.setattr(
-        pipeline.jobs, "hosted_darwin_skips_root_closures", lambda: False
-    )
-
-
 @pytest.mark.parametrize("darwin_only", [False, True])
 def test_native_stages_pin_versions_preserve_hashes_and_never_promote(
     prepared_run,
@@ -389,14 +382,14 @@ def test_native_validation_and_certification(
         )
         return ()
 
-    def validate_roots(*, systems, include_dependencies, **_kwargs):
+    def validate_roots(*, systems, include_dependencies, print_build_logs, **_kwargs):
         assert include_dependencies
+        assert print_build_logs is True
         order.append("roots")
         roots.append(systems)
         return ()
 
     order: list[str] = []
-    _run_root_closures(monkeypatch)
     monkeypatch.setattr(
         pipeline.jobs, "reclaim_hosted_store", lambda: order.append("reclaim")
     )
@@ -615,7 +608,6 @@ def test_hosted_validation_streams_nix_logs_to_stderr(
         )
         return ()
 
-    _run_root_closures(monkeypatch)
     monkeypatch.setattr(
         pipeline.validation, "validate_derivations", validate_derivations
     )
@@ -662,7 +654,6 @@ def test_noop_candidate_still_validates_repaired_baseline_roots(
         patch=b"",
     )
     checked = []
-    _run_root_closures(monkeypatch)
     monkeypatch.setattr(
         pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
     )
@@ -674,6 +665,38 @@ def test_noop_candidate_still_validates_repaired_baseline_roots(
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
     assert pipeline.validate_candidate(candidate).failures == ()
     assert checked == [(state["system"],)]
+
+
+def test_hosted_darwin_builds_root_closures_without_derivation_logs(
+    prepared_run, monkeypatch
+) -> None:
+    """The Mac runner must realize the closure; -L logs previously killed the job."""
+    root, _, _state = prepared_run
+    tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
+    candidate = Candidate(
+        base_tree=tree,
+        tree=tree,
+        targets=(),
+        sources=(),
+        systems=pipeline.supported_systems(),
+        resolutions={},
+        prepared=True,
+        patch=b"",
+    )
+    seen: list[bool] = []
+    monkeypatch.setattr(pipeline.jobs, "is_hosted_darwin_runner", lambda: True)
+    monkeypatch.setattr(pipeline.jobs, "reclaim_hosted_store", lambda: None)
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+
+    def roots(**kwargs):
+        seen.append(kwargs["print_build_logs"])
+        return ()
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
+    assert pipeline.validate_candidate(candidate).failures == ()
+    assert seen == [False]
 
 
 @pytest.mark.parametrize(
@@ -756,7 +779,6 @@ def test_incomplete_native_validation_cannot_issue_report(
             sleep=lambda _: pytest.fail("incomplete execution must not retry"),
         )
 
-    _run_root_closures(monkeypatch)
     monkeypatch.setattr(
         pipeline.validation,
         "validate_derivations",

@@ -105,12 +105,12 @@ goose bump rebuilds `goose-cli-v8-native` from source on hosted macos-15
 Use `nixcfg update goose-cli` to retry explicitly; remove the holds once that
 derivation is in the `gkze` cache.
 
-Hosted Darwin validation then GCs the Nix store and skips native
-`root-closures`. That check is 4000+ derivations and ~60 GiB; hosted macos-15
-dies mid-build even after image cleanup (~160 GB free) and store GC. Linux
-validate already owns eval and identity of `checks.aarch64-darwin.root-closures`.
-Hosted Darwin still validates native package derivations. `min-free` /
-`max-free` stay at 32 / 64 GiB.
+Hosted Darwin validation GCs the Nix store, then builds native
+`root-closures`. That check is 4000+ derivations and ~60 GiB. Per-derivation
+`-L` logs killed the macos-15 job after image cleanup (~160 GB free) and store
+GC, so that build omits `-L`. The Cachix daemon still uploads each realized
+path, and command progress stays on the job log. `min-free` / `max-free` stay
+at 32 / 64 GiB.
 
 Each update invocation owns its concurrency limits, shared work, and timings.
 There are no process-global build semaphores tied to a previous event loop.
