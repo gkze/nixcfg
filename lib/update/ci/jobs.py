@@ -158,11 +158,6 @@ def is_hosted_darwin_runner() -> bool:
     )
 
 
-def hosted_darwin_skips_root_closures() -> bool:
-    """Hosted macos-15 cannot realize checks.aarch64-darwin.root-closures."""
-    return is_hosted_darwin_runner()
-
-
 def reclaim_hosted_store() -> None:
     """Reclaim unused store paths on hosted Darwin before root-closure fetches."""
     if not is_hosted_darwin_runner():
@@ -509,10 +504,11 @@ def _commit_and_push(
 
 
 def _queue_squash_auto_merge(branch: str) -> None:
-    """Queue squash auto-merge, or accept a PR that is already mergeable.
+    """Queue squash auto-merge, or squash-merge a PR that is already clean.
 
     GitHub rejects ``enablePullRequestAutoMerge`` with "clean status" when the
-    base has no pending required checks. The PR is already mergeable then.
+    base has no pending required checks. The certified tree is already good
+    then, so merge it now instead of leaving the PR open.
     """
     result = _run(
         "gh",
@@ -526,18 +522,18 @@ def _queue_squash_auto_merge(branch: str) -> None:
     )
     if result.returncode == 0:
         return
-    if "clean status" in f"{result.stdout}{result.stderr}":
-        return
-    raise subprocess.CalledProcessError(
-        result.returncode,
-        result.args,
-        output=result.stdout,
-        stderr=result.stderr,
-    )
+    if "clean status" not in f"{result.stdout}{result.stderr}":
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            result.args,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+    _run("gh", "pr", "merge", branch, "--squash")
 
 
 def publish() -> None:
-    """Open the verified update as a PR against the default branch and queue squash auto-merge.
+    """Open the verified update as a PR against the default branch and squash-merge it.
 
     The product PR always targets the repository default branch, including when
     Update was exercised from a feature or repair ref. That keeps validated

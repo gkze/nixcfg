@@ -34,10 +34,10 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    gates, and check that validation did not alter the candidate. Only then create
    the signed update commit and PR. Publication always opens that PR against the
    default branch from `origin/<default>` with the certified tree as one commit,
-   then queues squash auto-merge, including when Update was dispatched from a
-   feature or repair ref. Exercise runs therefore never merge into the branch
-   under review. Queuing auto-merge requires a ruleset or classic protection
-   rule on the default branch; `allow_auto_merge` alone is not enough.
+   then squash-merges that PR. `--auto` queues the merge when required checks
+   are still pending. When GitHub reports the PR is already clean, publish
+   squash-merges it immediately. That includes runs dispatched from a feature or
+   repair ref. Exercise runs therefore never merge into the branch under review.
 
 The system inventory comes from `lib/system-policy.json`. `nixcfg ci update matrix`
 projects it to hosted runner labels. A conformance test keeps preparation and
@@ -103,12 +103,11 @@ fail the job. Unused Xcode and simulator trees still fail closed.
 Android, .NET and unused Linux compiler libraries are removed
 where present. The step refuses local or self-hosted execution and logs available
 space before and after cleanup. This matters because the measured Darwin root
-closure alone occupies about 73.5 GB. Hosted Darwin therefore skips native
-`root-closures` after package validation; Linux validate already owns that
-check. Publish quality also runs on macos-15, so tests that require
-root-closures must disable that skip, and CLI help assertions must survive
-Rich's hosted TTY geometry. Runner capacity remains an acceptance check for
-local Darwin.
+closure alone occupies about 73.5 GB. Hosted Darwin GCs the store after
+package validation, then builds native `root-closures` without per-derivation
+`-L` logs. The Cachix daemon uploads each realized path. Publish quality also
+runs on macos-15, and CLI help assertions must survive Rich's hosted TTY
+geometry. Runner capacity remains an acceptance check for local Darwin.
 
 Repository secrets used by the workflow:
 
