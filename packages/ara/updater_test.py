@@ -55,7 +55,7 @@ def bundle_info(tmp_path: Path) -> Path:
     info.write_bytes(
         plistlib.dumps({
             "CFBundleIdentifier": "so.ara.desktop",
-            "CFBundleExecutable": "Reason",
+            "CFBundleExecutable": "Ara",
             "CFBundleShortVersionString": "0.1.57",
         })
     )

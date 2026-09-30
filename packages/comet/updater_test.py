@@ -224,3 +224,12 @@ def test_comet_rechecks_same_version_download_hashes() -> None:
     module = _load_module()
 
     assert module.CometUpdater.materialize_when_current is True
+
+
+def test_bulk_update_hold_skips_hosted_linux_arm_r2_prefetch() -> None:
+    """Linux ARM prefetch of the R2 DMG stalls; do not rematerialize until that works."""
+    module = _load_module()
+    hold = module.CometUpdater.bulk_update_hold
+    assert hold is not None
+    assert "ubuntu-24.04-arm" in hold
+    assert "2400s" in hold

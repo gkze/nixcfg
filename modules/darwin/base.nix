@@ -130,11 +130,7 @@ in
       defaults = {
         NSGlobalDomain = {
           AppleEnableSwipeNavigateWithScrolls = true;
-          # Pin dark mode. SwitchesAutomatically must stay explicitly false:
-          # nix-darwin writes defaults but never deletes keys, so hosts that
-          # previously had `true` would keep auto-switching without this.
-          AppleInterfaceStyle = "Dark";
-          AppleInterfaceStyleSwitchesAutomatically = false;
+          AppleInterfaceStyleSwitchesAutomatically = true;
           "com.apple.mouse.tapBehavior" = 1;
           "com.apple.sound.beep.feedback" = 0;
           "com.apple.trackpad.enableSecondaryClick" = true;
@@ -187,12 +183,7 @@ in
 
     security.pam.services.sudo_local.touchIdAuth = cfg.security.touchIdSudo;
 
-    programs.zsh = {
-      # Starship (home-manager) owns the prompt; skip nix-darwin's default
-      # `promptinit` + `prompt suse` shell init (~12ms per interactive shell).
-      promptInit = lib.mkDefault "";
-    }
-    // lib.optionalAttrs cfg.zsh.deferCompletionInitToHomeManager {
+    programs.zsh = lib.mkIf cfg.zsh.deferCompletionInitToHomeManager {
       enableGlobalCompInit = false;
       enableBashCompletion = false;
     };

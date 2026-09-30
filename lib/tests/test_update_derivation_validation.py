@@ -542,6 +542,9 @@ def test_native_validator_builds_the_foreign_root_dependency_boundary(
         "show",
         "--recursive",
         "--no-update-lock-file",
+        "--option",
+        "allow-import-from-derivation",
+        "false",
         f"path:{tmp_path}#checks.aarch64-darwin.root-closures",
     ]
     builds = [args[-1] for args in calls if args[1] == "build"]
@@ -618,6 +621,7 @@ def test_native_dependency_failure_never_issues_success(
         assert failures[0].installable == "/nix/store/vm.drv^*"
         assert failures[0].message == "VM build failed"
     else:
+        assert failures[0].installable == "path:.#checks.aarch64-darwin.root-closures"
         assert not any(args[1] == "build" for args in calls)
 
 

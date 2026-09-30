@@ -12,6 +12,9 @@
   sysctl,
   version,
 }:
+let
+  cliPackage = if lib.versionAtLeast version "2.0.0" then "cli" else "opencode";
+in
 stdenvNoCC.mkDerivation {
   pname = "openchamber-opencode";
   inherit src version;
@@ -62,7 +65,7 @@ stdenvNoCC.mkDerivation {
     export HOME="$buildTmp/home"
     mkdir -p "$TMPDIR" "$HOME"
 
-    cd packages/opencode
+    cd packages/${cliPackage}
     bun --bun ./script/build.ts --single --skip-install
 
     runHook postBuild
@@ -71,7 +74,7 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     runHook preInstall
 
-    install -Dm755 dist/opencode-*/bin/opencode "$out/bin/opencode"
+    install -Dm755 dist/${cliPackage}-*/bin/opencode "$out/bin/opencode"
     wrapProgram "$out/bin/opencode" \
       --set OPENCODE_DISABLE_AUTOUPDATE true \
       --set OPENCODE_NIX_MANAGED 1 \

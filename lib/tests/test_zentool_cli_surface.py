@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from lib.tests._cli_text import visible_cli_text
 from lib.tests._zen_tooling import load_zentool_module
 
 if TYPE_CHECKING:
@@ -377,7 +378,7 @@ def test_main_handles_help_errors_and_interrupts(
     stderr_lines: list[str] = []
 
     assert zentool.main([]) == 0
-    assert "usage: zentool" in capsys.readouterr().out.lower()
+    assert "usage: zentool" in visible_cli_text(capsys.readouterr().out).lower()
 
     monkeypatch.setattr(
         zentool,

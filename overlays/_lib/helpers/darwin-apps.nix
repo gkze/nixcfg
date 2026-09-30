@@ -58,16 +58,6 @@ let
 
   guardedBinLink = import ./guarded-bin-link.nix;
 
-  # Upstream archives can ship entries with read-only modes, and macOS 27
-  # attaches system provenance xattrs to some payload files (e.g. MCP
-  # configs) at extraction time. Removing an xattr requires write access to
-  # the file, so restore owner-write before clearing; otherwise the clear
-  # aborts mid-walk and leaves quarantine bits behind.
-  clearXattrs = appPath: ''
-    chmod -R u+w "${appPath}"
-    ${prev.darwin.xattr}/bin/xattr -cr "${appPath}"
-  '';
-
   # Shared derivation assembly for every mk*App builder below. Each builder is
   # a thin wrapper that resolves its naming defaults and supplies an `unpack`
   # strategy: the unpack tooling, any strategy-specific derivation attributes
@@ -228,7 +218,7 @@ in
           mkdir -p "$out/Applications"
           ${prev.lib.optionalString makeBinary ''mkdir -p "$out/bin"''}
           cp -R . "$out/Applications/${resolvedBundleName}"
-          ${clearXattrs "$out/Applications/${resolvedBundleName}"}
+          ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${resolvedBundleName}"
           ${postInstallApp}
           ${prev.lib.optionalString codesignApp ''
             /usr/bin/codesign --force --deep --sign - "$out/Applications/${resolvedBundleName}"
@@ -316,7 +306,7 @@ in
           fi
 
           cp -R "$app_bundle" "$out/Applications/${bundleName}"
-          ${clearXattrs "$out/Applications/${bundleName}"}
+          ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${bundleName}"
           ${postInstallApp}
           ${prev.lib.optionalString createBin (guardedBinLink {
             inherit bundleName;
@@ -429,7 +419,7 @@ in
             fi
 
             cp -R "$dmg_dir/${resolvedBundleName}" "$out/Applications/${resolvedBundleName}"
-            ${clearXattrs "$out/Applications/${resolvedBundleName}"}
+            ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${resolvedBundleName}"
             ${postInstallApp}
             ${prev.lib.optionalString codesignApp ''
               /usr/bin/codesign --force --deep --sign - "$out/Applications/${resolvedBundleName}"
@@ -513,7 +503,7 @@ in
           fi
 
           cp -R "$app_bundle" "$out/Applications/${resolvedBundleName}"
-          ${clearXattrs "$out/Applications/${resolvedBundleName}"}
+          ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${resolvedBundleName}"
           ${postInstallApp}
           ${prev.lib.optionalString makeBinary (guardedBinLink {
             bundleName = resolvedBundleName;
@@ -554,11 +544,6 @@ in
           if sourcePayloadPath == null then
             ''
               payload_path="$(find "$pkg_dir" -maxdepth 4 -type d -path "*/Payload/Contents" -print -quit)"
-              if [ -z "''${payload_path:-}" ]; then
-                # Some vendors ship the full app bundle in the payload
-                # (Payload/<App>.app/Contents) instead of a bare Contents.
-                payload_path="$(find "$pkg_dir" -maxdepth 4 -type d -path "*/Payload/*.app/Contents" -print -quit)"
-              fi
             ''
           else
             ''
@@ -623,7 +608,7 @@ in
           fi
 
           ${copyPayload}
-          ${clearXattrs "$out/Applications/${bundleName}"}
+          ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${bundleName}"
           ${postInstallApp}
           ${prev.lib.optionalString createBin (guardedBinLink {
             inherit bundleName binaryName;
@@ -676,7 +661,7 @@ in
           fi
 
           cp -R "$app_bundle" "$out/Applications/${bundleName}"
-          ${clearXattrs "$out/Applications/${bundleName}"}
+          ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${bundleName}"
           ${postInstallApp}
           ${prev.lib.optionalString createBin (guardedBinLink {
             inherit bundleName;

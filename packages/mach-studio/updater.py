@@ -14,6 +14,11 @@ class MachStudioUpdater(ElectronBuilderAssetURLsUpdater):
     """Track Mach Studio's signed arm64 DMG from its electron-builder feed."""
 
     name = "mach-studio"
+    bulk_update_hold = (
+        "0.1.172's ASAR local-engine provisioning anchors match no audited "
+        "generation (found 0 on Update 36562737373). Keep the current pin "
+        "until a new generation is reviewed from that DMG."
+    )
     FEED_URL: ClassVar[str] = (
         "https://api.maniac.ai/storage/v1/object/public/"
         "desktop-releases/stable/mac-arm64/latest-mac.yml"

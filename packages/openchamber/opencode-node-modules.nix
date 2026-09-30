@@ -12,6 +12,7 @@ let
   platform = stdenvNoCC.hostPlatform;
   bunCpu = if platform.isAarch64 then "arm64" else "x64";
   bunOs = if platform.isLinux then "linux" else "darwin";
+  cliPackage = if lib.versionAtLeast version "2.0.0" then "cli" else "opencode";
 in
 stdenvNoCC.mkDerivation {
   pname = "openchamber-opencode-node-modules";
@@ -32,7 +33,7 @@ stdenvNoCC.mkDerivation {
       --cpu=${lib.escapeShellArg bunCpu} \
       --os=${lib.escapeShellArg bunOs} \
       --filter '!./' \
-      --filter './packages/opencode' \
+      --filter './packages/${cliPackage}' \
       --filter './packages/desktop' \
       --filter './packages/app' \
       --frozen-lockfile \

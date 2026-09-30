@@ -4,6 +4,8 @@ The `Update` workflow uses disposable GitHub-hosted builders. It runs weekly on
 Monday at 07:17 UTC and supports manual target selection. An empty selection uses
 the CLI's eligible inventory, including bulk holds. Successful changes become a
 signed commit and a pull request; the workflow does not apply a system configuration.
+Concurrency is per Git ref. Default-branch runs stay queued; feature-branch
+exercise runs cancel an older in-progress run so a newer HEAD can start.
 
 ## Execution and ownership
 
@@ -11,23 +13,31 @@ signed commit and a pull request; the workflow does not apply a system configura
    one candidate, retaining previously selected release metadata and native hashes.
    Preparation is sequential because updaters can share generated files. Dependent
    updaters recompute metadata from their pinned prerequisites.
-1. Validate the final identical tree on all three native builders. The two Linux
+2. Validate the final identical tree on all three native builders. The two Linux
    validators run in parallel and finish their Cachix uploads before Darwin starts.
    Each builder evaluates every declared package platform, builds native package
    validations, and builds its roots from the independently checked root manifest.
    Nix's recursive derivation graph supplies native dependencies of foreign roots,
    including the Linux Rosetta builder image embedded in the Darwin configurations.
    These exact outputs are built natively and handed off through the binary cache;
-   no VM configuration or dependency list is duplicated in CI.
+   no VM configuration or dependency list is duplicated in CI. That graph is
+   evaluated with import-from-derivation disabled: a Linux runner cannot realize a
+   Darwin derivation during evaluation, so Darwin roots must read theme files and
+   other evaluation inputs from flake inputs rather than from built port outputs.
    Hosted ARM runners do not expose KVM. The builder-image overlay permits Nix's
    existing QEMU TCG fallback by removing the image builder's KVM scheduling
    requirement. The full image, bootloader installation and guest configuration
    remain required; this does not advertise nonexistent runner hardware or disable
    the configured builder VM.
-1. Certify that every required platform reported success for that exact Git tree.
+3. Certify that every required platform reported success for that exact Git tree.
    Apply the certified patch, run repository hooks and the full Python/coverage
    gates, and check that validation did not alter the candidate. Only then create
-   the signed update commit and PR.
+   the signed update commit and PR. Publication always opens that PR against the
+   default branch from `origin/<default>` with the certified tree as one commit,
+   then queues squash auto-merge, including when Update was dispatched from a
+   feature or repair ref. Exercise runs therefore never merge into the branch
+   under review. Queuing auto-merge requires a ruleset or classic protection
+   rule on the default branch; `allow_auto_merge` alone is not enough.
 
 The system inventory comes from `lib/system-policy.json`. `nixcfg ci update matrix`
 projects it to hosted runner labels. A conformance test keeps preparation and
@@ -84,17 +94,30 @@ Candidate changes do not silently change the code executing the job.
 Before installing Nix, a Python step reclaims unused preinstalled image tools.
 The job launcher uses Python 3.12 syntax and standard-library imports so it can
 run with the hosted image's interpreter before the Python 3.14 runtime exists.
-On macOS it retains the selected Xcode and removes other Xcodes.
+On macOS it retains the selected Xcode and removes other Xcodes, the
+Android SDK, unused iOS simulators, Xcode device-support caches, the
+hosted tool cache, and `~/Library/Caches`.
+Those last cache trees are deleted best-effort: hosted macOS can rewrite
+`~/Library/Caches` during `rmtree` and fail with `ENOTEMPTY`; that must not
+fail the job. Unused Xcode and simulator trees still fail closed.
 Android, .NET and unused Linux compiler libraries are removed
 where present. The step refuses local or self-hosted execution and logs available
 space before and after cleanup. This matters because the measured Darwin root
-closure alone occupies about 73.5 GB; runner capacity remains an acceptance check.
+closure alone occupies about 73.5 GB. Hosted Darwin therefore skips native
+`root-closures` after package validation; Linux validate already owns that
+check. Publish quality also runs on macos-15, so tests that require
+root-closures must disable that skip, and CLI help assertions must survive
+Rich's hosted TTY geometry. Runner capacity remains an acceptance check for
+local Darwin.
 
 Repository secrets used by the workflow:
 
 - `UPDATE_SELF_HEAL_GITHUB_TOKEN`: public upstream API access for Nix and updaters.
 - `CACHIX_AUTH_TOKEN`: populate the existing `gkze` binary cache; `zed` is also read.
-- `GH_TOKEN_FOR_UPDATES`: push the update branch and open its PR.
+- Job `GITHUB_TOKEN` on `publish` (`contents: write`, `pull-requests: write`):
+  push the update branch and open the PR. `start-repair` also needs
+  `actions: write` so `gh workflow run` can create the follow-up dispatch.
+  `GH_TOKEN_FOR_UPDATES` is unused until it can authenticate `git push`.
 - `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`: sign the update commit.
 
 The repair agent uses the short-lived Actions `GITHUB_TOKEN` with job-scoped
@@ -114,9 +137,11 @@ runner capacity; tests of workflow wiring do not establish either.
 
 Each native job uploads its candidate or validation report, structured result and
 stderr diagnostics, including on failure. Preparation streams phase and target
-progress to stderr while keeping stdout as one machine-readable JSON result. It
-also retains the updater's redacted run logs under `runs/` for detailed source
-errors. Artifacts expire after 30 days. An
+progress to stderr while keeping stdout as one machine-readable JSON result.
+Validation streams Nix command and build lines (`nix build -L`) to the live job
+log as they arrive. The job wrapper also tails redacted `runs/*/output.log`
+files into that same log and only emits a liveness heartbeat when both the child
+and those run logs are quiet. Artifacts expire after 30 days. An
 interrupted job may need to repeat work; completed upstream artifacts can be reused
 by Actions reruns. A failed preparation cannot advance to another platform, and a
 missing or mismatched validation report cannot authorize publication.
@@ -151,9 +176,12 @@ substituted for the existing command deadline.
 
 By default, a failed run collects job logs and artifacts for one Copilot CLI repair
 attempt. The agent works in an isolated checkout and may change packaging under
-`packages/` and `overlays/`, plus `flake.nix` and `flake.lock`. Changes outside that
-scope are rejected. The agent receives no publication credentials. Repository hooks
-and Python/coverage gates must pass before the repair is committed to a separate
+`packages/` and `overlays/`, plus `flake.nix`, `flake.lock`, and planner/selection
+coherence in `lib/update/planner.py` (with `lib/tests/test_update_planner.py`).
+Changes outside that scope are rejected, including CI, acceptance gates, and
+persistence. The agent receives no publication credentials. Repair runs on
+the Darwin runner, where repository hooks and the Python/coverage gates are
+maintained; they must pass before the repair is committed to a separate
 branch. A fresh Update run then prepares and validates it on every native builder.
 That run has repair disabled, so failures cannot create an unbounded retry loop.
 It explicitly sets `validate_all_packages=true`: every registered updater's
@@ -171,10 +199,17 @@ validation by default. Manual repaired candidates must opt in with the workflow'
 `validate_all_packages` input or `ci update prepare --validate-all-packages`.
 Only successful native validation permits a PR against the default branch.
 
-Set the manual workflow's `repair` input to false to retain failure evidence without
-invoking an agent. Agent output is a proposal, never validation evidence. CI does
-not reuse a DBOS history after changing code. This repair scope intentionally leaves
-framework defects and unavailable credentials for a maintainer to resolve.
+`gh workflow run` does not apply YAML boolean defaults, so a manual dispatch
+must pass `-f repair=true` when repair should run. The job condition accepts
+only an explicit true, matching that CLI behavior. Push events that touch
+`.github/update-kick` on `copilot/gkzenixcfg-update-automation` also enable
+repair; that path exists because some tokens cannot create `workflow_dispatch`
+events. Set `repair=false` to retain
+failure evidence without invoking an agent. Agent output is a proposal, never validation evidence. CI does
+not reuse a DBOS history after changing code. This repair scope includes planner
+and target-selection defects that leave packaging and flake pins incoherent.
+It still leaves acceptance-gate, CI, persistence, and credential failures for a
+maintainer to resolve.
 
 Commands can be exercised outside Actions, with artifacts outside the repository:
 

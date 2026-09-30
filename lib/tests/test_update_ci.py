@@ -5,6 +5,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 from io import StringIO
 from itertools import pairwise
 from pathlib import Path
@@ -60,8 +62,22 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "    Path(os.environ['UPDATE_PREFETCH_RECEIPTS']).write_text(receipts)\n"
         "print(json.dumps({'success': int(os.environ.get('TEST_EXIT', '0')) == 0}))\n"
         "print('diagnostic evidence', file=sys.stderr)\n"
-        "if seconds := os.environ.get('TEST_QUIET_SLEEP_SECONDS'):\n"
-        "    time.sleep(float(seconds))\n"
+        "if stop := os.environ.get('TEST_STOP_FILE'):\n"
+        "    end = time.time() + float(os.environ.get('TEST_STOP_TIMEOUT_SECONDS', '5'))\n"
+        "    while not Path(stop).exists() and time.time() < end:\n"
+        "        time.sleep(0.01)\n"
+        "elif seconds := os.environ.get('TEST_QUIET_SLEEP_SECONDS'):\n"
+        "    logs = Path(os.environ.get('UPDATE_RUN_LOG_DIR', '')) / 'test-run'\n"
+        "    output = logs / 'output.log'\n"
+        "    end = time.time() + float(seconds)\n"
+        "    n = 0\n"
+        "    while time.time() < end:\n"
+        "        if os.environ.get('TEST_APPEND_RUN_LOG') == '1':\n"
+        "            logs.mkdir(parents=True, exist_ok=True)\n"
+        "            with output.open('a') as fh:\n"
+        "                fh.write(f'live build line {n}\\n')\n"
+        "            n += 1\n"
+        "        time.sleep(0.01)\n"
         "sys.exit(int(os.environ.get('TEST_EXIT', '0')))\n"
     )
     boundary.chmod(0o755)
@@ -80,6 +96,20 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "NIXCFG_CI_STAGE": "prepare",
     }
     return env, checkout
+
+
+def _wait_for_log_text(path: Path, needle: str, *, timeout: float = 5.0) -> str:
+    """Block until *path* contains *needle*, or raise with the observed text."""
+    deadline = time.monotonic() + timeout
+    text = ""
+    while time.monotonic() < deadline:
+        if path.is_file():
+            text = path.read_text()
+            if needle in text:
+                return text
+        time.sleep(0.01)
+    message = f"did not observe {needle!r} in {path}: {text!r}"
+    raise AssertionError(message)
 
 
 def invoke(env: dict[str, str], checkout: Path) -> subprocess.CompletedProcess[str]:
@@ -127,6 +157,8 @@ def test_native_job_keeps_evidence_and_propagates_failure(
     assert "Starting updater stage=" + stage in stderr_log
     assert "diagnostic evidence\n" in stderr_log
     assert "diagnostic evidence\n" in result.stderr
+    assert "source failure detail\n" in stderr_log
+    assert "source failure detail\n" in result.stderr
     assert (artifacts / "runs/test-run/output.log").read_text() == (
         "source failure detail\n"
     )
@@ -163,18 +195,59 @@ def test_native_job_heartbeats_while_the_updater_is_quiet(
     native_job, monkeypatch, capsys
 ) -> None:
     env, checkout = native_job
+    # Wait for the fallback heartbeat itself. A fixed quiet sleep races the
+    # first output.log drain on a loaded Darwin quality runner.
+    monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.05)
+    monkeypatch.chdir(checkout)
+    stop = Path(env["RUNNER_TEMP"]) / "stop-updater"
+    for key, value in (env | {"TEST_STOP_FILE": str(stop)}).items():
+        monkeypatch.setenv(key, value)
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    stderr_log = artifacts / "stderr.log"
+    result: list[int] = []
+
+    def run_native() -> None:
+        result.append(jobs.native("prepare"))
+
+    worker = threading.Thread(target=run_native, name="native-quiet-heartbeat")
+    worker.start()
+    try:
+        _wait_for_log_text(stderr_log, "Updater still running stage=prepare pid=")
+    finally:
+        stop.touch()
+        worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert result == [0]
+    captured = capsys.readouterr()
+    log_text = stderr_log.read_text()
+    assert "Starting updater stage=prepare pid=" in captured.err
+    assert "source failure detail\n" in captured.err
+    assert "Updater still running stage=prepare pid=" in captured.err
+    assert "Updater still running stage=prepare pid=" in log_text
+    assert json.loads((artifacts / "result.json").read_bytes()) == {"success": True}
+
+
+def test_native_job_forwards_run_logs_instead_of_quiet_heartbeats(
+    native_job, monkeypatch, capsys
+) -> None:
+    """Growing output.log is the live job log; a meta heartbeat is only a fallback."""
+    env, checkout = native_job
     monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.01)
     monkeypatch.chdir(checkout)
-    for key, value in (env | {"TEST_QUIET_SLEEP_SECONDS": "0.05"}).items():
+    for key, value in (
+        env
+        | {
+            "TEST_QUIET_SLEEP_SECONDS": "0.08",
+            "TEST_APPEND_RUN_LOG": "1",
+        }
+    ).items():
         monkeypatch.setenv(key, value)
     assert jobs.native("prepare") == 0
     captured = capsys.readouterr()
     artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
     stderr_log = (artifacts / "stderr.log").read_text()
-    assert "Starting updater stage=prepare pid=" in captured.err
-    assert "Updater still running stage=prepare pid=" in captured.err
-    assert "Updater still running stage=prepare pid=" in stderr_log
-    assert json.loads((artifacts / "result.json").read_bytes()) == {"success": True}
+    assert "live build line 0\n" in captured.err
+    assert "live build line 0\n" in stderr_log
 
 
 def test_native_job_heartbeats_while_publishing_prefetched_paths(
@@ -218,6 +291,44 @@ def test_failure_summary_tolerates_missing_or_incomplete_result(
     assert jobs._failure_summary(result) is None
 
 
+def test_wait_for_diagnostics_prefers_run_logs_to_heartbeat(
+    tmp_path, monkeypatch
+) -> None:
+    """A growing output.log is forwarded instead of the meta liveness line."""
+    monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.1)
+    output = tmp_path / "runs" / "test-run" / "output.log"
+    output.parent.mkdir(parents=True)
+    output.write_text("live 0\n")
+    stop = threading.Event()
+
+    def writer() -> None:
+        n = 1
+        # Tight appends so a loaded Darwin quality runner cannot insert a
+        # heartbeat-sized gap between live lines. Production uses 60s; this
+        # only needs new bytes before each Empty timeout.
+        while not stop.is_set():
+            with output.open("a") as handle:
+                handle.write(f"live {n}\n")
+            n += 1
+            stop.wait(0.001)
+
+    writer_thread = threading.Thread(target=writer)
+    writer_thread.start()
+    command = [sys.executable, "-c", "import time; time.sleep(0.35)"]
+    try:
+        with subprocess.Popen(command, stderr=subprocess.PIPE, text=True) as process:  # noqa: S603 -- controlled Python fixture.
+            log = StringIO()
+            assert (
+                jobs._wait_for_diagnostics(process, log, "validate", tmp_path, command)
+                == 0
+            )
+    finally:
+        stop.set()
+        writer_thread.join()
+    assert "live 0\n" in log.getvalue()
+    assert "Updater still running" not in log.getvalue()
+
+
 def test_diagnostics_drain_after_child_exit(tmp_path, monkeypatch) -> None:
     """Inherited stderr may outlive the child; retain its final diagnostic."""
     monkeypatch.setattr(jobs, "_HEARTBEAT_INTERVAL_SECONDS", 0.01)
@@ -237,6 +348,59 @@ def test_diagnostics_drain_after_child_exit(tmp_path, monkeypatch) -> None:
         )
     assert "final diagnostic\n" in log.getvalue()
     assert "Updater still running" not in log.getvalue()
+
+
+def test_run_log_tail_reads_only_new_bytes_and_skips_duplicates(tmp_path: Path) -> None:
+    """The live tail follows output.log once, including through latest/."""
+    run_logs = tmp_path / "runs"
+    run_dir = run_logs / "20260101-run"
+    run_dir.mkdir(parents=True)
+    output = run_dir / "output.log"
+    output.write_text("one\n")
+    alias = run_logs / "alias"
+    alias.mkdir()
+    (alias / "output.log").symlink_to(output)
+    (run_logs / "latest").symlink_to(run_dir.name)
+    (run_logs / "output.log").mkdir()
+    offsets: dict[str, int] = {}
+    assert jobs._read_new_run_log_text(run_logs, offsets) == "one\n"
+    assert jobs._read_new_run_log_text(run_logs, offsets) == ""
+    output.write_text("one\ntwo\n")
+    assert jobs._read_new_run_log_text(run_logs, offsets) == "two\n"
+    output.write_text("short\n")
+    assert jobs._read_new_run_log_text(run_logs, offsets) == "short\n"
+    assert jobs._read_new_run_log_text(tmp_path / "absent", {}) == ""
+
+
+def test_run_log_tail_skips_unreadable_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A disappearing run log must not take down the live job log."""
+    run_logs = tmp_path / "runs"
+    readable = run_logs / "ok"
+    unreadable = run_logs / "gone"
+    readable.mkdir(parents=True)
+    unreadable.mkdir()
+    (readable / "output.log").write_text("kept\n")
+    (unreadable / "output.log").write_text("lost\n")
+    real_read = Path.read_bytes
+    real_resolve = Path.resolve
+
+    def read_bytes(self: Path) -> bytes:
+        if self.parent.name == "gone":
+            raise OSError("gone")
+        return real_read(self)
+
+    def resolve(self: Path, **kwargs: object) -> Path:
+        if self.parent.name == "gone":
+            raise OSError("gone")
+        return real_resolve(self, **kwargs)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    assert jobs._read_new_run_log_text(run_logs, {}) == "kept\n"
+    monkeypatch.setattr(Path, "read_bytes", real_read)
+    monkeypatch.setattr(Path, "resolve", resolve)
+    assert jobs._read_new_run_log_text(run_logs, {}) == "kept\n"
 
 
 def test_flake_lock_has_no_registry_dependent_inputs() -> None:
@@ -372,7 +536,16 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     workflow = yaml.load(
         (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
     )
-    assert set(workflow["on"]) == {"workflow_dispatch", "schedule"}
+    assert set(workflow["on"]) == {"workflow_dispatch", "schedule", "push"}
+    assert workflow["concurrency"]["group"] == "nixcfg-update-${{ github.ref }}"
+    assert (
+        workflow["concurrency"]["cancel-in-progress"]
+        == "${{ github.ref_name != github.event.repository.default_branch }}"
+    )
+    assert workflow["on"]["push"]["branches"] == [
+        "copilot/gkzenixcfg-update-automation"
+    ]
+    assert workflow["on"]["push"]["paths"] == [".github/update-kick"]
     assert workflow["permissions"] == {"contents": "read"}
     jobs = workflow["jobs"]
     preparation = [
@@ -403,8 +576,8 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     assert set(jobs["publish"]["needs"]) == set(validators)
     assert set(validators) <= set(jobs["repair"]["needs"])
     assert jobs["repair"]["permissions"] == {
-        "actions": "read",
-        "contents": "read",
+        "actions": "write",
+        "contents": "write",
         "copilot-requests": "write",
     }
     agent = next(
@@ -415,6 +588,19 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     assert agent["env"]["GITHUB_TOKEN"] == "${{ github.token }}"  # noqa: S105 -- Actions expression, not a credential.
     assert agent["env"]["COPILOT_MODEL"] == "gpt-6-astra"
     assert not {"COPILOT_GITHUB_TOKEN", "GH_TOKEN"} & agent["env"].keys()
+    assert workflow["on"]["workflow_dispatch"]["inputs"]["repair"]["default"] == "true"
+    repair_if = " ".join(workflow["jobs"]["repair"]["if"].split())
+    assert "inputs.repair == true" in repair_if
+    assert "inputs.repair == 'true'" in repair_if
+    assert "github.event_name == 'push'" in repair_if
+    for stage in ("publish", "start-repair"):
+        step = next(
+            step
+            for job in jobs.values()
+            for step in job.get("steps", [])
+            if step.get("env", {}).get("NIXCFG_CI_STAGE") == stage
+        )
+        assert step["env"]["GH_TOKEN"] == "${{ github.token }}"  # noqa: S105 -- Actions expression, not a credential.
 
 
 def test_agent_check_limits_permissions_and_uses_selected_model() -> None:
@@ -692,8 +878,11 @@ def test_publication_uses_signed_commit_and_bounded_repair(
 
     def run(*args, capture=False, check=True):
         calls.append(args)
+        stdout = "certified-tree\n" if args[:2] == ("git", "write-tree") else ""
         return subprocess.CompletedProcess(
-            args, int(changed) if args[:2] == ("git", "diff") else 0
+            args,
+            int(changed) if args[:2] == ("git", "diff") else 0,
+            stdout=stdout,
         )
 
     monkeypatch.setattr(jobs, "_run", run)
@@ -711,17 +900,111 @@ def test_publication_uses_signed_commit_and_bounded_repair(
             "-S",
         )
     if operation == "publish":
-        assert calls[-1][:3] == ("gh", "pr", "create")
-        assert calls[-1][calls[-1].index("--base") + 1] == "main"
+        assert ("git", "fetch", "origin", "main") in calls
+        switch = next(
+            args for args in calls if args[:3] == ("git", "switch", "--discard-changes")
+        )
+        assert switch[3] == "-c"
+        assert switch[4].startswith("codex/update-")
+        assert switch[5] == "origin/main"
+        assert (
+            "git",
+            "restore",
+            "--source",
+            "certified-tree",
+            "--worktree",
+            "--staged",
+            ".",
+        ) in calls
+        create = next(args for args in calls if args[:3] == ("gh", "pr", "create"))
+        assert create[create.index("--base") + 1] == "main"
+        branch = create[create.index("--head") + 1]
+        assert calls[-1] == ("gh", "pr", "merge", branch, "--auto", "--squash")
         assert (
             "https://github.com/example/repo/actions/runs/123"
             in (tmp_path / "update-body.md").read_text()
         )
     else:
+        assert ("git", "fetch", "origin", "main") not in calls
         assert calls[-1][:3] == ("gh", "workflow", "run")
         assert "repair=false" in calls[-1]
         assert "validate_all_packages=true" in calls[-1]
         assert "targets=example" in calls[-1]
+
+
+def test_commit_and_push_from_base_requires_a_certified_tree(
+    job_repository,
+) -> None:
+    """A default-branch publication without the certified tree is undefined."""
+    with pytest.raises(ValueError, match="certified tree"):
+        jobs._commit_and_push("x", "msg", base="main")
+
+
+def test_publication_from_a_feature_branch_still_targets_default_branch(
+    job_repository, monkeypatch
+) -> None:
+    """Exercise runs must not merge into the reviewed branch; the product PR is on main."""
+    monkeypatch.setenv("GITHUB_REF_NAME", "feature")
+    calls = []
+
+    def run(*args, capture=False, check=True):
+        calls.append(args)
+        stdout = "certified-tree\n" if args[:2] == ("git", "write-tree") else ""
+        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs.main("publish") == 0
+    assert ("git", "fetch", "origin", "main") in calls
+    switch = next(
+        args for args in calls if args[:3] == ("git", "switch", "--discard-changes")
+    )
+    assert switch[-1] == "origin/main"
+    create = next(args for args in calls if args[:3] == ("gh", "pr", "create"))
+    assert create[create.index("--base") + 1] == "main"
+    branch = create[create.index("--head") + 1]
+    assert ("gh", "pr", "merge", branch, "--auto", "--squash") in calls
+
+
+def test_publish_accepts_an_already_mergeable_pull_request(
+    job_repository, monkeypatch
+) -> None:
+    """Auto-merge cannot queue when the base has no pending required checks."""
+
+    def run(*args, capture=False, check=True):
+        stdout = "certified-tree\n" if args[:2] == ("git", "write-tree") else ""
+        if args[:3] == ("gh", "pr", "merge"):
+            return subprocess.CompletedProcess(
+                args,
+                1,
+                stdout="",
+                stderr="GraphQL: Pull request Pull request is in clean status "
+                "(enablePullRequestAutoMerge)\n",
+            )
+        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs.main("publish") == 0
+
+
+def test_publish_raises_other_auto_merge_failures(job_repository, monkeypatch) -> None:
+    """A real merge failure must still fail publication."""
+
+    def run(*args, capture=False, check=True):
+        stdout = "certified-tree\n" if args[:2] == ("git", "write-tree") else ""
+        if args[:3] == ("gh", "pr", "merge"):
+            return subprocess.CompletedProcess(
+                args,
+                1,
+                stdout="",
+                stderr="GraphQL: Protected branch rules not configured\n",
+            )
+        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+
+    monkeypatch.setattr(jobs, "_run", run)
+    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+        jobs.main("publish")
+    assert exc_info.value.returncode == 1
+    assert "Protected branch" in exc_info.value.stderr
 
 
 def test_bootstrap_and_failure_evidence(job_repository, tmp_path, monkeypatch) -> None:
@@ -778,15 +1061,7 @@ def test_image_cleanup_refuses_developer_and_self_hosted_machines(
         jobs.main("clean-image")
 
 
-@pytest.mark.parametrize("system", ["darwin", "linux"])
-@pytest.mark.parametrize("active_xcode", ["selected", "missing", "relative"])
-def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
-    tmp_path, monkeypatch, system, active_xcode
-) -> None:
-    monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
-    monkeypatch.setattr(jobs.sys, "platform", system)
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+def _cleanup_image_tree(tmp_path: Path) -> dict[str, Path]:
     apps = tmp_path / "Applications"
     selected = apps / "Xcode_active.app/Contents/Developer"
     selected.mkdir(parents=True)
@@ -798,13 +1073,48 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
     other.mkdir()
     unused = tmp_path / "unused-tool"
     unused.mkdir()
-    android = tmp_path / "Library/Android/sdk"
-    android.mkdir(parents=True)
+    reclaimable = {
+        "android": tmp_path / "Library/Android/sdk",
+        "simulators": tmp_path / "Library/Developer/CoreSimulator",
+        "system_simulators": tmp_path / "system-core-simulators",
+        "device_support": tmp_path / "Library/Developer/Xcode/iOS DeviceSupport",
+        "caches": tmp_path / "Library/Caches",
+        "hosted": tmp_path / "hostedtoolcache",
+        "tool_cache": tmp_path / "runner-tool-cache",
+    }
+    for path in reclaimable.values():
+        path.mkdir(parents=True)
     link = tmp_path / "external-link"
     link.symlink_to(other)
-    monkeypatch.setattr(jobs, "_APPLICATIONS", apps)
+    return {
+        "apps": apps,
+        "selected": selected,
+        "old": old,
+        "alias": alias,
+        "other": other,
+        "unused": unused,
+        "link": link,
+        **reclaimable,
+    }
+
+
+@pytest.mark.parametrize("system", ["darwin", "linux"])
+@pytest.mark.parametrize("active_xcode", ["selected", "missing", "relative"])
+def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
+    tmp_path, monkeypatch, system, active_xcode
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(jobs.sys, "platform", system)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    tree = _cleanup_image_tree(tmp_path)
+    monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
+    monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
+    monkeypatch.setattr(jobs, "_DARWIN_SYSTEM_SIMULATORS", tree["system_simulators"])
     monkeypatch.setattr(
-        jobs, "_UNUSED_IMAGE_PATHS", {system: (unused, link, tmp_path / "absent")}
+        jobs,
+        "_UNUSED_IMAGE_PATHS",
+        {system: (tree["unused"], tree["link"], tmp_path / "absent")},
     )
     calls = []
     real_run = jobs._run
@@ -816,7 +1126,7 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
             assert Path(args[-1]).is_relative_to(tmp_path)
             return real_run(*args[1:], capture=capture, check=check)
         value = {
-            "selected": str(selected),
+            "selected": str(tree["selected"]),
             "missing": str(tmp_path / "missing"),
             "relative": "relative/path",
         }[active_xcode]
@@ -829,12 +1139,126 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
             jobs.main("clean-image")
     else:
         assert jobs.main("clean-image") == 0
-    assert unused.exists() == rejected
-    assert selected.is_dir()
-    assert alias.is_symlink()
-    assert other.is_dir()
-    assert link.is_symlink()
-    assert old.exists() == (system != "darwin" or rejected)
-    assert android.exists() == (system != "darwin" or rejected)
+    kept_unless_darwin_cleanup = system != "darwin" or rejected
+    assert tree["unused"].exists() == rejected
+    assert tree["selected"].is_dir()
+    assert tree["alias"].is_symlink()
+    assert tree["other"].is_dir()
+    assert tree["link"].is_symlink()
+    assert tree["old"].exists() == kept_unless_darwin_cleanup
+    for name in (
+        "android",
+        "simulators",
+        "system_simulators",
+        "device_support",
+        "caches",
+        "hosted",
+        "tool_cache",
+    ):
+        assert tree[name].exists() == kept_unless_darwin_cleanup
     if system == "darwin" and not rejected:
         assert not any(call[:2] == ("xcrun", "simctl") for call in calls)
+
+
+def test_image_cleanup_skips_absent_runner_tool_cache(tmp_path, monkeypatch) -> None:
+    """Image cleanup must not require RUNNER_TOOL_CACHE to collect Darwin paths."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.delenv("RUNNER_TOOL_CACHE", raising=False)
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    tree = _cleanup_image_tree(tmp_path)
+    monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
+    monkeypatch.setattr(jobs, "_DARWIN_SYSTEM_SIMULATORS", tree["system_simulators"])
+    monkeypatch.setattr(jobs, "_UNUSED_IMAGE_PATHS", {"darwin": (tree["unused"],)})
+
+    def run(*args, capture=False, check=True):
+        if args[0] == "sudo":
+            assert Path(args[-1]).is_relative_to(tmp_path)
+            return subprocess.CompletedProcess(args, 0, stdout="")
+        return subprocess.CompletedProcess(args, 0, stdout=str(tree["selected"]))
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs.main("clean-image") == 0
+    assert tree["tool_cache"].is_dir()
+
+
+def test_image_cleanup_tolerates_live_cache_directory_races(
+    tmp_path, monkeypatch
+) -> None:
+    """Hosted macOS can rewrite ~/Library/Caches while sudo rmtree runs."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    tree = _cleanup_image_tree(tmp_path)
+    monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
+    monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
+    monkeypatch.setattr(jobs, "_DARWIN_SYSTEM_SIMULATORS", tree["system_simulators"])
+    monkeypatch.setattr(jobs, "_UNUSED_IMAGE_PATHS", {"darwin": (tree["unused"],)})
+    leftover = tree["caches"] / "writer"
+    leftover.mkdir()
+    real_run = jobs._run
+
+    def run(*args, capture=False, check=True):
+        if args[0] == "sudo":
+            snippet = args[args.index("-c") + 1]
+            target = Path(args[-1])
+            assert Path(target).is_relative_to(tmp_path)
+            if target == tree["caches"]:
+                assert "ignore_errors=True" in snippet
+                return subprocess.CompletedProcess(args, 0, stdout="")
+            assert "ignore_errors=True" not in snippet or target in {
+                tree["hosted"],
+                tree["tool_cache"],
+            }
+            return real_run(*args[1:], capture=capture, check=check)
+        return subprocess.CompletedProcess(args, 0, stdout=str(tree["selected"]))
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs.main("clean-image") == 0
+    assert leftover.is_dir()
+    assert not tree["old"].exists()
+    assert not tree["unused"].exists()
+
+
+@pytest.mark.parametrize(
+    ("actions", "environment", "platform", "runs"),
+    [
+        ("true", "github-hosted", "darwin", True),
+        ("true", "github-hosted", "linux", False),
+        ("true", "self-hosted", "darwin", False),
+        ("false", "github-hosted", "darwin", False),
+    ],
+)
+def test_hosted_darwin_store_gc_is_gated_to_disposable_runners(
+    monkeypatch, actions: str, environment: str, platform: str, runs: bool
+) -> None:
+    """A 62 GiB Darwin root-closure fetch must not inherit a full package store."""
+    monkeypatch.setenv("GITHUB_ACTIONS", actions)
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", environment)
+    monkeypatch.setattr(jobs.sys, "platform", platform)
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        jobs, "_run", lambda *args, **_kwargs: calls.append(args) or None
+    )
+    assert jobs.main("reclaim-store") == 0
+    assert calls == ([("nix", "store", "gc")] if runs else [])
+    assert jobs.hosted_darwin_skips_root_closures() is runs
+
+
+def test_hosted_update_runtime_reserves_store_headroom_for_root_closures() -> None:
+    """Nix must GC before unpacking a Darwin root that can exceed 60 GiB."""
+    action = yaml.load(
+        (ROOT / ".github/actions/update-runtime/action.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    extra_conf = next(
+        step["with"]["extra-conf"]
+        for step in action["runs"]["steps"]
+        if str(step.get("uses", "")).startswith(
+            "DeterminateSystems/determinate-nix-action@"
+        )
+    )
+    assert "min-free = 34359738368" in extra_conf
+    assert "max-free = 68719476736" in extra_conf

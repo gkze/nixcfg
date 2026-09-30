@@ -3280,9 +3280,9 @@ def test_netnewswire_package_exposes_copy_mode_mac_app_metadata() -> None:
     )
 
 
-def test_chatgpt_package_ships_the_unified_chatgpt_bundle() -> None:
-    """The chatgpt package should install the merged app under its upstream name."""
-    package_source = Path(REPO_ROOT / "packages/chatgpt/default.nix").read_text(
+def test_codex_desktop_package_ships_the_unified_chatgpt_bundle() -> None:
+    """Codex Desktop should install the merged app under its upstream ChatGPT name."""
+    package_source = Path(REPO_ROOT / "packages/codex-desktop/default.nix").read_text(
         encoding="utf-8"
     )
     package = expect_instance(parse_nix_expr(package_source), FunctionDefinition)
@@ -3494,7 +3494,6 @@ def test_work_mac_app_routes_preserve_system_and_user_scopes() -> None:
         "paseo": "pkgs.paseo",
         "reflect": "pkgs.reflect-open",
         "screen-studio": "pkgs.screen-studio",
-        "tailscale": "pkgs.tailscale-app",
         "thorium": "pkgs.thorium",
         "unsloth": "pkgs.unsloth",
         "voiceos": "pkgs.voiceos",
@@ -3510,19 +3509,19 @@ def test_work_mac_app_routes_preserve_system_and_user_scopes() -> None:
             StringPrimitive(value="system"),
         )
 
-    for name in ("gemini", "tailscale"):
-        protected_app = expect_instance(_routing_entry(routing, name), AttributeSet)
-        assert_nix_ast_equal(
-            expect_binding(protected_app.values, "preventDowngrade").value,
-            Primitive(value=True),
-        )
+    gemini = expect_instance(_routing_entry(routing, "gemini"), AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(gemini.values, "preventDowngrade").value,
+        Primitive(value=True),
+    )
 
     expected_user_routes = {
         "claude-code-url-handler": "pkgs.claude-code-url-handler",
         "cleanshot": "pkgs.cleanshot",
         "freelens": "pkgs.freelens",
         "grok-build": "pkgs.grok-build",
-        "town-assistant": "pkgs.town-assistant-internal",
+        "tailscale": "pkgs.tailscale-app",
+        "town-assistant": "pkgs.town-assistant-nightly",
         "warp-preview": "pkgs.warp-preview",
     }
     for name, package in expected_user_routes.items():
@@ -3963,12 +3962,12 @@ def test_george_config_routes_only_the_unified_chatgpt_app() -> None:
         AttributeSet,
     )
 
-    assert "codex-desktop" not in binding_map(routing.values)
+    assert "chatgpt" not in binding_map(routing.values)
 
     codex = expect_instance(expect_binding(routing.values, "codex").value, AttributeSet)
     assert_nix_ast_equal(
         expect_binding(codex.values, "package").value,
-        identifier_attr_path("pkgs", "chatgpt"),
+        identifier_attr_path("pkgs", "codex-desktop"),
     )
     assert "bundleName" not in binding_map(codex.values)
 
@@ -4002,10 +4001,10 @@ def test_darwin_gui_package_set_retains_only_unified_chatgpt_app() -> None:
     }
 
     assert_nix_ast_equal(
-        packages_by_name["chatgpt"],
-        Identifier(name="chatgpt"),
+        packages_by_name["codex-desktop"],
+        Identifier(name="codex-desktop"),
     )
-    assert "codex-desktop" not in packages_by_name
+    assert "chatgpt" not in packages_by_name
 
 
 def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
@@ -4135,6 +4134,7 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
           (appPath "ghostty" "Ghostty.app")
           (appPath "datagrip" "DataGrip.app")
           (appPath "notion" "Notion.app")
+          "/System/Applications/Notes.app"
           (appPath "spotify" "Spotify.app")
           "/System/Applications/System Settings.app"
         ]
@@ -4283,46 +4283,3 @@ def test_george_config_does_not_install_repo_managed_editor_cli_wrappers() -> No
     assert not (REPO_ROOT / "home/george/bin/_managed-app-cli-wrapper").exists()
     assert not (REPO_ROOT / "home/george/bin/code-insiders").exists()
     assert not (REPO_ROOT / "home/george/bin/cursor").exists()
-
-
-@pytest.mark.parametrize("writable", [True, False])
-def test_copy_preserves_custom_icon_and_prunes_stale_contents(
-    tmp_path: Path,
-    writable: bool,
-) -> None:
-    """A bundle replacement must not orphan Finder's custom-icon flag."""
-    source = _fake_app_bundle(tmp_path / "source")
-    destination = _fake_app_bundle(tmp_path / "Applications")
-    (source / "Contents" / "current").write_text("new version")
-    (destination / "Contents" / "stale").write_text("old version")
-    (destination / "Contents" / "Icon\r").write_bytes(b"stale nested resource")
-    custom_icon = destination / "Icon\r"
-    custom_icon.write_bytes(b"custom icon resource")
-
-    mac_apps_helper._rsync_copy(
-        source, destination, rsync_path=_rsync_path(), writable=writable
-    )
-
-    assert custom_icon.read_bytes() == b"custom icon resource"
-    assert (destination / "Contents" / "current").read_text() == "new version"
-    assert not (destination / "Contents" / "stale").exists()
-    assert not (destination / "Contents" / "Icon\r").exists()
-
-
-@pytest.mark.parametrize("writable", [True, False])
-def test_fresh_copy_does_not_create_custom_icon(
-    tmp_path: Path,
-    writable: bool,
-) -> None:
-    """Apps without a customization retain their packaged icon resources."""
-    source = _fake_app_bundle(tmp_path / "source")
-    destination = tmp_path / "Applications" / source.name
-    destination.mkdir(parents=True)
-    (source / "Contents" / "AppIcon.icns").write_bytes(b"bundled logo")
-
-    mac_apps_helper._rsync_copy(
-        source, destination, rsync_path=_rsync_path(), writable=writable
-    )
-
-    assert (destination / "Contents" / "AppIcon.icns").read_bytes() == b"bundled logo"
-    assert not (destination / "Icon\r").exists()

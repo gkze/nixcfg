@@ -9,10 +9,9 @@ from nix_manipulator.expressions.function.definition import FunctionDefinition
 
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding
-from lib.tests._nix_eval import nix_attrset, nix_eval_raw, nix_import, nix_let
+from lib.tests._nix_eval import nix_attrset, nix_eval_raw, nix_import
 from lib.tests._nix_source import nix_file_expr
-from lib.update.flake import nixpkgs_expression
-from lib.update.nix_expr import identifier_attr_path
+from lib.update.flake import nixpkgs_lib_expression
 from lib.update.paths import REPO_ROOT
 
 if TYPE_CHECKING:
@@ -20,14 +19,22 @@ if TYPE_CHECKING:
 
 
 def _stylix_harness_expression(**arguments: object) -> NixExpression:
-    return nix_let(
-        {"nixpkgs": nixpkgs_expression()},
+    return FunctionCall(
+        name=nix_import(REPO_ROOT / "tests/nix/stylix-explicit-scheme.nix"),
+        argument=nix_attrset({
+            "lib": nixpkgs_lib_expression(),
+            **arguments,
+        }),
+    )
+
+
+def test_stylix_harness_imports_nixpkgs_lib_only() -> None:
+    """The laziness harness must not instantiate the nixpkgs package set."""
+    assert_nix_ast_equal(
+        _stylix_harness_expression(),
         FunctionCall(
             name=nix_import(REPO_ROOT / "tests/nix/stylix-explicit-scheme.nix"),
-            argument=nix_attrset({
-                "lib": identifier_attr_path("nixpkgs", "lib"),
-                **arguments,
-            }),
+            argument=nix_attrset({"lib": nixpkgs_lib_expression()}),
         ),
     )
 

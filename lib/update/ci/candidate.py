@@ -11,10 +11,12 @@ from typing import Annotated
 import typer
 from pydantic import BaseModel, ConfigDict
 
+from lib.diagnostics import redact_urls
 from lib.system_policy import supported_systems
 from lib.update import cli as update_cli
 from lib.update import derivation_validation as validation
 from lib.update.candidate import Candidate, Preparation
+from lib.update.ci import jobs
 from lib.update.cli_options import RepairAgent, UpdateOptions
 from lib.update.io import atomic_write_text
 from lib.update.nix import get_current_nix_platform
@@ -102,6 +104,26 @@ def prepare_candidate(
     return preparation.candidate, status
 
 
+def _hosted_validation_progress(source: str) -> validation.ValidationProgress:
+    """Stream Nix validation output to the live hosted job log."""
+
+    def emit(event: validation.ValidationProgressEvent) -> None:
+        if isinstance(event, validation.ValidationCommandFinished):
+            return
+        if isinstance(event, validation.ValidationCommandStarted):
+            text = f"$ {event.command}"
+        elif isinstance(event, validation.ValidationCommandOutput):
+            text = event.line.replace("\r", "")
+        else:
+            text = event.replace("\r", "")
+        if not text:
+            return
+        sys.stderr.write(f"[{source}] {redact_urls(text)}\n")
+        sys.stderr.flush()
+
+    return emit
+
+
 def require_complete_candidate(candidate: Candidate) -> None:
     """Reject failed or incomplete preparation before issuing validation evidence."""
     if not candidate.prepared or (
@@ -139,15 +161,30 @@ def validate_candidate(candidate: Candidate) -> ValidationReport:
                 print_build_logs=True,
                 all_declared_systems=True,
                 native_builds_only=True,
+                progress=_hosted_validation_progress("derivations"),
             )
+            # Hosted macos-15 root-closures can fetch tens of GiB after package
+            # validation has already filled the store. GC first so the Nix
+            # daemon is not killed mid-unpack.
+            jobs.reclaim_hosted_store()
             # Root checks are computed from the same independently verified
             # manifest used by local updates; only native execution is sharded.
-            failures += validation.validate_root_closures(
-                flake_root=snapshot.root,
-                systems=(system,),
-                include_dependencies=True,
-                print_build_logs=True,
-            )
+            # Hosted Darwin still cannot finish that check (4000+ derivations;
+            # streamed log dies mid-build). Linux validate already owns eval
+            # and identity of checks.aarch64-darwin.root-closures.
+            if jobs.hosted_darwin_skips_root_closures():
+                sys.stdout.write(
+                    "Skipping hosted Darwin root-closures; "
+                    "Linux validate owns that check\n"
+                )
+            else:
+                failures += validation.validate_root_closures(
+                    flake_root=snapshot.root,
+                    systems=(system,),
+                    include_dependencies=True,
+                    print_build_logs=True,
+                    progress=_hosted_validation_progress("root-closures"),
+                )
         workspace.validate_changes(allowed)
     return ValidationReport(
         tree=candidate.tree,

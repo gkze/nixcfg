@@ -21,6 +21,7 @@ from lib import http_utils
 from lib.github_actions.client import Workflow, WorkflowListRow, WorkflowRun
 from lib.schema_codegen import cli as schema_cli
 from lib.schema_codegen.runner import SchemaTargetSummary
+from lib.tests._cli_text import visible_cli_text
 
 if TYPE_CHECKING:
     from lib.update.cli import UpdateOptions
@@ -292,15 +293,21 @@ def test_nixcfg_recover_hashes_parses_flags(monkeypatch: _MonkeyPatchLike) -> No
     }
 
 
+def test_visible_cli_text_rejoins_wrapped_rich_flags() -> None:
+    """Hosted Darwin quality wraps Rich help; flags must still be findable."""
+    assert "--native-only" in visible_cli_text("\x1b[1m--native-\x1b[0m\nonly")
+
+
 def test_nixcfg_update_help_includes_typer_options() -> None:
     """Ensure `nixcfg update --help` shows typed option definitions."""
     runner = CliRunner()
     result = runner.invoke(nixcfg.app, ["update", "--help"])
 
     assert result.exit_code == 0
-    assert "--native-only" in result.output
-    assert "--pinned-versions" not in result.output
-    assert "--no-sources" in result.output
+    help_text = visible_cli_text(result.output)
+    assert "--native-only" in help_text
+    assert "--pinned-versions" not in help_text
+    assert "--no-sources" in help_text
 
 
 def test_nixcfg_schema_targets_lists_configured_targets(
@@ -846,8 +853,9 @@ def test_nixcfg_ci_subcommand_help_includes_crate2nix_options() -> None:
     )
 
     assert result.exit_code == 0
-    assert "--package" in result.output
-    assert "--write" in result.output
+    help_text = visible_cli_text(result.output)
+    assert "--package" in help_text
+    assert "--write" in help_text
 
 
 def test_nixcfg_ci_crate2nix_exposes_central_normalizer_command() -> None:
@@ -882,7 +890,7 @@ def test_nixcfg_recover_snapshot_help_exposes_recovery_options() -> None:
     )
 
     assert result.exit_code == 0
-    assert "--json" in result.output
+    assert "--json" in visible_cli_text(result.output)
 
 
 def test_nixcfg_recover_files_help_exposes_recovery_options() -> None:
@@ -894,12 +902,13 @@ def test_nixcfg_recover_files_help_exposes_recovery_options() -> None:
     )
 
     assert result.exit_code == 0
-    assert "--apply" in result.output
-    assert "--path" in result.output
-    assert "--glob" in result.output
-    assert "--stage" in result.output
-    assert "--sync" in result.output
-    assert "--json" in result.output
+    help_text = visible_cli_text(result.output)
+    assert "--apply" in help_text
+    assert "--path" in help_text
+    assert "--glob" in help_text
+    assert "--stage" in help_text
+    assert "--sync" in help_text
+    assert "--json" in help_text
 
 
 def test_nixcfg_recover_hashes_help_exposes_recovery_options() -> None:
@@ -911,10 +920,11 @@ def test_nixcfg_recover_hashes_help_exposes_recovery_options() -> None:
     )
 
     assert result.exit_code == 0
-    assert "--apply" in result.output
-    assert "--stage" in result.output
-    assert "--sync" in result.output
-    assert "--json" in result.output
+    help_text = visible_cli_text(result.output)
+    assert "--apply" in help_text
+    assert "--stage" in help_text
+    assert "--sync" in help_text
+    assert "--json" in help_text
 
 
 def test_nixcfg_tree_shows_declared_command_descriptions() -> None:

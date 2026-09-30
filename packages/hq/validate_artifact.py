@@ -123,17 +123,25 @@ def validate_artifact(
             )
             raise ValueError(msg)
     for patch in AUTOMATIC_MUTATION_PATCHES:
-        if _matching_offsets(executable, patch.original):
+        if any(
+            _matching_offsets(executable, variant.original)
+            for variant in (patch, *patch.alternatives)
+        ):
             msg = f"HQ executable retains automatic mutation path: {patch.label}"
             raise ValueError(msg)
-        disabled_offsets = _matching_offsets(executable, patch.disabled)
-        if len(disabled_offsets) != 1:
+        disabled_matches = [
+            (offset, variant)
+            for variant in (patch, *patch.alternatives)
+            for offset in _matching_offsets(executable, variant.disabled)
+        ]
+        if len(disabled_matches) != 1:
             msg = (
                 f"HQ disabled automatic mutation signature {patch.label} "
-                f"expected 1, got {len(disabled_offsets)}"
+                f"expected 1, got {len(disabled_matches)}"
             )
             raise ValueError(msg)
-        _validate_disabled_control_flow(executable, disabled_offsets[0], patch)
+        offset, variant = disabled_matches[0]
+        _validate_disabled_control_flow(executable, offset, variant)
 
 
 def main() -> None:
