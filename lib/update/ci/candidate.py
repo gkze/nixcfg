@@ -2,11 +2,12 @@
 
 import asyncio
 import json
+import math
 import sys
 from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import typer
 from pydantic import BaseModel, ConfigDict
@@ -42,6 +43,21 @@ def repair(
     propose_repair(get_repo_root(), evidence=evidence, output=output, agent=agent)
 
 
+ValidationScope = Literal["all", "packages", "closures"]
+ValidationGate = Literal["packages", "closures"]
+# Exit status for a closure shard that stopped on its budget with a consistent
+# Cachix handoff. jobs.py treats only this status as continuation, and only
+# when the workflow asked the shard to yield.
+CLOSURE_YIELD_EXIT = 75
+# Graph discovery is minutes, not the build. Keep it inside the job cap so a
+# hung eval fails this shard instead of consuming the build budget.
+_CLOSURE_DISCOVERY_TIMEOUT_SECONDS = 45 * 60
+# Five hours of nix build, inside the 360-minute hosted job, leaves time for
+# image cleanup, discovery, and the Cachix daemon flush before GitHub cancels.
+HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS = 5 * 60 * 60
+HOSTED_DARWIN_CLOSURE_SHARDS = 4
+
+
 class ValidationReport(BaseModel):
     """Evidence from one native validator, bound to the exact proposed Git tree."""
 
@@ -50,6 +66,7 @@ class ValidationReport(BaseModel):
     tree: str
     system: str
     validate_all_packages: bool = False
+    gates: tuple[ValidationGate, ...] = ("packages", "closures")
     failures: tuple[validation.DerivationValidationFailure, ...]
 
 
@@ -134,9 +151,48 @@ def require_complete_candidate(candidate: Candidate) -> None:
         raise ValueError(msg)
 
 
-def validate_candidate(candidate: Candidate) -> ValidationReport:
-    """Validate the assembled tree on this native builder, leaving the repo alone."""
+def _gates_for_scope(scope: str) -> tuple[ValidationGate, ...]:
+    """Return the evidence a scope must produce."""
+    if scope == "packages":
+        return ("packages",)
+    if scope == "closures":
+        return ("closures",)
+    if scope == "all":
+        return ("packages", "closures")
+    msg = f"Unknown validation scope: {scope}"
+    raise ValueError(msg)
+
+
+def _require_closure_budget(seconds: float | None) -> float | None:
+    """Reject a budget that cannot bound one hosted closure shard."""
+    if seconds is None:
+        return None
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+        msg = "Closure budget must be a positive number of seconds"
+        raise TypeError(msg)
+    if not math.isfinite(seconds) or seconds <= 0:
+        msg = "Closure budget must be a positive number of seconds"
+        raise ValueError(msg)
+    return float(seconds)
+
+
+def validate_candidate(
+    candidate: Candidate,
+    *,
+    scope: ValidationScope = "all",
+    closure_budget_seconds: float | None = None,
+) -> ValidationReport:
+    """Validate the assembled tree on this native builder, leaving the repo alone.
+
+    ``packages`` and ``closures`` split one platform across runners. A combined
+    ``all`` scope is what Linux validators and local updates use. Closure shards
+    do not GC: each starts from an empty store and reuses paths the previous
+    shard pushed to Cachix. The combined scope still GCs on hosted Darwin
+    because package outputs and the closure fetch share one disk.
+    """
     require_complete_candidate(candidate)
+    gates = _gates_for_scope(scope)
+    budget = _require_closure_budget(closure_budget_seconds)
     system = get_current_nix_platform()
     if system not in candidate.systems:
         msg = f"Unexpected validation platform: {system}"
@@ -153,60 +209,93 @@ def validate_candidate(candidate: Candidate) -> ValidationReport:
             Path("flake.lock"),
         )
         workspace.validate_changes(allowed)
+        failures: tuple[validation.DerivationValidationFailure, ...] = ()
         with workspace.validation_snapshot() as snapshot:
-            failures = validation.validate_derivations(
-                None if candidate.validate_all_packages else candidate.sources,
-                updaters=updaters,
-                flake_root=snapshot.root,
-                print_build_logs=True,
-                all_declared_systems=True,
-                native_builds_only=True,
-                progress=_hosted_validation_progress("derivations"),
-            )
-            # Hosted macos-15 root-closures can fetch tens of GiB after package
-            # validation has already filled the store. GC first so the Nix
-            # daemon is not killed mid-unpack.
-            jobs.reclaim_hosted_store()
-            # Root checks are computed from the same independently verified
-            # manifest used by local updates; only native execution is sharded.
-            # Hosted macos-15 died mid-build when -L streamed 4000+ derivation
-            # logs. Build the closure without those logs so Cachix's daemon can
-            # upload every realized path. Command progress still reaches the job log.
-            failures += validation.validate_root_closures(
-                flake_root=snapshot.root,
-                systems=(system,),
-                include_dependencies=True,
-                print_build_logs=not jobs.is_hosted_darwin_runner(),
-                progress=_hosted_validation_progress("root-closures"),
-            )
+            if "packages" in gates:
+                failures += validation.validate_derivations(
+                    None if candidate.validate_all_packages else candidate.sources,
+                    updaters=updaters,
+                    flake_root=snapshot.root,
+                    print_build_logs=True,
+                    all_declared_systems=True,
+                    native_builds_only=True,
+                    progress=_hosted_validation_progress("derivations"),
+                )
+            if "closures" in gates:
+                if scope == "all":
+                    # Hosted macos-15 root-closures can fetch tens of GiB after
+                    # package validation has already filled the store. GC first
+                    # so the Nix daemon is not killed mid-unpack.
+                    jobs.reclaim_hosted_store()
+                # Root checks are computed from the same independently verified
+                # manifest used by local updates; only native execution is sharded.
+                # Hosted macos-15 died mid-build when -L streamed 4000+ derivation
+                # logs. Build the closure without those logs so Cachix's daemon can
+                # upload every realized path. Command progress still reaches the job log.
+                closure_progress = _hosted_validation_progress("root-closures")
+                if budget is not None:
+                    closure_progress(
+                        f"Root-closure build budget is {budget:.0f}s; "
+                        "realized paths stay in the gkze cache for the next shard"
+                    )
+                failures += validation.validate_root_closures(
+                    flake_root=snapshot.root,
+                    systems=(system,),
+                    include_dependencies=True,
+                    print_build_logs=not jobs.is_hosted_darwin_runner(),
+                    progress=closure_progress,
+                    timeout=(
+                        _CLOSURE_DISCOVERY_TIMEOUT_SECONDS
+                        if budget is not None
+                        else None
+                    ),
+                    build_timeout=budget,
+                )
         workspace.validate_changes(allowed)
     return ValidationReport(
         tree=candidate.tree,
         system=system,
+        gates=gates,
         failures=failures,
         validate_all_packages=candidate.validate_all_packages,
     )
 
 
 def certified_patch(candidate: Candidate, reports: list[ValidationReport]) -> bytes:
-    """Publish only when each required builder validated this exact candidate."""
+    """Publish only when each required builder validated this exact candidate.
+
+    One system may report package and closure evidence from different runners.
+    The union has to cover both gates once, for this tree, with no failures.
+    """
     require_complete_candidate(candidate)
-    systems = [report.system for report in reports]
-    if (
-        len(systems) != len(set(systems))
-        or set(systems) != set(candidate.systems)
-        or any(
-            report.tree != candidate.tree
-            or report.validate_all_packages != candidate.validate_all_packages
-            or report.failures
-            for report in reports
-        )
-    ):
+
+    def reject() -> None:
         msg = (
             "Validation reports are missing, duplicated, failed, "
             "or for another tree or validation scope"
         )
         raise ValueError(msg)
+
+    grouped: dict[str, list[ValidationReport]] = {}
+    for report in reports:
+        grouped.setdefault(report.system, []).append(report)
+    if set(grouped) != set(candidate.systems):
+        reject()
+    for group in grouped.values():
+        covered: set[str] = set()
+        for report in group:
+            if (
+                report.tree != candidate.tree
+                or report.validate_all_packages != candidate.validate_all_packages
+                or report.failures
+            ):
+                reject()
+            for gate in report.gates:
+                if gate in covered:
+                    reject()
+                covered.add(gate)
+        if covered != {"packages", "closures"}:
+            reject()
     return candidate.patch
 
 
@@ -244,14 +333,49 @@ def prepare(
     raise typer.Exit(status)
 
 
+def _closure_build_budget_exhausted(
+    error: validation.ValidationIncompleteError,
+) -> bool:
+    """Return whether the root-closure realization itself ran out of budget."""
+    text = str(error)
+    return "timed out" in text and "nix build" in text
+
+
 @app.command("validate")
 def validate(
     candidate: Annotated[Path, typer.Option(help="Final prepared candidate JSON.")],
     output: Annotated[Path, typer.Option(help="Native validation report.")],
+    scope: Annotated[
+        ValidationScope,
+        typer.Option(help="Package gate, closure gate, or both."),
+    ] = "all",
+    closure_budget_seconds: Annotated[
+        float | None,
+        typer.Option(help="Stop the root-closure build after this many seconds."),
+    ] = None,
+    *,
+    closure_yield: Annotated[
+        bool,
+        typer.Option(
+            help="Exit with the continuation status when the closure budget is exhausted."
+        ),
+    ] = False,
 ) -> None:
     """Run the existing package and root gates on the exact assembled tree."""
+    if closure_yield and (scope != "closures" or closure_budget_seconds is None):
+        msg = "Closure yield requires a closure scope and budget"
+        raise ValueError(msg)
     output = _output_path(output, get_repo_root())
-    report = validate_candidate(Candidate.model_validate_json(candidate.read_bytes()))
+    try:
+        report = validate_candidate(
+            Candidate.model_validate_json(candidate.read_bytes()),
+            scope=scope,
+            closure_budget_seconds=closure_budget_seconds,
+        )
+    except validation.ValidationIncompleteError as error:
+        if closure_yield and _closure_build_budget_exhausted(error):
+            raise typer.Exit(CLOSURE_YIELD_EXIT) from error
+        raise
     atomic_write_text(output, report.model_dump_json(indent=2) + "\n")
     raise typer.Exit(bool(report.failures))
 
