@@ -612,7 +612,7 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     )
     assert (
         workflow["jobs"]["prepare-darwin"]["with"]["validate_all_packages"]
-        == "${{ inputs.validate_all_packages || false }}"
+        == "${{ github.event_name == 'push' || inputs.validate_all_packages || false }}"
     )
     native = yaml.load(
         (ROOT / ".github/workflows/update-native.yml").read_text(),
@@ -698,10 +698,14 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         == "${{ github.ref_name != github.event.repository.default_branch }}"
     )
     assert workflow["on"]["push"]["branches"] == [
-        "copilot/gkzenixcfg-update-automation"
+        "main",
+        "copilot/gkzenixcfg-update-automation",
     ]
     assert workflow["on"]["push"]["paths"] == [".github/update-kick"]
     assert workflow["permissions"] == {"contents": "read"}
+    assert "github.event_name == 'push'" in (
+        workflow["jobs"]["prepare-darwin"]["with"]["validate_all_packages"]
+    )
     jobs = workflow["jobs"]
     preparation = [
         (name, job) for name, job in jobs.items() if name.startswith("prepare-")

@@ -17,10 +17,13 @@ on:
         default: true
   schedule:
     - cron: "17 7 * * 1"
-  # workflow_dispatch is unavailable to the cloud-agent token. Touching
-  # .github/update-kick on this WIP branch queues one Update run.
+  # workflow_dispatch is unavailable to the Cursor GitHub App token
+  # (HTTP 403, missing actions:write). Touching .github/update-kick on
+  # main or the WIP branch queues one Update run. Prefer
+  # `gh workflow run` when the App has Actions write.
   push:
     branches:
+      - main
       - copilot/gkzenixcfg-update-automation
     paths:
       - .github/update-kick
@@ -41,7 +44,9 @@ jobs:
       system: aarch64-darwin
       stage: prepare
       targets: ${{ inputs.targets || '' }}
-      validate_all_packages: ${{ inputs.validate_all_packages || false }}
+      # workflow_dispatch inputs are unset on push/schedule. A kick-file
+      # push must match EM's dispatch: repair (job if) + validate_all.
+      validate_all_packages: ${{ github.event_name == 'push' || inputs.validate_all_packages || false }}
     secrets: inherit
   prepare-arm:
     needs: prepare-darwin
