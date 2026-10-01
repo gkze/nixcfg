@@ -376,6 +376,16 @@ def _validate_anchor(path: Path, text: str, expected_count: int) -> None:
         raise RuntimeError(msg)
 
 
+def _opencode_v2_layout(root: Path) -> bool:
+    """Select the Effect updater only when that service is in the pin.
+
+    OpenCode 1.18 ships ``packages/cli/package.json`` without
+    ``packages/cli/src/services/updater.ts``. Treating the package file as the
+    v2 layout makes the patcher read a file the pin does not contain.
+    """
+    return (root / "packages/cli/src/services/updater.ts").is_file()
+
+
 def _patch_selected(
     roots: dict[str, Path],
     components: frozenset[str],
@@ -384,10 +394,7 @@ def _patch_selected(
 ) -> None:
     patches = _PATCHES
     anchors = _ANCHORS
-    if (
-        "opencode" in components
-        and (roots["opencode"] / "packages/cli/package.json").is_file()
-    ):
+    if "opencode" in components and _opencode_v2_layout(roots["opencode"]):
         patches = (
             tuple(patch for patch in _PATCHES if patch.component != "opencode")
             + _OPENCODE_V2_PATCHES

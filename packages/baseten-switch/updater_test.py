@@ -115,6 +115,10 @@ def test_package_skips_headed_swift_layout_guide_check() -> None:
         if "/usr/bin/swift test" in command
     }
     assert any(
+        "--skip testUnusableSecondaryReceiptRetainsRecoveryGate" in command
+        for command in swift_tests
+    )
+    assert any(
         command.endswith("--skip testRouterWindowContentUsesNonObscuredLayoutGuide")
         for command in swift_tests
     )

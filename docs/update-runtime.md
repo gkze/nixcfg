@@ -105,6 +105,16 @@ goose bump rebuilds `goose-cli-v8-native` from source on hosted macos-15
 Use `nixcfg update goose-cli` to retry explicitly; remove the holds once that
 derivation is in the `gkze` cache.
 
+Run 36672202468 failed Darwin closure builds that a later shard would still
+rebuild. Those pins stay in the closure, with the build corrected in tree:
+Comet's aarch64 DMG hash is the bytes that run fetched, while the Linux ARM
+prefetch hold remains. Superconductor's app executable is
+`super.engineering`. Reason's `CFBundleExecutable` is `Reason`. OpenCode 1.18
+ships `packages/cli/package.json` without the Effect updater service, so
+OpenChamber keeps the 1.x upgrade patch. Baseten Switch stays on 0.5.1;
+`testUnusableSecondaryReceiptRetainsRecoveryGate` SIGTRAPs on headless
+macos-15 and is skipped there, and 0.6.0 stays held.
+
 Hosted Darwin validation builds native `root-closures` in continuation shards.
 Run 36672202468 showed why one job cannot: after a ~17-minute fetch burst the
 tail started about six derivations a minute, with thousands still queued when
