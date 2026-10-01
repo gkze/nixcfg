@@ -544,6 +544,27 @@ raise SystemExit(1)
     assert failed.returncode == 1
     assert builder_sleeps == []
 
+    current_nix = tmp_path / "current-nix"
+    current_script = """
+import pathlib, sys
+pathlib.Path(sys.argv[1]).touch()
+print("error: Cannot build '/nix/store/abc.drv'.", file=sys.stderr)
+print("Reason: builder failed with exit code 1.", file=sys.stderr)
+print("error: Build failed due to failed dependency", file=sys.stderr)
+print('error: cannot unlink "/nix/store/abc.tgz": Illegal byte sequence', file=sys.stderr)
+raise SystemExit(1)
+"""
+    current_sleeps: list[float] = []
+    current = validation._run_validation_command(
+        [sys.executable, "-c", current_script, str(current_nix)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=current_sleeps.append,
+    )
+    assert current.returncode == 1
+    assert current_sleeps == []
+
     codes = iter([-signal.SIGBUS, 0])
 
     def run(
@@ -598,6 +619,86 @@ raise SystemExit(1)
             sleep=other_sleeps.append,
         )
     assert other_sleeps == []
+
+
+def test_store_fault_retry_keeps_the_remaining_closure_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A late EILSEQ retry must not start another full shard budget."""
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr(validation.time, "monotonic", lambda: clock["now"])
+    timeouts: list[object] = []
+    sleeps: list[float] = []
+    store_error = (
+        'error: cannot unlink "/nix/store/abc-replay-10.67.0.tgz": '
+        "Illegal byte sequence"
+    )
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        timeouts.append(kwargs["timeout"])
+        clock["now"] = 1_000.0 + 18_000 - 0.4
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr=store_error)
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        clock["now"] += seconds
+
+    with pytest.raises(validation.ValidationIncompleteError, match="timed out") as raised:
+        validation._run_validation_command(
+            ["nix", "build", "path:.#checks.aarch64-darwin.root-closures"],
+            cwd=tmp_path,
+            timeout=18_000,
+            run=run,
+            sleep=sleep,
+        )
+    assert "nix build" in str(raised.value)
+    assert timeouts == [18_000]
+    assert sleeps == [pytest.approx(0.4)]
+
+    clock["now"] = 50_000.0
+
+    def unbounded(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
+
+    recovered = validation._run_validation_command(
+        ["nix", "build", "path:.#checks.aarch64-darwin.root-closures"],
+        cwd=tmp_path,
+        timeout=None,
+        deadline=0,
+        run=unbounded,
+        sleep=lambda _seconds: pytest.fail("unbounded validation must not wait"),
+    )
+    assert recovered.returncode == 0
+
+
+def test_store_fault_past_the_deadline_does_not_sleep_into_another_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Once the shard budget is gone, the retry delay is zero and no build starts."""
+    clock = {"now": 0.0}
+    monkeypatch.setattr(validation.time, "monotonic", lambda: clock["now"])
+    sleeps: list[float] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        clock["now"] = 20
+        return subprocess.CompletedProcess(
+            args,
+            1,
+            stdout="",
+            stderr='error: cannot unlink "/nix/store/abc.tgz": Illegal byte sequence',
+        )
+
+    with pytest.raises(validation.ValidationIncompleteError, match="timed out"):
+        validation._run_validation_command(
+            ["nix", "build", "path:.#checks.aarch64-darwin.root-closures"],
+            cwd=tmp_path,
+            timeout=10,
+            run=run,
+            sleep=sleeps.append,
+        )
+    assert sleeps == [0.0]
 
 
 def test_validation_progress_preserves_retry_diagnostics(tmp_path: Path) -> None:

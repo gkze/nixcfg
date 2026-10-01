@@ -535,10 +535,22 @@ def _has_hash_mismatch_signal(output: str) -> bool:
     return any(indicator in output for indicator in _HASH_MISMATCH_INDICATORS)
 
 
+# Legacy Nix says "error: builder for". Determinate Nix v3 says
+# "error: Cannot build" / "error: Build failed due to failed dependency".
+# Bare "Reason:" and "Output paths:" are log noise, not failure evidence.
+_PERMANENT_BUILD_FAILURE_MARKERS = (
+    "error: builder for",
+    "error: cannot build",
+    "error: build failed due to failed dependency",
+)
+
+
 def _nix_output_has_permanent_build_failure(output: str) -> bool:
     """Return whether Nix attributed the output to a derivation, not the store."""
     folded = output.casefold()
-    return "error: builder for" in folded or _has_hash_mismatch_signal(output)
+    return any(
+        marker in folded for marker in _PERMANENT_BUILD_FAILURE_MARKERS
+    ) or _has_hash_mismatch_signal(output)
 
 
 def is_retryable_nix_network_failure(*, stdout: str, stderr: str) -> bool:
@@ -577,8 +589,10 @@ def is_transient_store_interruption(text: str) -> bool:
     """Return whether validation stopped on a runner store fault.
 
     Hosted macOS jobs lose the store mid-build (``Illegal byte sequence`` or
-    SIGBUS). A hash mismatch or ``error: builder for`` in the same output is a
-    derivation failure and must not continue as if the store had only faulted.
+    SIGBUS). A hash mismatch or a derivation failure in the same output
+    (``error: builder for``, ``error: Cannot build``, or
+    ``error: Build failed due to failed dependency``) must not continue as if
+    the store had only faulted.
     """
     if _nix_output_has_permanent_build_failure(text):
         return False

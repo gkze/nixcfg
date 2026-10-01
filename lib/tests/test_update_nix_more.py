@@ -243,6 +243,24 @@ def test_retryable_fixed_output_hash_failure_classification() -> None:
     assert not is_transient_store_interruption(
         "error: builder for '/nix/store/abc.drv' failed\nterminated by signal 10"
     )
+    cannot_build = (
+        "error: Cannot build '/nix/store/abc.drv'.\n"
+        "Reason: builder failed with exit code 1.\n"
+        'error: cannot unlink "/nix/store/abc.tgz": Illegal byte sequence'
+    )
+    assert not is_retryable_nix_store_failure(stdout="", stderr=cannot_build)
+    assert not is_transient_store_interruption(cannot_build)
+    assert not is_transient_store_interruption(
+        "error: Cannot build '/nix/store/abc.drv'.\nterminated by signal 10"
+    )
+    assert not is_transient_store_interruption(
+        "error: Build failed due to failed dependency\n"
+        "Illegal byte sequence\n"
+        "terminated by signal 10"
+    )
+    assert is_transient_store_interruption(
+        "Reason: builder failed\nOutput paths:\nIllegal byte sequence"
+    )
 
 
 def test_emit_sri_hash_from_build_result_paths(monkeypatch: pytest.MonkeyPatch) -> None:

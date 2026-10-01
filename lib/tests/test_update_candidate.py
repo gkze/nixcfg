@@ -623,6 +623,17 @@ def test_closure_yield_continues_after_store_unlink_only(
         installable="path:.#checks.aarch64-darwin.root-closures",
         message="error: builder for '/nix/store/abc.drv' failed with exit code 1",
     )
+    current_nix_failure = DerivationValidationFailure(
+        source="root-closures",
+        installable="path:.#checks.aarch64-darwin.root-closures",
+        message=(
+            "error: Cannot build '/nix/store/abc.drv'.\n"
+            "Reason: builder failed with exit code 1.\n"
+            "error: Build failed due to failed dependency\n"
+            'error: cannot unlink "/nix/store/abc.tgz": Illegal byte sequence\n'
+            "terminated by signal 10"
+        ),
+    )
 
     def only_store(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
         return (store_failure,)
@@ -652,6 +663,15 @@ def test_closure_yield_continues_after_store_unlink_only(
     assert mixed_result.exit_code == 1
     written = json.loads(output.read_text())
     assert len(written["failures"]) == 2
+    output.unlink()
+
+    def current_nix(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
+        return (current_nix_failure,)
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", current_nix)
+    current = CliRunner().invoke(pipeline.app, args)
+    assert current.exit_code == 1
+    assert len(json.loads(output.read_text())["failures"]) == 1
     output.unlink()
 
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", only_store)

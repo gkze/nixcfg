@@ -114,6 +114,10 @@ ROOT_CLOSURE_VALIDATION_TIMEOUT_SECONDS = 6 * 60 * 60
 _VALIDATION_MAX_ATTEMPTS = 3
 _VALIDATION_INDIVIDUAL_THRESHOLD = 4
 _VALIDATION_RETRY_BACKOFF_SECONDS = 1.0
+# A command that has barely started keeps the caller's exact timeout, including
+# an explicit zero. A later store-fault retry is outside this window and gets
+# only the time still left.
+_FULL_BUDGET_SLACK_SECONDS = 1.0
 _VALIDATION_DIAGNOSTIC_LIMIT = 16 * 1024
 _SIMPLE_ATTRIBUTE_PATH = re.compile(
     r"[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)+"
@@ -491,6 +495,34 @@ def _retryable_validation_output(result: _RunResult) -> bool:
     )
 
 
+def _timeout_for_attempt(
+    *,
+    args: list[str],
+    timeout: float,
+    deadline: float,
+) -> float:
+    """Return the process timeout that still fits *deadline*.
+
+    A fresh budget, including an explicit zero, is returned unchanged so the
+    process timeout stays the caller's value. Time already spent past that
+    slack raises ``TimeoutExpired`` instead of starting another full build.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining + _FULL_BUDGET_SLACK_SECONDS >= timeout:
+        return timeout
+    if remaining <= 0:
+        raise subprocess.TimeoutExpired(args, timeout)
+    return remaining
+
+
+def _retry_backoff(attempt: int, deadline: float | None) -> float:
+    """Sleep the retry delay, but not past a shared build deadline."""
+    backoff = _VALIDATION_RETRY_BACKOFF_SECONDS * (2**attempt)
+    if deadline is None:
+        return backoff
+    return min(backoff, max(0.0, deadline - time.monotonic()))
+
+
 def _run_validation_command_impl(
     args: list[str],
     *,
@@ -501,11 +533,34 @@ def _run_validation_command_impl(
     max_attempts: int = _VALIDATION_MAX_ATTEMPTS,
     progress: ValidationProgress | None = None,
     check_cancelled: ValidationCancellationCheck = _ignore_validation_cancellation,
+    deadline: float | None = None,
 ) -> _RunResult:
-    """Run once for deterministic failures and retry transient Nix I/O failures."""
+    """Run once for deterministic failures and retry transient Nix I/O failures.
+
+    *timeout* ``None`` stays unbounded. Otherwise every attempt stops at one
+    monotonic deadline, so a late store fault cannot restart the full budget.
+    """
     command = shlex.join(args)
+    if timeout is None:
+        # Local and unbounded validation retries without a wall-clock budget.
+        bounded_timeout = None
+        active_deadline = None
+    else:
+        bounded_timeout = timeout
+        active_deadline = (
+            time.monotonic() + timeout if deadline is None else deadline
+        )
     for attempt in range(max_attempts):
         check_cancelled()
+        attempt_timeout = (
+            None
+            if bounded_timeout is None
+            else _timeout_for_attempt(
+                args=args,
+                timeout=bounded_timeout,
+                deadline=cast("float", active_deadline),
+            )
+        )
         if progress is not None:
             progress(ValidationCommandStarted(command))
         succeeded = False
@@ -517,13 +572,13 @@ def _run_validation_command_impl(
                     text=True,
                     capture_output=True,
                     check=False,
-                    timeout=timeout,
+                    timeout=attempt_timeout,
                 )
             else:
                 result = _run_with_validation_progress(
                     args,
                     cwd=cwd,
-                    timeout=timeout,
+                    timeout=attempt_timeout,
                     run=run,
                     progress=progress,
                     check_cancelled=check_cancelled,
@@ -558,7 +613,7 @@ def _run_validation_command_impl(
             progress(
                 f"Retrying transient Nix failure (attempt {attempt + 2}/{max_attempts})"
             )
-        sleep(_VALIDATION_RETRY_BACKOFF_SECONDS * (2**attempt))
+        sleep(_retry_backoff(attempt, active_deadline))
     raise AssertionError  # pragma: no cover -- finite loop always returns
 
 
@@ -572,6 +627,7 @@ def _run_validation_command(
     max_attempts: int = _VALIDATION_MAX_ATTEMPTS,
     progress: ValidationProgress | None = None,
     check_cancelled: ValidationCancellationCheck = _ignore_validation_cancellation,
+    deadline: float | None = None,
 ) -> _RunResult:
     """Measure validation independently from candidate hash preparation."""
     with measure("validation", args[1]) as timing:
@@ -585,6 +641,7 @@ def _run_validation_command(
                 max_attempts=max_attempts,
                 progress=progress,
                 check_cancelled=check_cancelled,
+                deadline=deadline,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             error = _incomplete_validation_error(
@@ -766,6 +823,7 @@ def validate_derivation_requests(
     print_build_logs: bool = False,
     max_eval_workers: int = 1,
     max_build_workers: int = 1,
+    deadline: float | None = None,
 ) -> tuple[DerivationValidationFailure, ...]:
     """Batch snapshot validations, retaining individual failure diagnostics.
 
@@ -777,6 +835,10 @@ def validate_derivation_requests(
     Groups are independent read-only commands over one immutable snapshot, so
     eval groups run up to *max_eval_workers* at a time and build groups up to
     *max_build_workers*; one worker keeps the historical sequential behavior.
+    *deadline* is a monotonic timestamp shared by every command in this call.
+    Closure shards pass one build deadline so isolation and later dependencies
+    cannot restart *timeout*. Callers that omit it give each command its own
+    budget.
     """
     runner = run
     sleeper = time.sleep if sleep is None else sleep
@@ -821,6 +883,7 @@ def validate_derivation_requests(
             max_attempts=1,
             progress=guarded_progress,
             check_cancelled=check_group_cancelled,
+            deadline=deadline,
         )
         return result.returncode == 0
 
@@ -836,6 +899,7 @@ def validate_derivation_requests(
                 progress=guarded_progress,
                 check_cancelled=check_group_cancelled,
                 print_build_logs=print_build_logs,
+                deadline=deadline,
             )
             if failure is not None:
                 failures[index] = failure
@@ -899,6 +963,7 @@ def _run_single_validation(
     progress: ValidationProgress | None,
     check_cancelled: ValidationCancellationCheck,
     print_build_logs: bool,
+    deadline: float | None = None,
 ) -> DerivationValidationFailure | None:
     """Validate one request individually and return its failure, if any."""
     result = _run_validation_command(
@@ -913,6 +978,7 @@ def _run_single_validation(
         sleep=sleep,
         progress=progress,
         check_cancelled=check_cancelled,
+        deadline=deadline,
     )
     if result.returncode == 0:
         return None
@@ -1178,9 +1244,16 @@ def validate_root_closures(
                 )
                 + requests
             )
+        # Discovery above keeps root_timeout. The build budget starts here, so
+        # a slow manifest eval does not consume the shard's realization time,
+        # and later dependency builds cannot restart it.
+        build_deadline = (
+            None if build_limit is None else time.monotonic() + build_limit
+        )
         return validate_derivation_requests(
             requests,
             timeout=build_limit,
+            deadline=build_deadline,
             run=runner,
             flake_root=snapshot_root,
             sleep=sleeper,
