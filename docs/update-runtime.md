@@ -105,12 +105,16 @@ goose bump rebuilds `goose-cli-v8-native` from source on hosted macos-15
 Use `nixcfg update goose-cli` to retry explicitly; remove the holds once that
 derivation is in the `gkze` cache.
 
-Hosted Darwin validation GCs the Nix store, then builds native
-`root-closures`. That check is 4000+ derivations and ~60 GiB. Per-derivation
-`-L` logs killed the macos-15 job after image cleanup (~160 GB free) and store
-GC, so that build omits `-L`. The Cachix daemon still uploads each realized
-path, and command progress stays on the job log. `min-free` / `max-free` stay
-at 32 / 64 GiB.
+Hosted Darwin validation builds native `root-closures` in continuation shards.
+Run 36672202468 showed why one job cannot: after a ~17-minute fetch burst the
+tail started about six derivations a minute, with thousands still queued when
+the 360-minute cap cancelled the job. Package validation had already used the
+first half of that same job, and a store GC between the two phases deleted
+outputs the closure then had to rebuild. Shards keep package validation off
+that budget. Each closure shard builds for five hours without `-L`, flushes
+the Cachix daemon, and the next shard substitutes what landed in `gkze`.
+`min-free` / `max-free` stay at 32 / 64 GiB, and `max-jobs` / `cores` stay at
+2: the hosted runner was already keeping both build slots busy on that tail.
 
 Each update invocation owns its concurrency limits, shared work, and timings.
 There are no process-global build semaphores tied to a previous event loop.

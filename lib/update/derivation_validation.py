@@ -1048,13 +1048,20 @@ def validate_root_closures(
     progress: ValidationProgress | None = None,
     check_cancelled: ValidationCancellationCheck = _ignore_validation_cancellation,
     print_build_logs: bool = False,
+    build_timeout: float | None = None,
 ) -> tuple[DerivationValidationFailure, ...]:
-    """Build roots with a six-hour default or the caller's per-process bound."""
+    """Build roots with a six-hour default or the caller's per-process bound.
+
+    *build_timeout* limits only the realization commands. Discovery keeps
+    *timeout*, so a continuation shard can stop the build and still flush
+    uploads without shortening manifest evaluation to the same budget.
+    """
     runner = run
     sleeper = time.sleep if sleep is None else sleep
     root_timeout = (
         ROOT_CLOSURE_VALIDATION_TIMEOUT_SECONDS if timeout is None else timeout
     )
+    build_limit = root_timeout if build_timeout is None else build_timeout
     snapshot = (
         update_persistence.visible_source_snapshot(get_repo_root())
         if flake_root is None
@@ -1150,7 +1157,7 @@ def validate_root_closures(
             )
         return validate_derivation_requests(
             requests,
-            timeout=root_timeout,
+            timeout=build_limit,
             run=runner,
             flake_root=snapshot_root,
             sleep=sleeper,

@@ -14,7 +14,17 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    Preparation is sequential because updaters can share generated files. Dependent
    updaters recompute metadata from their pinned prerequisites.
 2. Validate the final identical tree on all three native builders. The two Linux
-   validators run in parallel and finish their Cachix uploads before Darwin starts.
+   validators and Darwin package validation run in parallel after preparation.
+   Darwin root-closure shards start only after both Linux validators finish, so
+   the Linux VM image is already in `gkze`. Package evidence and closure evidence
+   are separate reports; certification requires both gates for every system.
+   One hosted macOS job cannot realize `checks.aarch64-darwin.root-closures`
+   inside the 360-minute job cap, so that build is a chain of shards. Each shard
+   builds for five hours, the Cachix daemon flushes, and the next shard
+   substitutes those paths and continues. The last shard does not yield: an
+   unfinished closure fails the run. Every declared package platform and every
+   native root is still built. Shards are serial because the closure's slow
+   graph is shared; parallel host builds would repeat it.
    Each builder evaluates every declared package platform, builds native package
    validations, and builds its roots from the independently checked root manifest.
    Nix's recursive derivation graph supplies native dependencies of foreign roots,
@@ -103,9 +113,10 @@ fail the job. Unused Xcode and simulator trees still fail closed.
 Android, .NET and unused Linux compiler libraries are removed
 where present. The step refuses local or self-hosted execution and logs available
 space before and after cleanup. This matters because the measured Darwin root
-closure alone occupies about 73.5 GB. Hosted Darwin GCs the store after
-package validation, then builds native `root-closures` without per-derivation
-`-L` logs. The Cachix daemon uploads each realized path. Publish quality also
+closure alone occupies about 73.5 GB. A combined hosted Darwin job still GCs
+the store between package validation and `root-closures`. Split shards do not:
+each closure runner starts empty and reuses paths from `gkze`. That build omits
+per-derivation `-L` logs. The Cachix daemon uploads each realized path. Publish quality also
 runs on macos-15, and CLI help assertions must survive Rich's hosted TTY
 geometry. Runner capacity remains an acceptance check for local Darwin.
 

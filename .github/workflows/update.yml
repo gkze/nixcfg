@@ -79,7 +79,23 @@ jobs:
       stage: validate
       previous: prepare-x86_64-linux
     secrets: inherit
-  validate-darwin:
+  # Package validation does not need the Linux VM image, so it overlaps the
+  # Linux validators. The closure does need that image in gkze first.
+  validate-darwin-packages:
+    needs: prepare-x86
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: packages
+    secrets: inherit
+  # One macos-15 job cannot both validate every package and realize
+  # checks.aarch64-darwin.root-closures inside GitHub's 360-minute cap.
+  # Each shard builds until its budget, the Cachix daemon flushes, and the
+  # next shard substitutes those paths. The last shard fails closed.
+  validate-darwin-closures:
     needs: [validate-arm, validate-x86]
     uses: ./.github/workflows/update-native.yml
     with:
@@ -87,9 +103,79 @@ jobs:
       system: aarch64-darwin
       stage: validate
       previous: prepare-x86_64-linux
+      scope: closures
+      closure_budget_seconds: "18000"
+      closure_yield: true
+    secrets: inherit
+  validate-darwin-closures-2:
+    needs: validate-darwin-closures
+    if: >-
+      always() && !cancelled() &&
+      needs.validate-darwin-closures.result == 'success' &&
+      needs.validate-darwin-closures.outputs.closure_complete == 'false'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: closures
+      closure_budget_seconds: "18000"
+      closure_yield: true
+    secrets: inherit
+  validate-darwin-closures-3:
+    needs: validate-darwin-closures-2
+    if: >-
+      always() && !cancelled() &&
+      needs.validate-darwin-closures-2.result == 'success' &&
+      needs.validate-darwin-closures-2.outputs.closure_complete == 'false'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: closures
+      closure_budget_seconds: "18000"
+      closure_yield: true
+    secrets: inherit
+  validate-darwin-closures-4:
+    needs: validate-darwin-closures-3
+    if: >-
+      always() && !cancelled() &&
+      needs.validate-darwin-closures-3.result == 'success' &&
+      needs.validate-darwin-closures-3.outputs.closure_complete == 'false'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: closures
+      closure_budget_seconds: "18000"
     secrets: inherit
   publish:
-    needs: [validate-arm, validate-x86, validate-darwin]
+    needs:
+      - validate-arm
+      - validate-x86
+      - validate-darwin-packages
+      - validate-darwin-closures
+      - validate-darwin-closures-2
+      - validate-darwin-closures-3
+      - validate-darwin-closures-4
+    if: >-
+      always() && !cancelled() &&
+      needs.validate-arm.result == 'success' &&
+      needs.validate-x86.result == 'success' &&
+      needs.validate-darwin-packages.result == 'success' &&
+      (needs.validate-darwin-closures.result == 'success' &&
+      needs.validate-darwin-closures.outputs.closure_complete == 'true' ||
+      needs.validate-darwin-closures-2.result == 'success' &&
+      needs.validate-darwin-closures-2.outputs.closure_complete == 'true' ||
+      needs.validate-darwin-closures-3.result == 'success' &&
+      needs.validate-darwin-closures-3.outputs.closure_complete == 'true' ||
+      needs.validate-darwin-closures-4.result == 'success' &&
+      needs.validate-darwin-closures-4.outputs.closure_complete == 'true')
     # The Python suite and its 100% coverage floor are maintained on Darwin.
     runs-on: macos-15
     timeout-minutes: 120
@@ -145,7 +231,11 @@ jobs:
       - prepare-x86
       - validate-arm
       - validate-x86
-      - validate-darwin
+      - validate-darwin-packages
+      - validate-darwin-closures
+      - validate-darwin-closures-2
+      - validate-darwin-closures-3
+      - validate-darwin-closures-4
       - publish
     if: |-
       always() && !cancelled() && contains(needs.*.result, 'failure') &&

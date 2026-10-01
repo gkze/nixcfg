@@ -18,6 +18,7 @@ from typer.testing import CliRunner
 from lib.system_policy import supported_systems
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
 from lib.update.candidate import git
+from lib.update.ci import candidate as pipeline
 from lib.update.ci import jobs
 from lib.update.ci.candidate import app
 
@@ -169,6 +170,107 @@ def test_native_job_keeps_evidence_and_propagates_failure(
     else:
         assert "Updater failed" not in result.stderr
     assert (checkout / "flake.lock").read_text() == "baseline"
+
+
+def test_closure_shard_yield_continues_without_certifying(native_job) -> None:
+    """A budget exit hands realized paths to the next shard and is not success of the closure."""
+    env, checkout = native_job
+    env |= {
+        "GITHUB_OUTPUT": str(Path(env["RUNNER_TEMP"]) / "github-output"),
+        "NIXCFG_CI_STAGE": "validate",
+        "NIXCFG_PREVIOUS_CANDIDATE": "/candidate from previous job.json",
+        "NIXCFG_VALIDATE_SCOPE": "closures",
+        "NIXCFG_CLOSURE_BUDGET_SECONDS": "18000",
+        "NIXCFG_CLOSURE_YIELD": "true",
+        "TEST_EXIT": str(jobs._CLOSURE_YIELD_EXIT),
+    }
+    result = invoke(env, checkout)
+    assert jobs._CLOSURE_YIELD_EXIT == pipeline.CLOSURE_YIELD_EXIT
+    assert result.returncode == 0, result.stderr
+    assert Path(env["GITHUB_OUTPUT"]).read_text() == "closure_complete=false\n"
+    assert "next shard continues from Cachix" in result.stderr
+    args = json.loads(Path(env["TEST_LOG"]).read_text())
+    assert args[args.index("--scope") + 1] == "closures"
+    assert args[args.index("--closure-budget-seconds") + 1] == "18000"
+    assert args[-1] == "--closure-yield"
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "yield_requested"),
+    [(0, True), (1, True), (0, False)],
+)
+def test_finished_closure_shard_does_not_request_another(
+    native_job, exit_code: int, yield_requested: bool
+) -> None:
+    """A finished closure build, including one with derivation failures, stops the chain."""
+    env, checkout = native_job
+    env |= {
+        "GITHUB_OUTPUT": str(Path(env["RUNNER_TEMP"]) / "github-output"),
+        "NIXCFG_CI_STAGE": "validate",
+        "NIXCFG_PREVIOUS_CANDIDATE": "/candidate from previous job.json",
+        "NIXCFG_VALIDATE_SCOPE": "closures",
+        "NIXCFG_CLOSURE_BUDGET_SECONDS": "18000",
+        "TEST_EXIT": str(exit_code),
+    }
+    if yield_requested:
+        env["NIXCFG_CLOSURE_YIELD"] = "true"
+    result = invoke(env, checkout)
+    assert result.returncode == exit_code, result.stderr
+    assert Path(env["GITHUB_OUTPUT"]).read_text() == "closure_complete=true\n"
+    assert "next shard" not in result.stderr
+    args = json.loads(Path(env["TEST_LOG"]).read_text())
+    assert ("--closure-yield" in args) is yield_requested
+
+
+def test_native_adapter_rejects_a_miswired_closure_shard(
+    native_job, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Continuation is only valid for a closure scope with a finite positive budget."""
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("NIXCFG_PREVIOUS_CANDIDATE", "/previous candidate")
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "nope")
+    with pytest.raises(ValueError, match="scope"):
+        jobs.main("native-validate")
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "packages")
+    monkeypatch.setenv("NIXCFG_CLOSURE_BUDGET_SECONDS", "18000")
+    with pytest.raises(ValueError, match="budget"):
+        jobs.main("native-validate")
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "closures")
+    monkeypatch.setenv("NIXCFG_CLOSURE_BUDGET_SECONDS", "nope")
+    with pytest.raises(ValueError, match="budget"):
+        jobs.main("native-validate")
+    monkeypatch.setenv("NIXCFG_CLOSURE_BUDGET_SECONDS", "inf")
+    with pytest.raises(ValueError, match="budget"):
+        jobs.main("native-validate")
+    monkeypatch.setenv("NIXCFG_CLOSURE_BUDGET_SECONDS", "0")
+    with pytest.raises(ValueError, match="budget"):
+        jobs.main("native-validate")
+    monkeypatch.setenv("NIXCFG_CLOSURE_BUDGET_SECONDS", "")
+    monkeypatch.setenv("NIXCFG_CLOSURE_YIELD", "true")
+    with pytest.raises(ValueError, match="yield"):
+        jobs.main("native-validate")
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "all")
+    monkeypatch.setenv("NIXCFG_CLOSURE_BUDGET_SECONDS", "18000")
+    with pytest.raises(ValueError, match="yield"):
+        jobs.main("native-validate")
+    output = Path(env["RUNNER_TEMP"]) / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "closures")
+    monkeypatch.setenv("NIXCFG_CLOSURE_YIELD", "true")
+    monkeypatch.setenv("TEST_EXIT", str(jobs._CLOSURE_YIELD_EXIT))
+    assert jobs.main("native-validate") == 0
+    assert output.read_text() == "closure_complete=false\n"
+    output.unlink()
+    monkeypatch.setenv("TEST_EXIT", "0")
+    assert jobs.main("native-validate") == 0
+    assert output.read_text() == "closure_complete=true\n"
+    output.unlink()
+    monkeypatch.delenv("NIXCFG_CLOSURE_YIELD")
+    assert jobs.main("native-validate") == 0
+    assert output.read_text() == "closure_complete=true\n"
 
 
 def test_native_job_forwards_diagnostics_before_the_updater_exits(native_job) -> None:
@@ -529,6 +631,59 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
         step["env"]["NIXCFG_VALIDATE_ALL_PACKAGES"]
         == "${{ inputs.validate_all_packages }}"
     )
+    assert step["id"] == "candidate"
+    assert step["env"]["NIXCFG_VALIDATE_SCOPE"] == "${{ inputs.scope }}"
+    assert (
+        step["env"]["NIXCFG_CLOSURE_BUDGET_SECONDS"]
+        == "${{ inputs.closure_budget_seconds }}"
+    )
+    assert step["env"]["NIXCFG_CLOSURE_YIELD"] == "${{ inputs.closure_yield }}"
+    assert native["on"]["workflow_call"]["inputs"]["scope"]["default"] == "all"
+    assert (
+        native["on"]["workflow_call"]["outputs"]["closure_complete"]["value"]
+        == "${{ jobs.native.outputs.closure_complete }}"
+    )
+    upload = next(
+        step
+        for step in native["jobs"]["native"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+    )
+    assert "inputs.scope" in upload["with"]["name"]
+
+
+def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
+    """Darwin packages overlap Linux; closure shards continue through Cachix."""
+    packages = workflow_jobs["validate-darwin-packages"]
+    assert packages["needs"] == "prepare-x86"
+    assert packages["with"]["scope"] == "packages"
+    assert set(workflow_jobs["validate-darwin-closures"]["needs"]) == {
+        "validate-arm",
+        "validate-x86",
+    }
+    closure_jobs = (
+        "validate-darwin-closures",
+        "validate-darwin-closures-2",
+        "validate-darwin-closures-3",
+        "validate-darwin-closures-4",
+    )
+    assert len(closure_jobs) == pipeline.HOSTED_DARWIN_CLOSURE_SHARDS
+    budget = str(pipeline.HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS)
+    for name in closure_jobs:
+        spec = workflow_jobs[name]["with"]
+        assert spec["scope"] == "closures"
+        assert spec["closure_budget_seconds"] == budget
+        assert spec["runner"] == "macos-15"
+    for previous, name in pairwise(closure_jobs):
+        assert workflow_jobs[name]["needs"] == previous
+        condition = " ".join(workflow_jobs[name]["if"].split())
+        assert condition.count("closure_complete == 'false'") == 1
+    assert "closure_yield" not in workflow_jobs["validate-darwin-closures-4"]["with"]
+    for name in closure_jobs[:-1]:
+        assert workflow_jobs[name]["with"]["closure_yield"] == "true"
+    publish_if = " ".join(workflow_jobs["publish"]["if"].split())
+    assert "always() && !cancelled()" in publish_if
+    for name in closure_jobs:
+        assert f"needs.{name}.outputs.closure_complete == 'true'" in publish_if
 
 
 def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
@@ -572,7 +727,7 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         assert job["with"]["stage"] == "validate"
     assert jobs["validate-arm"]["needs"] == preparation[-1][0]
     assert jobs["validate-x86"]["needs"] == preparation[-1][0]
-    assert set(jobs["validate-darwin"]["needs"]) == {"validate-arm", "validate-x86"}
+    _assert_darwin_closure_shards(jobs)
     assert set(jobs["publish"]["needs"]) == set(validators)
     assert set(validators) <= set(jobs["repair"]["needs"])
     assert jobs["repair"]["permissions"] == {

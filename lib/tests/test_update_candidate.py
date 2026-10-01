@@ -23,6 +23,7 @@ from lib.update.derivation_validation import (
     ValidationCommandFinished,
     ValidationCommandOutput,
     ValidationCommandStarted,
+    ValidationIncompleteError,
 )
 from lib.update.persistence import IsolatedUpdateWorkspace
 from lib.update.ui_consumer import consume_events
@@ -426,37 +427,165 @@ def test_native_validation_and_certification(
         pipeline.certified_patch(candidate.model_copy(update={"systems": ()}), reports)
 
 
-def test_hosted_darwin_validation_skips_root_closures(
+def _candidate_for_scope(prepared_run) -> Candidate:
+    root, _, state = prepared_run
+    tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
+    state["system"] = "aarch64-darwin"
+    return Candidate(
+        base_tree=tree,
+        tree=tree,
+        targets=(),
+        sources=(),
+        systems=pipeline.supported_systems(),
+        resolutions={},
+        prepared=True,
+        patch=b"",
+    )
+
+
+def test_validation_scopes_split_packages_from_closures(
     prepared_run, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Hosted macos-15 dies mid-build of 4000+ Darwin root-closure derivations."""
-    _, _, state = prepared_run
-    candidate = None
-    for system in pipeline.supported_systems():
-        state["system"] = system
-        candidate, _ = pipeline.prepare_candidate(("example",), previous=candidate)
-    assert candidate is not None
+    """Package and closure shards do separate work and do not GC a fresh runner."""
+    candidate = _candidate_for_scope(prepared_run)
     order: list[str] = []
-    monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
-    monkeypatch.setattr(pipeline.jobs.sys, "platform", "darwin")
+    seen: list[dict[str, object]] = []
     monkeypatch.setattr(
         pipeline.jobs, "reclaim_hosted_store", lambda: order.append("reclaim")
     )
     monkeypatch.setattr(
         pipeline.validation,
         "validate_derivations",
-        lambda *_args, **_kwargs: (),
+        lambda *_args, **_kwargs: order.append("packages") or (),
     )
+
+    def roots(**kwargs):
+        order.append("roots")
+        seen.append(kwargs)
+        return ()
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
+    packages = pipeline.validate_candidate(candidate, scope="packages")
+    assert packages.gates == ("packages",)
+    assert order == ["packages"]
+    closures = pipeline.validate_candidate(
+        candidate,
+        scope="closures",
+        closure_budget_seconds=pipeline.HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS,
+    )
+    assert closures.gates == ("closures",)
+    assert order == ["packages", "roots"]
+    assert seen[0]["build_timeout"] == (
+        pipeline.HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS
+    )
+    assert seen[0]["timeout"] == pipeline._CLOSURE_DISCOVERY_TIMEOUT_SECONDS
+    others = [
+        pipeline.ValidationReport(
+            tree=candidate.tree,
+            system=system,
+            failures=(),
+        )
+        for system in pipeline.supported_systems()
+        if system != packages.system
+    ]
+    assert (
+        pipeline.certified_patch(candidate, [packages, closures, *others])
+        == candidate.patch
+    )
+    with pytest.raises(ValueError, match="Validation reports"):
+        pipeline.certified_patch(candidate, [packages, *others])
+    with pytest.raises(ValueError, match="Validation reports"):
+        pipeline.certified_patch(candidate, [packages, packages, closures, *others])
+    with pytest.raises(ValueError, match="Unknown validation scope"):
+        pipeline.validate_candidate(candidate, scope="neither")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="positive"):
+        pipeline.validate_candidate(candidate, closure_budget_seconds=0)
+    with pytest.raises(ValueError, match="positive"):
+        pipeline.validate_candidate(candidate, closure_budget_seconds=float("nan"))
+    with pytest.raises(TypeError, match="positive"):
+        pipeline._require_closure_budget("18000")  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="positive"):
+        pipeline._require_closure_budget(seconds=True)  # type: ignore[arg-type]
+
+
+def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a timed-out closure build continues; signals and eval timeouts fail the shard."""
+    candidate = _candidate_for_scope(prepared_run)
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    output = tmp_path / "validation.json"
     monkeypatch.setattr(
-        pipeline.validation,
-        "validate_root_closures",
-        lambda **_kwargs: order.append("roots") or (),
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
     )
-    state["system"] = "aarch64-darwin"
-    report = pipeline.validate_candidate(candidate)
-    assert report.failures == ()
-    assert order == ["reclaim"]
+
+    def timed_out(**_kwargs: object) -> None:
+        raise ValidationIncompleteError(
+            "Validation incomplete: nix build path:.#checks.aarch64-darwin.root-closures: "
+            "Command timed out after 18000 seconds"
+        )
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", timed_out)
+    args = [
+        "validate",
+        "--candidate",
+        str(candidate_path),
+        "--output",
+        str(output),
+        "--scope",
+        "closures",
+        "--closure-budget-seconds",
+        "18000",
+        "--closure-yield",
+    ]
+    yielded = CliRunner().invoke(pipeline.app, args)
+    assert yielded.exit_code == pipeline.CLOSURE_YIELD_EXIT
+    assert not output.exists()
+
+    def eval_timed_out(**_kwargs: object) -> None:
+        raise ValidationIncompleteError(
+            "Validation incomplete: nix eval path:.#lib.rootClosureManifest: "
+            "Command timed out after 2700 seconds"
+        )
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", eval_timed_out)
+    stalled = CliRunner().invoke(pipeline.app, args)
+    assert stalled.exit_code not in {0, pipeline.CLOSURE_YIELD_EXIT}
+    assert not output.exists()
+
+    def signaled(**_kwargs: object) -> None:
+        raise ValidationIncompleteError(
+            "Validation incomplete: nix build: terminated by signal 15"
+        )
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", signaled)
+    killed = CliRunner().invoke(pipeline.app, args)
+    assert killed.exit_code not in {0, pipeline.CLOSURE_YIELD_EXIT}
+    base = [
+        "validate",
+        "--candidate",
+        str(candidate_path),
+        "--output",
+        str(output),
+    ]
+    missing_budget = CliRunner().invoke(
+        pipeline.app,
+        [*base, "--scope", "closures", "--closure-yield"],
+    )
+    assert missing_budget.exit_code != 0
+    package_yield = CliRunner().invoke(
+        pipeline.app,
+        [
+            *base,
+            "--scope",
+            "packages",
+            "--closure-budget-seconds",
+            "18000",
+            "--closure-yield",
+        ],
+    )
+    assert package_yield.exit_code != 0
 
 
 def test_prepare_command_exports_failure_evidence_outside_checkout(

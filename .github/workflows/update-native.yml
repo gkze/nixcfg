@@ -21,6 +21,22 @@ on:
       targets:
         default: ""
         type: string
+      scope:
+        description: Package gate, closure gate, or both
+        default: all
+        type: string
+      closure_budget_seconds:
+        description: Stop the root-closure build after this many seconds
+        default: ""
+        type: string
+      closure_yield:
+        description: Succeed when the closure budget is exhausted so the next shard can continue
+        default: false
+        type: boolean
+    outputs:
+      closure_complete:
+        description: Whether this shard realized the native root closure
+        value: ${{ jobs.native.outputs.closure_complete }}
     secrets:
       UPDATE_SELF_HEAL_GITHUB_TOKEN:
         required: true
@@ -32,6 +48,8 @@ jobs:
   native:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 360
+    outputs:
+      closure_complete: ${{ steps.candidate.outputs.closure_complete }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -48,11 +66,15 @@ jobs:
           name: ${{ inputs.previous }}
           path: ${{ runner.temp }}/previous
       - name: Prepare or validate candidate
+        id: candidate
         env:
           NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
           NIXCFG_UPDATE_TARGETS: ${{ inputs.targets }}
           NIXCFG_VALIDATE_ALL_PACKAGES: ${{ inputs.validate_all_packages }}
+          NIXCFG_VALIDATE_SCOPE: ${{ inputs.scope }}
+          NIXCFG_CLOSURE_BUDGET_SECONDS: ${{ inputs.closure_budget_seconds }}
+          NIXCFG_CLOSURE_YIELD: ${{ inputs.closure_yield }}
           NIXCFG_PREVIOUS_CANDIDATE: |-
             ${{ inputs.previous != '' &&
             format('{0}/previous/candidate.json', runner.temp) || '' }}
@@ -66,7 +88,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: ${{ inputs.stage }}-${{ inputs.system }}
+          name: ${{ inputs.scope == 'all' && format('{0}-{1}', inputs.stage, inputs.system) || format('{0}-{1}-{2}', inputs.stage, inputs.system, inputs.scope) }}
           path: ${{ runner.temp }}/update-artifacts
           if-no-files-found: warn
           overwrite: true

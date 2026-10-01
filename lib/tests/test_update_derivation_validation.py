@@ -467,6 +467,49 @@ def test_validate_root_closures_builds_flake_owned_aggregate(
     )
 
 
+def test_root_closure_build_budget_does_not_shorten_discovery(
+    tmp_path: Path,
+) -> None:
+    """Continuation shards bound realization separately from manifest discovery."""
+    timeouts: list[tuple[str, float | None]] = []
+
+    def _run(
+        args: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        timeouts.append((args[1], kwargs["timeout"]))  # type: ignore[arg-type]
+        if args[:2] == ["nix", "eval"]:
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout="""
+                {
+                  "schemaVersion": 2,
+                  "requiredKinds": ["darwin", "home"],
+                  "requiredRoots": [],
+                  "roots": [
+                    {"kind": "darwin", "name": "argus", "system": "aarch64-darwin"},
+                    {"kind": "home", "name": "george", "system": "aarch64-darwin"}
+                  ]
+                }
+                """,
+                stderr="",
+            )
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    assert (
+        validation.validate_root_closures(
+            flake_root=tmp_path,
+            systems=("aarch64-darwin",),
+            timeout=42,
+            build_timeout=7,
+            run=_run,
+        )
+        == ()
+    )
+    assert timeouts == [("eval", 42), ("build", 7)]
+
+
 @pytest.fixture
 def native_root_graph(tmp_path) -> tuple:
     """Model the actual Darwin -> Linux VM boundary at the Nix process seam."""

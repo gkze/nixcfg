@@ -6,6 +6,7 @@ directly; Actions owns the job graph.
 """
 
 import json
+import math
 import os
 import queue
 import shutil
@@ -17,6 +18,10 @@ from pathlib import Path
 from typing import TextIO
 
 _BINARY_CACHE = "gkze"
+# lib.update.ci.candidate.CLOSURE_YIELD_EXIT. Kept literal so this launcher
+# stays importable on the hosted image before the project runtime exists.
+_CLOSURE_YIELD_EXIT = 75
+_VALIDATION_SCOPES = frozenset({"all", "packages", "closures"})
 _HEARTBEAT_INTERVAL_SECONDS = 60
 _OUTPUT_LOG_NAME = "output.log"
 _APPLICATIONS = Path("/Applications")
@@ -53,6 +58,15 @@ def _temp() -> Path:
 
 def _runtime() -> str:
     return str(Path(os.environ["NIXCFG_RUNTIME"]) / "bin/nixcfg")
+
+
+def _is_positive_number(value: str) -> bool:
+    """Return whether *value* is a finite number of seconds greater than zero."""
+    try:
+        number = float(value)
+    except ValueError:
+        return False
+    return math.isfinite(number) and number > 0
 
 
 def _outputs(**values: str) -> None:
@@ -363,12 +377,54 @@ def _push_prefetched_paths(paths: list[str], log: TextIO, artifacts: Path) -> No
         raise subprocess.CalledProcessError(returncode, args)
 
 
+def _append_validation_scope(args: list[str]) -> str:
+    """Add shard flags and return the scope the hosted job requested."""
+    scope = os.environ.get("NIXCFG_VALIDATE_SCOPE", "all")
+    if scope not in _VALIDATION_SCOPES:
+        msg = "Validation scope must be all, packages, or closures"
+        raise ValueError(msg)
+    if scope != "all":
+        args.extend(("--scope", scope))
+    budget = os.environ.get("NIXCFG_CLOSURE_BUDGET_SECONDS", "")
+    yield_on_budget = os.environ.get("NIXCFG_CLOSURE_YIELD") == "true"
+    if budget and (scope == "packages" or not _is_positive_number(budget)):
+        msg = "Closure budget must be a positive number of seconds on a closure validation"
+        raise ValueError(msg)
+    if yield_on_budget and (scope != "closures" or not budget):
+        msg = "Closure yield requires a closure scope and budget"
+        raise ValueError(msg)
+    if budget:
+        args.extend(("--closure-budget-seconds", budget))
+    if yield_on_budget:
+        args.append("--closure-yield")
+    return scope
+
+
+def _finish_closure_shard(scope: str, returncode: int, log: TextIO) -> int:
+    """Record whether this shard realized the closure, and continue only on its budget."""
+    yielded = (
+        scope == "closures"
+        and os.environ.get("NIXCFG_CLOSURE_YIELD") == "true"
+        and returncode == _CLOSURE_YIELD_EXIT
+    )
+    if scope == "closures":
+        _outputs(closure_complete="false" if yielded else "true")
+    if yielded:
+        _write_diagnostic(
+            log,
+            "Closure build budget exhausted; the next shard continues from Cachix",
+        )
+        return 0
+    return returncode
+
+
 def native(stage: str) -> int:
     """Prepare or validate with immutable inputs and retained failure evidence."""
     artifacts = _temp() / "update-artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
     args = [_runtime(), "ci", "update", stage]
     previous = os.environ.get("NIXCFG_PREVIOUS_CANDIDATE", "")
+    scope = "all"
     if stage == "prepare":
         args.extend(("--output", str(artifacts / "candidate.json")))
         if previous:
@@ -396,6 +452,7 @@ def native(stage: str) -> int:
             "--output",
             str(artifacts / "validation.json"),
         ))
+        scope = _append_validation_scope(args)
     receipts = artifacts / "prefetch-receipts.jsonl"
     with (
         (artifacts / "result.json").open("w") as output,
@@ -427,7 +484,7 @@ def native(stage: str) -> int:
             _write_diagnostic(log, f"Collected {len(paths)} prefetched store paths")
             if paths:
                 _push_prefetched_paths(paths, log, artifacts)
-    return returncode
+        return _finish_closure_shard(scope, returncode, log)
 
 
 def certify() -> None:
