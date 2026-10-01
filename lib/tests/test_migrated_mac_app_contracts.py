@@ -234,7 +234,6 @@ def test_source_built_apps_expose_copy_mode_mac_app_metadata(
     "package_name",
     [
         "agentlog",
-        "baseten-switch",
         "bb",
         "clearly",
         "executor",

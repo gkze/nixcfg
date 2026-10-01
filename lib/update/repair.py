@@ -48,24 +48,42 @@ def repair_paths(paths: tuple[Path, ...]) -> tuple[Path, ...]:
     return paths
 
 
-def agent_command(agent: RepairAgent, evidence: Path) -> list[str]:
-    """Give the agent evidence and authority to propose one packaging repair."""
-    prompt = (
+def repair_agent_prompt(evidence: Path) -> str:
+    """Return the one-shot prompt the bounded repair agent must follow."""
+    return (
         f"Fix the updater or package failure recorded in {evidence}. "
         "Work in this isolated repository. Read AGENTS.md and inspect the causal "
         "failure before editing. Make the smallest coherent fix in packages/, "
         "overlays/, flake.nix, flake.lock, or planner/selection coherence in "
         "lib/update/planner.py (and lib/tests/test_update_planner.py). Preserve "
         "platform support, discovery, validation declarations, upstream pin "
-        "intent, and generated-file ownership. Do not bypass validation, weaken "
-        "tests, add holds, suppress errors, change CI, acceptance gates, "
-        "persistence, or other updater-framework files, commit, push, or contact "
-        "anyone. Regenerate outputs through their generators. Add a focused "
-        "package or planner regression test when behavior changes. This is one "
-        "bounded repair attempt; explain an unfixable infrastructure or "
-        "credential failure instead of masking it. The caller will independently "
-        "rerun quality and native build gates."
+        "intent, and generated-file ownership. "
+        "Upstream checkPhase skip is allowed only when ALL of: "
+        "(1) the failure is an upstream package's own tests "
+        "(checkPhase / XCTest / pytest / similar), not compile or link; "
+        "(2) the derivation build itself succeeded before checks; "
+        "(3) the failure is not in George's overlay, app, or home-manager "
+        "module code (wrapping an upstream project in packages/ is OK); "
+        "(4) prefer doCheck = false (or equivalent) pinned to the failing "
+        "version, with a short comment citing the failing test and signal; "
+        "(5) document the skip so it is visible in the change. "
+        "HARD FAIL — do not skip or waive: SIGBUS; hosted runner lost "
+        "communication; store ValidationIncomplete (infra — retry, never "
+        "waive Darwin); compile/link failures; failures in George's own "
+        "overlay/app/home-manager module code; waiving Darwin validation "
+        "entirely. Do not add holds, suppress errors, change CI, acceptance "
+        "gates, persistence, or other updater-framework files, commit, push, "
+        "or contact anyone. Regenerate outputs through their generators. Add "
+        "a focused package or planner regression test when behavior changes. "
+        "This is one bounded repair attempt; explain an unfixable "
+        "infrastructure or credential failure instead of masking it. The "
+        "caller will independently rerun quality and native build gates."
     )
+
+
+def agent_command(agent: RepairAgent, evidence: Path) -> list[str]:
+    """Give the agent evidence and authority to propose one packaging repair."""
+    prompt = repair_agent_prompt(evidence)
     match agent:
         case RepairAgent.CODEX:
             return [

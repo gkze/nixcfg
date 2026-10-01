@@ -348,6 +348,16 @@ phase-consciously. Platform-specific updater guards and crate2nix refreshes run 
 CLI. The GitHub Actions Update workflow uses disposable native builders;
 see `docs/update-ci.md`. Keep execution and promotion semantics in the CLI.
 
+The bounded Update repair agent (`lib/update/repair.py`) may disable
+`checkPhase` only when all of the following are true: the failure is an
+upstream package's own tests (not compile/link); the derivation built
+before checks; the failure is not in George's overlay/app/home-manager
+module code; the skip is `doCheck = false` (or equivalent) pinned to the
+failing version with a comment citing the test and signal; and the skip
+is documented in the change. Never skip SIGBUS, runner-lost-communication,
+store `ValidationIncomplete`, compile/link failures, George's own
+overlay/app/module code, or Darwin validation itself.
+
 ### Working on OpenCode / MCP / profile setup
 
 Keep the reusable OpenCode mechanism in `modules/home/opencode.nix`, George's MCP inventory in

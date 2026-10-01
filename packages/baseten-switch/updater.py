@@ -29,9 +29,9 @@ class BasetenSwitchUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
     supported_platforms = ("aarch64-darwin", "x86_64-darwin")
     bulk_update_hold = (
         "0.6.0's Swift XCTest suite SIGTRAPs on hosted macos-15. "
-        "0.5.1's testUnusableSecondaryReceiptRetainsRecoveryGate also "
+        "0.5.1's testUnsupportedStatusFallsBackWithoutRepeatedProbe "
         "SIGTRAPs (signal 5) on that headless runner after the rest of the "
-        "suite passes, so the package check skips it. Keep 0.5.1 until those "
+        "suite passes, so doCheck is false for 0.5.1. Keep 0.5.1 until those "
         "tests run on a headed Darwin."
     )
     derivation_validations = (
