@@ -127,6 +127,7 @@ let
           /usr/bin/swift test \
             --disable-sandbox \
             --scratch-path "$swift_test_build" \
+            --skip testUnusableSecondaryReceiptRetainsRecoveryGate \
             --skip testRouterWindowContentUsesNonObscuredLayoutGuide
       )
       runHook postCheck

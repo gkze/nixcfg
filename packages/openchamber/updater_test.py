@@ -1061,6 +1061,46 @@ def test_openchamber_patches_v1_upgrade_before_any_side_effect(tmp_path: Path) -
     )
 
 
+def test_openchamber_cli_package_without_v2_updater_keeps_v1_upgrade(
+    tmp_path: Path,
+) -> None:
+    """OpenCode 1.18 has a CLI package and still uses the 1.x upgrade command."""
+    module = _load_patcher_module()
+    sources = {
+        "packages/cli/package.json": '{"name":"@opencode-ai/cli"}\n',
+        "packages/opencode/src/cli/upgrade.ts": (
+            "export async function upgrade() {\n"
+            "  if (config.autoupdate === false || Flag.OPENCODE_DISABLE_AUTOUPDATE) return\n"
+            "}\n"
+        ),
+        "packages/core/src/flag/flag.ts": (
+            '  OPENCODE_DISABLE_AUTOUPDATE: truthy("OPENCODE_DISABLE_AUTOUPDATE"),\n'
+        ),
+        "packages/opencode/src/cli/cmd/upgrade.ts": (
+            "export const UpgradeCommand = {\n"
+            "  handler: async (args: { target?: string; method?: string }) => {\n"
+            "    calls.push(args)\n"
+            "  },\n"
+            "}\n"
+        ),
+    }
+    for relative_path, source in sources.items():
+        path = tmp_path / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+
+    module.patch_component("opencode", tmp_path, check=True)
+    module.patch_component("opencode", tmp_path)
+    patched = (tmp_path / "packages/opencode/src/cli/cmd/upgrade.ts").read_text(
+        encoding="utf-8"
+    )
+    v1_upgrade = next(
+        patch for patch in module._PATCHES if patch.surface == "opencode-cli-upgrade"
+    )
+    assert v1_upgrade.new in patched
+    assert not (tmp_path / "packages/cli/src/services/updater.ts").exists()
+
+
 @pytest.mark.parametrize("service_copies", [0, 1, 2])
 def test_openchamber_v2_upgrade_policy_is_fail_closed(
     tmp_path: Path, service_copies: int
