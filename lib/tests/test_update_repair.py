@@ -34,6 +34,20 @@ def repair_root(tmp_path: Path) -> Path:
     return root
 
 
+def test_repair_agent_prompt_encodes_checkphase_skip_policy() -> None:
+    """The bounded agent must see the approved checkPhase exception and hard fails."""
+    prompt = repair.repair_agent_prompt(Path("/tmp/evidence"))
+    assert "/tmp/evidence" in prompt
+    assert "doCheck = false" in prompt
+    assert "checkPhase" in prompt
+    assert "XCTest" in prompt
+    assert "never waive Darwin" in prompt
+    assert "SIGBUS" in prompt
+    assert "ValidationIncomplete" in prompt
+    assert "hosted runner lost communication" in prompt
+    assert "one bounded repair attempt" in prompt
+
+
 @pytest.mark.parametrize("agent", list(RepairAgent))
 def test_agent_invocation_is_noninteractive_and_cannot_choose_evidence_command(
     agent: RepairAgent,
@@ -44,6 +58,10 @@ def test_agent_invocation_is_noninteractive_and_cannot_choose_evidence_command(
     assert command[0] == agent.value
     assert command[command.index("--add-dir") + 1] == str(evidence)
     assert "one bounded repair attempt" in command[-1]
+    assert "doCheck = false" in command[-1]
+    assert "never waive Darwin" in command[-1]
+    assert "ValidationIncomplete" in command[-1]
+    assert "SIGBUS" in command[-1]
     if agent is RepairAgent.CODEX:
         assert command[command.index("--sandbox") + 1] == "workspace-write"
     else:

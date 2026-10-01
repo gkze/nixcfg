@@ -195,7 +195,26 @@ attempt. The agent works in an isolated checkout and may change packaging under
 `packages/` and `overlays/`, plus `flake.nix`, `flake.lock`, and planner/selection
 coherence in `lib/update/planner.py` (with `lib/tests/test_update_planner.py`).
 Changes outside that scope are rejected, including CI, acceptance gates, and
-persistence. The agent receives no publication credentials. Repair runs on
+persistence. The agent receives no publication credentials.
+
+The repair prompt encodes a narrow checkPhase exception. The agent may skip or
+disable **checkPhase only** when every condition holds:
+
+1. The failure is an upstream package's own tests (`checkPhase` / XCTest /
+   pytest / similar), not compile or link.
+2. The derivation build itself succeeded before checks.
+3. The failure is not in George's overlay, app, or home-manager module code.
+   Wrapping an upstream project in `packages/` is allowed.
+4. Prefer `doCheck = false` (or equivalent) pinned to the failing version,
+   with a short comment citing the failing test and signal.
+5. Document the skip so it is visible in the change.
+
+Still hard-fail — never skip or waive Darwin: SIGBUS, hosted runner lost
+communication, store `ValidationIncomplete` (infra; retry), compile/link
+failures, failures in George's own overlay/app/home-manager module code, or
+waiving Darwin validation entirely.
+
+Repair runs on
 the Darwin runner, where repository hooks and the Python/coverage gates are
 maintained; they must pass before the repair is committed to a separate
 branch. A fresh Update run then prepares and validates it on every native builder.

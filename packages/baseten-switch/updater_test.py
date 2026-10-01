@@ -16,6 +16,7 @@ from lib.tests._nix_ast import (
     expect_scope_binding,
     parse_nix_expr,
 )
+from lib.tests._nix_source import nix_file_expr
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
 from lib.tests._updater_helpers import load_repo_module
 from lib.update.nix import _build_fetch_from_github_call
@@ -43,6 +44,8 @@ def test_bulk_update_hold_keeps_the_last_hosted_darwin_green_release() -> None:
     assert hold is not None
     assert "macos-15" in hold
     assert "0.6.0" in hold
+    assert "testUnsupportedStatusFallsBackWithoutRepeatedProbe" in hold
+    assert "doCheck" in hold
 
 
 def test_source_expression_tracks_the_immutable_upstream_commit() -> None:
@@ -57,6 +60,46 @@ def test_source_expression_tracks_the_immutable_upstream_commit() -> None:
             rev=COMMIT,
             fetch_submodules=False,
         ),
+    )
+
+
+def test_package_disables_checkphase_for_0_5_1_sigtrap() -> None:
+    """0.5.1's testUnsupportedStatusFallsBackWithoutRepeatedProbe SIGTRAPs on macos-15."""
+    package = expect_instance(
+        parse_nix_expr(
+            (REPO_ROOT / "packages/baseten-switch/default.nix").read_text(
+                encoding="utf-8"
+            )
+        ),
+        FunctionDefinition,
+    )
+    derivation = expect_instance(
+        expect_scope_binding(package.output, "package").value,
+        FunctionCall,
+    )
+    assert_nix_ast_equal(
+        expect_binding(
+            expect_instance(derivation.argument, AttributeSet).values,
+            "doCheck",
+        ).value,
+        'version != "0.5.1"',
+    )
+
+
+def test_overlay_disables_checkphase_for_hosted_0_5_1_sigtrap() -> None:
+    """The Darwin overlay must pin the same 0.5.1 checkPhase skip as the package."""
+    overlay = expect_instance(
+        nix_file_expr("overlays/binary-darwin-apps.nix"),
+        FunctionDefinition,
+    )
+    exports = expect_instance(overlay.output, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(exports.values, "baseten-switch").value,
+        """
+        (callDarwinAppPackage "baseten-switch").overrideAttrs (
+          old: if old.version == "0.5.1" then { doCheck = false; } else { }
+        )
+        """,
     )
 
 
