@@ -5,6 +5,7 @@ import dataclasses
 import json
 import platform
 import re
+import signal
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -117,6 +118,12 @@ _FIXED_OUTPUT_ONLY_TRANSIENT_MARKERS = (
     "Fail extracting tarball",
     "timed out",
 )
+
+# Hosted macos-15 store filesystems fault mid-build with EILSEQ. Nix reports
+# that as "Illegal byte sequence" on unlink or pread; the same machines also
+# die with SIGBUS (signal 10). Neither is a derivation failure.
+_NIX_STORE_TRANSIENT_MARKERS = ("Illegal byte sequence",)
+_STORE_BUS_SIGNALS = frozenset({10, signal.SIGBUS})
 
 _PLATFORM_HASH_PAYLOAD_SIZE = 2
 
@@ -528,6 +535,24 @@ def _has_hash_mismatch_signal(output: str) -> bool:
     return any(indicator in output for indicator in _HASH_MISMATCH_INDICATORS)
 
 
+# Legacy Nix says "error: builder for". Determinate Nix v3 says
+# "error: Cannot build" / "error: Build failed due to failed dependency".
+# Bare "Reason:" and "Output paths:" are log noise, not failure evidence.
+_PERMANENT_BUILD_FAILURE_MARKERS = (
+    "error: builder for",
+    "error: cannot build",
+    "error: build failed due to failed dependency",
+)
+
+
+def _nix_output_has_permanent_build_failure(output: str) -> bool:
+    """Return whether Nix attributed the output to a derivation, not the store."""
+    folded = output.casefold()
+    return any(
+        marker in folded for marker in _PERMANENT_BUILD_FAILURE_MARKERS
+    ) or _has_hash_mismatch_signal(output)
+
+
 def is_retryable_nix_network_failure(*, stdout: str, stderr: str) -> bool:
     """Return whether Nix reported a transient network or substituter failure."""
     output = f"{stderr}\n{stdout}"
@@ -537,11 +562,53 @@ def is_retryable_nix_network_failure(*, stdout: str, stderr: str) -> bool:
     return any(marker.casefold() in folded for marker in _NIX_NETWORK_TRANSIENT_MARKERS)
 
 
+def is_retryable_nix_store_failure(*, stdout: str, stderr: str) -> bool:
+    """Return whether Nix hit a transient store I/O fault, not a bad derivation."""
+    output = f"{stderr}\n{stdout}"
+    if _nix_output_has_permanent_build_failure(output):
+        return False
+    folded = output.casefold()
+    return any(marker.casefold() in folded for marker in _NIX_STORE_TRANSIENT_MARKERS)
+
+
+def _mentions_store_bus_signal(text: str) -> bool:
+    """Return whether *text* names SIGBUS without matching a longer signal number."""
+    folded = text.casefold()
+    for number in _STORE_BUS_SIGNALS:
+        needle = f"terminated by signal {number}"
+        start = 0
+        while (index := folded.find(needle, start)) != -1:
+            end = index + len(needle)
+            if end == len(folded) or not folded[end].isdigit():
+                return True
+            start = end
+    return False
+
+
+def is_transient_store_interruption(text: str) -> bool:
+    """Return whether validation stopped on a runner store fault.
+
+    Hosted macOS jobs lose the store mid-build (``Illegal byte sequence`` or
+    SIGBUS). A hash mismatch or a derivation failure in the same output
+    (``error: builder for``, ``error: Cannot build``, or
+    ``error: Build failed due to failed dependency``) must not continue as if
+    the store had only faulted.
+    """
+    if _nix_output_has_permanent_build_failure(text):
+        return False
+    if is_retryable_nix_store_failure(stdout="", stderr=text):
+        return True
+    return _mentions_store_bus_signal(text)
+
+
 def _is_retryable_fixed_output_hash_failure(result: CommandResult) -> bool:
     output = f"{result.stderr}\n{result.stdout}"
     if _has_hash_mismatch_signal(output):
         return False
     if is_retryable_nix_network_failure(
+        stdout=result.stdout,
+        stderr=result.stderr,
+    ) or is_retryable_nix_store_failure(
         stdout=result.stdout,
         stderr=result.stderr,
     ):
@@ -1123,6 +1190,8 @@ __all__ = [
     "compute_overlay_hash",
     "get_current_nix_platform",
     "is_retryable_nix_network_failure",
+    "is_retryable_nix_store_failure",
+    "is_transient_store_interruption",
     "normalize_nix_platform",
     "prepare_fixed_output_probes",
 ]

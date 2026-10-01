@@ -123,6 +123,10 @@ first half of that same job, and a store GC between the two phases deleted
 outputs the closure then had to rebuild. Shards keep package validation off
 that budget. Each closure shard builds for five hours without `-L`, flushes
 the Cachix daemon, and the next shard substitutes what landed in `gkze`.
+A store unlink or SIGBUS on those runners is retried with only the time left
+in the shard budget, then handed to the next shard the same way; the last
+shard still fails closed. A derivation failure reported by current Nix
+(`error: Cannot build` or a failed dependency) is not treated as that fault.
 `min-free` / `max-free` stay at 32 / 64 GiB, and `max-jobs` / `cores` stay at
 2: the hosted runner was already keeping both build slots busy on that tail.
 

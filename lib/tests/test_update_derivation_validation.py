@@ -510,6 +510,81 @@ def test_root_closure_build_budget_does_not_shorten_discovery(
     assert timeouts == [("eval", 42), ("build", 7)]
 
 
+def test_closure_builds_share_one_deadline_after_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Manifest eval keeps its own timeout; later dependency builds share the rest."""
+    clock = {"now": 0.0}
+    monkeypatch.setattr(validation.time, "monotonic", lambda: clock["now"])
+    timeouts: list[tuple[str, object]] = []
+    manifest = json.dumps({
+        "schemaVersion": 2,
+        "requiredKinds": ["darwin", "home"],
+        "requiredRoots": [],
+        "roots": [
+            {"kind": "darwin", "name": "argus", "system": "aarch64-darwin"},
+            {"kind": "home", "name": "george", "system": "aarch64-darwin"},
+        ],
+    })
+    graph = json.dumps({
+        "version": 4,
+        "derivations": {
+            "root.drv": {
+                "version": 4,
+                "system": "aarch64-darwin",
+                "inputs": {
+                    "drvs": {
+                        "vm.drv": {"outputs": ["out"], "dynamicOutputs": {}},
+                        "vm2.drv": {"outputs": ["out"], "dynamicOutputs": {}},
+                    }
+                },
+            },
+            "vm.drv": {
+                "version": 4,
+                "system": "aarch64-linux",
+                "inputs": {"drvs": {}},
+            },
+            "vm2.drv": {
+                "version": 4,
+                "system": "aarch64-linux",
+                "inputs": {"drvs": {}},
+            },
+        },
+    })
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        timeouts.append((args[1], kwargs["timeout"]))
+        if args[1] == "eval":
+            clock["now"] += 1_000
+            return subprocess.CompletedProcess(args, 0, stdout=manifest, stderr="")
+        if args[1] == "derivation":
+            return subprocess.CompletedProcess(args, 0, stdout=graph, stderr="")
+        clock["now"] += 90
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    assert (
+        validation.validate_root_closures(
+            flake_root=tmp_path,
+            systems=("aarch64-linux",),
+            include_dependencies=True,
+            timeout=42,
+            build_timeout=100,
+            run=run,
+        )
+        == ()
+    )
+    assert [name for name, _timeout in timeouts] == [
+        "eval",
+        "derivation",
+        "build",
+        "build",
+    ]
+    assert timeouts[0][1] == 42
+    assert timeouts[1][1] == 42
+    assert timeouts[2][1] == 100
+    assert timeouts[3][1] == pytest.approx(10)
+
+
 @pytest.fixture
 def native_root_graph(tmp_path) -> tuple:
     """Model the actual Darwin -> Linux VM boundary at the Nix process seam."""
