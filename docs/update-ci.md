@@ -236,8 +236,25 @@ Only successful native validation permits a PR against the default branch.
 
 `gh workflow run` does not apply YAML boolean defaults, so a manual dispatch
 must pass `-f repair=true` when repair should run. The job condition accepts
-only an explicit true, matching that CLI behavior. Push events that touch
-`.github/update-kick` on `copilot/gkzenixcfg-update-automation` also enable
+only an explicit true, matching that CLI behavior. Prefer
+`gh workflow run Update --ref main -f repair=true -f validate_all_packages=true`
+when the token has Actions write.
+
+The Cursor GitHub App install token (`ghs_…`) used by cloud agents gets
+HTTP 403 `Resource not accessible by integration` on `workflow_dispatch`
+until the App is granted **Actions: Read and write** on `gkze/nixcfg`.
+Repo Settings → Actions → Workflow permissions only affect `GITHUB_TOKEN`
+inside jobs; they do not grant that App dispatch rights.
+
+Until Actions write is granted, cloud agents should open and merge a
+one-line timestamp bump to `.github/update-kick` on `main`. That push
+queues one Update run with the same path filter. Kick-file pushes set
+`validate_all_packages` and enable the repair job so they match EM's
+`repair=true` + `validate_all_packages=true` dispatches. The same file
+still kicks `copilot/gkzenixcfg-update-automation` if that WIP branch is
+updated. Do not start a second main Update while one is already running.
+
+Push events that touch `.github/update-kick` therefore enable
 repair; that path exists because some tokens cannot create `workflow_dispatch`
 events. Set `repair=false` to retain
 failure evidence without invoking an agent. Agent output is a proposal, never validation evidence. CI does
