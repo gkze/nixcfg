@@ -20,7 +20,7 @@ from lib.update.candidate import Candidate, Preparation
 from lib.update.ci import jobs
 from lib.update.cli_options import RepairAgent, UpdateOptions
 from lib.update.io import atomic_write_text
-from lib.update.nix import get_current_nix_platform
+from lib.update.nix import get_current_nix_platform, is_transient_store_interruption
 from lib.update.paths import get_repo_root
 from lib.update.persistence import IsolatedUpdateWorkspace, planned_update_paths
 from lib.update.repair import propose_repair
@@ -341,6 +341,17 @@ def _closure_build_budget_exhausted(
     return "timed out" in text and "nix build" in text
 
 
+def _closure_store_fault(report: ValidationReport) -> bool:
+    """Return whether every recorded failure is a transient store fault.
+
+    One bad derivation mixed with a store fault still fails the shard. The
+    next runner only continues when the build itself did not fail.
+    """
+    return bool(report.failures) and all(
+        is_transient_store_interruption(failure.message) for failure in report.failures
+    )
+
+
 @app.command("validate")
 def validate(
     candidate: Annotated[Path, typer.Option(help="Final prepared candidate JSON.")],
@@ -373,9 +384,16 @@ def validate(
             closure_budget_seconds=closure_budget_seconds,
         )
     except validation.ValidationIncompleteError as error:
-        if closure_yield and _closure_build_budget_exhausted(error):
+        if closure_yield and (
+            _closure_build_budget_exhausted(error)
+            or is_transient_store_interruption(str(error))
+        ):
             raise typer.Exit(CLOSURE_YIELD_EXIT) from error
         raise
+    if closure_yield and _closure_store_fault(report):
+        # Same handoff as a budget yield: realized paths are already in gkze,
+        # and the next shard substitutes them. The last shard does not yield.
+        raise typer.Exit(CLOSURE_YIELD_EXIT)
     atomic_write_text(output, report.model_dump_json(indent=2) + "\n")
     raise typer.Exit(bool(report.failures))
 

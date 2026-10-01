@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -494,6 +495,109 @@ def test_validation_progress_reader_failure_is_propagated(tmp_path: Path) -> Non
     with pytest.raises(ProcessLookupError):
         os.kill(int(seen[0]), 0)
     _assert_reader_stopped()
+
+
+def test_validation_retries_store_unlink_and_store_bus(
+    tmp_path: Path,
+) -> None:
+    """EILSEQ and SIGBUS are retried; a real builder failure and other signals are not."""
+    marker = tmp_path / "unlink"
+    script = """
+import pathlib, sys
+marker = pathlib.Path(sys.argv[1])
+if not marker.exists():
+    marker.touch()
+    print(
+        'error: cannot unlink "/nix/store/abc-replay-10.67.0.tgz": Illegal byte sequence',
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+print("complete")
+"""
+    sleeps: list[float] = []
+    result = validation._run_validation_command(
+        [sys.executable, "-c", script, str(marker)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=sleeps.append,
+    )
+    assert result.returncode == 0
+    assert sleeps == [1.0]
+
+    builder = tmp_path / "builder"
+    builder_script = """
+import pathlib, sys
+pathlib.Path(sys.argv[1]).touch()
+print("error: builder for '/nix/store/abc.drv' failed with exit code 1", file=sys.stderr)
+print('error: cannot unlink "/nix/store/abc.tgz": Illegal byte sequence', file=sys.stderr)
+raise SystemExit(1)
+"""
+    builder_sleeps: list[float] = []
+    failed = validation._run_validation_command(
+        [sys.executable, "-c", builder_script, str(builder)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=builder_sleeps.append,
+    )
+    assert failed.returncode == 1
+    assert builder_sleeps == []
+
+    codes = iter([-signal.SIGBUS, 0])
+
+    def run(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args, next(codes), stdout="", stderr="store bus"
+        )
+
+    bus_sleeps: list[float] = []
+    recovered = validation._run_validation_command(
+        ["nix", "build", "path:.#checks.aarch64-darwin.root-closures"],
+        cwd=tmp_path,
+        timeout=None,
+        run=run,
+        sleep=bus_sleeps.append,
+    )
+    assert recovered.returncode == 0
+    assert bus_sleeps == [1.0]
+
+    def always_bus(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, -signal.SIGBUS, stdout="", stderr="")
+
+    exhausted: list[float] = []
+    with pytest.raises(
+        validation.ValidationIncompleteError, match=f"signal {signal.SIGBUS}"
+    ):
+        validation._run_validation_command(
+            ["nix", "build", "path:.#checks.aarch64-darwin.root-closures"],
+            cwd=tmp_path,
+            timeout=None,
+            run=always_bus,
+            sleep=exhausted.append,
+            max_attempts=2,
+        )
+    assert exhausted == [1.0]
+
+    def other_signal(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, -15, stdout="", stderr="")
+
+    other_sleeps: list[float] = []
+    with pytest.raises(validation.ValidationIncompleteError, match="signal 15"):
+        validation._run_validation_command(
+            ["nix", "build", "path:.#checks.aarch64-darwin.root-closures"],
+            cwd=tmp_path,
+            timeout=None,
+            run=other_signal,
+            sleep=other_sleeps.append,
+        )
+    assert other_sleeps == []
 
 
 def test_validation_progress_preserves_retry_diagnostics(tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 """Additional tests for update.nix hash helpers and build flows."""
 
 import asyncio
+import signal
 
 import pytest
 
@@ -25,6 +26,8 @@ from lib.update.nix import (
     compute_overlay_hash,
     get_current_nix_platform,
     is_retryable_nix_network_failure,
+    is_retryable_nix_store_failure,
+    is_transient_store_interruption,
     normalize_nix_platform,
 )
 
@@ -196,6 +199,49 @@ def test_retryable_fixed_output_hash_failure_classification() -> None:
     assert not is_retryable_nix_network_failure(
         stdout=permanent.stdout,
         stderr=permanent.stderr,
+    )
+
+    store_fault = CommandResult(
+        args=["nix"],
+        returncode=1,
+        stdout="",
+        stderr=(
+            'error: cannot unlink "/nix/store/kif07wvrg569fqmqh9a0zkqx8x3lkmhx-'
+            'replay-10.67.0.tgz": Illegal byte sequence'
+        ),
+    )
+    assert _is_retryable_fixed_output_hash_failure(store_fault)
+    assert is_retryable_nix_store_failure(
+        stdout=store_fault.stdout,
+        stderr=store_fault.stderr,
+    )
+    assert is_transient_store_interruption(store_fault.stderr)
+    assert not is_retryable_nix_network_failure(
+        stdout=store_fault.stdout,
+        stderr=store_fault.stderr,
+    )
+    builder_and_store = (
+        "error: builder for '/nix/store/abc-replay.drv' failed with exit code 1\n"
+        'error: cannot unlink "/nix/store/abc-replay.tgz": Illegal byte sequence'
+    )
+    assert not is_retryable_nix_store_failure(stdout="", stderr=builder_and_store)
+    assert not is_transient_store_interruption(builder_and_store)
+    assert not is_transient_store_interruption(
+        "error: hash mismatch in fixed-output derivation\n"
+        "Illegal byte sequence"
+    )
+    assert is_transient_store_interruption("terminated by signal 10")
+    assert is_transient_store_interruption(f"terminated by signal {signal.SIGBUS}\n")
+    assert not is_transient_store_interruption("terminated by signal 15")
+    assert not is_transient_store_interruption("terminated by signal 100")
+    assert not is_transient_store_interruption(
+        "terminated by signal 100\nterminated by signal 15"
+    )
+    assert is_transient_store_interruption(
+        "terminated by signal 100 then terminated by signal 10"
+    )
+    assert not is_transient_store_interruption(
+        "error: builder for '/nix/store/abc.drv' failed\nterminated by signal 10"
     )
 
 

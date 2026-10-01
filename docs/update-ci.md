@@ -21,8 +21,11 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    One hosted macOS job cannot realize `checks.aarch64-darwin.root-closures`
    inside the 360-minute job cap, so that build is a chain of shards. Each shard
    builds for five hours, the Cachix daemon flushes, and the next shard
-   substitutes those paths and continues. The last shard does not yield: an
-   unfinished closure fails the run. Every declared package platform and every
+   substitutes those paths and continues. A transient store fault
+   (`Illegal byte sequence` or SIGBUS) is retried, then continues the same way:
+   realized paths stay in `gkze` and the next shard substitutes them. The last
+   shard does not yield: an unfinished closure or a store fault that survives
+   the retry fails the run. Every declared package platform and every
    native root is still built. Shards are serial because the closure's slow
    graph is shared; parallel host builds would repeat it.
    Each builder evaluates every declared package platform, builds native package

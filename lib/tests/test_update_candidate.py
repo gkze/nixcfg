@@ -511,7 +511,7 @@ def test_validation_scopes_split_packages_from_closures(
 def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Only a timed-out closure build continues; signals and eval timeouts fail the shard."""
+    """A timed-out closure build continues; other signals and eval timeouts fail."""
     candidate = _candidate_for_scope(prepared_run)
     candidate_path = tmp_path / "candidate.json"
     candidate_path.write_text(candidate.model_dump_json())
@@ -562,6 +562,17 @@ def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", signaled)
     killed = CliRunner().invoke(pipeline.app, args)
     assert killed.exit_code not in {0, pipeline.CLOSURE_YIELD_EXIT}
+
+    def store_bus(**_kwargs: object) -> None:
+        raise ValidationIncompleteError(
+            "Validation incomplete: nix build path:.#checks.aarch64-darwin.root-closures: "
+            "terminated by signal 10"
+        )
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", store_bus)
+    bus = CliRunner().invoke(pipeline.app, args)
+    assert bus.exit_code == pipeline.CLOSURE_YIELD_EXIT
+    assert not output.exists()
     base = [
         "validate",
         "--candidate",
@@ -586,6 +597,89 @@ def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
         ],
     )
     assert package_yield.exit_code != 0
+
+
+def test_closure_yield_continues_after_store_unlink_only(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A store unlink continues the shard; a real derivation failure still fails it."""
+    candidate = _candidate_for_scope(prepared_run)
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    output = tmp_path / "validation.json"
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+    store_failure = DerivationValidationFailure(
+        source="root-closures",
+        installable="path:.#checks.aarch64-darwin.root-closures",
+        message=(
+            'error: cannot unlink "/nix/store/abc-replay-10.67.0.tgz": '
+            "Illegal byte sequence"
+        ),
+    )
+    builder_failure = DerivationValidationFailure(
+        source="root-closures",
+        installable="path:.#checks.aarch64-darwin.root-closures",
+        message="error: builder for '/nix/store/abc.drv' failed with exit code 1",
+    )
+
+    def only_store(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
+        return (store_failure,)
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", only_store)
+    args = [
+        "validate",
+        "--candidate",
+        str(candidate_path),
+        "--output",
+        str(output),
+        "--scope",
+        "closures",
+        "--closure-budget-seconds",
+        "18000",
+        "--closure-yield",
+    ]
+    yielded = CliRunner().invoke(pipeline.app, args)
+    assert yielded.exit_code == pipeline.CLOSURE_YIELD_EXIT
+    assert not output.exists()
+
+    def mixed(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
+        return (store_failure, builder_failure)
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", mixed)
+    mixed_result = CliRunner().invoke(pipeline.app, args)
+    assert mixed_result.exit_code == 1
+    written = json.loads(output.read_text())
+    assert len(written["failures"]) == 2
+    output.unlink()
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", only_store)
+    held = CliRunner().invoke(
+        pipeline.app,
+        [
+            "validate",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(output),
+            "--scope",
+            "closures",
+            "--closure-budget-seconds",
+            "18000",
+        ],
+    )
+    assert held.exit_code == 1
+    assert json.loads(output.read_text())["failures"]
+    output.unlink()
+
+    def clean(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
+        return ()
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", clean)
+    succeeded = CliRunner().invoke(pipeline.app, args)
+    assert succeeded.exit_code == 0
+    assert json.loads(output.read_text())["failures"] == []
 
 
 def test_prepare_command_exports_failure_evidence_outside_checkout(

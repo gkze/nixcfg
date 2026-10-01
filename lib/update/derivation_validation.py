@@ -3,6 +3,7 @@
 import os
 import re
 import shlex
+import signal
 import subprocess
 import tempfile
 import threading
@@ -27,6 +28,7 @@ from lib.update import persistence as update_persistence
 from lib.update.nix import (
     get_current_nix_platform,
     is_retryable_nix_network_failure,
+    is_retryable_nix_store_failure,
 )
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.paths import get_repo_root
@@ -473,6 +475,22 @@ def _incomplete_validation_error(
     return ValidationIncompleteError(message)
 
 
+def _retryable_store_signal(returncode: int) -> bool:
+    """Return whether Nix died from the hosted macOS store bus fault."""
+    return returncode == -signal.SIGBUS
+
+
+def _retryable_validation_output(result: _RunResult) -> bool:
+    """Return whether a completed Nix command failed on a transient fault."""
+    return is_retryable_nix_network_failure(
+        stdout=result.stdout,
+        stderr=result.stderr,
+    ) or is_retryable_nix_store_failure(
+        stdout=result.stdout,
+        stderr=result.stderr,
+    )
+
+
 def _run_validation_command_impl(
     args: list[str],
     *,
@@ -511,7 +529,9 @@ def _run_validation_command_impl(
                     check_cancelled=check_cancelled,
                 )
             check_cancelled()
-            if result.returncode < 0:
+            # Other signals stay incomplete immediately. SIGBUS is the macOS
+            # store fault and is retried like an EILSEQ unlink.
+            if result.returncode < 0 and not _retryable_store_signal(result.returncode):
                 raise _incomplete_validation_error(
                     args,
                     f"terminated by signal {-result.returncode}",
@@ -522,14 +542,17 @@ def _run_validation_command_impl(
         finally:
             if progress is not None:
                 progress(ValidationCommandFinished(command, succeeded))
-        if (
-            result.returncode == 0
-            or attempt + 1 == max_attempts
-            or not is_retryable_nix_network_failure(
-                stdout=result.stdout,
-                stderr=result.stderr,
-            )
-        ):
+        retryable = _retryable_store_signal(
+            result.returncode
+        ) or _retryable_validation_output(result)
+        if result.returncode == 0 or attempt + 1 == max_attempts or not retryable:
+            if result.returncode < 0:
+                raise _incomplete_validation_error(
+                    args,
+                    f"terminated by signal {-result.returncode}",
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                )
             return result
         if progress is not None:
             progress(
