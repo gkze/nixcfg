@@ -94,13 +94,13 @@ def test_energy_policy_disables_packaged_checks_and_install_on_quit() -> None:
     """Every app-update entry point must see a fail-closed packaged gate."""
     packaged_gate = b"!this.app.isPackaged"
     install_on_quit = b"kn.autoUpdater.autoInstallOnAppQuit=!0"
-    payload = b"|".join([packaged_gate, packaged_gate, packaged_gate, install_on_quit])
+    payload = b"|".join([packaged_gate, packaged_gate, install_on_quit])
 
     patched = _load_policy_module().disable_updates(payload)
 
     assert len(patched) == len(payload)
     assert packaged_gate not in patched
-    assert patched.count(b"!!1/*nix-managed*/  ") == 3
+    assert patched.count(b"!!1/*nix-managed*/  ") == 2
     assert install_on_quit not in patched
     assert b"kn.autoUpdater.autoInstallOnAppQuit=!1" in patched
 
@@ -109,7 +109,7 @@ def test_energy_policy_ignores_the_minified_auto_updater_binding_name() -> None:
     """Vendor symbol renaming must not reactivate the install-on-quit path."""
     packaged_gate = b"!this.app.isPackaged"
     install_on_quit = b"Cn.autoUpdater.autoInstallOnAppQuit=!0"
-    payload = b"|".join([packaged_gate, packaged_gate, packaged_gate, install_on_quit])
+    payload = b"|".join([packaged_gate, packaged_gate, install_on_quit])
 
     patched = _load_policy_module().disable_updates(payload)
 
@@ -117,9 +117,28 @@ def test_energy_policy_ignores_the_minified_auto_updater_binding_name() -> None:
     assert b"Cn.autoUpdater.autoInstallOnAppQuit=!1" in patched
 
 
+def test_energy_0_8_17_start_and_check_stay_closed() -> None:
+    """0.8.17's two remaining gates must both refuse to contact the feed."""
+    module = _load_policy_module()
+    start = b"start(){if(!(this.started||!this.app.isPackaged)){configure()}}"
+    check = (
+        b"checkCurrentFeed(){if(!this.app.isPackaged)return Promise.resolve({ok:!1});"
+    )
+    install = b"Gt.autoUpdater.autoInstallOnAppQuit=!0"
+    payload = start + check + install
+
+    patched = module.disable_updates(payload)
+
+    assert module._PACKAGED_GATE not in patched
+    assert b"if(!(this.started||!!1/*nix-managed*/  )){configure()}" in patched
+    assert b"if(!!1/*nix-managed*/  )return Promise.resolve({ok:!1})" in patched
+    assert b"autoInstallOnAppQuit=!1" in patched
+    assert b"autoInstallOnAppQuit=!0" not in patched
+
+
 @pytest.mark.parametrize(
     ("packaged_gate_count", "install_on_quit_count"),
-    [(2, 1), (4, 1), (3, 0), (3, 2)],
+    [(1, 1), (3, 1), (2, 0), (2, 2)],
 )
 def test_energy_policy_rejects_drifted_vendor_contracts(
     packaged_gate_count: int,
@@ -140,12 +159,10 @@ def test_energy_policy_allows_release_drift_outside_owned_anchors() -> None:
     """Unrelated bundle bytes must not become a second release-version pin."""
     module = _load_policy_module()
     release_specific_prefix = b"release-specific-vendor-code|"
-    payload = release_specific_prefix + b"|".join([
-        module._PACKAGED_GATE,
-        module._PACKAGED_GATE,
-        module._PACKAGED_GATE,
-        module._INSTALL_ON_QUIT,
-    ])
+    payload = release_specific_prefix + b"|".join(
+        [module._PACKAGED_GATE] * module._PACKAGED_GATE_COUNT
+        + [module._INSTALL_ON_QUIT]
+    )
 
     patched = module.disable_updates(payload)
 
@@ -160,12 +177,10 @@ def test_energy_patch_cli_updates_the_real_integrity_layers(
 ) -> None:
     """The package CLI must patch policy, refresh integrity, and fail on drift."""
     module = _load_policy_module()
-    payload = b"|".join([
-        module._PACKAGED_GATE,
-        module._PACKAGED_GATE,
-        module._PACKAGED_GATE,
-        module._INSTALL_ON_QUIT,
-    ])
+    payload = b"|".join(
+        [module._PACKAGED_GATE] * module._PACKAGED_GATE_COUNT
+        + [module._INSTALL_ON_QUIT]
+    )
     asar_path, plist_path = _write_policy_bundle(tmp_path, payload)
     original_size = asar_path.stat().st_size
 

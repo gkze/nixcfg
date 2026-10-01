@@ -14,6 +14,10 @@ from lib.asar_integrity import (
 MAIN_PATH = "out/main/index.js"
 _PACKAGED_GATE = b"!this.app.isPackaged"
 _DISABLED_PACKAGED_GATE = b"!!1/*nix-managed*/  "
+# 0.8.17 has two packaged updater gates. start() will not configure while
+# `!this.app.isPackaged` is true, and checkCurrentFeed() returns before the
+# feed. 0.7.x carried a third copy of that same gate.
+_PACKAGED_GATE_COUNT = 2
 _INSTALL_ON_QUIT = b"autoUpdater.autoInstallOnAppQuit=!0"
 _DISABLED_INSTALL_ON_QUIT = b"autoUpdater.autoInstallOnAppQuit=!1"
 
@@ -36,7 +40,7 @@ def disable_updates(payload: bytes) -> bytes:
         payload,
         _PACKAGED_GATE,
         _DISABLED_PACKAGED_GATE,
-        3,
+        _PACKAGED_GATE_COUNT,
     )
     return _replace_exactly(
         patched,
