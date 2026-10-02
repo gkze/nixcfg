@@ -70,6 +70,19 @@ def test_reason_install_check(
     validate_artifact.main()
 
 
+def test_reason_install_accepts_rebranded_bundle_identifier(tmp_path: Path) -> None:
+    """0.1.64+ ships com.reasonmachines.desktop after the Ara-to-Reason rename."""
+    info = tmp_path / "Info.plist"
+    info.write_bytes(
+        plistlib.dumps({
+            "CFBundleIdentifier": "com.reasonmachines.desktop",
+            "CFBundleExecutable": "Reason",
+            "CFBundleShortVersionString": "0.1.64",
+        })
+    )
+    validate_artifact.validate(info, "0.1.64")
+
+
 @pytest.mark.parametrize(
     "key", ["CFBundleIdentifier", "CFBundleExecutable", "CFBundleShortVersionString"]
 )

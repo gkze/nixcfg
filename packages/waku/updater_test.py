@@ -1,6 +1,7 @@
 """Focused contracts for the source-built Waku macOS package."""
 
 import json
+import tomllib
 from types import ModuleType
 
 import pytest
@@ -8,6 +9,7 @@ from nix_manipulator.expressions.assertion import Assertion
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.if_expression import IfExpression
 from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
@@ -63,6 +65,27 @@ def _load_updater_module() -> ModuleType:
         "packages/waku/updater.py",
         "waku_updater_dedicated_test",
     )
+
+
+def _waku_derivation() -> tuple[FunctionDefinition, FunctionCall, AttributeSet]:
+    package = expect_instance(
+        parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+    assertion = expect_instance(package.output, Assertion)
+    derivation = expect_instance(assertion.body, FunctionCall)
+    arguments = expect_instance(derivation.argument, AttributeSet)
+    return package, derivation, arguments
+
+
+def _gated_phase(derivation: FunctionCall, name: str) -> IndentedString:
+    phase = expect_instance(
+        expect_binding(derivation.scope, name).value,
+        IfExpression,
+    )
+    assert_nix_ast_equal(phase.condition, "hasCuaHost")
+    assert_nix_ast_equal(phase.alternative, "null")
+    return expect_instance(phase.consequence, IndentedString)
 
 
 def _appcast(
@@ -522,13 +545,8 @@ def test_waku_validates_the_materialized_bootstrap_source() -> None:
 
 def test_waku_package_is_a_source_built_nix_owned_arm64_app() -> None:
     """The derivation must compile public source and enable runtime shaders."""
-    package = expect_instance(
-        parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),
-        FunctionDefinition,
-    )
+    package, derivation, arguments = _waku_derivation()
     assertion = expect_instance(package.output, Assertion)
-    derivation = expect_instance(assertion.body, FunctionCall)
-    arguments = expect_instance(derivation.argument, AttributeSet)
 
     formal_names = {
         argument.name
@@ -538,6 +556,7 @@ def test_waku_package_is_a_source_built_nix_owned_arm64_app() -> None:
     assert "outputs" in formal_names
     assert "selfSource" not in formal_names
     assert "swift" in formal_names
+    assert "fetchurl" in formal_names
     assert_nix_ast_equal(
         expect_binding(derivation.scope, "source").value,
         "outputs.lib.sourceEntry pname",
@@ -545,6 +564,10 @@ def test_waku_package_is_a_source_built_nix_owned_arm64_app() -> None:
     assert_nix_ast_equal(
         expect_binding(derivation.scope, "version").value,
         "source.version",
+    )
+    assert_nix_ast_equal(
+        expect_binding(derivation.scope, "hasCuaHost").value,
+        'lib.versionAtLeast version "0.1.20"',
     )
     assert_nix_ast_equal(
         expect_binding(derivation.scope, "buildNumber").value,
@@ -572,7 +595,7 @@ def test_waku_package_is_a_source_built_nix_owned_arm64_app() -> None:
         Identifier(name="rustPlatform.buildRustPackage"),
     )
     assert_nix_ast_equal(
-        expect_binding(arguments.values, "src").value,
+        expect_binding(derivation.scope, "wakuSrc").value,
         nix_attrset_call(
             Identifier(name="fetchFromGitHub"),
             owner="egoist",
@@ -584,6 +607,10 @@ def test_waku_package_is_a_source_built_nix_owned_arm64_app() -> None:
                 StringPrimitive(value="srcHash"),
             ),
         ),
+    )
+    assert_nix_ast_equal(
+        expect_binding(arguments.values, "src").value,
+        Identifier(name="wakuSrc"),
     )
     assert_nix_ast_equal(
         expect_binding(arguments.values, "cargoHash").value,
@@ -635,6 +662,36 @@ def test_waku_package_is_a_source_built_nix_owned_arm64_app() -> None:
         expect_binding(arguments.values, "doInstallCheck").value,
         Primitive(value=True),
     )
+    assert_nix_ast_equal(
+        expect_binding(arguments.values, "buildInputs").value,
+        "lib.optionals hasCuaHost [ cuaDriverSdk ]",
+    )
+    install_phase = expect_instance(
+        expect_binding(arguments.values, "installPhase").value,
+        IfExpression,
+    )
+    assert_nix_ast_equal(install_phase.condition, "hasCuaHost")
+    assert_nix_ast_equal(
+        install_phase.consequence,
+        Identifier(name="cuaInstallPhase"),
+    )
+    assert_nix_ast_equal(
+        install_phase.alternative,
+        Identifier(name="legacyInstallPhase"),
+    )
+    check_phase = expect_instance(
+        expect_binding(arguments.values, "installCheckPhase").value,
+        IfExpression,
+    )
+    assert_nix_ast_equal(check_phase.condition, "hasCuaHost")
+    assert_nix_ast_equal(
+        check_phase.consequence,
+        Identifier(name="cuaInstallCheckPhase"),
+    )
+    assert_nix_ast_equal(
+        check_phase.alternative,
+        Identifier(name="legacyInstallCheckPhase"),
+    )
 
     assert_nix_ast_equal(
         expect_binding(arguments.values, "patches").value,
@@ -644,16 +701,10 @@ def test_waku_package_is_a_source_built_nix_owned_arm64_app() -> None:
 
 def test_waku_bundle_has_tcc_identity_no_sparkle_and_leaf_first_signing() -> None:
     """Bundle assembly must retain helper identity while suppressing self-update."""
-    package = expect_instance(
-        parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),
-        FunctionDefinition,
-    )
-    assertion = expect_instance(package.output, Assertion)
-    derivation = expect_instance(assertion.body, FunctionCall)
-    arguments = expect_instance(derivation.argument, AttributeSet)
+    _package, derivation, arguments = _waku_derivation()
 
     install = expect_instance(
-        expect_binding(arguments.values, "installPhase").value,
+        expect_binding(derivation.scope, "legacyInstallPhase").value,
         IndentedString,
     )
     install_commands = parse_shell(indented_string_body(install.rebuild()))
@@ -700,7 +751,7 @@ def test_waku_bundle_has_tcc_identity_no_sparkle_and_leaf_first_signing() -> Non
     )
 
     check = expect_instance(
-        expect_binding(arguments.values, "installCheckPhase").value,
+        expect_binding(derivation.scope, "legacyInstallCheckPhase").value,
         IndentedString,
     )
     check_commands = parse_shell(indented_string_body(check.rebuild()))
@@ -753,6 +804,10 @@ def test_waku_bundle_has_tcc_identity_no_sparkle_and_leaf_first_signing() -> Non
         expect_binding(passthru_set.values, "buildNumber").value,
         "buildNumber",
     )
+    assert_nix_ast_equal(
+        expect_binding(passthru_set.values, "hasCuaHost").value,
+        "hasCuaHost",
+    )
     mac_app = expect_instance(
         expect_binding(passthru_set.values, "macApp").value,
         AttributeSet,
@@ -777,4 +832,194 @@ def test_waku_bundle_has_tcc_identity_no_sparkle_and_leaf_first_signing() -> Non
     assert_nix_ast_equal(
         expect_binding(metadata.values, "platforms").value,
         '[ "aarch64-darwin" ]',
+    )
+
+
+def test_waku_cua_lock_is_an_isolated_crates_io_workspace() -> None:
+    """Cua's lock stays outside Waku's Cargo workspace and names only crates.io."""
+    lock = tomllib.loads((_PACKAGE_DIR / "cua-driver.lock").read_text(encoding="utf-8"))
+    packages = lock["package"]
+    assert lock["version"] == 4
+    sdk = next(package for package in packages if package["name"] == "cua-driver-sdk")
+    assert sdk["version"] == "0.28.0"
+    assert "source" not in sdk
+    for package in packages:
+        source = package.get("source")
+        if source is not None:
+            assert source == "registry+https://github.com/rust-lang/crates.io-index"
+
+
+def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> None:
+    """0.1.20+ must rebuild Cua, link both Swift files, and stop shipping cursor assets."""
+    _package, derivation, arguments = _waku_derivation()
+
+    cua_sdk_gate = expect_instance(
+        expect_binding(derivation.scope, "cuaDriverSdk").value,
+        IfExpression,
+    )
+    assert_nix_ast_equal(cua_sdk_gate.condition, "hasCuaHost")
+    assert_nix_ast_equal(cua_sdk_gate.alternative, "null")
+    cua_sdk = expect_instance(cua_sdk_gate.consequence, FunctionCall)
+    assert_nix_ast_equal(cua_sdk.name, "rustPlatform.buildRustPackage")
+    sdk_arguments = expect_instance(cua_sdk.argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(sdk_arguments.values, "src").value,
+        nix_attrset_call(
+            Identifier(name="fetchurl"),
+            url=StringPrimitive(
+                value="https://github.com/trycua/cua/archive/1b50c02e2d34734f64d2d22f54eb76cc97b4a663.tar.gz"
+            ),
+            hash=StringPrimitive(
+                value="sha256-nSftPDKDAEUkXcX604t02s91xrSjbyQe1EX608NRHr8="
+            ),
+        ),
+    )
+    assert_nix_ast_equal(
+        expect_binding(sdk_arguments.values, "sourceRoot").value,
+        StringPrimitive(
+            value="cua-1b50c02e2d34734f64d2d22f54eb76cc97b4a663/libs/cua-driver/rust"
+        ),
+    )
+    cargo_lock = expect_instance(
+        expect_binding(sdk_arguments.values, "cargoLock").value,
+        AttributeSet,
+    )
+    assert_nix_ast_equal(
+        expect_binding(cargo_lock.values, "lockFile").value,
+        "./cua-driver.lock",
+    )
+    assert_nix_ast_equal(
+        expect_binding(sdk_arguments.values, "cargoBuildFlags").value,
+        '[ "--package" "cua-driver-sdk" ]',
+    )
+    assert_nix_ast_equal(
+        expect_binding(sdk_arguments.values, "doCheck").value,
+        Primitive(value=False),
+    )
+
+    post_patch = expect_instance(
+        expect_binding(sdk_arguments.values, "postPatch").value,
+        IndentedString,
+    )
+    post_patch_shell = parse_shell(indented_string_body(post_patch.rebuild()))
+    assert [
+        node_text(node, post_patch_shell.sanitized)
+        for node in iter_nodes(post_patch_shell.tree.root_node, "redirected_statement")
+    ] == [
+        "cat __NIX_INTERP__/resources/computer-use/cua-host.rs >> crates/cua-driver-sdk/src/abi.rs",
+    ]
+
+    sdk_install = expect_instance(
+        expect_binding(sdk_arguments.values, "installPhase").value,
+        IndentedString,
+    )
+    sdk_pre_build = expect_instance(
+        expect_binding(sdk_arguments.values, "preBuild").value,
+        IndentedString,
+    )
+    sdk_pre_build_shell = parse_shell(indented_string_body(sdk_pre_build.rebuild()))
+    assert command_texts(sdk_pre_build_shell) == ['export PATH="/usr/bin:$PATH"']
+    assert [
+        node_text(node, sdk_pre_build_shell.sanitized)
+        for node in iter_nodes(sdk_pre_build_shell.tree.root_node, "unset_command")
+    ] == ["unset AR CC CXX LD NIX_CFLAGS_COMPILE NIX_LDFLAGS"]
+
+    assert command_texts(parse_shell(indented_string_body(sdk_install.rebuild()))) == [
+        "runHook preInstall",
+        'mkdir -p "$out/lib" "$out/include"',
+        'cp "target/__NIX_INTERP__/release/libcua_driver_sdk.dylib" "$out/lib/"',
+        'cp include/cua_driver_abi.h "$out/include/"',
+        'cp __NIX_INTERP__/resources/computer-use/cua-host.h "$out/include/"',
+        "runHook postInstall",
+    ]
+
+    install = _gated_phase(derivation, "cuaInstallPhase")
+    install_commands = parse_shell(indented_string_body(install.rebuild()))
+    install_texts = command_texts(install_commands)
+    assert [
+        command
+        for command in command_texts(install_commands, "install")
+        if "CUA-LICENSE" in command
+    ] == [
+        "install -m0644 \\\n"
+        "      resources/computer-use/CUA-LICENSE \\\n"
+        '      "$helperContents/Resources/CUA-LICENSE"',
+    ]
+    assert [
+        command
+        for command in command_texts(install_commands, "install")
+        if "libcua_driver_sdk.dylib" in command or command.endswith('"$cuaLibrary"')
+    ] == [
+        "install -m0755 \\\n"
+        "      __NIX_INTERP__/lib/libcua_driver_sdk.dylib \\\n"
+        '      "$cuaLibrary"',
+    ]
+    assert all("menubar-cursor.png" not in text for text in install_texts)
+    assert all("overlay-cursor.svg" not in text for text in install_texts)
+    assert all("standalone-service-v2" not in text for text in install_texts)
+    assert command_texts(install_commands, "/usr/bin/swiftc") == [
+        "/usr/bin/swiftc \\\n"
+        "      -O \\\n"
+        "      -parse-as-library \\\n"
+        '      -module-cache-path "$swiftModuleCache" \\\n'
+        "      -target __NIX_INTERP__ \\\n"
+        "      -import-objc-header __NIX_INTERP__/include/cua-host.h \\\n"
+        '      -L "$helperFrameworks" -lcua_driver_sdk \\\n'
+        "      -Xlinker -rpath -Xlinker @executable_path/../Frameworks \\\n"
+        "      resources/computer-use/WakuComputerUse.swift \\\n"
+        "      resources/computer-use/CuaDriver.swift \\\n"
+        '      -o "$helperExecutable"',
+        "/usr/bin/swiftc -version",
+    ]
+    assert command_texts(install_commands, "printf") == [
+        "printf '%s\\n' \\\n"
+        '        "cua-in-process-v1" \\\n'
+        '        "__NIX_INTERP__" \\\n'
+        '        "sh.waku.computer-use" \\\n'
+        '        "-" \\\n'
+        '        "__NIX_INTERP__"',
+        "printf '%s\\n' \"$helperFingerprint\"",
+    ]
+    signing_commands = [
+        '/usr/bin/codesign --force --sign - "$cuaLibrary"',
+        '/usr/bin/codesign --force --identifier "sh.waku.computer-use" --sign - "$helper"',
+        '/usr/bin/codesign --force --identifier "sh.waku.js-repl" --sign - "$repl"',
+        '/usr/bin/codesign --force --identifier "sh.waku.daemon" --sign - "$daemon"',
+        '/usr/bin/codesign --force --identifier "sh.waku" --sign - "$app"',
+    ]
+    assert command_texts(install_commands, "/usr/bin/codesign") == signing_commands
+    assert install_texts.index("runHook postInstall") < install_texts.index(
+        signing_commands[0]
+    )
+    assert install_texts.index(signing_commands[0]) < install_texts.index(
+        signing_commands[1]
+    )
+
+    check = _gated_phase(derivation, "cuaInstallCheckPhase")
+    check_commands = parse_shell(indented_string_body(check.rebuild()))
+    check_texts = command_texts(check_commands)
+    assert all("menubar-cursor.png" not in text for text in check_texts)
+    assert all("overlay-cursor.svg" not in text for text in check_texts)
+    assert command_texts(check_commands, "/usr/bin/lipo") == [
+        '/usr/bin/lipo "$executable" -verify_arch arm64',
+        '/usr/bin/lipo "$repl" -verify_arch arm64',
+        '/usr/bin/lipo "$daemon" -verify_arch arm64',
+        '/usr/bin/lipo "$helperExecutable" -verify_arch arm64',
+        '/usr/bin/lipo "$cuaLibrary" -verify_arch arm64',
+    ]
+    assert command_texts(check_commands, "/usr/bin/codesign") == [
+        '/usr/bin/codesign --verify --strict --verbose=2 "$cuaLibrary"',
+        '/usr/bin/codesign --verify --strict --verbose=2 "$helper"',
+        '/usr/bin/codesign --verify --strict --verbose=2 "$repl"',
+        '/usr/bin/codesign --verify --strict --verbose=2 "$daemon"',
+        '/usr/bin/codesign --verify --deep --strict --verbose=2 "$app"',
+    ]
+
+    passthru_set = expect_instance(
+        expect_binding(arguments.values, "passthru").value,
+        AttributeSet,
+    )
+    assert_nix_ast_equal(
+        expect_binding(passthru_set.values, "hasCuaHost").value,
+        "hasCuaHost",
     )
