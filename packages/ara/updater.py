@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING, ClassVar
 
 from lib import json_utils
-from lib.update.net import fetch_json
+from lib.update.net import fetch_headers, fetch_json
 from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 
 if TYPE_CHECKING:
@@ -37,8 +37,23 @@ class AraUpdater(DownloadHashUpdater):
             await fetch_json(session, self.FEED_URL, config=self.config),
             context="Reason desktop feed",
         )
-        return VersionInfo(
-            version=json_utils.get_required_str(
-                payload, "name", context="Reason desktop feed"
-            )
+        feed_version = json_utils.get_required_str(
+            payload, "name", context="Reason desktop feed"
         )
+        # The public redirect can race ahead of the feed (Update 37037587993
+        # hashed 0.1.66 bytes while the feed still named 0.1.64). Pin the
+        # version of the bytes Nix will hash.
+        download_headers = await fetch_headers(
+            session,
+            self.PLATFORMS["aarch64-darwin"],
+            config=self.config,
+        )
+        download_version = next(
+            (
+                value.strip()
+                for key, value in download_headers.items()
+                if key.lower() == "x-ara-desktop-version" and value.strip()
+            ),
+            "",
+        )
+        return VersionInfo(version=download_version or feed_version)

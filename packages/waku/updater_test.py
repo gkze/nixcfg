@@ -557,6 +557,8 @@ def test_waku_package_is_a_source_built_nix_owned_arm64_app() -> None:
     assert "selfSource" not in formal_names
     assert "swift" in formal_names
     assert "fetchurl" in formal_names
+    assert "libiconv" in formal_names
+    assert "makeWrapper" in formal_names
     assert_nix_ast_equal(
         expect_binding(derivation.scope, "source").value,
         "outputs.lib.sourceEntry pname",
@@ -896,6 +898,14 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         expect_binding(sdk_arguments.values, "doCheck").value,
         Primitive(value=False),
     )
+    assert_nix_ast_equal(
+        expect_binding(sdk_arguments.values, "nativeBuildInputs").value,
+        "[ makeWrapper ]",
+    )
+    assert_nix_ast_equal(
+        expect_binding(sdk_arguments.values, "buildInputs").value,
+        "[ libiconv ]",
+    )
 
     post_patch = expect_instance(
         expect_binding(sdk_arguments.values, "postPatch").value,
@@ -918,11 +928,17 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         IndentedString,
     )
     sdk_pre_build_shell = parse_shell(indented_string_body(sdk_pre_build.rebuild()))
-    assert command_texts(sdk_pre_build_shell) == ['export PATH="/usr/bin:$PATH"']
+    assert command_texts(sdk_pre_build_shell) == [
+        'makeWrapper /usr/bin/swift "$TMPDIR/cua-swift/swift" \\\n'
+        "        --prefix PATH : /usr/bin \\\n"
+        "        --unset AR --unset CC --unset CXX --unset LD \\\n"
+        "        --unset NIX_CFLAGS_COMPILE --unset NIX_LDFLAGS",
+        'export PATH="$TMPDIR/cua-swift:$PATH"',
+    ]
     assert [
         node_text(node, sdk_pre_build_shell.sanitized)
         for node in iter_nodes(sdk_pre_build_shell.tree.root_node, "unset_command")
-    ] == ["unset AR CC CXX LD NIX_CFLAGS_COMPILE NIX_LDFLAGS"]
+    ] == []
 
     assert command_texts(parse_shell(indented_string_body(sdk_install.rebuild()))) == [
         "runHook preInstall",
