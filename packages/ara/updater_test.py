@@ -2,6 +2,7 @@
 
 import plistlib
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -12,31 +13,62 @@ from lib.update.updaters import UpdateContext
 from packages.ara import updater, validate_artifact
 
 
+@dataclass(slots=True)
+class _FakeResponse:
+    status: int = 307
+    reason: str = "Temporary Redirect"
+    headers: dict[str, str] = field(default_factory=dict)
+
+    async def __aenter__(self) -> _FakeResponse:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+
+class _FakeSession:
+    def __init__(self, response: _FakeResponse) -> None:
+        self.response = response
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def head(self, url: str, **kwargs: object) -> _FakeResponse:
+        self.calls.append((url, kwargs))
+        return self.response
+
+
+def _feed(monkeypatch: pytest.MonkeyPatch, payload: object) -> None:
+    async def feed(_session, url, *, config):
+        assert url == updater.AraUpdater.FEED_URL
+        assert config is not None
+        return payload
+
+    monkeypatch.setattr(updater, "fetch_json", feed)
+
+
 def test_reason_feed_does_not_persist_signed_urls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The portable candidate retains only the version and public redirect."""
-
-    async def feed(_session, url, *, config):
-        assert url == updater.AraUpdater.FEED_URL
-        assert config is not None
-        return {"name": "0.1.57", "url": "https://example.test/private?signature=test"}
-
-    async def headers(_session, url, *, config):
-        assert url == updater.AraUpdater.PLATFORMS["aarch64-darwin"]
-        assert config is not None
-        return {}
-
-    monkeypatch.setattr(updater, "fetch_json", feed)
-    monkeypatch.setattr(updater, "fetch_headers", headers)
+    _feed(
+        monkeypatch,
+        {"name": "0.1.57", "url": "https://example.test/private?signature=test"},
+    )
     instance = updater.AraUpdater()
-    info = run_async(instance.fetch_latest(None, context=UpdateContext(current=None)))
+    session = _FakeSession(_FakeResponse())
+    info = run_async(
+        instance.fetch_latest(session, context=UpdateContext(current=None))
+    )
     saved = ResolvedVersion.capture(info)
     assert saved.version == "0.1.57"
     assert saved.metadata is None
     assert instance.get_download_url("aarch64-darwin", saved.restore()) == (
         "https://reasonmachines.com/api/desktop-download?arch=aarch64"
     )
+    assert len(session.calls) == 1
+    url, kwargs = session.calls[0]
+    assert url == instance.PLATFORMS["aarch64-darwin"]
+    assert kwargs["allow_redirects"] is False
+    assert kwargs["timeout"].total == instance.config.default_timeout
 
 
 @pytest.mark.parametrize("payload", [{}, {"name": 57}, []])
@@ -44,38 +76,52 @@ def test_reason_feed_rejects_missing_version(
     monkeypatch: pytest.MonkeyPatch, payload
 ) -> None:
     """Malformed vendor data must fail before hashing a mutable download."""
-
-    async def feed(*_args, **_kwargs):
-        return payload
-
-    async def headers(*_args, **_kwargs):
-        return {}
-
-    monkeypatch.setattr(updater, "fetch_json", feed)
-    monkeypatch.setattr(updater, "fetch_headers", headers)
+    _feed(monkeypatch, payload)
     with pytest.raises((TypeError, ValueError)):
         run_async(
             updater.AraUpdater().fetch_latest(None, context=UpdateContext(current=None))
         )
 
 
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"x-ara-desktop-version": "0.1.66"},
+        {"X-Ara-Desktop-Version": " 0.1.66 "},
+    ],
+)
 def test_reason_uses_download_header_when_feed_lags(
     monkeypatch: pytest.MonkeyPatch,
+    headers: dict[str, str],
 ) -> None:
     """Nix hashes the redirect; its x-ara-desktop-version is the pin."""
-
-    async def feed(*_args, **_kwargs):
-        return {"name": "0.1.64", "url": "https://example.test/private?signature=test"}
-
-    async def headers(*_args, **_kwargs):
-        return {"x-ara-desktop-version": "0.1.66"}
-
-    monkeypatch.setattr(updater, "fetch_json", feed)
-    monkeypatch.setattr(updater, "fetch_headers", headers)
+    _feed(
+        monkeypatch,
+        {"name": "0.1.64", "url": "https://example.test/private?signature=test"},
+    )
     info = run_async(
-        updater.AraUpdater().fetch_latest(None, context=UpdateContext(current=None))
+        updater.AraUpdater().fetch_latest(
+            _FakeSession(_FakeResponse(headers=headers)),
+            context=UpdateContext(current=None),
+        )
     )
     assert info.version == "0.1.66"
+
+
+@pytest.mark.parametrize("status", [403, 500])
+def test_reason_download_discovery_does_not_hide_http_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+) -> None:
+    """A failed public endpoint must not fall back to the feed version."""
+    _feed(monkeypatch, {"name": "0.1.64"})
+    with pytest.raises(RuntimeError, match=f"discovery failed with HTTP {status}"):
+        run_async(
+            updater.AraUpdater().fetch_latest(
+                _FakeSession(_FakeResponse(status=status, reason="Unavailable")),
+                context=UpdateContext(current=None),
+            )
+        )
 
 
 @pytest.fixture
