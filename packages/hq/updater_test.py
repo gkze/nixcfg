@@ -9,6 +9,7 @@ import pytest
 from lib.tests._updater_helpers import load_repo_module, run_async
 from lib.tests.test_hq_package import (
     _CURRENT_AUTOMATIC_MUTATION_PATHS,
+    _CURRENT_DISABLED_MUTATION_PATHS,
     _load_hq_module,
     _mutation_fixture,
 )
@@ -147,3 +148,89 @@ def test_hq_0339_paired_load_guard_is_unique_and_preserves_its_target(
             main_executable=executable,
             expected_version="0.10.339",
         )
+
+
+_GENERIC_ARM64_RETURN_FALSE_STUB = bytes.fromhex(
+    "00 00 80 52 c0 03 5f d6 1f 20 03 d5 "
+    "1f 20 03 d5 1f 20 03 d5 1f 20 03 d5 "
+    "1f 20 03 d5"
+)
+
+
+def test_hq_arm64_auto_update_gate_disabled_signature_is_unique_against_compiler_stubs() -> (
+    None
+):
+    """0.10.373+ compiler return-false stubs must not collide with the brand."""
+    module = _load_hq_module("patch_updater.py", "hq_0373_gate_unique_test")
+    payload = _mutation_fixture(
+        module,
+        (
+            *_CURRENT_AUTOMATIC_MUTATION_PATHS,
+            _GENERIC_ARM64_RETURN_FALSE_STUB,
+            _GENERIC_ARM64_RETURN_FALSE_STUB,
+            _GENERIC_ARM64_RETURN_FALSE_STUB,
+        ),
+    )
+
+    patched = module.patch_payload(payload)
+
+    assert patched.count(_GENERIC_ARM64_RETURN_FALSE_STUB) == 3
+    assert patched.count(_CURRENT_DISABLED_MUTATION_PATHS[1]) == 1
+
+
+@pytest.mark.parametrize("copies", [0, 1, 2])
+def test_hq_0375_staging_guard_is_unique_and_preserves_its_target(
+    tmp_path: Path, copies: int
+) -> None:
+    """0.10.375's mov x19 state-base reload must stay a single staging guard."""
+    module = _load_hq_module("patch_updater.py", "hq_0375_staging_patch_test")
+    validator = _load_hq_module("validate_artifact.py", "hq_0375_staging_validator_test")
+    # HQ 0.10.375 arm64 staging at file offset 0x37d32bc.
+    guard = bytes.fromhex(
+        "50 c8 07 94 60 86 54 a9 d4 13 d6 97 60 41 00 36 "
+        "61 8a 54 a9 63 92 51 a9 e0 03 13 aa e3 7c 07 94 "
+        "e8 83 0f 91"
+    )
+    paths = (
+        *_CURRENT_AUTOMATIC_MUTATION_PATHS[:5],
+        *([guard] * copies),
+        *_CURRENT_AUTOMATIC_MUTATION_PATHS[6:],
+    )
+    payload = _mutation_fixture(module, paths)
+    if copies != 1:
+        with pytest.raises(
+            ValueError, match="arm64 staging hq-core install guard inventory"
+        ):
+            module.patch_payload(payload)
+        return
+
+    patched = module.patch_payload(payload)
+    offset = payload.index(guard)
+    assert len(patched) == len(payload)
+    assert patched[offset : offset + 12] == guard[:12]
+    assert patched[offset + 16 : offset + len(guard)] == guard[16:]
+    branch = int.from_bytes(patched[offset + 12 : offset + 16], "little")
+    assert branch >> 26 == 0b000101
+    assert 12 + ((branch & 0x03FFFFFF) << 2) == 0x838
+
+    executable = tmp_path / "hq-sync-menubar"
+    executable.write_bytes(patched)
+    info = tmp_path / "Info.plist"
+    info.write_bytes(
+        plistlib.dumps({
+            "CFBundleExecutable": "hq-sync-menubar",
+            "CFBundleIdentifier": "ai.indigo.hq-sync-menubar",
+            "CFBundleShortVersionString": "0.10.375",
+            "CFBundleVersion": "0.10.375",
+            "LSMinimumSystemVersion": "13.0",
+            "LSUIElement": True,
+        })
+    )
+    validator.validate_artifact(
+        info_plist=info,
+        main_executable=executable,
+        expected_version="0.10.375",
+    )
+    mixed = _mutation_fixture(module, (*paths, _CURRENT_AUTOMATIC_MUTATION_PATHS[5]))
+    with pytest.raises(ValueError, match="inventory drifted: expected 1, got 2"):
+        module.patch_payload(mixed)

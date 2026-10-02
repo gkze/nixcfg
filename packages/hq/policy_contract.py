@@ -103,8 +103,19 @@ _ARM64_AUTO_UPDATE_GATE = _exact(
         "fd 7b 0c a9 fd 03 03 91 e8 23 01 91"
     )
 )
+# 0.10.373+ already contains three compiler `mov w0,#0; ret; nop*` stubs in
+# the arm64 slice. Keep the live return-false/ret pair and brand the unused
+# tail with writes to xzr so the disabled signature stays unique.
 _DISABLED_ARM64_AUTO_UPDATE_GATE = _exact(
-    bytes.fromhex("00 00 80 52 c0 03 5f d6") + (bytes.fromhex("1f 20 03 d5") * 5)
+    bytes.fromhex(
+        "00 00 80 52 "  # mov w0, #0
+        "c0 03 5f d6 "  # ret
+        "1f 00 80 d2 "  # movz xzr, #0
+        "3f 20 a0 f2 "  # movk xzr, #0x101, lsl #16
+        "5f 40 c0 f2 "  # movk xzr, #0x202, lsl #32
+        "7f 60 e0 f2 "  # movk xzr, #0x303, lsl #48
+        "1f 20 03 d5"  # nop
+    )
 )
 
 
@@ -294,6 +305,31 @@ _DISABLED_ARM64_STAGING_CORE_INSTALL_GUARD = _aarch64_words(
     (0x94000000, _AARCH64_BRANCH26_MASK),
     (0x910003E0, _AARCH64_ADD_STATE_BASE_MASK),
 )
+# 0.10.375 replaces the post-branch sp-relative load with `mov x0, x19`
+# before the reviewed report call. The tbz bit-zero decision, x19 pair
+# reloads, and continuation add keep the same shape.
+_ARM64_STAGING_CORE_INSTALL_GUARD_375 = _aarch64_words(
+    (0x94000000, _AARCH64_BRANCH26_MASK),
+    (0xA9400260, _AARCH64_LDP_STATE_MASK),
+    (0x94000000, _AARCH64_BRANCH26_MASK),
+    (0x36000000, _AARCH64_TBZ_MASK),
+    (0xA9400261, _AARCH64_LDP_STATE_MASK),
+    (0xA9400263, _AARCH64_LDP_STATE_MASK),
+    (0xAA1303E0, _AARCH64_EXACT_MASK),
+    (0x94000000, _AARCH64_BRANCH26_MASK),
+    (0x910003E0, _AARCH64_ADD_STATE_BASE_MASK),
+)
+_DISABLED_ARM64_STAGING_CORE_INSTALL_GUARD_375 = _aarch64_words(
+    (0x94000000, _AARCH64_BRANCH26_MASK),
+    (0xA9400260, _AARCH64_LDP_STATE_MASK),
+    (0x94000000, _AARCH64_BRANCH26_MASK),
+    (0x14000000, _AARCH64_BRANCH26_MASK),
+    (0xA9400261, _AARCH64_LDP_STATE_MASK),
+    (0xA9400263, _AARCH64_LDP_STATE_MASK),
+    (0xAA1303E0, _AARCH64_EXACT_MASK),
+    (0x94000000, _AARCH64_BRANCH26_MASK),
+    (0x910003E0, _AARCH64_ADD_STATE_BASE_MASK),
+)
 
 # The CLI recovery blocks load two relocated addresses, call two relocated
 # functions, then branch past the mutation. Only instruction semantics and the
@@ -402,6 +438,15 @@ AUTOMATIC_MUTATION_PATCHES = (
         disabled=_DISABLED_ARM64_STAGING_CORE_INSTALL_GUARD,
         original_branch=RelativeBranch(12, "aarch64-tbz-imm14"),
         disabled_branch=RelativeBranch(12, "aarch64-b-imm26"),
+        alternatives=(
+            MachinePatch(
+                label="arm64 staging hq-core install guard (0.10.375)",
+                original=_ARM64_STAGING_CORE_INSTALL_GUARD_375,
+                disabled=_DISABLED_ARM64_STAGING_CORE_INSTALL_GUARD_375,
+                original_branch=RelativeBranch(12, "aarch64-tbz-imm14"),
+                disabled_branch=RelativeBranch(12, "aarch64-b-imm26"),
+            ),
+        ),
     ),
     MachinePatch(
         label="x86_64 CLI legacy-marker recovery",
