@@ -5,6 +5,7 @@
   lib,
   lld,
   libiconv,
+  makeWrapper,
   outputs,
   pkg-config,
   python3,
@@ -57,13 +58,18 @@ let
       "cua-driver-sdk"
     ];
     doCheck = false;
-    # apple-metal 0.6.0's build.rs runs `swift build`. Prefer Xcode's
-    # `swift` on PATH so the flake's Swift 5.10 pin is not selected.
-    # Keep NIX_LDFLAGS: unsetting it made rustc's -liconv fail while
-    # linking zstd-sys's build script (Update 37037587993).
+    # apple-metal 0.6.0's build.rs runs `swift build`. Wrap only that
+    # Xcode `swift` so the flake Swift 5.10 pin is not selected and Nix
+    # compiler flags stay on the Rust link of zstd-sys (Update 37037587993:
+    # ld: library not found for -liconv after a global unset).
+    nativeBuildInputs = [ makeWrapper ];
     buildInputs = [ libiconv ];
     preBuild = ''
-      export PATH="/usr/bin:$PATH"
+      makeWrapper /usr/bin/swift "$TMPDIR/cua-swift/swift" \
+        --prefix PATH : /usr/bin \
+        --unset AR --unset CC --unset CXX --unset LD \
+        --unset NIX_CFLAGS_COMPILE --unset NIX_LDFLAGS
+      export PATH="$TMPDIR/cua-swift:$PATH"
     '';
     postPatch = ''
       cat ${wakuSrc}/resources/computer-use/cua-host.rs >> crates/cua-driver-sdk/src/abi.rs
