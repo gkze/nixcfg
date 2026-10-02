@@ -913,6 +913,17 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         expect_binding(sdk_arguments.values, "installPhase").value,
         IndentedString,
     )
+    sdk_pre_build = expect_instance(
+        expect_binding(sdk_arguments.values, "preBuild").value,
+        IndentedString,
+    )
+    sdk_pre_build_shell = parse_shell(indented_string_body(sdk_pre_build.rebuild()))
+    assert command_texts(sdk_pre_build_shell) == ['export PATH="/usr/bin:$PATH"']
+    assert [
+        node_text(node, sdk_pre_build_shell.sanitized)
+        for node in iter_nodes(sdk_pre_build_shell.tree.root_node, "unset_command")
+    ] == ["unset AR CC CXX LD NIX_CFLAGS_COMPILE NIX_LDFLAGS"]
+
     assert command_texts(parse_shell(indented_string_body(sdk_install.rebuild()))) == [
         "runHook preInstall",
         'mkdir -p "$out/lib" "$out/include"',
@@ -946,8 +957,8 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
     assert all("menubar-cursor.png" not in text for text in install_texts)
     assert all("overlay-cursor.svg" not in text for text in install_texts)
     assert all("standalone-service-v2" not in text for text in install_texts)
-    assert command_texts(install_commands, "__NIX_INTERP__") == [
-        "__NIX_INTERP__ \\\n"
+    assert command_texts(install_commands, "/usr/bin/swiftc") == [
+        "/usr/bin/swiftc \\\n"
         "      -O \\\n"
         "      -parse-as-library \\\n"
         '      -module-cache-path "$swiftModuleCache" \\\n'
@@ -958,7 +969,7 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         "      resources/computer-use/WakuComputerUse.swift \\\n"
         "      resources/computer-use/CuaDriver.swift \\\n"
         '      -o "$helperExecutable"',
-        "__NIX_INTERP__ -version",
+        "/usr/bin/swiftc -version",
     ]
     assert command_texts(install_commands, "printf") == [
         "printf '%s\\n' \\\n"

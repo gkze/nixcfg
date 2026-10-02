@@ -56,6 +56,15 @@ let
       "cua-driver-sdk"
     ];
     doCheck = false;
+    # apple-metal 0.6.0's build.rs runs `swift build`. The flake's pinned
+    # nixpkgs Swift 5.10 cannot compile that crate's macOS 15 Metal APIs
+    # (Update 37010400847 repair reproduced this and reverted). Prefer the
+    # Xcode toolchain on the Darwin builder and drop Nix's compiler wrappers
+    # so SPM does not inherit clang/NIX_* flags.
+    preBuild = ''
+      export PATH="/usr/bin:$PATH"
+      unset AR CC CXX LD NIX_CFLAGS_COMPILE NIX_LDFLAGS
+    '';
     postPatch = ''
       cat ${wakuSrc}/resources/computer-use/cua-host.rs >> crates/cua-driver-sdk/src/abi.rs
     '';
@@ -271,7 +280,7 @@ let
 
     swiftModuleCache="$TMPDIR/swift-module-cache"
     mkdir -p "$swiftModuleCache"
-    ${lib.getExe' swift "swiftc"} \
+    /usr/bin/swiftc \
       -O \
       -parse-as-library \
       -module-cache-path "$swiftModuleCache" \
@@ -298,7 +307,7 @@ let
         "sh.waku.computer-use" \
         "-" \
         "${minimumMacosTarget}"
-      ${lib.getExe' swift "swiftc"} -version
+      /usr/bin/swiftc -version
     } | /usr/bin/shasum -a 256 | awk '{ print $1 }')"
     printf '%s\n' "$helperFingerprint" \
       > "$helperContents/Resources/.waku-helper-fingerprint"
