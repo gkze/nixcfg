@@ -4,6 +4,7 @@
   fetchurl,
   lib,
   lld,
+  libiconv,
   outputs,
   pkg-config,
   python3,
@@ -56,14 +57,13 @@ let
       "cua-driver-sdk"
     ];
     doCheck = false;
-    # apple-metal 0.6.0's build.rs runs `swift build`. The flake's pinned
-    # nixpkgs Swift 5.10 cannot compile that crate's macOS 15 Metal APIs
-    # (Update 37010400847 repair reproduced this and reverted). Prefer the
-    # Xcode toolchain on the Darwin builder and drop Nix's compiler wrappers
-    # so SPM does not inherit clang/NIX_* flags.
+    # apple-metal 0.6.0's build.rs runs `swift build`. Prefer Xcode's
+    # `swift` on PATH so the flake's Swift 5.10 pin is not selected.
+    # Keep NIX_LDFLAGS: unsetting it made rustc's -liconv fail while
+    # linking zstd-sys's build script (Update 37037587993).
+    buildInputs = [ libiconv ];
     preBuild = ''
       export PATH="/usr/bin:$PATH"
-      unset AR CC CXX LD NIX_CFLAGS_COMPILE NIX_LDFLAGS
     '';
     postPatch = ''
       cat ${wakuSrc}/resources/computer-use/cua-host.rs >> crates/cua-driver-sdk/src/abi.rs
