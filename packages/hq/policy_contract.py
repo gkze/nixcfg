@@ -361,9 +361,19 @@ _ARM64_CLI_LEGACY_MARKER_RECOVERY = _aarch64_words(
     (0x94000000, _AARCH64_BRANCH26_MASK),
     (0x14000000, _AARCH64_BRANCH26_MASK),
 )
+# 0.10.373+ emits many `b; nop*8` compiler pads. Keep the forced branch and
+# brand the unused tail with writes to xzr so the disabled signature stays
+# unique.
 _DISABLED_ARM64_CLI_LEGACY_MARKER_RECOVERY = _aarch64_words(
     (0x14000000, _AARCH64_BRANCH26_MASK),
-    *((0xD503201F, _AARCH64_EXACT_MASK),) * 8,
+    (0xD288699F, _AARCH64_EXACT_MASK),  # movz xzr, #0x434c
+    (0xF2A0003F, _AARCH64_EXACT_MASK),  # movk xzr, #0x1, lsl #16
+    (0xF2C0005F, _AARCH64_EXACT_MASK),  # movk xzr, #0x2, lsl #32
+    (0xF2E0007F, _AARCH64_EXACT_MASK),  # movk xzr, #0x3, lsl #48
+    (0xD280009F, _AARCH64_EXACT_MASK),  # movz xzr, #0x4
+    (0xF2A000BF, _AARCH64_EXACT_MASK),  # movk xzr, #0x5, lsl #16
+    (0xF2C000DF, _AARCH64_EXACT_MASK),  # movk xzr, #0x6, lsl #32
+    (0xF2E000FF, _AARCH64_EXACT_MASK),  # movk xzr, #0x7, lsl #48
 )
 
 # 0.10.339 pairs the same x19-relative loads. Keep the bit-zero decision and

@@ -178,6 +178,30 @@ def test_hq_arm64_auto_update_gate_disabled_signature_is_unique_against_compiler
     assert patched.count(_CURRENT_DISABLED_MUTATION_PATHS[1]) == 1
 
 
+_GENERIC_ARM64_BRANCH_NOP_SLED = bytes.fromhex(
+    "0f 00 00 14 1f 20 03 d5 1f 20 03 d5 "
+    "1f 20 03 d5 1f 20 03 d5 1f 20 03 d5 "
+    "1f 20 03 d5 1f 20 03 d5 1f 20 03 d5"
+)
+
+
+def test_hq_arm64_cli_disabled_signature_is_unique_against_compiler_pads() -> None:
+    """0.10.373+ `b; nop*8` pads must not collide with the branded CLI stub."""
+    module = _load_hq_module("patch_updater.py", "hq_0373_cli_unique_test")
+    payload = _mutation_fixture(
+        module,
+        (
+            *_CURRENT_AUTOMATIC_MUTATION_PATHS,
+            *([_GENERIC_ARM64_BRANCH_NOP_SLED] * 3),
+        ),
+    )
+
+    patched = module.patch_payload(payload)
+
+    assert patched.count(_GENERIC_ARM64_BRANCH_NOP_SLED) == 3
+    assert patched.count(_CURRENT_DISABLED_MUTATION_PATHS[7]) == 1
+
+
 @pytest.mark.parametrize("copies", [0, 1, 2])
 def test_hq_0375_staging_guard_is_unique_and_preserves_its_target(
     tmp_path: Path, copies: int
