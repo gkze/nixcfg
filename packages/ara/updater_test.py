@@ -22,7 +22,13 @@ def test_reason_feed_does_not_persist_signed_urls(
         assert config is not None
         return {"name": "0.1.57", "url": "https://example.test/private?signature=test"}
 
+    async def headers(_session, url, *, config):
+        assert url == updater.AraUpdater.PLATFORMS["aarch64-darwin"]
+        assert config is not None
+        return {}
+
     monkeypatch.setattr(updater, "fetch_json", feed)
+    monkeypatch.setattr(updater, "fetch_headers", headers)
     instance = updater.AraUpdater()
     info = run_async(instance.fetch_latest(None, context=UpdateContext(current=None)))
     saved = ResolvedVersion.capture(info)
@@ -42,11 +48,34 @@ def test_reason_feed_rejects_missing_version(
     async def feed(*_args, **_kwargs):
         return payload
 
+    async def headers(*_args, **_kwargs):
+        return {}
+
     monkeypatch.setattr(updater, "fetch_json", feed)
+    monkeypatch.setattr(updater, "fetch_headers", headers)
     with pytest.raises((TypeError, ValueError)):
         run_async(
             updater.AraUpdater().fetch_latest(None, context=UpdateContext(current=None))
         )
+
+
+def test_reason_uses_download_header_when_feed_lags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nix hashes the redirect; its x-ara-desktop-version is the pin."""
+
+    async def feed(*_args, **_kwargs):
+        return {"name": "0.1.64", "url": "https://example.test/private?signature=test"}
+
+    async def headers(*_args, **_kwargs):
+        return {"x-ara-desktop-version": "0.1.66"}
+
+    monkeypatch.setattr(updater, "fetch_json", feed)
+    monkeypatch.setattr(updater, "fetch_headers", headers)
+    info = run_async(
+        updater.AraUpdater().fetch_latest(None, context=UpdateContext(current=None))
+    )
+    assert info.version == "0.1.66"
 
 
 @pytest.fixture
