@@ -2,14 +2,25 @@
 
 from typing import TYPE_CHECKING, ClassVar
 
+import aiohttp
+
 from lib import json_utils
-from lib.update.net import fetch_headers, fetch_json
+from lib.update.net import HTTP_BAD_REQUEST, fetch_json
 from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 
 if TYPE_CHECKING:
-    import aiohttp
-
     from lib.update.updaters import UpdateContext
+
+
+def _header(headers: dict[str, str], name: str) -> str:
+    return next(
+        (
+            value.strip()
+            for key, value in headers.items()
+            if key.lower() == name and value.strip()
+        ),
+        "",
+    )
 
 
 @register_updater
@@ -42,18 +53,20 @@ class AraUpdater(DownloadHashUpdater):
         )
         # The public redirect can race ahead of the feed (Update 37037587993
         # hashed 0.1.66 bytes while the feed still named 0.1.64). Pin the
-        # version of the bytes Nix will hash.
-        download_headers = await fetch_headers(
-            session,
-            self.PLATFORMS["aarch64-darwin"],
-            config=self.config,
-        )
-        download_version = next(
-            (
-                value.strip()
-                for key, value in download_headers.items()
-                if key.lower() == "x-ara-desktop-version" and value.strip()
-            ),
-            "",
-        )
+        # version of the bytes Nix will hash. That version lives on the public
+        # 307; the signed Location authorizes GET only, so a following HEAD
+        # returns HTTP 403 (Update 37067759340).
+        download_url = self.PLATFORMS["aarch64-darwin"]
+        async with session.head(
+            download_url,
+            allow_redirects=False,
+            timeout=aiohttp.ClientTimeout(total=self.config.default_timeout),
+        ) as response:
+            if response.status >= HTTP_BAD_REQUEST:
+                msg = (
+                    f"Reason download discovery failed with HTTP {response.status} "
+                    f"{response.reason}"
+                )
+                raise RuntimeError(msg)
+            download_version = _header(dict(response.headers), "x-ara-desktop-version")
         return VersionInfo(version=download_version or feed_version)
