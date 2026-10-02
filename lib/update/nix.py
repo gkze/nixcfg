@@ -543,14 +543,32 @@ _PERMANENT_BUILD_FAILURE_MARKERS = (
     "error: cannot build",
     "error: build failed due to failed dependency",
 )
+# A builder that actually ran and exited. Substitute EILSEQ also makes
+# Determinate Nix print "Cannot build" / "Reason: 1 dependency failed".
+_BUILDER_EXIT_MARKERS = (
+    "failed with exit code",
+    "error: builder for",
+)
+
+
+def _nix_output_has_builder_exit(output: str) -> bool:
+    folded = output.casefold()
+    return any(marker in folded for marker in _BUILDER_EXIT_MARKERS)
 
 
 def _nix_output_has_permanent_build_failure(output: str) -> bool:
     """Return whether Nix attributed the output to a derivation, not the store."""
+    if _has_hash_mismatch_signal(output):
+        return True
     folded = output.casefold()
-    return any(
-        marker in folded for marker in _PERMANENT_BUILD_FAILURE_MARKERS
-    ) or _has_hash_mismatch_signal(output)
+    if not any(marker in folded for marker in _PERMANENT_BUILD_FAILURE_MARKERS):
+        return False
+    # Hosted macos-15 can EILSEQ while realizing a substitute. Nix then
+    # reports "Cannot build X / Reason: 1 dependency failed" for dependents.
+    # That is still a store fault unless a builder actually exited.
+    if any(marker.casefold() in folded for marker in _NIX_STORE_TRANSIENT_MARKERS):
+        return _nix_output_has_builder_exit(output)
+    return True
 
 
 def is_retryable_nix_network_failure(*, stdout: str, stderr: str) -> bool:
@@ -589,10 +607,11 @@ def is_transient_store_interruption(text: str) -> bool:
     """Return whether validation stopped on a runner store fault.
 
     Hosted macOS jobs lose the store mid-build (``Illegal byte sequence`` or
-    SIGBUS). A hash mismatch or a derivation failure in the same output
-    (``error: builder for``, ``error: Cannot build``, or
-    ``error: Build failed due to failed dependency``) must not continue as if
-    the store had only faulted.
+    SIGBUS). A hash mismatch or a builder that actually exited
+    (``failed with exit code``, ``error: builder for``) must not continue as
+    if the store had only faulted. ``error: Cannot build`` /
+    ``Reason: 1 dependency failed`` after a substitute EILSEQ is still a
+    store fault.
     """
     if _nix_output_has_permanent_build_failure(text):
         return False

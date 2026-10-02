@@ -565,6 +565,36 @@ raise SystemExit(1)
     assert current.returncode == 1
     assert current_sleeps == []
 
+    substitute = tmp_path / "substitute"
+    substitute_script = """
+import pathlib, sys
+marker = pathlib.Path(sys.argv[1])
+if not marker.exists():
+    marker.touch()
+    print(
+        'error: clearing flags of path "/nix/store/s6-bun-cache/share/bun-packages/'
+        'lie@3.3.0": Illegal byte sequence',
+        file=sys.stderr,
+    )
+    print(
+        "error: Cannot build '/nix/store/a7-superset-1.30.2.drv'.",
+        file=sys.stderr,
+    )
+    print("       Reason: 1 dependency failed.", file=sys.stderr)
+    raise SystemExit(1)
+print("complete")
+"""
+    substitute_sleeps: list[float] = []
+    recovered = validation._run_validation_command(
+        [sys.executable, "-c", substitute_script, str(substitute)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=substitute_sleeps.append,
+    )
+    assert recovered.returncode == 0
+    assert substitute_sleeps == [1.0]
+
     codes = iter([-signal.SIGBUS, 0])
 
     def run(

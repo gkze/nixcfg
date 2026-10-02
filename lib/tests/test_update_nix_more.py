@@ -253,7 +253,26 @@ def test_retryable_fixed_output_hash_failure_classification() -> None:
     assert not is_transient_store_interruption(
         "error: Cannot build '/nix/store/abc.drv'.\nterminated by signal 10"
     )
-    assert not is_transient_store_interruption(
+    substitute_eilseq = (
+        'error: clearing flags of path "/nix/store/s6r17xm79153d1h8wk7axg58whz0bw1j-'
+        'bun-cache/share/bun-packages/lie@3.3.0": Illegal byte sequence\n'
+        "error: path '/nix/store/s6r17xm79153d1h8wk7axg58whz0bw1j-bun-cache' is "
+        "required, but there is no substituter that can build it\n"
+        "error: some substitutes for the outputs of derivation "
+        "'/nix/store/pp1lw91z156n1k67c9y46ygs952drra8-bun-cache.drv' failed "
+        "(usually happens due to networking issues); try '--fallback' to build "
+        "derivation from source\n"
+        "error: Cannot build '/nix/store/a7l7d5dr4zav4fcfd7ywzkxb5vsi95jk-"
+        "superset-1.30.2.drv'.\n"
+        "       Reason: 1 dependency failed.\n"
+        "error (ignored): write of 1 bytes: Illegal byte sequence\n"
+        "error: creating log file "
+        '"/nix/var/log/nix/drvs/08/wzx3233whhrfcrbdbv5lcjhp7nz9iw-'
+        'ansi-escapes-7.3.0.tgz.drv.bz2": Invalid argument'
+    )
+    assert is_retryable_nix_store_failure(stdout="", stderr=substitute_eilseq)
+    assert is_transient_store_interruption(substitute_eilseq)
+    assert is_transient_store_interruption(
         "error: Build failed due to failed dependency\n"
         "Illegal byte sequence\n"
         "terminated by signal 10"
