@@ -499,8 +499,8 @@ _CURRENT_DISABLED_MUTATION_PATHS = (
         "90 90 90"
     ),
     bytes.fromhex(
-        "00 00 80 52 c0 03 5f d6 1f 20 03 d5 "
-        "1f 20 03 d5 1f 20 03 d5 1f 20 03 d5 "
+        "00 00 80 52 c0 03 5f d6 1f 00 80 d2 "
+        "3f 20 a0 f2 5f 40 c0 f2 7f 60 e0 f2 "
         "1f 20 03 d5"
     ),
     bytes.fromhex(
@@ -533,9 +533,9 @@ _CURRENT_DISABLED_MUTATION_PATHS = (
         "90 90 90 90 90 90 90 90 90 90 90 90"
     ),
     bytes.fromhex(
-        "0f 00 00 14 1f 20 03 d5 1f 20 03 d5 "
-        "1f 20 03 d5 1f 20 03 d5 1f 20 03 d5 "
-        "1f 20 03 d5 1f 20 03 d5 1f 20 03 d5"
+        "0f 00 00 14 9f 69 88 d2 3f 00 a0 f2 "
+        "5f 00 c0 f2 7f 00 e0 f2 9f 00 80 d2 "
+        "bf 00 a0 f2 df 00 c0 f2 ff 00 e0 f2"
     ),
 )
 
