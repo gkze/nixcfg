@@ -21,12 +21,15 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    One hosted macOS job cannot realize `checks.aarch64-darwin.root-closures`
    inside the 360-minute job cap, so that build is a chain of shards. Each shard
    builds for five hours, the Cachix daemon flushes, and the next shard
-   substitutes those paths and continues. A transient store fault
+   substitutes those paths and continues.    A transient store fault
    (`Illegal byte sequence` or SIGBUS) is retried with only the time left in
    that shard's build budget, then continues the same way: realized paths stay
-   in `gkze` and the next shard substitutes them. A real derivation failure
-   (`error: builder for`, `error: Cannot build`, or a failed dependency) still
-   fails the shard. The last
+   in `gkze` and the next shard substitutes them. Determinate Nix can report
+   that fault as `Cannot build` / `Reason: 1 dependency failed` after a
+   substitute EILSEQ; that still retries. A builder that actually exited
+   (`failed with exit code`, `error: builder for`) still fails the shard.
+   Validation `nix build` passes `--fallback` so a failed substitute can
+   rebuild from source. The last
    shard does not yield: an unfinished closure or a store fault that survives
    the retry fails the run. Every declared package platform and every
    native root is still built. Shards are serial because the closure's slow

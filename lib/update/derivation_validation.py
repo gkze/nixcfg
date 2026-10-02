@@ -742,7 +742,14 @@ def _validation_args(
         *(
             # keep-going lets one batch report every failing derivation instead
             # of stopping at the first, so later isolation rounds are cheap.
-            ["--no-link", "--keep-going", *(["-L"] if print_build_logs else [])]
+            [
+                "--no-link",
+                "--keep-going",
+                # Substitute EILSEQ on hosted macos-15 is not a derivation
+                # failure; Nix can rebuild that path from source.
+                "--fallback",
+                *(["-L"] if print_build_logs else []),
+            ]
             if request.mode == "build"
             else ["--option", "allow-import-from-derivation", "false", "--raw"]
         ),

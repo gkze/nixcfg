@@ -325,6 +325,7 @@ def test_validate_derivations_can_build_an_installable() -> None:
             "--no-update-lock-file",
             "--no-link",
             "--keep-going",
+            "--fallback",
             "path:.#portable",
         ]
     ]
@@ -453,6 +454,7 @@ def test_validate_root_closures_builds_flake_owned_aggregate(
                     "--no-update-lock-file",
                     "--no-link",
                     "--keep-going",
+                    "--fallback",
                     *(
                         f"path:{snapshot_root}#checks.{system}.root-closures"
                         for system in ("aarch64-darwin", "x86_64-linux")
