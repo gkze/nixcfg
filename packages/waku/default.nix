@@ -57,7 +57,7 @@ let
       "cua-driver-sdk"
     ];
     doCheck = false;
-    # apple-metal 0.6.0 / apple-cf 0.9.3 build.rs run `swift build`.
+    # apple-metal / apple-cf / screencapturekit build.rs run `swift build`.
     # Nix's stdenv DEVELOPER_DIR is the SDK-only store tree. Discover
     # the host Xcode swift with that unset (Update 37101218094 still
     # failed with DEVELOPER_DIR left in place for xcrun). Do not use
@@ -73,7 +73,10 @@ let
     # `sandbox-exec: sandbox_apply: Operation not permitted` inside
     # Nix's sandbox. Pass `--disable-sandbox` the same way
     # baseten-switch does. Pin HOME on the spawn — cargo build
-    # scripts still see /var/empty after preBuild exports.
+    # scripts still see /var/empty after preBuild exports. Update
+    # 37156933929 got past sandbox-exec on apple-cf/apple-metal, then
+    # screencapturekit-8.0.1 still spawned unpinned `swift` against
+    # apple-sdk-14.4. Patch every vendor build.rs that calls swift.
     buildInputs = [ libiconv ];
     preBuild = ''
       xcodeSwift="$(
@@ -113,10 +116,8 @@ let
       echo "cua-driver-sdk host Xcode swift=$xcodeSwift DEVELOPER_DIR=$developerDir SDKROOT=$xcodeSdk" >&2
       patched=0
       for build_rs in \
-        cargo-vendor-dir/apple-metal-*/build.rs \
-        cargo-vendor-dir/apple-cf-*/build.rs \
-        "$NIX_BUILD_TOP"/cargo-vendor-dir/apple-metal-*/build.rs \
-        "$NIX_BUILD_TOP"/cargo-vendor-dir/apple-cf-*/build.rs
+        cargo-vendor-dir/*/build.rs \
+        "$NIX_BUILD_TOP"/cargo-vendor-dir/*/build.rs
       do
         if [ ! -f "$build_rs" ]; then
           continue
@@ -140,7 +141,7 @@ let
         patched=$((patched + 1))
       done
       if [ "$patched" -eq 0 ]; then
-        echo "failed to pin host Xcode swift on apple-metal/apple-cf build.rs" >&2
+        echo "failed to pin host Xcode swift on vendor build.rs" >&2
         exit 1
       fi
     '';

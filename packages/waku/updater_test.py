@@ -956,6 +956,51 @@ def test_waku_cua_discovers_host_xcode_swift_outside_nix_sdk(
     assert "Nix SDK selection" not in result.stderr
 
 
+def test_waku_cua_pins_every_vendor_swift_build_rs(tmp_path: Path) -> None:
+    """Update 37156933929 compiled apple-cf/metal, then screencapturekit used Nix SDK."""
+    vendor = tmp_path / "cargo-vendor-dir"
+    swift_build = (
+        'fn main() {\n'
+        '    let _ = std::process::Command::new("swift")\n'
+        '        .args(&["build", "-c", "release"]);\n'
+        "}\n"
+    )
+    rustc_only = 'fn main() { println!("cargo:rerun-if-changed=build.rs"); }\n'
+    for name in ("apple-metal-0.6.0", "apple-cf-0.9.3", "screencapturekit-8.0.1"):
+        crate = vendor / name
+        crate.mkdir(parents=True)
+        (crate / "build.rs").write_text(swift_build, encoding="utf-8")
+    (vendor / "serde-1.0.0").mkdir()
+    (vendor / "serde-1.0.0" / "build.rs").write_text(rustc_only, encoding="utf-8")
+
+    patch = "patched=0" + _cua_pre_build_shell().split("patched=0", 1)[1]
+    result = subprocess.run(  # noqa: S603 -- executes repository shell against temp vendor trees
+        ["bash", "-eu", "-c", patch],  # noqa: S607 -- resolves Bash from the test environment
+        cwd=tmp_path,
+        env=os.environ
+        | {
+            "TMPDIR": str(tmp_path),
+            "NIX_BUILD_TOP": str(tmp_path),
+            "CUA_XCODE_SWIFT": "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift",
+            "CUA_XCODE_DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
+            "CUA_XCODE_SDKROOT": "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+            "CUA_XCODE_HOME": str(tmp_path / "cua-swiftpm-home"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    for name in ("apple-metal-0.6.0", "apple-cf-0.9.3", "screencapturekit-8.0.1"):
+        patched = (vendor / name / "build.rs").read_text(encoding="utf-8")
+        assert 'Command::new(std::env::var("CUA_XCODE_SWIFT")' in patched
+        assert 'env("SDKROOT", std::env::var("CUA_XCODE_SDKROOT")' in patched
+        assert "--disable-sandbox" in patched
+        assert 'Command::new("swift")' not in patched
+    assert (vendor / "serde-1.0.0" / "build.rs").read_text(encoding="utf-8") == rustc_only
+
+
 def test_waku_cua_lock_is_an_isolated_crates_io_workspace() -> None:
     """Cua's lock stays outside Waku's Cargo workspace and names only crates.io."""
     lock = tomllib.loads((_PACKAGE_DIR / "cua-driver.lock").read_text(encoding="utf-8"))
@@ -1080,7 +1125,7 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         'echo "failed to add --disable-sandbox to $build_rs"',
         "exit 1",
         '[ "$patched" -eq 0 ]',
-        'echo "failed to pin host Xcode swift on apple-metal/apple-cf build.rs"',
+        'echo "failed to pin host Xcode swift on vendor build.rs"',
         "exit 1",
     ]
     assert [
