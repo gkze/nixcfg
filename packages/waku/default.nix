@@ -57,26 +57,60 @@ let
       "cua-driver-sdk"
     ];
     doCheck = false;
-    # apple-metal 0.6.0's build.rs runs `swift build`. Put the real
-    # Xcode toolchain bin first on PATH and set DEVELOPER_DIR from that
-    # swift, not `xcode-select -p`. The latter can point at CLT while
-    # `xcrun --find swift` resolves Xcode; exporting CLT as
-    # DEVELOPER_DIR makes SwiftPM report `tool 'swift' not found`
-    # (Update 37090922383). Do not wrap swift: a bash wrapper first on
-    # PATH is what SwiftPM tries to execute (Update 37074798271). Do
-    # not unset NIX_LDFLAGS globally — rustc still needs libiconv for
-    # zstd-sys (Update 37037587993).
+    # apple-metal 0.6.0 / apple-cf 0.9.3 build.rs run `swift build`.
+    # Nix's stdenv DEVELOPER_DIR is the SDK-only store tree. Discover
+    # the host Xcode swift with that unset (Update 37101218094 still
+    # failed with DEVELOPER_DIR left in place for xcrun). Do not use
+    # `xcode-select -p` (CLT vs Xcode; Update 37090922383). Do not wrap
+    # swift: SwiftPM execs the tool (Update 37074798271). Do not unset
+    # NIX_LDFLAGS globally — rustc still needs libiconv (Update
+    # 37037587993). Pin DEVELOPER_DIR on the `swift` spawn so cargo's
+    # process env cannot put the Nix SDK back.
     buildInputs = [ libiconv ];
     preBuild = ''
-      xcodeSwift="$(/usr/bin/xcrun --sdk macosx --find swift)"
+      xcodeSwift="$(
+        env -u DEVELOPER_DIR -u SDKROOT /usr/bin/xcrun --sdk macosx --find swift
+      )"
       xcodeToolchain="$(/usr/bin/dirname "$xcodeSwift")"
       developerDir="$(printf '%s\n' "$xcodeSwift" | /usr/bin/sed 's|/Toolchains/.*||')"
+      case "$xcodeSwift" in
+        /nix/store/*)
+          echo "xcrun resolved a Nix store swift: $xcodeSwift" >&2
+          exit 1
+          ;;
+      esac
       if [ "$developerDir" = "$xcodeSwift" ]; then
         echo "xcrun swift is not under an Xcode Toolchains tree: $xcodeSwift" >&2
         exit 1
       fi
       export DEVELOPER_DIR="$developerDir"
+      export CUA_XCODE_SWIFT="$xcodeSwift"
+      export CUA_XCODE_DEVELOPER_DIR="$developerDir"
       export PATH="$xcodeToolchain:$PATH"
+      echo "cua-driver-sdk host Xcode swift=$xcodeSwift DEVELOPER_DIR=$developerDir" >&2
+      patched=0
+      for build_rs in \
+        cargo-vendor-dir/apple-metal-*/build.rs \
+        cargo-vendor-dir/apple-cf-*/build.rs \
+        "$NIX_BUILD_TOP"/cargo-vendor-dir/apple-metal-*/build.rs \
+        "$NIX_BUILD_TOP"/cargo-vendor-dir/apple-cf-*/build.rs
+      do
+        if [ ! -f "$build_rs" ]; then
+          continue
+        fi
+        if ! grep -q 'Command::new("swift")' "$build_rs"; then
+          continue
+        fi
+        /usr/bin/sed -i.bak \
+          's/Command::new("swift")/Command::new(std::env::var("CUA_XCODE_SWIFT").expect("CUA_XCODE_SWIFT")).env("DEVELOPER_DIR", std::env::var("CUA_XCODE_DEVELOPER_DIR").expect("CUA_XCODE_DEVELOPER_DIR"))/' \
+          "$build_rs"
+        rm -f "$build_rs.bak"
+        patched=$((patched + 1))
+      done
+      if [ "$patched" -eq 0 ]; then
+        echo "failed to pin host Xcode swift on apple-metal/apple-cf build.rs" >&2
+        exit 1
+      fi
     '';
     postPatch = ''
       cat ${wakuSrc}/resources/computer-use/cua-host.rs >> crates/cua-driver-sdk/src/abi.rs
