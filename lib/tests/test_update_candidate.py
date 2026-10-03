@@ -443,6 +443,89 @@ def _candidate_for_scope(prepared_run) -> Candidate:
     )
 
 
+def test_cache_root_dependencies_skips_complete_candidate_and_own_roots(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """VM warmup may use the Darwin-prepare candidate and must not certify."""
+    root, _, _state = prepared_run
+    tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
+    incomplete = Candidate(
+        base_tree=tree,
+        tree=tree,
+        targets=(),
+        sources=(),
+        systems=("aarch64-darwin",),
+        resolutions={},
+        prepared=True,
+        patch=b"",
+    )
+    seen: list[dict[str, object]] = []
+
+    def roots(**kwargs: object) -> tuple[()]:
+        seen.append(kwargs)
+        return ()
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
+    report = pipeline.cache_root_dependencies(incomplete)
+    assert report.tree == tree
+    assert report.failures == ()
+    assert seen[0]["include_dependencies"] is True
+    assert seen[0]["dependencies_only"] is True
+    assert seen[0]["timeout"] == pipeline._CLOSURE_DISCOVERY_TIMEOUT_SECONDS
+    failed = incomplete.model_copy(update={"prepared": False})
+    with pytest.raises(ValueError, match="failed preparation"):
+        pipeline.cache_root_dependencies(failed)
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(incomplete.model_dump_json())
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "cache-root-deps",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(tmp_path / "cache-root-deps.json"),
+        ],
+    )
+    assert result.exit_code == 0
+    receipt = json.loads((tmp_path / "cache-root-deps.json").read_text())
+    assert receipt["tree"] == tree
+    assert "gates" not in receipt
+
+
+def test_cache_root_deps_cli_propagates_dependency_failures(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed VM cache must fail the job without becoming a validation report."""
+    candidate = _candidate_for_scope(prepared_run)
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_root_closures",
+        lambda **_kwargs: (
+            DerivationValidationFailure(
+                source="root-closures",
+                installable="/nix/store/vm.drv^*",
+                message="VM build failed",
+            ),
+        ),
+    )
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "cache-root-deps",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(tmp_path / "cache-root-deps.json"),
+        ],
+    )
+    assert result.exit_code == 1
+    receipt = json.loads((tmp_path / "cache-root-deps.json").read_text())
+    assert receipt["failures"][0]["message"] == "VM build failed"
+
+
 def test_validation_scopes_split_packages_from_closures(
     prepared_run, monkeypatch: pytest.MonkeyPatch
 ) -> None:

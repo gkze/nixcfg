@@ -66,6 +66,28 @@ jobs:
       stage: prepare
       previous: prepare-aarch64-linux
     secrets: inherit
+  # Flake.lock freezes after prepare-darwin. Cache the Linux native boundary
+  # of Darwin roots (the Rosetta/linux-builder VM image) here so Darwin
+  # closures can start with Darwin packages instead of waiting for Linux
+  # package validation. These jobs are not publication evidence.
+  cache-darwin-linux-deps-arm:
+    needs: prepare-darwin
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04-arm
+      system: aarch64-linux
+      stage: cache-root-deps
+      previous: prepare-aarch64-darwin
+    secrets: inherit
+  cache-darwin-linux-deps-x86:
+    needs: prepare-darwin
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: cache-root-deps
+      previous: prepare-aarch64-darwin
+    secrets: inherit
   validate-arm:
     needs: prepare-x86
     uses: ./.github/workflows/update-native.yml
@@ -85,7 +107,11 @@ jobs:
       previous: prepare-x86_64-linux
     secrets: inherit
   # Package validation does not need the Linux VM image, so it overlaps the
-  # Linux validators. The closure does need that image in gkze first.
+  # Linux validators. Closures need that image in gkze; the cache-* jobs
+  # populate it during later prepare, so this shard no longer waits for
+  # Linux package validation. Public macos-15 concurrency is at least 2
+  # (run 37090922383 overlapped packages+closures), so these two Darwin
+  # jobs run together instead of queuing.
   validate-darwin-packages:
     needs: prepare-x86
     uses: ./.github/workflows/update-native.yml
@@ -101,7 +127,10 @@ jobs:
   # Each shard builds until its budget, the Cachix daemon flushes, and the
   # next shard substitutes those paths. The last shard fails closed.
   validate-darwin-closures:
-    needs: [validate-arm, validate-x86]
+    needs:
+      - prepare-x86
+      - cache-darwin-linux-deps-arm
+      - cache-darwin-linux-deps-x86
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -234,6 +263,8 @@ jobs:
       - prepare-darwin
       - prepare-arm
       - prepare-x86
+      - cache-darwin-linux-deps-arm
+      - cache-darwin-linux-deps-x86
       - validate-arm
       - validate-x86
       - validate-darwin-packages

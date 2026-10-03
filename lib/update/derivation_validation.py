@@ -1138,6 +1138,7 @@ def validate_root_closures(
     flake_root: Path | None = None,
     systems: tuple[str, ...] | None = None,
     include_dependencies: bool = False,
+    dependencies_only: bool = False,
     timeout: float | None = None,
     run: _Runner | None = None,
     sleep: _Sleeper | None = None,
@@ -1151,7 +1152,12 @@ def validate_root_closures(
     *build_timeout* limits only the realization commands. Discovery keeps
     *timeout*, so a continuation shard can stop the build and still flush
     uploads without shortening manifest evaluation to the same budget.
+    *dependencies_only* realizes the native boundary of foreign roots and
+    skips this platform's own root closures.
     """
+    if dependencies_only and not include_dependencies:
+        msg = "dependencies_only requires include_dependencies"
+        raise ValueError(msg)
     runner = run
     sleeper = time.sleep if sleep is None else sleep
     root_timeout = (
@@ -1240,16 +1246,18 @@ def validate_root_closures(
                         message=str(exc),
                     ),
                 )
-            requests = (
-                tuple(
-                    DerivationValidationRequest(
-                        source=_ROOT_CLOSURE_VALIDATION_SOURCE,
-                        installable=installable,
-                        mode="build",
-                    )
-                    for installable in dependencies
+            dependency_requests = tuple(
+                DerivationValidationRequest(
+                    source=_ROOT_CLOSURE_VALIDATION_SOURCE,
+                    installable=installable,
+                    mode="build",
                 )
-                + requests
+                for installable in dependencies
+            )
+            requests = (
+                dependency_requests
+                if dependencies_only
+                else dependency_requests + requests
             )
         # Discovery above keeps root_timeout. The build budget starts here, so
         # a slow manifest eval does not consume the shard's realization time,

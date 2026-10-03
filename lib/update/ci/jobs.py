@@ -442,7 +442,17 @@ def native(stage: str) -> int:
             raise ValueError(msg)
         if targets:
             args.extend(("--", *targets))
-    else:
+    elif stage == "cache-root-deps":
+        if not previous:
+            msg = "Foreign-root dependency cache requires a previous candidate"
+            raise ValueError(msg)
+        args.extend((
+            "--candidate",
+            previous,
+            "--output",
+            str(artifacts / "cache-root-deps.json"),
+        ))
+    elif stage == "validate":
         if not previous:
             msg = "Validation requires a previous candidate"
             raise ValueError(msg)
@@ -453,6 +463,9 @@ def native(stage: str) -> int:
             str(artifacts / "validation.json"),
         ))
         scope = _append_validation_scope(args)
+    else:
+        msg = f"Unknown native stage: {stage}"
+        raise ValueError(msg)
     receipts = artifacts / "prefetch-receipts.jsonl"
     with (
         (artifacts / "result.json").open("w") as output,
@@ -702,13 +715,13 @@ def start_repair() -> None:
 
 def main(stage: str) -> int:
     """Dispatch the finite set of Actions operations, preserving process failures."""
-    if stage in {"prepare", "validate"}:
+    if stage in {"prepare", "validate", "cache-root-deps"}:
         # Capture CLI JSON inside the environment, after any devshell startup output.
         return _run(
             *_develop("python", str(Path(__file__).resolve()), f"native-{stage}"),
             check=False,
         ).returncode
-    if stage in {"native-prepare", "native-validate"}:
+    if stage in {"native-prepare", "native-validate", "native-cache-root-deps"}:
         return native(stage.removeprefix("native-"))
     operations = {
         "clean-image": clean_runner_image,
