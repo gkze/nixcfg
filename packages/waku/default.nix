@@ -58,17 +58,23 @@ let
       "cua-driver-sdk"
     ];
     doCheck = false;
-    # apple-metal 0.6.0's build.rs runs `swift build`. Wrap only that
-    # Xcode `swift` so the flake Swift 5.10 pin is not selected and Nix
-    # compiler flags stay on the Rust link of zstd-sys (Update 37037587993:
-    # ld: library not found for -liconv after a global unset).
+    # apple-metal 0.6.0's build.rs runs `swift build`. Wrap the real
+    # Xcode toolchain swift (not /usr/bin/swift): that path is an xcrun
+    # trampoline, and with a bash wrapper first on PATH SwiftPM's
+    # "execute tool swift" finds the script and fails (Update
+    # 37074798271). Unset Nix compiler flags only on that wrapper so
+    # rustc keeps libiconv for zstd-sys (Update 37037587993).
     nativeBuildInputs = [ makeWrapper ];
     buildInputs = [ libiconv ];
     preBuild = ''
-      makeWrapper /usr/bin/swift "$TMPDIR/cua-swift/swift" \
+      developerDir="$(/usr/bin/xcode-select -p)"
+      xcodeSwift="$(/usr/bin/xcrun --sdk macosx --find swift)"
+      makeWrapper "$xcodeSwift" "$TMPDIR/cua-swift/swift" \
         --prefix PATH : /usr/bin \
+        --set DEVELOPER_DIR "$developerDir" \
         --unset AR --unset CC --unset CXX --unset LD \
         --unset NIX_CFLAGS_COMPILE --unset NIX_LDFLAGS
+      export DEVELOPER_DIR="$developerDir"
       export PATH="$TMPDIR/cua-swift:$PATH"
     '';
     postPatch = ''
