@@ -70,6 +70,16 @@ class ValidationReport(BaseModel):
     failures: tuple[validation.DerivationValidationFailure, ...]
 
 
+class RootDependencyCacheReport(BaseModel):
+    """Cachix warmup for foreign-root native deps; not publication evidence."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tree: str
+    system: str
+    failures: tuple[validation.DerivationValidationFailure, ...]
+
+
 def _output_path(output: Path, root: Path) -> Path:
     """Keep job artifacts outside the source snapshot they describe."""
     output = output.resolve()
@@ -139,6 +149,48 @@ def _hosted_validation_progress(source: str) -> validation.ValidationProgress:
         sys.stderr.flush()
 
     return emit
+
+
+def cache_root_dependencies(candidate: Candidate) -> RootDependencyCacheReport:
+    """Realize this platform's native deps of foreign roots for later substitutes.
+
+    Flake references freeze after the first prepare. Later stages only add
+    hashes, so the Linux VM image inside Darwin roots can be cached from the
+    Darwin-prepare candidate while Linux prepare continues. This is not a
+    validation report: certification still requires the final-tree gates.
+    """
+    if not candidate.prepared:
+        msg = "A failed preparation cannot populate the binary cache"
+        raise ValueError(msg)
+    system = get_current_nix_platform()
+    updaters = ensure_updaters_loaded()
+    with IsolatedUpdateWorkspace(get_repo_root()) as workspace:
+        candidate.apply(workspace.root)
+        allowed = (
+            *(
+                path.relative_to(workspace.root)
+                for path in planned_update_paths(list(candidate.sources), updaters)
+            ),
+            Path("flake.nix"),
+            Path("flake.lock"),
+        )
+        workspace.validate_changes(allowed)
+        with workspace.validation_snapshot() as snapshot:
+            failures = validation.validate_root_closures(
+                flake_root=snapshot.root,
+                systems=(system,),
+                include_dependencies=True,
+                dependencies_only=True,
+                print_build_logs=True,
+                progress=_hosted_validation_progress("root-deps"),
+                timeout=_CLOSURE_DISCOVERY_TIMEOUT_SECONDS,
+            )
+        workspace.validate_changes(allowed)
+    return RootDependencyCacheReport(
+        tree=candidate.tree,
+        system=system,
+        failures=failures,
+    )
 
 
 def require_complete_candidate(candidate: Candidate) -> None:
@@ -350,6 +402,20 @@ def _closure_store_fault(report: ValidationReport) -> bool:
     return bool(report.failures) and all(
         is_transient_store_interruption(failure.message) for failure in report.failures
     )
+
+
+@app.command("cache-root-deps")
+def cache_root_deps(
+    candidate: Annotated[Path, typer.Option(help="Prepared candidate JSON.")],
+    output: Annotated[Path, typer.Option(help="Foreign-root dependency receipt.")],
+) -> None:
+    """Cache this platform's native deps of foreign roots; do not certify."""
+    output = _output_path(output, get_repo_root())
+    report = cache_root_dependencies(
+        Candidate.model_validate_json(candidate.read_bytes())
+    )
+    atomic_write_text(output, report.model_dump_json(indent=2) + "\n")
+    raise typer.Exit(bool(report.failures))
 
 
 @app.command("validate")

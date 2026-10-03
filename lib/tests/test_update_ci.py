@@ -126,7 +126,7 @@ def invoke(env: dict[str, str], checkout: Path) -> subprocess.CompletedProcess[s
 
 
 @pytest.mark.parametrize("exit_code", [0, 17])
-@pytest.mark.parametrize("stage", ["prepare", "validate"])
+@pytest.mark.parametrize("stage", ["prepare", "validate", "cache-root-deps"])
 @pytest.mark.parametrize("validate_all_packages", [False, True])
 def test_native_job_keeps_evidence_and_propagates_failure(
     native_job, exit_code: int, stage: str, validate_all_packages: bool
@@ -592,7 +592,17 @@ def test_first_job_uses_default_inventory(native_job, targets: str) -> None:
     assert "--previous" not in args
 
 
-@pytest.mark.parametrize("stage", ["invalid", "validate"])
+def test_native_job_rejects_unknown_stage(native_job, monkeypatch) -> None:
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("NIXCFG_PREVIOUS_CANDIDATE", "/previous candidate")
+    with pytest.raises(ValueError, match="Unknown native stage"):
+        jobs.native("certify")
+
+
+@pytest.mark.parametrize("stage", ["invalid", "validate", "cache-root-deps"])
 def test_job_rejects_unknown_stage_or_missing_candidate(native_job, stage: str) -> None:
     env, checkout = native_job
     assert invoke(env | {"NIXCFG_CI_STAGE": stage}, checkout).returncode != 0
@@ -657,8 +667,9 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
     assert packages["needs"] == "prepare-x86"
     assert packages["with"]["scope"] == "packages"
     assert set(workflow_jobs["validate-darwin-closures"]["needs"]) == {
-        "validate-arm",
-        "validate-x86",
+        "prepare-x86",
+        "cache-darwin-linux-deps-arm",
+        "cache-darwin-linux-deps-x86",
     }
     closure_jobs = (
         "validate-darwin-closures",
@@ -687,7 +698,7 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
 
 
 def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
-    """All writers finish before native validation; cached VM outputs precede macOS."""
+    """VM cache overlaps later prepare; Darwin closures no longer wait on Linux validate."""
     workflow = yaml.load(
         (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
     )
@@ -720,6 +731,19 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     for (name, previous), (_, job) in pairwise(preparation):
         assert job["needs"] == name
         assert job["with"]["previous"] == f"prepare-{previous['with']['system']}"
+    cache_jobs = {
+        name: job for name, job in jobs.items() if name.startswith("cache-darwin-linux-deps-")
+    }
+    assert set(cache_jobs) == {
+        "cache-darwin-linux-deps-arm",
+        "cache-darwin-linux-deps-x86",
+    }
+    for job in cache_jobs.values():
+        assert job["needs"] == "prepare-darwin"
+        assert job["with"]["stage"] == "cache-root-deps"
+        assert job["with"]["previous"] == "prepare-aarch64-darwin"
+    assert cache_jobs["cache-darwin-linux-deps-arm"]["with"]["runner"] == "ubuntu-24.04-arm"
+    assert cache_jobs["cache-darwin-linux-deps-x86"]["with"]["runner"] == "ubuntu-24.04"
     validators = {
         name: job for name, job in jobs.items() if name.startswith("validate-")
     }
@@ -734,6 +758,8 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     _assert_darwin_closure_shards(jobs)
     assert set(jobs["publish"]["needs"]) == set(validators)
     assert set(validators) <= set(jobs["repair"]["needs"])
+    assert set(cache_jobs) <= set(jobs["repair"]["needs"])
+    assert set(cache_jobs).isdisjoint(jobs["publish"]["needs"])
     assert jobs["repair"]["permissions"] == {
         "actions": "write",
         "contents": "write",
@@ -848,7 +874,7 @@ def test_generator_cache_is_scoped_to_disposable_accelerators() -> None:
     assert repair["with"]["cache-generators"] == "true"
 
 
-@pytest.mark.parametrize("stage", ["prepare", "validate"])
+@pytest.mark.parametrize("stage", ["prepare", "validate", "cache-root-deps"])
 @pytest.mark.parametrize("targets", ["", "alpha beta", "--force", "alpha\nbeta"])
 @pytest.mark.parametrize("validate_all_packages", [False, True])
 def test_native_adapter_captures_only_cli_output(
@@ -862,9 +888,9 @@ def test_native_adapter_captures_only_cli_output(
     monkeypatch.setenv(
         "NIXCFG_VALIDATE_ALL_PACKAGES", str(validate_all_packages).lower()
     )
-    if stage == "validate":
+    if stage != "prepare":
         with pytest.raises(ValueError, match="requires a previous"):
-            jobs.main("native-validate")
+            jobs.main(f"native-{stage}")
         monkeypatch.setenv("NIXCFG_PREVIOUS_CANDIDATE", "/previous candidate")
     if stage == "prepare" and (targets.startswith("-") or "\n" in targets):
         with pytest.raises(ValueError, match="space-separated"):

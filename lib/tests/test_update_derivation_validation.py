@@ -678,6 +678,56 @@ def test_native_validator_builds_the_foreign_root_dependency_boundary(
     )
 
 
+def test_dependencies_only_skips_this_platform_root_closures(
+    native_root_graph,
+    tmp_path,
+) -> None:
+    """VM warmup must not realize Darwin or Linux roots on the Linux runner."""
+    _, calls, run = native_root_graph
+    with pytest.raises(ValueError, match="include_dependencies"):
+        validation.validate_root_closures(
+            flake_root=tmp_path,
+            systems=("aarch64-linux",),
+            dependencies_only=True,
+            timeout=42,
+            run=run,
+        )
+    assert (
+        validation.validate_root_closures(
+            flake_root=tmp_path,
+            systems=("aarch64-darwin",),
+            include_dependencies=True,
+            dependencies_only=True,
+            timeout=42,
+            run=run,
+        )
+        == ()
+    )
+    builds = [args[-1] for args in calls if args[1] == "build"]
+    assert builds == []
+
+
+def test_linux_dependencies_only_builds_the_vm_and_not_foreign_roots(
+    native_root_graph,
+    tmp_path,
+) -> None:
+    """An ARM Linux warmup realizes the VM image and stops there."""
+    _, calls, run = native_root_graph
+    assert (
+        validation.validate_root_closures(
+            flake_root=tmp_path,
+            systems=("aarch64-linux",),
+            include_dependencies=True,
+            dependencies_only=True,
+            timeout=42,
+            run=run,
+        )
+        == ()
+    )
+    builds = [args[-1] for args in calls if args[1] == "build"]
+    assert builds == ["/nix/store/vm.drv^*"]
+
+
 @pytest.mark.parametrize(
     "failure",
     ["missing", "version", "json", "command", "empty", "os", "timeout", "build"],

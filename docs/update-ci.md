@@ -13,11 +13,18 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    one candidate, retaining previously selected release metadata and native hashes.
    Preparation is sequential because updaters can share generated files. Dependent
    updaters recompute metadata from their pinned prerequisites.
-2. Validate the final identical tree on all three native builders. The two Linux
-   validators and Darwin package validation run in parallel after preparation.
-   Darwin root-closure shards start only after both Linux validators finish, so
-   the Linux VM image is already in `gkze`. Package evidence and closure evidence
-   are separate reports; certification requires both gates for every system.
+2. Validate the final identical tree on all three native builders. After
+   `prepare-darwin` freezes flake references, two Linux jobs cache the native
+   boundary of Darwin roots (the Rosetta/linux-builder VM image) in `gkze`
+   while Linux prepare continues. Those jobs are not publication evidence.
+   After the last prepare, the two Linux validators, Darwin package validation,
+   and Darwin root-closure shards run in parallel: closures wait only for the
+   final candidate plus that VM cache, not for Linux package validation.
+   Hosted public `macos-15` concurrency is at least two, so the Darwin package
+   and closure jobs overlap instead of queuing. Package evidence and closure
+   evidence are separate reports; certification requires both gates for every
+   system. Linux arm and x86 validation still run to completion before
+   publish.
    One hosted macOS job cannot realize `checks.aarch64-darwin.root-closures`
    inside the 360-minute job cap, so that build is a chain of shards. Each shard
    builds for five hours, the Cachix daemon flushes, and the next shard
