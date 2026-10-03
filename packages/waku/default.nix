@@ -68,8 +68,12 @@ let
     # so cargo's process env cannot put the Nix SDK back. Update
     # 37107263529 found Xcode 16.4 swift 6.1.2, then SwiftPM compiled
     # the manifest against apple-sdk-14.4 (Swift 5.10). Do not export
-    # SDKROOT globally — rustc/clang still need the Nix SDK. HOME must
-    # not stay /var/empty or SwiftPM cannot write its cache.
+    # SDKROOT globally — rustc/clang still need the Nix SDK. Update
+    # 37114244846 then used the host MacOSX15.5.sdk and died on
+    # `sandbox-exec: sandbox_apply: Operation not permitted` inside
+    # Nix's sandbox. Pass `--disable-sandbox` the same way
+    # baseten-switch does. Pin HOME on the spawn — cargo build
+    # scripts still see /var/empty after preBuild exports.
     buildInputs = [ libiconv ];
     preBuild = ''
       xcodeSwift="$(
@@ -100,8 +104,10 @@ let
       export CUA_XCODE_SWIFT="$xcodeSwift"
       export CUA_XCODE_DEVELOPER_DIR="$developerDir"
       export CUA_XCODE_SDKROOT="$xcodeSdk"
+      export CUA_XCODE_HOME="$TMPDIR/cua-swiftpm-home"
       export PATH="$xcodeToolchain:$PATH"
-      export HOME="$TMPDIR/cua-swiftpm-home"
+      export HOME="$CUA_XCODE_HOME"
+      export CFFIXED_USER_HOME="$CUA_XCODE_HOME"
       export SWIFTPM_MODULECACHE_OVERRIDE="$TMPDIR/cua-swiftpm-module-cache"
       mkdir -p "$HOME" "$SWIFTPM_MODULECACHE_OVERRIDE"
       echo "cua-driver-sdk host Xcode swift=$xcodeSwift DEVELOPER_DIR=$developerDir SDKROOT=$xcodeSdk" >&2
@@ -119,9 +125,18 @@ let
           continue
         fi
         /usr/bin/sed -i.bak \
-          's/Command::new("swift")/Command::new(std::env::var("CUA_XCODE_SWIFT").expect("CUA_XCODE_SWIFT")).env("DEVELOPER_DIR", std::env::var("CUA_XCODE_DEVELOPER_DIR").expect("CUA_XCODE_DEVELOPER_DIR")).env("SDKROOT", std::env::var("CUA_XCODE_SDKROOT").expect("CUA_XCODE_SDKROOT"))/' \
+          's/Command::new("swift")/Command::new(std::env::var("CUA_XCODE_SWIFT").expect("CUA_XCODE_SWIFT")).env("DEVELOPER_DIR", std::env::var("CUA_XCODE_DEVELOPER_DIR").expect("CUA_XCODE_DEVELOPER_DIR")).env("SDKROOT", std::env::var("CUA_XCODE_SDKROOT").expect("CUA_XCODE_SDKROOT")).env("HOME", std::env::var("CUA_XCODE_HOME").expect("CUA_XCODE_HOME")).env("CFFIXED_USER_HOME", std::env::var("CUA_XCODE_HOME").expect("CUA_XCODE_HOME"))/' \
           "$build_rs"
+        if grep -q '"build",' "$build_rs"; then
+          /usr/bin/sed -i.bak \
+            's/"build",/"build", "--disable-sandbox",/' \
+            "$build_rs"
+        fi
         rm -f "$build_rs.bak"
+        if ! grep -q -- '--disable-sandbox' "$build_rs"; then
+          echo "failed to add --disable-sandbox to $build_rs" >&2
+          exit 1
+        fi
         patched=$((patched + 1))
       done
       if [ "$patched" -eq 0 ]; then
