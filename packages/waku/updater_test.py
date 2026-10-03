@@ -929,10 +929,14 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
     )
     sdk_pre_build_shell = parse_shell(indented_string_body(sdk_pre_build.rebuild()))
     assert command_texts(sdk_pre_build_shell) == [
-        'makeWrapper /usr/bin/swift "$TMPDIR/cua-swift/swift" \\\n'
+        "/usr/bin/xcode-select -p",
+        "/usr/bin/xcrun --sdk macosx --find swift",
+        'makeWrapper "$xcodeSwift" "$TMPDIR/cua-swift/swift" \\\n'
         "        --prefix PATH : /usr/bin \\\n"
+        '        --set DEVELOPER_DIR "$developerDir" \\\n'
         "        --unset AR --unset CC --unset CXX --unset LD \\\n"
         "        --unset NIX_CFLAGS_COMPILE --unset NIX_LDFLAGS",
+        'export DEVELOPER_DIR="$developerDir"',
         'export PATH="$TMPDIR/cua-swift:$PATH"',
     ]
     assert [
