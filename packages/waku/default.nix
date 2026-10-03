@@ -5,7 +5,6 @@
   lib,
   lld,
   libiconv,
-  makeWrapper,
   outputs,
   pkg-config,
   python3,
@@ -58,24 +57,26 @@ let
       "cua-driver-sdk"
     ];
     doCheck = false;
-    # apple-metal 0.6.0's build.rs runs `swift build`. Wrap the real
-    # Xcode toolchain swift (not /usr/bin/swift): that path is an xcrun
-    # trampoline, and with a bash wrapper first on PATH SwiftPM's
-    # "execute tool swift" finds the script and fails (Update
-    # 37074798271). Unset Nix compiler flags only on that wrapper so
-    # rustc keeps libiconv for zstd-sys (Update 37037587993).
-    nativeBuildInputs = [ makeWrapper ];
+    # apple-metal 0.6.0's build.rs runs `swift build`. Put the real
+    # Xcode toolchain bin first on PATH and set DEVELOPER_DIR from that
+    # swift, not `xcode-select -p`. The latter can point at CLT while
+    # `xcrun --find swift` resolves Xcode; exporting CLT as
+    # DEVELOPER_DIR makes SwiftPM report `tool 'swift' not found`
+    # (Update 37090922383). Do not wrap swift: a bash wrapper first on
+    # PATH is what SwiftPM tries to execute (Update 37074798271). Do
+    # not unset NIX_LDFLAGS globally — rustc still needs libiconv for
+    # zstd-sys (Update 37037587993).
     buildInputs = [ libiconv ];
     preBuild = ''
-      developerDir="$(/usr/bin/xcode-select -p)"
       xcodeSwift="$(/usr/bin/xcrun --sdk macosx --find swift)"
-      makeWrapper "$xcodeSwift" "$TMPDIR/cua-swift/swift" \
-        --prefix PATH : /usr/bin \
-        --set DEVELOPER_DIR "$developerDir" \
-        --unset AR --unset CC --unset CXX --unset LD \
-        --unset NIX_CFLAGS_COMPILE --unset NIX_LDFLAGS
+      xcodeToolchain="$(/usr/bin/dirname "$xcodeSwift")"
+      developerDir="$(printf '%s\n' "$xcodeSwift" | /usr/bin/sed 's|/Toolchains/.*||')"
+      if [ "$developerDir" = "$xcodeSwift" ]; then
+        echo "xcrun swift is not under an Xcode Toolchains tree: $xcodeSwift" >&2
+        exit 1
+      fi
       export DEVELOPER_DIR="$developerDir"
-      export PATH="$TMPDIR/cua-swift:$PATH"
+      export PATH="$xcodeToolchain:$PATH"
     '';
     postPatch = ''
       cat ${wakuSrc}/resources/computer-use/cua-host.rs >> crates/cua-driver-sdk/src/abi.rs

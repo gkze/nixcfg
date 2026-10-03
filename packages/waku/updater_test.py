@@ -18,6 +18,7 @@ from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
+    binding_map,
     expect_binding,
     nix_apply,
     nix_attrset_call,
@@ -558,7 +559,7 @@ def test_waku_package_is_a_source_built_nix_owned_arm64_app() -> None:
     assert "swift" in formal_names
     assert "fetchurl" in formal_names
     assert "libiconv" in formal_names
-    assert "makeWrapper" in formal_names
+    assert "makeWrapper" not in formal_names
     assert_nix_ast_equal(
         expect_binding(derivation.scope, "source").value,
         "outputs.lib.sourceEntry pname",
@@ -898,10 +899,7 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         expect_binding(sdk_arguments.values, "doCheck").value,
         Primitive(value=False),
     )
-    assert_nix_ast_equal(
-        expect_binding(sdk_arguments.values, "nativeBuildInputs").value,
-        "[ makeWrapper ]",
-    )
+    assert "nativeBuildInputs" not in binding_map(sdk_arguments.values)
     assert_nix_ast_equal(
         expect_binding(sdk_arguments.values, "buildInputs").value,
         "[ libiconv ]",
@@ -929,15 +927,15 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
     )
     sdk_pre_build_shell = parse_shell(indented_string_body(sdk_pre_build.rebuild()))
     assert command_texts(sdk_pre_build_shell) == [
-        "/usr/bin/xcode-select -p",
         "/usr/bin/xcrun --sdk macosx --find swift",
-        'makeWrapper "$xcodeSwift" "$TMPDIR/cua-swift/swift" \\\n'
-        "        --prefix PATH : /usr/bin \\\n"
-        '        --set DEVELOPER_DIR "$developerDir" \\\n'
-        "        --unset AR --unset CC --unset CXX --unset LD \\\n"
-        "        --unset NIX_CFLAGS_COMPILE --unset NIX_LDFLAGS",
+        '/usr/bin/dirname "$xcodeSwift"',
+        "printf '%s\\n' \"$xcodeSwift\"",
+        "/usr/bin/sed 's|/Toolchains/.*||'",
+        '[ "$developerDir" = "$xcodeSwift" ]',
+        'echo "xcrun swift is not under an Xcode Toolchains tree: $xcodeSwift"',
+        "exit 1",
         'export DEVELOPER_DIR="$developerDir"',
-        'export PATH="$TMPDIR/cua-swift:$PATH"',
+        'export PATH="$xcodeToolchain:$PATH"',
     ]
     assert [
         node_text(node, sdk_pre_build_shell.sanitized)
