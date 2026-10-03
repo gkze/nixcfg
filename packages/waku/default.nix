@@ -64,18 +64,31 @@ let
     # `xcode-select -p` (CLT vs Xcode; Update 37090922383). Do not wrap
     # swift: SwiftPM execs the tool (Update 37074798271). Do not unset
     # NIX_LDFLAGS globally — rustc still needs libiconv (Update
-    # 37037587993). Pin DEVELOPER_DIR on the `swift` spawn so cargo's
-    # process env cannot put the Nix SDK back.
+    # 37037587993). Pin DEVELOPER_DIR and SDKROOT on the `swift` spawn
+    # so cargo's process env cannot put the Nix SDK back. Update
+    # 37107263529 found Xcode 16.4 swift 6.1.2, then SwiftPM compiled
+    # the manifest against apple-sdk-14.4 (Swift 5.10). Do not export
+    # SDKROOT globally — rustc/clang still need the Nix SDK. HOME must
+    # not stay /var/empty or SwiftPM cannot write its cache.
     buildInputs = [ libiconv ];
     preBuild = ''
       xcodeSwift="$(
         env -u DEVELOPER_DIR -u SDKROOT /usr/bin/xcrun --sdk macosx --find swift
+      )"
+      xcodeSdk="$(
+        env -u DEVELOPER_DIR -u SDKROOT /usr/bin/xcrun --sdk macosx --show-sdk-path
       )"
       xcodeToolchain="$(/usr/bin/dirname "$xcodeSwift")"
       developerDir="$(printf '%s\n' "$xcodeSwift" | /usr/bin/sed 's|/Toolchains/.*||')"
       case "$xcodeSwift" in
         /nix/store/*)
           echo "xcrun resolved a Nix store swift: $xcodeSwift" >&2
+          exit 1
+          ;;
+      esac
+      case "$xcodeSdk" in
+        /nix/store/*)
+          echo "xcrun resolved a Nix store SDK: $xcodeSdk" >&2
           exit 1
           ;;
       esac
@@ -86,8 +99,12 @@ let
       export DEVELOPER_DIR="$developerDir"
       export CUA_XCODE_SWIFT="$xcodeSwift"
       export CUA_XCODE_DEVELOPER_DIR="$developerDir"
+      export CUA_XCODE_SDKROOT="$xcodeSdk"
       export PATH="$xcodeToolchain:$PATH"
-      echo "cua-driver-sdk host Xcode swift=$xcodeSwift DEVELOPER_DIR=$developerDir" >&2
+      export HOME="$TMPDIR/cua-swiftpm-home"
+      export SWIFTPM_MODULECACHE_OVERRIDE="$TMPDIR/cua-swiftpm-module-cache"
+      mkdir -p "$HOME" "$SWIFTPM_MODULECACHE_OVERRIDE"
+      echo "cua-driver-sdk host Xcode swift=$xcodeSwift DEVELOPER_DIR=$developerDir SDKROOT=$xcodeSdk" >&2
       patched=0
       for build_rs in \
         cargo-vendor-dir/apple-metal-*/build.rs \
@@ -102,7 +119,7 @@ let
           continue
         fi
         /usr/bin/sed -i.bak \
-          's/Command::new("swift")/Command::new(std::env::var("CUA_XCODE_SWIFT").expect("CUA_XCODE_SWIFT")).env("DEVELOPER_DIR", std::env::var("CUA_XCODE_DEVELOPER_DIR").expect("CUA_XCODE_DEVELOPER_DIR"))/' \
+          's/Command::new("swift")/Command::new(std::env::var("CUA_XCODE_SWIFT").expect("CUA_XCODE_SWIFT")).env("DEVELOPER_DIR", std::env::var("CUA_XCODE_DEVELOPER_DIR").expect("CUA_XCODE_DEVELOPER_DIR")).env("SDKROOT", std::env::var("CUA_XCODE_SDKROOT").expect("CUA_XCODE_SDKROOT"))/' \
           "$build_rs"
         rm -f "$build_rs.bak"
         patched=$((patched + 1))

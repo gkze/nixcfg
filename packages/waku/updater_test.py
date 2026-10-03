@@ -857,20 +857,29 @@ def _cua_pre_build_shell() -> str:
 
 
 @pytest.mark.parametrize(
-    ("swift_path", "expect_code", "expect_developer_dir"),
+    ("swift_path", "sdk_path", "expect_code", "expect_developer_dir"),
     [
         (
             "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift",
+            "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
             0,
             "/Applications/Xcode.app/Contents/Developer",
         ),
         (
             "/nix/store/sdk/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift",
+            "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+            1,
+            None,
+        ),
+        (
+            "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift",
+            "/nix/store/rq88-apple-sdk-14.4/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
             1,
             None,
         ),
         (
             "/Library/Developer/CommandLineTools/usr/bin/swift",
+            "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
             1,
             None,
         ),
@@ -879,10 +888,11 @@ def _cua_pre_build_shell() -> str:
 def test_waku_cua_discovers_host_xcode_swift_outside_nix_sdk(
     tmp_path: Path,
     swift_path: str,
+    sdk_path: str,
     expect_code: int,
     expect_developer_dir: str | None,
 ) -> None:
-    """Host swift discovery must ignore Nix DEVELOPER_DIR/SDKROOT and reject store/CLT paths."""
+    """Host swift/SDK discovery must ignore Nix DEVELOPER_DIR/SDKROOT and reject store/CLT paths."""
     discovery = _cua_pre_build_shell().split("patched=0", 1)[0]
     xcrun = tmp_path / "xcrun"
     xcrun.write_text(
@@ -892,8 +902,15 @@ def test_waku_cua_discovers_host_xcode_swift_outside_nix_sdk(
         "  echo 'xcrun saw Nix SDK selection' >&2\n"
         "  exit 17\n"
         "fi\n"
-        'test "$*" = "--sdk macosx --find swift"\n'
-        f'printf "%s\\n" "{swift_path}"\n',
+        'if [ "$*" = "--sdk macosx --find swift" ]; then\n'
+        f'  printf "%s\\n" "{swift_path}"\n'
+        "  exit 0\n"
+        "fi\n"
+        'if [ "$*" = "--sdk macosx --show-sdk-path" ]; then\n'
+        f'  printf "%s\\n" "{sdk_path}"\n'
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
         encoding="utf-8",
     )
     xcrun.chmod(0o755)
@@ -905,13 +922,16 @@ def test_waku_cua_discovers_host_xcode_swift_outside_nix_sdk(
             "-c",
             discovery
             + 'printf "%s\\n" "$xcodeSwift" "$developerDir" '
-            + '"$DEVELOPER_DIR" "$CUA_XCODE_SWIFT" "$CUA_XCODE_DEVELOPER_DIR"\n',
+            + '"$DEVELOPER_DIR" "$CUA_XCODE_SWIFT" "$CUA_XCODE_DEVELOPER_DIR" '
+            + '"$xcodeSdk" "$CUA_XCODE_SDKROOT" "$HOME" '
+            + '"$SWIFTPM_MODULECACHE_OVERRIDE"\n',
         ],
         env=os.environ
         | {
             "DEVELOPER_DIR": "/nix/store/sdk-only",
             "SDKROOT": "/nix/store/sdk-only/MacOSX.sdk",
             "NIX_LDFLAGS": "-L/nix/store/libiconv/lib",
+            "TMPDIR": str(tmp_path),
         },
         capture_output=True,
         text=True,
@@ -928,6 +948,10 @@ def test_waku_cua_discovers_host_xcode_swift_outside_nix_sdk(
         expect_developer_dir,
         swift_path,
         expect_developer_dir,
+        sdk_path,
+        sdk_path,
+        f"{tmp_path}/cua-swiftpm-home",
+        f"{tmp_path}/cua-swiftpm-module-cache",
     ]
     assert "Nix SDK selection" not in result.stderr
 
@@ -1022,10 +1046,13 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
     sdk_pre_build_shell = parse_shell(indented_string_body(sdk_pre_build.rebuild()))
     assert command_texts(sdk_pre_build_shell) == [
         "env -u DEVELOPER_DIR -u SDKROOT /usr/bin/xcrun --sdk macosx --find swift",
+        "env -u DEVELOPER_DIR -u SDKROOT /usr/bin/xcrun --sdk macosx --show-sdk-path",
         '/usr/bin/dirname "$xcodeSwift"',
         "printf '%s\\n' \"$xcodeSwift\"",
         "/usr/bin/sed 's|/Toolchains/.*||'",
         'echo "xcrun resolved a Nix store swift: $xcodeSwift"',
+        "exit 1",
+        'echo "xcrun resolved a Nix store SDK: $xcodeSdk"',
         "exit 1",
         '[ "$developerDir" = "$xcodeSwift" ]',
         'echo "xcrun swift is not under an Xcode Toolchains tree: $xcodeSwift"',
@@ -1033,13 +1060,17 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         'export DEVELOPER_DIR="$developerDir"',
         'export CUA_XCODE_SWIFT="$xcodeSwift"',
         'export CUA_XCODE_DEVELOPER_DIR="$developerDir"',
+        'export CUA_XCODE_SDKROOT="$xcodeSdk"',
         'export PATH="$xcodeToolchain:$PATH"',
-        'echo "cua-driver-sdk host Xcode swift=$xcodeSwift DEVELOPER_DIR=$developerDir"',
+        'export HOME="$TMPDIR/cua-swiftpm-home"',
+        'export SWIFTPM_MODULECACHE_OVERRIDE="$TMPDIR/cua-swiftpm-module-cache"',
+        'mkdir -p "$HOME" "$SWIFTPM_MODULECACHE_OVERRIDE"',
+        'echo "cua-driver-sdk host Xcode swift=$xcodeSwift DEVELOPER_DIR=$developerDir SDKROOT=$xcodeSdk"',
         '[ ! -f "$build_rs" ]',
         "continue",
         'grep -q \'Command::new("swift")\' "$build_rs"',
         "continue",
-        '/usr/bin/sed -i.bak \\\n          \'s/Command::new("swift")/Command::new(std::env::var("CUA_XCODE_SWIFT").expect("CUA_XCODE_SWIFT")).env("DEVELOPER_DIR", std::env::var("CUA_XCODE_DEVELOPER_DIR").expect("CUA_XCODE_DEVELOPER_DIR"))/\' \\\n          "$build_rs"',
+        '/usr/bin/sed -i.bak \\\n          \'s/Command::new("swift")/Command::new(std::env::var("CUA_XCODE_SWIFT").expect("CUA_XCODE_SWIFT")).env("DEVELOPER_DIR", std::env::var("CUA_XCODE_DEVELOPER_DIR").expect("CUA_XCODE_DEVELOPER_DIR")).env("SDKROOT", std::env::var("CUA_XCODE_SDKROOT").expect("CUA_XCODE_SDKROOT"))/\' \\\n          "$build_rs"',
         'rm -f "$build_rs.bak"',
         '[ "$patched" -eq 0 ]',
         'echo "failed to pin host Xcode swift on apple-metal/apple-cf build.rs"',
