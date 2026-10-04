@@ -91,8 +91,12 @@ let
     # line, but that tree has no libswift*.dylib (Xcode 16.4 ships
     # modules/TBD there). ld then warned it could not find autolinked
     # swiftCore while already emitting -Wl,-rpath,/usr/lib/swift.
-    # Link the OS Swift runtime dylibs from /usr/lib/swift. Do not add
-    # $SDKROOT/usr/lib/swift (TBD). Do not only pass -L.
+    # Update 37183921815 then died in preBuild (exit 1) after the
+    # Xcode swift echo: #189 required a bash-visible /usr/lib/swift
+    # (cd / pwd -P / libswiftCore.dylib). The Nix Darwin sandbox can
+    # hide that tree from stat while ld still honors -L/usr/lib/swift.
+    # Always pass that search path plus the autolinked -lswift* set.
+    # Do not add $SDKROOT/usr/lib/swift (TBD). Do not only pass -L.
     buildInputs = [ libiconv ];
     preBuild = ''
       xcodeSwift="$(
@@ -167,7 +171,7 @@ let
         exit 1
       fi
       xcodeSwiftLib="$(
-        cd "$xcodeToolchain/../lib/swift/macosx" && pwd -P
+        cd "$xcodeToolchain/../lib/swift/macosx" && pwd
       )"
       case "$xcodeSwiftLib" in
         /nix/store/*)
@@ -176,41 +180,7 @@ let
           ;;
       esac
       hostSwiftLib="/usr/lib/swift"
-      if [ -n "$CUA_HOST_SWIFT_LIB" ]; then
-        hostSwiftLib="$CUA_HOST_SWIFT_LIB"
-      fi
-      if [ ! -d "$hostSwiftLib" ]; then
-        echo "host OS Swift runtime directory missing: $hostSwiftLib" >&2
-        exit 1
-      fi
-      hostSwiftLib="$(
-        cd "$hostSwiftLib" && pwd -P
-      )"
-      case "$hostSwiftLib" in
-        /nix/store/*)
-          echo "host OS Swift runtime resolved to Nix store: $hostSwiftLib" >&2
-          exit 1
-          ;;
-      esac
-      if [ ! -f "$hostSwiftLib/libswiftCore.dylib" ]; then
-        echo "host OS Swift runtime missing libswiftCore.dylib under $hostSwiftLib" >&2
-        exit 1
-      fi
-      swiftLink=""
-      for swiftDylib in "$hostSwiftLib"/libswift*.dylib; do
-        if [ ! -f "$swiftDylib" ]; then
-          echo "host OS Swift runtime has no libswift*.dylib under $hostSwiftLib" >&2
-          exit 1
-        fi
-        swiftName="$(
-          /usr/bin/basename "$swiftDylib" .dylib | /usr/bin/sed 's/^lib//'
-        )"
-        swiftLink="$swiftLink -l$swiftName"
-      done
-      if [ -z "$swiftLink" ]; then
-        echo "host OS Swift runtime produced no -lswift* flags from $hostSwiftLib" >&2
-        exit 1
-      fi
+      swiftLink=" -lswiftCore -lswift_Concurrency -lswift_StringProcessing -lswift_Builtin_float -lswift_errno -lswift_math -lswift_signal -lswift_stdio -lswift_time -lswiftunistd -lswiftsys_time -lswiftDarwin -lswiftDispatch -lswiftObjectiveC -lswiftXPC -lswiftIOKit -lswiftSystem -lswiftos -lswiftObservation -lswiftCoreFoundation -lswiftFoundation -lswiftCoreAudio -lswiftCoreMIDI -lswiftCoreMedia -lswiftAVFoundation -lswiftMetal -lswiftQuartzCore -lswiftCoreImage -lswiftOSLog -lswiftUniformTypeIdentifiers -lswiftDataDetection -lswiftVideoToolbox -lswiftsimd"
       export NIX_LDFLAGS="$NIX_LDFLAGS -L$xcodeSwiftLib -L$hostSwiftLib$swiftLink"
       echo "cua-driver-sdk host OS Swift runtime=$hostSwiftLib$swiftLink" >&2
     '';
