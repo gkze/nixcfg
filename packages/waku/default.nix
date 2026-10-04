@@ -83,6 +83,13 @@ let
     # 37156933929 got past sandbox-exec on apple-cf/apple-metal, then
     # screencapturekit-8.0.1 still spawned unpinned `swift` against
     # apple-sdk-14.4. Patch every vendor build.rs that calls swift.
+    # Update 37172173272 compiled those Swift .o files with host Xcode
+    # 16.4, then rustc linked libcua_driver_sdk.dylib without
+    # libswiftCore (`_swift_willThrow`, `_swift_weakLoadStrong`,
+    # `_swift_task_switch`). Append the host toolchain's
+    # lib/swift/macosx dylibs to NIX_LDFLAGS. Do not add
+    # $SDKROOT/usr/lib/swift (TBD). Do not only pass -L (Update
+    # 37172173272 repair).
     buildInputs = [ libiconv ];
     preBuild = ''
       xcodeSwift="$(
@@ -151,6 +158,33 @@ let
         echo "failed to pin host Xcode swift on vendor build.rs" >&2
         exit 1
       fi
+      # link host Xcode Swift runtime into rustc
+      if [ ! -d "$xcodeToolchain/../lib/swift/macosx" ]; then
+        echo "host Xcode Swift runtime directory missing under $xcodeToolchain" >&2
+        exit 1
+      fi
+      xcodeSwiftLib="$(
+        cd "$xcodeToolchain/../lib/swift/macosx" && pwd
+      )"
+      case "$xcodeSwiftLib" in
+        /nix/store/*)
+          echo "xcrun resolved a Nix store Swift runtime: $xcodeSwiftLib" >&2
+          exit 1
+          ;;
+      esac
+      swiftLink=""
+      for swiftDylib in "$xcodeSwiftLib"/libswift*.dylib; do
+        if [ ! -f "$swiftDylib" ]; then
+          echo "host Xcode Swift runtime has no libswift*.dylib under $xcodeSwiftLib" >&2
+          exit 1
+        fi
+        swiftName="$(
+          /usr/bin/basename "$swiftDylib" .dylib | /usr/bin/sed 's/^lib//'
+        )"
+        swiftLink="$swiftLink -l$swiftName"
+      done
+      export NIX_LDFLAGS="$NIX_LDFLAGS -L$xcodeSwiftLib$swiftLink"
+      echo "cua-driver-sdk host Xcode Swift runtime=$xcodeSwiftLib$swiftLink" >&2
     '';
     postPatch = ''
       cat ${wakuSrc}/resources/computer-use/cua-host.rs >> crates/cua-driver-sdk/src/abi.rs

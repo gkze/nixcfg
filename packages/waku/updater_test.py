@@ -974,7 +974,10 @@ def test_waku_cua_pins_every_vendor_swift_build_rs(tmp_path: Path) -> None:
     (vendor / "serde-1.0.0").mkdir()
     (vendor / "serde-1.0.0" / "build.rs").write_text(rustc_only, encoding="utf-8")
 
-    patch = "patched=0" + _cua_pre_build_shell().split("patched=0", 1)[1]
+    pin, _runtime = _cua_pre_build_shell().split(
+        "# link host Xcode Swift runtime into rustc", 1
+    )
+    patch = "patched=0" + pin.split("patched=0", 1)[1]
     result = subprocess.run(  # noqa: S603 -- executes repository shell against temp vendor trees
         ["bash", "-eu", "-c", patch],  # noqa: S607 -- resolves Bash from the test environment
         cwd=tmp_path,
@@ -1000,6 +1003,93 @@ def test_waku_cua_pins_every_vendor_swift_build_rs(tmp_path: Path) -> None:
         assert "--disable-sandbox" in patched
         assert 'Command::new("swift")' not in patched
     assert (vendor / "serde-1.0.0" / "build.rs").read_text(encoding="utf-8") == rustc_only
+
+
+def test_waku_cua_links_host_swift_runtime(tmp_path: Path) -> None:
+    """Update 37172173272 linked vendor Swift .o files without libswiftCore."""
+    toolchain = (
+        tmp_path
+        / "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin"
+    )
+    toolchain.mkdir(parents=True)
+    swift_lib = toolchain.parent / "lib/swift/macosx"
+    swift_lib.mkdir(parents=True)
+    (swift_lib / "libswiftCore.dylib").write_bytes(b"")
+    (swift_lib / "libswift_Concurrency.dylib").write_bytes(b"")
+    (swift_lib / "libswiftCore.tbd").write_text("tbd\n", encoding="utf-8")
+    (swift_lib / "libother.dylib").write_bytes(b"")
+
+    runtime = _cua_pre_build_shell().split(
+        "# link host Xcode Swift runtime into rustc", 1
+    )[1]
+    result = subprocess.run(  # noqa: S603 -- executes repository shell against a fake toolchain
+        [  # noqa: S607 -- resolves Bash from the test environment
+            "bash",
+            "-eu",
+            "-c",
+            runtime + 'printf "%s\\n" "$NIX_LDFLAGS"\n',
+        ],
+        env=os.environ
+        | {
+            "xcodeToolchain": str(toolchain),
+            "NIX_LDFLAGS": "-L/nix/store/libiconv/lib",
+            "TMPDIR": str(tmp_path),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    resolved = str(swift_lib.resolve())
+    [ldflags] = result.stdout.splitlines()
+    assert ldflags.startswith(f"-L/nix/store/libiconv/lib -L{resolved} ")
+    flag_set = set(ldflags.split())
+    assert {"-lswiftCore", "-lswift_Concurrency"} <= flag_set
+    assert "-lother" not in flag_set
+    assert not any(flag.endswith(".tbd") for flag in flag_set)
+    assert not any("SDKs/" in flag and "/usr/lib/swift" in flag for flag in flag_set)
+    assert "host Xcode Swift runtime=" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("layout", "expect_stderr"),
+    [
+        ("missing-dir", "host Xcode Swift runtime directory missing under"),
+        ("empty-glob", "host Xcode Swift runtime has no libswift*.dylib under"),
+    ],
+)
+def test_waku_cua_rejects_unusable_host_swift_runtime(
+    tmp_path: Path,
+    layout: str,
+    expect_stderr: str,
+) -> None:
+    """Fail closed when the host toolchain has no usable Swift runtime dylibs."""
+    toolchain = tmp_path / "toolchain/usr/bin"
+    toolchain.mkdir(parents=True)
+    if layout == "empty-glob":
+        swift_lib = toolchain.parent / "lib/swift/macosx"
+        swift_lib.mkdir(parents=True)
+        (swift_lib / "libswiftCore.tbd").write_text("tbd\n", encoding="utf-8")
+
+    runtime = _cua_pre_build_shell().split(
+        "# link host Xcode Swift runtime into rustc", 1
+    )[1]
+    result = subprocess.run(  # noqa: S603 -- executes repository shell against a fake toolchain
+        ["bash", "-eu", "-c", runtime],  # noqa: S607 -- resolves Bash from the test environment
+        env=os.environ
+        | {
+            "xcodeToolchain": str(toolchain),
+            "NIX_LDFLAGS": "-L/nix/store/libiconv/lib",
+            "TMPDIR": str(tmp_path),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert expect_stderr in result.stderr
 
 
 def test_waku_cua_lock_is_an_isolated_crates_io_workspace() -> None:
@@ -1200,6 +1290,20 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         '[ "$patched" -eq 0 ]',
         'echo "failed to pin host Xcode swift on vendor build.rs"',
         "exit 1",
+        '[ ! -d "$xcodeToolchain/../lib/swift/macosx" ]',
+        'echo "host Xcode Swift runtime directory missing under $xcodeToolchain"',
+        "exit 1",
+        'cd "$xcodeToolchain/../lib/swift/macosx"',
+        "pwd",
+        'echo "xcrun resolved a Nix store Swift runtime: $xcodeSwiftLib"',
+        "exit 1",
+        '[ ! -f "$swiftDylib" ]',
+        'echo "host Xcode Swift runtime has no libswift*.dylib under $xcodeSwiftLib"',
+        "exit 1",
+        '/usr/bin/basename "$swiftDylib" .dylib',
+        "/usr/bin/sed 's/^lib//'",
+        'export NIX_LDFLAGS="$NIX_LDFLAGS -L$xcodeSwiftLib$swiftLink"',
+        'echo "cua-driver-sdk host Xcode Swift runtime=$xcodeSwiftLib$swiftLink"',
     ]
     assert [
         node_text(node, sdk_pre_build_shell.sanitized)
