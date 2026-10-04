@@ -86,10 +86,13 @@ let
     # Update 37172173272 compiled those Swift .o files with host Xcode
     # 16.4, then rustc linked libcua_driver_sdk.dylib without
     # libswiftCore (`_swift_willThrow`, `_swift_weakLoadStrong`,
-    # `_swift_task_switch`). Append the host toolchain's
-    # lib/swift/macosx dylibs to NIX_LDFLAGS. Do not add
-    # $SDKROOT/usr/lib/swift (TBD). Do not only pass -L (Update
-    # 37172173272 repair).
+    # `_swift_task_switch`). Update 37178462694 showed #187's
+    # $xcodeToolchain/../lib/swift/macosx -L landed on the rustc cc
+    # line, but that tree has no libswift*.dylib (Xcode 16.4 ships
+    # modules/TBD there). ld then warned it could not find autolinked
+    # swiftCore while already emitting -Wl,-rpath,/usr/lib/swift.
+    # Link the OS Swift runtime dylibs from /usr/lib/swift. Do not add
+    # $SDKROOT/usr/lib/swift (TBD). Do not only pass -L.
     buildInputs = [ libiconv ];
     preBuild = ''
       xcodeSwift="$(
@@ -158,13 +161,13 @@ let
         echo "failed to pin host Xcode swift on vendor build.rs" >&2
         exit 1
       fi
-      # link host Xcode Swift runtime into rustc
+      # link host OS Swift runtime into rustc
       if [ ! -d "$xcodeToolchain/../lib/swift/macosx" ]; then
         echo "host Xcode Swift runtime directory missing under $xcodeToolchain" >&2
         exit 1
       fi
       xcodeSwiftLib="$(
-        cd "$xcodeToolchain/../lib/swift/macosx" && pwd
+        cd "$xcodeToolchain/../lib/swift/macosx" && pwd -P
       )"
       case "$xcodeSwiftLib" in
         /nix/store/*)
@@ -172,10 +175,31 @@ let
           exit 1
           ;;
       esac
+      hostSwiftLib="/usr/lib/swift"
+      if [ -n "$CUA_HOST_SWIFT_LIB" ]; then
+        hostSwiftLib="$CUA_HOST_SWIFT_LIB"
+      fi
+      if [ ! -d "$hostSwiftLib" ]; then
+        echo "host OS Swift runtime directory missing: $hostSwiftLib" >&2
+        exit 1
+      fi
+      hostSwiftLib="$(
+        cd "$hostSwiftLib" && pwd -P
+      )"
+      case "$hostSwiftLib" in
+        /nix/store/*)
+          echo "host OS Swift runtime resolved to Nix store: $hostSwiftLib" >&2
+          exit 1
+          ;;
+      esac
+      if [ ! -f "$hostSwiftLib/libswiftCore.dylib" ]; then
+        echo "host OS Swift runtime missing libswiftCore.dylib under $hostSwiftLib" >&2
+        exit 1
+      fi
       swiftLink=""
-      for swiftDylib in "$xcodeSwiftLib"/libswift*.dylib; do
+      for swiftDylib in "$hostSwiftLib"/libswift*.dylib; do
         if [ ! -f "$swiftDylib" ]; then
-          echo "host Xcode Swift runtime has no libswift*.dylib under $xcodeSwiftLib" >&2
+          echo "host OS Swift runtime has no libswift*.dylib under $hostSwiftLib" >&2
           exit 1
         fi
         swiftName="$(
@@ -183,8 +207,12 @@ let
         )"
         swiftLink="$swiftLink -l$swiftName"
       done
-      export NIX_LDFLAGS="$NIX_LDFLAGS -L$xcodeSwiftLib$swiftLink"
-      echo "cua-driver-sdk host Xcode Swift runtime=$xcodeSwiftLib$swiftLink" >&2
+      if [ -z "$swiftLink" ]; then
+        echo "host OS Swift runtime produced no -lswift* flags from $hostSwiftLib" >&2
+        exit 1
+      fi
+      export NIX_LDFLAGS="$NIX_LDFLAGS -L$xcodeSwiftLib -L$hostSwiftLib$swiftLink"
+      echo "cua-driver-sdk host OS Swift runtime=$hostSwiftLib$swiftLink" >&2
     '';
     postPatch = ''
       cat ${wakuSrc}/resources/computer-use/cua-host.rs >> crates/cua-driver-sdk/src/abi.rs
