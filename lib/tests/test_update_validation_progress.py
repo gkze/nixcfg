@@ -651,6 +651,68 @@ print("complete")
     assert other_sleeps == []
 
 
+def test_validation_retries_missing_store_drv_after_eilseq(tmp_path: Path) -> None:
+    """Update 37165499384: EILSEQ retry then a vanished .drv must still retry."""
+    marker = tmp_path / "attempt"
+    script = """
+import pathlib, sys
+marker = pathlib.Path(sys.argv[1])
+count = int(marker.read_text()) if marker.exists() else 0
+count += 1
+marker.write_text(str(count))
+if count == 1:
+    print(
+        'error (ignored): write of 1 bytes: Illegal byte sequence',
+        file=sys.stderr,
+    )
+    print(
+        'error: opening file "/nix/store/xi9sai0nbg5pn04vfzaslbhj7swybc05-'
+        'git-lfs-3.7.1.drv": No such file or directory',
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+if count == 2:
+    print(
+        'error: opening file "/nix/store/67b3dw9p5i6qynv9mf3fhsa21cmibk57-'
+        'unsloth-desktop-0.1.813-beta.drv": No such file or directory',
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+print("complete")
+"""
+    sleeps: list[float] = []
+    result = validation._run_validation_command(
+        [sys.executable, "-c", script, str(marker)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=sleeps.append,
+    )
+    assert result.returncode == 0
+    assert sleeps == [1.0, 2.0]
+
+    stray = tmp_path / "stray"
+    stray_script = """
+import pathlib, sys
+pathlib.Path(sys.argv[1]).touch()
+print(
+    'error: opening file "/tmp/foo": No such file or directory',
+    file=sys.stderr,
+)
+raise SystemExit(1)
+"""
+    stray_sleeps: list[float] = []
+    stray_result = validation._run_validation_command(
+        [sys.executable, "-c", stray_script, str(stray)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=stray_sleeps.append,
+    )
+    assert stray_result.returncode == 1
+    assert stray_sleeps == []
+
+
 def test_store_fault_retry_keeps_the_remaining_closure_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

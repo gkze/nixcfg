@@ -727,6 +727,14 @@ def test_closure_yield_continues_after_store_unlink_only(
             "       Reason: 1 dependency failed.\n"
         ),
     )
+    missing_drv_failure = DerivationValidationFailure(
+        source="root-closures",
+        installable="path:.#checks.aarch64-darwin.root-closures",
+        message=(
+            'error: opening file "/nix/store/67b3dw9p5i6qynv9mf3fhsa21cmibk57-'
+            'unsloth-desktop-0.1.813-beta.drv": No such file or directory'
+        ),
+    )
 
     def only_store(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
         return (store_failure,)
@@ -773,6 +781,16 @@ def test_closure_yield_continues_after_store_unlink_only(
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", substitute_eilseq)
     cascaded = CliRunner().invoke(pipeline.app, args)
     assert cascaded.exit_code == pipeline.CLOSURE_YIELD_EXIT
+    assert not output.exists()
+
+    def missing_drv(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
+        return (missing_drv_failure,)
+
+    monkeypatch.setattr(
+        pipeline.validation, "validate_root_closures", missing_drv
+    )
+    vanished = CliRunner().invoke(pipeline.app, args)
+    assert vanished.exit_code == pipeline.CLOSURE_YIELD_EXIT
     assert not output.exists()
 
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", only_store)

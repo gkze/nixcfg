@@ -282,6 +282,58 @@ def test_retryable_fixed_output_hash_failure_classification() -> None:
     )
 
 
+def test_missing_store_drv_after_eilseq_is_retryable() -> None:
+    """Update 37165499384: a vanished store .drv is the same fault as EILSEQ."""
+    missing_drv = (
+        'error: opening file "/nix/store/67b3dw9p5i6qynv9mf3fhsa21cmibk57-'
+        'unsloth-desktop-0.1.813-beta.drv": No such file or directory'
+    )
+    git_lfs_drv = (
+        'error: opening file "/nix/store/xi9sai0nbg5pn04vfzaslbhj7swybc05-'
+        'git-lfs-3.7.1.drv": No such file or directory'
+    )
+    assert is_retryable_nix_store_failure(stdout="", stderr=missing_drv)
+    assert is_retryable_nix_store_failure(stdout="", stderr=git_lfs_drv)
+    assert is_transient_store_interruption(missing_drv)
+    assert is_retryable_nix_store_failure(
+        stdout="",
+        stderr=(
+            "error: Cannot build '/nix/store/abc.drv'.\n"
+            "Reason: 1 dependency failed.\n"
+            f"{missing_drv}"
+        ),
+    )
+    assert not is_retryable_nix_store_failure(
+        stdout="",
+        stderr='error: opening file "/tmp/foo": No such file or directory',
+    )
+    assert not is_retryable_nix_store_failure(
+        stdout="",
+        stderr=(
+            'error: opening file "/nix/store/abc-granola-7.595.3": '
+            "No such file or directory"
+        ),
+    )
+    assert not is_retryable_nix_store_failure(
+        stdout="",
+        stderr="gcc: /usr/bin/ld: No such file or directory",
+    )
+    assert not is_retryable_nix_store_failure(
+        stdout="",
+        stderr=(
+            "error: builder for '/nix/store/abc-waku.drv' failed with exit code 1\n"
+            f"{missing_drv}"
+        ),
+    )
+    assert not is_retryable_nix_store_failure(
+        stdout="",
+        stderr=f"error: hash mismatch in fixed-output derivation\n{missing_drv}",
+    )
+    assert not is_transient_store_interruption(
+        "error: builder for '/nix/store/abc.drv' failed\n" + missing_drv
+    )
+
+
 def test_emit_sri_hash_from_build_result_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """Emit SRI directly or convert legacy hash formats."""
     result = CommandResult(args=["nix"], returncode=1, stdout="", stderr="")

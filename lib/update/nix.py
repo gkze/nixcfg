@@ -121,7 +121,9 @@ _FIXED_OUTPUT_ONLY_TRANSIENT_MARKERS = (
 
 # Hosted macos-15 store filesystems fault mid-build with EILSEQ. Nix reports
 # that as "Illegal byte sequence" on unlink or pread; the same machines also
-# die with SIGBUS (signal 10). Neither is a derivation failure.
+# die with SIGBUS (signal 10). After that I/O damage the next nix invocation
+# can fail only on a vanished store .drv (see
+# ``_nix_output_has_missing_store_drv``). None of those are derivation failures.
 _NIX_STORE_TRANSIENT_MARKERS = ("Illegal byte sequence",)
 _STORE_BUS_SIGNALS = frozenset({10, signal.SIGBUS})
 
@@ -556,6 +558,35 @@ def _nix_output_has_builder_exit(output: str) -> bool:
     return any(marker in folded for marker in _BUILDER_EXIT_MARKERS)
 
 
+def _nix_output_has_missing_store_drv(output: str) -> bool:
+    """Return whether Nix could not open a store ``.drv`` after store I/O damage.
+
+    Hosted macos-15 EILSEQ substitute faults can drop ``.drv`` files. The next
+    ``nix`` invocation then reports only::
+
+        error: opening file "/nix/store/<hash>-<name>.drv": No such file or directory
+
+    That is the same store fault, not a missing package. Other ENOENT text,
+    including a vanished non-``.drv`` store path, is not this signal.
+    """
+    for line in output.splitlines():
+        folded = line.casefold()
+        if (
+            'error: opening file "/nix/store/' in folded
+            and '.drv": no such file or directory' in folded
+        ):
+            return True
+    return False
+
+
+def _nix_output_has_store_transient_signal(output: str) -> bool:
+    """Return whether *output* names a hosted-macOS store I/O fault."""
+    folded = output.casefold()
+    if any(marker.casefold() in folded for marker in _NIX_STORE_TRANSIENT_MARKERS):
+        return True
+    return _nix_output_has_missing_store_drv(output)
+
+
 def _nix_output_has_permanent_build_failure(output: str) -> bool:
     """Return whether Nix attributed the output to a derivation, not the store."""
     if _has_hash_mismatch_signal(output):
@@ -563,10 +594,10 @@ def _nix_output_has_permanent_build_failure(output: str) -> bool:
     folded = output.casefold()
     if not any(marker in folded for marker in _PERMANENT_BUILD_FAILURE_MARKERS):
         return False
-    # Hosted macos-15 can EILSEQ while realizing a substitute. Nix then
-    # reports "Cannot build X / Reason: 1 dependency failed" for dependents.
-    # That is still a store fault unless a builder actually exited.
-    if any(marker.casefold() in folded for marker in _NIX_STORE_TRANSIENT_MARKERS):
+    # Hosted macos-15 can EILSEQ while realizing a substitute, then lose the
+    # .drv. Nix reports "Cannot build X / Reason: 1 dependency failed" for
+    # dependents. That is still a store fault unless a builder actually exited.
+    if _nix_output_has_store_transient_signal(output):
         return _nix_output_has_builder_exit(output)
     return True
 
@@ -585,8 +616,7 @@ def is_retryable_nix_store_failure(*, stdout: str, stderr: str) -> bool:
     output = f"{stderr}\n{stdout}"
     if _nix_output_has_permanent_build_failure(output):
         return False
-    folded = output.casefold()
-    return any(marker.casefold() in folded for marker in _NIX_STORE_TRANSIENT_MARKERS)
+    return _nix_output_has_store_transient_signal(output)
 
 
 def _mentions_store_bus_signal(text: str) -> bool:
@@ -606,10 +636,10 @@ def _mentions_store_bus_signal(text: str) -> bool:
 def is_transient_store_interruption(text: str) -> bool:
     """Return whether validation stopped on a runner store fault.
 
-    Hosted macOS jobs lose the store mid-build (``Illegal byte sequence`` or
-    SIGBUS). A hash mismatch or a builder that actually exited
-    (``failed with exit code``, ``error: builder for``) must not continue as
-    if the store had only faulted. ``error: Cannot build`` /
+    Hosted macOS jobs lose the store mid-build (``Illegal byte sequence``,
+    a vanished store ``.drv``, or SIGBUS). A hash mismatch or a builder that
+    actually exited (``failed with exit code``, ``error: builder for``) must
+    not continue as if the store had only faulted. ``error: Cannot build`` /
     ``Reason: 1 dependency failed`` after a substitute EILSEQ is still a
     store fault.
     """
