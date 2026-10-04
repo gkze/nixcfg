@@ -1,0 +1,75 @@
+--- a/crates/platform-macos/build.rs
++++ b/crates/platform-macos/build.rs
+@@ -12,10 +12,9 @@
+     println!("cargo:rustc-link-lib=framework=QuartzCore");
+     println!("cargo:rustc-link-lib=framework=CoreGraphics");
+ 
+-    // Point the linker at the SDK's system sub-library directory so
+-    // `#[link(name = "dispatch", kind = "dylib")]` can find libdispatch.tbd.
+-    // The path is stable across Xcode / CLT installs; SDKROOT takes precedence
+-    // if set (Xcode builds set it automatically).
++    // Xcode 16+ ld refuses a direct libdispatch.tbd link.
++    // Use the System umbrella framework and do not add usr/lib/system.
++    println!("cargo:rustc-link-lib=framework=System");
+     let sdk_root = std::env::var("SDKROOT").unwrap_or_else(|_| {
+         // Fall back to the active CLT SDK.
+         let out = std::process::Command::new("xcrun")
+@@ -28,7 +27,6 @@
+     });
+ 
+     if !sdk_root.is_empty() {
+-        println!("cargo:rustc-link-search={sdk_root}/usr/lib/system");
+         println!("cargo:rustc-link-search={sdk_root}/usr/lib");
+         println!("cargo:rustc-link-search=framework={sdk_root}/System/Library/Frameworks");
+     }
+--- a/crates/platform-macos/src/apps/mod.rs
++++ b/crates/platform-macos/src/apps/mod.rs
+@@ -276,7 +276,7 @@
+     tx: SyncSender<Result<(), String>>,
+ }
+ 
+-#[link(name = "dispatch", kind = "dylib")]
++#[link(name = "System", kind = "framework")]
+ extern "C" {
+     static _dispatch_main_q: u8;
+     fn dispatch_async_f(
+--- a/crates/platform-macos/src/cursor/overlay.rs
++++ b/crates/platform-macos/src/cursor/overlay.rs
+@@ -950,7 +950,7 @@
+     // symbol is `_dispatch_main_q`, a *struct* (not a pointer).
+     // We declare it as `u8` (opaque placeholder) and take its ADDRESS to
+     // obtain the `dispatch_queue_t` (pointer to the struct).
+-    #[link(name = "dispatch", kind = "dylib")]
++    #[link(name = "System", kind = "framework")]
+     extern "C" {
+         // Opaque placeholder — we only ever take &_dispatch_main_q, never read it.
+         static _dispatch_main_q: u8;
+@@ -995,7 +995,7 @@
+ fn dispatch_order_front(win_ptr: usize) {
+     use std::ffi::c_void;
+ 
+-    #[link(name = "dispatch", kind = "dylib")]
++    #[link(name = "System", kind = "framework")]
+     extern "C" {
+         static _dispatch_main_q: u8;
+         fn dispatch_async_f(
+@@ -1059,7 +1059,7 @@
+ fn dispatch_pin_above(win_ptr: usize, target_wid: u64) {
+     use std::ffi::c_void;
+ 
+-    #[link(name = "dispatch", kind = "dylib")]
++    #[link(name = "System", kind = "framework")]
+     extern "C" {
+         static _dispatch_main_q: u8;
+         fn dispatch_async_f(
+--- a/crates/platform-macos/src/pip/mod.rs
++++ b/crates/platform-macos/src/pip/mod.rs
+@@ -86,7 +86,7 @@
+ 
+ // ── libdispatch glue — same shape as cursor::overlay ──────────────────────
+ 
+-#[link(name = "dispatch", kind = "dylib")]
++#[link(name = "System", kind = "framework")]
+ extern "C" {
+     static _dispatch_main_q: u8;
+     fn dispatch_async_f(
