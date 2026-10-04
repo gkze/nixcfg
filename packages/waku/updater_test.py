@@ -1006,7 +1006,7 @@ def test_waku_cua_pins_every_vendor_swift_build_rs(tmp_path: Path) -> None:
 
 
 def test_waku_cua_links_host_swift_runtime(tmp_path: Path) -> None:
-    """Update 37178462694: toolchain macosx is TBD-only; OS /usr/lib/swift has dylibs."""
+    """Update 37183921815: pass -L/usr/lib/swift even when bash cannot stat it."""
     toolchain = (
         tmp_path
         / "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin"
@@ -1015,11 +1015,6 @@ def test_waku_cua_links_host_swift_runtime(tmp_path: Path) -> None:
     swift_lib = toolchain.parent / "lib/swift/macosx"
     swift_lib.mkdir(parents=True)
     (swift_lib / "libswiftCore.tbd").write_text("tbd\n", encoding="utf-8")
-    os_swift = tmp_path / "usr/lib/swift"
-    os_swift.mkdir(parents=True)
-    (os_swift / "libswiftCore.dylib").write_bytes(b"")
-    (os_swift / "libswift_Concurrency.dylib").write_bytes(b"")
-    (os_swift / "libother.dylib").write_bytes(b"")
 
     runtime = _cua_pre_build_shell().split(
         "# link host OS Swift runtime into rustc", 1
@@ -1034,7 +1029,6 @@ def test_waku_cua_links_host_swift_runtime(tmp_path: Path) -> None:
         env=os.environ
         | {
             "xcodeToolchain": str(toolchain),
-            "CUA_HOST_SWIFT_LIB": str(os_swift),
             "NIX_LDFLAGS": "-L/nix/store/libiconv/lib",
             "TMPDIR": str(tmp_path),
         },
@@ -1044,66 +1038,38 @@ def test_waku_cua_links_host_swift_runtime(tmp_path: Path) -> None:
         timeout=10,
     )
     assert result.returncode == 0, result.stderr
-    resolved_toolchain = str(swift_lib.resolve())
-    resolved_os = str(os_swift.resolve())
     [ldflags] = result.stdout.splitlines()
-    assert ldflags.startswith(
-        f"-L/nix/store/libiconv/lib -L{resolved_toolchain} -L{resolved_os} "
-    )
+    assert ldflags.startswith("-L/nix/store/libiconv/lib -L")
+    assert " -L/usr/lib/swift " in f"{ldflags} "
     flag_set = set(ldflags.split())
-    assert {"-lswiftCore", "-lswift_Concurrency"} <= flag_set
-    assert "-lother" not in flag_set
+    assert {"-lswiftCore", "-lswift_Concurrency", "-lswiftFoundation"} <= flag_set
     assert not any(flag.endswith(".tbd") for flag in flag_set)
     assert not any("SDKs/" in flag and "/usr/lib/swift" in flag for flag in flag_set)
-    assert "host OS Swift runtime=" in result.stderr
+    assert "host OS Swift runtime=/usr/lib/swift" in result.stderr
 
 
-@pytest.mark.parametrize(
-    ("layout", "expect_stderr"),
-    [
-        ("missing-toolchain", "host Xcode Swift runtime directory missing under"),
-        ("missing-os", "host OS Swift runtime directory missing:"),
-        ("tbd-only-os", "host OS Swift runtime missing libswiftCore.dylib under"),
-    ],
-)
-def test_waku_cua_rejects_unusable_host_swift_runtime(
-    tmp_path: Path,
-    layout: str,
-    expect_stderr: str,
-) -> None:
-    """Fail closed when the OS Swift runtime has no usable libswiftCore.dylib."""
+def test_waku_cua_rejects_unusable_host_swift_runtime(tmp_path: Path) -> None:
+    """Fail closed when the Xcode toolchain macosx tree is missing."""
     toolchain = tmp_path / "toolchain/usr/bin"
     toolchain.mkdir(parents=True)
-    env = {
-        "xcodeToolchain": str(toolchain),
-        "NIX_LDFLAGS": "-L/nix/store/libiconv/lib",
-        "TMPDIR": str(tmp_path),
-    }
-    if layout != "missing-toolchain":
-        swift_lib = toolchain.parent / "lib/swift/macosx"
-        swift_lib.mkdir(parents=True)
-        (swift_lib / "libswiftCore.tbd").write_text("tbd\n", encoding="utf-8")
-    if layout == "missing-os":
-        env["CUA_HOST_SWIFT_LIB"] = str(tmp_path / "missing-usr-lib-swift")
-    elif layout == "tbd-only-os":
-        os_swift = tmp_path / "usr/lib/swift"
-        os_swift.mkdir(parents=True)
-        (os_swift / "libswiftCore.tbd").write_text("tbd\n", encoding="utf-8")
-        env["CUA_HOST_SWIFT_LIB"] = str(os_swift)
-
     runtime = _cua_pre_build_shell().split(
         "# link host OS Swift runtime into rustc", 1
     )[1]
     result = subprocess.run(  # noqa: S603 -- executes repository shell against a fake toolchain
         ["bash", "-eu", "-c", runtime],  # noqa: S607 -- resolves Bash from the test environment
-        env=os.environ | env,
+        env=os.environ
+        | {
+            "xcodeToolchain": str(toolchain),
+            "NIX_LDFLAGS": "-L/nix/store/libiconv/lib",
+            "TMPDIR": str(tmp_path),
+        },
         capture_output=True,
         text=True,
         check=False,
         timeout=10,
     )
     assert result.returncode == 1
-    assert expect_stderr in result.stderr
+    assert "host Xcode Swift runtime directory missing under" in result.stderr
 
 
 def test_waku_cua_lock_is_an_isolated_crates_io_workspace() -> None:
@@ -1308,27 +1274,8 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         'echo "host Xcode Swift runtime directory missing under $xcodeToolchain"',
         "exit 1",
         'cd "$xcodeToolchain/../lib/swift/macosx"',
-        "pwd -P",
+        "pwd",
         'echo "xcrun resolved a Nix store Swift runtime: $xcodeSwiftLib"',
-        "exit 1",
-        '[ -n "$CUA_HOST_SWIFT_LIB" ]',
-        '[ ! -d "$hostSwiftLib" ]',
-        'echo "host OS Swift runtime directory missing: $hostSwiftLib"',
-        "exit 1",
-        'cd "$hostSwiftLib"',
-        "pwd -P",
-        'echo "host OS Swift runtime resolved to Nix store: $hostSwiftLib"',
-        "exit 1",
-        '[ ! -f "$hostSwiftLib/libswiftCore.dylib" ]',
-        'echo "host OS Swift runtime missing libswiftCore.dylib under $hostSwiftLib"',
-        "exit 1",
-        '[ ! -f "$swiftDylib" ]',
-        'echo "host OS Swift runtime has no libswift*.dylib under $hostSwiftLib"',
-        "exit 1",
-        '/usr/bin/basename "$swiftDylib" .dylib',
-        "/usr/bin/sed 's/^lib//'",
-        '[ -z "$swiftLink" ]',
-        'echo "host OS Swift runtime produced no -lswift* flags from $hostSwiftLib"',
         "exit 1",
         'export NIX_LDFLAGS="$NIX_LDFLAGS -L$xcodeSwiftLib -L$hostSwiftLib$swiftLink"',
         'echo "cua-driver-sdk host OS Swift runtime=$hostSwiftLib$swiftLink"',
