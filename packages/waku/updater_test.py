@@ -923,7 +923,7 @@ def test_waku_cua_discovers_host_xcode_swift_outside_nix_sdk(
             discovery
             + 'printf "%s\\n" "$xcodeSwift" "$developerDir" '
             + '"$DEVELOPER_DIR" "$CUA_XCODE_SWIFT" "$CUA_XCODE_DEVELOPER_DIR" '
-            + '"$xcodeSdk" "$CUA_XCODE_SDKROOT" "$HOME" '
+            + '"$xcodeSdk" "$CUA_XCODE_SDKROOT" "$SDKROOT" "$HOME" '
             + '"$SWIFTPM_MODULECACHE_OVERRIDE"\n',
         ],
         env=os.environ
@@ -948,6 +948,7 @@ def test_waku_cua_discovers_host_xcode_swift_outside_nix_sdk(
         expect_developer_dir,
         swift_path,
         expect_developer_dir,
+        sdk_path,
         sdk_path,
         sdk_path,
         f"{tmp_path}/cua-swiftpm-home",
@@ -1013,6 +1014,77 @@ def test_waku_cua_lock_is_an_isolated_crates_io_workspace() -> None:
         source = package.get("source")
         if source is not None:
             assert source == "registry+https://github.com/rust-lang/crates.io-index"
+
+
+def _unified_diff_file_edits(text: str) -> dict[str, tuple[tuple[str, ...], tuple[str, ...]]]:
+    """Return path -> (removed lines, added lines) for a unified diff."""
+    edits: dict[str, tuple[list[str], list[str]]] = {}
+    current: str | None = None
+    for line in text.splitlines():
+        if line.startswith("+++ b/"):
+            current = line.removeprefix("+++ b/")
+            edits[current] = ([], [])
+            continue
+        if current is None or line.startswith(("+++ ", "--- ")):
+            continue
+        if line.startswith("+"):
+            edits[current][1].append(line[1:])
+        elif line.startswith("-"):
+            edits[current][0].append(line[1:])
+    return {
+        path: (tuple(removed), tuple(added)) for path, (removed, added) in edits.items()
+    }
+
+
+def test_waku_cua_links_dispatch_through_system_framework() -> None:
+    """Update 37165499384: Xcode 16.4 ld rejected a direct libdispatch.tbd link."""
+    _package, derivation, _arguments = _waku_derivation()
+    sdk_gate = expect_instance(
+        expect_binding(derivation.scope, "cuaDriverSdk").value,
+        IfExpression,
+    )
+    sdk = expect_instance(sdk_gate.consequence, FunctionCall)
+    sdk_arguments = expect_instance(sdk.argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(sdk_arguments.values, "patches").value,
+        "[ ./cua-libsystem.patch ]",
+    )
+    edits = _unified_diff_file_edits(
+        (_PACKAGE_DIR / "cua-libsystem.patch").read_text(encoding="utf-8")
+    )
+    assert set(edits) == {
+        "crates/platform-macos/build.rs",
+        "crates/platform-macos/src/apps/mod.rs",
+        "crates/platform-macos/src/cursor/overlay.rs",
+        "crates/platform-macos/src/pip/mod.rs",
+    }
+    build_removed, build_added = edits["crates/platform-macos/build.rs"]
+    assert any(
+        line.strip()
+        == 'println!("cargo:rustc-link-search={sdk_root}/usr/lib/system");'
+        for line in build_removed
+    )
+    assert any(
+        line.strip() == 'println!("cargo:rustc-link-lib=framework=System");'
+        for line in build_added
+    )
+    assert not any(
+        "rustc-link-search" in line and "usr/lib/system" in line for line in build_added
+    )
+    rust_removed = [
+        line.strip()
+        for path, (removed, _added) in edits.items()
+        if "/src/" in path
+        for line in removed
+    ]
+    rust_added = [
+        line.strip()
+        for path, (_removed, added) in edits.items()
+        if "/src/" in path
+        for line in added
+    ]
+    assert rust_removed == ['#[link(name = "dispatch", kind = "dylib")]'] * 5
+    assert rust_added == ['#[link(name = "System", kind = "framework")]'] * 5
 
 
 def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> None:
@@ -1103,6 +1175,7 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         'echo "xcrun swift is not under an Xcode Toolchains tree: $xcodeSwift"',
         "exit 1",
         'export DEVELOPER_DIR="$developerDir"',
+        'export SDKROOT="$xcodeSdk"',
         'export CUA_XCODE_SWIFT="$xcodeSwift"',
         'export CUA_XCODE_DEVELOPER_DIR="$developerDir"',
         'export CUA_XCODE_SDKROOT="$xcodeSdk"',

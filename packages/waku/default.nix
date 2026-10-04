@@ -56,6 +56,11 @@ let
       "--package"
       "cua-driver-sdk"
     ];
+    # Update 37165499384: Xcode 16.4 ld refused Nix apple-sdk-14.4
+    # libdispatch.tbd ("Link against the umbrella framework
+    # System.framework instead"). Cua's platform-macos crate asked for
+    # `#[link(name = "dispatch")]` and added `$SDKROOT/usr/lib/system`.
+    patches = [ ./cua-libsystem.patch ];
     doCheck = false;
     # apple-metal / apple-cf / screencapturekit build.rs run `swift build`.
     # Nix's stdenv DEVELOPER_DIR is the SDK-only store tree. Discover
@@ -67,8 +72,9 @@ let
     # 37037587993). Pin DEVELOPER_DIR and SDKROOT on the `swift` spawn
     # so cargo's process env cannot put the Nix SDK back. Update
     # 37107263529 found Xcode 16.4 swift 6.1.2, then SwiftPM compiled
-    # the manifest against apple-sdk-14.4 (Swift 5.10). Do not export
-    # SDKROOT globally — rustc/clang still need the Nix SDK. Update
+    # the manifest against apple-sdk-14.4 (Swift 5.10). Export host
+    # SDKROOT after discovery so platform-macos build.rs does not add
+    # Nix apple-sdk-14.4 `/usr/lib/system` (Update 37165499384). Update
     # 37114244846 then used the host MacOSX15.5.sdk and died on
     # `sandbox-exec: sandbox_apply: Operation not permitted` inside
     # Nix's sandbox. Pass `--disable-sandbox` the same way
@@ -104,6 +110,7 @@ let
         exit 1
       fi
       export DEVELOPER_DIR="$developerDir"
+      export SDKROOT="$xcodeSdk"
       export CUA_XCODE_SWIFT="$xcodeSwift"
       export CUA_XCODE_DEVELOPER_DIR="$developerDir"
       export CUA_XCODE_SDKROOT="$xcodeSdk"
