@@ -27,7 +27,11 @@ from lib.update.events import (
     UpdateEvent,
     raise_failed_command,
 )
-from lib.update.nix import _build_fetch_from_github_expr, _build_flake_attr_expr
+from lib.update.nix import (
+    _build_fetch_from_github_expr,
+    _build_flake_attr_expr,
+    is_retryable_nix_network_failure,
+)
 from lib.update.paths import get_repo_file, local_flake_url
 from lib.update.process import RunCommandOptions, run_command
 from lib.update.updaters import (
@@ -257,35 +261,56 @@ class NeutilsUpdater(GitHubReleaseUpdater):
         if expression:
             command.extend(("--impure", "--expr"))
         command.append(installable)
-        result = await run_command(
-            command,
-            options=RunCommandOptions(
-                source=self.name,
-                config=self.config,
-            ),
-            emit=emit,
-        )
-        if result.returncode != 0:
-            msg = (
+        attempt = 1
+        while True:
+            result = await run_command(
+                command,
+                options=RunCommandOptions(
+                    source=self.name,
+                    config=self.config,
+                ),
+                emit=emit,
+            )
+            if result.returncode == 0:
+                out_paths = [
+                    line.strip() for line in result.stdout.splitlines() if line.strip()
+                ]
+                if not out_paths:
+                    msg = f"nix build returned no out path for {installable}"
+                    raise RuntimeError(msg)
+                return out_paths[-1]
+            message = (
                 result.stderr.strip()
                 or result.stdout.strip()
                 or f"nix build failed for {installable}"
             )
-            raise RuntimeError(msg)
-        out_paths = [
-            line.strip() for line in result.stdout.splitlines() if line.strip()
-        ]
-        if not out_paths:
-            msg = f"nix build returned no out path for {installable}"
-            raise RuntimeError(msg)
-        return out_paths[-1]
+            if (
+                attempt >= self._ZON2NIX_MAX_ATTEMPTS
+                or not self._is_transient_zon2nix_failure(result)
+            ):
+                raise RuntimeError(message)
+            attempt += 1
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    "transient nix fetch failure while resolving an installable; retrying...",
+                    operation="compute_hash",
+                    status=StatusInfo(
+                        kind=StatusKind.RETRY,
+                        value=f"attempt {attempt}/{self._ZON2NIX_MAX_ATTEMPTS}",
+                    ),
+                )
+            )
+            await asyncio.sleep(max(0.0, self.config.default_retry_backoff))
 
     @classmethod
     def _is_transient_zon2nix_text(cls, output: str) -> bool:
-        output = output.casefold()
-        return any(
-            marker.casefold() in output for marker in cls._ZON2NIX_TRANSIENT_MARKERS
-        )
+        if any(
+            marker.casefold() in output.casefold()
+            for marker in cls._ZON2NIX_TRANSIENT_MARKERS
+        ):
+            return True
+        return is_retryable_nix_network_failure(stdout="", stderr=output)
 
     @classmethod
     def _is_transient_zon2nix_failure(cls, result: CommandResult) -> bool:

@@ -739,6 +739,108 @@ def test_resolve_installable_path_rejects_bad_command_results(
         )
 
 
+_CODEBERG_ZIG_OVERLAY_503 = (
+    "fatal: unable to access 'https://codeberg.org/jcollie/zig-overlay.git/': "
+    "The requested URL returned error: 503\n"
+    "error: Failed to fetch git repository "
+    "'https://codeberg.org/jcollie/zig-overlay.git'"
+)
+
+
+def test_codeberg_zig_overlay_503_is_a_transient_zon2nix_failure() -> None:
+    """Update 37162169861 died resolving zon2nix when Codeberg returned 503."""
+    module = _load_module("neutils_codeberg_503_is_transient")
+    updater = module.NeutilsUpdater()
+    assert updater._is_transient_zon2nix_text(_CODEBERG_ZIG_OVERLAY_503)
+
+
+def test_resolve_installable_path_retries_codeberg_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry flake-input fetches that fail on Codeberg 503, then return the path."""
+    module = _load_module("neutils_resolve_installable_codeberg_503")
+    updater = module.NeutilsUpdater()
+    calls = 0
+    sleep_delays: list[float] = []
+
+    async def _run_command(
+        args: list[str], *, options, emit: EventSink = ignore_event
+    ) -> object:
+        nonlocal calls
+        _ = (args, options)
+        calls += 1
+        if calls == 1:
+            return CommandResult(
+                args=args,
+                returncode=1,
+                stdout="",
+                stderr=_CODEBERG_ZIG_OVERLAY_503,
+            )
+        await emit(UpdateEvent.status(updater.name, "building installable"))
+        return CommandResult(
+            args=args,
+            returncode=0,
+            stdout="/nix/store/zon2nix\n",
+            stderr="",
+        )
+
+    async def _sleep(delay: float) -> None:
+        sleep_delays.append(delay)
+
+    monkeypatch.setattr(module, "run_command", _run_command)
+    monkeypatch.setattr(module.asyncio, "sleep", _sleep)
+
+    events = _run(
+        _collect_events(
+            lambda emit: updater._resolve_installable_path(
+                "flake#zon2nix", expression=True, emit=emit
+            )
+        )
+    )
+    assert calls == 2
+    assert sleep_delays == [updater.config.default_retry_backoff]
+    assert events.result == "/nix/store/zon2nix"
+    retry_events = [event for event in events if event.kind is UpdateEventKind.STATUS]
+    assert retry_events[0] == UpdateEvent.status(
+        updater.name,
+        "transient nix fetch failure while resolving an installable; retrying...",
+        operation="compute_hash",
+        status=StatusInfo(kind=StatusKind.RETRY, value="attempt 2/3"),
+    )
+
+
+def test_resolve_installable_path_exhausts_codeberg_503_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the Codeberg 503 after the bounded resolve retries."""
+    module = _load_module("neutils_resolve_installable_codeberg_503_exhaust")
+    updater = module.NeutilsUpdater()
+    calls = 0
+
+    async def _run_command(
+        args: list[str], *, options, emit: EventSink = ignore_event
+    ) -> object:
+        nonlocal calls
+        _ = (options, emit)
+        calls += 1
+        return CommandResult(
+            args=args,
+            returncode=1,
+            stdout="",
+            stderr=_CODEBERG_ZIG_OVERLAY_503,
+        )
+
+    async def _sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(module, "run_command", _run_command)
+    monkeypatch.setattr(module.asyncio, "sleep", _sleep)
+
+    with pytest.raises(RuntimeError, match="returned error: 503"):
+        _run(updater._resolve_installable_path("flake#zon2nix", expression=True))
+    assert calls == updater._ZON2NIX_MAX_ATTEMPTS
+
+
 def test_render_build_zig_zon_nix_renders_artifact_with_resolved_tools(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
