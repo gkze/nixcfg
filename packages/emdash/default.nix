@@ -148,17 +148,17 @@ stdenv.mkDerivation {
 
   strictDeps = true;
 
-  # Nx 23's daemon and Vite/esbuild talk over localhost. Hosted Darwin
-  # sandboxing turns that into a Node abort (stack dump + ELIFECYCLE) during
-  # `ensure-packages-built` / `pnpm run build` — Update 37203829641
-  # closures-4, emdash-1.2.6.drv, nodejs-slim-24.20.0.
+  # Hosted Darwin sandboxing aborted Node 24 during the workspace build
+  # (Update 37203829641 closures-4, emdash-1.2.6.drv). Do not send that
+  # work through Nx: even with CI=1 (daemon already off) Nx still opens
+  # plugin-worker sockets. Keep esbuild in-process. Loopback is outbound
+  # only; do not treat it as a listen() grant (NixOS/nix#11269).
   __darwinAllowLocalNetworking = true;
 
   env = electronBuild.commonEnv // {
     CI = "1";
     EMDASH_NIXCFG_BUILD_REV = "3";
-    NX_DAEMON = "false";
-    NX_NO_CLOUD = "true";
+    ESBUILD_WORKER_THREADS = "0";
     npm_config_build_from_source = "true";
     npm_config_manage_package_manager_versions = "false";
     npm_config_node_linker = "hoisted";
@@ -203,7 +203,13 @@ stdenv.mkDerivation {
     ${lib.getExe python3} ${stageWorkspacePackages} \
       link "$PWD" "$PWD/node_modules" "$workspace_package_paths"
 
-    node tooling/scripts/ensure-packages-built.mjs
+    # Same exclude list as tooling/scripts/ensure-packages-built.mjs, but
+    # via pnpm filters so Nx never starts plugin workers or a daemon.
+    pnpm \
+      --filter '@emdash/emdash-desktop^...' \
+      --filter '!@emdash/workspace-server' \
+      --workspace-concurrency=1 \
+      run build
 
     ${lib.getExe python3} ${stageWorkspacePackages} \
       copy "$PWD" "$PWD/node_modules" "$workspace_package_paths"

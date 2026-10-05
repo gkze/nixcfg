@@ -7,8 +7,8 @@ from lib.tests._nix_source import nix_file_binding_expr
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
 
 
-def test_emdash_allows_darwin_loopback_for_nx_and_vite() -> None:
-    """Hosted Darwin sandboxing aborts Node when Nx/Vite bind localhost."""
+def test_emdash_allows_darwin_loopback_outbound() -> None:
+    """Loopback outbound stays on; it is not treated as a listen() grant."""
     assert_nix_ast_equal(
         nix_file_binding_expr(
             "packages/emdash/default.nix",
@@ -18,15 +18,14 @@ def test_emdash_allows_darwin_loopback_for_nx_and_vite() -> None:
     )
 
 
-def test_emdash_build_env_disables_the_nx_daemon() -> None:
-    """`ensure-packages-built` shells `pnpm exec nx`; the daemon is the abort."""
+def test_emdash_build_env_keeps_esbuild_in_process() -> None:
+    """The esbuild service thread is a leftover localhost listener after Nx is gone."""
     assert_nix_ast_equal(
         nix_file_binding_expr("packages/emdash/default.nix", "env"),
         """electronBuild.commonEnv // {
           CI = "1";
           EMDASH_NIXCFG_BUILD_REV = "3";
-          NX_DAEMON = "false";
-          NX_NO_CLOUD = "true";
+          ESBUILD_WORKER_THREADS = "0";
           npm_config_build_from_source = "true";
           npm_config_manage_package_manager_versions = "false";
           npm_config_node_linker = "hoisted";
@@ -34,22 +33,32 @@ def test_emdash_build_env_disables_the_nx_daemon() -> None:
     )
 
 
-def test_emdash_still_builds_workspace_packages_through_nx() -> None:
-    """The abort fix must keep the Nx workspace build, not delete it."""
+def test_emdash_builds_workspace_packages_without_nx() -> None:
+    """The aborting `ensure-packages-built` / Nx path must not run."""
     build_phase = nix_file_binding_expr("packages/emdash/default.nix", "buildPhase")
     shell = parse_shell(indented_string_body(build_phase.rebuild()))
+    pnpm_commands = command_texts(shell, "pnpm")
     node_commands = command_texts(shell, "node")
-    assert any(
+
+    assert not any(
         "tooling/scripts/ensure-packages-built.mjs" in command
         for command in node_commands
     )
+    assert not any("nx" in command.split() for command in pnpm_commands)
+
+    workspace_builds = [
+        command
+        for command in pnpm_commands
+        if "--filter '@emdash/emdash-desktop^...'" in command
+        and "run build" in command
+    ]
+    assert len(workspace_builds) == 1
+    assert "--filter '!@emdash/workspace-server'" in workspace_builds[0]
+    assert "--workspace-concurrency=1" in workspace_builds[0]
     assert any(
-        command.startswith("pnpm exec electron-rebuild")
-        for command in command_texts(shell, "pnpm")
+        command.startswith("pnpm exec electron-rebuild") for command in pnpm_commands
     )
-    assert any(
-        command == "pnpm run build" for command in command_texts(shell, "pnpm")
-    )
+    assert any(command == "pnpm run build" for command in pnpm_commands)
 
 
 def test_emdash_keeps_darwin_install_checks() -> None:
