@@ -151,14 +151,27 @@ stdenv.mkDerivation {
   # Hosted Darwin sandboxing aborted Node 24 during the workspace build
   # (Update 37203829641 closures-4, emdash-1.2.6.drv). Do not send that
   # work through Nx: even with CI=1 (daemon already off) Nx still opens
-  # plugin-worker sockets. Keep esbuild in-process. Loopback is outbound
-  # only; do not treat it as a listen() grant (NixOS/nix#11269).
+  # plugin-worker sockets. Keep esbuild in-process. Loopback outbound
+  # is not a listen() grant (NixOS/nix#11269).
   __darwinAllowLocalNetworking = true;
+
+  # Update 37273390067 closures-1: workspace filters succeeded, then
+  # desktop `pnpm run build` (`electron-vite build`) died with exit 134
+  # / Abort trap 6 in V8 AfterThreadPoolWork. The renderer config still
+  # names server.port 3000; vite/esbuild leftover binds plus FSEvents
+  # from @parcel/watcher abort the builder under outbound-only loopback.
+  # This is a listen()/FSEvents grant for the build, not a checkPhase skip.
+  sandboxProfile = lib.optionalString stdenv.hostPlatform.isDarwin ''
+    (allow network-inbound (local ip "localhost:*"))
+    (allow network-inbound (local ip "127.0.0.1:*"))
+    (allow mach-lookup (global-name "com.apple.FSEvents"))
+  '';
 
   env = electronBuild.commonEnv // {
     CI = "1";
-    EMDASH_NIXCFG_BUILD_REV = "4";
+    EMDASH_NIXCFG_BUILD_REV = "5";
     ESBUILD_WORKER_THREADS = "0";
+    UV_THREADPOOL_SIZE = "1";
     npm_config_build_from_source = "true";
     npm_config_manage_package_manager_versions = "false";
     npm_config_node_linker = "hoisted";
@@ -226,7 +239,7 @@ stdenv.mkDerivation {
     # postinstall scripts, so rebuild native Electron modules explicitly.
     pnpm exec electron-rebuild -f -v ${electronVersion} --only=better-sqlite3,node-pty
 
-    pnpm run build
+    pnpm exec electron-vite build
 
     install -Dm644 ${msShim} out/main/ms-shim.cjs
     install -Dm644 ${msShim} ../../out/main/ms-shim.cjs
