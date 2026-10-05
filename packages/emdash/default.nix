@@ -148,9 +148,17 @@ stdenv.mkDerivation {
 
   strictDeps = true;
 
+  # Nx 23's daemon and Vite/esbuild talk over localhost. Hosted Darwin
+  # sandboxing turns that into a Node abort (stack dump + ELIFECYCLE) during
+  # `ensure-packages-built` / `pnpm run build` — Update 37203829641
+  # closures-4, emdash-1.2.6.drv, nodejs-slim-24.20.0.
+  __darwinAllowLocalNetworking = true;
+
   env = electronBuild.commonEnv // {
     CI = "1";
     EMDASH_NIXCFG_BUILD_REV = "3";
+    NX_DAEMON = "false";
+    NX_NO_CLOUD = "true";
     npm_config_build_from_source = "true";
     npm_config_manage_package_manager_versions = "false";
     npm_config_node_linker = "hoisted";
