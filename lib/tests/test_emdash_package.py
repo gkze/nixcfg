@@ -24,8 +24,9 @@ def test_emdash_build_env_keeps_esbuild_in_process() -> None:
         nix_file_binding_expr("packages/emdash/default.nix", "env"),
         """electronBuild.commonEnv // {
           CI = "1";
-          EMDASH_NIXCFG_BUILD_REV = "4";
+          EMDASH_NIXCFG_BUILD_REV = "5";
           ESBUILD_WORKER_THREADS = "0";
+          UV_THREADPOOL_SIZE = "1";
           npm_config_build_from_source = "true";
           npm_config_manage_package_manager_versions = "false";
           npm_config_node_linker = "hoisted";
@@ -58,7 +59,20 @@ def test_emdash_builds_workspace_packages_without_nx() -> None:
     assert any(
         command.startswith("pnpm exec electron-rebuild") for command in pnpm_commands
     )
-    assert any(command == "pnpm run build" for command in pnpm_commands)
+    assert any(command == "pnpm exec electron-vite build" for command in pnpm_commands)
+    assert not any(command == "pnpm run build" for command in pnpm_commands)
+
+
+def test_emdash_grants_darwin_inbound_loopback_for_electron_vite() -> None:
+    """Desktop electron-vite aborted under outbound-only loopback; inbound stays on."""
+    assert_nix_ast_equal(
+        nix_file_binding_expr("packages/emdash/default.nix", "sandboxProfile"),
+        """lib.optionalString stdenv.hostPlatform.isDarwin ''
+          (allow network-inbound (local ip "localhost:*"))
+          (allow network-inbound (local ip "127.0.0.1:*"))
+          (allow mach-lookup (global-name "com.apple.FSEvents"))
+        ''""",
+    )
 
 
 def test_emdash_strips_build_node_modules_after_install() -> None:
