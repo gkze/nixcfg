@@ -157,7 +157,7 @@ stdenv.mkDerivation {
 
   env = electronBuild.commonEnv // {
     CI = "1";
-    EMDASH_NIXCFG_BUILD_REV = "3";
+    EMDASH_NIXCFG_BUILD_REV = "4";
     ESBUILD_WORKER_THREADS = "0";
     npm_config_build_from_source = "true";
     npm_config_manage_package_manager_versions = "false";
@@ -354,6 +354,17 @@ stdenv.mkDerivation {
 
         runHook postInstall
       '';
+
+  # Hosted Darwin Nix follows directory symlinks when deleting the
+  # sandbox (Update 37265448999 closures-1). The desktop
+  # node_modules -> ../../node_modules link plus staged workspace
+  # copies make that walk cyclic, and cleanup dies with
+  # "cannot unlink .../source/node_modules: Directory not empty".
+  # installPhase already copied the app from dist/; installCheck
+  # reads only $out.
+  postInstall = ''
+    ${lib.getExe python3} ${stageWorkspacePackages} clean "$PWD"
+  '';
 
   doInstallCheck = stdenv.hostPlatform.isDarwin;
 

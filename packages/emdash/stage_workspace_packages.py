@@ -1,11 +1,19 @@
 """Stage pnpm-selected workspace packages under their manifest-owned names."""
 
+from __future__ import annotations
+
 import argparse
 import json
+import os
 import re
 import shutil
+import stat
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _MAX_MANIFEST_BYTES = 1024 * 1024
 _SCOPED_PACKAGE_COMPONENT_COUNT = 2
@@ -141,14 +149,67 @@ def stage_workspace_packages(
             shutil.copytree(package.source, destination, symlinks=True)
 
 
+def _retry_readonly(
+    function: Callable[[str], object],
+    path: str,
+    exc: BaseException,
+) -> None:
+    """Retry a delete after clearing a read-only bit left by pnpm."""
+    if not isinstance(exc, PermissionError):
+        raise exc
+    target = Path(path)
+    target.chmod(stat.S_IRWXU)
+    target.parent.chmod(stat.S_IRWXU)
+    function(path)
+
+
+def clean_build_node_modules(root: Path) -> None:
+    """Remove build-time node_modules without following directory symlinks.
+
+    Hosted Darwin Nix walks directory symlinks when deleting the sandbox.
+    The desktop ``node_modules -> ../../node_modules`` link plus staged
+    workspace copies make that walk cyclic, and cleanup dies with
+    ``cannot unlink .../source/node_modules: Directory not empty``.
+    """
+    root = root.resolve(strict=True)
+    targets: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        retained: list[str] = []
+        for name in dirnames:
+            path = Path(dirpath, name)
+            if name == "node_modules":
+                targets.append(path)
+                continue
+            if path.is_symlink():
+                continue
+            retained.append(name)
+        dirnames[:] = retained
+        targets.extend(
+            Path(dirpath, name) for name in filenames if name == "node_modules"
+        )
+
+    for path in sorted(targets, key=lambda item: len(item.parts), reverse=True):
+        if path.is_symlink() or not path.is_dir():
+            path.unlink()
+        else:
+            shutil.rmtree(path, onexc=_retry_readonly)
+
+
 def main(argv: list[str] | None = None) -> None:
-    """Stage the exact package paths selected by pnpm."""
+    """Stage the exact package paths selected by pnpm, or strip build node_modules."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("link", "copy"))
+    parser.add_argument("mode", choices=("link", "copy", "clean"))
     parser.add_argument("source_root", type=Path)
-    parser.add_argument("node_modules", type=Path)
-    parser.add_argument("path_list", type=Path)
+    parser.add_argument("node_modules", type=Path, nargs="?")
+    parser.add_argument("path_list", type=Path, nargs="?")
     args = parser.parse_args(argv)
+    if args.mode == "clean":
+        if args.node_modules is not None or args.path_list is not None:
+            parser.error("clean takes only source_root")
+        clean_build_node_modules(args.source_root)
+        return
+    if args.node_modules is None or args.path_list is None:
+        parser.error("link and copy require node_modules and path_list")
     packages = workspace_packages(args.source_root, args.path_list)
     stage_workspace_packages(packages, args.node_modules, mode=args.mode)
 
