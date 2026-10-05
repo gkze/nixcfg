@@ -24,7 +24,7 @@ def test_emdash_build_env_keeps_esbuild_in_process() -> None:
         nix_file_binding_expr("packages/emdash/default.nix", "env"),
         """electronBuild.commonEnv // {
           CI = "1";
-          EMDASH_NIXCFG_BUILD_REV = "3";
+          EMDASH_NIXCFG_BUILD_REV = "4";
           ESBUILD_WORKER_THREADS = "0";
           npm_config_build_from_source = "true";
           npm_config_manage_package_manager_versions = "false";
@@ -59,6 +59,18 @@ def test_emdash_builds_workspace_packages_without_nx() -> None:
         command.startswith("pnpm exec electron-rebuild") for command in pnpm_commands
     )
     assert any(command == "pnpm run build" for command in pnpm_commands)
+
+
+def test_emdash_strips_build_node_modules_after_install() -> None:
+    """Sandbox cleanup must not walk the desktop node_modules symlink."""
+    post_install = nix_file_binding_expr("packages/emdash/default.nix", "postInstall")
+    shell = parse_shell(indented_string_body(post_install.rebuild()))
+    clean_commands = [
+        command
+        for command in command_texts(shell)
+        if command.split()[-2:] == ["clean", '"$PWD"']
+    ]
+    assert len(clean_commands) == 1
 
 
 def test_emdash_keeps_darwin_install_checks() -> None:
