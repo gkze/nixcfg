@@ -314,22 +314,18 @@ let
         expected ${appVersion}; regenerate Cargo.nix
       '';
 
-  livekitLibwebrtc =
-    let
-      upstreamLivekitLibwebrtc = pkgs.callPackage "${src}/nix/livekit-libwebrtc/package.nix" { };
-    in
-    if pkgs.stdenv.hostPlatform.isLinux then
-      upstreamLivekitLibwebrtc.overrideAttrs (old: {
-        gnFlags = builtins.filter (flag: flag != "rtc_use_pipewire=true") (old.gnFlags or [ ]) ++ [
-          "rtc_use_pipewire=false"
-        ];
-        # Keep Linux CI/builder runs stable here; parallel livekit-libwebrtc
-        # builds have been flaky enough in practice that serialized ninja is the
-        # safer default until the underlying failure mode is better understood.
-        ninjaFlags = [ "-j1" ] ++ (old.ninjaFlags or [ ]);
-      })
-    else
-      upstreamLivekitLibwebrtc;
+  # Zed #65203 removed the vendored nix/livekit-libwebrtc derivation and
+  # switched LK_CUSTOM_WEBRTC to nixpkgs. Interpolating the deleted path
+  # fails evaluation of every graph that imports this package.
+  livekitLibwebrtc = pkgs.livekit-libwebrtc.overrideAttrs (
+    old:
+    lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+      # Wayland capture dlopens EGL/GL; match upstream so fixup does not
+      # strip the search path after the vendored package went away.
+      NIX_LDFLAGS = (old.NIX_LDFLAGS or "") + " -rpath ${lib.makeLibraryPath [ libglvnd ]}";
+      dontPatchELF = true;
+    }
+  );
   gpuLib = vulkan-loader;
 
   zedBuildInputs = [
