@@ -251,7 +251,7 @@ def test_clean_unlinks_desktop_node_modules_without_following(
     _write_tree(core_esbuild)
     _write_tree(keep)
     _write_tree(foreign_modules)
-    desktop_modules.parent.mkdir(parents=True)
+    desktop_modules.parent.mkdir(parents=True, exist_ok=True)
     desktop_modules.symlink_to(Path("../../node_modules"), target_is_directory=True)
     (source / "apps/workspace-server").mkdir(parents=True)
     (source / "apps/workspace-server/node_modules").symlink_to(

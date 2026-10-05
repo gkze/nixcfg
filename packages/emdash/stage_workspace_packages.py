@@ -1,14 +1,19 @@
 """Stage pnpm-selected workspace packages under their manifest-owned names."""
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
 import re
 import shutil
 import stat
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _MAX_MANIFEST_BYTES = 1024 * 1024
 _SCOPED_PACKAGE_COMPONENT_COUNT = 2
