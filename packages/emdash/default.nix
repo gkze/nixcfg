@@ -160,18 +160,27 @@ stdenv.mkDerivation {
   # / Abort trap 6 in V8 AfterThreadPoolWork. The renderer config still
   # names server.port 3000; vite/esbuild leftover binds plus FSEvents
   # from @parcel/watcher abort the builder under outbound-only loopback.
-  # This is a listen()/FSEvents grant for the build, not a checkPhase skip.
+  # Update 37331638201 closures-1 rebuilt the same emdash-1.2.6.drv
+  # packages had already realized and still SIGABRT'd in
+  # AfterThreadPoolWork (`ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL
+  # electron-vite build`). FSEvents-only mach-lookup is not enough:
+  # Node 24 / @parcel/watcher / Tailwind also talk to other
+  # com.apple.* services, and vite may bind ::1. This is a listen()
+  # and Apple-mach grant for the build, not a checkPhase skip.
   sandboxProfile = lib.optionalString stdenv.hostPlatform.isDarwin ''
     (allow network-inbound (local ip "localhost:*"))
     (allow network-inbound (local ip "127.0.0.1:*"))
-    (allow mach-lookup (global-name "com.apple.FSEvents"))
+    (allow network-inbound (local ip "::1:*"))
+    (allow mach-lookup (global-name-regex #"^com\.apple\."))
   '';
 
   env = electronBuild.commonEnv // {
     CI = "1";
-    EMDASH_NIXCFG_BUILD_REV = "5";
+    CHOKIDAR_USEPOLLING = "1";
+    EMDASH_NIXCFG_BUILD_REV = "6";
     ESBUILD_WORKER_THREADS = "0";
     UV_THREADPOOL_SIZE = "1";
+    WATCHPACK_POLLING = "true";
     npm_config_build_from_source = "true";
     npm_config_manage_package_manager_versions = "false";
     npm_config_node_linker = "hoisted";
@@ -194,6 +203,17 @@ stdenv.mkDerivation {
     fi
     substituteInPlace "''${shell_env_capture_paths[0]}" \
       --replace-fail "['-ilc', 'env']" "['-lc', 'env']"
+
+    # Production `electron-vite build` still constructs the renderer
+    # server stanza (port 3000). Nulling watch keeps @parcel/watcher
+    # / FSEvents off that path under the Darwin sandbox.
+    electron_vite_config=${appDir}/electron.vite.config.ts
+    if [ ! -f "$electron_vite_config" ]; then
+      echo "missing $electron_vite_config" >&2
+      exit 1
+    fi
+    substituteInPlace "$electron_vite_config" \
+      --replace-fail "port: 3000," "port: 3000, watch: null,"
   '';
 
   buildPhase = ''

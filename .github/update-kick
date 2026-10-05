@@ -1,4 +1,4 @@
 # Touch this file to queue one Update run on main (or the WIP branch).
 # Cloud-agent ghs_ tokens cannot workflow_dispatch (HTTP 403, actions:read).
 # Remove this kick path after E2E prepare → validate → publish is proven.
-2026-10-05T15:15:00Z after-37284732800-closures-npm-dns
+2026-10-05T20:40:00Z after-37331638201-emdash-electron-vite-sigabrt

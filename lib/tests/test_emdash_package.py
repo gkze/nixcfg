@@ -4,7 +4,13 @@ from nix_manipulator.expressions.indented_string import IndentedString
 
 from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._nix_source import nix_file_binding_expr
-from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
+from lib.tests._shell_ast import (
+    command_texts,
+    indented_string_body,
+    iter_nodes,
+    node_text,
+    parse_shell,
+)
 
 
 def test_emdash_allows_darwin_loopback_outbound() -> None:
@@ -24,9 +30,11 @@ def test_emdash_build_env_keeps_esbuild_in_process() -> None:
         nix_file_binding_expr("packages/emdash/default.nix", "env"),
         """electronBuild.commonEnv // {
           CI = "1";
-          EMDASH_NIXCFG_BUILD_REV = "5";
+          CHOKIDAR_USEPOLLING = "1";
+          EMDASH_NIXCFG_BUILD_REV = "6";
           ESBUILD_WORKER_THREADS = "0";
           UV_THREADPOOL_SIZE = "1";
+          WATCHPACK_POLLING = "true";
           npm_config_build_from_source = "true";
           npm_config_manage_package_manager_versions = "false";
           npm_config_node_linker = "hoisted";
@@ -70,9 +78,31 @@ def test_emdash_grants_darwin_inbound_loopback_for_electron_vite() -> None:
         """lib.optionalString stdenv.hostPlatform.isDarwin ''
           (allow network-inbound (local ip "localhost:*"))
           (allow network-inbound (local ip "127.0.0.1:*"))
-          (allow mach-lookup (global-name "com.apple.FSEvents"))
+          (allow network-inbound (local ip "::1:*"))
+          (allow mach-lookup (global-name-regex #"^com\\.apple\\."))
         ''""",
     )
+
+
+def test_emdash_disables_electron_vite_server_watch() -> None:
+    """Renderer server.port 3000 must not start @parcel/watcher under the sandbox."""
+    post_patch = nix_file_binding_expr("packages/emdash/default.nix", "postPatch")
+    shell = parse_shell(indented_string_body(post_patch.rebuild()))
+    assignments = [
+        node_text(node, shell.sanitized)
+        for node in iter_nodes(shell.tree.root_node, "variable_assignment")
+        if node_text(node, shell.sanitized).endswith("electron.vite.config.ts")
+    ]
+    substitutes = [
+        command
+        for command in command_texts(shell, "substituteInPlace")
+        if "watch: null" in command
+    ]
+    assert len(assignments) == 1
+    assert assignments[0].startswith("electron_vite_config=")
+    assert assignments[0].endswith("electron.vite.config.ts")
+    assert len(substitutes) == 1
+    assert "port: 3000, watch: null," in substitutes[0]
 
 
 def test_emdash_strips_build_node_modules_after_install() -> None:
