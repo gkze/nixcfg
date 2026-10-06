@@ -327,7 +327,9 @@ def test_retry_readonly_reraises_non_permission_errors(
 ) -> None:
     path = tmp_path / "gone"
     with pytest.raises(FileNotFoundError, match="gone"):
-        staging_module._retry_readonly(Path.unlink, str(path), FileNotFoundError("gone"))
+        staging_module._retry_readonly(
+            Path.unlink, str(path), FileNotFoundError("gone")
+        )
 
 
 def test_retry_readonly_clears_permission_and_retries(

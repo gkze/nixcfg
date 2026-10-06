@@ -159,7 +159,9 @@ def test_reason_rejects_missing_versioned_location(
     with pytest.raises(RuntimeError, match="versioned object for 0.1.73"):
         run_async(
             updater.AraUpdater().fetch_latest(
-                _FakeSession(_FakeResponse(headers={"x-ara-desktop-version": "0.1.73"})),
+                _FakeSession(
+                    _FakeResponse(headers={"x-ara-desktop-version": "0.1.73"})
+                ),
                 context=UpdateContext(current=None),
             )
         )

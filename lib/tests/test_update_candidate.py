@@ -778,7 +778,9 @@ def test_closure_yield_continues_after_store_unlink_only(
     def substitute_eilseq(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
         return (substitute_eilseq_failure,)
 
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", substitute_eilseq)
+    monkeypatch.setattr(
+        pipeline.validation, "validate_root_closures", substitute_eilseq
+    )
     cascaded = CliRunner().invoke(pipeline.app, args)
     assert cascaded.exit_code == pipeline.CLOSURE_YIELD_EXIT
     assert not output.exists()
@@ -786,9 +788,7 @@ def test_closure_yield_continues_after_store_unlink_only(
     def missing_drv(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
         return (missing_drv_failure,)
 
-    monkeypatch.setattr(
-        pipeline.validation, "validate_root_closures", missing_drv
-    )
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", missing_drv)
     vanished = CliRunner().invoke(pipeline.app, args)
     assert vanished.exit_code == pipeline.CLOSURE_YIELD_EXIT
     assert not output.exists()

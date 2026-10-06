@@ -961,7 +961,7 @@ def test_waku_cua_pins_every_vendor_swift_build_rs(tmp_path: Path) -> None:
     """Update 37156933929 compiled apple-cf/metal, then screencapturekit used Nix SDK."""
     vendor = tmp_path / "cargo-vendor-dir"
     swift_build = (
-        'fn main() {\n'
+        "fn main() {\n"
         '    let _ = std::process::Command::new("swift")\n'
         '        .args(&["build", "-c", "release"]);\n'
         "}\n"
@@ -1002,7 +1002,9 @@ def test_waku_cua_pins_every_vendor_swift_build_rs(tmp_path: Path) -> None:
         assert 'env("SDKROOT", std::env::var("CUA_XCODE_SDKROOT")' in patched
         assert "--disable-sandbox" in patched
         assert 'Command::new("swift")' not in patched
-    assert (vendor / "serde-1.0.0" / "build.rs").read_text(encoding="utf-8") == rustc_only
+    assert (vendor / "serde-1.0.0" / "build.rs").read_text(
+        encoding="utf-8"
+    ) == rustc_only
 
 
 def test_waku_cua_links_host_swift_runtime(tmp_path: Path) -> None:
@@ -1086,7 +1088,9 @@ def test_waku_cua_lock_is_an_isolated_crates_io_workspace() -> None:
             assert source == "registry+https://github.com/rust-lang/crates.io-index"
 
 
-def _unified_diff_file_edits(text: str) -> dict[str, tuple[tuple[str, ...], tuple[str, ...]]]:
+def _unified_diff_file_edits(
+    text: str,
+) -> dict[str, tuple[tuple[str, ...], tuple[str, ...]]]:
     """Return path -> (removed lines, added lines) for a unified diff."""
     edits: dict[str, tuple[list[str], list[str]]] = {}
     current: str | None = None
@@ -1130,8 +1134,7 @@ def test_waku_cua_links_dispatch_through_system_framework() -> None:
     }
     build_removed, build_added = edits["crates/platform-macos/build.rs"]
     assert any(
-        line.strip()
-        == 'println!("cargo:rustc-link-search={sdk_root}/usr/lib/system");'
+        line.strip() == 'println!("cargo:rustc-link-search={sdk_root}/usr/lib/system");'
         for line in build_removed
     )
     assert any(

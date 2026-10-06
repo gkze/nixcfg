@@ -682,8 +682,9 @@ def test_code_cursor_keeps_pin_when_platforms_stage_different_commits(
     )
     assert latest.version == "3.22.12"
     assert latest.commit == darwin_commit
-    assert latest.metadata["platform_info"]["aarch64-linux"]["downloadUrl"] == (
-        pinned_urls["aarch64-linux"]
+    assert (
+        latest.metadata["platform_info"]["aarch64-linux"]["downloadUrl"]
+        == (pinned_urls["aarch64-linux"])
     )
 
     with pytest.raises(RuntimeError, match="Unable to resolve one Cursor"):
@@ -729,7 +730,9 @@ def test_code_cursor_retries_head_timeouts(
             attempts["n"] += 1
             if attempts["n"] < 3:
                 raise TimeoutError
-            return _HeadResponse(302, {"Location": "/production/abc/darwin/arm64/C.dmg"})
+            return _HeadResponse(
+                302, {"Location": "/production/abc/darwin/arm64/C.dmg"}
+            )
 
     async def _no_sleep(_delay: float) -> None:
         return None
@@ -1259,7 +1262,10 @@ def test_code_cursor_require_uniform_regex_value_rejects_mixed_urls(
         updater._require_uniform_regex_value(urls, pattern, "commit", context="commit")
     assert (
         updater._require_uniform_regex_value(
-            {"darwin-arm64": "https://d/abc/x.dmg", "darwin-x64": "https://d/abc/y.dmg"},
+            {
+                "darwin-arm64": "https://d/abc/x.dmg",
+                "darwin-x64": "https://d/abc/y.dmg",
+            },
             pattern,
             "commit",
             context="commit",

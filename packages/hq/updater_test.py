@@ -208,7 +208,9 @@ def test_hq_0375_staging_guard_is_unique_and_preserves_its_target(
 ) -> None:
     """0.10.375's mov x19 state-base reload must stay a single staging guard."""
     module = _load_hq_module("patch_updater.py", "hq_0375_staging_patch_test")
-    validator = _load_hq_module("validate_artifact.py", "hq_0375_staging_validator_test")
+    validator = _load_hq_module(
+        "validate_artifact.py", "hq_0375_staging_validator_test"
+    )
     # HQ 0.10.375 arm64 staging at file offset 0x37d32bc.
     guard = bytes.fromhex(
         "50 c8 07 94 60 86 54 a9 d4 13 d6 97 60 41 00 36 "

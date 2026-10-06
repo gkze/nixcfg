@@ -46,7 +46,9 @@ jobs:
       targets: ${{ inputs.targets || '' }}
       # workflow_dispatch inputs are unset on push/schedule. A kick-file
       # push must match EM's dispatch: repair (job if) + validate_all.
-      validate_all_packages: ${{ github.event_name == 'push' || inputs.validate_all_packages || false }}
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
     secrets: inherit
   prepare-arm:
     needs: prepare-darwin
@@ -143,7 +145,7 @@ jobs:
     secrets: inherit
   validate-darwin-closures-2:
     needs: validate-darwin-closures
-    if: >-
+    if: |-
       always() && !cancelled() &&
       needs.validate-darwin-closures.result == 'success' &&
       needs.validate-darwin-closures.outputs.closure_complete == 'false'
@@ -159,7 +161,7 @@ jobs:
     secrets: inherit
   validate-darwin-closures-3:
     needs: validate-darwin-closures-2
-    if: >-
+    if: |-
       always() && !cancelled() &&
       needs.validate-darwin-closures-2.result == 'success' &&
       needs.validate-darwin-closures-2.outputs.closure_complete == 'false'
@@ -175,7 +177,7 @@ jobs:
     secrets: inherit
   validate-darwin-closures-4:
     needs: validate-darwin-closures-3
-    if: >-
+    if: |-
       always() && !cancelled() &&
       needs.validate-darwin-closures-3.result == 'success' &&
       needs.validate-darwin-closures-3.outputs.closure_complete == 'false'
@@ -197,7 +199,7 @@ jobs:
       - validate-darwin-closures-2
       - validate-darwin-closures-3
       - validate-darwin-closures-4
-    if: >-
+    if: |-
       always() && !cancelled() &&
       needs.validate-arm.result == 'success' &&
       needs.validate-x86.result == 'success' &&

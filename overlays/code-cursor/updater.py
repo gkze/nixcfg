@@ -95,7 +95,9 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
                     await asyncio.sleep(
                         self.config.default_retry_backoff * (attempt + 1)
                     )
-        msg = f"Cursor download redirect from {api_url} failed after {attempts} attempts"
+        msg = (
+            f"Cursor download redirect from {api_url} failed after {attempts} attempts"
+        )
         raise RuntimeError(msg) from last_error
 
     @staticmethod

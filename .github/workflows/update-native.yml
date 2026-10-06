@@ -88,7 +88,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: ${{ inputs.scope == 'all' && format('{0}-{1}', inputs.stage, inputs.system) || format('{0}-{1}-{2}', inputs.stage, inputs.system, inputs.scope) }}
+          name: |-
+            ${{ inputs.scope == 'all' &&
+            format('{0}-{1}', inputs.stage, inputs.system) ||
+            format('{0}-{1}-{2}', inputs.stage, inputs.system, inputs.scope) }}
           path: ${{ runner.temp }}/update-artifacts
           if-no-files-found: warn
           overwrite: true
