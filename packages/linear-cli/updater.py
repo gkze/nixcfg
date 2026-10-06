@@ -53,6 +53,12 @@ class LinearCliUpdater(DenoManifestUpdater):
     """Update deno-deps manifest plus denort runtime hashes per platform."""
 
     name = "linear-cli"
+    bulk_update_hold = (
+        "v3.0.0 rewrote linear-cli from Deno to Rust (Cargo.toml / crates/). "
+        "The package is still mkDenoApplication and fetches deno.lock. Keep "
+        "v2.6.0 until a crate2nix package exists. Update #1234 prepare 404'd "
+        "deno.lock and fail-closed the whole candidate."
+    )
     required_tools: ClassVar[tuple[str, ...]] = (
         *DenoManifestUpdater.required_tools,
         "nix",
