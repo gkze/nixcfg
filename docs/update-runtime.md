@@ -123,11 +123,14 @@ first half of that same job, and a store GC between the two phases deleted
 outputs the closure then had to rebuild. Shards keep package validation off
 that budget. Each closure shard builds for five hours without `-L`, flushes
 the Cachix daemon, and the next shard substitutes what landed in `gkze`.
-A store unlink, substitute EILSEQ, vanished store `.drv`, or SIGBUS on those
+A store unlink, substitute EILSEQ, vanished store `.drv`, vanished store
+build input, crashed Nix daemon, or SIGBUS on those
 runners is retried with only the time left in the shard budget, then handed
 to the next shard the same way; the last shard still fails closed. Determinate
-Nix can report that fault as `Cannot build` / `Reason: 1 dependency failed`;
-a builder that actually exited (`failed with exit code`, `error: builder for`)
+Nix can report that fault as `Cannot build` / `Reason: 1 dependency failed`,
+or as `builder failed with exit code 1` when the only builder log is a
+vanished `/nix/store/` build input; a builder that actually compiled or
+linked and then exited (`failed with exit code`, `error: builder for`)
 is not treated as that fault.
 `min-free` / `max-free` stay at 32 / 64 GiB, and `max-jobs` / `cores` stay at
 2: the hosted runner was already keeping both build slots busy on that tail.

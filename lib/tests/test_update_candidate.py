@@ -823,6 +823,70 @@ def test_closure_yield_continues_after_store_unlink_only(
     assert json.loads(output.read_text())["failures"] == []
 
 
+def test_closure_yield_continues_after_vanished_build_input_or_daemon_disconnect(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Update 37522365810: vanished stdenv hook and daemon crash yield the shard."""
+    candidate = _candidate_for_scope(prepared_run)
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    output = tmp_path / "validation.json"
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+    args = [
+        "validate",
+        "--candidate",
+        str(candidate_path),
+        "--output",
+        str(output),
+        "--scope",
+        "closures",
+        "--closure-budget-seconds",
+        "18000",
+        "--closure-yield",
+    ]
+
+    def vanished_input(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
+        return (
+            DerivationValidationFailure(
+                source="root-closures",
+                installable="path:.#checks.aarch64-darwin.root-closures",
+                message=(
+                    "error: Cannot build '/nix/store/wzrs1hpgczfxgv6q7yvp7iy39plhakw7-"
+                    "granola-7.626.3.drv'.\n"
+                    "       Reason: builder failed with exit code 1.\n"
+                    "       > build input /nix/store/fyaryjvghbkpfnsyw97hb3lyb37s1pd6-"
+                    "move-lib64.sh does not exist"
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", vanished_input)
+    granola_store = CliRunner().invoke(pipeline.app, args)
+    assert granola_store.exit_code == pipeline.CLOSURE_YIELD_EXIT
+    assert not output.exists()
+
+    def daemon_disconnect(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
+        return (
+            DerivationValidationFailure(
+                source="root-closures",
+                installable="path:.#checks.aarch64-darwin.root-closures",
+                message=(
+                    "error: cannot open connection to remote store 'daemon': "
+                    "Nix daemon disconnected unexpectedly (maybe it crashed?)"
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        pipeline.validation, "validate_root_closures", daemon_disconnect
+    )
+    daemon = CliRunner().invoke(pipeline.app, args)
+    assert daemon.exit_code == pipeline.CLOSURE_YIELD_EXIT
+    assert not output.exists()
+
+
 def test_prepare_command_exports_failure_evidence_outside_checkout(
     prepared_run, tmp_path: Path
 ) -> None:

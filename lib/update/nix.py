@@ -122,9 +122,15 @@ _FIXED_OUTPUT_ONLY_TRANSIENT_MARKERS = (
 # Hosted macos-15 store filesystems fault mid-build with EILSEQ. Nix reports
 # that as "Illegal byte sequence" on unlink or pread; the same machines also
 # die with SIGBUS (signal 10). After that I/O damage the next nix invocation
-# can fail only on a vanished store .drv (see
-# ``_nix_output_has_missing_store_drv``). None of those are derivation failures.
-_NIX_STORE_TRANSIENT_MARKERS = ("Illegal byte sequence",)
+# can fail only on a vanished store .drv, a vanished store build input, or a
+# crashed daemon (see ``_nix_output_has_missing_store_drv`` and
+# ``_nix_output_has_vanished_store_build_input``). None of those are
+# derivation failures.
+_NIX_STORE_TRANSIENT_MARKERS = (
+    "Illegal byte sequence",
+    "Nix daemon disconnected unexpectedly",
+    "cannot open connection to remote store 'daemon'",
+)
 _STORE_BUS_SIGNALS = frozenset({10, signal.SIGBUS})
 
 _PLATFORM_HASH_PAYLOAD_SIZE = 2
@@ -553,7 +559,30 @@ _BUILDER_EXIT_MARKERS = (
 )
 
 
+def _nix_output_has_vanished_store_build_input(output: str) -> bool:
+    """Return whether a builder died because a store build input vanished.
+
+    Hosted macos-15 EILSEQ can delete stdenv hooks while realizing substitutes.
+    Determinate Nix then starts the derivation and the builder exits 1 with::
+
+        build input /nix/store/<hash>-move-lib64.sh does not exist
+
+    That is the same store fault as a vanished ``.drv``, not a package defect.
+    Other "does not exist" text is not this signal.
+    """
+    for line in output.splitlines():
+        folded = line.casefold()
+        if (
+            "build input /nix/store/" in folded
+            and folded.rstrip().endswith("does not exist")
+        ):
+            return True
+    return False
+
+
 def _nix_output_has_builder_exit(output: str) -> bool:
+    if _nix_output_has_vanished_store_build_input(output):
+        return False
     folded = output.casefold()
     return any(marker in folded for marker in _BUILDER_EXIT_MARKERS)
 
@@ -584,7 +613,9 @@ def _nix_output_has_store_transient_signal(output: str) -> bool:
     folded = output.casefold()
     if any(marker.casefold() in folded for marker in _NIX_STORE_TRANSIENT_MARKERS):
         return True
-    return _nix_output_has_missing_store_drv(output)
+    return _nix_output_has_missing_store_drv(
+        output
+    ) or _nix_output_has_vanished_store_build_input(output)
 
 
 def _nix_output_has_permanent_build_failure(output: str) -> bool:
@@ -637,11 +668,13 @@ def is_transient_store_interruption(text: str) -> bool:
     """Return whether validation stopped on a runner store fault.
 
     Hosted macOS jobs lose the store mid-build (``Illegal byte sequence``,
-    a vanished store ``.drv``, or SIGBUS). A hash mismatch or a builder that
-    actually exited (``failed with exit code``, ``error: builder for``) must
-    not continue as if the store had only faulted. ``error: Cannot build`` /
-    ``Reason: 1 dependency failed`` after a substitute EILSEQ is still a
-    store fault.
+    a vanished store ``.drv``, a vanished store build input, a crashed Nix
+    daemon, or SIGBUS). A hash mismatch or a builder that actually exited
+    (``failed with exit code``, ``error: builder for``) must not continue as
+    if the store had only faulted. ``error: Cannot build`` / ``Reason: 1
+    dependency failed`` after a substitute EILSEQ is still a store fault, as
+    is ``builder failed with exit code 1`` when the only builder log is a
+    vanished ``/nix/store/`` build input.
     """
     if _nix_output_has_permanent_build_failure(text):
         return False
