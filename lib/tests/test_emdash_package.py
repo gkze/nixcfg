@@ -31,8 +31,9 @@ def test_emdash_build_env_keeps_esbuild_in_process() -> None:
         """electronBuild.commonEnv // {
           CI = "1";
           CHOKIDAR_USEPOLLING = "1";
-          EMDASH_NIXCFG_BUILD_REV = "8";
+          EMDASH_NIXCFG_BUILD_REV = "9";
           ESBUILD_WORKER_THREADS = "0";
+          NODE_OPTIONS = "--max-old-space-size=6144";
           UV_THREADPOOL_SIZE = "1";
           WATCHPACK_POLLING = "true";
           npm_config_build_from_source = "true";
@@ -69,10 +70,46 @@ def test_emdash_builds_workspace_packages_without_nx() -> None:
     )
     assert any(command == "pnpm exec electron-vite build" for command in pnpm_commands)
     assert not any(command == "pnpm run build" for command in pnpm_commands)
+    patch_commands = [
+        command
+        for command in command_texts(shell)
+        if command.split()[:1] == ["patchShebangs"]
+    ]
+    assert patch_commands == ["patchShebangs node_modules"]
+    node_shims = [
+        command
+        for command in command_texts(shell, "ln")
+        if command.endswith("node_modules/.bin/node")
+    ]
+    assert len(node_shims) == 1
+    assert node_shims[0].startswith("ln -sfn ")
+    rebuilds = [
+        command
+        for command in pnpm_commands
+        if command.startswith("pnpm exec electron-rebuild")
+    ]
+    assert len(rebuilds) == 1
+    patch_node = next(
+        node
+        for node in iter_nodes(shell.tree.root_node, "command")
+        if node_text(node, shell.sanitized).startswith("patchShebangs")
+    )
+    shim_node = next(
+        node
+        for node in iter_nodes(shell.tree.root_node, "command")
+        if node_text(node, shell.sanitized).startswith("ln -sfn ")
+        and node_text(node, shell.sanitized).endswith("node_modules/.bin/node")
+    )
+    rebuild_node = next(
+        node
+        for node in iter_nodes(shell.tree.root_node, "command")
+        if node_text(node, shell.sanitized).startswith("pnpm exec electron-rebuild")
+    )
+    assert patch_node.end_byte < shim_node.start_byte < rebuild_node.start_byte
 
 
 def test_emdash_opens_darwin_sandbox_for_electron_vite() -> None:
-    """Incremental network/mach grants still SIGABRT'd AfterThreadPoolWork."""
+    """#201 opened the profile; 37406317879's abort was heap OOM, not sandbox."""
     assert_nix_ast_equal(
         nix_file_binding_expr("packages/emdash/default.nix", "sandboxProfile"),
         """lib.optionalString stdenv.hostPlatform.isDarwin ''

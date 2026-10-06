@@ -155,11 +155,14 @@ stdenv.mkDerivation {
   # is not a listen() grant (NixOS/nix#11269).
   __darwinAllowLocalNetworking = true;
 
-  # Incremental Darwin sandbox grants (#195/#197/#200: loopback, inbound,
-  # outbound, com.apple.* mach-lookup) still SIGABRT in Node 24
-  # AfterThreadPoolWork during `pnpm exec electron-vite build` on the
-  # same emdash-1.2.6.drv (Update 37406317879 packages + closures-1,
-  # vnly7r02…). Open the profile; keep installCheck.
+  # Incremental Darwin sandbox grants (#195/#197/#200) were a misread of
+  # Update 37406317879: validate-darwin-packages job 112097013792 OOMs
+  # at Node's ~2GB default before SIGABRT (`FATAL ERROR: Ineffective
+  # mark-compacts near heap limit` / `Reached heap limit`, stack
+  # HeapAllocator::AllocateRawWithRetryOrFailSlowPath ->
+  # Factory::NewFillerObject inside `electron-vite build`). Keep the
+  # open profile from #201; the heap cap is the actual fix. installCheck
+  # stays on.
   sandboxProfile = lib.optionalString stdenv.hostPlatform.isDarwin ''
     (allow default)
   '';
@@ -167,8 +170,9 @@ stdenv.mkDerivation {
   env = electronBuild.commonEnv // {
     CI = "1";
     CHOKIDAR_USEPOLLING = "1";
-    EMDASH_NIXCFG_BUILD_REV = "8";
+    EMDASH_NIXCFG_BUILD_REV = "9";
     ESBUILD_WORKER_THREADS = "0";
+    NODE_OPTIONS = "--max-old-space-size=6144";
     UV_THREADPOOL_SIZE = "1";
     WATCHPACK_POLLING = "true";
     npm_config_build_from_source = "true";
@@ -236,6 +240,13 @@ stdenv.mkDerivation {
 
     ${lib.getExe python3} ${stageWorkspacePackages} \
       copy "$PWD" "$PWD/node_modules" "$workspace_package_paths"
+
+    # Update 37406317879 validate-arm: electron-rebuild's gyp
+    # locate_sqlite3 execs node_modules/.bin/node and dies Error 127
+    # `cannot execute: required file not found` — unpatched pnpm shim,
+    # not a generic make failure.
+    patchShebangs node_modules
+    ln -sfn ${lib.getExe nodejs} node_modules/.bin/node
 
     pushd ${appDir}
 

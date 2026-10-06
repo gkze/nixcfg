@@ -362,7 +362,7 @@ class EmdashUpdater(NpmDepsHashUpdater):
     derivation_validations = (
         DerivationValidation(
             installable="path:.#pkgs.{system}.{name}",
-            systems=("aarch64-darwin",),
+            systems=("aarch64-darwin", "aarch64-linux"),
             mode="build",
         ),
     )
