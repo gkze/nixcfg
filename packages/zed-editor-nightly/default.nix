@@ -63,23 +63,16 @@ let
   # crate2nix release builds strip outputs. Darwin cctools strip v973 then
   # removes the .rmeta section from already-stripped rustc rlibs, and rustc
   # rejects the consumer with E0786 (nixpkgs#218712, crate2nix#263). Keep
-  # rlib metadata on Darwin. Do not skip Darwin packages, closures, or
-  # installCheck to paper over this.
-  zedBuildRustCrate =
-    let
-      buildRustCrate = pkgs.buildRustCrate.override {
-        cargo = rustToolchain;
-        rustc = rustToolchain;
-      };
-    in
-    attrs:
-    (buildRustCrate attrs).overrideAttrs (
-      _old:
-      lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
-        dontStrip = true;
-        stripExclude = [ "*.rlib" ];
-      }
-    );
+  # rlib metadata on Darwin. The wrapper must stay a callPackage functor
+  # (set with .override); a bare attrs: lambda breaks Cargo.nix eval on
+  # every platform (Update #1235). Do not skip Darwin packages, closures,
+  # or installCheck to paper over this.
+  zedBuildRustCrate = (import ./build-rust-crate.nix { inherit lib; }).wrapBuildRustCrate (
+    pkgs.buildRustCrate.override {
+      cargo = rustToolchain;
+      rustc = rustToolchain;
+    }
+  ) pkgs.stdenv.hostPlatform.isDarwin;
   generatedLicenses = destination: ''
     {
       printf '# ###### THEME LICENSES ######\n\n'
