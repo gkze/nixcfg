@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, ClassVar
 import aiohttp
 
 from lib import json_utils
+from lib.update.derivation_validation import DerivationValidation
 from lib.update.net import HTTP_BAD_REQUEST, fetch_json
 from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 
@@ -34,10 +35,21 @@ class AraUpdater(DownloadHashUpdater):
     )
     # The vendor only exposes signed release URLs. Persist its stable redirect
     # instead; Nix pins the bytes, and the package verifies their bundle version.
-    # Rebuilding older releases after a vendor update requires the binary cache.
+    # The redirect is latest-only (Update 37385596458 hashed 0.1.71, then
+    # fetched different bytes). Signed Tigris URLs expire in 900s; unsigned
+    # object keys 403. The fetcher reuses this public URL and fail-closes
+    # unless Location is /desktop/stable/<pin>/ and the version header matches.
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "https://reasonmachines.com/api/desktop-download?arch=aarch64"
     }
+    VERSIONED_OBJECT_PREFIX: ClassVar[str] = "/desktop/stable/"
+    derivation_validations = (
+        DerivationValidation(
+            installable="path:.#pkgs.{system}.{name}",
+            systems=("aarch64-darwin",),
+            mode="build",
+        ),
+    )
 
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext
@@ -68,5 +80,15 @@ class AraUpdater(DownloadHashUpdater):
                     f"{response.reason}"
                 )
                 raise RuntimeError(msg)
-            download_version = _header(dict(response.headers), "x-ara-desktop-version")
-        return VersionInfo(version=download_version or feed_version)
+            headers = dict(response.headers)
+            download_version = _header(headers, "x-ara-desktop-version")
+            pin_version = download_version or feed_version
+            location = _header(headers, "location")
+            expected_object = f"{self.VERSIONED_OBJECT_PREFIX}{pin_version}/"
+            if expected_object not in location:
+                msg = (
+                    "Reason download Location is not the versioned object "
+                    f"for {pin_version}: {location or '<missing>'}"
+                )
+                raise RuntimeError(msg)
+        return VersionInfo(version=pin_version)
