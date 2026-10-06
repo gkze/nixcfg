@@ -1,0 +1,31 @@
+name: PR quality
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  certify-python:
+    # Publish certify only ran these contracts after Darwin validate.
+    # Keep the same pytest files on every PR so pin/hash drift fails here.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
+      - name: Install uv and repository dependencies
+        run: |-
+          python -m pip install --upgrade uv
+          uv sync --frozen
+      - name: Run certify Python contracts
+        run: |-
+          uv run pytest \
+            lib/tests/test_models.py \
+            lib/tests/test_packaging_source_modification_policy.py \
+            lib/tests/test_update_candidate.py \
+            packages/baseten-switch/updater_test.py \
+            packages/buzz/updater_test.py \
+            packages/waku/updater_test.py

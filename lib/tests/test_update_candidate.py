@@ -385,7 +385,9 @@ def test_native_validation_and_certification(
 
     def validate_roots(*, systems, include_dependencies, print_build_logs, **_kwargs):
         assert include_dependencies
-        assert print_build_logs is True
+        # Hosted macos-15 died when -L streamed 4000+ derivation logs.
+        # Dedicated Darwin builders still want the logs.
+        assert print_build_logs is (not pipeline.jobs.is_hosted_darwin_runner())
         order.append("roots")
         roots.append(systems)
         return ()
@@ -1059,6 +1061,38 @@ def test_hosted_darwin_builds_root_closures_without_derivation_logs(
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
     assert pipeline.validate_candidate(candidate).failures == ()
     assert seen == [False]
+
+
+def test_non_hosted_builders_print_root_closure_derivation_logs(
+    prepared_run, monkeypatch
+) -> None:
+    """Linux and dedicated Darwin builders still stream -L for closure triage."""
+    root, _, _state = prepared_run
+    tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
+    candidate = Candidate(
+        base_tree=tree,
+        tree=tree,
+        targets=(),
+        sources=(),
+        systems=pipeline.supported_systems(),
+        resolutions={},
+        prepared=True,
+        patch=b"",
+    )
+    seen: list[bool] = []
+    monkeypatch.setattr(pipeline.jobs, "is_hosted_darwin_runner", lambda: False)
+    monkeypatch.setattr(pipeline.jobs, "reclaim_hosted_store", lambda: None)
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+
+    def roots(**kwargs):
+        seen.append(kwargs["print_build_logs"])
+        return ()
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
+    assert pipeline.validate_candidate(candidate).failures == ()
+    assert seen == [True]
 
 
 @pytest.mark.parametrize(

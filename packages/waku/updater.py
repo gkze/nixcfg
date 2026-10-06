@@ -18,6 +18,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
 from defusedxml import ElementTree
+from nix_manipulator.expressions.binding import Binding
+from nix_manipulator.expressions.function.call import FunctionCall
+from nix_manipulator.expressions.primitive import StringPrimitive
+from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update.derivation_validation import DerivationValidation
@@ -27,6 +31,7 @@ from lib.update.nix import (
     _build_fetch_from_github_expr,
     _build_package_path_attr_expr,
 )
+from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.updaters import (
     FixedOutputHashStep,
     UpdateContext,
@@ -193,8 +198,22 @@ class WakuUpdater(Updater):
     name = "waku"
     GITHUB_OWNER = "egoist"
     GITHUB_REPO = "waku"
+    CUA_GITHUB_OWNER = "trycua"
+    CUA_GITHUB_REPO = "cua"
     DARWIN_PLATFORM: ClassVar[str] = "aarch64-darwin"
     supported_platforms = (DARWIN_PLATFORM,)
+    compatibility_pin_rationale = (
+        "Waku 0.1.20+ rebuilds one reviewed Cua Driver SDK tree with a host "
+        "cursor ABI extension. The SDK version, commit, and rust sourceRoot "
+        "are independent of the Waku appcast."
+    )
+    compatibility_pins: ClassVar[dict[str, str]] = {
+        "cuaDriverSdkCommit": "1b50c02e2d34734f64d2d22f54eb76cc97b4a663",
+        "cuaDriverSdkSourceRoot": (
+            "cua-1b50c02e2d34734f64d2d22f54eb76cc97b4a663/libs/cua-driver/rust"
+        ),
+        "cuaDriverSdkVersion": "0.28.0",
+    }
     derivation_validations = (
         DerivationValidation(
             installable="path:.#pkgs.{system}.{name}",
@@ -288,14 +307,50 @@ class WakuUpdater(Updater):
             fetch_submodules=False,
         )
 
+    @classmethod
+    def _cua_archive_url(cls) -> str:
+        commit = cls.get_compatibility_pin("cuaDriverSdkCommit")
+        return (
+            f"https://github.com/{cls.CUA_GITHUB_OWNER}/{cls.CUA_GITHUB_REPO}"
+            f"/archive/{commit}.tar.gz"
+        )
+
+    @classmethod
+    def _cua_src_expr(cls) -> str:
+        return compact_nix_expr(
+            FunctionCall(
+                name=identifier_attr_path("pkgs", "fetchurl"),
+                argument=AttributeSet(
+                    values=[
+                        Binding(
+                            name="url",
+                            value=StringPrimitive(value=cls._cua_archive_url()),
+                        ),
+                        Binding(
+                            name="hash",
+                            value=identifier_attr_path("pkgs", "lib", "fakeHash"),
+                        ),
+                    ]
+                ),
+            ).rebuild()
+        )
+
     def _source_override(self, info: VersionInfo, *, src_hash: str) -> SourceEntry:
+        cua_url = self._cua_archive_url()
         return SourceEntry(
             version=info.version,
             commit=self._require_commit(info),
             hashes=HashCollection.from_value([
                 HashEntry.create("srcHash", src_hash),
                 HashEntry.create("cargoHash", self.config.fake_hash),
+                HashEntry.create(
+                    "cuaDriverSdkHash",
+                    self.config.fake_hash,
+                    url=cua_url,
+                ),
             ]),
+            pins=self.source_pins_for(info),
+            urls={"cuaDriverSdk": cua_url},
         )
 
     async def fetch_hashes(
@@ -330,6 +385,10 @@ class WakuUpdater(Updater):
                         },
                     ),
                 ),
+                FixedOutputHashStep(
+                    hash_type="cuaDriverSdkHash",
+                    expr=lambda _resolved: self._cua_src_expr(),
+                ),
             ),
             config=self.config,
             emit=emit,
@@ -337,8 +396,31 @@ class WakuUpdater(Updater):
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist version, immutable source commit, and complete source hashes."""
+        commit = self._require_commit(info)
+        collection = HashCollection.from_value(hashes)
+        entries = collection.entries
+        if entries is None:
+            msg = "Waku updater requires structured source hash entries"
+            raise TypeError(msg)
+        cua_url = self._cua_archive_url()
+        rewritten: list[HashEntry] = []
+        seen: set[str] = set()
+        for entry in entries:
+            if entry.hash_type == "cuaDriverSdkHash":
+                rewritten.append(
+                    HashEntry.create("cuaDriverSdkHash", entry.hash, url=cua_url)
+                )
+            else:
+                rewritten.append(entry)
+            seen.add(entry.hash_type)
+        expected = {"cargoHash", "cuaDriverSdkHash", "srcHash"}
+        if seen != expected or len(entries) != len(expected):
+            msg = f"Waku updater expected exact closure keys {expected}, got {seen}"
+            raise RuntimeError(msg)
         return SourceEntry(
             version=info.version,
-            commit=self._require_commit(info),
-            hashes=HashCollection.from_value(hashes),
+            commit=commit,
+            hashes=HashCollection.from_value(rewritten),
+            pins=self.source_pins_for(info),
+            urls={"cuaDriverSdk": cua_url},
         )

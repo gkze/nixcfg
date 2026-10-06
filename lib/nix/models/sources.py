@@ -38,6 +38,7 @@ def _validate_sri_hash(value: str) -> str:
 HashType = Literal[
     "bunRuntimeHash",  # Exact Bun release binary selected by packageManager
     "cargoHash",
+    "cuaDriverSdkHash",  # Waku's pinned Cua Driver SDK fetchurl
     "denoDepsHash",
     "nodeModulesHash",  # For node_modules built via bun/custom builders
     "npmDepsHash",
@@ -362,9 +363,29 @@ class SourceEntry(BaseModel):
         """Return whether *other* represents the same semantic source state."""
         return self.to_dict() == other.to_dict()
 
+    def _replaced_named_urls(self, other: SourceEntry) -> frozenset[str]:
+        """Return previous named URLs that *other* replaced with a new location."""
+        if not self.urls or not other.urls:
+            return frozenset()
+        return frozenset(
+            old_url
+            for name, old_url in self.urls.items()
+            if (new_url := other.urls.get(name)) is not None and new_url != old_url
+        )
+
+    def _hashes_without_urls(self, urls: frozenset[str]) -> HashCollection:
+        """Drop URL-keyed hash entries that belong to replaced named sources."""
+        if not urls or self.hashes.entries is None:
+            return self.hashes
+        return HashCollection(
+            entries=[entry for entry in self.hashes.entries if entry.url not in urls]
+        )
+
     def _merge(self, other: SourceEntry, *, replace_pins: bool) -> SourceEntry:
         """Merge *other*, optionally treating its pins as authoritative."""
-        merged_hashes = self.hashes.merge(other.hashes)
+        merged_hashes = self._hashes_without_urls(
+            self._replaced_named_urls(other)
+        ).merge(other.hashes)
         merged_urls: dict[str, str] | None = None
         if self.urls or other.urls:
             merged_urls = {**(self.urls or {}), **(other.urls or {})}

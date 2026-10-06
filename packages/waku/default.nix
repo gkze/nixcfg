@@ -40,17 +40,17 @@ let
     rev = source.commit;
     hash = outputs.lib.sourceHash pname "srcHash";
   };
-  # Pinned Cua Driver SDK 0.28.0, rebuilt with Waku's tiny host/cursor ABI
+  # Pinned Cua Driver SDK, rebuilt with Waku's tiny host/cursor ABI
   # extension from resources/computer-use/cua-host.rs. Instantiated only for
   # 0.1.20+ so the current 0.1.19 pin does not fetch or build Cua.
   cuaDriverSdk = if hasCuaHost then rustPlatform.buildRustPackage {
     pname = "cua-driver-sdk";
-    version = "0.28.0";
+    version = source.pins.cuaDriverSdkVersion;
     src = fetchurl {
-      url = "https://github.com/trycua/cua/archive/1b50c02e2d34734f64d2d22f54eb76cc97b4a663.tar.gz";
-      hash = "sha256-nSftPDKDAEUkXcX604t02s91xrSjbyQe1EX608NRHr8=";
+      url = outputs.lib.sourceUrl pname "cuaDriverSdkHash";
+      hash = outputs.lib.sourceHash pname "cuaDriverSdkHash";
     };
-    sourceRoot = "cua-1b50c02e2d34734f64d2d22f54eb76cc97b4a663/libs/cua-driver/rust";
+    sourceRoot = source.pins.cuaDriverSdkSourceRoot;
     cargoLock.lockFile = ./cua-driver.lock;
     cargoBuildFlags = [
       "--package"
