@@ -12,6 +12,7 @@ from lib.nix.models.flake_lock import (
     FlakeLockNode,  # noqa: TC001 -- candidate metadata is validated at runtime
 )
 from lib.system_policy import supported_systems
+from lib.update.derivation_validation import DerivationValidation
 from lib.update.locked_source import resolve_locked_source
 from lib.update.npm_semver import (
     require_exact_semantic_version,
@@ -358,6 +359,13 @@ class EmdashUpdater(NpmDepsHashUpdater):
     hash_attr_path = ".pnpmDeps"
     platform_specific = True
     supported_platforms = supported_systems()
+    derivation_validations = (
+        DerivationValidation(
+            installable="path:.#pkgs.{system}.{name}",
+            systems=("aarch64-darwin", "aarch64-linux"),
+            mode="build",
+        ),
+    )
 
     def source_pins_for(self, info: VersionInfo) -> dict[str, str]:
         """Persist the complete manifest-derived toolchain contract."""

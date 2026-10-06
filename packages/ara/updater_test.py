@@ -54,7 +54,16 @@ def test_reason_feed_does_not_persist_signed_urls(
         {"name": "0.1.57", "url": "https://example.test/private?signature=test"},
     )
     instance = updater.AraUpdater()
-    session = _FakeSession(_FakeResponse())
+    session = _FakeSession(
+        _FakeResponse(
+            headers={
+                "location": (
+                    "https://ara-desktop-releases.t3.storage.dev"
+                    "/desktop/stable/0.1.57/Reason.dmg?signature=test"
+                )
+            }
+        )
+    )
     info = run_async(
         instance.fetch_latest(session, context=UpdateContext(current=None))
     )
@@ -101,11 +110,68 @@ def test_reason_uses_download_header_when_feed_lags(
     )
     info = run_async(
         updater.AraUpdater().fetch_latest(
-            _FakeSession(_FakeResponse(headers=headers)),
+            _FakeSession(
+                _FakeResponse(
+                    headers={
+                        **headers,
+                        "location": (
+                            "https://ara-desktop-releases.t3.storage.dev"
+                            "/desktop/stable/0.1.66/Reason.dmg?signature=test"
+                        ),
+                    }
+                )
+            ),
             context=UpdateContext(current=None),
         )
     )
     assert info.version == "0.1.66"
+
+
+def test_reason_rejects_location_that_is_not_the_versioned_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The public redirect is latest-only; refuse a Location for another release."""
+    _feed(monkeypatch, {"name": "0.1.71"})
+    with pytest.raises(RuntimeError, match="versioned object for 0.1.73"):
+        run_async(
+            updater.AraUpdater().fetch_latest(
+                _FakeSession(
+                    _FakeResponse(
+                        headers={
+                            "x-ara-desktop-version": "0.1.73",
+                            "location": (
+                                "https://ara-desktop-releases.t3.storage.dev"
+                                "/desktop/stable/0.1.71/Reason.dmg?signature=test"
+                            ),
+                        }
+                    )
+                ),
+                context=UpdateContext(current=None),
+            )
+        )
+
+
+def test_reason_rejects_missing_versioned_location(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A version header without the Tigris object path is not an immutable pin."""
+    _feed(monkeypatch, {"name": "0.1.73"})
+    with pytest.raises(RuntimeError, match="versioned object for 0.1.73"):
+        run_async(
+            updater.AraUpdater().fetch_latest(
+                _FakeSession(_FakeResponse(headers={"x-ara-desktop-version": "0.1.73"})),
+                context=UpdateContext(current=None),
+            )
+        )
+
+
+def test_reason_validates_aarch64_darwin_package() -> None:
+    """Closures was the first Nix fetch; packages must realize the FOD too."""
+    validations = updater.AraUpdater.get_derivation_validations()
+    assert len(validations) == 1
+    assert validations[0].mode == "build"
+    assert validations[0].systems == ("aarch64-darwin",)
+    assert validations[0].installable == "path:.#pkgs.{system}.{name}"
 
 
 @pytest.mark.parametrize("status", [403, 500])

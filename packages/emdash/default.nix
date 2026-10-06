@@ -163,21 +163,21 @@ stdenv.mkDerivation {
   # Update 37331638201 closures-1 rebuilt the same emdash-1.2.6.drv
   # packages had already realized and still SIGABRT'd in
   # AfterThreadPoolWork (`ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL
-  # electron-vite build`). FSEvents-only mach-lookup is not enough:
-  # Node 24 / @parcel/watcher / Tailwind also talk to other
-  # com.apple.* services, and vite may bind ::1. This is a listen()
-  # and Apple-mach grant for the build, not a checkPhase skip.
+  # electron-vite build`). Update 37385596458 closures-1 did it again
+  # on 3zaa0kjc… after #197: packages never built emdash (no
+  # derivation_validations), and loopback-only inbound is not enough
+  # for Node 24 getaddrinfo / Tailwind / @parcel/watcher thread-pool
+  # work. Broaden to network in/out for the build; keep installCheck.
   sandboxProfile = lib.optionalString stdenv.hostPlatform.isDarwin ''
-    (allow network-inbound (local ip "localhost:*"))
-    (allow network-inbound (local ip "127.0.0.1:*"))
-    (allow network-inbound (local ip "::1:*"))
+    (allow network-inbound)
+    (allow network-outbound)
     (allow mach-lookup (global-name-regex #"^com\.apple\."))
   '';
 
   env = electronBuild.commonEnv // {
     CI = "1";
     CHOKIDAR_USEPOLLING = "1";
-    EMDASH_NIXCFG_BUILD_REV = "6";
+    EMDASH_NIXCFG_BUILD_REV = "7";
     ESBUILD_WORKER_THREADS = "0";
     UV_THREADPOOL_SIZE = "1";
     WATCHPACK_POLLING = "true";
@@ -213,7 +213,7 @@ stdenv.mkDerivation {
       exit 1
     fi
     substituteInPlace "$electron_vite_config" \
-      --replace-fail "port: 3000," "port: 3000, watch: null,"
+      --replace-fail "port: 3000," "port: 3000, watch: null, hmr: false,"
   '';
 
   buildPhase = ''

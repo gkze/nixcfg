@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-Zu9vJfnRZJPwavD39y5T3hIWhSYcM3MhZhCnAi/VreU="
+    "aarch64-darwin": "sha256-d5qI5pQ+tFRByV4w0n0wMHmdAMAUeSYES29Dle1t5EY="
   },
   "urls": {
     "aarch64-darwin": "https://reasonmachines.com/api/desktop-download?arch=aarch64"
   },
-  "version": "0.1.62"
+  "version": "0.1.73"
 }

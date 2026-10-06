@@ -31,7 +31,7 @@ def test_emdash_build_env_keeps_esbuild_in_process() -> None:
         """electronBuild.commonEnv // {
           CI = "1";
           CHOKIDAR_USEPOLLING = "1";
-          EMDASH_NIXCFG_BUILD_REV = "6";
+          EMDASH_NIXCFG_BUILD_REV = "7";
           ESBUILD_WORKER_THREADS = "0";
           UV_THREADPOOL_SIZE = "1";
           WATCHPACK_POLLING = "true";
@@ -76,9 +76,8 @@ def test_emdash_grants_darwin_inbound_loopback_for_electron_vite() -> None:
     assert_nix_ast_equal(
         nix_file_binding_expr("packages/emdash/default.nix", "sandboxProfile"),
         """lib.optionalString stdenv.hostPlatform.isDarwin ''
-          (allow network-inbound (local ip "localhost:*"))
-          (allow network-inbound (local ip "127.0.0.1:*"))
-          (allow network-inbound (local ip "::1:*"))
+          (allow network-inbound)
+          (allow network-outbound)
           (allow mach-lookup (global-name-regex #"^com\\.apple\\."))
         ''""",
     )
@@ -102,7 +101,7 @@ def test_emdash_disables_electron_vite_server_watch() -> None:
     assert assignments[0].startswith("electron_vite_config=")
     assert assignments[0].endswith("electron.vite.config.ts")
     assert len(substitutes) == 1
-    assert "port: 3000, watch: null," in substitutes[0]
+    assert "port: 3000, watch: null, hmr: false," in substitutes[0]
 
 
 def test_emdash_strips_build_node_modules_after_install() -> None:

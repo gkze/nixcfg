@@ -919,6 +919,7 @@ _ALLOWED_NIX_SUBSTITUTE_SITES: Final = (
     *_nix_sites(
         "packages/emdash/default.nix",
         r'''substituteInPlace "''${shell_env_capture_paths[0]}" --replace-fail "['-ilc', 'env']" "['-lc', 'env']"''',
+        r'''substituteInPlace "$electron_vite_config" --replace-fail "port: 3000," "port: 3000, watch: null, hmr: false,"''',
         r'''substituteInPlace node_modules/debug/src/common.js --replace-fail "require('ms')" "require('../../../out/main/ms-shim.cjs')"''',
         r'''substituteInPlace "$out/bin/emdash" --replace-fail "#!/usr/bin/env bash" "#!${stdenv.shell}" --replace-fail "@out@" "$out"''',
         r'''substituteInPlace "$out/bin/emdash" --replace-fail "#!/usr/bin/env bash" "#!${stdenv.shell}" --replace-fail "@out@" "$out"''',

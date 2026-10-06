@@ -47,6 +47,7 @@ def test_full_inventory_respects_package_platforms(
     }
     darwin = {
         "antigravity",
+        "ara",
         "baseten-switch",
         "bb",
         "buzz",
@@ -67,14 +68,24 @@ def test_full_inventory_respects_package_platforms(
         "zen-twilight",
         "zeron",
     }
+    non_x86 = {
+        "emdash",
+    }
     builds = [request for request in captured if request.mode == "build"]
     expected = portable | (
         darwin if system == "aarch64-darwin" or not native_builds_only else set()
     )
+    if system in {"aarch64-darwin", "aarch64-linux"} or not native_builds_only:
+        expected |= non_x86
     assert {request.source for request in builds} == expected
     for request in builds:
         target = request.installable.partition("#")[2].split(".")[1]
-        assert target == ("aarch64-darwin" if request.source in darwin else system)
+        if request.source in darwin:
+            assert target == "aarch64-darwin"
+        elif request.source in non_x86:
+            assert target in {"aarch64-darwin", "aarch64-linux"}
+        else:
+            assert target == system
 
     # Cross-system evaluation is independent of native build sharding.
     assert {

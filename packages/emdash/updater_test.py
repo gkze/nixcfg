@@ -571,3 +571,14 @@ def test_version_and_source_identity_metadata_fail_closed(
         updater.build_result(VersionInfo(version=_REF), [])
     with pytest.raises(TypeError, match="resolved source contracts"):
         updater.source_pins_for(VersionInfo(version=_REF))
+
+
+def test_emdash_validates_non_x86_package_builds(
+    updater_module: ModuleType,
+) -> None:
+    """Closures rebuilt emdash because packages never realized the drv."""
+    validations = updater_module.EmdashUpdater.get_derivation_validations()
+    assert len(validations) == 1
+    assert validations[0].mode == "build"
+    assert validations[0].systems == ("aarch64-darwin", "aarch64-linux")
+    assert validations[0].installable == "path:.#pkgs.{system}.{name}"
