@@ -9,6 +9,7 @@ from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
@@ -35,6 +36,19 @@ def _load_module() -> ModuleType:
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def test_compatibility_pin_skips_checkphase_for_the_hosted_sigtrap() -> None:
+    """The skip stays in updater-owned metadata, not a handwritten version literal."""
+    module = _load_module()
+    updater = module.BasetenSwitchUpdater()
+    assert updater.compatibility_pins == {"checkSkipVersion": "0.5.1"}
+    source = SourceEntry.model_validate_json(
+        (REPO_ROOT / "packages/baseten-switch/sources.json").read_text(encoding="utf-8")
+    )
+    assert source.pins == updater.compatibility_pins
+    assert source.pins is not None
+    assert source.version == source.pins["checkSkipVersion"]
 
 
 def test_bulk_update_hold_keeps_the_last_hosted_darwin_green_release() -> None:
@@ -82,12 +96,12 @@ def test_package_disables_checkphase_for_0_5_1_sigtrap() -> None:
             expect_instance(derivation.argument, AttributeSet).values,
             "doCheck",
         ).value,
-        'version != "0.5.1"',
+        "version != selfSource.pins.checkSkipVersion",
     )
 
 
-def test_overlay_disables_checkphase_for_hosted_0_5_1_sigtrap() -> None:
-    """The Darwin overlay must pin the same 0.5.1 checkPhase skip as the package."""
+def test_overlay_does_not_restate_the_hosted_checkphase_skip() -> None:
+    """The Darwin overlay must not hand-write the version-specific check skip."""
     overlay = expect_instance(
         nix_file_expr("overlays/binary-darwin-apps.nix"),
         FunctionDefinition,
@@ -95,11 +109,7 @@ def test_overlay_disables_checkphase_for_hosted_0_5_1_sigtrap() -> None:
     exports = expect_instance(overlay.output, AttributeSet)
     assert_nix_ast_equal(
         expect_binding(exports.values, "baseten-switch").value,
-        """
-        (callDarwinAppPackage "baseten-switch").overrideAttrs (
-          old: if old.version == "0.5.1" then { doCheck = false; } else { }
-        )
-        """,
+        'callDarwinAppPackage "baseten-switch"',
     )
 
 

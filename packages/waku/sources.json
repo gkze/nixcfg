@@ -6,9 +6,22 @@
       "hashType": "cargoHash"
     },
     {
+      "hash": "sha256-nSftPDKDAEUkXcX604t02s91xrSjbyQe1EX608NRHr8=",
+      "hashType": "cuaDriverSdkHash",
+      "url": "https://github.com/trycua/cua/archive/1b50c02e2d34734f64d2d22f54eb76cc97b4a663.tar.gz"
+    },
+    {
       "hash": "sha256-IC9zgW8bPTezZiX7vlFu6malzuVdakukpqETXHkdLA8=",
       "hashType": "srcHash"
     }
   ],
+  "pins": {
+    "cuaDriverSdkCommit": "1b50c02e2d34734f64d2d22f54eb76cc97b4a663",
+    "cuaDriverSdkSourceRoot": "cua-1b50c02e2d34734f64d2d22f54eb76cc97b4a663/libs/cua-driver/rust",
+    "cuaDriverSdkVersion": "0.28.0"
+  },
+  "urls": {
+    "cuaDriverSdk": "https://github.com/trycua/cua/archive/1b50c02e2d34734f64d2d22f54eb76cc97b4a663.tar.gz"
+  },
   "version": "0.1.19"
 }

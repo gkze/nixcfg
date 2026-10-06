@@ -670,6 +670,69 @@ class TestSourcesFile:
         assert base.merge_native_update(SourceEntry(hashes=[], pins={})).pins == {}
         assert base.merge_native_update(SourceEntry(hashes=[])).pins is None
 
+    def test_source_entry_merge_drops_hashes_for_replaced_named_urls(self) -> None:
+        """A version bump must not keep URL-keyed hashes for the previous archive."""
+        old_buzz = "https://github.com/block/buzz/archive/" + ("a" * 40) + ".tar.gz"
+        new_buzz = "https://github.com/block/buzz/archive/" + ("b" * 40) + ".tar.gz"
+        mesh = "https://github.com/Mesh-LLM/mesh-llm/archive/" + ("c" * 40) + ".tar.gz"
+        old_buzz_hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        new_buzz_hash = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+        mesh_hash = "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
+        current = SourceEntry.model_validate({
+            "commit": "a" * 40,
+            "hashes": [
+                {
+                    "hashType": "srcHash",
+                    "hash": old_buzz_hash,
+                    "url": old_buzz,
+                },
+                {
+                    "hashType": "srcHash",
+                    "hash": mesh_hash,
+                    "url": mesh,
+                },
+                {
+                    "hashType": "cargoHash",
+                    "hash": old_buzz_hash,
+                    "url": old_buzz,
+                },
+            ],
+            "urls": {"buzz": old_buzz, "meshLlm": mesh},
+            "version": "0.5.25",
+        })
+        incoming = SourceEntry.model_validate({
+            "commit": "b" * 40,
+            "hashes": [
+                {
+                    "hashType": "srcHash",
+                    "hash": new_buzz_hash,
+                    "url": new_buzz,
+                },
+                {
+                    "hashType": "srcHash",
+                    "hash": mesh_hash,
+                    "url": mesh,
+                },
+                {
+                    "hashType": "cargoHash",
+                    "hash": new_buzz_hash,
+                    "url": new_buzz,
+                },
+            ],
+            "urls": {"buzz": new_buzz, "meshLlm": mesh},
+            "version": "0.5.26",
+        })
+
+        merged = current.merge_native_update(incoming)
+        entries = expect_not_none(merged.hashes.entries)
+        assert {(entry.hash_type, entry.url, entry.hash) for entry in entries} == {
+            ("srcHash", new_buzz, new_buzz_hash),
+            ("srcHash", mesh, mesh_hash),
+            ("cargoHash", new_buzz, new_buzz_hash),
+        }
+        assert merged.urls == {"buzz": new_buzz, "meshLlm": mesh}
+        assert merged.version == "0.5.26"
+
     def test_source_entry_sources_file_merge_load_save(
         self,
         tmp_path: Path,

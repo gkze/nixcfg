@@ -61,6 +61,10 @@ _BUILD = "1015"
 _COMMIT = "f0645da06b046e0e58176105d69e2d56ae4fc342"
 _SRC_HASH = "sha256-CJTfiWfvUXI58eM9W42omzh547OQ+HKx+BXyAAuMTJI="
 _CARGO_HASH = "sha256-3mHNISEGQQFwdhAkI9LJxpYV6f3RbhvHVEPuLG4oguY="
+_CUA_HASH = "sha256-nSftPDKDAEUkXcX604t02s91xrSjbyQe1EX608NRHr8="
+_CUA_COMMIT = "1b50c02e2d34734f64d2d22f54eb76cc97b4a663"
+_CUA_URL = f"https://github.com/trycua/cua/archive/{_CUA_COMMIT}.tar.gz"
+_CUA_SOURCE_ROOT = f"cua-{_CUA_COMMIT}/libs/cua-driver/rust"
 _CHANGELOG_BODY = "- Codex thread goals and provider-native command discovery."
 
 
@@ -447,7 +451,7 @@ def test_waku_hashes_the_exact_source_and_cargo_closure(
     )
     calls = install_fixed_hash_stream(
         monkeypatch,
-        ((None, _SRC_HASH), (None, _CARGO_HASH)),
+        ((None, _SRC_HASH), (None, _CARGO_HASH), (None, _CUA_HASH)),
     )
 
     run_async(
@@ -474,7 +478,14 @@ def test_waku_hashes_the_exact_source_and_cargo_closure(
         hashes=HashCollection.from_value([
             HashEntry.create("srcHash", _SRC_HASH),
             HashEntry.create("cargoHash", updater.config.fake_hash),
+            HashEntry.create(
+                "cuaDriverSdkHash",
+                updater.config.fake_hash,
+                url=_CUA_URL,
+            ),
         ]),
+        pins=updater.source_pins_for(info),
+        urls={"cuaDriverSdk": _CUA_URL},
     )
     assert_nix_ast_equal(
         str(calls[1]["expr"]),
@@ -486,11 +497,17 @@ def test_waku_hashes_the_exact_source_and_cargo_closure(
         ),
     )
 
+    assert_nix_ast_equal(
+        str(calls[2]["expr"]),
+        updater._cua_src_expr(),
+    )
+
     assert updater.build_result(
         info,
         [
             HashEntry.create("srcHash", _SRC_HASH),
             HashEntry.create("cargoHash", _CARGO_HASH),
+            HashEntry.create("cuaDriverSdkHash", _CUA_HASH),
         ],
     ) == SourceEntry(
         version=_VERSION,
@@ -498,7 +515,10 @@ def test_waku_hashes_the_exact_source_and_cargo_closure(
         hashes=HashCollection.from_value([
             HashEntry.create("srcHash", _SRC_HASH),
             HashEntry.create("cargoHash", _CARGO_HASH),
+            HashEntry.create("cuaDriverSdkHash", _CUA_HASH, url=_CUA_URL),
         ]),
+        pins=updater.source_pins_for(info),
+        urls={"cuaDriverSdk": _CUA_URL},
     )
 
 
@@ -516,8 +536,25 @@ def test_waku_requires_commit_when_building_source_result() -> None:
         )
 
 
+def test_waku_build_result_requires_the_complete_source_closure() -> None:
+    """Persisted metadata cannot drop the Cua Driver SDK fixed output."""
+    updater = _load_updater_module().WakuUpdater()
+    info = VersionInfo(_VERSION, {"commit": _COMMIT})
+    with pytest.raises(RuntimeError, match="expected exact closure keys"):
+        updater.build_result(
+            info,
+            [
+                HashEntry.create("srcHash", _SRC_HASH),
+                HashEntry.create("cargoHash", _CARGO_HASH),
+            ],
+        )
+    with pytest.raises(TypeError, match="structured source hash entries"):
+        updater.build_result(info, {"srcHash": _SRC_HASH})
+
+
 def test_waku_source_metadata_is_exact_and_never_names_a_vendor_binary() -> None:
     """Bootstrap metadata pins immutable source closures, never vendor binaries."""
+    updater = _load_updater_module().WakuUpdater()
     source = SourceEntry.model_validate_json(
         (_PACKAGE_DIR / "sources.json").read_text(encoding="utf-8")
     )
@@ -526,9 +563,15 @@ def test_waku_source_metadata_is_exact_and_never_names_a_vendor_binary() -> None
     assert_immutable_commit(source.commit)
     assert_structured_source_hashes(
         source,
-        hash_types={"cargoHash", "srcHash"},
+        hash_types={"cargoHash", "cuaDriverSdkHash", "srcHash"},
     )
-    assert source.urls is None
+    assert source.pins == updater.compatibility_pins
+    assert source.pins == {
+        "cuaDriverSdkCommit": _CUA_COMMIT,
+        "cuaDriverSdkSourceRoot": _CUA_SOURCE_ROOT,
+        "cuaDriverSdkVersion": "0.28.0",
+    }
+    assert source.urls == {"cuaDriverSdk": _CUA_URL}
     serialized = json.dumps(source.to_dict())
     assert ".zip" not in serialized
     assert ".dmg" not in serialized
@@ -1174,22 +1217,28 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
     assert_nix_ast_equal(cua_sdk.name, "rustPlatform.buildRustPackage")
     sdk_arguments = expect_instance(cua_sdk.argument, AttributeSet)
     assert_nix_ast_equal(
+        expect_binding(sdk_arguments.values, "version").value,
+        identifier_attr_path("source", "pins", "cuaDriverSdkVersion"),
+    )
+    assert_nix_ast_equal(
         expect_binding(sdk_arguments.values, "src").value,
         nix_attrset_call(
             Identifier(name="fetchurl"),
-            url=StringPrimitive(
-                value="https://github.com/trycua/cua/archive/1b50c02e2d34734f64d2d22f54eb76cc97b4a663.tar.gz"
+            url=nix_apply(
+                identifier_attr_path("outputs", "lib", "sourceUrl"),
+                Identifier(name="pname"),
+                StringPrimitive(value="cuaDriverSdkHash"),
             ),
-            hash=StringPrimitive(
-                value="sha256-nSftPDKDAEUkXcX604t02s91xrSjbyQe1EX608NRHr8="
+            hash=nix_apply(
+                identifier_attr_path("outputs", "lib", "sourceHash"),
+                Identifier(name="pname"),
+                StringPrimitive(value="cuaDriverSdkHash"),
             ),
         ),
     )
     assert_nix_ast_equal(
         expect_binding(sdk_arguments.values, "sourceRoot").value,
-        StringPrimitive(
-            value="cua-1b50c02e2d34734f64d2d22f54eb76cc97b4a663/libs/cua-driver/rust"
-        ),
+        identifier_attr_path("source", "pins", "cuaDriverSdkSourceRoot"),
     )
     cargo_lock = expect_instance(
         expect_binding(sdk_arguments.values, "cargoLock").value,
