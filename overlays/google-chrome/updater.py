@@ -401,12 +401,6 @@ def _parse_linux_artifact(
             f"version: expected {expected_version}, observed {package_version!r}"
         )
         raise RuntimeError(msg)
-    if chrome_version != expected_version:
-        msg = (
-            "Chrome apt package does not match the fully rolled-out Linux "
-            f"version: expected {expected_version}, observed {package_version!r}"
-        )
-        raise ChromeLinuxRolloutLagError(msg)
 
     filename = _required_debian_field(fields, "Filename")
     path = PurePosixPath(filename)
@@ -426,12 +420,19 @@ def _parse_linux_artifact(
         msg = f"Google Chrome apt metadata has invalid Filename: {filename!r}"
         raise RuntimeError(msg)
     package_hash = _required_debian_field(fields, "SHA256")
+    sri_hash = _sri_sha256(
+        package_hash,
+        context="Google Chrome apt package",
+    )
+    if chrome_version != expected_version:
+        msg = (
+            "Chrome apt package does not match the fully rolled-out Linux "
+            f"version: expected {expected_version}, observed {package_version!r}"
+        )
+        raise ChromeLinuxRolloutLagError(msg)
     return _ResolvedArtifact(
         url=f"{_LINUX_REPOSITORY_URL}{filename}",
-        sri_hash=_sri_sha256(
-            package_hash,
-            context="Google Chrome apt package",
-        ),
+        sri_hash=sri_hash,
     )
 
 

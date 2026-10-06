@@ -838,7 +838,12 @@ def test_google_chrome_rejects_malformed_or_ambiguous_omaha_artifacts(
         ),
         (
             _chrome_apt_packages(version="152.0.7977.81-1"),
-            "observed '152.0.7977.81-1'",
+            "invalid Filename",
+        ),
+        (
+            b"Package: google-chrome-stable\nArchitecture: amd64\n"
+            b"Version: 152.0.7977.81-1\n",
+            "invalid 'Filename' field",
         ),
         (
             _chrome_apt_packages(version=f"{_CHROME_LINUX_VERSION}-?"),
@@ -1076,17 +1081,25 @@ def _install_chrome_linux_lag_mocks(
 
 
 def test_google_chrome_parse_linux_mismatch_is_rollout_lag() -> None:
-    """A valid apt stanza on the previous version is rollout lag, not malformed metadata."""
+    """A complete apt stanza on the previous version is rollout lag, not malformed metadata."""
     module = _load_module(
         "overlays/google-chrome/updater.py",
         "google_chrome_lane_apt_rollout_lag_type",
+    )
+    lagging_version = "152.0.7977.81-1"
+    payload = _chrome_apt_packages(
+        version=lagging_version,
+        filename=(
+            "pool/main/g/google-chrome-stable/"
+            f"google-chrome-stable_{lagging_version}_amd64.deb"
+        ),
     )
 
     with pytest.raises(
         module.ChromeLinuxRolloutLagError, match="observed '152.0.7977.81-1'"
     ):
         module._parse_linux_artifact(
-            _chrome_apt_packages(version="152.0.7977.81-1"),
+            payload,
             expected_version=_CHROME_LINUX_VERSION,
         )
 
@@ -1222,6 +1235,36 @@ def test_google_chrome_malformed_apt_still_fails_with_current_pin(
     )
 
     with pytest.raises(RuntimeError, match="Packages metadata is not UTF-8"):
+        _run(updater.fetch_latest(session, context=UpdateContext(current=current)))
+
+
+def test_google_chrome_truncated_apt_does_not_keep_pin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Version-only amd64 stanza is malformed, not Linux rollout lag."""
+    module = _load_module(
+        "overlays/google-chrome/updater.py",
+        "google_chrome_lane_truncated_apt_with_pin",
+    )
+    updater = module.GoogleChromeUpdater()
+    platform_versions, asset_urls, artifact_hashes = _chrome_published_identity()
+    current = SourceEntry(
+        version=_CHROME_MAC_VERSION,
+        hashes=artifact_hashes,
+        urls=asset_urls,
+        pins=platform_versions,
+    )
+    session = _install_chrome_linux_lag_mocks(
+        monkeypatch,
+        module,
+        updater,
+        apt_payload=(
+            b"Package: google-chrome-stable\nArchitecture: amd64\n"
+            b"Version: 152.0.7977.81-1\n"
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="invalid 'Filename' field"):
         _run(updater.fetch_latest(session, context=UpdateContext(current=current)))
 
 
