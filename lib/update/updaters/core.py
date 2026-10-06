@@ -504,6 +504,20 @@ class Updater(ABC):
             return current.commit == upstream_commit
         return True
 
+    def _can_reuse_persisted_hashes(
+        self,
+        context: UpdateContext,
+        info: VersionInfo,
+    ) -> bool:
+        """Return whether a later prepare stage can keep already-written hashes.
+
+        Download artifacts that already carry every platform hash should not be
+        re-prefetched on Linux ARM after Darwin hashed them. Other updater
+        families still rematerialize during prepare.
+        """
+        _ = (context, info)
+        return False
+
     def _comparison_result(
         self,
         result: SourceEntry,
@@ -594,7 +608,14 @@ class Updater(ABC):
     ) -> SourceEntry | None:
         """Hash and finalize one resolved candidate source."""
         is_latest = await self._is_latest(context, info)
-        if is_latest and not self.materialize_when_current and not context.preparing:
+        if (
+            is_latest
+            and not self.materialize_when_current
+            and (
+                not context.preparing
+                or self._can_reuse_persisted_hashes(context, info)
+            )
+        ):
             await emit(
                 UpdateEvent.status(
                     self.name,
@@ -858,6 +879,25 @@ class DownloadHashUpdater(Updater):
         if not await super()._is_latest(context, info):
             return False
         return current.urls == self._platform_urls(info)
+
+    def _can_reuse_persisted_hashes(
+        self,
+        context: UpdateContext,
+        info: VersionInfo,
+    ) -> bool:
+        """Reuse Darwin-written DMG hashes instead of re-prefetching on Linux ARM.
+
+        Update 37539644019: prepare-darwin hashed both wispr-flow 1.6.1074 DMGs,
+        then prepare-arm re-prefetched the same x64 URL and failed DNS on
+        ``dl.wisprflow.com``.
+        """
+        current = context.current
+        if current is None or current.hashes.mapping is None:
+            return False
+        return all(
+            current.hashes.mapping.get(platform)
+            for platform in self._platform_urls(info)
+        )
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build a result including generated platform URLs."""
