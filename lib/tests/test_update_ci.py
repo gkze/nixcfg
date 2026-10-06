@@ -621,7 +621,9 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
         == "false"
     )
     assert (
-        workflow["jobs"]["prepare-darwin"]["with"]["validate_all_packages"]
+        " ".join(
+            workflow["jobs"]["prepare-darwin"]["with"]["validate_all_packages"].split()
+        )
         == "${{ github.event_name == 'push' || inputs.validate_all_packages || false }}"
     )
     native = yaml.load(
@@ -658,7 +660,12 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
         for step in native["jobs"]["native"]["steps"]
         if str(step.get("uses", "")).startswith("actions/upload-artifact@")
     )
-    assert "inputs.scope" in upload["with"]["name"]
+    artifact = " ".join(upload["with"]["name"].split())
+    assert "inputs.scope == 'all'" in artifact
+    assert "format('{0}-{1}', inputs.stage, inputs.system)" in artifact
+    assert (
+        "format('{0}-{1}-{2}', inputs.stage, inputs.system, inputs.scope)" in artifact
+    )
 
 
 def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
@@ -714,8 +721,9 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     ]
     assert workflow["on"]["push"]["paths"] == [".github/update-kick"]
     assert workflow["permissions"] == {"contents": "read"}
-    assert "github.event_name == 'push'" in (
-        workflow["jobs"]["prepare-darwin"]["with"]["validate_all_packages"]
+    assert (
+        "github.event_name == 'push'"
+        in (workflow["jobs"]["prepare-darwin"]["with"]["validate_all_packages"])
     )
     jobs = workflow["jobs"]
     preparation = [
@@ -732,7 +740,9 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         assert job["needs"] == name
         assert job["with"]["previous"] == f"prepare-{previous['with']['system']}"
     cache_jobs = {
-        name: job for name, job in jobs.items() if name.startswith("cache-darwin-linux-deps-")
+        name: job
+        for name, job in jobs.items()
+        if name.startswith("cache-darwin-linux-deps-")
     }
     assert set(cache_jobs) == {
         "cache-darwin-linux-deps-arm",
@@ -742,7 +752,10 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         assert job["needs"] == "prepare-darwin"
         assert job["with"]["stage"] == "cache-root-deps"
         assert job["with"]["previous"] == "prepare-aarch64-darwin"
-    assert cache_jobs["cache-darwin-linux-deps-arm"]["with"]["runner"] == "ubuntu-24.04-arm"
+    assert (
+        cache_jobs["cache-darwin-linux-deps-arm"]["with"]["runner"]
+        == "ubuntu-24.04-arm"
+    )
     assert cache_jobs["cache-darwin-linux-deps-x86"]["with"]["runner"] == "ubuntu-24.04"
     validators = {
         name: job for name, job in jobs.items() if name.startswith("validate-")

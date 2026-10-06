@@ -59,8 +59,7 @@ def test_emdash_builds_workspace_packages_without_nx() -> None:
     workspace_builds = [
         command
         for command in pnpm_commands
-        if "--filter '@emdash/emdash-desktop^...'" in command
-        and "run build" in command
+        if "--filter '@emdash/emdash-desktop^...'" in command and "run build" in command
     ]
     assert len(workspace_builds) == 1
     assert "--filter '!@emdash/workspace-server'" in workspace_builds[0]

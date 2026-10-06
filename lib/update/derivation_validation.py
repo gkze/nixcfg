@@ -547,9 +547,7 @@ def _run_validation_command_impl(
         active_deadline = None
     else:
         bounded_timeout = timeout
-        active_deadline = (
-            time.monotonic() + timeout if deadline is None else deadline
-        )
+        active_deadline = time.monotonic() + timeout if deadline is None else deadline
     for attempt in range(max_attempts):
         check_cancelled()
         attempt_timeout = (
@@ -1262,9 +1260,7 @@ def validate_root_closures(
         # Discovery above keeps root_timeout. The build budget starts here, so
         # a slow manifest eval does not consume the shard's realization time,
         # and later dependency builds cannot restart it.
-        build_deadline = (
-            None if build_limit is None else time.monotonic() + build_limit
-        )
+        build_deadline = None if build_limit is None else time.monotonic() + build_limit
         return validate_derivation_requests(
             requests,
             timeout=build_limit,

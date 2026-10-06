@@ -249,7 +249,9 @@ def test_ara_fetch_dmg_script_rejects_version_and_location_drift(
     assert (tmp_path / "ok" / "curl.log").read_text(encoding="utf-8") == (
         f"{public}\n{signed}\n"
     )
-    assert (tmp_path / "ok" / "curl.get.log").read_text(encoding="utf-8") == f"{signed}\n"
+    assert (tmp_path / "ok" / "curl.get.log").read_text(
+        encoding="utf-8"
+    ) == f"{signed}\n"
     assert (tmp_path / "ok" / "Reason.dmg").read_bytes() == b"reason-dmg-bytes"
 
 

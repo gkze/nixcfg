@@ -227,8 +227,7 @@ def test_retryable_fixed_output_hash_failure_classification() -> None:
     assert not is_retryable_nix_store_failure(stdout="", stderr=builder_and_store)
     assert not is_transient_store_interruption(builder_and_store)
     assert not is_transient_store_interruption(
-        "error: hash mismatch in fixed-output derivation\n"
-        "Illegal byte sequence"
+        "error: hash mismatch in fixed-output derivation\nIllegal byte sequence"
     )
     assert is_transient_store_interruption("terminated by signal 10")
     assert is_transient_store_interruption(f"terminated by signal {signal.SIGBUS}\n")

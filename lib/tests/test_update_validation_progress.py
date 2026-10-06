@@ -597,9 +597,7 @@ print("complete")
 
     codes = iter([-signal.SIGBUS, 0])
 
-    def run(
-        args: list[str], **_kwargs: object
-    ) -> subprocess.CompletedProcess[str]:
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             args, next(codes), stdout="", stderr="store bus"
         )
@@ -735,7 +733,9 @@ def test_store_fault_retry_keeps_the_remaining_closure_budget(
         sleeps.append(seconds)
         clock["now"] += seconds
 
-    with pytest.raises(validation.ValidationIncompleteError, match="timed out") as raised:
+    with pytest.raises(
+        validation.ValidationIncompleteError, match="timed out"
+    ) as raised:
         validation._run_validation_command(
             ["nix", "build", "path:.#checks.aarch64-darwin.root-closures"],
             cwd=tmp_path,

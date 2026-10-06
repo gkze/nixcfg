@@ -1,7 +1,5 @@
 """Stage pnpm-selected workspace packages under their manifest-owned names."""
 
-from __future__ import annotations
-
 import argparse
 import json
 import os
