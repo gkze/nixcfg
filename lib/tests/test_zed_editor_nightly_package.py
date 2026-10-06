@@ -1,4 +1,4 @@
-"""Structural tests for the Zed nightly WebRTC source contract."""
+"""Structural tests for the Zed nightly package contracts."""
 
 from typing import TYPE_CHECKING
 
@@ -26,6 +26,29 @@ def test_zed_nightly_uses_nixpkgs_livekit_libwebrtc() -> None:
             dontPatchELF = true;
           }
         )""",
+    )
+
+
+def test_zed_nightly_preserves_darwin_rlib_metadata() -> None:
+    """Darwin cctools strip removes .rmeta from rustc rlibs (nixpkgs#218712)."""
+    assert_nix_ast_equal(
+        nix_file_binding_expr(_PACKAGE, "zedBuildRustCrate"),
+        """
+        let
+          buildRustCrate = pkgs.buildRustCrate.override {
+            cargo = rustToolchain;
+            rustc = rustToolchain;
+          };
+        in
+        attrs:
+        (buildRustCrate attrs).overrideAttrs (
+          _old:
+          lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+            dontStrip = true;
+            stripExclude = [ "*.rlib" ];
+          }
+        )
+        """,
     )
 
 
