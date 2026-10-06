@@ -274,6 +274,70 @@ def test_download_updater_applies_explicit_retry_and_timeout_config() -> None:
     assert events[-1].kind is UpdateEventKind.RESULT
 
 
+def test_download_updater_skips_prepare_reprefetch_when_hashes_are_complete() -> None:
+    """Update 37539644019: Linux ARM re-prefetched Darwin-hashed wispr-flow DMGs."""
+    complete = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "hashes": {
+            "aarch64-darwin": "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo="
+        },
+        "urls": {"aarch64-darwin": "https://example.com/archive.tar.gz"},
+    })
+    hash_calls: list[object] = []
+
+    async def _forbidden_hashes(*_args: object, **_kwargs: object) -> SourceHashes:
+        hash_calls.append(_args)
+        raise AssertionError("complete download hashes must not be re-prefetched")
+
+    async def _run(current: SourceEntry) -> list[UpdateEvent]:
+        updater = _ConfiguredDownloadUpdater()
+        with patch.object(updater, "fetch_hashes", _forbidden_hashes):
+            async with aiohttp.ClientSession() as session:
+                return await collect_events(
+                    lambda emit: updater.update_stream(
+                        current,
+                        session,
+                        context=UpdateContext(current=current, preparing=True),
+                        emit=emit,
+                    )
+                )
+
+    events = asyncio.run(_run(complete))
+    assert hash_calls == []
+    assert any(event.message and event.message.startswith("Up to date") for event in events)
+
+    incomplete = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "hashes": {},
+        "urls": {"aarch64-darwin": "https://example.com/archive.tar.gz"},
+    })
+    refetch_calls: list[object] = []
+
+    async def _refetch(*_args: object, **_kwargs: object) -> SourceHashes:
+        refetch_calls.append(_args)
+        return {"aarch64-darwin": "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo="}
+
+    async def _run_incomplete() -> list[UpdateEvent]:
+        updater = _ConfiguredDownloadUpdater()
+        with patch.object(updater, "fetch_hashes", _refetch):
+            async with aiohttp.ClientSession() as session:
+                return await collect_events(
+                    lambda emit: updater.update_stream(
+                        incomplete,
+                        session,
+                        context=UpdateContext(current=incomplete, preparing=True),
+                        emit=emit,
+                    )
+                )
+
+    incomplete_events = asyncio.run(_run_incomplete())
+    assert refetch_calls
+    assert any(
+        event.kind is UpdateEventKind.RESULT and isinstance(event.payload, SourceEntry)
+        for event in incomplete_events
+    )
+
+
 def test_generic_updater_treats_changed_source_pins_as_stale() -> None:
     """Download-only updaters cannot skip a pin-only transaction."""
 
