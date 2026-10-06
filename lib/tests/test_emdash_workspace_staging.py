@@ -1,5 +1,6 @@
 """Behavioral tests for Emdash workspace package staging."""
 
+import ast
 import json
 from pathlib import Path
 from types import ModuleType
@@ -319,6 +320,38 @@ def test_clean_requires_an_existing_source_root(
 ) -> None:
     with pytest.raises(FileNotFoundError):
         staging_module.clean_build_node_modules(tmp_path / "missing")
+
+
+def test_staging_imports_callable_at_runtime() -> None:
+    """Nixpkgs python3 is 3.13 and evaluates annotations on import.
+
+    pyupgrade --py314-plus strips ``from __future__ import annotations``.
+    Callable must therefore be a runtime import, not a TYPE_CHECKING alias.
+    """
+    tree = ast.parse(
+        Path("packages/emdash/stage_workspace_packages.py").read_text(encoding="utf-8"),
+        filename="packages/emdash/stage_workspace_packages.py",
+    )
+    runtime: set[str] = set()
+    guarded: set[str] = set()
+    for statement in tree.body:
+        if (
+            isinstance(statement, ast.ImportFrom)
+            and statement.module == "collections.abc"
+        ):
+            runtime.update(alias.name for alias in statement.names)
+            continue
+        if not isinstance(statement, ast.If):
+            continue
+        test = statement.test
+        guarded_here = isinstance(test, ast.Name) and test.id == "TYPE_CHECKING"
+        if not guarded_here:
+            continue
+        for node in statement.body:
+            if isinstance(node, ast.ImportFrom) and node.module == "collections.abc":
+                guarded.update(alias.name for alias in node.names)
+    assert "Callable" in runtime
+    assert "Callable" not in guarded
 
 
 def test_retry_readonly_reraises_non_permission_errors(
