@@ -881,6 +881,15 @@
               }
             );
 
+            "test-nix-zed-build-rust-crate-functor" =
+              mkEvalOnlyCheck "test-nix-zed-build-rust-crate-functor"
+                (
+                  { pkgs, ... }:
+                  import ./tests/nix/zed-build-rust-crate-functor.nix {
+                    inherit (pkgs) lib;
+                  }
+                );
+
             "test-nix-codex-bundled-plugin-repair" =
               { pkgs, ... }:
               if pkgs.stdenv.hostPlatform.isDarwin then
