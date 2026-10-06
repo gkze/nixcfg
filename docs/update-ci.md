@@ -29,13 +29,15 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    inside the 360-minute job cap, so that build is a chain of shards. Each shard
    builds for five hours, the Cachix daemon flushes, and the next shard
    substitutes those paths and continues.    A transient store fault
-   (`Illegal byte sequence`, a vanished store `.drv`, or SIGBUS) is retried
+   (`Illegal byte sequence`, a vanished store `.drv`, a vanished store build
+   input, a crashed Nix daemon, or SIGBUS) is retried
    with only the time left in that shard's build budget, then continues the
    same way: realized paths stay in `gkze` and the next shard substitutes them.
    Determinate Nix can report that fault as `Cannot build` /
    `Reason: 1 dependency failed` after a substitute EILSEQ; that still retries.
-   A builder that actually exited (`failed with exit code`, `error: builder for`)
-   still fails the shard.
+   A builder that exits 1 only because a `/nix/store/` build input vanished
+   is the same fault. A builder that actually compiled or linked and then
+   exited (`failed with exit code`, `error: builder for`) still fails the shard.
    Validation `nix build` passes `--fallback` so a failed substitute can
    rebuild from source. The last
    shard does not yield: an unfinished closure or a store fault that survives

@@ -711,6 +711,46 @@ raise SystemExit(1)
     assert stray_sleeps == []
 
 
+def test_validation_retries_vanished_build_input_and_daemon_disconnect(
+    tmp_path: Path,
+) -> None:
+    """Update 37522365810: vanished stdenv hook and daemon crash retry like EILSEQ."""
+    marker = tmp_path / "attempt"
+    script = """
+import pathlib, sys
+marker = pathlib.Path(sys.argv[1])
+count = int(marker.read_text()) if marker.exists() else 0
+count += 1
+marker.write_text(str(count))
+if count == 1:
+    print("error: Cannot build '/nix/store/wz-granola-7.626.3.drv'.", file=sys.stderr)
+    print("Reason: builder failed with exit code 1.", file=sys.stderr)
+    print(
+        "> build input /nix/store/fy-move-lib64.sh does not exist",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+if count == 2:
+    print(
+        "error: cannot open connection to remote store 'daemon': "
+        "Nix daemon disconnected unexpectedly (maybe it crashed?)",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+print("complete")
+"""
+    sleeps: list[float] = []
+    result = validation._run_validation_command(
+        [sys.executable, "-c", script, str(marker)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=sleeps.append,
+    )
+    assert result.returncode == 0
+    assert sleeps == [1.0, 2.0]
+
+
 def test_store_fault_retry_keeps_the_remaining_closure_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

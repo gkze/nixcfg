@@ -333,6 +333,44 @@ def test_missing_store_drv_after_eilseq_is_retryable() -> None:
     )
 
 
+def test_vanished_store_build_input_and_daemon_disconnect_are_retryable() -> None:
+    """Update 37522365810: granola exit 1 was a vanished stdenv hook, then the daemon died."""
+    vanished_input = (
+        "error: Cannot build '/nix/store/wzrs1hpgczfxgv6q7yvp7iy39plhakw7-"
+        "granola-7.626.3.drv'.\n"
+        "       Reason: builder failed with exit code 1.\n"
+        "       Last 1 log lines:\n"
+        "       > build input /nix/store/fyaryjvghbkpfnsyw97hb3lyb37s1pd6-"
+        "move-lib64.sh does not exist\n"
+        'error: clearing flags of path "/nix/store/mxzgf8zlr2mbxrqp1ami2ixqsqpskv0w-'
+        'apple-sdk-14.4/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.4.sdk/'
+        'System/Library/PrivateFrameworks/AppleDepth.framework/Versions/Current": '
+        "No such file or directory\n"
+        "error: path '/nix/store/mxzgf8zlr2mbxrqp1ami2ixqsqpskv0w-apple-sdk-14.4' "
+        "is required, but there is no substituter that can build it"
+    )
+    daemon_disconnect = (
+        "error: cannot open connection to remote store 'daemon': "
+        "Nix daemon disconnected unexpectedly (maybe it crashed?)"
+    )
+    assert is_retryable_nix_store_failure(stdout="", stderr=vanished_input)
+    assert is_transient_store_interruption(vanished_input)
+    assert is_retryable_nix_store_failure(stdout="", stderr=daemon_disconnect)
+    assert is_transient_store_interruption(daemon_disconnect)
+    assert not is_retryable_nix_store_failure(
+        stdout="",
+        stderr="gcc: /usr/bin/ld: build input does not exist",
+    )
+    assert not is_retryable_nix_store_failure(
+        stdout="",
+        stderr=(
+            "error: Cannot build '/nix/store/abc-waku.drv'.\n"
+            "       Reason: builder failed with exit code 1.\n"
+            "       > error: linker command failed with exit code 1"
+        ),
+    )
+
+
 def test_emit_sri_hash_from_build_result_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """Emit SRI directly or convert legacy hash formats."""
     result = CommandResult(args=["nix"], returncode=1, stdout="", stderr="")
