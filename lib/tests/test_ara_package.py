@@ -148,6 +148,23 @@ def test_ara_fetch_dmg_fail_closes_on_latest_redirect_drift() -> None:
     assert_nix_ast_equal(expect_binding(args.values, "outputHashMode").value, '"flat"')
     assert_nix_ast_equal(expect_binding(args.values, "outputHash").value, "hash")
     assert_nix_ast_equal(expect_binding(args.values, "preferLocalBuild").value, "true")
+    assert_nix_ast_equal(
+        expect_binding(args.values, "impureEnvVars").value,
+        "lib.fetchers.proxyImpureEnvVars",
+    )
+    assert_nix_ast_equal(
+        expect_binding(args.values, "nativeBuildInputs").value,
+        "[ cacert curl ]",
+    )
+    cert_bundle = '"${cacert}/etc/ssl/certs/ca-bundle.crt"'
+    assert_nix_ast_equal(
+        expect_binding(args.values, "SSL_CERT_FILE").value,
+        cert_bundle,
+    )
+    assert_nix_ast_equal(
+        expect_binding(args.values, "NIX_SSL_CERT_FILE").value,
+        cert_bundle,
+    )
     shell = parse_shell(_fetch_dmg_build_command())
     assert command_texts(shell, "curl") == [
         'curl -fsSI --dump-header headers "$url" -o /dev/null',

@@ -155,29 +155,19 @@ stdenv.mkDerivation {
   # is not a listen() grant (NixOS/nix#11269).
   __darwinAllowLocalNetworking = true;
 
-  # Update 37273390067 closures-1: workspace filters succeeded, then
-  # desktop `pnpm run build` (`electron-vite build`) died with exit 134
-  # / Abort trap 6 in V8 AfterThreadPoolWork. The renderer config still
-  # names server.port 3000; vite/esbuild leftover binds plus FSEvents
-  # from @parcel/watcher abort the builder under outbound-only loopback.
-  # Update 37331638201 closures-1 rebuilt the same emdash-1.2.6.drv
-  # packages had already realized and still SIGABRT'd in
-  # AfterThreadPoolWork (`ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL
-  # electron-vite build`). Update 37385596458 closures-1 did it again
-  # on 3zaa0kjc… after #197: packages never built emdash (no
-  # derivation_validations), and loopback-only inbound is not enough
-  # for Node 24 getaddrinfo / Tailwind / @parcel/watcher thread-pool
-  # work. Broaden to network in/out for the build; keep installCheck.
+  # Incremental Darwin sandbox grants (#195/#197/#200: loopback, inbound,
+  # outbound, com.apple.* mach-lookup) still SIGABRT in Node 24
+  # AfterThreadPoolWork during `pnpm exec electron-vite build` on the
+  # same emdash-1.2.6.drv (Update 37406317879 packages + closures-1,
+  # vnly7r02…). Open the profile; keep installCheck.
   sandboxProfile = lib.optionalString stdenv.hostPlatform.isDarwin ''
-    (allow network-inbound)
-    (allow network-outbound)
-    (allow mach-lookup (global-name-regex #"^com\.apple\."))
+    (allow default)
   '';
 
   env = electronBuild.commonEnv // {
     CI = "1";
     CHOKIDAR_USEPOLLING = "1";
-    EMDASH_NIXCFG_BUILD_REV = "7";
+    EMDASH_NIXCFG_BUILD_REV = "8";
     ESBUILD_WORKER_THREADS = "0";
     UV_THREADPOOL_SIZE = "1";
     WATCHPACK_POLLING = "true";

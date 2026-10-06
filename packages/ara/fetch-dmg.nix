@@ -1,4 +1,5 @@
 {
+  cacert,
   curl,
   hash,
   lib,
@@ -11,6 +12,10 @@
 # Unsigned object URLs 403. HEAD the public URL, fail closed unless the
 # header/Location still name the pin, then GET that signed Location so
 # the second hop cannot race to a newer latest.
+#
+# Do not pass SSL_CERT_FILE through impureEnvVars. Hosted Darwin Nix
+# injects /no-cert-file.crt there (Update 37406317879, curl 77 on the
+# 0.1.73 FOD). Pin cacert like clearly/mux.
 stdenvNoCC.mkDerivation {
   name = "Reason_${version}_aarch64.dmg";
   inherit url version;
@@ -18,11 +23,13 @@ stdenvNoCC.mkDerivation {
   outputHashAlgo = "sha256";
   outputHashMode = "flat";
   preferLocalBuild = true;
-  impureEnvVars = lib.fetchers.proxyImpureEnvVars ++ [
-    "NIX_SSL_CERT_FILE"
-    "SSL_CERT_FILE"
+  impureEnvVars = lib.fetchers.proxyImpureEnvVars;
+  nativeBuildInputs = [
+    cacert
+    curl
   ];
-  nativeBuildInputs = [ curl ];
+  NIX_SSL_CERT_FILE = "${cacert}/etc/ssl/certs/ca-bundle.crt";
+  SSL_CERT_FILE = "${cacert}/etc/ssl/certs/ca-bundle.crt";
   buildCommand = ''
     set -eu
     curl -fsSI --dump-header headers "$url" -o /dev/null

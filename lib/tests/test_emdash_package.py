@@ -31,7 +31,7 @@ def test_emdash_build_env_keeps_esbuild_in_process() -> None:
         """electronBuild.commonEnv // {
           CI = "1";
           CHOKIDAR_USEPOLLING = "1";
-          EMDASH_NIXCFG_BUILD_REV = "7";
+          EMDASH_NIXCFG_BUILD_REV = "8";
           ESBUILD_WORKER_THREADS = "0";
           UV_THREADPOOL_SIZE = "1";
           WATCHPACK_POLLING = "true";
@@ -71,14 +71,12 @@ def test_emdash_builds_workspace_packages_without_nx() -> None:
     assert not any(command == "pnpm run build" for command in pnpm_commands)
 
 
-def test_emdash_grants_darwin_inbound_loopback_for_electron_vite() -> None:
-    """Desktop electron-vite aborted under outbound-only loopback; inbound stays on."""
+def test_emdash_opens_darwin_sandbox_for_electron_vite() -> None:
+    """Incremental network/mach grants still SIGABRT'd AfterThreadPoolWork."""
     assert_nix_ast_equal(
         nix_file_binding_expr("packages/emdash/default.nix", "sandboxProfile"),
         """lib.optionalString stdenv.hostPlatform.isDarwin ''
-          (allow network-inbound)
-          (allow network-outbound)
-          (allow mach-lookup (global-name-regex #"^com\\.apple\\."))
+          (allow default)
         ''""",
     )
 
