@@ -611,6 +611,149 @@ def test_code_cursor_fetch_latest_from_download_page(
     )
 
 
+def _cursor_download_page(updater: object) -> str:
+    api_urls = {
+        api_platform: updater._api_url(api_platform)
+        for api_platform in updater.PLATFORMS.values()
+    }
+    return "".join(
+        f'{{\\"downloadUrl\\":\\"{api_url}\\"}}' for api_url in api_urls.values()
+    )
+
+
+def test_code_cursor_keeps_pin_when_platforms_stage_different_commits(
+    code_cursor_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """37415412232: Linux 3.22.15 / Darwin 3.22.12 must not fail prepare."""
+    updater = code_cursor_module.CodeCursorUpdater()
+    darwin_commit = "3a92974361033b2051526321308c2740fe5912c5"
+    linux_commit = "983d341a4889c3126325a403b8af55a649fd0122"
+    resolved_urls = {
+        "darwin-arm64": (
+            f"https://downloads.cursor.com/production/{darwin_commit}/darwin/arm64/"
+            "Cursor-darwin-arm64.dmg"
+        ),
+        "darwin-x64": (
+            f"https://downloads.cursor.com/production/{darwin_commit}/darwin/x64/"
+            "Cursor-darwin-x64.dmg"
+        ),
+        "linux-arm64": (
+            f"https://downloads.cursor.com/production/{linux_commit}/linux/arm64/"
+            "Cursor-3.22.15-aarch64.AppImage"
+        ),
+        "linux-x64": (
+            f"https://downloads.cursor.com/production/{linux_commit}/linux/x64/"
+            "Cursor-3.22.15-x86_64.AppImage"
+        ),
+    }
+    pinned_urls = {
+        "aarch64-darwin": resolved_urls["darwin-arm64"],
+        "x86_64-darwin": resolved_urls["darwin-x64"],
+        "aarch64-linux": (
+            f"https://downloads.cursor.com/production/{darwin_commit}/linux/arm64/"
+            "Cursor-3.22.12-aarch64.AppImage"
+        ),
+        "x86_64-linux": (
+            f"https://downloads.cursor.com/production/{darwin_commit}/linux/x64/"
+            "Cursor-3.22.12-x86_64.AppImage"
+        ),
+    }
+
+    async def _fetch_url(_session: object, url: str, **_kwargs: object) -> bytes:
+        assert url == updater.DOWNLOAD_PAGE
+        return _cursor_download_page(updater).encode()
+
+    async def _resolve_download_url(_session: object, api_url: str) -> str:
+        api_platform = api_url.rsplit("/cursor/", maxsplit=1)[0].rsplit("/", 1)[1]
+        return resolved_urls[api_platform]
+
+    monkeypatch.setattr(code_cursor_module, "fetch_url", _fetch_url)
+    monkeypatch.setattr(updater, "_resolve_download_url", _resolve_download_url)
+
+    current = SourceEntry.model_validate({
+        "version": "3.22.12",
+        "commit": darwin_commit,
+        "urls": pinned_urls,
+        "hashes": dict.fromkeys(pinned_urls, HASH_A),
+    })
+    latest = _run(
+        updater.fetch_latest(object(), context=UpdateContext(current=current))
+    )
+    assert latest.version == "3.22.12"
+    assert latest.commit == darwin_commit
+    assert latest.metadata["platform_info"]["aarch64-linux"]["downloadUrl"] == (
+        pinned_urls["aarch64-linux"]
+    )
+
+    with pytest.raises(RuntimeError, match="Unable to resolve one Cursor"):
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
+
+    incomplete = SourceEntry.model_validate({
+        "version": "3.22.12",
+        "commit": darwin_commit,
+        "hashes": dict.fromkeys(pinned_urls, HASH_A),
+    })
+    with pytest.raises(RuntimeError, match="Unable to resolve one Cursor"):
+        _run(
+            updater.fetch_latest(
+                object(),
+                context=UpdateContext(current=incomplete),
+            )
+        )
+
+
+def test_code_cursor_retries_head_timeouts(
+    code_cursor_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """37415714902: unretried HEAD TimeoutError aborted prepare."""
+    updater = code_cursor_module.CodeCursorUpdater()
+    api_url = updater._api_url("darwin-arm64")
+    attempts = {"n": 0}
+
+    class _HeadResponse:
+        def __init__(self, status: int, headers: dict[str, str]) -> None:
+            self.status = status
+            self.headers = headers
+
+        async def __aenter__(self) -> _HeadResponse:
+            return self
+
+        async def __aexit__(self, *_args: object) -> bool:
+            return False
+
+    class _Session:
+        def head(self, url: str, **_kwargs: object) -> _HeadResponse:
+            assert url == api_url
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise TimeoutError
+            return _HeadResponse(302, {"Location": "/production/abc/darwin/arm64/C.dmg"})
+
+    async def _no_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(code_cursor_module.asyncio, "sleep", _no_sleep)
+    resolved = _run(updater._resolve_download_url(_Session(), api_url))
+    assert resolved == "https://api2.cursor.sh/production/abc/darwin/arm64/C.dmg"
+    assert attempts["n"] == 3
+
+    class _TimeoutSession:
+        def head(self, _url: str, **_kwargs: object) -> _HeadResponse:
+            raise TimeoutError
+
+    with pytest.raises(RuntimeError, match="failed after"):
+        _run(updater._resolve_download_url(_TimeoutSession(), api_url))
+
+    class _ClientErrorSession:
+        def head(self, _url: str, **_kwargs: object) -> _HeadResponse:
+            raise code_cursor_module.aiohttp.ClientError
+
+    with pytest.raises(RuntimeError, match="failed after"):
+        _run(updater._resolve_download_url(_ClientErrorSession(), api_url))
+
+
 def test_goose_v8_updater_skips_unchanged_pinned_revision(
     goose_v8_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -1114,3 +1257,12 @@ def test_code_cursor_require_uniform_regex_value_rejects_mixed_urls(
     }
     with pytest.raises(RuntimeError, match="Unable to resolve one Cursor commit"):
         updater._require_uniform_regex_value(urls, pattern, "commit", context="commit")
+    assert (
+        updater._require_uniform_regex_value(
+            {"darwin-arm64": "https://d/abc/x.dmg", "darwin-x64": "https://d/abc/y.dmg"},
+            pattern,
+            "commit",
+            context="commit",
+        )
+        == "abc"
+    )
