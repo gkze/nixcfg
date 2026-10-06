@@ -65,49 +65,104 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
         session: aiohttp.ClientSession,
         api_url: str,
     ) -> str:
-        timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
-        async with session.head(
-            api_url,
-            allow_redirects=False,
-            timeout=timeout,
-        ) as response:
-            if not HTTP_REDIRECT_MIN <= response.status < HTTP_BAD_REQUEST:
-                msg = (
-                    f"Expected Cursor download redirect from {api_url}, "
-                    f"got HTTP {response.status}"
-                )
-                raise RuntimeError(msg)
-            location = response.headers.get("Location")
-            if not location:
-                msg = (
-                    f"Cursor download redirect from {api_url} did not include Location"
-                )
-                raise RuntimeError(msg)
-            return urljoin(api_url, location)
+        attempts = max(1, self.config.default_retries)
+        last_error: BaseException | None = None
+        for attempt in range(attempts):
+            try:
+                timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
+                async with session.head(
+                    api_url,
+                    allow_redirects=False,
+                    timeout=timeout,
+                ) as response:
+                    if not HTTP_REDIRECT_MIN <= response.status < HTTP_BAD_REQUEST:
+                        msg = (
+                            f"Expected Cursor download redirect from {api_url}, "
+                            f"got HTTP {response.status}"
+                        )
+                        raise RuntimeError(msg)
+                    location = response.headers.get("Location")
+                    if not location:
+                        msg = (
+                            f"Cursor download redirect from {api_url} "
+                            "did not include Location"
+                        )
+                        raise RuntimeError(msg)
+                    return urljoin(api_url, location)
+            except (TimeoutError, aiohttp.ClientError) as exc:
+                last_error = exc
+                if attempt + 1 < attempts:
+                    await asyncio.sleep(
+                        self.config.default_retry_backoff * (attempt + 1)
+                    )
+        msg = f"Cursor download redirect from {api_url} failed after {attempts} attempts"
+        raise RuntimeError(msg) from last_error
 
     @staticmethod
-    def _require_uniform_regex_value(
+    def _uniform_regex_value(
         urls: dict[str, str],
         pattern: re.Pattern[str],
         group: str,
-        *,
-        context: str,
-    ) -> str:
+    ) -> str | None:
         values = {
             match.group(group)
             for url in urls.values()
             if (match := pattern.search(url)) is not None
         }
         if len(values) != 1:
+            return None
+        return values.pop()
+
+    @classmethod
+    def _require_uniform_regex_value(
+        cls,
+        urls: dict[str, str],
+        pattern: re.Pattern[str],
+        group: str,
+        *,
+        context: str,
+    ) -> str:
+        value = cls._uniform_regex_value(urls, pattern, group)
+        if value is None:
             msg = f"Unable to resolve one Cursor {context} from URLs: {urls}"
             raise RuntimeError(msg)
-        return values.pop()
+        return value
+
+    def _pinned_version_for_incomplete_rollout(
+        self,
+        context: UpdateContext,
+        *,
+        resolved_urls: dict[str, str],
+    ) -> VersionInfo:
+        current = context.current
+        pinned_urls = None if current is None else current.urls
+        if (
+            current is None
+            or current.version is None
+            or current.commit is None
+            or not pinned_urls
+        ):
+            msg = (
+                "Unable to resolve one Cursor version/commit from URLs: "
+                f"{resolved_urls}"
+            )
+            raise RuntimeError(msg)
+        return VersionInfo(
+            version=current.version,
+            metadata=PlatformAPIMetadata(
+                platform_info={
+                    platform: {"downloadUrl": url}
+                    for platform, url in pinned_urls.items()
+                },
+                equality_fields={"commitSha": current.commit},
+                commit=current.commit,
+            ),
+        )
 
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
         """Fetch Cursor release metadata from the download page redirect targets."""
-        _ = context
         page = (
             await fetch_url(session, self.DOWNLOAD_PAGE, config=self.config)
         ).decode(errors="replace")
@@ -128,18 +183,25 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
             nix_platform: resolved_by_api_platform[api_platform]
             for nix_platform, api_platform in self.PLATFORMS.items()
         }
-        version = self._require_uniform_regex_value(
+        version = self._uniform_regex_value(
             resolved_urls,
             _CURSOR_APPIMAGE_VERSION_RE,
             "version",
-            context="version",
         )
-        commit = self._require_uniform_regex_value(
+        commit = self._uniform_regex_value(
             resolved_urls,
             _CURSOR_PRODUCTION_COMMIT_RE,
             "commit",
-            context="commit",
         )
+        # Cursor stages Linux and Darwin independently. Update 37415412232
+        # failed prepare because Linux was 3.22.15 / 983d341a while Darwin
+        # was still 3.22.12 / 3a929743. Keep the complete pin until every
+        # platform names one version and commit.
+        if version is None or commit is None:
+            return self._pinned_version_for_incomplete_rollout(
+                context,
+                resolved_urls=resolved_urls,
+            )
         return VersionInfo(
             version=version,
             metadata=PlatformAPIMetadata(
