@@ -16,6 +16,22 @@ def _load_module() -> ModuleType:
     return load_repo_module("packages/linear-cli/updater.py", "linear_cli_updater_test")
 
 
+def test_bulk_update_hold_keeps_deno_v2_until_rust_packaging() -> None:
+    """v3 dropped deno.lock; do not rematerialize until a crate2nix package exists."""
+    from lib.update.planner import held_bulk_update_input_names
+
+    module = _load_module()
+    hold = module.LinearCliUpdater.bulk_update_hold
+    assert hold is not None
+    assert "v2.6.0" in hold
+    assert "Rust" in hold
+    assert "crate2nix" in hold
+    assert "deno.lock" in hold
+    assert held_bulk_update_input_names({"linear-cli": module.LinearCliUpdater}) == {
+        "linear-cli"
+    }
+
+
 def _current_source_entry(*entries: HashEntry) -> SourceEntry:
     return SourceEntry.model_validate({
         "version": "1.2.3",

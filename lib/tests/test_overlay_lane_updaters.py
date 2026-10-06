@@ -1008,6 +1008,223 @@ def test_google_chrome_latest_check_compares_complete_published_identity() -> No
     assert _run(updater._is_latest(UpdateContext(current=changed_hash), info)) is False
 
 
+def _chrome_published_identity() -> tuple[
+    dict[str, str], dict[str, str], dict[str, str]
+]:
+    platform_versions = {
+        "aarch64-darwin": _CHROME_MAC_VERSION,
+        "x86_64-darwin": _CHROME_MAC_VERSION,
+        "x86_64-linux": _CHROME_LINUX_VERSION,
+    }
+    asset_urls = {
+        "aarch64-darwin": _CHROME_DMG_URL,
+        "x86_64-darwin": _CHROME_DMG_URL,
+        "x86_64-linux": _CHROME_DEB_URL,
+    }
+    artifact_hashes = {
+        "aarch64-darwin": _CHROME_DMG_SRI_HASH,
+        "x86_64-darwin": _CHROME_DMG_SRI_HASH,
+        "x86_64-linux": _CHROME_DEB_SRI_HASH,
+    }
+    return platform_versions, asset_urls, artifact_hashes
+
+
+def _install_chrome_linux_lag_mocks(
+    monkeypatch: pytest.MonkeyPatch,
+    module: object,
+    updater: object,
+    *,
+    apt_payload: bytes,
+    linux_history_version: str = "155.0.8059.39",
+) -> _ChromeHTTPSession:
+    session = _ChromeHTTPSession(_ChromeHTTPResponse(_chrome_omaha_response()))
+
+    async def _fetch_json(_session: object, url: str, *, config) -> object:
+        assert config == updater.config
+        if "/platforms/mac_arm64/" in url or "/platforms/mac/" in url:
+            return {
+                "releases": [
+                    {"version": _CHROME_MAC_VERSION, "fraction": 1, "serving": {}},
+                ]
+            }
+        assert "/platforms/linux/" in url
+        return {
+            "releases": [
+                {"version": linux_history_version, "fraction": 1, "serving": {}}
+            ]
+        }
+
+    async def _fetch_url(
+        _passed_session: object,
+        url: str,
+        **kwargs: object,
+    ) -> bytes:
+        assert url == module._LINUX_PACKAGES_URL
+        assert kwargs["request_timeout"] == updater.config.default_timeout
+        assert kwargs["config"] == updater.config
+        return apt_payload
+
+    monkeypatch.setattr(module, "fetch_json", _fetch_json)
+    monkeypatch.setattr(module, "fetch_url", _fetch_url)
+    monkeypatch.setattr(
+        module.host_platform,
+        "mac_ver",
+        lambda: ("26.6.2", ("", "", ""), ""),
+    )
+    monkeypatch.setattr(module.host_platform, "machine", lambda: "arm64")
+    return session
+
+
+def test_google_chrome_parse_linux_mismatch_is_rollout_lag() -> None:
+    """A valid apt stanza on the previous version is rollout lag, not malformed metadata."""
+    module = _load_module(
+        "overlays/google-chrome/updater.py",
+        "google_chrome_lane_apt_rollout_lag_type",
+    )
+
+    with pytest.raises(
+        module.ChromeLinuxRolloutLagError, match="observed '152.0.7977.81-1'"
+    ):
+        module._parse_linux_artifact(
+            _chrome_apt_packages(version="152.0.7977.81-1"),
+            expected_version=_CHROME_LINUX_VERSION,
+        )
+
+
+def test_google_chrome_keeps_pin_when_linux_apt_lags_version_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """37503760721: apt 154 vs VersionHistory 155 must not fail-close prepare."""
+    module = _load_module(
+        "overlays/google-chrome/updater.py",
+        "google_chrome_lane_apt_lag_keep_pin",
+    )
+    updater = module.GoogleChromeUpdater()
+    platform_versions, asset_urls, artifact_hashes = _chrome_published_identity()
+    current = SourceEntry(
+        version=_CHROME_MAC_VERSION,
+        hashes=artifact_hashes,
+        urls=asset_urls,
+        pins=platform_versions,
+    )
+    session = _install_chrome_linux_lag_mocks(
+        monkeypatch,
+        module,
+        updater,
+        apt_payload=_chrome_apt_packages(),
+    )
+
+    latest = _run(updater.fetch_latest(session, context=UpdateContext(current=current)))
+    assert latest.version == _CHROME_MAC_VERSION
+    assert isinstance(latest.metadata, module._ChromeReleaseMetadata)
+    assert latest.metadata.platform_versions == platform_versions
+    assert latest.metadata.asset_urls == asset_urls
+    assert latest.metadata.artifact_hashes == artifact_hashes
+    assert _run(updater._is_latest(UpdateContext(current=current), latest)) is True
+
+
+@pytest.mark.parametrize(
+    "current",
+    [
+        None,
+        SourceEntry(
+            hashes=_chrome_published_identity()[2],
+            urls=_chrome_published_identity()[1],
+            pins=_chrome_published_identity()[0],
+        ),
+        SourceEntry(
+            version=_CHROME_MAC_VERSION,
+            hashes=_chrome_published_identity()[2],
+            pins=_chrome_published_identity()[0],
+        ),
+        SourceEntry(
+            version=_CHROME_MAC_VERSION,
+            hashes=_chrome_published_identity()[2],
+            urls=_chrome_published_identity()[1],
+        ),
+        SourceEntry(
+            version=_CHROME_MAC_VERSION,
+            hashes=[
+                HashEntry.create(
+                    "sha256",
+                    _CHROME_DMG_SRI_HASH,
+                    platform="aarch64-darwin",
+                )
+            ],
+            urls=_chrome_published_identity()[1],
+            pins=_chrome_published_identity()[0],
+        ),
+        SourceEntry(
+            version=_CHROME_MAC_VERSION,
+            hashes=_chrome_published_identity()[2],
+            urls={"aarch64-darwin": _CHROME_DMG_URL},
+            pins=_chrome_published_identity()[0],
+        ),
+        SourceEntry(
+            version=_CHROME_MAC_VERSION,
+            hashes={"aarch64-darwin": _CHROME_DMG_SRI_HASH},
+            urls=_chrome_published_identity()[1],
+            pins=_chrome_published_identity()[0],
+        ),
+        SourceEntry(
+            version=_CHROME_MAC_VERSION,
+            hashes=_chrome_published_identity()[2],
+            urls=_chrome_published_identity()[1],
+            pins={"aarch64-darwin": _CHROME_MAC_VERSION},
+        ),
+    ],
+)
+def test_google_chrome_linux_rollout_lag_requires_complete_current_pin(
+    monkeypatch: pytest.MonkeyPatch,
+    current: SourceEntry | None,
+) -> None:
+    """Without a complete published identity, apt lag still fail-closes prepare."""
+    module = _load_module(
+        "overlays/google-chrome/updater.py",
+        "google_chrome_lane_apt_lag_missing_pin",
+    )
+    updater = module.GoogleChromeUpdater()
+    session = _install_chrome_linux_lag_mocks(
+        monkeypatch,
+        module,
+        updater,
+        apt_payload=_chrome_apt_packages(),
+    )
+
+    with pytest.raises(
+        module.ChromeLinuxRolloutLagError,
+        match="no complete current pin is available",
+    ):
+        _run(updater.fetch_latest(session, context=UpdateContext(current=current)))
+
+
+def test_google_chrome_malformed_apt_still_fails_with_current_pin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep-pin is only for version lag; malformed apt must still abort prepare."""
+    module = _load_module(
+        "overlays/google-chrome/updater.py",
+        "google_chrome_lane_malformed_apt_with_pin",
+    )
+    updater = module.GoogleChromeUpdater()
+    platform_versions, asset_urls, artifact_hashes = _chrome_published_identity()
+    current = SourceEntry(
+        version=_CHROME_MAC_VERSION,
+        hashes=artifact_hashes,
+        urls=asset_urls,
+        pins=platform_versions,
+    )
+    session = _install_chrome_linux_lag_mocks(
+        monkeypatch,
+        module,
+        updater,
+        apt_payload=b"\xff",
+    )
+
+    with pytest.raises(RuntimeError, match="Packages metadata is not UTF-8"):
+        _run(updater.fetch_latest(session, context=UpdateContext(current=current)))
+
+
 def test_sentry_cli_fetch_hashes_handles_event_flow_and_type_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

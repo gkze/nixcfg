@@ -56,6 +56,10 @@ _API_PLATFORM_SYSTEMS = {
 }
 
 
+class ChromeLinuxRolloutLagError(RuntimeError):
+    """Linux apt has not published the VersionHistory 100% Stable version yet."""
+
+
 @dataclass(frozen=True, slots=True)
 class _ChromeReleaseMetadata(MappingMetadata):
     """Artifact URLs and their platform-specific package versions."""
@@ -391,16 +395,18 @@ def _parse_linux_artifact(
     fields = candidates[0]
     package_version = _required_debian_field(fields, "Version")
     chrome_version, separator, revision = package_version.rpartition("-")
-    if (
-        not separator
-        or chrome_version != expected_version
-        or _DEBIAN_REVISION_PATTERN.fullmatch(revision) is None
-    ):
+    if not separator or _DEBIAN_REVISION_PATTERN.fullmatch(revision) is None:
         msg = (
             "Chrome apt package does not match the fully rolled-out Linux "
             f"version: expected {expected_version}, observed {package_version!r}"
         )
         raise RuntimeError(msg)
+    if chrome_version != expected_version:
+        msg = (
+            "Chrome apt package does not match the fully rolled-out Linux "
+            f"version: expected {expected_version}, observed {package_version!r}"
+        )
+        raise ChromeLinuxRolloutLagError(msg)
 
     filename = _required_debian_field(fields, "Filename")
     path = PurePosixPath(filename)
@@ -508,11 +514,42 @@ class GoogleChromeUpdater(Updater):
         )
         return _parse_linux_artifact(payload, expected_version=expected_version)
 
+    def _pinned_version_for_linux_rollout_lag(
+        self,
+        context: UpdateContext,
+    ) -> VersionInfo:
+        """Keep the published pin while Linux apt lags VersionHistory."""
+        current = context.current
+        hashes = None if current is None else current.hashes.mapping
+        expected = set(self.PLATFORMS)
+        if (
+            current is None
+            or current.version is None
+            or current.urls is None
+            or current.pins is None
+            or hashes is None
+            or set(current.urls) != expected
+            or set(hashes) != expected
+            or set(current.pins) != expected
+        ):
+            msg = (
+                "Chrome apt package does not match the fully rolled-out Linux "
+                "version, and no complete current pin is available"
+            )
+            raise ChromeLinuxRolloutLagError(msg)
+        return VersionInfo(
+            version=current.version,
+            metadata=_ChromeReleaseMetadata(
+                asset_urls=dict(current.urls),
+                artifact_hashes=dict(hashes),
+                platform_versions=dict(current.pins),
+            ),
+        )
+
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext
     ) -> VersionInfo:
         """Fetch the active 100% Stable baseline for each artifact platform."""
-        _ = context
 
         async def _fetch_one(api_platform: str) -> tuple[str, str]:
             payload = await fetch_json(
@@ -531,16 +568,19 @@ class GoogleChromeUpdater(Updater):
             )
         )
         darwin_version = _shared_darwin_version(versions)
-        darwin_artifact, linux_artifact = await asyncio.gather(
-            self._fetch_darwin_artifact(
-                session,
-                expected_version=darwin_version,
-            ),
-            self._fetch_linux_artifact(
-                session,
-                expected_version=versions["linux"],
-            ),
-        )
+        try:
+            darwin_artifact, linux_artifact = await asyncio.gather(
+                self._fetch_darwin_artifact(
+                    session,
+                    expected_version=darwin_version,
+                ),
+                self._fetch_linux_artifact(
+                    session,
+                    expected_version=versions["linux"],
+                ),
+            )
+        except ChromeLinuxRolloutLagError:
+            return self._pinned_version_for_linux_rollout_lag(context)
         platform_versions = {
             system: versions[api_platform]
             for api_platform, systems in _API_PLATFORM_SYSTEMS.items()
