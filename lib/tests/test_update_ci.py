@@ -818,12 +818,15 @@ def test_agent_check_limits_permissions_and_uses_selected_model() -> None:
     }
 
 
-def test_all_authored_actions_commands_are_python() -> None:
-    paths = [
-        *ROOT.glob(".github/workflows/*.yml"),
+def _authored_actions_paths() -> list[Path]:
+    return [
+        *sorted(ROOT.glob(".github/workflows/*.yml")),
         ROOT / ".github/actions/update-runtime/action.yml",
     ]
-    for path in paths:
+
+
+def test_all_authored_actions_commands_are_python() -> None:
+    for path in _authored_actions_paths():
         workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
         groups = (
             workflow.get("jobs", {}).values()
@@ -835,6 +838,20 @@ def test_all_authored_actions_commands_are_python() -> None:
                 if "run" in step:
                     assert step["shell"] == "python"
                     ast.parse(step["run"], filename=str(path), feature_version=(3, 12))
+
+
+def test_authored_actions_yaml_has_explicit_document_start() -> None:
+    """Yamlfmt include_document_start: true; publish certify fails without ---."""
+    for path in _authored_actions_paths():
+        starts = [
+            event
+            for event in yaml.parse(path.read_text(), Loader=yaml.SafeLoader)
+            if isinstance(event, yaml.DocumentStartEvent)
+        ]
+        assert starts, f"{path} has no YAML document"
+        assert all(event.explicit for event in starts), (
+            f"{path} is missing an explicit YAML document start"
+        )
 
 
 def test_generator_cache_is_scoped_to_disposable_accelerators() -> None:
