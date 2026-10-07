@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-iaT0lD6BUKUjzU9AECFYBjYT+Ti+pntdZZsNnBt2av8=",
-    "x86_64-darwin": "sha256-Ve+ZPfS2uIPwxEkkMiFIMBeINrH/1T5z1dDr9ptCd8c="
+    "aarch64-darwin": "sha256-kFxEZduC4yh7LJbg72qUFLHJDK0KNs9HipH38QCgpyo=",
+    "x86_64-darwin": "sha256-ooPwao3rb+v90AEEP/G4kxAmt6pVzC1krGDLnlQ55x0="
   },
   "urls": {
-    "aarch64-darwin": "https://downloads.factory.ai/factory-desktop/releases/0.186.0/darwin/arm64/Factory-0.186.0-arm64.dmg",
-    "x86_64-darwin": "https://downloads.factory.ai/factory-desktop/releases/0.186.0/darwin/x64/Factory-0.186.0-x64.dmg"
+    "aarch64-darwin": "https://downloads.factory.ai/factory-desktop/releases/0.192.0/darwin/arm64/Factory-0.192.0-arm64.dmg",
+    "x86_64-darwin": "https://downloads.factory.ai/factory-desktop/releases/0.192.0/darwin/x64/Factory-0.192.0-x64.dmg"
   },
-  "version": "0.186.0"
+  "version": "0.192.0"
 }

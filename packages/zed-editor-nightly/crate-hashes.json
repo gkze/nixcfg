@@ -1,5 +1,6 @@
 {
-  "git+https://github.com/RustAudio/rodio?rev=e50e726ddd0292f6ef9de0dda6b90af4ed1fb66a#0.21.1": "062374xvlbd7as11bnawql7db404j2q2hnlxxwf0834j8wrbfcyx",
+  "git+https://github.com/RustAudio/cpal?rev=e1612d5d98152f8dc2a62e1b51ef7cbf4f7f26b7#0.18.2": "0zicjvnjpcvy1xc5n8pxk6dmh5nq9mh1wcsyh8pvyadi9iqkfadh",
+  "git+https://github.com/RustAudio/rodio?rev=3ee9745862279ce1d18db593155016e7ce024aeb#0.22.2": "1na7a0wqh76s62kbr94zymm7kw7dsjy15mv1yhy22rk4iza7d1ik",
   "git+https://github.com/camdencheek/tree-sitter-go-mod?rev=2e886870578eeba1927a2dc4bd2e2b3f598c5f9a#tree-sitter-gomod@1.1.1": "0j43jls6zmnxmj0j0jf2qi1arlxmqjknsn3nvm08ij2xbkg5by1r",
   "git+https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#1.10.0": "0sk91zzzpbdq6hv1n6xgdcv5bi007hl003gh8888zf3bg1q574x7",
   "git+https://github.com/proptest-rs/proptest?rev=3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b#proptest-macro@0.5.0": "0sk91zzzpbdq6hv1n6xgdcv5bi007hl003gh8888zf3bg1q574x7",
@@ -11,7 +12,7 @@
   "git+https://github.com/zed-industries/async-pipe-rs?rev=82d00a04211cf4e1236029aa03e6b6ce2a74c553#async-pipe@0.1.3": "1lbjfcn4j8py94wyw7vrph0asaz5a8xayhk3x07ky687rxgv8pc3",
   "git+https://github.com/zed-industries/async-process.git?rev=0b6d6713570af61806e1e5cb40e0f757cb93fd9d#async-process@2.5.0": "1dg9pr69ljjksv3mkir2vd10n0yh5x6wzilqz2psr3dcpr7d0zk3",
   "git+https://github.com/zed-industries/async-tar?rev=bd3ad6f89df9a9da7a8535958756d6bf465936a0#0.6.1": "0jjf4yigvfq3x77i2ari4krsbldvgby5i176qpvcp4l8gsm1rpgg",
-  "git+https://github.com/zed-industries/calloop#0.14.3": "0gyrf4yz990sm453dbicinb4bdjy4gyw8l1bn7mjn5ldxjdzraav",
+  "git+https://github.com/zed-industries/calloop?rev=3759371fee14c40066d64777e2a36b6ffcc22590#0.14.3": "0d7p2arsay3kr2l7f54mfw4m9jc4ficqcryi8kvifylndqd8cmg6",
   "git+https://github.com/zed-industries/dap-types?rev=1b461b310481d01e02b2603c16d7144b926339f8#0.0.1": "0snc05ia4jvykajavsvyxcyn24s2jxbw7k9wmby23r1aqxf31i0z",
   "git+https://github.com/zed-industries/font-kit?rev=94b0f28166665e8fd2f53ff6d268a14955c82269#zed-font-kit@0.14.1-zed": "07jxxm5g2ighb2f3z383ydnfvl4hfaanh7ngr2whhd959a5s0z19",
   "git+https://github.com/zed-industries/gh-workflow?rev=37f3c0575d379c218a9c455ee67585184e40d43f#0.8.0": "024vrd49xlw54dsk9bmry785x0qa6ay1swnkgamvzj5g1riwypz5",

@@ -1,8 +1,8 @@
 {
   "buzz": {
-    "commit": "c8f73213089cbd5a0f1e675d3193558280d46e10",
+    "commit": "7a2fb3cc2d401e91e67d9819741d9025278cbec0",
     "rustVersion": "1.95.0",
-    "version": "0.5.25"
+    "version": "0.5.27"
   },
   "llamaCpp": {
     "commit": "b31b71f3a076bfc4278daad442203a9c51c6e676"
