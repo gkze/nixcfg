@@ -26,6 +26,23 @@ jobs:
               check=True,
           )
           subprocess.run(["uv", "sync", "--frozen"], check=True)
+      - name: Check Python formatting
+        shell: python
+        run: |-
+          import subprocess
+          subprocess.run(
+              [
+                  "uv",
+                  "run",
+                  "ruff",
+                  "format",
+                  "--check",
+                  "--config",
+                  "pyproject.toml",
+                  ".",
+              ],
+              check=True,
+          )
       - name: Run certify Python contracts
         shell: python
         run: |-

@@ -73,7 +73,9 @@ def is_transient_discovery_failure(error: BaseException) -> bool:
     while current is not None and current not in seen:
         seen.append(current)
         current = current.__cause__
-    if any(isinstance(exc, TimeoutError | aiohttp.ClientConnectorError) for exc in seen):
+    if any(
+        isinstance(exc, TimeoutError | aiohttp.ClientConnectorError) for exc in seen
+    ):
         return True
     folded = " ".join(f"{type(exc).__name__} {exc}" for exc in seen).casefold()
     return any(marker in folded for marker in _DISCOVERY_TRANSIENT_MARKERS)

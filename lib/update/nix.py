@@ -572,9 +572,8 @@ def _nix_output_has_vanished_store_build_input(output: str) -> bool:
     """
     for line in output.splitlines():
         folded = line.casefold()
-        if (
-            "build input /nix/store/" in folded
-            and folded.rstrip().endswith("does not exist")
+        if "build input /nix/store/" in folded and folded.rstrip().endswith(
+            "does not exist"
         ):
             return True
     return False

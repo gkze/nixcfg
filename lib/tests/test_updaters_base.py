@@ -306,7 +306,9 @@ def test_download_updater_skips_prepare_reprefetch_when_hashes_are_complete() ->
 
     events = asyncio.run(_run(complete))
     assert hash_calls == []
-    assert any(event.message and event.message.startswith("Up to date") for event in events)
+    assert any(
+        event.message and event.message.startswith("Up to date") for event in events
+    )
 
     incomplete = SourceEntry.model_validate({
         "version": "1.0.0",

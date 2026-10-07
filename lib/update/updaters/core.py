@@ -612,8 +612,7 @@ class Updater(ABC):
             is_latest
             and not self.materialize_when_current
             and (
-                not context.preparing
-                or self._can_reuse_persisted_hashes(context, info)
+                not context.preparing or self._can_reuse_persisted_hashes(context, info)
             )
         ):
             await emit(
