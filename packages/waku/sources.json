@@ -1,8 +1,8 @@
 {
-  "commit": "9acc598ddcc23bf608a69efa41d1f234a4ebcbe1",
+  "commit": "10bcd728c9b2f07d664cfece3c8c870d3418ddd2",
   "hashes": [
     {
-      "hash": "sha256-/W9JeA91z0LOIqfTGmStpy2is8hIAcnZlHc1p/4UPvY=",
+      "hash": "sha256-9uNvTZ3BOgdWv4FH8FfGKPTzt5kqOwGb4J55ZgE+808=",
       "hashType": "cargoHash"
     },
     {
@@ -11,7 +11,7 @@
       "url": "https://github.com/trycua/cua/archive/1b50c02e2d34734f64d2d22f54eb76cc97b4a663.tar.gz"
     },
     {
-      "hash": "sha256-IC9zgW8bPTezZiX7vlFu6malzuVdakukpqETXHkdLA8=",
+      "hash": "sha256-722A+14mI5HheG/NngWrty/wXQ0esq/4dhA6PeqOw8s=",
       "hashType": "srcHash"
     }
   ],
@@ -23,5 +23,5 @@
   "urls": {
     "cuaDriverSdk": "https://github.com/trycua/cua/archive/1b50c02e2d34734f64d2d22f54eb76cc97b4a663.tar.gz"
   },
-  "version": "0.1.19"
+  "version": "0.1.20"
 }
