@@ -343,7 +343,7 @@ def test_vanished_store_build_input_and_daemon_disconnect_are_retryable() -> Non
         "       > build input /nix/store/fyaryjvghbkpfnsyw97hb3lyb37s1pd6-"
         "move-lib64.sh does not exist\n"
         'error: clearing flags of path "/nix/store/mxzgf8zlr2mbxrqp1ami2ixqsqpskv0w-'
-        'apple-sdk-14.4/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.4.sdk/'
+        "apple-sdk-14.4/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.4.sdk/"
         'System/Library/PrivateFrameworks/AppleDepth.framework/Versions/Current": '
         "No such file or directory\n"
         "error: path '/nix/store/mxzgf8zlr2mbxrqp1ami2ixqsqpskv0w-apple-sdk-14.4' "

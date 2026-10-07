@@ -74,7 +74,9 @@ def test_is_transient_discovery_failure_classifies_dns_timeouts_and_payloads() -
     )
     assert net.is_transient_discovery_failure(dns)
 
-    timeout = RuntimeError("Request to https://example.com/RELEASES.json failed after 3 attempts")
+    timeout = RuntimeError(
+        "Request to https://example.com/RELEASES.json failed after 3 attempts"
+    )
     timeout.__cause__ = TimeoutError("timed out")
     assert net.is_transient_discovery_failure(timeout)
 
@@ -100,10 +102,14 @@ def test_is_transient_discovery_failure_classifies_dns_timeouts_and_payloads() -
     assert net.is_transient_discovery_failure(cycle)
 
     assert not net.is_transient_discovery_failure(
-        RuntimeError("Request to https://example.com/RELEASES.json failed after 3 attempts: HTTP 404 Not Found")
+        RuntimeError(
+            "Request to https://example.com/RELEASES.json failed after 3 attempts: HTTP 404 Not Found"
+        )
     )
     assert not net.is_transient_discovery_failure(
-        RuntimeError("Invalid JSON response from https://example.com/RELEASES.json: Expecting value")
+        RuntimeError(
+            "Invalid JSON response from https://example.com/RELEASES.json: Expecting value"
+        )
     )
     assert not net.is_transient_discovery_failure(TypeError("Expected JSON object"))
 

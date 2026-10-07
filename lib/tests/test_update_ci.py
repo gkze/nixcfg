@@ -854,6 +854,45 @@ def test_authored_actions_yaml_has_explicit_document_start() -> None:
         )
 
 
+def test_pr_quality_checks_ruff_format_before_certify_pytest() -> None:
+    """Update 37550004735: publish certify failed ruff format after Darwin closures."""
+    path = ROOT / ".github/workflows/pr-quality.yml"
+    workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+    step = next(
+        item
+        for item in workflow["jobs"]["certify-python"]["steps"]
+        if item.get("name") == "Check Python formatting"
+    )
+    module = ast.parse(step["run"], filename=str(path), feature_version=(3, 12))
+    format_args: list[str] = []
+    for node in ast.walk(module):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "run"
+            and node.args
+            and isinstance(node.args[0], ast.List)
+        ):
+            values = [
+                elt.value
+                for elt in node.args[0].elts
+                if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+            ]
+            if values[:3] == ["uv", "run", "ruff"]:
+                format_args = values
+                break
+    assert format_args == [
+        "uv",
+        "run",
+        "ruff",
+        "format",
+        "--check",
+        "--config",
+        "pyproject.toml",
+        ".",
+    ]
+
+
 def test_pr_quality_certify_covers_prepare_updater_contracts() -> None:
     """#1234 prepare fail-closed updater contracts must run on every PR."""
     path = ROOT / ".github/workflows/pr-quality.yml"
