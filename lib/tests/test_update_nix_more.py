@@ -371,6 +371,56 @@ def test_vanished_store_build_input_and_daemon_disconnect_are_retryable() -> Non
     )
 
 
+def test_unreadable_store_rlib_e0463_is_retryable() -> None:
+    """Update 37599536875: rustc E0463 after --extern store rlib is a substitute fault."""
+    e0463_store_rlib = (
+        "error: Cannot build '/nix/store/1vhn1bsiqchjp101n2sj5fjjk6fiw596-"
+        "rust_agent_settings-0.1.0.drv'.\n"
+        "       Reason: builder failed with exit code 1.\n"
+        "       > Running env rustc --crate-name agent_settings "
+        "src/agent_settings.rs --extern settings=/nix/store/"
+        "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
+        "libsettings-7be7f1170a.rlib --extern project=/nix/store/"
+        "190kd4d9c2mvcl54val1pw8fpjq34cn0-rust_project-0.1.0-lib/lib/"
+        "libproject-53a1143c9f.rlib\n"
+        "       > error[E0463]: can't find crate for `settings`\n"
+        "       > error[E0463]: can't find crate for `project`\n"
+    )
+    assert is_retryable_nix_store_failure(stdout="", stderr=e0463_store_rlib)
+    assert is_transient_store_interruption(e0463_store_rlib)
+    assert not is_retryable_nix_store_failure(
+        stdout="",
+        stderr=(
+            "error: Cannot build '/nix/store/abc-agent_settings.drv'.\n"
+            "       Reason: builder failed with exit code 1.\n"
+            "       > error[E0463]: can't find crate for `settings`"
+        ),
+    )
+    assert not is_retryable_nix_store_failure(
+        stdout="",
+        stderr=(
+            "error: Cannot build '/nix/store/abc-agent_settings.drv'.\n"
+            "       Reason: builder failed with exit code 1.\n"
+            "       > rustc --extern settings=/tmp/libsettings.rlib\n"
+            "       > error[E0463]: can't find crate for `settings`"
+        ),
+    )
+    assert not is_retryable_nix_store_failure(
+        stdout="",
+        stderr=(
+            "error: Cannot build '/nix/store/abc-copilot.drv'.\n"
+            "       Reason: builder failed with exit code 1.\n"
+            "       > rustc --extern copilot=/nix/store/"
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_copilot-0.1.0-lib/lib/"
+            "libcopilot-bbbbbbbbbb.rlib\n"
+            "       > error[E0786]: found invalid metadata files for crate `copilot`"
+        ),
+    )
+    assert not is_transient_store_interruption(
+        "error: hash mismatch in fixed-output derivation\n" + e0463_store_rlib
+    )
+
+
 def test_emit_sri_hash_from_build_result_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """Emit SRI directly or convert legacy hash formats."""
     result = CommandResult(args=["nix"], returncode=1, stdout="", stderr="")
