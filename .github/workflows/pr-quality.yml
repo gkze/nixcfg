@@ -57,6 +57,7 @@ jobs:
                   "lib/tests/test_update_candidate.py",
                   "lib/tests/test_update_ci.py",
                   "lib/tests/test_overlay_lane_updaters.py",
+                  "lib/tests/test_ara_package.py",
                   "packages/baseten-switch/updater_test.py",
                   "packages/buzz/updater_test.py",
                   "packages/linear-cli/updater_test.py",
