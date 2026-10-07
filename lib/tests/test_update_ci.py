@@ -894,7 +894,7 @@ def test_pr_quality_checks_ruff_format_before_certify_pytest() -> None:
 
 
 def test_pr_quality_certify_covers_prepare_updater_contracts() -> None:
-    """#1234 prepare fail-closed updater contracts must run on every PR."""
+    """#1234/#1240 pin contracts must run on every PR, not only publish."""
     path = ROOT / ".github/workflows/pr-quality.yml"
     workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
     step = next(
@@ -921,6 +921,7 @@ def test_pr_quality_certify_covers_prepare_updater_contracts() -> None:
                 pytest_files = values[3:]
                 break
     assert "lib/tests/test_overlay_lane_updaters.py" in pytest_files
+    assert "lib/tests/test_ara_package.py" in pytest_files
     assert "packages/linear-cli/updater_test.py" in pytest_files
 
 

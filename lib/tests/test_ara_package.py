@@ -1,17 +1,18 @@
 """Structural tests for the Reason (ara) version-pinned DMG fetch."""
 
-import json
 import os
 import shutil
 import stat
 import subprocess
 from pathlib import Path
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding
 from lib.tests._nix_source import nix_file_binding_expr, nix_file_expr
@@ -23,7 +24,17 @@ from lib.tests._shell_ast import (
     node_text,
     parse_shell,
 )
+from lib.tests._source_metadata import (
+    assert_https_url,
+    assert_platform_source_entry,
+    assert_release_version,
+)
 from lib.update.paths import REPO_ROOT
+
+_PUBLIC_DOWNLOAD_URLS = {
+    "aarch64-darwin": "https://reasonmachines.com/api/desktop-download?arch=aarch64"
+}
+_VERSIONED_OBJECT_PREFIX = "/desktop/stable/"
 
 _FAKE_CURL = r"""#!/usr/bin/env bash
 set -euo pipefail
@@ -125,16 +136,49 @@ def _redirect_headers(*, version: str, location: str) -> str:
     )
 
 
+def _assert_pin_current_reason(source: SourceEntry) -> None:
+    version = assert_release_version(source.version)
+    _, urls = assert_platform_source_entry(
+        source,
+        platforms=set(_PUBLIC_DOWNLOAD_URLS),
+    )
+    assert urls == _PUBLIC_DOWNLOAD_URLS
+    for url in urls.values():
+        parsed = urlsplit(url)
+        assert_https_url(url, host="reasonmachines.com")
+        assert version not in unquote(parsed.path)
+        assert _VERSIONED_OBJECT_PREFIX not in parsed.path
+        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        assert query == {"arch": "aarch64"}
+
+
 def test_ara_sources_pin_current_reason_stable() -> None:
-    """37385596458 hashed 0.1.71 then fetched different latest bytes."""
-    sources = json.loads((REPO_ROOT / "packages/ara/sources.json").read_text())
-    assert sources["version"] == "0.1.73"
-    assert sources["urls"] == {
-        "aarch64-darwin": "https://reasonmachines.com/api/desktop-download?arch=aarch64"
-    }
-    assert sources["hashes"] == {
-        "aarch64-darwin": "sha256-d5qI5pQ+tFRByV4w0n0wMHmdAMAUeSYES29Dle1t5EY="
-    }
+    """37385596458 hashed 0.1.71 then fetched different latest bytes.
+
+    Persist the public latest-only redirect plus an opaque version/hash.
+    Update 37566013983 re-pinned 0.1.74; a frozen version/hash then failed
+    publish after Darwin closures. The pin floats; the URL must not.
+    """
+    _assert_pin_current_reason(
+        SourceEntry.model_validate_json(
+            (REPO_ROOT / "packages/ara/sources.json").read_text(encoding="utf-8")
+        )
+    )
+
+
+def test_ara_pin_current_contract_accepts_a_later_reason_pin() -> None:
+    """A successful ara bump must not fail publish by freezing the last pin."""
+    _assert_pin_current_reason(
+        SourceEntry.model_validate({
+            "version": "0.1.74",
+            "urls": _PUBLIC_DOWNLOAD_URLS,
+            "hashes": {
+                "aarch64-darwin": (
+                    "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                )
+            },
+        })
+    )
 
 
 def test_ara_fetch_dmg_fail_closes_on_latest_redirect_drift() -> None:
