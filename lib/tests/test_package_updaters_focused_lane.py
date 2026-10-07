@@ -264,6 +264,15 @@ def test_codex_desktop_fetch_latest_and_download_urls(
             "No enclosure found in Codex appcast",
         ),
         (
+            '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
+            "<channel><item>"
+            "<sparkle:version>13520</sparkle:version>"
+            "<sparkle:shortVersionString>26.930.61225</sparkle:shortVersionString>"
+            '<enclosure url="https://example.invalid/ChatGPT-darwin-arm64.zip" />'
+            "</item></channel></rss>",
+            "not version-pinned",
+        ),
+        (
             '<rss><channel><item><enclosure url="https://example.invalid" />'
             "</item></channel></rss>",
             "No short version found in Codex appcast",

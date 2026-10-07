@@ -2,7 +2,6 @@
   mkZipApp,
   selfSource,
   lib,
-  stdenvNoCC,
   ...
 }:
 mkZipApp {
@@ -10,7 +9,10 @@ mkZipApp {
   appName = "ChatGPT";
   info = selfSource;
   dontFixup = true;
-  sourceName = "ChatGPT_${selfSource.version}_${stdenvNoCC.hostPlatform.system}.zip";
+  # Leave sourceName unset so fetchurl keeps the ZIP basename. Prepare
+  # prefetches that same name into Cachix; a versioned rename misses the cache
+  # and re-fetches OpenAI's short-version URL, which can change bytes before
+  # Darwin closures (Update 37586805620).
   meta = with lib; {
     description = "ChatGPT desktop app (unified ChatGPT and Codex)";
     homepage = "https://developers.openai.com/codex/app";

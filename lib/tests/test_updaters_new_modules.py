@@ -480,6 +480,43 @@ def test_codex_desktop_reads_platform_appcasts(
     assert updater.get_download_url("x86_64-darwin", latest) == x64_url
 
 
+def test_codex_desktop_rejects_blank_short_version_in_url_guard(
+    codex_desktop_module: ModuleType,
+) -> None:
+    """The URL pin check cannot treat an empty short version as present."""
+    updater = codex_desktop_module.CodexDesktopUpdater()
+    with pytest.raises(RuntimeError, match="not version-pinned"):
+        updater._require_version_pinned_url(
+            url="https://example.invalid/ChatGPT-darwin-arm64-26.930.61225.zip",
+            short_version="",
+        )
+
+
+def test_codex_desktop_rejects_latest_only_archive_url(
+    codex_desktop_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail closed when the Sparkle enclosure omits the short version."""
+    updater = codex_desktop_module.CodexDesktopUpdater()
+    payload = b"""
+        <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+          <channel><item>
+            <sparkle:version>13520</sparkle:version>
+            <sparkle:shortVersionString>26.930.61225</sparkle:shortVersionString>
+            <enclosure url="https://example.invalid/ChatGPT-darwin-arm64.zip" />
+          </item></channel>
+        </rss>
+    """
+    monkeypatch.setattr(
+        codex_desktop_module,
+        "fetch_url",
+        lambda *_a, **_k: asyncio.sleep(0, result=payload),
+    )
+
+    with pytest.raises(RuntimeError, match="not version-pinned"):
+        _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
+
+
 def test_codex_desktop_rejects_appcasts_without_common_release(
     codex_desktop_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -494,7 +531,7 @@ def test_codex_desktop_rejects_appcasts_without_common_release(
               <channel><item>
                 <sparkle:version>2312</sparkle:version>
                 <sparkle:shortVersionString>{version}</sparkle:shortVersionString>
-                <enclosure url="https://example.invalid/Codex.zip" />
+                <enclosure url="https://example.invalid/ChatGPT-darwin-arm64-{version}.zip" />
               </item></channel>
             </rss>
         """.encode()

@@ -1,7 +1,9 @@
 """Updater for Codex desktop Sparkle releases."""
 
 from dataclasses import dataclass
+from posixpath import basename
 from typing import TYPE_CHECKING, ClassVar, cast
+from urllib.parse import urlparse
 
 from defusedxml import ElementTree
 
@@ -92,20 +94,42 @@ class CodexDesktopUpdater(DownloadHashUpdater):
             raise RuntimeError(msg)
         return value
 
+    @staticmethod
+    def _require_version_pinned_url(*, url: str, short_version: str) -> None:
+        """Reject latest-only archives whose basename omits the short version.
+
+        OpenAI's ZIP URL is ``ChatGPT-darwin-{arch}-{shortVersion}.zip``. The
+        build number is not in the path, so a custom fetchurl name that differs
+        from that basename misses the prefetch Cachix path and re-downloads
+        bytes that can change in-place (Update 37586805620). Fail closed if the
+        enclosure is not even short-version-pinned.
+        """
+        name = basename(urlparse(url).path)
+        if short_version and short_version in name:
+            return
+        msg = (
+            "Codex desktop archive URL is not version-pinned: "
+            f"{url} (short version {short_version})"
+        )
+        raise RuntimeError(msg)
+
     def _extract_appcast_item(self, item: Element) -> _CodexAppcastItem:
         enclosure = self._extract_enclosure(item)
+        short_version = self._required_text(
+            item,
+            _SPARKLE_SHORT_VERSION,
+            "short version",
+        )
+        url = self._extract_download_url(enclosure)
+        self._require_version_pinned_url(url=url, short_version=short_version)
         return _CodexAppcastItem(
-            short_version=self._required_text(
-                item,
-                _SPARKLE_SHORT_VERSION,
-                "short version",
-            ),
+            short_version=short_version,
             build_version=self._required_text(
                 item,
                 _SPARKLE_BUILD_VERSION,
                 "build version",
             ),
-            url=self._extract_download_url(enclosure),
+            url=url,
         )
 
     def _extract_appcast_items(

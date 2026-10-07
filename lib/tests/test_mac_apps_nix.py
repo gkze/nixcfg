@@ -3296,10 +3296,13 @@ def test_codex_desktop_package_ships_the_unified_chatgpt_bundle() -> None:
     )
     # The zip's ChatGPT.app payload must flow through mkZipApp defaults so the
     # bundle, executable, and source path all stay on the upstream name.
+    # Leave sourceName unset so fetchurl uses the ZIP basename and hits the
+    # prepare prefetch Cachix path (Update 37586805620).
     derivation_bindings = binding_map(derivation_args.values)
     assert "sourceAppPath" not in derivation_bindings
     assert "executableName" not in derivation_bindings
     assert "bundleName" not in derivation_bindings
+    assert "sourceName" not in derivation_bindings
 
 
 def test_zen_twilight_package_embeds_autoconfig_and_resigns_app() -> None:
