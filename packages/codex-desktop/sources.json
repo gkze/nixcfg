@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-rBKevy6Qhpbc5EnjNZLtwWuQsXP0VCJxSN0Q352OwQA=",
-    "x86_64-darwin": "sha256-YrBbfH0iyNBMYFkZ9LCeG23IlsjBYT7LNrdlehLWfyk="
+    "aarch64-darwin": "sha256-Pxhv1tisEm6dZpNs78++EWQA4PGfOa4WfiUXAjC4VMU=",
+    "x86_64-darwin": "sha256-NkJJL03jHmFdtW79d8vkjWzXgUSMygjNr0x5SdZ6xfY="
   },
   "urls": {
-    "aarch64-darwin": "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-darwin-arm64-26.928.20755.zip",
-    "x86_64-darwin": "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-darwin-x64-26.928.20755.zip"
+    "aarch64-darwin": "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-darwin-arm64-26.1002.52244.zip",
+    "x86_64-darwin": "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-darwin-x64-26.1002.52244.zip"
   },
-  "version": "26.928.20755-12246"
+  "version": "26.1002.52244-13536"
 }

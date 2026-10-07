@@ -2,7 +2,6 @@
   mkZipApp,
   selfSource,
   lib,
-  stdenvNoCC,
   ...
 }:
 mkZipApp {
@@ -10,7 +9,8 @@ mkZipApp {
   appName = "ChatGPT";
   info = selfSource;
   dontFixup = true;
-  sourceName = "ChatGPT_${selfSource.version}_${stdenvNoCC.hostPlatform.system}.zip";
+  # Keep fetchurl's URL basename so validation reuses the prefetched ZIP.
+  # Upstream can replace an archive when only the Sparkle build number changes.
   meta = with lib; {
     description = "ChatGPT desktop app (unified ChatGPT and Codex)";
     homepage = "https://developers.openai.com/codex/app";
