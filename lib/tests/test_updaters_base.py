@@ -342,6 +342,37 @@ def test_download_updater_skips_prepare_reprefetch_when_hashes_are_complete() ->
     )
 
 
+def test_download_updater_cannot_reuse_hashes_without_a_persisted_mapping() -> None:
+    """Update 37575209842: certify missed core.py:914 after Darwin closures.
+
+    ``update_stream`` never reaches reuse when ``current is None`` because
+    ``_is_latest`` already returns False. Call the helper directly so both
+    sides of the None-mapping guard stay covered.
+    """
+    updater = _ConfiguredDownloadUpdater()
+    info = VersionInfo(version="1.0.0")
+    assert not updater._can_reuse_persisted_hashes(
+        UpdateContext(current=None, preparing=True),
+        info,
+    )
+    missing_mapping = SourceEntry(
+        version="1.0.0",
+        hashes=HashCollection(
+            entries=[
+                HashEntry.create(
+                    "sha256",
+                    "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                )
+            ]
+        ),
+    )
+    assert missing_mapping.hashes.mapping is None
+    assert not updater._can_reuse_persisted_hashes(
+        UpdateContext(current=missing_mapping, preparing=True),
+        info,
+    )
+
+
 def test_updater_keeps_current_when_version_discovery_hits_transient_dns() -> None:
     """Update 37546260513: Darwin prepare died on wispr-flow RELEASES.json DNS."""
     current = SourceEntry.model_validate({
