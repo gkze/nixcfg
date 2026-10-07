@@ -65,6 +65,49 @@ class _FakeResponseCM:
         return False
 
 
+def test_is_transient_discovery_failure_classifies_dns_timeouts_and_payloads() -> None:
+    """Update 37546260513: wispr-flow RELEASES.json DNS must not fail prepare."""
+    dns = RuntimeError(
+        "Request to https://dl.wisprflow.com/wispr-flow/darwin/x64/RELEASES.json "
+        "failed after 3 attempts: Cannot connect to host dl.wisprflow.com:443 "
+        "ssl:default [nodename nor servname provided, or not known]"
+    )
+    assert net.is_transient_discovery_failure(dns)
+
+    timeout = RuntimeError("Request to https://example.com/RELEASES.json failed after 3 attempts")
+    timeout.__cause__ = TimeoutError("timed out")
+    assert net.is_transient_discovery_failure(timeout)
+
+    connector = RuntimeError("Request failed after 3 attempts")
+    connector.__cause__ = aiohttp.ClientConnectorError(
+        aiohttp.client_reqrep.ConnectionKey(
+            host="dl.wisprflow.com",
+            port=443,
+            is_ssl=True,
+            ssl=True,
+            proxy=None,
+            proxy_auth=None,
+            proxy_headers_hash=None,
+        ),
+        OSError("nodename nor servname provided, or not known"),
+    )
+    assert net.is_transient_discovery_failure(connector)
+
+    cycle = RuntimeError("nodename nor servname provided, or not known")
+    wrapper = RuntimeError("wrapper")
+    cycle.__cause__ = wrapper
+    wrapper.__cause__ = cycle
+    assert net.is_transient_discovery_failure(cycle)
+
+    assert not net.is_transient_discovery_failure(
+        RuntimeError("Request to https://example.com/RELEASES.json failed after 3 attempts: HTTP 404 Not Found")
+    )
+    assert not net.is_transient_discovery_failure(
+        RuntimeError("Invalid JSON response from https://example.com/RELEASES.json: Expecting value")
+    )
+    assert not net.is_transient_discovery_failure(TypeError("Expected JSON object"))
+
+
 def test_get_github_token_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
     monkeypatch.setenv("GITHUB_TOKEN", "env-token")

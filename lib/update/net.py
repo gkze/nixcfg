@@ -46,6 +46,39 @@ def _expect_json_list(payload: JSONValue, *, context: str) -> JSONList:
 HTTP_BAD_REQUEST = 400
 HTTP_FORBIDDEN = 403
 RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
+# Version discovery already exhausts ``fetch_json`` retries. These leftovers
+# are runner/CDN resolver flakes, not a missing current pin or a bad payload.
+_DISCOVERY_TRANSIENT_MARKERS = (
+    "cannot connect to host",
+    "clientconnectorerror",
+    "could not resolve host",
+    "getaddrinfo failed",
+    "name or service not known",
+    "no address associated with hostname",
+    "nodename nor servname provided, or not known",
+    "temporary failure in name resolution",
+)
+
+
+def is_transient_discovery_failure(error: BaseException) -> bool:
+    """Return whether latest-version fetch failed on a retry-exhausted network flake.
+
+    Update 37546260513: prepare-darwin failed the whole run because
+    ``wispr-flow`` could not resolve ``dl.wisprflow.com`` while reading
+    ``RELEASES.json``. The current pin was already hashed; only discovery
+    flaked.
+    """
+    seen: list[BaseException] = []
+    current: BaseException | None = error
+    while current is not None and current not in seen:
+        seen.append(current)
+        current = current.__cause__
+    if any(isinstance(exc, TimeoutError | aiohttp.ClientConnectorError) for exc in seen):
+        return True
+    folded = " ".join(f"{type(exc).__name__} {exc}" for exc in seen).casefold()
+    return any(marker in folded for marker in _DISCOVERY_TRANSIENT_MARKERS)
+
+
 # Bound server-directed sleeps so an untrusted response cannot stall an update forever.
 _MAX_RETRY_AFTER_SECONDS = 300.0
 logger = logging.getLogger(__name__)
@@ -590,4 +623,5 @@ __all__ = [
     "fetch_url",
     "github_api_url",
     "github_raw_url",
+    "is_transient_discovery_failure",
 ]
