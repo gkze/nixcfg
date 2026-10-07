@@ -7,10 +7,71 @@ from pathlib import Path
 
 import pytest
 
+from lib.nix.models.sources import SourceEntry
 from lib.tests._updater_helpers import run_async
 from lib.update.candidate import ResolvedVersion
-from lib.update.updaters import UpdateContext
+from lib.update.updaters import UpdateContext, VersionInfo
 from packages.ara import updater, validate_artifact
+
+_HASH = "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo="
+
+
+@pytest.mark.parametrize(
+    ("hashes", "reuses_hashes"),
+    [
+        ({}, False),
+        ([], False),
+        (
+            [{"hashType": "sha256", "platform": "aarch64-darwin", "hash": _HASH}],
+            False,
+        ),
+        ({"aarch64-darwin": _HASH}, True),
+    ],
+)
+def test_reason_prepare_requires_platform_hash_mapping_for_reuse(
+    monkeypatch: pytest.MonkeyPatch,
+    hashes: dict[str, str] | list[dict[str, str]],
+    reuses_hashes: bool,
+) -> None:
+    """Prepare must rehash missing or structured hashes, not report them current."""
+    instance = updater.AraUpdater()
+    current = SourceEntry.model_validate({
+        "version": "0.1.57",
+        "hashes": hashes,
+        "urls": dict(instance.PLATFORMS),
+    })
+    calls: list[dict[str, str]] = []
+
+    async def prefetch(_name, urls, *, config, emit):
+        calls.append(urls)
+        return {"aarch64-darwin": _HASH}
+
+    monkeypatch.setattr(
+        "lib.update.updaters.core.stream_url_hash_mapping",
+        prefetch,
+    )
+    result = run_async(
+        instance.update_stream(
+            current,
+            None,
+            context=UpdateContext(
+                current=current,
+                preparing=True,
+                resolved_version=VersionInfo(version="0.1.57"),
+            ),
+        )
+    )
+
+    if reuses_hashes:
+        assert calls == []
+        assert result is None
+    else:
+        assert calls == [instance.PLATFORMS]
+        assert result == SourceEntry.model_validate({
+            "version": "0.1.57",
+            "hashes": {"aarch64-darwin": _HASH},
+            "urls": dict(instance.PLATFORMS),
+        })
 
 
 @dataclass(slots=True)
