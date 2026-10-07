@@ -743,10 +743,29 @@ class Updater(ABC):
 
         info = context.resolved_version
         if info is None:
-            info = await checkpoint(
-                f"resolve:{self.name}",
-                lambda: self.fetch_latest(session, context=context),
-            )
+            try:
+                info = await checkpoint(
+                    f"resolve:{self.name}",
+                    lambda: self.fetch_latest(session, context=context),
+                )
+            except Exception as exc:
+                if current is None or not update_net.is_transient_discovery_failure(
+                    exc
+                ):
+                    raise
+                await emit(
+                    UpdateEvent.status(
+                        self.name,
+                        "Version discovery failed transiently; keeping current",
+                        operation="check_version",
+                        status=StatusInfo(
+                            kind=StatusKind.SKIPPED,
+                            value=current.version,
+                        ),
+                    )
+                )
+                await emit(UpdateEvent.result(self.name))
+                return None
         context.resolved_version = info
 
         await emit(

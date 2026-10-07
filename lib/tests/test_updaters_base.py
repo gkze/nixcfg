@@ -16,6 +16,8 @@ from lib.tests._updater_helpers import collect_events
 from lib.update.config import resolve_config
 from lib.update.events import (
     EventSink,
+    StatusKind,
+    StatusPayload,
     UpdateEvent,
     UpdateEventKind,
     ignore_event,
@@ -336,6 +338,70 @@ def test_download_updater_skips_prepare_reprefetch_when_hashes_are_complete() ->
         event.kind is UpdateEventKind.RESULT and isinstance(event.payload, SourceEntry)
         for event in incomplete_events
     )
+
+
+def test_updater_keeps_current_when_version_discovery_hits_transient_dns() -> None:
+    """Update 37546260513: Darwin prepare died on wispr-flow RELEASES.json DNS."""
+    current = SourceEntry.model_validate({
+        "version": "1.6.957",
+        "hashes": {
+            "aarch64-darwin": "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo="
+        },
+        "urls": {"aarch64-darwin": "https://example.com/archive.tar.gz"},
+    })
+    dns = RuntimeError(
+        "Request to https://dl.wisprflow.com/wispr-flow/darwin/x64/RELEASES.json "
+        "failed after 3 attempts: Cannot connect to host dl.wisprflow.com:443 "
+        "ssl:default [nodename nor servname provided, or not known]"
+    )
+
+    class _FlakyDiscoveryUpdater(_ConfiguredDownloadUpdater):
+        async def fetch_latest(
+            self, session: aiohttp.ClientSession, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = (session, context)
+            raise dns
+
+    async def _run(entry: SourceEntry | None) -> list[UpdateEvent]:
+        updater = _FlakyDiscoveryUpdater()
+        async with aiohttp.ClientSession() as session:
+            return await collect_events(
+                lambda emit: updater.update_stream(entry, session, emit=emit)
+            )
+
+    events = asyncio.run(_run(current))
+    assert any(
+        isinstance(event.payload, StatusPayload)
+        and event.payload.info is not None
+        and event.payload.info.kind is StatusKind.SKIPPED
+        for event in events
+    )
+    assert events[-1].kind is UpdateEventKind.RESULT
+    assert events[-1].payload is None
+
+    with pytest.raises(RuntimeError, match="nodename nor servname"):
+        asyncio.run(_run(None))
+
+    payload = RuntimeError(
+        "Request to https://example.com/RELEASES.json failed after 3 attempts: HTTP 404 Not Found"
+    )
+
+    class _MissingFeedUpdater(_ConfiguredDownloadUpdater):
+        async def fetch_latest(
+            self, session: aiohttp.ClientSession, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = (session, context)
+            raise payload
+
+    async def _run_missing() -> list[UpdateEvent]:
+        updater = _MissingFeedUpdater()
+        async with aiohttp.ClientSession() as session:
+            return await collect_events(
+                lambda emit: updater.update_stream(current, session, emit=emit)
+            )
+
+    with pytest.raises(RuntimeError, match="HTTP 404"):
+        asyncio.run(_run_missing())
 
 
 def test_generic_updater_treats_changed_source_pins_as_stale() -> None:

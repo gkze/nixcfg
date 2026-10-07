@@ -19,7 +19,7 @@ log is retained for `tail -f`.
 | Existing updater concept | Explicit contract |
 | --- | --- |
 | Selected targets and captured dirty checkout | Immutable workflow request and SQLite baseline |
-| Latest-version discovery | Checkpointed resolution step; replay reuses the resolved version |
+| Latest-version discovery | Checkpointed resolution step; replay reuses the resolved version. Retry-exhausted DNS or connect flakes keep the current pin instead of failing the run |
 | Hashing and artifact generation | Checkpointed materialization step, including declared artifact bytes |
 | Source dependency graph | Independent source workflows with serializable prerequisite results |
 | Ref/input refresh and source persistence | Steps returning a verified candidate snapshot |

@@ -174,6 +174,9 @@ and those run logs are quiet. Artifacts expire after 30 days. An
 interrupted job may need to repeat work; completed upstream artifacts can be reused
 by Actions reruns. A failed preparation cannot advance to another platform, and a
 missing or mismatched validation report cannot authorize publication.
+A source whose latest-version fetch fails on retry-exhausted DNS or connect
+(for example `dl.wisprflow.com` `RELEASES.json`) keeps its current pin instead
+of failing preparation.
 
 Validation distinguishes completed target failures from incomplete execution.
 Only completed failures can trigger batch subdivision and package withholding.
