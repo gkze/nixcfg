@@ -122,8 +122,10 @@ _FIXED_OUTPUT_ONLY_TRANSIENT_MARKERS = (
 # Hosted macos-15 store filesystems fault mid-build with EILSEQ. Nix reports
 # that as "Illegal byte sequence" on unlink or pread; the same machines also
 # die with SIGBUS (signal 10). After that I/O damage the next nix invocation
-# can fail only on a vanished store .drv, a vanished store build input, or a
-# crashed daemon (see ``_nix_output_has_missing_store_drv`` and
+# can fail only on a vanished store .drv, a vanished store build input, an
+# unreadable Cachix-substituted crate2nix rlib (rustc E0463 after --extern
+# /nix/store/...rlib), or a crashed daemon (see
+# ``_nix_output_has_missing_store_drv`` and
 # ``_nix_output_has_vanished_store_build_input``). None of those are
 # derivation failures.
 _NIX_STORE_TRANSIENT_MARKERS = (
@@ -132,6 +134,14 @@ _NIX_STORE_TRANSIENT_MARKERS = (
     "cannot open connection to remote store 'daemon'",
 )
 _STORE_BUS_SIGNALS = frozenset({10, signal.SIGBUS})
+_STORE_EXTERN_RLIB = re.compile(
+    r"--extern\s+\S+=/nix/store/[0-9a-z]{32}-[^\s]+\.rlib",
+    re.IGNORECASE,
+)
+_RUSTC_CANT_FIND_CRATE = re.compile(
+    r"error\[e0463\]:\s*can't find crate",
+    re.IGNORECASE,
+)
 
 _PLATFORM_HASH_PAYLOAD_SIZE = 2
 
@@ -579,8 +589,35 @@ def _nix_output_has_vanished_store_build_input(output: str) -> bool:
     return False
 
 
+def _nix_output_has_unreadable_store_rlib(output: str) -> bool:
+    """Return whether rustc exited E0463 after ``--extern`` named a store rlib.
+
+    Hosted macos-15 can copy a crate2nix ``-lib`` output from Cachix and still
+    leave the hashed rlib missing or unreadable. rustc then exits 1 with
+    ``error[E0463]: can't find crate`` even though the command line named
+    ``--extern <crate>=/nix/store/…-lib/lib/lib<crate>-<hash>.rlib``.
+
+    Update #1244 hit that on ``rust_agent_settings`` immediately after
+    substituting ``rust_settings`` / ``rust_project`` ``-lib`` paths. The
+    crate names matched Cargo.nix; the same extra-filename scheme built those
+    crates earlier. That is the same store fault as a vanished build input,
+    not a missing crate in the generated graph. E0463 without a store rlib
+    ``--extern``, or E0786 (stripped ``.rmeta``), is not this signal.
+    """
+    if _RUSTC_CANT_FIND_CRATE.search(output) is None:
+        return False
+    return _STORE_EXTERN_RLIB.search(output) is not None
+
+
+def _nix_output_has_vanished_store_artifact(output: str) -> bool:
+    """Return whether a builder died only because a store input vanished."""
+    return _nix_output_has_vanished_store_build_input(
+        output
+    ) or _nix_output_has_unreadable_store_rlib(output)
+
+
 def _nix_output_has_builder_exit(output: str) -> bool:
-    if _nix_output_has_vanished_store_build_input(output):
+    if _nix_output_has_vanished_store_artifact(output):
         return False
     folded = output.casefold()
     return any(marker in folded for marker in _BUILDER_EXIT_MARKERS)
@@ -614,7 +651,7 @@ def _nix_output_has_store_transient_signal(output: str) -> bool:
         return True
     return _nix_output_has_missing_store_drv(
         output
-    ) or _nix_output_has_vanished_store_build_input(output)
+    ) or _nix_output_has_vanished_store_artifact(output)
 
 
 def _nix_output_has_permanent_build_failure(output: str) -> bool:
@@ -667,13 +704,15 @@ def is_transient_store_interruption(text: str) -> bool:
     """Return whether validation stopped on a runner store fault.
 
     Hosted macOS jobs lose the store mid-build (``Illegal byte sequence``,
-    a vanished store ``.drv``, a vanished store build input, a crashed Nix
-    daemon, or SIGBUS). A hash mismatch or a builder that actually exited
-    (``failed with exit code``, ``error: builder for``) must not continue as
-    if the store had only faulted. ``error: Cannot build`` / ``Reason: 1
-    dependency failed`` after a substitute EILSEQ is still a store fault, as
-    is ``builder failed with exit code 1`` when the only builder log is a
-    vanished ``/nix/store/`` build input.
+    a vanished store ``.drv``, a vanished store build input, an unreadable
+    Cachix-substituted crate2nix rlib, a crashed Nix daemon, or SIGBUS). A
+    hash mismatch or a builder that actually exited (``failed with exit
+    code``, ``error: builder for``) must not continue as if the store had
+    only faulted. ``error: Cannot build`` / ``Reason: 1 dependency failed``
+    after a substitute EILSEQ is still a store fault, as is ``builder
+    failed with exit code 1`` when the only builder log is a vanished
+    ``/nix/store/`` build input or rustc E0463 after ``--extern`` named a
+    store rlib.
     """
     if _nix_output_has_permanent_build_failure(text):
         return False

@@ -30,12 +30,14 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    builds for five hours, the Cachix daemon flushes, and the next shard
    substitutes those paths and continues.    A transient store fault
    (`Illegal byte sequence`, a vanished store `.drv`, a vanished store build
-   input, a crashed Nix daemon, or SIGBUS) is retried
+   input, rustc E0463 after `--extern` named a `/nix/store/` rlib, a crashed
+   Nix daemon, or SIGBUS) is retried
    with only the time left in that shard's build budget, then continues the
    same way: realized paths stay in `gkze` and the next shard substitutes them.
    Determinate Nix can report that fault as `Cannot build` /
    `Reason: 1 dependency failed` after a substitute EILSEQ; that still retries.
-   A builder that exits 1 only because a `/nix/store/` build input vanished
+   A builder that exits 1 only because a `/nix/store/` build input vanished,
+   or because rustc could not load a store rlib it was passed via `--extern`,
    is the same fault. A builder that actually compiled or linked and then
    exited (`failed with exit code`, `error: builder for`) still fails the shard.
    Validation `nix build` passes `--fallback` so a failed substitute can

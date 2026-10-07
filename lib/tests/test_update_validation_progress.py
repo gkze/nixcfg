@@ -751,6 +751,40 @@ print("complete")
     assert sleeps == [1.0, 2.0]
 
 
+def test_validation_retries_unreadable_store_rlib_e0463(tmp_path: Path) -> None:
+    """Update 37599536875: rustc E0463 after --extern store rlib retries like EILSEQ."""
+    marker = tmp_path / "attempt"
+    script = """
+import pathlib, sys
+marker = pathlib.Path(sys.argv[1])
+count = int(marker.read_text()) if marker.exists() else 0
+count += 1
+marker.write_text(str(count))
+if count == 1:
+    print("error: Cannot build '/nix/store/1v-rust_agent_settings-0.1.0.drv'.", file=sys.stderr)
+    print("Reason: builder failed with exit code 1.", file=sys.stderr)
+    print(
+        "> rustc --extern settings=/nix/store/"
+        "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
+        "libsettings-7be7f1170a.rlib",
+        file=sys.stderr,
+    )
+    print("error[E0463]: can't find crate for `settings`", file=sys.stderr)
+    raise SystemExit(1)
+print("complete")
+"""
+    sleeps: list[float] = []
+    result = validation._run_validation_command(
+        [sys.executable, "-c", script, str(marker)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=sleeps.append,
+    )
+    assert result.returncode == 0
+    assert sleeps == [1.0]
+
+
 def test_store_fault_retry_keeps_the_remaining_closure_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

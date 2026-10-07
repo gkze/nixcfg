@@ -887,6 +887,53 @@ def test_closure_yield_continues_after_vanished_build_input_or_daemon_disconnect
     assert not output.exists()
 
 
+def test_closure_yield_continues_after_unreadable_store_rlib_e0463(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Update 37599536875: rustc E0463 after --extern store rlib yields the shard."""
+    candidate = _candidate_for_scope(prepared_run)
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    output = tmp_path / "validation.json"
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+    args = [
+        "validate",
+        "--candidate",
+        str(candidate_path),
+        "--output",
+        str(output),
+        "--scope",
+        "closures",
+        "--closure-budget-seconds",
+        "18000",
+        "--closure-yield",
+    ]
+
+    def unreadable_rlib(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
+        return (
+            DerivationValidationFailure(
+                source="root-closures",
+                installable="path:.#checks.aarch64-darwin.root-closures",
+                message=(
+                    "error: Cannot build '/nix/store/1vhn1bsiqchjp101n2sj5fjjk6fiw596-"
+                    "rust_agent_settings-0.1.0.drv'.\n"
+                    "       Reason: builder failed with exit code 1.\n"
+                    "       > rustc --extern settings=/nix/store/"
+                    "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
+                    "libsettings-7be7f1170a.rlib\n"
+                    "       > error[E0463]: can't find crate for `settings`"
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", unreadable_rlib)
+    yielded = CliRunner().invoke(pipeline.app, args)
+    assert yielded.exit_code == pipeline.CLOSURE_YIELD_EXIT
+    assert not output.exists()
+
+
 def test_prepare_command_exports_failure_evidence_outside_checkout(
     prepared_run, tmp_path: Path
 ) -> None:
