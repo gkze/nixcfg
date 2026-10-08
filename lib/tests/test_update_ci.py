@@ -1287,7 +1287,6 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     assert workflow["on"]["push"]["branches"] == [
         "main",
         "cursor/no-skip-darwin-shards-6614",
-        "cursor/fix-zed-out-lib-cycle-6614",
     ]
     assert workflow["on"]["push"]["paths"] == [".github/update-kick"]
     assert workflow["permissions"] == {"contents": "read"}
