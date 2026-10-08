@@ -20,7 +20,9 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    After the last prepare, the two Linux validators and Darwin package
    validation run in parallel. Closures still wait for the final three-system
    candidate because certify binds reports to that tree. Darwin packages own
-   the shared `zed-editor-nightly` / `rust_*` subtree. Always-run per-root
+   the shared `zed-editor-nightly` / `rust_*` subtree: they `nix build` the
+   native package (not only eval `.drvPath`) so Cachix has those crates
+   before root shards start. Always-run per-root
    Darwin shards start after that package job (they wait for its cache, not
    its success) and after the Linux VM-image cache jobs. A generated matrix
    from `lib.rootClosureManifest` plus `lib/update/ci/shard_costs.json` is the
