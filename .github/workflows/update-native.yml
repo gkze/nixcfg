@@ -89,14 +89,6 @@ jobs:
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
         shell: python
-      - name: Flush Cachix daemon
-        if: always()
-        env:
-          NIXCFG_CI_STAGE: flush-cachix
-        run: |
-          import runpy
-          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
-        shell: python
       - name: Retain candidate and failure evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -111,3 +103,11 @@ jobs:
           if-no-files-found: warn
           overwrite: true
           retention-days: 30
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python

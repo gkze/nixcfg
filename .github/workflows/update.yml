@@ -280,14 +280,6 @@ jobs:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           path: ${{ runner.temp }}/evidence
-      - name: Flush Cachix daemon
-        if: always()
-        env:
-          NIXCFG_CI_STAGE: flush-cachix
-        run: |
-          import runpy
-          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
-        shell: python
       - name: Certify and check final tree
         id: candidate
         env:
@@ -314,6 +306,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           UPDATE_BASE_BRANCH: ${{ github.event.repository.default_branch }}
           NIXCFG_CI_STAGE: publish
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
         run: |
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
@@ -357,14 +357,6 @@ jobs:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           path: ${{ runner.temp }}/repair-evidence
-      - name: Flush Cachix daemon
-        if: always()
-        env:
-          NIXCFG_CI_STAGE: flush-cachix
-        run: |
-          import runpy
-          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
-        shell: python
       - name: Collect failed job logs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -415,6 +407,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NIXCFG_CI_STAGE: start-repair
           NIXCFG_UPDATE_TARGETS: ${{ inputs.targets || '' }}
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
         run: |
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")

@@ -89,8 +89,16 @@ core owns source discovery, declared output authority, candidate identity and va
 Cachix's daemon uploads built outputs continuously in every job that uses
 `update-runtime` (`useDaemon: true`). cachix-action binds
 `$CACHIX_DAEMON_DIR/daemon.sock` and registers a Nix `post-build-hook`.
-Each native job also has an explicit `if: always()` flush that pushes leftover
-prefetch receipts and runs `cachix daemon stop --socket` against that socket.
+Each job that starts `update-runtime` with a Cachix token ends with an
+explicit `if: always()` flush. That step is last so certify, publish,
+repair, and shard builds still have a live daemon and post-build-hook.
+The flush pushes leftover prefetch receipts and runs
+`cachix daemon stop --socket` against that socket. After a clean
+drain it clears `CACHIX_DAEMON_DIR` and `CACHIX_DAEMON_SOCKET` in
+`GITHUB_ENV` so cachix-action's post hook skips a second stop (a
+missing pid throws; a missing socket fails stop). The flush-proof
+job is not `continue-on-error`; only the designed fail step is, so
+a post-hook throw fails that job.
 A bare `cachix daemon stop` talks to `~/.cache/cachix/cachix-daemon.sock`,
 which this action never creates; flush fails closed if the real socket is
 missing or stop is unclean. Slack before the 360-minute hard kill is the

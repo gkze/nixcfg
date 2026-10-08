@@ -645,9 +645,13 @@ def test_flush_cachix_stops_daemon_and_republishes_receipts(
         '{"storePath": "/nix/store/flush.zip"}\n'
     )
     daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
+    github_env = Path(env["RUNNER_TEMP"]) / "github-env"
+    github_env.write_text("KEEP=1\n")
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
+    monkeypatch.setenv("GITHUB_ENV", str(github_env))
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
     assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
@@ -662,6 +666,12 @@ def test_flush_cachix_stops_daemon_and_republishes_receipts(
     assert (artifacts / "cachix-daemon" / "daemon.log").read_text() == "started\n"
     assert not (daemon_dir / "daemon.sock").exists()
     assert not (daemon_dir / "daemon.pid").exists()
+    assert "CACHIX_DAEMON_DIR" not in os.environ
+    assert "CACHIX_DAEMON_SOCKET" not in os.environ
+    written = github_env.read_text()
+    assert "CACHIX_DAEMON_DIR=\n" in written
+    assert "CACHIX_DAEMON_SOCKET=\n" in written
+    assert "cleared CACHIX_DAEMON_DIR" in flush_log
     empty = Path(env["RUNNER_TEMP"]) / "empty-flush"
     empty.mkdir()
     monkeypatch.setenv("RUNNER_TEMP", str(empty))
@@ -735,8 +745,43 @@ def test_cachix_daemon_helpers_tolerate_missing_or_busy_paths(
     (busy / "daemon.sock").mkdir()
     (busy / "daemon.pid").mkdir()
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(busy))
+    github_env = tmp_path / "github-env"
+    github_env.write_text("")
+    monkeypatch.setenv("GITHUB_ENV", str(github_env))
     jobs._release_cachix_daemon_dir()
     assert (busy / "daemon.sock").is_dir()
+    assert "CACHIX_DAEMON_DIR=\n" in github_env.read_text()
+    assert "CACHIX_DAEMON_DIR" not in os.environ
+
+
+def test_clear_cachix_daemon_env_is_the_action_post_hook_skip(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Unlinking pid/socket is not a skip; empty CACHIX_DAEMON_* in GITHUB_ENV is.
+
+    cachix-action's post hook reads ``$CACHIX_DAEMON_DIR/daemon.pid`` and
+    throws if the file is gone. A missing socket fails ``daemon stop``
+    after ~30s (cachix#726). The skip path is ``if (!daemonDir)``.
+    """
+    daemon_dir = tmp_path / "cachixXXXX"
+    daemon_dir.mkdir()
+    socket = daemon_dir / "daemon.sock"
+    socket.write_text("")
+    (daemon_dir / "daemon.pid").write_text("123\n")
+    github_env = tmp_path / "github-env"
+    github_env.write_text("KEEP=1\n")
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(socket))
+    monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    jobs._clear_cachix_daemon_env()
+    assert "CACHIX_DAEMON_DIR" not in os.environ
+    assert "CACHIX_DAEMON_SOCKET" not in os.environ
+    written = github_env.read_text()
+    assert written.startswith("KEEP=1\n")
+    assert "CACHIX_DAEMON_DIR=\n" in written
+    assert "CACHIX_DAEMON_SOCKET=\n" in written
+    assert socket.exists()
+    assert (daemon_dir / "daemon.pid").exists()
 
 
 def test_record_runner_storage_writes_df_inodes_and_store_bytes(
@@ -906,6 +951,7 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     )
     assert flush["if"] == "always()"
     assert flush["env"]["NIXCFG_CI_STAGE"] == "flush-cachix"
+    assert native["jobs"]["native"]["steps"][-1] is flush
     upload = next(
         step
         for step in native["jobs"]["native"]["steps"]
@@ -996,20 +1042,32 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
 
 
 def test_cachix_flush_proof_requires_partial_presence_after_designed_failure() -> None:
-    """A unique path must reach gkze even when the builder exits 1."""
+    """A unique path must reach gkze even when the builder exits 1.
+
+    Job-level continue-on-error hid the #1250 post-hook throw. Only the
+    designed fail step may continue; a post-hook failure must fail the job.
+    """
     workflow = yaml.load(
         (ROOT / ".github/workflows/cachix-flush-proof.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
     fail = workflow["jobs"]["fail-after-push"]
-    assert fail["continue-on-error"] == "true"
+    assert "continue-on-error" not in fail
+    designed = next(
+        step
+        for step in fail["steps"]
+        if step.get("name") == "Realize a unique path and fail"
+    )
+    assert designed["continue-on-error"] == "true"
+    for step in fail["steps"]:
+        if step.get("name") == "Realize a unique path and fail":
+            continue
+        assert "continue-on-error" not in step, step.get("name")
     names = [step.get("name") for step in fail["steps"]]
     assert "Require Cachix daemon socket" in names
     assert "Realize a post-failure path" in names
-    assert any(
-        step.get("name") == "Flush Cachix daemon" and step.get("if") == "always()"
-        for step in fail["steps"]
-    )
+    assert fail["steps"][-1].get("name") == "Flush Cachix daemon"
+    assert fail["steps"][-1].get("if") == "always()"
     post = next(
         step
         for step in fail["steps"]
@@ -1032,6 +1090,54 @@ def test_cachix_flush_proof_requires_partial_presence_after_designed_failure() -
     )["run"]
     assert "proof-path-after.txt" in assert_source
     assert "after-failure" in assert_source
+    assert workflow["jobs"]["assert-partial"]["steps"][-1]["name"] == (
+        "Flush Cachix daemon"
+    )
+
+
+def _uses_update_runtime_with_cachix(steps: list[object]) -> bool:
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        uses = str(step.get("uses", ""))
+        if not uses.startswith("./.github/actions/update-runtime"):
+            continue
+        with_ = step.get("with")
+        if isinstance(with_, dict) and "cachix-token" in with_:
+            return True
+    return False
+
+
+def test_cachix_flush_is_last_step_of_every_update_runtime_cachix_job() -> None:
+    """Stopping the daemon before certify/repair/builds drops paths from gkze."""
+    workflows = sorted((ROOT / ".github/workflows").glob("*.yml"))
+    checked: list[str] = []
+    for path in workflows:
+        workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+        for name, job in (workflow.get("jobs") or {}).items():
+            if not isinstance(job, dict):
+                continue
+            steps = job.get("steps") or []
+            if not _uses_update_runtime_with_cachix(steps):
+                continue
+            last = steps[-1]
+            assert isinstance(last, dict)
+            env = last.get("env") if isinstance(last.get("env"), dict) else {}
+            assert last.get("name") == "Flush Cachix daemon", (
+                f"{path.name} job {name} last step is "
+                f"{last.get('name') or last.get('uses')!r}"
+            )
+            assert env.get("NIXCFG_CI_STAGE") == "flush-cachix"
+            assert last.get("if") == "always()"
+            checked.append(f"{path.name}:{name}")
+    assert sorted(checked) == [
+        "cachix-flush-proof.yml:assert-partial",
+        "cachix-flush-proof.yml:fail-after-push",
+        "update-native.yml:native",
+        "update.yml:assert-coverage",
+        "update.yml:publish",
+        "update.yml:repair",
+    ]
 
 
 def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:

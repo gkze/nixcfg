@@ -896,20 +896,35 @@ def _retain_cachix_daemon_evidence(artifacts: Path, log: TextIO) -> None:
             _write_diagnostic(log, f"retained {name} bytes={path.stat().st_size}")
 
 
+def _clear_cachix_daemon_env() -> None:
+    """Hide a drained daemon from cachix-action's post hook.
+
+    The post hook reads ``$CACHIX_DAEMON_DIR/daemon.pid`` and runs
+    ``cachix daemon stop`` again. A missing pid throws; a missing socket
+    fails stop after a ~30s retry. Empty ``CACHIX_DAEMON_DIR`` makes the
+    hook skip push without failing the job.
+    """
+    github_env = os.environ.get("GITHUB_ENV", "").strip()
+    for key in (_CACHIX_DAEMON_DIR_ENV, _CACHIX_DAEMON_SOCKET_ENV):
+        os.environ.pop(key, None)
+        if github_env:
+            with Path(github_env).open("a", encoding="utf-8") as handle:
+                handle.write(f"{key}=\n")
+
+
 def _release_cachix_daemon_dir() -> None:
-    """Remove the action's pid/socket so the post hook does not fail after we drain."""
+    """Remove the action's pid/socket after a confirmed drain."""
     daemon_dir = os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip()
-    if not daemon_dir:
-        return
-    path = Path(daemon_dir)
-    if not path.is_dir():
-        return
-    for name in (_CACHIX_DAEMON_SOCKET_NAME, "daemon.pid"):
-        target = path / name
-        try:
-            target.unlink()
-        except OSError:
-            continue
+    if daemon_dir:
+        path = Path(daemon_dir)
+        if path.is_dir():
+            for name in (_CACHIX_DAEMON_SOCKET_NAME, "daemon.pid"):
+                target = path / name
+                try:
+                    target.unlink()
+                except OSError:
+                    continue
+    _clear_cachix_daemon_env()
 
 
 def flush_cachix() -> None:
@@ -978,6 +993,10 @@ def flush_cachix() -> None:
             _write_diagnostic(log, msg)
             raise CachixFlushError(msg)
         _release_cachix_daemon_dir()
+        _write_diagnostic(
+            log,
+            "cleared CACHIX_DAEMON_DIR so cachix-action post skips a second stop",
+        )
         record_runner_storage("flush-end", log)
 
 

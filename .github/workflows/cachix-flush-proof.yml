@@ -1,8 +1,10 @@
 ---
 # Deliberate failure after a unique store path is pushed. The proof job is
-# the required check: the builder must fail and gkze.cachix.org must still
-# have the path. continue-on-error keeps the workflow conclusion green so
-# this is evidence, not a merge blocker.
+# the required check: the designed fail step exits 1, and gkze.cachix.org
+# must still have the path. continue-on-error is only on that designed
+# fail step. The job conclusion stays green only when flush and the
+# cachix-action post hook both succeed; a post-hook throw (missing pid
+# after a drained daemon) fails the job and this workflow.
 name: Cachix flush proof
 on:
   pull_request:
@@ -13,7 +15,6 @@ jobs:
   fail-after-push:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    continue-on-error: true
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -43,6 +44,7 @@ jobs:
           print(f"daemon socket {socket}")
         shell: python
       - name: Realize a unique path and fail
+        continue-on-error: true
         env:
           PROOF_NAME: cachix-flush-proof-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
@@ -104,14 +106,6 @@ jobs:
               built + "\n"
           )
         shell: python
-      - name: Flush Cachix daemon
-        if: always()
-        env:
-          NIXCFG_CI_STAGE: flush-cachix
-        run: |
-          import runpy
-          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
-        shell: python
       - name: Retain proof path
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -121,6 +115,14 @@ jobs:
             ${{ runner.temp }}/proof-path.txt
             ${{ runner.temp }}/proof-path-after.txt
           if-no-files-found: error
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
   assert-partial:
     needs: fail-after-push
     if: always()
@@ -157,6 +159,14 @@ jobs:
               )
               print(f"partial Cachix presence proved for {label} {path}")
         shell: python
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
   proof:
     needs:
       - fail-after-push
@@ -167,10 +177,9 @@ jobs:
       - name: Require designed failure plus Cachix hit
         shell: python
         run: |-
-          # continue-on-error on fail-after-push reports success to needs
-          # after the job failed. The proof we need is assert-partial green
-          # plus the uploaded unique path. The fail step's exit 1 is in the
-          # job log (ED-1.1).
+          # continue-on-error is only on the designed fail step. The job
+          # conclusion is success only when flush and the cachix-action
+          # post hook both succeed. A post-hook throw fails this job.
           failed = "${{ needs.fail-after-push.result }}"
           proved = "${{ needs.assert-partial.result }}"
           if failed != "success" or proved != "success":
