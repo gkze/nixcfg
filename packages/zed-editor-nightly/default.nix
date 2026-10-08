@@ -383,11 +383,13 @@ let
     ++ crateCachePolicy.fontConfigConsumers
     ++ crateCachePolicy.lldConsumers
     ++ crateCachePolicy.livekitWebrtcConsumers
+    ++ crateCachePolicy.fontconfigSysConsumers
     ++ crateCachePolicy.pkgConfigConsumers
     ++ crateCachePolicy.protocConsumers
     ++ crateCachePolicy.releaseVersionConsumers
     ++ crateCachePolicy.systemLibraryConsumers
     ++ crateCachePolicy.updateExplanationConsumers
+    ++ crateCachePolicy.x11LibraryConsumers
     ++ crateCachePolicy.xcodebuildConsumers
     ++ crateCachePolicy.zstdPkgConfigConsumers
     ++ darwinWorkspaceCrates
@@ -434,6 +436,21 @@ let
       buildInputs =
         (attrs.buildInputs or [ ])
         ++ lib.optionals (builtins.elem crateName crateCachePolicy.systemLibraryConsumers) zedBuildInputs
+        ++
+          lib.optionals
+            (pkgs.stdenv.hostPlatform.isLinux && builtins.elem crateName crateCachePolicy.x11LibraryConsumers)
+            [
+              libx11
+            ]
+        ++
+          lib.optionals
+            (
+              pkgs.stdenv.hostPlatform.isLinux
+              && builtins.elem crateName crateCachePolicy.fontconfigSysConsumers
+            )
+            [
+              fontconfig
+            ]
         ++ lib.optionals (builtins.elem crateName darwinWorkspaceCrates) darwinWorkspaceBuildInputs;
     }
     // lib.optionalAttrs (builtins.elem crateName crateCachePolicy.systemLibraryConsumers) {
