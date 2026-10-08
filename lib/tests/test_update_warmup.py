@@ -10,6 +10,7 @@ from lib.update.ci.shard_plan import ClosureShard
 from lib.update.ci.warmup import (
     MAX_SHARD_LOCAL_BUILDS,
     RUST_WARMUP_SLOTS,
+    WARMUP_DRVS_NAME,
     WARMUP_PLAN_NAME,
     ShardLocalBuildReport,
     WarmupError,
@@ -17,6 +18,8 @@ from lib.update.ci.warmup import (
     darwin_output_paths,
     default_cache_present,
     eval_root_darwin_outputs,
+    export_warmup_drvs,
+    import_warmup_drvs,
     intersect_missing,
     is_crate2nix_rust_output,
     load_warmup_plan,
@@ -27,6 +30,8 @@ from lib.update.ci.warmup import (
     skip_cached_warmup_paths,
     slot_warmup_paths,
     substitutable_paths,
+    unique_drvs_for_outputs,
+    warmup_output_drvs,
     write_warmup_plan,
 )
 from lib.update.derivation_validation import RootClosureManifest
@@ -238,6 +243,14 @@ def test_plan_darwin_warmup_writes_intersection_and_rejects_huge_remainder(
         ("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared",),
         ("/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1",),
     )
+    assert plan.output_drvs == {
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared": (
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared.drv"
+        ),
+        "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1": (
+            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1.drv"
+        ),
+    }
     assert plan.per_root["darwin-argus"].remaining == 1
     assert plan.shards[0].remaining == 1
     assert plan.shards[1].remaining == 0
@@ -410,6 +423,63 @@ def test_realize_warmup_outputs_batches_store_paths(
     ]
     assert failures[0].source == "root-warmup"
     assert "boom" in failures[0].message
+
+
+def test_warmup_drvs_map_outputs_and_import_register_files(tmp_path: Path) -> None:
+    """Darwin can only nix-build .drv files; output paths are not rebuildable."""
+    shared = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared"
+    rust_out = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_zed-1"
+    rust_lib = "/nix/store/cccccccccccccccccccccccccccccccc-rust_zed-1-lib"
+    payload = _graph(shared, rust_out)
+    derivations = payload["derivations"]
+    assert isinstance(derivations, dict)
+    rust_drv = derivations["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_zed-1.drv"]
+    assert isinstance(rust_drv, dict)
+    outputs = rust_drv["outputs"]
+    assert isinstance(outputs, dict)
+    outputs["lib"] = {"path": rust_lib}
+    mapping = warmup_output_drvs(frozenset({shared, rust_out, rust_lib}), (payload,))
+    assert mapping[shared].endswith("-shared.drv")
+    assert mapping[rust_out] == mapping[rust_lib]
+    assert unique_drvs_for_outputs((rust_out, rust_lib, shared), mapping) == (
+        mapping[rust_out],
+        mapping[shared],
+    )
+    with pytest.raises(WarmupError, match="missing Darwin .drv mapping"):
+        unique_drvs_for_outputs(("/nix/store/missing",), mapping)
+    with pytest.raises(WarmupError, match="missing Darwin .drv mapping"):
+        warmup_output_drvs(frozenset({shared, "/nix/store/missing"}), (payload,))
+    drv_name = "dddddddddddddddddddddddddddddddd-rust_a-1.drv"
+    drv_path = f"/nix/store/{drv_name}"
+    planner_drv = tmp_path / "planner" / drv_name
+    planner_drv.parent.mkdir()
+    planner_drv.write_text("drv")
+    cache = tmp_path / WARMUP_DRVS_NAME
+    export_warmup_drvs((str(planner_drv),), cache)
+    assert (cache / drv_name).read_text() == "drv"
+    with pytest.raises(WarmupError, match="planner is missing"):
+        export_warmup_drvs((drv_path,), tmp_path / "missing-src")
+    added: list[str] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        added.append(args[-1])
+        return subprocess.CompletedProcess(args, 0, stdout=drv_path, stderr="")
+
+    import_warmup_drvs((), tmp_path / "no-cache")
+    with pytest.raises(WarmupError, match="warmup drv cache missing"):
+        import_warmup_drvs((drv_path,), tmp_path / "no-cache", run=run)
+    empty_cache = tmp_path / "empty-cache"
+    empty_cache.mkdir()
+    with pytest.raises(WarmupError, match="warmup drv cache missing"):
+        import_warmup_drvs((drv_path,), empty_cache, run=run)
+    import_warmup_drvs((drv_path,), cache, run=run)
+    assert added == [str(cache / drv_name)]
+
+    def fail(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="add failed")
+
+    with pytest.raises(WarmupError, match="failed to import"):
+        import_warmup_drvs((drv_path,), cache, run=fail)
 
 
 def test_rust_warmup_layers_and_slots_keep_dependency_order() -> None:

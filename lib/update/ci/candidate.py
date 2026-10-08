@@ -38,12 +38,16 @@ from lib.update.ci.shard_plan import (
     write_github_actions_output,
 )
 from lib.update.ci.warmup import (
+    WARMUP_DRVS_NAME,
     WARMUP_PLAN_NAME,
+    export_warmup_drvs,
+    import_warmup_drvs,
     load_warmup_plan,
     plan_darwin_warmup,
     realize_warmup_outputs,
     skip_cached_warmup_paths,
     slot_warmup_paths,
+    unique_drvs_for_outputs,
     write_warmup_plan,
 )
 from lib.update.cli_options import RepairAgent, UpdateOptions
@@ -267,8 +271,10 @@ def _realize_rust_warmup(
         slot_warmup_paths(plan.rust_layers, warmup_slot),
         present=check_path_in_cachix,
     )
+    drvs = unique_drvs_for_outputs(missing, plan.output_drvs)
+    import_warmup_drvs(drvs, warmup_plan.with_name(WARMUP_DRVS_NAME))
     failures = realize_warmup_outputs(
-        missing,
+        drvs,
         flake_root=flake_root,
         progress=_hosted_validation_progress("rust-warmup"),
     )
@@ -629,6 +635,9 @@ def plan_shards(
         manifest=manifest,
     )
     write_warmup_plan(output.with_name(WARMUP_PLAN_NAME), warmup)
+    export_warmup_drvs(
+        tuple(warmup.output_drvs.values()), output.with_name(WARMUP_DRVS_NAME)
+    )
     matrix = github_actions_matrix(shards)
     atomic_write_text(output, json.dumps(matrix, indent=2) + "\n")
     target = github_output

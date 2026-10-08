@@ -618,11 +618,17 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
         lambda *_args, **_kwargs: (),
     )
 
-    def warmup_realize(*_args: object, **_kwargs: object) -> tuple[()]:
+    realized: list[object] = []
+
+    def warmup_realize(
+        paths: object, *_args: object, **_kwargs: object
+    ) -> tuple[()]:
         order.append("warmup")
+        realized.append(paths)
         return ()
 
     monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
     from lib.update.ci.warmup import (
         RootWarmupStats,
@@ -640,6 +646,9 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
             warmupOutputs=("/nix/store/shared",),
             rustLayers=(("/nix/store/shared",),),
+            outputDrvs={
+                "/nix/store/shared": "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared.drv"
+            },
             perRoot={
                 "darwin-argus": RootWarmupStats(
                     outputs=1, missing=1, warmup=1, remaining=0
@@ -661,6 +670,7 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
     )
     assert rust.gates == ()
     assert order == ["warmup"]
+    assert realized == [("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared.drv",)]
     with pytest.raises(ValueError, match="warmup plan and slot"):
         pipeline.validate_candidate(candidate, scope="rust-warmup")
     with pytest.raises(ValueError, match="warmup slots are only valid"):

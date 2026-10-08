@@ -23,6 +23,7 @@ import json
 import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -47,11 +48,11 @@ from lib.update.io import atomic_write_text
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
-    from pathlib import Path
 
     from lib.update.derivation_validation import ValidationProgress
 
 WARMUP_PLAN_NAME = "warmup-plan.json"
+WARMUP_DRVS_NAME = "warmup-drvs"
 _DARWIN_SYSTEM = "aarch64-darwin"
 # Hosted packages on 37740898487 realized 132 local zed drvs. Home-george
 # compiled 1534 rust_* because those hashes were not the packages graph.
@@ -108,6 +109,7 @@ class WarmupPlan(BaseModel):
     substituters: tuple[str, ...]
     warmup_outputs: tuple[str, ...] = Field(alias="warmupOutputs")
     rust_layers: tuple[tuple[str, ...], ...] = Field(alias="rustLayers", default=())
+    output_drvs: dict[str, str] = Field(alias="outputDrvs", default_factory=dict)
     per_root: dict[str, RootWarmupStats] = Field(alias="perRoot")
     shards: tuple[ShardLocalBuildReport, ...]
     notes: str
@@ -342,6 +344,104 @@ def rust_warmup_layers(
     return tuple(layers)
 
 
+def warmup_output_drvs(
+    warmup: frozenset[str],
+    payloads: Sequence[Mapping[str, object]],
+) -> dict[str, str]:
+    """Map each warmup output to the Darwin ``.drv`` that produces it."""
+    mapping: dict[str, str] = {}
+    for payload in payloads:
+        derivations = payload.get("derivations")
+        if not isinstance(derivations, dict):
+            msg = "derivation graph missing derivations"
+            raise WarmupError(msg)
+        for raw_name, drv in derivations.items():
+            if not isinstance(raw_name, str) or not isinstance(drv, dict):
+                continue
+            if drv.get("system") != _DARWIN_SYSTEM:
+                continue
+            drv_path = _absolute_store_path(raw_name)
+            if drv_path is None or not drv_path.endswith(".drv"):
+                continue
+            outputs = drv.get("outputs")
+            if not isinstance(outputs, dict):
+                continue
+            for output in outputs.values():
+                if not isinstance(output, dict):
+                    continue
+                raw = output.get("path")
+                if not isinstance(raw, str):
+                    continue
+                path = _absolute_store_path(raw)
+                if path is None or path not in warmup:
+                    continue
+                mapping[path] = drv_path
+    missing = warmup - frozenset(mapping)
+    if missing:
+        sample = ", ".join(sorted(missing)[:8])
+        msg = f"warmup outputs missing Darwin .drv mapping: {sample}"
+        raise WarmupError(msg)
+    return mapping
+
+
+def unique_drvs_for_outputs(
+    outputs: Sequence[str],
+    output_drvs: Mapping[str, str],
+) -> tuple[str, ...]:
+    """Return first-seen ``.drv`` paths for *outputs*, failing closed on gaps."""
+    missing = [path for path in outputs if path not in output_drvs]
+    if missing:
+        sample = ", ".join(missing[:8])
+        msg = f"warmup outputs missing Darwin .drv mapping: {sample}"
+        raise WarmupError(msg)
+    seen: dict[str, None] = {}
+    for path in outputs:
+        seen.setdefault(output_drvs[path], None)
+    return tuple(seen)
+
+
+def export_warmup_drvs(drv_paths: Sequence[str], dest: Path) -> None:
+    """Copy planner-instantiated ``.drv`` files next to warmup-plan.json."""
+    dest.mkdir(parents=True, exist_ok=True)
+    for drv in dict.fromkeys(drv_paths):
+        source = Path(drv)
+        if not source.is_file():
+            msg = f"planner is missing warmup .drv {drv}"
+            raise WarmupError(msg)
+        target = dest / source.name
+        target.write_bytes(source.read_bytes())
+
+
+def import_warmup_drvs(
+    drv_paths: Sequence[str],
+    cache: Path,
+    *,
+    run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+) -> None:
+    """Register copied ``.drv`` files so Darwin can ``nix build`` them."""
+    if not drv_paths:
+        return
+    if not cache.is_dir():
+        msg = f"warmup drv cache missing: {cache}"
+        raise WarmupError(msg)
+    runner = subprocess.run if run is None else run
+    for drv in dict.fromkeys(drv_paths):
+        source = cache / Path(drv).name
+        if not source.is_file():
+            msg = f"warmup drv cache missing {Path(drv).name}"
+            raise WarmupError(msg)
+        result = runner(
+            ["nix-store", "--add", str(source)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode:
+            detail = result.stderr.strip() or result.stdout.strip() or "nix-store --add failed"
+            msg = f"failed to import warmup .drv {source.name}: {detail}"
+            raise WarmupError(msg)
+
+
 def slot_warmup_paths(
     layers: Sequence[Sequence[str]],
     slot: int,
@@ -418,6 +518,7 @@ def plan_darwin_warmup(
     substitutable = substitutable_paths(all_outputs, present=checker)
     warmup = intersect_missing(per_root, substitutable)
     rust_layers = rust_warmup_layers(warmup, tuple(graphs.values()))
+    output_drvs = warmup_output_drvs(warmup, tuple(graphs.values()))
     reports: list[ShardLocalBuildReport] = []
     stats: dict[str, RootWarmupStats] = {}
     for name, outputs in per_root.items():
@@ -451,6 +552,7 @@ def plan_darwin_warmup(
         substituters=(_NIXOS_CACHE, _GKZE_CACHE),
         warmupOutputs=ordered,
         rustLayers=rust_layers,
+        outputDrvs=output_drvs,
         perRoot=stats,
         shards=tuple(reports),
         notes=(
