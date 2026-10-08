@@ -18,10 +18,7 @@ from pathlib import Path
 from typing import TextIO
 
 _BINARY_CACHE = "gkze"
-# lib.update.ci.candidate.CLOSURE_YIELD_EXIT. Kept literal so this launcher
-# stays importable on the hosted image before the project runtime exists.
-_CLOSURE_YIELD_EXIT = 75
-_VALIDATION_SCOPES = frozenset({"all", "packages", "closures"})
+_VALIDATION_SCOPES = frozenset({"all", "packages", "closures", "closure-shard"})
 _HEARTBEAT_INTERVAL_SECONDS = 60
 _OUTPUT_LOG_NAME = "output.log"
 _APPLICATIONS = Path("/Applications")
@@ -381,50 +378,69 @@ def _append_validation_scope(args: list[str]) -> str:
     """Add shard flags and return the scope the hosted job requested."""
     scope = os.environ.get("NIXCFG_VALIDATE_SCOPE", "all")
     if scope not in _VALIDATION_SCOPES:
-        msg = "Validation scope must be all, packages, or closures"
+        msg = "Validation scope must be all, packages, closures, or closure-shard"
         raise ValueError(msg)
     if scope != "all":
         args.extend(("--scope", scope))
     budget = os.environ.get("NIXCFG_CLOSURE_BUDGET_SECONDS", "")
-    yield_on_budget = os.environ.get("NIXCFG_CLOSURE_YIELD") == "true"
-    if budget and (scope == "packages" or not _is_positive_number(budget)):
+    roots = os.environ.get("NIXCFG_CLOSURE_ROOTS", "")
+    shard = os.environ.get("NIXCFG_CLOSURE_SHARD", "")
+    if budget and (
+        scope not in {"closures", "closure-shard"} or not _is_positive_number(budget)
+    ):
         msg = "Closure budget must be a positive number of seconds on a closure validation"
         raise ValueError(msg)
-    if yield_on_budget and (scope != "closures" or not budget):
-        msg = "Closure yield requires a closure scope and budget"
+    if scope == "closure-shard" and (not roots or not shard):
+        msg = "closure-shard requires NIXCFG_CLOSURE_ROOTS and NIXCFG_CLOSURE_SHARD"
+        raise ValueError(msg)
+    if scope != "closure-shard" and (roots or shard):
+        msg = "Named closure roots are only valid for the closure-shard scope"
         raise ValueError(msg)
     if budget:
         args.extend(("--closure-budget-seconds", budget))
-    if yield_on_budget:
-        args.append("--closure-yield")
+    if roots:
+        args.extend(("--closure-roots", roots))
+    if shard:
+        args.extend(("--shard", shard))
     return scope
 
 
-def _finish_closure_shard(scope: str, returncode: int, log: TextIO) -> int:
-    """Record whether this shard realized the closure, and continue only on its budget."""
-    yielded = (
-        scope == "closures"
-        and os.environ.get("NIXCFG_CLOSURE_YIELD") == "true"
-        and returncode == _CLOSURE_YIELD_EXIT
-    )
-    if scope == "closures":
-        _outputs(closure_complete="false" if yielded else "true")
-    if yielded:
-        _write_diagnostic(
-            log,
-            "Closure build budget exhausted; the next shard continues from Cachix",
-        )
-        return 0
+def _publish_prefetched_receipts(
+    receipts: Path, log: TextIO, artifacts: Path, returncode: int
+) -> int:
+    """Push exact prefetch receipts on every exit path that produced them."""
+    try:
+        paths = _prefetched_paths_from_receipts(receipts)
+    except ValueError:
+        if returncode:
+            _write_diagnostic(
+                log,
+                "Prefetch receipts were unusable after updater failure; "
+                "retaining the updater status",
+            )
+            return returncode
+        raise
+    _write_diagnostic(log, f"Collected {len(paths)} prefetched store paths")
+    if not paths:
+        return returncode
+    try:
+        _push_prefetched_paths(paths, log, artifacts)
+    except subprocess.CalledProcessError as error:
+        if returncode:
+            _write_diagnostic(
+                log,
+                "Prefetch publication failed after updater failure; "
+                f"retaining updater status cache_exit={error.returncode}",
+            )
+            return returncode
+        raise
     return returncode
 
 
-def native(stage: str) -> int:
-    """Prepare or validate with immutable inputs and retained failure evidence."""
-    artifacts = _temp() / "update-artifacts"
-    artifacts.mkdir(parents=True, exist_ok=True)
+def _native_args(stage: str, artifacts: Path) -> list[str]:
+    """Return the updater argv for one hosted native stage."""
     args = [_runtime(), "ci", "update", stage]
     previous = os.environ.get("NIXCFG_PREVIOUS_CANDIDATE", "")
-    scope = "all"
     if stage == "prepare":
         args.extend(("--output", str(artifacts / "candidate.json")))
         if previous:
@@ -442,30 +458,73 @@ def native(stage: str) -> int:
             raise ValueError(msg)
         if targets:
             args.extend(("--", *targets))
-    elif stage == "cache-root-deps":
-        if not previous:
+        return args
+    if not previous:
+        if stage == "cache-root-deps":
             msg = "Foreign-root dependency cache requires a previous candidate"
-            raise ValueError(msg)
+        elif stage == "validate":
+            msg = "Validation requires a previous candidate"
+        elif stage == "plan-shards":
+            msg = "Shard planning requires a previous candidate"
+        elif stage == "assert-coverage":
+            msg = "Coverage requires a previous candidate"
+        else:
+            msg = f"Unknown native stage: {stage}"
+        raise ValueError(msg)
+    if stage == "cache-root-deps":
         args.extend((
             "--candidate",
             previous,
             "--output",
             str(artifacts / "cache-root-deps.json"),
         ))
-    elif stage == "validate":
-        if not previous:
-            msg = "Validation requires a previous candidate"
-            raise ValueError(msg)
+        return args
+    if stage == "validate":
+        scope = _append_validation_scope(args)
+        report_name = (
+            "shard-receipt.json" if scope == "closure-shard" else "validation.json"
+        )
         args.extend((
             "--candidate",
             previous,
             "--output",
-            str(artifacts / "validation.json"),
+            str(artifacts / report_name),
         ))
-        scope = _append_validation_scope(args)
-    else:
-        msg = f"Unknown native stage: {stage}"
-        raise ValueError(msg)
+        return args
+    if stage == "plan-shards":
+        args.extend((
+            "--candidate",
+            previous,
+            "--output",
+            str(artifacts / "darwin-closure-shards.json"),
+        ))
+        github_output = os.environ.get("GITHUB_OUTPUT", "")
+        if github_output:
+            args.extend(("--github-output", github_output))
+        return args
+    if stage == "assert-coverage":
+        evidence = os.environ.get("NIXCFG_COVERAGE_EVIDENCE", "")
+        if not evidence:
+            msg = "Coverage requires NIXCFG_COVERAGE_EVIDENCE"
+            raise ValueError(msg)
+        args.extend((
+            "--candidate",
+            previous,
+            "--evidence",
+            evidence,
+            "--job-results",
+            os.environ.get("NIXCFG_JOB_RESULTS", ""),
+        ))
+        return args
+    msg = f"Unknown native stage: {stage}"
+    raise ValueError(msg)
+
+
+def native(stage: str) -> int:
+    """Prepare or validate with immutable inputs and retained failure evidence."""
+    artifacts = _temp() / "update-artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    args = _native_args(stage, artifacts)
     receipts = artifacts / "prefetch-receipts.jsonl"
     with (
         (artifacts / "result.json").open("w") as output,
@@ -492,12 +551,7 @@ def native(stage: str) -> int:
         )
         if summary := _failure_summary(artifacts / "result.json"):
             _write_diagnostic(log, summary)
-        if stage == "prepare" and returncode == 0:
-            paths = _prefetched_paths_from_receipts(receipts)
-            _write_diagnostic(log, f"Collected {len(paths)} prefetched store paths")
-            if paths:
-                _push_prefetched_paths(paths, log, artifacts)
-        return _finish_closure_shard(scope, returncode, log)
+        return _publish_prefetched_receipts(receipts, log, artifacts, returncode)
 
 
 def certify() -> None:
@@ -713,15 +767,51 @@ def start_repair() -> None:
     )
 
 
+def flush_cachix() -> None:
+    """Push leftover prefetch receipts and stop the Cachix daemon.
+
+    Failure points and what reaches gkze:
+    - Build failure: every path the daemon already uploaded, plus prefetch
+      receipts flushed here.
+    - Job timeout at 360 minutes: shards end their build budget at 5 hours so
+      this step and the action post hook still have slack. A SIGKILL during
+      flush can still drop the queue tail.
+    - Cancellation: this step is ``if: always()``. GitHub may still skip later
+      post hooks; the explicit flush is the mitigation and does not survive a
+      cancel that kills the runner first.
+    - Runner loss: only paths Cachix already acknowledged.
+    """
+    artifacts = _temp() / "update-artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    receipts = artifacts / "prefetch-receipts.jsonl"
+    with (artifacts / "cachix-flush.log").open("a") as log:
+        _write_diagnostic(log, "Flushing Cachix daemon and prefetch receipts")
+        if receipts.exists():
+            _publish_prefetched_receipts(receipts, log, artifacts, 0)
+        stop = _run("cachix", "daemon", "stop", check=False, capture=True)
+        _write_diagnostic(
+            log,
+            f"cachix daemon stop returncode={stop.returncode} "
+            f"stdout={stop.stdout.strip()} stderr={stop.stderr.strip()}",
+        )
+
+
 def main(stage: str) -> int:
     """Dispatch the finite set of Actions operations, preserving process failures."""
-    if stage in {"prepare", "validate", "cache-root-deps"}:
+    native_stages = {
+        "prepare",
+        "validate",
+        "cache-root-deps",
+        "plan-shards",
+        "assert-coverage",
+    }
+    if stage in native_stages:
         # Capture CLI JSON inside the environment, after any devshell startup output.
         return _run(
             *_develop("python", str(Path(__file__).resolve()), f"native-{stage}"),
             check=False,
         ).returncode
-    if stage in {"native-prepare", "native-validate", "native-cache-root-deps"}:
+    if stage.startswith("native-") and stage.removeprefix("native-") in native_stages:
         return native(stage.removeprefix("native-"))
     operations = {
         "clean-image": clean_runner_image,
@@ -734,6 +824,7 @@ def main(stage: str) -> int:
         "install-agent": install_agent,
         "repair": repair,
         "start-repair": start_repair,
+        "flush-cachix": flush_cachix,
     }
     operations[stage]()
     return 0

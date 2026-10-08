@@ -126,7 +126,9 @@ def invoke(env: dict[str, str], checkout: Path) -> subprocess.CompletedProcess[s
 
 
 @pytest.mark.parametrize("exit_code", [0, 17])
-@pytest.mark.parametrize("stage", ["prepare", "validate", "cache-root-deps"])
+@pytest.mark.parametrize(
+    "stage", ["prepare", "validate", "cache-root-deps", "plan-shards"]
+)
 @pytest.mark.parametrize("validate_all_packages", [False, True])
 def test_native_job_keeps_evidence_and_propagates_failure(
     native_job, exit_code: int, stage: str, validate_all_packages: bool
@@ -164,45 +166,48 @@ def test_native_job_keeps_evidence_and_propagates_failure(
         "source failure detail\n"
     )
     if exit_code:
-        assert result.stderr.endswith(
+        assert (
             "Updater failed; inspect the retained result and run-log artifacts.\n"
+            in result.stderr
         )
+        assert "Collected 0 prefetched store paths" in result.stderr
     else:
         assert "Updater failed" not in result.stderr
     assert (checkout / "flake.lock").read_text() == "baseline"
 
 
-def test_closure_shard_yield_continues_without_certifying(native_job) -> None:
-    """A budget exit hands realized paths to the next shard and is not success of the closure."""
+def test_closure_shard_forwards_named_roots_and_budget(native_job) -> None:
+    """An always-run root shard records a receipt, not a continuation output."""
     env, checkout = native_job
     env |= {
         "GITHUB_OUTPUT": str(Path(env["RUNNER_TEMP"]) / "github-output"),
         "NIXCFG_CI_STAGE": "validate",
         "NIXCFG_PREVIOUS_CANDIDATE": "/candidate from previous job.json",
-        "NIXCFG_VALIDATE_SCOPE": "closures",
+        "NIXCFG_VALIDATE_SCOPE": "closure-shard",
         "NIXCFG_CLOSURE_BUDGET_SECONDS": "18000",
-        "NIXCFG_CLOSURE_YIELD": "true",
-        "TEST_EXIT": str(jobs._CLOSURE_YIELD_EXIT),
+        "NIXCFG_CLOSURE_ROOTS": "darwin-argus",
+        "NIXCFG_CLOSURE_SHARD": "darwin-argus",
     }
     result = invoke(env, checkout)
-    assert jobs._CLOSURE_YIELD_EXIT == pipeline.CLOSURE_YIELD_EXIT
     assert result.returncode == 0, result.stderr
-    assert Path(env["GITHUB_OUTPUT"]).read_text() == "closure_complete=false\n"
-    assert "next shard continues from Cachix" in result.stderr
+    assert not Path(env["GITHUB_OUTPUT"]).exists() or (
+        "closure_complete" not in Path(env["GITHUB_OUTPUT"]).read_text()
+    )
     args = json.loads(Path(env["TEST_LOG"]).read_text())
-    assert args[args.index("--scope") + 1] == "closures"
+    assert args[args.index("--scope") + 1] == "closure-shard"
     assert args[args.index("--closure-budget-seconds") + 1] == "18000"
-    assert args[-1] == "--closure-yield"
+    assert args[args.index("--closure-roots") + 1] == "darwin-argus"
+    assert args[args.index("--shard") + 1] == "darwin-argus"
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    assert (artifacts / "shard-receipt.json").is_file()
+    assert not (artifacts / "validation.json").exists()
 
 
-@pytest.mark.parametrize(
-    ("exit_code", "yield_requested"),
-    [(0, True), (1, True), (0, False)],
-)
-def test_finished_closure_shard_does_not_request_another(
-    native_job, exit_code: int, yield_requested: bool
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_finished_closure_aggregate_does_not_emit_continuation(
+    native_job, exit_code: int
 ) -> None:
-    """A finished closure build, including one with derivation failures, stops the chain."""
+    """The aggregate closures gate fails closed and writes certify evidence."""
     env, checkout = native_job
     env |= {
         "GITHUB_OUTPUT": str(Path(env["RUNNER_TEMP"]) / "github-output"),
@@ -212,14 +217,11 @@ def test_finished_closure_shard_does_not_request_another(
         "NIXCFG_CLOSURE_BUDGET_SECONDS": "18000",
         "TEST_EXIT": str(exit_code),
     }
-    if yield_requested:
-        env["NIXCFG_CLOSURE_YIELD"] = "true"
     result = invoke(env, checkout)
     assert result.returncode == exit_code, result.stderr
-    assert Path(env["GITHUB_OUTPUT"]).read_text() == "closure_complete=true\n"
-    assert "next shard" not in result.stderr
-    args = json.loads(Path(env["TEST_LOG"]).read_text())
-    assert ("--closure-yield" in args) is yield_requested
+    assert "--closure-yield" not in json.loads(Path(env["TEST_LOG"]).read_text())
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    assert (artifacts / "validation.json").is_file()
 
 
 def test_native_adapter_rejects_a_miswired_closure_shard(
@@ -249,28 +251,22 @@ def test_native_adapter_rejects_a_miswired_closure_shard(
     with pytest.raises(ValueError, match="budget"):
         jobs.main("native-validate")
     monkeypatch.setenv("NIXCFG_CLOSURE_BUDGET_SECONDS", "")
-    monkeypatch.setenv("NIXCFG_CLOSURE_YIELD", "true")
-    with pytest.raises(ValueError, match="yield"):
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "closure-shard")
+    with pytest.raises(ValueError, match="closure-shard"):
         jobs.main("native-validate")
-    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "all")
-    monkeypatch.setenv("NIXCFG_CLOSURE_BUDGET_SECONDS", "18000")
-    with pytest.raises(ValueError, match="yield"):
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    with pytest.raises(ValueError, match="closure-shard"):
         jobs.main("native-validate")
-    output = Path(env["RUNNER_TEMP"]) / "github-output"
-    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "closures")
-    monkeypatch.setenv("NIXCFG_CLOSURE_YIELD", "true")
-    monkeypatch.setenv("TEST_EXIT", str(jobs._CLOSURE_YIELD_EXIT))
-    assert jobs.main("native-validate") == 0
-    assert output.read_text() == "closure_complete=false\n"
-    output.unlink()
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    monkeypatch.setenv("NIXCFG_CLOSURE_SHARD", "darwin-argus")
+    with pytest.raises(ValueError, match="Named closure roots"):
+        jobs.main("native-validate")
+    monkeypatch.delenv("NIXCFG_CLOSURE_ROOTS")
+    monkeypatch.delenv("NIXCFG_CLOSURE_SHARD")
+    monkeypatch.setenv("NIXCFG_CLOSURE_BUDGET_SECONDS", "18000")
     monkeypatch.setenv("TEST_EXIT", "0")
     assert jobs.main("native-validate") == 0
-    assert output.read_text() == "closure_complete=true\n"
-    output.unlink()
-    monkeypatch.delenv("NIXCFG_CLOSURE_YIELD")
-    assert jobs.main("native-validate") == 0
-    assert output.read_text() == "closure_complete=true\n"
 
 
 def test_native_job_forwards_diagnostics_before_the_updater_exits(native_job) -> None:
@@ -543,10 +539,7 @@ def test_preparation_publishes_only_exact_prefetch_receipts(
     else:
         assert jobs.native("prepare") == update_exit
     log = Path(env["TEST_CACHE_LOG"])
-    if update_exit:
-        assert not log.exists()
-    else:
-        assert json.loads(log.read_text()) == ["push", "gkze", "/nix/store/new.zip"]
+    assert json.loads(log.read_text()) == ["push", "gkze", "/nix/store/new.zip"]
 
 
 @pytest.mark.parametrize(
@@ -590,6 +583,140 @@ def test_first_job_uses_default_inventory(native_job, targets: str) -> None:
     args = json.loads(Path(env["TEST_LOG"]).read_text())
     assert "--" not in args
     assert "--previous" not in args
+
+
+def test_failed_prepare_still_publishes_prefetch_receipts(
+    native_job, monkeypatch
+) -> None:
+    """Prefetch receipts are pushed on the failure path, not only on success."""
+    env, checkout = native_job
+    for key, value in (
+        env
+        | {
+            "TEST_PREFETCH_RECEIPTS": '{"storePath": "/nix/store/fail.zip"}\n',
+            "TEST_EXIT": "17",
+        }
+    ).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    assert jobs.native("prepare") == 17
+    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
+        "push",
+        "gkze",
+        "/nix/store/fail.zip",
+    ]
+
+
+def test_prefetch_publication_keeps_updater_status_when_both_fail(
+    native_job, monkeypatch
+) -> None:
+    env, checkout = native_job
+    for key, value in (
+        env
+        | {
+            "TEST_PREFETCH_RECEIPTS": '{"storePath": "/nix/store/fail.zip"}\n',
+            "TEST_EXIT": "17",
+            "TEST_CACHE_EXIT": "19",
+        }
+    ).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    assert jobs.native("prepare") == 17
+
+
+def test_flush_cachix_stops_daemon_and_republishes_receipts(
+    native_job, monkeypatch
+) -> None:
+    env, checkout = native_job
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "prefetch-receipts.jsonl").write_text(
+        '{"storePath": "/nix/store/flush.zip"}\n'
+    )
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    assert jobs.main("flush-cachix") == 0
+    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == ["daemon", "stop"]
+    flush_log = (artifacts / "cachix-flush.log").read_text()
+    assert "Collected 1 prefetched store paths" in flush_log
+    assert "cachix daemon stop returncode=" in flush_log
+    empty = Path(env["RUNNER_TEMP"]) / "empty-flush"
+    empty.mkdir()
+    monkeypatch.setenv("RUNNER_TEMP", str(empty))
+    assert jobs.main("flush-cachix") == 0
+    assert (
+        "Flushing Cachix daemon"
+        in (empty / "update-artifacts" / "cachix-flush.log").read_text()
+    )
+
+
+def test_plan_shards_and_coverage_native_stages(native_job, monkeypatch) -> None:
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    with pytest.raises(ValueError, match="previous candidate"):
+        jobs.native("plan-shards")
+    with pytest.raises(ValueError, match="Coverage requires a previous"):
+        jobs.native("assert-coverage")
+    monkeypatch.setenv("NIXCFG_PREVIOUS_CANDIDATE", "/candidate.json")
+    with pytest.raises(ValueError, match="NIXCFG_COVERAGE_EVIDENCE"):
+        jobs.native("assert-coverage")
+    monkeypatch.setenv("NIXCFG_COVERAGE_EVIDENCE", "/evidence")
+    monkeypatch.setenv("NIXCFG_JOB_RESULTS", "validate-arm=success")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(Path(env["RUNNER_TEMP"]) / "github-output"))
+    assert jobs.native("plan-shards") == 0
+    args = json.loads(Path(env["TEST_LOG"]).read_text())
+    assert args[:3] == ["ci", "update", "plan-shards"]
+    assert "--github-output" in args
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    coverage_args = jobs._native_args("assert-coverage", artifacts)
+    assert coverage_args[1:4] == ["ci", "update", "assert-coverage"]
+    assert coverage_args[coverage_args.index("--evidence") + 1] == "/evidence"
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "closure-shard")
+    monkeypatch.setenv("NIXCFG_CLOSURE_BUDGET_SECONDS", "18000")
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    monkeypatch.setenv("NIXCFG_CLOSURE_SHARD", "darwin-argus")
+    shard_args = jobs._native_args("validate", artifacts)
+    assert shard_args[shard_args.index("--closure-roots") + 1] == "darwin-argus"
+    assert shard_args[shard_args.index("--shard") + 1] == "darwin-argus"
+    monkeypatch.delenv("NIXCFG_PREVIOUS_CANDIDATE")
+    with pytest.raises(ValueError, match="Unknown native stage"):
+        jobs._native_args("unexpected", artifacts)
+
+
+def test_successful_prepare_rejects_malformed_prefetch_receipts(
+    native_job, monkeypatch
+) -> None:
+    env, checkout = native_job
+    for key, value in (
+        env
+        | {
+            "TEST_PREFETCH_RECEIPTS": "not-json\n",
+            "TEST_EXIT": "0",
+        }
+    ).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    with pytest.raises(ValueError, match="[Pp]refetch receipt"):
+        jobs.native("prepare")
+
+
+def test_malformed_prefetch_receipts_keep_updater_failure(
+    native_job, monkeypatch
+) -> None:
+    env, checkout = native_job
+    for key, value in (
+        env
+        | {
+            "TEST_PREFETCH_RECEIPTS": "not-json\n",
+            "TEST_EXIT": "17",
+        }
+    ).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    assert jobs.native("prepare") == 17
 
 
 def test_native_job_rejects_unknown_stage(native_job, monkeypatch) -> None:
@@ -649,12 +776,23 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
         step["env"]["NIXCFG_CLOSURE_BUDGET_SECONDS"]
         == "${{ inputs.closure_budget_seconds }}"
     )
-    assert step["env"]["NIXCFG_CLOSURE_YIELD"] == "${{ inputs.closure_yield }}"
+    assert step["env"]["NIXCFG_CLOSURE_ROOTS"] == "${{ inputs.closure_roots }}"
+    assert step["env"]["NIXCFG_CLOSURE_SHARD"] == "${{ inputs.shard }}"
+    assert "NIXCFG_CLOSURE_YIELD" not in step["env"]
     assert native["on"]["workflow_call"]["inputs"]["scope"]["default"] == "all"
+    assert "closure_yield" not in native["on"]["workflow_call"]["inputs"]
+    assert "closure_complete" not in native["on"]["workflow_call"]["outputs"]
     assert (
-        native["on"]["workflow_call"]["outputs"]["closure_complete"]["value"]
-        == "${{ jobs.native.outputs.closure_complete }}"
+        native["on"]["workflow_call"]["outputs"]["darwin_closure_shards"]["value"]
+        == "${{ jobs.native.outputs.darwin_closure_shards }}"
     )
+    flush = next(
+        step
+        for step in native["jobs"]["native"]["steps"]
+        if step.get("name") == "Flush Cachix daemon"
+    )
+    assert flush["if"] == "always()"
+    assert flush["env"]["NIXCFG_CI_STAGE"] == "flush-cachix"
     upload = next(
         step
         for step in native["jobs"]["native"]["steps"]
@@ -666,42 +804,92 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     assert (
         "format('{0}-{1}-{2}', inputs.stage, inputs.system, inputs.scope)" in artifact
     )
+    assert "inputs.shard" in artifact
 
 
 def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
-    """Darwin packages overlap Linux; closure shards continue through Cachix."""
+    """Darwin packages own zed; always-run root shards then the aggregate."""
     packages = workflow_jobs["validate-darwin-packages"]
     assert packages["needs"] == "prepare-x86"
     assert packages["with"]["scope"] == "packages"
-    assert set(workflow_jobs["validate-darwin-closures"]["needs"]) == {
+    plan = workflow_jobs["plan-darwin-closures"]
+    assert plan["needs"] == "prepare-x86"
+    assert plan["with"]["stage"] == "plan-shards"
+    assert plan["with"]["runner"] == "ubuntu-24.04"
+    roots = workflow_jobs["validate-darwin-roots"]
+    assert set(roots["needs"]) == {
+        "plan-darwin-closures",
         "prepare-x86",
         "cache-darwin-linux-deps-arm",
         "cache-darwin-linux-deps-x86",
+        "validate-darwin-packages",
     }
-    closure_jobs = (
-        "validate-darwin-closures",
-        "validate-darwin-closures-2",
-        "validate-darwin-closures-3",
-        "validate-darwin-closures-4",
+    roots_if = " ".join(roots["if"].split())
+    assert "always() && !cancelled()" in roots_if
+    assert "needs.plan-darwin-closures.result == 'success'" in roots_if
+    assert "validate-darwin-packages.result" not in roots_if
+    assert "closure_complete" not in roots_if
+    assert roots["strategy"]["fail-fast"] == "false"
+    assert (
+        roots["strategy"]["matrix"]
+        == "${{ fromJSON(needs.plan-darwin-closures.outputs.darwin_closure_shards) }}"
     )
-    assert len(closure_jobs) == pipeline.HOSTED_DARWIN_CLOSURE_SHARDS
-    budget = str(pipeline.HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS)
-    for name in closure_jobs:
-        spec = workflow_jobs[name]["with"]
-        assert spec["scope"] == "closures"
-        assert spec["closure_budget_seconds"] == budget
-        assert spec["runner"] == "macos-15"
-    for previous, name in pairwise(closure_jobs):
-        assert workflow_jobs[name]["needs"] == previous
-        condition = " ".join(workflow_jobs[name]["if"].split())
-        assert condition.count("closure_complete == 'false'") == 1
-    assert "closure_yield" not in workflow_jobs["validate-darwin-closures-4"]["with"]
-    for name in closure_jobs[:-1]:
-        assert workflow_jobs[name]["with"]["closure_yield"] == "true"
+    assert roots["with"]["scope"] == "closure-shard"
+    assert roots["with"]["closure_budget_seconds"] == str(
+        pipeline.HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS
+    )
+    assert roots["with"]["closure_roots"] == "${{ matrix.roots }}"
+    assert roots["with"]["shard"] == "${{ matrix.shard }}"
+    assert "closure_yield" not in roots["with"]
+    closures = workflow_jobs["validate-darwin-closures"]
+    assert set(closures["needs"]) == {
+        "prepare-x86",
+        "cache-darwin-linux-deps-arm",
+        "cache-darwin-linux-deps-x86",
+        "validate-darwin-roots",
+    }
+    assert closures["with"]["scope"] == "closures"
+    assert "closure_yield" not in closures["with"]
+    coverage = workflow_jobs["assert-coverage"]
+    assert coverage["if"] == "always()"
+    assert set(coverage["needs"]) == {
+        "prepare-x86",
+        "plan-darwin-closures",
+        "validate-arm",
+        "validate-x86",
+        "validate-darwin-packages",
+        "validate-darwin-roots",
+        "validate-darwin-closures",
+    }
     publish_if = " ".join(workflow_jobs["publish"]["if"].split())
     assert "always() && !cancelled()" in publish_if
-    for name in closure_jobs:
-        assert f"needs.{name}.outputs.closure_complete == 'true'" in publish_if
+    assert "closure_complete" not in publish_if
+    for name in (
+        "validate-arm",
+        "validate-x86",
+        "validate-darwin-packages",
+        "validate-darwin-roots",
+        "validate-darwin-closures",
+        "assert-coverage",
+    ):
+        assert f"needs.{name}.result == 'success'" in publish_if
+
+
+def test_cachix_flush_proof_requires_partial_presence_after_designed_failure() -> None:
+    """A unique path must reach gkze even when the builder exits 1."""
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/cachix-flush-proof.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    fail = workflow["jobs"]["fail-after-push"]
+    assert fail["continue-on-error"] == "true"
+    assert any(
+        step.get("name") == "Flush Cachix daemon" and step.get("if") == "always()"
+        for step in fail["steps"]
+    )
+    assert workflow["jobs"]["assert-partial"]["if"] == "always()"
+    proof_if = " ".join(workflow["jobs"]["proof"]["if"].split())
+    assert "always() && !cancelled()" in proof_if
 
 
 def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
@@ -718,6 +906,7 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     assert workflow["on"]["push"]["branches"] == [
         "main",
         "copilot/gkzenixcfg-update-automation",
+        "cursor/no-skip-darwin-shards-6614",
     ]
     assert workflow["on"]["push"]["paths"] == [".github/update-kick"]
     assert workflow["permissions"] == {"contents": "read"}
@@ -769,8 +958,9 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     assert jobs["validate-arm"]["needs"] == preparation[-1][0]
     assert jobs["validate-x86"]["needs"] == preparation[-1][0]
     _assert_darwin_closure_shards(jobs)
-    assert set(jobs["publish"]["needs"]) == set(validators)
+    assert set(jobs["publish"]["needs"]) == set(validators) | {"assert-coverage"}
     assert set(validators) <= set(jobs["repair"]["needs"])
+    assert {"plan-darwin-closures", "assert-coverage"} <= set(jobs["repair"]["needs"])
     assert set(cache_jobs) <= set(jobs["repair"]["needs"])
     assert set(cache_jobs).isdisjoint(jobs["publish"]["needs"])
     assert jobs["repair"]["permissions"] == {
@@ -975,7 +1165,9 @@ def test_generator_cache_is_scoped_to_disposable_accelerators() -> None:
     assert repair["with"]["cache-generators"] == "true"
 
 
-@pytest.mark.parametrize("stage", ["prepare", "validate", "cache-root-deps"])
+@pytest.mark.parametrize(
+    "stage", ["prepare", "validate", "cache-root-deps", "plan-shards"]
+)
 @pytest.mark.parametrize("targets", ["", "alpha beta", "--force", "alpha\nbeta"])
 @pytest.mark.parametrize("validate_all_packages", [False, True])
 def test_native_adapter_captures_only_cli_output(

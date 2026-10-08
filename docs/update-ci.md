@@ -17,23 +17,29 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    `prepare-darwin` freezes flake references, two Linux jobs cache the native
    boundary of Darwin roots (the Rosetta/linux-builder VM image) in `gkze`
    while Linux prepare continues. Those jobs are not publication evidence.
-   After the last prepare, the two Linux validators, Darwin package validation,
-   and Darwin root-closure shards run in parallel: closures wait only for the
-   final candidate plus that VM cache, not for Linux package validation.
-   Hosted public `macos-15` concurrency is at least two, so the Darwin package
-   and closure jobs overlap instead of queuing. Package evidence and closure
-   evidence are separate reports; certification requires both gates for every
-   system. Linux arm and x86 validation still run to completion before
-   publish.
-   One hosted macOS job cannot realize `checks.aarch64-darwin.root-closures`
-   inside the 360-minute job cap, so that build is a chain of shards. Each shard
-   builds for five hours, the Cachix daemon flushes, and the next shard
-   substitutes those paths and continues.    A transient store fault
+   After the last prepare, the two Linux validators and Darwin package
+   validation run in parallel. Closures still wait for the final three-system
+   candidate because certify binds reports to that tree. Darwin packages own
+   the shared `zed-editor-nightly` / `rust_*` subtree. Always-run per-root
+   Darwin shards start after that package job (they wait for its cache, not
+   its success) and after the Linux VM-image cache jobs. A generated matrix
+   from `lib.rootClosureManifest` plus `lib/update/ci/shard_costs.json` is the
+   only shard plan; there is no serial yield chain and no
+   `closure_complete` skip gate. Each planned shard always runs on the success
+   path. An aggregate `root-closures` job then realizes the farm mostly by
+   substitution. `assert-coverage` always runs, takes the manifest as
+   authority, and fails the run if any root is unbuilt, unpushed, or skipped,
+   or if a Linux / Darwin package inventory was silently narrowed. publish
+   needs that job.
+   Hosted public `macos-15` concurrency is 5 of 20. Peak Darwin use after
+   packages is four root shards. `max-jobs` / `cores` stay at 2 until a later
+   run measures a safe increase (zed memory on hosted macos-15).
+   A transient store fault
    (`Illegal byte sequence`, a vanished store `.drv`, a vanished store build
    input, rustc E0463 after `--extern` named a `/nix/store/` rlib, a crashed
    Nix daemon, or SIGBUS) is retried
-   with only the time left in that shard's build budget, then continues the
-   same way: realized paths stay in `gkze` and the next shard substitutes them.
+   with only the time left in that shard's build budget. The shard then fails
+   closed; realized paths stay in `gkze` for the next run.
    Determinate Nix can report that fault as `Cannot build` /
    `Reason: 1 dependency failed` after a substitute EILSEQ; that still retries.
    A builder that exits 1 only because a `/nix/store/` build input vanished,
@@ -41,11 +47,8 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    is the same fault. A builder that actually compiled or linked and then
    exited (`failed with exit code`, `error: builder for`) still fails the shard.
    Validation `nix build` passes `--fallback` so a failed substitute can
-   rebuild from source. The last
-   shard does not yield: an unfinished closure or a store fault that survives
-   the retry fails the run. Every declared package platform and every
-   native root is still built. Shards are serial because the closure's slow
-   graph is shared; parallel host builds would repeat it.
+   rebuild from source. Every declared package platform and every
+   native root is still built.
    Each builder evaluates every declared package platform, builds native package
    validations, and builds its roots from the independently checked root manifest.
    Nix's recursive derivation graph supplies native dependencies of foreign roots,
@@ -77,9 +80,17 @@ validation jobs consistent with that inventory. Actions declares the job graph a
 publication; every authored command step runs Python, with no shell glue. The updater
 core owns source discovery, declared output authority, candidate identity and validation. Nix owns derivations, dependency ordering, builds and cache reuse.
 
-Cachix's daemon uploads built outputs continuously. Successful preparation also
-publishes the exact files recorded by successful URL prefetches, which enter the
-store directly and do not trigger Nix's post-build hook. Encoded path basenames use
+Cachix's daemon uploads built outputs continuously in every job that uses
+`update-runtime`. Each native job also has an explicit `if: always()` flush
+that pushes leftover prefetch receipts and runs `cachix daemon stop` so a
+failed, cancelled, or near-timeout job still drains the queue. Slack before
+the 360-minute hard kill is the five-hour build budget (ED-7.1: a SIGKILL
+during flush can still drop the queue tail; runner loss keeps only paths
+Cachix already acknowledged).
+Preparation, validation, and coverage also publish the exact files recorded
+by URL prefetches on every exit path, not only when the updater succeeds.
+Those files enter the store directly and do not trigger Nix's post-build hook.
+Encoded path basenames use
 nixpkgs' fetchurl spelling instead of URL-decoded spelling for matching store identities;
 explicit package-specific source names remain independent overrides. Prefetches
 append store paths to an invocation-local JSONL receipt retained with the job

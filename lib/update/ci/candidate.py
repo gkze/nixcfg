@@ -3,6 +3,7 @@
 import asyncio
 import json
 import math
+import os
 import sys
 from contextlib import redirect_stdout
 from dataclasses import replace
@@ -18,9 +19,22 @@ from lib.update import cli as update_cli
 from lib.update import derivation_validation as validation
 from lib.update.candidate import Candidate, Preparation
 from lib.update.ci import jobs
+from lib.update.ci.coverage import (
+    assert_update_coverage,
+    check_path_in_cachix,
+    parse_job_results,
+    root_store_paths,
+)
+from lib.update.ci.shard_plan import (
+    ClosureShardReceipt,
+    eval_root_closure_manifest,
+    github_actions_matrix,
+    plan_darwin_closure_shards,
+    write_github_actions_output,
+)
 from lib.update.cli_options import RepairAgent, UpdateOptions
 from lib.update.io import atomic_write_text
-from lib.update.nix import get_current_nix_platform, is_transient_store_interruption
+from lib.update.nix import get_current_nix_platform
 from lib.update.paths import get_repo_root
 from lib.update.persistence import IsolatedUpdateWorkspace, planned_update_paths
 from lib.update.repair import propose_repair
@@ -43,19 +57,14 @@ def repair(
     propose_repair(get_repo_root(), evidence=evidence, output=output, agent=agent)
 
 
-ValidationScope = Literal["all", "packages", "closures"]
+ValidationScope = Literal["all", "packages", "closures", "closure-shard"]
 ValidationGate = Literal["packages", "closures"]
-# Exit status for a closure shard that stopped on its budget with a consistent
-# Cachix handoff. jobs.py treats only this status as continuation, and only
-# when the workflow asked the shard to yield.
-CLOSURE_YIELD_EXIT = 75
 # Graph discovery is minutes, not the build. Keep it inside the job cap so a
 # hung eval fails this shard instead of consuming the build budget.
 _CLOSURE_DISCOVERY_TIMEOUT_SECONDS = 45 * 60
 # Five hours of nix build, inside the 360-minute hosted job, leaves time for
 # image cleanup, discovery, and the Cachix daemon flush before GitHub cancels.
 HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS = 5 * 60 * 60
-HOSTED_DARWIN_CLOSURE_SHARDS = 4
 
 
 class ValidationReport(BaseModel):
@@ -68,6 +77,7 @@ class ValidationReport(BaseModel):
     validate_all_packages: bool = False
     gates: tuple[ValidationGate, ...] = ("packages", "closures")
     failures: tuple[validation.DerivationValidationFailure, ...]
+    planned_installables: tuple[str, ...] = ()
 
 
 class RootDependencyCacheReport(BaseModel):
@@ -211,6 +221,8 @@ def _gates_for_scope(scope: str) -> tuple[ValidationGate, ...]:
         return ("closures",)
     if scope == "all":
         return ("packages", "closures")
+    if scope == "closure-shard":
+        return ()
     msg = f"Unknown validation scope: {scope}"
     raise ValueError(msg)
 
@@ -233,16 +245,25 @@ def validate_candidate(
     *,
     scope: ValidationScope = "all",
     closure_budget_seconds: float | None = None,
+    closure_roots: tuple[str, ...] | None = None,
 ) -> ValidationReport:
     """Validate the assembled tree on this native builder, leaving the repo alone.
 
     ``packages`` and ``closures`` split one platform across runners. A combined
-    ``all`` scope is what Linux validators and local updates use. Closure shards
-    do not GC: each starts from an empty store and reuses paths the previous
-    shard pushed to Cachix. The combined scope still GCs on hosted Darwin
-    because package outputs and the closure fetch share one disk.
+    ``all`` scope is what Linux validators and local updates use. ``closure-shard``
+    realizes named Darwin roots and is not certify evidence; the aggregate
+    ``closures`` gate still proves ``root-closures``. Hosted Darwin shards start
+    from an empty store and reuse paths Cachix already has. The combined scope
+    still GCs on hosted Darwin because package outputs and the closure fetch
+    share one disk.
     """
     require_complete_candidate(candidate)
+    if closure_roots is not None and scope != "closure-shard":
+        msg = "Named closure roots require the closure-shard scope"
+        raise ValueError(msg)
+    if scope == "closure-shard" and not closure_roots:
+        msg = "closure-shard requires a nonempty root list"
+        raise ValueError(msg)
     gates = _gates_for_scope(scope)
     budget = _require_closure_budget(closure_budget_seconds)
     system = get_current_nix_platform()
@@ -262,10 +283,21 @@ def validate_candidate(
         )
         workspace.validate_changes(allowed)
         failures: tuple[validation.DerivationValidationFailure, ...] = ()
+        planned_installables: tuple[str, ...] = ()
         with workspace.validation_snapshot() as snapshot:
             if "packages" in gates:
+                sources = None if candidate.validate_all_packages else candidate.sources
+                planned_installables = tuple(
+                    request.installable
+                    for request in validation.resolve_derivation_validations(
+                        updaters if sources is None else sources,
+                        updaters=updaters,
+                        all_declared_systems=True,
+                        native_builds_only=True,
+                    )
+                )
                 failures += validation.validate_derivations(
-                    None if candidate.validate_all_packages else candidate.sources,
+                    sources,
                     updaters=updaters,
                     flake_root=snapshot.root,
                     print_build_logs=True,
@@ -273,26 +305,26 @@ def validate_candidate(
                     native_builds_only=True,
                     progress=_hosted_validation_progress("derivations"),
                 )
-            if "closures" in gates:
+            if "closures" in gates or scope == "closure-shard":
                 if scope == "all":
                     # Hosted macos-15 root-closures can fetch tens of GiB after
                     # package validation has already filled the store. GC first
                     # so the Nix daemon is not killed mid-unpack.
                     jobs.reclaim_hosted_store()
-                # Root checks are computed from the same independently verified
-                # manifest used by local updates; only native execution is sharded.
-                # Hosted macos-15 died mid-build when -L streamed 4000+ derivation
-                # logs. Build the closure without those logs so Cachix's daemon can
-                # upload every realized path. Command progress still reaches the job log.
+                # Root checks come from the independently verified manifest.
+                # Hosted macos-15 died mid-build when -L streamed 4000+
+                # derivation logs. Build without those logs so Cachix can
+                # upload every realized path.
                 closure_progress = _hosted_validation_progress("root-closures")
                 if budget is not None:
                     closure_progress(
                         f"Root-closure build budget is {budget:.0f}s; "
-                        "realized paths stay in the gkze cache for the next shard"
+                        "realized paths stay in the gkze cache"
                     )
                 failures += validation.validate_root_closures(
                     flake_root=snapshot.root,
                     systems=(system,),
+                    root_names=closure_roots,
                     include_dependencies=True,
                     print_build_logs=not jobs.is_hosted_darwin_runner(),
                     progress=closure_progress,
@@ -310,6 +342,7 @@ def validate_candidate(
         gates=gates,
         failures=failures,
         validate_all_packages=candidate.validate_all_packages,
+        planned_installables=planned_installables,
     )
 
 
@@ -385,25 +418,6 @@ def prepare(
     raise typer.Exit(status)
 
 
-def _closure_build_budget_exhausted(
-    error: validation.ValidationIncompleteError,
-) -> bool:
-    """Return whether the root-closure realization itself ran out of budget."""
-    text = str(error)
-    return "timed out" in text and "nix build" in text
-
-
-def _closure_store_fault(report: ValidationReport) -> bool:
-    """Return whether every recorded failure is a transient store fault.
-
-    One bad derivation mixed with a store fault still fails the shard. The
-    next runner only continues when the build itself did not fail.
-    """
-    return bool(report.failures) and all(
-        is_transient_store_interruption(failure.message) for failure in report.failures
-    )
-
-
 @app.command("cache-root-deps")
 def cache_root_deps(
     candidate: Annotated[Path, typer.Option(help="Prepared candidate JSON.")],
@@ -424,43 +438,47 @@ def validate(
     output: Annotated[Path, typer.Option(help="Native validation report.")],
     scope: Annotated[
         ValidationScope,
-        typer.Option(help="Package gate, closure gate, or both."),
+        typer.Option(help="Package gate, closure gate, shard, or both."),
     ] = "all",
     closure_budget_seconds: Annotated[
         float | None,
         typer.Option(help="Stop the root-closure build after this many seconds."),
     ] = None,
-    *,
-    closure_yield: Annotated[
-        bool,
-        typer.Option(
-            help="Exit with the continuation status when the closure budget is exhausted."
-        ),
-    ] = False,
+    closure_roots: Annotated[
+        str | None,
+        typer.Option(help="Space-separated Darwin roots for one always-run shard."),
+    ] = None,
+    shard: Annotated[
+        str | None,
+        typer.Option(help="Shard identity recorded on a closure-shard receipt."),
+    ] = None,
 ) -> None:
     """Run the existing package and root gates on the exact assembled tree."""
-    if closure_yield and (scope != "closures" or closure_budget_seconds is None):
-        msg = "Closure yield requires a closure scope and budget"
+    if scope == "closure-shard" and (not closure_roots or not shard):
+        msg = "closure-shard requires --closure-roots and --shard"
+        raise ValueError(msg)
+    if scope != "closure-shard" and (closure_roots or shard):
+        msg = "--closure-roots and --shard are only valid for closure-shard"
         raise ValueError(msg)
     output = _output_path(output, get_repo_root())
-    try:
-        report = validate_candidate(
-            Candidate.model_validate_json(candidate.read_bytes()),
-            scope=scope,
-            closure_budget_seconds=closure_budget_seconds,
+    roots = None if closure_roots is None else tuple(closure_roots.split())
+    report = validate_candidate(
+        Candidate.model_validate_json(candidate.read_bytes()),
+        scope=scope,
+        closure_budget_seconds=closure_budget_seconds,
+        closure_roots=roots,
+    )
+    if scope == "closure-shard":
+        receipt = ClosureShardReceipt(
+            tree=report.tree,
+            system=report.system,
+            shard=shard or "",
+            roots=roots or (),
+            failures=tuple(failure.message for failure in report.failures),
         )
-    except validation.ValidationIncompleteError as error:
-        if closure_yield and (
-            _closure_build_budget_exhausted(error)
-            or is_transient_store_interruption(str(error))
-        ):
-            raise typer.Exit(CLOSURE_YIELD_EXIT) from error
-        raise
-    if closure_yield and _closure_store_fault(report):
-        # Same handoff as a budget yield: realized paths are already in gkze,
-        # and the next shard substitutes them. The last shard does not yield.
-        raise typer.Exit(CLOSURE_YIELD_EXIT)
-    atomic_write_text(output, report.model_dump_json(indent=2) + "\n")
+        atomic_write_text(output, receipt.model_dump_json(indent=2) + "\n")
+    else:
+        atomic_write_text(output, report.model_dump_json(indent=2) + "\n")
     raise typer.Exit(bool(report.failures))
 
 
@@ -496,4 +514,97 @@ def matrix() -> None:
                 for system in supported_systems()
             ]
         })
+    )
+
+
+@app.command("plan-shards")
+def plan_shards(
+    candidate: Annotated[Path, typer.Option(help="Final prepared candidate JSON.")],
+    output: Annotated[Path, typer.Option(help="Generated Darwin shard matrix JSON.")],
+    github_output: Annotated[
+        Path | None,
+        typer.Option(help="Optional Actions GITHUB_OUTPUT path."),
+    ] = None,
+) -> None:
+    """Plan always-run Darwin closure shards from the candidate manifest."""
+    prepared = Candidate.model_validate_json(candidate.read_bytes())
+    require_complete_candidate(prepared)
+    updaters = ensure_updaters_loaded()
+    output = _output_path(output, get_repo_root())
+    with IsolatedUpdateWorkspace(get_repo_root()) as workspace:
+        prepared.apply(workspace.root)
+        allowed = (
+            *(
+                path.relative_to(workspace.root)
+                for path in planned_update_paths(list(prepared.sources), updaters)
+            ),
+            Path("flake.nix"),
+            Path("flake.lock"),
+        )
+        workspace.validate_changes(allowed)
+        with workspace.validation_snapshot() as snapshot:
+            shards = plan_darwin_closure_shards(
+                eval_root_closure_manifest(snapshot.root)
+            )
+    matrix = github_actions_matrix(shards)
+    atomic_write_text(output, json.dumps(matrix, indent=2) + "\n")
+    target = github_output
+    if target is None:
+        raw = os.environ.get("GITHUB_OUTPUT")
+        target = Path(raw) if raw else None
+    if target is not None:
+        write_github_actions_output(shards, target)
+
+
+@app.command("assert-coverage")
+def assert_coverage(
+    candidate: Annotated[Path, typer.Option(help="Final prepared candidate JSON.")],
+    evidence: Annotated[Path, typer.Option(help="Downloaded Update artifacts.")],
+    job_results: Annotated[
+        str,
+        typer.Option(help="name=result lines for every required job."),
+    ],
+) -> None:
+    """Fail unless every planned root and package is present in Cachix."""
+    prepared = Candidate.model_validate_json(candidate.read_bytes())
+    require_complete_candidate(prepared)
+    updaters = ensure_updaters_loaded()
+    with IsolatedUpdateWorkspace(get_repo_root()) as workspace:
+        prepared.apply(workspace.root)
+        allowed = (
+            *(
+                path.relative_to(workspace.root)
+                for path in planned_update_paths(list(prepared.sources), updaters)
+            ),
+            Path("flake.nix"),
+            Path("flake.lock"),
+        )
+        workspace.validate_changes(allowed)
+        with workspace.validation_snapshot() as snapshot:
+            manifest = eval_root_closure_manifest(snapshot.root)
+            package_expected = {
+                system: frozenset(
+                    request.installable
+                    for request in validation.resolve_derivation_validations(
+                        updaters
+                        if prepared.validate_all_packages
+                        else prepared.sources,
+                        updaters=updaters,
+                        all_declared_systems=True,
+                        native_builds_only=True,
+                        native_system=system,
+                    )
+                )
+                for system in prepared.systems
+            }
+            paths = root_store_paths(snapshot.root, manifest)
+    assert_update_coverage(
+        job_results=parse_job_results(job_results),
+        evidence=evidence,
+        tree=prepared.tree,
+        validate_all_packages=prepared.validate_all_packages,
+        manifest=manifest,
+        package_expected=package_expected,
+        root_paths=paths,
+        cachix_present=check_path_in_cachix,
     )

@@ -25,6 +25,7 @@ on:
     branches:
       - main
       - copilot/gkzenixcfg-update-automation
+      - cursor/no-skip-darwin-shards-6614
     paths:
       - .github/update-kick
 permissions:
@@ -110,10 +111,11 @@ jobs:
     secrets: inherit
   # Package validation does not need the Linux VM image, so it overlaps the
   # Linux validators. Closures need that image in gkze; the cache-* jobs
-  # populate it during later prepare, so this shard no longer waits for
-  # Linux package validation. Public macos-15 concurrency is at least 2
-  # (run 37090922383 overlapped packages+closures), so these two Darwin
-  # jobs run together instead of queuing.
+  # populate it during later prepare. zed-editor-nightly / rust_* is the
+  # shared heavy subtree and is assigned to this job so root shards
+  # substitute it instead of rebuilding it. Public macos-15 concurrency is
+  # 5; root shards wait for this job so they do not consume a fifth slot
+  # while zed is still compiling.
   validate-darwin-packages:
     needs: prepare-x86
     uses: ./.github/workflows/update-native.yml
@@ -124,63 +126,60 @@ jobs:
       previous: prepare-x86_64-linux
       scope: packages
     secrets: inherit
-  # One macos-15 job cannot both validate every package and realize
-  # checks.aarch64-darwin.root-closures inside GitHub's 360-minute cap.
-  # Each shard builds until its budget, the Cachix daemon flushes, and the
-  # next shard substitutes those paths. The last shard fails closed.
+  # One generated matrix from lib.rootClosureManifest plus shard_costs.json.
+  # The plan job evaluates the candidate tree, not a hand-maintained host list.
+  plan-darwin-closures:
+    needs: prepare-x86
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: plan-shards
+      previous: prepare-x86_64-linux
+    secrets: inherit
+  # Always-run per-root Darwin shards. The if: only skips when a required
+  # input job failed; a planned shard cannot skip on the success path.
+  # Packages are a wait-for-cache edge, not a success gate, so a failed
+  # zed build still lets shards push whatever they realize.
+  validate-darwin-roots:
+    needs:
+      - plan-darwin-closures
+      - prepare-x86
+      - cache-darwin-linux-deps-arm
+      - cache-darwin-linux-deps-x86
+      - validate-darwin-packages
+    if: |-
+      always() && !cancelled() &&
+      needs.plan-darwin-closures.result == 'success' &&
+      needs.prepare-x86.result == 'success' &&
+      needs.cache-darwin-linux-deps-arm.result == 'success' &&
+      needs.cache-darwin-linux-deps-x86.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan-darwin-closures.outputs.darwin_closure_shards) }}
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: closure-shard
+      closure_budget_seconds: "18000"
+      closure_roots: ${{ matrix.roots }}
+      shard: ${{ matrix.shard }}
+    secrets: inherit
+  # Aggregate proof. Mostly substitution of the per-root checks.
   validate-darwin-closures:
     needs:
       - prepare-x86
       - cache-darwin-linux-deps-arm
       - cache-darwin-linux-deps-x86
-    uses: ./.github/workflows/update-native.yml
-    with:
-      runner: macos-15
-      system: aarch64-darwin
-      stage: validate
-      previous: prepare-x86_64-linux
-      scope: closures
-      closure_budget_seconds: "18000"
-      closure_yield: true
-    secrets: inherit
-  validate-darwin-closures-2:
-    needs: validate-darwin-closures
+      - validate-darwin-roots
     if: |-
       always() && !cancelled() &&
-      needs.validate-darwin-closures.result == 'success' &&
-      needs.validate-darwin-closures.outputs.closure_complete == 'false'
-    uses: ./.github/workflows/update-native.yml
-    with:
-      runner: macos-15
-      system: aarch64-darwin
-      stage: validate
-      previous: prepare-x86_64-linux
-      scope: closures
-      closure_budget_seconds: "18000"
-      closure_yield: true
-    secrets: inherit
-  validate-darwin-closures-3:
-    needs: validate-darwin-closures-2
-    if: |-
-      always() && !cancelled() &&
-      needs.validate-darwin-closures-2.result == 'success' &&
-      needs.validate-darwin-closures-2.outputs.closure_complete == 'false'
-    uses: ./.github/workflows/update-native.yml
-    with:
-      runner: macos-15
-      system: aarch64-darwin
-      stage: validate
-      previous: prepare-x86_64-linux
-      scope: closures
-      closure_budget_seconds: "18000"
-      closure_yield: true
-    secrets: inherit
-  validate-darwin-closures-4:
-    needs: validate-darwin-closures-3
-    if: |-
-      always() && !cancelled() &&
-      needs.validate-darwin-closures-3.result == 'success' &&
-      needs.validate-darwin-closures-3.outputs.closure_complete == 'false'
+      needs.prepare-x86.result == 'success' &&
+      needs.cache-darwin-linux-deps-arm.result == 'success' &&
+      needs.cache-darwin-linux-deps-x86.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -190,28 +189,78 @@ jobs:
       scope: closures
       closure_budget_seconds: "18000"
     secrets: inherit
+  # Fail closed: every manifest root valid and present in gkze.cachix.org,
+  # every planned shard ran, Linux + Darwin package inventories intact.
+  assert-coverage:
+    needs:
+      - prepare-x86
+      - plan-darwin-closures
+      - validate-arm
+      - validate-x86
+      - validate-darwin-packages
+      - validate-darwin-roots
+      - validate-darwin-closures
+    if: always()
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/update-runtime
+        id: runtime
+        with:
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: prepare-x86_64-linux
+          path: ${{ runner.temp }}/previous
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: ${{ runner.temp }}/evidence
+      - name: Assert root and package coverage
+        env:
+          NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          NIXCFG_CI_STAGE: assert-coverage
+          NIXCFG_PREVIOUS_CANDIDATE: ${{ runner.temp }}/previous/candidate.json
+          NIXCFG_COVERAGE_EVIDENCE: ${{ runner.temp }}/evidence
+          NIXCFG_JOB_RESULTS: |-
+            plan-darwin-closures=${{ needs.plan-darwin-closures.result }}
+            validate-arm=${{ needs.validate-arm.result }}
+            validate-x86=${{ needs.validate-x86.result }}
+            validate-darwin-packages=${{ needs.validate-darwin-packages.result }}
+            validate-darwin-roots=${{ needs.validate-darwin-roots.result }}
+            validate-darwin-closures=${{ needs.validate-darwin-closures.result }}
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
   publish:
     needs:
       - validate-arm
       - validate-x86
       - validate-darwin-packages
+      - validate-darwin-roots
       - validate-darwin-closures
-      - validate-darwin-closures-2
-      - validate-darwin-closures-3
-      - validate-darwin-closures-4
+      - assert-coverage
     if: |-
       always() && !cancelled() &&
       needs.validate-arm.result == 'success' &&
       needs.validate-x86.result == 'success' &&
       needs.validate-darwin-packages.result == 'success' &&
-      (needs.validate-darwin-closures.result == 'success' &&
-      needs.validate-darwin-closures.outputs.closure_complete == 'true' ||
-      needs.validate-darwin-closures-2.result == 'success' &&
-      needs.validate-darwin-closures-2.outputs.closure_complete == 'true' ||
-      needs.validate-darwin-closures-3.result == 'success' &&
-      needs.validate-darwin-closures-3.outputs.closure_complete == 'true' ||
-      needs.validate-darwin-closures-4.result == 'success' &&
-      needs.validate-darwin-closures-4.outputs.closure_complete == 'true')
+      needs.validate-darwin-roots.result == 'success' &&
+      needs.validate-darwin-closures.result == 'success' &&
+      needs.assert-coverage.result == 'success'
     # The Python suite and its 100% coverage floor are maintained on Darwin.
     runs-on: macos-15
     timeout-minutes: 120
@@ -230,6 +279,14 @@ jobs:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           path: ${{ runner.temp }}/evidence
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
       - name: Certify and check final tree
         id: candidate
         env:
@@ -270,10 +327,10 @@ jobs:
       - validate-arm
       - validate-x86
       - validate-darwin-packages
+      - plan-darwin-closures
+      - validate-darwin-roots
       - validate-darwin-closures
-      - validate-darwin-closures-2
-      - validate-darwin-closures-3
-      - validate-darwin-closures-4
+      - assert-coverage
       - publish
     if: |-
       always() && !cancelled() && contains(needs.*.result, 'failure') &&
@@ -299,6 +356,14 @@ jobs:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           path: ${{ runner.temp }}/repair-evidence
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
       - name: Collect failed job logs
         env:
           GH_TOKEN: ${{ github.token }}

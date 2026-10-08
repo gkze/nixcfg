@@ -591,12 +591,18 @@ def test_validation_scopes_split_packages_from_closures(
         pipeline._require_closure_budget("18000")  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="positive"):
         pipeline._require_closure_budget(seconds=True)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="Named closure roots"):
+        pipeline.validate_candidate(
+            candidate, scope="packages", closure_roots=("darwin-argus",)
+        )
+    with pytest.raises(ValueError, match="nonempty root list"):
+        pipeline.validate_candidate(candidate, scope="closure-shard", closure_roots=())
 
 
-def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
+def test_closure_budget_timeout_fails_closed(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A timed-out closure build continues; other signals and eval timeouts fail."""
+    """A timed-out or interrupted closure build writes no success report."""
     candidate = _candidate_for_scope(prepared_run)
     candidate_path = tmp_path / "candidate.json"
     candidate_path.write_text(candidate.model_dump_json())
@@ -604,14 +610,6 @@ def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
     monkeypatch.setattr(
         pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
     )
-
-    def timed_out(**_kwargs: object) -> None:
-        raise ValidationIncompleteError(
-            "Validation incomplete: nix build path:.#checks.aarch64-darwin.root-closures: "
-            "Command timed out after 18000 seconds"
-        )
-
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", timed_out)
     args = [
         "validate",
         "--candidate",
@@ -622,10 +620,17 @@ def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
         "closures",
         "--closure-budget-seconds",
         "18000",
-        "--closure-yield",
     ]
-    yielded = CliRunner().invoke(pipeline.app, args)
-    assert yielded.exit_code == pipeline.CLOSURE_YIELD_EXIT
+
+    def timed_out(**_kwargs: object) -> None:
+        raise ValidationIncompleteError(
+            "Validation incomplete: nix build path:.#checks.aarch64-darwin.root-closures: "
+            "Command timed out after 18000 seconds"
+        )
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", timed_out)
+    timed = CliRunner().invoke(pipeline.app, args)
+    assert timed.exit_code not in {0, None}
     assert not output.exists()
 
     def eval_timed_out(**_kwargs: object) -> None:
@@ -636,7 +641,7 @@ def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
 
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", eval_timed_out)
     stalled = CliRunner().invoke(pipeline.app, args)
-    assert stalled.exit_code not in {0, pipeline.CLOSURE_YIELD_EXIT}
+    assert stalled.exit_code not in {0, None}
     assert not output.exists()
 
     def signaled(**_kwargs: object) -> None:
@@ -646,7 +651,7 @@ def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
 
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", signaled)
     killed = CliRunner().invoke(pipeline.app, args)
-    assert killed.exit_code not in {0, pipeline.CLOSURE_YIELD_EXIT}
+    assert killed.exit_code not in {0, None}
 
     def store_bus(**_kwargs: object) -> None:
         raise ValidationIncompleteError(
@@ -656,38 +661,77 @@ def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
 
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", store_bus)
     bus = CliRunner().invoke(pipeline.app, args)
-    assert bus.exit_code == pipeline.CLOSURE_YIELD_EXIT
+    assert bus.exit_code not in {0, None}
     assert not output.exists()
-    base = [
-        "validate",
-        "--candidate",
-        str(candidate_path),
-        "--output",
-        str(output),
-    ]
-    missing_budget = CliRunner().invoke(
-        pipeline.app,
-        [*base, "--scope", "closures", "--closure-yield"],
-    )
-    assert missing_budget.exit_code != 0
-    package_yield = CliRunner().invoke(
+    missing_roots = CliRunner().invoke(
         pipeline.app,
         [
-            *base,
+            *args,
             "--scope",
-            "packages",
-            "--closure-budget-seconds",
-            "18000",
-            "--closure-yield",
+            "closure-shard",
         ],
     )
-    assert package_yield.exit_code != 0
+    assert missing_roots.exit_code != 0
+    package_roots = CliRunner().invoke(
+        pipeline.app,
+        [
+            "validate",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(output),
+            "--scope",
+            "packages",
+            "--closure-roots",
+            "darwin-argus",
+        ],
+    )
+    assert package_roots.exit_code != 0
 
 
-def test_closure_yield_continues_after_store_unlink_only(
-    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "message",
+    [
+        'error: cannot unlink "/nix/store/abc-replay-10.67.0.tgz": Illegal byte sequence',
+        (
+            'error: clearing flags of path "/nix/store/s6-bun-cache/share/'
+            'bun-packages/lie@3.3.0": Illegal byte sequence\n'
+            "error: Cannot build '/nix/store/a7-superset-1.30.2.drv'.\n"
+            "       Reason: 1 dependency failed.\n"
+        ),
+        (
+            'error: opening file "/nix/store/67b3dw9p5i6qynv9mf3fhsa21cmibk57-'
+            'unsloth-desktop-0.1.813-beta.drv": No such file or directory'
+        ),
+        (
+            "error: Cannot build '/nix/store/wzrs1hpgczfxgv6q7yvp7iy39plhakw7-"
+            "granola-7.626.3.drv'.\n"
+            "       Reason: builder failed with exit code 1.\n"
+            "       > build input /nix/store/fyaryjvghbkpfnsyw97hb3lyb37s1pd6-"
+            "move-lib64.sh does not exist"
+        ),
+        (
+            "error: cannot open connection to remote store 'daemon': "
+            "Nix daemon disconnected unexpectedly (maybe it crashed?)"
+        ),
+        (
+            "error: Cannot build '/nix/store/1vhn1bsiqchjp101n2sj5fjjk6fiw596-"
+            "rust_agent_settings-0.1.0.drv'.\n"
+            "       Reason: builder failed with exit code 1.\n"
+            "       > rustc --extern settings=/nix/store/"
+            "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
+            "libsettings-7be7f1170a.rlib\n"
+            "       > error[E0463]: can't find crate for `settings`"
+        ),
+    ],
+)
+def test_closure_store_faults_fail_closed(
+    prepared_run,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
 ) -> None:
-    """A store unlink continues the shard; a real derivation failure still fails it."""
+    """Store faults no longer yield a later shard; the job fails closed."""
     candidate = _candidate_for_scope(prepared_run)
     candidate_path = tmp_path / "candidate.json"
     candidate_path.write_text(candidate.model_dump_json())
@@ -695,108 +739,18 @@ def test_closure_yield_continues_after_store_unlink_only(
     monkeypatch.setattr(
         pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
     )
-    store_failure = DerivationValidationFailure(
-        source="root-closures",
-        installable="path:.#checks.aarch64-darwin.root-closures",
-        message=(
-            'error: cannot unlink "/nix/store/abc-replay-10.67.0.tgz": '
-            "Illegal byte sequence"
-        ),
-    )
-    builder_failure = DerivationValidationFailure(
-        source="root-closures",
-        installable="path:.#checks.aarch64-darwin.root-closures",
-        message="error: builder for '/nix/store/abc.drv' failed with exit code 1",
-    )
-    current_nix_failure = DerivationValidationFailure(
-        source="root-closures",
-        installable="path:.#checks.aarch64-darwin.root-closures",
-        message=(
-            "error: Cannot build '/nix/store/abc.drv'.\n"
-            "Reason: builder failed with exit code 1.\n"
-            "error: Build failed due to failed dependency\n"
-            'error: cannot unlink "/nix/store/abc.tgz": Illegal byte sequence\n'
-            "terminated by signal 10"
-        ),
-    )
-    substitute_eilseq_failure = DerivationValidationFailure(
-        source="root-closures",
-        installable="path:.#checks.aarch64-darwin.root-closures",
-        message=(
-            'error: clearing flags of path "/nix/store/s6-bun-cache/share/'
-            'bun-packages/lie@3.3.0": Illegal byte sequence\n'
-            "error: Cannot build '/nix/store/a7-superset-1.30.2.drv'.\n"
-            "       Reason: 1 dependency failed.\n"
-        ),
-    )
-    missing_drv_failure = DerivationValidationFailure(
-        source="root-closures",
-        installable="path:.#checks.aarch64-darwin.root-closures",
-        message=(
-            'error: opening file "/nix/store/67b3dw9p5i6qynv9mf3fhsa21cmibk57-'
-            'unsloth-desktop-0.1.813-beta.drv": No such file or directory'
-        ),
-    )
 
     def only_store(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (store_failure,)
+        return (
+            DerivationValidationFailure(
+                source="root-closures",
+                installable="path:.#checks.aarch64-darwin.root-closures",
+                message=message,
+            ),
+        )
 
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", only_store)
-    args = [
-        "validate",
-        "--candidate",
-        str(candidate_path),
-        "--output",
-        str(output),
-        "--scope",
-        "closures",
-        "--closure-budget-seconds",
-        "18000",
-        "--closure-yield",
-    ]
-    yielded = CliRunner().invoke(pipeline.app, args)
-    assert yielded.exit_code == pipeline.CLOSURE_YIELD_EXIT
-    assert not output.exists()
-
-    def mixed(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (store_failure, builder_failure)
-
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", mixed)
-    mixed_result = CliRunner().invoke(pipeline.app, args)
-    assert mixed_result.exit_code == 1
-    written = json.loads(output.read_text())
-    assert len(written["failures"]) == 2
-    output.unlink()
-
-    def current_nix(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (current_nix_failure,)
-
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", current_nix)
-    current = CliRunner().invoke(pipeline.app, args)
-    assert current.exit_code == 1
-    assert len(json.loads(output.read_text())["failures"]) == 1
-    output.unlink()
-
-    def substitute_eilseq(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (substitute_eilseq_failure,)
-
-    monkeypatch.setattr(
-        pipeline.validation, "validate_root_closures", substitute_eilseq
-    )
-    cascaded = CliRunner().invoke(pipeline.app, args)
-    assert cascaded.exit_code == pipeline.CLOSURE_YIELD_EXIT
-    assert not output.exists()
-
-    def missing_drv(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (missing_drv_failure,)
-
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", missing_drv)
-    vanished = CliRunner().invoke(pipeline.app, args)
-    assert vanished.exit_code == pipeline.CLOSURE_YIELD_EXIT
-    assert not output.exists()
-
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", only_store)
-    held = CliRunner().invoke(
+    result = CliRunner().invoke(
         pipeline.app,
         [
             "validate",
@@ -810,128 +764,178 @@ def test_closure_yield_continues_after_store_unlink_only(
             "18000",
         ],
     )
-    assert held.exit_code == 1
-    assert json.loads(output.read_text())["failures"]
-    output.unlink()
+    assert result.exit_code == 1
+    written = json.loads(output.read_text())
+    assert written["failures"][0]["message"] == message
 
-    def clean(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
+
+def test_closure_shard_writes_receipt_instead_of_validation_report(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Per-root shards are not certify evidence."""
+    candidate = _candidate_for_scope(prepared_run)
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    output = tmp_path / "shard-receipt.json"
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+    seen: list[object] = []
+
+    def roots(**kwargs: object) -> tuple[()]:
+        seen.append(kwargs.get("root_names"))
         return ()
 
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", clean)
-    succeeded = CliRunner().invoke(pipeline.app, args)
-    assert succeeded.exit_code == 0
-    assert json.loads(output.read_text())["failures"] == []
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "validate",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(output),
+            "--scope",
+            "closure-shard",
+            "--closure-roots",
+            "darwin-argus",
+            "--shard",
+            "darwin-argus",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    receipt = json.loads(output.read_text())
+    assert receipt["shard"] == "darwin-argus"
+    assert receipt["roots"] == ["darwin-argus"]
+    assert receipt["failures"] == []
+    assert seen == [("darwin-argus",)]
 
 
-def test_closure_yield_continues_after_vanished_build_input_or_daemon_disconnect(
+def test_plan_shards_writes_generated_matrix(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Update 37522365810: vanished stdenv hook and daemon crash yield the shard."""
     candidate = _candidate_for_scope(prepared_run)
     candidate_path = tmp_path / "candidate.json"
     candidate_path.write_text(candidate.model_dump_json())
-    output = tmp_path / "validation.json"
-    monkeypatch.setattr(
-        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    output = tmp_path / "matrix.json"
+    github = tmp_path / "github-output"
+    manifest = {
+        "schemaVersion": 2,
+        "requiredKinds": ["darwin", "home"],
+        "requiredRoots": [],
+        "roots": [
+            {"kind": "darwin", "name": "argus", "system": "aarch64-darwin"},
+            {"kind": "home", "name": "george", "system": "aarch64-darwin"},
+        ],
+    }
+
+    def fake_eval(flake_root: Path) -> object:
+        from lib.update.derivation_validation import RootClosureManifest
+
+        assert flake_root.is_dir()
+        return RootClosureManifest.model_validate(manifest)
+
+    monkeypatch.setattr(pipeline, "eval_root_closure_manifest", fake_eval)
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "plan-shards",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(output),
+            "--github-output",
+            str(github),
+        ],
     )
-    args = [
-        "validate",
-        "--candidate",
-        str(candidate_path),
-        "--output",
-        str(output),
-        "--scope",
-        "closures",
-        "--closure-budget-seconds",
-        "18000",
-        "--closure-yield",
-    ]
-
-    def vanished_input(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (
-            DerivationValidationFailure(
-                source="root-closures",
-                installable="path:.#checks.aarch64-darwin.root-closures",
-                message=(
-                    "error: Cannot build '/nix/store/wzrs1hpgczfxgv6q7yvp7iy39plhakw7-"
-                    "granola-7.626.3.drv'.\n"
-                    "       Reason: builder failed with exit code 1.\n"
-                    "       > build input /nix/store/fyaryjvghbkpfnsyw97hb3lyb37s1pd6-"
-                    "move-lib64.sh does not exist"
-                ),
-            ),
-        )
-
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", vanished_input)
-    granola_store = CliRunner().invoke(pipeline.app, args)
-    assert granola_store.exit_code == pipeline.CLOSURE_YIELD_EXIT
-    assert not output.exists()
-
-    def daemon_disconnect(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (
-            DerivationValidationFailure(
-                source="root-closures",
-                installable="path:.#checks.aarch64-darwin.root-closures",
-                message=(
-                    "error: cannot open connection to remote store 'daemon': "
-                    "Nix daemon disconnected unexpectedly (maybe it crashed?)"
-                ),
-            ),
-        )
-
-    monkeypatch.setattr(
-        pipeline.validation, "validate_root_closures", daemon_disconnect
+    assert result.exit_code == 0, result.output
+    matrix = json.loads(output.read_text())
+    assert {row["shard"] for row in matrix["include"]} == {
+        "darwin-argus",
+        "home-george",
+    }
+    assert "darwin_closure_shards=" in github.read_text()
+    env_output = tmp_path / "github-output-env"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(env_output))
+    env_matrix = tmp_path / "matrix-env.json"
+    via_env = CliRunner().invoke(
+        pipeline.app,
+        [
+            "plan-shards",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(env_matrix),
+        ],
     )
-    daemon = CliRunner().invoke(pipeline.app, args)
-    assert daemon.exit_code == pipeline.CLOSURE_YIELD_EXIT
-    assert not output.exists()
+    assert via_env.exit_code == 0, via_env.output
+    assert "darwin_closure_shards=" in env_output.read_text()
+    monkeypatch.delenv("GITHUB_OUTPUT")
+    no_output = tmp_path / "matrix-no-github.json"
+    without = CliRunner().invoke(
+        pipeline.app,
+        [
+            "plan-shards",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(no_output),
+        ],
+    )
+    assert without.exit_code == 0, without.output
+    assert json.loads(no_output.read_text())["include"]
 
 
-def test_closure_yield_continues_after_unreadable_store_rlib_e0463(
+def test_assert_coverage_cli_uses_manifest_and_cachix(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Update 37599536875: rustc E0463 after --extern store rlib yields the shard."""
     candidate = _candidate_for_scope(prepared_run)
     candidate_path = tmp_path / "candidate.json"
     candidate_path.write_text(candidate.model_dump_json())
-    output = tmp_path / "validation.json"
-    monkeypatch.setattr(
-        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    seen: dict[str, object] = {}
+
+    def fake_eval(flake_root: Path) -> object:
+        from lib.update.derivation_validation import RootClosureManifest
+
+        return RootClosureManifest.model_validate({
+            "schemaVersion": 2,
+            "requiredKinds": ["darwin", "home"],
+            "requiredRoots": [],
+            "roots": [
+                {"kind": "darwin", "name": "argus", "system": "aarch64-darwin"},
+                {"kind": "home", "name": "george", "system": "aarch64-darwin"},
+            ],
+        })
+
+    def fake_paths(
+        flake_root: Path, manifest: object, **_kwargs: object
+    ) -> dict[str, str]:
+        return {"darwin-argus": "/nix/store/a", "home-george": "/nix/store/h"}
+
+    def fake_assert(**kwargs: object) -> None:
+        seen.update(kwargs)
+
+    monkeypatch.setattr(pipeline, "eval_root_closure_manifest", fake_eval)
+    monkeypatch.setattr(pipeline, "root_store_paths", fake_paths)
+    monkeypatch.setattr(pipeline, "assert_update_coverage", fake_assert)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "assert-coverage",
+            "--candidate",
+            str(candidate_path),
+            "--evidence",
+            str(evidence),
+            "--job-results",
+            "validate-arm=success",
+        ],
     )
-    args = [
-        "validate",
-        "--candidate",
-        str(candidate_path),
-        "--output",
-        str(output),
-        "--scope",
-        "closures",
-        "--closure-budget-seconds",
-        "18000",
-        "--closure-yield",
-    ]
-
-    def unreadable_rlib(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (
-            DerivationValidationFailure(
-                source="root-closures",
-                installable="path:.#checks.aarch64-darwin.root-closures",
-                message=(
-                    "error: Cannot build '/nix/store/1vhn1bsiqchjp101n2sj5fjjk6fiw596-"
-                    "rust_agent_settings-0.1.0.drv'.\n"
-                    "       Reason: builder failed with exit code 1.\n"
-                    "       > rustc --extern settings=/nix/store/"
-                    "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
-                    "libsettings-7be7f1170a.rlib\n"
-                    "       > error[E0463]: can't find crate for `settings`"
-                ),
-            ),
-        )
-
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", unreadable_rlib)
-    yielded = CliRunner().invoke(pipeline.app, args)
-    assert yielded.exit_code == pipeline.CLOSURE_YIELD_EXIT
-    assert not output.exists()
+    assert result.exit_code == 0, result.output
+    assert seen["tree"] == candidate.tree
+    assert seen["evidence"] == evidence
 
 
 def test_prepare_command_exports_failure_evidence_outside_checkout(

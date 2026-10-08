@@ -1,4 +1,4 @@
 # Touch this file to queue one Update run on main (or the WIP branch).
 # Cloud-agent ghs_ tokens cannot workflow_dispatch (HTTP 403, actions:write).
 # Remove this kick path after E2E prepare → validate → publish is proven.
-2026-10-07T17:20:00Z after-1244-zed-e0463-store-rlib
+2026-10-08T01:45:00Z no-skip-darwin-shards

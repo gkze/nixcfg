@@ -469,6 +469,142 @@ def test_validate_root_closures_builds_flake_owned_aggregate(
     )
 
 
+def test_validate_root_closures_builds_named_root_checks(
+    tmp_path: Path,
+) -> None:
+    """A shard builds ``root-closure-<name>`` checks, not the aggregate farm."""
+    calls: list[list[str]] = []
+
+    def _run(
+        args: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if args[:2] == ["nix", "eval"]:
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout="""
+                {
+                  "schemaVersion": 2,
+                  "requiredKinds": ["darwin", "home"],
+                  "requiredRoots": [],
+                  "roots": [
+                    {"kind": "darwin", "name": "argus", "system": "aarch64-darwin"},
+                    {"kind": "home", "name": "george", "system": "aarch64-darwin"}
+                  ]
+                }
+                """,
+                stderr="",
+            )
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    assert (
+        validation.validate_root_closures(
+            flake_root=tmp_path,
+            systems=("aarch64-darwin",),
+            root_names=("darwin-argus",),
+            timeout=42,
+            run=_run,
+        )
+        == ()
+    )
+    builds = [args for args in calls if args[1] == "build"]
+    assert builds[-1][-1] == (
+        f"path:{tmp_path}#checks.aarch64-darwin.root-closure-darwin-argus"
+    )
+    graph_calls: list[list[str]] = []
+
+    def _graph(
+        args: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        graph_calls.append(args)
+        if args[:2] == ["nix", "eval"]:
+            return _run(args)
+        if args[1] == "derivation":
+            assert (
+                f"path:{tmp_path}#checks.aarch64-darwin.root-closure-darwin-argus"
+                in args
+            )
+            return subprocess.CompletedProcess(
+                args, 0, stdout='{"version": 4, "derivations": {}}', stderr=""
+            )
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    assert (
+        validation.validate_root_closures(
+            flake_root=tmp_path,
+            systems=("aarch64-darwin",),
+            root_names=("darwin-argus",),
+            include_dependencies=True,
+            timeout=42,
+            run=_graph,
+        )
+        == ()
+    )
+
+    def _graph_fail(
+        args: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        if args[:2] == ["nix", "eval"]:
+            return _run(args)
+        return subprocess.CompletedProcess(
+            args, 1, stdout="", stderr="graph unavailable"
+        )
+
+    failed = validation.validate_root_closures(
+        flake_root=tmp_path,
+        systems=("aarch64-darwin",),
+        root_names=("darwin-argus",),
+        include_dependencies=True,
+        timeout=42,
+        run=_graph_fail,
+    )
+    assert failed[0].installable == (
+        "path:.#checks.aarch64-darwin.root-closure-darwin-argus"
+    )
+    empty = validation.validate_root_closures(
+        flake_root=tmp_path,
+        systems=("aarch64-darwin",),
+        root_names=(),
+        timeout=42,
+        run=_run,
+    )
+    assert empty[0].message == "closure shard root list is empty"
+    unknown = validation.validate_root_closures(
+        flake_root=tmp_path,
+        systems=("aarch64-darwin",),
+        root_names=("darwin-missing",),
+        timeout=42,
+        run=_run,
+    )
+    assert "darwin-missing" in unknown[0].message
+    assert validation.composed_root_name("darwin", "argus") == "darwin-argus"
+    assert (
+        validation.root_closure_installable("aarch64-darwin", "home-george")
+        == "path:.#checks.aarch64-darwin.root-closure-home-george"
+    )
+
+
+def test_resolve_derivation_validations_honors_native_system() -> None:
+    """Coverage on one host can compute another system's package inventory."""
+    updaters = {"demo": _DarwinAndLinuxUpdater}
+    darwin = validation.resolve_derivation_validations(
+        ["demo"],
+        updaters=updaters,
+        native_builds_only=True,
+        native_system="x86_64-linux",
+    )
+    assert darwin == (
+        DerivationValidationRequest(
+            source="demo",
+            installable=".#pkgs.x86_64-linux.demo.drvPath",
+        ),
+    )
+
+
 def test_root_closure_build_budget_does_not_shorten_discovery(
     tmp_path: Path,
 ) -> None:

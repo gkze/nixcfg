@@ -590,11 +590,22 @@
 
           outputs.lib.rootClosureManifest = rootClosureData.manifest;
 
-          outputs.checks = lib.genAttrs rootClosureData.rootSystems (system: {
-            root-closures = baseOutputs.legacyPackages.${system}.linkFarm "nixcfg-root-closures" (
-              rootClosureData.forSystem system
-            );
-          });
+          outputs.checks = lib.genAttrs rootClosureData.rootSystems (
+            system:
+            let
+              pkgs = baseOutputs.legacyPackages.${system};
+              roots = rootClosureData.forSystem system;
+            in
+            {
+              root-closures = pkgs.linkFarm "nixcfg-root-closures" roots;
+            }
+            // builtins.listToAttrs (
+              map (root: {
+                name = "root-closure-${root.name}";
+                value = root.path;
+              }) roots
+            )
+          );
 
           nixpkgs.config = nixpkgsConfig;
 

@@ -668,9 +668,10 @@ def resolve_derivation_validations(
     updaters: Mapping[str, type[object]],
     all_declared_systems: bool = False,
     native_builds_only: bool = False,
+    native_system: str | None = None,
 ) -> tuple[DerivationValidationRequest, ...]:
     """Resolve concrete validation requests for selected updater targets."""
-    current_system = get_current_nix_platform()
+    current_system = native_system or get_current_nix_platform()
     requests: list[DerivationValidationRequest] = []
     seen: set[tuple[str, str, DerivationValidationMode]] = set()
 
@@ -1131,10 +1132,26 @@ def _load_root_closure_manifest(
     return manifest
 
 
+def composed_root_name(kind: str, name: str) -> str:
+    """Return the ``forSystem`` root name ``<kind>-<name>``."""
+    return f"{kind}-{name}"
+
+
+def root_closure_check_attr(root_name: str | None = None) -> str:
+    """Return the flake check attribute for one root or the aggregate farm."""
+    return "root-closures" if root_name is None else f"root-closure-{root_name}"
+
+
+def root_closure_installable(system: str, root_name: str | None = None) -> str:
+    """Return ``path:.#checks.<system>.<attr>`` for a root or the aggregate."""
+    return f"path:.#checks.{system}.{root_closure_check_attr(root_name)}"
+
+
 def validate_root_closures(
     *,
     flake_root: Path | None = None,
     systems: tuple[str, ...] | None = None,
+    root_names: tuple[str, ...] | None = None,
     include_dependencies: bool = False,
     dependencies_only: bool = False,
     timeout: float | None = None,
@@ -1148,10 +1165,11 @@ def validate_root_closures(
     """Build roots with a six-hour default or the caller's per-process bound.
 
     *build_timeout* limits only the realization commands. Discovery keeps
-    *timeout*, so a continuation shard can stop the build and still flush
-    uploads without shortening manifest evaluation to the same budget.
-    *dependencies_only* realizes the native boundary of foreign roots and
-    skips this platform's own root closures.
+    *timeout*, so a shard can stop the build and still flush uploads without
+    shortening manifest evaluation to the same budget.
+    *root_names* selects ``checks.<system>.root-closure-<name>`` attributes.
+    An explicit empty list is a hard error. *dependencies_only* realizes the
+    native boundary of foreign roots and skips this platform's own root closures.
     """
     if dependencies_only and not include_dependencies:
         msg = "dependencies_only requires include_dependencies"
@@ -1193,14 +1211,48 @@ def validate_root_closures(
                 if systems is None or root.system in systems
             )
         )
-        requests = tuple(
-            DerivationValidationRequest(
-                source=_ROOT_CLOSURE_VALIDATION_SOURCE,
-                installable=f"path:.#checks.{system}.root-closures",
-                mode="build",
+        available = {
+            composed_root_name(root.kind, root.name)
+            for root in manifest.roots
+            if systems is None or root.system in systems
+        }
+        if root_names is not None:
+            if not root_names:
+                return (
+                    DerivationValidationFailure(
+                        source=_ROOT_CLOSURE_VALIDATION_SOURCE,
+                        installable=_ROOT_CLOSURE_MANIFEST_INSTALLABLE,
+                        message="closure shard root list is empty",
+                    ),
+                )
+            unknown = tuple(name for name in root_names if name not in available)
+            if unknown:
+                rendered = ", ".join(unknown)
+                return (
+                    DerivationValidationFailure(
+                        source=_ROOT_CLOSURE_VALIDATION_SOURCE,
+                        installable=_ROOT_CLOSURE_MANIFEST_INSTALLABLE,
+                        message=f"unknown root-closure shard members: {rendered}",
+                    ),
+                )
+            requests = tuple(
+                DerivationValidationRequest(
+                    source=_ROOT_CLOSURE_VALIDATION_SOURCE,
+                    installable=root_closure_installable(system, name),
+                    mode="build",
+                )
+                for name in root_names
+                for system in root_systems
             )
-            for system in root_systems
-        )
+        else:
+            requests = tuple(
+                DerivationValidationRequest(
+                    source=_ROOT_CLOSURE_VALIDATION_SOURCE,
+                    installable=root_closure_installable(system),
+                    mode="build",
+                )
+                for system in root_systems
+            )
         if include_dependencies:
             # A Darwin root may contain a Linux VM image. Build the native
             # boundary of every root's graph, even on a runner with no roots.
@@ -1217,8 +1269,9 @@ def validate_root_closures(
                 "allow-import-from-derivation",
                 "false",
                 *(
-                    f"path:{snapshot_root}#checks.{system}.root-closures"
+                    f"path:{snapshot_root}#checks.{system}.{root_closure_check_attr(name)}"
                     for system in graph_systems
+                    for name in (root_names if root_names is not None else (None,))
                 ),
             ]
             try:
@@ -1238,8 +1291,11 @@ def validate_root_closures(
                     DerivationValidationFailure(
                         source=_ROOT_CLOSURE_VALIDATION_SOURCE,
                         installable=" ".join(
-                            f"path:.#checks.{system}.root-closures"
+                            root_closure_installable(system, name)
                             for system in graph_systems
+                            for name in (
+                                root_names if root_names is not None else (None,)
+                            )
                         ),
                         message=str(exc),
                     ),
@@ -1284,7 +1340,10 @@ __all__ = [
     "RootClosureManifestIdentity",
     "RootClosureManifestRoot",
     "ValidationIncompleteError",
+    "composed_root_name",
     "resolve_derivation_validations",
+    "root_closure_check_attr",
+    "root_closure_installable",
     "validate_derivation_requests",
     "validate_derivations",
     "validate_root_closures",

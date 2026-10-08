@@ -22,21 +22,25 @@ on:
         default: ""
         type: string
       scope:
-        description: Package gate, closure gate, or both
+        description: Package gate, closure gate, shard, or both
         default: all
         type: string
       closure_budget_seconds:
         description: Stop the root-closure build after this many seconds
         default: ""
         type: string
-      closure_yield:
-        description: Succeed when the closure budget is exhausted so the next shard can continue
-        default: false
-        type: boolean
+      closure_roots:
+        description: Space-separated Darwin roots for one always-run shard
+        default: ""
+        type: string
+      shard:
+        description: Shard identity for artifact and receipt names
+        default: ""
+        type: string
     outputs:
-      closure_complete:
-        description: Whether this shard realized the native root closure
-        value: ${{ jobs.native.outputs.closure_complete }}
+      darwin_closure_shards:
+        description: Generated always-run Darwin closure matrix
+        value: ${{ jobs.native.outputs.darwin_closure_shards }}
     secrets:
       UPDATE_SELF_HEAL_GITHUB_TOKEN:
         required: true
@@ -49,7 +53,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 360
     outputs:
-      closure_complete: ${{ steps.candidate.outputs.closure_complete }}
+      darwin_closure_shards: ${{ steps.candidate.outputs.darwin_closure_shards }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -74,7 +78,8 @@ jobs:
           NIXCFG_VALIDATE_ALL_PACKAGES: ${{ inputs.validate_all_packages }}
           NIXCFG_VALIDATE_SCOPE: ${{ inputs.scope }}
           NIXCFG_CLOSURE_BUDGET_SECONDS: ${{ inputs.closure_budget_seconds }}
-          NIXCFG_CLOSURE_YIELD: ${{ inputs.closure_yield }}
+          NIXCFG_CLOSURE_ROOTS: ${{ inputs.closure_roots }}
+          NIXCFG_CLOSURE_SHARD: ${{ inputs.shard }}
           NIXCFG_PREVIOUS_CANDIDATE: |-
             ${{ inputs.previous != '' &&
             format('{0}/previous/candidate.json', runner.temp) || '' }}
@@ -84,12 +89,22 @@ jobs:
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
         shell: python
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
       - name: Retain candidate and failure evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: |-
-            ${{ inputs.scope == 'all' &&
+            ${{ inputs.shard != '' &&
+            format('{0}-{1}-{2}-{3}', inputs.stage, inputs.system, inputs.scope, inputs.shard) ||
+            inputs.scope == 'all' &&
             format('{0}-{1}', inputs.stage, inputs.system) ||
             format('{0}-{1}-{2}', inputs.stage, inputs.system, inputs.scope) }}
           path: ${{ runner.temp }}/update-artifacts
