@@ -1838,6 +1838,7 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
     monkeypatch.setattr(jobs.sys, "platform", system)
+    _disable_image_headroom(monkeypatch)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     tree = _cleanup_image_tree(tmp_path)
     monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
@@ -1892,8 +1893,9 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
         assert not any(call[:2] == ("xcrun", "simctl") for call in calls)
 
 
-def test_image_cleanup_reclaims_unused_trees_in_parallel(tmp_path, monkeypatch) -> None:
-    """Eight unused Xcode.app copies are serial ~4 min; 4-wide shards contend."""
+def test_image_cleanup_skips_xcode_when_free_already_meets_headroom(
+    tmp_path, monkeypatch, capsys
+) -> None:
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
     monkeypatch.setattr(jobs.sys, "platform", "darwin")
@@ -1903,14 +1905,8 @@ def test_image_cleanup_reclaims_unused_trees_in_parallel(tmp_path, monkeypatch) 
     monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
     monkeypatch.setattr(jobs, "_DARWIN_SYSTEM_SIMULATORS", tree["system_simulators"])
     monkeypatch.setattr(jobs, "_UNUSED_IMAGE_PATHS", {"darwin": (tree["unused"],)})
-    created: list[int] = []
-    real_pool = jobs.ThreadPoolExecutor
-
-    def tracking_pool(*args, **kwargs):
-        created.append(kwargs["max_workers"])
-        return real_pool(*args, **kwargs)
-
-    monkeypatch.setattr(jobs, "ThreadPoolExecutor", tracking_pool)
+    need = jobs.image_headroom_required_bytes()
+    monkeypatch.setattr(jobs, "runner_free_bytes", lambda: need)
 
     def run(*args, capture=False, check=True):
         if args[0] == "sudo":
@@ -1920,8 +1916,77 @@ def test_image_cleanup_reclaims_unused_trees_in_parallel(tmp_path, monkeypatch) 
 
     monkeypatch.setattr(jobs, "_run", run)
     assert jobs.main("clean-image") == 0
-    assert created
-    assert created[0] >= 2
+    assert tree["old"].is_dir()
+    assert tree["android"].is_dir()
+    output = capsys.readouterr().out
+    assert "df before image cleanup /:" in output
+    assert f"Skipping Xcode/Android reclaim; free {need} bytes" in output
+    assert f"already meets headroom {need} bytes" in output
+
+
+def test_image_cleanup_stops_when_reclaim_crosses_headroom(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    tree = _cleanup_image_tree(tmp_path)
+    monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
+    monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
+    monkeypatch.setattr(jobs, "_DARWIN_SYSTEM_SIMULATORS", tree["system_simulators"])
+    monkeypatch.setattr(jobs, "_UNUSED_IMAGE_PATHS", {"darwin": (tree["unused"],)})
+    need = jobs.image_headroom_required_bytes()
+    free = {"n": 0}
+    removed: list[Path] = []
+
+    def current_free() -> int:
+        return free["n"]
+
+    def remove(path: Path) -> None:
+        removed.append(path)
+        free["n"] = need
+
+    monkeypatch.setattr(jobs, "runner_free_bytes", current_free)
+    monkeypatch.setattr(jobs, "_remove_unused_image_path", remove)
+
+    def run(*args, capture=False, check=True):
+        return subprocess.CompletedProcess(args, 0, stdout=str(tree["selected"]))
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs.main("clean-image") == 0
+    assert removed == [tree["old"]]
+    assert tree["android"].is_dir()
+    output = capsys.readouterr().out
+    assert (
+        f"Stopped image reclaim; free {need} bytes meets headroom {need} bytes"
+        in output
+    )
+
+
+def test_image_cleanup_fails_closed_when_headroom_still_missing(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    tree = _cleanup_image_tree(tmp_path)
+    monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
+    monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
+    monkeypatch.setattr(jobs, "_DARWIN_SYSTEM_SIMULATORS", tree["system_simulators"])
+    monkeypatch.setattr(jobs, "_UNUSED_IMAGE_PATHS", {"darwin": (tree["unused"],)})
+    monkeypatch.setattr(jobs, "runner_free_bytes", lambda: 0)
+
+    def run(*args, capture=False, check=True):
+        if args[0] == "sudo":
+            assert Path(args[-1]).is_relative_to(tmp_path)
+            return subprocess.CompletedProcess(args, 0, stdout="")
+        return subprocess.CompletedProcess(args, 0, stdout=str(tree["selected"]))
+
+    monkeypatch.setattr(jobs, "_run", run)
+    with pytest.raises(jobs.ImageCleanupError, match="Image cleanup left 0 bytes free"):
+        jobs.main("clean-image")
 
 
 def test_image_cleanup_reports_elapsed_seconds_per_tree(
@@ -1930,6 +1995,7 @@ def test_image_cleanup_reports_elapsed_seconds_per_tree(
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
     monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    _disable_image_headroom(monkeypatch)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     tree = _cleanup_image_tree(tmp_path)
     monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
@@ -1960,6 +2026,7 @@ def test_image_cleanup_raises_first_failure_after_other_trees_finish(
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
     monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    _disable_image_headroom(monkeypatch)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     tree = _cleanup_image_tree(tmp_path)
     monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
@@ -2008,6 +2075,7 @@ def test_image_cleanup_skips_absent_runner_tool_cache(tmp_path, monkeypatch) -> 
     monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
     monkeypatch.delenv("RUNNER_TOOL_CACHE", raising=False)
     monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    _disable_image_headroom(monkeypatch)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     tree = _cleanup_image_tree(tmp_path)
     monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
@@ -2032,6 +2100,7 @@ def test_image_cleanup_tolerates_live_cache_directory_races(
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
     monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    _disable_image_headroom(monkeypatch)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     tree = _cleanup_image_tree(tmp_path)
     monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
@@ -2066,6 +2135,39 @@ def test_image_cleanup_tolerates_live_cache_directory_races(
 
 def _free_disk(free: int) -> object:
     return type("Usage", (), {"total": free + 1, "used": 1, "free": free})()
+
+
+def _disable_image_headroom(monkeypatch) -> None:
+    monkeypatch.setattr(jobs, "image_headroom_required_bytes", lambda: 0)
+
+
+def test_runner_free_bytes_prefers_nix_when_mounted(monkeypatch) -> None:
+    monkeypatch.setattr(jobs.Path, "exists", lambda self: True)
+
+    def usage(path: Path) -> object:
+        return _free_disk(11 if path == Path("/nix") else 3)
+
+    monkeypatch.setattr(jobs.shutil, "disk_usage", usage)
+    assert jobs.runner_free_bytes() == 11
+
+
+def test_runner_free_bytes_uses_root_before_nix_exists(monkeypatch) -> None:
+    monkeypatch.setattr(jobs.Path, "exists", lambda self: str(self) != "/nix")
+
+    def usage(path: Path) -> object:
+        return _free_disk(5 if path == Path("/") else 0)
+
+    monkeypatch.setattr(jobs.shutil, "disk_usage", usage)
+    assert jobs.runner_free_bytes() == 5
+
+
+def test_log_runner_disk_reports_absent_nix_mount(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(jobs.Path, "exists", lambda self: str(self) != "/nix")
+    monkeypatch.setattr(jobs.shutil, "disk_usage", lambda _path: _free_disk(9))
+    jobs._log_runner_disk("df test")
+    output = capsys.readouterr().out
+    assert "df test /: free=9 used=1 total=10" in output
+    assert "df test /nix: not mounted" in output
 
 
 @pytest.mark.parametrize(
@@ -2115,7 +2217,7 @@ def test_hosted_darwin_store_gc_skips_when_free_covers_max_and_min_free(
     assert calls == []
     output = capsys.readouterr().out
     assert f"Skipping store GC; free {skip_free} bytes already meets" in output
-    assert f"max-free+min-free {skip_free} bytes" in output
+    assert f"headroom {skip_free} bytes" in output
 
 
 def test_hosted_update_runtime_reserves_store_headroom_for_root_closures() -> None:
@@ -2135,3 +2237,7 @@ def test_hosted_update_runtime_reserves_store_headroom_for_root_closures() -> No
     assert "max-free = 68719476736" in extra_conf
     assert jobs._NIX_MIN_FREE_BYTES == 34359738368
     assert jobs._NIX_MAX_FREE_BYTES == 68719476736
+    assert jobs._IMAGE_HEADROOM_BYTES == (
+        jobs._NIX_MAX_FREE_BYTES + jobs._NIX_MIN_FREE_BYTES
+    )
+    assert jobs.image_headroom_required_bytes() == jobs._IMAGE_HEADROOM_BYTES

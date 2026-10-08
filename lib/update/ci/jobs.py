@@ -14,7 +14,6 @@ import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TextIO
 
@@ -35,7 +34,10 @@ _VOLATILE_IMAGE_LEAVES = frozenset({"Caches", "hostedtoolcache"})
 # Must match .github/actions/update-runtime/action.yml extra-conf.
 _NIX_MIN_FREE_BYTES = 34359738368
 _NIX_MAX_FREE_BYTES = 68719476736
-_IMAGE_CLEANUP_WORKERS = 8
+# Floor: max-free + min-free. Raise to measured zeus peak + margin once
+# 37740898487 storage.jsonl exists. macos-15 starts at ~43 GiB free, so
+# the skip path does not fire until that peak is known and lower than 96 GiB.
+_IMAGE_HEADROOM_BYTES = _NIX_MAX_FREE_BYTES + _NIX_MIN_FREE_BYTES
 _IMAGE_LOG_LOCK = threading.Lock()
 _UNUSED_IMAGE_PATHS = {
     "darwin": (Path("/usr/local/share/dotnet"),),
@@ -187,8 +189,51 @@ class CachixFlushError(RuntimeError):
     """The explicit flush could not confirm a clean Cachix daemon drain."""
 
 
+class ImageCleanupError(RuntimeError):
+    """Hosted Darwin still lacks closure headroom after image reclaim."""
+
+
+def image_headroom_required_bytes() -> int:
+    """Free bytes hosted Darwin must keep so min-free cannot fire mid-rustc."""
+    return _IMAGE_HEADROOM_BYTES
+
+
+def runner_free_bytes() -> int:
+    """Return APFS-shared free bytes; /nix is absent before Nix install."""
+    mount = Path("/nix") if Path("/nix").exists() else Path("/")
+    return shutil.disk_usage(mount).free
+
+
+def _log_runner_disk(label: str) -> None:
+    for mount in ("/", "/nix"):
+        path = Path(mount)
+        if not path.exists():
+            sys.stdout.write(f"{label} {mount}: not mounted\n")
+            continue
+        usage = shutil.disk_usage(mount)
+        sys.stdout.write(
+            f"{label} {mount}: free={usage.free} used={usage.used} "
+            f"total={usage.total}\n"
+        )
+    sys.stdout.flush()
+
+
+def _is_darwin_heavy_reclaim_path(path: Path) -> bool:
+    if path.name.startswith("Xcode") and path.suffix == ".app":
+        return True
+    return path.name == "sdk" and "Android" in path.parts
+
+
 def clean_runner_image() -> None:
-    """Reclaim unused image tools, exclusively on disposable hosted runners."""
+    """Reclaim unused image tools, exclusively on disposable hosted runners.
+
+    Hosted macos-15 starts around 43 GiB free. Four concurrent Darwin shards
+    already serialize Xcode rmtree for tens of minutes; eight-wide parallel
+    deletes on those VMs add host I/O, they do not shorten the wait. Skip
+    Xcode/Android when free already covers closure headroom. Otherwise delete
+    serially, timed per path, and stop once the threshold is met. Fail closed
+    if the disk is still short. Do not overlap this I/O with Nix install.
+    """
     if (
         os.environ.get("GITHUB_ACTIONS") != "true"
         or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
@@ -197,9 +242,10 @@ def clean_runner_image() -> None:
         raise RuntimeError(msg)
     paths = list(_UNUSED_IMAGE_PATHS[sys.platform])
     record_runner_storage("before-image-cleanup")
-    sys.stdout.write(
-        f"Available before image cleanup: {shutil.disk_usage('/').free} bytes\n"
-    )
+    _log_runner_disk("df before image cleanup")
+    need = image_headroom_required_bytes()
+    before = runner_free_bytes()
+    sys.stdout.write(f"Available before image cleanup: {before} bytes (need {need})\n")
     if sys.platform == "darwin":
         selected = Path(
             _run("xcode-select", "--print-path", capture=True).stdout.strip()
@@ -232,11 +278,28 @@ def clean_runner_image() -> None:
         if tool_cache:
             paths.append(Path(tool_cache))
     to_remove = [path for path in paths if path.is_dir() and not path.is_symlink()]
+    if sys.platform == "darwin" and need > 0:
+        heavy = [path for path in to_remove if _is_darwin_heavy_reclaim_path(path)]
+        light = [path for path in to_remove if path not in heavy]
+        if before >= need:
+            sys.stdout.write(
+                f"Skipping Xcode/Android reclaim; free {before} bytes "
+                f"already meets headroom {need} bytes\n"
+            )
+            to_remove = light
+        else:
+            _reclaim_until_headroom([*heavy, *light], need)
+            to_remove = []
     if to_remove:
         _reclaim_unused_image_paths(to_remove)
-    sys.stdout.write(
-        f"Available after image cleanup: {shutil.disk_usage('/').free} bytes\n"
-    )
+    after = runner_free_bytes()
+    sys.stdout.write(f"Available after image cleanup: {after} bytes\n")
+    if sys.platform == "darwin" and need > 0 and after < need:
+        msg = (
+            f"Image cleanup left {after} bytes free; need {need} bytes "
+            "for Darwin root-closure headroom"
+        )
+        raise ImageCleanupError(msg)
     record_runner_storage("after-image-cleanup")
 
 
@@ -249,7 +312,7 @@ def _image_cleanup_best_effort(path: Path) -> bool:
 
 
 def _image_log(message: str) -> None:
-    """Write one cleanup line without interleaving parallel rmtree logs."""
+    """Write one cleanup line and flush so GHA shows per-path elapsed seconds."""
     with _IMAGE_LOG_LOCK:
         sys.stdout.write(f"{message}\n")
         sys.stdout.flush()
@@ -284,12 +347,22 @@ def _remove_unused_image_path_timed(path: Path) -> None:
 
 
 def _reclaim_unused_image_paths(paths: list[Path]) -> None:
-    """Delete unused image trees concurrently; unused Xcode.app copies dominate."""
-    workers = min(_IMAGE_CLEANUP_WORKERS, len(paths))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_remove_unused_image_path_timed, path) for path in paths]
-    for future in futures:
-        future.result()
+    """Delete unused image trees serially with elapsed seconds per path."""
+    for path in paths:
+        _remove_unused_image_path_timed(path)
+
+
+def _reclaim_until_headroom(paths: list[Path], need: int) -> None:
+    """Delete unused trees only until hosted Darwin has closure headroom."""
+    for path in paths:
+        free = runner_free_bytes()
+        if free >= need:
+            sys.stdout.write(
+                f"Stopped image reclaim; free {free} bytes meets headroom {need} bytes\n"
+            )
+            sys.stdout.flush()
+            return
+        _remove_unused_image_path_timed(path)
 
 
 def is_hosted_darwin_runner() -> bool:
@@ -314,11 +387,11 @@ def reclaim_hosted_store() -> None:
     # already covers max-free plus min-free; otherwise a 60+ GiB fetch can
     # still trip min-free mid-rustc. Combined packages+closures on a tight
     # disk still GCs unused outputs first.
-    skip_free = _NIX_MAX_FREE_BYTES + _NIX_MIN_FREE_BYTES
-    if free >= skip_free:
+    skip_free = image_headroom_required_bytes()
+    if skip_free > 0 and free >= skip_free:
         sys.stdout.write(
             f"Skipping store GC; free {free} bytes already meets "
-            f"max-free+min-free {skip_free} bytes\n"
+            f"headroom {skip_free} bytes\n"
         )
         sys.stdout.flush()
         record_runner_storage("after-store-gc")
