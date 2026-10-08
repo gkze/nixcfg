@@ -24,7 +24,6 @@ on:
   push:
     branches:
       - main
-      - copilot/gkzenixcfg-update-automation
       - cursor/no-skip-darwin-shards-6614
     paths:
       - .github/update-kick

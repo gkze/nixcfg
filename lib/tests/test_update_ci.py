@@ -905,7 +905,6 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     )
     assert workflow["on"]["push"]["branches"] == [
         "main",
-        "copilot/gkzenixcfg-update-automation",
         "cursor/no-skip-darwin-shards-6614",
     ]
     assert workflow["on"]["push"]["paths"] == [".github/update-kick"]

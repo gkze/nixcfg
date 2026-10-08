@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 from lib.update.ci.shard_plan import (
     ClosureShard,
     ClosureShardReceipt,
+    ShardCosts,
     composed_root_name,
     darwin_roots,
     plan_darwin_closure_shards,
@@ -319,13 +320,14 @@ def assert_update_coverage(
     package_expected: Mapping[str, frozenset[str]],
     root_paths: Mapping[str, str],
     cachix_present: Callable[[str], bool],
+    costs: ShardCosts | None = None,
 ) -> None:
     """Fail closed unless every planned root, shard, and package is present."""
     require_required_jobs(job_results)
     if not darwin_roots(manifest):
         msg = "root manifest has no Darwin roots"
         raise CoverageError(msg)
-    shards = plan_darwin_closure_shards(manifest)
+    shards = plan_darwin_closure_shards(manifest, costs=costs)
     reports = require_validation_reports(
         evidence,
         tree=tree,

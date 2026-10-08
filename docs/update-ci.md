@@ -279,9 +279,8 @@ Until Actions write is granted, cloud agents should open and merge a
 one-line timestamp bump to `.github/update-kick` on `main`. That push
 queues one Update run with the same path filter. Kick-file pushes set
 `validate_all_packages` and enable the repair job so they match EM's
-`repair=true` + `validate_all_packages=true` dispatches. The same file
-still kicks `copilot/gkzenixcfg-update-automation` if that WIP branch is
-updated. Do not start a second main Update while one is already running.
+`repair=true` + `validate_all_packages=true` dispatches. Do not start a
+second main Update while one is already running.
 
 Push events that touch `.github/update-kick` therefore enable
 repair; that path exists because some tokens cannot create `workflow_dispatch`

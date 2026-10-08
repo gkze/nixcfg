@@ -13,6 +13,7 @@ from lib.update.ci.shard_plan import (
     ClosureShard,
     ShardCosts,
     composed_root_name,
+    costs_for_tree,
     darwin_roots,
     default_costs_path,
     eval_root_closure_manifest,
@@ -225,6 +226,45 @@ def test_committed_costs_and_repo_root_are_the_measured_baseline() -> None:
     assert default_costs_path() == Path(REPO_ROOT / "lib/update/ci/shard_costs.json")
     assert repo_root() == REPO_ROOT
     assert ShardCosts.model_validate_json(default_costs_path().read_bytes()) == costs
+
+
+def test_costs_path_falls_back_to_checkout_when_unpackaged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Update 37714392950: site-packages omitted shard_costs.json."""
+    from lib.update.ci import shard_plan
+
+    monkeypatch.setattr(shard_plan, "_INSTALLED_COSTS_PATH", tmp_path / "missing.json")
+    assert shard_plan.default_costs_path() == shard_plan._REPO_COSTS_PATH
+    assert shard_plan.load_shard_costs().measured_from == "37657691147"
+
+
+def test_costs_path_fails_closed_when_no_authority_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lib.update.ci import shard_plan
+
+    monkeypatch.setattr(shard_plan, "_INSTALLED_COSTS_PATH", tmp_path / "missing.json")
+    monkeypatch.setattr(shard_plan, "_REPO_COSTS_PATH", tmp_path / "also-missing.json")
+    with pytest.raises(FileNotFoundError, match="shard_costs.json is missing"):
+        shard_plan.default_costs_path()
+    with pytest.raises(FileNotFoundError, match="shard cost table is missing"):
+        shard_plan.load_shard_costs(tmp_path / "absent.json")
+
+
+def test_costs_for_tree_prefers_snapshot_then_packaged(tmp_path: Path) -> None:
+    payload = {
+        "schemaVersion": 1,
+        "measuredFrom": "snapshot",
+        "notes": "fixture",
+        "sharedPackages": ["zed-editor-nightly"],
+        "rootWeights": {"darwin-argus": 9},
+    }
+    table = tmp_path / "lib" / "update" / "ci" / "shard_costs.json"
+    table.parent.mkdir(parents=True)
+    table.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    assert costs_for_tree(tmp_path).measured_from == "snapshot"
+    assert costs_for_tree(tmp_path / "empty").measured_from == "37657691147"
 
 
 def test_packed_shard_skips_empty_bins() -> None:

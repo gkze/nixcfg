@@ -29,7 +29,8 @@ from lib.update.paths import REPO_ROOT
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-_COSTS_PATH = Path(__file__).with_name("shard_costs.json")
+_INSTALLED_COSTS_PATH = Path(__file__).with_name("shard_costs.json")
+_REPO_COSTS_PATH = REPO_ROOT / "lib" / "update" / "ci" / "shard_costs.json"
 _DARWIN_SYSTEM = "aarch64-darwin"
 _DEFAULT_WEIGHT = 1
 # Public macos-15 cap is 5. darwin-packages occupies one slot while the
@@ -90,7 +91,25 @@ def composed_root_name(root: RootClosureManifestRoot) -> str:
 
 def load_shard_costs(path: Path | None = None) -> ShardCosts:
     """Load the committed relative-cost table."""
-    return ShardCosts.model_validate_json((path or _COSTS_PATH).read_bytes())
+    table = path or default_costs_path()
+    try:
+        return ShardCosts.model_validate_json(table.read_bytes())
+    except FileNotFoundError as error:
+        msg = f"shard cost table is missing: {table}"
+        raise FileNotFoundError(msg) from error
+
+
+def costs_for_tree(tree: Path) -> ShardCosts:
+    """Prefer the candidate tree's cost table; otherwise the packaged copy.
+
+    Hosted plan-shards applies the candidate into a snapshot. That snapshot
+    is the authority when it ships ``shard_costs.json``. Test workspaces and
+    an unpackaged venv fall back to ``default_costs_path``.
+    """
+    candidate_table = tree / "lib" / "update" / "ci" / "shard_costs.json"
+    if candidate_table.is_file():
+        return load_shard_costs(candidate_table)
+    return load_shard_costs()
 
 
 def darwin_roots(manifest: RootClosureManifest) -> tuple[RootClosureManifestRoot, ...]:
@@ -192,8 +211,21 @@ def write_github_actions_output(shards: tuple[ClosureShard, ...], output: Path) 
 
 
 def default_costs_path() -> Path:
-    """Return the committed cost table path."""
-    return _COSTS_PATH
+    """Return the packaged cost table, or the checkout copy if unpackaged.
+
+    Hosted ``nixcfg`` runs from site-packages. The cost table must be in
+    ``[tool.setuptools.package-data]`` or this falls back to the checkout
+    ``REPO_ROOT``. Missing both is a hard error: there is no second authority.
+    """
+    if _INSTALLED_COSTS_PATH.is_file():
+        return _INSTALLED_COSTS_PATH
+    if _REPO_COSTS_PATH.is_file():
+        return _REPO_COSTS_PATH
+    msg = (
+        "shard_costs.json is missing from the installed nixcfg package "
+        f"({_INSTALLED_COSTS_PATH}) and from the checkout ({_REPO_COSTS_PATH})"
+    )
+    raise FileNotFoundError(msg)
 
 
 def repo_root() -> Path:

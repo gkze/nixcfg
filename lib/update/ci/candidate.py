@@ -27,6 +27,7 @@ from lib.update.ci.coverage import (
 )
 from lib.update.ci.shard_plan import (
     ClosureShardReceipt,
+    costs_for_tree,
     eval_root_closure_manifest,
     github_actions_matrix,
     plan_darwin_closure_shards,
@@ -543,8 +544,10 @@ def plan_shards(
         )
         workspace.validate_changes(allowed)
         with workspace.validation_snapshot() as snapshot:
+            costs = costs_for_tree(snapshot.root)
             shards = plan_darwin_closure_shards(
-                eval_root_closure_manifest(snapshot.root)
+                eval_root_closure_manifest(snapshot.root),
+                costs=costs,
             )
     matrix = github_actions_matrix(shards)
     atomic_write_text(output, json.dumps(matrix, indent=2) + "\n")
@@ -582,6 +585,7 @@ def assert_coverage(
         workspace.validate_changes(allowed)
         with workspace.validation_snapshot() as snapshot:
             manifest = eval_root_closure_manifest(snapshot.root)
+            costs = costs_for_tree(snapshot.root)
             package_expected = {
                 system: frozenset(
                     request.installable
@@ -607,4 +611,5 @@ def assert_coverage(
         package_expected=package_expected,
         root_paths=paths,
         cachix_present=check_path_in_cachix,
+        costs=costs,
     )
