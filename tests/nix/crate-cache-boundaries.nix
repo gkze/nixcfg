@@ -68,12 +68,14 @@ let
   ];
   expectedZedFontConfigConsumers = [ "zed" ];
   expectedZedPkgConfigConsumers = [
+    "webrtc-sys"
     "x11"
     "yeslogic-fontconfig-sys"
     "zed"
   ];
   expectedZedX11LibraryConsumers = [ "x11" ];
   expectedZedFontconfigSysConsumers = [ "yeslogic-fontconfig-sys" ];
+  expectedZedWebrtcSysLibraryConsumers = [ "webrtc-sys" ];
   expectedZedLivekitWebrtcConsumers = [ "webrtc-sys" ];
   expectedZedProtocConsumers = [
     "livekit_api"
@@ -184,6 +186,10 @@ let
     )
     (
       assert sorted zedPolicy.fontconfigSysConsumers == sorted expectedZedFontconfigSysConsumers;
+      true
+    )
+    (
+      assert sorted zedPolicy.webrtcSysLibraryConsumers == sorted expectedZedWebrtcSysLibraryConsumers;
       true
     )
     (

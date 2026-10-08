@@ -25,12 +25,14 @@ let
   # Leaf crates whose build.rs shells out to pkg-config. Keep these exact;
   # dumping zedBuildInputs onto them would bust the crate2nix cache boundary.
   pkgConfigConsumers = [
+    "webrtc-sys"
     "x11"
     "yeslogic-fontconfig-sys"
     "zed"
   ];
   x11LibraryConsumers = [ "x11" ];
   fontconfigSysConsumers = [ "yeslogic-fontconfig-sys" ];
+  webrtcSysLibraryConsumers = [ "webrtc-sys" ];
   lldConsumers = [ "zed" ];
   xcodebuildConsumers = [
     "gpui_apple"
@@ -53,6 +55,7 @@ in
     releaseVersionConsumers
     systemLibraryConsumers
     updateExplanationConsumers
+    webrtcSysLibraryConsumers
     x11LibraryConsumers
     xcodebuildConsumers
     zstdPkgConfigConsumers

@@ -102,10 +102,11 @@ def test_zed_nightly_does_not_import_deleted_livekit_libwebrtc_path() -> None:
 
 
 def test_zed_linux_x11_and_fontconfig_sys_are_pkgconfig_leaf_crates() -> None:
-    """validate-x86 rust_x11 / yeslogic-fontconfig-sys run pkg-config in build.rs."""
+    """validate-x86 rust_x11 / yeslogic-fontconfig-sys / webrtc-sys run pkg-config in build.rs."""
     assert_nix_ast_equal(
         nix_file_binding_expr(_POLICY, "pkgConfigConsumers"),
         """[
+          "webrtc-sys"
           "x11"
           "yeslogic-fontconfig-sys"
           "zed"
@@ -118,6 +119,10 @@ def test_zed_linux_x11_and_fontconfig_sys_are_pkgconfig_leaf_crates() -> None:
     assert_nix_ast_equal(
         nix_file_binding_expr(_POLICY, "fontconfigSysConsumers"),
         '[ "yeslogic-fontconfig-sys" ]',
+    )
+    assert_nix_ast_equal(
+        nix_file_binding_expr(_POLICY, "webrtcSysLibraryConsumers"),
+        '[ "webrtc-sys" ]',
     )
 
 
@@ -162,6 +167,15 @@ def test_zed_scoped_override_adds_linux_x11_and_fontconfig_libraries() -> None:
             [
               fontconfig
             ]
+        ++
+          lib.optionals
+            (
+              pkgs.stdenv.hostPlatform.isLinux
+              && builtins.elem crateName crateCachePolicy.webrtcSysLibraryConsumers
+            )
+            [
+              glib
+            ]
         ++ lib.optionals (builtins.elem crateName darwinWorkspaceCrates) darwinWorkspaceBuildInputs
         """,
     )
@@ -185,6 +199,7 @@ def test_zed_scoped_crates_include_linux_pkgconfig_leaf_consumers() -> None:
           ++ crateCachePolicy.releaseVersionConsumers
           ++ crateCachePolicy.systemLibraryConsumers
           ++ crateCachePolicy.updateExplanationConsumers
+          ++ crateCachePolicy.webrtcSysLibraryConsumers
           ++ crateCachePolicy.x11LibraryConsumers
           ++ crateCachePolicy.xcodebuildConsumers
           ++ crateCachePolicy.zstdPkgConfigConsumers

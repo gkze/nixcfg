@@ -68,10 +68,11 @@ let
   # every platform (Update #1235). Do not skip Darwin packages, closures,
   # or installCheck to paper over this.
   zedBuildRustCrate = (import ./build-rust-crate.nix { inherit lib; }).wrapBuildRustCrate (
-    pkgs.buildRustCrate.override {
-      cargo = rustToolchain;
-      rustc = rustToolchain;
-    }
+    pkgs.buildRustCrate.override
+      {
+        cargo = rustToolchain;
+        rustc = rustToolchain;
+      }
   ) pkgs.stdenv.hostPlatform.isDarwin;
   generatedLicenses = destination: ''
     {
@@ -389,6 +390,7 @@ let
     ++ crateCachePolicy.releaseVersionConsumers
     ++ crateCachePolicy.systemLibraryConsumers
     ++ crateCachePolicy.updateExplanationConsumers
+    ++ crateCachePolicy.webrtcSysLibraryConsumers
     ++ crateCachePolicy.x11LibraryConsumers
     ++ crateCachePolicy.xcodebuildConsumers
     ++ crateCachePolicy.zstdPkgConfigConsumers
@@ -445,11 +447,19 @@ let
         ++
           lib.optionals
             (
-              pkgs.stdenv.hostPlatform.isLinux
-              && builtins.elem crateName crateCachePolicy.fontconfigSysConsumers
+              pkgs.stdenv.hostPlatform.isLinux && builtins.elem crateName crateCachePolicy.fontconfigSysConsumers
             )
             [
               fontconfig
+            ]
+        ++
+          lib.optionals
+            (
+              pkgs.stdenv.hostPlatform.isLinux
+              && builtins.elem crateName crateCachePolicy.webrtcSysLibraryConsumers
+            )
+            [
+              glib
             ]
         ++ lib.optionals (builtins.elem crateName darwinWorkspaceCrates) darwinWorkspaceBuildInputs;
     }
