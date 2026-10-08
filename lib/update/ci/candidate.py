@@ -20,10 +20,14 @@ from lib.update import derivation_validation as validation
 from lib.update.candidate import Candidate, Preparation
 from lib.update.ci import jobs
 from lib.update.ci.coverage import (
+    ROOT_OUT_PATHS_NAME,
     assert_update_coverage,
     check_path_in_cachix,
+    load_planned_root_out_paths,
     parse_job_results,
+    require_required_jobs,
     root_store_paths,
+    write_root_out_path_cache,
 )
 from lib.update.ci.shard_plan import (
     ClosureShardReceipt,
@@ -530,7 +534,7 @@ def plan_shards(
         typer.Option(help="Optional Actions GITHUB_OUTPUT path."),
     ] = None,
 ) -> None:
-    """Plan always-run Darwin closure shards from the candidate manifest."""
+    """Plan always-run Darwin closure shards and cache evaluated root out paths."""
     prepared = Candidate.model_validate_json(candidate.read_bytes())
     require_complete_candidate(prepared)
     updaters = ensure_updaters_loaded()
@@ -548,10 +552,15 @@ def plan_shards(
         workspace.validate_changes(allowed)
         with workspace.validation_snapshot() as snapshot:
             costs = costs_for_tree(snapshot.root)
-            shards = plan_darwin_closure_shards(
-                eval_root_closure_manifest(snapshot.root),
-                costs=costs,
-            )
+            manifest = eval_root_closure_manifest(snapshot.root)
+            shards = plan_darwin_closure_shards(manifest, costs=costs)
+            paths = root_store_paths(snapshot.root, manifest)
+    write_root_out_path_cache(
+        output.with_name(ROOT_OUT_PATHS_NAME),
+        tree=prepared.tree,
+        root_paths=paths,
+        manifest=manifest,
+    )
     matrix = github_actions_matrix(shards)
     atomic_write_text(output, json.dumps(matrix, indent=2) + "\n")
     target = github_output
@@ -571,9 +580,17 @@ def assert_coverage(
         typer.Option(help="name=result lines for every required job."),
     ],
 ) -> None:
-    """Fail unless every planned root and package is present in Cachix."""
+    """Fail unless every planned root and package is present in Cachix.
+
+    Required-job results are checked first so a failed or cancelled shard
+    farm exits in seconds. Root out paths come from the planner cache;
+    this command never re-evaluates them.
+    """
     prepared = Candidate.model_validate_json(candidate.read_bytes())
     require_complete_candidate(prepared)
+    results = parse_job_results(job_results)
+    require_required_jobs(results)
+    cache = load_planned_root_out_paths(evidence, tree=prepared.tree)
     updaters = ensure_updaters_loaded()
     with IsolatedUpdateWorkspace(get_repo_root()) as workspace:
         prepared.apply(workspace.root)
@@ -587,7 +604,6 @@ def assert_coverage(
         )
         workspace.validate_changes(allowed)
         with workspace.validation_snapshot() as snapshot:
-            manifest = eval_root_closure_manifest(snapshot.root)
             costs = costs_for_tree(snapshot.root)
             package_expected = {
                 system: frozenset(
@@ -604,15 +620,14 @@ def assert_coverage(
                 )
                 for system in prepared.systems
             }
-            paths = root_store_paths(snapshot.root, manifest)
     assert_update_coverage(
-        job_results=parse_job_results(job_results),
+        job_results=results,
         evidence=evidence,
         tree=prepared.tree,
         validate_all_packages=prepared.validate_all_packages,
-        manifest=manifest,
+        manifest=cache.manifest,
         package_expected=package_expected,
-        root_paths=paths,
+        root_paths=cache.root_paths,
         cachix_present=check_path_in_cachix,
         costs=costs,
     )

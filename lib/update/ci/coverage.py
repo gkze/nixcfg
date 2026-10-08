@@ -4,6 +4,10 @@ The root inventory is ``lib.rootClosureManifest``. The shard plan is
 ``lib.update.ci.shard_plan``. This module is the only place that decides
 whether a run covered that inventory. A missing, skipped, unbuilt, or
 unpushed root fails the run.
+
+``plan-shards`` evaluates root ``outPath``s once and writes
+``root-out-paths.json``. ``assert-coverage`` reuses that cache after
+checking required-job results; it never re-evaluates Darwin out paths.
 """
 
 from __future__ import annotations
@@ -12,7 +16,7 @@ import json
 import subprocess
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lib.update.ci.shard_plan import (
     ClosureShard,
@@ -30,6 +34,7 @@ from lib.update.derivation_validation import (
 from lib.update.derivation_validation import (
     composed_root_name as compose_kind_name,
 )
+from lib.update.io import atomic_write_text
 from lib.update.nix import get_current_nix_platform
 
 if TYPE_CHECKING:
@@ -37,6 +42,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _BINARY_CACHE_STORE = "https://gkze.cachix.org"
+ROOT_OUT_PATHS_NAME = "root-out-paths.json"
 _REQUIRED_JOBS = (
     "plan-darwin-closures",
     "validate-arm",
@@ -67,6 +73,32 @@ class GateReport(BaseModel):
 
 class CoverageError(RuntimeError):
     """The run missed a required root, package, shard, or Cachix path."""
+
+
+class RootOutPathCache(BaseModel):
+    """Planner-evaluated root out paths reused by ``assert-coverage``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+
+    tree: str
+    root_paths: dict[str, str] = Field(alias="rootPaths")
+    manifest: RootClosureManifest
+
+    @model_validator(mode="after")
+    def require_store_paths(self) -> RootOutPathCache:
+        """Refuse an empty or non-store cache so coverage cannot re-eval."""
+        if not self.root_paths:
+            msg = "root out-path cache has no paths"
+            raise ValueError(msg)
+        bad = [
+            f"{name}={path}"
+            for name, path in self.root_paths.items()
+            if not path.startswith("/nix/store/")
+        ]
+        if bad:
+            msg = f"root out-path cache contains a non-store path: {', '.join(bad)}"
+            raise ValueError(msg)
+        return self
 
 
 def parse_job_results(raw: str) -> dict[str, str]:
@@ -281,6 +313,60 @@ def eval_check_out_path(
         msg = f"could not evaluate {system} {attr} out path: {detail}"
         raise CoverageError(msg)
     return path
+
+
+def write_root_out_path_cache(
+    path: Path,
+    *,
+    tree: str,
+    root_paths: Mapping[str, str],
+    manifest: RootClosureManifest,
+) -> None:
+    """Write the planner's evaluated root out paths for coverage reuse."""
+    cache = RootOutPathCache(tree=tree, root_paths=dict(root_paths), manifest=manifest)
+    atomic_write_text(
+        path,
+        cache.model_dump_json(by_alias=True, indent=2) + "\n",
+        mkdir=True,
+    )
+
+
+def load_root_out_path_cache(path: Path) -> RootOutPathCache:
+    """Load one planner out-path cache or fail closed."""
+    try:
+        return RootOutPathCache.model_validate_json(path.read_bytes())
+    except (OSError, ValueError) as error:
+        msg = f"invalid root out-path cache: {path}"
+        raise CoverageError(msg) from error
+
+
+def find_root_out_path_cache(evidence: Path) -> Path:
+    """Require exactly one planner out-path cache under *evidence*."""
+    if not evidence.is_dir():
+        msg = f"coverage evidence is not a directory: {evidence}"
+        raise CoverageError(msg)
+    matches = sorted(
+        path for path in evidence.rglob(ROOT_OUT_PATHS_NAME) if path.is_file()
+    )
+    if len(matches) != 1:
+        found = ", ".join(str(path) for path in matches) or "<none>"
+        msg = (
+            f"coverage needs exactly one {ROOT_OUT_PATHS_NAME} under {evidence}, "
+            f"found {len(matches)}: {found}"
+        )
+        raise CoverageError(msg)
+    return matches[0]
+
+
+def load_planned_root_out_paths(evidence: Path, *, tree: str) -> RootOutPathCache:
+    """Reuse the planner cache for *tree*; never re-evaluate out paths."""
+    cache = load_root_out_path_cache(find_root_out_path_cache(evidence))
+    if cache.tree != tree:
+        msg = (
+            f"root out-path cache tree {cache.tree!r} does not match candidate {tree!r}"
+        )
+        raise CoverageError(msg)
+    return cache
 
 
 def root_store_paths(

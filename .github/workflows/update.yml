@@ -190,6 +190,8 @@ jobs:
     secrets: inherit
   # Fail closed: every manifest root valid and present in gkze.cachix.org,
   # every planned shard ran, Linux + Darwin package inventories intact.
+  # Job results are checked first. Root outPaths come from the
+  # plan-darwin-closures artifact, not a second Darwin eval.
   assert-coverage:
     needs:
       - prepare-x86

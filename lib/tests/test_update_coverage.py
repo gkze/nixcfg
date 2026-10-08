@@ -9,14 +9,19 @@ from pathlib import Path
 import pytest
 
 from lib.update.ci.coverage import (
+    ROOT_OUT_PATHS_NAME,
     ClosureShardReceipt,
     CoverageError,
+    RootOutPathCache,
     assert_update_coverage,
     binary_cache_store,
     check_path_in_cachix,
     coverage_platform,
     dump_job_results,
     eval_check_out_path,
+    find_root_out_path_cache,
+    load_planned_root_out_paths,
+    load_root_out_path_cache,
     load_shard_receipt,
     load_validation_report,
     parse_job_results,
@@ -30,6 +35,7 @@ from lib.update.ci.coverage import (
     root_installable_for,
     root_store_paths,
     shard_artifact_name,
+    write_root_out_path_cache,
 )
 from lib.update.ci.shard_plan import ClosureShard, plan_darwin_closure_shards
 from lib.update.derivation_validation import RootClosureManifest
@@ -271,6 +277,49 @@ def test_cachix_and_eval_helpers_fail_closed(tmp_path: Path) -> None:
     payload = tmp_path / "doc.json"
     payload.write_text("[]")
     assert read_json(payload) == []
+
+
+def test_planned_root_out_path_cache_is_fail_closed(tmp_path: Path) -> None:
+    manifest = _manifest()
+    paths = {
+        "darwin-argus": "/nix/store/argus",
+        "home-george": "/nix/store/home",
+        "aggregate:aarch64-darwin": "/nix/store/farm",
+    }
+    cache_path = tmp_path / "plan-shards-x86_64-linux" / ROOT_OUT_PATHS_NAME
+    cache_path.parent.mkdir()
+    write_root_out_path_cache(
+        cache_path, tree="tree", root_paths=paths, manifest=manifest
+    )
+    loaded = load_planned_root_out_paths(tmp_path, tree="tree")
+    assert loaded.tree == "tree"
+    assert loaded.root_paths == paths
+    assert loaded.manifest == manifest
+    assert find_root_out_path_cache(tmp_path) == cache_path
+    with pytest.raises(CoverageError, match="does not match candidate"):
+        load_planned_root_out_paths(tmp_path, tree="other")
+    cache_path.write_text("{")
+    with pytest.raises(CoverageError, match="invalid root out-path cache"):
+        load_root_out_path_cache(cache_path)
+    cache_path.unlink()
+    with pytest.raises(CoverageError, match="exactly one"):
+        find_root_out_path_cache(tmp_path)
+    (tmp_path / "a" / ROOT_OUT_PATHS_NAME).parent.mkdir()
+    (tmp_path / "b" / ROOT_OUT_PATHS_NAME).parent.mkdir()
+    (tmp_path / "a" / ROOT_OUT_PATHS_NAME).write_text("{}")
+    (tmp_path / "b" / ROOT_OUT_PATHS_NAME).write_text("{}")
+    with pytest.raises(CoverageError, match="found 2"):
+        find_root_out_path_cache(tmp_path)
+    with pytest.raises(CoverageError, match="not a directory"):
+        find_root_out_path_cache(tmp_path / "missing")
+    with pytest.raises(ValueError, match="no paths"):
+        RootOutPathCache(tree="tree", root_paths={}, manifest=manifest)
+    with pytest.raises(ValueError, match="non-store"):
+        RootOutPathCache(
+            tree="tree",
+            root_paths={"darwin-argus": "not-a-store"},
+            manifest=manifest,
+        )
 
 
 def test_assert_update_coverage_rejects_empty_darwin_or_missing_paths(

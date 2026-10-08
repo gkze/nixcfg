@@ -974,6 +974,13 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
         "validate-darwin-roots",
         "validate-darwin-closures",
     }
+    evidence = next(
+        step
+        for step in coverage["steps"]
+        if str(step.get("uses", "")).startswith("actions/download-artifact@")
+        and step.get("with", {}).get("path") == "${{ runner.temp }}/evidence"
+    )
+    assert "name" not in evidence["with"]
     publish_if = " ".join(workflow_jobs["publish"]["if"].split())
     assert "always() && !cancelled()" in publish_if
     assert "closure_complete" not in publish_if

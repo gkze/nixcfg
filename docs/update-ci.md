@@ -31,7 +31,11 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    path. An aggregate `root-closures` job then realizes the farm mostly by
    substitution. `assert-coverage` always runs, takes the manifest as
    authority, and fails the run if any root is unbuilt, unpushed, or skipped,
-   or if a Linux / Darwin package inventory was silently narrowed. publish
+   or if a Linux / Darwin package inventory was silently narrowed. It
+   checks required-job results first so a failed or cancelled shard farm
+   exits in seconds, then reuses `root-out-paths.json` from
+   `plan-darwin-closures` instead of re-evaluating Darwin `outPath`s.
+   Missing, extra, or tree-mismatched caches fail closed. publish
    needs that job.
    Hosted public `macos-15` concurrency is 5 of 20. Peak Darwin use after
    packages is four root shards. `max-jobs` / `cores` stay at 2 until a later

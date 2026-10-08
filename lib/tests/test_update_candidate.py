@@ -17,6 +17,13 @@ from lib.tests._updater_helpers import load_repo_module_for_test
 from lib.update import cli, source_runner
 from lib.update.candidate import Candidate, Preparation, ResolvedVersion, git
 from lib.update.ci import candidate as pipeline
+from lib.update.ci.coverage import (
+    ROOT_OUT_PATHS_NAME,
+    CoverageError,
+    dump_job_results,
+    required_coverage_jobs,
+    write_root_out_path_cache,
+)
 from lib.update.derivation_validation import (
     DerivationValidation,
     DerivationValidationFailure,
@@ -841,7 +848,19 @@ def test_plan_shards_writes_generated_matrix(
         assert flake_root.is_dir()
         return RootClosureManifest.model_validate(manifest)
 
+    def fake_paths(
+        flake_root: Path, evaluated: object, **_kwargs: object
+    ) -> dict[str, str]:
+        assert flake_root.is_dir()
+        assert evaluated is not None
+        return {
+            "darwin-argus": "/nix/store/argus",
+            "home-george": "/nix/store/home",
+            "aggregate:aarch64-darwin": "/nix/store/farm",
+        }
+
     monkeypatch.setattr(pipeline, "eval_root_closure_manifest", fake_eval)
+    monkeypatch.setattr(pipeline, "root_store_paths", fake_paths)
     result = CliRunner().invoke(
         pipeline.app,
         [
@@ -860,6 +879,10 @@ def test_plan_shards_writes_generated_matrix(
         "darwin-argus",
         "home-george",
     }
+    cache = json.loads(output.with_name(ROOT_OUT_PATHS_NAME).read_text())
+    assert cache["tree"] == candidate.tree
+    assert cache["rootPaths"]["darwin-argus"] == "/nix/store/argus"
+    assert cache["manifest"]["roots"]
     assert "darwin_closure_shards=" in github.read_text()
     env_output = tmp_path / "github-output-env"
     monkeypatch.setenv("GITHUB_OUTPUT", str(env_output))
@@ -876,6 +899,7 @@ def test_plan_shards_writes_generated_matrix(
     )
     assert via_env.exit_code == 0, via_env.output
     assert "darwin_closure_shards=" in env_output.read_text()
+    assert (env_matrix.with_name(ROOT_OUT_PATHS_NAME)).is_file()
     monkeypatch.delenv("GITHUB_OUTPUT")
     no_output = tmp_path / "matrix-no-github.json"
     without = CliRunner().invoke(
@@ -890,41 +914,58 @@ def test_plan_shards_writes_generated_matrix(
     )
     assert without.exit_code == 0, without.output
     assert json.loads(no_output.read_text())["include"]
+    assert json.loads(no_output.with_name(ROOT_OUT_PATHS_NAME).read_text())["tree"] == (
+        candidate.tree
+    )
 
 
-def test_assert_coverage_cli_uses_manifest_and_cachix(
+def _coverage_manifest() -> object:
+    from lib.update.derivation_validation import RootClosureManifest
+
+    return RootClosureManifest.model_validate({
+        "schemaVersion": 2,
+        "requiredKinds": ["darwin", "home"],
+        "requiredRoots": [],
+        "roots": [
+            {"kind": "darwin", "name": "argus", "system": "aarch64-darwin"},
+            {"kind": "home", "name": "george", "system": "aarch64-darwin"},
+        ],
+    })
+
+
+def _write_coverage_cache(evidence: Path, *, tree: str) -> None:
+    cache = evidence / "plan-shards-x86_64-linux" / ROOT_OUT_PATHS_NAME
+    cache.parent.mkdir(parents=True)
+    write_root_out_path_cache(
+        cache,
+        tree=tree,
+        root_paths={
+            "darwin-argus": "/nix/store/argus",
+            "home-george": "/nix/store/home",
+            "aggregate:aarch64-darwin": "/nix/store/farm",
+        },
+        manifest=_coverage_manifest(),
+    )
+
+
+def test_assert_coverage_cli_reuses_planner_out_paths(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     candidate = _candidate_for_scope(prepared_run)
     candidate_path = tmp_path / "candidate.json"
     candidate_path.write_text(candidate.model_dump_json())
     evidence = tmp_path / "evidence"
-    evidence.mkdir()
+    _write_coverage_cache(evidence, tree=candidate.tree)
     seen: dict[str, object] = {}
-
-    def fake_eval(flake_root: Path) -> object:
-        from lib.update.derivation_validation import RootClosureManifest
-
-        return RootClosureManifest.model_validate({
-            "schemaVersion": 2,
-            "requiredKinds": ["darwin", "home"],
-            "requiredRoots": [],
-            "roots": [
-                {"kind": "darwin", "name": "argus", "system": "aarch64-darwin"},
-                {"kind": "home", "name": "george", "system": "aarch64-darwin"},
-            ],
-        })
-
-    def fake_paths(
-        flake_root: Path, manifest: object, **_kwargs: object
-    ) -> dict[str, str]:
-        return {"darwin-argus": "/nix/store/a", "home-george": "/nix/store/h"}
 
     def fake_assert(**kwargs: object) -> None:
         seen.update(kwargs)
 
-    monkeypatch.setattr(pipeline, "eval_root_closure_manifest", fake_eval)
-    monkeypatch.setattr(pipeline, "root_store_paths", fake_paths)
+    def refuse_eval(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("assert-coverage must not re-evaluate root out paths")
+
+    monkeypatch.setattr(pipeline, "eval_root_closure_manifest", refuse_eval)
+    monkeypatch.setattr(pipeline, "root_store_paths", refuse_eval)
     monkeypatch.setattr(pipeline, "assert_update_coverage", fake_assert)
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
     result = CliRunner().invoke(
@@ -936,12 +977,81 @@ def test_assert_coverage_cli_uses_manifest_and_cachix(
             "--evidence",
             str(evidence),
             "--job-results",
-            "validate-arm=success",
+            dump_job_results(dict.fromkeys(required_coverage_jobs(), "success")),
         ],
     )
     assert result.exit_code == 0, result.output
     assert seen["tree"] == candidate.tree
     assert seen["evidence"] == evidence
+    assert seen["root_paths"]["darwin-argus"] == "/nix/store/argus"
+    assert seen["manifest"] == _coverage_manifest()
+
+
+def test_assert_coverage_fails_closed_before_workspace_when_jobs_failed(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidate = _candidate_for_scope(prepared_run)
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+
+    def refuse_workspace(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("failed jobs must not enter IsolatedUpdateWorkspace")
+
+    def refuse_cache(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("failed jobs must not load the out-path cache")
+
+    monkeypatch.setattr(pipeline, "IsolatedUpdateWorkspace", refuse_workspace)
+    monkeypatch.setattr(pipeline, "load_planned_root_out_paths", refuse_cache)
+    failed = dict.fromkeys(required_coverage_jobs(), "success")
+    failed["validate-darwin-roots"] = "failure"
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "assert-coverage",
+            "--candidate",
+            str(candidate_path),
+            "--evidence",
+            str(evidence),
+            "--job-results",
+            dump_job_results(failed),
+        ],
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, CoverageError)
+    assert "did not succeed" in str(result.exception)
+
+
+def test_assert_coverage_fails_closed_when_planner_cache_missing(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidate = _candidate_for_scope(prepared_run)
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+
+    def refuse_eval(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("missing cache must not fall back to root_store_paths")
+
+    monkeypatch.setattr(pipeline, "root_store_paths", refuse_eval)
+    monkeypatch.setattr(pipeline, "IsolatedUpdateWorkspace", refuse_eval)
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "assert-coverage",
+            "--candidate",
+            str(candidate_path),
+            "--evidence",
+            str(evidence),
+            "--job-results",
+            dump_job_results(dict.fromkeys(required_coverage_jobs(), "success")),
+        ],
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, CoverageError)
+    assert ROOT_OUT_PATHS_NAME in str(result.exception)
 
 
 def test_prepare_command_exports_failure_evidence_outside_checkout(
