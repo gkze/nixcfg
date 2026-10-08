@@ -24,6 +24,10 @@ _OUTPUT_LOG_NAME = "output.log"
 _APPLICATIONS = Path("/Applications")
 _DARWIN_SYSTEM_SIMULATORS = Path("/Library/Developer/CoreSimulator")
 _STORE_PATH_PREFIX = Path("/nix/store")
+_CACHIX_DAEMON_DIR_ENV = "CACHIX_DAEMON_DIR"
+_CACHIX_DAEMON_SOCKET_ENV = "CACHIX_DAEMON_SOCKET"
+_CACHIX_DAEMON_SOCKET_NAME = "daemon.sock"
+_STORAGE_MOUNTS = ("/", "/nix", "/nix/store")
 # Live-written on hosted macOS; rmtree can lose a race (ENOTEMPTY) after children
 # are gone. Cleanup is disk reclaim, not a correctness gate for these trees.
 _VOLATILE_IMAGE_LEAVES = frozenset({"Caches", "hostedtoolcache"})
@@ -89,6 +93,94 @@ def bootstrap() -> None:
     _outputs(runtime=str(runtime), devshell=str(devshell))
 
 
+def record_runner_storage(
+    label: str,
+    log: TextIO | None = None,
+    *,
+    detail: bool = True,
+    live: bool = True,
+) -> dict[str, object]:
+    """Record df, inodes, and used bytes before or after a heavy hosted phase."""
+    snapshot: dict[str, object] = {
+        "label": label,
+        "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "mounts": {},
+    }
+    mounts: dict[str, dict[str, int]] = {}
+    for mount in _STORAGE_MOUNTS:
+        path = Path(mount)
+        if not path.exists():
+            continue
+        usage = shutil.disk_usage(mount)
+        mounts[mount] = {
+            "total": usage.total,
+            "used": usage.used,
+            "free": usage.free,
+        }
+    snapshot["mounts"] = mounts
+    df_bin = shutil.which("df")
+    if df_bin is None:
+        snapshot["df_h"] = ""
+        snapshot["df_i"] = ""
+    else:
+        df_h = subprocess.run(  # noqa: S603 -- resolved df path
+            [df_bin, "-h", *list(mounts)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        df_i = subprocess.run(  # noqa: S603 -- resolved df path
+            [df_bin, "-i", *list(mounts)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        snapshot["df_h"] = df_h.stdout
+        snapshot["df_i"] = df_i.stdout
+    root = mounts.get("/", {})
+    store = mounts.get("/nix/store", mounts.get("/nix", {}))
+    message = (
+        f"storage {label} free={root.get('free', 0)} "
+        f"used={root.get('used', 0)} store_used={store.get('used', 0)}"
+    )
+    if detail:
+        message = f"{message}\n{snapshot['df_h']}{snapshot['df_i']}"
+    if os.environ.get("RUNNER_TEMP"):
+        try:
+            artifacts = _temp() / "update-artifacts"
+            artifacts.mkdir(parents=True, exist_ok=True)
+            with (artifacts / "storage.jsonl").open("a") as handle:
+                handle.write(json.dumps(snapshot) + "\n")
+        except OSError:
+            pass
+    if live:
+        if log is not None:
+            _write_diagnostic(log, message.rstrip())
+        else:
+            sys.stderr.write(message if message.endswith("\n") else message + "\n")
+            sys.stderr.flush()
+    return snapshot
+
+
+def cachix_daemon_socket() -> Path | None:
+    """Return the socket cachix-action started, never the unused default path.
+
+    cachix-action v16 exports ``CACHIX_DAEMON_DIR`` and binds
+    ``$CACHIX_DAEMON_DIR/daemon.sock`` (or ``CACHIX_DAEMON_SOCKET``). Bare
+    ``cachix daemon stop`` talks to ``~/.cache/cachix/cachix-daemon.sock``,
+    which this action never creates.
+    """
+    if socket := os.environ.get(_CACHIX_DAEMON_SOCKET_ENV, "").strip():
+        return Path(socket)
+    if daemon_dir := os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip():
+        return Path(daemon_dir) / _CACHIX_DAEMON_SOCKET_NAME
+    return None
+
+
+class CachixFlushError(RuntimeError):
+    """The explicit flush could not confirm a clean Cachix daemon drain."""
+
+
 def clean_runner_image() -> None:
     """Reclaim unused image tools, exclusively on disposable hosted runners."""
     if (
@@ -98,6 +190,7 @@ def clean_runner_image() -> None:
         msg = "Image cleanup requires a disposable GitHub-hosted runner"
         raise RuntimeError(msg)
     paths = list(_UNUSED_IMAGE_PATHS[sys.platform])
+    record_runner_storage("before-image-cleanup")
     sys.stdout.write(
         f"Available before image cleanup: {shutil.disk_usage('/').free} bytes\n"
     )
@@ -140,6 +233,7 @@ def clean_runner_image() -> None:
     sys.stdout.write(
         f"Available after image cleanup: {shutil.disk_usage('/').free} bytes\n"
     )
+    record_runner_storage("after-image-cleanup")
 
 
 def _image_cleanup_best_effort(path: Path) -> bool:
@@ -173,12 +267,14 @@ def reclaim_hosted_store() -> None:
     """Reclaim unused store paths on hosted Darwin before root-closure fetches."""
     if not is_hosted_darwin_runner():
         return
+    record_runner_storage("before-store-gc")
     sys.stdout.write(
         f"Available before store GC: {shutil.disk_usage('/').free} bytes\n"
     )
     sys.stdout.flush()
     _run("nix", "store", "gc")
     sys.stdout.write(f"Available after store GC: {shutil.disk_usage('/').free} bytes\n")
+    record_runner_storage("after-store-gc")
 
 
 def _develop(*args: str) -> tuple[str, ...]:
@@ -336,7 +432,8 @@ def _wait_for_diagnostics(
                     log,
                     f"Updater still running stage={stage} pid={process.pid} "
                     f"elapsed={time.monotonic() - started:.0f}s artifacts={artifacts} "
-                    f"run_logs={run_logs}",
+                    f"run_logs={run_logs} "
+                    f"free={shutil.disk_usage('/').free}",
                 )
             continue
         if diagnostic is None:
@@ -531,6 +628,7 @@ def native(stage: str) -> int:
         (artifacts / "stderr.log").open("w") as log,
     ):
         _write_diagnostic(log, f"Starting native stage={stage} artifacts={artifacts}")
+        record_runner_storage(f"before-native-{stage}", log, detail=False, live=False)
         with subprocess.Popen(  # noqa: S603 -- fixed executable and separate target arguments
             args,
             stdout=output,
@@ -549,6 +647,7 @@ def native(stage: str) -> int:
         _write_diagnostic(
             log, f"Updater finished stage={stage} returncode={returncode}"
         )
+        record_runner_storage(f"after-native-{stage}", log, detail=False, live=False)
         if summary := _failure_summary(artifacts / "result.json"):
             _write_diagnostic(log, summary)
         return _publish_prefetched_receipts(receipts, log, artifacts, returncode)
@@ -767,8 +866,60 @@ def start_repair() -> None:
     )
 
 
+def _retain_cachix_daemon_evidence(artifacts: Path, log: TextIO) -> None:
+    """Keep the action's daemon log, hook, and env so a missing socket is diagnosable."""
+    daemon_dir = os.environ.get(_CACHIX_DAEMON_DIR_ENV, "")
+    socket = cachix_daemon_socket()
+    hook_files = os.environ.get("NIX_USER_CONF_FILES", "")
+    nix_conf = os.environ.get("NIX_CONF", "")
+    _write_diagnostic(
+        log,
+        "Cachix daemon wiring "
+        f"{_CACHIX_DAEMON_DIR_ENV}={daemon_dir!r} "
+        f"{_CACHIX_DAEMON_SOCKET_ENV}={os.environ.get(_CACHIX_DAEMON_SOCKET_ENV, '')!r} "
+        f"socket={socket} socket_exists={bool(socket and socket.exists())} "
+        f"NIX_USER_CONF_FILES={hook_files!r} "
+        f"NIX_CONF_has_post_build_hook={'post-build-hook' in nix_conf}",
+    )
+    if not daemon_dir:
+        return
+    source = Path(daemon_dir)
+    retained = artifacts / "cachix-daemon"
+    if not source.is_dir():
+        _write_diagnostic(log, f"CACHIX_DAEMON_DIR missing on disk: {source}")
+        return
+    retained.mkdir(parents=True, exist_ok=True)
+    for name in ("daemon.log", "daemon.pid", "nix.conf", "post-build-hook.sh"):
+        path = source / name
+        if path.is_file():
+            shutil.copy2(path, retained / name)
+            _write_diagnostic(log, f"retained {name} bytes={path.stat().st_size}")
+
+
+def _release_cachix_daemon_dir() -> None:
+    """Remove the action's pid/socket so the post hook does not fail after we drain."""
+    daemon_dir = os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip()
+    if not daemon_dir:
+        return
+    path = Path(daemon_dir)
+    if not path.is_dir():
+        return
+    for name in (_CACHIX_DAEMON_SOCKET_NAME, "daemon.pid"):
+        target = path / name
+        try:
+            target.unlink()
+        except OSError:
+            continue
+
+
 def flush_cachix() -> None:
-    """Push leftover prefetch receipts and stop the Cachix daemon.
+    """Push leftover prefetch receipts and drain the Cachix daemon.
+
+    cachix-action v16 starts ``cachix daemon run --socket
+    $CACHIX_DAEMON_DIR/daemon.sock`` and registers a Nix post-build hook.
+    This flush must stop that socket. A bare ``cachix daemon stop`` talks to
+    ``~/.cache/cachix/cachix-daemon.sock`` and reports success here while
+    leaving the real queue undrained.
 
     Failure points and what reaches gkze:
     - Build failure: every path the daemon already uploaded, plus prefetch
@@ -786,14 +937,48 @@ def flush_cachix() -> None:
     receipts = artifacts / "prefetch-receipts.jsonl"
     with (artifacts / "cachix-flush.log").open("a") as log:
         _write_diagnostic(log, "Flushing Cachix daemon and prefetch receipts")
+        record_runner_storage("flush-start", log)
+        _retain_cachix_daemon_evidence(artifacts, log)
         if receipts.exists():
             _publish_prefetched_receipts(receipts, log, artifacts, 0)
-        stop = _run("cachix", "daemon", "stop", check=False, capture=True)
+        socket = cachix_daemon_socket()
+        if socket is None:
+            msg = (
+                "Cachix daemon socket is unknown: "
+                f"{_CACHIX_DAEMON_DIR_ENV} and {_CACHIX_DAEMON_SOCKET_ENV} "
+                "are unset. useDaemon wiring did not export the socket."
+            )
+            _write_diagnostic(log, msg)
+            raise CachixFlushError(msg)
+        if not socket.exists():
+            msg = f"Cachix daemon socket missing: {socket}"
+            _write_diagnostic(log, msg)
+            raise CachixFlushError(msg)
+        stop = _run(
+            "cachix",
+            "daemon",
+            "stop",
+            "--socket",
+            str(socket),
+            check=False,
+            capture=True,
+        )
         _write_diagnostic(
             log,
             f"cachix daemon stop returncode={stop.returncode} "
-            f"stdout={stop.stdout.strip()} stderr={stop.stderr.strip()}",
+            f"socket={socket} stdout={stop.stdout.strip()} "
+            f"stderr={stop.stderr.strip()}",
         )
+        if stop.returncode:
+            msg = (
+                "Cachix daemon stop failed; cannot confirm a clean drain "
+                f"socket={socket} returncode={stop.returncode} "
+                f"stderr={stop.stderr.strip()}"
+            )
+            _write_diagnostic(log, msg)
+            raise CachixFlushError(msg)
+        _release_cachix_daemon_dir()
+        record_runner_storage("flush-end", log)
 
 
 def main(stage: str) -> int:

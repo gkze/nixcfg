@@ -122,8 +122,10 @@ job cannot own both packages and every Darwin root: after a ~17-minute fetch
 burst the tail started about six derivations a minute, with thousands still
 queued when the 360-minute cap cancelled the job. Package validation is a
 separate job and owns `zed-editor-nightly` so root shards substitute that
-subtree. Each root shard builds for five hours without `-L`, then the
-explicit Cachix flush and the action post hook drain the daemon. There is no
+subtree. Each root shard GCs first, records `df -h` / inode / store used
+bytes before and after the fetch, then builds for five hours without `-L`.
+The explicit Cachix flush drains `$CACHIX_DAEMON_DIR/daemon.sock` (fail-closed)
+and the action post hook is then a no-op. There is no
 serial yield / `closure_complete` continuation. A store unlink, substitute
 EILSEQ, vanished store `.drv`, vanished store
 build input, rustc E0463 after `--extern` named a `/nix/store/` rlib, crashed

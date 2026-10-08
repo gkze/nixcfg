@@ -531,7 +531,7 @@ def test_cache_root_deps_cli_propagates_dependency_failures(
 def test_validation_scopes_split_packages_from_closures(
     prepared_run, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Package and closure shards do separate work and do not GC a fresh runner."""
+    """Package shards do not GC; closure jobs GC before the root-closure fetch."""
     candidate = _candidate_for_scope(prepared_run)
     order: list[str] = []
     seen: list[dict[str, object]] = []
@@ -559,7 +559,7 @@ def test_validation_scopes_split_packages_from_closures(
         closure_budget_seconds=pipeline.HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS,
     )
     assert closures.gates == ("closures",)
-    assert order == ["packages", "roots"]
+    assert order == ["packages", "reclaim", "roots"]
     assert seen[0]["build_timeout"] == (
         pipeline.HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS
     )
@@ -781,11 +781,16 @@ def test_closure_shard_writes_receipt_instead_of_validation_report(
         pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
     )
     seen: list[object] = []
+    order: list[str] = []
 
     def roots(**kwargs: object) -> tuple[()]:
+        order.append("roots")
         seen.append(kwargs.get("root_names"))
         return ()
 
+    monkeypatch.setattr(
+        pipeline.jobs, "reclaim_hosted_store", lambda: order.append("reclaim")
+    )
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
     result = CliRunner().invoke(
         pipeline.app,
@@ -809,6 +814,7 @@ def test_closure_shard_writes_receipt_instead_of_validation_report(
     assert receipt["roots"] == ["darwin-argus"]
     assert receipt["failures"] == []
     assert seen == [("darwin-argus",)]
+    assert order == ["reclaim", "roots"]
 
 
 def test_plan_shards_writes_generated_matrix(

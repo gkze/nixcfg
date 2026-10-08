@@ -150,6 +150,7 @@ def _hosted_validation_progress(source: str) -> validation.ValidationProgress:
             return
         if isinstance(event, validation.ValidationCommandStarted):
             text = f"$ {event.command}"
+            jobs.record_runner_storage(f"before-{source}")
         elif isinstance(event, validation.ValidationCommandOutput):
             text = event.line.replace("\r", "")
         else:
@@ -253,10 +254,10 @@ def validate_candidate(
     ``packages`` and ``closures`` split one platform across runners. A combined
     ``all`` scope is what Linux validators and local updates use. ``closure-shard``
     realizes named Darwin roots and is not certify evidence; the aggregate
-    ``closures`` gate still proves ``root-closures``. Hosted Darwin shards start
-    from an empty store and reuse paths Cachix already has. The combined scope
-    still GCs on hosted Darwin because package outputs and the closure fetch
-    share one disk.
+    ``closures`` gate still proves ``root-closures``. Hosted Darwin shards GC
+    before the root-closure fetch: a cache-miss rust_* subtree can fill
+    macos-15 and ``min-free`` then GCs mid-rustc, which tears rlibs (E0786 /
+    SIGBUS). The combined scope GCs after package outputs share the disk.
     """
     require_complete_candidate(candidate)
     if closure_roots is not None and scope != "closure-shard":
@@ -306,12 +307,13 @@ def validate_candidate(
                     native_builds_only=True,
                     progress=_hosted_validation_progress("derivations"),
                 )
+                jobs.record_runner_storage("after-packages")
             if "closures" in gates or scope == "closure-shard":
-                if scope == "all":
-                    # Hosted macos-15 root-closures can fetch tens of GiB after
-                    # package validation has already filled the store. GC first
-                    # so the Nix daemon is not killed mid-unpack.
-                    jobs.reclaim_hosted_store()
+                # Hosted macos-15 root-closures can fetch tens of GiB.
+                # GC first so min-free does not fire mid-rustc.
+                jobs.record_runner_storage(f"before-gc-{scope}")
+                jobs.reclaim_hosted_store()
+                jobs.record_runner_storage(f"after-gc-{scope}")
                 # Root checks come from the independently verified manifest.
                 # Hosted macos-15 died mid-build when -L streamed 4000+
                 # derivation logs. Build without those logs so Cachix can
@@ -336,6 +338,7 @@ def validate_candidate(
                     ),
                     build_timeout=budget,
                 )
+                jobs.record_runner_storage(f"after-closures-{scope}")
         workspace.validate_changes(allowed)
     return ValidationReport(
         tree=candidate.tree,

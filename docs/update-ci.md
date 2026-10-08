@@ -83,12 +83,15 @@ publication; every authored command step runs Python, with no shell glue. The up
 core owns source discovery, declared output authority, candidate identity and validation. Nix owns derivations, dependency ordering, builds and cache reuse.
 
 Cachix's daemon uploads built outputs continuously in every job that uses
-`update-runtime`. Each native job also has an explicit `if: always()` flush
-that pushes leftover prefetch receipts and runs `cachix daemon stop` so a
-failed, cancelled, or near-timeout job still drains the queue. Slack before
-the 360-minute hard kill is the five-hour build budget (ED-7.1: a SIGKILL
-during flush can still drop the queue tail; runner loss keeps only paths
-Cachix already acknowledged).
+`update-runtime` (`useDaemon: true`). cachix-action binds
+`$CACHIX_DAEMON_DIR/daemon.sock` and registers a Nix `post-build-hook`.
+Each native job also has an explicit `if: always()` flush that pushes leftover
+prefetch receipts and runs `cachix daemon stop --socket` against that socket.
+A bare `cachix daemon stop` talks to `~/.cache/cachix/cachix-daemon.sock`,
+which this action never creates; flush fails closed if the real socket is
+missing or stop is unclean. Slack before the 360-minute hard kill is the
+five-hour build budget (ED-7.1: a SIGKILL during flush can still drop the
+queue tail; runner loss keeps only paths Cachix already acknowledged).
 Preparation, validation, and coverage also publish the exact files recorded
 by URL prefetches on every exit path, not only when the updater succeeds.
 Those files enter the store directly and do not trigger Nix's post-build hook.

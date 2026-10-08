@@ -23,6 +23,25 @@ jobs:
         with:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Require Cachix daemon socket
+        run: |
+          import os
+          from pathlib import Path
+
+          daemon_dir = os.environ.get("CACHIX_DAEMON_DIR", "")
+          socket_env = os.environ.get("CACHIX_DAEMON_SOCKET", "")
+          socket = Path(socket_env) if socket_env else (
+              Path(daemon_dir) / "daemon.sock" if daemon_dir else None
+          )
+          if socket is None:
+              raise SystemExit(
+                  "CACHIX_DAEMON_DIR and CACHIX_DAEMON_SOCKET are unset; "
+                  "useDaemon did not start"
+              )
+          if not socket.exists():
+              raise SystemExit(f"Cachix daemon socket missing: {socket}")
+          print(f"daemon socket {socket}")
+        shell: python
       - name: Realize a unique path and fail
         env:
           PROOF_NAME: cachix-flush-proof-${{ github.run_id }}-${{ github.run_attempt }}
@@ -53,6 +72,38 @@ jobs:
           Path(os.environ["RUNNER_TEMP"], "proof-path.txt").write_text(built + "\n")
           raise SystemExit(1)
         shell: python
+      - name: Realize a post-failure path
+        if: always()
+        env:
+          PROOF_NAME: cachix-flush-proof-after-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          import os
+          import subprocess
+          from pathlib import Path
+
+          name = os.environ["PROOF_NAME"]
+          cwd = Path.cwd()
+          expr = (
+              "let pkgs = (builtins.getFlake "
+              f'"path:{cwd}").pkgs.x86_64-linux; '
+              f'in pkgs.runCommand "{name}" {{}} "echo {name} > $out"'
+          )
+          built = subprocess.check_output(
+              [
+                  "nix",
+                  "build",
+                  "--impure",
+                  "--no-link",
+                  "--print-out-paths",
+                  "--expr",
+                  expr,
+              ],
+              text=True,
+          ).strip()
+          Path(os.environ["RUNNER_TEMP"], "proof-path-after.txt").write_text(
+              built + "\n"
+          )
+        shell: python
       - name: Flush Cachix daemon
         if: always()
         env:
@@ -66,7 +117,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: cachix-flush-proof
-          path: ${{ runner.temp }}/proof-path.txt
+          path: |
+            ${{ runner.temp }}/proof-path.txt
+            ${{ runner.temp }}/proof-path-after.txt
           if-no-files-found: error
   assert-partial:
     needs: fail-after-push
@@ -92,14 +145,17 @@ jobs:
           from pathlib import Path
           import os
 
-          path = (Path(os.environ["RUNNER_TEMP"]) / "proof" / "proof-path.txt").read_text().strip()
-          if not path.startswith("/nix/store/"):
-              raise SystemExit(f"invalid proof path: {path}")
-          subprocess.run(
-              ["nix", "path-info", "--store", "https://gkze.cachix.org", path],
-              check=True,
-          )
-          print(f"partial Cachix presence proved for {path}")
+          evidence = Path(os.environ["RUNNER_TEMP"]) / "proof"
+          before = (evidence / "proof-path.txt").read_text().strip()
+          after = (evidence / "proof-path-after.txt").read_text().strip()
+          for label, path in (("before-failure", before), ("after-failure", after)):
+              if not path.startswith("/nix/store/"):
+                  raise SystemExit(f"invalid {label} proof path: {path}")
+              subprocess.run(
+                  ["nix", "path-info", "--store", "https://gkze.cachix.org", path],
+                  check=True,
+              )
+              print(f"partial Cachix presence proved for {label} {path}")
         shell: python
   proof:
     needs:
@@ -110,7 +166,7 @@ jobs:
     steps:
       - name: Require designed failure plus Cachix hit
         shell: python
-        run: |
+        run: |-
           # continue-on-error on fail-after-push reports success to needs
           # after the job failed. The proof we need is assert-partial green
           # plus the uploaded unique path. The fail step's exit 1 is in the

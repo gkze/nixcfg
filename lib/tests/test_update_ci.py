@@ -624,6 +624,17 @@ def test_prefetch_publication_keeps_updater_status_when_both_fail(
     assert jobs.native("prepare") == 17
 
 
+def _cachix_daemon_dir(root: Path) -> Path:
+    daemon_dir = root / "cachix-daemon"
+    daemon_dir.mkdir()
+    (daemon_dir / "daemon.sock").write_text("")
+    (daemon_dir / "daemon.pid").write_text("123\n")
+    (daemon_dir / "nix.conf").write_text("post-build-hook = /hook.sh\n")
+    (daemon_dir / "post-build-hook.sh").write_text("#!/bin/sh\n")
+    (daemon_dir / "daemon.log").write_text("started\n")
+    return daemon_dir
+
+
 def test_flush_cachix_stops_daemon_and_republishes_receipts(
     native_job, monkeypatch
 ) -> None:
@@ -633,22 +644,124 @@ def test_flush_cachix_stops_daemon_and_republishes_receipts(
     (artifacts / "prefetch-receipts.jsonl").write_text(
         '{"storePath": "/nix/store/flush.zip"}\n'
     )
+    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
     for key, value in env.items():
         monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
-    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == ["daemon", "stop"]
+    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
+        "daemon",
+        "stop",
+        "--socket",
+        str(daemon_dir / "daemon.sock"),
+    ]
     flush_log = (artifacts / "cachix-flush.log").read_text()
     assert "Collected 1 prefetched store paths" in flush_log
-    assert "cachix daemon stop returncode=" in flush_log
+    assert "cachix daemon stop returncode=0" in flush_log
+    assert (artifacts / "cachix-daemon" / "daemon.log").read_text() == "started\n"
+    assert not (daemon_dir / "daemon.sock").exists()
+    assert not (daemon_dir / "daemon.pid").exists()
     empty = Path(env["RUNNER_TEMP"]) / "empty-flush"
     empty.mkdir()
     monkeypatch.setenv("RUNNER_TEMP", str(empty))
+    empty_daemon = _cachix_daemon_dir(empty)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(empty_daemon))
     assert jobs.main("flush-cachix") == 0
     assert (
         "Flushing Cachix daemon"
         in (empty / "update-artifacts" / "cachix-flush.log").read_text()
     )
+
+
+def test_flush_cachix_fails_closed_without_action_socket(
+    native_job, monkeypatch
+) -> None:
+    """Bare `cachix daemon stop` hitting ~/.cache is not a drain."""
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.delenv("CACHIX_DAEMON_DIR", raising=False)
+    monkeypatch.delenv("CACHIX_DAEMON_SOCKET", raising=False)
+    with pytest.raises(jobs.CachixFlushError, match="socket is unknown"):
+        jobs.main("flush-cachix")
+    flush_log = (
+        Path(env["RUNNER_TEMP"]) / "update-artifacts" / "cachix-flush.log"
+    ).read_text()
+    assert "socket is unknown" in flush_log
+
+
+def test_flush_cachix_fails_closed_when_socket_is_missing_or_stop_fails(
+    native_job, monkeypatch
+) -> None:
+    env, checkout = native_job
+    daemon_dir = Path(env["RUNNER_TEMP"]) / "missing-socket"
+    daemon_dir.mkdir(parents=True)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.chdir(checkout)
+    with pytest.raises(jobs.CachixFlushError, match="socket missing"):
+        jobs.main("flush-cachix")
+    (daemon_dir / "daemon.sock").write_text("")
+    monkeypatch.setenv("TEST_CACHE_EXIT", "1")
+    with pytest.raises(jobs.CachixFlushError, match="stop failed"):
+        jobs.main("flush-cachix")
+
+
+def test_cachix_daemon_socket_reads_action_env_only(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("CACHIX_DAEMON_DIR", raising=False)
+    monkeypatch.delenv("CACHIX_DAEMON_SOCKET", raising=False)
+    assert jobs.cachix_daemon_socket() is None
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(tmp_path / "daemon"))
+    assert jobs.cachix_daemon_socket() == tmp_path / "daemon" / "daemon.sock"
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(tmp_path / "explicit.sock"))
+    assert jobs.cachix_daemon_socket() == tmp_path / "explicit.sock"
+
+
+def test_cachix_daemon_helpers_tolerate_missing_or_busy_paths(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("CACHIX_DAEMON_DIR", raising=False)
+    jobs._release_cachix_daemon_dir()
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(tmp_path / "absent"))
+    jobs._retain_cachix_daemon_evidence(tmp_path / "artifacts", StringIO())
+    jobs._release_cachix_daemon_dir()
+    busy = tmp_path / "busy"
+    busy.mkdir()
+    (busy / "daemon.sock").mkdir()
+    (busy / "daemon.pid").mkdir()
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(busy))
+    jobs._release_cachix_daemon_dir()
+    assert (busy / "daemon.sock").is_dir()
+
+
+def test_record_runner_storage_writes_df_inodes_and_store_bytes(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    snapshot = jobs.record_runner_storage("phase")
+    assert snapshot["label"] == "phase"
+    mounts = snapshot["mounts"]
+    assert isinstance(mounts, dict)
+    assert "/" in mounts
+    assert {"total", "used", "free"} <= set(mounts["/"])
+    lines = (tmp_path / "update-artifacts" / "storage.jsonl").read_text().splitlines()
+    assert json.loads(lines[-1])["label"] == "phase"
+    captured = capsys.readouterr()
+    assert "storage phase free=" in captured.err
+    assert "Filesystem" in snapshot["df_h"] or snapshot["df_h"] == ""
+    monkeypatch.setattr(jobs.shutil, "which", lambda _name: None)
+    empty = jobs.record_runner_storage("no-df", live=False)
+    assert empty["df_h"] == ""
+    assert empty["df_i"] == ""
+    blocked = tmp_path / "update-artifacts" / "storage.jsonl"
+    blocked.unlink(missing_ok=True)
+    blocked.mkdir()
+    jobs.record_runner_storage("blocked-jsonl", live=False)
 
 
 def test_plan_shards_and_coverage_native_stages(native_job, monkeypatch) -> None:
@@ -883,13 +996,35 @@ def test_cachix_flush_proof_requires_partial_presence_after_designed_failure() -
     )
     fail = workflow["jobs"]["fail-after-push"]
     assert fail["continue-on-error"] == "true"
+    names = [step.get("name") for step in fail["steps"]]
+    assert "Require Cachix daemon socket" in names
+    assert "Realize a post-failure path" in names
     assert any(
         step.get("name") == "Flush Cachix daemon" and step.get("if") == "always()"
         for step in fail["steps"]
     )
+    post = next(
+        step
+        for step in fail["steps"]
+        if step.get("name") == "Realize a post-failure path"
+    )
+    assert post["if"] == "always()"
+    upload = next(
+        step
+        for step in fail["steps"]
+        if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+    )
+    assert "proof-path-after.txt" in upload["with"]["path"]
     assert workflow["jobs"]["assert-partial"]["if"] == "always()"
     proof_if = " ".join(workflow["jobs"]["proof"]["if"].split())
     assert "always() && !cancelled()" in proof_if
+    assert_source = next(
+        step
+        for step in workflow["jobs"]["assert-partial"]["steps"]
+        if step.get("name") == "Require the failed job's path in Cachix"
+    )["run"]
+    assert "proof-path-after.txt" in assert_source
+    assert "after-failure" in assert_source
 
 
 def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
@@ -1143,6 +1278,7 @@ def test_generator_cache_is_scoped_to_disposable_accelerators() -> None:
         if step.get("uses", "").startswith("cachix/cachix-action@")
     )
     assert cachix["with"]["name"] == jobs._BINARY_CACHE
+    assert cachix["with"]["useDaemon"] == "true"
     native = yaml.load(
         (ROOT / ".github/workflows/update-native.yml").read_text(),
         Loader=yaml.BaseLoader,
