@@ -18,7 +18,13 @@ from pathlib import Path
 from typing import TextIO
 
 _BINARY_CACHE = "gkze"
-_VALIDATION_SCOPES = frozenset({"all", "packages", "closures", "closure-shard"})
+_VALIDATION_SCOPES = frozenset({
+    "all",
+    "packages",
+    "closures",
+    "closure-shard",
+    "rust-warmup",
+})
 _HEARTBEAT_INTERVAL_SECONDS = 60
 _OUTPUT_LOG_NAME = "output.log"
 _APPLICATIONS = Path("/Applications")
@@ -753,13 +759,18 @@ def _append_validation_scope(args: list[str]) -> str:
     """Add shard flags and return the scope the hosted job requested."""
     scope = os.environ.get("NIXCFG_VALIDATE_SCOPE", "all")
     if scope not in _VALIDATION_SCOPES:
-        msg = "Validation scope must be all, packages, closures, or closure-shard"
+        msg = (
+            "Validation scope must be all, packages, closures, "
+            "closure-shard, or rust-warmup"
+        )
         raise ValueError(msg)
     if scope != "all":
         args.extend(("--scope", scope))
     budget = os.environ.get("NIXCFG_CLOSURE_BUDGET_SECONDS", "")
     roots = os.environ.get("NIXCFG_CLOSURE_ROOTS", "")
     shard = os.environ.get("NIXCFG_CLOSURE_SHARD", "")
+    slot = os.environ.get("NIXCFG_WARMUP_SLOT", "").strip()
+    warmup = os.environ.get("NIXCFG_WARMUP_PLAN", "").strip()
     if budget and (
         scope not in {"closures", "closure-shard"} or not _is_positive_number(budget)
     ):
@@ -768,18 +779,28 @@ def _append_validation_scope(args: list[str]) -> str:
     if scope == "closure-shard" and (not roots or not shard):
         msg = "closure-shard requires NIXCFG_CLOSURE_ROOTS and NIXCFG_CLOSURE_SHARD"
         raise ValueError(msg)
-    if scope != "closure-shard" and (roots or shard):
+    if scope == "rust-warmup" and (not warmup or not slot):
+        msg = "rust-warmup requires NIXCFG_WARMUP_PLAN and NIXCFG_WARMUP_SLOT"
+        raise ValueError(msg)
+    if scope != "closure-shard" and roots:
         msg = "Named closure roots are only valid for the closure-shard scope"
+        raise ValueError(msg)
+    if scope not in {"closure-shard", "rust-warmup"} and shard:
+        msg = "Named closure roots are only valid for the closure-shard scope"
+        raise ValueError(msg)
+    if scope != "rust-warmup" and slot:
+        msg = "warmup slots are only valid for the rust-warmup scope"
         raise ValueError(msg)
     if budget:
         args.extend(("--closure-budget-seconds", budget))
     if roots:
         args.extend(("--closure-roots", roots))
-    if shard:
+    if scope == "closure-shard" and shard:
         args.extend(("--shard", shard))
-    warmup = os.environ.get("NIXCFG_WARMUP_PLAN", "").strip()
     if warmup:
         args.extend(("--warmup-plan", warmup))
+    if slot:
+        args.extend(("--warmup-slot", slot))
     return scope
 
 

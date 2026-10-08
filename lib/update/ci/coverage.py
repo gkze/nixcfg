@@ -46,6 +46,7 @@ _REQUIRED_JOBS = (
     "plan-darwin-closures",
     "validate-arm",
     "validate-x86",
+    "validate-darwin-warm-rust",
     "validate-darwin-packages",
     "validate-darwin-roots",
     "validate-darwin-closures",

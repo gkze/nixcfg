@@ -42,6 +42,8 @@ from lib.update.ci.warmup import (
     load_warmup_plan,
     plan_darwin_warmup,
     realize_warmup_outputs,
+    skip_cached_warmup_paths,
+    slot_warmup_paths,
     write_warmup_plan,
 )
 from lib.update.cli_options import RepairAgent, UpdateOptions
@@ -69,7 +71,7 @@ def repair(
     propose_repair(get_repo_root(), evidence=evidence, output=output, agent=agent)
 
 
-ValidationScope = Literal["all", "packages", "closures", "closure-shard"]
+ValidationScope = Literal["all", "packages", "closures", "closure-shard", "rust-warmup"]
 ValidationGate = Literal["packages", "closures"]
 # Graph discovery is minutes, not the build. Keep it inside the job cap so a
 # hung eval fails this shard instead of consuming the build budget.
@@ -100,21 +102,6 @@ class RootDependencyCacheReport(BaseModel):
     tree: str
     system: str
     failures: tuple[validation.DerivationValidationFailure, ...]
-
-
-def _hosted_darwin_packages_job(system: str) -> bool:
-    """Require a warmup plan only on a real hosted macOS packages shard.
-
-    Linux CI mocks ``get_current_nix_platform`` to ``aarch64-darwin``.
-    ``GITHUB_ACTIONS`` is also true there, so the nix platform alone would
-    fail-closed every unit test that validates packages. The runner OS is
-    the hosted-macOS signal; tests that need the gate patch ``sys.platform``.
-    """
-    return (
-        os.environ.get("GITHUB_ACTIONS") == "true"
-        and system == "aarch64-darwin"
-        and sys.platform == "darwin"
-    )
 
 
 def _output_path(output: Path, root: Path) -> Path:
@@ -249,7 +236,7 @@ def _gates_for_scope(scope: str) -> tuple[ValidationGate, ...]:
         return ("closures",)
     if scope == "all":
         return ("packages", "closures")
-    if scope == "closure-shard":
+    if scope in {"closure-shard", "rust-warmup"}:
         return ()
     msg = f"Unknown validation scope: {scope}"
     raise ValueError(msg)
@@ -268,6 +255,27 @@ def _require_closure_budget(seconds: float | None) -> float | None:
     return float(seconds)
 
 
+def _realize_rust_warmup(
+    warmup_plan: Path,
+    warmup_slot: int,
+    *,
+    flake_root: Path,
+) -> tuple[validation.DerivationValidationFailure, ...]:
+    """Realize one rust-warmup stripe, skipping paths already in gkze."""
+    plan = load_warmup_plan(warmup_plan)
+    missing = skip_cached_warmup_paths(
+        slot_warmup_paths(plan.rust_layers, warmup_slot),
+        present=check_path_in_cachix,
+    )
+    failures = realize_warmup_outputs(
+        missing,
+        flake_root=flake_root,
+        progress=_hosted_validation_progress("rust-warmup"),
+    )
+    jobs.record_runner_storage("after-rust-warmup")
+    return failures
+
+
 def validate_candidate(
     candidate: Candidate,
     *,
@@ -275,16 +283,19 @@ def validate_candidate(
     closure_budget_seconds: float | None = None,
     closure_roots: tuple[str, ...] | None = None,
     warmup_plan: Path | None = None,
+    warmup_slot: int | None = None,
 ) -> ValidationReport:
     """Validate the assembled tree on this native builder, leaving the repo alone.
 
     ``packages`` and ``closures`` split one platform across runners. A combined
     ``all`` scope is what Linux validators and local updates use. ``closure-shard``
     realizes named Darwin roots and is not certify evidence; the aggregate
-    ``closures`` gate still proves ``root-closures``. Hosted Darwin shards GC
-    before the root-closure fetch: a cache-miss rust_* subtree can fill
-    macos-15 and ``min-free`` then GCs mid-rustc, which tears rlibs (E0786 /
-    SIGBUS). The combined scope GCs after package outputs share the disk.
+    ``closures`` gate still proves ``root-closures``. ``rust-warmup`` realizes
+    one 5-wide stripe of the planner rust_* layers and is not certify
+    evidence. Hosted Darwin shards GC before the root-closure fetch: a
+    cache-miss rust_* subtree can fill macos-15 and ``min-free`` then GCs
+    mid-rustc, which tears rlibs (E0786 / SIGBUS). The combined scope GCs
+    after package outputs share the disk.
     """
     require_complete_candidate(candidate)
     if closure_roots is not None and scope != "closure-shard":
@@ -292,6 +303,12 @@ def validate_candidate(
         raise ValueError(msg)
     if scope == "closure-shard" and not closure_roots:
         msg = "closure-shard requires a nonempty root list"
+        raise ValueError(msg)
+    if scope == "rust-warmup" and (warmup_plan is None or warmup_slot is None):
+        msg = "rust-warmup requires a warmup plan and slot"
+        raise ValueError(msg)
+    if scope != "rust-warmup" and warmup_slot is not None:
+        msg = "warmup slots are only valid for the rust-warmup scope"
         raise ValueError(msg)
     gates = _gates_for_scope(scope)
     budget = _require_closure_budget(closure_budget_seconds)
@@ -314,10 +331,14 @@ def validate_candidate(
         failures: tuple[validation.DerivationValidationFailure, ...] = ()
         planned_installables: tuple[str, ...] = ()
         with workspace.validation_snapshot() as snapshot:
-            if "packages" in gates:
-                if warmup_plan is None and _hosted_darwin_packages_job(system):
-                    msg = "hosted Darwin packages validation requires a warmup plan"
+            if scope == "rust-warmup" and warmup_plan is not None:
+                if warmup_slot is None:
+                    msg = "rust-warmup requires a warmup plan and slot"
                     raise ValueError(msg)
+                failures += _realize_rust_warmup(
+                    warmup_plan, warmup_slot, flake_root=snapshot.root
+                )
+            if "packages" in gates:
                 sources = None if candidate.validate_all_packages else candidate.sources
                 planned_installables = tuple(
                     request.installable
@@ -338,14 +359,6 @@ def validate_candidate(
                     progress=_hosted_validation_progress("derivations"),
                 )
                 jobs.record_runner_storage("after-packages")
-                if warmup_plan is not None:
-                    plan = load_warmup_plan(warmup_plan)
-                    failures += realize_warmup_outputs(
-                        plan.warmup_outputs,
-                        flake_root=snapshot.root,
-                        progress=_hosted_validation_progress("root-warmup"),
-                    )
-                    jobs.record_runner_storage("after-warmup")
             if "closures" in gates or scope == "closure-shard":
                 # Hosted macos-15 root-closures can fetch tens of GiB.
                 # GC first when free is below max-free+min-free so min-free
@@ -499,7 +512,11 @@ def validate(
     ] = None,
     warmup_plan: Annotated[
         Path | None,
-        typer.Option(help="Planner warmup-plan.json for Darwin packages."),
+        typer.Option(help="Planner warmup-plan.json for Darwin rust-warmup."),
+    ] = None,
+    warmup_slot: Annotated[
+        int | None,
+        typer.Option(help="rust-warmup matrix slot 0-4."),
     ] = None,
 ) -> None:
     """Run the existing package and root gates on the exact assembled tree."""
@@ -509,6 +526,12 @@ def validate(
     if scope != "closure-shard" and (closure_roots or shard):
         msg = "--closure-roots and --shard are only valid for closure-shard"
         raise ValueError(msg)
+    if scope == "rust-warmup" and (warmup_plan is None or warmup_slot is None):
+        msg = "rust-warmup requires --warmup-plan and --warmup-slot"
+        raise ValueError(msg)
+    if scope != "rust-warmup" and warmup_slot is not None:
+        msg = "--warmup-slot is only valid for rust-warmup"
+        raise ValueError(msg)
     output = _output_path(output, get_repo_root())
     roots = None if closure_roots is None else tuple(closure_roots.split())
     report = validate_candidate(
@@ -517,6 +540,7 @@ def validate(
         closure_budget_seconds=closure_budget_seconds,
         closure_roots=roots,
         warmup_plan=warmup_plan,
+        warmup_slot=warmup_slot,
     )
     if scope == "closure-shard":
         receipt = ClosureShardReceipt(

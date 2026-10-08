@@ -53,7 +53,7 @@ def test_zed_nightly_build_rust_crate_is_overridable_functor() -> None:
 
 
 def test_zed_nightly_preserves_darwin_rlib_metadata() -> None:
-    """Darwin cctools strip removes .rmeta from rustc rlibs (nixpkgs#218712)."""
+    """Darwin keeps rlib metadata; Linux rust_zed unsplits out+lib (nixpkgs#218712)."""
     assert_nix_ast_equal(
         nix_file_binding_expr(
             "packages/zed-editor-nightly/build-rust-crate.nix",
@@ -71,12 +71,17 @@ def test_zed_nightly_preserves_darwin_rlib_metadata() -> None:
                 stripExclude = [ "*.rlib" ];
               }
             );
-          wrap =
-            inner:
-            {
-              __functor = self: args: applyDarwinRlibMetadata (inner args);
-              override = f: wrap (inner.override f);
+          linuxZedUnsplit =
+            args:
+            args
+            // lib.optionalAttrs (!isDarwin && (args.crateName or "") == "zed") {
+              outputs = [ "out" ];
+              outputDev = [ "out" ];
             };
+          wrap = inner: {
+            __functor = _self: args: applyDarwinRlibMetadata (inner (linuxZedUnsplit args));
+            override = f: wrap (inner.override f);
+          };
         in
         wrap builder
         """,

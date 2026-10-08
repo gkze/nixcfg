@@ -25,6 +25,7 @@ on:
     branches:
       - main
       - cursor/no-skip-darwin-shards-6614
+      - cursor/fix-zed-out-lib-cycle-6614
     paths:
       - .github/update-kick
 permissions:
@@ -108,18 +109,38 @@ jobs:
       stage: validate
       previous: prepare-x86_64-linux
     secrets: inherit
-  # Package validation does not need the Linux VM image, so it overlaps the
-  # Linux validators once the planner has the missing shared drv set.
-  # Closures need that image in gkze; the cache-* jobs populate it during
-  # later prepare. This job realizes the planner intersection of per-root
-  # Darwin outputs absent from cache.nixos.org and gkze, not a hand-picked
-  # zed list, so root shards substitute the shared stdenv/rust graph.
-  # Public macos-15 concurrency is 5; root shards wait for this job so
-  # they do not consume a fifth slot while that set is still compiling.
+  # rust_* warmup owns all 5 public macos-15 slots, striped across the
+  # planner's crate2nix dependency layers. Packages inventory waits so it
+  # does not steal a slot. Each slot skip-if-in-gkze resumes. Root shards
+  # still build full closures after this job succeeds; the 400-local-drv
+  # gate is unchanged.
+  validate-darwin-warm-rust:
+    needs:
+      - prepare-x86
+      - plan-darwin-closures
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        slot: [0, 1, 2, 3, 4]
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: rust-warmup
+      shard: rust-${{ matrix.slot }}
+      warmup_artifact: plan-shards-x86_64-linux
+      warmup_slot: ${{ matrix.slot }}
+    secrets: inherit
+  # Package inventory is certify evidence. It no longer serializes the
+  # 3755-path root warmup; that set is the rust-warmup matrix above.
   validate-darwin-packages:
     needs:
       - prepare-x86
       - plan-darwin-closures
+      - validate-darwin-warm-rust
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -127,7 +148,6 @@ jobs:
       stage: validate
       previous: prepare-x86_64-linux
       scope: packages
-      warmup_artifact: plan-shards-x86_64-linux
     secrets: inherit
   # One generated matrix from lib.rootClosureManifest plus shard_costs.json.
   # The plan job evaluates the candidate tree, not a hand-maintained host list.
@@ -142,21 +162,21 @@ jobs:
     secrets: inherit
   # Always-run per-root Darwin shards. The if: only skips when a required
   # input job failed; a planned shard cannot skip on the success path.
-  # Packages are a wait-for-cache edge, not a success gate, so a failed
-  # zed build still lets shards push whatever they realize.
+  # rust-warmup is a success gate so shards start from a pushed rust_* set.
   validate-darwin-roots:
     needs:
       - plan-darwin-closures
       - prepare-x86
       - cache-darwin-linux-deps-arm
       - cache-darwin-linux-deps-x86
-      - validate-darwin-packages
+      - validate-darwin-warm-rust
     if: |-
       always() && !cancelled() &&
       needs.plan-darwin-closures.result == 'success' &&
       needs.prepare-x86.result == 'success' &&
       needs.cache-darwin-linux-deps-arm.result == 'success' &&
-      needs.cache-darwin-linux-deps-x86.result == 'success'
+      needs.cache-darwin-linux-deps-x86.result == 'success' &&
+      needs.validate-darwin-warm-rust.result == 'success'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan-darwin-closures.outputs.darwin_closure_shards) }}
@@ -202,6 +222,7 @@ jobs:
       - plan-darwin-closures
       - validate-arm
       - validate-x86
+      - validate-darwin-warm-rust
       - validate-darwin-packages
       - validate-darwin-roots
       - validate-darwin-closures
@@ -235,6 +256,7 @@ jobs:
             plan-darwin-closures=${{ needs.plan-darwin-closures.result }}
             validate-arm=${{ needs.validate-arm.result }}
             validate-x86=${{ needs.validate-x86.result }}
+            validate-darwin-warm-rust=${{ needs.validate-darwin-warm-rust.result }}
             validate-darwin-packages=${{ needs.validate-darwin-packages.result }}
             validate-darwin-roots=${{ needs.validate-darwin-roots.result }}
             validate-darwin-closures=${{ needs.validate-darwin-closures.result }}
@@ -254,6 +276,7 @@ jobs:
     needs:
       - validate-arm
       - validate-x86
+      - validate-darwin-warm-rust
       - validate-darwin-packages
       - validate-darwin-roots
       - validate-darwin-closures
@@ -262,6 +285,7 @@ jobs:
       always() && !cancelled() &&
       needs.validate-arm.result == 'success' &&
       needs.validate-x86.result == 'success' &&
+      needs.validate-darwin-warm-rust.result == 'success' &&
       needs.validate-darwin-packages.result == 'success' &&
       needs.validate-darwin-roots.result == 'success' &&
       needs.validate-darwin-closures.result == 'success' &&
@@ -331,6 +355,7 @@ jobs:
       - cache-darwin-linux-deps-x86
       - validate-arm
       - validate-x86
+      - validate-darwin-warm-rust
       - validate-darwin-packages
       - plan-darwin-closures
       - validate-darwin-roots

@@ -923,6 +923,17 @@ def test_plan_shards_and_coverage_native_stages(native_job, monkeypatch) -> None
         "/warmup/warmup-plan.json"
     )
     assert shard_args[shard_args.index("--shard") + 1] == "darwin-argus"
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "rust-warmup")
+    monkeypatch.delenv("NIXCFG_CLOSURE_ROOTS")
+    monkeypatch.delenv("NIXCFG_CLOSURE_BUDGET_SECONDS")
+    monkeypatch.setenv("NIXCFG_CLOSURE_SHARD", "rust-0")
+    monkeypatch.setenv("NIXCFG_WARMUP_SLOT", "0")
+    rust_args = jobs._native_args("validate", artifacts)
+    assert rust_args[rust_args.index("--warmup-slot") + 1] == "0"
+    assert "--shard" not in rust_args
+    monkeypatch.delenv("NIXCFG_WARMUP_SLOT")
+    with pytest.raises(ValueError, match="WARMUP_SLOT"):
+        jobs._native_args("validate", artifacts)
     monkeypatch.delenv("NIXCFG_PREVIOUS_CANDIDATE")
     with pytest.raises(ValueError, match="Unknown native stage"):
         jobs._native_args("unexpected", artifacts)
@@ -1021,6 +1032,8 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     assert step["env"]["NIXCFG_CLOSURE_ROOTS"] == "${{ inputs.closure_roots }}"
     assert step["env"]["NIXCFG_CLOSURE_SHARD"] == "${{ inputs.shard }}"
     assert "NIXCFG_WARMUP_PLAN" in step["env"]
+    assert step["env"]["NIXCFG_WARMUP_SLOT"] == "${{ inputs.warmup_slot }}"
+    assert "warmup_slot" in native["on"]["workflow_call"]["inputs"]
     assert "NIXCFG_CLOSURE_YIELD" not in step["env"]
     assert "warmup_artifact" in native["on"]["workflow_call"]["inputs"]
     downloads = [
@@ -1070,11 +1083,24 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
 
 
 def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
-    """Darwin packages own zed; always-run root shards then the aggregate."""
+    """Darwin rust-warmup owns rust_*; packages stay inventory; shards always run."""
+    rust = workflow_jobs["validate-darwin-warm-rust"]
+    assert set(rust["needs"]) == {"prepare-x86", "plan-darwin-closures"}
+    assert rust["with"]["scope"] == "rust-warmup"
+    assert rust["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"
+    assert rust["with"]["warmup_slot"] == "${{ matrix.slot }}"
+    assert rust["with"]["shard"] == "rust-${{ matrix.slot }}"
+    assert rust["strategy"]["fail-fast"] == "false"
+    assert rust["strategy"]["max-parallel"] == "5"
+    assert rust["strategy"]["matrix"]["slot"] == ["0", "1", "2", "3", "4"]
     packages = workflow_jobs["validate-darwin-packages"]
-    assert set(packages["needs"]) == {"prepare-x86", "plan-darwin-closures"}
+    assert set(packages["needs"]) == {
+        "prepare-x86",
+        "plan-darwin-closures",
+        "validate-darwin-warm-rust",
+    }
     assert packages["with"]["scope"] == "packages"
-    assert packages["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"
+    assert "warmup_artifact" not in packages["with"]
     plan = workflow_jobs["plan-darwin-closures"]
     assert plan["needs"] == "prepare-x86"
     assert plan["with"]["stage"] == "plan-shards"
@@ -1085,11 +1111,12 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
         "prepare-x86",
         "cache-darwin-linux-deps-arm",
         "cache-darwin-linux-deps-x86",
-        "validate-darwin-packages",
+        "validate-darwin-warm-rust",
     }
     roots_if = " ".join(roots["if"].split())
     assert "always() && !cancelled()" in roots_if
     assert "needs.plan-darwin-closures.result == 'success'" in roots_if
+    assert "needs.validate-darwin-warm-rust.result == 'success'" in roots_if
     assert "validate-darwin-packages.result" not in roots_if
     assert "closure_complete" not in roots_if
     assert roots["strategy"]["fail-fast"] == "false"
@@ -1120,6 +1147,7 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
         "plan-darwin-closures",
         "validate-arm",
         "validate-x86",
+        "validate-darwin-warm-rust",
         "validate-darwin-packages",
         "validate-darwin-roots",
         "validate-darwin-closures",
@@ -1137,6 +1165,7 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
     for name in (
         "validate-arm",
         "validate-x86",
+        "validate-darwin-warm-rust",
         "validate-darwin-packages",
         "validate-darwin-roots",
         "validate-darwin-closures",
@@ -1258,6 +1287,7 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     assert workflow["on"]["push"]["branches"] == [
         "main",
         "cursor/no-skip-darwin-shards-6614",
+        "cursor/fix-zed-out-lib-cycle-6614",
     ]
     assert workflow["on"]["push"]["paths"] == [".github/update-kick"]
     assert workflow["permissions"] == {"contents": "read"}

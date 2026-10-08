@@ -35,8 +35,8 @@ _DEFAULT_WEIGHT = 1
 # proves four shards land on two Apple hosts. After structural warmup
 # cuts local builds to roughly the packages job, measure 4-wide versus
 # 2-wide by bytes written and update-runtime and revisit this number.
-# Public macos-15 cap is 5; packages occupies one slot while the shared
-# missing drv set builds, then root shards use the remaining slots.
+# Public macos-15 cap is 5; rust-warmup occupies those slots by crate
+# layer, then root shards use the remaining slots.
 MAX_PARALLEL_DARWIN_ROOT_SHARDS = 2
 
 
