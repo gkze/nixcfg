@@ -1443,6 +1443,40 @@ def test_snapshot_evaluations_share_one_flake_output(tmp_path: Path) -> None:
     }
 
 
+def test_store_path_builds_batch_together(tmp_path: Path) -> None:
+    """Warmup outputs share one nix build so post-build-hook sees each path."""
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    assert (
+        validation.validate_derivation_requests(
+            (
+                DerivationValidationRequest(
+                    "root-warmup",
+                    "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-one",
+                    "build",
+                ),
+                DerivationValidationRequest(
+                    "root-warmup",
+                    "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-two",
+                    "build",
+                ),
+            ),
+            flake_root=tmp_path,
+            timeout=42,
+            run=run,
+        )
+        == ()
+    )
+    assert len(calls) == 1
+    assert calls[0][1] == "build"
+    assert "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-one" in calls[0]
+    assert "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-two" in calls[0]
+
+
 def test_failed_batch_rechecks_each_target_with_original_retry_policy(
     tmp_path: Path,
 ) -> None:

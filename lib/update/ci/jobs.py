@@ -208,6 +208,10 @@ class CachixFlushError(RuntimeError):
     """The explicit flush could not confirm a clean Cachix daemon drain."""
 
 
+class CachixDaemonError(RuntimeError):
+    """useDaemon did not start a live post-build-hook daemon."""
+
+
 class ImageCleanupError(RuntimeError):
     """Hosted Darwin still lacks closure headroom after image reclaim."""
 
@@ -759,6 +763,9 @@ def _append_validation_scope(args: list[str]) -> str:
         args.extend(("--closure-roots", roots))
     if shard:
         args.extend(("--shard", shard))
+    warmup = os.environ.get("NIXCFG_WARMUP_PLAN", "").strip()
+    if warmup:
+        args.extend(("--warmup-plan", warmup))
     return scope
 
 
@@ -1187,6 +1194,63 @@ def _release_cachix_daemon_dir() -> None:
     _clear_cachix_daemon_env()
 
 
+def require_cachix_daemon() -> None:
+    """Fail closed unless cachix-action started a live post-build-hook daemon.
+
+    Per-derivation push is the Nix hook talking to ``$CACHIX_DAEMON_DIR``.
+    Flush-after-retain cannot prove that hook ran during the build. If the
+    daemon never started, nothing a shard compiles reaches gkze, which
+    breaks push-at-the-smallest-unit. This check runs after cachix-action
+    and before bootstrap so a silent skip cannot burn a five-hour shard.
+    Evidence is copied into artifacts here so retain (before flush) keeps it.
+    """
+    artifacts = _temp() / "update-artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    with (artifacts / "cachix-daemon-require.log").open("a") as log:
+        _retain_cachix_daemon_evidence(artifacts, log)
+        socket = cachix_daemon_socket()
+        if socket is None:
+            msg = (
+                "Cachix daemon socket is unknown: "
+                f"{_CACHIX_DAEMON_DIR_ENV} and {_CACHIX_DAEMON_SOCKET_ENV} "
+                "are unset. useDaemon did not start a post-build-hook daemon."
+            )
+            _write_diagnostic(log, msg)
+            raise CachixDaemonError(msg)
+        if not socket.exists():
+            msg = f"Cachix daemon socket missing: {socket}"
+            _write_diagnostic(log, msg)
+            raise CachixDaemonError(msg)
+        daemon_dir = os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip()
+        missing: list[str] = []
+        if not daemon_dir:
+            missing.append(_CACHIX_DAEMON_DIR_ENV)
+        else:
+            directory = Path(daemon_dir)
+            pid = directory / "daemon.pid"
+            hook = directory / "post-build-hook.sh"
+            nix_conf = directory / "nix.conf"
+            if not pid.is_file():
+                missing.append("daemon.pid")
+            if not hook.is_file():
+                missing.append("post-build-hook.sh")
+            if not nix_conf.is_file() or "post-build-hook" not in nix_conf.read_text(
+                encoding="utf-8"
+            ):
+                missing.append("nix.conf post-build-hook")
+        if missing:
+            msg = (
+                "Cachix daemon started incompletely; per-derivation push "
+                f"cannot run: missing {', '.join(missing)}"
+            )
+            _write_diagnostic(log, msg)
+            raise CachixDaemonError(msg)
+        _write_diagnostic(
+            log,
+            f"Cachix daemon ready socket={socket} dir={daemon_dir}",
+        )
+
+
 def flush_cachix() -> None:
     """Push leftover prefetch receipts and drain the Cachix daemon.
 
@@ -1282,6 +1346,7 @@ def main(stage: str) -> int:
         "reclaim-store": reclaim_hosted_store,
         "record-storage": record_named_storage,
         "dump-storage-fault": dump_hosted_storage_fault,
+        "require-cachix-daemon": require_cachix_daemon,
         "bootstrap": bootstrap,
         "quality": quality,
         "certify": certify,

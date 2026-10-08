@@ -37,6 +37,10 @@ on:
         description: Shard identity for artifact and receipt names
         default: ""
         type: string
+      warmup_artifact:
+        description: Planner artifact that contains warmup-plan.json
+        default: ""
+        type: string
     outputs:
       darwin_closure_shards:
         description: Generated always-run Darwin closure matrix
@@ -69,6 +73,11 @@ jobs:
         with:
           name: ${{ inputs.previous }}
           path: ${{ runner.temp }}/previous
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: inputs.warmup_artifact != ''
+        with:
+          name: ${{ inputs.warmup_artifact }}
+          path: ${{ runner.temp }}/warmup
       - name: Prepare or validate candidate
         id: candidate
         env:
@@ -80,6 +89,9 @@ jobs:
           NIXCFG_CLOSURE_BUDGET_SECONDS: ${{ inputs.closure_budget_seconds }}
           NIXCFG_CLOSURE_ROOTS: ${{ inputs.closure_roots }}
           NIXCFG_CLOSURE_SHARD: ${{ inputs.shard }}
+          NIXCFG_WARMUP_PLAN: |-
+            ${{ inputs.warmup_artifact != '' &&
+            format('{0}/warmup/warmup-plan.json', runner.temp) || '' }}
           NIXCFG_PREVIOUS_CANDIDATE: |-
             ${{ inputs.previous != '' &&
             format('{0}/previous/candidate.json', runner.temp) || '' }}

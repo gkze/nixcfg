@@ -6,8 +6,6 @@ list. GitHub Actions consumes the matrix JSON; it does not hand-maintain
 job blocks per host.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import subprocess
@@ -33,10 +31,13 @@ _INSTALLED_COSTS_PATH = Path(__file__).with_name("shard_costs.json")
 _REPO_COSTS_PATH = REPO_ROOT / "lib" / "update" / "ci" / "shard_costs.json"
 _DARWIN_SYSTEM = "aarch64-darwin"
 _DEFAULT_WEIGHT = 1
-# Public macos-15 cap is 5. darwin-packages occupies one slot while the
-# shared heavy subtree builds; root shards start after that so they can
-# use all remaining slots without duplicating zed/rust_*.
-MAX_PARALLEL_DARWIN_ROOT_SHARDS = 4
+# Provisional width for this kick, not a 2-VMs-per-host cap. Nothing
+# proves four shards land on two Apple hosts. After structural warmup
+# cuts local builds to roughly the packages job, measure 4-wide versus
+# 2-wide by bytes written and update-runtime and revisit this number.
+# Public macos-15 cap is 5; packages occupies one slot while the shared
+# missing drv set builds, then root shards use the remaining slots.
+MAX_PARALLEL_DARWIN_ROOT_SHARDS = 2
 
 
 class ShardCosts(BaseModel):

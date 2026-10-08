@@ -109,14 +109,17 @@ jobs:
       previous: prepare-x86_64-linux
     secrets: inherit
   # Package validation does not need the Linux VM image, so it overlaps the
-  # Linux validators. Closures need that image in gkze; the cache-* jobs
-  # populate it during later prepare. zed-editor-nightly / rust_* is the
-  # shared heavy subtree and is assigned to this job so root shards
-  # substitute it instead of rebuilding it. Public macos-15 concurrency is
-  # 5; root shards wait for this job so they do not consume a fifth slot
-  # while zed is still compiling.
+  # Linux validators once the planner has the missing shared drv set.
+  # Closures need that image in gkze; the cache-* jobs populate it during
+  # later prepare. This job realizes the planner intersection of per-root
+  # Darwin outputs absent from cache.nixos.org and gkze, not a hand-picked
+  # zed list, so root shards substitute the shared stdenv/rust graph.
+  # Public macos-15 concurrency is 5; root shards wait for this job so
+  # they do not consume a fifth slot while that set is still compiling.
   validate-darwin-packages:
-    needs: prepare-x86
+    needs:
+      - prepare-x86
+      - plan-darwin-closures
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -124,6 +127,7 @@ jobs:
       stage: validate
       previous: prepare-x86_64-linux
       scope: packages
+      warmup_artifact: plan-shards-x86_64-linux
     secrets: inherit
   # One generated matrix from lib.rootClosureManifest plus shard_costs.json.
   # The plan job evaluates the candidate tree, not a hand-maintained host list.

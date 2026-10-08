@@ -17,15 +17,26 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    `prepare-darwin` freezes flake references, two Linux jobs cache the native
    boundary of Darwin roots (the Rosetta/linux-builder VM image) in `gkze`
    while Linux prepare continues. Those jobs are not publication evidence.
-   After the last prepare, the two Linux validators and Darwin package
-   validation run in parallel. Closures still wait for the final three-system
-   candidate because certify binds reports to that tree. Darwin packages own
-   the shared `zed-editor-nightly` / `rust_*` subtree: they `nix build` the
-   native package (not only eval `.drvPath`) so Cachix has those crates
-   before root shards start. Always-run per-root
-   Darwin shards start after that package job (they wait for its cache, not
-   its success) and after the Linux VM-image cache jobs. A generated matrix
-   from `lib.rootClosureManifest` plus `lib/update/ci/shard_costs.json` is the
+   After the last prepare, the two Linux validators and Darwin shard
+   planning run in parallel. Closures still wait for the final three-system
+   candidate because certify binds reports to that tree. The planner
+   instantiates each Darwin root's drv graph, queries cache.nixos.org and
+   gkze, and writes the intersection of missing aarch64-darwin outputs as
+   `warmup-plan.json`. Any shard that would still compile more than 400
+   of those outputs locally (packages-scale on 37740898487 was 132; home
+   compiled 1534 `rust_*` from a divergent stdenv graph) fails at plan
+   time. Darwin packages then `nix build` that intersection so Cachix has
+   the shared stdenv/rust graph before root shards start; the packages
+   inventory itself remains certify evidence. The CVE-2026-56391/56392
+   coreutils patches live in nixpkgs, not a repo overlay; they change
+   every stdenv-dependent drv versus hydra until hydra publishes them.
+   `coreutils-full` in the home packages module is a leaf. Do not drop
+   those patches here. Always-run Darwin shards start after that package
+   job (they wait for its cache, not its success) and after the Linux
+   VM-image cache jobs. Width is provisionally 2, not a 2-VMs-per-host
+   cap: revisit 4-wide versus 2-wide by bytes written and update-runtime
+   once warmup cuts local builds. A generated matrix from
+   `lib.rootClosureManifest` plus `lib/update/ci/shard_costs.json` is the
    only shard plan; there is no serial yield chain and no
    `closure_complete` skip gate. Each planned shard always runs on the success
    path. An aggregate `root-closures` job then realizes the farm mostly by
@@ -38,7 +49,7 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    Missing, extra, or tree-mismatched caches fail closed. publish
    needs that job.
    Hosted public `macos-15` concurrency is 5 of 20. Peak Darwin use after
-   packages is four root shards. `max-jobs` / `cores` stay at 2 until a later
+   packages is two provisional root shards. `max-jobs` / `cores` stay at 2 until a later
    run measures a safe increase (zed memory on hosted macos-15).
    A transient store fault
    (`Illegal byte sequence`, a vanished store `.drv`, a vanished store build
@@ -89,7 +100,11 @@ core owns source discovery, declared output authority, candidate identity and va
 Cachix's daemon uploads built outputs continuously in every job that uses
 `update-runtime` (`useDaemon: true`). cachix-action binds
 `$CACHIX_DAEMON_DIR/daemon.sock` and registers a Nix `post-build-hook`.
-Each job that starts `update-runtime` with a Cachix token ends with an
+`update-runtime` then requires that socket, `daemon.pid`, and the hook
+script before bootstrap; a silent skip cannot spend a shard compiling
+paths that never reach gkze. Evidence is copied into artifacts at that
+check so retain (before flush) keeps it. Each job that starts
+`update-runtime` with a Cachix token ends with an
 explicit `if: always()` flush. That step is last so certify, publish,
 repair, and shard builds still have a live daemon and post-build-hook.
 The flush pushes leftover prefetch receipts and runs

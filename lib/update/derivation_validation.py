@@ -762,6 +762,15 @@ def _batch_key(
     flake_root: Path | None,
 ) -> tuple[DerivationValidationMode, str] | None:
     """Only batch explicit local attribute paths from one immutable snapshot."""
+    # Warmup realizes missing Darwin *outputs*. Do not batch `/nix/store/*.drv^*`
+    # graph nodes: those share a deadline as one build each.
+    name = request.installable.removeprefix("/nix/store/")
+    if (
+        request.installable.startswith("/nix/store/")
+        and "/" not in name
+        and ".drv" not in name
+    ):
+        return request.mode, "store-path"
     if flake_root is None or not request.installable.startswith((".#", "path:.#")):
         return None
     attributes = request.installable.split("#", 1)[1]

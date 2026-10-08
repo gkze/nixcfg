@@ -684,6 +684,47 @@ def test_flush_cachix_stops_daemon_and_republishes_receipts(
     )
 
 
+def test_require_cachix_daemon_fails_closed_before_bootstrap(
+    native_job, monkeypatch
+) -> None:
+    """A silent skip of the post-build-hook cannot burn a Darwin shard."""
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.delenv("CACHIX_DAEMON_DIR", raising=False)
+    monkeypatch.delenv("CACHIX_DAEMON_SOCKET", raising=False)
+    with pytest.raises(jobs.CachixDaemonError, match="useDaemon did not start"):
+        jobs.main("require-cachix-daemon")
+    socket_only = Path(env["RUNNER_TEMP"]) / "explicit.sock"
+    socket_only.write_text("")
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(socket_only))
+    with pytest.raises(jobs.CachixDaemonError, match="CACHIX_DAEMON_DIR"):
+        jobs.main("require-cachix-daemon")
+    monkeypatch.delenv("CACHIX_DAEMON_SOCKET")
+    daemon_dir = Path(env["RUNNER_TEMP"]) / "cachix-daemon"
+    daemon_dir.mkdir()
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    with pytest.raises(jobs.CachixDaemonError, match="socket missing"):
+        jobs.main("require-cachix-daemon")
+    (daemon_dir / "daemon.sock").write_text("")
+    with pytest.raises(jobs.CachixDaemonError, match="incompletely"):
+        jobs.main("require-cachix-daemon")
+    (daemon_dir / "daemon.pid").write_text("1\n")
+    (daemon_dir / "post-build-hook.sh").write_text("#!/bin/sh\n")
+    (daemon_dir / "nix.conf").write_text("max-jobs = 2\n")
+    with pytest.raises(jobs.CachixDaemonError, match="post-build-hook"):
+        jobs.main("require-cachix-daemon")
+    (daemon_dir / "nix.conf").write_text("post-build-hook = /hook.sh\n")
+    (daemon_dir / "daemon.log").write_text("started\n")
+    assert jobs.main("require-cachix-daemon") == 0
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    assert (
+        "Cachix daemon ready" in (artifacts / "cachix-daemon-require.log").read_text()
+    )
+    assert (artifacts / "cachix-daemon" / "daemon.log").read_text() == "started\n"
+
+
 def test_flush_cachix_fails_closed_without_action_socket(
     native_job, monkeypatch
 ) -> None:
@@ -847,6 +888,11 @@ def test_plan_shards_and_coverage_native_stages(native_job, monkeypatch) -> None
     monkeypatch.setenv("NIXCFG_CLOSURE_SHARD", "darwin-argus")
     shard_args = jobs._native_args("validate", artifacts)
     assert shard_args[shard_args.index("--closure-roots") + 1] == "darwin-argus"
+    monkeypatch.setenv("NIXCFG_WARMUP_PLAN", "/warmup/warmup-plan.json")
+    package_args = jobs._native_args("validate", artifacts)
+    assert package_args[package_args.index("--warmup-plan") + 1] == (
+        "/warmup/warmup-plan.json"
+    )
     assert shard_args[shard_args.index("--shard") + 1] == "darwin-argus"
     monkeypatch.delenv("NIXCFG_PREVIOUS_CANDIDATE")
     with pytest.raises(ValueError, match="Unknown native stage"):
@@ -945,7 +991,15 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     )
     assert step["env"]["NIXCFG_CLOSURE_ROOTS"] == "${{ inputs.closure_roots }}"
     assert step["env"]["NIXCFG_CLOSURE_SHARD"] == "${{ inputs.shard }}"
+    assert "NIXCFG_WARMUP_PLAN" in step["env"]
     assert "NIXCFG_CLOSURE_YIELD" not in step["env"]
+    assert "warmup_artifact" in native["on"]["workflow_call"]["inputs"]
+    downloads = [
+        step
+        for step in native["jobs"]["native"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/download-artifact@")
+    ]
+    assert any(step.get("if") == "inputs.warmup_artifact != ''" for step in downloads)
     assert native["on"]["workflow_call"]["inputs"]["scope"]["default"] == "all"
     assert "closure_yield" not in native["on"]["workflow_call"]["inputs"]
     assert "closure_complete" not in native["on"]["workflow_call"]["outputs"]
@@ -989,8 +1043,9 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
 def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
     """Darwin packages own zed; always-run root shards then the aggregate."""
     packages = workflow_jobs["validate-darwin-packages"]
-    assert packages["needs"] == "prepare-x86"
+    assert set(packages["needs"]) == {"prepare-x86", "plan-darwin-closures"}
     assert packages["with"]["scope"] == "packages"
+    assert packages["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"
     plan = workflow_jobs["plan-darwin-closures"]
     assert plan["needs"] == "prepare-x86"
     assert plan["with"]["stage"] == "plan-shards"
@@ -1418,6 +1473,14 @@ def test_generator_cache_is_scoped_to_disposable_accelerators() -> None:
         if step.get("env", {}).get("NIXCFG_CI_STAGE") == "record-storage"
     }
     assert set(labels) == {"after-nix-install", "after-cachix"}
+    require = next(
+        step for step in steps if step.get("name") == "Require Cachix daemon"
+    )
+    assert require["if"] == "inputs.cachix-token != ''"
+    assert require["env"]["NIXCFG_CI_STAGE"] == "require-cachix-daemon"
+    bootstrap = next(step for step in steps if step.get("id") == "runtime")
+    assert steps.index(cachix) < steps.index(require)
+    assert steps.index(require) < steps.index(bootstrap)
     nix_step = next(
         step
         for step in steps

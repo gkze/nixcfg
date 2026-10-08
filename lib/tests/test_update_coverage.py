@@ -1,7 +1,5 @@
 """Fail-closed Update coverage over roots, shards, packages, and Cachix."""
 
-from __future__ import annotations
-
 import json
 import subprocess
 from pathlib import Path
@@ -16,6 +14,7 @@ from lib.update.ci.coverage import (
     assert_update_coverage,
     binary_cache_store,
     check_path_in_cachix,
+    check_path_on_nixos,
     coverage_platform,
     dump_job_results,
     eval_check_out_path,
@@ -24,6 +23,7 @@ from lib.update.ci.coverage import (
     load_root_out_path_cache,
     load_shard_receipt,
     load_validation_report,
+    nixos_cache_store,
     parse_job_results,
     read_json,
     require_cachix_paths,
@@ -232,12 +232,25 @@ def test_cachix_and_eval_helpers_fail_closed(tmp_path: Path) -> None:
     def present(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         assert args[2] == "--store"
         assert args[3] == binary_cache_store()
+        assert nixos_cache_store() == "https://cache.nixos.org"
         return subprocess.CompletedProcess(
             args, 0, stdout="/nix/store/hit\n", stderr=""
         )
 
     assert check_path_in_cachix("/nix/store/hit", run=present)
     assert not check_path_in_cachix(
+        "/nix/store/miss",
+        run=lambda args, **_k: subprocess.CompletedProcess(args, 1, "", "gone"),
+    )
+
+    def nixos(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert args[3] == nixos_cache_store()
+        return subprocess.CompletedProcess(
+            args, 0, stdout="/nix/store/hit\n", stderr=""
+        )
+
+    assert check_path_on_nixos("/nix/store/hit", run=nixos)
+    assert not check_path_on_nixos(
         "/nix/store/miss",
         run=lambda args, **_k: subprocess.CompletedProcess(args, 1, "", "gone"),
     )

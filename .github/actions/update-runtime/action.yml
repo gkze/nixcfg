@@ -59,6 +59,14 @@ runs:
       run: |
         import runpy
         runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+    - name: Require Cachix daemon
+      if: inputs.cachix-token != ''
+      shell: python
+      env:
+        NIXCFG_CI_STAGE: require-cachix-daemon
+      run: |
+        import runpy
+        runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
     - name: Restore generator downloads and verified receipts
       if: inputs.cache-generators == 'true'
       uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5

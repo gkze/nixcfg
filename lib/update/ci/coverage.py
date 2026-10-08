@@ -10,8 +10,6 @@ unpushed root fails the run.
 checking required-job results; it never re-evaluates Darwin out paths.
 """
 
-from __future__ import annotations
-
 import json
 import subprocess
 from typing import TYPE_CHECKING
@@ -42,6 +40,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _BINARY_CACHE_STORE = "https://gkze.cachix.org"
+_NIXOS_CACHE_STORE = "https://cache.nixos.org"
 ROOT_OUT_PATHS_NAME = "root-out-paths.json"
 _REQUIRED_JOBS = (
     "plan-darwin-closures",
@@ -264,19 +263,20 @@ def require_cachix_paths(
         raise CoverageError(msg)
 
 
-def check_path_in_cachix(
+def _path_on_store(
     store_path: str,
+    store: str,
     *,
     run: Callable[..., object] | None = None,
 ) -> bool:
-    """Return whether *store_path* is present in the gkze binary cache."""
+    """Return whether *store_path* is present on one Nix HTTP binary cache."""
     runner = subprocess.run if run is None else run
     result = runner(
         [
             "nix",
             "path-info",
             "--store",
-            _BINARY_CACHE_STORE,
+            store,
             store_path,
         ],
         check=False,
@@ -284,6 +284,24 @@ def check_path_in_cachix(
         text=True,
     )
     return getattr(result, "returncode", 1) == 0
+
+
+def check_path_in_cachix(
+    store_path: str,
+    *,
+    run: Callable[..., object] | None = None,
+) -> bool:
+    """Return whether *store_path* is present in the gkze binary cache."""
+    return _path_on_store(store_path, _BINARY_CACHE_STORE, run=run)
+
+
+def check_path_on_nixos(
+    store_path: str,
+    *,
+    run: Callable[..., object] | None = None,
+) -> bool:
+    """Return whether *store_path* is present on cache.nixos.org."""
+    return _path_on_store(store_path, _NIXOS_CACHE_STORE, run=run)
 
 
 def eval_check_out_path(
@@ -432,6 +450,11 @@ def assert_update_coverage(
 def binary_cache_store() -> str:
     """Return the Cachix HTTP store URL coverage queries."""
     return _BINARY_CACHE_STORE
+
+
+def nixos_cache_store() -> str:
+    """Return the cache.nixos.org HTTP store URL planner queries."""
+    return _NIXOS_CACHE_STORE
 
 
 def required_coverage_jobs() -> tuple[str, ...]:

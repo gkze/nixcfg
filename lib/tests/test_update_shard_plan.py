@@ -1,7 +1,5 @@
 """Generated Darwin closure-shard plan is the only host inventory."""
 
-from __future__ import annotations
-
 import json
 import subprocess
 from pathlib import Path
@@ -55,20 +53,22 @@ def _darwin_inventory() -> RootClosureManifest:
     )
 
 
-def test_current_repo_plan_is_one_always_run_shard_per_darwin_root() -> None:
-    """Four Darwin roots fit the free-tier cap without packing."""
+def test_current_repo_plan_is_provisional_two_wide() -> None:
+    """Four Darwin roots pack into two shards until 4-wide vs 2-wide is measured."""
     shards = plan_darwin_closure_shards(_darwin_inventory())
-    assert MAX_PARALLEL_DARWIN_ROOT_SHARDS == 4
-    assert [shard.shard for shard in shards] == [
-        "darwin-argus",
-        "darwin-rocinante",
-        "darwin-zeus",
-        "home-george",
+    assert MAX_PARALLEL_DARWIN_ROOT_SHARDS == 2
+    assert [tuple(shard.roots) for shard in shards] == [
+        ("darwin-argus", "home-george"),
+        ("darwin-rocinante", "darwin-zeus"),
     ]
     assert shards[0].installables == (
         "path:.#checks.aarch64-darwin.root-closure-darwin-argus",
+        "path:.#checks.aarch64-darwin.root-closure-home-george",
     )
-    assert shards[3].check_attrs == ("root-closure-home-george",)
+    assert shards[1].check_attrs == (
+        "root-closure-darwin-rocinante",
+        "root-closure-darwin-zeus",
+    )
 
 
 def test_planner_packs_extra_roots_by_measured_weight() -> None:
@@ -123,23 +123,13 @@ def test_github_matrix_and_output_are_generated_from_the_plan(
     assert matrix == {
         "include": [
             {
-                "shard": "darwin-argus",
-                "roots": "darwin-argus",
+                "shard": "darwin-argus+home-george",
+                "roots": "darwin-argus home-george",
                 "system": "aarch64-darwin",
             },
             {
-                "shard": "darwin-rocinante",
-                "roots": "darwin-rocinante",
-                "system": "aarch64-darwin",
-            },
-            {
-                "shard": "darwin-zeus",
-                "roots": "darwin-zeus",
-                "system": "aarch64-darwin",
-            },
-            {
-                "shard": "home-george",
-                "roots": "home-george",
+                "shard": "darwin-rocinante+darwin-zeus",
+                "roots": "darwin-rocinante darwin-zeus",
                 "system": "aarch64-darwin",
             },
         ]
@@ -157,6 +147,10 @@ def test_plan_from_manifest_json_and_cli_round_trip(tmp_path: Path, capsys) -> N
     path = tmp_path / "manifest.json"
     path.write_text(json.dumps(payload))
     shards = plan_from_manifest_json(payload)
+    assert [shard.shard for shard in shards] == [
+        "darwin-argus+home-george",
+        "darwin-rocinante+darwin-zeus",
+    ]
     assert [shard.shard for shard in shards] == [
         shard.shard for shard in plan_from_manifest_json(path.read_bytes())
     ]

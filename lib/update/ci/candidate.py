@@ -37,6 +37,13 @@ from lib.update.ci.shard_plan import (
     plan_darwin_closure_shards,
     write_github_actions_output,
 )
+from lib.update.ci.warmup import (
+    WARMUP_PLAN_NAME,
+    load_warmup_plan,
+    plan_darwin_warmup,
+    realize_warmup_outputs,
+    write_warmup_plan,
+)
 from lib.update.cli_options import RepairAgent, UpdateOptions
 from lib.update.io import atomic_write_text
 from lib.update.nix import get_current_nix_platform
@@ -252,6 +259,7 @@ def validate_candidate(
     scope: ValidationScope = "all",
     closure_budget_seconds: float | None = None,
     closure_roots: tuple[str, ...] | None = None,
+    warmup_plan: Path | None = None,
 ) -> ValidationReport:
     """Validate the assembled tree on this native builder, leaving the repo alone.
 
@@ -292,6 +300,12 @@ def validate_candidate(
         planned_installables: tuple[str, ...] = ()
         with workspace.validation_snapshot() as snapshot:
             if "packages" in gates:
+                if warmup_plan is None and (
+                    os.environ.get("GITHUB_ACTIONS") == "true"
+                    and system == "aarch64-darwin"
+                ):
+                    msg = "hosted Darwin packages validation requires a warmup plan"
+                    raise ValueError(msg)
                 sources = None if candidate.validate_all_packages else candidate.sources
                 planned_installables = tuple(
                     request.installable
@@ -312,6 +326,14 @@ def validate_candidate(
                     progress=_hosted_validation_progress("derivations"),
                 )
                 jobs.record_runner_storage("after-packages")
+                if warmup_plan is not None:
+                    plan = load_warmup_plan(warmup_plan)
+                    failures += realize_warmup_outputs(
+                        plan.warmup_outputs,
+                        flake_root=snapshot.root,
+                        progress=_hosted_validation_progress("root-warmup"),
+                    )
+                    jobs.record_runner_storage("after-warmup")
             if "closures" in gates or scope == "closure-shard":
                 # Hosted macos-15 root-closures can fetch tens of GiB.
                 # GC first when free is below max-free+min-free so min-free
@@ -463,6 +485,10 @@ def validate(
         str | None,
         typer.Option(help="Shard identity recorded on a closure-shard receipt."),
     ] = None,
+    warmup_plan: Annotated[
+        Path | None,
+        typer.Option(help="Planner warmup-plan.json for Darwin packages."),
+    ] = None,
 ) -> None:
     """Run the existing package and root gates on the exact assembled tree."""
     if scope == "closure-shard" and (not closure_roots or not shard):
@@ -478,6 +504,7 @@ def validate(
         scope=scope,
         closure_budget_seconds=closure_budget_seconds,
         closure_roots=roots,
+        warmup_plan=warmup_plan,
     )
     if scope == "closure-shard":
         receipt = ClosureShardReceipt(
@@ -558,12 +585,14 @@ def plan_shards(
             manifest = eval_root_closure_manifest(snapshot.root)
             shards = plan_darwin_closure_shards(manifest, costs=costs)
             paths = root_store_paths(snapshot.root, manifest)
+            warmup = plan_darwin_warmup(snapshot.root, manifest=manifest, shards=shards)
     write_root_out_path_cache(
         output.with_name(ROOT_OUT_PATHS_NAME),
         tree=prepared.tree,
         root_paths=paths,
         manifest=manifest,
     )
+    write_warmup_plan(output.with_name(WARMUP_PLAN_NAME), warmup)
     matrix = github_actions_matrix(shards)
     atomic_write_text(output, json.dumps(matrix, indent=2) + "\n")
     target = github_output
