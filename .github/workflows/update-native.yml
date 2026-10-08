@@ -89,6 +89,14 @@ jobs:
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
         shell: python
+      - name: Dump hosted storage-fault evidence
+        if: failure()
+        env:
+          NIXCFG_CI_STAGE: dump-storage-fault
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
       - name: Retain candidate and failure evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

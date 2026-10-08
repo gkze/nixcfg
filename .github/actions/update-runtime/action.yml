@@ -37,12 +37,28 @@ runs:
           cores = 2
           min-free = 34359738368
           max-free = 68719476736
+    - name: Record disk after Nix install
+      shell: python
+      env:
+        NIXCFG_CI_STAGE: record-storage
+        NIXCFG_STORAGE_LABEL: after-nix-install
+      run: |
+        import runpy
+        runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
     - uses: cachix/cachix-action@3ba601ff5bbb07c7220846facfa2cd81eeee15a1 # v16
       with:
         name: gkze
         extraPullNames: zed
         authToken: ${{ inputs.cachix-token }}
         useDaemon: true
+    - name: Record disk after Cachix daemon
+      shell: python
+      env:
+        NIXCFG_CI_STAGE: record-storage
+        NIXCFG_STORAGE_LABEL: after-cachix
+      run: |
+        import runpy
+        runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
     - name: Restore generator downloads and verified receipts
       if: inputs.cache-generators == 'true'
       uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5

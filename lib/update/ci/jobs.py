@@ -38,6 +38,14 @@ _NIX_MAX_FREE_BYTES = 68719476736
 # 37740898487 storage.jsonl exists. macos-15 starts at ~43 GiB free, so
 # the skip path does not fire until that peak is known and lower than 96 GiB.
 _IMAGE_HEADROOM_BYTES = _NIX_MAX_FREE_BYTES + _NIX_MIN_FREE_BYTES
+_STORAGE_FAULT_LOG_SECONDS = 90
+_STORAGE_FAULT_PREDICATE = (
+    'eventMessage CONTAINS[c] "Input/output error" OR '
+    'eventMessage CONTAINS[c] "I/O error" OR '
+    'subsystem CONTAINS[c] "apfs" OR '
+    'senderImagePath CONTAINS[c] "IOStorage" OR '
+    'eventMessage CONTAINS[c] "IOStorage"'
+)
 _IMAGE_LOG_LOCK = threading.Lock()
 _UNUSED_IMAGE_PATHS = {
     "darwin": (Path("/usr/local/share/dotnet"),),
@@ -85,6 +93,7 @@ def _outputs(**values: str) -> None:
 
 def bootstrap() -> None:
     """Keep the baseline executable and tools as GC roots for this job."""
+    record_runner_storage("before-bootstrap")
     runtime, devshell = _temp() / "nixcfg-runtime", _temp() / "nixcfg-devshell"
     _run("nix", "build", "--no-write-lock-file", "--out-link", str(runtime), ".#nixcfg")
     _run(
@@ -99,6 +108,16 @@ def bootstrap() -> None:
         "pass",
     )
     _outputs(runtime=str(runtime), devshell=str(devshell))
+    record_runner_storage("after-bootstrap")
+
+
+def record_named_storage() -> None:
+    """Write one labeled df snapshot for a hosted runtime sub-step."""
+    label = os.environ.get("NIXCFG_STORAGE_LABEL", "").strip()
+    if not label:
+        msg = "NIXCFG_STORAGE_LABEL is required"
+        raise ValueError(msg)
+    record_runner_storage(label)
 
 
 def record_runner_storage(
@@ -372,6 +391,123 @@ def is_hosted_darwin_runner() -> bool:
         and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted"
         and sys.platform == "darwin"
     )
+
+
+def _storage_fault_artifacts() -> Path:
+    artifacts = _temp() / "update-artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    return artifacts
+
+
+def _append_command_output(report: Path, heading: str, args: list[str]) -> None:
+    """Run one diagnostic command and append stdout/stderr to the fault report."""
+    with report.open("a", encoding="utf-8") as handle:
+        handle.write(f"## {heading}\n")
+        if not args:
+            handle.write("\n")
+            return
+        try:
+            result = subprocess.run(  # noqa: S603 -- fixed diagnostic argv
+                args,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=_STORAGE_FAULT_LOG_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            handle.write(f"{type(error).__name__}: {error}\n\n")
+            return
+        if result.stdout:
+            handle.write(result.stdout)
+            if not result.stdout.endswith("\n"):
+                handle.write("\n")
+        if result.stderr:
+            handle.write(result.stderr)
+            if not result.stderr.endswith("\n"):
+                handle.write("\n")
+        handle.write(f"exit={result.returncode}\n\n")
+
+
+def _diskutil_info_targets() -> tuple[str, ...]:
+    """Return mount and APFS container identifiers for the hosted /nix disk."""
+    targets = ["/", "/nix"] if Path("/nix").exists() else ["/"]
+    diskutil = shutil.which("diskutil")
+    if diskutil is None:
+        return tuple(targets)
+    try:
+        listing = subprocess.run(  # noqa: S603 -- resolved diskutil path
+            [diskutil, "info", targets[-1]],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return tuple(targets)
+    extras: list[str] = []
+    for line in listing.stdout.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        name = key.strip()
+        ident = value.strip()
+        if name in {"APFS Container", "Part of Whole", "Device Node"} and ident:
+            extras.append(ident)
+    return tuple(dict.fromkeys([*targets, *extras]))
+
+
+def dump_hosted_storage_fault() -> None:
+    """Keep diskutil and APFS I/O logs after a hosted Darwin builder EIO.
+
+    Guest ``df`` can show tens of GiB free while the host backing store or
+    I/O path is saturated. A process-only ranlib EIO is not enough: capture
+    the device layer before the VM disappears.
+    """
+    if not is_hosted_darwin_runner():
+        return
+    artifacts = _storage_fault_artifacts()
+    record_runner_storage("storage-fault")
+    report = artifacts / "storage-fault.txt"
+    log_path = artifacts / "apfs-io.log"
+    report.write_text("hosted Darwin storage-fault dump\n\n", encoding="utf-8")
+    diskutil = shutil.which("diskutil")
+    if diskutil is None:
+        _append_command_output(report, "diskutil missing", [])
+    else:
+        _append_command_output(report, "diskutil list", [diskutil, "list"])
+        for target in _diskutil_info_targets():
+            _append_command_output(
+                report, f"diskutil info {target}", [diskutil, "info", target]
+            )
+    log_bin = shutil.which("log")
+    if log_bin is None:
+        log_path.write_text("log show missing\n", encoding="utf-8")
+        return
+    try:
+        result = subprocess.run(  # noqa: S603 -- resolved log path
+            [
+                log_bin,
+                "show",
+                "--last",
+                "2h",
+                "--style",
+                "compact",
+                "--predicate",
+                _STORAGE_FAULT_PREDICATE,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=_STORAGE_FAULT_LOG_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        log_path.write_text(f"{type(error).__name__}: {error}\n", encoding="utf-8")
+        return
+    log_path.write_text(result.stdout + result.stderr, encoding="utf-8")
+    with report.open("a", encoding="utf-8") as handle:
+        handle.write(
+            f"## log show exit={result.returncode} bytes={log_path.stat().st_size}\n"
+        )
 
 
 def reclaim_hosted_store() -> None:
@@ -1144,6 +1280,8 @@ def main(stage: str) -> int:
     operations = {
         "clean-image": clean_runner_image,
         "reclaim-store": reclaim_hosted_store,
+        "record-storage": record_named_storage,
+        "dump-storage-fault": dump_hosted_storage_fault,
         "bootstrap": bootstrap,
         "quality": quality,
         "certify": certify,

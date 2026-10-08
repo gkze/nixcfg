@@ -807,6 +807,15 @@ def test_record_runner_storage_writes_df_inodes_and_store_bytes(
     blocked.unlink(missing_ok=True)
     blocked.mkdir()
     jobs.record_runner_storage("blocked-jsonl", live=False)
+    real_exists = Path.exists
+
+    def exists(self: Path) -> bool:
+        return str(self) not in {"/nix", "/nix/store"} and real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", exists)
+    missing = jobs.record_runner_storage("no-nix", live=False)
+    assert "/nix" not in missing["mounts"]
+    assert "/" in missing["mounts"]
 
 
 def test_plan_shards_and_coverage_native_stages(native_job, monkeypatch) -> None:
@@ -952,6 +961,17 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     assert flush["if"] == "always()"
     assert flush["env"]["NIXCFG_CI_STAGE"] == "flush-cachix"
     assert native["jobs"]["native"]["steps"][-1] is flush
+    dump = next(
+        step
+        for step in native["jobs"]["native"]["steps"]
+        if step.get("name") == "Dump hosted storage-fault evidence"
+    )
+    assert dump["if"] == "failure()"
+    assert dump["env"]["NIXCFG_CI_STAGE"] == "dump-storage-fault"
+    names = [step.get("name") for step in native["jobs"]["native"]["steps"]]
+    assert names.index("Dump hosted storage-fault evidence") < names.index(
+        "Retain candidate and failure evidence"
+    )
     upload = next(
         step
         for step in native["jobs"]["native"]["steps"]
@@ -1392,6 +1412,22 @@ def test_generator_cache_is_scoped_to_disposable_accelerators() -> None:
     )
     assert cachix["with"]["name"] == jobs._BINARY_CACHE
     assert cachix["with"]["useDaemon"] == "true"
+    labels = {
+        step["env"]["NIXCFG_STORAGE_LABEL"]: step
+        for step in steps
+        if step.get("env", {}).get("NIXCFG_CI_STAGE") == "record-storage"
+    }
+    assert set(labels) == {"after-nix-install", "after-cachix"}
+    nix_step = next(
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith(
+            "DeterminateSystems/determinate-nix-action@"
+        )
+    )
+    assert steps.index(nix_step) < steps.index(labels["after-nix-install"])
+    assert steps.index(labels["after-nix-install"]) < steps.index(cachix)
+    assert steps.index(cachix) < steps.index(labels["after-cachix"])
     native = yaml.load(
         (ROOT / ".github/workflows/update-native.yml").read_text(),
         Loader=yaml.BaseLoader,
@@ -2241,3 +2277,202 @@ def test_hosted_update_runtime_reserves_store_headroom_for_root_closures() -> No
         jobs._NIX_MAX_FREE_BYTES + jobs._NIX_MIN_FREE_BYTES
     )
     assert jobs.image_headroom_required_bytes() == jobs._IMAGE_HEADROOM_BYTES
+
+
+def test_record_named_storage_requires_a_label(monkeypatch) -> None:
+    monkeypatch.delenv("NIXCFG_STORAGE_LABEL", raising=False)
+    with pytest.raises(ValueError, match="NIXCFG_STORAGE_LABEL"):
+        jobs.main("record-storage")
+
+
+def test_record_named_storage_writes_the_requested_label(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setenv("NIXCFG_STORAGE_LABEL", "after-nix-install")
+    monkeypatch.setattr(jobs.shutil, "disk_usage", lambda _path: _free_disk(8))
+    monkeypatch.setattr(jobs.shutil, "which", lambda _name: None)
+    assert jobs.main("record-storage") == 0
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "update-artifacts/storage.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    assert rows[-1]["label"] == "after-nix-install"
+
+
+def test_dump_hosted_storage_fault_skips_non_darwin_runners(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setattr(jobs.sys, "platform", "linux")
+    assert jobs.main("dump-storage-fault") == 0
+    assert not (tmp_path / "update-artifacts/storage-fault.txt").exists()
+
+
+def _hosted_darwin_dump_env(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    monkeypatch.setattr(jobs.shutil, "disk_usage", lambda _path: _free_disk(8))
+    real_exists = Path.exists
+
+    def exists(self: Path) -> bool:
+        if str(self) in {"/nix", "/nix/store"}:
+            return True
+        return real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", exists)
+
+
+def test_dump_hosted_storage_fault_keeps_diskutil_and_unified_logs(
+    tmp_path, monkeypatch
+) -> None:
+    """A guest df with 60+ GiB free is not proof the host backing store is healthy."""
+    _hosted_darwin_dump_env(tmp_path, monkeypatch)
+    diskutil = tmp_path / "diskutil"
+    log_bin = tmp_path / "log"
+    diskutil.write_text("")
+    log_bin.write_text("")
+
+    def which(name: str) -> str | None:
+        return {"diskutil": str(diskutil), "log": str(log_bin), "df": None}.get(name)
+
+    def run(args, **kwargs):
+        joined = " ".join(args)
+        if args[:2] == [str(diskutil), "list"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout="/dev/disk2", stderr="list warn"
+            )
+        if args[:2] == [str(diskutil), "info"]:
+            stdout = (
+                "Device Node: disk2s7\n"
+                "APFS Container: disk2\n"
+                "Part of Whole: disk2\n"
+                "Device Node: \n"
+                "Random line without a field\n"
+                if args[-1] == "/nix"
+                else "Volume Name: Macintosh HD\n"
+            )
+            return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+        if args[:2] == [str(log_bin), "show"]:
+            assert "--last" in args
+            assert "2h" in args
+            assert jobs._STORAGE_FAULT_PREDICATE in args
+            return subprocess.CompletedProcess(
+                args, 0, stdout="apfs I/O error disk2s7\n", stderr=""
+            )
+        raise AssertionError(joined)
+
+    monkeypatch.setattr(jobs.shutil, "which", which)
+    monkeypatch.setattr(jobs.subprocess, "run", run)
+    assert jobs.main("dump-storage-fault") == 0
+    report = (tmp_path / "update-artifacts/storage-fault.txt").read_text()
+    assert "diskutil list" in report
+    assert "diskutil info /nix" in report
+    assert "diskutil info disk2" in report
+    assert "list warn" in report
+    assert "apfs I/O error" in (tmp_path / "update-artifacts/apfs-io.log").read_text()
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "update-artifacts/storage.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    assert rows[-1]["label"] == "storage-fault"
+
+
+def test_dump_hosted_storage_fault_survives_missing_and_timed_out_tools(
+    tmp_path, monkeypatch
+) -> None:
+    _hosted_darwin_dump_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(jobs.shutil, "which", lambda _name: None)
+    assert jobs.main("dump-storage-fault") == 0
+    report = (tmp_path / "update-artifacts/storage-fault.txt").read_text()
+    assert "diskutil missing" in report
+    assert (
+        tmp_path / "update-artifacts/apfs-io.log"
+    ).read_text() == "log show missing\n"
+
+    diskutil = tmp_path / "diskutil"
+    log_bin = tmp_path / "log"
+    diskutil.write_text("")
+    log_bin.write_text("")
+
+    def which(name: str) -> str | None:
+        return {"diskutil": str(diskutil), "log": str(log_bin), "df": None}.get(name)
+
+    def run(args, **kwargs):
+        if args[:2] == [str(diskutil), "list"]:
+            raise subprocess.TimeoutExpired(args, jobs._STORAGE_FAULT_LOG_SECONDS)
+        if args[:2] == [str(diskutil), "info"]:
+            raise OSError("no disk")
+        if args[:2] == [str(log_bin), "show"]:
+            raise subprocess.TimeoutExpired(args, jobs._STORAGE_FAULT_LOG_SECONDS)
+        raise AssertionError(" ".join(args))
+
+    monkeypatch.setattr(jobs.shutil, "which", which)
+    monkeypatch.setattr(jobs.subprocess, "run", run)
+    assert jobs.main("dump-storage-fault") == 0
+    timed = (tmp_path / "update-artifacts/storage-fault.txt").read_text()
+    assert "TimeoutExpired" in timed
+    assert (
+        (tmp_path / "update-artifacts/apfs-io.log")
+        .read_text()
+        .startswith("TimeoutExpired:")
+    )
+
+    def run_log_oserror(args, **kwargs):
+        if args[:2] == [str(diskutil), "list"]:
+            raise OSError("list failed")
+        if args[:2] == [str(diskutil), "info"]:
+            raise subprocess.TimeoutExpired(args, jobs._STORAGE_FAULT_LOG_SECONDS)
+        if args[:2] == [str(log_bin), "show"]:
+            raise OSError("log show failed")
+        raise AssertionError(" ".join(args))
+
+    monkeypatch.setattr(jobs.subprocess, "run", run_log_oserror)
+    assert jobs.main("dump-storage-fault") == 0
+    assert (
+        (tmp_path / "update-artifacts/apfs-io.log").read_text().startswith("OSError:")
+    )
+
+
+def test_append_command_output_keeps_empty_stdout_and_terminated_stderr(
+    tmp_path, monkeypatch
+) -> None:
+    report = tmp_path / "report.txt"
+    report.write_text("", encoding="utf-8")
+
+    def run(_args, **_kwargs):
+        return subprocess.CompletedProcess(["diskutil"], 0, stdout="", stderr="warn\n")
+
+    monkeypatch.setattr(jobs.subprocess, "run", run)
+    jobs._append_command_output(report, "empty stdout", ["diskutil", "info"])
+    text = report.read_text()
+    assert "warn" in text
+    assert "exit=0" in text
+
+
+def test_diskutil_info_targets_tolerate_missing_nix_and_tools(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(jobs.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(Path, "exists", lambda self: str(self) != "/nix")
+    assert jobs._diskutil_info_targets() == ("/",)
+
+    diskutil = tmp_path / "diskutil"
+    diskutil.write_text("")
+
+    def which(name: str) -> str | None:
+        return str(diskutil) if name == "diskutil" else None
+
+    monkeypatch.setattr(jobs.shutil, "which", which)
+
+    def run(_args, **_kwargs):
+        raise OSError("diskutil info failed")
+
+    monkeypatch.setattr(jobs.subprocess, "run", run)
+    assert jobs._diskutil_info_targets() == ("/",)
