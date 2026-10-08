@@ -1,4 +1,4 @@
 # Touch this file to queue one Update run on main (or a listed feature branch).
 # Cloud-agent ghs_ tokens cannot workflow_dispatch (HTTP 403, actions:write).
 # Remove this kick path after E2E prepare → validate → publish is proven.
-2026-10-08T06:59:18Z flush-last-and-post-hook-skip
+2026-10-08T15:30:00Z structural-warmup-require-cachix-provisional-2wide
