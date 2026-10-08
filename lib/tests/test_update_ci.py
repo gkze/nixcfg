@@ -692,6 +692,7 @@ def test_require_cachix_daemon_fails_closed_before_bootstrap(
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     monkeypatch.chdir(checkout)
+    monkeypatch.setenv("NIXCFG_CACHIX_DAEMON_READY_SECONDS", "0")
     monkeypatch.delenv("CACHIX_DAEMON_DIR", raising=False)
     monkeypatch.delenv("CACHIX_DAEMON_SOCKET", raising=False)
     with pytest.raises(jobs.CachixDaemonError, match="useDaemon did not start"):
@@ -723,6 +724,34 @@ def test_require_cachix_daemon_fails_closed_before_bootstrap(
         "Cachix daemon ready" in (artifacts / "cachix-daemon-require.log").read_text()
     )
     assert (artifacts / "cachix-daemon" / "daemon.log").read_text() == "started\n"
+
+
+def test_require_cachix_daemon_waits_for_the_action_socket(
+    native_job, monkeypatch
+) -> None:
+    """cachix-action can return before daemon.sock exists."""
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("NIXCFG_CACHIX_DAEMON_READY_SECONDS", "5")
+    monkeypatch.delenv("CACHIX_DAEMON_SOCKET", raising=False)
+    daemon_dir = Path(env["RUNNER_TEMP"]) / "cachix-wait"
+    daemon_dir.mkdir(parents=True)
+    (daemon_dir / "daemon.pid").write_text("1\n")
+    (daemon_dir / "post-build-hook.sh").write_text("#!/bin/sh\n")
+    (daemon_dir / "nix.conf").write_text("post-build-hook = /hook.sh\n")
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+
+    def appear(_seconds: float) -> None:
+        (daemon_dir / "daemon.sock").write_text("")
+
+    monkeypatch.setattr(jobs.time, "sleep", appear)
+    assert jobs.main("require-cachix-daemon") == 0
+    monkeypatch.delenv("NIXCFG_CACHIX_DAEMON_READY_SECONDS")
+    assert jobs._cachix_daemon_ready_wait_seconds() == jobs._CACHIX_DAEMON_READY_SECONDS
+    monkeypatch.setenv("NIXCFG_CACHIX_DAEMON_READY_SECONDS", "-1")
+    assert jobs._cachix_daemon_ready_wait_seconds() == 0.0
 
 
 def test_flush_cachix_fails_closed_without_action_socket(

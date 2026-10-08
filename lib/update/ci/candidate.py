@@ -102,6 +102,21 @@ class RootDependencyCacheReport(BaseModel):
     failures: tuple[validation.DerivationValidationFailure, ...]
 
 
+def _hosted_darwin_packages_job(system: str) -> bool:
+    """Require a warmup plan only on a real hosted macOS packages shard.
+
+    Linux CI mocks ``get_current_nix_platform`` to ``aarch64-darwin``.
+    ``GITHUB_ACTIONS`` is also true there, so the nix platform alone would
+    fail-closed every unit test that validates packages. The runner OS is
+    the hosted-macOS signal; tests that need the gate patch ``sys.platform``.
+    """
+    return (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and system == "aarch64-darwin"
+        and sys.platform == "darwin"
+    )
+
+
 def _output_path(output: Path, root: Path) -> Path:
     """Keep job artifacts outside the source snapshot they describe."""
     output = output.resolve()
@@ -300,10 +315,7 @@ def validate_candidate(
         planned_installables: tuple[str, ...] = ()
         with workspace.validation_snapshot() as snapshot:
             if "packages" in gates:
-                if warmup_plan is None and (
-                    os.environ.get("GITHUB_ACTIONS") == "true"
-                    and system == "aarch64-darwin"
-                ):
+                if warmup_plan is None and _hosted_darwin_packages_job(system):
                     msg = "hosted Darwin packages validation requires a warmup plan"
                     raise ValueError(msg)
                 sources = None if candidate.validate_all_packages else candidate.sources

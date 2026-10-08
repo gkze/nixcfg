@@ -27,6 +27,12 @@ _STORE_PATH_PREFIX = Path("/nix/store")
 _CACHIX_DAEMON_DIR_ENV = "CACHIX_DAEMON_DIR"
 _CACHIX_DAEMON_SOCKET_ENV = "CACHIX_DAEMON_SOCKET"
 _CACHIX_DAEMON_SOCKET_NAME = "daemon.sock"
+# cachix-action can return before daemon.sock exists. Poll so the
+# require-before-bootstrap gate still fail-closes without racing the
+# listener. Tests disable the wait through NIXCFG_CACHIX_DAEMON_READY_SECONDS.
+_CACHIX_DAEMON_READY_SECONDS = 60.0
+_CACHIX_DAEMON_READY_POLL_SECONDS = 0.1
+_CACHIX_DAEMON_READY_SECONDS_ENV = "NIXCFG_CACHIX_DAEMON_READY_SECONDS"
 _STORAGE_MOUNTS = ("/", "/nix", "/nix/store")
 # Live-written on hosted macOS; rmtree can lose a race (ENOTEMPTY) after children
 # are gone. Cleanup is disk reclaim, not a correctness gate for these trees.
@@ -187,6 +193,14 @@ def record_runner_storage(
             sys.stderr.write(message if message.endswith("\n") else message + "\n")
             sys.stderr.flush()
     return snapshot
+
+
+def _cachix_daemon_ready_wait_seconds() -> float:
+    """Seconds to wait for ``daemon.sock`` after cachix-action returns."""
+    raw = os.environ.get(_CACHIX_DAEMON_READY_SECONDS_ENV, "").strip()
+    if raw:
+        return max(0.0, float(raw))
+    return _CACHIX_DAEMON_READY_SECONDS
 
 
 def cachix_daemon_socket() -> Path | None:
@@ -1207,20 +1221,27 @@ def require_cachix_daemon() -> None:
     artifacts = _temp() / "update-artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
     with (artifacts / "cachix-daemon-require.log").open("a") as log:
+        deadline = time.monotonic() + _cachix_daemon_ready_wait_seconds()
+        socket: Path | None = None
+        while True:
+            socket = cachix_daemon_socket()
+            if socket is not None and socket.exists():
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _retain_cachix_daemon_evidence(artifacts, log)
+                if socket is None:
+                    msg = (
+                        "Cachix daemon socket is unknown: "
+                        f"{_CACHIX_DAEMON_DIR_ENV} and {_CACHIX_DAEMON_SOCKET_ENV} "
+                        "are unset. useDaemon did not start a post-build-hook daemon."
+                    )
+                else:
+                    msg = f"Cachix daemon socket missing: {socket}"
+                _write_diagnostic(log, msg)
+                raise CachixDaemonError(msg)
+            time.sleep(min(_CACHIX_DAEMON_READY_POLL_SECONDS, remaining))
         _retain_cachix_daemon_evidence(artifacts, log)
-        socket = cachix_daemon_socket()
-        if socket is None:
-            msg = (
-                "Cachix daemon socket is unknown: "
-                f"{_CACHIX_DAEMON_DIR_ENV} and {_CACHIX_DAEMON_SOCKET_ENV} "
-                "are unset. useDaemon did not start a post-build-hook daemon."
-            )
-            _write_diagnostic(log, msg)
-            raise CachixDaemonError(msg)
-        if not socket.exists():
-            msg = f"Cachix daemon socket missing: {socket}"
-            _write_diagnostic(log, msg)
-            raise CachixDaemonError(msg)
         daemon_dir = os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip()
         missing: list[str] = []
         if not daemon_dir:

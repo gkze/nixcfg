@@ -645,8 +645,27 @@ def test_validation_scopes_split_packages_from_closures(
         pipeline.validate_candidate(candidate, scope="closure-shard", closure_roots=())
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setattr(pipeline, "get_current_nix_platform", lambda: "aarch64-darwin")
+    monkeypatch.setattr(pipeline.sys, "platform", "darwin")
     with pytest.raises(ValueError, match="warmup plan"):
         pipeline.validate_candidate(candidate, scope="packages")
+
+
+def test_linux_ci_mocking_darwin_does_not_require_warmup_plan(
+    prepared_run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GITHUB_ACTIONS on Linux is not a hosted Darwin packages shard."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(pipeline, "get_current_nix_platform", lambda: "aarch64-darwin")
+    monkeypatch.setattr(pipeline.sys, "platform", "linux")
+    assert pipeline.validate_candidate(candidate, scope="packages").gates == (
+        "packages",
+    )
 
 
 def test_closure_budget_timeout_fails_closed(
