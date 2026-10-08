@@ -25,14 +25,15 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    `warmup-plan.json`. Any shard that would still compile more than 400
    of those outputs locally (packages-scale on 37740898487 was 132; home
    compiled 1534 `rust_*` from a divergent stdenv graph) fails at plan
-   time. Darwin packages then `nix build` that intersection so Cachix has
-   the shared stdenv/rust graph before root shards start; the packages
-   inventory itself remains certify evidence. The CVE-2026-56391/56392
+   time. Five `macos-15` `rust-warmup` slots then `nix build` the rust_*
+   dependency layers (skip-if-in-gkze) so Cachix has the shared
+   stdenv/rust graph before root shards start; the packages inventory
+   itself remains certify evidence and waits for that matrix. The CVE-2026-56391/56392
    coreutils patches live in nixpkgs, not a repo overlay; they change
    every stdenv-dependent drv versus hydra until hydra publishes them.
    `coreutils-full` in the home packages module is a leaf. Do not drop
-   those patches here. Always-run Darwin shards start after that package
-   job (they wait for its cache, not its success) and after the Linux
+   those patches here.    Always-run Darwin shards start after rust-warmup
+   succeeds and after the Linux
    VM-image cache jobs. Width is provisionally 2, not a 2-VMs-per-host
    cap: revisit 4-wide versus 2-wide by bytes written and update-runtime
    once warmup cuts local builds. A generated matrix from
@@ -48,8 +49,9 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    `plan-darwin-closures` instead of re-evaluating Darwin `outPath`s.
    Missing, extra, or tree-mismatched caches fail closed. publish
    needs that job.
-   Hosted public `macos-15` concurrency is 5 of 20. Peak Darwin use after
-   packages is two provisional root shards. `max-jobs` / `cores` stay at 2 until a later
+   Hosted public `macos-15` concurrency is 5 of 20. Peak Darwin use during
+   rust-warmup is those five slots; after that, packages inventory plus
+   two provisional root shards. `max-jobs` / `cores` stay at 2 until a later
    run measures a safe increase (zed memory on hosted macos-15).
    A transient store fault
    (`Illegal byte sequence`, a vanished store `.drv`, a vanished store build

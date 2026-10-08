@@ -557,55 +557,16 @@ def test_validation_scopes_split_packages_from_closures(
         return ()
 
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
-
-    def warmup_realize(*_args: object, **_kwargs: object) -> tuple[()]:
-        order.append("warmup")
-        return ()
-
-    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
-    warmup_plan = tmp_path / "warmup-plan.json"
-    from lib.update.ci.warmup import (
-        RootWarmupStats,
-        ShardLocalBuildReport,
-        WarmupPlan,
-        write_warmup_plan,
-    )
-
-    write_warmup_plan(
-        warmup_plan,
-        WarmupPlan(
-            schemaVersion=1,
-            system="aarch64-darwin",
-            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
-            warmupOutputs=("/nix/store/shared",),
-            perRoot={
-                "darwin-argus": RootWarmupStats(
-                    outputs=1, missing=1, warmup=1, remaining=0
-                )
-            },
-            shards=(
-                ShardLocalBuildReport(
-                    shard="darwin-argus",
-                    roots=("darwin-argus",),
-                    remaining=0,
-                    remaining_rust_crates=0,
-                ),
-            ),
-            notes="fixture",
-        ),
-    )
-    packages = pipeline.validate_candidate(
-        candidate, scope="packages", warmup_plan=warmup_plan
-    )
+    packages = pipeline.validate_candidate(candidate, scope="packages")
     assert packages.gates == ("packages",)
-    assert order == ["packages", "warmup"]
+    assert order == ["packages"]
     closures = pipeline.validate_candidate(
         candidate,
         scope="closures",
         closure_budget_seconds=pipeline.HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS,
     )
     assert closures.gates == ("closures",)
-    assert order == ["packages", "warmup", "reclaim", "roots"]
+    assert order == ["packages", "reclaim", "roots"]
     assert seen[0]["build_timeout"] == (
         pipeline.HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS
     )
@@ -643,29 +604,67 @@ def test_validation_scopes_split_packages_from_closures(
         )
     with pytest.raises(ValueError, match="nonempty root list"):
         pipeline.validate_candidate(candidate, scope="closure-shard", closure_roots=())
-    monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    monkeypatch.setattr(pipeline, "get_current_nix_platform", lambda: "aarch64-darwin")
-    monkeypatch.setattr(pipeline.sys, "platform", "darwin")
-    with pytest.raises(ValueError, match="warmup plan"):
-        pipeline.validate_candidate(candidate, scope="packages")
 
 
-def test_linux_ci_mocking_darwin_does_not_require_warmup_plan(
-    prepared_run, monkeypatch: pytest.MonkeyPatch
+def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """GITHUB_ACTIONS on Linux is not a hosted Darwin packages shard."""
+    """rust-warmup is not certify evidence; packages no longer serialize it."""
     candidate = _candidate_for_scope(prepared_run)
+    order: list[str] = []
     monkeypatch.setattr(
         pipeline.validation,
         "validate_derivations",
         lambda *_args, **_kwargs: (),
     )
-    monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    monkeypatch.setattr(pipeline, "get_current_nix_platform", lambda: "aarch64-darwin")
-    monkeypatch.setattr(pipeline.sys, "platform", "linux")
-    assert pipeline.validate_candidate(candidate, scope="packages").gates == (
-        "packages",
+
+    def warmup_realize(*_args: object, **_kwargs: object) -> tuple[()]:
+        order.append("warmup")
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
     )
+
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=("/nix/store/shared",),
+            rustLayers=(("/nix/store/shared",),),
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert order == ["warmup"]
+    with pytest.raises(ValueError, match="warmup plan and slot"):
+        pipeline.validate_candidate(candidate, scope="rust-warmup")
+    with pytest.raises(ValueError, match="warmup slots are only valid"):
+        pipeline.validate_candidate(candidate, scope="packages", warmup_slot=0)
 
 
 def test_closure_budget_timeout_fails_closed(
@@ -986,6 +985,7 @@ def test_plan_shards_writes_generated_matrix(
     assert cache["manifest"]["roots"]
     warmup = json.loads(output.with_name("warmup-plan.json").read_text())
     assert warmup["warmupOutputs"] == ["/nix/store/shared"]
+    assert "rustLayers" in warmup
     assert "darwin_closure_shards=" in github.read_text()
     env_output = tmp_path / "github-output-env"
     monkeypatch.setenv("GITHUB_OUTPUT", str(env_output))

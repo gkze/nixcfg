@@ -9,6 +9,7 @@ import pytest
 from lib.update.ci.shard_plan import ClosureShard
 from lib.update.ci.warmup import (
     MAX_SHARD_LOCAL_BUILDS,
+    RUST_WARMUP_SLOTS,
     WARMUP_PLAN_NAME,
     ShardLocalBuildReport,
     WarmupError,
@@ -21,7 +22,10 @@ from lib.update.ci.warmup import (
     load_warmup_plan,
     plan_darwin_warmup,
     realize_warmup_outputs,
+    rust_warmup_layers,
     shard_remaining_outputs,
+    skip_cached_warmup_paths,
+    slot_warmup_paths,
     substitutable_paths,
     write_warmup_plan,
 )
@@ -41,15 +45,23 @@ def _manifest() -> RootClosureManifest:
     })
 
 
-def _graph(*darwin: str, linux: str | None = None) -> dict[str, object]:
+def _graph(
+    *darwin: str,
+    linux: str | None = None,
+    edges: dict[str, tuple[str, ...]] | None = None,
+) -> dict[str, object]:
     derivations: dict[str, object] = {}
     for path in darwin:
         name = path.rsplit("/", 1)[-1]
+        input_drvs = {
+            f"{dep.rsplit('/', 1)[-1]}.drv": ["out"]
+            for dep in (edges or {}).get(path, ())
+        }
         derivations[f"{name}.drv"] = {
             "version": 4,
             "system": "aarch64-darwin",
             "outputs": {"out": {"path": path}},
-            "inputs": {"drvs": {}},
+            "inputs": {"drvs": input_drvs},
         }
     if linux is not None:
         derivations["vm.drv"] = {
@@ -222,6 +234,10 @@ def test_plan_darwin_warmup_writes_intersection_and_rejects_huge_remainder(
         "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared",
         "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1",
     )
+    assert plan.rust_layers == (
+        ("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared",),
+        ("/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1",),
+    )
     assert plan.per_root["darwin-argus"].remaining == 1
     assert plan.shards[0].remaining == 1
     assert plan.shards[1].remaining == 0
@@ -361,6 +377,7 @@ def test_plan_defaults_to_subprocess_and_cache_helpers(
         present=lambda _path: False,
     )
     assert empty.warmup_outputs == ()
+    assert empty.rust_layers == ()
     assert empty.per_root == {}
 
 
@@ -393,3 +410,49 @@ def test_realize_warmup_outputs_batches_store_paths(
     ]
     assert failures[0].source == "root-warmup"
     assert "boom" in failures[0].message
+
+
+def test_rust_warmup_layers_and_slots_keep_dependency_order() -> None:
+    shared = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared"
+    rust_a = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_a-1"
+    rust_b = "/nix/store/cccccccccccccccccccccccccccccccc-rust_b-1"
+    rust_c = "/nix/store/dddddddddddddddddddddddddddddddd-rust_c-1"
+    rust_d = "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-rust_d-1"
+    rust_e = "/nix/store/ffffffffffffffffffffffffffffffff-rust_e-1"
+    payload = _graph(
+        shared,
+        rust_a,
+        rust_b,
+        rust_c,
+        rust_d,
+        rust_e,
+        edges={rust_b: (rust_a,), rust_c: (rust_b,)},
+    )
+    warmup = frozenset({shared, rust_a, rust_b, rust_c, rust_d, rust_e})
+    layers = rust_warmup_layers(warmup, (payload,))
+    assert layers[0] == (shared,)
+    assert rust_a in layers[1]
+    assert rust_d in layers[1]
+    assert rust_e in layers[1]
+    assert layers[2] == (rust_b,)
+    assert layers[3] == (rust_c,)
+    assert RUST_WARMUP_SLOTS == 5
+    slot0 = slot_warmup_paths(layers, 0)
+    assert slot0[0] == shared
+    assert rust_b in slot0
+    assert rust_c in slot0
+    assert rust_a not in slot_warmup_paths(layers, 1)
+    assert skip_cached_warmup_paths(
+        (rust_a, rust_b, rust_a), present=lambda path: path.endswith("rust_a-1")
+    ) == (rust_b,)
+    with pytest.raises(WarmupError, match="slot must be"):
+        slot_warmup_paths(layers, 5)
+    with pytest.raises(WarmupError, match="width must be"):
+        slot_warmup_paths(layers, 0, width=0)
+    cycle = _graph(rust_a, rust_b, edges={rust_a: (rust_b,), rust_b: (rust_a,)})
+    with pytest.raises(WarmupError, match="dependency cycle"):
+        rust_warmup_layers(frozenset({rust_a, rust_b}), (cycle,))
+    with pytest.raises(WarmupError, match="missing from Darwin graphs"):
+        rust_warmup_layers(frozenset({rust_a}), (_graph(shared),))
+    assert rust_warmup_layers(frozenset({shared}), (_graph(shared),)) == ((shared,),)
+    assert rust_warmup_layers(frozenset(), (_graph(shared),)) == ()

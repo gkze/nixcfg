@@ -585,6 +585,9 @@ let
   zedOverride = attrs: {
     # crate2nix does not provide Cargo's per-binary compile-time env here, but
     # Zed 1.3.0 now asserts that it matches paths::APP_NAME_LOWERCASE.
+    # Linux out↔lib cycle for this lib+bin crate is collapsed in
+    # wrapBuildRustCrate (outputs + outputDev = [ "out" ] on Linux only).
+    # Do not unsplit Darwin rust_zed: those hashes are already warmed in gkze.
     CARGO_BIN_NAME = "zed";
     nativeBuildInputs =
       (attrs.nativeBuildInputs or [ ])
