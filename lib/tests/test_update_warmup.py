@@ -94,9 +94,16 @@ def test_darwin_output_paths_keep_darwin_and_skip_linux_or_pathless() -> None:
         "outputs": {"out": {"path": "not-a-store-path"}},
         "inputs": {"drvs": {}},
     }
+    derivations["v4-relative.drv"] = {
+        "version": 4,
+        "system": "aarch64-darwin",
+        "outputs": {"out": {"path": "mklmiipy424axj6zgl1vnqg6a58mdz77-hello-2.12.3"}},
+        "inputs": {"drvs": {}},
+    }
     paths = darwin_output_paths(payload)
     assert "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared" in paths
     assert "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1" in paths
+    assert "/nix/store/mklmiipy424axj6zgl1vnqg6a58mdz77-hello-2.12.3" in paths
     assert "/nix/store/cccccccccccccccccccccccccccccccc-vm" not in paths
     assert "not-a-store-path" not in paths
     with pytest.raises(WarmupError, match="missing derivations"):

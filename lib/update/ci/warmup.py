@@ -20,6 +20,7 @@ still compile more than a packages-scale remainder locally.
 """
 
 import json
+import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
@@ -61,6 +62,11 @@ _WARMUP_REALIZE_CHUNK = 128
 _SUBSTITUTER_WORKERS = 16
 _NIXOS_CACHE = "https://cache.nixos.org"
 _GKZE_CACHE = "https://gkze.cachix.org"
+_STORE_PREFIX = "/nix/store/"
+# Derivation-v4 JSON omits the store dir; older `nix derivation show`
+# responses used absolute paths. Accept both so warmup does not collect
+# zero Darwin outputs on Nix 2.35.
+_STORE_BASENAME = re.compile(r"^[0-9a-z]{32}-.+$")
 
 
 class WarmupError(ValueError):
@@ -110,6 +116,15 @@ def is_crate2nix_rust_output(store_path: str) -> bool:
     return bool(separator) and rest.startswith("rust_")
 
 
+def _absolute_store_path(path: str) -> str | None:
+    """Return a full store path, or None if *path* is not a store output."""
+    if path.startswith(_STORE_PREFIX) and path != _STORE_PREFIX:
+        return path
+    if _STORE_BASENAME.fullmatch(path):
+        return f"{_STORE_PREFIX}{path}"
+    return None
+
+
 def darwin_output_paths(payload: Mapping[str, object]) -> frozenset[str]:
     """Collect aarch64-darwin output paths from ``nix derivation show`` JSON."""
     derivations = payload.get("derivations")
@@ -126,8 +141,11 @@ def darwin_output_paths(payload: Mapping[str, object]) -> frozenset[str]:
         for output in outputs.values():
             if not isinstance(output, dict):
                 continue
-            path = output.get("path")
-            if isinstance(path, str) and path.startswith("/nix/store/"):
+            raw = output.get("path")
+            if not isinstance(raw, str):
+                continue
+            path = _absolute_store_path(raw)
+            if path is not None:
                 paths.add(path)
     return frozenset(paths)
 
