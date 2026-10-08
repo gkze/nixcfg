@@ -314,7 +314,10 @@ def validate_candidate(
                 jobs.record_runner_storage("after-packages")
             if "closures" in gates or scope == "closure-shard":
                 # Hosted macos-15 root-closures can fetch tens of GiB.
-                # GC first so min-free does not fire mid-rustc.
+                # GC first when free is below max-free+min-free so min-free
+                # does not fire mid-rustc. Skip when image cleanup already
+                # left that headroom; closure shards do not inherit a
+                # package store.
                 jobs.record_runner_storage(f"before-gc-{scope}")
                 jobs.reclaim_hosted_store()
                 jobs.record_runner_storage(f"after-gc-{scope}")

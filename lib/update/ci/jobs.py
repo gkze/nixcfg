@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TextIO
 
@@ -31,6 +32,11 @@ _STORAGE_MOUNTS = ("/", "/nix", "/nix/store")
 # Live-written on hosted macOS; rmtree can lose a race (ENOTEMPTY) after children
 # are gone. Cleanup is disk reclaim, not a correctness gate for these trees.
 _VOLATILE_IMAGE_LEAVES = frozenset({"Caches", "hostedtoolcache"})
+# Must match .github/actions/update-runtime/action.yml extra-conf.
+_NIX_MIN_FREE_BYTES = 34359738368
+_NIX_MAX_FREE_BYTES = 68719476736
+_IMAGE_CLEANUP_WORKERS = 8
+_IMAGE_LOG_LOCK = threading.Lock()
 _UNUSED_IMAGE_PATHS = {
     "darwin": (Path("/usr/local/share/dotnet"),),
     "linux": (
@@ -225,11 +231,9 @@ def clean_runner_image() -> None:
         tool_cache = os.environ.get("RUNNER_TOOL_CACHE")
         if tool_cache:
             paths.append(Path(tool_cache))
-    for path in paths:
-        if path.is_dir() and not path.is_symlink():
-            sys.stdout.write(f"Removing unused runner image tool: {path}\n")
-            sys.stdout.flush()
-            _remove_unused_image_path(path)
+    to_remove = [path for path in paths if path.is_dir() and not path.is_symlink()]
+    if to_remove:
+        _reclaim_unused_image_paths(to_remove)
     sys.stdout.write(
         f"Available after image cleanup: {shutil.disk_usage('/').free} bytes\n"
     )
@@ -244,6 +248,13 @@ def _image_cleanup_best_effort(path: Path) -> bool:
     )
 
 
+def _image_log(message: str) -> None:
+    """Write one cleanup line without interleaving parallel rmtree logs."""
+    with _IMAGE_LOG_LOCK:
+        sys.stdout.write(f"{message}\n")
+        sys.stdout.flush()
+
+
 def _remove_unused_image_path(path: Path) -> None:
     """Delete one unused image tree; ignore leftover writers in cache dirs."""
     snippet = (
@@ -252,6 +263,33 @@ def _remove_unused_image_path(path: Path) -> None:
         else "import shutil, sys; shutil.rmtree(sys.argv[1])"
     )
     _run("sudo", sys.executable, "-c", snippet, str(path))
+
+
+def _remove_unused_image_path_timed(path: Path) -> None:
+    """Delete one unused tree and log elapsed seconds for the GHA breakdown."""
+    started = time.perf_counter()
+    _image_log(f"Removing unused runner image tool: {path}")
+    try:
+        _remove_unused_image_path(path)
+    except (OSError, subprocess.CalledProcessError):
+        _image_log(
+            f"Failed unused runner image tool: {path} in "
+            f"{time.perf_counter() - started:.1f}s"
+        )
+        raise
+    _image_log(
+        f"Removed unused runner image tool: {path} in "
+        f"{time.perf_counter() - started:.1f}s"
+    )
+
+
+def _reclaim_unused_image_paths(paths: list[Path]) -> None:
+    """Delete unused image trees concurrently; unused Xcode.app copies dominate."""
+    workers = min(_IMAGE_CLEANUP_WORKERS, len(paths))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_remove_unused_image_path_timed, path) for path in paths]
+    for future in futures:
+        future.result()
 
 
 def is_hosted_darwin_runner() -> bool:
@@ -268,10 +306,23 @@ def reclaim_hosted_store() -> None:
     if not is_hosted_darwin_runner():
         return
     record_runner_storage("before-store-gc")
-    sys.stdout.write(
-        f"Available before store GC: {shutil.disk_usage('/').free} bytes\n"
-    )
+    free = shutil.disk_usage("/").free
+    sys.stdout.write(f"Available before store GC: {free} bytes\n")
     sys.stdout.flush()
+    # Image cleanup typically leaves ~150 GiB. Closure shards do not inherit a
+    # package store, so nix store gc cannot free tens of GiB. Skip when free
+    # already covers max-free plus min-free; otherwise a 60+ GiB fetch can
+    # still trip min-free mid-rustc. Combined packages+closures on a tight
+    # disk still GCs unused outputs first.
+    skip_free = _NIX_MAX_FREE_BYTES + _NIX_MIN_FREE_BYTES
+    if free >= skip_free:
+        sys.stdout.write(
+            f"Skipping store GC; free {free} bytes already meets "
+            f"max-free+min-free {skip_free} bytes\n"
+        )
+        sys.stdout.flush()
+        record_runner_storage("after-store-gc")
+        return
     _run("nix", "store", "gc")
     sys.stdout.write(f"Available after store GC: {shutil.disk_usage('/').free} bytes\n")
     record_runner_storage("after-store-gc")
