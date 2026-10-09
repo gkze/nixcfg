@@ -30,12 +30,8 @@ Until that bar is met:
 
 ## Current head
 
-Code tip before this note: `3be750a36b33b1b2849f983437b4a3ff80875a6a`.
-This file is a docs-only commit on that tip. Confirm the handoff SHA with
-`git rev-parse HEAD` after you pull; it is also in the #221 comment that
-posted this note.
-
-What the tree already contains (ancestors of this file):
+Confirm the lane SHA with `git rev-parse HEAD` after you pull. The tree
+already contains:
 
 | SHA | What |
 | --- | --- |
@@ -45,7 +41,9 @@ What the tree already contains (ancestors of this file):
 | `ce43e92e` | Cherry-pick of `d6083a4f`: Linux rust_zed unsplit + 5-wide rust_* warmup |
 | `65150039` | Dropped the #222 kick branch so only #221 triggers Update |
 | `c7794ea0` | Realize rust_* warmup from exported `.drv` files, not output store paths |
-| `3be750a3` | Kick that queued `37851246740` |
+| `3be750a3` | Kick that queued `37851246740` (#1254) |
+| `2ab7291b` | Replace `nix-store --add` with store-closure export/import |
+| `1450528e` | Kick that queued `37868270521` (#1255) |
 
 #222 is **closed as superseded** (2026-10-08T21:40:26Z). The rust_zed fix and
 5-wide split live on this branch, not on `cursor/fix-zed-out-lib-cycle-6614`.
@@ -154,6 +152,17 @@ tree) is still split and still in gkze:
    action post-hook is **success after we drain and clear `CACHIX_DAEMON_DIR`**.
    It is not proof that the job failed to push. Real push is the daemon +
    explicit flush last.
+5. **`nix-store --add` CA path** (`37851246740` / #1254). Copying `.drv` files
+   and `--add`ing them minted `<newhash>-<oldhash>-name.drv`. Fixed in
+   `2ab7291b` by exporting the original store closure.
+6. **Unrooted import + `nix build foo.drv`** (`37868270521` / #1255).
+   `nix-store --import` of `closure.nar` exited 0, but hosted `min-free =
+   32GiB` GC collected the unrooted `.drv`s (`/nix` stayed ~4.6Gi). The
+   realize step then asked `nix build /nix/store/foo.drv`, which only
+   substitutes the derivation text (`don't know how to build` / no
+   substituter). Fix: `nix copy --derivation` into a `file://` cache,
+   `--add-root` each imported `.drv`, `nix path-info` fail-closed, and
+   `nix build foo.drv^*`.
 
 Also: realizing warmup as `nix build /nix/store/<output>` cannot compile missing
 paths. That is why packages died at 21:35Z after inventory.
@@ -180,26 +189,17 @@ creation if never accessed) is firing. Pins are immune with `--keep-revisions`
 
 ## Already queued (do not double-kick)
 
-A previous turn already kicked **Update `37851246740`** on `3be750a3`
-(https://github.com/gkze/nixcfg/actions/runs/37851246740). That SHA is an
-ancestor of this docs-only handoff and already has the rust_zed unsplit,
-5-wide split, and `.drv` realize. At handoff write time that run was
-**in_progress** (started ~22:13Z). Feature-branch `cancel-in-progress`
-cancelled the `37809856116` root shards at 22:06Z and finished that run
-at 22:13Z when the newer kick began.
-
-This handoff **does not kick**. A docs-only push does not match
-`update.yml` `paths: .github/update-kick`, so it will not cancel
-`37851246740`. Touching `.github/update-kick` again **will** cancel it.
+`37851246740` (#1254) and `37868270521` (#1255) are **terminal failures**.
+Do not touch `.github/update-kick` while another Update is pending or in
+progress. A docs-only push does not match `update.yml`
+`paths: .github/update-kick`.
 
 ## Open questions
 
 - Authenticated gkze `subscriptionPlan` / `subscriptionStorageLimit` /
   `subscriptionStorageUsage` / `totalFileSize` (need the live token).
-- Whether `37851246740` actually starts 5-wide rust-warmup and whether the
-  exported `.drv` cache imports on macos-15 (`nix-store --add`).
-- Whether skip-if-in-gkze plus 5-wide finishes the remaining ~2436 before the
-  6h cap (projected ~1.2h/slot at 400/h if layers stripe cleanly).
+- Whether skip-if-in-gkze plus 5-wide finishes the remaining rust_* before
+  the 6h cap once `foo.drv^*` actually builds after import.
 - 2-wide vs 4-wide root shards: still provisional; measure bytes written and
   update-runtime after rust_* are in gkze.
 - #1246 was 2h54m with shards 2–4 skipped by design. The done-bar table must
@@ -207,23 +207,8 @@ This handoff **does not kick**. A docs-only push does not match
 
 ## Exact next step
 
-Kick **one** full Update on head `3be750a36b33b1b2849f983437b4a3ff80875a6a`
-(the required tree: rust_zed unsplit + 5-wide + `.drv` realize).
-
-That kick is **already live** as `37851246740`. Watch it. Do not start a
-second kick while it is pending or in progress.
-
-If `37851246740` is dead (cancelled, never started, or failed before
-rust-warmup for a reason this tree already fixes), kick **one** full Update
-on the current #221 head after you `git rev-parse HEAD` (this docs commit,
-or later code if you landed more):
-
-```text
-# edit .github/update-kick with a new timestamp line only
-# commit: chore(update): kick Update after <reason>
-# push cursor/no-skip-darwin-shards-6614
-```
-
-Do not kick while `37851246740` is alive. Do not change flake inputs. Do not
-merge #221. Do not drive `main` Update until the done bar above is green.
-Do not schedule more self-check-ins or timers from this lane.
+After this fix lands, kick **one** full Update on the #221 head that has
+`nix copy --derivation` + GC roots + `foo.drv^*`. Do not kick while another
+Update is pending or in progress. Do not change flake inputs. Do not merge
+#221. Do not drive `main` Update until the done bar above is green. Do not
+schedule more self-check-ins or timers from this lane.

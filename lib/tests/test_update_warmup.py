@@ -10,8 +10,9 @@ from lib.update.ci.shard_plan import ClosureShard
 from lib.update.ci.warmup import (
     MAX_SHARD_LOCAL_BUILDS,
     RUST_WARMUP_SLOTS,
+    WARMUP_DRVS_CACHE_INFO,
     WARMUP_DRVS_NAME,
-    WARMUP_DRVS_NAR_NAME,
+    WARMUP_DRVS_ROOTS,
     WARMUP_PLAN_NAME,
     ShardLocalBuildReport,
     WarmupError,
@@ -32,6 +33,7 @@ from lib.update.ci.warmup import (
     slot_warmup_paths,
     substitutable_paths,
     unique_drvs_for_outputs,
+    warmup_build_installable,
     warmup_output_drvs,
     write_warmup_plan,
 )
@@ -426,8 +428,26 @@ def test_realize_warmup_outputs_batches_store_paths(
     assert "boom" in failures[0].message
 
 
+def test_realize_warmup_outputs_builds_drv_outputs(tmp_path: Path) -> None:
+    """Nix build foo.drv realizes the .drv file; outputs need foo.drv^* (#1255)."""
+    drv = "/nix/store/cccccccccccccccccccccccccccccccc-rust_a-1.drv"
+    drv_calls: list[list[str]] = []
+
+    def drv_run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        drv_calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    assert warmup_build_installable(drv) == f"{drv}^*"
+    assert (
+        warmup_build_installable("/nix/store/dddd-shared") == "/nix/store/dddd-shared"
+    )
+    assert realize_warmup_outputs((drv,), flake_root=tmp_path, run=drv_run) == ()
+    assert f"{drv}^*" in drv_calls[0]
+    assert drv not in drv_calls[0]
+
+
 def test_warmup_drvs_map_outputs_and_import_register_files(tmp_path: Path) -> None:
-    """Darwin can only nix-build .drv files; output paths are not rebuildable."""
+    """Darwin rebuilds from mapped .drv paths; output store paths are not enough."""
     shared = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared"
     rust_out = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_zed-1"
     rust_lib = "/nix/store/cccccccccccccccccccccccccccccccc-rust_zed-1-lib"
@@ -452,12 +472,12 @@ def test_warmup_drvs_map_outputs_and_import_register_files(tmp_path: Path) -> No
         warmup_output_drvs(frozenset({shared, "/nix/store/missing"}), (payload,))
 
 
-def _planner_drv(tmp_path: Path) -> tuple[Path, str]:
+def _planner_drv(tmp_path: Path, name: str = "rust_a-1") -> tuple[Path, str]:
     """Return a fake planner .drv file and its original store path."""
-    drv_name = "dddddddddddddddddddddddddddddddd-rust_a-1.drv"
+    drv_name = f"dddddddddddddddddddddddddddddddd-{name}.drv"
     drv_path = f"/nix/store/{drv_name}"
     planner_drv = tmp_path / "planner" / drv_name
-    planner_drv.parent.mkdir()
+    planner_drv.parent.mkdir(exist_ok=True)
     planner_drv.write_text("drv")
     return planner_drv, drv_path
 
@@ -465,15 +485,30 @@ def _planner_drv(tmp_path: Path) -> tuple[Path, str]:
 def _store_ok(
     args: list[str], stdout: str | bytes = "", stderr: str | bytes = ""
 ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
-    """Return a successful nix-store process result."""
+    """Return a successful nix process result."""
     return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr=stderr)
 
 
 def _store_fail(
     args: list[str], stdout: str | bytes = "", stderr: str | bytes = ""
 ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
-    """Return a failed nix-store process result."""
+    """Return a failed nix process result."""
     return subprocess.CompletedProcess(args, 1, stdout=stdout, stderr=stderr)
+
+
+def _write_file_cache(cache: Path) -> Path:
+    """Create a nix copy --to file:// cache marker."""
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / WARMUP_DRVS_CACHE_INFO).write_text(
+        "StoreDir: /nix/store\nWantMassQuery: 1\nPriority: 40\n"
+    )
+    return cache
+
+
+def _copy_paths(args: list[str]) -> tuple[str, ...]:
+    """Return store paths after the file:// URI in a nix copy argv."""
+    uri = next(part for part in args if part.startswith("file://"))
+    return tuple(args[args.index(uri) + 1 :])
 
 
 def test_warmup_drv_closure_exports_original_store_paths(tmp_path: Path) -> None:
@@ -484,110 +519,61 @@ def test_warmup_drv_closure_exports_original_store_paths(tmp_path: Path) -> None
 
     def export_run(
         args: list[str], **_kwargs: object
-    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+    ) -> subprocess.CompletedProcess[str]:
         export_calls.append(args)
-        if args[:3] == ["nix-store", "--query", "--requisites"]:
-            return _store_ok(args, stdout=f"{drv_path}\n/nix/store/eeee-builder.sh\n")
-        if args[:2] == ["nix-store", "--export"]:
-            return _store_ok(args, stdout=b"NAR", stderr=b"")
-        raise AssertionError(args)
+        assert args[:3] == ["nix", "copy", "--derivation"]
+        return _store_ok(args)
 
     export_warmup_drvs((), cache)
-    assert (cache / WARMUP_DRVS_NAR_NAME).read_bytes() == b""
+    assert cache.is_dir()
+    assert not (cache / WARMUP_DRVS_CACHE_INFO).exists()
     export_warmup_drvs((str(planner_drv),), cache, run=export_run)
-    assert (cache / WARMUP_DRVS_NAR_NAME).read_bytes() == b"NAR"
-    assert export_calls[0][:3] == ["nix-store", "--query", "--requisites"]
-    assert export_calls[1][:2] == ["nix-store", "--export"]
+    assert export_calls[0][:3] == ["nix", "copy", "--derivation"]
+    assert "--to" in export_calls[0]
+    assert (
+        export_calls[0][export_calls[0].index("--to") + 1] == cache.resolve().as_uri()
+    )
+    assert str(planner_drv) in export_calls[0]
     assert "--add" not in {part for call in export_calls for part in call}
+    assert "--export" not in {part for call in export_calls for part in call}
     with pytest.raises(WarmupError, match="planner is missing"):
         export_warmup_drvs((drv_path,), tmp_path / "missing-src")
 
-    def export_text(
-        args: list[str], **_kwargs: object
-    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
-        if args[:3] == ["nix-store", "--query", "--requisites"]:
-            return _store_ok(args, stdout=b"/nix/store/ffff-src.sh\n", stderr=b"")
-        return _store_ok(args, stdout="TEXTNAR")
-
-    export_warmup_drvs((str(planner_drv),), tmp_path / "text-export", run=export_text)
-    assert (
-        (tmp_path / "text-export") / WARMUP_DRVS_NAR_NAME
-    ).read_bytes() == b"TEXTNAR"
-
 
 def test_warmup_drv_closure_export_failures_fail_closed(tmp_path: Path) -> None:
-    """Query/export errors and empty requisites must not write a fake cache."""
-    planner_drv, drv_path = _planner_drv(tmp_path)
+    """A failed file:// copy must not look like a usable Darwin cache."""
+    planner_drv, _drv_path = _planner_drv(tmp_path)
 
-    def empty_requisites(
+    def copy_fail(
         args: list[str], **_kwargs: object
     ) -> subprocess.CompletedProcess[str]:
-        return _store_ok(args, stdout="\n")
-
-    with pytest.raises(WarmupError, match="requisites were empty"):
-        export_warmup_drvs(
-            (str(planner_drv),), tmp_path / "empty-req", run=empty_requisites
-        )
-
-    def query_fail(
-        args: list[str], **_kwargs: object
-    ) -> subprocess.CompletedProcess[str]:
-        return _store_fail(args, stderr="query failed")
-
-    with pytest.raises(WarmupError, match="failed to query"):
-        export_warmup_drvs((str(planner_drv),), tmp_path / "query-fail", run=query_fail)
-
-    def export_fail(
-        args: list[str], **_kwargs: object
-    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
-        if args[:3] == ["nix-store", "--query", "--requisites"]:
-            return _store_ok(args, stdout=f"{drv_path}\n")
-        return _store_fail(args, stdout=b"", stderr=b"export failed")
+        return _store_fail(args, stderr="copy failed")
 
     with pytest.raises(WarmupError, match="failed to export"):
-        export_warmup_drvs(
-            (str(planner_drv),), tmp_path / "export-fail", run=export_fail
-        )
+        export_warmup_drvs((str(planner_drv),), tmp_path / "export-fail", run=copy_fail)
 
-    def export_empty_streams(
+    def copy_empty_streams(
         args: list[str], **_kwargs: object
     ) -> subprocess.CompletedProcess[bytes]:
         return _store_fail(args, stdout=b"", stderr=b"")
 
-    with pytest.raises(WarmupError, match="nix-store --query failed"):
+    with pytest.raises(WarmupError, match="nix copy --derivation failed"):
         export_warmup_drvs(
-            (str(planner_drv),), tmp_path / "empty-streams", run=export_empty_streams
-        )
-
-    def export_empty_after_query(
-        args: list[str], **_kwargs: object
-    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
-        if args[:3] == ["nix-store", "--query", "--requisites"]:
-            return _store_ok(args, stdout=f"{drv_path}\n")
-        return _store_fail(args, stdout=b"", stderr=b"")
-
-    with pytest.raises(WarmupError, match="nix-store --export failed"):
-        export_warmup_drvs(
-            (str(planner_drv),),
-            tmp_path / "empty-export-streams",
-            run=export_empty_after_query,
+            (str(planner_drv),), tmp_path / "empty-streams", run=copy_empty_streams
         )
 
 
-def test_warmup_drv_closure_imports_exported_nar(tmp_path: Path) -> None:
-    """Darwin registers the exported closure, not content-addressed copies."""
+def test_warmup_drv_closure_imports_file_store(tmp_path: Path) -> None:
+    """Darwin copies, GC-roots, and path-info-checks the original .drv paths."""
     _planner_file, drv_path = _planner_drv(tmp_path)
-    cache = tmp_path / WARMUP_DRVS_NAME
-    cache.mkdir()
-    (cache / WARMUP_DRVS_NAR_NAME).write_bytes(b"NAR")
+    cache = _write_file_cache(tmp_path / WARMUP_DRVS_NAME)
     imported: list[list[str]] = []
 
     def import_run(
-        args: list[str], **kwargs: object
-    ) -> subprocess.CompletedProcess[bytes]:
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         imported.append(args)
-        assert kwargs.get("input") == b"NAR"
-        return _store_ok(args, stdout=b"", stderr=b"")
+        return _store_ok(args, stdout=drv_path)
 
     import_warmup_drvs((), tmp_path / "no-cache")
     with pytest.raises(WarmupError, match="warmup drv cache missing"):
@@ -597,14 +583,25 @@ def test_warmup_drv_closure_imports_exported_nar(tmp_path: Path) -> None:
     with pytest.raises(WarmupError, match="warmup drv cache missing"):
         import_warmup_drvs((drv_path,), empty_cache, run=import_run)
     import_warmup_drvs((drv_path,), cache, run=import_run)
-    assert imported == [["nix-store", "--import"]]
+    assert imported[0][:3] == ["nix", "copy", "--derivation"]
+    assert "--from" in imported[0]
+    assert "--no-check-sigs" in imported[0]
+    assert "min-free" in imported[0]
+    assert imported[0][imported[0].index("min-free") + 1] == "0"
+    assert imported[0][imported[0].index("--from") + 1] == cache.resolve().as_uri()
+    assert imported[1][:2] == ["nix-store", "--add-root"]
+    assert "--indirect" in imported[1]
+    assert drv_path in imported[1]
+    assert (cache / WARMUP_DRVS_ROOTS / Path(drv_path).name) == Path(imported[1][2])
+    assert imported[2][:2] == ["nix", "path-info"]
+    assert drv_path in imported[2]
     with pytest.raises(WarmupError, match="failed to import"):
         import_warmup_drvs(
             (drv_path,),
             cache,
             run=lambda args, **_kwargs: _store_fail(args, stderr="import failed"),
         )
-    with pytest.raises(WarmupError, match="nix-store --import failed"):
+    with pytest.raises(WarmupError, match="nix copy --derivation failed"):
         import_warmup_drvs(
             (drv_path,),
             cache,
@@ -613,25 +610,54 @@ def test_warmup_drv_closure_imports_exported_nar(tmp_path: Path) -> None:
     assert _planner_file.is_file()
 
 
-def test_warmup_drv_closure_export_batches_requisites(tmp_path: Path) -> None:
-    """ARG_MAX-safe export keeps the full eval closure."""
-    planner_drv, _drv_path = _planner_drv(tmp_path)
+def test_warmup_drv_closure_import_roots_and_path_info_fail_closed(
+    tmp_path: Path,
+) -> None:
+    """#1255 would have died at path-info instead of nix build don't-know-how."""
+    _planner_file, drv_path = _planner_drv(tmp_path)
+    cache = _write_file_cache(tmp_path / WARMUP_DRVS_NAME)
+
+    def root_fail(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if args[:2] == ["nix", "copy"]:
+            return _store_ok(args)
+        return _store_fail(args, stderr="add-root failed")
+
+    with pytest.raises(WarmupError, match="failed to GC-root"):
+        import_warmup_drvs((drv_path,), cache, run=root_fail)
+
+    def path_info_fail(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if args[:2] == ["nix", "path-info"]:
+            return _store_fail(args, stderr="don't know how to build")
+        return _store_ok(args)
+
+    with pytest.raises(WarmupError, match="imported warmup .drv missing"):
+        import_warmup_drvs((drv_path,), cache, run=path_info_fail)
+
+
+def test_warmup_drv_closure_copy_batches_paths(tmp_path: Path) -> None:
+    """ARG_MAX-safe copy keeps every planner .drv in the file:// cache."""
+    planner_dir = tmp_path / "planner"
+    planner_dir.mkdir()
+    drvs = []
+    for index in range(129):
+        path = planner_dir / f"{index:032d}-x.drv"
+        path.write_text("drv")
+        drvs.append(str(path))
     export_batches: list[tuple[str, ...]] = []
 
     def batched_run(
         args: list[str], **_kwargs: object
-    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
-        if args[:3] == ["nix-store", "--query", "--requisites"]:
-            paths = "\n".join(f"/nix/store/{index:032d}-x.drv" for index in range(129))
-            return _store_ok(args, stdout=f"{paths}\n")
-        if args[:2] == ["nix-store", "--export"]:
-            export_batches.append(tuple(args[2:]))
-            return _store_ok(args, stdout=b"X", stderr=b"")
-        raise AssertionError(args)
+    ) -> subprocess.CompletedProcess[str]:
+        assert args[:3] == ["nix", "copy", "--derivation"]
+        export_batches.append(_copy_paths(args))
+        return _store_ok(args)
 
-    export_warmup_drvs((str(planner_drv),), tmp_path / "batched", run=batched_run)
+    export_warmup_drvs(tuple(drvs), tmp_path / "batched", run=batched_run)
     assert [len(batch) for batch in export_batches] == [128, 1]
-    assert ((tmp_path / "batched") / WARMUP_DRVS_NAR_NAME).read_bytes() == b"XX"
 
 
 def test_rust_warmup_layers_and_slots_keep_dependency_order() -> None:
