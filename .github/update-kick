@@ -1,4 +1,4 @@
 # Touch this file to queue one Update run on main (or a listed feature branch).
 # Cloud-agent ghs_ tokens cannot workflow_dispatch (HTTP 403, actions:write).
 # Remove this kick path after E2E prepare → validate → publish is proven.
-2026-10-08T21:50:00Z rust-zed-unsplit-5wide-drv-warmup
+2026-10-09T01:07:00Z rust-warmup-store-closure-import
