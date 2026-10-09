@@ -44,6 +44,9 @@ already contains:
 | `3be750a3` | Kick that queued `37851246740` (#1254) |
 | `2ab7291b` | Replace `nix-store --add` with store-closure export/import |
 | `1450528e` | Kick that queued `37868270521` (#1255) |
+| `e7bc1c7b` | Named fetchurl `cannot download \\S+ from any mirror` retry |
+| `d77a6fc8` | Rosetta recache after rust-warmup + daemon kickstart |
+| `bd56a070` | Kick that queued `37947952083` (#1258); terminal, cause 10 |
 
 #222 is **closed as superseded** (2026-10-08T21:40:26Z). The rust_zed fix and
 5-wide split live on this branch, not on `cursor/fix-zed-out-lib-cycle-6614`.
@@ -189,6 +192,43 @@ tree) is still split and still in gkze:
    The retry list only matched the literal `cannot download source from
    any mirror`; Deno `fetchurl` names the file. Match `cannot download
    \\S+ from any mirror` on the validation network path.
+10. **`rust_agent_ui` E0463 for `language_models` is not a missing Cachix
+    rlib** (`37947952083` / #1258 warm-rust 3 / `113921652313`).
+    `ks6dzvch…-rust_agent_ui-0.1.0.drv` built from source. Both
+    `h3crq11a…-lib` and sibling `gxx4jc6a…-lib` (`language_model`)
+    substituted from `gkze.cachix.org`. rustc `--extern language_models=`
+    and `--extern language_model=` named the hashed store rlibs. The only
+    error, 3/3 identical, is bare `error[E0463]: can't find crate for
+    \`language_models\`` at `src/buffer_codegen.rs:24` (`use
+    language_models::provider::…`) with no `ExternLocationNotExist`,
+    `via_invalid` / E0786, or `via_triple` / E0461 notes. `language` and
+    `language_model` in the same invocation produced no error.
+
+    The "cached `-lib` is missing the rlib / stale rust_zed split" hunch
+    is **disproven**. Cachix NAR `h3crq11a` is
+    `/lib/liblanguage_models-f75b2474e2.rlib` (42070568) + `/lib/link` +
+    `propagated-build-inputs`. `$out` (`7h1bjnkidcms`) is empty (normal
+    lib-only). BSD ar has `#1/12 lib.rmeta` (Mach-O ARM64,
+    `__DWARF,.rmeta`, `#rustc 1.98.1 (48a229cea 2026-09-01)`). rustc
+    1.98.1 on Linux reads that NAR and reports crate `language_models`,
+    triple `aarch64-apple-darwin`, `is_proc_macro=false` (E0461 wrong
+    host triple — crate found). `linuxZedUnsplit` is Linux-only and only
+    for crateName `zed`. Evicting `h3crq11a` is useless (same hash → same
+    NAR). Cargo.nix has no `language_models` cycle; `--extern` uses exact
+    `BTreeMap` keys (`language_model` ≠ `language_models`). rustc
+    `find_commandline_library` would emit notes for a missing or unreadable
+    `--extern` path. Bare E0463 is `LocatorCombined` with empty rejections
+    or `CrateError::NotFound` — Darwin rustc 1.98.1 rejected this crate
+    after substitution, not a store I/O fault.
+
+    The retry classifier `_nix_output_has_unreadable_store_rlib` treated
+    any E0463 plus any store `--extern` as transient (Update #1244). That
+    is why #1258 retried 3×. It is the wrong classification here; fixing
+    the classifier does not make `agent_ui` build.
+
+    The post-hook `Cachix Daemon not started. Skipping push` is still
+    cause 4 (flush already drained). Packages, closures, roots, and
+    linux-deps were skipped because warm-rust 3 failed.
 
 Also: realizing warmup as `nix build /nix/store/<output>` cannot compile missing
 paths. That is why packages died at 21:35Z after inventory.
@@ -215,12 +255,12 @@ creation if never accessed) is firing. Pins are immune with `--keep-revisions`
 
 ## Already queued (do not double-kick)
 
-`37890830675` (#1257) is **terminal failure** (ended 14:46:42Z). Warm-rust
-0-4 and `validate-darwin-packages` succeeded; both Darwin root shards
-failed (causes 8–9); closures skipped; assert-coverage and repair failed;
-publish skipped. The next kick is one Update onto `e7bc1c7b` (Rosetta
-recache + named fetchurl retry). Do not double-kick. A docs-only push
-does not match `update.yml` `paths: .github/update-kick`.
+`37947952083` (#1258) @ `bd56a070` is **terminal failure** (ended
+18:33:23Z). Warm-rust 0/1/2/4 and validate-arm/x86 succeeded; warm-rust 3
+failed (cause 10); Darwin packages/closures/roots and linux-deps skipped;
+assert-coverage and repair failed; publish skipped. `37890830675` (#1257)
+is also terminal (causes 8–9). Do not kick from this handoff. A docs-only
+push does not match `update.yml` `paths: .github/update-kick`.
 
 ## Open questions
 
@@ -235,8 +275,13 @@ does not match `update.yml` `paths: .github/update-kick`.
 
 ## Exact next step
 
-After this fix lands, kick **one** full Update on the #221 head that has
-`nix copy --derivation` + GC roots + `foo.drv^*`. Do not kick while another
-Update is pending or in progress. Do not change flake inputs. Do not merge
-#221. Do not drive `main` Update until the done bar above is green. Do not
-schedule more self-check-ins or timers from this lane.
+**Stop for George.** Cause 10 is a Darwin rustc 1.98.1 crate-load of a
+valid substituted `language_models` rlib. This Linux environment cannot
+run `aarch64-apple-darwin` rustc against the store path inside the Nix
+sandbox. The remaining levers are a rustc/nixpkgs bump, a Cachix pin, or
+a plan change for Darwin-native `RUSTC_LOG=rustc_metadata` on
+`rust_agent_ui`. Do not evict `h3crq11a` or `aqsm7q08`. Do not kick a
+no-op or a classifier-only change. Do not change flake inputs without
+George. Do not merge #221. Do not drive `main` Update until the done bar
+above is green. Do not schedule more self-check-ins or timers from this
+lane.
