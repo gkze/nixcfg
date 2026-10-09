@@ -2,6 +2,7 @@
 
 from typing import TYPE_CHECKING
 
+import pytest
 from nix_manipulator import parse
 from nix_manipulator.expressions.binary import BinaryExpression
 from nix_manipulator.expressions.function.definition import FunctionDefinition
@@ -78,8 +79,18 @@ def test_zed_nightly_preserves_darwin_rlib_metadata() -> None:
               outputs = [ "out" ];
               outputDev = [ "out" ];
             };
+          darwinLanguageModelsIntern =
+            args:
+            args
+            // lib.optionalAttrs (isDarwin && (args.crateName or "") == "language_models") {
+              extraRustcOpts = (args.extraRustcOpts or [ ]) ++ [
+                "-C metadata=nixcfg-221-e0463"
+              ];
+            };
           wrap = inner: {
-            __functor = _self: args: applyDarwinRlibMetadata (inner (linuxZedUnsplit args));
+            __functor =
+              _self: args:
+              applyDarwinRlibMetadata (inner (darwinLanguageModelsIntern (linuxZedUnsplit args)));
             override = f: wrap (inner.override f);
           };
         in
@@ -186,29 +197,15 @@ def test_zed_scoped_override_adds_linux_x11_and_fontconfig_libraries() -> None:
     )
 
 
-def test_zed_agent_ui_has_temporary_darwin_locator_diagnostic() -> None:
-    """#221 diagnostic is Darwin-only on rust_agent_ui; language_models is untouched."""
-    assert_nix_ast_equal(
-        nix_file_binding_expr(_PACKAGE, "agentUiLocatorDiagnostic"),
-        """
-        attrs:
-        lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
-          RUSTC_LOG = "rustc_metadata::locator=debug,rustc_metadata::creader=debug";
-          RUSTC_LOG_COLOR = "never";
-          preBuild = (attrs.preBuild or "") + ''
-            echo "TEMPORARY #221 rust_agent_ui locator diagnostic" >&2
-            echo "TEMPORARY #221 target/deps liblanguage*:" >&2
-            ls -la target/deps/liblanguage* 2>/dev/null \\
-              || echo "TEMPORARY #221 no target/deps/liblanguage*" >&2
-          '';
-        }
-        """,
-    )
+def test_zed_project_overrides_do_not_special_case_agent_ui() -> None:
+    """#1259 intern fix lives in wrapBuildRustCrate, not an agent_ui override."""
     overrides = nix_file_binding_expr(_PACKAGE, "projectCrateOverrides")
-    assert_nix_ast_equal(
-        _binding_from_override(overrides, "agent_ui"),
-        "scopedThen agentUiLocatorDiagnostic",
-    )
+    with pytest.raises(AssertionError, match="missing binding agent_ui"):
+        _binding_from_override(overrides, "agent_ui")
+    with pytest.raises(
+        AssertionError, match="missing binding agentUiLocatorDiagnostic"
+    ):
+        _binding_from_override(overrides, "agentUiLocatorDiagnostic")
 
 
 def test_zed_scoped_crates_include_linux_pkgconfig_leaf_consumers() -> None:

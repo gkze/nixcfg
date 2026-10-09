@@ -487,28 +487,24 @@ def test_unreadable_store_rlib_e0463_is_retryable() -> None:
         "       > error[E0463]: can't find crate for `project`\n"
     )
     missing_extern = (
-        bare_e0463
-        + "       > note: extern location for settings does not exist: "
+        bare_e0463 + "       > note: extern location for settings does not exist: "
         "/nix/store/l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/"
         "lib/libsettings-7be7f1170a.rlib\n"
     )
     vanished_rlib = (
-        rustc_line
-        + "       > error[E0463]: can't find crate for `settings`\n"
+        rustc_line + "       > error[E0463]: can't find crate for `settings`\n"
         '       > error: opening file "/nix/store/'
         "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
         'libsettings-7be7f1170a.rlib": No such file or directory\n'
     )
     eilseq_rlib = (
-        rustc_line
-        + "       > error[E0463]: can't find crate for `settings`\n"
+        rustc_line + "       > error[E0463]: can't find crate for `settings`\n"
         "       > error: cannot pread /nix/store/"
         "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
         "libsettings-7be7f1170a.rlib: Illegal byte sequence\n"
     )
     not_a_file = (
-        rustc_line
-        + "       > error[E0463]: can't find crate for `settings`\n"
+        rustc_line + "       > error[E0463]: can't find crate for `settings`\n"
         "       > note: extern location for settings is not a file: "
         "/nix/store/l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/"
         "lib/libsettings-7be7f1170a.rlib\n"

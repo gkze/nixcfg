@@ -512,24 +512,6 @@ let
     crateBin = [ ];
   };
 
-  # TEMPORARY #221 diagnostic — Darwin rust_agent_ui locator only.
-  # Remove after the language_models E0463 cause is known. Changes only
-  # the Darwin rust_agent_ui hash; language_models / h3crq11a stay put.
-  # -Z print-link-args and rustc --print=* are not useful here: E0463
-  # is crate-load, and --print exits before compile.
-  agentUiLocatorDiagnostic =
-    attrs:
-    lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
-      RUSTC_LOG = "rustc_metadata::locator=debug,rustc_metadata::creader=debug";
-      RUSTC_LOG_COLOR = "never";
-      preBuild = (attrs.preBuild or "") + ''
-        echo "TEMPORARY #221 rust_agent_ui locator diagnostic" >&2
-        echo "TEMPORARY #221 target/deps liblanguage*:" >&2
-        ls -la target/deps/liblanguage* 2>/dev/null \
-          || echo "TEMPORARY #221 no target/deps/liblanguage*" >&2
-      '';
-    };
-
   rav1eOverride = _attrs: {
     CARGO_ENCODED_RUSTFLAGS = "";
   };
@@ -655,8 +637,6 @@ let
 
   projectCrateOverrides = lib.genAttrs scopedCrates (_: scopedOverride) // {
     documented = documentedOverride;
-    # TEMPORARY #221: Darwin locator debug for rust_agent_ui only.
-    agent_ui = scopedThen agentUiLocatorDiagnostic;
     "av-scenechange" = _attrs: {
       CARGO_ENCODED_RUSTFLAGS = "";
     };

@@ -2,8 +2,8 @@
 
 Lane for `cursor/no-skip-darwin-shards-6614` / [PR #221](https://github.com/gkze/nixcfg/pull/221).
 George approved handing this to a fresh agent once `37809856116` ended.
-This note is the stop point after the diagnostic Update is queued: **do
-not kick a second Update from that commit, and do not self-schedule
+This note is the stop point after the #1259 intern-fix Update is queued:
+**do not kick a second Update from that commit, and do not self-schedule
 checks.** The manager routine watches the run.
 
 ## Done bar (standing rules, verbatim)
@@ -49,7 +49,10 @@ already contains:
 | `e7bc1c7b` | Named fetchurl `cannot download \\S+ from any mirror` retry |
 | `d77a6fc8` | Rosetta recache after rust-warmup + daemon kickstart |
 | `bd56a070` | Kick that queued `37947952083` (#1258); terminal, cause 10 |
-| this head | Bare-E0463 classifier + temporary Darwin `rust_agent_ui` locator / `language_models --check` diagnostic; one Update kick |
+| `45bb4efd` | Bare-E0463 classifier + temporary Darwin locator diagnostic |
+| `950a8812` | Kick that queued `37976189014` (#1259); terminal, cause 11 |
+| `85c7f526` | ruff-format of the diagnostic helpers |
+| this head | Darwin `language_models` extra `-C metadata=nixcfg-221-e0463`; diagnostic removed |
 
 #222 is **closed as superseded** (2026-10-08T21:40:26Z). The rust_zed fix and
 5-wide split live on this branch, not on `cursor/fix-zed-out-lib-cycle-6614`.
@@ -234,13 +237,53 @@ tree) is still split and still in gkze:
     cause 4 (flush already drained). Packages, closures, roots, and
     linux-deps were skipped because warm-rust 3 failed.
 
-    A Darwin-native diagnostic does **not** need George. This head adds a
-    temporary, labeled `agent_ui` override (`RUSTC_LOG=rustc_metadata::locator=debug,rustc_metadata::creader=debug`)
-    on Darwin only, plus a warm-rust `language_models` `nix build --check`
-    against the substituted rlib (SVH / extra-filename / rustc / target).
-    Nothing is skipped or masked. Remove the diagnostic once the cause is
-    known. Stop for George only if the real fix is a flake input bump,
-    a Cachix pin, or a plan change.
+    A Darwin-native diagnostic does **not** need George. `45bb4efd` added
+    a temporary Darwin `agent_ui` locator log plus a warm-rust
+    `language_models --check`. The `--check` `print()` never appeared in
+    hosted logs (stdout was not the rust-warmup progress logger).
+11. **`intern_stable_crate_id` NotFound after a successful rlib read**
+    (`37976189014` / #1259 warm-rust 0+1 / `114006058130` +
+    `114006057970` @ `950a8812`, branch head was `85c7f526`). Same
+    compile error on both slots, not an import or substituter fault.
+    Locator read
+    `x49g8qy1…-lib/lib/liblanguage_models-f75b2474e2.rlib` (substituted
+    from gkze; extra-filename still `f75b2474e2`, Nix path moved from
+    `h3crq11a` because `45bb4efd` added an `agent_ui` key to the shared
+    `crateOverrides` closure). creader logged `register newly loaded
+    library for language_models`, then **no** `register crate … cnum`
+    line, then `resolving crate core` (the `resolve_crate` error
+    handler's `missing_core` probe; core was Previous cnum 2). Bare
+    E0463 at `src/buffer_codegen.rs:24`. rustc 1.98
+    `intern_stable_crate_id` maps `create_crate_num` miss +
+    `metas[existing] is None` to `CrateError::NotFound` — the only intern
+    error that is bare E0463 (`SymbolConflictsCurrent` /
+    `StableCrateIdCollision` have other messages). Cargo.nix has **no**
+    `language_models` runtime cycle (dependents: `agent_ui`, `eval_cli`,
+    `edit_prediction_cli`, `zed`). So this is not a crate2nix dep-graph
+    loop; it is the cached rlib's StableCrateId colliding with an
+    in-progress / leftover `metas=None` slot, same shape as
+    nixpkgs#482646 (substitutable rlib rustc can `--extern` but cannot
+    intern). The `agent_ui` locator override is removed. Darwin-only
+    `wrapBuildRustCrate` now appends `-C metadata=nixcfg-221-e0463` for
+    crateName `language_models` so StableCrateId changes and the cached
+    NAR cannot be reused. Linux is identity. Do not evict `h3crq11a`.
+
+    Slots 2/3/4 of #1259 succeeded. #1257 holds on this head: Rosetta
+    recache still `needs: validate-darwin-warm-rust`; Darwin Linux-VM
+    realize still `--max-jobs 0`; daemon disconnect still
+    `launchctl kickstart`; fetchurl retry still `cannot download \\S+
+    from any mirror`. The cachix-action post `Cachix Daemon not started.
+    Skipping push` is still cause 4: explicit flush ran
+    `cachix daemon stop returncode=0` (daemon.log 352 → 644801 bytes;
+    `nix.conf` has `post-build-hook`; `NIX_CONF_has_post_build_hook=False`
+    is the require-script looking at `NIX_CONF` instead of
+    `NIX_USER_CONF_FILES`). `Collected 0 prefetched store paths` is the
+    prefetch-receipt counter, not a failed per-derivation push.
+
+    Packages, roots, closures, and linux-deps were skipped because
+    warm-rust 0/1 failed. assert-coverage `114035222846` required-jobs
+    failed. publish skipped. repair `114037497085` finished failed;
+    the run ended 21:48:55Z.
 
 Also: realizing warmup as `nix build /nix/store/<output>` cannot compile missing
 paths. That is why packages died at 21:35Z after inventory.
@@ -267,12 +310,14 @@ creation if never accessed) is firing. Pins are immune with `--keep-revisions`
 
 ## Already queued (do not double-kick)
 
-`37947952083` (#1258) @ `bd56a070` is **terminal failure** (ended
-18:33:23Z). Warm-rust 0/1/2/4 and validate-arm/x86 succeeded; warm-rust 3
-failed (cause 10); Darwin packages/closures/roots and linux-deps skipped;
-assert-coverage and repair failed; publish skipped. `37890830675` (#1257)
-is also terminal (causes 8–9). The next Update is the diagnostic kick on
-this head (`.github/update-kick`). Do not queue a second one.
+`37976189014` (#1259) @ `950a8812` is **terminal failure** (ended
+21:48:55Z, including repair). Warm-rust 2/3/4 and
+prepare/validate-arm/x86 / plan-darwin-closures succeeded; warm-rust 0/1
+failed (cause 11); Darwin packages/closures/roots and linux-deps
+skipped; assert-coverage and repair failed; publish skipped.
+`37947952083` (#1258) and `37890830675` (#1257) are also terminal
+(causes 8–10). The next Update is the intern-fix kick on this head
+(`.github/update-kick`). Do not queue a second one.
 
 ## Open questions
 
@@ -287,12 +332,10 @@ this head (`.github/update-kick`). Do not queue a second one.
 
 ## Exact next step
 
-**One diagnostic Update is the next kick** (this head). After it is
-queued, read warm-rust 3 / `rust_agent_ui` locator traces and the
-`language_models --check` vs `h3crq11a` dump. Then fix the cause on
-#221, or stop for George only if that fix is a flake input bump, a
-Cachix pin, or a plan change (state exact options, cost, and risk).
-Do not evict `h3crq11a` or `aqsm7q08`. Do not change flake inputs
-without George. Do not merge #221. Do not drive `main` Update until the
-done bar above is green. Do not schedule self-check-ins or timers; the
-manager routine watches the run.
+**One intern-fix Update is the next kick** (this head). After it is
+queued, watch warm-rust 0/1 for `rust_language_models` compiling from
+source (new `-C metadata`) and `rust_agent_ui` succeeding. Do not evict
+`h3crq11a` or `aqsm7q08`. Do not change flake inputs without George.
+Do not merge #221. Do not drive `main` Update until the done bar above
+is green. Do not schedule self-check-ins or timers; the manager routine
+watches the run.

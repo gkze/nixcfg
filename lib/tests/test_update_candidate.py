@@ -676,29 +676,22 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
         pipeline.validate_candidate(candidate, scope="packages", warmup_slot=0)
 
 
-def test_rust_warmup_agent_ui_slot_runs_language_models_diagnostic(
+def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The agent_ui stripe --checks language_models, then realizes agent_ui with -L."""
+    """The agent_ui stripe realizes other drvs first, then agent_ui with -L."""
     candidate = _candidate_for_scope(prepared_run)
     monkeypatch.setattr(
         pipeline.validation,
         "validate_derivations",
         lambda *_args, **_kwargs: (),
     )
-    diagnosed: list[object] = []
     realized: list[tuple[object, bool]] = []
-    logged: list[object] = []
-
-    def diagnose(*args: object, **kwargs: object) -> None:
-        diagnosed.append((args, kwargs))
 
     def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
         realized.append((paths, bool(kwargs.get("print_build_logs"))))
         return ()
 
-    monkeypatch.setattr(pipeline, "diagnose_agent_ui_language_models", diagnose)
-    monkeypatch.setattr(pipeline, "dump_agent_ui_build_log", logged.append)
     monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
     monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
@@ -753,21 +746,17 @@ def test_rust_warmup_agent_ui_slot_runs_language_models_diagnostic(
         candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
     )
     assert rust.gates == ()
-    assert diagnosed
     assert realized == [
         ((language_models_drv, other_drv), False),
         ((agent_ui_drv,), True),
     ]
-    assert logged == [(agent_ui_drv,)]
     realized.clear()
-    logged.clear()
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda path: path != agent_ui)
     rust = pipeline.validate_candidate(
         candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
     )
     assert rust.gates == ()
     assert realized == [((agent_ui_drv,), True)]
-    assert logged == [(agent_ui_drv,)]
 
 
 def test_closure_budget_timeout_fails_closed(

@@ -40,8 +40,6 @@ from lib.update.ci.shard_plan import (
 from lib.update.ci.warmup import (
     WARMUP_DRVS_NAME,
     WARMUP_PLAN_NAME,
-    diagnose_agent_ui_language_models,
-    dump_agent_ui_build_log,
     export_warmup_drvs,
     import_warmup_drvs,
     load_warmup_plan,
@@ -282,14 +280,6 @@ def _realize_rust_warmup(
     )
     drvs = unique_drvs_for_outputs(missing, plan.output_drvs)
     import_warmup_drvs(drvs, warmup_plan.with_name(WARMUP_DRVS_NAME))
-    # TEMPORARY #221: locator + language_models --check on the agent_ui slot.
-    diagnose_agent_ui_language_models(
-        plan,
-        slot_paths=slot_paths,
-        flake_root=flake_root,
-        warmup_drvs=warmup_plan.with_name(WARMUP_DRVS_NAME),
-        realize_drvs=drvs,
-    )
     others, agent_ui = partition_agent_ui_drvs(drvs)
     failures: list[validation.DerivationValidationFailure] = []
     if others:
@@ -309,7 +299,6 @@ def _realize_rust_warmup(
                 print_build_logs=True,
             )
         )
-        dump_agent_ui_build_log(agent_ui)
     jobs.record_runner_storage("after-rust-warmup")
     return tuple(failures)
 
