@@ -27,7 +27,9 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    compiled 1534 `rust_*` from a divergent stdenv graph) fails at plan
    time.    Five `macos-15` `rust-warmup` slots then `nix copy --derivation`
    the planner's `file://` warmup cache (`warmup-drvs/`), GC-root each
-   imported `.drv`, and `nix build` `foo.drv^*` by dependency layer
+   imported `.drv` with `nix build --out-link` (not `nix-store --add-root`
+   alone; that is not an operation on Determinate Nix), and `nix build`
+   `foo.drv^*` by dependency layer
    (skip-if-in-gkze) so Cachix has the shared
    stdenv/rust graph before root shards start; the packages inventory
    itself remains certify evidence and waits for that matrix. The CVE-2026-56391/56392

@@ -25,6 +25,7 @@ from lib.update.ci.warmup import (
     intersect_missing,
     is_crate2nix_rust_output,
     load_warmup_plan,
+    nix_store_argv_has_operation,
     plan_darwin_warmup,
     realize_warmup_outputs,
     rust_warmup_layers,
@@ -34,6 +35,7 @@ from lib.update.ci.warmup import (
     substitutable_paths,
     unique_drvs_for_outputs,
     warmup_build_installable,
+    warmup_drv_root_args,
     warmup_output_drvs,
     write_warmup_plan,
 )
@@ -589,10 +591,10 @@ def test_warmup_drv_closure_imports_file_store(tmp_path: Path) -> None:
     assert "min-free" in imported[0]
     assert imported[0][imported[0].index("min-free") + 1] == "0"
     assert imported[0][imported[0].index("--from") + 1] == cache.resolve().as_uri()
-    assert imported[1][:2] == ["nix-store", "--add-root"]
-    assert "--indirect" in imported[1]
+    assert imported[1][:3] == ["nix", "build", "--out-link"]
+    assert "--offline" in imported[1]
     assert drv_path in imported[1]
-    assert (cache / WARMUP_DRVS_ROOTS / Path(drv_path).name) == Path(imported[1][2])
+    assert imported[1][3] == str(cache / WARMUP_DRVS_ROOTS / Path(drv_path).name)
     assert imported[2][:2] == ["nix", "path-info"]
     assert drv_path in imported[2]
     with pytest.raises(WarmupError, match="failed to import"):
@@ -608,6 +610,39 @@ def test_warmup_drv_closure_imports_file_store(tmp_path: Path) -> None:
             run=lambda args, **_kwargs: _store_fail(args, stdout=b"", stderr=b""),
         )
     assert _planner_file.is_file()
+
+
+def test_warmup_gc_root_argv_rejects_add_root_without_operation() -> None:
+    """Exact #1256 argv: nix-store --add-root is a modifier, not an operation."""
+    drv = "/nix/store/byzk43f67r0kgqvpwmx6cwynxg8qjf5g-patchutils-0.3.3.drv"
+    root = Path(
+        "/tmp/warmup-drvs/gcroots/byzk43f67r0kgqvpwmx6cwynxg8qjf5g-patchutils-0.3.3.drv"
+    )
+    malformed = ["nix-store", "--add-root", str(root), "--indirect", drv]
+    assert not nix_store_argv_has_operation(())
+    assert not nix_store_argv_has_operation(malformed)
+    assert nix_store_argv_has_operation([
+        "nix-store",
+        "--realise",
+        "--add-root",
+        str(root),
+        drv,
+    ])
+    assert not nix_store_argv_has_operation([
+        "nix",
+        "build",
+        "--out-link",
+        str(root),
+        drv,
+    ])
+    args = warmup_drv_root_args(root, drv)
+    assert args[:3] == ["nix", "build", "--out-link"]
+    assert args[3] == str(root)
+    assert "--offline" in args
+    assert drv in args
+    assert "--add-root" not in args
+    assert "--indirect" not in args
+    assert args != malformed
 
 
 def test_warmup_drv_closure_import_roots_and_path_info_fail_closed(

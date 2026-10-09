@@ -452,6 +452,62 @@ def _auto_gc_off_args() -> tuple[str, ...]:
     return ("--option", "min-free", "0", "--option", "max-free", "0")
 
 
+# ``nix-store --add-root`` is a modifier. Determinate Nix 3.22 on macos-15
+# prints ``error: no operation specified`` unless an operation such as
+# ``--realise`` is also present (``37879308953`` / #1256).
+_NIX_STORE_OPERATIONS = frozenset({
+    "--realise",
+    "-r",
+    "--query",
+    "-q",
+    "--add",
+    "--delete",
+    "--gc",
+    "--dump",
+    "--restore",
+    "--export",
+    "--import",
+    "--verify",
+    "--optimise",
+    "--read-log",
+    "-l",
+    "--dump-db",
+    "--load-db",
+    "--print-env",
+    "--serve",
+})
+
+
+def nix_store_argv_has_operation(args: Sequence[str]) -> bool:
+    """Return whether a ``nix-store`` argv includes a real operation.
+
+    The #1256 argv ``nix-store --add-root ROOT --indirect DRV`` does not.
+    """
+    return (
+        bool(args)
+        and args[0] == "nix-store"
+        and bool(_NIX_STORE_OPERATIONS & set(args))
+    )
+
+
+def warmup_drv_root_args(root: Path, drv: str) -> list[str]:
+    """Return argv that GC-roots an imported ``.drv`` file without building it.
+
+    ``nix-store --realise --add-root`` on a ``.drv`` builds outputs. ``nix
+    build --out-link`` realizes the already-copied ``.drv`` store path and
+    registers the symlink as a GC root. That is the #1256-safe form.
+    """
+    return [
+        "nix",
+        "build",
+        "--out-link",
+        str(root),
+        "--offline",
+        *_auto_gc_off_args(),
+        drv,
+    ]
+
+
 def _copy_derivation_closure(
     drv_paths: Sequence[str],
     store: Path,
@@ -503,14 +559,14 @@ def _register_warmup_drv_roots(
     for drv in dict.fromkeys(drv_paths):
         root = roots_dir / Path(drv).name
         result = runner(
-            ["nix-store", "--add-root", str(root), "--indirect", drv],
+            warmup_drv_root_args(root, drv),
             check=False,
             capture_output=True,
             text=True,
         )
         if result.returncode:
             detail = _store_command_detail(
-                result, fallback="nix-store --add-root failed"
+                result, fallback="nix build --out-link failed"
             )
             msg = f"failed to GC-root imported warmup .drv {drv}: {detail}"
             raise WarmupError(msg)

@@ -161,8 +161,14 @@ tree) is still split and still in gkze:
    realize step then asked `nix build /nix/store/foo.drv`, which only
    substitutes the derivation text (`don't know how to build` / no
    substituter). Fix: `nix copy --derivation` into a `file://` cache,
-   `--add-root` each imported `.drv`, `nix path-info` fail-closed, and
+   GC-root each imported `.drv`, `nix path-info` fail-closed, and
    `nix build foo.drv^*`.
+7. **`nix-store --add-root` is not an operation** (`37879308953` / #1256).
+   Copy-back reached rooting, then macos-15 `nix-store --add-root ROOT
+   --indirect DRV` exited `error: no operation specified`. `--add-root` is
+   a modifier; `--realise` on a `.drv` would build outputs. Root with
+   `nix build --out-link --offline`. PR quality `certify-python` also
+   failed: ruff format on `test_update_candidate.py`.
 
 Also: realizing warmup as `nix build /nix/store/<output>` cannot compile missing
 paths. That is why packages died at 21:35Z after inventory.

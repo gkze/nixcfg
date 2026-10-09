@@ -620,9 +620,7 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
 
     realized: list[object] = []
 
-    def warmup_realize(
-        paths: object, *_args: object, **_kwargs: object
-    ) -> tuple[()]:
+    def warmup_realize(paths: object, *_args: object, **_kwargs: object) -> tuple[()]:
         order.append("warmup")
         realized.append(paths)
         return ()
