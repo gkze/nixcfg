@@ -837,7 +837,9 @@ def language_models_output_drvs(output_drvs: Mapping[str, str]) -> dict[str, str
     }
 
 
-def partition_agent_ui_drvs(drvs: Sequence[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def partition_agent_ui_drvs(
+    drvs: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Split warmup drvs so ``rust_agent_ui`` can realize last with ``-L``."""
     others: list[str] = []
     agent_ui: list[str] = []
@@ -912,9 +914,7 @@ def describe_rlib(path: Path) -> dict[str, object]:
         "path": str(path),
         "size": path.stat().st_size,
         "extraFilename": extra_filename_from_rlib_name(path.name),
-        "members": [
-            {"name": name, "size": size} for name, size in _ar_members(data)
-        ],
+        "members": [{"name": name, "size": size} for name, size in _ar_members(data)],
         "rustc": [text for text in strings if text.startswith("rustc ")],
         "triples": [text for text in strings if text in _RLIB_TRIPLE_MARKERS],
         "crateNames": [
@@ -1029,7 +1029,14 @@ def diagnose_agent_ui_language_models(
             continue
         seen_drvs[drv] = None
         substitute = _nix_process(
-            ["nix", "build", "--no-link", "--max-jobs", "0", warmup_build_installable(drv)],
+            [
+                "nix",
+                "build",
+                "--no-link",
+                "--max-jobs",
+                "0",
+                warmup_build_installable(drv),
+            ],
             run=run,
             timeout=_LANGUAGE_MODELS_CHECK_TIMEOUT_SECONDS,
         )

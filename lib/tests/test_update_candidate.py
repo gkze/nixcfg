@@ -693,9 +693,7 @@ def test_rust_warmup_agent_ui_slot_runs_language_models_diagnostic(
     def diagnose(*args: object, **kwargs: object) -> None:
         diagnosed.append((args, kwargs))
 
-    def warmup_realize(
-        paths: object, *_args: object, **kwargs: object
-    ) -> tuple[()]:
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
         realized.append((paths, bool(kwargs.get("print_build_logs"))))
         return ()
 
@@ -718,9 +716,7 @@ def test_rust_warmup_agent_ui_slot_runs_language_models_diagnostic(
         "/nix/store/lmdrvaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0.drv"
     )
     agent_ui = "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0"
-    agent_ui_drv = (
-        "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv"
-    )
+    agent_ui_drv = "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv"
     other = "/nix/store/otheraaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-0.1.0"
     other_drv = "/nix/store/otheraaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-0.1.0.drv"
     warmup_plan = tmp_path / "warmup-plan.json"
@@ -765,9 +761,7 @@ def test_rust_warmup_agent_ui_slot_runs_language_models_diagnostic(
     assert logged == [(agent_ui_drv,)]
     realized.clear()
     logged.clear()
-    monkeypatch.setattr(
-        pipeline, "check_path_in_cachix", lambda path: path != agent_ui
-    )
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda path: path != agent_ui)
     rust = pipeline.validate_candidate(
         candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
     )

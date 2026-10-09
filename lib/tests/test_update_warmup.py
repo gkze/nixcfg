@@ -821,7 +821,9 @@ def _plan(output_drvs: dict[str, str]) -> WarmupPlan:
 
 def test_rust_agent_ui_and_language_models_store_path_helpers() -> None:
     agent = "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv"
-    models = "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0-lib"
+    models = (
+        "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0-lib"
+    )
     assert is_rust_agent_ui_store_path(agent)
     assert not is_rust_agent_ui_store_path(models)
     assert is_rust_language_models_store_path(models)
@@ -838,20 +840,18 @@ def test_rust_agent_ui_and_language_models_store_path_helpers() -> None:
     assert language_models_output_drvs({models: models + ".drv", agent: agent}) == {
         models: models + ".drv"
     }
-    assert language_models_output_drvs(
-        {"/nix/store/plain": "/nix/store/aaaa-rust_language_models-0.1.0.drv"}
-    ) == {"/nix/store/plain": "/nix/store/aaaa-rust_language_models-0.1.0.drv"}
+    assert language_models_output_drvs({
+        "/nix/store/plain": "/nix/store/aaaa-rust_language_models-0.1.0.drv"
+    }) == {"/nix/store/plain": "/nix/store/aaaa-rust_language_models-0.1.0.drv"}
 
 
 def test_describe_rlib_reads_svh_target_and_ar_members(tmp_path: Path) -> None:
-    payload = b"".join(
-        [
-            b"rustc 1.98.1 (48a229cea 2026-09-01)\0",
-            b"aarch64-apple-darwin\0",
-            b"language_models\0",
-            b"trailing",
-        ]
-    )
+    payload = b"".join([
+        b"rustc 1.98.1 (48a229cea 2026-09-01)\0",
+        b"aarch64-apple-darwin\0",
+        b"language_models\0",
+        b"trailing",
+    ])
     gnu = tmp_path / "liblanguage_models-f75b2474e2.rlib"
     gnu.write_bytes(_gnu_ar([("lib.rmeta", payload), ("lm.0.o", b"obj")]))
     described = describe_rlib(gnu)
@@ -895,18 +895,16 @@ def test_drv_rustc_env_filters_metadata_and_target() -> None:
     assert _drv_rustc_env("nope") == {}
     assert _drv_rustc_env({"drv": "nope"}) == {}
     assert _drv_rustc_env({"drv": {"env": "nope"}}) == {}
-    assert _drv_rustc_env(
-        {
-            "drv": {
-                "env": {
-                    "NIX_RUSTFLAGS": "-C metadata=f75b2474e2 --target aarch64-apple-darwin",
-                    "ignored": 1,
-                    "CARGO_CRATE_NAME": "language_models",
-                    "unrelated": "plain",
-                }
+    assert _drv_rustc_env({
+        "drv": {
+            "env": {
+                "NIX_RUSTFLAGS": "-C metadata=f75b2474e2 --target aarch64-apple-darwin",
+                "ignored": 1,
+                "CARGO_CRATE_NAME": "language_models",
+                "unrelated": "plain",
             }
         }
-    ) == {
+    }) == {
         "NIX_RUSTFLAGS": "-C metadata=f75b2474e2 --target aarch64-apple-darwin",
         "CARGO_CRATE_NAME": "language_models",
     }
@@ -935,9 +933,7 @@ def test_diagnose_agent_ui_language_models_is_slot_gated(
     assert lines == []
     diagnose_agent_ui_language_models(
         _plan({}),
-        slot_paths=(
-            "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0",
-        ),
+        slot_paths=("/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0",),
         flake_root=tmp_path,
         warmup_drvs=tmp_path / "warmup-drvs",
         realize_drvs=(),
@@ -950,25 +946,25 @@ def test_diagnose_agent_ui_language_models_is_slot_gated(
 def test_diagnose_agent_ui_language_models_checks_substituted_rlib(
     tmp_path: Path,
 ) -> None:
-    lib_out = tmp_path / "h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0-lib"
+    lib_out = (
+        tmp_path / "h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0-lib"
+    )
     (lib_out / "lib").mkdir(parents=True)
     rlib = lib_out / "lib" / "liblanguage_models-f75b2474e2.rlib"
     rlib.write_bytes(
-        _gnu_ar(
-            [
-                (
-                    "lib.rmeta",
-                    b"rustc 1.98.1 (48a229cea 2026-09-01)\0"
-                    b"aarch64-apple-darwin\0language_models\0",
-                )
-            ]
-        )
+        _gnu_ar([
+            (
+                "lib.rmeta",
+                b"rustc 1.98.1 (48a229cea 2026-09-01)\0"
+                b"aarch64-apple-darwin\0language_models\0",
+            )
+        ])
     )
-    sibling = (
-        tmp_path / "7h1bjnkidcmsaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0"
-    )
+    sibling = tmp_path / "7h1bjnkidcmsaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0"
     (sibling / "lib").mkdir(parents=True)
-    (sibling / "lib" / "liblanguage_models-f75b2474e2.rlib").write_bytes(rlib.read_bytes())
+    (sibling / "lib" / "liblanguage_models-f75b2474e2.rlib").write_bytes(
+        rlib.read_bytes()
+    )
     drv = "/nix/store/lmdrvaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0.drv"
     cache = tmp_path / "warmup-drvs"
     cache.mkdir()
@@ -982,18 +978,15 @@ def test_diagnose_agent_ui_language_models_checks_substituted_rlib(
             return subprocess.CompletedProcess(
                 args,
                 0,
-                json.dumps(
-                    {
-                        drv: {
-                            "env": {
-                                "NIX_RUSTFLAGS": (
-                                    "-C metadata=f75b2474e2 "
-                                    "--target aarch64-apple-darwin"
-                                )
-                            }
+                json.dumps({
+                    drv: {
+                        "env": {
+                            "NIX_RUSTFLAGS": (
+                                "-C metadata=f75b2474e2 --target aarch64-apple-darwin"
+                            )
                         }
                     }
-                ),
+                }),
                 "",
             )
         if "--check" in args:
@@ -1002,9 +995,7 @@ def test_diagnose_agent_ui_language_models_checks_substituted_rlib(
 
     diagnose_agent_ui_language_models(
         _plan({str(lib_out): drv, str(sibling): drv}),
-        slot_paths=(
-            "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0",
-        ),
+        slot_paths=("/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0",),
         flake_root=tmp_path,
         warmup_drvs=cache,
         realize_drvs=(),
@@ -1013,7 +1004,10 @@ def test_diagnose_agent_ui_language_models_checks_substituted_rlib(
         write=lines.append,
     )
     assert imported == [((drv,), cache)]
-    assert any(args[:3] == ["nix", "build", "--no-link"] and "--check" in args for args in calls)
+    assert any(
+        args[:3] == ["nix", "build", "--no-link"] and "--check" in args
+        for args in calls
+    )
     assert any("--max-jobs" in args and "0" in args for args in calls)
     assert any("output differs" in line for line in lines)
     assert any("f75b2474e2" in line for line in lines)
@@ -1024,17 +1018,15 @@ def test_diagnose_agent_ui_language_models_checks_substituted_rlib(
     lines.clear()
     diagnose_agent_ui_language_models(
         _plan({str(missing_lib): drv}),
-        slot_paths=(
-            "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0",
-        ),
+        slot_paths=("/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0",),
         flake_root=tmp_path,
         warmup_drvs=tmp_path / "absent-cache",
         realize_drvs=(drv,),
-        run=lambda args, **_kwargs: subprocess.CompletedProcess(
-            args, 0, "{", "not-json"
-        )
-        if args[:3] == ["nix", "derivation", "show"]
-        else subprocess.CompletedProcess(args, 0, "", ""),
+        run=lambda args, **_kwargs: (
+            subprocess.CompletedProcess(args, 0, "{", "not-json")
+            if args[:3] == ["nix", "derivation", "show"]
+            else subprocess.CompletedProcess(args, 0, "", "")
+        ),
         write=lines.append,
     )
     assert any("no liblanguage_models*.rlib" in line for line in lines)
@@ -1060,7 +1052,11 @@ def test_dump_agent_ui_build_log_and_realize_print_logs(tmp_path: Path) -> None:
         write=lines.append,
     )
     assert calls == [
-        ["nix", "log", "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv"]
+        [
+            "nix",
+            "log",
+            "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv",
+        ]
     ]
     assert any("locator debug" in line for line in lines)
 
@@ -1098,23 +1094,19 @@ def test_diagnose_defaults_to_print_and_subprocess(
 
     monkeypatch.setattr("lib.update.ci.warmup.subprocess.run", fake_run)
     diagnose_agent_ui_language_models(
-        _plan(
-            {
-                "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0-lib": (
-                    "/nix/store/lmdrvaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0.drv"
-                )
-            }
-        ),
-        slot_paths=(
-            "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0",
-        ),
+        _plan({
+            "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0-lib": (
+                "/nix/store/lmdrvaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0.drv"
+            )
+        }),
+        slot_paths=("/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0",),
         flake_root=tmp_path,
         warmup_drvs=tmp_path / "absent",
         realize_drvs=(),
     )
-    dump_agent_ui_build_log(
-        ("/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv",)
-    )
+    dump_agent_ui_build_log((
+        "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv",
+    ))
     captured = capsys.readouterr()
     assert "TEMPORARY #221 rust_agent_ui / language_models diagnostic" in captured.out
     assert "nix missing" in captured.out
