@@ -40,9 +40,12 @@ from lib.update.ci.shard_plan import (
 from lib.update.ci.warmup import (
     WARMUP_DRVS_NAME,
     WARMUP_PLAN_NAME,
+    diagnose_agent_ui_language_models,
+    dump_agent_ui_build_log,
     export_warmup_drvs,
     import_warmup_drvs,
     load_warmup_plan,
+    partition_agent_ui_drvs,
     plan_darwin_warmup,
     realize_warmup_outputs,
     skip_cached_warmup_paths,
@@ -272,19 +275,43 @@ def _realize_rust_warmup(
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     """Realize one rust-warmup stripe, skipping paths already in gkze."""
     plan = load_warmup_plan(warmup_plan)
+    slot_paths = slot_warmup_paths(plan.rust_layers, warmup_slot)
     missing = skip_cached_warmup_paths(
-        slot_warmup_paths(plan.rust_layers, warmup_slot),
+        slot_paths,
         present=check_path_in_cachix,
     )
     drvs = unique_drvs_for_outputs(missing, plan.output_drvs)
     import_warmup_drvs(drvs, warmup_plan.with_name(WARMUP_DRVS_NAME))
-    failures = realize_warmup_outputs(
-        drvs,
+    # TEMPORARY #221: locator + language_models --check on the agent_ui slot.
+    diagnose_agent_ui_language_models(
+        plan,
+        slot_paths=slot_paths,
         flake_root=flake_root,
-        progress=_hosted_validation_progress("rust-warmup"),
+        warmup_drvs=warmup_plan.with_name(WARMUP_DRVS_NAME),
+        realize_drvs=drvs,
     )
+    others, agent_ui = partition_agent_ui_drvs(drvs)
+    failures: list[validation.DerivationValidationFailure] = []
+    if others:
+        failures.extend(
+            realize_warmup_outputs(
+                others,
+                flake_root=flake_root,
+                progress=_hosted_validation_progress("rust-warmup"),
+            )
+        )
+    if agent_ui:
+        failures.extend(
+            realize_warmup_outputs(
+                agent_ui,
+                flake_root=flake_root,
+                progress=_hosted_validation_progress("rust-warmup"),
+                print_build_logs=True,
+            )
+        )
+        dump_agent_ui_build_log(agent_ui)
     jobs.record_runner_storage("after-rust-warmup")
-    return failures
+    return tuple(failures)
 
 
 def validate_candidate(

@@ -134,10 +134,11 @@ _CANNOT_DOWNLOAD_FROM_MIRROR = re.compile(
 # die with SIGBUS (signal 10). After that I/O damage the next nix invocation
 # can fail only on a vanished store .drv, a vanished store build input, an
 # unreadable Cachix-substituted crate2nix rlib (rustc E0463 after --extern
-# /nix/store/...rlib), or a crashed daemon (see
-# ``_nix_output_has_missing_store_drv`` and
-# ``_nix_output_has_vanished_store_build_input``). None of those are
-# derivation failures.
+# /nix/store/...rlib *and* an I/O or existence note), or a crashed daemon
+# (see ``_nix_output_has_missing_store_drv`` and
+# ``_nix_output_has_vanished_store_build_input``). Bare E0463 with a store
+# ``--extern`` and no I/O note is a builder failure (#1258). None of the
+# store-fault signals are derivation failures.
 _NIX_STORE_TRANSIENT_MARKERS = (
     "Illegal byte sequence",
     "Nix daemon disconnected unexpectedly",
@@ -152,6 +153,20 @@ _STORE_EXTERN_RLIB = re.compile(
 )
 _RUSTC_CANT_FIND_CRATE = re.compile(
     r"error\[e0463\]:\s*can't find crate",
+    re.IGNORECASE,
+)
+# rustc locator notes for a missing or non-file --extern path. Bare E0463
+# (#1258 rust_agent_ui / language_models) does not emit these.
+_RUSTC_EXTERN_LOCATION_IO = re.compile(
+    r"extern location for \S+ (?:does not exist|is not a file):",
+    re.IGNORECASE,
+)
+_STORE_RLIB_ENOENT = re.compile(
+    r'opening file "/nix/store/[^"]+\.rlib": no such file or directory',
+    re.IGNORECASE,
+)
+_STORE_RLIB_EILSEQ = re.compile(
+    r"/nix/store/\S+\.rlib[^\n]*illegal byte sequence",
     re.IGNORECASE,
 )
 
@@ -602,23 +617,30 @@ def _nix_output_has_vanished_store_build_input(output: str) -> bool:
 
 
 def _nix_output_has_unreadable_store_rlib(output: str) -> bool:
-    """Return whether rustc exited E0463 after ``--extern`` named a store rlib.
+    """Return whether rustc E0463 names a vanished or unreadable store rlib.
 
     Hosted macos-15 can copy a crate2nix ``-lib`` output from Cachix and still
     leave the hashed rlib missing or unreadable. rustc then exits 1 with
-    ``error[E0463]: can't find crate`` even though the command line named
-    ``--extern <crate>=/nix/store/…-lib/lib/lib<crate>-<hash>.rlib``.
+    ``error[E0463]: can't find crate`` and a locator note that the
+    ``--extern`` store path does not exist, is not a file, vanished, or
+    hit EILSEQ.
 
-    Update #1244 hit that on ``rust_agent_settings`` immediately after
-    substituting ``rust_settings`` / ``rust_project`` ``-lib`` paths. The
-    crate names matched Cargo.nix; the same extra-filename scheme built those
-    crates earlier. That is the same store fault as a vanished build input,
-    not a missing crate in the generated graph. E0463 without a store rlib
-    ``--extern``, or E0786 (stripped ``.rmeta``), is not this signal.
+    Update #1244 is that store-fault shape. Update #1258 is not: Darwin
+    ``rust_agent_ui`` printed bare E0463 for ``language_models`` after
+    ``--extern`` named a readable substituted rlib, with no locator I/O
+    note, three identical times. Bare E0463 plus a store ``--extern`` is a
+    permanent builder failure. E0463 without a store rlib ``--extern``, or
+    E0786 (stripped ``.rmeta``), is not this signal either.
     """
     if _RUSTC_CANT_FIND_CRATE.search(output) is None:
         return False
-    return _STORE_EXTERN_RLIB.search(output) is not None
+    if _STORE_EXTERN_RLIB.search(output) is None:
+        return False
+    return (
+        _RUSTC_EXTERN_LOCATION_IO.search(output) is not None
+        or _STORE_RLIB_ENOENT.search(output) is not None
+        or _STORE_RLIB_EILSEQ.search(output) is not None
+    )
 
 
 def _nix_output_has_vanished_store_artifact(output: str) -> bool:
@@ -786,7 +808,7 @@ def is_transient_store_interruption(text: str) -> bool:
     after a substitute EILSEQ is still a store fault, as is ``builder
     failed with exit code 1`` when the only builder log is a vanished
     ``/nix/store/`` build input or rustc E0463 after ``--extern`` named a
-    store rlib.
+    store rlib that rustc then reported missing or unreadable.
     """
     if _nix_output_has_permanent_build_failure(text):
         return False

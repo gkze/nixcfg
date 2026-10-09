@@ -676,6 +676,106 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
         pipeline.validate_candidate(candidate, scope="packages", warmup_slot=0)
 
 
+def test_rust_warmup_agent_ui_slot_runs_language_models_diagnostic(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The agent_ui stripe --checks language_models, then realizes agent_ui with -L."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    diagnosed: list[object] = []
+    realized: list[tuple[object, bool]] = []
+    logged: list[object] = []
+
+    def diagnose(*args: object, **kwargs: object) -> None:
+        diagnosed.append((args, kwargs))
+
+    def warmup_realize(
+        paths: object, *_args: object, **kwargs: object
+    ) -> tuple[()]:
+        realized.append((paths, bool(kwargs.get("print_build_logs"))))
+        return ()
+
+    monkeypatch.setattr(pipeline, "diagnose_agent_ui_language_models", diagnose)
+    monkeypatch.setattr(pipeline, "dump_agent_ui_build_log", logged.append)
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    language_models = (
+        "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0-lib"
+    )
+    language_models_drv = (
+        "/nix/store/lmdrvaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0.drv"
+    )
+    agent_ui = "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0"
+    agent_ui_drv = (
+        "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv"
+    )
+    other = "/nix/store/otheraaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-0.1.0"
+    other_drv = "/nix/store/otheraaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-0.1.0.drv"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(language_models, other, agent_ui),
+            rustLayers=((language_models,), (other,), (agent_ui,)),
+            outputDrvs={
+                language_models: language_models_drv,
+                other: other_drv,
+                agent_ui: agent_ui_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=3, missing=3, warmup=3, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert diagnosed
+    assert realized == [
+        ((language_models_drv, other_drv), False),
+        ((agent_ui_drv,), True),
+    ]
+    assert logged == [(agent_ui_drv,)]
+    realized.clear()
+    logged.clear()
+    monkeypatch.setattr(
+        pipeline, "check_path_in_cachix", lambda path: path != agent_ui
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [((agent_ui_drv,), True)]
+    assert logged == [(agent_ui_drv,)]
+
+
 def test_closure_budget_timeout_fails_closed(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -798,7 +898,10 @@ def test_closure_budget_timeout_fails_closed(
             "       > rustc --extern settings=/nix/store/"
             "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
             "libsettings-7be7f1170a.rlib\n"
-            "       > error[E0463]: can't find crate for `settings`"
+            "       > error[E0463]: can't find crate for `settings`\n"
+            "       > note: extern location for settings does not exist: "
+            "/nix/store/l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/"
+            "lib/libsettings-7be7f1170a.rlib"
         ),
     ],
 )

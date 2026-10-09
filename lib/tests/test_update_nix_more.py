@@ -469,22 +469,57 @@ def test_recover_nix_store_after_fault_restarts_determinate_daemon(
 
 
 def test_unreadable_store_rlib_e0463_is_retryable() -> None:
-    """Update 37599536875: rustc E0463 after --extern store rlib is a substitute fault."""
-    e0463_store_rlib = (
-        "error: Cannot build '/nix/store/1vhn1bsiqchjp101n2sj5fjjk6fiw596-"
-        "rust_agent_settings-0.1.0.drv'.\n"
-        "       Reason: builder failed with exit code 1.\n"
+    """E0463 after --extern store rlib is a substitute fault only with an I/O note."""
+    rustc_line = (
         "       > Running env rustc --crate-name agent_settings "
         "src/agent_settings.rs --extern settings=/nix/store/"
         "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
         "libsettings-7be7f1170a.rlib --extern project=/nix/store/"
         "190kd4d9c2mvcl54val1pw8fpjq34cn0-rust_project-0.1.0-lib/lib/"
         "libproject-53a1143c9f.rlib\n"
-        "       > error[E0463]: can't find crate for `settings`\n"
+    )
+    bare_e0463 = (
+        "error: Cannot build '/nix/store/1vhn1bsiqchjp101n2sj5fjjk6fiw596-"
+        "rust_agent_settings-0.1.0.drv'.\n"
+        "       Reason: builder failed with exit code 1.\n"
+        + rustc_line
+        + "       > error[E0463]: can't find crate for `settings`\n"
         "       > error[E0463]: can't find crate for `project`\n"
     )
-    assert is_retryable_nix_store_failure(stdout="", stderr=e0463_store_rlib)
-    assert is_transient_store_interruption(e0463_store_rlib)
+    missing_extern = (
+        bare_e0463
+        + "       > note: extern location for settings does not exist: "
+        "/nix/store/l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/"
+        "lib/libsettings-7be7f1170a.rlib\n"
+    )
+    vanished_rlib = (
+        rustc_line
+        + "       > error[E0463]: can't find crate for `settings`\n"
+        '       > error: opening file "/nix/store/'
+        "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
+        'libsettings-7be7f1170a.rlib": No such file or directory\n'
+    )
+    eilseq_rlib = (
+        rustc_line
+        + "       > error[E0463]: can't find crate for `settings`\n"
+        "       > error: cannot pread /nix/store/"
+        "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
+        "libsettings-7be7f1170a.rlib: Illegal byte sequence\n"
+    )
+    not_a_file = (
+        rustc_line
+        + "       > error[E0463]: can't find crate for `settings`\n"
+        "       > note: extern location for settings is not a file: "
+        "/nix/store/l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/"
+        "lib/libsettings-7be7f1170a.rlib\n"
+    )
+    assert is_retryable_nix_store_failure(stdout="", stderr=missing_extern)
+    assert is_transient_store_interruption(missing_extern)
+    assert is_retryable_nix_store_failure(stdout="", stderr=vanished_rlib)
+    assert is_retryable_nix_store_failure(stdout="", stderr=eilseq_rlib)
+    assert is_retryable_nix_store_failure(stdout="", stderr=not_a_file)
+    assert not is_retryable_nix_store_failure(stdout="", stderr=bare_e0463)
+    assert not is_transient_store_interruption(bare_e0463)
     assert not is_retryable_nix_store_failure(
         stdout="",
         stderr=(
@@ -499,7 +534,9 @@ def test_unreadable_store_rlib_e0463_is_retryable() -> None:
             "error: Cannot build '/nix/store/abc-agent_settings.drv'.\n"
             "       Reason: builder failed with exit code 1.\n"
             "       > rustc --extern settings=/tmp/libsettings.rlib\n"
-            "       > error[E0463]: can't find crate for `settings`"
+            "       > error[E0463]: can't find crate for `settings`\n"
+            "       > note: extern location for settings does not exist: "
+            "/tmp/libsettings.rlib"
         ),
     )
     assert not is_retryable_nix_store_failure(
@@ -514,7 +551,7 @@ def test_unreadable_store_rlib_e0463_is_retryable() -> None:
         ),
     )
     assert not is_transient_store_interruption(
-        "error: hash mismatch in fixed-output derivation\n" + e0463_store_rlib
+        "error: hash mismatch in fixed-output derivation\n" + missing_extern
     )
 
 

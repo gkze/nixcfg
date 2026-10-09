@@ -186,6 +186,31 @@ def test_zed_scoped_override_adds_linux_x11_and_fontconfig_libraries() -> None:
     )
 
 
+def test_zed_agent_ui_has_temporary_darwin_locator_diagnostic() -> None:
+    """#221 diagnostic is Darwin-only on rust_agent_ui; language_models is untouched."""
+    assert_nix_ast_equal(
+        nix_file_binding_expr(_PACKAGE, "agentUiLocatorDiagnostic"),
+        """
+        attrs:
+        lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+          RUSTC_LOG = "rustc_metadata::locator=debug,rustc_metadata::creader=debug";
+          RUSTC_LOG_COLOR = "never";
+          preBuild = (attrs.preBuild or "") + ''
+            echo "TEMPORARY #221 rust_agent_ui locator diagnostic" >&2
+            echo "TEMPORARY #221 target/deps liblanguage*:" >&2
+            ls -la target/deps/liblanguage* 2>/dev/null \\
+              || echo "TEMPORARY #221 no target/deps/liblanguage*" >&2
+          '';
+        }
+        """,
+    )
+    overrides = nix_file_binding_expr(_PACKAGE, "projectCrateOverrides")
+    assert_nix_ast_equal(
+        _binding_from_override(overrides, "agent_ui"),
+        "scopedThen agentUiLocatorDiagnostic",
+    )
+
+
 def test_zed_scoped_crates_include_linux_pkgconfig_leaf_consumers() -> None:
     """x11 and yeslogic-fontconfig-sys must receive scopedOverride on Linux."""
     assert_nix_ast_equal(

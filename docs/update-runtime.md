@@ -128,13 +128,16 @@ The explicit Cachix flush drains `$CACHIX_DAEMON_DIR/daemon.sock` (fail-closed)
 and the action post hook is then a no-op. There is no
 serial yield / `closure_complete` continuation. A store unlink, substitute
 EILSEQ, vanished store `.drv`, vanished store
-build input, rustc E0463 after `--extern` named a `/nix/store/` rlib, crashed
+build input, rustc E0463 after `--extern` named a `/nix/store/` rlib that
+rustc then reported missing or unreadable, crashed
 Nix daemon, or SIGBUS on those
 runners is retried with only the time left in the shard budget; the shard
 then fails closed so `assert-coverage` sees the miss. Determinate
 Nix can report that fault as `Cannot build` / `Reason: 1 dependency failed`,
 or as `builder failed with exit code 1` when the only builder log is a
-vanished `/nix/store/` build input or an unreadable store rlib; a builder
+vanished `/nix/store/` build input or an I/O-marked unreadable store rlib;
+bare E0463 with a store `--extern` and no locator I/O note is a builder
+failure. A builder
 that actually compiled or linked and then exited (`failed with exit code`,
 `error: builder for`) is not treated as that fault.
 `min-free` / `max-free` stay at 32 / 64 GiB, and `max-jobs` / `cores` stay at

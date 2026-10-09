@@ -61,15 +61,18 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    run measures a safe increase (zed memory on hosted macos-15).
    A transient store fault
    (`Illegal byte sequence`, a vanished store `.drv`, a vanished store build
-   input, rustc E0463 after `--extern` named a `/nix/store/` rlib, a crashed
+   input, rustc E0463 after `--extern` named a `/nix/store/` rlib *and* a
+   locator I/O note that the rlib is missing or unreadable, a crashed
    Nix daemon, or SIGBUS) is retried
    with only the time left in that shard's build budget. The shard then fails
    closed; realized paths stay in `gkze` for the next run.
    Determinate Nix can report that fault as `Cannot build` /
    `Reason: 1 dependency failed` after a substitute EILSEQ; that still retries.
    A builder that exits 1 only because a `/nix/store/` build input vanished,
-   or because rustc could not load a store rlib it was passed via `--extern`,
-   is the same fault. A builder that actually compiled or linked and then
+   or because rustc reported a store `--extern` rlib missing or unreadable,
+   is the same fault. Bare E0463 with a store `--extern` and no I/O note
+   (`#1258` `rust_agent_ui` / `language_models`) is a builder failure.
+   A builder that actually compiled or linked and then
    exited (`failed with exit code`, `error: builder for`) still fails the shard.
    Native `nix build` passes `--fallback` so a failed substitute can
    rebuild from source. Darwin cannot compile the nested aarch64-linux

@@ -2,7 +2,9 @@
 
 Lane for `cursor/no-skip-darwin-shards-6614` / [PR #221](https://github.com/gkze/nixcfg/pull/221).
 George approved handing this to a fresh agent once `37809856116` ended.
-This note is the stop point: **do not kick another Update from this handoff commit.**
+This note is the stop point after the diagnostic Update is queued: **do
+not kick a second Update from that commit, and do not self-schedule
+checks.** The manager routine watches the run.
 
 ## Done bar (standing rules, verbatim)
 
@@ -47,6 +49,7 @@ already contains:
 | `e7bc1c7b` | Named fetchurl `cannot download \\S+ from any mirror` retry |
 | `d77a6fc8` | Rosetta recache after rust-warmup + daemon kickstart |
 | `bd56a070` | Kick that queued `37947952083` (#1258); terminal, cause 10 |
+| this head | Bare-E0463 classifier + temporary Darwin `rust_agent_ui` locator / `language_models --check` diagnostic; one Update kick |
 
 #222 is **closed as superseded** (2026-10-08T21:40:26Z). The rust_zed fix and
 5-wide split live on this branch, not on `cursor/fix-zed-out-lib-cycle-6614`.
@@ -223,12 +226,21 @@ tree) is still split and still in gkze:
 
     The retry classifier `_nix_output_has_unreadable_store_rlib` treated
     any E0463 plus any store `--extern` as transient (Update #1244). That
-    is why #1258 retried 3×. It is the wrong classification here; fixing
-    the classifier does not make `agent_ui` build.
+    is why #1258 retried 3×. This head requires a locator I/O note
+    (`extern location … does not exist` / `is not a file`, vanished
+    `.rlib`, or EILSEQ on the rlib). Bare E0463 is a builder failure.
 
     The post-hook `Cachix Daemon not started. Skipping push` is still
     cause 4 (flush already drained). Packages, closures, roots, and
     linux-deps were skipped because warm-rust 3 failed.
+
+    A Darwin-native diagnostic does **not** need George. This head adds a
+    temporary, labeled `agent_ui` override (`RUSTC_LOG=rustc_metadata::locator=debug,rustc_metadata::creader=debug`)
+    on Darwin only, plus a warm-rust `language_models` `nix build --check`
+    against the substituted rlib (SVH / extra-filename / rustc / target).
+    Nothing is skipped or masked. Remove the diagnostic once the cause is
+    known. Stop for George only if the real fix is a flake input bump,
+    a Cachix pin, or a plan change.
 
 Also: realizing warmup as `nix build /nix/store/<output>` cannot compile missing
 paths. That is why packages died at 21:35Z after inventory.
@@ -259,8 +271,8 @@ creation if never accessed) is firing. Pins are immune with `--keep-revisions`
 18:33:23Z). Warm-rust 0/1/2/4 and validate-arm/x86 succeeded; warm-rust 3
 failed (cause 10); Darwin packages/closures/roots and linux-deps skipped;
 assert-coverage and repair failed; publish skipped. `37890830675` (#1257)
-is also terminal (causes 8–9). Do not kick from this handoff. A docs-only
-push does not match `update.yml` `paths: .github/update-kick`.
+is also terminal (causes 8–9). The next Update is the diagnostic kick on
+this head (`.github/update-kick`). Do not queue a second one.
 
 ## Open questions
 
@@ -275,13 +287,12 @@ push does not match `update.yml` `paths: .github/update-kick`.
 
 ## Exact next step
 
-**Stop for George.** Cause 10 is a Darwin rustc 1.98.1 crate-load of a
-valid substituted `language_models` rlib. This Linux environment cannot
-run `aarch64-apple-darwin` rustc against the store path inside the Nix
-sandbox. The remaining levers are a rustc/nixpkgs bump, a Cachix pin, or
-a plan change for Darwin-native `RUSTC_LOG=rustc_metadata` on
-`rust_agent_ui`. Do not evict `h3crq11a` or `aqsm7q08`. Do not kick a
-no-op or a classifier-only change. Do not change flake inputs without
-George. Do not merge #221. Do not drive `main` Update until the done bar
-above is green. Do not schedule more self-check-ins or timers from this
-lane.
+**One diagnostic Update is the next kick** (this head). After it is
+queued, read warm-rust 3 / `rust_agent_ui` locator traces and the
+`language_models --check` vs `h3crq11a` dump. Then fix the cause on
+#221, or stop for George only if that fix is a flake input bump, a
+Cachix pin, or a plan change (state exact options, cost, and risk).
+Do not evict `h3crq11a` or `aqsm7q08`. Do not change flake inputs
+without George. Do not merge #221. Do not drive `main` Update until the
+done bar above is green. Do not schedule self-check-ins or timers; the
+manager routine watches the run.

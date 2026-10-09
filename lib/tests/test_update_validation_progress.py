@@ -830,7 +830,7 @@ print("complete")
 
 
 def test_validation_retries_unreadable_store_rlib_e0463(tmp_path: Path) -> None:
-    """Update 37599536875: rustc E0463 after --extern store rlib retries like EILSEQ."""
+    """E0463 after --extern store rlib retries only when rustc reports I/O."""
     marker = tmp_path / "attempt"
     script = """
 import pathlib, sys
@@ -848,6 +848,12 @@ if count == 1:
         file=sys.stderr,
     )
     print("error[E0463]: can't find crate for `settings`", file=sys.stderr)
+    print(
+        "note: extern location for settings does not exist: /nix/store/"
+        "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
+        "libsettings-7be7f1170a.rlib",
+        file=sys.stderr,
+    )
     raise SystemExit(1)
 print("complete")
 """
@@ -861,6 +867,39 @@ print("complete")
     )
     assert result.returncode == 0
     assert sleeps == [1.0]
+
+
+def test_validation_does_not_retry_bare_e0463_store_extern(tmp_path: Path) -> None:
+    """#1258 rust_agent_ui: bare E0463 plus a store --extern is a builder failure."""
+    marker = tmp_path / "attempt"
+    script = """
+import pathlib, sys
+marker = pathlib.Path(sys.argv[1])
+count = int(marker.read_text()) if marker.exists() else 0
+count += 1
+marker.write_text(str(count))
+print("error: Cannot build '/nix/store/ks-rust_agent_ui-0.1.0.drv'.", file=sys.stderr)
+print("Reason: builder failed with exit code 1.", file=sys.stderr)
+print(
+    "> rustc --crate-name agent_ui --extern language_models=/nix/store/"
+    "h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0-lib/lib/"
+    "liblanguage_models-f75b2474e2.rlib",
+    file=sys.stderr,
+)
+print("error[E0463]: can't find crate for `language_models`", file=sys.stderr)
+raise SystemExit(1)
+"""
+    sleeps: list[float] = []
+    result = validation._run_validation_command(
+        [sys.executable, "-c", script, str(marker)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=sleeps.append,
+    )
+    assert result.returncode == 1
+    assert sleeps == []
+    assert marker.read_text() == "1"
 
 
 def test_store_fault_retry_keeps_the_remaining_closure_budget(
