@@ -25,8 +25,10 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    `warmup-plan.json`. Any shard that would still compile more than 400
    of those outputs locally (packages-scale on 37740898487 was 132; home
    compiled 1534 `rust_*` from a divergent stdenv graph) fails at plan
-   time. Five `macos-15` `rust-warmup` slots then `nix build` the rust_*
-   dependency layers (skip-if-in-gkze) so Cachix has the shared
+   time.    Five `macos-15` `rust-warmup` slots then import the planner's
+   `nix-store --export` derivation closure (`warmup-drvs/closure.nar`)
+   and `nix build` those original `.drv` paths by dependency layer
+   (skip-if-in-gkze) so Cachix has the shared
    stdenv/rust graph before root shards start; the packages inventory
    itself remains certify evidence and waits for that matrix. The CVE-2026-56391/56392
    coreutils patches live in nixpkgs, not a repo overlay; they change

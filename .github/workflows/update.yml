@@ -201,7 +201,8 @@ jobs:
       always() && !cancelled() &&
       needs.prepare-x86.result == 'success' &&
       needs.cache-darwin-linux-deps-arm.result == 'success' &&
-      needs.cache-darwin-linux-deps-x86.result == 'success'
+      needs.cache-darwin-linux-deps-x86.result == 'success' &&
+      needs.validate-darwin-roots.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15

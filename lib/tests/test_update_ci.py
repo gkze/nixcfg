@@ -1138,6 +1138,9 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
         "cache-darwin-linux-deps-x86",
         "validate-darwin-roots",
     }
+    closures_if = " ".join(closures["if"].split())
+    assert "always() && !cancelled()" in closures_if
+    assert "needs.validate-darwin-roots.result == 'success'" in closures_if
     assert closures["with"]["scope"] == "closures"
     assert "closure_yield" not in closures["with"]
     coverage = workflow_jobs["assert-coverage"]

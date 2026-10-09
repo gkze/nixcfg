@@ -44,15 +44,20 @@ from lib.update.derivation_validation import (
     root_closure_installable,
     validate_derivation_requests,
 )
-from lib.update.io import atomic_write_text
+from lib.update.io import atomic_write_bytes, atomic_write_text
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
 
     from lib.update.derivation_validation import ValidationProgress
 
+type _StoreRun = Callable[
+    ..., subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]
+]
+
 WARMUP_PLAN_NAME = "warmup-plan.json"
 WARMUP_DRVS_NAME = "warmup-drvs"
+WARMUP_DRVS_NAR_NAME = "closure.nar"
 _DARWIN_SYSTEM = "aarch64-darwin"
 # Hosted packages on 37740898487 realized 132 local zed drvs. Home-george
 # compiled 1534 rust_* because those hashes were not the packages graph.
@@ -63,6 +68,7 @@ MAX_SHARD_LOCAL_BUILDS = 400
 # crate2nix dependency layers so later crates can substitute earlier ones.
 RUST_WARMUP_SLOTS = 5
 _WARMUP_REALIZE_CHUNK = 128
+_STORE_EXPORT_CHUNK = 128
 _SUBSTITUTER_WORKERS = 16
 _NIXOS_CACHE = "https://cache.nixos.org"
 _GKZE_CACHE = "https://gkze.cachix.org"
@@ -400,46 +406,137 @@ def unique_drvs_for_outputs(
     return tuple(seen)
 
 
-def export_warmup_drvs(drv_paths: Sequence[str], dest: Path) -> None:
-    """Copy planner-instantiated ``.drv`` files next to warmup-plan.json."""
+def _store_command_detail(
+    result: subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes],
+    *,
+    fallback: str,
+) -> str:
+    """Return stderr/stdout from a nix-store process as text."""
+    stderr = result.stderr
+    stdout = result.stdout
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode(errors="replace")
+    if isinstance(stdout, bytes):
+        stdout = stdout.decode(errors="replace")
+    return stderr.strip() or stdout.strip() or fallback
+
+
+def _store_stdout_bytes(
+    result: subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes],
+) -> bytes:
+    """Return stdout as bytes whether the runner captured text or binary."""
+    payload = result.stdout
+    if isinstance(payload, bytes):
+        return payload
+    return payload.encode()
+
+
+def _warmup_drv_requisites(
+    drv_paths: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return the eval closure of warmup ``.drv`` files (drvs + inputSrcs)."""
+    runner = subprocess.run if run is None else run
+    found: dict[str, None] = {}
+    ordered = tuple(dict.fromkeys(drv_paths))
+    for start in range(0, len(ordered), _STORE_EXPORT_CHUNK):
+        batch = ordered[start : start + _STORE_EXPORT_CHUNK]
+        result = runner(
+            ["nix-store", "--query", "--requisites", *batch],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode:
+            detail = _store_command_detail(result, fallback="nix-store --query failed")
+            msg = f"failed to query warmup .drv requisites: {detail}"
+            raise WarmupError(msg)
+        stdout = result.stdout
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode()
+        for line in stdout.splitlines():
+            path = line.strip()
+            if path:
+                found.setdefault(path, None)
+    return tuple(found)
+
+
+def export_warmup_drvs(
+    drv_paths: Sequence[str],
+    dest: Path,
+    *,
+    run: _StoreRun | None = None,
+) -> None:
+    """Export the planner's warmup derivation closure at original store paths.
+
+    ``nix-store --add`` of a copied ``.drv`` is wrong: it content-addresses a
+    new path (``<newhash>-<oldhash>-name.drv``) and then Nix checks that
+    file as a derivation. On macos-15 that failed closed as either
+    ``derivation has incorrect output`` (FODs) or ``store path ... does not
+    exist`` (missing inputDrvs). ``37851246740`` rust-warmup slots 0-4 all
+    died there. ``--export`` of ``--query --requisites`` preserves the
+    original drv paths and their eval closure so Darwin can ``nix build``
+    them.
+    """
     dest.mkdir(parents=True, exist_ok=True)
-    for drv in dict.fromkeys(drv_paths):
-        source = Path(drv)
-        if not source.is_file():
+    nar = dest / WARMUP_DRVS_NAR_NAME
+    ordered = tuple(dict.fromkeys(drv_paths))
+    if not ordered:
+        atomic_write_bytes(nar, b"")
+        return
+    for drv in ordered:
+        if not Path(drv).is_file():
             msg = f"planner is missing warmup .drv {drv}"
             raise WarmupError(msg)
-        target = dest / source.name
-        target.write_bytes(source.read_bytes())
+    requisites = _warmup_drv_requisites(ordered, run=run)
+    if not requisites:
+        msg = "warmup .drv requisites were empty"
+        raise WarmupError(msg)
+    runner = subprocess.run if run is None else run
+    chunks: list[bytes] = []
+    for start in range(0, len(requisites), _STORE_EXPORT_CHUNK):
+        batch = requisites[start : start + _STORE_EXPORT_CHUNK]
+        result = runner(
+            ["nix-store", "--export", *batch],
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode:
+            detail = _store_command_detail(result, fallback="nix-store --export failed")
+            msg = f"failed to export warmup .drv closure: {detail}"
+            raise WarmupError(msg)
+        chunks.append(_store_stdout_bytes(result))
+    atomic_write_bytes(nar, b"".join(chunks))
 
 
 def import_warmup_drvs(
     drv_paths: Sequence[str],
     cache: Path,
     *,
-    run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+    run: _StoreRun | None = None,
 ) -> None:
-    """Register copied ``.drv`` files so Darwin can ``nix build`` them."""
+    """Register the exported derivation closure at the original store paths."""
     if not drv_paths:
         return
     if not cache.is_dir():
         msg = f"warmup drv cache missing: {cache}"
         raise WarmupError(msg)
+    nar = cache / WARMUP_DRVS_NAR_NAME
+    if not nar.is_file():
+        msg = f"warmup drv cache missing {WARMUP_DRVS_NAR_NAME}"
+        raise WarmupError(msg)
     runner = subprocess.run if run is None else run
-    for drv in dict.fromkeys(drv_paths):
-        source = cache / Path(drv).name
-        if not source.is_file():
-            msg = f"warmup drv cache missing {Path(drv).name}"
-            raise WarmupError(msg)
-        result = runner(
-            ["nix-store", "--add", str(source)],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode:
-            detail = result.stderr.strip() or result.stdout.strip() or "nix-store --add failed"
-            msg = f"failed to import warmup .drv {source.name}: {detail}"
-            raise WarmupError(msg)
+    result = runner(
+        ["nix-store", "--import"],
+        check=False,
+        capture_output=True,
+        input=nar.read_bytes(),
+    )
+    if result.returncode:
+        detail = _store_command_detail(result, fallback="nix-store --import failed")
+        msg = f"failed to import warmup .drv closure: {detail}"
+        raise WarmupError(msg)
 
 
 def slot_warmup_paths(
