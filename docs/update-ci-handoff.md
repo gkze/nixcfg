@@ -181,6 +181,14 @@ tree) is still split and still in gkze:
    line is still cause 4 (flush already drained). Nothing from that
    shard reached gkze because Darwin never realized the Linux VM;
    per-derivation hook + `if: always()` flush stay in place.
+9. **JSR fetchurl name is not "source"** (`37890830675` / #1257
+   argus+home-george). `curl: (6) Could not resolve host: jsr.io` then
+   `cannot download _std_collections-1.1.6-sum_of_test.ts from any
+   mirror`. The URL `https://jsr.io/@std/collections/1.1.6/sum_of_test.ts`
+   is HTTP 200 and its sha256 matches `packages/linear-cli/deno-deps.json`.
+   The retry list only matched the literal `cannot download source from
+   any mirror`; Deno `fetchurl` names the file. Match `cannot download
+   \\S+ from any mirror` on the validation network path.
 
 Also: realizing warmup as `nix build /nix/store/<output>` cannot compile missing
 paths. That is why packages died at 21:35Z after inventory.

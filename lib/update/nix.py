@@ -119,9 +119,14 @@ _NIX_NETWORK_TRANSIENT_MARKERS = (
 _FIXED_OUTPUT_ONLY_TRANSIENT_MARKERS = (
     "Operation timed out",
     "aborted due to timeout",
-    "cannot download source from any mirror",
     "Fail extracting tarball",
     "timed out",
+)
+# fetchurl prints the derivation *name*, not the word "source". Deno JSR
+# files use names like `_std_collections-1.1.6-sum_of_test.ts` (#1257).
+_CANNOT_DOWNLOAD_FROM_MIRROR = re.compile(
+    r"cannot download \S+ from any mirror",
+    re.IGNORECASE,
 )
 
 # Hosted macos-15 store filesystems fault mid-build with EILSEQ. Nix reports
@@ -682,6 +687,8 @@ def is_retryable_nix_network_failure(*, stdout: str, stderr: str) -> bool:
     if _has_hash_mismatch_signal(output):
         return False
     folded = output.casefold()
+    if _CANNOT_DOWNLOAD_FROM_MIRROR.search(folded):
+        return True
     return any(marker.casefold() in folded for marker in _NIX_NETWORK_TRANSIENT_MARKERS)
 
 

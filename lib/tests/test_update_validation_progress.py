@@ -791,6 +791,44 @@ print("complete")
     assert sleeps == [1.0]
 
 
+def test_validation_retries_named_fetchurl_mirror_failure(
+    tmp_path: Path,
+) -> None:
+    """#1257: cannot download <filename> from any mirror is a fetch flake."""
+    marker = tmp_path / "attempt"
+    script = """
+import pathlib, sys
+marker = pathlib.Path(sys.argv[1])
+count = int(marker.read_text()) if marker.exists() else 0
+count += 1
+marker.write_text(str(count))
+if count == 1:
+    print(
+        "error: Cannot build "
+        "'/nix/store/7z11-_std_collections-1.1.6-sum_of_test.ts.drv'.",
+        file=sys.stderr,
+    )
+    print("Reason: builder failed with exit code 1.", file=sys.stderr)
+    print(
+        "> error: cannot download "
+        "_std_collections-1.1.6-sum_of_test.ts from any mirror",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+print("complete")
+"""
+    sleeps: list[float] = []
+    result = validation._run_validation_command(
+        [sys.executable, "-c", script, str(marker)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=sleeps.append,
+    )
+    assert result.returncode == 0
+    assert sleeps == [1.0]
+
+
 def test_validation_retries_unreadable_store_rlib_e0463(tmp_path: Path) -> None:
     """Update 37599536875: rustc E0463 after --extern store rlib retries like EILSEQ."""
     marker = tmp_path / "attempt"

@@ -176,6 +176,23 @@ def test_retryable_fixed_output_hash_failure_classification() -> None:
     ):
         assert is_retryable_nix_network_failure(stdout="", stderr=libcurl_failure)
 
+    # #1257 argus+home-george: fetchurl name is the JSR file, not "source".
+    named_mirror = (
+        "error: Cannot build '/nix/store/7z11drai9yzh0d6g4kr5aa7pw6l9ab2f-"
+        "_std_collections-1.1.6-sum_of_test.ts.drv'.\n"
+        "       Reason: builder failed with exit code 1.\n"
+        "       > error: cannot download "
+        "_std_collections-1.1.6-sum_of_test.ts from any mirror"
+    )
+    assert is_retryable_nix_network_failure(stdout="", stderr=named_mirror)
+    assert _is_retryable_fixed_output_hash_failure(
+        CommandResult(args=["nix"], returncode=1, stdout="", stderr=named_mirror)
+    )
+    assert is_retryable_nix_network_failure(
+        stdout="",
+        stderr="error: cannot download source from any mirror",
+    )
+
     hash_mismatch = CommandResult(
         args=["nix"],
         returncode=1,
