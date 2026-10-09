@@ -29,6 +29,8 @@ from lib.update.nix import (
     get_current_nix_platform,
     is_retryable_nix_network_failure,
     is_retryable_nix_store_failure,
+    recover_nix_store_after_fault,
+    should_restart_nix_daemon,
 )
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.paths import get_repo_root
@@ -59,6 +61,7 @@ class DerivationValidationRequest:
     source: str
     installable: str
     mode: DerivationValidationMode = "eval"
+    substitute_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -607,6 +610,8 @@ def _run_validation_command_impl(
                     stderr=result.stderr,
                 )
             return result
+        if should_restart_nix_daemon(stdout=result.stdout, stderr=result.stderr):
+            recover_nix_store_after_fault(sleep=sleep)
         if progress is not None:
             progress(
                 f"Retrying transient Nix failure (attempt {attempt + 2}/{max_attempts})"
@@ -744,9 +749,18 @@ def _validation_args(
             [
                 "--no-link",
                 "--keep-going",
-                # Substitute EILSEQ on hosted macos-15 is not a derivation
-                # failure; Nix can rebuild that path from source.
-                "--fallback",
+                *(
+                    # Linux VM image inside Darwin roots cannot compile here
+                    # (#1257 platform mismatch). Substitute only.
+                    ["--max-jobs", "0"]
+                    if request.substitute_only
+                    else [
+                        # Substitute EILSEQ on hosted macos-15 is not a
+                        # derivation failure; Nix can rebuild that path
+                        # from source.
+                        "--fallback",
+                    ]
+                ),
                 *(["-L"] if print_build_logs else []),
             ]
             if request.mode == "build"
@@ -763,7 +777,10 @@ def _batch_key(
 ) -> tuple[DerivationValidationMode, str] | None:
     """Only batch explicit local attribute paths from one immutable snapshot."""
     # Warmup realizes missing Darwin *outputs*. Do not batch `/nix/store/*.drv^*`
-    # graph nodes: those share a deadline as one build each.
+    # graph nodes: those share a deadline as one build each. Substitute-only
+    # foreign Linux deps must not share a --fallback batch with Darwin roots.
+    if request.substitute_only:
+        return None
     name = request.installable.removeprefix("/nix/store/")
     if (
         request.installable.startswith("/nix/store/")
@@ -1317,10 +1334,32 @@ def validate_root_closures(
                 )
                 for installable in dependencies
             )
+            runner_systems = systems or root_systems
+            on_darwin = any(system.endswith("-darwin") for system in runner_systems)
+            foreign_linux = (
+                ()
+                if dependencies_only or not on_darwin
+                else tuple(
+                    system
+                    for system in ("aarch64-linux", "x86_64-linux")
+                    if system not in runner_systems
+                )
+            )
+            substitute_requests = tuple(
+                DerivationValidationRequest(
+                    source=_ROOT_CLOSURE_VALIDATION_SOURCE,
+                    installable=installable,
+                    mode="build",
+                    substitute_only=True,
+                )
+                for installable in (
+                    graph.dependencies(foreign_linux) if foreign_linux else ()
+                )
+            )
             requests = (
                 dependency_requests
                 if dependencies_only
-                else dependency_requests + requests
+                else substitute_requests + dependency_requests + requests
             )
         # Discovery above keeps root_timeout. The build budget starts here, so
         # a slow manifest eval does not consume the shard's realization time,

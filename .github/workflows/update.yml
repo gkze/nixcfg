@@ -68,27 +68,33 @@ jobs:
       stage: prepare
       previous: prepare-aarch64-linux
     secrets: inherit
-  # Flake.lock freezes after prepare-darwin. Cache the Linux native boundary
-  # of Darwin roots (the Rosetta/linux-builder VM image) here so Darwin
-  # closures can start with Darwin packages instead of waiting for Linux
-  # package validation. These jobs are not publication evidence.
+  # Recache the Linux native boundary of Darwin roots (the Rosetta VM
+  # image) after rust-warmup. Doing this from the Darwin-prepare tree
+  # before warmup (#1257) left the image in gkze for LRU eviction by
+  # rust_*, then macos-15 hit platform mismatch on aarch64-linux
+  # etc-fstab.drv. These jobs are not publication evidence. Packages
+  # inventory starts in parallel and does not wait.
   cache-darwin-linux-deps-arm:
-    needs: prepare-darwin
+    needs:
+      - prepare-x86
+      - validate-darwin-warm-rust
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04-arm
       system: aarch64-linux
       stage: cache-root-deps
-      previous: prepare-aarch64-darwin
+      previous: prepare-x86_64-linux
     secrets: inherit
   cache-darwin-linux-deps-x86:
-    needs: prepare-darwin
+    needs:
+      - prepare-x86
+      - validate-darwin-warm-rust
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04
       system: x86_64-linux
       stage: cache-root-deps
-      previous: prepare-aarch64-darwin
+      previous: prepare-x86_64-linux
     secrets: inherit
   validate-arm:
     needs: prepare-x86

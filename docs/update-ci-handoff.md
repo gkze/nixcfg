@@ -169,6 +169,18 @@ tree) is still split and still in gkze:
    a modifier; `--realise` on a `.drv` would build outputs. Root with
    `nix build --out-link --offline`. PR quality `certify-python` also
    failed: ruff format on `test_update_candidate.py`.
+8. **Rosetta VM missing + daemon crash** (`37890830675` / #1257). Warm-rust
+   slots 0-4 succeeded. `cache-darwin-linux-deps` had pushed the
+   aarch64-linux VM from the Darwin-prepare tree *before* warmup; rust_*
+   then LRU-evicted it. Darwin roots `--fallback`-built `etc-fstab.drv`
+   (`platform mismatch`), then EILSEQ unlinked an `active-builds` lock and
+   the Nix daemon died. Isolation retried 3× against the dead socket.
+   Recache after warmup from the final candidate; Darwin substitutes the
+   Linux boundary with `--max-jobs 0`; restart determinate-nixd before
+   daemon-disconnect retries. The post-hook `Cachix Daemon not started`
+   line is still cause 4 (flush already drained). Nothing from that
+   shard reached gkze because Darwin never realized the Linux VM;
+   per-derivation hook + `if: always()` flush stay in place.
 
 Also: realizing warmup as `nix build /nix/store/<output>` cannot compile missing
 paths. That is why packages died at 21:35Z after inventory.
@@ -195,10 +207,10 @@ creation if never accessed) is firing. Pins are immune with `--keep-revisions`
 
 ## Already queued (do not double-kick)
 
-`37851246740` (#1254) and `37868270521` (#1255) are **terminal failures**.
-Do not touch `.github/update-kick` while another Update is pending or in
-progress. A docs-only push does not match `update.yml`
-`paths: .github/update-kick`.
+`37890830675` (#1257) is the live run on `f515b55e`. Warm-rust 0-4 passed;
+`validate-darwin-roots` rocinante+zeus failed (cause 8). Do not touch
+`.github/update-kick` until #1257 is terminal, then kick exactly once.
+A docs-only push does not match `update.yml` `paths: .github/update-kick`.
 
 ## Open questions
 

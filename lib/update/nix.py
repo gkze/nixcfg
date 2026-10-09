@@ -3,9 +3,13 @@
 import asyncio
 import dataclasses
 import json
+import os
 import platform
 import re
 import signal
+import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -50,7 +54,8 @@ from lib.update.process import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
+    from subprocess import CompletedProcess
 
     from lib.nix.models.sources import SourceEntry
 
@@ -132,6 +137,8 @@ _NIX_STORE_TRANSIENT_MARKERS = (
     "Illegal byte sequence",
     "Nix daemon disconnected unexpectedly",
     "cannot open connection to remote store 'daemon'",
+    # #1257: EILSEQ unlink of an active-builds lock, then the daemon died.
+    'opening lock file "/nix/var/nix/active-builds/',
 )
 _STORE_BUS_SIGNALS = frozenset({10, signal.SIGBUS})
 _STORE_EXTERN_RLIB = re.compile(
@@ -676,6 +683,66 @@ def is_retryable_nix_network_failure(*, stdout: str, stderr: str) -> bool:
         return False
     folded = output.casefold()
     return any(marker.casefold() in folded for marker in _NIX_NETWORK_TRANSIENT_MARKERS)
+
+
+_NIX_DAEMON_SOCKET = Path("/nix/var/nix/daemon-socket/socket")
+_NIX_DAEMON_LAUNCHD_LABELS = (
+    "system/systems.determinate.nix-daemon",
+    "system/org.nixos.nix-daemon",
+)
+_NIX_DAEMON_RESTART_MARKERS = (
+    "nix daemon disconnected",
+    "cannot open connection to remote store 'daemon'",
+    "/nix/var/nix/active-builds/",
+)
+_NIX_DAEMON_RESTART_WAIT_SECONDS = 15.0
+_NIX_DAEMON_RESTART_POLL_SECONDS = 0.2
+
+
+def should_restart_nix_daemon(*, stdout: str, stderr: str) -> bool:
+    """Return whether a retry must kick the Nix daemon back up first.
+
+    ``#1257`` retried ``nix build`` three times after ``Nix daemon
+    disconnected unexpectedly`` without restarting determinate-nixd, so every
+    isolation attempt died on the same dead socket.
+    """
+    text = f"{stderr}\n{stdout}".casefold()
+    return any(marker in text for marker in _NIX_DAEMON_RESTART_MARKERS)
+
+
+def recover_nix_store_after_fault(
+    *,
+    run: Callable[..., CompletedProcess[str]] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    platform: str | None = None,
+    socket: Path | None = None,
+    wait_seconds: float = _NIX_DAEMON_RESTART_WAIT_SECONDS,
+) -> None:
+    """Restart the hosted Darwin Nix daemon so a store-fault retry can reconnect."""
+    host = sys.platform if platform is None else platform
+    runner = subprocess.run if run is None else run
+    sleeper = time.sleep if sleep is None else sleep
+    daemon_socket = _NIX_DAEMON_SOCKET if socket is None else socket
+    if host != "darwin":
+        return
+    # Pytest on Darwin would otherwise kickstart the live daemon. Hosted
+    # Update validation does not import pytest.
+    if run is None and os.environ.get("PYTEST_CURRENT_TEST"):
+        return
+    for label in _NIX_DAEMON_LAUNCHD_LABELS:
+        result = runner(
+            ["sudo", "-n", "launchctl", "kickstart", "-k", label],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            break
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        if daemon_socket.exists():
+            return
+        sleeper(_NIX_DAEMON_RESTART_POLL_SECONDS)
 
 
 def is_retryable_nix_store_failure(*, stdout: str, stderr: str) -> bool:
@@ -1314,4 +1381,6 @@ __all__ = [
     "is_transient_store_interruption",
     "normalize_nix_platform",
     "prepare_fixed_output_probes",
+    "recover_nix_store_after_fault",
+    "should_restart_nix_daemon",
 ]

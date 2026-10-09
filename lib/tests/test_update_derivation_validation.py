@@ -803,15 +803,24 @@ def test_native_validator_builds_the_foreign_root_dependency_boundary(
         "false",
         f"path:{tmp_path}#checks.aarch64-darwin.root-closures",
     ]
-    builds = [args[-1] for args in calls if args[1] == "build"]
+    build_calls = [args for args in calls if args[1] == "build"]
+    builds = [args[-1] for args in build_calls]
     assert (
         builds
         == {
             "aarch64-linux": ["/nix/store/vm.drv^*"],
-            "aarch64-darwin": [f"path:{tmp_path}#checks.aarch64-darwin.root-closures"],
+            "aarch64-darwin": [
+                "/nix/store/vm.drv^*",
+                f"path:{tmp_path}#checks.aarch64-darwin.root-closures",
+            ],
             "x86_64-linux": [],
         }[system]
     )
+    if system == "aarch64-darwin":
+        assert "--max-jobs" in build_calls[0]
+        assert "0" in build_calls[0]
+        assert "--fallback" not in build_calls[0]
+        assert "--fallback" in build_calls[1]
 
 
 def test_dependencies_only_skips_this_platform_root_closures(

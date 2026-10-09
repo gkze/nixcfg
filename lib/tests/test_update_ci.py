@@ -1277,7 +1277,7 @@ def test_cachix_flush_is_last_step_of_every_update_runtime_cachix_job() -> None:
 
 
 def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
-    """VM cache overlaps later prepare; Darwin closures no longer wait on Linux validate."""
+    """VM cache recaches after rust-warmup so gkze LRU cannot drop the image."""
     workflow = yaml.load(
         (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
     )
@@ -1321,9 +1321,9 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         "cache-darwin-linux-deps-x86",
     }
     for job in cache_jobs.values():
-        assert job["needs"] == "prepare-darwin"
+        assert set(job["needs"]) == {"prepare-x86", "validate-darwin-warm-rust"}
         assert job["with"]["stage"] == "cache-root-deps"
-        assert job["with"]["previous"] == "prepare-aarch64-darwin"
+        assert job["with"]["previous"] == "prepare-x86_64-linux"
     assert (
         cache_jobs["cache-darwin-linux-deps-arm"]["with"]["runner"]
         == "ubuntu-24.04-arm"

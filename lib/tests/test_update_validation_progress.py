@@ -751,6 +751,46 @@ print("complete")
     assert sleeps == [1.0, 2.0]
 
 
+def test_validation_restarts_nix_daemon_before_disconnect_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#1257 isolation retried against a dead socket; kickstart first."""
+    recovered: list[object] = []
+    monkeypatch.setattr(
+        validation,
+        "recover_nix_store_after_fault",
+        lambda **kwargs: recovered.append(kwargs),
+    )
+    marker = tmp_path / "attempt"
+    script = """
+import pathlib, sys
+marker = pathlib.Path(sys.argv[1])
+count = int(marker.read_text()) if marker.exists() else 0
+count += 1
+marker.write_text(str(count))
+if count == 1:
+    print(
+        "error: cannot open connection to remote store 'daemon': "
+        "Nix daemon disconnected unexpectedly (maybe it crashed?)",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+print("complete")
+"""
+    sleeps: list[float] = []
+    result = validation._run_validation_command(
+        [sys.executable, "-c", script, str(marker)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=sleeps.append,
+    )
+    assert result.returncode == 0
+    assert recovered
+    assert sleeps == [1.0]
+
+
 def test_validation_retries_unreadable_store_rlib_e0463(tmp_path: Path) -> None:
     """Update 37599536875: rustc E0463 after --extern store rlib retries like EILSEQ."""
     marker = tmp_path / "attempt"

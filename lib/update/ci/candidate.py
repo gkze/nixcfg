@@ -80,6 +80,10 @@ ValidationGate = Literal["packages", "closures"]
 # Graph discovery is minutes, not the build. Keep it inside the job cap so a
 # hung eval fails this shard instead of consuming the build budget.
 _CLOSURE_DISCOVERY_TIMEOUT_SECONDS = 45 * 60
+# Recaching the Rosetta VM after rust-warmup can rebuild from source if gkze
+# LRU-evicted it. 36m succeeded on #1257; 45m discovery+build was too tight
+# to share. Realization gets its own budget.
+_ROOT_DEPS_BUILD_TIMEOUT_SECONDS = 3 * 60 * 60
 # Five hours of nix build, inside the 360-minute hosted job, leaves time for
 # image cleanup, discovery, and the Cachix daemon flush before GitHub cancels.
 HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS = 5 * 60 * 60
@@ -183,10 +187,10 @@ def _hosted_validation_progress(source: str) -> validation.ValidationProgress:
 def cache_root_dependencies(candidate: Candidate) -> RootDependencyCacheReport:
     """Realize this platform's native deps of foreign roots for later substitutes.
 
-    Flake references freeze after the first prepare. Later stages only add
-    hashes, so the Linux VM image inside Darwin roots can be cached from the
-    Darwin-prepare candidate while Linux prepare continues. This is not a
-    validation report: certification still requires the final-tree gates.
+    Recache after rust-warmup from the final three-system candidate so gkze
+    LRU cannot drop the Rosetta VM image before Darwin roots substitute it.
+    This is not a validation report: certification still requires the
+    final-tree gates.
     """
     if not candidate.prepared:
         msg = "A failed preparation cannot populate the binary cache"
@@ -213,6 +217,7 @@ def cache_root_dependencies(candidate: Candidate) -> RootDependencyCacheReport:
                 print_build_logs=True,
                 progress=_hosted_validation_progress("root-deps"),
                 timeout=_CLOSURE_DISCOVERY_TIMEOUT_SECONDS,
+                build_timeout=_ROOT_DEPS_BUILD_TIMEOUT_SECONDS,
             )
         workspace.validate_changes(allowed)
     return RootDependencyCacheReport(

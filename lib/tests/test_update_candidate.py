@@ -481,6 +481,7 @@ def test_cache_root_dependencies_skips_complete_candidate_and_own_roots(
     assert seen[0]["include_dependencies"] is True
     assert seen[0]["dependencies_only"] is True
     assert seen[0]["timeout"] == pipeline._CLOSURE_DISCOVERY_TIMEOUT_SECONDS
+    assert seen[0]["build_timeout"] == pipeline._ROOT_DEPS_BUILD_TIMEOUT_SECONDS
     failed = incomplete.model_copy(update={"prepared": False})
     with pytest.raises(ValueError, match="failed preparation"):
         pipeline.cache_root_dependencies(failed)

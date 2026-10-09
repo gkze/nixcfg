@@ -2,6 +2,8 @@
 
 import asyncio
 import signal
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -29,6 +31,8 @@ from lib.update.nix import (
     is_retryable_nix_store_failure,
     is_transient_store_interruption,
     normalize_nix_platform,
+    recover_nix_store_after_fault,
+    should_restart_nix_daemon,
 )
 
 
@@ -357,6 +361,17 @@ def test_vanished_store_build_input_and_daemon_disconnect_are_retryable() -> Non
     assert is_transient_store_interruption(vanished_input)
     assert is_retryable_nix_store_failure(stdout="", stderr=daemon_disconnect)
     assert is_transient_store_interruption(daemon_disconnect)
+    active_builds_lock = (
+        "error (ignored): filesystem error: in remove: Illegal byte sequence "
+        '["/nix/var/nix/active-builds/35863-298"]\n'
+        'error: opening lock file "/nix/var/nix/active-builds/35863-2041": '
+        "Invalid argument"
+    )
+    assert is_retryable_nix_store_failure(stdout="", stderr=active_builds_lock)
+    assert is_transient_store_interruption(active_builds_lock)
+    assert should_restart_nix_daemon(stdout="", stderr=daemon_disconnect)
+    assert should_restart_nix_daemon(stdout="", stderr=active_builds_lock)
+    assert not should_restart_nix_daemon(stdout="", stderr="hash mismatch")
     assert not is_retryable_nix_store_failure(
         stdout="",
         stderr="gcc: /usr/bin/ld: build input does not exist",
@@ -369,6 +384,71 @@ def test_vanished_store_build_input_and_daemon_disconnect_are_retryable() -> Non
             "       > error: linker command failed with exit code 1"
         ),
     )
+
+
+def test_recover_nix_store_after_fault_restarts_determinate_daemon(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#1257 retried nix build against a dead daemon; kickstart first."""
+    calls: list[list[str]] = []
+    socket = tmp_path / "daemon-socket"
+    sleeps: list[float] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if args[-1].endswith("determinate.nix-daemon"):
+            return subprocess.CompletedProcess(args, 1, "", "no such service")
+        socket.touch()
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    recover_nix_store_after_fault(platform="linux")
+    recover_nix_store_after_fault(platform="linux", run=run, socket=socket)
+    assert calls == []
+    recover_nix_store_after_fault(platform="darwin")
+    assert calls == []
+    present = tmp_path / "present-socket"
+    present.touch()
+    recover_nix_store_after_fault(
+        platform="darwin",
+        run=lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "", ""),
+        socket=present,
+    )
+    recover_nix_store_after_fault(
+        platform="darwin",
+        run=run,
+        sleep=sleeps.append,
+        socket=socket,
+        wait_seconds=1.0,
+    )
+    assert calls[0][:4] == ["sudo", "-n", "launchctl", "kickstart"]
+    assert calls[0][-1] == "system/systems.determinate.nix-daemon"
+    assert calls[1][-1] == "system/org.nixos.nix-daemon"
+    assert socket.is_file()
+    missing = tmp_path / "missing-socket"
+    recover_nix_store_after_fault(
+        platform="darwin",
+        run=lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "", ""),
+        sleep=sleeps.append,
+        socket=missing,
+        wait_seconds=0.3,
+    )
+    assert sleeps
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    hosted = tmp_path / "hosted-socket"
+    hosted_calls: list[list[str]] = []
+
+    def hosted_run(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        hosted_calls.append(list(args))
+        hosted.touch()
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr("lib.update.nix.subprocess.run", hosted_run)
+    recover_nix_store_after_fault(platform="darwin", socket=hosted)
+    assert hosted_calls[0][:4] == ["sudo", "-n", "launchctl", "kickstart"]
+    assert hosted.is_file()
 
 
 def test_unreadable_store_rlib_e0463_is_retryable() -> None:

@@ -14,9 +14,11 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    Preparation is sequential because updaters can share generated files. Dependent
    updaters recompute metadata from their pinned prerequisites.
 2. Validate the final identical tree on all three native builders. After
-   `prepare-darwin` freezes flake references, two Linux jobs cache the native
-   boundary of Darwin roots (the Rosetta/linux-builder VM image) in `gkze`
-   while Linux prepare continues. Those jobs are not publication evidence.
+   rust-warmup, two Linux jobs recache the native boundary of Darwin roots
+   (the Rosetta/linux-builder VM image) into `gkze` from the final
+   three-system candidate so macos-15 can substitute it. Caching before
+   warmup lets rust_* LRU-evict the image (`#1257`). Those jobs are not
+   publication evidence. Darwin packages start in parallel and do not wait.
    After the last prepare, the two Linux validators and Darwin shard
    planning run in parallel. Closures still wait for the final three-system
    candidate because certify binds reports to that tree. The planner
@@ -69,9 +71,13 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    or because rustc could not load a store rlib it was passed via `--extern`,
    is the same fault. A builder that actually compiled or linked and then
    exited (`failed with exit code`, `error: builder for`) still fails the shard.
-   Validation `nix build` passes `--fallback` so a failed substitute can
-   rebuild from source. Every declared package platform and every
-   native root is still built.
+   Native `nix build` passes `--fallback` so a failed substitute can
+   rebuild from source. Darwin cannot compile the nested aarch64-linux
+   Rosetta VM (`#1257` platform mismatch on `etc-fstab.drv`); it
+   substitutes that boundary with `--max-jobs 0` after Linux recache.
+   A crashed Nix daemon is `launchctl kickstart -k`'d before the next
+   retry so isolation does not hammer a dead socket. Every declared
+   package platform and every native root is still built.
    Each builder evaluates every declared package platform, builds native package
    validations, and builds its roots from the independently checked root manifest.
    Nix's recursive derivation graph supplies native dependencies of foreign roots,
