@@ -1,4 +1,4 @@
 # Touch this file to queue one Update run on main (or a listed feature branch).
 # Cloud-agent ghs_ tokens cannot workflow_dispatch (HTTP 403, actions:write).
 # Remove this kick path after E2E prepare → validate → publish is proven.
-2026-10-09T05:54:29Z rust-warmup-out-link-gc-root
+2026-10-09T14:56:07Z recache-rosetta-after-warmup-and-named-fetch-retry

@@ -215,10 +215,12 @@ creation if never accessed) is firing. Pins are immune with `--keep-revisions`
 
 ## Already queued (do not double-kick)
 
-`37890830675` (#1257) is the live run on `f515b55e`. Warm-rust 0-4 passed;
-`validate-darwin-roots` rocinante+zeus failed (cause 8). Do not touch
-`.github/update-kick` until #1257 is terminal, then kick exactly once.
-A docs-only push does not match `update.yml` `paths: .github/update-kick`.
+`37890830675` (#1257) is **terminal failure** (ended 14:46:42Z). Warm-rust
+0-4 and `validate-darwin-packages` succeeded; both Darwin root shards
+failed (causes 8–9); closures skipped; assert-coverage and repair failed;
+publish skipped. The next kick is one Update onto `e7bc1c7b` (Rosetta
+recache + named fetchurl retry). Do not double-kick. A docs-only push
+does not match `update.yml` `paths: .github/update-kick`.
 
 ## Open questions
 
