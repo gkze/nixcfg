@@ -95,6 +95,7 @@ def parse_canary_crates(raw: str) -> tuple[str, ...]:
 
 
 _KICK_CANARY_SLOTS = re.compile(r"(?m)^canary-slots:\s*(.+?)\s*$")
+_KICK_CANARY_CRATES = re.compile(r"(?m)^canary-crates:\s*(.+?)\s*$")
 
 
 def parse_kick_canary_slots(text: str) -> tuple[int, ...]:
@@ -108,6 +109,40 @@ def parse_kick_canary_slots(text: str) -> tuple[int, ...]:
     if not match:
         return ()
     return parse_canary_slots(match.group(1))
+
+
+def parse_kick_canary_crates(text: str) -> tuple[str, ...]:
+    """Parse ``canary-crates: settings settings_content`` from an update-kick file.
+
+    Push-path canary cannot set ``inputs.canary_crates``. #1269's
+    slot-only canary never reached rust_settings (2h20m, still
+    in_progress) so the settings SVH mix landed on validate slot 3.
+    """
+    match = _KICK_CANARY_CRATES.search(text)
+    if not match:
+        return ()
+    return parse_canary_crates(match.group(1))
+
+
+def canary_crate_warmup_paths(
+    layers: Sequence[Sequence[str]],
+    crates: Sequence[str],
+) -> tuple[str, ...]:
+    """Return rust_* outputs for *crates* from every warmup layer.
+
+    Slot-stripe filtering misses a crate that lives on another slot
+    (settings on slot 3, canary on slot 0). Named-crate canary is a
+    family probe, not a slot probe.
+    """
+    wanted = tuple(dict.fromkeys(crates))
+    if not wanted:
+        return ()
+    return _warmup_outputs_matching(
+        layers,
+        lambda path: any(
+            is_named_rust_crate_store_path(path, crate) for crate in wanted
+        ),
+    )
 
 
 _WARMUP_REALIZE_CHUNK = 128

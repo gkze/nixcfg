@@ -180,6 +180,7 @@ jobs:
     outputs:
       matrix: ${{ steps.slots.outputs.matrix }}
       slots: ${{ steps.slots.outputs.slots }}
+      crates: ${{ steps.slots.outputs.crates }}
       enabled: ${{ steps.slots.outputs.enabled }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -201,17 +202,20 @@ jobs:
           raw = os.environ.get("CANARY_SLOTS", "").strip()
           crates = os.environ.get("CANARY_CRATES", "").strip()
           kick = Path(".github/update-kick")
-          kick_match = re.search(
-              r"(?m)^canary-slots:\s*(.+?)\s*$",
-              kick.read_text(encoding="utf-8") if kick.is_file() else "",
-          )
+          kick_text = kick.read_text(encoding="utf-8") if kick.is_file() else ""
+          kick_slots = re.search(r"(?m)^canary-slots:\s*(.+?)\s*$", kick_text)
+          kick_crates = re.search(r"(?m)^canary-crates:\s*(.+?)\s*$", kick_text)
           if event == "push":
-              raw_slots = kick_match.group(1) if kick_match else ""
-              slots = [int(part) for part in raw_slots.replace(",", " ").split() if part]
+              raw = kick_slots.group(1) if kick_slots else ""
+              crates = kick_crates.group(1) if kick_crates else ""
+          # Named crates are a family probe realized from every rust
+          # layer. Expanding crates to slots 0-4 (#1269) hogged the
+          # five free-tier macos-15 runners for 2h+ and still missed
+          # rust_settings on the slot stripe filter.
+          if crates:
+              slots = [0]
           elif raw:
               slots = [int(part) for part in raw.replace(",", " ").split() if part]
-          elif crates:
-              slots = [0, 1, 2, 3, 4]
           else:
               slots = [0]
           unique: list[int] = []
@@ -221,10 +225,15 @@ jobs:
           slots = unique
           if any(slot < 0 or slot > 4 for slot in slots):
               raise SystemExit(f"canary slot must be in 0..4, got {slots}")
+          crate_names: list[str] = []
+          for part in crates.replace(",", " ").split():
+              if part and part not in crate_names:
+                  crate_names.append(part)
           enabled = bool(slots)
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
               fh.write(f"enabled={'true' if enabled else 'false'}\n")
               fh.write(f"slots={','.join(str(slot) for slot in slots)}\n")
+              fh.write(f"crates={' '.join(crate_names)}\n")
               fh.write(f"matrix={json.dumps({'slot': slots})}\n")
         shell: python
   canary-plan:
@@ -283,7 +292,7 @@ jobs:
       warmup_slot: ${{ matrix.slot }}
       canary: true
       canary_slots: ${{ needs.canary-slots.outputs.slots }}
-      canary_crates: ${{ inputs.canary_crates }}
+      canary_crates: ${{ needs.canary-slots.outputs.crates }}
     secrets: inherit
   # rust_* warmup owns all 5 public macos-15 slots, striped across the
   # planner's crate2nix dependency layers. Packages inventory waits so it

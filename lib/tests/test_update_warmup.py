@@ -10,6 +10,7 @@ from lib.update.ci.shard_plan import ClosureShard
 from lib.update.ci.warmup import (
     MAX_SHARD_LOCAL_BUILDS,
     RUST_WARMUP_SLOTS,
+    SETTINGS_MEMBER_CRATES,
     WARMUP_DRVS_CACHE_INFO,
     WARMUP_DRVS_NAME,
     WARMUP_DRVS_ROOTS,
@@ -21,6 +22,7 @@ from lib.update.ci.warmup import (
     _store_output_rest,
     assert_force_local_dry_run,
     assert_local_build_threshold,
+    canary_crate_warmup_paths,
     classify_slot_warmup_will_be_built,
     compiler_input_drvs,
     darwin_output_paths,
@@ -50,6 +52,7 @@ from lib.update.ci.warmup import (
     nix_store_argv_has_operation,
     parse_canary_crates,
     parse_canary_slots,
+    parse_kick_canary_crates,
     parse_kick_canary_slots,
     partition_agent_ui_drvs,
     partition_compiler_input_drvs,
@@ -75,6 +78,7 @@ from lib.update.ci.warmup import (
     write_warmup_plan,
 )
 from lib.update.derivation_validation import RootClosureManifest
+from lib.update.paths import REPO_ROOT
 
 
 def _manifest() -> RootClosureManifest:
@@ -962,6 +966,77 @@ def test_parse_canary_slots_and_crates() -> None:
     assert parse_kick_canary_slots("canary-slots: 4 4 3\n") == (4, 3)
     with pytest.raises(WarmupError, match="0..4"):
         parse_kick_canary_slots("canary-slots: 5\n")
+    assert parse_kick_canary_crates("# comment\ncanary-slots: 3,4\n") == ()
+    assert parse_kick_canary_crates(
+        "canary-crates: settings settings_content settings\n"
+        "canary-slots: 0\n"
+        "2026-10-10T18:40:00Z\n"
+    ) == ("settings", "settings_content")
+    assert parse_kick_canary_crates("canary-crates: settings_json, settings_macros\n") == (
+        "settings_json",
+        "settings_macros",
+    )
+    kick = (REPO_ROOT / ".github" / "update-kick").read_text(encoding="utf-8")
+    assert parse_kick_canary_crates(kick) == SETTINGS_MEMBER_CRATES
+    assert parse_kick_canary_slots(kick) == (0,)
+
+
+def test_canary_crate_warmup_paths_reads_every_layer() -> None:
+    """Named-crate canary must not filter to the slot stripe.
+
+    rust_settings lives on slot 3 of its layer. A slot-0 stripe would
+    miss it; #1269's slot-3/4 canary still never reached it.
+    """
+    other = "/nix/store/otheraaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-0.1.0"
+    content = "/nix/store/ma14flyg1v5b4vhinb2l0klw1xmdg9nz-rust_settings_content-0.1.0"
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    filler = (
+        "/nix/store/fill0aaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_collections-0.1.0",
+        "/nix/store/fill1aaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_util-0.1.0",
+        "/nix/store/fill2aaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_fs-0.1.0",
+        "/nix/store/fill3aaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_paths-0.1.0",
+    )
+    layers = (
+        (other, filler[0], filler[1], filler[2], filler[3]),
+        (filler[0], filler[1], filler[2], content, filler[3]),
+        (filler[0], filler[1], filler[2], settings, filler[3]),
+    )
+    assert slot_warmup_paths(layers, 0) == (other, filler[0], filler[0])
+    assert settings not in slot_warmup_paths(layers, 0)
+    assert settings in slot_warmup_paths(layers, 3)
+    assert canary_crate_warmup_paths(layers, ("settings", "settings_content")) == (
+        content,
+        settings,
+    )
+    assert canary_crate_warmup_paths(layers, ()) == ()
+
+
+def test_1269_slot3_settings_svh_mix_under_fatal_limit() -> None:
+    """#1269 slot 3: rust_settings was 6 local + Cachix content cluster.
+
+    Hosted job 114266601834: ``these 6 derivations will be built``
+    (num_cpus, trash, paths, seahash, ec4rs, settings) and 225 fetched
+    including rust_settings_content/_json/_macros from gkze, then local
+    rust_settings E0463/E0432. Missing crate2nix deps would not fetch
+    those rlibs. This workspace cannot ``nix build`` aarch64-darwin
+    rust_settings; the hosted dry-run plus force-local classification
+    is the proof.
+    """
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0.drv"
+    content = "/nix/store/ma14flyg1v5b4vhinb2l0klw1xmdg9nz-rust_settings_content-0.1.0.drv"
+    settings_json = (
+        "/nix/store/jsonaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_settings_json-0.1.0.drv"
+    )
+    macros = (
+        "/nix/store/macroaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_settings_macros-0.1.0.drv"
+    )
+    assert is_settings_family_store_path(settings)
+    assert is_settings_family_store_path(content)
+    assert is_settings_family_store_path(settings_json)
+    assert is_settings_family_store_path(macros)
+    assert is_svh_sensitive_store_path(settings)
+    assert is_force_local_allowed_build(settings)
+    assert WARMUP_FATAL_BUILD_LIMIT >= 6
 
 
 def test_1268_slot_others_defer_leaf_packages_with_dry_run_counts() -> None:

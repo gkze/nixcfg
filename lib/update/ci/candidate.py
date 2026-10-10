@@ -46,12 +46,12 @@ from lib.update.ci.warmup import (
     WarmupError,
     WarmupPlan,
     assert_force_local_dry_run,
+    canary_crate_warmup_paths,
     compiler_input_drvs,
     export_warmup_drvs,
     extension_host_family_warmup_outputs,
     import_warmup_drvs,
     is_extension_host_family_store_path,
-    is_named_rust_crate_store_path,
     is_rust_extension_host_store_path,
     is_rust_language_models_store_path,
     language_models_input_drvs,
@@ -703,6 +703,26 @@ def _merge_settings_family(
     )
 
 
+def _canary_warmup_selection() -> tuple[tuple[int, ...], tuple[str, ...]]:
+    """Read canary slot/crate env; unnamed canary defaults to slot 0 only."""
+    slots = parse_canary_slots(os.environ.get("NIXCFG_CANARY_SLOTS", ""))
+    crates = parse_canary_crates(os.environ.get("NIXCFG_CANARY_CRATES", ""))
+    if os.environ.get("NIXCFG_CANARY") == "true" and not slots:
+        slots = (0,)
+    return slots, crates
+
+
+def _canary_or_slot_paths(
+    plan: WarmupPlan,
+    warmup_slot: int,
+    requested_crates: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Named crates come from every rust layer; otherwise use the slot stripe."""
+    if requested_crates:
+        return canary_crate_warmup_paths(plan.rust_layers, requested_crates)
+    return slot_warmup_paths(plan.rust_layers, warmup_slot)
+
+
 def _realize_rust_warmup(
     warmup_plan: Path,
     warmup_slot: int,
@@ -710,27 +730,11 @@ def _realize_rust_warmup(
     flake_root: Path,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     """Realize one rust-warmup stripe, skipping paths already in gkze."""
-    requested_slots = parse_canary_slots(os.environ.get("NIXCFG_CANARY_SLOTS", ""))
-    requested_crates = parse_canary_crates(os.environ.get("NIXCFG_CANARY_CRATES", ""))
-    if (
-        os.environ.get("NIXCFG_CANARY") == "true"
-        and not requested_slots
-        and not requested_crates
-    ):
-        requested_slots = (0,)
+    requested_slots, requested_crates = _canary_warmup_selection()
     if requested_slots and warmup_slot not in requested_slots:
         return ()
     plan = load_warmup_plan(warmup_plan)
-    slot_paths = slot_warmup_paths(plan.rust_layers, warmup_slot)
-    if requested_crates:
-        slot_paths = tuple(
-            path
-            for path in slot_paths
-            if any(
-                is_named_rust_crate_store_path(path, crate)
-                for crate in requested_crates
-            )
-        )
+    slot_paths = _canary_or_slot_paths(plan, warmup_slot, requested_crates)
     missing = skip_cached_warmup_paths(
         slot_paths,
         present=check_path_in_cachix,

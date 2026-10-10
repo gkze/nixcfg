@@ -1149,19 +1149,24 @@ def _assert_canary_jobs(workflow_jobs: dict) -> None:
     assert canary["with"]["warmup_artifact"] == "canary-plan"
     assert canary["with"]["scope"] == "rust-warmup"
     assert canary["with"]["canary_slots"] == ("${{ needs.canary-slots.outputs.slots }}")
+    assert canary["with"]["canary_crates"] == (
+        "${{ needs.canary-slots.outputs.crates }}"
+    )
     assert "outputs.enabled" in canary["if"]
     slots = workflow_jobs["canary-slots"]
     assert "github.event_name == 'push'" in slots["if"]
     assert "workflow_dispatch" in slots["if"]
     assert "inputs.canary_warm_rust" in slots["if"]
     assert slots["outputs"]["enabled"] == "${{ steps.slots.outputs.enabled }}"
+    assert slots["outputs"]["crates"] == "${{ steps.slots.outputs.crates }}"
     slot_step = next(step for step in slots["steps"] if step.get("id") == "slots")
     assert slot_step["env"]["CANARY_CRATES"] == "${{ inputs.canary_crates }}"
     assert slot_step["env"]["EVENT_NAME"] == "${{ github.event_name }}"
     assert "update-kick" in slot_step["run"]
     assert "canary-slots:" in slot_step["run"]
-    assert "elif crates:" in slot_step["run"]
-    assert "[0, 1, 2, 3, 4]" in slot_step["run"]
+    assert "canary-crates:" in slot_step["run"]
+    assert "if crates:" in slot_step["run"]
+    assert "[0, 1, 2, 3, 4]" not in slot_step["run"]
     plan = workflow_jobs["canary-plan"]
     assert plan["needs"] == ["canary-slots"]
     assert "outputs.enabled" in plan["if"]
