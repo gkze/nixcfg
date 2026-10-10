@@ -62,7 +62,8 @@ already contains:
 | `4dc53c2c` | Kick that queued `38019308787` (#1262); terminal failure 04:38:23Z |
 | `ce38e78f` | `--no-substitute` family after rustc inputs; nightly waits |
 | `8c3c98fe` | Kick that queued `38026041776` (#1263); George cancelled ~06:58Z |
-| this head | Substitute full non-family requisites; `--no-substitute` rust_* only |
+| `a8ac17ab` | Substitute full non-family requisites; `--no-substitute` rust_* only |
+| this head | Kick that queues the narrower-rebuild Update |
 
 #222 is **closed as superseded** (2026-10-08T21:40:26Z). The rust_zed fix and
 5-wide split live on this branch, not on `cursor/fix-zed-out-lib-cycle-6614`.
