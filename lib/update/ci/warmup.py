@@ -945,6 +945,42 @@ def is_extension_host_family_store_path(path: str) -> bool:
     )
 
 
+# #1269 slot 3: rust_settings compiled locally against Cachix
+# rust_settings_content / _json / _macros and E0463'd (nixpkgs#482646).
+SETTINGS_MEMBER_CRATES = (
+    "settings",
+    "settings_content",
+    "settings_json",
+    "settings_macros",
+)
+
+
+def is_settings_family_store_path(path: str) -> bool:
+    """Return whether *path* is a rust_settings SVH-family crate."""
+    return any(
+        is_named_rust_crate_store_path(path, crate) for crate in SETTINGS_MEMBER_CRATES
+    )
+
+
+def partition_settings_family_drvs(
+    drvs: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Split rust_settings* out of others so they force-local together."""
+    others: list[str] = []
+    settings: list[str] = []
+    for drv in dict.fromkeys(drvs):
+        if is_settings_family_store_path(drv):
+            settings.append(drv)
+        else:
+            others.append(drv)
+    return tuple(others), tuple(settings)
+
+
+def settings_family_warmup_outputs(layers: Sequence[Sequence[str]]) -> tuple[str, ...]:
+    """Return rust_settings-family outputs from every warmup layer."""
+    return _warmup_outputs_matching(layers, is_settings_family_store_path)
+
+
 def is_rust_extension_host_store_path(path: str) -> bool:
     """Return whether *path* is crate2nix ``rust_extension_host``."""
     return is_named_rust_crate_store_path(path, "extension_host")
@@ -996,6 +1032,7 @@ def is_svh_sensitive_store_path(path: str) -> bool:
     """Return whether substituting *path* can mix extension_host-family SVHs."""
     return (
         is_extension_host_family_store_path(path)
+        or is_settings_family_store_path(path)
         or is_rust_zed_store_path(path)
         or is_zed_editor_nightly_store_path(path)
         or is_rust_agent_ui_store_path(path)

@@ -40,9 +40,11 @@ from lib.update.ci.shard_plan import (
 )
 from lib.update.ci.warmup import (
     EXTENSION_HOST_MEMBER_CRATES,
+    SETTINGS_MEMBER_CRATES,
     WARMUP_DRVS_NAME,
     WARMUP_PLAN_NAME,
     WarmupError,
+    WarmupPlan,
     assert_force_local_dry_run,
     compiler_input_drvs,
     export_warmup_drvs,
@@ -61,11 +63,13 @@ from lib.update.ci.warmup import (
     partition_compiler_input_drvs,
     partition_rust_warmup_others,
     partition_rust_zed_drvs,
+    partition_settings_family_drvs,
     partition_zed_editor_nightly_drvs,
     plan_darwin_warmup,
     raise_if_warmup_fatal,
     realize_warmup_outputs,
     rust_crate_input_drvs,
+    settings_family_warmup_outputs,
     skip_cached_warmup_paths,
     slot_warmup_paths,
     unique_drvs_for_outputs,
@@ -673,6 +677,32 @@ def _partition_rust_warmup_stripe(
     return others, agent_ui, rust_zed, zed_nightly
 
 
+def _settings_plan_drvs(settings: tuple[str, ...], plan: WarmupPlan) -> tuple[str, ...]:
+    """Map rust_layers rust_settings* onto .drv paths, including Cachix hits."""
+    if not settings:
+        return ()
+    planned = settings_family_warmup_outputs(plan.rust_layers)
+    return unique_drvs_for_outputs(planned, plan.output_drvs) if planned else ()
+
+
+def _merge_settings_family(
+    family: tuple[str, ...],
+    settings: tuple[str, ...],
+    plan: WarmupPlan,
+) -> tuple[str, ...]:
+    """Add rust_settings* from the plan and imported inputDrvs to *family*."""
+    if not settings:
+        return family
+    return tuple(
+        dict.fromkeys((
+            *family,
+            *_settings_plan_drvs(settings, plan),
+            *settings,
+            *rust_crate_input_drvs(settings, SETTINGS_MEMBER_CRATES),
+        ))
+    )
+
+
 def _realize_rust_warmup(
     warmup_plan: Path,
     warmup_slot: int,
@@ -707,14 +737,17 @@ def _realize_rust_warmup(
     )
     drvs = unique_drvs_for_outputs(missing, plan.output_drvs)
     others, agent_ui, rust_zed, zed_nightly = _partition_rust_warmup_stripe(drvs)
+    others, settings = partition_settings_family_drvs(others)
     # Update #1258/#1263: Darwin rustc intern of a Cachix
     # language_models rlib is bare E0463 (nixpkgs#482646). rust_zed
     # then E0460s when target/deps/libextension_host is a newer SVH
-    # than substituted settings_ui. #1263 `--no-substitute` on
-    # extension_host rebuilt 406 bootstrap drvs (bmake 404) because
-    # only direct refs were `--fallback`'d. Substitute the full
-    # non-family `--requisites`` with `--max-jobs 0`, dry-run gate
-    # the will-be-built set, then `--no-substitute` rust_* only.
+    # than substituted settings_ui. #1269 slot 3: rust_settings
+    # E0463'd against Cachix rust_settings_content. #1263
+    # `--no-substitute` on extension_host rebuilt 406 bootstrap
+    # drvs (bmake 404) because only direct refs were `--fallback`'d.
+    # Substitute the full non-family `--requisites`` with
+    # `--max-jobs 0`, dry-run gate the will-be-built set, then
+    # `--no-substitute` rust_* only.
     zed_slot = bool(rust_zed or zed_nightly)
     family: tuple[str, ...] = ()
     if zed_slot:
@@ -738,7 +771,7 @@ def _realize_rust_warmup(
             else ()
         )
     import_warmup_drvs(
-        tuple(dict.fromkeys((*family, *drvs))),
+        tuple(dict.fromkeys((*family, *drvs, *_settings_plan_drvs(settings, plan)))),
         warmup_plan.with_name(WARMUP_DRVS_NAME),
     )
     # Planned family is only the still-missing warmup stripe. Cached
@@ -760,6 +793,7 @@ def _realize_rust_warmup(
         if not family:
             msg = "agent_ui drv has no rust_language_models input"
             raise WarmupError(msg)
+    family = _merge_settings_family(family, settings, plan)
     failures: list[validation.DerivationValidationFailure] = []
     if others:
         failures.extend(

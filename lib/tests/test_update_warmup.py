@@ -40,7 +40,9 @@ from lib.update.ci.warmup import (
     is_rust_language_models_store_path,
     is_rust_zed_store_path,
     is_safe_rust_warmup_other,
+    is_settings_family_store_path,
     is_source_fetch_store_path,
+    is_svh_sensitive_store_path,
     is_zed_editor_nightly_store_path,
     language_models_input_drvs,
     language_models_warmup_outputs,
@@ -53,12 +55,14 @@ from lib.update.ci.warmup import (
     partition_compiler_input_drvs,
     partition_rust_warmup_others,
     partition_rust_zed_drvs,
+    partition_settings_family_drvs,
     partition_zed_editor_nightly_drvs,
     plan_darwin_warmup,
     query_drv_outputs,
     raise_if_warmup_fatal,
     realize_warmup_outputs,
     rust_warmup_layers,
+    settings_family_warmup_outputs,
     shard_remaining_outputs,
     skip_cached_warmup_paths,
     slot_warmup_paths,
@@ -810,6 +814,21 @@ def test_rust_agent_ui_partition_and_realize_print_logs(tmp_path: Path) -> None:
     assert _store_output_rest("not-a-store") == "a-store"
     assert partition_agent_ui_drvs((models, agent, agent)) == ((models,), (agent,))
     assert partition_rust_zed_drvs((models, zed, zed)) == ((models,), (zed,))
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0.drv"
+    content = "/nix/store/ma14flyg1v5b4vhinb2l0klw1xmdg9nz-rust_settings_content-0.1.0"
+    settings_ui = "/nix/store/setuiaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_settings_ui-0.1.0"
+    assert is_settings_family_store_path(settings)
+    assert is_settings_family_store_path(content)
+    assert not is_settings_family_store_path(settings_ui)
+    assert is_svh_sensitive_store_path(settings)
+    assert partition_settings_family_drvs((zed, settings, content, settings)) == (
+        (zed,),
+        (settings, content),
+    )
+    assert settings_family_warmup_outputs(((content,), (settings, zed))) == (
+        content,
+        settings,
+    )
 
     realize_calls: list[list[str]] = []
 
