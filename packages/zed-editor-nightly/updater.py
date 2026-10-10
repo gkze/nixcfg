@@ -24,6 +24,8 @@ class ZedEditorNightlyUpdater(Crate2NixMetadataUpdater):
 
     name = "zed-editor-nightly"
     input_name = "zed"
+    # Root rust-overlay is rev-pinned after #1265; this stays a no-op until
+    # that nightly rustc is in gkze.cachix.org and the flake.nix pin lifts.
     additional_input_names = ("rust-overlay",)
     _MANIFEST_PATH = "crates/zed/Cargo.toml"
 

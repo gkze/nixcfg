@@ -33,6 +33,7 @@ from lib.update.flake import (
     resolve_root_input_node,
     update_flake_input,
 )
+from lib.update.paths import REPO_ROOT
 from lib.update.refs import (
     FlakeInputRef,
     RefTaskOptions,
@@ -64,6 +65,8 @@ if TYPE_CHECKING:
 
     from lib.update.config import UpdateConfig
     from lib.update.process import RunCommandOptions
+
+_CACHED_RUST_OVERLAY = "4ca2963243427cb86bd6b4d9ca6010db0162a619"
 
 
 def _run_async[T](
@@ -107,12 +110,7 @@ def test_flake_helpers_and_fetch_expr_error_paths(
     assert version_from_ref == "v9.9.9"
 
     version_from_original_rev = get_flake_input_version(
-        cast(
-            "FlakeLockNode",
-            SimpleNamespace(
-                original=SimpleNamespace(ref=None, rev="cafebabe"), locked=None
-            ),
-        )
+        FlakeLockNode(original=OriginalRef(type="github", rev="cafebabe"))
     )
     assert version_from_original_rev == "cafebabe"
 
@@ -279,6 +277,18 @@ def test_load_flake_lock_cache_can_be_invalidated(
     third = load_flake_lock()
     assert third.nodes["demo"] == "b"
     invalidate_flake_lock()
+
+
+def test_root_rust_overlay_is_rev_pinned_to_cached_nightly() -> None:
+    """#1265 floated rust-overlay nightly; keep the last substitutable rustc pin."""
+    lock = FlakeLock.from_file(REPO_ROOT / "flake.lock")
+    node, follows = resolve_root_input_node(lock, "rust-overlay")
+    assert follows is None
+    assert node is not None
+    assert node.original is not None
+    assert node.locked is not None
+    assert node.original.rev == _CACHED_RUST_OVERLAY
+    assert node.locked.rev == _CACHED_RUST_OVERLAY
 
 
 def test_refs_version_parsing_and_selection_helpers() -> None:

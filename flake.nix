@@ -113,7 +113,14 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     rust-overlay = {
-      url = "github:oxalica/rust-overlay";
+      # #1265 floated rust-overlay 8afee9fa→e90fafa7 (oxalica "manifest:
+      # update" for nightly 2026-10-10). Plan-darwin-closures jumped from
+      # warmup=4 / rustc-1.98.1 substitutable (#1264, 4ca29632) to
+      # warmup=7812 (6515 rust_* plus file_cmds/dummyBuild). rust-warmup
+      # then printed 529/634/1762 will-be-built on vendor-registry /
+      # vendor-cargo-deps / goose-cli. Unpin after that nightly rustc is
+      # in gkze.cachix.org.
+      url = "github:oxalica/rust-overlay/4ca2963243427cb86bd6b4d9ca6010db0162a619";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     scratch = {
