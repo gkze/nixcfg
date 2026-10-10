@@ -5,4 +5,4 @@
 # One macos-15 runner; realize these crates from every rust layer.
 canary-crates: settings settings_content settings_json settings_macros
 canary-slots: 0
-2026-10-10T19:14:00Z pbzx-helper-after-1270-canary
+2026-10-10T19:32:36Z retry-substitute-helpers-after-cpio
