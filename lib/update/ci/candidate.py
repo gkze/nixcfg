@@ -631,6 +631,22 @@ def _retry_substitute_only_helpers(
     return tuple(dict.fromkeys(retry))
 
 
+def _is_deferred_compiler_rust_miss(
+    failure: validation.DerivationValidationFailure,
+) -> bool:
+    """Return whether a substitute-only rust_* miss should force-local later.
+
+    38088756238 substituted rustc/stdenv, then --max-jobs 0'd 80 third-party
+    rust_* (lsp-types, but-*, gix-*) that were not in gkze. Those
+    ``will be built`` lines aborted before ``--no-substitute``. rustc /
+    stdenv misses stay fatal. Missing rust_* compile with the family.
+    """
+    drv = failure.installable.removesuffix("^*")
+    if is_compiler_must_substitute_store_path(drv):
+        return False
+    return is_crate2nix_rust_output(drv)
+
+
 def _realize_compiler_substitutes(
     substitute: tuple[str, ...],
     *,
@@ -639,9 +655,9 @@ def _realize_compiler_substitutes(
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     """``--max-jobs 0`` first; retry cache-miss 1-drv Unix helpers locally.
 
-    Keep rustc/stdenv/rust_* failures. Do not overwrite them with a
-    successful helper retry — that would let force-local run after a
-    bootstrap miss.
+    Keep rustc/stdenv failures. Defer crate2nix rust_* cache misses so
+    force-local can compile them with the SVH family. Do not overwrite
+    a rustc miss with a successful helper retry.
     """
     failures = realize_warmup_outputs(
         substitute,
@@ -654,11 +670,12 @@ def _realize_compiler_substitutes(
         failure
         for failure in failures
         if failure.installable.removesuffix("^*") not in retry
+        and not _is_deferred_compiler_rust_miss(failure)
     )
     if stubborn:
         return failures
     if not retry:
-        return failures
+        return ()
     return realize_warmup_outputs(
         retry,
         flake_root=flake_root,
