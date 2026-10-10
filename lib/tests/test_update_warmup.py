@@ -972,7 +972,9 @@ def test_parse_canary_slots_and_crates() -> None:
         "canary-slots: 0\n"
         "2026-10-10T18:40:00Z\n"
     ) == ("settings", "settings_content")
-    assert parse_kick_canary_crates("canary-crates: settings_json, settings_macros\n") == (
+    assert parse_kick_canary_crates(
+        "canary-crates: settings_json, settings_macros\n"
+    ) == (
         "settings_json",
         "settings_macros",
     )
@@ -1023,7 +1025,9 @@ def test_1269_slot3_settings_svh_mix_under_fatal_limit() -> None:
     is the proof.
     """
     settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0.drv"
-    content = "/nix/store/ma14flyg1v5b4vhinb2l0klw1xmdg9nz-rust_settings_content-0.1.0.drv"
+    content = (
+        "/nix/store/ma14flyg1v5b4vhinb2l0klw1xmdg9nz-rust_settings_content-0.1.0.drv"
+    )
     settings_json = (
         "/nix/store/jsonaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_settings_json-0.1.0.drv"
     )
