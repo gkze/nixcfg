@@ -1237,6 +1237,20 @@ def test_zed_family_policy_is_atomic_all_or_force_local() -> None:
     assert rustc_generation_ids((f"{settings}.drv",), run=query_default) == (
         rust_default,
     )
+    wrapper = "/nix/store/sqbzbgwqqn62fcwayrm0yk3778fdhmyj-rustc-wrapper-1.98.1.drv"
+
+    def query_hosted(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args, 0, f"{wrapper}\n{rust_default}\n{clang}\n", ""
+        )
+
+    assert rustc_generation_ids((f"{settings}.drv",), run=query_hosted) == (wrapper,)
+    assert (
+        zed_family_realize_policy(family, present=lambda _p: True, rustc_ids=(wrapper,))
+        == "substitute"
+    )
 
 
 def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:

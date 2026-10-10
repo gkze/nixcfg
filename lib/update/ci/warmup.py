@@ -1113,17 +1113,25 @@ def rustc_generation_ids(
     *,
     run: _StoreRun | None = None,
 ) -> tuple[str, ...]:
-    """Return rustc / rust-default ``.drv`` references of *drvs*, first-seen.
+    """Return one rustc generation key per distinct compiler ``.drv``.
 
-    Hosted Darwin crate2nix uses ``rust-default-1.98.1``, not ``rustc-``.
-    Matching only ``rustc-`` left the generation-mix guard a no-op.
+    Hosted crate2nix references both ``rustc-wrapper-1.98.1`` and
+    ``rust-default-1.98.1``. Those are one toolchain (38086011709
+    false-mixed them). Prefer wrapper, then rustc, then rust-default.
+    Distinct wrapper hashes still fail closed.
     """
-    found: list[str] = []
+    wrappers: list[str] = []
+    rustcs: list[str] = []
+    defaults: list[str] = []
     for path in _query_drv_graph(drvs, "references", run=run):
         rest = _store_output_rest(path).removesuffix(".drv")
-        if rest.startswith(("rustc-", "rust-default-")):
-            found.append(path)
-    return tuple(dict.fromkeys(found))
+        if rest.startswith("rustc-wrapper-"):
+            wrappers.append(path)
+        elif rest.startswith("rustc-"):
+            rustcs.append(path)
+        elif rest.startswith("rust-default-"):
+            defaults.append(path)
+    return tuple(dict.fromkeys(wrappers or rustcs or defaults))
 
 
 def is_rust_extension_host_store_path(path: str) -> bool:

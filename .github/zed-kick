@@ -3,4 +3,4 @@
 # Do not kick while validate-darwin-warm-rust owns all five macos-15 runners.
 # canary-crates stay on Update; this job realizes rust_zed + nightly + SVH family.
 # Feature-branch kicks restore the parent Update plan artifact.
-2026-10-10T21:00:00Z zed-family-tree-sitter-not-all-rust
+2026-10-10T21:12:00Z zed-family-rustc-wrapper-same-gen
