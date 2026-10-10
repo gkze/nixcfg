@@ -50,6 +50,7 @@ from lib.update.ci.warmup import (
     is_svh_sensitive_store_path,
     is_tree_sitter_family_store_path,
     is_zed_editor_nightly_store_path,
+    is_zed_workspace_crate_store_path,
     language_models_input_drvs,
     language_models_warmup_outputs,
     load_warmup_plan,
@@ -906,6 +907,10 @@ def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
     tree_sitter = (
         "/nix/store/1zsfiw8m72a6ql2wx3f5bpq3mn7vnw77-rust_tree-sitter-0.27.0.drv"
     )
+    git_ui_core = (
+        "/nix/store/vr7hj25vd3073rylxr7p82jl02i9gpaq-rust_git_ui_core-0.1.0.drv"
+    )
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229.drv"
     assert is_zed_editor_nightly_store_path(nightly)
     assert not is_zed_editor_nightly_store_path(src)
     assert partition_zed_editor_nightly_drvs((models, nightly, nightly)) == (
@@ -921,12 +926,26 @@ def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
         return subprocess.CompletedProcess(
             args,
             0,
-            "\n".join((rustc, models, nightly, bmake, src, tree_sitter)),
+            "\n".join((
+                rustc,
+                models,
+                nightly,
+                bmake,
+                src,
+                tree_sitter,
+                git_ui_core,
+                serde,
+            )),
             "",
         )
 
-    assert compiler_input_drvs((zed,), run=query_run) == (rustc, bmake, src)
-    assert rust_compile_input_drvs((zed,), run=query_run) == (models, tree_sitter)
+    assert compiler_input_drvs((zed,), run=query_run) == (rustc, bmake, src, serde)
+    assert rust_compile_input_drvs((zed,), run=query_run) == (
+        models,
+        tree_sitter,
+        git_ui_core,
+        serde,
+    )
     assert partition_compiler_input_drvs((rustc, bmake, src, bmake)) == (
         (rustc,),
         (bmake, src),
@@ -1190,6 +1209,44 @@ def test_1270_canary_patchutils_is_local_compiler_helper() -> None:
     )
 
 
+def test_zed_workspace_0_1_0_crates_are_svh_not_compiler_inputs() -> None:
+    """38086720924: rust_git_ui_core --max-jobs 0 built the 37 workspace.
+
+    Workspace rust_*-0.1.0 force-local with the family. crates.io
+    rust_serde-1.0.229 / rust_lsp-types-0.95.1 stay compiler substitutes.
+    rust_foo-10.1.0 must not match the 0.1.0 marker.
+    """
+    git_ui_core = (
+        "/nix/store/vr7hj25vd3073rylxr7p82jl02i9gpaq-rust_git_ui_core-0.1.0.drv"
+    )
+    git_ui_lib = (
+        "/nix/store/vr7hj25vd3073rylxr7p82jl02i9gpaq-rust_git_ui_core-0.1.0-lib"
+    )
+    gpui = "/nix/store/otheraaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-0.1.0"
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229.drv"
+    lsp_types = (
+        "/nix/store/lspaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_lsp-types-0.95.1.drv"
+    )
+    ten = "/nix/store/tenaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_foo-10.1.0.drv"
+    tree_sitter = (
+        "/nix/store/1zsfiw8m72a6ql2wx3f5bpq3mn7vnw77-rust_tree-sitter-0.27.0.drv"
+    )
+    rust_zed = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0.drv"
+    assert is_zed_workspace_crate_store_path(git_ui_core)
+    assert is_zed_workspace_crate_store_path(git_ui_lib)
+    assert is_zed_workspace_crate_store_path(gpui)
+    assert is_svh_sensitive_store_path(git_ui_core)
+    assert is_force_local_allowed_build(git_ui_core)
+    assert not is_zed_workspace_crate_store_path(serde)
+    assert not is_zed_workspace_crate_store_path(lsp_types)
+    assert not is_zed_workspace_crate_store_path(ten)
+    assert not is_svh_sensitive_store_path(serde)
+    assert not is_zed_workspace_crate_store_path(tree_sitter)
+    assert is_svh_sensitive_store_path(tree_sitter)
+    assert not is_zed_workspace_crate_store_path(rust_zed)
+    assert is_svh_sensitive_store_path(rust_zed)
+
+
 def test_zed_family_policy_is_atomic_all_or_force_local() -> None:
     """Mixed Cachix presence must not substitute a subset of the family."""
     settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
@@ -1218,8 +1275,14 @@ def test_zed_family_policy_is_atomic_all_or_force_local() -> None:
     with pytest.raises(WarmupError, match="mixes generations"):
         assert_zed_family_realize_set(family, (settings,))
     tree_sitter = "/nix/store/1zsfiw8m72a6ql2wx3f5bpq3mn7vnw77-rust_tree-sitter-0.27.0"
-    layers = ((content,), (tree_sitter,), (settings,))
-    assert zed_family_warmup_outputs(layers) == (content, tree_sitter, settings)
+    git_ui_core = "/nix/store/vr7hj25vd3073rylxr7p82jl02i9gpaq-rust_git_ui_core-0.1.0"
+    layers = ((content,), (tree_sitter,), (settings,), (git_ui_core,))
+    assert zed_family_warmup_outputs(layers) == (
+        content,
+        tree_sitter,
+        settings,
+        git_ui_core,
+    )
     rustc = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
     rust_default = "/nix/store/dq17vrzvx74ismp4s6xicxirkmlshw1b-rust-default-1.98.1.drv"
     clang = "/nix/store/cccccccccccccccccccccccccccccccc-clang-21.1.8.drv"

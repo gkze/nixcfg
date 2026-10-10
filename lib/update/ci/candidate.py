@@ -635,6 +635,7 @@ def _realize_compiler_substitutes(
     substitute: tuple[str, ...],
     *,
     flake_root: Path,
+    progress_source: str = "rust-warmup",
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     """``--max-jobs 0`` first; retry cache-miss 1-drv Unix helpers locally.
 
@@ -645,7 +646,7 @@ def _realize_compiler_substitutes(
     failures = realize_warmup_outputs(
         substitute,
         flake_root=flake_root,
-        progress=_hosted_validation_progress("rust-warmup"),
+        progress=_hosted_validation_progress(progress_source),
         substitute_only=True,
     )
     retry = _retry_substitute_only_helpers(failures)
@@ -661,7 +662,7 @@ def _realize_compiler_substitutes(
     return realize_warmup_outputs(
         retry,
         flake_root=flake_root,
-        progress=_hosted_validation_progress("rust-warmup"),
+        progress=_hosted_validation_progress(progress_source),
     )
 
 
@@ -690,7 +691,7 @@ def _realize_svh_family(
     failures: list[validation.DerivationValidationFailure] = []
     if substitute:
         compiler_failures = _realize_compiler_substitutes(
-            substitute, flake_root=flake_root
+            substitute, flake_root=flake_root, progress_source=progress_source
         )
         failures.extend(compiler_failures)
         if compiler_failures:
@@ -699,7 +700,7 @@ def _realize_svh_family(
         fetch_failures = realize_warmup_outputs(
             fetches,
             flake_root=flake_root,
-            progress=_hosted_validation_progress("rust-warmup"),
+            progress=_hosted_validation_progress(progress_source),
         )
         failures.extend(fetch_failures)
         if fetch_failures:

@@ -2850,6 +2850,35 @@ def test_hosted_validation_streams_nix_logs_to_stderr(
     assert "[derivations] \n" not in err
 
 
+def test_hosted_zed_warmup_progress_keeps_going_past_workspace_family(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38086720924: compiler substitutes logged rust-warmup, so 37 > 32 fatal.
+
+    zed-warmup keep_going uses the 400-drv ceiling. The same 37-drv
+    workspace line must not abort populate when source is zed-warmup.
+    """
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
+    rust = pipeline._hosted_validation_progress("rust-warmup")
+    rust(ValidationCommandStarted("nix build --max-jobs 0 /nix/store/git_ui.drv"))
+    with pytest.raises(WarmupFatalError, match="will-be-built"):
+        rust(
+            ValidationCommandOutput(
+                "nix build --max-jobs 0 /nix/store/git_ui.drv",
+                "these 37 derivations will be built:",
+            )
+        )
+    zed = pipeline._hosted_validation_progress("zed-warmup")
+    zed(ValidationCommandStarted("nix build --max-jobs 0 /nix/store/git_ui.drv"))
+    zed(
+        ValidationCommandOutput(
+            "nix build --max-jobs 0 /nix/store/git_ui.drv",
+            "these 37 derivations will be built:",
+        )
+    )
+    assert "these 37 derivations will be built" in capsys.readouterr().err
+
+
 def test_hosted_warmup_progress_fails_fast_on_fatal_patterns(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

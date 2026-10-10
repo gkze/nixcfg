@@ -1049,10 +1049,11 @@ def settings_family_warmup_outputs(layers: Sequence[Sequence[str]]) -> tuple[str
 def zed_family_warmup_outputs(layers: Sequence[Sequence[str]]) -> tuple[str, ...]:
     """Return the atomic Zed rust_* family from every warmup layer.
 
-    rust_zed, zed-editor-nightly, settings*, tree-sitter, and
-    extension_host* share one rustc intern / SVH generation. skip_cached
-    on a subset is the mix that produced #1269 rust_settings E0463
-    against Cachix content/json and #1270 settings_json vs tree_sitter.
+    rust_zed, zed-editor-nightly, settings*, tree-sitter,
+    rust_*-0.1.0 workspace members, and extension_host* share one
+    rustc intern / SVH generation. skip_cached on a subset is the mix
+    that produced #1269 rust_settings E0463 against Cachix content/json
+    and #1270 settings_json vs tree_sitter.
     """
     return _warmup_outputs_matching(layers, is_svh_sensitive_store_path)
 
@@ -1181,12 +1182,33 @@ def partition_zed_editor_nightly_drvs(
     return tuple(others), tuple(nightly)
 
 
+def is_zed_workspace_crate_store_path(path: str) -> bool:
+    """Return whether *path* is a Zed workspace ``rust_*-0.1.0`` crate.
+
+    38086720924 put ``rust_git_ui_core`` in compiler substitutes. Its
+    --max-jobs 0 closure was the 37 workspace members and tripped the
+    32-drv gate before force-local. crates.io rust_* keep their
+    published versions (serde-1.0.229, lsp-types-0.95.1). The digit
+    guard keeps ``rust_foo-10.1.0`` from matching ``-0.1.0``.
+    """
+    rest = _store_output_rest(path).removesuffix(".drv")
+    if not rest.startswith("rust_"):
+        return False
+    marker = "-0.1.0"
+    index = rest.find(marker)
+    if index <= 0 or rest[index - 1].isdigit():
+        return False
+    version = rest[index + len(marker) :]
+    return version == "" or version.startswith("-")
+
+
 def is_svh_sensitive_store_path(path: str) -> bool:
     """Return whether substituting *path* can mix extension_host-family SVHs."""
     return (
         is_extension_host_family_store_path(path)
         or is_settings_family_store_path(path)
         or is_tree_sitter_family_store_path(path)
+        or is_zed_workspace_crate_store_path(path)
         or is_rust_zed_store_path(path)
         or is_zed_editor_nightly_store_path(path)
         or is_rust_agent_ui_store_path(path)
@@ -1310,7 +1332,7 @@ def compiler_input_drvs(
     ``--max-jobs 0`` so only the SVH-sensitive rust_* compile.
     Excluding every rust_* (eab3998a) made extension_host --no-substitute
     will-be-built 682 on 38083709508. Third-party rust_* stay here;
-    tree-sitter is SVH-sensitive with settings_json.
+    tree-sitter and rust_*-0.1.0 workspace crates are SVH-sensitive.
     """
     return tuple(
         path
