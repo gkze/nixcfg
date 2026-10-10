@@ -1,0 +1,62 @@
+---
+name: Zed Darwin
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: Optional iteration note for the live tail
+        type: string
+        default: ""
+  # workflow_dispatch is unavailable to the Cursor GitHub App token
+  # (HTTP 403). Touching .github/zed-kick on this branch queues one
+  # Zed-only family build. Separate concurrency from Update so a kick
+  # here cannot cancel the no-skip run.
+  push:
+    branches:
+      - cursor/no-skip-darwin-shards-6614
+    paths:
+      - .github/zed-kick
+permissions:
+  contents: read
+concurrency:
+  group: nixcfg-zed-darwin-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  zed-plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Restore current warmup plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIXCFG_CI_STAGE: restore-canary-plan
+          NIXCFG_CANARY_PLAN_DIR: ${{ runner.temp }}/zed-plan
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: zed-plan
+          path: ${{ runner.temp }}/zed-plan
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+  zed-family:
+    needs: zed-plan
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      scope: zed-warmup
+      shard: zed
+      warmup_artifact: zed-plan
+      canary: true
+    secrets: inherit

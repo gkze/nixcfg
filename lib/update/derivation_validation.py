@@ -63,6 +63,7 @@ class DerivationValidationRequest:
     mode: DerivationValidationMode = "eval"
     substitute_only: bool = False
     no_substitute: bool = False
+    keep_going: bool = False
 
 
 @dataclass(frozen=True)
@@ -753,9 +754,13 @@ def _validation_args(
             [
                 "--no-link",
                 *(
-                    []
-                    if request.no_substitute or request.substitute_only
-                    else ["--keep-going"]
+                    ["--keep-going"]
+                    if request.keep_going
+                    else (
+                        []
+                        if request.no_substitute or request.substitute_only
+                        else ["--keep-going"]
+                    )
                 ),
                 *(
                     # Linux VM image inside Darwin roots cannot compile here

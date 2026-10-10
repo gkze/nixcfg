@@ -1146,6 +1146,165 @@ def test_rust_warmup_refuses_force_local_after_rustc_substitute_miss(
     assert realized == [((rustc_drv, unknown_drv), False, False, True)]
 
 
+def test_zed_warmup_force_locals_whole_family_when_cachix_is_mixed(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zed-only cold/mixed path builds every family drv; never a Cachix subset."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+            bool(kwargs.get("keep_going")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        pipeline, "check_path_in_cachix", lambda path: "settings_content" in path
+    )
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline, "rustc_generation_ids", lambda *_a, **_k: ())
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    content = "/nix/store/ma14flyg1v5b4vhinb2l0klw1xmdg9nz-rust_settings_content-0.1.0"
+    rust_zed = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(content, settings, rust_zed),
+            rustLayers=((content,), (settings,), (rust_zed,)),
+            outputDrvs={
+                content: f"{content}.drv",
+                settings: f"{settings}.drv",
+                rust_zed: f"{rust_zed}.drv",
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=3, missing=3, warmup=3, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="zed-warmup", warmup_plan=warmup_plan
+    )
+    assert report.failures == ()
+    force_local = [row for row in realized if row[2]]
+    assert force_local
+    assert all(row[4] for row in force_local)
+    leaves = [row for row in realized if row[0] == (f"{rust_zed}.drv",)]
+    assert leaves == [((f"{rust_zed}.drv",), True, False, False, True)]
+
+
+def test_zed_warmup_substitutes_whole_family_from_one_generation(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cache-hit path substitutes rust_zed + family together, never a mix."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(
+        pipeline,
+        "rustc_generation_ids",
+        lambda *_a, **_k: (
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv",
+        ),
+    )
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    rust_zed = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(settings, rust_zed),
+            rustLayers=((settings,), (rust_zed,)),
+            outputDrvs={settings: f"{settings}.drv", rust_zed: f"{rust_zed}.drv"},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="zed-warmup", warmup_plan=warmup_plan
+    )
+    assert report.failures == ()
+    assert realized == [
+        ((f"{settings}.drv", f"{rust_zed}.drv"), False, False, True),
+    ]
+
+
 def test_rust_warmup_canary_crates_realize_settings_off_slot_stripe(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

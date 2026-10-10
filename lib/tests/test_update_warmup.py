@@ -22,6 +22,7 @@ from lib.update.ci.warmup import (
     _store_output_rest,
     assert_force_local_dry_run,
     assert_local_build_threshold,
+    assert_zed_family_realize_set,
     canary_crate_warmup_paths,
     classify_slot_warmup_will_be_built,
     compiler_input_drvs,
@@ -67,6 +68,7 @@ from lib.update.ci.warmup import (
     raise_if_warmup_fatal,
     realize_warmup_outputs,
     rust_warmup_layers,
+    rustc_generation_ids,
     settings_family_warmup_outputs,
     shard_remaining_outputs,
     skip_cached_warmup_paths,
@@ -78,6 +80,9 @@ from lib.update.ci.warmup import (
     warmup_fatal_line,
     warmup_output_drvs,
     write_warmup_plan,
+    zed_family_cachix_presence,
+    zed_family_realize_policy,
+    zed_family_warmup_outputs,
 )
 from lib.update.derivation_validation import RootClosureManifest
 from lib.update.paths import REPO_ROOT
@@ -1164,6 +1169,44 @@ def test_1270_canary_patchutils_is_local_compiler_helper() -> None:
     )
 
 
+def test_zed_family_policy_is_atomic_all_or_force_local() -> None:
+    """Mixed Cachix presence must not substitute a subset of the family."""
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    content = "/nix/store/ma14flyg1v5b4vhinb2l0klw1xmdg9nz-rust_settings_content-0.1.0"
+    rustc_a = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    rustc_b = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rustc-1.98.1.drv"
+    family = (content, settings)
+    assert zed_family_cachix_presence(family, present=lambda _p: False) == "none"
+    assert zed_family_cachix_presence(family, present=lambda _p: True) == "all"
+    assert (
+        zed_family_cachix_presence(family, present=lambda path: path == content)
+        == "mixed"
+    )
+    assert zed_family_realize_policy(family, present=lambda _p: False) == "force-local"
+    assert zed_family_realize_policy(family, present=lambda _p: True) == "substitute"
+    assert (
+        zed_family_realize_policy(family, present=lambda path: path == content)
+        == "force-local"
+    )
+    with pytest.raises(WarmupError, match="rustc generations"):
+        zed_family_realize_policy(
+            family, present=lambda _p: True, rustc_ids=(rustc_a, rustc_b)
+        )
+    assert_zed_family_realize_set(family, family)
+    assert_zed_family_realize_set(family, ())
+    with pytest.raises(WarmupError, match="mixes generations"):
+        assert_zed_family_realize_set(family, (settings,))
+    layers = ((content,), (settings,))
+    assert zed_family_warmup_outputs(layers) == family
+    rustc = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    clang = "/nix/store/cccccccccccccccccccccccccccccccc-clang-21.1.8.drv"
+
+    def query(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, f"{rustc}\n{clang}\n", "")
+
+    assert rustc_generation_ids((f"{settings}.drv",), run=query) == (rustc,)
+
+
 def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:
     """#1270: --max-jobs 0 Cannot-build is retried; SVH and rustc counts stay fatal."""
     cannot = "error: Cannot build '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cpio-2.15.drv'."
@@ -1180,6 +1223,10 @@ def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:
     assert warmup_fatal_line(huge, substitute_only=True) is not None
     with pytest.raises(WarmupFatalError, match="will-be-built"):
         raise_if_warmup_fatal(huge, substitute_only=True)
+    svh_keep = "error[E0463]: can't find crate for `settings_content`"
+    assert warmup_fatal_line(svh_keep, keep_going=True) is None
+    raise_if_warmup_fatal(svh_keep, keep_going=True)
+    assert warmup_fatal_line(huge, keep_going=True) is not None
 
 
 def test_realize_warmup_substitute_only_is_max_jobs_zero(tmp_path: Path) -> None:

@@ -90,3 +90,34 @@ def test_zed_settings_crate2nix_depends_on_content_cluster() -> None:
             ).value
             == crate
         )
+
+
+def test_zed_workspace_svh_family_matches_pinned_cargo_toml() -> None:
+    """Pinned Zed a34a062 Cargo.toml workspace deps are in Cargo.nix.
+
+    settings → content/json/macros; extension_host → settings;
+    language_models → extension_host + settings. Missing crate2nix
+    edges are not the #1269/#1261 class; those were Cachix SVH mixes.
+    """
+    host = set(
+        _package_ids(
+            expect_instance(
+                expect_binding(
+                    _internal_crate("extension_host").values, "dependencies"
+                ).value,
+                NixList,
+            )
+        )
+    )
+    models = set(
+        _package_ids(
+            expect_instance(
+                expect_binding(
+                    _internal_crate("language_models").values, "dependencies"
+                ).value,
+                NixList,
+            )
+        )
+    )
+    assert "settings" in host
+    assert {"extension_host", "settings"} <= models

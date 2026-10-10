@@ -169,16 +169,17 @@ class WarmupFatalError(WarmupError):
     """A streamed warmup/root line that must fail the hosted job immediately."""
 
 
-def warmup_fatal_line(line: str, *, substitute_only: bool = False) -> str | None:
+def warmup_fatal_line(
+    line: str, *, substitute_only: bool = False, keep_going: bool = False
+) -> str | None:
     """Return why a live warmup/root log line must fail the job."""
     if "error[E04" in line:
-        return "rustc SVH/crate mismatch"
+        # Zed-only keep_going collects every crate error in one pass.
+        return None if keep_going else "rustc SVH/crate mismatch"
     if "Cannot build" in line:
-        if substitute_only:
-            # --max-jobs 0 cache miss on a 1-drv helper (patchutils/pbzx/cpio).
-            # Caller retries those locally; rustc/stdenv stay substitute-only.
-            return None
-        return "cannot build"
+        # --max-jobs 0 cache miss on a 1-drv helper (patchutils/pbzx/cpio).
+        # keep_going surfaces every broken Zed crate instead of one/run.
+        return None if substitute_only or keep_going else "cannot build"
     if "liveness" in line.lower():
         return "liveness"
     lowered = line.lower()
@@ -190,9 +191,13 @@ def warmup_fatal_line(line: str, *, substitute_only: bool = False) -> str | None
     return None
 
 
-def raise_if_warmup_fatal(line: str, *, substitute_only: bool = False) -> None:
+def raise_if_warmup_fatal(
+    line: str, *, substitute_only: bool = False, keep_going: bool = False
+) -> None:
     """Abort as soon as a fatal warmup/root pattern is streamed."""
-    if reason := warmup_fatal_line(line, substitute_only=substitute_only):
+    if reason := warmup_fatal_line(
+        line, substitute_only=substitute_only, keep_going=keep_going
+    ):
         msg = f"{reason}: {line}"
         raise WarmupFatalError(msg)
 
@@ -1020,6 +1025,81 @@ def settings_family_warmup_outputs(layers: Sequence[Sequence[str]]) -> tuple[str
     return _warmup_outputs_matching(layers, is_settings_family_store_path)
 
 
+def zed_family_warmup_outputs(layers: Sequence[Sequence[str]]) -> tuple[str, ...]:
+    """Return the atomic Zed rust_* family from every warmup layer.
+
+    rust_zed, zed-editor-nightly, settings*, and extension_host* share one
+    rustc intern / SVH generation. skip_cached on a subset is the mix
+    that produced #1269 rust_settings E0463 against Cachix content/json.
+    """
+    return _warmup_outputs_matching(layers, is_svh_sensitive_store_path)
+
+
+def zed_family_cachix_presence(
+    paths: Sequence[str],
+    *,
+    present: Callable[[str], bool],
+) -> Literal["all", "none", "mixed"]:
+    """Return whether gkze has the whole Zed family, none of it, or a mix."""
+    unique = tuple(dict.fromkeys(paths))
+    if not unique:
+        return "none"
+    hits = tuple(path for path in unique if present(path))
+    if not hits:
+        return "none"
+    if len(hits) == len(unique):
+        return "all"
+    return "mixed"
+
+
+def zed_family_realize_policy(
+    paths: Sequence[str],
+    *,
+    present: Callable[[str], bool],
+    rustc_ids: Sequence[str] = (),
+) -> Literal["force-local", "substitute"]:
+    """Choose one family policy: never substitute a Cachix subset.
+
+    ``all`` plus one rustc generation substitutes. ``none`` or mixed
+    Cachix presence force-locals the entire family. Distinct rustc
+    hashes among family drvs fail closed.
+    """
+    ids = tuple(dict.fromkeys(rustc_ids))
+    if len(ids) > 1:
+        msg = f"zed family mixes rustc generations: {', '.join(ids)}"
+        raise WarmupError(msg)
+    presence = zed_family_cachix_presence(paths, present=present)
+    if presence == "all":
+        return "substitute"
+    return "force-local"
+
+
+def assert_zed_family_realize_set(
+    family: Sequence[str], realize: Sequence[str]
+) -> None:
+    """Fail if a realize set would compile some family crates and substitute others."""
+    wanted = tuple(dict.fromkeys(family))
+    chosen = tuple(dict.fromkeys(realize))
+    if not chosen or chosen == wanted:
+        return
+    msg = "zed family realize set mixes generations"
+    raise WarmupError(msg)
+
+
+def rustc_generation_ids(
+    drvs: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return rustc ``.drv`` references of *drvs*, first-seen."""
+    found: list[str] = []
+    for path in _query_drv_graph(drvs, "references", run=run):
+        rest = _store_output_rest(path).removesuffix(".drv")
+        if rest.startswith("rustc-"):
+            found.append(path)
+    return tuple(dict.fromkeys(found))
+
+
 def is_rust_extension_host_store_path(path: str) -> bool:
     """Return whether *path* is crate2nix ``rust_extension_host``."""
     return is_named_rust_crate_store_path(path, "extension_host")
@@ -1436,6 +1516,7 @@ def realize_warmup_outputs(
     print_build_logs: bool = False,
     force_local: bool = False,
     substitute_only: bool = False,
+    keep_going: bool = False,
 ) -> tuple[DerivationValidationFailure, ...]:
     """Build the warmup outputs so Cachix's post-build-hook pushes each path.
 
@@ -1458,6 +1539,7 @@ def realize_warmup_outputs(
                 mode="build",
                 no_substitute=force_local,
                 substitute_only=substitute_only,
+                keep_going=keep_going,
             )
             for path in chunk
         )

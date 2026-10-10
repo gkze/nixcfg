@@ -25,6 +25,7 @@ _VALIDATION_SCOPES = frozenset({
     "closures",
     "closure-shard",
     "rust-warmup",
+    "zed-warmup",
 })
 _HEARTBEAT_INTERVAL_SECONDS = 60
 _OUTPUT_LOG_NAME = "output.log"
@@ -762,7 +763,7 @@ def _append_validation_scope(args: list[str]) -> str:
     if scope not in _VALIDATION_SCOPES:
         msg = (
             "Validation scope must be all, packages, closures, "
-            "closure-shard, or rust-warmup"
+            "closure-shard, rust-warmup, or zed-warmup"
         )
         raise ValueError(msg)
     if scope != "all":
@@ -783,10 +784,13 @@ def _append_validation_scope(args: list[str]) -> str:
     if scope == "rust-warmup" and (not warmup or not slot):
         msg = "rust-warmup requires NIXCFG_WARMUP_PLAN and NIXCFG_WARMUP_SLOT"
         raise ValueError(msg)
+    if scope == "zed-warmup" and not warmup:
+        msg = "zed-warmup requires NIXCFG_WARMUP_PLAN"
+        raise ValueError(msg)
     if scope != "closure-shard" and roots:
         msg = "Named closure roots are only valid for the closure-shard scope"
         raise ValueError(msg)
-    if scope not in {"closure-shard", "rust-warmup"} and shard:
+    if scope not in {"closure-shard", "rust-warmup", "zed-warmup"} and shard:
         msg = "Named closure roots are only valid for the closure-shard scope"
         raise ValueError(msg)
     if scope != "rust-warmup" and slot:

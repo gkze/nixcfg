@@ -1018,6 +1018,43 @@ def test_job_rejects_unknown_stage_or_missing_candidate(native_job, stage: str) 
     assert not Path(env["TEST_LOG"]).exists()
 
 
+def test_native_args_zed_warmup_needs_plan_not_slot(native_job, monkeypatch) -> None:
+    """Zed-only validate is one family job: plan required, no rust-warmup slot."""
+    env, _checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    monkeypatch.setenv("NIXCFG_CANARY", "true")
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "zed-warmup")
+    monkeypatch.setenv("NIXCFG_WARMUP_PLAN", "/warmup/warmup-plan.json")
+    monkeypatch.delenv("NIXCFG_WARMUP_SLOT", raising=False)
+    monkeypatch.delenv("NIXCFG_PREVIOUS_CANDIDATE", raising=False)
+    args = jobs._native_args("validate", artifacts)
+    assert args[args.index("--scope") + 1] == "zed-warmup"
+    assert "--warmup-slot" not in args
+    monkeypatch.delenv("NIXCFG_WARMUP_PLAN")
+    with pytest.raises(ValueError, match="zed-warmup requires NIXCFG_WARMUP_PLAN"):
+        jobs._native_args("validate", artifacts)
+
+
+def test_zed_darwin_workflow_is_one_macos_runner_and_not_update() -> None:
+    """Zed-only loop must not share Update concurrency or the 5-wide rust matrix."""
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/zed-darwin.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    assert workflow["name"] == "Zed Darwin"
+    assert "workflow_dispatch" in workflow["on"]
+    assert ".github/zed-kick" in workflow["on"]["push"]["paths"]
+    assert workflow["concurrency"]["group"] == "nixcfg-zed-darwin-${{ github.ref }}"
+    update = yaml.load(
+        (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    assert update["concurrency"]["group"] != workflow["concurrency"]["group"]
+    assert workflow["jobs"]["zed-family"]["with"]["scope"] == "zed-warmup"
+    assert workflow["jobs"]["zed-family"]["with"]["runner"] == "macos-15"
+    assert "strategy" not in workflow["jobs"]["zed-family"]
+
+
 def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     """Explicit dispatch scope enters the candidate once; later stages inherit it."""
     workflow = yaml.load(

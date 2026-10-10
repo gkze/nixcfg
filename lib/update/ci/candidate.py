@@ -46,6 +46,7 @@ from lib.update.ci.warmup import (
     WarmupError,
     WarmupPlan,
     assert_force_local_dry_run,
+    assert_zed_family_realize_set,
     canary_crate_warmup_paths,
     compiler_input_drvs,
     export_warmup_drvs,
@@ -56,7 +57,9 @@ from lib.update.ci.warmup import (
     is_extension_host_family_store_path,
     is_rust_extension_host_store_path,
     is_rust_language_models_store_path,
+    is_rust_zed_store_path,
     is_svh_sensitive_store_path,
+    is_zed_editor_nightly_store_path,
     language_models_input_drvs,
     language_models_warmup_outputs,
     load_warmup_plan,
@@ -72,11 +75,14 @@ from lib.update.ci.warmup import (
     raise_if_warmup_fatal,
     realize_warmup_outputs,
     rust_crate_input_drvs,
+    rustc_generation_ids,
     settings_family_warmup_outputs,
     skip_cached_warmup_paths,
     slot_warmup_paths,
     unique_drvs_for_outputs,
     write_warmup_plan,
+    zed_family_realize_policy,
+    zed_family_warmup_outputs,
 )
 from lib.update.cli_options import RepairAgent, UpdateOptions
 from lib.update.io import atomic_write_text
@@ -103,7 +109,9 @@ def repair(
     propose_repair(get_repo_root(), evidence=evidence, output=output, agent=agent)
 
 
-ValidationScope = Literal["all", "packages", "closures", "closure-shard", "rust-warmup"]
+ValidationScope = Literal[
+    "all", "packages", "closures", "closure-shard", "rust-warmup", "zed-warmup"
+]
 ValidationGate = Literal["packages", "closures"]
 # Graph discovery is minutes, not the build. Keep it inside the job cap so a
 # hung eval fails this shard instead of consuming the build budget.
@@ -218,7 +226,11 @@ def _hosted_validation_progress(source: str) -> validation.ValidationProgress:
             return
         sys.stderr.write(f"[{source}] {redact_urls(text)}\n")
         sys.stderr.flush()
-        if source in _FAIL_FAST_PROGRESS_SOURCES:
+        if source == "zed-warmup":
+            raise_if_warmup_fatal(
+                text, substitute_only=substitute_only, keep_going=True
+            )
+        elif source in _FAIL_FAST_PROGRESS_SOURCES:
             raise_if_warmup_fatal(text, substitute_only=substitute_only)
 
     return emit
@@ -574,7 +586,7 @@ def _gates_for_scope(scope: str) -> tuple[ValidationGate, ...]:
         return ("closures",)
     if scope == "all":
         return ("packages", "closures")
-    if scope in {"closure-shard", "rust-warmup"}:
+    if scope in {"closure-shard", "rust-warmup", "zed-warmup"}:
         return ()
     msg = f"Unknown validation scope: {scope}"
     raise ValueError(msg)
@@ -656,6 +668,8 @@ def _realize_svh_family(
     family: tuple[str, ...],
     *,
     flake_root: Path,
+    keep_going: bool = False,
+    progress_source: str = "rust-warmup",
 ) -> tuple[tuple[validation.DerivationValidationFailure, ...], bool]:
     """Substitute the non-family closure, then compile SVH-sensitive rust_*.
 
@@ -690,14 +704,16 @@ def _realize_svh_family(
         if fetch_failures:
             return tuple(failures), False
     assert_force_local_dry_run((*extension_host, *family_rest))
+    family_progress = _hosted_validation_progress(progress_source)
     if extension_host:
         failures.extend(
             realize_warmup_outputs(
                 extension_host,
                 flake_root=flake_root,
-                progress=_hosted_validation_progress("rust-warmup"),
+                progress=family_progress,
                 print_build_logs=True,
                 force_local=True,
+                keep_going=keep_going,
             )
         )
     if family_rest:
@@ -705,9 +721,10 @@ def _realize_svh_family(
             realize_warmup_outputs(
                 family_rest,
                 flake_root=flake_root,
-                progress=_hosted_validation_progress("rust-warmup"),
+                progress=family_progress,
                 print_build_logs=True,
                 force_local=True,
+                keep_going=keep_going,
             )
         )
     return tuple(failures), True
@@ -717,14 +734,17 @@ def _realize_logged_warmup(
     paths: tuple[str, ...],
     *,
     flake_root: Path,
+    keep_going: bool = False,
+    progress_source: str = "rust-warmup",
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     if not paths:
         return ()
     return realize_warmup_outputs(
         paths,
         flake_root=flake_root,
-        progress=_hosted_validation_progress("rust-warmup"),
+        progress=_hosted_validation_progress(progress_source),
         print_build_logs=True,
+        keep_going=keep_going,
     )
 
 
@@ -882,6 +902,110 @@ def _realize_rust_warmup(
     return tuple(failures)
 
 
+def _realize_zed_warmup(
+    warmup_plan: Path,
+    *,
+    flake_root: Path,
+) -> tuple[validation.DerivationValidationFailure, ...]:
+    """Build the whole Zed rust family on one runner, or substitute all of it.
+
+    Mixed Cachix presence force-locals every family drv. Distinct rustc
+    generations fail closed. --keep-going surfaces every broken crate.
+    """
+    plan = load_warmup_plan(warmup_plan)
+    family_outputs = zed_family_warmup_outputs(plan.rust_layers)
+    rust_zed_out = tuple(
+        path for path in family_outputs if is_rust_zed_store_path(path)
+    )
+    nightly_out = tuple(
+        path for path in family_outputs if is_zed_editor_nightly_store_path(path)
+    )
+    member_out = tuple(
+        path
+        for path in family_outputs
+        if not is_rust_zed_store_path(path)
+        and not is_zed_editor_nightly_store_path(path)
+    )
+    import_warmup_drvs(
+        tuple(dict.fromkeys((*family_outputs,))),
+        warmup_plan.with_name(WARMUP_DRVS_NAME),
+    )
+    member_drvs = unique_drvs_for_outputs(member_out, plan.output_drvs)
+    rust_zed = unique_drvs_for_outputs(rust_zed_out, plan.output_drvs)
+    zed_nightly = unique_drvs_for_outputs(nightly_out, plan.output_drvs)
+    parents = rust_zed or rust_crate_input_drvs(zed_nightly, ("zed",))
+    if parents:
+        member_drvs = tuple(
+            dict.fromkeys((
+                *member_drvs,
+                *rust_crate_input_drvs(parents, EXTENSION_HOST_MEMBER_CRATES),
+                *rust_crate_input_drvs(parents, SETTINGS_MEMBER_CRATES),
+            ))
+        )
+    family_drvs = tuple(dict.fromkeys((*member_drvs, *rust_zed, *zed_nightly)))
+    assert_zed_family_realize_set(family_drvs, family_drvs)
+    rustc_ids = rustc_generation_ids(family_drvs) if family_drvs else ()
+    policy = zed_family_realize_policy(
+        family_outputs or family_drvs,
+        present=check_path_in_cachix,
+        rustc_ids=rustc_ids,
+    )
+    if policy == "substitute":
+        return realize_warmup_outputs(
+            family_drvs,
+            flake_root=flake_root,
+            progress=_hosted_validation_progress("zed-warmup"),
+            substitute_only=True,
+        )
+    family_failures, compiled = _realize_svh_family(
+        member_drvs,
+        flake_root=flake_root,
+        keep_going=True,
+        progress_source="zed-warmup",
+    )
+    failures = list(family_failures)
+    if compiled:
+        failures.extend(
+            _realize_logged_warmup(
+                rust_zed,
+                flake_root=flake_root,
+                keep_going=True,
+                progress_source="zed-warmup",
+            )
+        )
+        failures.extend(
+            _realize_logged_warmup(
+                zed_nightly,
+                flake_root=flake_root,
+                keep_going=True,
+                progress_source="zed-warmup",
+            )
+        )
+    jobs.record_runner_storage("after-zed-warmup")
+    return tuple(failures)
+
+
+def _realize_requested_warmup(
+    scope: str,
+    warmup_plan: Path | None,
+    warmup_slot: int | None,
+    *,
+    flake_root: Path,
+) -> tuple[validation.DerivationValidationFailure, ...]:
+    """Dispatch rust-warmup or zed-warmup; other scopes realize nothing here."""
+    if scope == "rust-warmup":
+        if warmup_plan is None or warmup_slot is None:
+            msg = "rust-warmup requires a warmup plan and slot"
+            raise ValueError(msg)
+        return _realize_rust_warmup(warmup_plan, warmup_slot, flake_root=flake_root)
+    if scope == "zed-warmup":
+        if warmup_plan is None:
+            msg = "zed-warmup requires a warmup plan"
+            raise ValueError(msg)
+        return _realize_zed_warmup(warmup_plan, flake_root=flake_root)
+    return ()
+
+
 def validate_candidate(
     candidate: Candidate,
     *,
@@ -913,6 +1037,9 @@ def validate_candidate(
     if scope == "rust-warmup" and (warmup_plan is None or warmup_slot is None):
         msg = "rust-warmup requires a warmup plan and slot"
         raise ValueError(msg)
+    if scope == "zed-warmup" and warmup_plan is None:
+        msg = "zed-warmup requires a warmup plan"
+        raise ValueError(msg)
     if scope != "rust-warmup" and warmup_slot is not None:
         msg = "warmup slots are only valid for the rust-warmup scope"
         raise ValueError(msg)
@@ -937,13 +1064,12 @@ def validate_candidate(
         failures: tuple[validation.DerivationValidationFailure, ...] = ()
         planned_installables: tuple[str, ...] = ()
         with workspace.validation_snapshot() as snapshot:
-            if scope == "rust-warmup" and warmup_plan is not None:
-                if warmup_slot is None:
-                    msg = "rust-warmup requires a warmup plan and slot"
-                    raise ValueError(msg)
-                failures += _realize_rust_warmup(
-                    warmup_plan, warmup_slot, flake_root=snapshot.root
-                )
+            failures += _realize_requested_warmup(
+                scope,
+                warmup_plan,
+                warmup_slot,
+                flake_root=snapshot.root,
+            )
             if "packages" in gates:
                 sources = None if candidate.validate_all_packages else candidate.sources
                 planned_installables = tuple(
@@ -1156,6 +1282,9 @@ def validate(
         raise ValueError(msg)
     if scope == "rust-warmup" and (warmup_plan is None or warmup_slot is None):
         msg = "rust-warmup requires --warmup-plan and --warmup-slot"
+        raise ValueError(msg)
+    if scope == "zed-warmup" and warmup_plan is None:
+        msg = "zed-warmup requires --warmup-plan"
         raise ValueError(msg)
     if scope != "rust-warmup" and warmup_slot is not None:
         msg = "--warmup-slot is only valid for rust-warmup"

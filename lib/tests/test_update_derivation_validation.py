@@ -1528,6 +1528,35 @@ def test_no_substitute_request_is_unbatched_and_skips_fallback(
     assert "--keep-going" in other_call
 
 
+def test_zed_family_keep_going_survives_force_local(tmp_path: Path) -> None:
+    """Zed-only family builds collect every crate error in one --keep-going pass."""
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0.drv^*"
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    assert (
+        validation.validate_derivation_requests(
+            (
+                DerivationValidationRequest(
+                    "root-warmup",
+                    settings,
+                    "build",
+                    no_substitute=True,
+                    keep_going=True,
+                ),
+            ),
+            flake_root=tmp_path,
+            run=run,
+        )
+        == ()
+    )
+    local = next(args for args in calls if "--no-substitute" in args)
+    assert "--keep-going" in local
+
+
 def test_failed_batch_rechecks_each_target_with_original_retry_policy(
     tmp_path: Path,
 ) -> None:
