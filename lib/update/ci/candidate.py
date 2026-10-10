@@ -11,9 +11,10 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import typer
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from lib.diagnostics import redact_urls
+from lib.nix.models.sources import HashCollection, HashEntryMergeKey, SourceEntry
 from lib.system_policy import supported_systems
 from lib.update import cli as update_cli
 from lib.update import derivation_validation as validation
@@ -288,12 +289,128 @@ def _candidate_index_files(candidate: Candidate, repo: Path) -> dict[str, bytes]
         return _index_files(workspace.root)
 
 
+def _is_package_sources_path(path: str) -> bool:
+    """Return whether *path* is a per-package or flat ``sources.json``."""
+    name = path.rsplit("/", 1)[-1]
+    return name == "sources.json" or name.endswith(".sources.json")
+
+
+def _parse_source_entry(data: bytes) -> SourceEntry | None:
+    """Parse a bare per-package ``sources.json`` entry, or ``None`` if it is not one."""
+    try:
+        payload = json.loads(data)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return SourceEntry.model_validate(payload)
+    except (TypeError, ValueError, ValidationError):
+        return None
+
+
+def _conflicting_optional_text(left: str | None, right: str | None) -> bool:
+    """Return whether both sides set a scalar and disagree."""
+    return left is not None and right is not None and left != right
+
+
+def _conflicting_text_mapping(
+    left: dict[str, str] | None,
+    right: dict[str, str] | None,
+) -> bool:
+    """Return whether both sides set the same key to different values."""
+    if left is None or right is None:
+        return False
+    return any(key in right and right[key] != value for key, value in left.items())
+
+
+def _real_entry_hashes(collection: HashCollection) -> dict[HashEntryMergeKey, str]:
+    """Return identity → hash for every non-placeholder structured hash."""
+    return {
+        entry.merge_key(): entry.hash
+        for entry in (collection.entries or ())
+        if not entry.hash.startswith(HashCollection.FAKE_HASH_PREFIX)
+    }
+
+
+def _real_mapping_hashes(collection: HashCollection) -> dict[str, str]:
+    """Return platform → hash for every non-placeholder mapping hash."""
+    return {
+        platform: hash_val
+        for platform, hash_val in (collection.mapping or {}).items()
+        if not hash_val.startswith(HashCollection.FAKE_HASH_PREFIX)
+    }
+
+
+def _hashes_preserved(original: HashCollection, merged: HashCollection) -> bool:
+    """Return whether every real hash in *original* survived *merged*."""
+    merged_entries = _real_entry_hashes(merged)
+    merged_mapping = _real_mapping_hashes(merged)
+    return all(
+        merged_entries.get(key) == hash_val
+        for key, hash_val in _real_entry_hashes(original).items()
+    ) and all(
+        merged_mapping.get(platform) == hash_val
+        for platform, hash_val in _real_mapping_hashes(original).items()
+    )
+
+
+def _hash_collections_compatible(left: HashCollection, right: HashCollection) -> bool:
+    """Union platform hashes; reject silent last-wins overwrites."""
+    try:
+        merged = left.merge(right)
+    except ValueError:
+        return False
+    return _hashes_preserved(left, merged) and _hashes_preserved(right, merged)
+
+
+def _source_entries_compatible(left: SourceEntry, right: SourceEntry) -> bool:
+    """Return whether two source entries may be unioned across native prepares.
+
+    Serial prepare last-wins ``drvHash`` when version and artifact hashes agree.
+    Parallel Linux prepares both start from Darwin and rewrite that fingerprint,
+    so a drvHash-only (or complementary platform-hash) overlap is not a conflict.
+    Version, input, commit, URLs, pins, and real artifact hashes still fail closed.
+    """
+    if any(
+        _conflicting_optional_text(getattr(left, name), getattr(right, name))
+        for name in ("version", "input", "commit", "electron_version")
+    ):
+        return False
+    return (
+        not _conflicting_text_mapping(left.urls, right.urls)
+        and not _conflicting_text_mapping(left.pins, right.pins)
+        and not _conflicting_text_mapping(
+            left.platform_drv_hashes, right.platform_drv_hashes
+        )
+        and _hash_collections_compatible(left.hashes, right.hashes)
+    )
+
+
+def _merged_package_sources(path: str, first: bytes, second: bytes) -> bytes | None:
+    """Semantically merge two ``sources.json`` blobs, or ``None`` to fail closed."""
+    if not _is_package_sources_path(path):
+        return None
+    left = _parse_source_entry(first)
+    right = _parse_source_entry(second)
+    if left is None or right is None or not _source_entries_compatible(left, right):
+        return None
+    return (
+        json.dumps(left.merge(right).to_dict(), indent=2, sort_keys=True) + "\n"
+    ).encode()
+
+
 def _merged_index_files(
     base: dict[str, bytes],
     left: dict[str, bytes],
     right: dict[str, bytes],
 ) -> dict[str, bytes]:
-    """3-way merge file maps; fail closed on content conflicts."""
+    """3-way merge file maps; fail closed on content conflicts.
+
+    Per-package ``sources.json`` overlaps use :class:`SourceEntry` merge when the
+    only disagreements are derivation fingerprints or complementary native
+    hashes. Other overlapping edits still fail closed.
+    """
     merged = dict(base)
     for path in set(base) | set(left) | set(right):
         ancestor = base.get(path)
@@ -305,9 +422,14 @@ def _merged_index_files(
             chosen = second
         elif second == ancestor:
             chosen = first
-        else:
+        elif first is None or second is None:
             msg = f"Conflicting candidate edits for {path}"
             raise ValueError(msg)
+        else:
+            chosen = _merged_package_sources(path, first, second)
+            if chosen is None:
+                msg = f"Conflicting candidate edits for {path}"
+                raise ValueError(msg)
         if chosen is None:
             merged.pop(path, None)
         else:
@@ -325,7 +447,9 @@ def merge_prepared_candidates(
 
     Darwin pins refs and shared generated files. Linux prepare only adds
     native hashes, so arm and x86 can extend Darwin in parallel. Overlapping
-    file edits with different contents fail closed.
+    file edits with different contents fail closed, except per-package
+    ``sources.json`` files whose only disagreements are ``drvHash`` or
+    complementary native hashes.
     """
     if left.base_tree != right.base_tree:
         msg = "Merged candidates must share a baseline tree"

@@ -10,7 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from lib.nix.models.flake_lock import FlakeLockNode
-from lib.nix.models.sources import SourceEntry
+from lib.nix.models.sources import HashCollection, SourceEntry
 from lib.tests._run_updates_helpers import drain_events, make_run_plan
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
 from lib.tests._updater_helpers import load_repo_module_for_test
@@ -2270,6 +2270,40 @@ def test_merge_prepared_candidates_keeps_disjoint_linux_edits(tmp_path: Path) ->
     assert (root / "keep.txt").read_text(encoding="utf-8") == "keep\n"
 
 
+_OPENAI_VENDOR = "sha256-V7ZBn8uZ+oMF9HOT8Upao2rUDFpb7+bk77w7ODBdiO4="
+_OPENAI_OLD_VENDOR = "sha256-h06DRGoNo7T6HMNQKg8WgyyxCbrWMVM8LJvfPkVHXPs="
+_OTHER_VENDOR = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+_THIRD_VENDOR = "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
+_OPENAI_ARM_DRV = "924w8bq2jgn13ygzxkjz4hss80xk75k2"
+_OPENAI_X86_DRV = "j7ikqjdxpm48apk76ph7alvh8xrdac1r"
+
+
+def _source_json(
+    *,
+    version: str = "v1.38.0",
+    drv_hash: str = _OPENAI_ARM_DRV,
+    vendor: str = _OPENAI_VENDOR,
+    input_name: str = "openai-cli",
+    **extra: object,
+) -> str:
+    """Persist-shaped per-package ``sources.json`` used by merge tests."""
+    payload: dict[str, object] = {
+        "drvHash": drv_hash,
+        "hashes": [{"hash": vendor, "hashType": "vendorHash"}],
+        "input": input_name,
+        "version": version,
+        **extra,
+    }
+    return (
+        json.dumps(
+            SourceEntry.model_validate(payload).to_dict(),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+
 def test_merge_prepared_candidates_rejects_file_conflicts(tmp_path: Path) -> None:
     """Shared generated files with different contents fail closed."""
     root = tmp_path / "repo"
@@ -2303,6 +2337,273 @@ def test_merge_prepared_candidates_rejects_file_conflicts(tmp_path: Path) -> Non
             ),
             repo=root,
         )
+
+
+def test_merge_prepared_candidates_unions_drv_hash_only_sources_json(
+    tmp_path: Path,
+) -> None:
+    """#1266: parallel Linux prepares rewrote openai-cli drvHash only."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "packages/openai-cli/sources.json": _source_json(
+                version="v1.37.0",
+                drv_hash="s4dcpz4xz6z89q4a8kjml53mqrvxbp11",
+                vendor=_OPENAI_OLD_VENDOR,
+            )
+        },
+    )
+    arm = _candidate_with_file(
+        root,
+        "packages/openai-cli/sources.json",
+        _source_json(drv_hash=_OPENAI_ARM_DRV),
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "packages/openai-cli/sources.json",
+        _source_json(drv_hash=_OPENAI_X86_DRV),
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    merged = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    merged.apply(root)
+    entry = SourceEntry.model_validate_json(
+        (root / "packages/openai-cli/sources.json").read_bytes()
+    )
+    assert entry.version == "v1.38.0"
+    assert entry.input == "openai-cli"
+    assert entry.drv_hash == _OPENAI_X86_DRV
+    assert entry.hashes.primary_hash() == _OPENAI_VENDOR
+
+
+def test_merge_prepared_candidates_unions_complementary_platform_hashes(
+    tmp_path: Path,
+) -> None:
+    """Arm and x86 may each add their native hash to the same sources.json."""
+    root = tmp_path / "repo"
+    darwin = {
+        "hashes": {"aarch64-darwin": _OPENAI_VENDOR},
+        "version": "1.0.0",
+    }
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "overlays/demo.sources.json": json.dumps(darwin, indent=2) + "\n"
+        },
+    )
+    arm_entry = SourceEntry.model_validate({
+        "hashes": {
+            **darwin["hashes"],
+            "aarch64-linux": _OTHER_VENDOR,
+        },
+        "version": "1.0.0",
+    })
+    x86_entry = SourceEntry.model_validate({
+        "hashes": {
+            **darwin["hashes"],
+            "x86_64-linux": _THIRD_VENDOR,
+        },
+        "version": "1.0.0",
+    })
+    arm = _candidate_with_file(
+        root,
+        "overlays/demo.sources.json",
+        json.dumps(arm_entry.to_dict(), indent=2, sort_keys=True) + "\n",
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "overlays/demo.sources.json",
+        json.dumps(x86_entry.to_dict(), indent=2, sort_keys=True) + "\n",
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    merged = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    merged.apply(root)
+    entry = SourceEntry.model_validate_json(
+        (root / "overlays/demo.sources.json").read_bytes()
+    )
+    assert entry.hashes.mapping == {
+        "aarch64-darwin": _OPENAI_VENDOR,
+        "aarch64-linux": _OTHER_VENDOR,
+        "x86_64-linux": _THIRD_VENDOR,
+    }
+
+
+def test_merge_prepared_candidates_rejects_incompatible_sources_json(
+    tmp_path: Path,
+) -> None:
+    """Version or artifact-hash disagreements still fail closed."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "packages/openai-cli/sources.json": _source_json(version="v1.37.0")
+        },
+    )
+    arm = _candidate_with_file(
+        root,
+        "packages/openai-cli/sources.json",
+        _source_json(version="v1.38.0"),
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "packages/openai-cli/sources.json",
+        _source_json(version="v1.39.0"),
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    with pytest.raises(ValueError, match="Conflicting candidate edits"):
+        pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    git(root, "reset", "--hard", "HEAD")
+    hashed = _candidate_with_file(
+        root,
+        "packages/openai-cli/sources.json",
+        _source_json(vendor=_OTHER_VENDOR),
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    with pytest.raises(ValueError, match="Conflicting candidate edits"):
+        pipeline.merge_prepared_candidates(arm, hashed, repo=root)
+
+
+def test_merge_prepared_candidates_rejects_non_entry_json_conflicts(
+    tmp_path: Path,
+) -> None:
+    """crate-sources and unparseable JSON keep the whole-file fail-closed path."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "packages/demo/crate-sources.json": '{"crate":{"name":"old"}}\n'
+        },
+    )
+    arm = _candidate_with_file(
+        root,
+        "packages/demo/crate-sources.json",
+        '{"crate":{"name":"arm"}}\n',
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "packages/demo/crate-sources.json",
+        '{"crate":{"name":"x86"}}\n',
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    with pytest.raises(ValueError, match="Conflicting candidate edits"):
+        pipeline.merge_prepared_candidates(arm, x86, repo=root)
+
+
+def test_merge_prepared_candidates_rejects_sources_delete_versus_edit(
+    tmp_path: Path,
+) -> None:
+    """A delete on one platform and an edit on the other is still a conflict."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "packages/openai-cli/sources.json": _source_json(version="v1.37.0")
+        },
+    )
+    git(root, "rm", "--", "packages/openai-cli/sources.json")
+    deleted = Candidate(
+        base_tree=git(root, "rev-parse", "HEAD^{tree}").decode().strip(),
+        tree=git(root, "write-tree").decode().strip(),
+        targets=("example",),
+        sources=("example",),
+        systems=("aarch64-darwin", "aarch64-linux"),
+        resolutions={},
+        prepared=True,
+        patch=git(
+            root,
+            "diff",
+            "--cached",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "HEAD",
+            "--",
+        ),
+    )
+    git(root, "reset", "--hard", "HEAD")
+    x86 = _candidate_with_file(
+        root,
+        "packages/openai-cli/sources.json",
+        _source_json(),
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    with pytest.raises(ValueError, match="Conflicting candidate edits"):
+        pipeline.merge_prepared_candidates(deleted, x86, repo=root)
+
+
+@pytest.mark.parametrize(
+    ("left_fields", "right_fields"),
+    [
+        ({"input": "openai-cli"}, {"input": "other-cli"}),
+        ({"commit": "a" * 40}, {"commit": "b" * 40}),
+        ({"electronVersion": "40.0.0"}, {"electronVersion": "41.0.0"}),
+        (
+            {"urls": {"upstream": "https://example.invalid/a"}},
+            {"urls": {"upstream": "https://example.invalid/b"}},
+        ),
+        (
+            {"pins": {"electronVersion": "40.0.0"}},
+            {"pins": {"electronVersion": "41.0.0"}},
+        ),
+        (
+            {"platformDrvHashes": {"aarch64-linux": "armdrv"}},
+            {"platformDrvHashes": {"aarch64-linux": "x86drv"}},
+        ),
+    ],
+)
+def test_source_entries_compatible_rejects_scalar_and_mapping_conflicts(
+    left_fields: dict[str, object],
+    right_fields: dict[str, object],
+) -> None:
+    """Parallel prepares may not silently last-win identity or pin fields."""
+    base = json.loads(_source_json())
+    left = SourceEntry.model_validate({**base, **left_fields})
+    right = SourceEntry.model_validate({**base, **right_fields})
+    assert not pipeline._source_entries_compatible(left, right)
+
+
+def test_source_entry_helpers_cover_parse_and_hash_edges() -> None:
+    """Parse failures and hash-representation mismatches stay fail-closed."""
+    assert pipeline._parse_source_entry(b"{not json") is None
+    assert (
+        pipeline._parse_source_entry(
+            b'["sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="]'
+        )
+        is None
+    )
+    assert pipeline._parse_source_entry(b'{"hashes": "nope"}') is None
+    assert pipeline._merged_package_sources("README.md", b"a", b"b") is None
+    fake = HashCollection.FAKE_HASH_PREFIX
+    left = SourceEntry.model_validate({
+        "hashes": [{"hash": fake, "hashType": "vendorHash"}],
+        "version": "1",
+    })
+    right = SourceEntry.model_validate({
+        "hashes": [{"hash": _OPENAI_VENDOR, "hashType": "vendorHash"}],
+        "version": "1",
+    })
+    assert pipeline._source_entries_compatible(left, right)
+    mapping = SourceEntry.model_validate({
+        "hashes": {"aarch64-linux": _OPENAI_VENDOR},
+        "version": "1",
+    })
+    assert not pipeline._hash_collections_compatible(left.hashes, mapping.hashes)
+    other_mapping = HashCollection.model_validate({"aarch64-linux": _OTHER_VENDOR})
+    assert not pipeline._hash_collections_compatible(mapping.hashes, other_mapping)
+    fake_mapping = HashCollection.model_validate({"aarch64-linux": fake})
+    assert pipeline._hash_collections_compatible(fake_mapping, mapping.hashes)
+    empty = HashCollection()
+    assert pipeline._hashes_preserved(empty, empty)
+    plain = SourceEntry.model_validate_json(_source_json().encode())
+    with_url = plain.model_copy(
+        update={"urls": {"upstream": "https://example.invalid/a"}}
+    )
+    assert pipeline._source_entries_compatible(plain, with_url)
 
 
 def test_checkout_candidate_is_identity_of_head(tmp_path: Path) -> None:
