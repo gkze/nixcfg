@@ -169,11 +169,15 @@ class WarmupFatalError(WarmupError):
     """A streamed warmup/root line that must fail the hosted job immediately."""
 
 
-def warmup_fatal_line(line: str) -> str | None:
+def warmup_fatal_line(line: str, *, substitute_only: bool = False) -> str | None:
     """Return why a live warmup/root log line must fail the job."""
     if "error[E04" in line:
         return "rustc SVH/crate mismatch"
     if "Cannot build" in line:
+        if substitute_only:
+            # --max-jobs 0 cache miss on a 1-drv helper (patchutils/pbzx/cpio).
+            # Caller retries those locally; rustc/stdenv stay substitute-only.
+            return None
         return "cannot build"
     if "liveness" in line.lower():
         return "liveness"
@@ -186,9 +190,9 @@ def warmup_fatal_line(line: str) -> str | None:
     return None
 
 
-def raise_if_warmup_fatal(line: str) -> None:
+def raise_if_warmup_fatal(line: str, *, substitute_only: bool = False) -> None:
     """Abort as soon as a fatal warmup/root pattern is streamed."""
-    if reason := warmup_fatal_line(line):
+    if reason := warmup_fatal_line(line, substitute_only=substitute_only):
         msg = f"{reason}: {line}"
         raise WarmupFatalError(msg)
 
@@ -1201,14 +1205,25 @@ def is_source_fetch_store_path(path: str) -> bool:
     return name == "source" or name.endswith(("-src", "-source"))
 
 
-# 1-drv Unix helpers that miss cache.nixos.org on the CVE-patched
-# stdenv. The tarball substitutes; the package drv must compile locally.
-# #1270 canary: patchutils-0.3.3.drv was 1 local + 1 fetch, then
-# ``--max-jobs 0`` fatal'd Cannot build before rust_settings.
+# Known 1-drv Unix helpers that miss cache.nixos.org on the CVE-patched
+# stdenv. The tarball substitutes; the package drv compiles locally on
+# the first pass. Unknown helpers still retry after ``--max-jobs 0``
+# Cannot-build; rustc/stdenv stay substitute-only.
+# #1270 canary: patchutils, then pbzx, then cpio (job 114291903959).
 _COMPILER_LOCAL_HELPER_PREFIXES = (
     "patchutils-",
     "pbzx-",
     "xar-",
+    "cpio-",
+)
+_COMPILER_MUST_SUBSTITUTE_PREFIXES = (
+    "rustc-",
+    "stdenv-",
+    "clang-",
+    "gcc-",
+    "llvm-",
+    "compiler-rt-",
+    "bmake-",
 )
 
 
@@ -1218,6 +1233,12 @@ def is_compiler_local_helper_store_path(path: str) -> bool:
         return False
     rest = _store_output_rest(path).removesuffix(".drv")
     return rest.startswith(_COMPILER_LOCAL_HELPER_PREFIXES)
+
+
+def is_compiler_must_substitute_store_path(path: str) -> bool:
+    """Return whether a compiler input must stay ``--max-jobs 0``."""
+    rest = _store_output_rest(path).removesuffix(".drv")
+    return rest.startswith(_COMPILER_MUST_SUBSTITUTE_PREFIXES)
 
 
 # rust-warmup others may realize these without compiling a crate graph.

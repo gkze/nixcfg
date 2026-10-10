@@ -930,6 +930,222 @@ def test_rust_warmup_settings_family_builds_patchutils_helper(
     ]
 
 
+def test_retry_substitute_only_helpers_skips_toolchain_and_rust() -> None:
+    """#1270: retry unknown Unix helpers; refuse rustc and rust_*."""
+    cpio = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cpio-2.15.drv"
+    unknown = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-diffutils-3.12.drv"
+    rustc = "/nix/store/cccccccccccccccccccccccccccccccc-rustc-1.98.1.drv"
+    settings = "/nix/store/dddddddddddddddddddddddddddddddd-rust_settings-0.1.0.drv"
+    num_cpus = "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-rust_num_cpus-1.16.0.drv"
+    assert pipeline._retry_substitute_only_helpers((
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{cpio}^*",
+            message="error: Cannot build '/nix/store/...-cpio-2.15.drv'.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{unknown}^*",
+            message="error: Cannot build '/nix/store/...-diffutils-3.12.drv'.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{rustc}^*",
+            message="error: Cannot build '/nix/store/...-rustc-1.98.1.drv'.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{settings}^*",
+            message="error: Cannot build '/nix/store/...-rust_settings-0.1.0.drv'.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{num_cpus}^*",
+            message="error: Cannot build '/nix/store/...-rust_num_cpus-1.16.0.drv'.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{unknown}^*",
+            message="error: hash mismatch in fixed-output derivation",
+        ),
+    )) == (cpio, unknown)
+
+
+def test_rust_warmup_retries_unknown_1drv_helper_after_max_jobs_zero(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unknown helper cache miss must retry locally; rustc miss must not."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+    unknown_drv = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-diffutils-3.12.drv"
+    rustc_drv = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    unknown_fail = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{unknown_drv}^*",
+        message="error: Cannot build '/nix/store/...-diffutils-3.12.drv'.",
+    )
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> object:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        if kwargs.get("substitute_only"):
+            return (unknown_fail,)
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(
+        pipeline,
+        "compiler_input_drvs",
+        lambda *_args, **_kwargs: (rustc_drv, unknown_drv),
+    )
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    content = "/nix/store/ma14flyg1v5b4vhinb2l0klw1xmdg9nz-rust_settings_content-0.1.0"
+    settings_drv = f"{settings}.drv"
+    content_drv = f"{content}.drv"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(content, settings),
+            rustLayers=((content,), (settings,)),
+            outputDrvs={content: content_drv, settings: settings_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == ()
+    assert realized == [
+        ((rustc_drv, unknown_drv), False, False, True),
+        ((unknown_drv,), False, False, False),
+        ((content_drv, settings_drv), True, True, False),
+    ]
+
+
+def test_rust_warmup_refuses_force_local_after_rustc_substitute_miss(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rustc --max-jobs 0 miss must keep the failure and skip force-local."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+    rustc_drv = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    unknown_drv = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-diffutils-3.12.drv"
+    rustc_fail = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{rustc_drv}^*",
+        message="error: Cannot build '/nix/store/...-rustc-1.98.1.drv'.",
+    )
+    unknown_fail = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{unknown_drv}^*",
+        message="error: Cannot build '/nix/store/...-diffutils-3.12.drv'.",
+    )
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> object:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        if kwargs.get("substitute_only"):
+            return (rustc_fail, unknown_fail)
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(
+        pipeline,
+        "compiler_input_drvs",
+        lambda *_args, **_kwargs: (rustc_drv, unknown_drv),
+    )
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    settings_drv = f"{settings}.drv"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(settings,),
+            rustLayers=((settings,),),
+            outputDrvs={settings: settings_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == (rustc_fail, unknown_fail)
+    assert realized == [((rustc_drv, unknown_drv), False, False, True)]
+
+
 def test_rust_warmup_canary_crates_realize_settings_off_slot_stripe(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2415,6 +2631,39 @@ def test_hosted_warmup_progress_fails_fast_on_fatal_patterns(
             "error[E0460]: packages inventory is not a warmup abort",
         )
     )
+
+
+def test_hosted_warmup_progress_skips_cannot_build_during_max_jobs_zero(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1270: streamed Cannot-build under --max-jobs 0 is retried, not fatal."""
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
+    progress = pipeline._hosted_validation_progress("rust-warmup")
+    progress(ValidationCommandStarted("nix build --max-jobs 0 /nix/store/cpio.drv"))
+    progress(
+        ValidationCommandOutput(
+            "nix build --max-jobs 0 /nix/store/cpio.drv",
+            "error: Cannot build '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cpio-2.15.drv'.",
+        )
+    )
+    assert "Cannot build" in capsys.readouterr().err
+    with pytest.raises(WarmupFatalError, match="SVH"):
+        progress(
+            ValidationCommandOutput(
+                "nix build --max-jobs 0 /nix/store/cpio.drv",
+                "error[E0463]: can't find crate for `settings_content`",
+            )
+        )
+    progress(
+        ValidationCommandStarted("nix build --no-substitute /nix/store/settings.drv")
+    )
+    with pytest.raises(WarmupFatalError, match="cannot build"):
+        progress(
+            ValidationCommandOutput(
+                "nix build --no-substitute /nix/store/settings.drv",
+                "Cannot build '/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0.drv'",
+            )
+        )
 
 
 def test_noop_candidate_still_validates_repaired_baseline_roots(

@@ -34,6 +34,7 @@ from lib.update.ci.warmup import (
     import_warmup_drvs,
     intersect_missing,
     is_compiler_local_helper_store_path,
+    is_compiler_must_substitute_store_path,
     is_crate2nix_rust_output,
     is_extension_host_family_store_path,
     is_force_local_allowed_build,
@@ -1138,24 +1139,47 @@ def test_is_source_fetch_store_path_classifies_archives(
 
 
 def test_1270_canary_patchutils_is_local_compiler_helper() -> None:
-    """#1270 canary: patchutils then pbzx were 1-drv helpers after FODs.
+    """#1270 canary: patchutils, pbzx, then cpio were 1-drv helpers after FODs.
 
-    Jobs 114284201109 / 114290145820: ``this derivation will be built``
-    plus one fetched source, then ``--max-jobs 0`` fatal'd Cannot build.
-    rustc/stdenv stay substitute-only.
+    Jobs 114284201109 / 114290145820 / 114291903959: ``this derivation
+    will be built`` plus one fetched source, then ``--max-jobs 0``
+    fatal'd Cannot build. rustc/stdenv stay substitute-only.
     """
     patchutils = "/nix/store/m6399k05aaqiz3mx4cdpkdqr4hp05kmj-patchutils-0.3.3.drv"
     pbzx = "/nix/store/9wq7n6729mdhisgxjyahy0cpjm4aq85p-pbzx-1.0.2.drv"
+    cpio = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cpio-2.15.drv"
     rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
     stdenv = "/nix/store/1gx3hvygaaaaaaaaaaaaaaaaaaaaaaaa-stdenv-darwin.drv"
     assert is_compiler_local_helper_store_path(patchutils)
     assert is_compiler_local_helper_store_path(pbzx)
+    assert is_compiler_local_helper_store_path(cpio)
     assert not is_compiler_local_helper_store_path(rustc)
     assert not is_compiler_local_helper_store_path(stdenv)
-    assert partition_compiler_input_drvs((rustc, stdenv, patchutils, pbzx)) == (
+    assert is_compiler_must_substitute_store_path(rustc)
+    assert is_compiler_must_substitute_store_path(stdenv)
+    assert not is_compiler_must_substitute_store_path(cpio)
+    assert partition_compiler_input_drvs((rustc, stdenv, patchutils, pbzx, cpio)) == (
         (rustc, stdenv),
-        (patchutils, pbzx),
+        (patchutils, pbzx, cpio),
     )
+
+
+def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:
+    """#1270: --max-jobs 0 Cannot-build is retried; SVH and rustc counts stay fatal."""
+    cannot = "error: Cannot build '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cpio-2.15.drv'."
+    assert warmup_fatal_line(cannot, substitute_only=True) is None
+    raise_if_warmup_fatal(cannot, substitute_only=True)
+    assert warmup_fatal_line(cannot) == "cannot build"
+    with pytest.raises(WarmupFatalError, match="cannot build"):
+        raise_if_warmup_fatal(cannot)
+    svh = "error[E0463]: can't find crate for `settings_content`"
+    assert warmup_fatal_line(svh, substitute_only=True) is not None
+    with pytest.raises(WarmupFatalError, match="SVH"):
+        raise_if_warmup_fatal(svh, substitute_only=True)
+    huge = "these 406 derivations will be built:"
+    assert warmup_fatal_line(huge, substitute_only=True) is not None
+    with pytest.raises(WarmupFatalError, match="will-be-built"):
+        raise_if_warmup_fatal(huge, substitute_only=True)
 
 
 def test_realize_warmup_substitute_only_is_max_jobs_zero(tmp_path: Path) -> None:

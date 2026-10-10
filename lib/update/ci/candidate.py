@@ -51,9 +51,12 @@ from lib.update.ci.warmup import (
     export_warmup_drvs,
     extension_host_family_warmup_outputs,
     import_warmup_drvs,
+    is_compiler_must_substitute_store_path,
+    is_crate2nix_rust_output,
     is_extension_host_family_store_path,
     is_rust_extension_host_store_path,
     is_rust_language_models_store_path,
+    is_svh_sensitive_store_path,
     language_models_input_drvs,
     language_models_warmup_outputs,
     load_warmup_plan,
@@ -197,12 +200,15 @@ _FAIL_FAST_PROGRESS_SOURCES = frozenset({
 
 def _hosted_validation_progress(source: str) -> validation.ValidationProgress:
     """Stream Nix validation output to the live hosted job log."""
+    substitute_only = False
 
     def emit(event: validation.ValidationProgressEvent) -> None:
+        nonlocal substitute_only
         if isinstance(event, validation.ValidationCommandFinished):
             return
         if isinstance(event, validation.ValidationCommandStarted):
             text = f"$ {event.command}"
+            substitute_only = "--max-jobs 0" in event.command
             jobs.record_runner_storage(f"before-{source}")
         elif isinstance(event, validation.ValidationCommandOutput):
             text = event.line.replace("\r", "")
@@ -213,7 +219,7 @@ def _hosted_validation_progress(source: str) -> validation.ValidationProgress:
         sys.stderr.write(f"[{source}] {redact_urls(text)}\n")
         sys.stderr.flush()
         if source in _FAIL_FAST_PROGRESS_SOURCES:
-            raise_if_warmup_fatal(text)
+            raise_if_warmup_fatal(text, substitute_only=substitute_only)
 
     return emit
 
@@ -587,6 +593,67 @@ def _require_closure_budget(seconds: float | None) -> float | None:
     return float(seconds)
 
 
+def _retry_substitute_only_helpers(
+    failures: tuple[validation.DerivationValidationFailure, ...],
+) -> tuple[str, ...]:
+    """Retry ``--max-jobs 0`` Cannot-build helpers as 1-drv local compiles.
+
+    #1270 canary: patchutils, then pbzx, then cpio each fetched their
+    source and died on ``Cannot build`` under substitute-only. rustc /
+    stdenv / rust_* stay refused so the next Unix helper does not need
+    another prefix + kick.
+    """
+    retry: list[str] = []
+    for failure in failures:
+        drv = failure.installable.removesuffix("^*")
+        if is_compiler_must_substitute_store_path(drv):
+            continue
+        if is_svh_sensitive_store_path(drv):
+            continue
+        if is_crate2nix_rust_output(drv):
+            continue
+        if "Cannot build" not in failure.message:
+            continue
+        retry.append(drv)
+    return tuple(dict.fromkeys(retry))
+
+
+def _realize_compiler_substitutes(
+    substitute: tuple[str, ...],
+    *,
+    flake_root: Path,
+) -> tuple[validation.DerivationValidationFailure, ...]:
+    """``--max-jobs 0`` first; retry cache-miss 1-drv Unix helpers locally.
+
+    Keep rustc/stdenv/rust_* failures. Do not overwrite them with a
+    successful helper retry — that would let force-local run after a
+    bootstrap miss.
+    """
+    if not substitute:
+        return ()
+    failures = realize_warmup_outputs(
+        substitute,
+        flake_root=flake_root,
+        progress=_hosted_validation_progress("rust-warmup"),
+        substitute_only=True,
+    )
+    retry = _retry_substitute_only_helpers(failures)
+    stubborn = tuple(
+        failure
+        for failure in failures
+        if failure.installable.removesuffix("^*") not in retry
+    )
+    if stubborn:
+        return failures
+    if not retry:
+        return failures
+    return realize_warmup_outputs(
+        retry,
+        flake_root=flake_root,
+        progress=_hosted_validation_progress("rust-warmup"),
+    )
+
+
 def _realize_svh_family(
     family: tuple[str, ...],
     *,
@@ -609,11 +676,8 @@ def _realize_svh_family(
     substitute, fetches = partition_compiler_input_drvs(compiler)
     failures: list[validation.DerivationValidationFailure] = []
     if substitute:
-        compiler_failures = realize_warmup_outputs(
-            substitute,
-            flake_root=flake_root,
-            progress=_hosted_validation_progress("rust-warmup"),
-            substitute_only=True,
+        compiler_failures = _realize_compiler_substitutes(
+            substitute, flake_root=flake_root
         )
         failures.extend(compiler_failures)
         if compiler_failures:
