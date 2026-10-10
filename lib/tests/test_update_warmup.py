@@ -33,6 +33,7 @@ from lib.update.ci.warmup import (
     force_local_dry_run_builds,
     import_warmup_drvs,
     intersect_missing,
+    is_compiler_local_helper_store_path,
     is_crate2nix_rust_output,
     is_extension_host_family_store_path,
     is_force_local_allowed_build,
@@ -911,6 +912,17 @@ def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
         (rustc,),
         (bmake, src),
     )
+    patchutils = "/nix/store/m6399k05aaqiz3mx4cdpkdqr4hp05kmj-patchutils-0.3.3.drv"
+    patchutils_tar = (
+        "/nix/store/r59fr714v93cagij26k3082icsksrsv1-patchutils-0.3.3.tar.xz"
+    )
+    assert is_compiler_local_helper_store_path(patchutils)
+    assert not is_compiler_local_helper_store_path(patchutils_tar)
+    assert not is_compiler_local_helper_store_path(rustc)
+    assert partition_compiler_input_drvs((rustc, patchutils, patchutils_tar)) == (
+        (rustc,),
+        (patchutils, patchutils_tar),
+    )
     assert any("--requisites" in args for args in seen_query)
     host_lib = (
         "/nix/store/5crb9axiaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0-lib"
@@ -1123,6 +1135,25 @@ def test_is_source_fetch_store_path_classifies_archives(
 ) -> None:
     """#1264: crate tarball FODs download; compiler/stdenv still substitute-only."""
     assert is_source_fetch_store_path(path) is expected
+
+
+def test_1270_canary_patchutils_is_local_compiler_helper() -> None:
+    """#1270 canary: patchutils was 1 drv after its tarball substituted.
+
+    Hosted job 114284201109: ``this derivation will be built``
+    patchutils-0.3.3.drv, fetched the tar.xz, then ``--max-jobs 0``
+    fatal'd Cannot build. rustc/stdenv stay substitute-only.
+    """
+    patchutils = "/nix/store/m6399k05aaqiz3mx4cdpkdqr4hp05kmj-patchutils-0.3.3.drv"
+    rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    stdenv = "/nix/store/1gx3hvygaaaaaaaaaaaaaaaaaaaaaaaa-stdenv-darwin.drv"
+    assert is_compiler_local_helper_store_path(patchutils)
+    assert not is_compiler_local_helper_store_path(rustc)
+    assert not is_compiler_local_helper_store_path(stdenv)
+    assert partition_compiler_input_drvs((rustc, stdenv, patchutils)) == (
+        (rustc, stdenv),
+        (patchutils,),
+    )
 
 
 def test_realize_warmup_substitute_only_is_max_jobs_zero(tmp_path: Path) -> None:

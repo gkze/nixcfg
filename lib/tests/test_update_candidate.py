@@ -849,6 +849,87 @@ def test_rust_warmup_settings_family_force_locals_content_cluster(
     assert others == [(other_drv,)]
 
 
+def test_rust_warmup_settings_family_builds_patchutils_helper(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1270 canary: do not --max-jobs 0 the 1-drv patchutils helper."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    rustc_drv = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    patchutils_drv = "/nix/store/m6399k05aaqiz3mx4cdpkdqr4hp05kmj-patchutils-0.3.3.drv"
+    monkeypatch.setattr(
+        pipeline,
+        "compiler_input_drvs",
+        lambda *_args, **_kwargs: (rustc_drv, patchutils_drv),
+    )
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    content = "/nix/store/ma14flyg1v5b4vhinb2l0klw1xmdg9nz-rust_settings_content-0.1.0"
+    settings_drv = f"{settings}.drv"
+    content_drv = f"{content}.drv"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(content, settings),
+            rustLayers=((content,), (settings,)),
+            outputDrvs={content: content_drv, settings: settings_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == ()
+    assert realized == [
+        ((rustc_drv,), False, False, True),
+        ((patchutils_drv,), False, False, False),
+        ((content_drv, settings_drv), True, True, False),
+    ]
+
+
 def test_rust_warmup_canary_crates_realize_settings_off_slot_stripe(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

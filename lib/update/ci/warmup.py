@@ -1201,6 +1201,21 @@ def is_source_fetch_store_path(path: str) -> bool:
     return name == "source" or name.endswith(("-src", "-source"))
 
 
+# 1-drv Unix helpers that miss cache.nixos.org on the CVE-patched
+# stdenv. The tarball substitutes; the package drv must compile locally.
+# #1270 canary: patchutils-0.3.3.drv was 1 local + 1 fetch, then
+# ``--max-jobs 0`` fatal'd Cannot build before rust_settings.
+_COMPILER_LOCAL_HELPER_PREFIXES = ("patchutils-",)
+
+
+def is_compiler_local_helper_store_path(path: str) -> bool:
+    """Return whether a compiler input may compile locally (1-drv helper)."""
+    if is_source_fetch_store_path(path):
+        return False
+    rest = _store_output_rest(path).removesuffix(".drv")
+    return rest.startswith(_COMPILER_LOCAL_HELPER_PREFIXES)
+
+
 # rust-warmup others may realize these without compiling a crate graph.
 # #1268 slot 4: goose-cli-1.51.0 = 1759 will-be-built; crane-utils = 1.
 # #1268 slot 3: vendor-cargo-deps = 521; cargo-package-* and but = 1.
@@ -1260,11 +1275,11 @@ def classify_slot_warmup_will_be_built(
 def partition_compiler_input_drvs(
     drvs: Sequence[str],
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Split compiler requisites into substitute-only vs source-fetch FODs."""
+    """Split compiler requisites into substitute-only vs local-ok helpers/FODs."""
     substitute: list[str] = []
     fetches: list[str] = []
     for drv in dict.fromkeys(drvs):
-        if is_source_fetch_store_path(drv):
+        if is_source_fetch_store_path(drv) or is_compiler_local_helper_store_path(drv):
             fetches.append(drv)
         else:
             substitute.append(drv)
