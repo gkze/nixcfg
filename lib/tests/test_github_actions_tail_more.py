@@ -825,7 +825,9 @@ class _FakePageSession:
             raise gha_page.PageSessionUnavailableError("no chrome")
         return self.html, self.job_urls[-1]
 
-    async def fetch(self, url: str, *, headers: dict[str, str]) -> gha_page.InPageFetchResult:
+    async def fetch(
+        self, url: str, *, headers: dict[str, str]
+    ) -> gha_page.InPageFetchResult:
         del headers
         if self.unavailable:
             raise gha_page.PageSessionUnavailableError("no chrome")
@@ -839,9 +841,12 @@ def test_live_client_uses_inpage_session_for_job_page_and_json() -> None:
         '<check-steps job-steps-url="/acme/demo/actions/runs/9/jobs/55/steps">'
         "</check-steps>"
     )
-    session = _FakePageSession(html=html, body=b'[{"id":"step-1","name":"Build",'
+    session = _FakePageSession(
+        html=html,
+        body=b'[{"id":"step-1","name":"Build",'
         b'"status":"in_progress","conclusion":null,"number":1,"change_id":3,'
-        b'"started_at":"2026-04-02T16:00:00Z","completed_at":null}]')
+        b'"started_at":"2026-04-02T16:00:00Z","completed_at":null}]',
+    )
     client = gha_tail.GitHubActionsLiveClient(
         token="test" + "-token",
         context=_context(),
@@ -858,7 +863,10 @@ def test_live_client_uses_inpage_session_for_job_page_and_json() -> None:
             referer="https://github.com/acme/demo/actions/runs/9/job/42",
         )
         await client.aclose()
-        assert info.steps_url == "https://github.com/acme/demo/actions/runs/9/jobs/55/steps"
+        assert (
+            info.steps_url
+            == "https://github.com/acme/demo/actions/runs/9/jobs/55/steps"
+        )
         assert steps[0].id == "step-1"
         assert steps[0].change_id == 3
 
@@ -897,14 +905,28 @@ def test_live_client_page_session_errors_and_fallbacks(
         )
         is None
     )
-    assert asyncio.run(gha_tail.GitHubActionsLiveClient(
-        token="", context=_context()
-    )._discover_job_page_from_tab(job_url="https://github.com/x")) is None
-    assert asyncio.run(gha_tail.GitHubActionsLiveClient(
-        token="", context=_context()
-    )._fetch_via_page("https://github.com/x", accept="application/json", referer=None)) is None
+    assert (
+        asyncio.run(
+            gha_tail.GitHubActionsLiveClient(
+                token="", context=_context()
+            )._discover_job_page_from_tab(job_url="https://github.com/x")
+        )
+        is None
+    )
+    assert (
+        asyncio.run(
+            gha_tail.GitHubActionsLiveClient(
+                token="", context=_context()
+            )._fetch_via_page(
+                "https://github.com/x", accept="application/json", referer=None
+            )
+        )
+        is None
+    )
 
-    bad_status = _FakePageSession(status=400, body=b"nope", headers={"content-type": "text/plain"})
+    bad_status = _FakePageSession(
+        status=400, body=b"nope", headers={"content-type": "text/plain"}
+    )
     status_client = gha_tail.GitHubActionsLiveClient(
         token="",
         context=_context(),
@@ -957,4 +979,3 @@ def test_live_client_page_session_errors_and_fallbacks(
         )
     )
     assert info.steps_url == "https://github.com/acme/demo/actions/runs/9/jobs/55/steps"
-

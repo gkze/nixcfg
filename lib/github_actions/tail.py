@@ -289,9 +289,7 @@ class GitHubActionsLiveClient:
         accept: str,
         referer: str | None = None,
     ) -> tuple[bytes, dict[str, str]]:
-        page_result = await self._fetch_via_page(
-            url, accept=accept, referer=referer
-        )
+        page_result = await self._fetch_via_page(url, accept=accept, referer=referer)
         if page_result is not None:
             return page_result
 

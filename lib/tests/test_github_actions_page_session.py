@@ -42,11 +42,18 @@ def test_choose_existing_page_prefers_job_then_github_tabs() -> None:
     )
     assert page_session.choose_existing_page((inspect, job)).target_id == "job"
 
-    with pytest.raises(page_session.PageSessionUnavailableError, match="no existing page"):
+    with pytest.raises(
+        page_session.PageSessionUnavailableError, match="no existing page"
+    ):
         page_session.choose_existing_page((worker,))
-    with pytest.raises(page_session.PageSessionUnavailableError, match="no signed-in GitHub"):
+    with pytest.raises(
+        page_session.PageSessionUnavailableError, match="no signed-in GitHub"
+    ):
         page_session.choose_existing_page((inspect,))
-    assert page_session._parse_cdp_target({"targetId": 1, "type": "page", "url": "/"}) is None
+    assert (
+        page_session._parse_cdp_target({"targetId": 1, "type": "page", "url": "/"})
+        is None
+    )
 
 
 def test_inpage_fetch_expression_embeds_request_payload() -> None:
@@ -78,15 +85,29 @@ def test_parse_inpage_fetch_result_validates_payload() -> None:
     with pytest.raises(page_session.PageSessionError, match="fetch object"):
         page_session.parse_inpage_fetch_result([])
     with pytest.raises(page_session.PageSessionError, match="integer status"):
-        page_session.parse_inpage_fetch_result({"status": "200", "body": "", "headers": {}})
+        page_session.parse_inpage_fetch_result({
+            "status": "200",
+            "body": "",
+            "headers": {},
+        })
     with pytest.raises(page_session.PageSessionError, match="string body"):
-        page_session.parse_inpage_fetch_result({"status": 200, "body": None, "headers": {}})
+        page_session.parse_inpage_fetch_result({
+            "status": 200,
+            "body": None,
+            "headers": {},
+        })
     with pytest.raises(page_session.PageSessionError, match="headers object"):
-        page_session.parse_inpage_fetch_result({"status": 200, "body": "", "headers": []})
+        page_session.parse_inpage_fetch_result({
+            "status": 200,
+            "body": "",
+            "headers": [],
+        })
 
 
 class _FakeCdp:
-    def __init__(self, *, responses: list[object], errors: list[Exception] | None = None) -> None:
+    def __init__(
+        self, *, responses: list[object], errors: list[Exception] | None = None
+    ) -> None:
         self.responses = list(responses)
         self.errors = list(errors or [])
         self.calls: list[tuple[str, object, str | None]] = []
@@ -146,11 +167,7 @@ def test_page_session_fetches_and_reads_document_from_existing_tab(
             },
             {"sessionId": "sess-1"},
             {},
-            {
-                "result": {
-                    "value": "https://github.com/acme/demo/actions/runs/9/job/42"
-                }
-            },
+            {"result": {"value": "https://github.com/acme/demo/actions/runs/9/job/42"}},
             {
                 "result": {
                     "value": {
@@ -227,9 +244,11 @@ def test_page_session_navigates_existing_github_tab_only(
     asyncio.run(
         session.ensure_job_page("https://github.com/acme/demo/actions/runs/9/job/42")
     )
-    assert ("Page.navigate", {"url": "https://github.com/acme/demo/actions/runs/9/job/42"}, "sess-1") in [
-        (method, params, session_id) for method, params, session_id in fake.calls
-    ]
+    assert (
+        "Page.navigate",
+        {"url": "https://github.com/acme/demo/actions/runs/9/job/42"},
+        "sess-1",
+    ) in [(method, params, session_id) for method, params, session_id in fake.calls]
 
     inspect_fake = _FakeCdp(
         responses=[
@@ -265,8 +284,12 @@ def test_page_session_connect_and_evaluate_errors(
         return ()
 
     monkeypatch.setattr(page_session, "_discover_cdp_browser_ws_urls", _no_urls)
-    with pytest.raises(page_session.PageSessionUnavailableError, match="No Chrome DevTools"):
-        asyncio.run(page_session.GitHubPageSession().ensure_job_page("https://github.com/x"))
+    with pytest.raises(
+        page_session.PageSessionUnavailableError, match="No Chrome DevTools"
+    ):
+        asyncio.run(
+            page_session.GitHubPageSession().ensure_job_page("https://github.com/x")
+        )
 
     async def _urls(**_kwargs: object) -> tuple[str, ...]:
         return ("ws://127.0.0.1:9222/devtools/browser/demo",)
@@ -276,9 +299,20 @@ def test_page_session_connect_and_evaluate_errors(
     for response, match in [
         ("bad", "non-object payload"),
         ({}, "no targetInfos list"),
-        ({"targetInfos": [{"targetId": "p", "type": "page", "url": "https://github.com/x"}]}, "non-object payload"),
         (
-            {"targetInfos": [{"targetId": "p", "type": "page", "url": "https://github.com/x"}]},
+            {
+                "targetInfos": [
+                    {"targetId": "p", "type": "page", "url": "https://github.com/x"}
+                ]
+            },
+            "non-object payload",
+        ),
+        (
+            {
+                "targetInfos": [
+                    {"targetId": "p", "type": "page", "url": "https://github.com/x"}
+                ]
+            },
             "sessionId",
         ),
     ]:
@@ -302,8 +336,12 @@ def test_page_session_connect_and_evaluate_errors(
         errors=[page_session.PageSessionUnavailableError("Failed connecting")],
     )
     monkeypatch.setattr(page_session, "_CdpClient", lambda: connect_fail)
-    with pytest.raises(page_session.PageSessionUnavailableError, match="Failed connecting"):
-        asyncio.run(page_session.GitHubPageSession().ensure_job_page("https://github.com/x"))
+    with pytest.raises(
+        page_session.PageSessionUnavailableError, match="Failed connecting"
+    ):
+        asyncio.run(
+            page_session.GitHubPageSession().ensure_job_page("https://github.com/x")
+        )
     assert connect_fail.closed is True
 
 
@@ -319,9 +357,7 @@ def test_page_session_evaluate_payload_errors(
     with pytest.raises(page_session.PageSessionError, match="non-object payload"):
         asyncio.run(session._evaluate_value("1"))
 
-    session._cdp = _FakeCdp(
-        responses=[{"exceptionDetails": {"text": "boom"}}]
-    )
+    session._cdp = _FakeCdp(responses=[{"exceptionDetails": {"text": "boom"}}])
     with pytest.raises(page_session.PageSessionError, match="boom"):
         asyncio.run(session._evaluate_value("1"))
 
@@ -460,7 +496,9 @@ def test_cdp_client_send_receive_and_transport_errors(
     ]:
         fail_ws = _FakeWebSocket([_FakeMessage(msg_type)])
         monkeypatch.setattr(
-            page_session.aiohttp, "ClientSession", lambda fail_ws=fail_ws: _FakeSession(fail_ws)
+            page_session.aiohttp,
+            "ClientSession",
+            lambda fail_ws=fail_ws: _FakeSession(fail_ws),
         )
         fail_client = page_session._CdpClient()
         asyncio.run(fail_client.connect("ws://example"))
@@ -472,7 +510,9 @@ def test_cdp_client_send_receive_and_transport_errors(
         "ClientSession",
         lambda: _FakeSession(aiohttp.ClientConnectionError("down")),
     )
-    with pytest.raises(page_session.PageSessionUnavailableError, match="Failed connecting"):
+    with pytest.raises(
+        page_session.PageSessionUnavailableError, match="Failed connecting"
+    ):
         asyncio.run(page_session._CdpClient().connect("ws://example"))
 
     asyncio.run(page_session._CdpClient().close())

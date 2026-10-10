@@ -225,9 +225,7 @@ def _build_tail_clients(
             token=token,
             context=context,
             cookie_provider=cookie_provider,
-            page_session=GitHubPageSession(
-                chrome_debugging_url=chrome_debugging_url
-            ),
+            page_session=GitHubPageSession(chrome_debugging_url=chrome_debugging_url),
         ),
     )
 

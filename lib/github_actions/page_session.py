@@ -46,6 +46,7 @@ class CdpClientProtocol(Protocol):
     ) -> object:
         """Send one CDP command and return its result payload."""
 
+
 _GITHUB_NETLOC = "github.com"
 _ACTIONS_PATH_MARKER = "/actions/"
 _FETCH_NONCE_META = "fetch-nonce"
@@ -152,9 +153,7 @@ def parse_inpage_fetch_result(value: object) -> InPageFetchResult:
         msg = "In-page fetch result is missing a headers object"
         raise PageSessionError(msg)
     header_map = {
-        str(key): header
-        for key, header in headers.items()
-        if isinstance(header, str)
+        str(key): header for key, header in headers.items() if isinstance(header, str)
     }
     return InPageFetchResult(
         status=status,
@@ -280,11 +279,7 @@ class GitHubPageSession:
             raise PageSessionError(msg)
         if "exceptionDetails" in result:
             details = result["exceptionDetails"]
-            text = (
-                details.get("text")
-                if isinstance(details, dict)
-                else None
-            )
+            text = details.get("text") if isinstance(details, dict) else None
             msg = f"In-page evaluate failed: {text or 'unknown exception'}"
             raise PageSessionError(msg)
         remote = result.get("result")
@@ -354,11 +349,7 @@ class _CdpClient:
                     continue
                 if "error" in decoded:
                     error = decoded["error"]
-                    detail = (
-                        error.get("message")
-                        if isinstance(error, dict)
-                        else error
-                    )
+                    detail = error.get("message") if isinstance(error, dict) else error
                     msg = f"CDP {method} failed: {detail}"
                     raise PageSessionError(msg)
                 return decoded.get("result")
