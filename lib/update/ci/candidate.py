@@ -38,18 +38,24 @@ from lib.update.ci.shard_plan import (
     write_github_actions_output,
 )
 from lib.update.ci.warmup import (
+    EXTENSION_HOST_MEMBER_CRATES,
     WARMUP_DRVS_NAME,
     WARMUP_PLAN_NAME,
     WarmupError,
     export_warmup_drvs,
+    extension_host_family_warmup_outputs,
     import_warmup_drvs,
+    is_extension_host_family_store_path,
+    is_rust_extension_host_store_path,
     is_rust_language_models_store_path,
     language_models_input_drvs,
     language_models_warmup_outputs,
     load_warmup_plan,
     partition_agent_ui_drvs,
+    partition_rust_zed_drvs,
     plan_darwin_warmup,
     realize_warmup_outputs,
+    rust_crate_input_drvs,
     skip_cached_warmup_paths,
     slot_warmup_paths,
     unique_drvs_for_outputs,
@@ -284,44 +290,65 @@ def _realize_rust_warmup(
     )
     drvs = unique_drvs_for_outputs(missing, plan.output_drvs)
     others, agent_ui = partition_agent_ui_drvs(drvs)
-    language_models: tuple[str, ...] = ()
-    if agent_ui:
+    others, rust_zed = partition_rust_zed_drvs(others)
+    # Update #1258/#1261: Darwin rustc intern of a Cachix
+    # language_models rlib is bare E0463 (nixpkgs#482646). rust_zed
+    # then E0460s when target/deps/libextension_host is a newer SVH
+    # than substituted activity_indicator / settings_ui (#1261).
+    # `nix build --rebuild` is --check and keeps the cached NAR
+    # (and fails when out+lib are not both valid). Delete the local
+    # outputs and `--no-substitute` the extension_host family on the
+    # same runner. Do not evict h3crq11a from Cachix.
+    family: tuple[str, ...] = ()
+    if rust_zed:
+        others = tuple(
+            drv for drv in others if not is_extension_host_family_store_path(drv)
+        )
+        planned_family = extension_host_family_warmup_outputs(plan.rust_layers)
+        family = (
+            unique_drvs_for_outputs(planned_family, plan.output_drvs)
+            if planned_family
+            else ()
+        )
+    elif agent_ui:
         others = tuple(
             drv for drv in others if not is_rust_language_models_store_path(drv)
         )
-        # Update #1258/#1259/#1260: Darwin rustc intern of a Cachix
-        # language_models rlib is bare E0463 (nixpkgs#482646). Extra
-        # -C metadata on that crate alone mixed generations (#1260 E0460
-        # title_bar/recent_projects/extension_host) and still failed intern
-        # after the new NAR was substituted onto the agent_ui slots. Rebuild
-        # language_models on the same runner that compiles agent_ui; keep
-        # every other rust_* substitutable. Do not evict h3crq11a.
         planned_models = language_models_warmup_outputs(plan.rust_layers)
-        language_models = (
+        family = (
             unique_drvs_for_outputs(planned_models, plan.output_drvs)
             if planned_models
             else ()
         )
     import_warmup_drvs(
-        tuple(dict.fromkeys((*language_models, *drvs))),
+        tuple(dict.fromkeys((*family, *drvs))),
         warmup_plan.with_name(WARMUP_DRVS_NAME),
     )
-    if agent_ui and not language_models:
-        language_models = language_models_input_drvs(agent_ui)
-        if not language_models:
+    # Planned family is only the still-missing warmup stripe. Cached
+    # dependents (the #1261 E0460 mix) are absent from rust_layers, so
+    # always merge rust_zed / agent_ui inputDrvs after import.
+    if rust_zed:
+        family = tuple(
+            dict.fromkeys((
+                *family,
+                *rust_crate_input_drvs(rust_zed, EXTENSION_HOST_MEMBER_CRATES),
+            ))
+        )
+        if not any(is_rust_extension_host_store_path(drv) for drv in family):
+            msg = "rust_zed drv has no rust_extension_host input"
+            raise WarmupError(msg)
+    elif agent_ui:
+        family = tuple(dict.fromkeys((*family, *language_models_input_drvs(agent_ui))))
+        if not family:
             msg = "agent_ui drv has no rust_language_models input"
             raise WarmupError(msg)
+    extension_host = tuple(
+        drv for drv in family if is_rust_extension_host_store_path(drv)
+    )
+    family_rest = tuple(
+        drv for drv in family if not is_rust_extension_host_store_path(drv)
+    )
     failures: list[validation.DerivationValidationFailure] = []
-    if language_models:
-        failures.extend(
-            realize_warmup_outputs(
-                language_models,
-                flake_root=flake_root,
-                progress=_hosted_validation_progress("rust-warmup"),
-                print_build_logs=True,
-                rebuild=True,
-            )
-        )
     if others:
         failures.extend(
             realize_warmup_outputs(
@@ -330,10 +357,39 @@ def _realize_rust_warmup(
                 progress=_hosted_validation_progress("rust-warmup"),
             )
         )
-    if agent_ui:
+    if extension_host:
+        failures.extend(
+            realize_warmup_outputs(
+                extension_host,
+                flake_root=flake_root,
+                progress=_hosted_validation_progress("rust-warmup"),
+                print_build_logs=True,
+                force_local=True,
+            )
+        )
+    if family_rest:
+        failures.extend(
+            realize_warmup_outputs(
+                family_rest,
+                flake_root=flake_root,
+                progress=_hosted_validation_progress("rust-warmup"),
+                print_build_logs=True,
+                force_local=True,
+            )
+        )
+    if agent_ui and not rust_zed:
         failures.extend(
             realize_warmup_outputs(
                 agent_ui,
+                flake_root=flake_root,
+                progress=_hosted_validation_progress("rust-warmup"),
+                print_build_logs=True,
+            )
+        )
+    if rust_zed:
+        failures.extend(
+            realize_warmup_outputs(
+                rust_zed,
                 flake_root=flake_root,
                 progress=_hosted_validation_progress("rust-warmup"),
                 print_build_logs=True,

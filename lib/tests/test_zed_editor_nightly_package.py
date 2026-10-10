@@ -190,7 +190,7 @@ def test_zed_scoped_override_adds_linux_x11_and_fontconfig_libraries() -> None:
 
 
 def test_zed_project_overrides_do_not_special_case_agent_ui() -> None:
-    """Intern fix is a same-slot language_models --rebuild, not an override."""
+    """Intern fix is same-slot force-local language_models, not an override."""
     overrides = nix_file_binding_expr(_PACKAGE, "projectCrateOverrides")
     with pytest.raises(AssertionError, match="missing binding agent_ui"):
         _binding_from_override(overrides, "agent_ui")

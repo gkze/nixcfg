@@ -62,7 +62,7 @@ class DerivationValidationRequest:
     installable: str
     mode: DerivationValidationMode = "eval"
     substitute_only: bool = False
-    rebuild: bool = False
+    no_substitute: bool = False
 
 
 @dataclass(frozen=True)
@@ -755,17 +755,20 @@ def _validation_args(
                     # (#1257 platform mismatch). Substitute only.
                     ["--max-jobs", "0"]
                     if request.substitute_only
-                    else [
-                        # Substitute EILSEQ on hosted macos-15 is not a
-                        # derivation failure; Nix can rebuild that path
-                        # from source.
-                        "--fallback",
-                        # Update #1260: a Cachix language_models NAR that
-                        # rustc can --extern still intern-fails as bare
-                        # E0463 (nixpkgs#482646). --rebuild realizes that
-                        # one drv locally; dependents stay substitutable.
-                        *(["--rebuild"] if request.rebuild else []),
-                    ]
+                    # Update #1261: nix build --rebuild is --check and
+                    # keeps the cached NAR. Delete+--no-substitute
+                    # compiles language_models / extension_host on
+                    # this runner so rustc intern/SVH match.
+                    else (
+                        ["--no-substitute"]
+                        if request.no_substitute
+                        else [
+                            # Substitute EILSEQ on hosted macos-15 is not a
+                            # derivation failure; Nix can rebuild that path
+                            # from source.
+                            "--fallback",
+                        ]
+                    )
                 ),
                 *(["-L"] if print_build_logs else []),
             ]
@@ -785,7 +788,7 @@ def _batch_key(
     # Warmup realizes missing Darwin *outputs*. Do not batch `/nix/store/*.drv^*`
     # graph nodes: those share a deadline as one build each. Substitute-only
     # foreign Linux deps must not share a --fallback batch with Darwin roots.
-    if request.substitute_only or request.rebuild:
+    if request.substitute_only or request.no_substitute:
         return None
     name = request.installable.removeprefix("/nix/store/")
     if (

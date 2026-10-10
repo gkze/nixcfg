@@ -2,8 +2,8 @@
 
 Lane for `cursor/no-skip-darwin-shards-6614` / [PR #221](https://github.com/gkze/nixcfg/pull/221).
 George approved handing this to a fresh agent once `37809856116` ended.
-This note is the stop point after the #1260 same-slot `--rebuild`
-kick: **do not queue a second Update, and do not self-schedule
+This note is the stop point after the #1261 force-local kick:
+**do not queue a second Update, and do not self-schedule
 checks.** The manager routine watches the run.
 
 ## Done bar (standing rules, verbatim)
@@ -54,8 +54,9 @@ already contains:
 | `85c7f526` | ruff-format of the diagnostic helpers |
 | `493c899b` | Darwin `language_models` extra `-C metadata` (wrong; caused #1260 mix) |
 | `2ff8fb84` | Kick that queued `37998753277` (#1260); terminal failure 01:06:51Z |
-| `486d5a17` | Revert that salt; same-slot `language_models --rebuild` before `agent_ui` |
-| this head | Kick that queues the same-slot `--rebuild` Update |
+| `486d5a17` | Revert that salt; same-slot `language_models --rebuild` (wrong Nix flag) |
+| `414eab18` | Kick that queued `38011931476` (#1261); terminal failure 02:52:41Z |
+| this head | Delete+`--no-substitute` the extension_host family on rust_zed slots |
 
 #222 is **closed as superseded** (2026-10-08T21:40:26Z). The rust_zed fix and
 5-wide split live on this branch, not on `cursor/fix-zed-out-lib-cycle-6614`.
@@ -327,6 +328,60 @@ tree) is still split and still in gkze:
     pushes of successful rust_* in those slots are not that line.
     `NIX_CONF_has_post_build_hook=False` is the require-script looking
     at `NIX_CONF` instead of `NIX_USER_CONF_FILES`. #1257 holds.
+13. **`nix build --rebuild` is `--check` and rust_zed E0460 is an
+    extension_host SVH mix** (`38011931476` / #1261 warm-rust 0/1/2 /
+    `114105469446` + `114105469460` + `114105469382` @ `414eab18`).
+    Slots 3 and 4 passed. Slots 0/1/2 failed the same
+    `/nix/store/av7xckfpd3j4k0a6yx7dkf2jj48l791y-rust_zed-1.25.0.drv`
+    (builder exit 2). Slot 2's report names
+    `zed-editor-nightly-unstable-f16f965.drv` (same rust_zed leaf).
+    Packages/roots/closures and both linux-deps jobs skipped.
+    assert-coverage `114108707393` failed on required Darwin jobs.
+    repair `114109962250` finished failed. publish skipped. The run
+    ended 02:52:41Z.
+
+    Slot 0 `--rebuild` of `d6dy3p29…-rust_language_models-0.1.0.drv^*`
+    substituted only `$out` `9ijw0hpw` and died with `some outputs of
+    '…d6dy3p29…drv' are not valid, so checking is not possible`.
+    `--rebuild` implies `--check`: it compares a new build to the
+    cached NAR and **keeps the cached NAR** when the check can run
+    (slot 1). It cannot replace a substitutable intern-failing rlib.
+    A later normal `language_models` + `agent_ui` build on slot 0
+    succeeded — E0463 is fixed by a from-source compile, not `--check`.
+
+    rust_zed then substituted `5crb9axi…-rust_extension_host-0.1.0-lib`
+    (copied into `target/deps/libextension_host-85905da4ec.rlib`),
+    `8xk2b1cb…-rust_activity_indicator-0.1.0-lib`, and
+    `1wfqda42…-rust_settings_ui-0.1.0-lib`. rustc E0460 at
+    `src/zed.rs:606` (`activity_indicator`) and `src/main.rs:782`
+    (`settings_ui`): `found possibly newer version of crate
+    extension_host`. User hunch confirmed: per-crate rust_zed linked
+    a mismatched `extension_host` SVH. Cargo.nix lists those crates
+    as `extension_host` dependents; the `.drv` input edges are
+    present. This is rustc SVH / intern nondeterminism
+    (nixpkgs#482646 family), not a missing crate2nix dep.
+
+    Cachix post `Cachix Daemon not started. Skipping push` is still
+    cause 4. Slot 0 `cachix-daemon-require.log`: daemon ready,
+    `post-build-hook.sh` present, retained `daemon.log` 352 bytes
+    (startup; `Starting Cachix Daemon` / cache `gkze`). Explicit
+    `if: always()` flush already stopped the socket
+    (`cleared CACHIX_DAEMON_DIR`). Per-derivation hook pushes of
+    successful rust_* survive the failed leaf.
+
+    This head substitute-only realizes the family first (`--max-jobs
+    0`) so rustc/stdenv exist when the slot's `others` set is empty,
+    deletes this-store outputs only
+    (`nix-store --delete --ignore-liveness`; not Cachix), and
+    `nix build --no-substitute`s the extension_host family
+    (`activity_indicator`, `agent_ui`, `extension_host`,
+    `extensions_ui`, `feedback`, `language_models`,
+    `recent_projects`, `remote_server`, `settings_ui`, `title_bar`)
+    on the rust_zed slot, extension_host first, then dependents,
+    then rust_zed. agent_ui-only slots still force-local
+    language_models. Family members already in Cachix at plan time
+    are discovered from `nix-store --query --references` and merged
+    into the force-local set. Do not evict `h3crq11a`.
 
 Also: realizing warmup as `nix build /nix/store/<output>` cannot compile missing
 paths. That is why packages died at 21:35Z after inventory.
@@ -353,14 +408,14 @@ creation if never accessed) is firing. Pins are immune with `--keep-revisions`
 
 ## Already queued (do not double-kick)
 
-`37998753277` (#1260) @ `2ff8fb84` is **terminal failure** (ended
-01:06:51Z, including repair). Warm-rust 3/4 succeeded; 0/1/2 failed
-(cause 12); Darwin packages/closures/roots and linux-deps skipped;
-assert-coverage and repair failed; publish skipped. `37976189014`
-(#1259), `37947952083` (#1258), and `37890830675` (#1257) are also
-terminal (causes 8–11). The next Update is the same-slot
-language_models `--rebuild` kick from `486d5a17`
-(`.github/update-kick`). Do not queue a second one.
+`38011931476` (#1261) @ `414eab18` is **terminal failure** (ended
+02:52:41Z, including repair). Warm-rust 3/4 succeeded; 0/1/2 failed
+(cause 13); Darwin packages/closures/roots and linux-deps skipped;
+assert-coverage and repair failed; publish skipped. `37998753277`
+(#1260), `37976189014` (#1259), `37947952083` (#1258), and
+`37890830675` (#1257) are also terminal (causes 8–12). The next
+Update is the force-local extension_host-family kick from this
+head (`.github/update-kick`). Do not queue a second one.
 
 ## Open questions
 
@@ -375,11 +430,12 @@ language_models `--rebuild` kick from `486d5a17`
 
 ## Exact next step
 
-Watch the same-slot `--rebuild` Update from this kick. Warm-rust
-agent_ui slots should `nix build …rust_language_models… --rebuild` on
-the same runner as `rust_agent_ui`, then compile agent_ui without
-E0463 / E0460 on title_bar/recent_projects. Do not evict `h3crq11a`
-or `aqsm7q08`. Do not change flake inputs without George. Do not
-merge #221. Do not drive `main` Update until the done bar above is
-green. Do not schedule self-check-ins or timers; the manager routine
-watches the run.
+Watch the force-local Update from this kick. rust_zed slots should
+delete this-store family outputs and `nix build --no-substitute`
+extension_host, then activity_indicator / settings_ui / language_models
+/ agent_ui / title_bar / …, then rust_zed, with no E0460 / E0463.
+agent_ui-only slots still force-local language_models. Do not evict
+`h3crq11a` or `aqsm7q08`. Do not change flake inputs without George.
+Do not merge #221. Do not drive `main` Update until the done bar
+above is green. Do not schedule self-check-ins or timers; the
+manager routine watches the run.

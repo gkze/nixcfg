@@ -1486,10 +1486,10 @@ def test_store_path_builds_batch_together(tmp_path: Path) -> None:
     assert "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-two" in calls[0]
 
 
-def test_rebuild_request_is_unbatched_and_passes_nix_rebuild(
+def test_no_substitute_request_is_unbatched_and_skips_fallback(
     tmp_path: Path,
 ) -> None:
-    """#1260 language_models intern fix rebuilds one drv; peers stay substitutable."""
+    """#1261 force-local compile uses --no-substitute, not --rebuild/--check."""
     calls: list[list[str]] = []
 
     def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -1507,7 +1507,7 @@ def test_rebuild_request_is_unbatched_and_passes_nix_rebuild(
                     "root-warmup",
                     models,
                     "build",
-                    rebuild=True,
+                    no_substitute=True,
                 ),
                 DerivationValidationRequest("root-warmup", other, "build"),
             ),
@@ -1516,11 +1516,14 @@ def test_rebuild_request_is_unbatched_and_passes_nix_rebuild(
         )
         == ()
     )
-    rebuild_call = next(args for args in calls if "--rebuild" in args)
-    assert models in rebuild_call
-    assert other not in rebuild_call
+    local_call = next(args for args in calls if "--no-substitute" in args)
+    assert models in local_call
+    assert "--rebuild" not in local_call
+    assert "--fallback" not in local_call
+    assert other not in local_call
     other_call = next(args for args in calls if other in args)
-    assert "--rebuild" not in other_call
+    assert "--no-substitute" not in other_call
+    assert "--fallback" in other_call
 
 
 def test_failed_batch_rechecks_each_target_with_original_retry_policy(

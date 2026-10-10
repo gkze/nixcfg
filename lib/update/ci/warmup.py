@@ -795,14 +795,63 @@ def _store_output_rest(path: str) -> str:
     return rest if separator else name
 
 
+def is_named_rust_crate_store_path(path: str, crate: str) -> bool:
+    """Return whether *path* is crate2nix ``rust_<crate>-<version>``, not a sibling.
+
+    ``rust_language_models-`` does not match ``rust_language_models_cloud-``.
+    ``rust_zed-1.`` does not match ``rust_zed-font-kit`` or ``rust_zed_actions``.
+    """
+    rest = _store_output_rest(path)
+    prefix = f"rust_{crate}-"
+    if not rest.startswith(prefix):
+        return False
+    after = rest[len(prefix) :]
+    return bool(after) and after[0].isdigit()
+
+
 def is_rust_agent_ui_store_path(path: str) -> bool:
     """Return whether *path* is a crate2nix ``rust_agent_ui`` output or drv."""
-    return _store_output_rest(path).startswith("rust_agent_ui-")
+    return is_named_rust_crate_store_path(path, "agent_ui")
 
 
 def is_rust_language_models_store_path(path: str) -> bool:
     """Return whether *path* is crate2nix ``rust_language_models``, not ``_cloud``."""
-    return _store_output_rest(path).startswith("rust_language_models-")
+    return is_named_rust_crate_store_path(path, "language_models")
+
+
+def is_rust_zed_store_path(path: str) -> bool:
+    """Return whether *path* is crate2nix ``rust_zed-<version>``, not ``zed_*``."""
+    return is_named_rust_crate_store_path(path, "zed")
+
+
+# Cargo.nix crates that depend on ``extension_host`` plus ``title_bar``
+# (depends on ``recent_projects``; rust_zed --externs it). rust_zed is the
+# leaf and is realized after this set is compiled on the same runner.
+EXTENSION_HOST_MEMBER_CRATES = (
+    "activity_indicator",
+    "agent_ui",
+    "extension_host",
+    "extensions_ui",
+    "feedback",
+    "language_models",
+    "recent_projects",
+    "remote_server",
+    "settings_ui",
+    "title_bar",
+)
+
+
+def is_extension_host_family_store_path(path: str) -> bool:
+    """Return whether *path* is an ``extension_host`` SVH-family rust_* crate."""
+    return any(
+        is_named_rust_crate_store_path(path, crate)
+        for crate in EXTENSION_HOST_MEMBER_CRATES
+    )
+
+
+def is_rust_extension_host_store_path(path: str) -> bool:
+    """Return whether *path* is crate2nix ``rust_extension_host``."""
+    return is_named_rust_crate_store_path(path, "extension_host")
 
 
 def partition_agent_ui_drvs(
@@ -819,32 +868,52 @@ def partition_agent_ui_drvs(
     return tuple(others), tuple(agent_ui)
 
 
-def language_models_warmup_outputs(layers: Sequence[Sequence[str]]) -> tuple[str, ...]:
-    """Return rust_language_models outputs from every warmup layer, first-seen."""
+def partition_rust_zed_drvs(
+    drvs: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Split warmup drvs so ``rust_zed`` realizes after its extension_host family."""
+    others: list[str] = []
+    rust_zed: list[str] = []
+    for drv in dict.fromkeys(drvs):
+        if is_rust_zed_store_path(drv):
+            rust_zed.append(drv)
+        else:
+            others.append(drv)
+    return tuple(others), tuple(rust_zed)
+
+
+def _warmup_outputs_matching(
+    layers: Sequence[Sequence[str]],
+    predicate: Callable[[str], bool],
+) -> tuple[str, ...]:
     return tuple(
-        dict.fromkeys(
-            path
-            for layer in layers
-            for path in layer
-            if is_rust_language_models_store_path(path)
-        )
+        dict.fromkeys(path for layer in layers for path in layer if predicate(path))
     )
 
 
-def language_models_input_drvs(
-    agent_ui_drvs: Sequence[str],
+def language_models_warmup_outputs(layers: Sequence[Sequence[str]]) -> tuple[str, ...]:
+    """Return rust_language_models outputs from every warmup layer, first-seen."""
+    return _warmup_outputs_matching(layers, is_rust_language_models_store_path)
+
+
+def extension_host_family_warmup_outputs(
+    layers: Sequence[Sequence[str]],
+) -> tuple[str, ...]:
+    """Return extension_host-family outputs from every warmup layer, first-seen."""
+    return _warmup_outputs_matching(layers, is_extension_host_family_store_path)
+
+
+def rust_crate_input_drvs(
+    parent_drvs: Sequence[str],
+    crates: Sequence[str],
     *,
     run: _StoreRun | None = None,
 ) -> tuple[str, ...]:
-    """Return ``rust_language_models`` ``.drv`` inputs of *agent_ui_drvs*.
-
-    Used when that crate is already in gkze and therefore absent from the
-    warmup plan. ``nix-store --query --references`` is the store-side view
-    of crate2nix's direct ``inputDrvs`` after the agent_ui closure import.
-    """
+    """Return named crate2nix ``.drv`` inputs of *parent_drvs* after import."""
     runner = subprocess.run if run is None else run
+    wanted = tuple(crates)
     found: dict[str, None] = {}
-    for drv in dict.fromkeys(agent_ui_drvs):
+    for drv in dict.fromkeys(parent_drvs):
         result = runner(
             ["nix-store", "--query", "--references", drv],
             check=False,
@@ -855,15 +924,86 @@ def language_models_input_drvs(
             detail = _store_command_detail(
                 result, fallback="nix-store --query --references failed"
             )
-            msg = f"failed to query rust_language_models inputs of {drv}: {detail}"
+            msg = f"failed to query rust crate inputs of {drv}: {detail}"
             raise WarmupError(msg)
         stdout = result.stdout
         text = stdout.decode() if isinstance(stdout, bytes) else stdout
         for line in text.splitlines():
             path = line.strip()
-            if path.endswith(".drv") and is_rust_language_models_store_path(path):
+            if path.endswith(".drv") and any(
+                is_named_rust_crate_store_path(path, crate) for crate in wanted
+            ):
                 found.setdefault(path, None)
     return tuple(found)
+
+
+def language_models_input_drvs(
+    agent_ui_drvs: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return ``rust_language_models`` ``.drv`` inputs of *agent_ui_drvs*."""
+    return rust_crate_input_drvs(agent_ui_drvs, ("language_models",), run=run)
+
+
+def query_drv_outputs(
+    drv: str,
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return store output paths of one ``.drv``."""
+    runner = subprocess.run if run is None else run
+    result = runner(
+        ["nix-store", "--query", "--outputs", drv],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode:
+        detail = _store_command_detail(
+            result, fallback="nix-store --query --outputs failed"
+        )
+        msg = f"failed to query outputs of {drv}: {detail}"
+        raise WarmupError(msg)
+    stdout = result.stdout
+    text = stdout.decode() if isinstance(stdout, bytes) else stdout
+    return tuple(line.strip() for line in text.splitlines() if line.strip())
+
+
+def delete_local_store_paths(
+    paths: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> None:
+    """Drop *paths* from this store only. Does not evict Cachix."""
+    existing = tuple(path for path in dict.fromkeys(paths) if Path(path).exists())
+    if not existing:
+        return
+    runner = subprocess.run if run is None else run
+    result = runner(
+        ["nix-store", "--delete", "--ignore-liveness", *existing],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    still = tuple(path for path in existing if Path(path).exists())
+    if still:
+        detail = _store_command_detail(result, fallback="nix-store --delete failed")
+        sample = ", ".join(still[:8])
+        msg = f"failed to delete local outputs for force-local realize: {sample}: {detail}"
+        raise WarmupError(msg)
+
+
+def delete_warmup_drv_outputs(
+    drvs: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> None:
+    """Delete realized outputs of *drvs* so the next build is local source."""
+    outputs: list[str] = []
+    for drv in dict.fromkeys(drvs):
+        outputs.extend(query_drv_outputs(drv, run=run))
+    delete_local_store_paths(outputs, run=run)
 
 
 def realize_warmup_outputs(
@@ -874,19 +1014,46 @@ def realize_warmup_outputs(
     progress: ValidationProgress | None = None,
     timeout: float | None = None,
     print_build_logs: bool = False,
-    rebuild: bool = False,
+    force_local: bool = False,
 ) -> tuple[DerivationValidationFailure, ...]:
-    """Build the warmup outputs so Cachix's post-build-hook pushes each path."""
+    """Build the warmup outputs so Cachix's post-build-hook pushes each path.
+
+    ``force_local`` substitute-only populates rustc, deletes this-store
+    crate outputs, then ``--no-substitute`` compiles them here.
+    """
     failures: list[DerivationValidationFailure] = []
     ordered = tuple(dict.fromkeys(paths))
     for start in range(0, len(ordered), _WARMUP_REALIZE_CHUNK):
         chunk = ordered[start : start + _WARMUP_REALIZE_CHUNK]
+        if force_local:
+            # `--max-jobs 0` substitutes rustc/stdenv (and stale family
+            # NARs). `others` may be empty when earlier rust_* already
+            # skipped-if-in-gkze; `--no-substitute` alone cannot fetch
+            # the compiler. Discard substitute-only failures: a cache
+            # miss still proceeds to the local compile.
+            validate_derivation_requests(
+                tuple(
+                    DerivationValidationRequest(
+                        source="root-warmup",
+                        installable=warmup_build_installable(path),
+                        mode="build",
+                        substitute_only=True,
+                    )
+                    for path in chunk
+                ),
+                flake_root=flake_root,
+                run=run,
+                progress=progress,
+                timeout=timeout,
+                print_build_logs=print_build_logs,
+            )
+            delete_warmup_drv_outputs(chunk, run=run)
         requests = tuple(
             DerivationValidationRequest(
                 source="root-warmup",
                 installable=warmup_build_installable(path),
                 mode="build",
-                rebuild=rebuild,
+                no_substitute=force_local,
             )
             for path in chunk
         )
