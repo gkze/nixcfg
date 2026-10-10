@@ -10,13 +10,21 @@ import pytest
 from typer.testing import CliRunner
 
 from lib.nix.models.flake_lock import FlakeLockNode
-from lib.nix.models.sources import SourceEntry
+from lib.nix.models.sources import HashCollection, SourceEntry
 from lib.tests._run_updates_helpers import drain_events, make_run_plan
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
 from lib.tests._updater_helpers import load_repo_module_for_test
 from lib.update import cli, source_runner
 from lib.update.candidate import Candidate, Preparation, ResolvedVersion, git
 from lib.update.ci import candidate as pipeline
+from lib.update.ci.coverage import (
+    ROOT_OUT_PATHS_NAME,
+    CoverageError,
+    dump_job_results,
+    required_coverage_jobs,
+    write_root_out_path_cache,
+)
+from lib.update.ci.warmup import WarmupFatalError
 from lib.update.derivation_validation import (
     DerivationValidation,
     DerivationValidationFailure,
@@ -474,6 +482,7 @@ def test_cache_root_dependencies_skips_complete_candidate_and_own_roots(
     assert seen[0]["include_dependencies"] is True
     assert seen[0]["dependencies_only"] is True
     assert seen[0]["timeout"] == pipeline._CLOSURE_DISCOVERY_TIMEOUT_SECONDS
+    assert seen[0]["build_timeout"] == pipeline._ROOT_DEPS_BUILD_TIMEOUT_SECONDS
     failed = incomplete.model_copy(update={"prepared": False})
     with pytest.raises(ValueError, match="failed preparation"):
         pipeline.cache_root_dependencies(failed)
@@ -529,9 +538,9 @@ def test_cache_root_deps_cli_propagates_dependency_failures(
 
 
 def test_validation_scopes_split_packages_from_closures(
-    prepared_run, monkeypatch: pytest.MonkeyPatch
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Package and closure shards do separate work and do not GC a fresh runner."""
+    """Package shards do not GC; closure jobs GC before the root-closure fetch."""
     candidate = _candidate_for_scope(prepared_run)
     order: list[str] = []
     seen: list[dict[str, object]] = []
@@ -559,7 +568,7 @@ def test_validation_scopes_split_packages_from_closures(
         closure_budget_seconds=pipeline.HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS,
     )
     assert closures.gates == ("closures",)
-    assert order == ["packages", "roots"]
+    assert order == ["packages", "reclaim", "roots"]
     assert seen[0]["build_timeout"] == (
         pipeline.HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS
     )
@@ -591,12 +600,1509 @@ def test_validation_scopes_split_packages_from_closures(
         pipeline._require_closure_budget("18000")  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="positive"):
         pipeline._require_closure_budget(seconds=True)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="Named closure roots"):
+        pipeline.validate_candidate(
+            candidate, scope="packages", closure_roots=("darwin-argus",)
+        )
+    with pytest.raises(ValueError, match="nonempty root list"):
+        pipeline.validate_candidate(candidate, scope="closure-shard", closure_roots=())
 
 
-def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
+def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A timed-out closure build continues; other signals and eval timeouts fail."""
+    """rust-warmup is not certify evidence; packages no longer serialize it."""
+    candidate = _candidate_for_scope(prepared_run)
+    order: list[str] = []
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+
+    realized: list[object] = []
+
+    def warmup_realize(paths: object, *_args: object, **_kwargs: object) -> tuple[()]:
+        order.append("warmup")
+        realized.append(paths)
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    cargo = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9"
+    cargo_drv = f"{cargo}.drv"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(cargo,),
+            rustLayers=((cargo,),),
+            outputDrvs={cargo: cargo_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert order == ["warmup"]
+    assert realized == [(cargo_drv,)]
+    monkeypatch.setenv("NIXCFG_CANARY", "true")
+    default_skip = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=1
+    )
+    assert default_skip.failures == ()
+    assert order == ["warmup"]
+    monkeypatch.setenv("NIXCFG_CANARY_SLOTS", "1")
+    skipped = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert skipped.failures == ()
+    assert order == ["warmup"]
+    monkeypatch.delenv("NIXCFG_CANARY_SLOTS")
+    monkeypatch.setenv("NIXCFG_CANARY_CRATES", "extension_host")
+    filtered = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert filtered.failures == ()
+    assert order == ["warmup"]
+    monkeypatch.delenv("NIXCFG_CANARY")
+    monkeypatch.delenv("NIXCFG_CANARY_CRATES")
+    with pytest.raises(ValueError, match="warmup plan and slot"):
+        pipeline.validate_candidate(candidate, scope="rust-warmup")
+    with pytest.raises(ValueError, match="warmup slots are only valid"):
+        pipeline.validate_candidate(candidate, scope="packages", warmup_slot=0)
+
+
+def test_rust_warmup_defers_leaf_packages_from_others(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1268 slots 3/4: do not nix-build goose-cli / vendor-cargo-deps in others."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[object] = []
+
+    def warmup_realize(paths: object, *_args: object, **_kwargs: object) -> tuple[()]:
+        realized.append(paths)
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    cargo = "/nix/store/mynvanc4j9sgag5gdd8ir1s3p0pq3rgg-cargo-package-sha2-0.10.9"
+    goose = "/nix/store/rhak437lr7f3zwfgf2qrb40ryw7mx98i-goose-cli-1.51.0"
+    vendor = "/nix/store/0jmdym99ibn8rpv9696zvyrkr0mjyvjv-vendor-cargo-deps"
+    cargo_drv = f"{cargo}.drv"
+    goose_drv = f"{goose}.drv"
+    vendor_drv = f"{vendor}.drv"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(cargo, goose, vendor),
+            rustLayers=((cargo, goose, vendor),),
+            outputDrvs={cargo: cargo_drv, goose: goose_drv, vendor: vendor_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=3, missing=3, warmup=3, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == ()
+    assert realized == [(cargo_drv,)]
+    assert goose_drv not in realized[0]
+    assert vendor_drv not in realized[0]
+
+
+def test_rust_warmup_settings_family_force_locals_content_cluster(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1269 slot 3: do not compile rust_settings against Cachix settings_content."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    content = "/nix/store/ma14flyg1v5b4vhinb2l0klw1xmdg9nz-rust_settings_content-0.1.0"
+    other = "/nix/store/otheraaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-0.1.0"
+    settings_drv = f"{settings}.drv"
+    content_drv = f"{content}.drv"
+    other_drv = f"{other}.drv"
+    monkeypatch.setattr(
+        pipeline,
+        "rust_crate_input_drvs",
+        lambda _parents, _crates: (content_drv,),
+    )
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(other, content, settings),
+            rustLayers=((other,), (content,), (settings,)),
+            outputDrvs={
+                other: other_drv,
+                content: content_drv,
+                settings: settings_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=3, missing=3, warmup=3, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == ()
+    force_local = [paths for paths, _logs, force, _sub in realized if force]
+    assert force_local == [(content_drv, settings_drv)]
+    others = [paths for paths, _logs, force, _sub in realized if not force]
+    assert others == [(other_drv,)]
+
+
+def test_rust_warmup_settings_family_builds_patchutils_helper(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1270 canary: do not --max-jobs 0 the 1-drv patchutils helper."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    rustc_drv = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    patchutils_drv = "/nix/store/m6399k05aaqiz3mx4cdpkdqr4hp05kmj-patchutils-0.3.3.drv"
+    monkeypatch.setattr(
+        pipeline,
+        "compiler_input_drvs",
+        lambda *_args, **_kwargs: (rustc_drv, patchutils_drv),
+    )
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    content = "/nix/store/ma14flyg1v5b4vhinb2l0klw1xmdg9nz-rust_settings_content-0.1.0"
+    settings_drv = f"{settings}.drv"
+    content_drv = f"{content}.drv"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(content, settings),
+            rustLayers=((content,), (settings,)),
+            outputDrvs={content: content_drv, settings: settings_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == ()
+    assert realized == [
+        ((rustc_drv,), False, False, True),
+        ((patchutils_drv,), False, False, False),
+        ((content_drv, settings_drv), True, True, False),
+    ]
+
+
+def test_retry_substitute_only_helpers_skips_toolchain_and_rust() -> None:
+    """#1270: retry unknown Unix helpers; refuse rustc and rust_*."""
+    cpio = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cpio-2.15.drv"
+    unknown = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-diffutils-3.12.drv"
+    rustc = "/nix/store/cccccccccccccccccccccccccccccccc-rustc-1.98.1.drv"
+    settings = "/nix/store/dddddddddddddddddddddddddddddddd-rust_settings-0.1.0.drv"
+    num_cpus = "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-rust_num_cpus-1.16.0.drv"
+    assert pipeline._retry_substitute_only_helpers((
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{cpio}^*",
+            message="error: Cannot build '/nix/store/...-cpio-2.15.drv'.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{unknown}^*",
+            message="error: Cannot build '/nix/store/...-diffutils-3.12.drv'.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{rustc}^*",
+            message="error: Cannot build '/nix/store/...-rustc-1.98.1.drv'.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{settings}^*",
+            message="error: Cannot build '/nix/store/...-rust_settings-0.1.0.drv'.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{num_cpus}^*",
+            message="error: Cannot build '/nix/store/...-rust_num_cpus-1.16.0.drv'.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{unknown}^*",
+            message="error: hash mismatch in fixed-output derivation",
+        ),
+    )) == (cpio, unknown)
+
+
+def test_rust_warmup_retries_unknown_1drv_helper_after_max_jobs_zero(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unknown helper cache miss must retry locally; rustc miss must not."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+    unknown_drv = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-diffutils-3.12.drv"
+    rustc_drv = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    unknown_fail = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{unknown_drv}^*",
+        message="error: Cannot build '/nix/store/...-diffutils-3.12.drv'.",
+    )
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> object:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        if kwargs.get("substitute_only"):
+            return (unknown_fail,)
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(
+        pipeline,
+        "compiler_input_drvs",
+        lambda *_args, **_kwargs: (rustc_drv, unknown_drv),
+    )
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    content = "/nix/store/ma14flyg1v5b4vhinb2l0klw1xmdg9nz-rust_settings_content-0.1.0"
+    settings_drv = f"{settings}.drv"
+    content_drv = f"{content}.drv"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(content, settings),
+            rustLayers=((content,), (settings,)),
+            outputDrvs={content: content_drv, settings: settings_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == ()
+    assert realized == [
+        ((rustc_drv, unknown_drv), False, False, True),
+        ((unknown_drv,), False, False, False),
+        ((content_drv, settings_drv), True, True, False),
+    ]
+
+
+def test_rust_warmup_refuses_force_local_after_rustc_substitute_miss(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rustc --max-jobs 0 miss must keep the failure and skip force-local."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+    rustc_drv = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    unknown_drv = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-diffutils-3.12.drv"
+    rustc_fail = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{rustc_drv}^*",
+        message="error: Cannot build '/nix/store/...-rustc-1.98.1.drv'.",
+    )
+    unknown_fail = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{unknown_drv}^*",
+        message="error: Cannot build '/nix/store/...-diffutils-3.12.drv'.",
+    )
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> object:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        if kwargs.get("substitute_only"):
+            return (rustc_fail, unknown_fail)
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(
+        pipeline,
+        "compiler_input_drvs",
+        lambda *_args, **_kwargs: (rustc_drv, unknown_drv),
+    )
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    settings_drv = f"{settings}.drv"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(settings,),
+            rustLayers=((settings,),),
+            outputDrvs={settings: settings_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == (rustc_fail, unknown_fail)
+    assert realized == [((rustc_drv, unknown_drv), False, False, True)]
+
+
+def test_zed_warmup_force_locals_whole_family_when_cachix_is_mixed(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zed-only cold/mixed path builds every family drv; never a Cachix subset."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+            bool(kwargs.get("keep_going")),
+        ))
+        return ()
+
+    imported: list[object] = []
+
+    def capture_import(paths: object, *_args: object, **_kwargs: object) -> None:
+        imported.append(paths)
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", capture_import)
+    monkeypatch.setattr(
+        pipeline, "check_path_in_cachix", lambda path: "settings_content" in path
+    )
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline, "rustc_generation_ids", lambda *_a, **_k: ())
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    content = "/nix/store/ma14flyg1v5b4vhinb2l0klw1xmdg9nz-rust_settings_content-0.1.0"
+    rust_zed = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(content, settings, rust_zed),
+            rustLayers=((content,), (settings,), (rust_zed,)),
+            outputDrvs={
+                content: f"{content}.drv",
+                settings: f"{settings}.drv",
+                rust_zed: f"{rust_zed}.drv",
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=3, missing=3, warmup=3, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="zed-warmup", warmup_plan=warmup_plan
+    )
+    assert report.failures == ()
+    assert imported
+    assert all(str(path).endswith(".drv") for path in imported[0])
+    force_local = [row for row in realized if row[2]]
+    assert force_local
+    assert all(row[4] for row in force_local)
+    leaves = [row for row in realized if row[0] == (f"{rust_zed}.drv",)]
+    assert leaves == [((f"{rust_zed}.drv",), True, False, False, True)]
+
+
+def test_zed_warmup_substitutes_whole_family_from_one_generation(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cache-hit path substitutes rust_zed + family together, never a mix."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(
+        pipeline,
+        "rustc_generation_ids",
+        lambda *_a, **_k: (
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv",
+        ),
+    )
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    rust_zed = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(settings, rust_zed),
+            rustLayers=((settings,), (rust_zed,)),
+            outputDrvs={settings: f"{settings}.drv", rust_zed: f"{rust_zed}.drv"},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="zed-warmup", warmup_plan=warmup_plan
+    )
+    assert report.failures == ()
+    assert realized == [
+        ((f"{settings}.drv", f"{rust_zed}.drv"), False, False, True),
+    ]
+
+
+def test_rust_warmup_canary_crates_realize_settings_off_slot_stripe(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1269: canary-crates must realize rust_settings from every rust layer."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    filler = tuple(
+        f"/nix/store/fill{index}aaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_util-{index}.0"
+        for index in range(4)
+    )
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    content = "/nix/store/ma14flyg1v5b4vhinb2l0klw1xmdg9nz-rust_settings_content-0.1.0"
+    settings_drv = f"{settings}.drv"
+    content_drv = f"{content}.drv"
+    filler_drvs = {path: f"{path}.drv" for path in filler}
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(*filler, content, settings),
+            rustLayers=((*filler, content), (*filler, settings)),
+            outputDrvs={**filler_drvs, content: content_drv, settings: settings_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=6, missing=6, warmup=6, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    monkeypatch.setenv("NIXCFG_CANARY", "true")
+    monkeypatch.setenv(
+        "NIXCFG_CANARY_CRATES",
+        "settings settings_content settings_json settings_macros",
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == ()
+    force_local = [paths for paths, _logs, force, _sub in realized if force]
+    assert force_local == [(content_drv, settings_drv)]
+    skipped = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=3
+    )
+    assert skipped.failures == ()
+    assert [paths for paths, _logs, force, _sub in realized if force] == [
+        (content_drv, settings_drv)
+    ]
+    monkeypatch.delenv("NIXCFG_CANARY")
+    monkeypatch.delenv("NIXCFG_CANARY_CRATES")
+
+
+def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """agent_ui stripes force-local language_models, then realize the leaf."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    language_models = (
+        "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0-lib"
+    )
+    language_models_drv = (
+        "/nix/store/lmdrvaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0.drv"
+    )
+    monkeypatch.setattr(
+        pipeline, "language_models_input_drvs", lambda _drvs: (language_models_drv,)
+    )
+    agent_ui = "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0"
+    agent_ui_drv = "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv"
+    other = "/nix/store/otheraaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-0.1.0"
+    other_drv = "/nix/store/otheraaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-0.1.0.drv"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(language_models, other, agent_ui),
+            rustLayers=((language_models,), (other,), (agent_ui,)),
+            outputDrvs={
+                language_models: language_models_drv,
+                other: other_drv,
+                agent_ui: agent_ui_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=3, missing=3, warmup=3, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [
+        ((other_drv,), False, False, False),
+        ((language_models_drv,), True, True, False),
+        ((agent_ui_drv,), True, False, False),
+    ]
+    realized.clear()
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda path: path != agent_ui)
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [
+        ((language_models_drv,), True, True, False),
+        ((agent_ui_drv,), True, False, False),
+    ]
+    realized.clear()
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(other, agent_ui),
+            rustLayers=((other,), (agent_ui,)),
+            outputDrvs={
+                other: other_drv,
+                agent_ui: agent_ui_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(
+        pipeline,
+        "language_models_input_drvs",
+        lambda _drvs: (language_models_drv,),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [
+        ((other_drv,), False, False, False),
+        ((language_models_drv,), True, True, False),
+        ((agent_ui_drv,), True, False, False),
+    ]
+    realized.clear()
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(language_models, agent_ui),
+            rustLayers=((language_models, agent_ui),),
+            outputDrvs={
+                language_models: language_models_drv,
+                agent_ui: agent_ui_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [((language_models_drv,), False, False, False)]
+    monkeypatch.setattr(pipeline, "language_models_input_drvs", lambda _drvs: ())
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(other, agent_ui),
+            rustLayers=((other,), (agent_ui,)),
+            outputDrvs={
+                other: other_drv,
+                agent_ui: agent_ui_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    with pytest.raises(pipeline.WarmupError, match="no rust_language_models input"):
+        pipeline.validate_candidate(
+            candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+        )
+
+
+def test_rust_warmup_zed_slot_force_locals_extension_host_family(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """rust_zed stripe force-locals extension_host then dependents, then rust_zed."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    extension_host = (
+        "/nix/store/5crb9axiaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0-lib"
+    )
+    extension_host_drv = (
+        "/nix/store/exthostaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0.drv"
+    )
+    activity = (
+        "/nix/store/8xk2b1cbaaaaaaaaaaaaaaaaaaaaaaaaa-rust_activity_indicator-0.1.0-lib"
+    )
+    activity_drv = "/nix/store/actindaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_activity_indicator-0.1.0.drv"
+    rust_zed = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0"
+    rust_zed_drv = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0.drv"
+    settings_drv = (
+        "/nix/store/setuiaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_settings_ui-0.1.0.drv"
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "rust_crate_input_drvs",
+        lambda *_args, **_kwargs: (extension_host_drv, activity_drv),
+    )
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(extension_host, activity, rust_zed),
+            rustLayers=((extension_host,), (activity,), (rust_zed,)),
+            outputDrvs={
+                extension_host: extension_host_drv,
+                activity: activity_drv,
+                rust_zed: rust_zed_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=3, missing=3, warmup=3, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [
+        ((extension_host_drv,), True, True, False),
+        ((activity_drv,), True, True, False),
+        ((rust_zed_drv,), True, False, False),
+    ]
+    realized.clear()
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(extension_host, rust_zed),
+            rustLayers=((extension_host,), (rust_zed,)),
+            outputDrvs={
+                extension_host: extension_host_drv,
+                rust_zed: rust_zed_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "rust_crate_input_drvs",
+        lambda *_args, **_kwargs: (extension_host_drv, activity_drv, settings_drv),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [
+        ((extension_host_drv,), True, True, False),
+        ((activity_drv, settings_drv), True, True, False),
+        ((rust_zed_drv,), True, False, False),
+    ]
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_args, **_kwargs: ())
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(rust_zed,),
+            rustLayers=((rust_zed,),),
+            outputDrvs={rust_zed: rust_zed_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    with pytest.raises(pipeline.WarmupError, match="no rust_extension_host input"):
+        pipeline.validate_candidate(
+            candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+        )
+
+
+def test_rust_warmup_zed_nightly_waits_for_family(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1262: zed-editor-nightly must not compile rust_zed before the family."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    extension_host = (
+        "/nix/store/5crb9axiaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0-lib"
+    )
+    extension_host_drv = (
+        "/nix/store/exthostaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0.drv"
+    )
+    settings_drv = (
+        "/nix/store/setuiaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_settings_ui-0.1.0.drv"
+    )
+    rust_zed = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0"
+    rust_zed_drv = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0.drv"
+    nightly = "/nix/store/rlcwld41aaaaaaaaaaaaaaaaaaaaaaaaa-zed-editor-nightly-unstable-f16f965"
+    nightly_drv = (
+        "/nix/store/rlcwld41aaaaaaaaaaaaaaaaaaaaaaaaa-"
+        "zed-editor-nightly-unstable-f16f965.drv"
+    )
+    rustc_drv = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    monkeypatch.setattr(
+        pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: (rustc_drv,)
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "rust_crate_input_drvs",
+        lambda *_args, **_kwargs: (extension_host_drv, settings_drv),
+    )
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(extension_host, rust_zed, nightly),
+            rustLayers=((extension_host,), (rust_zed,), (nightly,)),
+            outputDrvs={
+                extension_host: extension_host_drv,
+                rust_zed: rust_zed_drv,
+                nightly: nightly_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=3, missing=3, warmup=3, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [
+        ((rustc_drv,), False, False, True),
+        ((extension_host_drv,), True, True, False),
+        ((settings_drv,), True, True, False),
+        ((rust_zed_drv,), True, False, False),
+        ((nightly_drv,), True, False, False),
+    ]
+    realized.clear()
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(nightly,),
+            rustLayers=((nightly,),),
+            outputDrvs={nightly: nightly_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+
+    def crate_inputs(
+        _parents: object, crates: object, **_kwargs: object
+    ) -> tuple[str, ...]:
+        if tuple(crates) == ("zed",):
+            return (rust_zed_drv,)
+        return (extension_host_drv, settings_drv)
+
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", crate_inputs)
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [
+        ((rustc_drv,), False, False, True),
+        ((extension_host_drv,), True, True, False),
+        ((settings_drv,), True, True, False),
+        ((nightly_drv,), True, False, False),
+    ]
+    realized.clear()
+    from lib.update.derivation_validation import DerivationValidationFailure
+
+    def failing_compiler(
+        paths: object, *_args: object, **kwargs: object
+    ) -> tuple[DerivationValidationFailure, ...]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        if kwargs.get("substitute_only"):
+            return (
+                DerivationValidationFailure("root-warmup", "rustc.drv^*", "cache miss"),
+            )
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", failing_compiler)
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(extension_host, rust_zed),
+            rustLayers=((extension_host,), (rust_zed,)),
+            outputDrvs={
+                extension_host: extension_host_drv,
+                rust_zed: rust_zed_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "rust_crate_input_drvs",
+        lambda *_args, **_kwargs: (extension_host_drv, settings_drv),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.failures[0].message == "cache miss"
+    assert realized == [((rustc_drv,), False, False, True)]
+
+
+def test_rust_warmup_downloads_source_fods_before_force_local(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1264: crate tarball FODs download; rustc stays --max-jobs 0."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    extension_host = (
+        "/nix/store/5crb9axiaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0-lib"
+    )
+    extension_host_drv = (
+        "/nix/store/exthostaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0.drv"
+    )
+    rust_zed = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0"
+    rust_zed_drv = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0.drv"
+    rustc_drv = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    crate_src = (
+        "/nix/store/195q1crx0p9g5na7l7aw96bqvs3y2ab0-coreaudio-rs-0.14.2.tar.gz.drv"
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "compiler_input_drvs",
+        lambda *_args, **_kwargs: (rustc_drv, crate_src),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "rust_crate_input_drvs",
+        lambda *_args, **_kwargs: (extension_host_drv,),
+    )
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(extension_host, rust_zed),
+            rustLayers=((extension_host,), (rust_zed,)),
+            outputDrvs={
+                extension_host: extension_host_drv,
+                rust_zed: rust_zed_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [
+        ((rustc_drv,), False, False, True),
+        ((crate_src,), False, False, False),
+        ((extension_host_drv,), True, True, False),
+        ((rust_zed_drv,), True, False, False),
+    ]
+    realized.clear()
+
+    def failing_fetch(
+        paths: object, *_args: object, **kwargs: object
+    ) -> tuple[DerivationValidationFailure, ...]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        if not kwargs.get("substitute_only") and not kwargs.get("force_local"):
+            return (
+                DerivationValidationFailure(
+                    "root-warmup", "coreaudio.drv^*", "cannot download"
+                ),
+            )
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", failing_fetch)
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.failures[0].message == "cannot download"
+    assert realized == [
+        ((rustc_drv,), False, False, True),
+        ((crate_src,), False, False, False),
+    ]
+
+
+def test_closure_budget_timeout_fails_closed(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A timed-out or interrupted closure build writes no success report."""
     candidate = _candidate_for_scope(prepared_run)
     candidate_path = tmp_path / "candidate.json"
     candidate_path.write_text(candidate.model_dump_json())
@@ -604,14 +2110,6 @@ def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
     monkeypatch.setattr(
         pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
     )
-
-    def timed_out(**_kwargs: object) -> None:
-        raise ValidationIncompleteError(
-            "Validation incomplete: nix build path:.#checks.aarch64-darwin.root-closures: "
-            "Command timed out after 18000 seconds"
-        )
-
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", timed_out)
     args = [
         "validate",
         "--candidate",
@@ -622,10 +2120,17 @@ def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
         "closures",
         "--closure-budget-seconds",
         "18000",
-        "--closure-yield",
     ]
-    yielded = CliRunner().invoke(pipeline.app, args)
-    assert yielded.exit_code == pipeline.CLOSURE_YIELD_EXIT
+
+    def timed_out(**_kwargs: object) -> None:
+        raise ValidationIncompleteError(
+            "Validation incomplete: nix build path:.#checks.aarch64-darwin.root-closures: "
+            "Command timed out after 18000 seconds"
+        )
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", timed_out)
+    timed = CliRunner().invoke(pipeline.app, args)
+    assert timed.exit_code not in {0, None}
     assert not output.exists()
 
     def eval_timed_out(**_kwargs: object) -> None:
@@ -636,7 +2141,7 @@ def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
 
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", eval_timed_out)
     stalled = CliRunner().invoke(pipeline.app, args)
-    assert stalled.exit_code not in {0, pipeline.CLOSURE_YIELD_EXIT}
+    assert stalled.exit_code not in {0, None}
     assert not output.exists()
 
     def signaled(**_kwargs: object) -> None:
@@ -646,7 +2151,7 @@ def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
 
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", signaled)
     killed = CliRunner().invoke(pipeline.app, args)
-    assert killed.exit_code not in {0, pipeline.CLOSURE_YIELD_EXIT}
+    assert killed.exit_code not in {0, None}
 
     def store_bus(**_kwargs: object) -> None:
         raise ValidationIncompleteError(
@@ -656,38 +2161,80 @@ def test_closure_yield_writes_no_report_and_rejects_other_interruptions(
 
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", store_bus)
     bus = CliRunner().invoke(pipeline.app, args)
-    assert bus.exit_code == pipeline.CLOSURE_YIELD_EXIT
+    assert bus.exit_code not in {0, None}
     assert not output.exists()
-    base = [
-        "validate",
-        "--candidate",
-        str(candidate_path),
-        "--output",
-        str(output),
-    ]
-    missing_budget = CliRunner().invoke(
-        pipeline.app,
-        [*base, "--scope", "closures", "--closure-yield"],
-    )
-    assert missing_budget.exit_code != 0
-    package_yield = CliRunner().invoke(
+    missing_roots = CliRunner().invoke(
         pipeline.app,
         [
-            *base,
+            *args,
             "--scope",
-            "packages",
-            "--closure-budget-seconds",
-            "18000",
-            "--closure-yield",
+            "closure-shard",
         ],
     )
-    assert package_yield.exit_code != 0
+    assert missing_roots.exit_code != 0
+    package_roots = CliRunner().invoke(
+        pipeline.app,
+        [
+            "validate",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(output),
+            "--scope",
+            "packages",
+            "--closure-roots",
+            "darwin-argus",
+        ],
+    )
+    assert package_roots.exit_code != 0
 
 
-def test_closure_yield_continues_after_store_unlink_only(
-    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "message",
+    [
+        'error: cannot unlink "/nix/store/abc-replay-10.67.0.tgz": Illegal byte sequence',
+        (
+            'error: clearing flags of path "/nix/store/s6-bun-cache/share/'
+            'bun-packages/lie@3.3.0": Illegal byte sequence\n'
+            "error: Cannot build '/nix/store/a7-superset-1.30.2.drv'.\n"
+            "       Reason: 1 dependency failed.\n"
+        ),
+        (
+            'error: opening file "/nix/store/67b3dw9p5i6qynv9mf3fhsa21cmibk57-'
+            'unsloth-desktop-0.1.813-beta.drv": No such file or directory'
+        ),
+        (
+            "error: Cannot build '/nix/store/wzrs1hpgczfxgv6q7yvp7iy39plhakw7-"
+            "granola-7.626.3.drv'.\n"
+            "       Reason: builder failed with exit code 1.\n"
+            "       > build input /nix/store/fyaryjvghbkpfnsyw97hb3lyb37s1pd6-"
+            "move-lib64.sh does not exist"
+        ),
+        (
+            "error: cannot open connection to remote store 'daemon': "
+            "Nix daemon disconnected unexpectedly (maybe it crashed?)"
+        ),
+        (
+            "error: Cannot build '/nix/store/1vhn1bsiqchjp101n2sj5fjjk6fiw596-"
+            "rust_agent_settings-0.1.0.drv'.\n"
+            "       Reason: builder failed with exit code 1.\n"
+            "       > rustc --extern settings=/nix/store/"
+            "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
+            "libsettings-7be7f1170a.rlib\n"
+            "       > error[E0463]: can't find crate for `settings`\n"
+            "       > note: extern location for settings does not exist: "
+            "/nix/store/l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/"
+            "lib/libsettings-7be7f1170a.rlib"
+        ),
+    ],
+)
+def test_closure_store_faults_fail_closed(
+    prepared_run,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
 ) -> None:
-    """A store unlink continues the shard; a real derivation failure still fails it."""
+    """Store faults no longer yield a later shard; the job fails closed."""
     candidate = _candidate_for_scope(prepared_run)
     candidate_path = tmp_path / "candidate.json"
     candidate_path.write_text(candidate.model_dump_json())
@@ -695,108 +2242,18 @@ def test_closure_yield_continues_after_store_unlink_only(
     monkeypatch.setattr(
         pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
     )
-    store_failure = DerivationValidationFailure(
-        source="root-closures",
-        installable="path:.#checks.aarch64-darwin.root-closures",
-        message=(
-            'error: cannot unlink "/nix/store/abc-replay-10.67.0.tgz": '
-            "Illegal byte sequence"
-        ),
-    )
-    builder_failure = DerivationValidationFailure(
-        source="root-closures",
-        installable="path:.#checks.aarch64-darwin.root-closures",
-        message="error: builder for '/nix/store/abc.drv' failed with exit code 1",
-    )
-    current_nix_failure = DerivationValidationFailure(
-        source="root-closures",
-        installable="path:.#checks.aarch64-darwin.root-closures",
-        message=(
-            "error: Cannot build '/nix/store/abc.drv'.\n"
-            "Reason: builder failed with exit code 1.\n"
-            "error: Build failed due to failed dependency\n"
-            'error: cannot unlink "/nix/store/abc.tgz": Illegal byte sequence\n'
-            "terminated by signal 10"
-        ),
-    )
-    substitute_eilseq_failure = DerivationValidationFailure(
-        source="root-closures",
-        installable="path:.#checks.aarch64-darwin.root-closures",
-        message=(
-            'error: clearing flags of path "/nix/store/s6-bun-cache/share/'
-            'bun-packages/lie@3.3.0": Illegal byte sequence\n'
-            "error: Cannot build '/nix/store/a7-superset-1.30.2.drv'.\n"
-            "       Reason: 1 dependency failed.\n"
-        ),
-    )
-    missing_drv_failure = DerivationValidationFailure(
-        source="root-closures",
-        installable="path:.#checks.aarch64-darwin.root-closures",
-        message=(
-            'error: opening file "/nix/store/67b3dw9p5i6qynv9mf3fhsa21cmibk57-'
-            'unsloth-desktop-0.1.813-beta.drv": No such file or directory'
-        ),
-    )
 
     def only_store(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (store_failure,)
+        return (
+            DerivationValidationFailure(
+                source="root-closures",
+                installable="path:.#checks.aarch64-darwin.root-closures",
+                message=message,
+            ),
+        )
 
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", only_store)
-    args = [
-        "validate",
-        "--candidate",
-        str(candidate_path),
-        "--output",
-        str(output),
-        "--scope",
-        "closures",
-        "--closure-budget-seconds",
-        "18000",
-        "--closure-yield",
-    ]
-    yielded = CliRunner().invoke(pipeline.app, args)
-    assert yielded.exit_code == pipeline.CLOSURE_YIELD_EXIT
-    assert not output.exists()
-
-    def mixed(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (store_failure, builder_failure)
-
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", mixed)
-    mixed_result = CliRunner().invoke(pipeline.app, args)
-    assert mixed_result.exit_code == 1
-    written = json.loads(output.read_text())
-    assert len(written["failures"]) == 2
-    output.unlink()
-
-    def current_nix(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (current_nix_failure,)
-
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", current_nix)
-    current = CliRunner().invoke(pipeline.app, args)
-    assert current.exit_code == 1
-    assert len(json.loads(output.read_text())["failures"]) == 1
-    output.unlink()
-
-    def substitute_eilseq(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (substitute_eilseq_failure,)
-
-    monkeypatch.setattr(
-        pipeline.validation, "validate_root_closures", substitute_eilseq
-    )
-    cascaded = CliRunner().invoke(pipeline.app, args)
-    assert cascaded.exit_code == pipeline.CLOSURE_YIELD_EXIT
-    assert not output.exists()
-
-    def missing_drv(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (missing_drv_failure,)
-
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", missing_drv)
-    vanished = CliRunner().invoke(pipeline.app, args)
-    assert vanished.exit_code == pipeline.CLOSURE_YIELD_EXIT
-    assert not output.exists()
-
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", only_store)
-    held = CliRunner().invoke(
+    result = CliRunner().invoke(
         pipeline.app,
         [
             "validate",
@@ -810,128 +2267,329 @@ def test_closure_yield_continues_after_store_unlink_only(
             "18000",
         ],
     )
-    assert held.exit_code == 1
-    assert json.loads(output.read_text())["failures"]
-    output.unlink()
+    assert result.exit_code == 1
+    written = json.loads(output.read_text())
+    assert written["failures"][0]["message"] == message
 
-    def clean(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
+
+def test_closure_shard_writes_receipt_instead_of_validation_report(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Per-root shards are not certify evidence."""
+    candidate = _candidate_for_scope(prepared_run)
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    output = tmp_path / "shard-receipt.json"
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+    seen: list[object] = []
+    order: list[str] = []
+
+    def roots(**kwargs: object) -> tuple[()]:
+        order.append("roots")
+        seen.append(kwargs.get("root_names"))
         return ()
 
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", clean)
-    succeeded = CliRunner().invoke(pipeline.app, args)
-    assert succeeded.exit_code == 0
-    assert json.loads(output.read_text())["failures"] == []
+    monkeypatch.setattr(
+        pipeline.jobs, "reclaim_hosted_store", lambda: order.append("reclaim")
+    )
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "validate",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(output),
+            "--scope",
+            "closure-shard",
+            "--closure-roots",
+            "darwin-argus",
+            "--shard",
+            "darwin-argus",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    receipt = json.loads(output.read_text())
+    assert receipt["shard"] == "darwin-argus"
+    assert receipt["roots"] == ["darwin-argus"]
+    assert receipt["failures"] == []
+    assert seen == [("darwin-argus",)]
+    assert order == ["reclaim", "roots"]
 
 
-def test_closure_yield_continues_after_vanished_build_input_or_daemon_disconnect(
+def test_plan_shards_writes_generated_matrix(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Update 37522365810: vanished stdenv hook and daemon crash yield the shard."""
     candidate = _candidate_for_scope(prepared_run)
     candidate_path = tmp_path / "candidate.json"
     candidate_path.write_text(candidate.model_dump_json())
-    output = tmp_path / "validation.json"
-    monkeypatch.setattr(
-        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
-    )
-    args = [
-        "validate",
-        "--candidate",
-        str(candidate_path),
-        "--output",
-        str(output),
-        "--scope",
-        "closures",
-        "--closure-budget-seconds",
-        "18000",
-        "--closure-yield",
-    ]
+    output = tmp_path / "matrix.json"
+    github = tmp_path / "github-output"
+    manifest = {
+        "schemaVersion": 2,
+        "requiredKinds": ["darwin", "home"],
+        "requiredRoots": [],
+        "roots": [
+            {"kind": "darwin", "name": "argus", "system": "aarch64-darwin"},
+            {"kind": "home", "name": "george", "system": "aarch64-darwin"},
+        ],
+    }
 
-    def vanished_input(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (
-            DerivationValidationFailure(
-                source="root-closures",
-                installable="path:.#checks.aarch64-darwin.root-closures",
-                message=(
-                    "error: Cannot build '/nix/store/wzrs1hpgczfxgv6q7yvp7iy39plhakw7-"
-                    "granola-7.626.3.drv'.\n"
-                    "       Reason: builder failed with exit code 1.\n"
-                    "       > build input /nix/store/fyaryjvghbkpfnsyw97hb3lyb37s1pd6-"
-                    "move-lib64.sh does not exist"
-                ),
-            ),
+    def fake_eval(flake_root: Path) -> object:
+        from lib.update.derivation_validation import RootClosureManifest
+
+        assert flake_root.is_dir()
+        return RootClosureManifest.model_validate(manifest)
+
+    def fake_paths(
+        flake_root: Path, evaluated: object, **_kwargs: object
+    ) -> dict[str, str]:
+        assert flake_root.is_dir()
+        assert evaluated is not None
+        return {
+            "darwin-argus": "/nix/store/argus",
+            "home-george": "/nix/store/home",
+            "aggregate:aarch64-darwin": "/nix/store/farm",
+        }
+
+    monkeypatch.setattr(pipeline, "eval_root_closure_manifest", fake_eval)
+    monkeypatch.setattr(pipeline, "root_store_paths", fake_paths)
+
+    def fake_warmup(*_args: object, **_kwargs: object) -> object:
+        from lib.update.ci.warmup import (
+            RootWarmupStats,
+            ShardLocalBuildReport,
+            WarmupPlan,
         )
 
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", vanished_input)
-    granola_store = CliRunner().invoke(pipeline.app, args)
-    assert granola_store.exit_code == pipeline.CLOSURE_YIELD_EXIT
-    assert not output.exists()
-
-    def daemon_disconnect(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (
-            DerivationValidationFailure(
-                source="root-closures",
-                installable="path:.#checks.aarch64-darwin.root-closures",
-                message=(
-                    "error: cannot open connection to remote store 'daemon': "
-                    "Nix daemon disconnected unexpectedly (maybe it crashed?)"
+        return WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=("/nix/store/shared",),
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=1, warmup=1, remaining=0
+                ),
+                "home-george": RootWarmupStats(
+                    outputs=2, missing=1, warmup=1, remaining=0
+                ),
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+                ShardLocalBuildReport(
+                    shard="home-george",
+                    roots=("home-george",),
+                    remaining=0,
+                    remaining_rust_crates=0,
                 ),
             ),
+            notes="fixture",
         )
 
-    monkeypatch.setattr(
-        pipeline.validation, "validate_root_closures", daemon_disconnect
+    monkeypatch.setattr(pipeline, "plan_darwin_warmup", fake_warmup)
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "plan-shards",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(output),
+            "--github-output",
+            str(github),
+        ],
     )
-    daemon = CliRunner().invoke(pipeline.app, args)
-    assert daemon.exit_code == pipeline.CLOSURE_YIELD_EXIT
-    assert not output.exists()
+    assert result.exit_code == 0, result.output
+    matrix = json.loads(output.read_text())
+    assert {row["shard"] for row in matrix["include"]} == {
+        "darwin-argus",
+        "home-george",
+    }
+    cache = json.loads(output.with_name(ROOT_OUT_PATHS_NAME).read_text())
+    assert cache["tree"] == candidate.tree
+    assert cache["rootPaths"]["darwin-argus"] == "/nix/store/argus"
+    assert cache["manifest"]["roots"]
+    warmup = json.loads(output.with_name("warmup-plan.json").read_text())
+    assert warmup["warmupOutputs"] == ["/nix/store/shared"]
+    assert "rustLayers" in warmup
+    assert "darwin_closure_shards=" in github.read_text()
+    env_output = tmp_path / "github-output-env"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(env_output))
+    env_matrix = tmp_path / "matrix-env.json"
+    via_env = CliRunner().invoke(
+        pipeline.app,
+        [
+            "plan-shards",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(env_matrix),
+        ],
+    )
+    assert via_env.exit_code == 0, via_env.output
+    assert "darwin_closure_shards=" in env_output.read_text()
+    assert (env_matrix.with_name(ROOT_OUT_PATHS_NAME)).is_file()
+    monkeypatch.delenv("GITHUB_OUTPUT")
+    no_output = tmp_path / "matrix-no-github.json"
+    without = CliRunner().invoke(
+        pipeline.app,
+        [
+            "plan-shards",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(no_output),
+        ],
+    )
+    assert without.exit_code == 0, without.output
+    assert json.loads(no_output.read_text())["include"]
+    assert json.loads(no_output.with_name(ROOT_OUT_PATHS_NAME).read_text())["tree"] == (
+        candidate.tree
+    )
 
 
-def test_closure_yield_continues_after_unreadable_store_rlib_e0463(
+def _coverage_manifest() -> object:
+    from lib.update.derivation_validation import RootClosureManifest
+
+    return RootClosureManifest.model_validate({
+        "schemaVersion": 2,
+        "requiredKinds": ["darwin", "home"],
+        "requiredRoots": [],
+        "roots": [
+            {"kind": "darwin", "name": "argus", "system": "aarch64-darwin"},
+            {"kind": "home", "name": "george", "system": "aarch64-darwin"},
+        ],
+    })
+
+
+def _write_coverage_cache(evidence: Path, *, tree: str) -> None:
+    cache = evidence / "plan-shards-x86_64-linux" / ROOT_OUT_PATHS_NAME
+    cache.parent.mkdir(parents=True)
+    write_root_out_path_cache(
+        cache,
+        tree=tree,
+        root_paths={
+            "darwin-argus": "/nix/store/argus",
+            "home-george": "/nix/store/home",
+            "aggregate:aarch64-darwin": "/nix/store/farm",
+        },
+        manifest=_coverage_manifest(),
+    )
+
+
+def test_assert_coverage_cli_reuses_planner_out_paths(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Update 37599536875: rustc E0463 after --extern store rlib yields the shard."""
     candidate = _candidate_for_scope(prepared_run)
     candidate_path = tmp_path / "candidate.json"
     candidate_path.write_text(candidate.model_dump_json())
-    output = tmp_path / "validation.json"
-    monkeypatch.setattr(
-        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    evidence = tmp_path / "evidence"
+    _write_coverage_cache(evidence, tree=candidate.tree)
+    seen: dict[str, object] = {}
+
+    def fake_assert(**kwargs: object) -> None:
+        seen.update(kwargs)
+
+    def refuse_eval(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("assert-coverage must not re-evaluate root out paths")
+
+    monkeypatch.setattr(pipeline, "eval_root_closure_manifest", refuse_eval)
+    monkeypatch.setattr(pipeline, "root_store_paths", refuse_eval)
+    monkeypatch.setattr(pipeline, "assert_update_coverage", fake_assert)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "assert-coverage",
+            "--candidate",
+            str(candidate_path),
+            "--evidence",
+            str(evidence),
+            "--job-results",
+            dump_job_results(dict.fromkeys(required_coverage_jobs(), "success")),
+        ],
     )
-    args = [
-        "validate",
-        "--candidate",
-        str(candidate_path),
-        "--output",
-        str(output),
-        "--scope",
-        "closures",
-        "--closure-budget-seconds",
-        "18000",
-        "--closure-yield",
-    ]
+    assert result.exit_code == 0, result.output
+    assert seen["tree"] == candidate.tree
+    assert seen["evidence"] == evidence
+    assert seen["root_paths"]["darwin-argus"] == "/nix/store/argus"
+    assert seen["manifest"] == _coverage_manifest()
 
-    def unreadable_rlib(**_kwargs: object) -> tuple[DerivationValidationFailure, ...]:
-        return (
-            DerivationValidationFailure(
-                source="root-closures",
-                installable="path:.#checks.aarch64-darwin.root-closures",
-                message=(
-                    "error: Cannot build '/nix/store/1vhn1bsiqchjp101n2sj5fjjk6fiw596-"
-                    "rust_agent_settings-0.1.0.drv'.\n"
-                    "       Reason: builder failed with exit code 1.\n"
-                    "       > rustc --extern settings=/nix/store/"
-                    "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
-                    "libsettings-7be7f1170a.rlib\n"
-                    "       > error[E0463]: can't find crate for `settings`"
-                ),
-            ),
-        )
 
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", unreadable_rlib)
-    yielded = CliRunner().invoke(pipeline.app, args)
-    assert yielded.exit_code == pipeline.CLOSURE_YIELD_EXIT
-    assert not output.exists()
+def test_assert_coverage_fails_closed_before_workspace_when_jobs_failed(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidate = _candidate_for_scope(prepared_run)
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+
+    def refuse_workspace(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("failed jobs must not enter IsolatedUpdateWorkspace")
+
+    def refuse_cache(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("failed jobs must not load the out-path cache")
+
+    monkeypatch.setattr(pipeline, "IsolatedUpdateWorkspace", refuse_workspace)
+    monkeypatch.setattr(pipeline, "load_planned_root_out_paths", refuse_cache)
+    failed = dict.fromkeys(required_coverage_jobs(), "success")
+    failed["validate-darwin-roots"] = "failure"
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "assert-coverage",
+            "--candidate",
+            str(candidate_path),
+            "--evidence",
+            str(evidence),
+            "--job-results",
+            dump_job_results(failed),
+        ],
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, CoverageError)
+    assert "did not succeed" in str(result.exception)
+
+
+def test_assert_coverage_fails_closed_when_planner_cache_missing(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidate = _candidate_for_scope(prepared_run)
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+
+    def refuse_eval(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("missing cache must not fall back to root_store_paths")
+
+    monkeypatch.setattr(pipeline, "root_store_paths", refuse_eval)
+    monkeypatch.setattr(pipeline, "IsolatedUpdateWorkspace", refuse_eval)
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "assert-coverage",
+            "--candidate",
+            str(candidate_path),
+            "--evidence",
+            str(evidence),
+            "--job-results",
+            dump_job_results(dict.fromkeys(required_coverage_jobs(), "success")),
+        ],
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, CoverageError)
+    assert ROOT_OUT_PATHS_NAME in str(result.exception)
 
 
 def test_prepare_command_exports_failure_evidence_outside_checkout(
@@ -1111,6 +2769,69 @@ def test_hosted_validation_streams_nix_logs_to_stderr(
     assert "[derivations] \n" not in err
 
 
+def test_hosted_warmup_progress_fails_fast_on_fatal_patterns(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Warm-rust and roots must abort on the first streamed fatal line."""
+    progress = pipeline._hosted_validation_progress("rust-warmup")
+    with pytest.raises(WarmupFatalError, match="SVH"):
+        progress(
+            ValidationCommandOutput(
+                "nix build --no-substitute",
+                "error[E0460]: found possibly newer version of crate `settings_ui`",
+            )
+        )
+    assert "[rust-warmup] error[E0460]" in capsys.readouterr().err
+    roots = pipeline._hosted_validation_progress("root-closures")
+    with pytest.raises(WarmupFatalError, match="will-be-built"):
+        roots(
+            ValidationCommandOutput(
+                "nix build",
+                "these 406 derivations will be built:",
+            )
+        )
+    packages = pipeline._hosted_validation_progress("derivations")
+    packages(
+        ValidationCommandOutput(
+            "nix build",
+            "error[E0460]: packages inventory is not a warmup abort",
+        )
+    )
+
+
+def test_hosted_warmup_progress_skips_cannot_build_during_max_jobs_zero(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1270: streamed Cannot-build under --max-jobs 0 is retried, not fatal."""
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
+    progress = pipeline._hosted_validation_progress("rust-warmup")
+    progress(ValidationCommandStarted("nix build --max-jobs 0 /nix/store/cpio.drv"))
+    progress(
+        ValidationCommandOutput(
+            "nix build --max-jobs 0 /nix/store/cpio.drv",
+            "error: Cannot build '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cpio-2.15.drv'.",
+        )
+    )
+    assert "Cannot build" in capsys.readouterr().err
+    with pytest.raises(WarmupFatalError, match="SVH"):
+        progress(
+            ValidationCommandOutput(
+                "nix build --max-jobs 0 /nix/store/cpio.drv",
+                "error[E0463]: can't find crate for `settings_content`",
+            )
+        )
+    progress(
+        ValidationCommandStarted("nix build --no-substitute /nix/store/settings.drv")
+    )
+    with pytest.raises(WarmupFatalError, match="cannot build"):
+        progress(
+            ValidationCommandOutput(
+                "nix build --no-substitute /nix/store/settings.drv",
+                "Cannot build '/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0.drv'",
+            )
+        )
+
+
 def test_noop_candidate_still_validates_repaired_baseline_roots(
     prepared_run,
     monkeypatch,
@@ -1204,6 +2925,740 @@ def test_non_hosted_builders_print_root_closure_derivation_logs(
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
     assert pipeline.validate_candidate(candidate).failures == ()
     assert seen == [True]
+
+
+def _candidate_with_file(
+    root: Path,
+    relative: str,
+    content: str,
+    *,
+    systems: tuple[str, ...],
+) -> Candidate:
+    """Build a prepared candidate whose patch adds or replaces one file."""
+    base = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    git(root, "add", "--", relative)
+    tree = git(root, "write-tree").decode().strip()
+    patch = git(
+        root,
+        "diff",
+        "--cached",
+        "--binary",
+        "--full-index",
+        "--no-ext-diff",
+        "--no-textconv",
+        "HEAD",
+        "--",
+    )
+    git(root, "reset", "--hard", "HEAD")
+    return Candidate(
+        base_tree=base,
+        tree=tree,
+        targets=("example",),
+        sources=("example",),
+        systems=systems,
+        resolutions={},
+        prepared=True,
+        patch=patch,
+    )
+
+
+def test_merge_prepared_candidates_preserves_guide_symlink(tmp_path: Path) -> None:
+    """Materializing the merge must not follow CLAUDE.md into AGENTS.md (#1267)."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "AGENTS.md": "# Agent Guide\nkeep this body\n",
+            "keep.txt": "keep\n",
+        },
+    )
+    (root / "CLAUDE.md").symlink_to("AGENTS.md")
+    git(root, "add", "--", "CLAUDE.md")
+    git(
+        root,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "-c",
+        "commit.gpgSign=false",
+        "commit",
+        "-m",
+        "symlink",
+    )
+    arm = _candidate_with_file(
+        root,
+        "arm.txt",
+        "arm\n",
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "x86.txt",
+        "x86\n",
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    merged = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    merged.apply(root)
+    assert (root / "AGENTS.md").read_text(encoding="utf-8") == (
+        "# Agent Guide\nkeep this body\n"
+    )
+    assert (root / "CLAUDE.md").is_symlink()
+    assert (root / "CLAUDE.md").readlink() == Path("AGENTS.md")
+    assert b"AGENTS.md" not in merged.patch
+
+
+def test_merge_prepared_candidates_keeps_disjoint_linux_edits(tmp_path: Path) -> None:
+    """Arm and x86 may extend Darwin in parallel when they do not clash."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(
+        root,
+        tracked_files={"shared.txt": "base\n", "keep.txt": "keep\n"},
+    )
+    arm = _candidate_with_file(
+        root,
+        "arm.txt",
+        "arm\n",
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "x86.txt",
+        "x86\n",
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    x86 = Candidate(
+        base_tree=x86.base_tree,
+        tree=x86.tree,
+        targets=x86.targets,
+        sources=x86.sources,
+        systems=x86.systems,
+        resolutions={"linux": ResolvedVersion(version="1")},
+        prepared=True,
+        patch=x86.patch,
+    )
+    merged = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    assert merged.resolutions["linux"].version == "1"
+    assert set(merged.systems) == {
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-linux",
+    }
+    assert merged.prepared
+    merged.apply(root)
+    assert (root / "arm.txt").read_text(encoding="utf-8") == "arm\n"
+    assert (root / "x86.txt").read_text(encoding="utf-8") == "x86\n"
+    assert (root / "keep.txt").read_text(encoding="utf-8") == "keep\n"
+
+
+_OPENAI_VENDOR = "sha256-V7ZBn8uZ+oMF9HOT8Upao2rUDFpb7+bk77w7ODBdiO4="
+_OPENAI_OLD_VENDOR = "sha256-h06DRGoNo7T6HMNQKg8WgyyxCbrWMVM8LJvfPkVHXPs="
+_OTHER_VENDOR = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+_THIRD_VENDOR = "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
+_OPENAI_ARM_DRV = "924w8bq2jgn13ygzxkjz4hss80xk75k2"
+_OPENAI_X86_DRV = "j7ikqjdxpm48apk76ph7alvh8xrdac1r"
+
+
+def _source_json(
+    *,
+    version: str = "v1.38.0",
+    drv_hash: str = _OPENAI_ARM_DRV,
+    vendor: str = _OPENAI_VENDOR,
+    input_name: str = "openai-cli",
+    **extra: object,
+) -> str:
+    """Persist-shaped per-package ``sources.json`` used by merge tests."""
+    payload: dict[str, object] = {
+        "drvHash": drv_hash,
+        "hashes": [{"hash": vendor, "hashType": "vendorHash"}],
+        "input": input_name,
+        "version": version,
+        **extra,
+    }
+    return (
+        json.dumps(
+            SourceEntry.model_validate(payload).to_dict(),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+
+def test_merge_prepared_candidates_rejects_file_conflicts(tmp_path: Path) -> None:
+    """Shared generated files with different contents fail closed."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files={"shared.txt": "base\n"})
+    arm = _candidate_with_file(
+        root,
+        "shared.txt",
+        "arm\n",
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "shared.txt",
+        "x86\n",
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    with pytest.raises(ValueError, match="Conflicting candidate edits"):
+        pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    with pytest.raises(ValueError, match="share a baseline"):
+        pipeline.merge_prepared_candidates(
+            arm,
+            Candidate(
+                base_tree="b" * 40,
+                tree="b" * 40,
+                targets=("example",),
+                sources=(),
+                systems=("aarch64-darwin", "x86_64-linux"),
+                resolutions={},
+                prepared=True,
+                patch=b"",
+            ),
+            repo=root,
+        )
+
+
+def test_merge_prepared_candidates_unions_drv_hash_only_sources_json(
+    tmp_path: Path,
+) -> None:
+    """#1266: parallel Linux prepares rewrote openai-cli drvHash only."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "packages/openai-cli/sources.json": _source_json(
+                version="v1.37.0",
+                drv_hash="s4dcpz4xz6z89q4a8kjml53mqrvxbp11",
+                vendor=_OPENAI_OLD_VENDOR,
+            )
+        },
+    )
+    arm = _candidate_with_file(
+        root,
+        "packages/openai-cli/sources.json",
+        _source_json(drv_hash=_OPENAI_ARM_DRV),
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "packages/openai-cli/sources.json",
+        _source_json(drv_hash=_OPENAI_X86_DRV),
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    merged = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    merged.apply(root)
+    entry = SourceEntry.model_validate_json(
+        (root / "packages/openai-cli/sources.json").read_bytes()
+    )
+    assert entry.version == "v1.38.0"
+    assert entry.input == "openai-cli"
+    assert entry.drv_hash == _OPENAI_X86_DRV
+    assert entry.hashes.primary_hash() == _OPENAI_VENDOR
+
+
+def test_merge_prepared_candidates_unions_complementary_platform_hashes(
+    tmp_path: Path,
+) -> None:
+    """Arm and x86 may each add their native hash to the same sources.json."""
+    root = tmp_path / "repo"
+    darwin = {
+        "hashes": {"aarch64-darwin": _OPENAI_VENDOR},
+        "version": "1.0.0",
+    }
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "overlays/demo.sources.json": json.dumps(darwin, indent=2) + "\n"
+        },
+    )
+    arm_entry = SourceEntry.model_validate({
+        "hashes": {
+            **darwin["hashes"],
+            "aarch64-linux": _OTHER_VENDOR,
+        },
+        "version": "1.0.0",
+    })
+    x86_entry = SourceEntry.model_validate({
+        "hashes": {
+            **darwin["hashes"],
+            "x86_64-linux": _THIRD_VENDOR,
+        },
+        "version": "1.0.0",
+    })
+    arm = _candidate_with_file(
+        root,
+        "overlays/demo.sources.json",
+        json.dumps(arm_entry.to_dict(), indent=2, sort_keys=True) + "\n",
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "overlays/demo.sources.json",
+        json.dumps(x86_entry.to_dict(), indent=2, sort_keys=True) + "\n",
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    merged = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    merged.apply(root)
+    entry = SourceEntry.model_validate_json(
+        (root / "overlays/demo.sources.json").read_bytes()
+    )
+    assert entry.hashes.mapping == {
+        "aarch64-darwin": _OPENAI_VENDOR,
+        "aarch64-linux": _OTHER_VENDOR,
+        "x86_64-linux": _THIRD_VENDOR,
+    }
+
+
+def test_merge_prepared_candidates_rejects_incompatible_sources_json(
+    tmp_path: Path,
+) -> None:
+    """Version or artifact-hash disagreements still fail closed."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "packages/openai-cli/sources.json": _source_json(version="v1.37.0")
+        },
+    )
+    arm = _candidate_with_file(
+        root,
+        "packages/openai-cli/sources.json",
+        _source_json(version="v1.38.0"),
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "packages/openai-cli/sources.json",
+        _source_json(version="v1.39.0"),
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    with pytest.raises(ValueError, match="Conflicting candidate edits"):
+        pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    git(root, "reset", "--hard", "HEAD")
+    hashed = _candidate_with_file(
+        root,
+        "packages/openai-cli/sources.json",
+        _source_json(vendor=_OTHER_VENDOR),
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    with pytest.raises(ValueError, match="Conflicting candidate edits"):
+        pipeline.merge_prepared_candidates(arm, hashed, repo=root)
+
+
+def test_merge_prepared_candidates_rejects_non_entry_json_conflicts(
+    tmp_path: Path,
+) -> None:
+    """crate-sources and unparseable JSON keep the whole-file fail-closed path."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "packages/demo/crate-sources.json": '{"crate":{"name":"old"}}\n'
+        },
+    )
+    arm = _candidate_with_file(
+        root,
+        "packages/demo/crate-sources.json",
+        '{"crate":{"name":"arm"}}\n',
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "packages/demo/crate-sources.json",
+        '{"crate":{"name":"x86"}}\n',
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    with pytest.raises(ValueError, match="Conflicting candidate edits"):
+        pipeline.merge_prepared_candidates(arm, x86, repo=root)
+
+
+def test_merge_prepared_candidates_rejects_sources_delete_versus_edit(
+    tmp_path: Path,
+) -> None:
+    """A delete on one platform and an edit on the other is still a conflict."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "packages/openai-cli/sources.json": _source_json(version="v1.37.0")
+        },
+    )
+    git(root, "rm", "--", "packages/openai-cli/sources.json")
+    deleted = Candidate(
+        base_tree=git(root, "rev-parse", "HEAD^{tree}").decode().strip(),
+        tree=git(root, "write-tree").decode().strip(),
+        targets=("example",),
+        sources=("example",),
+        systems=("aarch64-darwin", "aarch64-linux"),
+        resolutions={},
+        prepared=True,
+        patch=git(
+            root,
+            "diff",
+            "--cached",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "HEAD",
+            "--",
+        ),
+    )
+    git(root, "reset", "--hard", "HEAD")
+    x86 = _candidate_with_file(
+        root,
+        "packages/openai-cli/sources.json",
+        _source_json(),
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    with pytest.raises(ValueError, match="Conflicting candidate edits"):
+        pipeline.merge_prepared_candidates(deleted, x86, repo=root)
+
+
+@pytest.mark.parametrize(
+    ("left_fields", "right_fields"),
+    [
+        ({"input": "openai-cli"}, {"input": "other-cli"}),
+        ({"commit": "a" * 40}, {"commit": "b" * 40}),
+        ({"electronVersion": "40.0.0"}, {"electronVersion": "41.0.0"}),
+        (
+            {"urls": {"upstream": "https://example.invalid/a"}},
+            {"urls": {"upstream": "https://example.invalid/b"}},
+        ),
+        (
+            {"pins": {"electronVersion": "40.0.0"}},
+            {"pins": {"electronVersion": "41.0.0"}},
+        ),
+        (
+            {"platformDrvHashes": {"aarch64-linux": "armdrv"}},
+            {"platformDrvHashes": {"aarch64-linux": "x86drv"}},
+        ),
+    ],
+)
+def test_source_entries_compatible_rejects_scalar_and_mapping_conflicts(
+    left_fields: dict[str, object],
+    right_fields: dict[str, object],
+) -> None:
+    """Parallel prepares may not silently last-win identity or pin fields."""
+    base = json.loads(_source_json())
+    left = SourceEntry.model_validate({**base, **left_fields})
+    right = SourceEntry.model_validate({**base, **right_fields})
+    assert not pipeline._source_entries_compatible(left, right)
+
+
+def test_source_entry_helpers_cover_parse_and_hash_edges() -> None:
+    """Parse failures and hash-representation mismatches stay fail-closed."""
+    assert pipeline._parse_source_entry(b"{not json") is None
+    assert (
+        pipeline._parse_source_entry(
+            b'["sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="]'
+        )
+        is None
+    )
+    assert pipeline._parse_source_entry(b'{"hashes": "nope"}') is None
+    assert pipeline._merged_package_sources("README.md", b"a", b"b") is None
+    fake = HashCollection.FAKE_HASH_PREFIX
+    left = SourceEntry.model_validate({
+        "hashes": [{"hash": fake, "hashType": "vendorHash"}],
+        "version": "1",
+    })
+    right = SourceEntry.model_validate({
+        "hashes": [{"hash": _OPENAI_VENDOR, "hashType": "vendorHash"}],
+        "version": "1",
+    })
+    assert pipeline._source_entries_compatible(left, right)
+    mapping = SourceEntry.model_validate({
+        "hashes": {"aarch64-linux": _OPENAI_VENDOR},
+        "version": "1",
+    })
+    assert not pipeline._hash_collections_compatible(left.hashes, mapping.hashes)
+    other_mapping = HashCollection.model_validate({"aarch64-linux": _OTHER_VENDOR})
+    assert not pipeline._hash_collections_compatible(mapping.hashes, other_mapping)
+    fake_mapping = HashCollection.model_validate({"aarch64-linux": fake})
+    assert pipeline._hash_collections_compatible(fake_mapping, mapping.hashes)
+    empty = HashCollection()
+    assert pipeline._hashes_preserved(empty, empty)
+    plain = SourceEntry.model_validate_json(_source_json().encode())
+    with_url = plain.model_copy(
+        update={"urls": {"upstream": "https://example.invalid/a"}}
+    )
+    assert pipeline._source_entries_compatible(plain, with_url)
+
+
+def test_checkout_candidate_is_identity_of_head(tmp_path: Path) -> None:
+    """Canary uses the branch tree; it does not invent a prepare patch."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files={"keep.txt": "keep\n"})
+    candidate = pipeline.checkout_candidate(root)
+    tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
+    assert candidate.tree == tree
+    assert candidate.base_tree == tree
+    assert candidate.patch == b""
+    assert candidate.prepared
+    assert set(candidate.systems) == {
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-linux",
+    }
+
+
+def test_validate_command_canary_uses_checkout_without_previous(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dispatch canary validates the branch tree plus the current plan."""
+    output = tmp_path / "artifacts" / "validation.json"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=("/nix/store/shared",),
+            rustLayers=(("/nix/store/shared",),),
+            outputDrvs={
+                "/nix/store/shared": "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared.drv"
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    args = [
+        "validate",
+        "--scope",
+        "rust-warmup",
+        "--warmup-plan",
+        str(warmup_plan),
+        "--warmup-slot",
+        "0",
+        "--output",
+        str(output),
+    ]
+    rejected = CliRunner().invoke(pipeline.app, args)
+    assert rejected.exit_code != 0
+    assert "previous candidate" in str(rejected.exception)
+    monkeypatch.setenv("NIXCFG_CANARY", "true")
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
+    accepted = CliRunner().invoke(pipeline.app, args)
+    assert accepted.exit_code == 0, accepted.output
+    report = pipeline.ValidationReport.model_validate_json(output.read_bytes())
+    assert report.gates == ()
+    assert report.tree == pipeline.checkout_candidate(prepared_run[0]).tree
+
+
+def test_merge_prepared_candidates_keeps_identical_shared_edits(
+    tmp_path: Path,
+) -> None:
+    """Same-content overlap is not a conflict; one-sided deletes apply."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(
+        root,
+        tracked_files={"shared.txt": "base\n", "gone.txt": "gone\n"},
+    )
+    arm = _candidate_with_file(
+        root,
+        "shared.txt",
+        "same\n",
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "shared.txt",
+        "same\n",
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    merged = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    merged.apply(root)
+    assert (root / "shared.txt").read_text(encoding="utf-8") == "same\n"
+    git(root, "reset", "--hard", "HEAD")
+    git(root, "rm", "--", "gone.txt")
+    deleted = Candidate(
+        base_tree=arm.base_tree,
+        tree=git(root, "write-tree").decode().strip(),
+        targets=arm.targets,
+        sources=arm.sources,
+        systems=arm.systems,
+        resolutions={"pkg": ResolvedVersion(version="1")},
+        prepared=True,
+        patch=git(
+            root,
+            "diff",
+            "--cached",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "HEAD",
+            "--",
+        ),
+    )
+    git(root, "reset", "--hard", "HEAD")
+    gone = pipeline.merge_prepared_candidates(deleted, x86, repo=root)
+    gone.apply(root)
+    assert not (root / "gone.txt").exists()
+    assert (root / "shared.txt").read_text(encoding="utf-8") == "same\n"
+
+
+def test_merge_candidates_command_writes_outside_the_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files={"keep.txt": "keep\n"})
+    arm = _candidate_with_file(
+        root,
+        "arm.txt",
+        "arm\n",
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "x86.txt",
+        "x86\n",
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    left = tmp_path / "left.json"
+    right = tmp_path / "right.json"
+    output = tmp_path / "artifacts" / "merged.json"
+    left.write_text(arm.model_dump_json(), encoding="utf-8")
+    right.write_text(x86.model_dump_json(), encoding="utf-8")
+    monkeypatch.setattr(pipeline, "get_repo_root", lambda: root)
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "merge-candidates",
+            "--left",
+            str(left),
+            "--right",
+            str(right),
+            "--output",
+            str(output),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    merged = Candidate.model_validate_json(output.read_bytes())
+    assert set(merged.systems) == {
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-linux",
+    }
+
+
+def test_merge_prepared_candidates_rejects_incompatible_extensions(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files={"keep.txt": "keep\n"})
+    arm = _candidate_with_file(
+        root,
+        "arm.txt",
+        "arm\n",
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86_systems = ("aarch64-darwin", "x86_64-linux")
+    with pytest.raises(ValueError, match="target selection"):
+        pipeline.merge_prepared_candidates(
+            arm,
+            Candidate(
+                base_tree=arm.base_tree,
+                tree=arm.tree,
+                targets=("other",),
+                sources=arm.sources,
+                systems=x86_systems,
+                resolutions={},
+                prepared=True,
+                patch=arm.patch,
+            ),
+            repo=root,
+        )
+    with pytest.raises(ValueError, match="cannot be merged"):
+        pipeline.merge_prepared_candidates(
+            Candidate(
+                base_tree=arm.base_tree,
+                tree=arm.tree,
+                targets=arm.targets,
+                sources=arm.sources,
+                systems=arm.systems,
+                resolutions={},
+                prepared=False,
+                patch=arm.patch,
+            ),
+            Candidate(
+                base_tree=arm.base_tree,
+                tree=arm.tree,
+                targets=arm.targets,
+                sources=arm.sources,
+                systems=x86_systems,
+                resolutions={},
+                prepared=True,
+                patch=arm.patch,
+            ),
+            repo=root,
+        )
+    with pytest.raises(ValueError, match="disjoint platform"):
+        pipeline.merge_prepared_candidates(
+            arm,
+            Candidate(
+                base_tree=arm.base_tree,
+                tree=arm.tree,
+                targets=arm.targets,
+                sources=arm.sources,
+                systems=arm.systems,
+                resolutions={},
+                prepared=True,
+                patch=arm.patch,
+            ),
+            repo=root,
+        )
+    with pytest.raises(ValueError, match="Conflicting resolution"):
+        pipeline.merge_prepared_candidates(
+            Candidate(
+                base_tree=arm.base_tree,
+                tree=arm.tree,
+                targets=arm.targets,
+                sources=arm.sources,
+                systems=arm.systems,
+                resolutions={"pkg": ResolvedVersion(version="1")},
+                prepared=True,
+                patch=arm.patch,
+            ),
+            Candidate(
+                base_tree=arm.base_tree,
+                tree=arm.tree,
+                targets=arm.targets,
+                sources=arm.sources,
+                systems=x86_systems,
+                resolutions={"pkg": ResolvedVersion(version="2")},
+                prepared=True,
+                patch=b"",
+            ),
+            repo=root,
+        )
 
 
 @pytest.mark.parametrize(

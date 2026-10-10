@@ -14,22 +14,53 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TextIO
 
 _BINARY_CACHE = "gkze"
-# lib.update.ci.candidate.CLOSURE_YIELD_EXIT. Kept literal so this launcher
-# stays importable on the hosted image before the project runtime exists.
-_CLOSURE_YIELD_EXIT = 75
-_VALIDATION_SCOPES = frozenset({"all", "packages", "closures"})
+_VALIDATION_SCOPES = frozenset({
+    "all",
+    "packages",
+    "closures",
+    "closure-shard",
+    "rust-warmup",
+    "zed-warmup",
+})
 _HEARTBEAT_INTERVAL_SECONDS = 60
 _OUTPUT_LOG_NAME = "output.log"
 _APPLICATIONS = Path("/Applications")
 _DARWIN_SYSTEM_SIMULATORS = Path("/Library/Developer/CoreSimulator")
 _STORE_PATH_PREFIX = Path("/nix/store")
+_CACHIX_DAEMON_DIR_ENV = "CACHIX_DAEMON_DIR"
+_CACHIX_DAEMON_SOCKET_ENV = "CACHIX_DAEMON_SOCKET"
+_CACHIX_DAEMON_SOCKET_NAME = "daemon.sock"
+# cachix-action can return before daemon.sock exists. Poll so the
+# require-before-bootstrap gate still fail-closes without racing the
+# listener. Tests disable the wait through NIXCFG_CACHIX_DAEMON_READY_SECONDS.
+_CACHIX_DAEMON_READY_SECONDS = 60.0
+_CACHIX_DAEMON_READY_POLL_SECONDS = 0.1
+_CACHIX_DAEMON_READY_SECONDS_ENV = "NIXCFG_CACHIX_DAEMON_READY_SECONDS"
+_STORAGE_MOUNTS = ("/", "/nix", "/nix/store")
 # Live-written on hosted macOS; rmtree can lose a race (ENOTEMPTY) after children
 # are gone. Cleanup is disk reclaim, not a correctness gate for these trees.
 _VOLATILE_IMAGE_LEAVES = frozenset({"Caches", "hostedtoolcache"})
+# Must match .github/actions/update-runtime/action.yml extra-conf.
+_NIX_MIN_FREE_BYTES = 34359738368
+_NIX_MAX_FREE_BYTES = 68719476736
+# Floor: max-free + min-free. Raise to measured zeus peak + margin once
+# 37740898487 storage.jsonl exists. macos-15 starts at ~43 GiB free, so
+# the skip path does not fire until that peak is known and lower than 96 GiB.
+_IMAGE_HEADROOM_BYTES = _NIX_MAX_FREE_BYTES + _NIX_MIN_FREE_BYTES
+_STORAGE_FAULT_LOG_SECONDS = 90
+_STORAGE_FAULT_PREDICATE = (
+    'eventMessage CONTAINS[c] "Input/output error" OR '
+    'eventMessage CONTAINS[c] "I/O error" OR '
+    'subsystem CONTAINS[c] "apfs" OR '
+    'senderImagePath CONTAINS[c] "IOStorage" OR '
+    'eventMessage CONTAINS[c] "IOStorage"'
+)
+_IMAGE_LOG_LOCK = threading.Lock()
 _UNUSED_IMAGE_PATHS = {
     "darwin": (Path("/usr/local/share/dotnet"),),
     "linux": (
@@ -76,6 +107,7 @@ def _outputs(**values: str) -> None:
 
 def bootstrap() -> None:
     """Keep the baseline executable and tools as GC roots for this job."""
+    record_runner_storage("before-bootstrap")
     runtime, devshell = _temp() / "nixcfg-runtime", _temp() / "nixcfg-devshell"
     _run("nix", "build", "--no-write-lock-file", "--out-link", str(runtime), ".#nixcfg")
     _run(
@@ -90,10 +122,163 @@ def bootstrap() -> None:
         "pass",
     )
     _outputs(runtime=str(runtime), devshell=str(devshell))
+    record_runner_storage("after-bootstrap")
+
+
+def record_named_storage() -> None:
+    """Write one labeled df snapshot for a hosted runtime sub-step."""
+    label = os.environ.get("NIXCFG_STORAGE_LABEL", "").strip()
+    if not label:
+        msg = "NIXCFG_STORAGE_LABEL is required"
+        raise ValueError(msg)
+    record_runner_storage(label)
+
+
+def record_runner_storage(
+    label: str,
+    log: TextIO | None = None,
+    *,
+    detail: bool = True,
+    live: bool = True,
+) -> dict[str, object]:
+    """Record df, inodes, and used bytes before or after a heavy hosted phase."""
+    snapshot: dict[str, object] = {
+        "label": label,
+        "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "mounts": {},
+    }
+    mounts: dict[str, dict[str, int]] = {}
+    for mount in _STORAGE_MOUNTS:
+        path = Path(mount)
+        if not path.exists():
+            continue
+        usage = shutil.disk_usage(mount)
+        mounts[mount] = {
+            "total": usage.total,
+            "used": usage.used,
+            "free": usage.free,
+        }
+    snapshot["mounts"] = mounts
+    df_bin = shutil.which("df")
+    if df_bin is None:
+        snapshot["df_h"] = ""
+        snapshot["df_i"] = ""
+    else:
+        df_h = subprocess.run(  # noqa: S603 -- resolved df path
+            [df_bin, "-h", *list(mounts)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        df_i = subprocess.run(  # noqa: S603 -- resolved df path
+            [df_bin, "-i", *list(mounts)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        snapshot["df_h"] = df_h.stdout
+        snapshot["df_i"] = df_i.stdout
+    root = mounts.get("/", {})
+    store = mounts.get("/nix/store", mounts.get("/nix", {}))
+    message = (
+        f"storage {label} free={root.get('free', 0)} "
+        f"used={root.get('used', 0)} store_used={store.get('used', 0)}"
+    )
+    if detail:
+        message = f"{message}\n{snapshot['df_h']}{snapshot['df_i']}"
+    if os.environ.get("RUNNER_TEMP"):
+        try:
+            artifacts = _temp() / "update-artifacts"
+            artifacts.mkdir(parents=True, exist_ok=True)
+            with (artifacts / "storage.jsonl").open("a") as handle:
+                handle.write(json.dumps(snapshot) + "\n")
+        except OSError:
+            pass
+    if live:
+        if log is not None:
+            _write_diagnostic(log, message.rstrip())
+        else:
+            sys.stderr.write(message if message.endswith("\n") else message + "\n")
+            sys.stderr.flush()
+    return snapshot
+
+
+def _cachix_daemon_ready_wait_seconds() -> float:
+    """Seconds to wait for ``daemon.sock`` after cachix-action returns."""
+    raw = os.environ.get(_CACHIX_DAEMON_READY_SECONDS_ENV, "").strip()
+    if raw:
+        return max(0.0, float(raw))
+    return _CACHIX_DAEMON_READY_SECONDS
+
+
+def cachix_daemon_socket() -> Path | None:
+    """Return the socket cachix-action started, never the unused default path.
+
+    cachix-action v16 exports ``CACHIX_DAEMON_DIR`` and binds
+    ``$CACHIX_DAEMON_DIR/daemon.sock`` (or ``CACHIX_DAEMON_SOCKET``). Bare
+    ``cachix daemon stop`` talks to ``~/.cache/cachix/cachix-daemon.sock``,
+    which this action never creates.
+    """
+    if socket := os.environ.get(_CACHIX_DAEMON_SOCKET_ENV, "").strip():
+        return Path(socket)
+    if daemon_dir := os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip():
+        return Path(daemon_dir) / _CACHIX_DAEMON_SOCKET_NAME
+    return None
+
+
+class CachixFlushError(RuntimeError):
+    """The explicit flush could not confirm a clean Cachix daemon drain."""
+
+
+class CachixDaemonError(RuntimeError):
+    """useDaemon did not start a live post-build-hook daemon."""
+
+
+class ImageCleanupError(RuntimeError):
+    """Hosted Darwin still lacks closure headroom after image reclaim."""
+
+
+def image_headroom_required_bytes() -> int:
+    """Free bytes hosted Darwin must keep so min-free cannot fire mid-rustc."""
+    return _IMAGE_HEADROOM_BYTES
+
+
+def runner_free_bytes() -> int:
+    """Return APFS-shared free bytes; /nix is absent before Nix install."""
+    mount = Path("/nix") if Path("/nix").exists() else Path("/")
+    return shutil.disk_usage(mount).free
+
+
+def _log_runner_disk(label: str) -> None:
+    for mount in ("/", "/nix"):
+        path = Path(mount)
+        if not path.exists():
+            sys.stdout.write(f"{label} {mount}: not mounted\n")
+            continue
+        usage = shutil.disk_usage(mount)
+        sys.stdout.write(
+            f"{label} {mount}: free={usage.free} used={usage.used} "
+            f"total={usage.total}\n"
+        )
+    sys.stdout.flush()
+
+
+def _is_darwin_heavy_reclaim_path(path: Path) -> bool:
+    if path.name.startswith("Xcode") and path.suffix == ".app":
+        return True
+    return path.name == "sdk" and "Android" in path.parts
 
 
 def clean_runner_image() -> None:
-    """Reclaim unused image tools, exclusively on disposable hosted runners."""
+    """Reclaim unused image tools, exclusively on disposable hosted runners.
+
+    Hosted macos-15 starts around 43 GiB free. Four concurrent Darwin shards
+    already serialize Xcode rmtree for tens of minutes; eight-wide parallel
+    deletes on those VMs add host I/O, they do not shorten the wait. Skip
+    Xcode/Android when free already covers closure headroom. Otherwise delete
+    serially, timed per path, and stop once the threshold is met. Fail closed
+    if the disk is still short. Do not overlap this I/O with Nix install.
+    """
     if (
         os.environ.get("GITHUB_ACTIONS") != "true"
         or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
@@ -101,9 +286,11 @@ def clean_runner_image() -> None:
         msg = "Image cleanup requires a disposable GitHub-hosted runner"
         raise RuntimeError(msg)
     paths = list(_UNUSED_IMAGE_PATHS[sys.platform])
-    sys.stdout.write(
-        f"Available before image cleanup: {shutil.disk_usage('/').free} bytes\n"
-    )
+    record_runner_storage("before-image-cleanup")
+    _log_runner_disk("df before image cleanup")
+    need = image_headroom_required_bytes()
+    before = runner_free_bytes()
+    sys.stdout.write(f"Available before image cleanup: {before} bytes (need {need})\n")
     if sys.platform == "darwin":
         selected = Path(
             _run("xcode-select", "--print-path", capture=True).stdout.strip()
@@ -135,14 +322,30 @@ def clean_runner_image() -> None:
         tool_cache = os.environ.get("RUNNER_TOOL_CACHE")
         if tool_cache:
             paths.append(Path(tool_cache))
-    for path in paths:
-        if path.is_dir() and not path.is_symlink():
-            sys.stdout.write(f"Removing unused runner image tool: {path}\n")
-            sys.stdout.flush()
-            _remove_unused_image_path(path)
-    sys.stdout.write(
-        f"Available after image cleanup: {shutil.disk_usage('/').free} bytes\n"
-    )
+    to_remove = [path for path in paths if path.is_dir() and not path.is_symlink()]
+    if sys.platform == "darwin" and need > 0:
+        heavy = [path for path in to_remove if _is_darwin_heavy_reclaim_path(path)]
+        light = [path for path in to_remove if path not in heavy]
+        if before >= need:
+            sys.stdout.write(
+                f"Skipping Xcode/Android reclaim; free {before} bytes "
+                f"already meets headroom {need} bytes\n"
+            )
+            to_remove = light
+        else:
+            _reclaim_until_headroom([*heavy, *light], need)
+            to_remove = []
+    if to_remove:
+        _reclaim_unused_image_paths(to_remove)
+    after = runner_free_bytes()
+    sys.stdout.write(f"Available after image cleanup: {after} bytes\n")
+    if sys.platform == "darwin" and need > 0 and after < need:
+        msg = (
+            f"Image cleanup left {after} bytes free; need {need} bytes "
+            "for Darwin root-closure headroom"
+        )
+        raise ImageCleanupError(msg)
+    record_runner_storage("after-image-cleanup")
 
 
 def _image_cleanup_best_effort(path: Path) -> bool:
@@ -151,6 +354,13 @@ def _image_cleanup_best_effort(path: Path) -> bool:
     return path.name in _VOLATILE_IMAGE_LEAVES or (
         tool_cache is not None and path == Path(tool_cache)
     )
+
+
+def _image_log(message: str) -> None:
+    """Write one cleanup line and flush so GHA shows per-path elapsed seconds."""
+    with _IMAGE_LOG_LOCK:
+        sys.stdout.write(f"{message}\n")
+        sys.stdout.flush()
 
 
 def _remove_unused_image_path(path: Path) -> None:
@@ -163,6 +373,43 @@ def _remove_unused_image_path(path: Path) -> None:
     _run("sudo", sys.executable, "-c", snippet, str(path))
 
 
+def _remove_unused_image_path_timed(path: Path) -> None:
+    """Delete one unused tree and log elapsed seconds for the GHA breakdown."""
+    started = time.perf_counter()
+    _image_log(f"Removing unused runner image tool: {path}")
+    try:
+        _remove_unused_image_path(path)
+    except (OSError, subprocess.CalledProcessError):
+        _image_log(
+            f"Failed unused runner image tool: {path} in "
+            f"{time.perf_counter() - started:.1f}s"
+        )
+        raise
+    _image_log(
+        f"Removed unused runner image tool: {path} in "
+        f"{time.perf_counter() - started:.1f}s"
+    )
+
+
+def _reclaim_unused_image_paths(paths: list[Path]) -> None:
+    """Delete unused image trees serially with elapsed seconds per path."""
+    for path in paths:
+        _remove_unused_image_path_timed(path)
+
+
+def _reclaim_until_headroom(paths: list[Path], need: int) -> None:
+    """Delete unused trees only until hosted Darwin has closure headroom."""
+    for path in paths:
+        free = runner_free_bytes()
+        if free >= need:
+            sys.stdout.write(
+                f"Stopped image reclaim; free {free} bytes meets headroom {need} bytes\n"
+            )
+            sys.stdout.flush()
+            return
+        _remove_unused_image_path_timed(path)
+
+
 def is_hosted_darwin_runner() -> bool:
     """Return whether this process is a disposable hosted macos-15 job."""
     return (
@@ -172,16 +419,148 @@ def is_hosted_darwin_runner() -> bool:
     )
 
 
+def _storage_fault_artifacts() -> Path:
+    artifacts = _temp() / "update-artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    return artifacts
+
+
+def _append_command_output(report: Path, heading: str, args: list[str]) -> None:
+    """Run one diagnostic command and append stdout/stderr to the fault report."""
+    with report.open("a", encoding="utf-8") as handle:
+        handle.write(f"## {heading}\n")
+        if not args:
+            handle.write("\n")
+            return
+        try:
+            result = subprocess.run(  # noqa: S603 -- fixed diagnostic argv
+                args,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=_STORAGE_FAULT_LOG_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            handle.write(f"{type(error).__name__}: {error}\n\n")
+            return
+        if result.stdout:
+            handle.write(result.stdout)
+            if not result.stdout.endswith("\n"):
+                handle.write("\n")
+        if result.stderr:
+            handle.write(result.stderr)
+            if not result.stderr.endswith("\n"):
+                handle.write("\n")
+        handle.write(f"exit={result.returncode}\n\n")
+
+
+def _diskutil_info_targets() -> tuple[str, ...]:
+    """Return mount and APFS container identifiers for the hosted /nix disk."""
+    targets = ["/", "/nix"] if Path("/nix").exists() else ["/"]
+    diskutil = shutil.which("diskutil")
+    if diskutil is None:
+        return tuple(targets)
+    try:
+        listing = subprocess.run(  # noqa: S603 -- resolved diskutil path
+            [diskutil, "info", targets[-1]],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return tuple(targets)
+    extras: list[str] = []
+    for line in listing.stdout.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        name = key.strip()
+        ident = value.strip()
+        if name in {"APFS Container", "Part of Whole", "Device Node"} and ident:
+            extras.append(ident)
+    return tuple(dict.fromkeys([*targets, *extras]))
+
+
+def dump_hosted_storage_fault() -> None:
+    """Keep diskutil and APFS I/O logs after a hosted Darwin builder EIO.
+
+    Guest ``df`` can show tens of GiB free while the host backing store or
+    I/O path is saturated. A process-only ranlib EIO is not enough: capture
+    the device layer before the VM disappears.
+    """
+    if not is_hosted_darwin_runner():
+        return
+    artifacts = _storage_fault_artifacts()
+    record_runner_storage("storage-fault")
+    report = artifacts / "storage-fault.txt"
+    log_path = artifacts / "apfs-io.log"
+    report.write_text("hosted Darwin storage-fault dump\n\n", encoding="utf-8")
+    diskutil = shutil.which("diskutil")
+    if diskutil is None:
+        _append_command_output(report, "diskutil missing", [])
+    else:
+        _append_command_output(report, "diskutil list", [diskutil, "list"])
+        for target in _diskutil_info_targets():
+            _append_command_output(
+                report, f"diskutil info {target}", [diskutil, "info", target]
+            )
+    log_bin = shutil.which("log")
+    if log_bin is None:
+        log_path.write_text("log show missing\n", encoding="utf-8")
+        return
+    try:
+        result = subprocess.run(  # noqa: S603 -- resolved log path
+            [
+                log_bin,
+                "show",
+                "--last",
+                "2h",
+                "--style",
+                "compact",
+                "--predicate",
+                _STORAGE_FAULT_PREDICATE,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=_STORAGE_FAULT_LOG_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        log_path.write_text(f"{type(error).__name__}: {error}\n", encoding="utf-8")
+        return
+    log_path.write_text(result.stdout + result.stderr, encoding="utf-8")
+    with report.open("a", encoding="utf-8") as handle:
+        handle.write(
+            f"## log show exit={result.returncode} bytes={log_path.stat().st_size}\n"
+        )
+
+
 def reclaim_hosted_store() -> None:
     """Reclaim unused store paths on hosted Darwin before root-closure fetches."""
     if not is_hosted_darwin_runner():
         return
-    sys.stdout.write(
-        f"Available before store GC: {shutil.disk_usage('/').free} bytes\n"
-    )
+    record_runner_storage("before-store-gc")
+    free = shutil.disk_usage("/").free
+    sys.stdout.write(f"Available before store GC: {free} bytes\n")
     sys.stdout.flush()
+    # Image cleanup typically leaves ~150 GiB. Closure shards do not inherit a
+    # package store, so nix store gc cannot free tens of GiB. Skip when free
+    # already covers max-free plus min-free; otherwise a 60+ GiB fetch can
+    # still trip min-free mid-rustc. Combined packages+closures on a tight
+    # disk still GCs unused outputs first.
+    skip_free = image_headroom_required_bytes()
+    if skip_free > 0 and free >= skip_free:
+        sys.stdout.write(
+            f"Skipping store GC; free {free} bytes already meets "
+            f"headroom {skip_free} bytes\n"
+        )
+        sys.stdout.flush()
+        record_runner_storage("after-store-gc")
+        return
     _run("nix", "store", "gc")
     sys.stdout.write(f"Available after store GC: {shutil.disk_usage('/').free} bytes\n")
+    record_runner_storage("after-store-gc")
 
 
 def _develop(*args: str) -> tuple[str, ...]:
@@ -339,7 +718,8 @@ def _wait_for_diagnostics(
                     log,
                     f"Updater still running stage={stage} pid={process.pid} "
                     f"elapsed={time.monotonic() - started:.0f}s artifacts={artifacts} "
-                    f"run_logs={run_logs}",
+                    f"run_logs={run_logs} "
+                    f"free={shutil.disk_usage('/').free}",
                 )
             continue
         if diagnostic is None:
@@ -381,50 +761,128 @@ def _append_validation_scope(args: list[str]) -> str:
     """Add shard flags and return the scope the hosted job requested."""
     scope = os.environ.get("NIXCFG_VALIDATE_SCOPE", "all")
     if scope not in _VALIDATION_SCOPES:
-        msg = "Validation scope must be all, packages, or closures"
+        msg = (
+            "Validation scope must be all, packages, closures, "
+            "closure-shard, rust-warmup, or zed-warmup"
+        )
         raise ValueError(msg)
     if scope != "all":
         args.extend(("--scope", scope))
     budget = os.environ.get("NIXCFG_CLOSURE_BUDGET_SECONDS", "")
-    yield_on_budget = os.environ.get("NIXCFG_CLOSURE_YIELD") == "true"
-    if budget and (scope == "packages" or not _is_positive_number(budget)):
+    roots = os.environ.get("NIXCFG_CLOSURE_ROOTS", "")
+    shard = os.environ.get("NIXCFG_CLOSURE_SHARD", "")
+    slot = os.environ.get("NIXCFG_WARMUP_SLOT", "").strip()
+    warmup = os.environ.get("NIXCFG_WARMUP_PLAN", "").strip()
+    if budget and (
+        scope not in {"closures", "closure-shard"} or not _is_positive_number(budget)
+    ):
         msg = "Closure budget must be a positive number of seconds on a closure validation"
         raise ValueError(msg)
-    if yield_on_budget and (scope != "closures" or not budget):
-        msg = "Closure yield requires a closure scope and budget"
+    if scope == "closure-shard" and (not roots or not shard):
+        msg = "closure-shard requires NIXCFG_CLOSURE_ROOTS and NIXCFG_CLOSURE_SHARD"
+        raise ValueError(msg)
+    if scope == "rust-warmup" and (not warmup or not slot):
+        msg = "rust-warmup requires NIXCFG_WARMUP_PLAN and NIXCFG_WARMUP_SLOT"
+        raise ValueError(msg)
+    if scope == "zed-warmup" and not warmup:
+        msg = "zed-warmup requires NIXCFG_WARMUP_PLAN"
+        raise ValueError(msg)
+    if scope != "closure-shard" and roots:
+        msg = "Named closure roots are only valid for the closure-shard scope"
+        raise ValueError(msg)
+    if scope not in {"closure-shard", "rust-warmup", "zed-warmup"} and shard:
+        msg = "Named closure roots are only valid for the closure-shard scope"
+        raise ValueError(msg)
+    if scope != "rust-warmup" and slot:
+        msg = "warmup slots are only valid for the rust-warmup scope"
         raise ValueError(msg)
     if budget:
         args.extend(("--closure-budget-seconds", budget))
-    if yield_on_budget:
-        args.append("--closure-yield")
+    if roots:
+        args.extend(("--closure-roots", roots))
+    if scope == "closure-shard" and shard:
+        args.extend(("--shard", shard))
+    if warmup:
+        args.extend(("--warmup-plan", warmup))
+    if slot:
+        args.extend(("--warmup-slot", slot))
     return scope
 
 
-def _finish_closure_shard(scope: str, returncode: int, log: TextIO) -> int:
-    """Record whether this shard realized the closure, and continue only on its budget."""
-    yielded = (
-        scope == "closures"
-        and os.environ.get("NIXCFG_CLOSURE_YIELD") == "true"
-        and returncode == _CLOSURE_YIELD_EXIT
-    )
-    if scope == "closures":
-        _outputs(closure_complete="false" if yielded else "true")
-    if yielded:
-        _write_diagnostic(
-            log,
-            "Closure build budget exhausted; the next shard continues from Cachix",
-        )
-        return 0
+def _publish_prefetched_receipts(
+    receipts: Path, log: TextIO, artifacts: Path, returncode: int
+) -> int:
+    """Push exact prefetch receipts on every exit path that produced them."""
+    try:
+        paths = _prefetched_paths_from_receipts(receipts)
+    except ValueError:
+        if returncode:
+            _write_diagnostic(
+                log,
+                "Prefetch receipts were unusable after updater failure; "
+                "retaining the updater status",
+            )
+            return returncode
+        raise
+    _write_diagnostic(log, f"Collected {len(paths)} prefetched store paths")
+    if not paths:
+        return returncode
+    try:
+        _push_prefetched_paths(paths, log, artifacts)
+    except subprocess.CalledProcessError as error:
+        if returncode:
+            _write_diagnostic(
+                log,
+                "Prefetch publication failed after updater failure; "
+                f"retaining updater status cache_exit={error.returncode}",
+            )
+            return returncode
+        raise
     return returncode
 
 
-def native(stage: str) -> int:
-    """Prepare or validate with immutable inputs and retained failure evidence."""
-    artifacts = _temp() / "update-artifacts"
-    artifacts.mkdir(parents=True, exist_ok=True)
+def _merge_candidate_args(artifacts: Path) -> list[str]:
+    """Return argv that 3-way-merges two native prepare artifacts."""
+    previous = os.environ.get("NIXCFG_PREVIOUS_CANDIDATE", "")
+    right = os.environ.get("NIXCFG_MERGE_RIGHT", "")
+    if not previous or not right:
+        msg = "Merge requires NIXCFG_PREVIOUS_CANDIDATE and NIXCFG_MERGE_RIGHT"
+        raise ValueError(msg)
+    return [
+        _runtime(),
+        "ci",
+        "update",
+        "merge-candidates",
+        "--left",
+        previous,
+        "--right",
+        right,
+        "--output",
+        str(artifacts / "candidate.json"),
+    ]
+
+
+def _validate_native_args(args: list[str], artifacts: Path, previous: str) -> list[str]:
+    """Append validate flags, allowing canary to omit a previous candidate."""
+    if not previous and os.environ.get("NIXCFG_CANARY") != "true":
+        msg = "Validation requires a previous candidate"
+        raise ValueError(msg)
+    scope = _append_validation_scope(args)
+    report_name = (
+        "shard-receipt.json" if scope == "closure-shard" else "validation.json"
+    )
+    if previous:
+        args.extend(("--candidate", previous))
+    args.extend(("--output", str(artifacts / report_name)))
+    return args
+
+
+def _native_args(stage: str, artifacts: Path) -> list[str]:
+    """Return the updater argv for one hosted native stage."""
+    if stage == "merge-candidates":
+        return _merge_candidate_args(artifacts)
     args = [_runtime(), "ci", "update", stage]
     previous = os.environ.get("NIXCFG_PREVIOUS_CANDIDATE", "")
-    scope = "all"
     if stage == "prepare":
         args.extend(("--output", str(artifacts / "candidate.json")))
         if previous:
@@ -442,36 +900,70 @@ def native(stage: str) -> int:
             raise ValueError(msg)
         if targets:
             args.extend(("--", *targets))
-    elif stage == "cache-root-deps":
-        if not previous:
+        return args
+    if not previous:
+        if stage == "validate":
+            return _validate_native_args(args, artifacts, previous)
+        if stage == "cache-root-deps":
             msg = "Foreign-root dependency cache requires a previous candidate"
-            raise ValueError(msg)
+        elif stage == "plan-shards":
+            msg = "Shard planning requires a previous candidate"
+        elif stage == "assert-coverage":
+            msg = "Coverage requires a previous candidate"
+        else:
+            msg = f"Unknown native stage: {stage}"
+        raise ValueError(msg)
+    if stage == "cache-root-deps":
         args.extend((
             "--candidate",
             previous,
             "--output",
             str(artifacts / "cache-root-deps.json"),
         ))
-    elif stage == "validate":
-        if not previous:
-            msg = "Validation requires a previous candidate"
-            raise ValueError(msg)
+        return args
+    if stage == "validate":
+        return _validate_native_args(args, artifacts, previous)
+    if stage == "plan-shards":
         args.extend((
             "--candidate",
             previous,
             "--output",
-            str(artifacts / "validation.json"),
+            str(artifacts / "darwin-closure-shards.json"),
         ))
-        scope = _append_validation_scope(args)
-    else:
-        msg = f"Unknown native stage: {stage}"
-        raise ValueError(msg)
+        github_output = os.environ.get("GITHUB_OUTPUT", "")
+        if github_output:
+            args.extend(("--github-output", github_output))
+        return args
+    if stage == "assert-coverage":
+        evidence = os.environ.get("NIXCFG_COVERAGE_EVIDENCE", "")
+        if not evidence:
+            msg = "Coverage requires NIXCFG_COVERAGE_EVIDENCE"
+            raise ValueError(msg)
+        args.extend((
+            "--candidate",
+            previous,
+            "--evidence",
+            evidence,
+            "--job-results",
+            os.environ.get("NIXCFG_JOB_RESULTS", ""),
+        ))
+        return args
+    msg = f"Unknown native stage: {stage}"
+    raise ValueError(msg)
+
+
+def native(stage: str) -> int:
+    """Prepare or validate with immutable inputs and retained failure evidence."""
+    artifacts = _temp() / "update-artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    args = _native_args(stage, artifacts)
     receipts = artifacts / "prefetch-receipts.jsonl"
     with (
         (artifacts / "result.json").open("w") as output,
         (artifacts / "stderr.log").open("w") as log,
     ):
         _write_diagnostic(log, f"Starting native stage={stage} artifacts={artifacts}")
+        record_runner_storage(f"before-native-{stage}", log, detail=False, live=False)
         with subprocess.Popen(  # noqa: S603 -- fixed executable and separate target arguments
             args,
             stdout=output,
@@ -490,14 +982,10 @@ def native(stage: str) -> int:
         _write_diagnostic(
             log, f"Updater finished stage={stage} returncode={returncode}"
         )
+        record_runner_storage(f"after-native-{stage}", log, detail=False, live=False)
         if summary := _failure_summary(artifacts / "result.json"):
             _write_diagnostic(log, summary)
-        if stage == "prepare" and returncode == 0:
-            paths = _prefetched_paths_from_receipts(receipts)
-            _write_diagnostic(log, f"Collected {len(paths)} prefetched store paths")
-            if paths:
-                _push_prefetched_paths(paths, log, artifacts)
-        return _finish_closure_shard(scope, returncode, log)
+        return _publish_prefetched_receipts(receipts, log, artifacts, returncode)
 
 
 def certify() -> None:
@@ -713,19 +1201,284 @@ def start_repair() -> None:
     )
 
 
+def _retain_cachix_daemon_evidence(artifacts: Path, log: TextIO) -> None:
+    """Keep the action's daemon log, hook, and env so a missing socket is diagnosable."""
+    daemon_dir = os.environ.get(_CACHIX_DAEMON_DIR_ENV, "")
+    socket = cachix_daemon_socket()
+    hook_files = os.environ.get("NIX_USER_CONF_FILES", "")
+    nix_conf = os.environ.get("NIX_CONF", "")
+    _write_diagnostic(
+        log,
+        "Cachix daemon wiring "
+        f"{_CACHIX_DAEMON_DIR_ENV}={daemon_dir!r} "
+        f"{_CACHIX_DAEMON_SOCKET_ENV}={os.environ.get(_CACHIX_DAEMON_SOCKET_ENV, '')!r} "
+        f"socket={socket} socket_exists={bool(socket and socket.exists())} "
+        f"NIX_USER_CONF_FILES={hook_files!r} "
+        f"NIX_CONF_has_post_build_hook={'post-build-hook' in nix_conf}",
+    )
+    if not daemon_dir:
+        return
+    source = Path(daemon_dir)
+    retained = artifacts / "cachix-daemon"
+    if not source.is_dir():
+        _write_diagnostic(log, f"CACHIX_DAEMON_DIR missing on disk: {source}")
+        return
+    retained.mkdir(parents=True, exist_ok=True)
+    for name in ("daemon.log", "daemon.pid", "nix.conf", "post-build-hook.sh"):
+        path = source / name
+        if path.is_file():
+            shutil.copy2(path, retained / name)
+            _write_diagnostic(log, f"retained {name} bytes={path.stat().st_size}")
+
+
+def _clear_cachix_daemon_env() -> None:
+    """Hide a drained daemon from cachix-action's post hook.
+
+    The post hook reads ``$CACHIX_DAEMON_DIR/daemon.pid`` and runs
+    ``cachix daemon stop`` again. A missing pid throws; a missing socket
+    fails stop after a ~30s retry. Empty ``CACHIX_DAEMON_DIR`` makes the
+    hook skip push without failing the job.
+    """
+    github_env = os.environ.get("GITHUB_ENV", "").strip()
+    for key in (_CACHIX_DAEMON_DIR_ENV, _CACHIX_DAEMON_SOCKET_ENV):
+        os.environ.pop(key, None)
+        if github_env:
+            with Path(github_env).open("a", encoding="utf-8") as handle:
+                handle.write(f"{key}=\n")
+
+
+def _release_cachix_daemon_dir() -> None:
+    """Remove the action's pid/socket after a confirmed drain."""
+    daemon_dir = os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip()
+    if daemon_dir:
+        path = Path(daemon_dir)
+        if path.is_dir():
+            for name in (_CACHIX_DAEMON_SOCKET_NAME, "daemon.pid"):
+                target = path / name
+                try:
+                    target.unlink()
+                except OSError:
+                    continue
+    _clear_cachix_daemon_env()
+
+
+def require_cachix_daemon() -> None:
+    """Fail closed unless cachix-action started a live post-build-hook daemon.
+
+    Per-derivation push is the Nix hook talking to ``$CACHIX_DAEMON_DIR``.
+    Flush-after-retain cannot prove that hook ran during the build. If the
+    daemon never started, nothing a shard compiles reaches gkze, which
+    breaks push-at-the-smallest-unit. This check runs after cachix-action
+    and before bootstrap so a silent skip cannot burn a five-hour shard.
+    Evidence is copied into artifacts here so retain (before flush) keeps it.
+    """
+    artifacts = _temp() / "update-artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    with (artifacts / "cachix-daemon-require.log").open("a") as log:
+        deadline = time.monotonic() + _cachix_daemon_ready_wait_seconds()
+        socket: Path | None = None
+        while True:
+            socket = cachix_daemon_socket()
+            if socket is not None and socket.exists():
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _retain_cachix_daemon_evidence(artifacts, log)
+                if socket is None:
+                    msg = (
+                        "Cachix daemon socket is unknown: "
+                        f"{_CACHIX_DAEMON_DIR_ENV} and {_CACHIX_DAEMON_SOCKET_ENV} "
+                        "are unset. useDaemon did not start a post-build-hook daemon."
+                    )
+                else:
+                    msg = f"Cachix daemon socket missing: {socket}"
+                _write_diagnostic(log, msg)
+                raise CachixDaemonError(msg)
+            time.sleep(min(_CACHIX_DAEMON_READY_POLL_SECONDS, remaining))
+        _retain_cachix_daemon_evidence(artifacts, log)
+        daemon_dir = os.environ.get(_CACHIX_DAEMON_DIR_ENV, "").strip()
+        missing: list[str] = []
+        if not daemon_dir:
+            missing.append(_CACHIX_DAEMON_DIR_ENV)
+        else:
+            directory = Path(daemon_dir)
+            pid = directory / "daemon.pid"
+            hook = directory / "post-build-hook.sh"
+            nix_conf = directory / "nix.conf"
+            if not pid.is_file():
+                missing.append("daemon.pid")
+            if not hook.is_file():
+                missing.append("post-build-hook.sh")
+            if not nix_conf.is_file() or "post-build-hook" not in nix_conf.read_text(
+                encoding="utf-8"
+            ):
+                missing.append("nix.conf post-build-hook")
+        if missing:
+            msg = (
+                "Cachix daemon started incompletely; per-derivation push "
+                f"cannot run: missing {', '.join(missing)}"
+            )
+            _write_diagnostic(log, msg)
+            raise CachixDaemonError(msg)
+        _write_diagnostic(
+            log,
+            f"Cachix daemon ready socket={socket} dir={daemon_dir}",
+        )
+
+
+def flush_cachix() -> None:
+    """Push leftover prefetch receipts and drain the Cachix daemon.
+
+    cachix-action v16 starts ``cachix daemon run --socket
+    $CACHIX_DAEMON_DIR/daemon.sock`` and registers a Nix post-build hook.
+    This flush must stop that socket. A bare ``cachix daemon stop`` talks to
+    ``~/.cache/cachix/cachix-daemon.sock`` and reports success here while
+    leaving the real queue undrained.
+
+    Failure points and what reaches gkze:
+    - Build failure: every path the daemon already uploaded, plus prefetch
+      receipts flushed here.
+    - Job timeout at 360 minutes: shards end their build budget at 5 hours so
+      this step and the action post hook still have slack. A SIGKILL during
+      flush can still drop the queue tail.
+    - Cancellation: this step is ``if: always()``. GitHub may still skip later
+      post hooks; the explicit flush is the mitigation and does not survive a
+      cancel that kills the runner first.
+    - Runner loss: only paths Cachix already acknowledged.
+    """
+    artifacts = _temp() / "update-artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    receipts = artifacts / "prefetch-receipts.jsonl"
+    with (artifacts / "cachix-flush.log").open("a") as log:
+        _write_diagnostic(log, "Flushing Cachix daemon and prefetch receipts")
+        record_runner_storage("flush-start", log)
+        _retain_cachix_daemon_evidence(artifacts, log)
+        if receipts.exists():
+            _publish_prefetched_receipts(receipts, log, artifacts, 0)
+        socket = cachix_daemon_socket()
+        if socket is None:
+            msg = (
+                "Cachix daemon socket is unknown: "
+                f"{_CACHIX_DAEMON_DIR_ENV} and {_CACHIX_DAEMON_SOCKET_ENV} "
+                "are unset. useDaemon wiring did not export the socket."
+            )
+            _write_diagnostic(log, msg)
+            raise CachixFlushError(msg)
+        if not socket.exists():
+            msg = f"Cachix daemon socket missing: {socket}"
+            _write_diagnostic(log, msg)
+            raise CachixFlushError(msg)
+        stop = _run(
+            "cachix",
+            "daemon",
+            "stop",
+            "--socket",
+            str(socket),
+            check=False,
+            capture=True,
+        )
+        _write_diagnostic(
+            log,
+            f"cachix daemon stop returncode={stop.returncode} "
+            f"socket={socket} stdout={stop.stdout.strip()} "
+            f"stderr={stop.stderr.strip()}",
+        )
+        if stop.returncode:
+            msg = (
+                "Cachix daemon stop failed; cannot confirm a clean drain "
+                f"socket={socket} returncode={stop.returncode} "
+                f"stderr={stop.stderr.strip()}"
+            )
+            _write_diagnostic(log, msg)
+            raise CachixFlushError(msg)
+        _release_cachix_daemon_dir()
+        _write_diagnostic(
+            log,
+            "cleared CACHIX_DAEMON_DIR so cachix-action post skips a second stop",
+        )
+        record_runner_storage("flush-end", log)
+
+
+def restore_canary_plan(
+    *,
+    dest: Path | None = None,
+    run: Callable[..., object] | None = None,
+) -> Path:
+    """Download the latest ``plan-shards-x86_64-linux`` artifact on this ref."""
+    target = dest if dest is not None else Path(os.environ["NIXCFG_CANARY_PLAN_DIR"])
+    target.mkdir(parents=True, exist_ok=True)
+    runner: Callable[..., object] = _run if run is None else run
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    branch = os.environ.get("GITHUB_REF_NAME", "")
+    if not repo or not branch:
+        msg = "Canary plan restore requires GITHUB_REPOSITORY and GITHUB_REF_NAME"
+        raise ValueError(msg)
+    listed = runner(
+        "gh",
+        "run",
+        "list",
+        "-R",
+        repo,
+        "--workflow=Update",
+        "--branch",
+        branch,
+        "--limit",
+        "20",
+        "--json",
+        "databaseId,status,conclusion",
+        capture=True,
+        check=True,
+    )
+    payload = getattr(listed, "stdout", listed)
+    if not isinstance(payload, (str, bytes, bytearray)):
+        msg = "Canary plan listing must return JSON text"
+        raise TypeError(msg)
+    runs = json.loads(payload)
+    for run_row in runs:
+        run_id = run_row["databaseId"]
+        downloaded = runner(
+            "gh",
+            "run",
+            "download",
+            str(run_id),
+            "-n",
+            "plan-shards-x86_64-linux",
+            "-D",
+            str(target),
+            check=False,
+            capture=True,
+        )
+        code = downloaded.returncode if hasattr(downloaded, "returncode") else 0
+        if code == 0 and (target / "warmup-plan.json").is_file():
+            return target
+    msg = f"No current warmup plan artifact on {repo}@{branch}"
+    raise RuntimeError(msg)
+
+
 def main(stage: str) -> int:
     """Dispatch the finite set of Actions operations, preserving process failures."""
-    if stage in {"prepare", "validate", "cache-root-deps"}:
+    native_stages = {
+        "prepare",
+        "validate",
+        "cache-root-deps",
+        "plan-shards",
+        "assert-coverage",
+        "merge-candidates",
+    }
+    if stage in native_stages:
         # Capture CLI JSON inside the environment, after any devshell startup output.
         return _run(
             *_develop("python", str(Path(__file__).resolve()), f"native-{stage}"),
             check=False,
         ).returncode
-    if stage in {"native-prepare", "native-validate", "native-cache-root-deps"}:
+    if stage.startswith("native-") and stage.removeprefix("native-") in native_stages:
         return native(stage.removeprefix("native-"))
     operations = {
         "clean-image": clean_runner_image,
         "reclaim-store": reclaim_hosted_store,
+        "record-storage": record_named_storage,
+        "dump-storage-fault": dump_hosted_storage_fault,
+        "require-cachix-daemon": require_cachix_daemon,
         "bootstrap": bootstrap,
         "quality": quality,
         "certify": certify,
@@ -734,6 +1487,8 @@ def main(stage: str) -> int:
         "install-agent": install_agent,
         "repair": repair,
         "start-repair": start_repair,
+        "flush-cachix": flush_cachix,
+        "restore-canary-plan": restore_canary_plan,
     }
     operations[stage]()
     return 0

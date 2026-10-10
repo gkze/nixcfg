@@ -3,6 +3,7 @@
 import tomllib
 from typing import TYPE_CHECKING
 
+from lib.update.derivation_validation import DerivationValidation
 from lib.update.net import fetch_url
 from lib.update.updaters import (
     Crate2NixMetadataUpdater,
@@ -23,8 +24,28 @@ class ZedEditorNightlyUpdater(Crate2NixMetadataUpdater):
 
     name = "zed-editor-nightly"
     input_name = "zed"
+    # Root rust-overlay is rev-pinned after #1265; this stays a no-op until
+    # that nightly rustc is in gkze.cachix.org and the flake.nix pin lifts.
     additional_input_names = ("rust-overlay",)
     _MANIFEST_PATH = "crates/zed/Cargo.toml"
+
+    @classmethod
+    def get_derivation_validations(cls) -> tuple[DerivationValidation, ...]:
+        """Eval the crate graph, then realize the package on native runners.
+
+        Darwin host closures embed ``zed-editor-nightly`` / ``rust_*``. The
+        shared ``drvPath`` eval does not populate Cachix, so root shards
+        rebuild that subtree and can load a stripped ``rust_assets`` rlib
+        (Update 37719249543, rustc E0786). Packages owns that realize/push.
+        """
+        return (
+            *super().get_derivation_validations(),
+            DerivationValidation(
+                installable=".#pkgs.{system}.{name}",
+                systems=("aarch64-darwin", "x86_64-linux"),
+                mode="build",
+            ),
+        )
 
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext

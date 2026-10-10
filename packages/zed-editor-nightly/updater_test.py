@@ -18,6 +18,7 @@ from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.artifacts import GeneratedArtifact
+from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import (
     EventSink,
     StatusInfo,
@@ -43,6 +44,23 @@ def test_zed_editor_nightly_updater_refreshes_root_rust_overlay() -> None:
     module = _load_module("zed_editor_nightly_updater_input_dependencies_test")
 
     assert module.ZedEditorNightlyUpdater.additional_input_names == ("rust-overlay",)
+
+
+def test_zed_editor_nightly_packages_realize_the_native_package() -> None:
+    """Packages must build zed, not only eval drvPath, so rust_* land in Cachix."""
+    module = _load_module("zed_editor_nightly_updater_validation_test")
+
+    assert module.ZedEditorNightlyUpdater.get_derivation_validations() == (
+        DerivationValidation(
+            installable=".#pkgs.{system}.{name}.drvPath",
+            systems=("aarch64-darwin", "x86_64-linux"),
+        ),
+        DerivationValidation(
+            installable=".#pkgs.{system}.{name}",
+            systems=("aarch64-darwin", "x86_64-linux"),
+            mode="build",
+        ),
+    )
 
 
 def test_zed_source_preparations_follow_apple_shader_owner() -> None:

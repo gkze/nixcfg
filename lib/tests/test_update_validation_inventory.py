@@ -71,12 +71,17 @@ def test_full_inventory_respects_package_platforms(
     non_x86 = {
         "emdash",
     }
+    crate2nix_builds = {
+        "zed-editor-nightly",
+    }
     builds = [request for request in captured if request.mode == "build"]
     expected = portable | (
         darwin if system == "aarch64-darwin" or not native_builds_only else set()
     )
     if system in {"aarch64-darwin", "aarch64-linux"} or not native_builds_only:
         expected |= non_x86
+    if not native_builds_only or system in {"aarch64-darwin", "x86_64-linux"}:
+        expected |= crate2nix_builds
     assert {request.source for request in builds} == expected
     for request in builds:
         target = request.installable.partition("#")[2].split(".")[1]
@@ -84,6 +89,10 @@ def test_full_inventory_respects_package_platforms(
             assert target == "aarch64-darwin"
         elif request.source in non_x86:
             assert target in {"aarch64-darwin", "aarch64-linux"}
+        elif request.source in crate2nix_builds:
+            assert target in {"aarch64-darwin", "x86_64-linux"}
+            if native_builds_only:
+                assert target == system
         else:
             assert target == system
 

@@ -180,6 +180,9 @@ exclude = ["lib.tests*"]
 [tool.setuptools.package-data]
 # Ship the cross-language system policy beside ``lib.system_policy``.
 "lib" = ["system-policy.json"]
+# Hosted nixcfg runs from site-packages; the Darwin shard planner must
+# find this table next to ``lib.update.ci.shard_plan``.
+"lib.update.ci" = ["shard_costs.json"]
 # Ship the type marker and schemas owned by the Nix model/codegen package.
 "lib.nix" = ["py.typed"]
 "lib.nix.schemas" = ["*.yaml", "_version.json"]

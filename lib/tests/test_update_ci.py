@@ -8,7 +8,6 @@ import sys
 import threading
 import time
 from io import StringIO
-from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -126,7 +125,9 @@ def invoke(env: dict[str, str], checkout: Path) -> subprocess.CompletedProcess[s
 
 
 @pytest.mark.parametrize("exit_code", [0, 17])
-@pytest.mark.parametrize("stage", ["prepare", "validate", "cache-root-deps"])
+@pytest.mark.parametrize(
+    "stage", ["prepare", "validate", "cache-root-deps", "plan-shards"]
+)
 @pytest.mark.parametrize("validate_all_packages", [False, True])
 def test_native_job_keeps_evidence_and_propagates_failure(
     native_job, exit_code: int, stage: str, validate_all_packages: bool
@@ -164,45 +165,48 @@ def test_native_job_keeps_evidence_and_propagates_failure(
         "source failure detail\n"
     )
     if exit_code:
-        assert result.stderr.endswith(
+        assert (
             "Updater failed; inspect the retained result and run-log artifacts.\n"
+            in result.stderr
         )
+        assert "Collected 0 prefetched store paths" in result.stderr
     else:
         assert "Updater failed" not in result.stderr
     assert (checkout / "flake.lock").read_text() == "baseline"
 
 
-def test_closure_shard_yield_continues_without_certifying(native_job) -> None:
-    """A budget exit hands realized paths to the next shard and is not success of the closure."""
+def test_closure_shard_forwards_named_roots_and_budget(native_job) -> None:
+    """An always-run root shard records a receipt, not a continuation output."""
     env, checkout = native_job
     env |= {
         "GITHUB_OUTPUT": str(Path(env["RUNNER_TEMP"]) / "github-output"),
         "NIXCFG_CI_STAGE": "validate",
         "NIXCFG_PREVIOUS_CANDIDATE": "/candidate from previous job.json",
-        "NIXCFG_VALIDATE_SCOPE": "closures",
+        "NIXCFG_VALIDATE_SCOPE": "closure-shard",
         "NIXCFG_CLOSURE_BUDGET_SECONDS": "18000",
-        "NIXCFG_CLOSURE_YIELD": "true",
-        "TEST_EXIT": str(jobs._CLOSURE_YIELD_EXIT),
+        "NIXCFG_CLOSURE_ROOTS": "darwin-argus",
+        "NIXCFG_CLOSURE_SHARD": "darwin-argus",
     }
     result = invoke(env, checkout)
-    assert jobs._CLOSURE_YIELD_EXIT == pipeline.CLOSURE_YIELD_EXIT
     assert result.returncode == 0, result.stderr
-    assert Path(env["GITHUB_OUTPUT"]).read_text() == "closure_complete=false\n"
-    assert "next shard continues from Cachix" in result.stderr
+    assert not Path(env["GITHUB_OUTPUT"]).exists() or (
+        "closure_complete" not in Path(env["GITHUB_OUTPUT"]).read_text()
+    )
     args = json.loads(Path(env["TEST_LOG"]).read_text())
-    assert args[args.index("--scope") + 1] == "closures"
+    assert args[args.index("--scope") + 1] == "closure-shard"
     assert args[args.index("--closure-budget-seconds") + 1] == "18000"
-    assert args[-1] == "--closure-yield"
+    assert args[args.index("--closure-roots") + 1] == "darwin-argus"
+    assert args[args.index("--shard") + 1] == "darwin-argus"
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    assert (artifacts / "shard-receipt.json").is_file()
+    assert not (artifacts / "validation.json").exists()
 
 
-@pytest.mark.parametrize(
-    ("exit_code", "yield_requested"),
-    [(0, True), (1, True), (0, False)],
-)
-def test_finished_closure_shard_does_not_request_another(
-    native_job, exit_code: int, yield_requested: bool
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_finished_closure_aggregate_does_not_emit_continuation(
+    native_job, exit_code: int
 ) -> None:
-    """A finished closure build, including one with derivation failures, stops the chain."""
+    """The aggregate closures gate fails closed and writes certify evidence."""
     env, checkout = native_job
     env |= {
         "GITHUB_OUTPUT": str(Path(env["RUNNER_TEMP"]) / "github-output"),
@@ -212,14 +216,11 @@ def test_finished_closure_shard_does_not_request_another(
         "NIXCFG_CLOSURE_BUDGET_SECONDS": "18000",
         "TEST_EXIT": str(exit_code),
     }
-    if yield_requested:
-        env["NIXCFG_CLOSURE_YIELD"] = "true"
     result = invoke(env, checkout)
     assert result.returncode == exit_code, result.stderr
-    assert Path(env["GITHUB_OUTPUT"]).read_text() == "closure_complete=true\n"
-    assert "next shard" not in result.stderr
-    args = json.loads(Path(env["TEST_LOG"]).read_text())
-    assert ("--closure-yield" in args) is yield_requested
+    assert "--closure-yield" not in json.loads(Path(env["TEST_LOG"]).read_text())
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    assert (artifacts / "validation.json").is_file()
 
 
 def test_native_adapter_rejects_a_miswired_closure_shard(
@@ -249,28 +250,22 @@ def test_native_adapter_rejects_a_miswired_closure_shard(
     with pytest.raises(ValueError, match="budget"):
         jobs.main("native-validate")
     monkeypatch.setenv("NIXCFG_CLOSURE_BUDGET_SECONDS", "")
-    monkeypatch.setenv("NIXCFG_CLOSURE_YIELD", "true")
-    with pytest.raises(ValueError, match="yield"):
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "closure-shard")
+    with pytest.raises(ValueError, match="closure-shard"):
         jobs.main("native-validate")
-    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "all")
-    monkeypatch.setenv("NIXCFG_CLOSURE_BUDGET_SECONDS", "18000")
-    with pytest.raises(ValueError, match="yield"):
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    with pytest.raises(ValueError, match="closure-shard"):
         jobs.main("native-validate")
-    output = Path(env["RUNNER_TEMP"]) / "github-output"
-    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "closures")
-    monkeypatch.setenv("NIXCFG_CLOSURE_YIELD", "true")
-    monkeypatch.setenv("TEST_EXIT", str(jobs._CLOSURE_YIELD_EXIT))
-    assert jobs.main("native-validate") == 0
-    assert output.read_text() == "closure_complete=false\n"
-    output.unlink()
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    monkeypatch.setenv("NIXCFG_CLOSURE_SHARD", "darwin-argus")
+    with pytest.raises(ValueError, match="Named closure roots"):
+        jobs.main("native-validate")
+    monkeypatch.delenv("NIXCFG_CLOSURE_ROOTS")
+    monkeypatch.delenv("NIXCFG_CLOSURE_SHARD")
+    monkeypatch.setenv("NIXCFG_CLOSURE_BUDGET_SECONDS", "18000")
     monkeypatch.setenv("TEST_EXIT", "0")
     assert jobs.main("native-validate") == 0
-    assert output.read_text() == "closure_complete=true\n"
-    output.unlink()
-    monkeypatch.delenv("NIXCFG_CLOSURE_YIELD")
-    assert jobs.main("native-validate") == 0
-    assert output.read_text() == "closure_complete=true\n"
 
 
 def test_native_job_forwards_diagnostics_before_the_updater_exits(native_job) -> None:
@@ -543,10 +538,7 @@ def test_preparation_publishes_only_exact_prefetch_receipts(
     else:
         assert jobs.native("prepare") == update_exit
     log = Path(env["TEST_CACHE_LOG"])
-    if update_exit:
-        assert not log.exists()
-    else:
-        assert json.loads(log.read_text()) == ["push", "gkze", "/nix/store/new.zip"]
+    assert json.loads(log.read_text()) == ["push", "gkze", "/nix/store/new.zip"]
 
 
 @pytest.mark.parametrize(
@@ -592,6 +584,423 @@ def test_first_job_uses_default_inventory(native_job, targets: str) -> None:
     assert "--previous" not in args
 
 
+def test_failed_prepare_still_publishes_prefetch_receipts(
+    native_job, monkeypatch
+) -> None:
+    """Prefetch receipts are pushed on the failure path, not only on success."""
+    env, checkout = native_job
+    for key, value in (
+        env
+        | {
+            "TEST_PREFETCH_RECEIPTS": '{"storePath": "/nix/store/fail.zip"}\n',
+            "TEST_EXIT": "17",
+        }
+    ).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    assert jobs.native("prepare") == 17
+    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
+        "push",
+        "gkze",
+        "/nix/store/fail.zip",
+    ]
+
+
+def test_prefetch_publication_keeps_updater_status_when_both_fail(
+    native_job, monkeypatch
+) -> None:
+    env, checkout = native_job
+    for key, value in (
+        env
+        | {
+            "TEST_PREFETCH_RECEIPTS": '{"storePath": "/nix/store/fail.zip"}\n',
+            "TEST_EXIT": "17",
+            "TEST_CACHE_EXIT": "19",
+        }
+    ).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    assert jobs.native("prepare") == 17
+
+
+def _cachix_daemon_dir(root: Path) -> Path:
+    daemon_dir = root / "cachix-daemon"
+    daemon_dir.mkdir()
+    (daemon_dir / "daemon.sock").write_text("")
+    (daemon_dir / "daemon.pid").write_text("123\n")
+    (daemon_dir / "nix.conf").write_text("post-build-hook = /hook.sh\n")
+    (daemon_dir / "post-build-hook.sh").write_text("#!/bin/sh\n")
+    (daemon_dir / "daemon.log").write_text("started\n")
+    return daemon_dir
+
+
+def test_flush_cachix_stops_daemon_and_republishes_receipts(
+    native_job, monkeypatch
+) -> None:
+    env, checkout = native_job
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "prefetch-receipts.jsonl").write_text(
+        '{"storePath": "/nix/store/flush.zip"}\n'
+    )
+    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
+    github_env = Path(env["RUNNER_TEMP"]) / "github-env"
+    github_env.write_text("KEEP=1\n")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
+    monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    monkeypatch.chdir(checkout)
+    assert jobs.main("flush-cachix") == 0
+    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
+        "daemon",
+        "stop",
+        "--socket",
+        str(daemon_dir / "daemon.sock"),
+    ]
+    flush_log = (artifacts / "cachix-flush.log").read_text()
+    assert "Collected 1 prefetched store paths" in flush_log
+    assert "cachix daemon stop returncode=0" in flush_log
+    assert (artifacts / "cachix-daemon" / "daemon.log").read_text() == "started\n"
+    assert not (daemon_dir / "daemon.sock").exists()
+    assert not (daemon_dir / "daemon.pid").exists()
+    assert "CACHIX_DAEMON_DIR" not in os.environ
+    assert "CACHIX_DAEMON_SOCKET" not in os.environ
+    written = github_env.read_text()
+    assert "CACHIX_DAEMON_DIR=\n" in written
+    assert "CACHIX_DAEMON_SOCKET=\n" in written
+    assert "cleared CACHIX_DAEMON_DIR" in flush_log
+    empty = Path(env["RUNNER_TEMP"]) / "empty-flush"
+    empty.mkdir()
+    monkeypatch.setenv("RUNNER_TEMP", str(empty))
+    empty_daemon = _cachix_daemon_dir(empty)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(empty_daemon))
+    assert jobs.main("flush-cachix") == 0
+    assert (
+        "Flushing Cachix daemon"
+        in (empty / "update-artifacts" / "cachix-flush.log").read_text()
+    )
+
+
+def test_require_cachix_daemon_fails_closed_before_bootstrap(
+    native_job, monkeypatch
+) -> None:
+    """A silent skip of the post-build-hook cannot burn a Darwin shard."""
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("NIXCFG_CACHIX_DAEMON_READY_SECONDS", "0")
+    monkeypatch.delenv("CACHIX_DAEMON_DIR", raising=False)
+    monkeypatch.delenv("CACHIX_DAEMON_SOCKET", raising=False)
+    with pytest.raises(jobs.CachixDaemonError, match="useDaemon did not start"):
+        jobs.main("require-cachix-daemon")
+    socket_only = Path(env["RUNNER_TEMP"]) / "explicit.sock"
+    socket_only.write_text("")
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(socket_only))
+    with pytest.raises(jobs.CachixDaemonError, match="CACHIX_DAEMON_DIR"):
+        jobs.main("require-cachix-daemon")
+    monkeypatch.delenv("CACHIX_DAEMON_SOCKET")
+    daemon_dir = Path(env["RUNNER_TEMP"]) / "cachix-daemon"
+    daemon_dir.mkdir()
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    with pytest.raises(jobs.CachixDaemonError, match="socket missing"):
+        jobs.main("require-cachix-daemon")
+    (daemon_dir / "daemon.sock").write_text("")
+    with pytest.raises(jobs.CachixDaemonError, match="incompletely"):
+        jobs.main("require-cachix-daemon")
+    (daemon_dir / "daemon.pid").write_text("1\n")
+    (daemon_dir / "post-build-hook.sh").write_text("#!/bin/sh\n")
+    (daemon_dir / "nix.conf").write_text("max-jobs = 2\n")
+    with pytest.raises(jobs.CachixDaemonError, match="post-build-hook"):
+        jobs.main("require-cachix-daemon")
+    (daemon_dir / "nix.conf").write_text("post-build-hook = /hook.sh\n")
+    (daemon_dir / "daemon.log").write_text("started\n")
+    assert jobs.main("require-cachix-daemon") == 0
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    assert (
+        "Cachix daemon ready" in (artifacts / "cachix-daemon-require.log").read_text()
+    )
+    assert (artifacts / "cachix-daemon" / "daemon.log").read_text() == "started\n"
+
+
+def test_require_cachix_daemon_waits_for_the_action_socket(
+    native_job, monkeypatch
+) -> None:
+    """cachix-action can return before daemon.sock exists."""
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("NIXCFG_CACHIX_DAEMON_READY_SECONDS", "5")
+    monkeypatch.delenv("CACHIX_DAEMON_SOCKET", raising=False)
+    daemon_dir = Path(env["RUNNER_TEMP"]) / "cachix-wait"
+    daemon_dir.mkdir(parents=True)
+    (daemon_dir / "daemon.pid").write_text("1\n")
+    (daemon_dir / "post-build-hook.sh").write_text("#!/bin/sh\n")
+    (daemon_dir / "nix.conf").write_text("post-build-hook = /hook.sh\n")
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+
+    def appear(_seconds: float) -> None:
+        (daemon_dir / "daemon.sock").write_text("")
+
+    monkeypatch.setattr(jobs.time, "sleep", appear)
+    assert jobs.main("require-cachix-daemon") == 0
+    monkeypatch.delenv("NIXCFG_CACHIX_DAEMON_READY_SECONDS")
+    assert jobs._cachix_daemon_ready_wait_seconds() == jobs._CACHIX_DAEMON_READY_SECONDS
+    monkeypatch.setenv("NIXCFG_CACHIX_DAEMON_READY_SECONDS", "-1")
+    assert jobs._cachix_daemon_ready_wait_seconds() == 0.0
+
+
+def test_flush_cachix_fails_closed_without_action_socket(
+    native_job, monkeypatch
+) -> None:
+    """Bare `cachix daemon stop` hitting ~/.cache is not a drain."""
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.delenv("CACHIX_DAEMON_DIR", raising=False)
+    monkeypatch.delenv("CACHIX_DAEMON_SOCKET", raising=False)
+    with pytest.raises(jobs.CachixFlushError, match="socket is unknown"):
+        jobs.main("flush-cachix")
+    flush_log = (
+        Path(env["RUNNER_TEMP"]) / "update-artifacts" / "cachix-flush.log"
+    ).read_text()
+    assert "socket is unknown" in flush_log
+
+
+def test_flush_cachix_fails_closed_when_socket_is_missing_or_stop_fails(
+    native_job, monkeypatch
+) -> None:
+    env, checkout = native_job
+    daemon_dir = Path(env["RUNNER_TEMP"]) / "missing-socket"
+    daemon_dir.mkdir(parents=True)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.chdir(checkout)
+    with pytest.raises(jobs.CachixFlushError, match="socket missing"):
+        jobs.main("flush-cachix")
+    (daemon_dir / "daemon.sock").write_text("")
+    monkeypatch.setenv("TEST_CACHE_EXIT", "1")
+    with pytest.raises(jobs.CachixFlushError, match="stop failed"):
+        jobs.main("flush-cachix")
+
+
+def test_cachix_daemon_socket_reads_action_env_only(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("CACHIX_DAEMON_DIR", raising=False)
+    monkeypatch.delenv("CACHIX_DAEMON_SOCKET", raising=False)
+    assert jobs.cachix_daemon_socket() is None
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(tmp_path / "daemon"))
+    assert jobs.cachix_daemon_socket() == tmp_path / "daemon" / "daemon.sock"
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(tmp_path / "explicit.sock"))
+    assert jobs.cachix_daemon_socket() == tmp_path / "explicit.sock"
+
+
+def test_cachix_daemon_helpers_tolerate_missing_or_busy_paths(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("CACHIX_DAEMON_DIR", raising=False)
+    jobs._release_cachix_daemon_dir()
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(tmp_path / "absent"))
+    jobs._retain_cachix_daemon_evidence(tmp_path / "artifacts", StringIO())
+    jobs._release_cachix_daemon_dir()
+    busy = tmp_path / "busy"
+    busy.mkdir()
+    (busy / "daemon.sock").mkdir()
+    (busy / "daemon.pid").mkdir()
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(busy))
+    github_env = tmp_path / "github-env"
+    github_env.write_text("")
+    monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    jobs._release_cachix_daemon_dir()
+    assert (busy / "daemon.sock").is_dir()
+    assert "CACHIX_DAEMON_DIR=\n" in github_env.read_text()
+    assert "CACHIX_DAEMON_DIR" not in os.environ
+
+
+def test_clear_cachix_daemon_env_is_the_action_post_hook_skip(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Unlinking pid/socket is not a skip; empty CACHIX_DAEMON_* in GITHUB_ENV is.
+
+    cachix-action's post hook reads ``$CACHIX_DAEMON_DIR/daemon.pid`` and
+    throws if the file is gone. A missing socket fails ``daemon stop``
+    after ~30s (cachix#726). The skip path is ``if (!daemonDir)``.
+    """
+    daemon_dir = tmp_path / "cachixXXXX"
+    daemon_dir.mkdir()
+    socket = daemon_dir / "daemon.sock"
+    socket.write_text("")
+    (daemon_dir / "daemon.pid").write_text("123\n")
+    github_env = tmp_path / "github-env"
+    github_env.write_text("KEEP=1\n")
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(socket))
+    monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    jobs._clear_cachix_daemon_env()
+    assert "CACHIX_DAEMON_DIR" not in os.environ
+    assert "CACHIX_DAEMON_SOCKET" not in os.environ
+    written = github_env.read_text()
+    assert written.startswith("KEEP=1\n")
+    assert "CACHIX_DAEMON_DIR=\n" in written
+    assert "CACHIX_DAEMON_SOCKET=\n" in written
+    assert socket.exists()
+    assert (daemon_dir / "daemon.pid").exists()
+
+
+def test_record_runner_storage_writes_df_inodes_and_store_bytes(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    snapshot = jobs.record_runner_storage("phase")
+    assert snapshot["label"] == "phase"
+    mounts = snapshot["mounts"]
+    assert isinstance(mounts, dict)
+    assert "/" in mounts
+    assert {"total", "used", "free"} <= set(mounts["/"])
+    lines = (tmp_path / "update-artifacts" / "storage.jsonl").read_text().splitlines()
+    assert json.loads(lines[-1])["label"] == "phase"
+    captured = capsys.readouterr()
+    assert "storage phase free=" in captured.err
+    assert "Filesystem" in snapshot["df_h"] or snapshot["df_h"] == ""
+    monkeypatch.setattr(jobs.shutil, "which", lambda _name: None)
+    empty = jobs.record_runner_storage("no-df", live=False)
+    assert empty["df_h"] == ""
+    assert empty["df_i"] == ""
+    blocked = tmp_path / "update-artifacts" / "storage.jsonl"
+    blocked.unlink(missing_ok=True)
+    blocked.mkdir()
+    jobs.record_runner_storage("blocked-jsonl", live=False)
+    real_exists = Path.exists
+
+    def exists(self: Path) -> bool:
+        return str(self) not in {"/nix", "/nix/store"} and real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", exists)
+    missing = jobs.record_runner_storage("no-nix", live=False)
+    assert "/nix" not in missing["mounts"]
+    assert "/" in missing["mounts"]
+
+
+def test_plan_shards_and_coverage_native_stages(native_job, monkeypatch) -> None:
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    with pytest.raises(ValueError, match="previous candidate"):
+        jobs.native("plan-shards")
+    with pytest.raises(ValueError, match="Coverage requires a previous"):
+        jobs.native("assert-coverage")
+    monkeypatch.setenv("NIXCFG_PREVIOUS_CANDIDATE", "/candidate.json")
+    with pytest.raises(ValueError, match="NIXCFG_COVERAGE_EVIDENCE"):
+        jobs.native("assert-coverage")
+    monkeypatch.setenv("NIXCFG_COVERAGE_EVIDENCE", "/evidence")
+    monkeypatch.setenv("NIXCFG_JOB_RESULTS", "validate-arm=success")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(Path(env["RUNNER_TEMP"]) / "github-output"))
+    assert jobs.native("plan-shards") == 0
+    args = json.loads(Path(env["TEST_LOG"]).read_text())
+    assert args[:3] == ["ci", "update", "plan-shards"]
+    assert "--github-output" in args
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    coverage_args = jobs._native_args("assert-coverage", artifacts)
+    assert coverage_args[1:4] == ["ci", "update", "assert-coverage"]
+    assert coverage_args[coverage_args.index("--evidence") + 1] == "/evidence"
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "closure-shard")
+    monkeypatch.setenv("NIXCFG_CLOSURE_BUDGET_SECONDS", "18000")
+    monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
+    monkeypatch.setenv("NIXCFG_CLOSURE_SHARD", "darwin-argus")
+    shard_args = jobs._native_args("validate", artifacts)
+    assert shard_args[shard_args.index("--closure-roots") + 1] == "darwin-argus"
+    monkeypatch.setenv("NIXCFG_WARMUP_PLAN", "/warmup/warmup-plan.json")
+    package_args = jobs._native_args("validate", artifacts)
+    assert package_args[package_args.index("--warmup-plan") + 1] == (
+        "/warmup/warmup-plan.json"
+    )
+    assert shard_args[shard_args.index("--shard") + 1] == "darwin-argus"
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "rust-warmup")
+    monkeypatch.delenv("NIXCFG_CLOSURE_ROOTS")
+    monkeypatch.delenv("NIXCFG_CLOSURE_BUDGET_SECONDS")
+    monkeypatch.setenv("NIXCFG_CLOSURE_SHARD", "rust-0")
+    monkeypatch.setenv("NIXCFG_WARMUP_SLOT", "0")
+    rust_args = jobs._native_args("validate", artifacts)
+    assert rust_args[rust_args.index("--warmup-slot") + 1] == "0"
+    assert "--shard" not in rust_args
+    monkeypatch.delenv("NIXCFG_WARMUP_SLOT")
+    with pytest.raises(ValueError, match="WARMUP_SLOT"):
+        jobs._native_args("validate", artifacts)
+    monkeypatch.delenv("NIXCFG_PREVIOUS_CANDIDATE")
+    with pytest.raises(ValueError, match="Unknown native stage"):
+        jobs._native_args("unexpected", artifacts)
+
+
+def test_native_args_merge_candidates_and_canary_validate(
+    native_job, monkeypatch
+) -> None:
+    """Linux prepare artifacts merge; canary validate has no previous candidate."""
+    env, _checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    with pytest.raises(ValueError, match="Merge requires"):
+        jobs._native_args("merge-candidates", artifacts)
+    monkeypatch.setenv("NIXCFG_PREVIOUS_CANDIDATE", "/left.json")
+    monkeypatch.setenv("NIXCFG_MERGE_RIGHT", "/right.json")
+    merge_args = jobs._native_args("merge-candidates", artifacts)
+    assert merge_args[1:4] == ["ci", "update", "merge-candidates"]
+    assert merge_args[merge_args.index("--left") + 1] == "/left.json"
+    assert merge_args[merge_args.index("--right") + 1] == "/right.json"
+    monkeypatch.delenv("NIXCFG_PREVIOUS_CANDIDATE")
+    monkeypatch.delenv("NIXCFG_MERGE_RIGHT")
+    monkeypatch.setenv("NIXCFG_CANARY", "true")
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "rust-warmup")
+    monkeypatch.setenv("NIXCFG_WARMUP_PLAN", "/warmup/warmup-plan.json")
+    monkeypatch.setenv("NIXCFG_WARMUP_SLOT", "2")
+    canary_args = jobs._native_args("validate", artifacts)
+    assert "--candidate" not in canary_args
+    assert canary_args[canary_args.index("--warmup-slot") + 1] == "2"
+    monkeypatch.delenv("NIXCFG_CANARY")
+    with pytest.raises(ValueError, match="previous candidate"):
+        jobs._native_args("validate", artifacts)
+
+
+def test_successful_prepare_rejects_malformed_prefetch_receipts(
+    native_job, monkeypatch
+) -> None:
+    env, checkout = native_job
+    for key, value in (
+        env
+        | {
+            "TEST_PREFETCH_RECEIPTS": "not-json\n",
+            "TEST_EXIT": "0",
+        }
+    ).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    with pytest.raises(ValueError, match="[Pp]refetch receipt"):
+        jobs.native("prepare")
+
+
+def test_malformed_prefetch_receipts_keep_updater_failure(
+    native_job, monkeypatch
+) -> None:
+    env, checkout = native_job
+    for key, value in (
+        env
+        | {
+            "TEST_PREFETCH_RECEIPTS": "not-json\n",
+            "TEST_EXIT": "17",
+        }
+    ).items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    assert jobs.native("prepare") == 17
+
+
 def test_native_job_rejects_unknown_stage(native_job, monkeypatch) -> None:
     env, checkout = native_job
     for key, value in env.items():
@@ -607,6 +1016,43 @@ def test_job_rejects_unknown_stage_or_missing_candidate(native_job, stage: str) 
     env, checkout = native_job
     assert invoke(env | {"NIXCFG_CI_STAGE": stage}, checkout).returncode != 0
     assert not Path(env["TEST_LOG"]).exists()
+
+
+def test_native_args_zed_warmup_needs_plan_not_slot(native_job, monkeypatch) -> None:
+    """Zed-only validate is one family job: plan required, no rust-warmup slot."""
+    env, _checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    monkeypatch.setenv("NIXCFG_CANARY", "true")
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "zed-warmup")
+    monkeypatch.setenv("NIXCFG_WARMUP_PLAN", "/warmup/warmup-plan.json")
+    monkeypatch.delenv("NIXCFG_WARMUP_SLOT", raising=False)
+    monkeypatch.delenv("NIXCFG_PREVIOUS_CANDIDATE", raising=False)
+    args = jobs._native_args("validate", artifacts)
+    assert args[args.index("--scope") + 1] == "zed-warmup"
+    assert "--warmup-slot" not in args
+    monkeypatch.delenv("NIXCFG_WARMUP_PLAN")
+    with pytest.raises(ValueError, match="zed-warmup requires NIXCFG_WARMUP_PLAN"):
+        jobs._native_args("validate", artifacts)
+
+
+def test_zed_darwin_workflow_is_one_macos_runner_and_not_update() -> None:
+    """Zed-only loop must not share Update concurrency or the 5-wide rust matrix."""
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/zed-darwin.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    assert workflow["name"] == "Zed Darwin"
+    assert "workflow_dispatch" in workflow["on"]
+    assert ".github/zed-kick" in workflow["on"]["push"]["paths"]
+    assert workflow["concurrency"]["group"] == "nixcfg-zed-darwin-${{ github.ref }}"
+    update = yaml.load(
+        (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    assert update["concurrency"]["group"] != workflow["concurrency"]["group"]
+    assert workflow["jobs"]["zed-family"]["with"]["scope"] == "zed-warmup"
+    assert workflow["jobs"]["zed-family"]["with"]["runner"] == "macos-15"
+    assert "strategy" not in workflow["jobs"]["zed-family"]
 
 
 def test_repair_validation_mode_reaches_first_native_preparation() -> None:
@@ -649,11 +1095,44 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
         step["env"]["NIXCFG_CLOSURE_BUDGET_SECONDS"]
         == "${{ inputs.closure_budget_seconds }}"
     )
-    assert step["env"]["NIXCFG_CLOSURE_YIELD"] == "${{ inputs.closure_yield }}"
+    assert step["env"]["NIXCFG_CLOSURE_ROOTS"] == "${{ inputs.closure_roots }}"
+    assert step["env"]["NIXCFG_CLOSURE_SHARD"] == "${{ inputs.shard }}"
+    assert "NIXCFG_WARMUP_PLAN" in step["env"]
+    assert step["env"]["NIXCFG_WARMUP_SLOT"] == "${{ inputs.warmup_slot }}"
+    assert "warmup_slot" in native["on"]["workflow_call"]["inputs"]
+    assert "NIXCFG_CLOSURE_YIELD" not in step["env"]
+    assert "warmup_artifact" in native["on"]["workflow_call"]["inputs"]
+    downloads = [
+        step
+        for step in native["jobs"]["native"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/download-artifact@")
+    ]
+    assert any(step.get("if") == "inputs.warmup_artifact != ''" for step in downloads)
     assert native["on"]["workflow_call"]["inputs"]["scope"]["default"] == "all"
+    assert "closure_yield" not in native["on"]["workflow_call"]["inputs"]
+    assert "closure_complete" not in native["on"]["workflow_call"]["outputs"]
     assert (
-        native["on"]["workflow_call"]["outputs"]["closure_complete"]["value"]
-        == "${{ jobs.native.outputs.closure_complete }}"
+        native["on"]["workflow_call"]["outputs"]["darwin_closure_shards"]["value"]
+        == "${{ jobs.native.outputs.darwin_closure_shards }}"
+    )
+    flush = next(
+        step
+        for step in native["jobs"]["native"]["steps"]
+        if step.get("name") == "Flush Cachix daemon"
+    )
+    assert flush["if"] == "always()"
+    assert flush["env"]["NIXCFG_CI_STAGE"] == "flush-cachix"
+    assert native["jobs"]["native"]["steps"][-1] is flush
+    dump = next(
+        step
+        for step in native["jobs"]["native"]["steps"]
+        if step.get("name") == "Dump hosted storage-fault evidence"
+    )
+    assert dump["if"] == "failure()"
+    assert dump["env"]["NIXCFG_CI_STAGE"] == "dump-storage-fault"
+    names = [step.get("name") for step in native["jobs"]["native"]["steps"]]
+    assert names.index("Dump hosted storage-fault evidence") < names.index(
+        "Retain candidate and failure evidence"
     )
     upload = next(
         step
@@ -666,46 +1145,280 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     assert (
         "format('{0}-{1}-{2}', inputs.stage, inputs.system, inputs.scope)" in artifact
     )
+    assert "inputs.shard" in artifact
+    assert "inputs.stage == 'merge-candidates' && 'prepare-x86_64-linux'" in artifact
+
+
+def _assert_parallel_linux_prepare(jobs: dict, matrix: list[dict]) -> None:
+    """Darwin pins; Linux arm and x86 extend it in parallel; merge is the complete tree."""
+    preparation = [
+        (name, job)
+        for name, job in jobs.items()
+        if name.startswith("prepare-") and name != "prepare-merge"
+    ]
+    assert [job["with"]["system"] for _, job in preparation] == list(
+        supported_systems()
+    )
+    assert {job["with"]["system"]: job["with"]["runner"] for _, job in preparation} == {
+        row["system"]: row["runner"] for row in matrix
+    }
+    assert [name for name, _ in preparation] == [
+        "prepare-darwin",
+        "prepare-arm",
+        "prepare-x86",
+    ]
+    assert "needs" not in jobs["prepare-darwin"]
+    for name in ("prepare-arm", "prepare-x86"):
+        assert jobs[name]["needs"] == "prepare-darwin"
+        assert jobs[name]["with"]["previous"] == "prepare-aarch64-darwin"
+    merge = jobs["prepare-merge"]
+    assert set(merge["needs"]) == {"prepare-darwin", "prepare-arm", "prepare-x86"}
+    assert merge["with"]["stage"] == "merge-candidates"
+    assert merge["with"]["previous"] == "prepare-aarch64-linux"
+    assert merge["with"]["previous_extra"] == "prepare-x86_64-linux"
+
+
+def _assert_canary_jobs(workflow_jobs: dict) -> None:
+    """Kick-file or dispatch canary realizes selected rust-warmup slots."""
+    canary = workflow_jobs["canary-warm-rust"]
+    assert set(canary["needs"]) == {"canary-slots", "canary-plan"}
+    assert canary["with"]["canary"] == "true"
+    assert canary["with"]["warmup_artifact"] == "canary-plan"
+    assert canary["with"]["scope"] == "rust-warmup"
+    assert canary["with"]["canary_slots"] == ("${{ needs.canary-slots.outputs.slots }}")
+    assert canary["with"]["canary_crates"] == (
+        "${{ needs.canary-slots.outputs.crates }}"
+    )
+    assert "outputs.enabled" in canary["if"]
+    slots = workflow_jobs["canary-slots"]
+    assert "github.event_name == 'push'" in slots["if"]
+    assert "workflow_dispatch" in slots["if"]
+    assert "inputs.canary_warm_rust" in slots["if"]
+    assert slots["outputs"]["enabled"] == "${{ steps.slots.outputs.enabled }}"
+    assert slots["outputs"]["crates"] == "${{ steps.slots.outputs.crates }}"
+    slot_step = next(step for step in slots["steps"] if step.get("id") == "slots")
+    assert slot_step["env"]["CANARY_CRATES"] == "${{ inputs.canary_crates }}"
+    assert slot_step["env"]["EVENT_NAME"] == "${{ github.event_name }}"
+    assert "update-kick" in slot_step["run"]
+    assert "canary-slots:" in slot_step["run"]
+    assert "canary-crates:" in slot_step["run"]
+    assert "if crates:" in slot_step["run"]
+    assert "[0, 1, 2, 3, 4]" not in slot_step["run"]
+    plan = workflow_jobs["canary-plan"]
+    assert plan["needs"] == ["canary-slots"]
+    assert "outputs.enabled" in plan["if"]
 
 
 def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
-    """Darwin packages overlap Linux; closure shards continue through Cachix."""
+    """Darwin rust-warmup owns rust_*; packages stay inventory; shards always run."""
+    rust = workflow_jobs["validate-darwin-warm-rust"]
+    assert set(rust["needs"]) == {
+        "prepare-merge",
+        "plan-darwin-closures",
+        "canary-warm-rust",
+    }
+    assert "canary-warm-rust.result == 'skipped'" in rust["if"]
+    assert "canary-warm-rust.result == 'failure'" in rust["if"]
+    _assert_canary_jobs(workflow_jobs)
+    assert rust["with"]["scope"] == "rust-warmup"
+    assert rust["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"
+    assert rust["with"]["warmup_slot"] == "${{ matrix.slot }}"
+    assert rust["with"]["shard"] == "rust-${{ matrix.slot }}"
+    assert rust["strategy"]["fail-fast"] == "false"
+    assert rust["strategy"]["max-parallel"] == "5"
+    assert rust["strategy"]["matrix"]["slot"] == ["0", "1", "2", "3", "4"]
     packages = workflow_jobs["validate-darwin-packages"]
-    assert packages["needs"] == "prepare-x86"
+    assert set(packages["needs"]) == {
+        "prepare-merge",
+        "plan-darwin-closures",
+        "validate-darwin-warm-rust",
+    }
     assert packages["with"]["scope"] == "packages"
-    assert set(workflow_jobs["validate-darwin-closures"]["needs"]) == {
-        "prepare-x86",
+    assert "warmup_artifact" not in packages["with"]
+    plan = workflow_jobs["plan-darwin-closures"]
+    assert plan["needs"] == "prepare-merge"
+    assert plan["with"]["stage"] == "plan-shards"
+    assert plan["with"]["runner"] == "ubuntu-24.04"
+    roots = workflow_jobs["validate-darwin-roots"]
+    assert set(roots["needs"]) == {
+        "plan-darwin-closures",
+        "prepare-merge",
         "cache-darwin-linux-deps-arm",
         "cache-darwin-linux-deps-x86",
+        "validate-darwin-warm-rust",
     }
-    closure_jobs = (
-        "validate-darwin-closures",
-        "validate-darwin-closures-2",
-        "validate-darwin-closures-3",
-        "validate-darwin-closures-4",
+    roots_if = " ".join(roots["if"].split())
+    assert "always() && !cancelled()" in roots_if
+    assert "needs.plan-darwin-closures.result == 'success'" in roots_if
+    assert "needs.validate-darwin-warm-rust.result == 'success'" in roots_if
+    assert "validate-darwin-packages.result" not in roots_if
+    assert "closure_complete" not in roots_if
+    assert roots["strategy"]["fail-fast"] == "false"
+    assert (
+        roots["strategy"]["matrix"]
+        == "${{ fromJSON(needs.plan-darwin-closures.outputs.darwin_closure_shards) }}"
     )
-    assert len(closure_jobs) == pipeline.HOSTED_DARWIN_CLOSURE_SHARDS
-    budget = str(pipeline.HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS)
-    for name in closure_jobs:
-        spec = workflow_jobs[name]["with"]
-        assert spec["scope"] == "closures"
-        assert spec["closure_budget_seconds"] == budget
-        assert spec["runner"] == "macos-15"
-    for previous, name in pairwise(closure_jobs):
-        assert workflow_jobs[name]["needs"] == previous
-        condition = " ".join(workflow_jobs[name]["if"].split())
-        assert condition.count("closure_complete == 'false'") == 1
-    assert "closure_yield" not in workflow_jobs["validate-darwin-closures-4"]["with"]
-    for name in closure_jobs[:-1]:
-        assert workflow_jobs[name]["with"]["closure_yield"] == "true"
+    assert roots["with"]["scope"] == "closure-shard"
+    assert roots["with"]["closure_budget_seconds"] == str(
+        pipeline.HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS
+    )
+    assert roots["with"]["closure_roots"] == "${{ matrix.roots }}"
+    assert roots["with"]["shard"] == "${{ matrix.shard }}"
+    assert "closure_yield" not in roots["with"]
+    closures = workflow_jobs["validate-darwin-closures"]
+    assert set(closures["needs"]) == {
+        "prepare-merge",
+        "cache-darwin-linux-deps-arm",
+        "cache-darwin-linux-deps-x86",
+        "validate-darwin-roots",
+    }
+    closures_if = " ".join(closures["if"].split())
+    assert "always() && !cancelled()" in closures_if
+    assert "needs.validate-darwin-roots.result == 'success'" in closures_if
+    assert closures["with"]["scope"] == "closures"
+    assert "closure_yield" not in closures["with"]
+    _assert_coverage_and_publish(workflow_jobs)
+
+
+def _assert_coverage_and_publish(workflow_jobs: dict) -> None:
+    """Coverage stays the done-bar; it does not run on a rust-warmup canary."""
+    coverage = workflow_jobs["assert-coverage"]
+    coverage_if = " ".join(coverage["if"].split())
+    assert "always() && !cancelled()" in coverage_if
+    assert "inputs.canary_warm_rust" in coverage_if
+    assert set(coverage["needs"]) == {
+        "prepare-merge",
+        "plan-darwin-closures",
+        "validate-arm",
+        "validate-x86",
+        "validate-darwin-warm-rust",
+        "validate-darwin-packages",
+        "validate-darwin-roots",
+        "validate-darwin-closures",
+    }
+    evidence = next(
+        step
+        for step in coverage["steps"]
+        if str(step.get("uses", "")).startswith("actions/download-artifact@")
+        and step.get("with", {}).get("path") == "${{ runner.temp }}/evidence"
+    )
+    assert "name" not in evidence["with"]
     publish_if = " ".join(workflow_jobs["publish"]["if"].split())
     assert "always() && !cancelled()" in publish_if
-    for name in closure_jobs:
-        assert f"needs.{name}.outputs.closure_complete == 'true'" in publish_if
+    assert "closure_complete" not in publish_if
+    for name in (
+        "validate-arm",
+        "validate-x86",
+        "validate-darwin-warm-rust",
+        "validate-darwin-packages",
+        "validate-darwin-roots",
+        "validate-darwin-closures",
+        "assert-coverage",
+    ):
+        assert f"needs.{name}.result == 'success'" in publish_if
+
+
+def test_cachix_flush_proof_requires_partial_presence_after_designed_failure() -> None:
+    """A unique path must reach gkze even when the builder exits 1.
+
+    Job-level continue-on-error hid the #1250 post-hook throw. Only the
+    designed fail step may continue; a post-hook failure must fail the job.
+    """
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/cachix-flush-proof.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    fail = workflow["jobs"]["fail-after-push"]
+    assert "continue-on-error" not in fail
+    designed = next(
+        step
+        for step in fail["steps"]
+        if step.get("name") == "Realize a unique path and fail"
+    )
+    assert designed["continue-on-error"] == "true"
+    for step in fail["steps"]:
+        if step.get("name") == "Realize a unique path and fail":
+            continue
+        assert "continue-on-error" not in step, step.get("name")
+    names = [step.get("name") for step in fail["steps"]]
+    assert "Require Cachix daemon socket" in names
+    assert "Realize a post-failure path" in names
+    assert fail["steps"][-1].get("name") == "Flush Cachix daemon"
+    assert fail["steps"][-1].get("if") == "always()"
+    post = next(
+        step
+        for step in fail["steps"]
+        if step.get("name") == "Realize a post-failure path"
+    )
+    assert post["if"] == "always()"
+    upload = next(
+        step
+        for step in fail["steps"]
+        if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+    )
+    assert "proof-path-after.txt" in upload["with"]["path"]
+    assert workflow["jobs"]["assert-partial"]["if"] == "always()"
+    proof_if = " ".join(workflow["jobs"]["proof"]["if"].split())
+    assert "always() && !cancelled()" in proof_if
+    assert_source = next(
+        step
+        for step in workflow["jobs"]["assert-partial"]["steps"]
+        if step.get("name") == "Require the failed job's path in Cachix"
+    )["run"]
+    assert "proof-path-after.txt" in assert_source
+    assert "after-failure" in assert_source
+    assert workflow["jobs"]["assert-partial"]["steps"][-1]["name"] == (
+        "Flush Cachix daemon"
+    )
+
+
+def _uses_update_runtime_with_cachix(steps: list[object]) -> bool:
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        uses = str(step.get("uses", ""))
+        if not uses.startswith("./.github/actions/update-runtime"):
+            continue
+        with_ = step.get("with")
+        if isinstance(with_, dict) and "cachix-token" in with_:
+            return True
+    return False
+
+
+def test_cachix_flush_is_last_step_of_every_update_runtime_cachix_job() -> None:
+    """Stopping the daemon before certify/repair/builds drops paths from gkze."""
+    workflows = sorted((ROOT / ".github/workflows").glob("*.yml"))
+    checked: list[str] = []
+    for path in workflows:
+        workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+        for name, job in (workflow.get("jobs") or {}).items():
+            if not isinstance(job, dict):
+                continue
+            steps = job.get("steps") or []
+            if not _uses_update_runtime_with_cachix(steps):
+                continue
+            last = steps[-1]
+            assert isinstance(last, dict)
+            env = last.get("env") if isinstance(last.get("env"), dict) else {}
+            assert last.get("name") == "Flush Cachix daemon", (
+                f"{path.name} job {name} last step is "
+                f"{last.get('name') or last.get('uses')!r}"
+            )
+            assert env.get("NIXCFG_CI_STAGE") == "flush-cachix"
+            assert last.get("if") == "always()"
+            checked.append(f"{path.name}:{name}")
+    assert sorted(checked) == [
+        "cachix-flush-proof.yml:assert-partial",
+        "cachix-flush-proof.yml:fail-after-push",
+        "update-native.yml:native",
+        "update.yml:assert-coverage",
+        "update.yml:publish",
+        "update.yml:repair",
+    ]
 
 
 def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
-    """VM cache overlaps later prepare; Darwin closures no longer wait on Linux validate."""
+    """VM cache recaches after rust-warmup so gkze LRU cannot drop the image."""
     workflow = yaml.load(
         (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
     )
@@ -717,7 +1430,7 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     )
     assert workflow["on"]["push"]["branches"] == [
         "main",
-        "copilot/gkzenixcfg-update-automation",
+        "cursor/no-skip-darwin-shards-6614",
     ]
     assert workflow["on"]["push"]["paths"] == [".github/update-kick"]
     assert workflow["permissions"] == {"contents": "read"}
@@ -726,19 +1439,8 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         in (workflow["jobs"]["prepare-darwin"]["with"]["validate_all_packages"])
     )
     jobs = workflow["jobs"]
-    preparation = [
-        (name, job) for name, job in jobs.items() if name.startswith("prepare-")
-    ]
-    assert [job["with"]["system"] for _, job in preparation] == list(
-        supported_systems()
-    )
     matrix = json.loads(CliRunner().invoke(app, ["matrix"]).stdout)["include"]
-    assert {job["with"]["system"]: job["with"]["runner"] for _, job in preparation} == {
-        row["system"]: row["runner"] for row in matrix
-    }
-    for (name, previous), (_, job) in pairwise(preparation):
-        assert job["needs"] == name
-        assert job["with"]["previous"] == f"prepare-{previous['with']['system']}"
+    _assert_parallel_linux_prepare(jobs, matrix)
     cache_jobs = {
         name: job
         for name, job in jobs.items()
@@ -749,9 +1451,9 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         "cache-darwin-linux-deps-x86",
     }
     for job in cache_jobs.values():
-        assert job["needs"] == "prepare-darwin"
+        assert set(job["needs"]) == {"prepare-merge", "validate-darwin-warm-rust"}
         assert job["with"]["stage"] == "cache-root-deps"
-        assert job["with"]["previous"] == "prepare-aarch64-darwin"
+        assert job["with"]["previous"] == "prepare-x86_64-linux"
     assert (
         cache_jobs["cache-darwin-linux-deps-arm"]["with"]["runner"]
         == "ubuntu-24.04-arm"
@@ -766,11 +1468,12 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     for job in validators.values():
         assert job["with"]["previous"] == "prepare-x86_64-linux"
         assert job["with"]["stage"] == "validate"
-    assert jobs["validate-arm"]["needs"] == preparation[-1][0]
-    assert jobs["validate-x86"]["needs"] == preparation[-1][0]
+    assert jobs["validate-arm"]["needs"] == "prepare-merge"
+    assert jobs["validate-x86"]["needs"] == "prepare-merge"
     _assert_darwin_closure_shards(jobs)
-    assert set(jobs["publish"]["needs"]) == set(validators)
+    assert set(jobs["publish"]["needs"]) == set(validators) | {"assert-coverage"}
     assert set(validators) <= set(jobs["repair"]["needs"])
+    assert {"plan-darwin-closures", "assert-coverage"} <= set(jobs["repair"]["needs"])
     assert set(cache_jobs) <= set(jobs["repair"]["needs"])
     assert set(cache_jobs).isdisjoint(jobs["publish"]["needs"])
     assert jobs["repair"]["permissions"] == {
@@ -787,10 +1490,18 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     assert agent["env"]["COPILOT_MODEL"] == "gpt-6-astra"
     assert not {"COPILOT_GITHUB_TOKEN", "GH_TOKEN"} & agent["env"].keys()
     assert workflow["on"]["workflow_dispatch"]["inputs"]["repair"]["default"] == "true"
+    assert "canary_slots" in workflow["on"]["workflow_dispatch"]["inputs"]
+    assert "canary_crates" in workflow["on"]["workflow_dispatch"]["inputs"]
+    assert (
+        workflow["on"]["workflow_dispatch"]["inputs"]["canary_warm_rust"]["default"]
+        == "false"
+    )
     repair_if = " ".join(workflow["jobs"]["repair"]["if"].split())
     assert "inputs.repair == true" in repair_if
     assert "inputs.repair == 'true'" in repair_if
     assert "github.event_name == 'push'" in repair_if
+    assert "inputs.canary_warm_rust != true" in repair_if
+    assert "inputs.canary_slots == ''" in repair_if
     for stage in ("publish", "start-repair"):
         step = next(
             step
@@ -954,6 +1665,31 @@ def test_generator_cache_is_scoped_to_disposable_accelerators() -> None:
         if step.get("uses", "").startswith("cachix/cachix-action@")
     )
     assert cachix["with"]["name"] == jobs._BINARY_CACHE
+    assert cachix["with"]["useDaemon"] == "true"
+    labels = {
+        step["env"]["NIXCFG_STORAGE_LABEL"]: step
+        for step in steps
+        if step.get("env", {}).get("NIXCFG_CI_STAGE") == "record-storage"
+    }
+    assert set(labels) == {"after-nix-install", "after-cachix"}
+    require = next(
+        step for step in steps if step.get("name") == "Require Cachix daemon"
+    )
+    assert require["if"] == "inputs.cachix-token != ''"
+    assert require["env"]["NIXCFG_CI_STAGE"] == "require-cachix-daemon"
+    bootstrap = next(step for step in steps if step.get("id") == "runtime")
+    assert steps.index(cachix) < steps.index(require)
+    assert steps.index(require) < steps.index(bootstrap)
+    nix_step = next(
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith(
+            "DeterminateSystems/determinate-nix-action@"
+        )
+    )
+    assert steps.index(nix_step) < steps.index(labels["after-nix-install"])
+    assert steps.index(labels["after-nix-install"]) < steps.index(cachix)
+    assert steps.index(cachix) < steps.index(labels["after-cachix"])
     native = yaml.load(
         (ROOT / ".github/workflows/update-native.yml").read_text(),
         Loader=yaml.BaseLoader,
@@ -975,7 +1711,9 @@ def test_generator_cache_is_scoped_to_disposable_accelerators() -> None:
     assert repair["with"]["cache-generators"] == "true"
 
 
-@pytest.mark.parametrize("stage", ["prepare", "validate", "cache-root-deps"])
+@pytest.mark.parametrize(
+    "stage", ["prepare", "validate", "cache-root-deps", "plan-shards"]
+)
 @pytest.mark.parametrize("targets", ["", "alpha beta", "--force", "alpha\nbeta"])
 @pytest.mark.parametrize("validate_all_packages", [False, True])
 def test_native_adapter_captures_only_cli_output(
@@ -1398,6 +2136,7 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
     monkeypatch.setattr(jobs.sys, "platform", system)
+    _disable_image_headroom(monkeypatch)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     tree = _cleanup_image_tree(tmp_path)
     monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
@@ -1452,12 +2191,189 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
         assert not any(call[:2] == ("xcrun", "simctl") for call in calls)
 
 
+def test_image_cleanup_skips_xcode_when_free_already_meets_headroom(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    tree = _cleanup_image_tree(tmp_path)
+    monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
+    monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
+    monkeypatch.setattr(jobs, "_DARWIN_SYSTEM_SIMULATORS", tree["system_simulators"])
+    monkeypatch.setattr(jobs, "_UNUSED_IMAGE_PATHS", {"darwin": (tree["unused"],)})
+    need = jobs.image_headroom_required_bytes()
+    monkeypatch.setattr(jobs, "runner_free_bytes", lambda: need)
+
+    def run(*args, capture=False, check=True):
+        if args[0] == "sudo":
+            assert Path(args[-1]).is_relative_to(tmp_path)
+            return subprocess.CompletedProcess(args, 0, stdout="")
+        return subprocess.CompletedProcess(args, 0, stdout=str(tree["selected"]))
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs.main("clean-image") == 0
+    assert tree["old"].is_dir()
+    assert tree["android"].is_dir()
+    output = capsys.readouterr().out
+    assert "df before image cleanup /:" in output
+    assert f"Skipping Xcode/Android reclaim; free {need} bytes" in output
+    assert f"already meets headroom {need} bytes" in output
+
+
+def test_image_cleanup_stops_when_reclaim_crosses_headroom(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    tree = _cleanup_image_tree(tmp_path)
+    monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
+    monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
+    monkeypatch.setattr(jobs, "_DARWIN_SYSTEM_SIMULATORS", tree["system_simulators"])
+    monkeypatch.setattr(jobs, "_UNUSED_IMAGE_PATHS", {"darwin": (tree["unused"],)})
+    need = jobs.image_headroom_required_bytes()
+    free = {"n": 0}
+    removed: list[Path] = []
+
+    def current_free() -> int:
+        return free["n"]
+
+    def remove(path: Path) -> None:
+        removed.append(path)
+        free["n"] = need
+
+    monkeypatch.setattr(jobs, "runner_free_bytes", current_free)
+    monkeypatch.setattr(jobs, "_remove_unused_image_path", remove)
+
+    def run(*args, capture=False, check=True):
+        return subprocess.CompletedProcess(args, 0, stdout=str(tree["selected"]))
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs.main("clean-image") == 0
+    assert removed == [tree["old"]]
+    assert tree["android"].is_dir()
+    output = capsys.readouterr().out
+    assert (
+        f"Stopped image reclaim; free {need} bytes meets headroom {need} bytes"
+        in output
+    )
+
+
+def test_image_cleanup_fails_closed_when_headroom_still_missing(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    tree = _cleanup_image_tree(tmp_path)
+    monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
+    monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
+    monkeypatch.setattr(jobs, "_DARWIN_SYSTEM_SIMULATORS", tree["system_simulators"])
+    monkeypatch.setattr(jobs, "_UNUSED_IMAGE_PATHS", {"darwin": (tree["unused"],)})
+    monkeypatch.setattr(jobs, "runner_free_bytes", lambda: 0)
+
+    def run(*args, capture=False, check=True):
+        if args[0] == "sudo":
+            assert Path(args[-1]).is_relative_to(tmp_path)
+            return subprocess.CompletedProcess(args, 0, stdout="")
+        return subprocess.CompletedProcess(args, 0, stdout=str(tree["selected"]))
+
+    monkeypatch.setattr(jobs, "_run", run)
+    with pytest.raises(jobs.ImageCleanupError, match="Image cleanup left 0 bytes free"):
+        jobs.main("clean-image")
+
+
+def test_image_cleanup_reports_elapsed_seconds_per_tree(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    _disable_image_headroom(monkeypatch)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    tree = _cleanup_image_tree(tmp_path)
+    monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
+    monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
+    monkeypatch.setattr(jobs, "_DARWIN_SYSTEM_SIMULATORS", tree["system_simulators"])
+    monkeypatch.setattr(jobs, "_UNUSED_IMAGE_PATHS", {"darwin": (tree["unused"],)})
+
+    def run(*args, capture=False, check=True):
+        if args[0] == "sudo":
+            assert Path(args[-1]).is_relative_to(tmp_path)
+            return subprocess.CompletedProcess(args, 0, stdout="")
+        return subprocess.CompletedProcess(args, 0, stdout=str(tree["selected"]))
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs.main("clean-image") == 0
+    output = capsys.readouterr().out
+    assert f"Removing unused runner image tool: {tree['unused']}" in output
+    removed = f"Removed unused runner image tool: {tree['unused']} in "
+    assert removed in output
+    suffix = output.split(removed, 1)[1].splitlines()[0]
+    assert suffix.endswith("s")
+    assert float(suffix[:-1]) >= 0
+
+
+def test_image_cleanup_raises_first_failure_after_other_trees_finish(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    _disable_image_headroom(monkeypatch)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    tree = _cleanup_image_tree(tmp_path)
+    monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
+    monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
+    monkeypatch.setattr(jobs, "_DARWIN_SYSTEM_SIMULATORS", tree["system_simulators"])
+    monkeypatch.setattr(jobs, "_UNUSED_IMAGE_PATHS", {"darwin": (tree["unused"],)})
+    attempted: list[Path] = []
+
+    def remove(path: Path) -> None:
+        attempted.append(path)
+        if path == tree["old"]:
+            raise subprocess.CalledProcessError(1, "sudo")
+
+    monkeypatch.setattr(jobs, "_remove_unused_image_path", remove)
+
+    def run(*args, capture=False, check=True):
+        return subprocess.CompletedProcess(args, 0, stdout=str(tree["selected"]))
+
+    monkeypatch.setattr(jobs, "_run", run)
+    with pytest.raises(subprocess.CalledProcessError):
+        jobs.main("clean-image")
+    assert tree["old"] in attempted
+    assert len(attempted) > 1
+    output = capsys.readouterr().out
+    assert f"Failed unused runner image tool: {tree['old']} in " in output
+
+
+def test_image_cleanup_skips_reclaim_when_no_unused_trees_exist(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(jobs.sys, "platform", "linux")
+    monkeypatch.setattr(jobs, "_UNUSED_IMAGE_PATHS", {"linux": (tmp_path / "absent",)})
+    monkeypatch.setattr(
+        jobs,
+        "_run",
+        lambda *args, **_kwargs: subprocess.CompletedProcess(args, 0, stdout=""),
+    )
+    assert jobs.main("clean-image") == 0
+
+
 def test_image_cleanup_skips_absent_runner_tool_cache(tmp_path, monkeypatch) -> None:
     """Image cleanup must not require RUNNER_TOOL_CACHE to collect Darwin paths."""
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
     monkeypatch.delenv("RUNNER_TOOL_CACHE", raising=False)
     monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    _disable_image_headroom(monkeypatch)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     tree = _cleanup_image_tree(tmp_path)
     monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
@@ -1482,6 +2398,7 @@ def test_image_cleanup_tolerates_live_cache_directory_races(
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
     monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    _disable_image_headroom(monkeypatch)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     tree = _cleanup_image_tree(tmp_path)
     monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
@@ -1514,6 +2431,43 @@ def test_image_cleanup_tolerates_live_cache_directory_races(
     assert not tree["unused"].exists()
 
 
+def _free_disk(free: int) -> object:
+    return type("Usage", (), {"total": free + 1, "used": 1, "free": free})()
+
+
+def _disable_image_headroom(monkeypatch) -> None:
+    monkeypatch.setattr(jobs, "image_headroom_required_bytes", lambda: 0)
+
+
+def test_runner_free_bytes_prefers_nix_when_mounted(monkeypatch) -> None:
+    monkeypatch.setattr(jobs.Path, "exists", lambda self: True)
+
+    def usage(path: Path) -> object:
+        return _free_disk(11 if path == Path("/nix") else 3)
+
+    monkeypatch.setattr(jobs.shutil, "disk_usage", usage)
+    assert jobs.runner_free_bytes() == 11
+
+
+def test_runner_free_bytes_uses_root_before_nix_exists(monkeypatch) -> None:
+    monkeypatch.setattr(jobs.Path, "exists", lambda self: str(self) != "/nix")
+
+    def usage(path: Path) -> object:
+        return _free_disk(5 if path == Path("/") else 0)
+
+    monkeypatch.setattr(jobs.shutil, "disk_usage", usage)
+    assert jobs.runner_free_bytes() == 5
+
+
+def test_log_runner_disk_reports_absent_nix_mount(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(jobs.Path, "exists", lambda self: str(self) != "/nix")
+    monkeypatch.setattr(jobs.shutil, "disk_usage", lambda _path: _free_disk(9))
+    jobs._log_runner_disk("df test")
+    output = capsys.readouterr().out
+    assert "df test /: free=9 used=1 total=10" in output
+    assert "df test /nix: not mounted" in output
+
+
 @pytest.mark.parametrize(
     ("actions", "environment", "platform", "runs"),
     [
@@ -1530,6 +2484,11 @@ def test_hosted_darwin_store_gc_is_gated_to_disposable_runners(
     monkeypatch.setenv("GITHUB_ACTIONS", actions)
     monkeypatch.setenv("RUNNER_ENVIRONMENT", environment)
     monkeypatch.setattr(jobs.sys, "platform", platform)
+    monkeypatch.setattr(
+        jobs.shutil,
+        "disk_usage",
+        lambda _path: _free_disk(jobs._NIX_MIN_FREE_BYTES),
+    )
     calls: list[tuple[str, ...]] = []
     monkeypatch.setattr(
         jobs, "_run", lambda *args, **_kwargs: calls.append(args) or None
@@ -1537,6 +2496,26 @@ def test_hosted_darwin_store_gc_is_gated_to_disposable_runners(
     assert jobs.main("reclaim-store") == 0
     assert calls == ([("nix", "store", "gc")] if runs else [])
     assert jobs.is_hosted_darwin_runner() is runs
+
+
+def test_hosted_darwin_store_gc_skips_when_free_covers_max_and_min_free(
+    monkeypatch, capsys
+) -> None:
+    """Closure shards do not inherit a package store; skip GC with headroom."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    skip_free = jobs._NIX_MAX_FREE_BYTES + jobs._NIX_MIN_FREE_BYTES
+    monkeypatch.setattr(jobs.shutil, "disk_usage", lambda _path: _free_disk(skip_free))
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        jobs, "_run", lambda *args, **_kwargs: calls.append(args) or None
+    )
+    assert jobs.main("reclaim-store") == 0
+    assert calls == []
+    output = capsys.readouterr().out
+    assert f"Skipping store GC; free {skip_free} bytes already meets" in output
+    assert f"headroom {skip_free} bytes" in output
 
 
 def test_hosted_update_runtime_reserves_store_headroom_for_root_closures() -> None:
@@ -1554,3 +2533,272 @@ def test_hosted_update_runtime_reserves_store_headroom_for_root_closures() -> No
     )
     assert "min-free = 34359738368" in extra_conf
     assert "max-free = 68719476736" in extra_conf
+    assert jobs._NIX_MIN_FREE_BYTES == 34359738368
+    assert jobs._NIX_MAX_FREE_BYTES == 68719476736
+    assert jobs._IMAGE_HEADROOM_BYTES == (
+        jobs._NIX_MAX_FREE_BYTES + jobs._NIX_MIN_FREE_BYTES
+    )
+    assert jobs.image_headroom_required_bytes() == jobs._IMAGE_HEADROOM_BYTES
+
+
+def test_record_named_storage_requires_a_label(monkeypatch) -> None:
+    monkeypatch.delenv("NIXCFG_STORAGE_LABEL", raising=False)
+    with pytest.raises(ValueError, match="NIXCFG_STORAGE_LABEL"):
+        jobs.main("record-storage")
+
+
+def test_record_named_storage_writes_the_requested_label(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setenv("NIXCFG_STORAGE_LABEL", "after-nix-install")
+    monkeypatch.setattr(jobs.shutil, "disk_usage", lambda _path: _free_disk(8))
+    monkeypatch.setattr(jobs.shutil, "which", lambda _name: None)
+    assert jobs.main("record-storage") == 0
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "update-artifacts/storage.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    assert rows[-1]["label"] == "after-nix-install"
+
+
+def test_dump_hosted_storage_fault_skips_non_darwin_runners(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setattr(jobs.sys, "platform", "linux")
+    assert jobs.main("dump-storage-fault") == 0
+    assert not (tmp_path / "update-artifacts/storage-fault.txt").exists()
+
+
+def _hosted_darwin_dump_env(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    monkeypatch.setattr(jobs.shutil, "disk_usage", lambda _path: _free_disk(8))
+    real_exists = Path.exists
+
+    def exists(self: Path) -> bool:
+        if str(self) in {"/nix", "/nix/store"}:
+            return True
+        return real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", exists)
+
+
+def test_dump_hosted_storage_fault_keeps_diskutil_and_unified_logs(
+    tmp_path, monkeypatch
+) -> None:
+    """A guest df with 60+ GiB free is not proof the host backing store is healthy."""
+    _hosted_darwin_dump_env(tmp_path, monkeypatch)
+    diskutil = tmp_path / "diskutil"
+    log_bin = tmp_path / "log"
+    diskutil.write_text("")
+    log_bin.write_text("")
+
+    def which(name: str) -> str | None:
+        return {"diskutil": str(diskutil), "log": str(log_bin), "df": None}.get(name)
+
+    def run(args, **kwargs):
+        joined = " ".join(args)
+        if args[:2] == [str(diskutil), "list"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout="/dev/disk2", stderr="list warn"
+            )
+        if args[:2] == [str(diskutil), "info"]:
+            stdout = (
+                "Device Node: disk2s7\n"
+                "APFS Container: disk2\n"
+                "Part of Whole: disk2\n"
+                "Device Node: \n"
+                "Random line without a field\n"
+                if args[-1] == "/nix"
+                else "Volume Name: Macintosh HD\n"
+            )
+            return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+        if args[:2] == [str(log_bin), "show"]:
+            assert "--last" in args
+            assert "2h" in args
+            assert jobs._STORAGE_FAULT_PREDICATE in args
+            return subprocess.CompletedProcess(
+                args, 0, stdout="apfs I/O error disk2s7\n", stderr=""
+            )
+        raise AssertionError(joined)
+
+    monkeypatch.setattr(jobs.shutil, "which", which)
+    monkeypatch.setattr(jobs.subprocess, "run", run)
+    assert jobs.main("dump-storage-fault") == 0
+    report = (tmp_path / "update-artifacts/storage-fault.txt").read_text()
+    assert "diskutil list" in report
+    assert "diskutil info /nix" in report
+    assert "diskutil info disk2" in report
+    assert "list warn" in report
+    assert "apfs I/O error" in (tmp_path / "update-artifacts/apfs-io.log").read_text()
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "update-artifacts/storage.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    assert rows[-1]["label"] == "storage-fault"
+
+
+def test_dump_hosted_storage_fault_survives_missing_and_timed_out_tools(
+    tmp_path, monkeypatch
+) -> None:
+    _hosted_darwin_dump_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(jobs.shutil, "which", lambda _name: None)
+    assert jobs.main("dump-storage-fault") == 0
+    report = (tmp_path / "update-artifacts/storage-fault.txt").read_text()
+    assert "diskutil missing" in report
+    assert (
+        tmp_path / "update-artifacts/apfs-io.log"
+    ).read_text() == "log show missing\n"
+
+    diskutil = tmp_path / "diskutil"
+    log_bin = tmp_path / "log"
+    diskutil.write_text("")
+    log_bin.write_text("")
+
+    def which(name: str) -> str | None:
+        return {"diskutil": str(diskutil), "log": str(log_bin), "df": None}.get(name)
+
+    def run(args, **kwargs):
+        if args[:2] == [str(diskutil), "list"]:
+            raise subprocess.TimeoutExpired(args, jobs._STORAGE_FAULT_LOG_SECONDS)
+        if args[:2] == [str(diskutil), "info"]:
+            raise OSError("no disk")
+        if args[:2] == [str(log_bin), "show"]:
+            raise subprocess.TimeoutExpired(args, jobs._STORAGE_FAULT_LOG_SECONDS)
+        raise AssertionError(" ".join(args))
+
+    monkeypatch.setattr(jobs.shutil, "which", which)
+    monkeypatch.setattr(jobs.subprocess, "run", run)
+    assert jobs.main("dump-storage-fault") == 0
+    timed = (tmp_path / "update-artifacts/storage-fault.txt").read_text()
+    assert "TimeoutExpired" in timed
+    assert (
+        (tmp_path / "update-artifacts/apfs-io.log")
+        .read_text()
+        .startswith("TimeoutExpired:")
+    )
+
+    def run_log_oserror(args, **kwargs):
+        if args[:2] == [str(diskutil), "list"]:
+            raise OSError("list failed")
+        if args[:2] == [str(diskutil), "info"]:
+            raise subprocess.TimeoutExpired(args, jobs._STORAGE_FAULT_LOG_SECONDS)
+        if args[:2] == [str(log_bin), "show"]:
+            raise OSError("log show failed")
+        raise AssertionError(" ".join(args))
+
+    monkeypatch.setattr(jobs.subprocess, "run", run_log_oserror)
+    assert jobs.main("dump-storage-fault") == 0
+    assert (
+        (tmp_path / "update-artifacts/apfs-io.log").read_text().startswith("OSError:")
+    )
+
+
+def test_append_command_output_keeps_empty_stdout_and_terminated_stderr(
+    tmp_path, monkeypatch
+) -> None:
+    report = tmp_path / "report.txt"
+    report.write_text("", encoding="utf-8")
+
+    def run(_args, **_kwargs):
+        return subprocess.CompletedProcess(["diskutil"], 0, stdout="", stderr="warn\n")
+
+    monkeypatch.setattr(jobs.subprocess, "run", run)
+    jobs._append_command_output(report, "empty stdout", ["diskutil", "info"])
+    text = report.read_text()
+    assert "warn" in text
+    assert "exit=0" in text
+
+
+def test_diskutil_info_targets_tolerate_missing_nix_and_tools(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(jobs.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(Path, "exists", lambda self: str(self) != "/nix")
+    assert jobs._diskutil_info_targets() == ("/",)
+
+    diskutil = tmp_path / "diskutil"
+    diskutil.write_text("")
+
+    def which(name: str) -> str | None:
+        return str(diskutil) if name == "diskutil" else None
+
+    monkeypatch.setattr(jobs.shutil, "which", which)
+
+    def run(_args, **_kwargs):
+        raise OSError("diskutil info failed")
+
+    monkeypatch.setattr(jobs.subprocess, "run", run)
+    assert jobs._diskutil_info_targets() == ("/",)
+
+
+def test_restore_canary_plan_downloads_latest_warmup_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Canary reuses the current branch plan; it does not re-prepare."""
+    dest = tmp_path / "canary-plan"
+    calls: list[tuple[str, ...]] = []
+
+    def run(*args: str, capture: bool = False, check: bool = True) -> object:
+        calls.append(args)
+        if args[:3] == ("gh", "run", "list"):
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=json.dumps([
+                    {"databaseId": 1, "status": "completed", "conclusion": "failure"},
+                    {"databaseId": 2, "status": "completed", "conclusion": "success"},
+                ]),
+            )
+        if args[:3] == ("gh", "run", "download"):
+            run_id = args[3]
+            if run_id == "1":
+                return subprocess.CompletedProcess(args, 1, stdout="", stderr="missing")
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / "warmup-plan.json").write_text("{}", encoding="utf-8")
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        raise AssertionError(args)
+
+    monkeypatch.setenv("GITHUB_REPOSITORY", "gkze/nixcfg")
+    monkeypatch.setenv("GITHUB_REF_NAME", "cursor/no-skip-darwin-shards-6614")
+    assert jobs.restore_canary_plan(dest=dest, run=run) == dest
+    assert (dest / "warmup-plan.json").is_file()
+    assert calls[1][:4] == ("gh", "run", "download", "1")
+    assert calls[2][:4] == ("gh", "run", "download", "2")
+
+
+def test_restore_canary_plan_fails_closed_without_current_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
+    with pytest.raises(ValueError, match="GITHUB_REPOSITORY"):
+        jobs.restore_canary_plan(dest=tmp_path / "missing")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "gkze/nixcfg")
+    monkeypatch.setenv("GITHUB_REF_NAME", "cursor/no-skip-darwin-shards-6614")
+    monkeypatch.setenv("NIXCFG_CANARY_PLAN_DIR", str(tmp_path / "from-env"))
+
+    def empty(*_args: str, **_kwargs: object) -> object:
+        return subprocess.CompletedProcess(_args, 0, stdout="[]")
+
+    with pytest.raises(RuntimeError, match="No current warmup plan"):
+        jobs.restore_canary_plan(run=empty)
+
+    def listed(*args: str, capture: bool = False, check: bool = True) -> object:
+        if args[:3] == ("gh", "run", "list"):
+            return json.dumps([{"databaseId": 9}])
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="gone")
+
+    monkeypatch.setattr(jobs, "_run", listed)
+    with pytest.raises(RuntimeError, match="No current warmup plan"):
+        jobs.main("restore-canary-plan")
+    with pytest.raises(TypeError, match="JSON text"):
+        jobs.restore_canary_plan(dest=tmp_path / "bad", run=lambda *_a, **_k: 0)

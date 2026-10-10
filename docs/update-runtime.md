@@ -115,26 +115,34 @@ OpenChamber keeps the 1.x upgrade patch. Baseten Switch stays on 0.5.1;
 `testUnusableSecondaryReceiptRetainsRecoveryGate` SIGTRAPs on headless
 macos-15 and is skipped there, and 0.6.0 stays held.
 
-Hosted Darwin validation builds native `root-closures` in continuation shards.
-Run 36672202468 showed why one job cannot: after a ~17-minute fetch burst the
-tail started about six derivations a minute, with thousands still queued when
-the 360-minute cap cancelled the job. Package validation had already used the
-first half of that same job, and a store GC between the two phases deleted
-outputs the closure then had to rebuild. Shards keep package validation off
-that budget. Each closure shard builds for five hours without `-L`, flushes
-the Cachix daemon, and the next shard substitutes what landed in `gkze`.
-A store unlink, substitute EILSEQ, vanished store `.drv`, vanished store
-build input, rustc E0463 after `--extern` named a `/nix/store/` rlib, crashed
+Hosted Darwin validation builds each root as an always-run shard
+(`checks.aarch64-darwin.root-closure-<kind>-<name>`), then realizes the
+`root-closures` farm as an aggregate proof. Run 36672202468 showed why one
+job cannot own both packages and every Darwin root: after a ~17-minute fetch
+burst the tail started about six derivations a minute, with thousands still
+queued when the 360-minute cap cancelled the job. Package validation is a
+separate job and owns `zed-editor-nightly` so root shards substitute that
+subtree. Each root shard GCs first, records `df -h` / inode / store used
+bytes before and after the fetch, then builds for five hours without `-L`.
+The explicit Cachix flush drains `$CACHIX_DAEMON_DIR/daemon.sock` (fail-closed)
+and the action post hook is then a no-op. There is no
+serial yield / `closure_complete` continuation. A store unlink, substitute
+EILSEQ, vanished store `.drv`, vanished store
+build input, rustc E0463 after `--extern` named a `/nix/store/` rlib that
+rustc then reported missing or unreadable, crashed
 Nix daemon, or SIGBUS on those
-runners is retried with only the time left in the shard budget, then handed
-to the next shard the same way; the last shard still fails closed. Determinate
+runners is retried with only the time left in the shard budget; the shard
+then fails closed so `assert-coverage` sees the miss. Determinate
 Nix can report that fault as `Cannot build` / `Reason: 1 dependency failed`,
 or as `builder failed with exit code 1` when the only builder log is a
-vanished `/nix/store/` build input or an unreadable store rlib; a builder
+vanished `/nix/store/` build input or an I/O-marked unreadable store rlib;
+bare E0463 with a store `--extern` and no locator I/O note is a builder
+failure. A builder
 that actually compiled or linked and then exited (`failed with exit code`,
 `error: builder for`) is not treated as that fault.
 `min-free` / `max-free` stay at 32 / 64 GiB, and `max-jobs` / `cores` stay at
-2: the hosted runner was already keeping both build slots busy on that tail.
+2 until a later Update run measures a safe increase. The #1246 baseline for
+this change is run 37657691147 (2h54m wall, shards 2-4 skipped by design).
 
 Each update invocation owns its concurrency limits, shared work, and timings.
 There are no process-global build semaphores tied to a previous event loop.

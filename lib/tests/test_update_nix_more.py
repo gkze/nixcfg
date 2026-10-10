@@ -2,6 +2,8 @@
 
 import asyncio
 import signal
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -29,6 +31,8 @@ from lib.update.nix import (
     is_retryable_nix_store_failure,
     is_transient_store_interruption,
     normalize_nix_platform,
+    recover_nix_store_after_fault,
+    should_restart_nix_daemon,
 )
 
 
@@ -171,6 +175,23 @@ def test_retryable_fixed_output_hash_failure_classification() -> None:
         "Operation too slow. Less than 1 bytes/sec transferred the last 5 seconds",
     ):
         assert is_retryable_nix_network_failure(stdout="", stderr=libcurl_failure)
+
+    # #1257 argus+home-george: fetchurl name is the JSR file, not "source".
+    named_mirror = (
+        "error: Cannot build '/nix/store/7z11drai9yzh0d6g4kr5aa7pw6l9ab2f-"
+        "_std_collections-1.1.6-sum_of_test.ts.drv'.\n"
+        "       Reason: builder failed with exit code 1.\n"
+        "       > error: cannot download "
+        "_std_collections-1.1.6-sum_of_test.ts from any mirror"
+    )
+    assert is_retryable_nix_network_failure(stdout="", stderr=named_mirror)
+    assert _is_retryable_fixed_output_hash_failure(
+        CommandResult(args=["nix"], returncode=1, stdout="", stderr=named_mirror)
+    )
+    assert is_retryable_nix_network_failure(
+        stdout="",
+        stderr="error: cannot download source from any mirror",
+    )
 
     hash_mismatch = CommandResult(
         args=["nix"],
@@ -357,6 +378,17 @@ def test_vanished_store_build_input_and_daemon_disconnect_are_retryable() -> Non
     assert is_transient_store_interruption(vanished_input)
     assert is_retryable_nix_store_failure(stdout="", stderr=daemon_disconnect)
     assert is_transient_store_interruption(daemon_disconnect)
+    active_builds_lock = (
+        "error (ignored): filesystem error: in remove: Illegal byte sequence "
+        '["/nix/var/nix/active-builds/35863-298"]\n'
+        'error: opening lock file "/nix/var/nix/active-builds/35863-2041": '
+        "Invalid argument"
+    )
+    assert is_retryable_nix_store_failure(stdout="", stderr=active_builds_lock)
+    assert is_transient_store_interruption(active_builds_lock)
+    assert should_restart_nix_daemon(stdout="", stderr=daemon_disconnect)
+    assert should_restart_nix_daemon(stdout="", stderr=active_builds_lock)
+    assert not should_restart_nix_daemon(stdout="", stderr="hash mismatch")
     assert not is_retryable_nix_store_failure(
         stdout="",
         stderr="gcc: /usr/bin/ld: build input does not exist",
@@ -371,23 +403,119 @@ def test_vanished_store_build_input_and_daemon_disconnect_are_retryable() -> Non
     )
 
 
+def test_recover_nix_store_after_fault_restarts_determinate_daemon(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#1257 retried nix build against a dead daemon; kickstart first."""
+    calls: list[list[str]] = []
+    socket = tmp_path / "daemon-socket"
+    sleeps: list[float] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if args[-1].endswith("determinate.nix-daemon"):
+            return subprocess.CompletedProcess(args, 1, "", "no such service")
+        socket.touch()
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    recover_nix_store_after_fault(platform="linux")
+    recover_nix_store_after_fault(platform="linux", run=run, socket=socket)
+    assert calls == []
+    recover_nix_store_after_fault(platform="darwin")
+    assert calls == []
+    present = tmp_path / "present-socket"
+    present.touch()
+    recover_nix_store_after_fault(
+        platform="darwin",
+        run=lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "", ""),
+        socket=present,
+    )
+    recover_nix_store_after_fault(
+        platform="darwin",
+        run=run,
+        sleep=sleeps.append,
+        socket=socket,
+        wait_seconds=1.0,
+    )
+    assert calls[0][:4] == ["sudo", "-n", "launchctl", "kickstart"]
+    assert calls[0][-1] == "system/systems.determinate.nix-daemon"
+    assert calls[1][-1] == "system/org.nixos.nix-daemon"
+    assert socket.is_file()
+    missing = tmp_path / "missing-socket"
+    recover_nix_store_after_fault(
+        platform="darwin",
+        run=lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "", ""),
+        sleep=sleeps.append,
+        socket=missing,
+        wait_seconds=0.3,
+    )
+    assert sleeps
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    hosted = tmp_path / "hosted-socket"
+    hosted_calls: list[list[str]] = []
+
+    def hosted_run(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        hosted_calls.append(list(args))
+        hosted.touch()
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr("lib.update.nix.subprocess.run", hosted_run)
+    recover_nix_store_after_fault(platform="darwin", socket=hosted)
+    assert hosted_calls[0][:4] == ["sudo", "-n", "launchctl", "kickstart"]
+    assert hosted.is_file()
+
+
 def test_unreadable_store_rlib_e0463_is_retryable() -> None:
-    """Update 37599536875: rustc E0463 after --extern store rlib is a substitute fault."""
-    e0463_store_rlib = (
-        "error: Cannot build '/nix/store/1vhn1bsiqchjp101n2sj5fjjk6fiw596-"
-        "rust_agent_settings-0.1.0.drv'.\n"
-        "       Reason: builder failed with exit code 1.\n"
+    """E0463 after --extern store rlib is a substitute fault only with an I/O note."""
+    rustc_line = (
         "       > Running env rustc --crate-name agent_settings "
         "src/agent_settings.rs --extern settings=/nix/store/"
         "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
         "libsettings-7be7f1170a.rlib --extern project=/nix/store/"
         "190kd4d9c2mvcl54val1pw8fpjq34cn0-rust_project-0.1.0-lib/lib/"
         "libproject-53a1143c9f.rlib\n"
-        "       > error[E0463]: can't find crate for `settings`\n"
+    )
+    bare_e0463 = (
+        "error: Cannot build '/nix/store/1vhn1bsiqchjp101n2sj5fjjk6fiw596-"
+        "rust_agent_settings-0.1.0.drv'.\n"
+        "       Reason: builder failed with exit code 1.\n"
+        + rustc_line
+        + "       > error[E0463]: can't find crate for `settings`\n"
         "       > error[E0463]: can't find crate for `project`\n"
     )
-    assert is_retryable_nix_store_failure(stdout="", stderr=e0463_store_rlib)
-    assert is_transient_store_interruption(e0463_store_rlib)
+    missing_extern = (
+        bare_e0463 + "       > note: extern location for settings does not exist: "
+        "/nix/store/l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/"
+        "lib/libsettings-7be7f1170a.rlib\n"
+    )
+    vanished_rlib = (
+        rustc_line + "       > error[E0463]: can't find crate for `settings`\n"
+        '       > error: opening file "/nix/store/'
+        "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
+        'libsettings-7be7f1170a.rlib": No such file or directory\n'
+    )
+    eilseq_rlib = (
+        rustc_line + "       > error[E0463]: can't find crate for `settings`\n"
+        "       > error: cannot pread /nix/store/"
+        "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
+        "libsettings-7be7f1170a.rlib: Illegal byte sequence\n"
+    )
+    not_a_file = (
+        rustc_line + "       > error[E0463]: can't find crate for `settings`\n"
+        "       > note: extern location for settings is not a file: "
+        "/nix/store/l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/"
+        "lib/libsettings-7be7f1170a.rlib\n"
+    )
+    assert is_retryable_nix_store_failure(stdout="", stderr=missing_extern)
+    assert is_transient_store_interruption(missing_extern)
+    assert is_retryable_nix_store_failure(stdout="", stderr=vanished_rlib)
+    assert is_retryable_nix_store_failure(stdout="", stderr=eilseq_rlib)
+    assert is_retryable_nix_store_failure(stdout="", stderr=not_a_file)
+    assert not is_retryable_nix_store_failure(stdout="", stderr=bare_e0463)
+    assert not is_transient_store_interruption(bare_e0463)
     assert not is_retryable_nix_store_failure(
         stdout="",
         stderr=(
@@ -402,7 +530,9 @@ def test_unreadable_store_rlib_e0463_is_retryable() -> None:
             "error: Cannot build '/nix/store/abc-agent_settings.drv'.\n"
             "       Reason: builder failed with exit code 1.\n"
             "       > rustc --extern settings=/tmp/libsettings.rlib\n"
-            "       > error[E0463]: can't find crate for `settings`"
+            "       > error[E0463]: can't find crate for `settings`\n"
+            "       > note: extern location for settings does not exist: "
+            "/tmp/libsettings.rlib"
         ),
     )
     assert not is_retryable_nix_store_failure(
@@ -417,7 +547,7 @@ def test_unreadable_store_rlib_e0463_is_retryable() -> None:
         ),
     )
     assert not is_transient_store_interruption(
-        "error: hash mismatch in fixed-output derivation\n" + e0463_store_rlib
+        "error: hash mismatch in fixed-output derivation\n" + missing_extern
     )
 
 

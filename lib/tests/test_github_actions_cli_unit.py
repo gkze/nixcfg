@@ -238,3 +238,7 @@ def test_build_client_helpers_and_workflow_rows(
         "allow_playwright": True,
         "chrome_debugging_url": "http://127.0.0.1:9222",
     }
+    assert isinstance(created["live"]["page_session"], gha_cli.GitHubPageSession)
+    assert created["live"]["page_session"]._chrome_debugging_url == (
+        "http://127.0.0.1:9222"
+    )

@@ -9,43 +9,85 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
 
 ## Execution and ownership
 
-1. Prepare on macOS ARM64, then Linux ARM64, then Linux x86_64. Each stage extends
-   one candidate, retaining previously selected release metadata and native hashes.
-   Preparation is sequential because updaters can share generated files. Dependent
-   updaters recompute metadata from their pinned prerequisites.
+1. Darwin prepare pins flake refs and shared generated files. Linux ARM64 and
+   Linux x86_64 then extend that Darwin candidate in parallel (native hashes
+   only) and `prepare-merge` 3-way-merges the two extensions. Overlapping file
+   edits with different contents fail closed. `plan-darwin-closures` waits for
+   the merged tree because `root-out-paths.json` and certify bind to that
+   candidate. A dispatch-only `canary_warm_rust` / `canary_slots` /
+   `canary_crates` path realizes selected rust-warmup slots or crates against
+   the current branch plan and skips prepare, Linux validate, Darwin roots,
+   publish, and coverage. The push and schedule no-skip run remains the
+   done-bar proof. Dependent updaters still recompute metadata from their
+   pinned prerequisites.
 2. Validate the final identical tree on all three native builders. After
-   `prepare-darwin` freezes flake references, two Linux jobs cache the native
-   boundary of Darwin roots (the Rosetta/linux-builder VM image) in `gkze`
-   while Linux prepare continues. Those jobs are not publication evidence.
-   After the last prepare, the two Linux validators, Darwin package validation,
-   and Darwin root-closure shards run in parallel: closures wait only for the
-   final candidate plus that VM cache, not for Linux package validation.
-   Hosted public `macos-15` concurrency is at least two, so the Darwin package
-   and closure jobs overlap instead of queuing. Package evidence and closure
-   evidence are separate reports; certification requires both gates for every
-   system. Linux arm and x86 validation still run to completion before
-   publish.
-   One hosted macOS job cannot realize `checks.aarch64-darwin.root-closures`
-   inside the 360-minute job cap, so that build is a chain of shards. Each shard
-   builds for five hours, the Cachix daemon flushes, and the next shard
-   substitutes those paths and continues.    A transient store fault
+   rust-warmup, two Linux jobs recache the native boundary of Darwin roots
+   (the Rosetta/linux-builder VM image) into `gkze` from the final
+   three-system candidate so macos-15 can substitute it. Caching before
+   warmup lets rust_* LRU-evict the image (`#1257`). Those jobs are not
+   publication evidence. Darwin packages start in parallel and do not wait.
+   After the last prepare, the two Linux validators and Darwin shard
+   planning run in parallel. Closures still wait for the final three-system
+   candidate because certify binds reports to that tree. The planner
+   instantiates each Darwin root's drv graph, queries cache.nixos.org and
+   gkze, and writes the intersection of missing aarch64-darwin outputs as
+   `warmup-plan.json`. Any shard that would still compile more than 400
+   of those outputs locally (packages-scale on 37740898487 was 132; home
+   compiled 1534 `rust_*` from a divergent stdenv graph) fails at plan
+   time.    Five `macos-15` `rust-warmup` slots then `nix copy --derivation`
+   the planner's `file://` warmup cache (`warmup-drvs/`), GC-root each
+   imported `.drv` with `nix build --out-link` (not `nix-store --add-root`
+   alone; that is not an operation on Determinate Nix), and `nix build`
+   `foo.drv^*` by dependency layer
+   (skip-if-in-gkze) so Cachix has the shared
+   stdenv/rust graph before root shards start; the packages inventory
+   itself remains certify evidence and waits for that matrix. The CVE-2026-56391/56392
+   coreutils patches live in nixpkgs, not a repo overlay; they change
+   every stdenv-dependent drv versus hydra until hydra publishes them.
+   `coreutils-full` in the home packages module is a leaf. Do not drop
+   those patches here.    Always-run Darwin shards start after rust-warmup
+   succeeds and after the Linux
+   VM-image cache jobs. Width is provisionally 2, not a 2-VMs-per-host
+   cap: revisit 4-wide versus 2-wide by bytes written and update-runtime
+   once warmup cuts local builds. A generated matrix from
+   `lib.rootClosureManifest` plus `lib/update/ci/shard_costs.json` is the
+   only shard plan; there is no serial yield chain and no
+   `closure_complete` skip gate. Each planned shard always runs on the success
+   path. An aggregate `root-closures` job then realizes the farm mostly by
+   substitution. `assert-coverage` always runs, takes the manifest as
+   authority, and fails the run if any root is unbuilt, unpushed, or skipped,
+   or if a Linux / Darwin package inventory was silently narrowed. It
+   checks required-job results first so a failed or cancelled shard farm
+   exits in seconds, then reuses `root-out-paths.json` from
+   `plan-darwin-closures` instead of re-evaluating Darwin `outPath`s.
+   Missing, extra, or tree-mismatched caches fail closed. publish
+   needs that job.
+   Hosted public `macos-15` concurrency is 5 of 20. Peak Darwin use during
+   rust-warmup is those five slots; after that, packages inventory plus
+   two provisional root shards. `max-jobs` / `cores` stay at 2 until a later
+   run measures a safe increase (zed memory on hosted macos-15).
+   A transient store fault
    (`Illegal byte sequence`, a vanished store `.drv`, a vanished store build
-   input, rustc E0463 after `--extern` named a `/nix/store/` rlib, a crashed
+   input, rustc E0463 after `--extern` named a `/nix/store/` rlib *and* a
+   locator I/O note that the rlib is missing or unreadable, a crashed
    Nix daemon, or SIGBUS) is retried
-   with only the time left in that shard's build budget, then continues the
-   same way: realized paths stay in `gkze` and the next shard substitutes them.
+   with only the time left in that shard's build budget. The shard then fails
+   closed; realized paths stay in `gkze` for the next run.
    Determinate Nix can report that fault as `Cannot build` /
    `Reason: 1 dependency failed` after a substitute EILSEQ; that still retries.
    A builder that exits 1 only because a `/nix/store/` build input vanished,
-   or because rustc could not load a store rlib it was passed via `--extern`,
-   is the same fault. A builder that actually compiled or linked and then
+   or because rustc reported a store `--extern` rlib missing or unreadable,
+   is the same fault. Bare E0463 with a store `--extern` and no I/O note
+   (`#1258` `rust_agent_ui` / `language_models`) is a builder failure.
+   A builder that actually compiled or linked and then
    exited (`failed with exit code`, `error: builder for`) still fails the shard.
-   Validation `nix build` passes `--fallback` so a failed substitute can
-   rebuild from source. The last
-   shard does not yield: an unfinished closure or a store fault that survives
-   the retry fails the run. Every declared package platform and every
-   native root is still built. Shards are serial because the closure's slow
-   graph is shared; parallel host builds would repeat it.
+   Native `nix build` passes `--fallback` so a failed substitute can
+   rebuild from source. Darwin cannot compile the nested aarch64-linux
+   Rosetta VM (`#1257` platform mismatch on `etc-fstab.drv`); it
+   substitutes that boundary with `--max-jobs 0` after Linux recache.
+   A crashed Nix daemon is `launchctl kickstart -k`'d before the next
+   retry so isolation does not hammer a dead socket. Every declared
+   package platform and every native root is still built.
    Each builder evaluates every declared package platform, builds native package
    validations, and builds its roots from the independently checked root manifest.
    Nix's recursive derivation graph supplies native dependencies of foreign roots,
@@ -77,9 +119,32 @@ validation jobs consistent with that inventory. Actions declares the job graph a
 publication; every authored command step runs Python, with no shell glue. The updater
 core owns source discovery, declared output authority, candidate identity and validation. Nix owns derivations, dependency ordering, builds and cache reuse.
 
-Cachix's daemon uploads built outputs continuously. Successful preparation also
-publishes the exact files recorded by successful URL prefetches, which enter the
-store directly and do not trigger Nix's post-build hook. Encoded path basenames use
+Cachix's daemon uploads built outputs continuously in every job that uses
+`update-runtime` (`useDaemon: true`). cachix-action binds
+`$CACHIX_DAEMON_DIR/daemon.sock` and registers a Nix `post-build-hook`.
+`update-runtime` then requires that socket, `daemon.pid`, and the hook
+script before bootstrap; a silent skip cannot spend a shard compiling
+paths that never reach gkze. Evidence is copied into artifacts at that
+check so retain (before flush) keeps it. Each job that starts
+`update-runtime` with a Cachix token ends with an
+explicit `if: always()` flush. That step is last so certify, publish,
+repair, and shard builds still have a live daemon and post-build-hook.
+The flush pushes leftover prefetch receipts and runs
+`cachix daemon stop --socket` against that socket. After a clean
+drain it clears `CACHIX_DAEMON_DIR` and `CACHIX_DAEMON_SOCKET` in
+`GITHUB_ENV` so cachix-action's post hook skips a second stop (a
+missing pid throws; a missing socket fails stop). The flush-proof
+job is not `continue-on-error`; only the designed fail step is, so
+a post-hook throw fails that job.
+A bare `cachix daemon stop` talks to `~/.cache/cachix/cachix-daemon.sock`,
+which this action never creates; flush fails closed if the real socket is
+missing or stop is unclean. Slack before the 360-minute hard kill is the
+five-hour build budget (ED-7.1: a SIGKILL during flush can still drop the
+queue tail; runner loss keeps only paths Cachix already acknowledged).
+Preparation, validation, and coverage also publish the exact files recorded
+by URL prefetches on every exit path, not only when the updater succeeds.
+Those files enter the store directly and do not trigger Nix's post-build hook.
+Encoded path basenames use
 nixpkgs' fetchurl spelling instead of URL-decoded spelling for matching store identities;
 explicit package-specific source names remain independent overrides. Prefetches
 append store paths to an invocation-local JSONL receipt retained with the job
@@ -268,9 +333,8 @@ Until Actions write is granted, cloud agents should open and merge a
 one-line timestamp bump to `.github/update-kick` on `main`. That push
 queues one Update run with the same path filter. Kick-file pushes set
 `validate_all_packages` and enable the repair job so they match EM's
-`repair=true` + `validate_all_packages=true` dispatches. The same file
-still kicks `copilot/gkzenixcfg-update-automation` if that WIP branch is
-updated. Do not start a second main Update while one is already running.
+`repair=true` + `validate_all_packages=true` dispatches. Do not start a
+second main Update while one is already running.
 
 Push events that touch `.github/update-kick` therefore enable
 repair; that path exists because some tokens cannot create `workflow_dispatch`

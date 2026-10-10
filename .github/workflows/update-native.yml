@@ -15,6 +15,20 @@ on:
       previous:
         default: ""
         type: string
+      previous_extra:
+        description: Second prepare artifact for merge-candidates
+        default: ""
+        type: string
+      canary:
+        description: Dispatch-only rust-warmup canary (checkout tree + current plan)
+        default: false
+        type: boolean
+      canary_slots:
+        default: ""
+        type: string
+      canary_crates:
+        default: ""
+        type: string
       validate_all_packages:
         default: false
         type: boolean
@@ -22,21 +36,33 @@ on:
         default: ""
         type: string
       scope:
-        description: Package gate, closure gate, or both
+        description: Package gate, closure gate, shard, or both
         default: all
         type: string
       closure_budget_seconds:
         description: Stop the root-closure build after this many seconds
         default: ""
         type: string
-      closure_yield:
-        description: Succeed when the closure budget is exhausted so the next shard can continue
-        default: false
-        type: boolean
+      closure_roots:
+        description: Space-separated Darwin roots for one always-run shard
+        default: ""
+        type: string
+      shard:
+        description: Shard identity for artifact and receipt names
+        default: ""
+        type: string
+      warmup_artifact:
+        description: Planner artifact that contains warmup-plan.json
+        default: ""
+        type: string
+      warmup_slot:
+        description: rust-warmup matrix slot 0-4
+        default: ""
+        type: string
     outputs:
-      closure_complete:
-        description: Whether this shard realized the native root closure
-        value: ${{ jobs.native.outputs.closure_complete }}
+      darwin_closure_shards:
+        description: Generated always-run Darwin closure matrix
+        value: ${{ jobs.native.outputs.darwin_closure_shards }}
     secrets:
       UPDATE_SELF_HEAL_GITHUB_TOKEN:
         required: true
@@ -49,7 +75,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 360
     outputs:
-      closure_complete: ${{ steps.candidate.outputs.closure_complete }}
+      darwin_closure_shards: ${{ steps.candidate.outputs.darwin_closure_shards }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -65,6 +91,16 @@ jobs:
         with:
           name: ${{ inputs.previous }}
           path: ${{ runner.temp }}/previous
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: inputs.previous_extra != ''
+        with:
+          name: ${{ inputs.previous_extra }}
+          path: ${{ runner.temp }}/previous-extra
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: inputs.warmup_artifact != ''
+        with:
+          name: ${{ inputs.warmup_artifact }}
+          path: ${{ runner.temp }}/warmup
       - name: Prepare or validate candidate
         id: candidate
         env:
@@ -74,12 +110,31 @@ jobs:
           NIXCFG_VALIDATE_ALL_PACKAGES: ${{ inputs.validate_all_packages }}
           NIXCFG_VALIDATE_SCOPE: ${{ inputs.scope }}
           NIXCFG_CLOSURE_BUDGET_SECONDS: ${{ inputs.closure_budget_seconds }}
-          NIXCFG_CLOSURE_YIELD: ${{ inputs.closure_yield }}
+          NIXCFG_CLOSURE_ROOTS: ${{ inputs.closure_roots }}
+          NIXCFG_CLOSURE_SHARD: ${{ inputs.shard }}
+          NIXCFG_WARMUP_PLAN: |-
+            ${{ inputs.warmup_artifact != '' &&
+            format('{0}/warmup/warmup-plan.json', runner.temp) || '' }}
+          NIXCFG_WARMUP_SLOT: ${{ inputs.warmup_slot }}
           NIXCFG_PREVIOUS_CANDIDATE: |-
             ${{ inputs.previous != '' &&
             format('{0}/previous/candidate.json', runner.temp) || '' }}
+          NIXCFG_MERGE_RIGHT: |-
+            ${{ inputs.previous_extra != '' &&
+            format('{0}/previous-extra/candidate.json', runner.temp) || '' }}
+          NIXCFG_CANARY: ${{ inputs.canary }}
+          NIXCFG_CANARY_SLOTS: ${{ inputs.canary_slots }}
+          NIXCFG_CANARY_CRATES: ${{ inputs.canary_crates }}
           GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           NIXCFG_CI_STAGE: ${{ inputs.stage }}
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+      - name: Dump hosted storage-fault evidence
+        if: failure()
+        env:
+          NIXCFG_CI_STAGE: dump-storage-fault
         run: |
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
@@ -89,10 +144,21 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: |-
-            ${{ inputs.scope == 'all' &&
+            ${{ inputs.stage == 'merge-candidates' && 'prepare-x86_64-linux' ||
+            inputs.shard != '' &&
+            format('{0}-{1}-{2}-{3}', inputs.stage, inputs.system, inputs.scope, inputs.shard) ||
+            inputs.scope == 'all' &&
             format('{0}-{1}', inputs.stage, inputs.system) ||
             format('{0}-{1}-{2}', inputs.stage, inputs.system, inputs.scope) }}
           path: ${{ runner.temp }}/update-artifacts
           if-no-files-found: warn
           overwrite: true
           retention-days: 30
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
