@@ -1048,6 +1048,43 @@ def compiler_input_drvs(
     )
 
 
+_SOURCE_FETCH_ARCHIVES = (
+    ".tar.gz",
+    ".tar.bz2",
+    ".tar.xz",
+    ".tar.zst",
+    ".tgz",
+    ".zip",
+    ".crate",
+)
+
+
+def is_source_fetch_store_path(path: str) -> bool:
+    """Return whether *path* is a fetchurl/FOD archive, not a compile.
+
+    ``#1264`` ``--max-jobs 0`` refused ``coreaudio-rs-0.14.2.tar.gz.drv``
+    because a cache miss on a crate tarball is a download, not bootstrap.
+    """
+    name = _store_output_rest(path).removesuffix(".drv")
+    if name.endswith(_SOURCE_FETCH_ARCHIVES):
+        return True
+    return name == "source" or name.endswith(("-src", "-source"))
+
+
+def partition_compiler_input_drvs(
+    drvs: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Split compiler requisites into substitute-only vs source-fetch FODs."""
+    substitute: list[str] = []
+    fetches: list[str] = []
+    for drv in dict.fromkeys(drvs):
+        if is_source_fetch_store_path(drv):
+            fetches.append(drv)
+        else:
+            substitute.append(drv)
+    return tuple(substitute), tuple(fetches)
+
+
 _DRV_PATH = re.compile(r"/nix/store/[0-9a-z]{32}-[^/\s]+\.drv")
 
 

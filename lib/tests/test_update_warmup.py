@@ -38,12 +38,14 @@ from lib.update.ci.warmup import (
     is_rust_extension_host_store_path,
     is_rust_language_models_store_path,
     is_rust_zed_store_path,
+    is_source_fetch_store_path,
     is_zed_editor_nightly_store_path,
     language_models_input_drvs,
     language_models_warmup_outputs,
     load_warmup_plan,
     nix_store_argv_has_operation,
     partition_agent_ui_drvs,
+    partition_compiler_input_drvs,
     partition_rust_zed_drvs,
     partition_zed_editor_nightly_drvs,
     plan_darwin_warmup,
@@ -867,6 +869,10 @@ def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
         )
 
     assert compiler_input_drvs((zed,), run=query_run) == (rustc, bmake, src)
+    assert partition_compiler_input_drvs((rustc, bmake, src, bmake)) == (
+        (rustc,),
+        (bmake, src),
+    )
     assert any("--requisites" in args for args in seen_query)
     host_lib = (
         "/nix/store/5crb9axiaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0-lib"
@@ -902,6 +908,34 @@ def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
                 args, 1, "", "nix-store: dead"
             ),
         )
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        (
+            "/nix/store/195q1crx0p9g5na7l7aw96bqvs3y2ab0-coreaudio-rs-0.14.2.tar.gz.drv",
+            True,
+        ),
+        ("/nix/store/fcy73hrwaaaaaaaaaaaaaaaaaaaaaaaa-bmake-20260313.tar.gz.drv", True),
+        ("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source.drv", True),
+        (
+            "/nix/store/n2g2dzs3aaaaaaaaaaaaaaaaaaaaaaaaa-"
+            "zed-editor-nightly-extension_host-src.drv",
+            True,
+        ),
+        ("/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-vendor-source", True),
+        ("/nix/store/cccccccccccccccccccccccccccccccc-crate.crate.drv", True),
+        ("/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv", False),
+        ("/nix/store/1gx3hvygaaaaaaaaaaaaaaaaaaaaaaaa-stdenv-darwin.drv", False),
+        ("/nix/store/dddddddddddddddddddddddddddddddd-bmake-20260313.drv", False),
+    ],
+)
+def test_is_source_fetch_store_path_classifies_archives(
+    path: str, expected: bool
+) -> None:
+    """#1264: crate tarball FODs download; compiler/stdenv still substitute-only."""
+    assert is_source_fetch_store_path(path) is expected
 
 
 def test_realize_warmup_substitute_only_is_max_jobs_zero(tmp_path: Path) -> None:

@@ -54,6 +54,7 @@ from lib.update.ci.warmup import (
     language_models_warmup_outputs,
     load_warmup_plan,
     partition_agent_ui_drvs,
+    partition_compiler_input_drvs,
     partition_rust_zed_drvs,
     partition_zed_editor_nightly_drvs,
     plan_darwin_warmup,
@@ -307,16 +308,26 @@ def _realize_svh_family(
         drv for drv in family if not is_rust_extension_host_store_path(drv)
     )
     compiler = compiler_input_drvs(family)
+    substitute, fetches = partition_compiler_input_drvs(compiler)
     failures: list[validation.DerivationValidationFailure] = []
-    if compiler:
+    if substitute:
         compiler_failures = realize_warmup_outputs(
-            compiler,
+            substitute,
             flake_root=flake_root,
             progress=_hosted_validation_progress("rust-warmup"),
             substitute_only=True,
         )
         failures.extend(compiler_failures)
         if compiler_failures:
+            return tuple(failures), False
+    if fetches:
+        fetch_failures = realize_warmup_outputs(
+            fetches,
+            flake_root=flake_root,
+            progress=_hosted_validation_progress("rust-warmup"),
+        )
+        failures.extend(fetch_failures)
+        if fetch_failures:
             return tuple(failures), False
     assert_force_local_dry_run((*extension_host, *family_rest))
     if extension_host:

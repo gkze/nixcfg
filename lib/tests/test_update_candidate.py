@@ -1252,6 +1252,127 @@ def test_rust_warmup_zed_nightly_waits_for_family(
     assert realized == [((rustc_drv,), False, False, True)]
 
 
+def test_rust_warmup_downloads_source_fods_before_force_local(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1264: crate tarball FODs download; rustc stays --max-jobs 0."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    extension_host = (
+        "/nix/store/5crb9axiaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0-lib"
+    )
+    extension_host_drv = (
+        "/nix/store/exthostaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0.drv"
+    )
+    rust_zed = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0"
+    rust_zed_drv = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0.drv"
+    rustc_drv = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    crate_src = (
+        "/nix/store/195q1crx0p9g5na7l7aw96bqvs3y2ab0-coreaudio-rs-0.14.2.tar.gz.drv"
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "compiler_input_drvs",
+        lambda *_args, **_kwargs: (rustc_drv, crate_src),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "rust_crate_input_drvs",
+        lambda *_args, **_kwargs: (extension_host_drv,),
+    )
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(extension_host, rust_zed),
+            rustLayers=((extension_host,), (rust_zed,)),
+            outputDrvs={
+                extension_host: extension_host_drv,
+                rust_zed: rust_zed_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [
+        ((rustc_drv,), False, False, True),
+        ((crate_src,), False, False, False),
+        ((extension_host_drv,), True, True, False),
+        ((rust_zed_drv,), True, False, False),
+    ]
+    realized.clear()
+
+    def failing_fetch(
+        paths: object, *_args: object, **kwargs: object
+    ) -> tuple[DerivationValidationFailure, ...]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        if not kwargs.get("substitute_only") and not kwargs.get("force_local"):
+            return (
+                DerivationValidationFailure(
+                    "root-warmup", "coreaudio.drv^*", "cannot download"
+                ),
+            )
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", failing_fetch)
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.failures[0].message == "cannot download"
+    assert realized == [
+        ((rustc_drv,), False, False, True),
+        ((crate_src,), False, False, False),
+    ]
+
+
 def test_closure_budget_timeout_fails_closed(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
