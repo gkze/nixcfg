@@ -290,14 +290,21 @@ jobs:
   # does not steal a slot. Each slot skip-if-in-gkze resumes. Root shards
   # still build full closures after this job succeeds; the 400-local-drv
   # gate is unchanged.
+  # Wait for canary to finish (success, failure, or skip) so the five
+  # validate slots never share the free-tier macos-15 pool with it.
+  # #1269 canary 3/4 held two runners for 80+ min and starved slots 0/1.
   validate-darwin-warm-rust:
     needs:
       - prepare-merge
       - plan-darwin-closures
+      - canary-warm-rust
     if: |-
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
-      needs.plan-darwin-closures.result == 'success'
+      needs.plan-darwin-closures.result == 'success' &&
+      (needs.canary-warm-rust.result == 'success' ||
+      needs.canary-warm-rust.result == 'skipped' ||
+      needs.canary-warm-rust.result == 'failure')
     strategy:
       fail-fast: false
       max-parallel: 5

@@ -1170,7 +1170,13 @@ def _assert_canary_jobs(workflow_jobs: dict) -> None:
 def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
     """Darwin rust-warmup owns rust_*; packages stay inventory; shards always run."""
     rust = workflow_jobs["validate-darwin-warm-rust"]
-    assert set(rust["needs"]) == {"prepare-merge", "plan-darwin-closures"}
+    assert set(rust["needs"]) == {
+        "prepare-merge",
+        "plan-darwin-closures",
+        "canary-warm-rust",
+    }
+    assert "canary-warm-rust.result == 'skipped'" in rust["if"]
+    assert "canary-warm-rust.result == 'failure'" in rust["if"]
     _assert_canary_jobs(workflow_jobs)
     assert rust["with"]["scope"] == "rust-warmup"
     assert rust["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"
