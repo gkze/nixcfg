@@ -20,6 +20,7 @@ from lib.github_actions.client import (
     resolve_repository_context,
     select_named_workflow,
 )
+from lib.github_actions.page_session import GitHubPageSession
 from lib.github_actions.tail import GitHubActionsLiveClient, GitHubActionsTailer
 from lib.github_actions.web_auth import GitHubWebCookieProvider
 
@@ -224,6 +225,9 @@ def _build_tail_clients(
             token=token,
             context=context,
             cookie_provider=cookie_provider,
+            page_session=GitHubPageSession(
+                chrome_debugging_url=chrome_debugging_url
+            ),
         ),
     )
 

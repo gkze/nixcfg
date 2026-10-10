@@ -10,6 +10,7 @@ import pytest
 
 from lib import http_utils
 from lib.github_actions import client as gha_client
+from lib.github_actions import page_session as gha_page
 from lib.github_actions import tail as gha_tail
 
 
@@ -787,3 +788,173 @@ def test_tailer_sleep_delegates_to_asyncio(monkeypatch: pytest.MonkeyPatch) -> N
         )._sleep()
     )
     assert seen == [0.25]
+
+
+class _FakePageSession:
+    def __init__(
+        self,
+        *,
+        html: str | None = None,
+        fetch_result: gha_page.InPageFetchResult | None = None,
+        unavailable: bool = False,
+        status: int = 200,
+        body: bytes = b"[]",
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.html = html
+        self.fetch_result = fetch_result or gha_page.InPageFetchResult(
+            status=status,
+            body=body,
+            headers=headers or {"content-type": "application/json"},
+        )
+        self.unavailable = unavailable
+        self.closed = False
+        self.job_urls: list[str] = []
+        self.fetched: list[str] = []
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+    async def ensure_job_page(self, job_url: str) -> None:
+        if self.unavailable:
+            raise gha_page.PageSessionUnavailableError("no chrome")
+        self.job_urls.append(job_url)
+
+    async def read_document_html(self) -> tuple[str, str]:
+        if self.html is None:
+            raise gha_page.PageSessionUnavailableError("no chrome")
+        return self.html, self.job_urls[-1]
+
+    async def fetch(self, url: str, *, headers: dict[str, str]) -> gha_page.InPageFetchResult:
+        del headers
+        if self.unavailable:
+            raise gha_page.PageSessionUnavailableError("no chrome")
+        self.fetched.append(url)
+        return self.fetch_result
+
+
+def test_live_client_uses_inpage_session_for_job_page_and_json() -> None:
+    """Prefer the signed-in tab's fetch() over exporting cookies."""
+    html = (
+        '<check-steps job-steps-url="/acme/demo/actions/runs/9/jobs/55/steps">'
+        "</check-steps>"
+    )
+    session = _FakePageSession(html=html, body=b'[{"id":"step-1","name":"Build",'
+        b'"status":"in_progress","conclusion":null,"number":1,"change_id":3,'
+        b'"started_at":"2026-04-02T16:00:00Z","completed_at":null}]')
+    client = gha_tail.GitHubActionsLiveClient(
+        token="test" + "-token",
+        context=_context(),
+        page_session=session,
+    )
+
+    async def _exercise() -> None:
+        info = await client.discover_job_page(
+            job_url="https://github.com/acme/demo/actions/runs/9/job/42"
+        )
+        steps = await client.fetch_steps(
+            steps_url="https://github.com/acme/demo/actions/runs/9/jobs/55/steps",
+            change_id=0,
+            referer="https://github.com/acme/demo/actions/runs/9/job/42",
+        )
+        await client.aclose()
+        assert info.steps_url == "https://github.com/acme/demo/actions/runs/9/jobs/55/steps"
+        assert steps[0].id == "step-1"
+        assert steps[0].change_id == 3
+
+    asyncio.run(_exercise())
+    assert session.closed is True
+    assert session.fetched == [
+        "https://github.com/acme/demo/actions/runs/9/jobs/55/steps?change_id=0"
+    ]
+
+
+def test_live_client_page_session_errors_and_fallbacks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unavailable Chrome falls back; HTTP/non-JSON in-page answers fail closed."""
+    missing = _FakePageSession(unavailable=True)
+    client = gha_tail.GitHubActionsLiveClient(
+        token="",
+        context=_context(),
+        page_session=missing,
+    )
+    assert (
+        asyncio.run(
+            client._discover_job_page_from_tab(
+                job_url="https://github.com/acme/demo/actions/runs/9/job/42"
+            )
+        )
+        is None
+    )
+    assert (
+        asyncio.run(
+            client._fetch_via_page(
+                "https://github.com/acme/demo/steps",
+                accept="application/json",
+                referer=None,
+            )
+        )
+        is None
+    )
+    assert asyncio.run(gha_tail.GitHubActionsLiveClient(
+        token="", context=_context()
+    )._discover_job_page_from_tab(job_url="https://github.com/x")) is None
+    assert asyncio.run(gha_tail.GitHubActionsLiveClient(
+        token="", context=_context()
+    )._fetch_via_page("https://github.com/x", accept="application/json", referer=None)) is None
+
+    bad_status = _FakePageSession(status=400, body=b"nope", headers={"content-type": "text/plain"})
+    status_client = gha_tail.GitHubActionsLiveClient(
+        token="",
+        context=_context(),
+        page_session=bad_status,
+    )
+    with pytest.raises(http_utils.RequestError, match="HTTP 400"):
+        asyncio.run(
+            status_client._fetch_via_page(
+                "https://github.com/acme/demo/steps",
+                accept="application/json",
+                referer=None,
+            )
+        )
+
+    non_json = _FakePageSession(
+        status=200,
+        body=b"<html>nope</html>",
+        headers={"content-type": "text/html"},
+    )
+    json_client = gha_tail.GitHubActionsLiveClient(
+        token="",
+        context=_context(),
+        page_session=non_json,
+    )
+    with pytest.raises(RuntimeError, match="content-type"):
+        asyncio.run(
+            json_client._fetch_via_page(
+                "https://github.com/acme/demo/steps",
+                accept="application/json",
+                referer=None,
+            )
+        )
+
+    async def _html(_url: str, **_kwargs: object) -> tuple[bytes, dict[str, str]]:
+        return (
+            b'<check-steps job-steps-url="/acme/demo/actions/runs/9/jobs/55/steps">'
+            b"</check-steps>",
+            {},
+        )
+
+    fallback = gha_tail.GitHubActionsLiveClient(
+        token="",
+        context=_context(),
+        page_session=_FakePageSession(unavailable=True),
+    )
+    monkeypatch.setattr(fallback, "_fetch_web_bytes_once", _html)
+    info = asyncio.run(
+        fallback.discover_job_page(
+            job_url="https://github.com/acme/demo/actions/runs/9/job/42"
+        )
+    )
+    assert info.steps_url == "https://github.com/acme/demo/actions/runs/9/jobs/55/steps"
+

@@ -5,6 +5,10 @@ The official REST API is used for workflow/run/job discovery in
 transport that powers the GitHub web UI today: a job page exposes an internal
 ``.../jobs/<id>/steps`` endpoint plus per-step ``backscroll`` endpoints.
 
+When a signed-in Chrome tab is already open, fetches run inside that tab via
+``GitHubPageSession`` so session cookies never leave the renderer. The HTTP
+fallback still exists for cookie-jar or token attempts.
+
 The transport is intentionally kept separate so it can be swapped cleanly if
 GitHub moves back to websocket-based live logs in the future.
 """
@@ -29,6 +33,10 @@ from lib.github_actions.client import (
     WorkflowRun,
     choose_next_live_job,
     select_named_job,
+)
+from lib.github_actions.page_session import (
+    GitHubPageSession,
+    PageSessionUnavailableError,
 )
 
 if TYPE_CHECKING:
@@ -122,17 +130,21 @@ class GitHubActionsLiveClient:
         token: str,
         context: RepositoryContext,
         cookie_provider: GitHubWebCookieProvider | None = None,
+        page_session: GitHubPageSession | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         """Bind the live-log client to one repository context and token."""
         self._token = token
         self.context = context
         self._cookie_provider = cookie_provider
+        self._page_session = page_session
         self._http_client = http_client
         self._owns_http_client = http_client is None
 
     async def aclose(self) -> None:
-        """Close the owned async HTTP client, if any."""
+        """Close the owned page session and HTTP client, if any."""
+        if self._page_session is not None:
+            await self._page_session.aclose()
         if self._http_client is None or not self._owns_http_client:
             return
         await self._http_client.aclose()
@@ -140,6 +152,10 @@ class GitHubActionsLiveClient:
 
     async def discover_job_page(self, *, job_url: str) -> LiveJobPageInfo:
         """Return hidden live-log transport metadata exposed on one job page."""
+        page_info = await self._discover_job_page_from_tab(job_url=job_url)
+        if page_info is not None:
+            return page_info
+
         best_info = LiveJobPageInfo()
         saw_success = False
         last_error: http_utils.RequestError | None = None
@@ -223,6 +239,49 @@ class GitHubActionsLiveClient:
         )
         return tuple(_parse_live_line(item) for item in records)
 
+    async def _discover_job_page_from_tab(
+        self, *, job_url: str
+    ) -> LiveJobPageInfo | None:
+        if self._page_session is None:
+            return None
+        try:
+            await self._page_session.ensure_job_page(job_url)
+            html, page_url = await self._page_session.read_document_html()
+        except PageSessionUnavailableError:
+            return None
+        return _parse_live_job_page_from_html(html, job_url=page_url or job_url)
+
+    async def _fetch_via_page(
+        self,
+        url: str,
+        *,
+        accept: str,
+        referer: str | None,
+    ) -> tuple[bytes, dict[str, str]] | None:
+        if self._page_session is None:
+            return None
+        try:
+            result = await self._page_session.fetch(
+                url,
+                headers=self._build_web_headers(accept=accept, referer=referer),
+            )
+        except PageSessionUnavailableError:
+            return None
+        if result.status >= http_utils.HTTP_BAD_REQUEST:
+            raise http_utils.RequestError(
+                url=url,
+                attempts=1,
+                kind="status",
+                detail=f"HTTP {result.status} from in-page GitHub fetch",
+                status=result.status,
+            )
+        if accept == _JSON_ACCEPT and not _payload_is_json(
+            result.body,
+            headers=result.headers,
+        ):
+            raise _non_json_payload_error(url=url, headers=result.headers)
+        return result.body, result.headers
+
     async def _fetch_web_bytes(
         self,
         url: str,
@@ -230,6 +289,12 @@ class GitHubActionsLiveClient:
         accept: str,
         referer: str | None = None,
     ) -> tuple[bytes, dict[str, str]]:
+        page_result = await self._fetch_via_page(
+            url, accept=accept, referer=referer
+        )
+        if page_result is not None:
+            return page_result
+
         last_error: Exception | None = None
 
         async def _try_fetch(
