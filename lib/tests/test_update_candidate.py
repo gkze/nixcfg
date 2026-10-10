@@ -2227,6 +2227,52 @@ def _candidate_with_file(
     )
 
 
+def test_merge_prepared_candidates_preserves_guide_symlink(tmp_path: Path) -> None:
+    """Materializing the merge must not follow CLAUDE.md into AGENTS.md (#1267)."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(
+        root,
+        tracked_files={
+            "AGENTS.md": "# Agent Guide\nkeep this body\n",
+            "keep.txt": "keep\n",
+        },
+    )
+    (root / "CLAUDE.md").symlink_to("AGENTS.md")
+    git(root, "add", "--", "CLAUDE.md")
+    git(
+        root,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "-c",
+        "commit.gpgSign=false",
+        "commit",
+        "-m",
+        "symlink",
+    )
+    arm = _candidate_with_file(
+        root,
+        "arm.txt",
+        "arm\n",
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "x86.txt",
+        "x86\n",
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    merged = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    merged.apply(root)
+    assert (root / "AGENTS.md").read_text(encoding="utf-8") == (
+        "# Agent Guide\nkeep this body\n"
+    )
+    assert (root / "CLAUDE.md").is_symlink()
+    assert (root / "CLAUDE.md").readlink() == Path("AGENTS.md")
+    assert b"AGENTS.md" not in merged.patch
+
+
 def test_merge_prepared_candidates_keeps_disjoint_linux_edits(tmp_path: Path) -> None:
     """Arm and x86 may extend Darwin in parallel when they do not clash."""
     root = tmp_path / "repo"

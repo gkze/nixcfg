@@ -8,7 +8,7 @@ import sys
 from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 
 import typer
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -275,18 +275,49 @@ def checkout_candidate(root: Path) -> Candidate:
     )
 
 
-def _index_files(root: Path) -> dict[str, bytes]:
-    """Return blob contents of every path in the current Git index."""
+class _IndexBlob(NamedTuple):
+    """One Git index entry: mode plus blob bytes (symlink target or file)."""
+
+    mode: str
+    content: bytes
+
+
+def _index_files(root: Path) -> dict[str, _IndexBlob]:
+    """Return mode-aware blobs of every path in the current Git index."""
     git(root, "add", "--all")
-    names = [name for name in git(root, "ls-files", "-z").decode().split("\0") if name]
-    return {name: git(root, "show", f":{name}") for name in names}
+    files: dict[str, _IndexBlob] = {}
+    for entry in git(root, "ls-files", "--stage", "-z").split(b"\0"):
+        if not entry:
+            continue
+        meta, path = entry.split(b"\t", 1)
+        mode, _oid, _stage = meta.split(b" ", 2)
+        name = path.decode()
+        files[name] = _IndexBlob(mode.decode(), git(root, "show", f":{name}"))
+    return files
 
 
-def _candidate_index_files(candidate: Candidate, repo: Path) -> dict[str, bytes]:
+def _candidate_index_files(candidate: Candidate, repo: Path) -> dict[str, _IndexBlob]:
     """Apply *candidate* in isolation and return its indexed files."""
     with IsolatedUpdateWorkspace(repo) as workspace:
         candidate.apply(workspace.root)
         return _index_files(workspace.root)
+
+
+def _install_index_blob(dest: Path, blob: _IndexBlob) -> None:
+    """Write *blob* without following an existing symlink at *dest*.
+
+    ``Path.write_bytes`` follows ``CLAUDE.md`` → ``AGENTS.md`` and would
+    replace the guide with the symlink target. Unlink first, then recreate
+    the symlink or regular file using the index mode.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.unlink(missing_ok=True)
+    if blob.mode == "120000":
+        dest.symlink_to(os.fsdecode(blob.content))
+        return
+    dest.write_bytes(blob.content)
+    if blob.mode == "100755":
+        dest.chmod(0o755)
 
 
 def _is_package_sources_path(path: str) -> bool:
@@ -401,10 +432,10 @@ def _merged_package_sources(path: str, first: bytes, second: bytes) -> bytes | N
 
 
 def _merged_index_files(
-    base: dict[str, bytes],
-    left: dict[str, bytes],
-    right: dict[str, bytes],
-) -> dict[str, bytes]:
+    base: dict[str, _IndexBlob],
+    left: dict[str, _IndexBlob],
+    right: dict[str, _IndexBlob],
+) -> dict[str, _IndexBlob]:
     """3-way merge file maps; fail closed on content conflicts.
 
     Per-package ``sources.json`` overlaps use :class:`SourceEntry` merge when the
@@ -426,10 +457,11 @@ def _merged_index_files(
             msg = f"Conflicting candidate edits for {path}"
             raise ValueError(msg)
         else:
-            chosen = _merged_package_sources(path, first, second)
-            if chosen is None:
+            content = _merged_package_sources(path, first.content, second.content)
+            if content is None or first.mode != second.mode:
                 msg = f"Conflicting candidate edits for {path}"
                 raise ValueError(msg)
+            chosen = _IndexBlob(first.mode, content)
         if chosen is None:
             merged.pop(path, None)
         else:
@@ -481,10 +513,8 @@ def merge_prepared_candidates(
         root = workspace.root
         for path in set(base) - set(merged_files):
             (root / path).unlink()
-        for path, content in merged_files.items():
-            dest = root / path
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(content)
+        for path, blob in merged_files.items():
+            _install_index_blob(root / path, blob)
         git(root, "add", "--all")
         tree = git(root, "write-tree").decode().strip()
         patch = git(
