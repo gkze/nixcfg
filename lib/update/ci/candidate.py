@@ -926,13 +926,13 @@ def _realize_zed_warmup(
         if not is_rust_zed_store_path(path)
         and not is_zed_editor_nightly_store_path(path)
     )
-    import_warmup_drvs(
-        tuple(dict.fromkeys((*family_outputs,))),
-        warmup_plan.with_name(WARMUP_DRVS_NAME),
-    )
     member_drvs = unique_drvs_for_outputs(member_out, plan.output_drvs)
     rust_zed = unique_drvs_for_outputs(rust_zed_out, plan.output_drvs)
     zed_nightly = unique_drvs_for_outputs(nightly_out, plan.output_drvs)
+    import_warmup_drvs(
+        tuple(dict.fromkeys((*member_drvs, *rust_zed, *zed_nightly))),
+        warmup_plan.with_name(WARMUP_DRVS_NAME),
+    )
     parents = rust_zed or rust_crate_input_drvs(zed_nightly, ("zed",))
     if parents:
         member_drvs = tuple(

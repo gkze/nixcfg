@@ -1168,8 +1168,13 @@ def test_zed_warmup_force_locals_whole_family_when_cachix_is_mixed(
         ))
         return ()
 
+    imported: list[object] = []
+
+    def capture_import(paths: object, *_args: object, **_kwargs: object) -> None:
+        imported.append(paths)
+
     monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
-    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", capture_import)
     monkeypatch.setattr(
         pipeline, "check_path_in_cachix", lambda path: "settings_content" in path
     )
@@ -1221,6 +1226,8 @@ def test_zed_warmup_force_locals_whole_family_when_cachix_is_mixed(
         candidate, scope="zed-warmup", warmup_plan=warmup_plan
     )
     assert report.failures == ()
+    assert imported
+    assert all(str(path).endswith(".drv") for path in imported[0])
     force_local = [row for row in realized if row[2]]
     assert force_local
     assert all(row[4] for row in force_local)
