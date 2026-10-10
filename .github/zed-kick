@@ -2,4 +2,4 @@
 # Does not cancel Update (separate concurrency group).
 # Do not kick while validate-darwin-warm-rust owns all five macos-15 runners.
 # canary-crates stay on Update; this job realizes rust_zed + nightly + SVH family.
-2026-10-10T19:40:00Z zed-fast-loop-cold
+2026-10-10T19:52:00Z zed-fast-loop-import-drvs
