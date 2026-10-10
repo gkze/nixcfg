@@ -17,11 +17,20 @@ on:
         default: true
       canary_warm_rust:
         description: >
-          Dispatch-only reserved input. The full no-skip run is still the
-          done-bar proof. Prepare stays serial (one candidate extended
-          Darwin → arm → x86) so this flag does not skip those jobs yet.
+          Dispatch-only. Realize specified rust-warmup slot(s) or crate
+          family against the current plan on this branch. Skips prepare,
+          Linux validate, Darwin roots, publish, and coverage. The push
+          and schedule no-skip run is still the done-bar proof.
         type: boolean
         default: false
+      canary_slots:
+        description: Comma-separated rust-warmup slots (0-4). Default 0 when canary.
+        type: string
+        default: ""
+      canary_crates:
+        description: Space-separated crate2nix crate names to realize from the current plan.
+        type: string
+        default: ""
   schedule:
     - cron: "17 7 * * 1"
   # workflow_dispatch is unavailable to the Cursor GitHub App token
@@ -42,13 +51,18 @@ concurrency:
   # so a newer HEAD can start instead of waiting on a doomed older SHA.
   cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
 jobs:
-  # Generated artifacts share one pinned candidate. Each prepare extends
-  # the previous platform's tree (Darwin → arm → x86). These jobs cannot
-  # run in parallel without splitting that candidate. rust-warmup waits
-  # for prepare-x86 because that is the complete tree. #1263 force-local
-  # now dry-runs the will-be-built set so a 406-drv bootstrap compile
-  # fails the slot immediately instead of burning the runner.
+  # Darwin is the real pin: flake refs and shared generated files.
+  # Linux prepares only add native hashes, so arm and x86 both extend
+  # Darwin in parallel. prepare-merge 3-way-merges those extensions
+  # into the complete candidate. plan-darwin-closures's true input is
+  # that merged tree because root-out-paths and certify bind to it.
+  # #1263 force-local dry-runs the will-be-built set so a 406-drv
+  # bootstrap compile fails the slot immediately.
   prepare-darwin:
+    if: |-
+      github.event_name != 'workflow_dispatch' ||
+      (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
+      inputs.canary_slots == '' && inputs.canary_crates == '')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -63,6 +77,9 @@ jobs:
     secrets: inherit
   prepare-arm:
     needs: prepare-darwin
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-darwin.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04-arm
@@ -71,13 +88,34 @@ jobs:
       previous: prepare-aarch64-darwin
     secrets: inherit
   prepare-x86:
-    needs: prepare-arm
+    needs: prepare-darwin
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-darwin.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04
       system: x86_64-linux
       stage: prepare
+      previous: prepare-aarch64-darwin
+    secrets: inherit
+  prepare-merge:
+    needs:
+      - prepare-darwin
+      - prepare-arm
+      - prepare-x86
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-darwin.result == 'success' &&
+      needs.prepare-arm.result == 'success' &&
+      needs.prepare-x86.result == 'success'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: merge-candidates
       previous: prepare-aarch64-linux
+      previous_extra: prepare-x86_64-linux
     secrets: inherit
   # Recache the Linux native boundary of Darwin roots (the Rosetta VM
   # image) after rust-warmup. Doing this from the Darwin-prepare tree
@@ -87,7 +125,7 @@ jobs:
   # inventory starts in parallel and does not wait.
   cache-darwin-linux-deps-arm:
     needs:
-      - prepare-x86
+      - prepare-merge
       - validate-darwin-warm-rust
     uses: ./.github/workflows/update-native.yml
     with:
@@ -98,7 +136,7 @@ jobs:
     secrets: inherit
   cache-darwin-linux-deps-x86:
     needs:
-      - prepare-x86
+      - prepare-merge
       - validate-darwin-warm-rust
     uses: ./.github/workflows/update-native.yml
     with:
@@ -108,7 +146,10 @@ jobs:
       previous: prepare-x86_64-linux
     secrets: inherit
   validate-arm:
-    needs: prepare-x86
+    needs: prepare-merge
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04-arm
@@ -117,13 +158,102 @@ jobs:
       previous: prepare-x86_64-linux
     secrets: inherit
   validate-x86:
-    needs: prepare-x86
+    needs: prepare-merge
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04
       system: x86_64-linux
       stage: validate
       previous: prepare-x86_64-linux
+    secrets: inherit
+  canary-slots:
+    if: |-
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.canary_warm_rust == true || inputs.canary_warm_rust == 'true' ||
+      inputs.canary_slots != '' || inputs.canary_crates != '')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.slots.outputs.matrix }}
+    steps:
+      - name: Compute canary rust-warmup matrix
+        id: slots
+        env:
+          CANARY_SLOTS: ${{ inputs.canary_slots }}
+          CANARY_CRATES: ${{ inputs.canary_crates }}
+        run: |
+          import json
+          import os
+          raw = os.environ.get("CANARY_SLOTS", "").strip()
+          crates = os.environ.get("CANARY_CRATES", "").strip()
+          if raw:
+              slots = [int(part) for part in raw.replace(",", " ").split() if part]
+          elif crates:
+              slots = [0, 1, 2, 3, 4]
+          else:
+              slots = [0]
+          if any(slot < 0 or slot > 4 for slot in slots):
+              raise SystemExit(f"canary slot must be in 0..4, got {slots}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"matrix={json.dumps({'slot': slots})}\n")
+        shell: python
+  canary-plan:
+    if: |-
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.canary_warm_rust == true || inputs.canary_warm_rust == 'true' ||
+      inputs.canary_slots != '' || inputs.canary_crates != '')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Restore current warmup plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIXCFG_CI_STAGE: restore-canary-plan
+          NIXCFG_CANARY_PLAN_DIR: ${{ runner.temp }}/canary-plan
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: canary-plan
+          path: ${{ runner.temp }}/canary-plan
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+  canary-warm-rust:
+    needs:
+      - canary-slots
+      - canary-plan
+    if: |-
+      always() && !cancelled() &&
+      needs.canary-slots.result == 'success' &&
+      needs.canary-plan.result == 'success'
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix: ${{ fromJSON(needs.canary-slots.outputs.matrix) }}
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      scope: rust-warmup
+      shard: rust-${{ matrix.slot }}
+      warmup_artifact: canary-plan
+      warmup_slot: ${{ matrix.slot }}
+      canary: true
+      canary_slots: ${{ inputs.canary_slots }}
+      canary_crates: ${{ inputs.canary_crates }}
     secrets: inherit
   # rust_* warmup owns all 5 public macos-15 slots, striped across the
   # planner's crate2nix dependency layers. Packages inventory waits so it
@@ -132,8 +262,12 @@ jobs:
   # gate is unchanged.
   validate-darwin-warm-rust:
     needs:
-      - prepare-x86
+      - prepare-merge
       - plan-darwin-closures
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success' &&
+      needs.plan-darwin-closures.result == 'success'
     strategy:
       fail-fast: false
       max-parallel: 5
@@ -154,7 +288,7 @@ jobs:
   # 3755-path root warmup; that set is the rust-warmup matrix above.
   validate-darwin-packages:
     needs:
-      - prepare-x86
+      - prepare-merge
       - plan-darwin-closures
       - validate-darwin-warm-rust
     uses: ./.github/workflows/update-native.yml
@@ -168,7 +302,10 @@ jobs:
   # One generated matrix from lib.rootClosureManifest plus shard_costs.json.
   # The plan job evaluates the candidate tree, not a hand-maintained host list.
   plan-darwin-closures:
-    needs: prepare-x86
+    needs: prepare-merge
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04
@@ -182,14 +319,14 @@ jobs:
   validate-darwin-roots:
     needs:
       - plan-darwin-closures
-      - prepare-x86
+      - prepare-merge
       - cache-darwin-linux-deps-arm
       - cache-darwin-linux-deps-x86
       - validate-darwin-warm-rust
     if: |-
       always() && !cancelled() &&
       needs.plan-darwin-closures.result == 'success' &&
-      needs.prepare-x86.result == 'success' &&
+      needs.prepare-merge.result == 'success' &&
       needs.cache-darwin-linux-deps-arm.result == 'success' &&
       needs.cache-darwin-linux-deps-x86.result == 'success' &&
       needs.validate-darwin-warm-rust.result == 'success'
@@ -210,13 +347,13 @@ jobs:
   # Aggregate proof. Mostly substitution of the per-root checks.
   validate-darwin-closures:
     needs:
-      - prepare-x86
+      - prepare-merge
       - cache-darwin-linux-deps-arm
       - cache-darwin-linux-deps-x86
       - validate-darwin-roots
     if: |-
       always() && !cancelled() &&
-      needs.prepare-x86.result == 'success' &&
+      needs.prepare-merge.result == 'success' &&
       needs.cache-darwin-linux-deps-arm.result == 'success' &&
       needs.cache-darwin-linux-deps-x86.result == 'success' &&
       needs.validate-darwin-roots.result == 'success'
@@ -235,7 +372,7 @@ jobs:
   # plan-darwin-closures artifact, not a second Darwin eval.
   assert-coverage:
     needs:
-      - prepare-x86
+      - prepare-merge
       - plan-darwin-closures
       - validate-arm
       - validate-x86
@@ -243,7 +380,11 @@ jobs:
       - validate-darwin-packages
       - validate-darwin-roots
       - validate-darwin-closures
-    if: always()
+    if: |-
+      always() &&
+      (github.event_name != 'workflow_dispatch' ||
+      (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
+      inputs.canary_slots == '' && inputs.canary_crates == ''))
     runs-on: macos-15
     timeout-minutes: 120
     steps:
@@ -368,6 +509,7 @@ jobs:
       - prepare-darwin
       - prepare-arm
       - prepare-x86
+      - prepare-merge
       - cache-darwin-linux-deps-arm
       - cache-darwin-linux-deps-x86
       - validate-arm
@@ -382,7 +524,9 @@ jobs:
     if: |-
       always() && !cancelled() && contains(needs.*.result, 'failure') &&
       (github.event_name == 'schedule' || github.event_name == 'push' ||
-      inputs.repair == true || inputs.repair == 'true')
+      inputs.repair == true || inputs.repair == 'true') &&
+      (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
+      inputs.canary_slots == '' && inputs.canary_crates == '')
     # The repair gate runs the Darwin-maintained Python suite, as publish does.
     runs-on: macos-15
     timeout-minutes: 120

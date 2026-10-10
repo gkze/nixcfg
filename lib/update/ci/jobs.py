@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TextIO
 
@@ -836,8 +837,46 @@ def _publish_prefetched_receipts(
     return returncode
 
 
+def _merge_candidate_args(artifacts: Path) -> list[str]:
+    """Return argv that 3-way-merges two native prepare artifacts."""
+    previous = os.environ.get("NIXCFG_PREVIOUS_CANDIDATE", "")
+    right = os.environ.get("NIXCFG_MERGE_RIGHT", "")
+    if not previous or not right:
+        msg = "Merge requires NIXCFG_PREVIOUS_CANDIDATE and NIXCFG_MERGE_RIGHT"
+        raise ValueError(msg)
+    return [
+        _runtime(),
+        "ci",
+        "update",
+        "merge-candidates",
+        "--left",
+        previous,
+        "--right",
+        right,
+        "--output",
+        str(artifacts / "candidate.json"),
+    ]
+
+
+def _validate_native_args(args: list[str], artifacts: Path, previous: str) -> list[str]:
+    """Append validate flags, allowing canary to omit a previous candidate."""
+    if not previous and os.environ.get("NIXCFG_CANARY") != "true":
+        msg = "Validation requires a previous candidate"
+        raise ValueError(msg)
+    scope = _append_validation_scope(args)
+    report_name = (
+        "shard-receipt.json" if scope == "closure-shard" else "validation.json"
+    )
+    if previous:
+        args.extend(("--candidate", previous))
+    args.extend(("--output", str(artifacts / report_name)))
+    return args
+
+
 def _native_args(stage: str, artifacts: Path) -> list[str]:
     """Return the updater argv for one hosted native stage."""
+    if stage == "merge-candidates":
+        return _merge_candidate_args(artifacts)
     args = [_runtime(), "ci", "update", stage]
     previous = os.environ.get("NIXCFG_PREVIOUS_CANDIDATE", "")
     if stage == "prepare":
@@ -859,10 +898,10 @@ def _native_args(stage: str, artifacts: Path) -> list[str]:
             args.extend(("--", *targets))
         return args
     if not previous:
+        if stage == "validate":
+            return _validate_native_args(args, artifacts, previous)
         if stage == "cache-root-deps":
             msg = "Foreign-root dependency cache requires a previous candidate"
-        elif stage == "validate":
-            msg = "Validation requires a previous candidate"
         elif stage == "plan-shards":
             msg = "Shard planning requires a previous candidate"
         elif stage == "assert-coverage":
@@ -879,17 +918,7 @@ def _native_args(stage: str, artifacts: Path) -> list[str]:
         ))
         return args
     if stage == "validate":
-        scope = _append_validation_scope(args)
-        report_name = (
-            "shard-receipt.json" if scope == "closure-shard" else "validation.json"
-        )
-        args.extend((
-            "--candidate",
-            previous,
-            "--output",
-            str(artifacts / report_name),
-        ))
-        return args
+        return _validate_native_args(args, artifacts, previous)
     if stage == "plan-shards":
         args.extend((
             "--candidate",
@@ -1366,6 +1395,62 @@ def flush_cachix() -> None:
         record_runner_storage("flush-end", log)
 
 
+def restore_canary_plan(
+    *,
+    dest: Path | None = None,
+    run: Callable[..., object] | None = None,
+) -> Path:
+    """Download the latest ``plan-shards-x86_64-linux`` artifact on this ref."""
+    target = dest if dest is not None else Path(os.environ["NIXCFG_CANARY_PLAN_DIR"])
+    target.mkdir(parents=True, exist_ok=True)
+    runner: Callable[..., object] = _run if run is None else run
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    branch = os.environ.get("GITHUB_REF_NAME", "")
+    if not repo or not branch:
+        msg = "Canary plan restore requires GITHUB_REPOSITORY and GITHUB_REF_NAME"
+        raise ValueError(msg)
+    listed = runner(
+        "gh",
+        "run",
+        "list",
+        "-R",
+        repo,
+        "--workflow=Update",
+        "--branch",
+        branch,
+        "--limit",
+        "20",
+        "--json",
+        "databaseId,status,conclusion",
+        capture=True,
+        check=True,
+    )
+    payload = getattr(listed, "stdout", listed)
+    if not isinstance(payload, (str, bytes, bytearray)):
+        msg = "Canary plan listing must return JSON text"
+        raise TypeError(msg)
+    runs = json.loads(payload)
+    for run_row in runs:
+        run_id = run_row["databaseId"]
+        downloaded = runner(
+            "gh",
+            "run",
+            "download",
+            str(run_id),
+            "-n",
+            "plan-shards-x86_64-linux",
+            "-D",
+            str(target),
+            check=False,
+            capture=True,
+        )
+        code = downloaded.returncode if hasattr(downloaded, "returncode") else 0
+        if code == 0 and (target / "warmup-plan.json").is_file():
+            return target
+    msg = f"No current warmup plan artifact on {repo}@{branch}"
+    raise RuntimeError(msg)
+
+
 def main(stage: str) -> int:
     """Dispatch the finite set of Actions operations, preserving process failures."""
     native_stages = {
@@ -1374,6 +1459,7 @@ def main(stage: str) -> int:
         "cache-root-deps",
         "plan-shards",
         "assert-coverage",
+        "merge-candidates",
     }
     if stage in native_stages:
         # Capture CLI JSON inside the environment, after any devshell startup output.
@@ -1398,6 +1484,7 @@ def main(stage: str) -> int:
         "repair": repair,
         "start-repair": start_repair,
         "flush-cachix": flush_cachix,
+        "restore-canary-plan": restore_canary_plan,
     }
     operations[stage]()
     return 0

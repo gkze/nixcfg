@@ -68,6 +68,32 @@ MAX_SHARD_LOCAL_BUILDS = 400
 # Public macos-15 cap is 5. rust_* warmup owns those slots, partitioned by
 # crate2nix dependency layers so later crates can substitute earlier ones.
 RUST_WARMUP_SLOTS = 5
+
+
+def parse_canary_slots(raw: str) -> tuple[int, ...]:
+    """Parse dispatch ``canary_slots`` (comma or space separated 0-4)."""
+    parts = tuple(part for part in raw.replace(",", " ").split() if part)
+    if not parts:
+        return ()
+    slots: list[int] = []
+    for part in parts:
+        try:
+            slot = int(part)
+        except ValueError:
+            msg = f"canary slot {part!r} is not an integer"
+            raise WarmupError(msg) from None
+        if not 0 <= slot < RUST_WARMUP_SLOTS:
+            msg = f"canary slot must be in 0..{RUST_WARMUP_SLOTS - 1}, got {slot}"
+            raise WarmupError(msg)
+        slots.append(slot)
+    return tuple(dict.fromkeys(slots))
+
+
+def parse_canary_crates(raw: str) -> tuple[str, ...]:
+    """Parse dispatch ``canary_crates`` (space or comma separated crate names)."""
+    return tuple(dict.fromkeys(part for part in raw.replace(",", " ").split() if part))
+
+
 _WARMUP_REALIZE_CHUNK = 128
 _STORE_COPY_CHUNK = 128
 _SUBSTITUTER_WORKERS = 16

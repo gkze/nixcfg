@@ -17,7 +17,7 @@ from lib.diagnostics import redact_urls
 from lib.system_policy import supported_systems
 from lib.update import cli as update_cli
 from lib.update import derivation_validation as validation
-from lib.update.candidate import Candidate, Preparation
+from lib.update.candidate import Candidate, Preparation, git
 from lib.update.ci import jobs
 from lib.update.ci.coverage import (
     ROOT_OUT_PATHS_NAME,
@@ -48,11 +48,14 @@ from lib.update.ci.warmup import (
     extension_host_family_warmup_outputs,
     import_warmup_drvs,
     is_extension_host_family_store_path,
+    is_named_rust_crate_store_path,
     is_rust_extension_host_store_path,
     is_rust_language_models_store_path,
     language_models_input_drvs,
     language_models_warmup_outputs,
     load_warmup_plan,
+    parse_canary_crates,
+    parse_canary_slots,
     partition_agent_ui_drvs,
     partition_compiler_input_drvs,
     partition_rust_zed_drvs,
@@ -252,6 +255,142 @@ def cache_root_dependencies(candidate: Candidate) -> RootDependencyCacheReport:
     )
 
 
+def checkout_candidate(root: Path) -> Candidate:
+    """Return an identity candidate for the current checkout.
+
+    Dispatch canary realizes rust_* against the branch tree and the current
+    warmup plan. It does not refresh flake inputs or certify.
+    """
+    tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
+    return Candidate(
+        base_tree=tree,
+        tree=tree,
+        targets=(),
+        sources=(),
+        systems=supported_systems(),
+        resolutions={},
+        prepared=True,
+        patch=b"",
+    )
+
+
+def _index_files(root: Path) -> dict[str, bytes]:
+    """Return blob contents of every path in the current Git index."""
+    git(root, "add", "--all")
+    names = [name for name in git(root, "ls-files", "-z").decode().split("\0") if name]
+    return {name: git(root, "show", f":{name}") for name in names}
+
+
+def _candidate_index_files(candidate: Candidate, repo: Path) -> dict[str, bytes]:
+    """Apply *candidate* in isolation and return its indexed files."""
+    with IsolatedUpdateWorkspace(repo) as workspace:
+        candidate.apply(workspace.root)
+        return _index_files(workspace.root)
+
+
+def _merged_index_files(
+    base: dict[str, bytes],
+    left: dict[str, bytes],
+    right: dict[str, bytes],
+) -> dict[str, bytes]:
+    """3-way merge file maps; fail closed on content conflicts."""
+    merged = dict(base)
+    for path in set(base) | set(left) | set(right):
+        ancestor = base.get(path)
+        first = left.get(path)
+        second = right.get(path)
+        if first == second:
+            chosen = first
+        elif first == ancestor:
+            chosen = second
+        elif second == ancestor:
+            chosen = first
+        else:
+            msg = f"Conflicting candidate edits for {path}"
+            raise ValueError(msg)
+        if chosen is None:
+            merged.pop(path, None)
+        else:
+            merged[path] = chosen
+    return merged
+
+
+def merge_prepared_candidates(
+    left: Candidate,
+    right: Candidate,
+    *,
+    repo: Path,
+) -> Candidate:
+    """Merge two same-baseline native extensions into one candidate.
+
+    Darwin pins refs and shared generated files. Linux prepare only adds
+    native hashes, so arm and x86 can extend Darwin in parallel. Overlapping
+    file edits with different contents fail closed.
+    """
+    if left.base_tree != right.base_tree:
+        msg = "Merged candidates must share a baseline tree"
+        raise ValueError(msg)
+    if left.targets != right.targets:
+        msg = "Candidate target selection cannot change between platforms"
+        raise ValueError(msg)
+    if not left.prepared or not right.prepared:
+        msg = "A failed preparation cannot be merged"
+        raise ValueError(msg)
+    left_extra = set(left.systems) - set(right.systems)
+    right_extra = set(right.systems) - set(left.systems)
+    if not left_extra or not right_extra:
+        msg = "Merge needs disjoint platform extensions"
+        raise ValueError(msg)
+    for name, value in right.resolutions.items():
+        existing = left.resolutions.get(name)
+        if existing is not None and existing != value:
+            msg = f"Conflicting resolution for {name}"
+            raise ValueError(msg)
+    with IsolatedUpdateWorkspace(repo) as workspace:
+        base = _index_files(workspace.root)
+    merged_files = _merged_index_files(
+        base,
+        _candidate_index_files(left, repo),
+        _candidate_index_files(right, repo),
+    )
+    with IsolatedUpdateWorkspace(repo) as workspace:
+        root = workspace.root
+        for path in set(base) - set(merged_files):
+            (root / path).unlink()
+        for path, content in merged_files.items():
+            dest = root / path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(content)
+        git(root, "add", "--all")
+        tree = git(root, "write-tree").decode().strip()
+        patch = git(
+            root,
+            "diff",
+            "--cached",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "HEAD",
+            "--",
+        )
+    return Candidate(
+        base_tree=left.base_tree,
+        tree=tree,
+        targets=left.targets,
+        sources=tuple(dict.fromkeys((*left.sources, *right.sources))),
+        validate_all_packages=left.validate_all_packages or right.validate_all_packages,
+        systems=tuple(
+            system
+            for system in supported_systems()
+            if system in set(left.systems) | set(right.systems)
+        ),
+        resolutions={**left.resolutions, **right.resolutions},
+        prepared=True,
+        patch=patch,
+    )
+
+
 def require_complete_candidate(candidate: Candidate) -> None:
     """Reject failed or incomplete preparation before issuing validation evidence."""
     if not candidate.prepared or (
@@ -375,8 +514,27 @@ def _realize_rust_warmup(
     flake_root: Path,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     """Realize one rust-warmup stripe, skipping paths already in gkze."""
+    requested_slots = parse_canary_slots(os.environ.get("NIXCFG_CANARY_SLOTS", ""))
+    requested_crates = parse_canary_crates(os.environ.get("NIXCFG_CANARY_CRATES", ""))
+    if (
+        os.environ.get("NIXCFG_CANARY") == "true"
+        and not requested_slots
+        and not requested_crates
+    ):
+        requested_slots = (0,)
+    if requested_slots and warmup_slot not in requested_slots:
+        return ()
     plan = load_warmup_plan(warmup_plan)
     slot_paths = slot_warmup_paths(plan.rust_layers, warmup_slot)
+    if requested_crates:
+        slot_paths = tuple(
+            path
+            for path in slot_paths
+            if any(
+                is_named_rust_crate_store_path(path, crate)
+                for crate in requested_crates
+            )
+        )
     missing = skip_cached_warmup_paths(
         slot_paths,
         present=check_path_in_cachix,
@@ -626,6 +784,24 @@ def certified_patch(candidate: Candidate, reports: list[ValidationReport]) -> by
     return candidate.patch
 
 
+@app.command("merge-candidates")
+def merge_candidates_cmd(
+    left: Annotated[Path, typer.Option(help="First native candidate JSON.")],
+    right: Annotated[Path, typer.Option(help="Second native candidate JSON.")],
+    output: Annotated[
+        Path, typer.Option(help="Merged candidate JSON outside the repository.")
+    ],
+) -> None:
+    """Merge two same-baseline native prepare artifacts into one candidate."""
+    output = _output_path(output, get_repo_root())
+    merged = merge_prepared_candidates(
+        Candidate.model_validate_json(left.read_bytes()),
+        Candidate.model_validate_json(right.read_bytes()),
+        repo=get_repo_root(),
+    )
+    atomic_write_text(output, merged.model_dump_json(indent=2) + "\n")
+
+
 @app.command("prepare")
 def prepare(
     targets: Annotated[list[str] | None, typer.Argument()] = None,
@@ -676,8 +852,12 @@ def cache_root_deps(
 
 @app.command("validate")
 def validate(
-    candidate: Annotated[Path, typer.Option(help="Final prepared candidate JSON.")],
-    output: Annotated[Path, typer.Option(help="Native validation report.")],
+    candidate: Annotated[
+        Path | None, typer.Option(help="Final prepared candidate JSON.")
+    ] = None,
+    output: Annotated[Path, typer.Option(help="Native validation report.")] = Path(
+        "validation.json"
+    ),
     scope: Annotated[
         ValidationScope,
         typer.Option(help="Package gate, closure gate, shard, or both."),
@@ -718,8 +898,15 @@ def validate(
         raise ValueError(msg)
     output = _output_path(output, get_repo_root())
     roots = None if closure_roots is None else tuple(closure_roots.split())
+    if candidate is None:
+        if os.environ.get("NIXCFG_CANARY") != "true":
+            msg = "Validation requires a previous candidate"
+            raise ValueError(msg)
+        prepared = checkout_candidate(get_repo_root())
+    else:
+        prepared = Candidate.model_validate_json(candidate.read_bytes())
     report = validate_candidate(
-        Candidate.model_validate_json(candidate.read_bytes()),
+        prepared,
         scope=scope,
         closure_budget_seconds=closure_budget_seconds,
         closure_roots=roots,

@@ -44,6 +44,8 @@ from lib.update.ci.warmup import (
     language_models_warmup_outputs,
     load_warmup_plan,
     nix_store_argv_has_operation,
+    parse_canary_crates,
+    parse_canary_slots,
     partition_agent_ui_drvs,
     partition_compiler_input_drvs,
     partition_rust_zed_drvs,
@@ -908,6 +910,19 @@ def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
                 args, 1, "", "nix-store: dead"
             ),
         )
+
+
+def test_parse_canary_slots_and_crates() -> None:
+    """Dispatch canary accepts comma/space slots and unique crate names."""
+    assert parse_canary_slots("") == ()
+    assert parse_canary_slots("0, 2") == (0, 2)
+    assert parse_canary_slots("1 1 3") == (1, 3)
+    with pytest.raises(WarmupError, match="not an integer"):
+        parse_canary_slots("x")
+    with pytest.raises(WarmupError, match="0..4"):
+        parse_canary_slots("5")
+    assert parse_canary_crates("extension_host, zed zed") == ("extension_host", "zed")
+    assert parse_canary_crates("") == ()
 
 
 @pytest.mark.parametrize(

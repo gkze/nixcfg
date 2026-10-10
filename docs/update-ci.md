@@ -9,10 +9,17 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
 
 ## Execution and ownership
 
-1. Prepare on macOS ARM64, then Linux ARM64, then Linux x86_64. Each stage extends
-   one candidate, retaining previously selected release metadata and native hashes.
-   Preparation is sequential because updaters can share generated files. Dependent
-   updaters recompute metadata from their pinned prerequisites.
+1. Darwin prepare pins flake refs and shared generated files. Linux ARM64 and
+   Linux x86_64 then extend that Darwin candidate in parallel (native hashes
+   only) and `prepare-merge` 3-way-merges the two extensions. Overlapping file
+   edits with different contents fail closed. `plan-darwin-closures` waits for
+   the merged tree because `root-out-paths.json` and certify bind to that
+   candidate. A dispatch-only `canary_warm_rust` / `canary_slots` /
+   `canary_crates` path realizes selected rust-warmup slots or crates against
+   the current branch plan and skips prepare, Linux validate, Darwin roots,
+   publish, and coverage. The push and schedule no-skip run remains the
+   done-bar proof. Dependent updaters still recompute metadata from their
+   pinned prerequisites.
 2. Validate the final identical tree on all three native builders. After
    rust-warmup, two Linux jobs recache the native boundary of Darwin roots
    (the Rosetta/linux-builder VM image) into `gkze` from the final

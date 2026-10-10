@@ -8,7 +8,6 @@ import sys
 import threading
 import time
 from io import StringIO
-from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -939,6 +938,36 @@ def test_plan_shards_and_coverage_native_stages(native_job, monkeypatch) -> None
         jobs._native_args("unexpected", artifacts)
 
 
+def test_native_args_merge_candidates_and_canary_validate(
+    native_job, monkeypatch
+) -> None:
+    """Linux prepare artifacts merge; canary validate has no previous candidate."""
+    env, _checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    with pytest.raises(ValueError, match="Merge requires"):
+        jobs._native_args("merge-candidates", artifacts)
+    monkeypatch.setenv("NIXCFG_PREVIOUS_CANDIDATE", "/left.json")
+    monkeypatch.setenv("NIXCFG_MERGE_RIGHT", "/right.json")
+    merge_args = jobs._native_args("merge-candidates", artifacts)
+    assert merge_args[1:4] == ["ci", "update", "merge-candidates"]
+    assert merge_args[merge_args.index("--left") + 1] == "/left.json"
+    assert merge_args[merge_args.index("--right") + 1] == "/right.json"
+    monkeypatch.delenv("NIXCFG_PREVIOUS_CANDIDATE")
+    monkeypatch.delenv("NIXCFG_MERGE_RIGHT")
+    monkeypatch.setenv("NIXCFG_CANARY", "true")
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "rust-warmup")
+    monkeypatch.setenv("NIXCFG_WARMUP_PLAN", "/warmup/warmup-plan.json")
+    monkeypatch.setenv("NIXCFG_WARMUP_SLOT", "2")
+    canary_args = jobs._native_args("validate", artifacts)
+    assert "--candidate" not in canary_args
+    assert canary_args[canary_args.index("--warmup-slot") + 1] == "2"
+    monkeypatch.delenv("NIXCFG_CANARY")
+    with pytest.raises(ValueError, match="previous candidate"):
+        jobs._native_args("validate", artifacts)
+
+
 def test_successful_prepare_rejects_malformed_prefetch_receipts(
     native_job, monkeypatch
 ) -> None:
@@ -1080,12 +1109,59 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
         "format('{0}-{1}-{2}', inputs.stage, inputs.system, inputs.scope)" in artifact
     )
     assert "inputs.shard" in artifact
+    assert "inputs.stage == 'merge-candidates' && 'prepare-x86_64-linux'" in artifact
+
+
+def _assert_parallel_linux_prepare(jobs: dict, matrix: list[dict]) -> None:
+    """Darwin pins; Linux arm and x86 extend it in parallel; merge is the complete tree."""
+    preparation = [
+        (name, job)
+        for name, job in jobs.items()
+        if name.startswith("prepare-") and name != "prepare-merge"
+    ]
+    assert [job["with"]["system"] for _, job in preparation] == list(
+        supported_systems()
+    )
+    assert {job["with"]["system"]: job["with"]["runner"] for _, job in preparation} == {
+        row["system"]: row["runner"] for row in matrix
+    }
+    assert [name for name, _ in preparation] == [
+        "prepare-darwin",
+        "prepare-arm",
+        "prepare-x86",
+    ]
+    assert "needs" not in jobs["prepare-darwin"]
+    for name in ("prepare-arm", "prepare-x86"):
+        assert jobs[name]["needs"] == "prepare-darwin"
+        assert jobs[name]["with"]["previous"] == "prepare-aarch64-darwin"
+    merge = jobs["prepare-merge"]
+    assert set(merge["needs"]) == {"prepare-darwin", "prepare-arm", "prepare-x86"}
+    assert merge["with"]["stage"] == "merge-candidates"
+    assert merge["with"]["previous"] == "prepare-aarch64-linux"
+    assert merge["with"]["previous_extra"] == "prepare-x86_64-linux"
+
+
+def _assert_canary_jobs(workflow_jobs: dict) -> None:
+    """Dispatch canary realizes selected rust-warmup slots against the current plan."""
+    canary = workflow_jobs["canary-warm-rust"]
+    assert set(canary["needs"]) == {"canary-slots", "canary-plan"}
+    assert canary["with"]["canary"] == "true"
+    assert canary["with"]["warmup_artifact"] == "canary-plan"
+    assert canary["with"]["scope"] == "rust-warmup"
+    slots = workflow_jobs["canary-slots"]
+    assert "workflow_dispatch" in slots["if"]
+    assert "inputs.canary_warm_rust" in slots["if"]
+    slot_step = slots["steps"][0]
+    assert slot_step["env"]["CANARY_CRATES"] == "${{ inputs.canary_crates }}"
+    assert "elif crates:" in slot_step["run"]
+    assert "[0, 1, 2, 3, 4]" in slot_step["run"]
 
 
 def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
     """Darwin rust-warmup owns rust_*; packages stay inventory; shards always run."""
     rust = workflow_jobs["validate-darwin-warm-rust"]
-    assert set(rust["needs"]) == {"prepare-x86", "plan-darwin-closures"}
+    assert set(rust["needs"]) == {"prepare-merge", "plan-darwin-closures"}
+    _assert_canary_jobs(workflow_jobs)
     assert rust["with"]["scope"] == "rust-warmup"
     assert rust["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"
     assert rust["with"]["warmup_slot"] == "${{ matrix.slot }}"
@@ -1095,20 +1171,20 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
     assert rust["strategy"]["matrix"]["slot"] == ["0", "1", "2", "3", "4"]
     packages = workflow_jobs["validate-darwin-packages"]
     assert set(packages["needs"]) == {
-        "prepare-x86",
+        "prepare-merge",
         "plan-darwin-closures",
         "validate-darwin-warm-rust",
     }
     assert packages["with"]["scope"] == "packages"
     assert "warmup_artifact" not in packages["with"]
     plan = workflow_jobs["plan-darwin-closures"]
-    assert plan["needs"] == "prepare-x86"
+    assert plan["needs"] == "prepare-merge"
     assert plan["with"]["stage"] == "plan-shards"
     assert plan["with"]["runner"] == "ubuntu-24.04"
     roots = workflow_jobs["validate-darwin-roots"]
     assert set(roots["needs"]) == {
         "plan-darwin-closures",
-        "prepare-x86",
+        "prepare-merge",
         "cache-darwin-linux-deps-arm",
         "cache-darwin-linux-deps-x86",
         "validate-darwin-warm-rust",
@@ -1133,7 +1209,7 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
     assert "closure_yield" not in roots["with"]
     closures = workflow_jobs["validate-darwin-closures"]
     assert set(closures["needs"]) == {
-        "prepare-x86",
+        "prepare-merge",
         "cache-darwin-linux-deps-arm",
         "cache-darwin-linux-deps-x86",
         "validate-darwin-roots",
@@ -1143,10 +1219,17 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
     assert "needs.validate-darwin-roots.result == 'success'" in closures_if
     assert closures["with"]["scope"] == "closures"
     assert "closure_yield" not in closures["with"]
+    _assert_coverage_and_publish(workflow_jobs)
+
+
+def _assert_coverage_and_publish(workflow_jobs: dict) -> None:
+    """Coverage stays the done-bar; it does not run on a rust-warmup canary."""
     coverage = workflow_jobs["assert-coverage"]
-    assert coverage["if"] == "always()"
+    coverage_if = " ".join(coverage["if"].split())
+    assert "always()" in coverage_if
+    assert "inputs.canary_warm_rust" in coverage_if
     assert set(coverage["needs"]) == {
-        "prepare-x86",
+        "prepare-merge",
         "plan-darwin-closures",
         "validate-arm",
         "validate-x86",
@@ -1298,19 +1381,8 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         in (workflow["jobs"]["prepare-darwin"]["with"]["validate_all_packages"])
     )
     jobs = workflow["jobs"]
-    preparation = [
-        (name, job) for name, job in jobs.items() if name.startswith("prepare-")
-    ]
-    assert [job["with"]["system"] for _, job in preparation] == list(
-        supported_systems()
-    )
     matrix = json.loads(CliRunner().invoke(app, ["matrix"]).stdout)["include"]
-    assert {job["with"]["system"]: job["with"]["runner"] for _, job in preparation} == {
-        row["system"]: row["runner"] for row in matrix
-    }
-    for (name, previous), (_, job) in pairwise(preparation):
-        assert job["needs"] == name
-        assert job["with"]["previous"] == f"prepare-{previous['with']['system']}"
+    _assert_parallel_linux_prepare(jobs, matrix)
     cache_jobs = {
         name: job
         for name, job in jobs.items()
@@ -1321,7 +1393,7 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         "cache-darwin-linux-deps-x86",
     }
     for job in cache_jobs.values():
-        assert set(job["needs"]) == {"prepare-x86", "validate-darwin-warm-rust"}
+        assert set(job["needs"]) == {"prepare-merge", "validate-darwin-warm-rust"}
         assert job["with"]["stage"] == "cache-root-deps"
         assert job["with"]["previous"] == "prepare-x86_64-linux"
     assert (
@@ -1338,8 +1410,8 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     for job in validators.values():
         assert job["with"]["previous"] == "prepare-x86_64-linux"
         assert job["with"]["stage"] == "validate"
-    assert jobs["validate-arm"]["needs"] == preparation[-1][0]
-    assert jobs["validate-x86"]["needs"] == preparation[-1][0]
+    assert jobs["validate-arm"]["needs"] == "prepare-merge"
+    assert jobs["validate-x86"]["needs"] == "prepare-merge"
     _assert_darwin_closure_shards(jobs)
     assert set(jobs["publish"]["needs"]) == set(validators) | {"assert-coverage"}
     assert set(validators) <= set(jobs["repair"]["needs"])
@@ -1360,10 +1432,18 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     assert agent["env"]["COPILOT_MODEL"] == "gpt-6-astra"
     assert not {"COPILOT_GITHUB_TOKEN", "GH_TOKEN"} & agent["env"].keys()
     assert workflow["on"]["workflow_dispatch"]["inputs"]["repair"]["default"] == "true"
+    assert "canary_slots" in workflow["on"]["workflow_dispatch"]["inputs"]
+    assert "canary_crates" in workflow["on"]["workflow_dispatch"]["inputs"]
+    assert (
+        workflow["on"]["workflow_dispatch"]["inputs"]["canary_warm_rust"]["default"]
+        == "false"
+    )
     repair_if = " ".join(workflow["jobs"]["repair"]["if"].split())
     assert "inputs.repair == true" in repair_if
     assert "inputs.repair == 'true'" in repair_if
     assert "github.event_name == 'push'" in repair_if
+    assert "inputs.canary_warm_rust != true" in repair_if
+    assert "inputs.canary_slots == ''" in repair_if
     for stage in ("publish", "start-repair"):
         step = next(
             step
@@ -2600,3 +2680,67 @@ def test_diskutil_info_targets_tolerate_missing_nix_and_tools(
 
     monkeypatch.setattr(jobs.subprocess, "run", run)
     assert jobs._diskutil_info_targets() == ("/",)
+
+
+def test_restore_canary_plan_downloads_latest_warmup_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Canary reuses the current branch plan; it does not re-prepare."""
+    dest = tmp_path / "canary-plan"
+    calls: list[tuple[str, ...]] = []
+
+    def run(*args: str, capture: bool = False, check: bool = True) -> object:
+        calls.append(args)
+        if args[:3] == ("gh", "run", "list"):
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=json.dumps([
+                    {"databaseId": 1, "status": "completed", "conclusion": "failure"},
+                    {"databaseId": 2, "status": "completed", "conclusion": "success"},
+                ]),
+            )
+        if args[:3] == ("gh", "run", "download"):
+            run_id = args[3]
+            if run_id == "1":
+                return subprocess.CompletedProcess(args, 1, stdout="", stderr="missing")
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / "warmup-plan.json").write_text("{}", encoding="utf-8")
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        raise AssertionError(args)
+
+    monkeypatch.setenv("GITHUB_REPOSITORY", "gkze/nixcfg")
+    monkeypatch.setenv("GITHUB_REF_NAME", "cursor/no-skip-darwin-shards-6614")
+    assert jobs.restore_canary_plan(dest=dest, run=run) == dest
+    assert (dest / "warmup-plan.json").is_file()
+    assert calls[1][:4] == ("gh", "run", "download", "1")
+    assert calls[2][:4] == ("gh", "run", "download", "2")
+
+
+def test_restore_canary_plan_fails_closed_without_current_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
+    with pytest.raises(ValueError, match="GITHUB_REPOSITORY"):
+        jobs.restore_canary_plan(dest=tmp_path / "missing")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "gkze/nixcfg")
+    monkeypatch.setenv("GITHUB_REF_NAME", "cursor/no-skip-darwin-shards-6614")
+    monkeypatch.setenv("NIXCFG_CANARY_PLAN_DIR", str(tmp_path / "from-env"))
+
+    def empty(*_args: str, **_kwargs: object) -> object:
+        return subprocess.CompletedProcess(_args, 0, stdout="[]")
+
+    with pytest.raises(RuntimeError, match="No current warmup plan"):
+        jobs.restore_canary_plan(run=empty)
+
+    def listed(*args: str, capture: bool = False, check: bool = True) -> object:
+        if args[:3] == ("gh", "run", "list"):
+            return json.dumps([{"databaseId": 9}])
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="gone")
+
+    monkeypatch.setattr(jobs, "_run", listed)
+    with pytest.raises(RuntimeError, match="No current warmup plan"):
+        jobs.main("restore-canary-plan")
+    with pytest.raises(TypeError, match="JSON text"):
+        jobs.restore_canary_plan(dest=tmp_path / "bad", run=lambda *_a, **_k: 0)

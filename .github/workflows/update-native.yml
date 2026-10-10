@@ -15,6 +15,20 @@ on:
       previous:
         default: ""
         type: string
+      previous_extra:
+        description: Second prepare artifact for merge-candidates
+        default: ""
+        type: string
+      canary:
+        description: Dispatch-only rust-warmup canary (checkout tree + current plan)
+        default: false
+        type: boolean
+      canary_slots:
+        default: ""
+        type: string
+      canary_crates:
+        default: ""
+        type: string
       validate_all_packages:
         default: false
         type: boolean
@@ -78,6 +92,11 @@ jobs:
           name: ${{ inputs.previous }}
           path: ${{ runner.temp }}/previous
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: inputs.previous_extra != ''
+        with:
+          name: ${{ inputs.previous_extra }}
+          path: ${{ runner.temp }}/previous-extra
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: inputs.warmup_artifact != ''
         with:
           name: ${{ inputs.warmup_artifact }}
@@ -100,6 +119,12 @@ jobs:
           NIXCFG_PREVIOUS_CANDIDATE: |-
             ${{ inputs.previous != '' &&
             format('{0}/previous/candidate.json', runner.temp) || '' }}
+          NIXCFG_MERGE_RIGHT: |-
+            ${{ inputs.previous_extra != '' &&
+            format('{0}/previous-extra/candidate.json', runner.temp) || '' }}
+          NIXCFG_CANARY: ${{ inputs.canary }}
+          NIXCFG_CANARY_SLOTS: ${{ inputs.canary_slots }}
+          NIXCFG_CANARY_CRATES: ${{ inputs.canary_crates }}
           GITHUB_TOKEN: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           NIXCFG_CI_STAGE: ${{ inputs.stage }}
         run: |
@@ -119,7 +144,8 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: |-
-            ${{ inputs.shard != '' &&
+            ${{ inputs.stage == 'merge-candidates' && 'prepare-x86_64-linux' ||
+            inputs.shard != '' &&
             format('{0}-{1}-{2}-{3}', inputs.stage, inputs.system, inputs.scope, inputs.shard) ||
             inputs.scope == 'all' &&
             format('{0}-{1}', inputs.stage, inputs.system) ||

@@ -671,6 +671,27 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
     assert rust.gates == ()
     assert order == ["warmup"]
     assert realized == [("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared.drv",)]
+    monkeypatch.setenv("NIXCFG_CANARY", "true")
+    default_skip = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=1
+    )
+    assert default_skip.failures == ()
+    assert order == ["warmup"]
+    monkeypatch.setenv("NIXCFG_CANARY_SLOTS", "1")
+    skipped = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert skipped.failures == ()
+    assert order == ["warmup"]
+    monkeypatch.delenv("NIXCFG_CANARY_SLOTS")
+    monkeypatch.setenv("NIXCFG_CANARY_CRATES", "extension_host")
+    filtered = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert filtered.failures == ()
+    assert order == ["warmup"]
+    monkeypatch.delenv("NIXCFG_CANARY")
+    monkeypatch.delenv("NIXCFG_CANARY_CRATES")
     with pytest.raises(ValueError, match="warmup plan and slot"):
         pipeline.validate_candidate(candidate, scope="rust-warmup")
     with pytest.raises(ValueError, match="warmup slots are only valid"):
@@ -2166,6 +2187,393 @@ def test_non_hosted_builders_print_root_closure_derivation_logs(
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
     assert pipeline.validate_candidate(candidate).failures == ()
     assert seen == [True]
+
+
+def _candidate_with_file(
+    root: Path,
+    relative: str,
+    content: str,
+    *,
+    systems: tuple[str, ...],
+) -> Candidate:
+    """Build a prepared candidate whose patch adds or replaces one file."""
+    base = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    git(root, "add", "--", relative)
+    tree = git(root, "write-tree").decode().strip()
+    patch = git(
+        root,
+        "diff",
+        "--cached",
+        "--binary",
+        "--full-index",
+        "--no-ext-diff",
+        "--no-textconv",
+        "HEAD",
+        "--",
+    )
+    git(root, "reset", "--hard", "HEAD")
+    return Candidate(
+        base_tree=base,
+        tree=tree,
+        targets=("example",),
+        sources=("example",),
+        systems=systems,
+        resolutions={},
+        prepared=True,
+        patch=patch,
+    )
+
+
+def test_merge_prepared_candidates_keeps_disjoint_linux_edits(tmp_path: Path) -> None:
+    """Arm and x86 may extend Darwin in parallel when they do not clash."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(
+        root,
+        tracked_files={"shared.txt": "base\n", "keep.txt": "keep\n"},
+    )
+    arm = _candidate_with_file(
+        root,
+        "arm.txt",
+        "arm\n",
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "x86.txt",
+        "x86\n",
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    x86 = Candidate(
+        base_tree=x86.base_tree,
+        tree=x86.tree,
+        targets=x86.targets,
+        sources=x86.sources,
+        systems=x86.systems,
+        resolutions={"linux": ResolvedVersion(version="1")},
+        prepared=True,
+        patch=x86.patch,
+    )
+    merged = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    assert merged.resolutions["linux"].version == "1"
+    assert set(merged.systems) == {
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-linux",
+    }
+    assert merged.prepared
+    merged.apply(root)
+    assert (root / "arm.txt").read_text(encoding="utf-8") == "arm\n"
+    assert (root / "x86.txt").read_text(encoding="utf-8") == "x86\n"
+    assert (root / "keep.txt").read_text(encoding="utf-8") == "keep\n"
+
+
+def test_merge_prepared_candidates_rejects_file_conflicts(tmp_path: Path) -> None:
+    """Shared generated files with different contents fail closed."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files={"shared.txt": "base\n"})
+    arm = _candidate_with_file(
+        root,
+        "shared.txt",
+        "arm\n",
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "shared.txt",
+        "x86\n",
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    with pytest.raises(ValueError, match="Conflicting candidate edits"):
+        pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    with pytest.raises(ValueError, match="share a baseline"):
+        pipeline.merge_prepared_candidates(
+            arm,
+            Candidate(
+                base_tree="b" * 40,
+                tree="b" * 40,
+                targets=("example",),
+                sources=(),
+                systems=("aarch64-darwin", "x86_64-linux"),
+                resolutions={},
+                prepared=True,
+                patch=b"",
+            ),
+            repo=root,
+        )
+
+
+def test_checkout_candidate_is_identity_of_head(tmp_path: Path) -> None:
+    """Canary uses the branch tree; it does not invent a prepare patch."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files={"keep.txt": "keep\n"})
+    candidate = pipeline.checkout_candidate(root)
+    tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
+    assert candidate.tree == tree
+    assert candidate.base_tree == tree
+    assert candidate.patch == b""
+    assert candidate.prepared
+    assert set(candidate.systems) == {
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-linux",
+    }
+
+
+def test_validate_command_canary_uses_checkout_without_previous(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dispatch canary validates the branch tree plus the current plan."""
+    output = tmp_path / "artifacts" / "validation.json"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=("/nix/store/shared",),
+            rustLayers=(("/nix/store/shared",),),
+            outputDrvs={
+                "/nix/store/shared": "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared.drv"
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    args = [
+        "validate",
+        "--scope",
+        "rust-warmup",
+        "--warmup-plan",
+        str(warmup_plan),
+        "--warmup-slot",
+        "0",
+        "--output",
+        str(output),
+    ]
+    rejected = CliRunner().invoke(pipeline.app, args)
+    assert rejected.exit_code != 0
+    assert "previous candidate" in str(rejected.exception)
+    monkeypatch.setenv("NIXCFG_CANARY", "true")
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
+    accepted = CliRunner().invoke(pipeline.app, args)
+    assert accepted.exit_code == 0, accepted.output
+    report = pipeline.ValidationReport.model_validate_json(output.read_bytes())
+    assert report.gates == ()
+    assert report.tree == pipeline.checkout_candidate(prepared_run[0]).tree
+
+
+def test_merge_prepared_candidates_keeps_identical_shared_edits(
+    tmp_path: Path,
+) -> None:
+    """Same-content overlap is not a conflict; one-sided deletes apply."""
+    root = tmp_path / "repo"
+    init_update_workspace_repo(
+        root,
+        tracked_files={"shared.txt": "base\n", "gone.txt": "gone\n"},
+    )
+    arm = _candidate_with_file(
+        root,
+        "shared.txt",
+        "same\n",
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "shared.txt",
+        "same\n",
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    merged = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    merged.apply(root)
+    assert (root / "shared.txt").read_text(encoding="utf-8") == "same\n"
+    git(root, "reset", "--hard", "HEAD")
+    git(root, "rm", "--", "gone.txt")
+    deleted = Candidate(
+        base_tree=arm.base_tree,
+        tree=git(root, "write-tree").decode().strip(),
+        targets=arm.targets,
+        sources=arm.sources,
+        systems=arm.systems,
+        resolutions={"pkg": ResolvedVersion(version="1")},
+        prepared=True,
+        patch=git(
+            root,
+            "diff",
+            "--cached",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "HEAD",
+            "--",
+        ),
+    )
+    git(root, "reset", "--hard", "HEAD")
+    gone = pipeline.merge_prepared_candidates(deleted, x86, repo=root)
+    gone.apply(root)
+    assert not (root / "gone.txt").exists()
+    assert (root / "shared.txt").read_text(encoding="utf-8") == "same\n"
+
+
+def test_merge_candidates_command_writes_outside_the_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files={"keep.txt": "keep\n"})
+    arm = _candidate_with_file(
+        root,
+        "arm.txt",
+        "arm\n",
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86 = _candidate_with_file(
+        root,
+        "x86.txt",
+        "x86\n",
+        systems=("aarch64-darwin", "x86_64-linux"),
+    )
+    left = tmp_path / "left.json"
+    right = tmp_path / "right.json"
+    output = tmp_path / "artifacts" / "merged.json"
+    left.write_text(arm.model_dump_json(), encoding="utf-8")
+    right.write_text(x86.model_dump_json(), encoding="utf-8")
+    monkeypatch.setattr(pipeline, "get_repo_root", lambda: root)
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "merge-candidates",
+            "--left",
+            str(left),
+            "--right",
+            str(right),
+            "--output",
+            str(output),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    merged = Candidate.model_validate_json(output.read_bytes())
+    assert set(merged.systems) == {
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-linux",
+    }
+
+
+def test_merge_prepared_candidates_rejects_incompatible_extensions(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    init_update_workspace_repo(root, tracked_files={"keep.txt": "keep\n"})
+    arm = _candidate_with_file(
+        root,
+        "arm.txt",
+        "arm\n",
+        systems=("aarch64-darwin", "aarch64-linux"),
+    )
+    x86_systems = ("aarch64-darwin", "x86_64-linux")
+    with pytest.raises(ValueError, match="target selection"):
+        pipeline.merge_prepared_candidates(
+            arm,
+            Candidate(
+                base_tree=arm.base_tree,
+                tree=arm.tree,
+                targets=("other",),
+                sources=arm.sources,
+                systems=x86_systems,
+                resolutions={},
+                prepared=True,
+                patch=arm.patch,
+            ),
+            repo=root,
+        )
+    with pytest.raises(ValueError, match="cannot be merged"):
+        pipeline.merge_prepared_candidates(
+            Candidate(
+                base_tree=arm.base_tree,
+                tree=arm.tree,
+                targets=arm.targets,
+                sources=arm.sources,
+                systems=arm.systems,
+                resolutions={},
+                prepared=False,
+                patch=arm.patch,
+            ),
+            Candidate(
+                base_tree=arm.base_tree,
+                tree=arm.tree,
+                targets=arm.targets,
+                sources=arm.sources,
+                systems=x86_systems,
+                resolutions={},
+                prepared=True,
+                patch=arm.patch,
+            ),
+            repo=root,
+        )
+    with pytest.raises(ValueError, match="disjoint platform"):
+        pipeline.merge_prepared_candidates(
+            arm,
+            Candidate(
+                base_tree=arm.base_tree,
+                tree=arm.tree,
+                targets=arm.targets,
+                sources=arm.sources,
+                systems=arm.systems,
+                resolutions={},
+                prepared=True,
+                patch=arm.patch,
+            ),
+            repo=root,
+        )
+    with pytest.raises(ValueError, match="Conflicting resolution"):
+        pipeline.merge_prepared_candidates(
+            Candidate(
+                base_tree=arm.base_tree,
+                tree=arm.tree,
+                targets=arm.targets,
+                sources=arm.sources,
+                systems=arm.systems,
+                resolutions={"pkg": ResolvedVersion(version="1")},
+                prepared=True,
+                patch=arm.patch,
+            ),
+            Candidate(
+                base_tree=arm.base_tree,
+                tree=arm.tree,
+                targets=arm.targets,
+                sources=arm.sources,
+                systems=x86_systems,
+                resolutions={"pkg": ResolvedVersion(version="2")},
+                prepared=True,
+                patch=b"",
+            ),
+            repo=root,
+        )
 
 
 @pytest.mark.parametrize(
