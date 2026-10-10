@@ -800,6 +800,11 @@ def is_rust_agent_ui_store_path(path: str) -> bool:
     return _store_output_rest(path).startswith("rust_agent_ui-")
 
 
+def is_rust_language_models_store_path(path: str) -> bool:
+    """Return whether *path* is crate2nix ``rust_language_models``, not ``_cloud``."""
+    return _store_output_rest(path).startswith("rust_language_models-")
+
+
 def partition_agent_ui_drvs(
     drvs: Sequence[str],
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -814,6 +819,53 @@ def partition_agent_ui_drvs(
     return tuple(others), tuple(agent_ui)
 
 
+def language_models_warmup_outputs(layers: Sequence[Sequence[str]]) -> tuple[str, ...]:
+    """Return rust_language_models outputs from every warmup layer, first-seen."""
+    return tuple(
+        dict.fromkeys(
+            path
+            for layer in layers
+            for path in layer
+            if is_rust_language_models_store_path(path)
+        )
+    )
+
+
+def language_models_input_drvs(
+    agent_ui_drvs: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return ``rust_language_models`` ``.drv`` inputs of *agent_ui_drvs*.
+
+    Used when that crate is already in gkze and therefore absent from the
+    warmup plan. ``nix-store --query --references`` is the store-side view
+    of crate2nix's direct ``inputDrvs`` after the agent_ui closure import.
+    """
+    runner = subprocess.run if run is None else run
+    found: dict[str, None] = {}
+    for drv in dict.fromkeys(agent_ui_drvs):
+        result = runner(
+            ["nix-store", "--query", "--references", drv],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode:
+            detail = _store_command_detail(
+                result, fallback="nix-store --query --references failed"
+            )
+            msg = f"failed to query rust_language_models inputs of {drv}: {detail}"
+            raise WarmupError(msg)
+        stdout = result.stdout
+        text = stdout.decode() if isinstance(stdout, bytes) else stdout
+        for line in text.splitlines():
+            path = line.strip()
+            if path.endswith(".drv") and is_rust_language_models_store_path(path):
+                found.setdefault(path, None)
+    return tuple(found)
+
+
 def realize_warmup_outputs(
     paths: Sequence[str],
     *,
@@ -822,6 +874,7 @@ def realize_warmup_outputs(
     progress: ValidationProgress | None = None,
     timeout: float | None = None,
     print_build_logs: bool = False,
+    rebuild: bool = False,
 ) -> tuple[DerivationValidationFailure, ...]:
     """Build the warmup outputs so Cachix's post-build-hook pushes each path."""
     failures: list[DerivationValidationFailure] = []
@@ -833,6 +886,7 @@ def realize_warmup_outputs(
                 source="root-warmup",
                 installable=warmup_build_installable(path),
                 mode="build",
+                rebuild=rebuild,
             )
             for path in chunk
         )

@@ -26,6 +26,9 @@ from lib.update.ci.warmup import (
     intersect_missing,
     is_crate2nix_rust_output,
     is_rust_agent_ui_store_path,
+    is_rust_language_models_store_path,
+    language_models_input_drvs,
+    language_models_warmup_outputs,
     load_warmup_plan,
     nix_store_argv_has_operation,
     partition_agent_ui_drvs,
@@ -750,10 +753,42 @@ def test_rust_agent_ui_partition_and_realize_print_logs(tmp_path: Path) -> None:
     models = (
         "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0.drv"
     )
+    cloud = (
+        "/nix/store/cloudaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models_cloud-0.1.0"
+    )
     assert is_rust_agent_ui_store_path(agent)
     assert not is_rust_agent_ui_store_path(models)
+    assert is_rust_language_models_store_path(models)
+    assert not is_rust_language_models_store_path(cloud)
     assert _store_output_rest("not-a-store") == "a-store"
     assert partition_agent_ui_drvs((models, agent, agent)) == ((models,), (agent,))
+    models_lib = (
+        "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0-lib"
+    )
+    assert language_models_warmup_outputs(((cloud, models_lib), (agent,))) == (
+        models_lib,
+    )
+    refs = language_models_input_drvs(
+        (agent,),
+        run=lambda args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, "\n".join((models, cloud + ".drv", agent)), ""
+        ),
+    )
+    assert refs == (models,)
+    byte_refs = language_models_input_drvs(
+        (agent,),
+        run=lambda args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, b"\n".join((models.encode(), cloud.encode() + b".drv")), b""
+        ),
+    )
+    assert byte_refs == (models,)
+    with pytest.raises(WarmupError, match="failed to query rust_language_models"):
+        language_models_input_drvs(
+            (agent,),
+            run=lambda args, **_kwargs: subprocess.CompletedProcess(
+                args, 1, "", "nix-store: dead"
+            ),
+        )
 
     realize_calls: list[list[str]] = []
 
@@ -773,3 +808,32 @@ def test_rust_agent_ui_partition_and_realize_print_logs(tmp_path: Path) -> None:
         == ()
     )
     assert "-L" in realize_calls[0]
+    realize_calls.clear()
+    assert (
+        realize_warmup_outputs(
+            (models,),
+            flake_root=tmp_path,
+            run=realize_run,
+            print_build_logs=True,
+            rebuild=True,
+        )
+        == ()
+    )
+    assert "--rebuild" in realize_calls[0]
+    assert "-L" in realize_calls[0]
+
+
+def test_language_models_input_drvs_defaults_to_subprocess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Planner-absent language_models is discovered with the default store runner."""
+    agent = "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv"
+    models = (
+        "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0.drv"
+    )
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, f"{models}\n", "")
+
+    monkeypatch.setattr("lib.update.ci.warmup.subprocess.run", run)
+    assert language_models_input_drvs((agent,)) == (models,)

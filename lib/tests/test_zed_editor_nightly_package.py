@@ -79,18 +79,10 @@ def test_zed_nightly_preserves_darwin_rlib_metadata() -> None:
               outputs = [ "out" ];
               outputDev = [ "out" ];
             };
-          darwinLanguageModelsIntern =
-            args:
-            args
-            // lib.optionalAttrs (isDarwin && (args.crateName or "") == "language_models") {
-              extraRustcOpts = (args.extraRustcOpts or [ ]) ++ [
-                "-C metadata=nixcfg-221-e0463"
-              ];
-            };
           wrap = inner: {
             __functor =
               _self: args:
-              applyDarwinRlibMetadata (inner (darwinLanguageModelsIntern (linuxZedUnsplit args)));
+              applyDarwinRlibMetadata (inner (linuxZedUnsplit args));
             override = f: wrap (inner.override f);
           };
         in
@@ -198,7 +190,7 @@ def test_zed_scoped_override_adds_linux_x11_and_fontconfig_libraries() -> None:
 
 
 def test_zed_project_overrides_do_not_special_case_agent_ui() -> None:
-    """#1259 intern fix lives in wrapBuildRustCrate, not an agent_ui override."""
+    """Intern fix is a same-slot language_models --rebuild, not an override."""
     overrides = nix_file_binding_expr(_PACKAGE, "projectCrateOverrides")
     with pytest.raises(AssertionError, match="missing binding agent_ui"):
         _binding_from_override(overrides, "agent_ui")

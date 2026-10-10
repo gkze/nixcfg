@@ -62,6 +62,7 @@ class DerivationValidationRequest:
     installable: str
     mode: DerivationValidationMode = "eval"
     substitute_only: bool = False
+    rebuild: bool = False
 
 
 @dataclass(frozen=True)
@@ -759,6 +760,11 @@ def _validation_args(
                         # derivation failure; Nix can rebuild that path
                         # from source.
                         "--fallback",
+                        # Update #1260: a Cachix language_models NAR that
+                        # rustc can --extern still intern-fails as bare
+                        # E0463 (nixpkgs#482646). --rebuild realizes that
+                        # one drv locally; dependents stay substitutable.
+                        *(["--rebuild"] if request.rebuild else []),
                     ]
                 ),
                 *(["-L"] if print_build_logs else []),
@@ -779,7 +785,7 @@ def _batch_key(
     # Warmup realizes missing Darwin *outputs*. Do not batch `/nix/store/*.drv^*`
     # graph nodes: those share a deadline as one build each. Substitute-only
     # foreign Linux deps must not share a --fallback batch with Darwin roots.
-    if request.substitute_only:
+    if request.substitute_only or request.rebuild:
         return None
     name = request.installable.removeprefix("/nix/store/")
     if (

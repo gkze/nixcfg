@@ -679,17 +679,21 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
 def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The agent_ui stripe realizes other drvs first, then agent_ui with -L."""
+    """agent_ui stripe rebuilds language_models locally, then others, then agent_ui."""
     candidate = _candidate_for_scope(prepared_run)
     monkeypatch.setattr(
         pipeline.validation,
         "validate_derivations",
         lambda *_args, **_kwargs: (),
     )
-    realized: list[tuple[object, bool]] = []
+    realized: list[tuple[object, bool, bool]] = []
 
     def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
-        realized.append((paths, bool(kwargs.get("print_build_logs"))))
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("rebuild")),
+        ))
         return ()
 
     monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
@@ -747,8 +751,9 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
     )
     assert rust.gates == ()
     assert realized == [
-        ((language_models_drv, other_drv), False),
-        ((agent_ui_drv,), True),
+        ((language_models_drv,), True, True),
+        ((other_drv,), False, False),
+        ((agent_ui_drv,), True, False),
     ]
     realized.clear()
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda path: path != agent_ui)
@@ -756,7 +761,121 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
         candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
     )
     assert rust.gates == ()
-    assert realized == [((agent_ui_drv,), True)]
+    assert realized == [
+        ((language_models_drv,), True, True),
+        ((agent_ui_drv,), True, False),
+    ]
+    realized.clear()
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(other, agent_ui),
+            rustLayers=((other,), (agent_ui,)),
+            outputDrvs={
+                other: other_drv,
+                agent_ui: agent_ui_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(
+        pipeline,
+        "language_models_input_drvs",
+        lambda _drvs: (language_models_drv,),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [
+        ((language_models_drv,), True, True),
+        ((other_drv,), False, False),
+        ((agent_ui_drv,), True, False),
+    ]
+    realized.clear()
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(language_models, agent_ui),
+            rustLayers=((language_models, agent_ui),),
+            outputDrvs={
+                language_models: language_models_drv,
+                agent_ui: agent_ui_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [((language_models_drv,), False, False)]
+    monkeypatch.setattr(pipeline, "language_models_input_drvs", lambda _drvs: ())
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(other, agent_ui),
+            rustLayers=((other,), (agent_ui,)),
+            outputDrvs={
+                other: other_drv,
+                agent_ui: agent_ui_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    with pytest.raises(pipeline.WarmupError, match="no rust_language_models input"):
+        pipeline.validate_candidate(
+            candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+        )
 
 
 def test_closure_budget_timeout_fails_closed(

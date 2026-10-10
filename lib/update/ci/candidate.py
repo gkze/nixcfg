@@ -40,8 +40,12 @@ from lib.update.ci.shard_plan import (
 from lib.update.ci.warmup import (
     WARMUP_DRVS_NAME,
     WARMUP_PLAN_NAME,
+    WarmupError,
     export_warmup_drvs,
     import_warmup_drvs,
+    is_rust_language_models_store_path,
+    language_models_input_drvs,
+    language_models_warmup_outputs,
     load_warmup_plan,
     partition_agent_ui_drvs,
     plan_darwin_warmup,
@@ -279,9 +283,45 @@ def _realize_rust_warmup(
         present=check_path_in_cachix,
     )
     drvs = unique_drvs_for_outputs(missing, plan.output_drvs)
-    import_warmup_drvs(drvs, warmup_plan.with_name(WARMUP_DRVS_NAME))
     others, agent_ui = partition_agent_ui_drvs(drvs)
+    language_models: tuple[str, ...] = ()
+    if agent_ui:
+        others = tuple(
+            drv for drv in others if not is_rust_language_models_store_path(drv)
+        )
+        # Update #1258/#1259/#1260: Darwin rustc intern of a Cachix
+        # language_models rlib is bare E0463 (nixpkgs#482646). Extra
+        # -C metadata on that crate alone mixed generations (#1260 E0460
+        # title_bar/recent_projects/extension_host) and still failed intern
+        # after the new NAR was substituted onto the agent_ui slots. Rebuild
+        # language_models on the same runner that compiles agent_ui; keep
+        # every other rust_* substitutable. Do not evict h3crq11a.
+        planned_models = language_models_warmup_outputs(plan.rust_layers)
+        language_models = (
+            unique_drvs_for_outputs(planned_models, plan.output_drvs)
+            if planned_models
+            else ()
+        )
+    import_warmup_drvs(
+        tuple(dict.fromkeys((*language_models, *drvs))),
+        warmup_plan.with_name(WARMUP_DRVS_NAME),
+    )
+    if agent_ui and not language_models:
+        language_models = language_models_input_drvs(agent_ui)
+        if not language_models:
+            msg = "agent_ui drv has no rust_language_models input"
+            raise WarmupError(msg)
     failures: list[validation.DerivationValidationFailure] = []
+    if language_models:
+        failures.extend(
+            realize_warmup_outputs(
+                language_models,
+                flake_root=flake_root,
+                progress=_hosted_validation_progress("rust-warmup"),
+                print_build_logs=True,
+                rebuild=True,
+            )
+        )
     if others:
         failures.extend(
             realize_warmup_outputs(

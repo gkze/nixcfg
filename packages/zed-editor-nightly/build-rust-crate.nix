@@ -32,29 +32,10 @@
           outputs = [ "out" ];
           outputDev = [ "out" ];
         };
-      # Update #1258/#1259: Darwin rustc 1.98.1 reads the Cachix
-      # language_models rlib (extra-filename f75b2474e2; h3crq11a then
-      # x49g8qy1) and logs "register newly loaded library", then
-      # intern_stable_crate_id returns CrateError::NotFound — bare E0463
-      # at agent_ui buffer_codegen.rs:24. No register-crate cnum line.
-      # "resolving crate core" is resolve_crate's missing_core probe.
-      # Cargo.nix has no language_models cycle (dependents are agent_ui,
-      # eval_cli, edit_prediction_cli, zed). rustc StableCrateId hashes
-      # crate name + every -C metadata. Extra metadata forces a Darwin
-      # rebuild and a new intern id so the cached rlib cannot be reused.
-      # Linux is identity. Do not evict h3crq11a.
-      darwinLanguageModelsIntern =
-        args:
-        args
-        // lib.optionalAttrs (isDarwin && (args.crateName or "") == "language_models") {
-          extraRustcOpts = (args.extraRustcOpts or [ ]) ++ [
-            "-C metadata=nixcfg-221-e0463"
-          ];
-        };
       wrap = inner: {
         __functor =
           _self: args:
-          applyDarwinRlibMetadata (inner (darwinLanguageModelsIntern (linuxZedUnsplit args)));
+          applyDarwinRlibMetadata (inner (linuxZedUnsplit args));
         override = f: wrap (inner.override f);
       };
     in

@@ -1486,6 +1486,43 @@ def test_store_path_builds_batch_together(tmp_path: Path) -> None:
     assert "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-two" in calls[0]
 
 
+def test_rebuild_request_is_unbatched_and_passes_nix_rebuild(
+    tmp_path: Path,
+) -> None:
+    """#1260 language_models intern fix rebuilds one drv; peers stay substitutable."""
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    models = (
+        "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0.drv^*"
+    )
+    other = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-0.1.0.drv^*"
+    assert (
+        validation.validate_derivation_requests(
+            (
+                DerivationValidationRequest(
+                    "root-warmup",
+                    models,
+                    "build",
+                    rebuild=True,
+                ),
+                DerivationValidationRequest("root-warmup", other, "build"),
+            ),
+            flake_root=tmp_path,
+            run=run,
+        )
+        == ()
+    )
+    rebuild_call = next(args for args in calls if "--rebuild" in args)
+    assert models in rebuild_call
+    assert other not in rebuild_call
+    other_call = next(args for args in calls if other in args)
+    assert "--rebuild" not in other_call
+
+
 def test_failed_batch_rechecks_each_target_with_original_retry_policy(
     tmp_path: Path,
 ) -> None:
