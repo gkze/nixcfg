@@ -171,40 +171,69 @@ jobs:
     secrets: inherit
   canary-slots:
     if: |-
-      github.event_name == 'workflow_dispatch' &&
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' &&
       (inputs.canary_warm_rust == true || inputs.canary_warm_rust == 'true' ||
-      inputs.canary_slots != '' || inputs.canary_crates != '')
+      inputs.canary_slots != '' || inputs.canary_crates != ''))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       matrix: ${{ steps.slots.outputs.matrix }}
+      slots: ${{ steps.slots.outputs.slots }}
+      enabled: ${{ steps.slots.outputs.enabled }}
     steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - name: Compute canary rust-warmup matrix
         id: slots
         env:
           CANARY_SLOTS: ${{ inputs.canary_slots }}
           CANARY_CRATES: ${{ inputs.canary_crates }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           import json
           import os
+          import re
+          from pathlib import Path
+
+          event = os.environ.get("EVENT_NAME", "")
           raw = os.environ.get("CANARY_SLOTS", "").strip()
           crates = os.environ.get("CANARY_CRATES", "").strip()
-          if raw:
+          kick = Path(".github/update-kick")
+          kick_match = re.search(
+              r"(?m)^canary-slots:\s*(.+?)\s*$",
+              kick.read_text(encoding="utf-8") if kick.is_file() else "",
+          )
+          if event == "push":
+              raw_slots = kick_match.group(1) if kick_match else ""
+              slots = [int(part) for part in raw_slots.replace(",", " ").split() if part]
+          elif raw:
               slots = [int(part) for part in raw.replace(",", " ").split() if part]
           elif crates:
               slots = [0, 1, 2, 3, 4]
           else:
               slots = [0]
+          unique: list[int] = []
+          for slot in slots:
+              if slot not in unique:
+                  unique.append(slot)
+          slots = unique
           if any(slot < 0 or slot > 4 for slot in slots):
               raise SystemExit(f"canary slot must be in 0..4, got {slots}")
+          enabled = bool(slots)
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"enabled={'true' if enabled else 'false'}\n")
+              fh.write(f"slots={','.join(str(slot) for slot in slots)}\n")
               fh.write(f"matrix={json.dumps({'slot': slots})}\n")
         shell: python
   canary-plan:
+    needs:
+      - canary-slots
     if: |-
-      github.event_name == 'workflow_dispatch' &&
-      (inputs.canary_warm_rust == true || inputs.canary_warm_rust == 'true' ||
-      inputs.canary_slots != '' || inputs.canary_crates != '')
+      always() && !cancelled() &&
+      needs.canary-slots.result == 'success' &&
+      needs.canary-slots.outputs.enabled == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -237,7 +266,8 @@ jobs:
     if: |-
       always() && !cancelled() &&
       needs.canary-slots.result == 'success' &&
-      needs.canary-plan.result == 'success'
+      needs.canary-plan.result == 'success' &&
+      needs.canary-slots.outputs.enabled == 'true'
     strategy:
       fail-fast: false
       max-parallel: 5
@@ -252,7 +282,7 @@ jobs:
       warmup_artifact: canary-plan
       warmup_slot: ${{ matrix.slot }}
       canary: true
-      canary_slots: ${{ inputs.canary_slots }}
+      canary_slots: ${{ needs.canary-slots.outputs.slots }}
       canary_crates: ${{ inputs.canary_crates }}
     secrets: inherit
   # rust_* warmup owns all 5 public macos-15 slots, striped across the

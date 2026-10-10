@@ -21,6 +21,7 @@ from lib.update.ci.warmup import (
     _store_output_rest,
     assert_force_local_dry_run,
     assert_local_build_threshold,
+    classify_slot_warmup_will_be_built,
     compiler_input_drvs,
     darwin_output_paths,
     default_cache_present,
@@ -38,6 +39,7 @@ from lib.update.ci.warmup import (
     is_rust_extension_host_store_path,
     is_rust_language_models_store_path,
     is_rust_zed_store_path,
+    is_safe_rust_warmup_other,
     is_source_fetch_store_path,
     is_zed_editor_nightly_store_path,
     language_models_input_drvs,
@@ -46,8 +48,10 @@ from lib.update.ci.warmup import (
     nix_store_argv_has_operation,
     parse_canary_crates,
     parse_canary_slots,
+    parse_kick_canary_slots,
     partition_agent_ui_drvs,
     partition_compiler_input_drvs,
+    partition_rust_warmup_others,
     partition_rust_zed_drvs,
     partition_zed_editor_nightly_drvs,
     plan_darwin_warmup,
@@ -223,21 +227,24 @@ def test_plan_darwin_warmup_writes_intersection_and_rejects_huge_remainder(
 ) -> None:
     graphs = {
         "darwin-argus": _graph(
-            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared",
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1",
             "/nix/store/dddddddddddddddddddddddddddddddd-argus-only",
             "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-cached",
+            "/nix/store/ffffffffffffffffffffffffffffffff-goose-cli-1.51.0",
             linux="/nix/store/cccccccccccccccccccccccccccccccc-vm",
         ),
         "darwin-rocinante": _graph(
-            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared",
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1",
             "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-cached",
+            "/nix/store/ffffffffffffffffffffffffffffffff-goose-cli-1.51.0",
         ),
         "home-george": _graph(
-            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared",
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1",
             "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-cached",
+            "/nix/store/ffffffffffffffffffffffffffffffff-goose-cli-1.51.0",
         ),
     }
 
@@ -268,24 +275,28 @@ def test_plan_darwin_warmup_writes_intersection_and_rejects_huge_remainder(
         present=cached.__contains__,
     )
     assert plan.warmup_outputs == (
-        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared",
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
         "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1",
     )
     assert plan.rust_layers == (
-        ("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared",),
+        ("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",),
         ("/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1",),
     )
     assert plan.output_drvs == {
-        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared": (
-            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared.drv"
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9": (
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9.drv"
         ),
         "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1": (
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1.drv"
         ),
     }
-    assert plan.per_root["darwin-argus"].remaining == 1
-    assert plan.shards[0].remaining == 1
-    assert plan.shards[1].remaining == 0
+    assert (
+        "/nix/store/ffffffffffffffffffffffffffffffff-goose-cli-1.51.0"
+        not in plan.warmup_outputs
+    )
+    assert plan.per_root["darwin-argus"].remaining == 2
+    assert plan.shards[0].remaining == 2
+    assert plan.shards[1].remaining == 1
     path = tmp_path / WARMUP_PLAN_NAME
     write_warmup_plan(path, plan)
     loaded = load_warmup_plan(path)
@@ -294,7 +305,7 @@ def test_plan_darwin_warmup_writes_intersection_and_rejects_huge_remainder(
         load_warmup_plan(tmp_path / "missing.json")
     huge_unique = [f"/nix/store/{index:032d}-unique-{index}" for index in range(401)]
     graphs["darwin-argus"] = _graph(
-        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared",
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
         *huge_unique,
     )
     with pytest.raises(WarmupError, match="local-build budget"):
@@ -372,7 +383,7 @@ def test_plan_defaults_to_subprocess_and_cache_helpers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     graph = _graph(
-        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared",
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
         "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-cached",
     )
 
@@ -382,7 +393,7 @@ def test_plan_defaults_to_subprocess_and_cache_helpers(
     monkeypatch.setattr("lib.update.ci.warmup.subprocess.run", run)
     shown = eval_root_darwin_outputs(tmp_path, "darwin-argus")
     assert shown == frozenset({
-        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared",
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
         "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-cached",
     })
     monkeypatch.setattr(
@@ -403,7 +414,7 @@ def test_plan_defaults_to_subprocess_and_cache_helpers(
         run=run,
     )
     assert plan.warmup_outputs == (
-        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared",
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
     )
     linux_only = RootClosureManifest.model_validate({
         "schemaVersion": 2,
@@ -723,7 +734,7 @@ def test_warmup_drv_closure_copy_batches_paths(tmp_path: Path) -> None:
 
 
 def test_rust_warmup_layers_and_slots_keep_dependency_order() -> None:
-    shared = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared"
+    shared = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9"
     rust_a = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_a-1"
     rust_b = "/nix/store/cccccccccccccccccccccccccccccccc-rust_b-1"
     rust_c = "/nix/store/dddddddddddddddddddddddddddddddd-rust_c-1"
@@ -764,7 +775,9 @@ def test_rust_warmup_layers_and_slots_keep_dependency_order() -> None:
         rust_warmup_layers(frozenset({rust_a, rust_b}), (cycle,))
     with pytest.raises(WarmupError, match="missing from Darwin graphs"):
         rust_warmup_layers(frozenset({rust_a}), (_graph(shared),))
+    leaf = "/nix/store/hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh-goose-cli-1.51.0"
     assert rust_warmup_layers(frozenset({shared}), (_graph(shared),)) == ((shared,),)
+    assert rust_warmup_layers(frozenset({leaf}), (_graph(leaf),)) == ()
     assert rust_warmup_layers(frozenset(), (_graph(shared),)) == ()
 
 
@@ -923,6 +936,67 @@ def test_parse_canary_slots_and_crates() -> None:
         parse_canary_slots("5")
     assert parse_canary_crates("extension_host, zed zed") == ("extension_host", "zed")
     assert parse_canary_crates("") == ()
+    assert parse_kick_canary_slots("# comment\n2026-10-10T15:00:00Z kick\n") == ()
+    assert parse_kick_canary_slots(
+        "# Touch this file\ncanary-slots: 3,4\n2026-10-10T16:00:00Z\n"
+    ) == (3, 4)
+    assert parse_kick_canary_slots("canary-slots: 4 4 3\n") == (4, 3)
+    with pytest.raises(WarmupError, match="0..4"):
+        parse_kick_canary_slots("canary-slots: 5\n")
+
+
+def test_1268_slot_others_defer_leaf_packages_with_dry_run_counts() -> None:
+    """#1268 slots 3/4 exploded on leaf umbrellas; rustc itself substituted.
+
+    Counts are the hosted Darwin ``these N derivations will be built``
+    lines. This workspace cannot ``nix build`` aarch64-darwin; the
+    classifier plus those observed counts is the dry-run proof.
+    """
+    cargo_sha2 = (
+        "/nix/store/mynvanc4j9sgag5gdd8ir1s3p0pq3rgg-cargo-package-sha2-0.10.9.drv"
+    )
+    crane = "/nix/store/mad9jrvgkwimr9dx0nsabjbd6c7ii1lj-crane-utils-0.0.1.drv"
+    v8_native = (
+        "/nix/store/gh047rbs0widc6a8wy8x21szlyg0kjbz-"
+        "goose-cli-v8-native-dbb64c20b9062b358b101e4592abb3ca8f646c2b.drv"
+    )
+    goose = "/nix/store/rhak437lr7f3zwfgf2qrb40ryw7mx98i-goose-cli-1.51.0.drv"
+    vendor = "/nix/store/0jmdym99ibn8rpv9696zvyrkr0mjyvjv-vendor-cargo-deps.drv"
+    but = "/nix/store/x29aw11rvynwmi40dkl4wbwk4d44pgam-but.drv"
+    rustc = "/nix/store/arriw6r1qhajd9q60xi8dzw0mw9aixd1-rustc-1.98.1"
+    assert is_safe_rust_warmup_other(cargo_sha2)
+    assert is_safe_rust_warmup_other(crane)
+    assert is_safe_rust_warmup_other(v8_native)
+    assert not is_safe_rust_warmup_other(goose)
+    assert not is_safe_rust_warmup_other(vendor)
+    assert not is_safe_rust_warmup_other(but)
+    assert not is_safe_rust_warmup_other(rustc)
+    slot4 = (cargo_sha2, crane, goose)
+    slot3 = (but, vendor)
+    slot0 = (v8_native,)
+    counts = {
+        cargo_sha2: 1,
+        crane: 1,
+        v8_native: 1,
+        goose: 1759,
+        vendor: 521,
+        but: 1,
+    }
+    safe4, deferred4 = classify_slot_warmup_will_be_built(slot4, will_be_built=counts)
+    safe3, deferred3 = classify_slot_warmup_will_be_built(slot3, will_be_built=counts)
+    safe0, deferred0 = classify_slot_warmup_will_be_built(slot0, will_be_built=counts)
+    assert safe4 == ((cargo_sha2, 1), (crane, 1))
+    assert deferred4 == ((goose, 1759),)
+    assert max(count for _path, count in safe4) <= WARMUP_FATAL_BUILD_LIMIT
+    assert deferred4[0][1] > WARMUP_FATAL_BUILD_LIMIT
+    assert safe3 == ()
+    assert deferred3 == ((but, 1), (vendor, 521))
+    assert safe0 == ((v8_native, 1),)
+    assert deferred0 == ()
+    assert partition_rust_warmup_others((goose, cargo_sha2, goose)) == (
+        (cargo_sha2,),
+        (goose,),
+    )
 
 
 @pytest.mark.parametrize(

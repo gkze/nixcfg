@@ -94,6 +94,22 @@ def parse_canary_crates(raw: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(part for part in raw.replace(",", " ").split() if part))
 
 
+_KICK_CANARY_SLOTS = re.compile(r"(?m)^canary-slots:\s*(.+?)\s*$")
+
+
+def parse_kick_canary_slots(text: str) -> tuple[int, ...]:
+    """Parse ``canary-slots: 3,4`` from an update-kick file.
+
+    Kick-file pushes cannot set ``workflow_dispatch`` inputs (App token
+    403). #1268 skipped canary-warm-rust for that reason; a kick line is
+    the push-path equivalent of ``inputs.canary_slots``.
+    """
+    match = _KICK_CANARY_SLOTS.search(text)
+    if not match:
+        return ()
+    return parse_canary_slots(match.group(1))
+
+
 _WARMUP_REALIZE_CHUNK = 128
 _STORE_COPY_CHUNK = 128
 _SUBSTITUTER_WORKERS = 16
@@ -351,7 +367,16 @@ def rust_warmup_layers(
 ) -> tuple[tuple[str, ...], ...]:
     """Layer rust_* warmup outputs by crate2nix ``inputDrvs``; prelude is the rest."""
     rust_warmup = frozenset(path for path in warmup if is_crate2nix_rust_output(path))
-    prelude = tuple(sorted(path for path in warmup if path not in rust_warmup))
+    # #1268: goose-cli-1.51.0 / vendor-cargo-deps in the unfiltered
+    # prelude exploded slots 3/4 (1759 / 521 will-be-built). rustc-1.98.1
+    # was already substituting; only FOD/helpers belong here.
+    prelude = tuple(
+        sorted(
+            path
+            for path in warmup
+            if path not in rust_warmup and is_safe_rust_warmup_other(path)
+        )
+    )
     if not rust_warmup:
         return (prelude,) if prelude else ()
     path_to_drv: dict[str, str] = {}
@@ -775,7 +800,12 @@ def plan_darwin_warmup(
     all_outputs = frozenset().union(*per_root.values()) if per_root else frozenset()
     checker = present if present is not None else default_cache_present
     substitutable = substitutable_paths(all_outputs, present=checker)
-    warmup = intersect_missing(per_root, substitutable)
+    missing_shared = intersect_missing(per_root, substitutable)
+    warmup = frozenset(
+        path
+        for path in missing_shared
+        if is_crate2nix_rust_output(path) or is_safe_rust_warmup_other(path)
+    )
     rust_layers = rust_warmup_layers(warmup, tuple(graphs.values()))
     output_drvs = warmup_output_drvs(warmup, tuple(graphs.values()))
     reports: list[ShardLocalBuildReport] = []
@@ -815,8 +845,10 @@ def plan_darwin_warmup(
         perRoot=stats,
         shards=tuple(reports),
         notes=(
-            "Intersection of per-root aarch64-darwin outputs absent from "
-            "cache.nixos.org and gkze.cachix.org. Five macos-15 rust-warmup "
+            "Intersection of per-root aarch64-darwin rust_* and safe FOD "
+            "outputs absent from cache.nixos.org and gkze.cachix.org. "
+            "Leaf packages (goose-cli, vendor-cargo-deps) stay in remaining "
+            "and realize after rust_* is in gkze. Five macos-15 rust-warmup "
             "slots realize rust_* by dependency layer (skip-if-in-gkze); "
             "packages inventory stays certify evidence and does not serialize "
             "this set. "
@@ -1095,6 +1127,62 @@ def is_source_fetch_store_path(path: str) -> bool:
     if name.endswith(_SOURCE_FETCH_ARCHIVES):
         return True
     return name == "source" or name.endswith(("-src", "-source"))
+
+
+# rust-warmup others may realize these without compiling a crate graph.
+# #1268 slot 4: goose-cli-1.51.0 = 1759 will-be-built; crane-utils = 1.
+# #1268 slot 3: vendor-cargo-deps = 521; cargo-package-* and but = 1.
+# #1268 slot 0: goose-cli-v8-native = 1 (toolchain already in gkze).
+_SAFE_WARMUP_OTHER_PREFIXES = (
+    "cargo-package-",
+    "cargo-src-",
+    "crane-utils-",
+    "goose-cli-v8-",
+)
+
+
+def is_safe_rust_warmup_other(path: str) -> bool:
+    """Return whether rust-warmup may realize this non-rust_* path.
+
+    rustc-1.98.1 substituted from cache.nixos.org on #1268. The explosion
+    was realizing leaf/vendor umbrellas whose crate graphs were never in
+    gkze, not a rust-overlay hash mismatch for those slots.
+    """
+    if is_source_fetch_store_path(path):
+        return True
+    rest = _store_output_rest(path).removesuffix(".drv")
+    return rest.startswith(_SAFE_WARMUP_OTHER_PREFIXES)
+
+
+def partition_rust_warmup_others(
+    drvs: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Split rust-warmup others into safe FODs/helpers vs deferred leaves."""
+    safe: list[str] = []
+    deferred: list[str] = []
+    for drv in dict.fromkeys(drvs):
+        if is_crate2nix_rust_output(drv) or is_safe_rust_warmup_other(drv):
+            safe.append(drv)
+        else:
+            deferred.append(drv)
+    return tuple(safe), tuple(deferred)
+
+
+def classify_slot_warmup_will_be_built(
+    paths: Sequence[str],
+    *,
+    will_be_built: Mapping[str, int],
+) -> tuple[tuple[tuple[str, int], ...], tuple[tuple[str, int], ...]]:
+    """Pair slot paths with dry-run will-be-built counts, split safe/deferred.
+
+    Hosted Darwin logs are the count oracle: this Linux workspace cannot
+    ``nix build`` aarch64-darwin closures. Tests pass the #1268 counts.
+    """
+    safe, deferred = partition_rust_warmup_others(paths)
+    return (
+        tuple((path, will_be_built[path]) for path in safe),
+        tuple((path, will_be_built[path]) for path in deferred),
+    )
 
 
 def partition_compiler_input_drvs(

@@ -59,6 +59,7 @@ from lib.update.ci.warmup import (
     parse_canary_slots,
     partition_agent_ui_drvs,
     partition_compiler_input_drvs,
+    partition_rust_warmup_others,
     partition_rust_zed_drvs,
     partition_zed_editor_nightly_drvs,
     plan_darwin_warmup,
@@ -661,6 +662,17 @@ def _realize_logged_warmup(
     )
 
 
+def _partition_rust_warmup_stripe(
+    drvs: tuple[str, ...],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """Peel SVH leaves, then drop #1268 leaf/vendor umbrellas from others."""
+    others, agent_ui = partition_agent_ui_drvs(drvs)
+    others, rust_zed = partition_rust_zed_drvs(others)
+    others, zed_nightly = partition_zed_editor_nightly_drvs(others)
+    others = partition_rust_warmup_others(others)[0]
+    return others, agent_ui, rust_zed, zed_nightly
+
+
 def _realize_rust_warmup(
     warmup_plan: Path,
     warmup_slot: int,
@@ -694,9 +706,7 @@ def _realize_rust_warmup(
         present=check_path_in_cachix,
     )
     drvs = unique_drvs_for_outputs(missing, plan.output_drvs)
-    others, agent_ui = partition_agent_ui_drvs(drvs)
-    others, rust_zed = partition_rust_zed_drvs(others)
-    others, zed_nightly = partition_zed_editor_nightly_drvs(others)
+    others, agent_ui, rust_zed, zed_nightly = _partition_rust_warmup_stripe(drvs)
     # Update #1258/#1263: Darwin rustc intern of a Cachix
     # language_models rlib is bare E0463 (nixpkgs#482646). rust_zed
     # then E0460s when target/deps/libextension_host is a newer SVH

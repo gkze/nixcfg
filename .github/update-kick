@@ -1,4 +1,6 @@
 # Touch this file to queue one Update run on main (or a listed feature branch).
 # Cloud-agent ghs_ tokens cannot workflow_dispatch (HTTP 403, actions:write).
 # Remove this kick path after E2E prepare → validate → publish is proven.
-2026-10-10T13:55:00Z preserve-symlink-mode-after-1267-agents-clobber
+# canary-slots on push reads the next line (slots 3 and 4 exploded on #1268).
+canary-slots: 3,4
+2026-10-10T15:52:00Z defer-rust-warmup-leaf-others-after-1268

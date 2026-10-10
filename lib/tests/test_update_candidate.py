@@ -637,6 +637,8 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
         write_warmup_plan,
     )
 
+    cargo = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9"
+    cargo_drv = f"{cargo}.drv"
     warmup_plan = tmp_path / "warmup-plan.json"
     write_warmup_plan(
         warmup_plan,
@@ -644,11 +646,9 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
             schemaVersion=1,
             system="aarch64-darwin",
             substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
-            warmupOutputs=("/nix/store/shared",),
-            rustLayers=(("/nix/store/shared",),),
-            outputDrvs={
-                "/nix/store/shared": "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared.drv"
-            },
+            warmupOutputs=(cargo,),
+            rustLayers=((cargo,),),
+            outputDrvs={cargo: cargo_drv},
             perRoot={
                 "darwin-argus": RootWarmupStats(
                     outputs=1, missing=1, warmup=1, remaining=0
@@ -670,7 +670,7 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
     )
     assert rust.gates == ()
     assert order == ["warmup"]
-    assert realized == [("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-shared.drv",)]
+    assert realized == [(cargo_drv,)]
     monkeypatch.setenv("NIXCFG_CANARY", "true")
     default_skip = pipeline.validate_candidate(
         candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=1
@@ -696,6 +696,73 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
         pipeline.validate_candidate(candidate, scope="rust-warmup")
     with pytest.raises(ValueError, match="warmup slots are only valid"):
         pipeline.validate_candidate(candidate, scope="packages", warmup_slot=0)
+
+
+def test_rust_warmup_defers_leaf_packages_from_others(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1268 slots 3/4: do not nix-build goose-cli / vendor-cargo-deps in others."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[object] = []
+
+    def warmup_realize(paths: object, *_args: object, **_kwargs: object) -> tuple[()]:
+        realized.append(paths)
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    cargo = "/nix/store/mynvanc4j9sgag5gdd8ir1s3p0pq3rgg-cargo-package-sha2-0.10.9"
+    goose = "/nix/store/rhak437lr7f3zwfgf2qrb40ryw7mx98i-goose-cli-1.51.0"
+    vendor = "/nix/store/0jmdym99ibn8rpv9696zvyrkr0mjyvjv-vendor-cargo-deps"
+    cargo_drv = f"{cargo}.drv"
+    goose_drv = f"{goose}.drv"
+    vendor_drv = f"{vendor}.drv"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(cargo, goose, vendor),
+            rustLayers=((cargo, goose, vendor),),
+            outputDrvs={cargo: cargo_drv, goose: goose_drv, vendor: vendor_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=3, missing=3, warmup=3, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == ()
+    assert realized == [(cargo_drv,)]
+    assert goose_drv not in realized[0]
+    assert vendor_drv not in realized[0]
 
 
 def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
