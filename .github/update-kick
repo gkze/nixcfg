@@ -1,4 +1,4 @@
 # Touch this file to queue one Update run on main (or a listed feature branch).
 # Cloud-agent ghs_ tokens cannot workflow_dispatch (HTTP 403, actions:write).
 # Remove this kick path after E2E prepare → validate → publish is proven.
-2026-10-10T03:05:00Z extension-host-family-force-local
+2026-10-10T05:00:00Z extension-host-family-no-delete

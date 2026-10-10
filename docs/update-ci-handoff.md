@@ -58,7 +58,8 @@ already contains:
 | `414eab18` | Kick that queued `38011931476` (#1261); terminal failure 02:52:41Z |
 | `21eaab03` | Delete+`--no-substitute` family (wrong; #1262 live-path delete) |
 | `4dc53c2c` | Kick that queued `38019308787` (#1262); terminal failure 04:38:23Z |
-| this head | `--no-substitute` family after rustc inputs; nightly waits |
+| `ce38e78f` | `--no-substitute` family after rustc inputs; nightly waits |
+| this head | Kick that queues the no-delete force-local Update |
 
 #222 is **closed as superseded** (2026-10-08T21:40:26Z). The rust_zed fix and
 5-wide split live on this branch, not on `cursor/fix-zed-out-lib-cycle-6614`.
