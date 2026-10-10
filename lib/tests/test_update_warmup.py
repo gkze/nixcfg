@@ -1413,10 +1413,14 @@ def test_force_local_dry_run_rejects_bootstrap_builds() -> None:
         "/nix/store/n2g2dzs3aaaaaaaaaaaaaaaaaaaaaaaa-"
         "zed-editor-nightly-extension_host-src.drv"
     )
+    lsp_types = "/nix/store/v11pzry7z3p0d8pvkhqiclf5h2q0knqb-rust_lsp-types-0.95.1.drv"
+    merman = "/nix/store/s39xn12r5kn7jp29m7fnzcrqgx3qnhlb-rust_merman-0.8.0-alpha.5.drv"
     bmake = "/nix/store/fcy73hrwaaaaaaaaaaaaaaaaaaaaaaaa-bmake-20260313.tar.gz.drv"
     stdenv = "/nix/store/1gx3hvygaaaaaaaaaaaaaaaaaaaaaaaa-stdenv-darwin.drv"
     assert is_force_local_allowed_build(host)
     assert is_force_local_allowed_build(src)
+    assert is_force_local_allowed_build(lsp_types)
+    assert is_force_local_allowed_build(merman)
     assert not is_force_local_allowed_build(bmake)
     assert not is_force_local_allowed_build(stdenv)
     stderr = (
@@ -1444,6 +1448,19 @@ def test_force_local_dry_run_rejects_bootstrap_builds() -> None:
     assert_force_local_dry_run(
         (host,),
         run=lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "", ok),
+    )
+    third_party = (
+        "these 4 derivations will be built:\n"
+        f"  {host}\n"
+        f"  {src}\n"
+        f"  {lsp_types}\n"
+        f"  {merman}\n"
+    )
+    assert_force_local_dry_run(
+        (host,),
+        run=lambda args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, "", third_party
+        ),
     )
     with pytest.raises(WarmupError, match="failed to dry-run force-local"):
         assert_force_local_dry_run(

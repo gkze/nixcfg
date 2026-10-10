@@ -1477,6 +1477,12 @@ def is_force_local_allowed_build(path: str) -> bool:
     """Return whether a ``--dry-run --no-substitute`` build may compile *path*."""
     if is_svh_sensitive_store_path(path):
         return True
+    # 38092942461: deferred rust_lsp-types / rust_merman / rust_accesskit
+    # compile as --no-substitute family deps after rustc already substituted.
+    if is_crate2nix_rust_output(path) and not is_compiler_must_substitute_store_path(
+        path
+    ):
+        return True
     rest = _store_output_rest(path)
     if "-src" not in rest:
         return False
