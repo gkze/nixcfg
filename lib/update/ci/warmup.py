@@ -1004,11 +1004,26 @@ SETTINGS_MEMBER_CRATES = (
     "settings_macros",
 )
 
+# rust_settings_json --externs these. Canary 114295702356 substituted
+# rust_tree-sitter then E0463'd with the rlib on the rustc line.
+TREE_SITTER_MEMBER_CRATES = (
+    "tree-sitter",
+    "tree-sitter-json",
+)
+
 
 def is_settings_family_store_path(path: str) -> bool:
     """Return whether *path* is a rust_settings SVH-family crate."""
     return any(
         is_named_rust_crate_store_path(path, crate) for crate in SETTINGS_MEMBER_CRATES
+    )
+
+
+def is_tree_sitter_family_store_path(path: str) -> bool:
+    """Return whether *path* is rust_tree-sitter / rust_tree-sitter-json."""
+    return any(
+        is_named_rust_crate_store_path(path, crate)
+        for crate in TREE_SITTER_MEMBER_CRATES
     )
 
 
@@ -1034,9 +1049,10 @@ def settings_family_warmup_outputs(layers: Sequence[Sequence[str]]) -> tuple[str
 def zed_family_warmup_outputs(layers: Sequence[Sequence[str]]) -> tuple[str, ...]:
     """Return the atomic Zed rust_* family from every warmup layer.
 
-    rust_zed, zed-editor-nightly, settings*, and extension_host* share one
-    rustc intern / SVH generation. skip_cached on a subset is the mix
-    that produced #1269 rust_settings E0463 against Cachix content/json.
+    rust_zed, zed-editor-nightly, settings*, tree-sitter, and
+    extension_host* share one rustc intern / SVH generation. skip_cached
+    on a subset is the mix that produced #1269 rust_settings E0463
+    against Cachix content/json and #1270 settings_json vs tree_sitter.
     """
     return _warmup_outputs_matching(layers, is_svh_sensitive_store_path)
 
@@ -1162,6 +1178,7 @@ def is_svh_sensitive_store_path(path: str) -> bool:
     return (
         is_extension_host_family_store_path(path)
         or is_settings_family_store_path(path)
+        or is_tree_sitter_family_store_path(path)
         or is_rust_zed_store_path(path)
         or is_zed_editor_nightly_store_path(path)
         or is_rust_agent_ui_store_path(path)
@@ -1282,14 +1299,15 @@ def compiler_input_drvs(
     ``#1263`` used direct ``--references`` plus ``--fallback``, then
     ``--no-substitute`` on ``extension_host`` rebuilt 406 bootstrap
     drvs (bmake 404). Query ``--requisites`` and realize them with
-    ``--max-jobs 0`` so only rust_* compile. rust_* requisites stay
-    out of this set: substituting ``rust_tree-sitter`` then force-local
-    ``settings_json`` is the #1270 canary E0463 mix.
+    ``--max-jobs 0`` so only the SVH-sensitive rust_* compile.
+    Excluding every rust_* (eab3998a) made extension_host --no-substitute
+    will-be-built 682 on 38083709508. Third-party rust_* stay here;
+    tree-sitter is SVH-sensitive with settings_json.
     """
     return tuple(
         path
         for path in drv_input_requisites(parent_drvs, run=run)
-        if not is_svh_sensitive_store_path(path) and not is_crate2nix_rust_output(path)
+        if not is_svh_sensitive_store_path(path)
     )
 
 
@@ -1427,7 +1445,7 @@ _DRV_PATH = re.compile(r"/nix/store/[0-9a-z]{32}-[^/\s]+\.drv")
 
 def is_force_local_allowed_build(path: str) -> bool:
     """Return whether a ``--dry-run --no-substitute`` build may compile *path*."""
-    if is_svh_sensitive_store_path(path) or is_crate2nix_rust_output(path):
+    if is_svh_sensitive_store_path(path):
         return True
     rest = _store_output_rest(path)
     if "-src" not in rest:

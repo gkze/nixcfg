@@ -41,12 +41,6 @@ from lib.update.updaters.metadata import GitHubReleaseMetadata, MappingMetadata
 _HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 
 
-@pytest.fixture(autouse=True)
-def _default_rust_compile_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Hosted tests use fake .drv paths; nix-store --query would fail closed."""
-    monkeypatch.setattr(pipeline, "rust_compile_input_drvs", lambda *_a, **_k: ())
-
-
 @dataclass(frozen=True)
 class ExampleMetadata(MappingMetadata):
     """Representative nested updater metadata, including non-mapping state."""
@@ -894,12 +888,14 @@ def test_rust_warmup_settings_json_force_locals_tree_sitter(
     tree_sitter = "/nix/store/1zsfiw8m72a6ql2wx3f5bpq3mn7vnw77-rust_tree-sitter-0.27.0"
     settings_json_drv = f"{settings_json}.drv"
     tree_sitter_drv = f"{tree_sitter}.drv"
-    monkeypatch.setattr(
-        pipeline,
-        "rust_compile_input_drvs",
-        lambda _parents, **_k: (tree_sitter_drv,),
-    )
-    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+
+    def crate_inputs(_parents: object, crates: object, **_k: object) -> tuple[str, ...]:
+        names = tuple(crates) if isinstance(crates, tuple) else ()
+        if "tree-sitter" in names:
+            return (tree_sitter_drv,)
+        return ()
+
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", crate_inputs)
     warmup_plan = tmp_path / "warmup-plan.json"
     write_warmup_plan(
         warmup_plan,

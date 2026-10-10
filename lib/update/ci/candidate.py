@@ -41,6 +41,7 @@ from lib.update.ci.shard_plan import (
 from lib.update.ci.warmup import (
     EXTENSION_HOST_MEMBER_CRATES,
     SETTINGS_MEMBER_CRATES,
+    TREE_SITTER_MEMBER_CRATES,
     WARMUP_DRVS_NAME,
     WARMUP_PLAN_NAME,
     WarmupError,
@@ -74,7 +75,6 @@ from lib.update.ci.warmup import (
     plan_darwin_warmup,
     raise_if_warmup_fatal,
     realize_warmup_outputs,
-    rust_compile_input_drvs,
     rust_crate_input_drvs,
     rustc_generation_ids,
     settings_family_warmup_outputs,
@@ -679,7 +679,6 @@ def _realize_svh_family(
     """
     if not family:
         return (), True
-    family = tuple(dict.fromkeys((*family, *rust_compile_input_drvs(family))))
     extension_host = tuple(
         drv for drv in family if is_rust_extension_host_store_path(drv)
     )
@@ -783,6 +782,7 @@ def _merge_settings_family(
             *_settings_plan_drvs(settings, plan),
             *settings,
             *rust_crate_input_drvs(settings, SETTINGS_MEMBER_CRATES),
+            *rust_crate_input_drvs(settings, TREE_SITTER_MEMBER_CRATES),
         ))
     )
 
@@ -942,6 +942,7 @@ def _realize_zed_warmup(
                 *member_drvs,
                 *rust_crate_input_drvs(parents, EXTENSION_HOST_MEMBER_CRATES),
                 *rust_crate_input_drvs(parents, SETTINGS_MEMBER_CRATES),
+                *rust_crate_input_drvs(parents, TREE_SITTER_MEMBER_CRATES),
             ))
         )
     family_drvs = tuple(dict.fromkeys((*member_drvs, *rust_zed, *zed_nightly)))

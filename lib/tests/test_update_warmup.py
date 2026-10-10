@@ -48,6 +48,7 @@ from lib.update.ci.warmup import (
     is_settings_family_store_path,
     is_source_fetch_store_path,
     is_svh_sensitive_store_path,
+    is_tree_sitter_family_store_path,
     is_zed_editor_nightly_store_path,
     language_models_input_drvs,
     language_models_warmup_outputs,
@@ -1075,6 +1076,8 @@ def test_1269_slot3_settings_svh_mix_under_fatal_limit() -> None:
     )
     assert is_crate2nix_rust_output(tree_sitter)
     assert not is_settings_family_store_path(tree_sitter)
+    assert is_tree_sitter_family_store_path(tree_sitter)
+    assert is_svh_sensitive_store_path(tree_sitter)
     assert is_force_local_allowed_build(tree_sitter)
     assert WARMUP_FATAL_BUILD_LIMIT >= 6
 
@@ -1214,8 +1217,9 @@ def test_zed_family_policy_is_atomic_all_or_force_local() -> None:
     assert_zed_family_realize_set(family, ())
     with pytest.raises(WarmupError, match="mixes generations"):
         assert_zed_family_realize_set(family, (settings,))
-    layers = ((content,), (settings,))
-    assert zed_family_warmup_outputs(layers) == family
+    tree_sitter = "/nix/store/1zsfiw8m72a6ql2wx3f5bpq3mn7vnw77-rust_tree-sitter-0.27.0"
+    layers = ((content,), (tree_sitter,), (settings,))
+    assert zed_family_warmup_outputs(layers) == (content, tree_sitter, settings)
     rustc = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
     rust_default = "/nix/store/dq17vrzvx74ismp4s6xicxirkmlshw1b-rust-default-1.98.1.drv"
     clang = "/nix/store/cccccccccccccccccccccccccccccccc-clang-21.1.8.drv"
