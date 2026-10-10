@@ -629,8 +629,6 @@ def _realize_compiler_substitutes(
     successful helper retry — that would let force-local run after a
     bootstrap miss.
     """
-    if not substitute:
-        return ()
     failures = realize_warmup_outputs(
         substitute,
         flake_root=flake_root,
