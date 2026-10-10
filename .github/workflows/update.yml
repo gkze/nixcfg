@@ -15,6 +15,13 @@ on:
         description: Allow one agent repair and a fresh fully validated attempt
         type: boolean
         default: true
+      canary_warm_rust:
+        description: >
+          Dispatch-only reserved input. The full no-skip run is still the
+          done-bar proof. Prepare stays serial (one candidate extended
+          Darwin → arm → x86) so this flag does not skip those jobs yet.
+        type: boolean
+        default: false
   schedule:
     - cron: "17 7 * * 1"
   # workflow_dispatch is unavailable to the Cursor GitHub App token
@@ -35,8 +42,12 @@ concurrency:
   # so a newer HEAD can start instead of waiting on a doomed older SHA.
   cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
 jobs:
-  # Generated artifacts can be shared between platforms. Extend one pinned
-  # candidate serially. Linux builds the VM dependencies before Darwin roots.
+  # Generated artifacts share one pinned candidate. Each prepare extends
+  # the previous platform's tree (Darwin → arm → x86). These jobs cannot
+  # run in parallel without splitting that candidate. rust-warmup waits
+  # for prepare-x86 because that is the complete tree. #1263 force-local
+  # now dry-runs the will-be-built set so a 406-drv bootstrap compile
+  # fails the slot immediately instead of burning the runner.
   prepare-darwin:
     uses: ./.github/workflows/update-native.yml
     with:

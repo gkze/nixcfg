@@ -24,7 +24,7 @@ import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -825,8 +825,9 @@ def is_rust_zed_store_path(path: str) -> bool:
 
 
 def is_zed_editor_nightly_store_path(path: str) -> bool:
-    """Return whether *path* is the Zed nightly package, not ``rust_zed``."""
-    return _store_output_rest(path).startswith("zed-editor-nightly-")
+    """Return whether *path* is the Zed nightly package, not a crate ``-src``."""
+    rest = _store_output_rest(path)
+    return rest.startswith("zed-editor-nightly-") and "-src" not in rest
 
 
 # Cargo.nix crates that depend on ``extension_host`` plus ``title_bar``
@@ -932,24 +933,25 @@ def extension_host_family_warmup_outputs(
     return _warmup_outputs_matching(layers, is_extension_host_family_store_path)
 
 
-def drv_input_references(
+def _query_drv_graph(
     parent_drvs: Sequence[str],
+    operation: Literal["references", "requisites"],
     *,
     run: _StoreRun | None = None,
 ) -> tuple[str, ...]:
-    """Return ``.drv`` references of *parent_drvs* after import."""
+    """Return ``.drv`` ``--references`` or ``--requisites`` of *parent_drvs*."""
     runner = subprocess.run if run is None else run
     found: dict[str, None] = {}
     for drv in dict.fromkeys(parent_drvs):
         result = runner(
-            ["nix-store", "--query", "--references", drv],
+            ["nix-store", "--query", f"--{operation}", drv],
             check=False,
             capture_output=True,
             text=True,
         )
         if result.returncode:
             detail = _store_command_detail(
-                result, fallback="nix-store --query --references failed"
+                result, fallback=f"nix-store --query --{operation} failed"
             )
             msg = f"failed to query rust crate inputs of {drv}: {detail}"
             raise WarmupError(msg)
@@ -960,6 +962,24 @@ def drv_input_references(
             if path.endswith(".drv"):
                 found.setdefault(path, None)
     return tuple(found)
+
+
+def drv_input_references(
+    parent_drvs: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return direct ``.drv`` references of *parent_drvs* after import."""
+    return _query_drv_graph(parent_drvs, "references", run=run)
+
+
+def drv_input_requisites(
+    parent_drvs: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return the full ``.drv`` closure of *parent_drvs* after import."""
+    return _query_drv_graph(parent_drvs, "requisites", run=run)
 
 
 def rust_crate_input_drvs(
@@ -982,17 +1002,100 @@ def compiler_input_drvs(
     *,
     run: _StoreRun | None = None,
 ) -> tuple[str, ...]:
-    """Return build-input ``.drv``s that can substitute without mixing family SVHs.
+    """Return the non-family ``.drv`` closure that must be substituted first.
 
-    ``#1262`` ``--max-jobs 0`` on the family itself copied live
-    ``extension_host`` NARs that Determinate Nix then refused to delete.
-    Realize rustc/stdenv from these inputs instead.
+    ``#1263`` used direct ``--references`` plus ``--fallback``, then
+    ``--no-substitute`` on ``extension_host`` rebuilt 406 bootstrap
+    drvs (bmake 404). Query ``--requisites`` and realize them with
+    ``--max-jobs 0`` so only the SVH-sensitive rust_* compile.
     """
     return tuple(
         path
-        for path in drv_input_references(parent_drvs, run=run)
+        for path in drv_input_requisites(parent_drvs, run=run)
         if not is_svh_sensitive_store_path(path)
     )
+
+
+_DRV_PATH = re.compile(r"/nix/store/[0-9a-z]{32}-[^/\s]+\.drv")
+
+
+def is_force_local_allowed_build(path: str) -> bool:
+    """Return whether a ``--dry-run --no-substitute`` build may compile *path*."""
+    if is_svh_sensitive_store_path(path):
+        return True
+    rest = _store_output_rest(path)
+    if "-src" not in rest:
+        return False
+    return (
+        "zed-editor-nightly" in rest
+        or "extension_host" in rest
+        or any(crate in rest for crate in EXTENSION_HOST_MEMBER_CRATES)
+    )
+
+
+def force_local_dry_run_builds(
+    drvs: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return ``.drv``s ``nix build --dry-run --no-substitute`` would compile."""
+    runner = subprocess.run if run is None else run
+    found: dict[str, None] = {}
+    for drv in dict.fromkeys(drvs):
+        result = runner(
+            [
+                "nix",
+                "build",
+                "--dry-run",
+                "--no-link",
+                "--no-substitute",
+                warmup_build_installable(drv),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode:
+            detail = _store_command_detail(
+                result, fallback="nix build --dry-run --no-substitute failed"
+            )
+            msg = f"failed to dry-run force-local {drv}: {detail}"
+            raise WarmupError(msg)
+        stdout = result.stdout
+        stderr = result.stderr
+        out = stdout.decode() if isinstance(stdout, bytes) else stdout
+        err = stderr.decode() if isinstance(stderr, bytes) else stderr
+        in_section = False
+        for line in f"{out}\n{err}".splitlines():
+            if "will be built:" in line:
+                in_section = True
+                continue
+            if not in_section:
+                continue
+            match = _DRV_PATH.search(line)
+            if match:
+                found.setdefault(match.group(0), None)
+                continue
+            if line.strip() == "" or not line.lstrip().startswith("/nix/store/"):
+                in_section = False
+    return tuple(found)
+
+
+def assert_force_local_dry_run(
+    drvs: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> None:
+    """Fail closed if force-local would compile stdenv or other non-family drvs."""
+    extra = tuple(
+        path
+        for path in force_local_dry_run_builds(drvs, run=run)
+        if not is_force_local_allowed_build(path)
+    )
+    if extra:
+        sample = ", ".join(extra[:8])
+        msg = f"force-local would compile non-family: {sample}"
+        raise WarmupError(msg)
 
 
 def language_models_input_drvs(
@@ -1037,14 +1140,18 @@ def realize_warmup_outputs(
     timeout: float | None = None,
     print_build_logs: bool = False,
     force_local: bool = False,
+    substitute_only: bool = False,
 ) -> tuple[DerivationValidationFailure, ...]:
     """Build the warmup outputs so Cachix's post-build-hook pushes each path.
 
-    ``force_local`` is ``--no-substitute`` only. Do not substitute the
-    family first and do not ``--delete --ignore-liveness``: #1262
-    Determinate Nix refused that on live ``extension_host`` outputs.
-    Populate rustc via ``compiler_input_drvs`` before calling this.
+    ``substitute_only`` is ``--max-jobs 0`` for the non-family closure.
+    ``force_local`` is ``--no-substitute`` on SVH-sensitive rust_* only.
+    Do not combine them: #1263 ``--no-substitute`` on ``extension_host``
+    rebuilt 406 bootstrap drvs after a partial ``--fallback``.
     """
+    if force_local and substitute_only:
+        msg = "realize_warmup_outputs cannot be force_local and substitute_only"
+        raise WarmupError(msg)
     failures: list[DerivationValidationFailure] = []
     ordered = tuple(dict.fromkeys(paths))
     for start in range(0, len(ordered), _WARMUP_REALIZE_CHUNK):
@@ -1055,6 +1162,7 @@ def realize_warmup_outputs(
                 installable=warmup_build_installable(path),
                 mode="build",
                 no_substitute=force_local,
+                substitute_only=substitute_only,
             )
             for path in chunk
         )

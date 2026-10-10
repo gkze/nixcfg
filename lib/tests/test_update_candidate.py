@@ -686,13 +686,14 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
         "validate_derivations",
         lambda *_args, **_kwargs: (),
     )
-    realized: list[tuple[object, bool, bool]] = []
+    realized: list[tuple[object, bool, bool, bool]] = []
 
     def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
         realized.append((
             paths,
             bool(kwargs.get("print_build_logs")),
             bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
         ))
         return ()
 
@@ -700,6 +701,7 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
     monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
     monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
     from lib.update.ci.warmup import (
         RootWarmupStats,
         ShardLocalBuildReport,
@@ -755,9 +757,9 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
     )
     assert rust.gates == ()
     assert realized == [
-        ((other_drv,), False, False),
-        ((language_models_drv,), True, True),
-        ((agent_ui_drv,), True, False),
+        ((other_drv,), False, False, False),
+        ((language_models_drv,), True, True, False),
+        ((agent_ui_drv,), True, False, False),
     ]
     realized.clear()
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda path: path != agent_ui)
@@ -766,8 +768,8 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
     )
     assert rust.gates == ()
     assert realized == [
-        ((language_models_drv,), True, True),
-        ((agent_ui_drv,), True, False),
+        ((language_models_drv,), True, True, False),
+        ((agent_ui_drv,), True, False, False),
     ]
     realized.clear()
     write_warmup_plan(
@@ -809,9 +811,9 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
     )
     assert rust.gates == ()
     assert realized == [
-        ((other_drv,), False, False),
-        ((language_models_drv,), True, True),
-        ((agent_ui_drv,), True, False),
+        ((other_drv,), False, False, False),
+        ((language_models_drv,), True, True, False),
+        ((agent_ui_drv,), True, False, False),
     ]
     realized.clear()
     write_warmup_plan(
@@ -846,7 +848,7 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
         candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
     )
     assert rust.gates == ()
-    assert realized == [((language_models_drv,), False, False)]
+    assert realized == [((language_models_drv,), False, False, False)]
     monkeypatch.setattr(pipeline, "language_models_input_drvs", lambda _drvs: ())
     write_warmup_plan(
         warmup_plan,
@@ -892,13 +894,14 @@ def test_rust_warmup_zed_slot_force_locals_extension_host_family(
         "validate_derivations",
         lambda *_args, **_kwargs: (),
     )
-    realized: list[tuple[object, bool, bool]] = []
+    realized: list[tuple[object, bool, bool, bool]] = []
 
     def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
         realized.append((
             paths,
             bool(kwargs.get("print_build_logs")),
             bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
         ))
         return ()
 
@@ -906,6 +909,7 @@ def test_rust_warmup_zed_slot_force_locals_extension_host_family(
     monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
     monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
     from lib.update.ci.warmup import (
         RootWarmupStats,
         ShardLocalBuildReport,
@@ -968,9 +972,9 @@ def test_rust_warmup_zed_slot_force_locals_extension_host_family(
     )
     assert rust.gates == ()
     assert realized == [
-        ((extension_host_drv,), True, True),
-        ((activity_drv,), True, True),
-        ((rust_zed_drv,), True, False),
+        ((extension_host_drv,), True, True, False),
+        ((activity_drv,), True, True, False),
+        ((rust_zed_drv,), True, False, False),
     ]
     realized.clear()
     write_warmup_plan(
@@ -1011,9 +1015,9 @@ def test_rust_warmup_zed_slot_force_locals_extension_host_family(
     )
     assert rust.gates == ()
     assert realized == [
-        ((extension_host_drv,), True, True),
-        ((activity_drv, settings_drv), True, True),
-        ((rust_zed_drv,), True, False),
+        ((extension_host_drv,), True, True, False),
+        ((activity_drv, settings_drv), True, True, False),
+        ((rust_zed_drv,), True, False, False),
     ]
     monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_args, **_kwargs: ())
     write_warmup_plan(
@@ -1055,19 +1059,21 @@ def test_rust_warmup_zed_nightly_waits_for_family(
     monkeypatch.setattr(
         pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
     )
-    realized: list[tuple[object, bool, bool]] = []
+    realized: list[tuple[object, bool, bool, bool]] = []
 
     def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
         realized.append((
             paths,
             bool(kwargs.get("print_build_logs")),
             bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
         ))
         return ()
 
     monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
     monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
     from lib.update.ci.warmup import (
         RootWarmupStats,
         ShardLocalBuildReport,
@@ -1135,11 +1141,11 @@ def test_rust_warmup_zed_nightly_waits_for_family(
     )
     assert rust.gates == ()
     assert realized == [
-        ((rustc_drv,), False, False),
-        ((extension_host_drv,), True, True),
-        ((settings_drv,), True, True),
-        ((rust_zed_drv,), True, False),
-        ((nightly_drv,), True, False),
+        ((rustc_drv,), False, False, True),
+        ((extension_host_drv,), True, True, False),
+        ((settings_drv,), True, True, False),
+        ((rust_zed_drv,), True, False, False),
+        ((nightly_drv,), True, False, False),
     ]
     realized.clear()
     write_warmup_plan(
@@ -1181,11 +1187,68 @@ def test_rust_warmup_zed_nightly_waits_for_family(
     )
     assert rust.gates == ()
     assert realized == [
-        ((rustc_drv,), False, False),
-        ((extension_host_drv,), True, True),
-        ((settings_drv,), True, True),
-        ((nightly_drv,), True, False),
+        ((rustc_drv,), False, False, True),
+        ((extension_host_drv,), True, True, False),
+        ((settings_drv,), True, True, False),
+        ((nightly_drv,), True, False, False),
     ]
+    realized.clear()
+    from lib.update.derivation_validation import DerivationValidationFailure
+
+    def failing_compiler(
+        paths: object, *_args: object, **kwargs: object
+    ) -> tuple[DerivationValidationFailure, ...]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        if kwargs.get("substitute_only"):
+            return (
+                DerivationValidationFailure("root-warmup", "rustc.drv^*", "cache miss"),
+            )
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", failing_compiler)
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(extension_host, rust_zed),
+            rustLayers=((extension_host,), (rust_zed,)),
+            outputDrvs={
+                extension_host: extension_host_drv,
+                rust_zed: rust_zed_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "rust_crate_input_drvs",
+        lambda *_args, **_kwargs: (extension_host_drv, settings_drv),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.failures[0].message == "cache miss"
+    assert realized == [((rustc_drv,), False, False, True)]
 
 
 def test_closure_budget_timeout_fails_closed(

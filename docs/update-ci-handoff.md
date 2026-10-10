@@ -2,9 +2,11 @@
 
 Lane for `cursor/no-skip-darwin-shards-6614` / [PR #221](https://github.com/gkze/nixcfg/pull/221).
 George approved handing this to a fresh agent once `37809856116` ended.
-This note is the stop point after the #1262 no-delete force-local kick:
-**do not queue a second Update, and do not self-schedule
-checks.** The manager routine watches the run.
+This note is the stop point after the #1263 narrower-rebuild kick.
+George cancelled #1263 mid-run and replaced the wait-for-end rule:
+cancel a doomed run, fix, push, and kick immediately. The manager
+owns the watch (poll jobs every 2–3 minutes) until publish-green
+or a George decision.
 
 ## Done bar (standing rules, verbatim)
 
@@ -59,7 +61,8 @@ already contains:
 | `21eaab03` | Delete+`--no-substitute` family (wrong; #1262 live-path delete) |
 | `4dc53c2c` | Kick that queued `38019308787` (#1262); terminal failure 04:38:23Z |
 | `ce38e78f` | `--no-substitute` family after rustc inputs; nightly waits |
-| this head | Kick that queues the no-delete force-local Update |
+| `8c3c98fe` | Kick that queued `38026041776` (#1263); George cancelled ~06:58Z |
+| this head | Substitute full non-family requisites; `--no-substitute` rust_* only |
 
 #222 is **closed as superseded** (2026-10-08T21:40:26Z). The rust_zed fix and
 5-wide split live on this branch, not on `cursor/fix-zed-out-lib-cycle-6614`.
@@ -423,6 +426,46 @@ tree) is still split and still in gkze:
     `zed-editor-nightly` waits until extension_host, settings_ui,
     and rust_zed. Do not evict `h3crq11a`. This is still in-lane
     (no flake pin).
+    **#1263 proved `--no-substitute` still compiled bootstrap** — see
+    cause 15.
+15. **`--no-substitute` rebuilt the stdenv closure; bmake 404 is
+    a fetchurl of that closure** (`38026041776` / #1263 warm-rust
+    0/1 / `114148612277` + `114148612214` @ `8c3c98fe`). George
+    cancelled ~06:58Z. Slots 2/3/4, validate-arm, validate-x86, and
+    plan-darwin-closures had already passed. No E0460 / E0463 /
+    liveness. Packages/roots/closures skipped after the cancel.
+
+    Slot 0: `compiler_input_drvs` used direct `--references` and
+    `--fallback`'d them (653 fetches), then
+    `nix build --no-substitute …jwk3kr03…-rust_extension_host.drv^*`
+    printed `these 406 derivations will be built` starting at
+    `bootstrap-tools.tar.xz.drv` / `bootstrap-stage0-stdenv-darwin-no-cc`
+    and compiled libiconv / expat / gnum4. `bmake> curl: (22) 404`
+    `cannot download bmake-20260313.tar.gz from any mirror` while
+    **building** `fcy73hrw…-bmake-20260313.tar.gz.drv`. crufty.net
+    no longer hosts `bmake-20260313` (newer tarballs exist). That
+    download only happens when the fetchurl drv is compiled, not
+    when its NAR is substituted.
+
+    Slot 1: first `--no-substitute` extension_host was only 2 drvs
+    (`zed-editor-nightly-extension_host-src` + the crate). Then
+    `--no-substitute` language_models printed `these 528
+    derivations will be built` (same bootstrap) and hit the same
+    bmake 404.
+
+    This head queries `--requisites` of the whole family, realizes
+    that set minus SVH-sensitive rust_* with `--max-jobs 0`
+    (required substitute), dry-runs `--no-substitute` and fails
+    closed if will-be-built includes stdenv/bmake, then
+    `--no-substitute` rust_* only. If bmake's NAR is on
+    cache.nixos.org / gkze, #1 makes the 404 disappear. A mirror
+    overlay would retarget the fetchurl drv and move the stdenv
+    hash — that is George's call. Do not evict `h3crq11a`.
+
+    Prepare jobs stay serial: one candidate is extended Darwin →
+    arm → x86. A `canary_warm_rust` dispatch input is reserved
+    and not wired into job `if:` so this kick cannot skip the
+    done-bar path.
 
 Also: realizing warmup as `nix build /nix/store/<output>` cannot compile missing
 paths. That is why packages died at 21:35Z after inventory.
@@ -449,13 +492,13 @@ creation if never accessed) is firing. Pins are immune with `--keep-revisions`
 
 ## Already queued (do not double-kick)
 
-`38019308787` (#1262) @ `4dc53c2c` is **terminal failure** (ended
-04:38:23Z, including repair). Warm-rust 2/3/4 succeeded; 0/1 failed
-(cause 14); Darwin packages/closures/roots and linux-deps skipped;
-assert-coverage and repair failed; publish skipped. `38011931476`
-(#1261) and earlier (#1257–#1260) are also terminal (causes 8–13).
-The next Update is the no-delete `--no-substitute` family kick
-from this head (`.github/update-kick`). Do not queue a second one.
+`38026041776` (#1263) @ `8c3c98fe` was **cancelled by George**
+(~06:58Z). Warm-rust 0/1 cancelled mid `--no-substitute` bootstrap
+compile (cause 15); 2/3/4 had succeeded. `38019308787` (#1262) and
+earlier (#1257–#1261) are terminal (causes 8–14). The next Update
+is the requisites+`--max-jobs 0` then rust_*-only `--no-substitute`
+kick from this head. Do not queue a second one. Kicking cancels
+#1263 via `cancel-in-progress` if it is still wrapping.
 
 ## Open questions
 
@@ -470,12 +513,12 @@ from this head (`.github/update-kick`). Do not queue a second one.
 
 ## Exact next step
 
-Watch the no-delete force-local Update from this kick. rust_zed /
-zed-editor-nightly slots should substitute rustc from family input
-drvs, `--no-substitute` extension_host then settings_ui /
-activity_indicator / …, then rust_zed, then nightly, with no
-E0460 / E0463 and no `--ignore-liveness`. Do not evict `h3crq11a`
-or `aqsm7q08`. Do not change flake inputs without George. Do not
-merge #221. Do not drive `main` Update until the done bar above is
-green. Do not schedule self-check-ins or timers; the manager
-routine watches the run.
+Watch the narrower-rebuild Update from this kick. rust_zed slots
+should `--max-jobs 0` the non-family `--requisites`, dry-run a
+will-be-built set of rust_* (+ crate -src) only, then
+`--no-substitute` extension_host / settings_ui / …, then rust_zed
+/ nightly. If the dry-run still lists bootstrap or substitute-only
+misses bmake, stop for George (mirror/pin). Do not evict
+`h3crq11a` or `aqsm7q08`. Do not change flake inputs. Do not merge
+#221. Poll `gh run view --json jobs` every 2–3 minutes; cancel and
+fix in the same turn on the first failed job.

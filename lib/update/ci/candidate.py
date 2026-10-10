@@ -42,6 +42,7 @@ from lib.update.ci.warmup import (
     WARMUP_DRVS_NAME,
     WARMUP_PLAN_NAME,
     WarmupError,
+    assert_force_local_dry_run,
     compiler_input_drvs,
     export_warmup_drvs,
     extension_host_family_warmup_outputs,
@@ -277,6 +278,75 @@ def _require_closure_budget(seconds: float | None) -> float | None:
     return float(seconds)
 
 
+def _realize_svh_family(
+    family: tuple[str, ...],
+    *,
+    flake_root: Path,
+) -> tuple[tuple[validation.DerivationValidationFailure, ...], bool]:
+    """Substitute the non-family closure, then compile SVH-sensitive rust_*.
+
+    The bool is whether rust_zed / nightly may proceed. False means the
+    compiler populate missed cache and force-local must not run.
+    """
+    if not family:
+        return (), True
+    extension_host = tuple(
+        drv for drv in family if is_rust_extension_host_store_path(drv)
+    )
+    family_rest = tuple(
+        drv for drv in family if not is_rust_extension_host_store_path(drv)
+    )
+    compiler = compiler_input_drvs(family)
+    failures: list[validation.DerivationValidationFailure] = []
+    if compiler:
+        compiler_failures = realize_warmup_outputs(
+            compiler,
+            flake_root=flake_root,
+            progress=_hosted_validation_progress("rust-warmup"),
+            substitute_only=True,
+        )
+        failures.extend(compiler_failures)
+        if compiler_failures:
+            return tuple(failures), False
+    assert_force_local_dry_run((*extension_host, *family_rest))
+    if extension_host:
+        failures.extend(
+            realize_warmup_outputs(
+                extension_host,
+                flake_root=flake_root,
+                progress=_hosted_validation_progress("rust-warmup"),
+                print_build_logs=True,
+                force_local=True,
+            )
+        )
+    if family_rest:
+        failures.extend(
+            realize_warmup_outputs(
+                family_rest,
+                flake_root=flake_root,
+                progress=_hosted_validation_progress("rust-warmup"),
+                print_build_logs=True,
+                force_local=True,
+            )
+        )
+    return tuple(failures), True
+
+
+def _realize_logged_warmup(
+    paths: tuple[str, ...],
+    *,
+    flake_root: Path,
+) -> tuple[validation.DerivationValidationFailure, ...]:
+    if not paths:
+        return ()
+    return realize_warmup_outputs(
+        paths,
+        flake_root=flake_root,
+        progress=_hosted_validation_progress("rust-warmup"),
+        print_build_logs=True,
+    )
+
+
 def _realize_rust_warmup(
     warmup_plan: Path,
     warmup_slot: int,
@@ -294,14 +364,14 @@ def _realize_rust_warmup(
     others, agent_ui = partition_agent_ui_drvs(drvs)
     others, rust_zed = partition_rust_zed_drvs(others)
     others, zed_nightly = partition_zed_editor_nightly_drvs(others)
-    # Update #1258/#1262: Darwin rustc intern of a Cachix
+    # Update #1258/#1263: Darwin rustc intern of a Cachix
     # language_models rlib is bare E0463 (nixpkgs#482646). rust_zed
     # then E0460s when target/deps/libextension_host is a newer SVH
-    # than substituted activity_indicator / settings_ui. #1262
-    # `zed-editor-nightly` in `others` compiled rust_zed first.
-    # `--delete --ignore-liveness` is refused on live family outputs
-    # (`you are not allowed to ignore liveness`). `--no-substitute`
-    # the family without substituting it first. Do not evict Cachix.
+    # than substituted settings_ui. #1263 `--no-substitute` on
+    # extension_host rebuilt 406 bootstrap drvs (bmake 404) because
+    # only direct refs were `--fallback`'d. Substitute the full
+    # non-family `--requisites`` with `--max-jobs 0`, dry-run gate
+    # the will-be-built set, then `--no-substitute` rust_* only.
     zed_slot = bool(rust_zed or zed_nightly)
     family: tuple[str, ...] = ()
     if zed_slot:
@@ -347,13 +417,6 @@ def _realize_rust_warmup(
         if not family:
             msg = "agent_ui drv has no rust_language_models input"
             raise WarmupError(msg)
-    extension_host = tuple(
-        drv for drv in family if is_rust_extension_host_store_path(drv)
-    )
-    family_rest = tuple(
-        drv for drv in family if not is_rust_extension_host_store_path(drv)
-    )
-    compiler = compiler_input_drvs(extension_host or family)
     failures: list[validation.DerivationValidationFailure] = []
     if others:
         failures.extend(
@@ -363,61 +426,15 @@ def _realize_rust_warmup(
                 progress=_hosted_validation_progress("rust-warmup"),
             )
         )
-    if compiler:
-        failures.extend(
-            realize_warmup_outputs(
-                compiler,
-                flake_root=flake_root,
-                progress=_hosted_validation_progress("rust-warmup"),
-            )
-        )
-    if extension_host:
-        failures.extend(
-            realize_warmup_outputs(
-                extension_host,
-                flake_root=flake_root,
-                progress=_hosted_validation_progress("rust-warmup"),
-                print_build_logs=True,
-                force_local=True,
-            )
-        )
-    if family_rest:
-        failures.extend(
-            realize_warmup_outputs(
-                family_rest,
-                flake_root=flake_root,
-                progress=_hosted_validation_progress("rust-warmup"),
-                print_build_logs=True,
-                force_local=True,
-            )
-        )
-    if agent_ui and not zed_slot:
-        failures.extend(
-            realize_warmup_outputs(
-                agent_ui,
-                flake_root=flake_root,
-                progress=_hosted_validation_progress("rust-warmup"),
-                print_build_logs=True,
-            )
-        )
-    if rust_zed:
-        failures.extend(
-            realize_warmup_outputs(
-                rust_zed,
-                flake_root=flake_root,
-                progress=_hosted_validation_progress("rust-warmup"),
-                print_build_logs=True,
-            )
-        )
-    if zed_nightly:
-        failures.extend(
-            realize_warmup_outputs(
-                zed_nightly,
-                flake_root=flake_root,
-                progress=_hosted_validation_progress("rust-warmup"),
-                print_build_logs=True,
-            )
-        )
+    family_failures, compiled = _realize_svh_family(family, flake_root=flake_root)
+    failures.extend(family_failures)
+    if compiled:
+        if agent_ui and not zed_slot:
+            failures.extend(_realize_logged_warmup(agent_ui, flake_root=flake_root))
+        if rust_zed:
+            failures.extend(_realize_logged_warmup(rust_zed, flake_root=flake_root))
+        if zed_nightly:
+            failures.extend(_realize_logged_warmup(zed_nightly, flake_root=flake_root))
     jobs.record_runner_storage("after-rust-warmup")
     return tuple(failures)
 

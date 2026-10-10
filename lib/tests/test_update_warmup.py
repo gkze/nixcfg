@@ -17,6 +17,7 @@ from lib.update.ci.warmup import (
     ShardLocalBuildReport,
     WarmupError,
     _store_output_rest,
+    assert_force_local_dry_run,
     assert_local_build_threshold,
     compiler_input_drvs,
     darwin_output_paths,
@@ -24,10 +25,12 @@ from lib.update.ci.warmup import (
     eval_root_darwin_outputs,
     export_warmup_drvs,
     extension_host_family_warmup_outputs,
+    force_local_dry_run_builds,
     import_warmup_drvs,
     intersect_missing,
     is_crate2nix_rust_output,
     is_extension_host_family_store_path,
+    is_force_local_allowed_build,
     is_named_rust_crate_store_path,
     is_rust_agent_ui_store_path,
     is_rust_extension_host_store_path,
@@ -784,56 +787,8 @@ def test_rust_agent_ui_partition_and_realize_print_logs(tmp_path: Path) -> None:
     )
     assert not is_rust_extension_host_store_path(models)
     assert _store_output_rest("not-a-store") == "a-store"
-    nightly = "/nix/store/rlcwld41aaaaaaaaaaaaaaaaaaaaaaaaa-zed-editor-nightly-unstable-f16f965.drv"
-    assert is_zed_editor_nightly_store_path(nightly)
-    assert not is_zed_editor_nightly_store_path(zed)
     assert partition_agent_ui_drvs((models, agent, agent)) == ((models,), (agent,))
     assert partition_rust_zed_drvs((models, zed, zed)) == ((models,), (zed,))
-    assert partition_zed_editor_nightly_drvs((models, nightly, nightly)) == (
-        (models,),
-        (nightly,),
-    )
-    rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
-    assert compiler_input_drvs(
-        (zed,),
-        run=lambda args, **_kwargs: subprocess.CompletedProcess(
-            args, 0, "\n".join((rustc, models, nightly)), ""
-        ),
-    ) == (rustc,)
-    host_lib = (
-        "/nix/store/5crb9axiaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0-lib"
-    )
-    assert extension_host_family_warmup_outputs(((host_lib, zed), (models,))) == (
-        host_lib,
-        models,
-    )
-    models_lib = (
-        "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0-lib"
-    )
-    assert language_models_warmup_outputs(((cloud, models_lib), (agent,))) == (
-        models_lib,
-    )
-    refs = language_models_input_drvs(
-        (agent,),
-        run=lambda args, **_kwargs: subprocess.CompletedProcess(
-            args, 0, "\n".join((models, cloud + ".drv", agent)), ""
-        ),
-    )
-    assert refs == (models,)
-    byte_refs = language_models_input_drvs(
-        (agent,),
-        run=lambda args, **_kwargs: subprocess.CompletedProcess(
-            args, 0, b"\n".join((models.encode(), cloud.encode() + b".drv")), b""
-        ),
-    )
-    assert byte_refs == (models,)
-    with pytest.raises(WarmupError, match="failed to query rust crate inputs"):
-        language_models_input_drvs(
-            (agent,),
-            run=lambda args, **_kwargs: subprocess.CompletedProcess(
-                args, 1, "", "nix-store: dead"
-            ),
-        )
 
     realize_calls: list[list[str]] = []
 
@@ -873,6 +828,106 @@ def test_rust_agent_ui_partition_and_realize_print_logs(tmp_path: Path) -> None:
     assert "-L" in local
 
 
+def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
+    """#1263: substitute the full non-family closure, including crate -src."""
+    agent = "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv"
+    models = (
+        "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0.drv"
+    )
+    cloud = (
+        "/nix/store/cloudaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models_cloud-0.1.0"
+    )
+    zed = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0.drv"
+    nightly = "/nix/store/rlcwld41aaaaaaaaaaaaaaaaaaaaaaaaa-zed-editor-nightly-unstable-f16f965.drv"
+    rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    bmake = "/nix/store/fcy73hrwaaaaaaaaaaaaaaaaaaaaaaaa-bmake-20260313.tar.gz.drv"
+    src = (
+        "/nix/store/n2g2dzs3aaaaaaaaaaaaaaaaaaaaaaaaa-"
+        "zed-editor-nightly-extension_host-src.drv"
+    )
+    assert is_zed_editor_nightly_store_path(nightly)
+    assert not is_zed_editor_nightly_store_path(src)
+    assert partition_zed_editor_nightly_drvs((models, nightly, nightly)) == (
+        (models,),
+        (nightly,),
+    )
+    seen_query: list[list[str]] = []
+
+    def query_run(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        seen_query.append(args)
+        return subprocess.CompletedProcess(
+            args, 0, "\n".join((rustc, models, nightly, bmake, src)), ""
+        )
+
+    assert compiler_input_drvs((zed,), run=query_run) == (rustc, bmake, src)
+    assert any("--requisites" in args for args in seen_query)
+    host_lib = (
+        "/nix/store/5crb9axiaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0-lib"
+    )
+    assert extension_host_family_warmup_outputs(((host_lib, zed), (models,))) == (
+        host_lib,
+        models,
+    )
+    models_lib = (
+        "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0-lib"
+    )
+    assert language_models_warmup_outputs(((cloud, models_lib), (agent,))) == (
+        models_lib,
+    )
+    refs = language_models_input_drvs(
+        (agent,),
+        run=lambda args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, "\n".join((models, cloud + ".drv", agent)), ""
+        ),
+    )
+    assert refs == (models,)
+    byte_refs = language_models_input_drvs(
+        (agent,),
+        run=lambda args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, b"\n".join((models.encode(), cloud.encode() + b".drv")), b""
+        ),
+    )
+    assert byte_refs == (models,)
+    with pytest.raises(WarmupError, match="failed to query rust crate inputs"):
+        language_models_input_drvs(
+            (agent,),
+            run=lambda args, **_kwargs: subprocess.CompletedProcess(
+                args, 1, "", "nix-store: dead"
+            ),
+        )
+
+
+def test_realize_warmup_substitute_only_is_max_jobs_zero(tmp_path: Path) -> None:
+    """Non-family inputs must substitute; they cannot share force-local."""
+    rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    assert (
+        realize_warmup_outputs(
+            (rustc,), flake_root=tmp_path, run=run, substitute_only=True
+        )
+        == ()
+    )
+    sub = next(args for args in calls if args[:2] == ["nix", "build"])
+    assert "--max-jobs" in sub
+    assert "0" in sub
+    assert "--no-substitute" not in sub
+    with pytest.raises(WarmupError, match="cannot be force_local and substitute_only"):
+        realize_warmup_outputs(
+            (rustc,),
+            flake_root=tmp_path,
+            run=run,
+            force_local=True,
+            substitute_only=True,
+        )
+
+
 def test_language_models_input_drvs_defaults_to_subprocess(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -901,6 +956,54 @@ def test_query_drv_outputs_accepts_bytes_stdout() -> None:
     with pytest.raises(WarmupError, match="failed to query outputs"):
         query_drv_outputs(
             drv,
+            run=lambda args, **_kwargs: subprocess.CompletedProcess(
+                args, 1, "", "no drv"
+            ),
+        )
+
+
+def test_force_local_dry_run_rejects_bootstrap_builds() -> None:
+    """#1263: --no-substitute must not compile stdenv/bmake after inputs exist."""
+    host = "/nix/store/jwk3kr03aaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0.drv"
+    src = (
+        "/nix/store/n2g2dzs3aaaaaaaaaaaaaaaaaaaaaaaa-"
+        "zed-editor-nightly-extension_host-src.drv"
+    )
+    bmake = "/nix/store/fcy73hrwaaaaaaaaaaaaaaaaaaaaaaaa-bmake-20260313.tar.gz.drv"
+    stdenv = "/nix/store/1gx3hvygaaaaaaaaaaaaaaaaaaaaaaaa-stdenv-darwin.drv"
+    assert is_force_local_allowed_build(host)
+    assert is_force_local_allowed_build(src)
+    assert not is_force_local_allowed_build(bmake)
+    assert not is_force_local_allowed_build(stdenv)
+    stderr = (
+        "these 3 derivations will be built:\n"
+        f"  {host}\n"
+        f"  {src}\n"
+        f"  {bmake}\n"
+        "these 2 paths will be fetched:\n"
+        "  /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rustc\n"
+    )
+    assert force_local_dry_run_builds(
+        (host,),
+        run=lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "", stderr),
+    ) == (host, src, bmake)
+    seen: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen.append(args)
+        return subprocess.CompletedProcess(args, 0, "", stderr)
+
+    with pytest.raises(WarmupError, match="would compile non-family"):
+        assert_force_local_dry_run((host,), run=run)
+    assert any("--dry-run" in args and "--no-substitute" in args for args in seen)
+    ok = f"these 2 derivations will be built:\n  {host}\n  {src}\n"
+    assert_force_local_dry_run(
+        (host,),
+        run=lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "", ok),
+    )
+    with pytest.raises(WarmupError, match="failed to dry-run force-local"):
+        assert_force_local_dry_run(
+            (host,),
             run=lambda args, **_kwargs: subprocess.CompletedProcess(
                 args, 1, "", "no drv"
             ),
