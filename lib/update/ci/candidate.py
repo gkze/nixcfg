@@ -42,6 +42,7 @@ from lib.update.ci.warmup import (
     WARMUP_DRVS_NAME,
     WARMUP_PLAN_NAME,
     WarmupError,
+    compiler_input_drvs,
     export_warmup_drvs,
     extension_host_family_warmup_outputs,
     import_warmup_drvs,
@@ -53,6 +54,7 @@ from lib.update.ci.warmup import (
     load_warmup_plan,
     partition_agent_ui_drvs,
     partition_rust_zed_drvs,
+    partition_zed_editor_nightly_drvs,
     plan_darwin_warmup,
     realize_warmup_outputs,
     rust_crate_input_drvs,
@@ -291,16 +293,18 @@ def _realize_rust_warmup(
     drvs = unique_drvs_for_outputs(missing, plan.output_drvs)
     others, agent_ui = partition_agent_ui_drvs(drvs)
     others, rust_zed = partition_rust_zed_drvs(others)
-    # Update #1258/#1261: Darwin rustc intern of a Cachix
+    others, zed_nightly = partition_zed_editor_nightly_drvs(others)
+    # Update #1258/#1262: Darwin rustc intern of a Cachix
     # language_models rlib is bare E0463 (nixpkgs#482646). rust_zed
     # then E0460s when target/deps/libextension_host is a newer SVH
-    # than substituted activity_indicator / settings_ui (#1261).
-    # `nix build --rebuild` is --check and keeps the cached NAR
-    # (and fails when out+lib are not both valid). Delete the local
-    # outputs and `--no-substitute` the extension_host family on the
-    # same runner. Do not evict h3crq11a from Cachix.
+    # than substituted activity_indicator / settings_ui. #1262
+    # `zed-editor-nightly` in `others` compiled rust_zed first.
+    # `--delete --ignore-liveness` is refused on live family outputs
+    # (`you are not allowed to ignore liveness`). `--no-substitute`
+    # the family without substituting it first. Do not evict Cachix.
+    zed_slot = bool(rust_zed or zed_nightly)
     family: tuple[str, ...] = ()
-    if rust_zed:
+    if zed_slot:
         others = tuple(
             drv for drv in others if not is_extension_host_family_store_path(drv)
         )
@@ -325,13 +329,14 @@ def _realize_rust_warmup(
         warmup_plan.with_name(WARMUP_DRVS_NAME),
     )
     # Planned family is only the still-missing warmup stripe. Cached
-    # dependents (the #1261 E0460 mix) are absent from rust_layers, so
-    # always merge rust_zed / agent_ui inputDrvs after import.
-    if rust_zed:
+    # dependents (the #1261 E0460 mix, including settings_ui) are
+    # absent from rust_layers, so always merge inputDrvs after import.
+    if zed_slot:
+        parents = rust_zed or rust_crate_input_drvs(zed_nightly, ("zed",))
         family = tuple(
             dict.fromkeys((
                 *family,
-                *rust_crate_input_drvs(rust_zed, EXTENSION_HOST_MEMBER_CRATES),
+                *rust_crate_input_drvs(parents, EXTENSION_HOST_MEMBER_CRATES),
             ))
         )
         if not any(is_rust_extension_host_store_path(drv) for drv in family):
@@ -348,11 +353,20 @@ def _realize_rust_warmup(
     family_rest = tuple(
         drv for drv in family if not is_rust_extension_host_store_path(drv)
     )
+    compiler = compiler_input_drvs(extension_host or family)
     failures: list[validation.DerivationValidationFailure] = []
     if others:
         failures.extend(
             realize_warmup_outputs(
                 others,
+                flake_root=flake_root,
+                progress=_hosted_validation_progress("rust-warmup"),
+            )
+        )
+    if compiler:
+        failures.extend(
+            realize_warmup_outputs(
+                compiler,
                 flake_root=flake_root,
                 progress=_hosted_validation_progress("rust-warmup"),
             )
@@ -377,7 +391,7 @@ def _realize_rust_warmup(
                 force_local=True,
             )
         )
-    if agent_ui and not rust_zed:
+    if agent_ui and not zed_slot:
         failures.extend(
             realize_warmup_outputs(
                 agent_ui,
@@ -390,6 +404,15 @@ def _realize_rust_warmup(
         failures.extend(
             realize_warmup_outputs(
                 rust_zed,
+                flake_root=flake_root,
+                progress=_hosted_validation_progress("rust-warmup"),
+                print_build_logs=True,
+            )
+        )
+    if zed_nightly:
+        failures.extend(
+            realize_warmup_outputs(
+                zed_nightly,
                 flake_root=flake_root,
                 progress=_hosted_validation_progress("rust-warmup"),
                 print_build_logs=True,

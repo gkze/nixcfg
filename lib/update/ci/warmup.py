@@ -824,6 +824,11 @@ def is_rust_zed_store_path(path: str) -> bool:
     return is_named_rust_crate_store_path(path, "zed")
 
 
+def is_zed_editor_nightly_store_path(path: str) -> bool:
+    """Return whether *path* is the Zed nightly package, not ``rust_zed``."""
+    return _store_output_rest(path).startswith("zed-editor-nightly-")
+
+
 # Cargo.nix crates that depend on ``extension_host`` plus ``title_bar``
 # (depends on ``recent_projects``; rust_zed --externs it). rust_zed is the
 # leaf and is realized after this set is compiled on the same runner.
@@ -882,6 +887,30 @@ def partition_rust_zed_drvs(
     return tuple(others), tuple(rust_zed)
 
 
+def partition_zed_editor_nightly_drvs(
+    drvs: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Split warmup drvs so the nightly package cannot build rust_zed early."""
+    others: list[str] = []
+    nightly: list[str] = []
+    for drv in dict.fromkeys(drvs):
+        if is_zed_editor_nightly_store_path(drv):
+            nightly.append(drv)
+        else:
+            others.append(drv)
+    return tuple(others), tuple(nightly)
+
+
+def is_svh_sensitive_store_path(path: str) -> bool:
+    """Return whether substituting *path* can mix extension_host-family SVHs."""
+    return (
+        is_extension_host_family_store_path(path)
+        or is_rust_zed_store_path(path)
+        or is_zed_editor_nightly_store_path(path)
+        or is_rust_agent_ui_store_path(path)
+    )
+
+
 def _warmup_outputs_matching(
     layers: Sequence[Sequence[str]],
     predicate: Callable[[str], bool],
@@ -903,15 +932,13 @@ def extension_host_family_warmup_outputs(
     return _warmup_outputs_matching(layers, is_extension_host_family_store_path)
 
 
-def rust_crate_input_drvs(
+def drv_input_references(
     parent_drvs: Sequence[str],
-    crates: Sequence[str],
     *,
     run: _StoreRun | None = None,
 ) -> tuple[str, ...]:
-    """Return named crate2nix ``.drv`` inputs of *parent_drvs* after import."""
+    """Return ``.drv`` references of *parent_drvs* after import."""
     runner = subprocess.run if run is None else run
-    wanted = tuple(crates)
     found: dict[str, None] = {}
     for drv in dict.fromkeys(parent_drvs):
         result = runner(
@@ -930,11 +957,42 @@ def rust_crate_input_drvs(
         text = stdout.decode() if isinstance(stdout, bytes) else stdout
         for line in text.splitlines():
             path = line.strip()
-            if path.endswith(".drv") and any(
-                is_named_rust_crate_store_path(path, crate) for crate in wanted
-            ):
+            if path.endswith(".drv"):
                 found.setdefault(path, None)
     return tuple(found)
+
+
+def rust_crate_input_drvs(
+    parent_drvs: Sequence[str],
+    crates: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return named crate2nix ``.drv`` inputs of *parent_drvs* after import."""
+    wanted = tuple(crates)
+    return tuple(
+        path
+        for path in drv_input_references(parent_drvs, run=run)
+        if any(is_named_rust_crate_store_path(path, crate) for crate in wanted)
+    )
+
+
+def compiler_input_drvs(
+    parent_drvs: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return build-input ``.drv``s that can substitute without mixing family SVHs.
+
+    ``#1262`` ``--max-jobs 0`` on the family itself copied live
+    ``extension_host`` NARs that Determinate Nix then refused to delete.
+    Realize rustc/stdenv from these inputs instead.
+    """
+    return tuple(
+        path
+        for path in drv_input_references(parent_drvs, run=run)
+        if not is_svh_sensitive_store_path(path)
+    )
 
 
 def language_models_input_drvs(
@@ -970,42 +1028,6 @@ def query_drv_outputs(
     return tuple(line.strip() for line in text.splitlines() if line.strip())
 
 
-def delete_local_store_paths(
-    paths: Sequence[str],
-    *,
-    run: _StoreRun | None = None,
-) -> None:
-    """Drop *paths* from this store only. Does not evict Cachix."""
-    existing = tuple(path for path in dict.fromkeys(paths) if Path(path).exists())
-    if not existing:
-        return
-    runner = subprocess.run if run is None else run
-    result = runner(
-        ["nix-store", "--delete", "--ignore-liveness", *existing],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    still = tuple(path for path in existing if Path(path).exists())
-    if still:
-        detail = _store_command_detail(result, fallback="nix-store --delete failed")
-        sample = ", ".join(still[:8])
-        msg = f"failed to delete local outputs for force-local realize: {sample}: {detail}"
-        raise WarmupError(msg)
-
-
-def delete_warmup_drv_outputs(
-    drvs: Sequence[str],
-    *,
-    run: _StoreRun | None = None,
-) -> None:
-    """Delete realized outputs of *drvs* so the next build is local source."""
-    outputs: list[str] = []
-    for drv in dict.fromkeys(drvs):
-        outputs.extend(query_drv_outputs(drv, run=run))
-    delete_local_store_paths(outputs, run=run)
-
-
 def realize_warmup_outputs(
     paths: Sequence[str],
     *,
@@ -1018,36 +1040,15 @@ def realize_warmup_outputs(
 ) -> tuple[DerivationValidationFailure, ...]:
     """Build the warmup outputs so Cachix's post-build-hook pushes each path.
 
-    ``force_local`` substitute-only populates rustc, deletes this-store
-    crate outputs, then ``--no-substitute`` compiles them here.
+    ``force_local`` is ``--no-substitute`` only. Do not substitute the
+    family first and do not ``--delete --ignore-liveness``: #1262
+    Determinate Nix refused that on live ``extension_host`` outputs.
+    Populate rustc via ``compiler_input_drvs`` before calling this.
     """
     failures: list[DerivationValidationFailure] = []
     ordered = tuple(dict.fromkeys(paths))
     for start in range(0, len(ordered), _WARMUP_REALIZE_CHUNK):
         chunk = ordered[start : start + _WARMUP_REALIZE_CHUNK]
-        if force_local:
-            # `--max-jobs 0` substitutes rustc/stdenv (and stale family
-            # NARs). `others` may be empty when earlier rust_* already
-            # skipped-if-in-gkze; `--no-substitute` alone cannot fetch
-            # the compiler. Discard substitute-only failures: a cache
-            # miss still proceeds to the local compile.
-            validate_derivation_requests(
-                tuple(
-                    DerivationValidationRequest(
-                        source="root-warmup",
-                        installable=warmup_build_installable(path),
-                        mode="build",
-                        substitute_only=True,
-                    )
-                    for path in chunk
-                ),
-                flake_root=flake_root,
-                run=run,
-                progress=progress,
-                timeout=timeout,
-                print_build_logs=print_build_logs,
-            )
-            delete_warmup_drv_outputs(chunk, run=run)
         requests = tuple(
             DerivationValidationRequest(
                 source="root-warmup",

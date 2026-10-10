@@ -699,6 +699,7 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
     monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
     monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: ())
     from lib.update.ci.warmup import (
         RootWarmupStats,
         ShardLocalBuildReport,
@@ -904,6 +905,7 @@ def test_rust_warmup_zed_slot_force_locals_extension_host_family(
     monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
     monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: ())
     from lib.update.ci.warmup import (
         RootWarmupStats,
         ShardLocalBuildReport,
@@ -1043,6 +1045,147 @@ def test_rust_warmup_zed_slot_force_locals_extension_host_family(
         pipeline.validate_candidate(
             candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
         )
+
+
+def test_rust_warmup_zed_nightly_waits_for_family(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1262: zed-editor-nightly must not compile rust_zed before the family."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+    realized: list[tuple[object, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    extension_host = (
+        "/nix/store/5crb9axiaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0-lib"
+    )
+    extension_host_drv = (
+        "/nix/store/exthostaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0.drv"
+    )
+    settings_drv = (
+        "/nix/store/setuiaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_settings_ui-0.1.0.drv"
+    )
+    rust_zed = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0"
+    rust_zed_drv = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0.drv"
+    nightly = "/nix/store/rlcwld41aaaaaaaaaaaaaaaaaaaaaaaaa-zed-editor-nightly-unstable-f16f965"
+    nightly_drv = (
+        "/nix/store/rlcwld41aaaaaaaaaaaaaaaaaaaaaaaaa-"
+        "zed-editor-nightly-unstable-f16f965.drv"
+    )
+    rustc_drv = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    monkeypatch.setattr(
+        pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: (rustc_drv,)
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "rust_crate_input_drvs",
+        lambda *_args, **_kwargs: (extension_host_drv, settings_drv),
+    )
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(extension_host, rust_zed, nightly),
+            rustLayers=((extension_host,), (rust_zed,), (nightly,)),
+            outputDrvs={
+                extension_host: extension_host_drv,
+                rust_zed: rust_zed_drv,
+                nightly: nightly_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=3, missing=3, warmup=3, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [
+        ((rustc_drv,), False, False),
+        ((extension_host_drv,), True, True),
+        ((settings_drv,), True, True),
+        ((rust_zed_drv,), True, False),
+        ((nightly_drv,), True, False),
+    ]
+    realized.clear()
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(nightly,),
+            rustLayers=((nightly,),),
+            outputDrvs={nightly: nightly_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+
+    def crate_inputs(
+        _parents: object, crates: object, **_kwargs: object
+    ) -> tuple[str, ...]:
+        if tuple(crates) == ("zed",):
+            return (rust_zed_drv,)
+        return (extension_host_drv, settings_drv)
+
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", crate_inputs)
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [
+        ((rustc_drv,), False, False),
+        ((extension_host_drv,), True, True),
+        ((settings_drv,), True, True),
+        ((nightly_drv,), True, False),
+    ]
 
 
 def test_closure_budget_timeout_fails_closed(

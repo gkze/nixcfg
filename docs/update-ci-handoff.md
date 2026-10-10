@@ -2,7 +2,7 @@
 
 Lane for `cursor/no-skip-darwin-shards-6614` / [PR #221](https://github.com/gkze/nixcfg/pull/221).
 George approved handing this to a fresh agent once `37809856116` ended.
-This note is the stop point after the #1261 force-local kick:
+This note is the stop point after the #1262 no-delete force-local kick:
 **do not queue a second Update, and do not self-schedule
 checks.** The manager routine watches the run.
 
@@ -56,8 +56,9 @@ already contains:
 | `2ff8fb84` | Kick that queued `37998753277` (#1260); terminal failure 01:06:51Z |
 | `486d5a17` | Revert that salt; same-slot `language_models --rebuild` (wrong Nix flag) |
 | `414eab18` | Kick that queued `38011931476` (#1261); terminal failure 02:52:41Z |
-| `21eaab03` | Delete+`--no-substitute` the extension_host family on rust_zed slots |
-| this head | Kick that queues the force-local Update |
+| `21eaab03` | Delete+`--no-substitute` family (wrong; #1262 live-path delete) |
+| `4dc53c2c` | Kick that queued `38019308787` (#1262); terminal failure 04:38:23Z |
+| this head | `--no-substitute` family after rustc inputs; nightly waits |
 
 #222 is **closed as superseded** (2026-10-08T21:40:26Z). The rust_zed fix and
 5-wide split live on this branch, not on `cursor/fix-zed-out-lib-cycle-6614`.
@@ -383,6 +384,44 @@ tree) is still split and still in gkze:
     language_models. Family members already in Cachix at plan time
     are discovered from `nix-store --query --references` and merged
     into the force-local set. Do not evict `h3crq11a`.
+    **#1262 proved the delete is refused** — see cause 14.
+14. **`--ignore-liveness` is forbidden and nightly compiled rust_zed
+    first** (`38019308787` / #1262 warm-rust 0/1 / `114128672256` +
+    `114128672219` @ `4dc53c2c`, fix `21eaab03`). Slots 2/3/4,
+    validate-arm, validate-x86, and plan-darwin-closures passed.
+    Packages/roots/closures and both linux-deps skipped.
+    assert-coverage `114130250755` failed. repair `114131276283`
+    finished failed. publish skipped. The run ended 04:38:23Z.
+
+    Slot 0: `others` realized `zentool`, then force-local
+    `--max-jobs 0` on `jwk3kr03…-rust_extension_host-0.1.0.drv^*`
+    substituted rustc **and** live family NARs `2aclcx2y…-out` /
+    `5crb9axi…-lib`. `nix-store --delete --ignore-liveness` died
+    `error: you are not allowed to ignore liveness`. Never reached
+    `--no-substitute`.
+
+    Slot 1: `others` realized
+    `rlcwld41…-zed-editor-nightly-unstable-f16f965.drv^*` first,
+    which built `av7xckfp…-rust_zed-1.25.0.drv` against substituted
+    family. E0460 at `src/main.rs:782` (`settings_ui`):
+    `target/deps/libextension_host-85905da4ec.rlib` vs
+    `8xk2b1cb…-rust_activity_indicator`. Then the same
+    `--max-jobs 0` + delete refusal as slot 0.
+
+    Cachix post `Cachix Daemon not started. Skipping push` is still
+    cause 4. Slot 0 `cachix-daemon-require.log`: daemon ready,
+    retained `daemon.log` 352 bytes (`Starting Cachix Daemon` /
+    cache `gkze`). `Collected 0 prefetched store paths` is the
+    prefetch-receipt counter.
+
+    This head does **not** delete store paths and does **not**
+    `--max-jobs 0` the family. rustc/stdenv come from
+    `compiler_input_drvs` (family `.drv` references minus
+    SVH-sensitive leaves). Family is `--no-substitute` only, so
+    those outputs are not local until this runner compiles them.
+    `zed-editor-nightly` waits until extension_host, settings_ui,
+    and rust_zed. Do not evict `h3crq11a`. This is still in-lane
+    (no flake pin).
 
 Also: realizing warmup as `nix build /nix/store/<output>` cannot compile missing
 paths. That is why packages died at 21:35Z after inventory.
@@ -409,14 +448,13 @@ creation if never accessed) is firing. Pins are immune with `--keep-revisions`
 
 ## Already queued (do not double-kick)
 
-`38011931476` (#1261) @ `414eab18` is **terminal failure** (ended
-02:52:41Z, including repair). Warm-rust 3/4 succeeded; 0/1/2 failed
-(cause 13); Darwin packages/closures/roots and linux-deps skipped;
-assert-coverage and repair failed; publish skipped. `37998753277`
-(#1260), `37976189014` (#1259), `37947952083` (#1258), and
-`37890830675` (#1257) are also terminal (causes 8–12). The next
-Update is the force-local extension_host-family kick from this
-head (`.github/update-kick`). Do not queue a second one.
+`38019308787` (#1262) @ `4dc53c2c` is **terminal failure** (ended
+04:38:23Z, including repair). Warm-rust 2/3/4 succeeded; 0/1 failed
+(cause 14); Darwin packages/closures/roots and linux-deps skipped;
+assert-coverage and repair failed; publish skipped. `38011931476`
+(#1261) and earlier (#1257–#1260) are also terminal (causes 8–13).
+The next Update is the no-delete `--no-substitute` family kick
+from this head (`.github/update-kick`). Do not queue a second one.
 
 ## Open questions
 
@@ -431,12 +469,12 @@ head (`.github/update-kick`). Do not queue a second one.
 
 ## Exact next step
 
-Watch the force-local Update from this kick. rust_zed slots should
-delete this-store family outputs and `nix build --no-substitute`
-extension_host, then activity_indicator / settings_ui / language_models
-/ agent_ui / title_bar / …, then rust_zed, with no E0460 / E0463.
-agent_ui-only slots still force-local language_models. Do not evict
-`h3crq11a` or `aqsm7q08`. Do not change flake inputs without George.
-Do not merge #221. Do not drive `main` Update until the done bar
-above is green. Do not schedule self-check-ins or timers; the
-manager routine watches the run.
+Watch the no-delete force-local Update from this kick. rust_zed /
+zed-editor-nightly slots should substitute rustc from family input
+drvs, `--no-substitute` extension_host then settings_ui /
+activity_indicator / …, then rust_zed, then nightly, with no
+E0460 / E0463 and no `--ignore-liveness`. Do not evict `h3crq11a`
+or `aqsm7q08`. Do not change flake inputs without George. Do not
+merge #221. Do not drive `main` Update until the done bar above is
+green. Do not schedule self-check-ins or timers; the manager
+routine watches the run.

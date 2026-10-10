@@ -18,10 +18,9 @@ from lib.update.ci.warmup import (
     WarmupError,
     _store_output_rest,
     assert_local_build_threshold,
+    compiler_input_drvs,
     darwin_output_paths,
     default_cache_present,
-    delete_local_store_paths,
-    delete_warmup_drv_outputs,
     eval_root_darwin_outputs,
     export_warmup_drvs,
     extension_host_family_warmup_outputs,
@@ -34,12 +33,14 @@ from lib.update.ci.warmup import (
     is_rust_extension_host_store_path,
     is_rust_language_models_store_path,
     is_rust_zed_store_path,
+    is_zed_editor_nightly_store_path,
     language_models_input_drvs,
     language_models_warmup_outputs,
     load_warmup_plan,
     nix_store_argv_has_operation,
     partition_agent_ui_drvs,
     partition_rust_zed_drvs,
+    partition_zed_editor_nightly_drvs,
     plan_darwin_warmup,
     query_drv_outputs,
     realize_warmup_outputs,
@@ -783,8 +784,22 @@ def test_rust_agent_ui_partition_and_realize_print_logs(tmp_path: Path) -> None:
     )
     assert not is_rust_extension_host_store_path(models)
     assert _store_output_rest("not-a-store") == "a-store"
+    nightly = "/nix/store/rlcwld41aaaaaaaaaaaaaaaaaaaaaaaaa-zed-editor-nightly-unstable-f16f965.drv"
+    assert is_zed_editor_nightly_store_path(nightly)
+    assert not is_zed_editor_nightly_store_path(zed)
     assert partition_agent_ui_drvs((models, agent, agent)) == ((models,), (agent,))
     assert partition_rust_zed_drvs((models, zed, zed)) == ((models,), (zed,))
+    assert partition_zed_editor_nightly_drvs((models, nightly, nightly)) == (
+        (models,),
+        (nightly,),
+    )
+    rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    assert compiler_input_drvs(
+        (zed,),
+        run=lambda args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, "\n".join((rustc, models, nightly)), ""
+        ),
+    ) == (rustc,)
     host_lib = (
         "/nix/store/5crb9axiaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0-lib"
     )
@@ -849,9 +864,10 @@ def test_rust_agent_ui_partition_and_realize_print_logs(tmp_path: Path) -> None:
         )
         == ()
     )
-    assert any("--query" in args and "--outputs" in args for args in realize_calls)
     builds = [args for args in realize_calls if args[:2] == ["nix", "build"]]
-    assert any("--max-jobs" in args and "0" in args for args in builds)
+    assert builds
+    assert all("--max-jobs" not in args for args in builds)
+    assert all("--delete" not in args for args in realize_calls)
     local = next(args for args in builds if "--no-substitute" in args)
     assert "--rebuild" not in local
     assert "-L" in local
@@ -873,64 +889,19 @@ def test_language_models_input_drvs_defaults_to_subprocess(
     assert language_models_input_drvs((agent,)) == (models,)
 
 
-def test_delete_local_store_paths_removes_existing_and_fails_closed(
-    tmp_path: Path,
-) -> None:
-    """Force-local delete is this store only; leftover paths fail closed."""
-    target = tmp_path / "rust_language_models-0.1.0-lib"
-    target.write_text("nar", encoding="utf-8")
-
-    def remove(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        for path in args[args.index("--ignore-liveness") + 1 :]:
-            Path(path).unlink()
-        return subprocess.CompletedProcess(args, 0, "", "")
-
-    delete_local_store_paths((str(target),), run=remove)
-    assert not target.exists()
-    delete_local_store_paths((str(tmp_path / "missing-lib"),), run=remove)
-    target.write_text("nar", encoding="utf-8")
-    with pytest.raises(WarmupError, match="failed to delete local outputs"):
-        delete_local_store_paths(
-            (str(target),),
-            run=lambda args, **_kwargs: subprocess.CompletedProcess(
-                args, 1, "", "busy"
-            ),
-        )
-
-
-def test_query_and_delete_warmup_drv_outputs_use_subprocess(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Force-local queries outputs then deletes only paths that exist."""
+def test_query_drv_outputs_accepts_bytes_stdout() -> None:
+    """Output query keeps the default store runner and bytes stdout."""
     drv = "/nix/store/lmdrvaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0.drv"
-    output = tmp_path / "rust_language_models-0.1.0-lib"
-    output.write_text("nar", encoding="utf-8")
-    seen: list[list[str]] = []
-
-    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        seen.append(args)
-        if "--outputs" in args:
-            return subprocess.CompletedProcess(args, 0, f"{output}\n", "")
-        if "--delete" in args:
-            Path(args[-1]).unlink()
-            return subprocess.CompletedProcess(args, 0, "", "")
-        return subprocess.CompletedProcess(args, 1, "", "unexpected")
-
-    monkeypatch.setattr("lib.update.ci.warmup.subprocess.run", run)
-    delete_warmup_drv_outputs((drv,))
-    assert not output.exists()
-    assert any("--outputs" in args for args in seen)
-    assert any("--delete" in args and "--ignore-liveness" in args for args in seen)
-    with pytest.raises(WarmupError, match="failed to query outputs"):
-        delete_warmup_drv_outputs(
-            (drv,),
-            run=lambda args, **_kwargs: subprocess.CompletedProcess(
-                args, 1, "", "no drv"
-            ),
-        )
     assert query_drv_outputs(
         drv,
         run=lambda args, **_kwargs: subprocess.CompletedProcess(
             args, 0, b"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out\n", b""
         ),
     ) == ("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out",)
+    with pytest.raises(WarmupError, match="failed to query outputs"):
+        query_drv_outputs(
+            drv,
+            run=lambda args, **_kwargs: subprocess.CompletedProcess(
+                args, 1, "", "no drv"
+            ),
+        )
