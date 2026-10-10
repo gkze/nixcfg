@@ -78,10 +78,42 @@ _STORE_PREFIX = "/nix/store/"
 # responses used absolute paths. Accept both so warmup does not collect
 # zero Darwin outputs on Nix 2.35.
 _STORE_BASENAME = re.compile(r"^[0-9a-z]{32}-.+$")
+# rust_* family is a handful of crates. #1263 compiled 406 bootstrap
+# drvs; fail the hosted job on the dry-run line instead of --keep-going.
+WARMUP_FATAL_BUILD_LIMIT = 32
+_WILL_BE_BUILT = re.compile(r"these (\d+) derivations? will be built", re.IGNORECASE)
 
 
 class WarmupError(ValueError):
     """The planner could not produce a safe Darwin warmup set."""
+
+
+class WarmupFatalError(WarmupError):
+    """A streamed warmup/root line that must fail the hosted job immediately."""
+
+
+def warmup_fatal_line(line: str) -> str | None:
+    """Return why a live warmup/root log line must fail the job."""
+    if "error[E04" in line:
+        return "rustc SVH/crate mismatch"
+    if "Cannot build" in line:
+        return "cannot build"
+    if "liveness" in line.lower():
+        return "liveness"
+    lowered = line.lower()
+    if "cannot download" in lowered and "from any mirror" in lowered:
+        return "cannot download from any mirror"
+    match = _WILL_BE_BUILT.search(line)
+    if match and int(match.group(1)) > WARMUP_FATAL_BUILD_LIMIT:
+        return f"unexpectedly large will-be-built count ({match.group(1)})"
+    return None
+
+
+def raise_if_warmup_fatal(line: str) -> None:
+    """Abort as soon as a fatal warmup/root pattern is streamed."""
+    if reason := warmup_fatal_line(line):
+        msg = f"{reason}: {line}"
+        raise WarmupFatalError(msg)
 
 
 class RootWarmupStats(BaseModel):

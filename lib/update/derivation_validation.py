@@ -747,9 +747,16 @@ def _validation_args(
         *(
             # keep-going lets one batch report every failing derivation instead
             # of stopping at the first, so later isolation rounds are cheap.
+            # Warmup force-local / substitute-only must go red on the first
+            # fatal pattern (#1263 406-drv compile) instead of draining the
+            # rest of the graph.
             [
                 "--no-link",
-                "--keep-going",
+                *(
+                    []
+                    if request.no_substitute or request.substitute_only
+                    else ["--keep-going"]
+                ),
                 *(
                     # Linux VM image inside Darwin roots cannot compile here
                     # (#1257 platform mismatch). Substitute only.

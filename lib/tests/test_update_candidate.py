@@ -24,6 +24,7 @@ from lib.update.ci.coverage import (
     required_coverage_jobs,
     write_root_out_path_cache,
 )
+from lib.update.ci.warmup import WarmupFatalError
 from lib.update.derivation_validation import (
     DerivationValidation,
     DerivationValidationFailure,
@@ -1919,6 +1920,36 @@ def test_hosted_validation_streams_nix_logs_to_stderr(
         in err
     )
     assert "[derivations] \n" not in err
+
+
+def test_hosted_warmup_progress_fails_fast_on_fatal_patterns(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Warm-rust and roots must abort on the first streamed fatal line."""
+    progress = pipeline._hosted_validation_progress("rust-warmup")
+    with pytest.raises(WarmupFatalError, match="SVH"):
+        progress(
+            ValidationCommandOutput(
+                "nix build --no-substitute",
+                "error[E0460]: found possibly newer version of crate `settings_ui`",
+            )
+        )
+    assert "[rust-warmup] error[E0460]" in capsys.readouterr().err
+    roots = pipeline._hosted_validation_progress("root-closures")
+    with pytest.raises(WarmupFatalError, match="will-be-built"):
+        roots(
+            ValidationCommandOutput(
+                "nix build",
+                "these 406 derivations will be built:",
+            )
+        )
+    packages = pipeline._hosted_validation_progress("derivations")
+    packages(
+        ValidationCommandOutput(
+            "nix build",
+            "error[E0460]: packages inventory is not a warmup abort",
+        )
+    )
 
 
 def test_noop_candidate_still_validates_repaired_baseline_roots(

@@ -1520,10 +1520,12 @@ def test_no_substitute_request_is_unbatched_and_skips_fallback(
     assert models in local_call
     assert "--rebuild" not in local_call
     assert "--fallback" not in local_call
+    assert "--keep-going" not in local_call
     assert other not in local_call
     other_call = next(args for args in calls if other in args)
     assert "--no-substitute" not in other_call
     assert "--fallback" in other_call
+    assert "--keep-going" in other_call
 
 
 def test_failed_batch_rechecks_each_target_with_original_retry_policy(

@@ -57,6 +57,7 @@ from lib.update.ci.warmup import (
     partition_rust_zed_drvs,
     partition_zed_editor_nightly_drvs,
     plan_darwin_warmup,
+    raise_if_warmup_fatal,
     realize_warmup_outputs,
     rust_crate_input_drvs,
     skip_cached_warmup_paths,
@@ -177,6 +178,13 @@ def prepare_candidate(
     return preparation.candidate, status
 
 
+_FAIL_FAST_PROGRESS_SOURCES = frozenset({
+    "rust-warmup",
+    "root-deps",
+    "root-closures",
+})
+
+
 def _hosted_validation_progress(source: str) -> validation.ValidationProgress:
     """Stream Nix validation output to the live hosted job log."""
 
@@ -194,6 +202,8 @@ def _hosted_validation_progress(source: str) -> validation.ValidationProgress:
             return
         sys.stderr.write(f"[{source}] {redact_urls(text)}\n")
         sys.stderr.flush()
+        if source in _FAIL_FAST_PROGRESS_SOURCES:
+            raise_if_warmup_fatal(text)
 
     return emit
 

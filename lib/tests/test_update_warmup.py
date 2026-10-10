@@ -13,9 +13,11 @@ from lib.update.ci.warmup import (
     WARMUP_DRVS_CACHE_INFO,
     WARMUP_DRVS_NAME,
     WARMUP_DRVS_ROOTS,
+    WARMUP_FATAL_BUILD_LIMIT,
     WARMUP_PLAN_NAME,
     ShardLocalBuildReport,
     WarmupError,
+    WarmupFatalError,
     _store_output_rest,
     assert_force_local_dry_run,
     assert_local_build_threshold,
@@ -46,6 +48,7 @@ from lib.update.ci.warmup import (
     partition_zed_editor_nightly_drvs,
     plan_darwin_warmup,
     query_drv_outputs,
+    raise_if_warmup_fatal,
     realize_warmup_outputs,
     rust_warmup_layers,
     shard_remaining_outputs,
@@ -55,6 +58,7 @@ from lib.update.ci.warmup import (
     unique_drvs_for_outputs,
     warmup_build_installable,
     warmup_drv_root_args,
+    warmup_fatal_line,
     warmup_output_drvs,
     write_warmup_plan,
 )
@@ -825,6 +829,7 @@ def test_rust_agent_ui_partition_and_realize_print_logs(tmp_path: Path) -> None:
     assert all("--delete" not in args for args in realize_calls)
     local = next(args for args in builds if "--no-substitute" in args)
     assert "--rebuild" not in local
+    assert "--keep-going" not in local
     assert "-L" in local
 
 
@@ -918,6 +923,7 @@ def test_realize_warmup_substitute_only_is_max_jobs_zero(tmp_path: Path) -> None
     assert "--max-jobs" in sub
     assert "0" in sub
     assert "--no-substitute" not in sub
+    assert "--keep-going" not in sub
     with pytest.raises(WarmupError, match="cannot be force_local and substitute_only"):
         realize_warmup_outputs(
             (rustc,),
@@ -1008,3 +1014,49 @@ def test_force_local_dry_run_rejects_bootstrap_builds() -> None:
                 args, 1, "", "no drv"
             ),
         )
+
+
+@pytest.mark.parametrize(
+    ("line", "reason"),
+    [
+        ("error[E0460]: found possibly newer version of crate `settings_ui`", "SVH"),
+        ("error[E0463]: can't find crate for `gpui`", "SVH"),
+        (
+            "Cannot build '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed.drv'",
+            "cannot build",
+        ),
+        ("error: you are not allowed to ignore liveness of /nix/store/x", "liveness"),
+        (
+            "error: cannot download bmake-20260313.tar.gz from any mirror",
+            "cannot download",
+        ),
+        ("these 406 derivations will be built:", "will-be-built"),
+    ],
+)
+def test_warmup_fatal_line_matches_hosted_abort_patterns(
+    line: str, reason: str
+) -> None:
+    """#1263/#1262: the job must go red on the first fatal streamed line."""
+    match = warmup_fatal_line(line)
+    assert match is not None
+    assert reason.lower() in match.lower() or reason == "SVH"
+    with pytest.raises(WarmupFatalError, match=reason if reason != "SVH" else "SVH"):
+        raise_if_warmup_fatal(line)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "these 406 paths will be fetched",
+        "these 2 derivations will be built:",
+        f"these {WARMUP_FATAL_BUILD_LIMIT} derivations will be built:",
+        "error: failed to fetch git+https://github.com/example/flake",
+        "unable to download 'https://registry.npmjs.org/foo'",
+        "error[E0308]: mismatched types",
+        "building '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed.drv'",
+    ],
+)
+def test_warmup_fatal_line_ignores_nonfatal_noise(line: str) -> None:
+    """Fetched-only closures, small rust families, and flake fetch noise stay live."""
+    assert warmup_fatal_line(line) is None
+    raise_if_warmup_fatal(line)
