@@ -305,7 +305,7 @@ def _parse_source_entry(data: bytes) -> SourceEntry | None:
         return None
     try:
         return SourceEntry.model_validate(payload)
-    except (TypeError, ValueError, ValidationError):
+    except TypeError, ValueError, ValidationError:
         return None
 
 
