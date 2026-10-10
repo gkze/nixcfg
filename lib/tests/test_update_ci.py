@@ -1247,7 +1247,7 @@ def _assert_coverage_and_publish(workflow_jobs: dict) -> None:
     """Coverage stays the done-bar; it does not run on a rust-warmup canary."""
     coverage = workflow_jobs["assert-coverage"]
     coverage_if = " ".join(coverage["if"].split())
-    assert "always()" in coverage_if
+    assert "always() && !cancelled()" in coverage_if
     assert "inputs.canary_warm_rust" in coverage_if
     assert set(coverage["needs"]) == {
         "prepare-merge",

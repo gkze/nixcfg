@@ -427,7 +427,7 @@ jobs:
       - validate-darwin-roots
       - validate-darwin-closures
     if: |-
-      always() &&
+      always() && !cancelled() &&
       (github.event_name != 'workflow_dispatch' ||
       (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
       inputs.canary_slots == '' && inputs.canary_crates == ''))
