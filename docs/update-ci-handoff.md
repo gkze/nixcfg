@@ -56,7 +56,8 @@ already contains:
 | `2ff8fb84` | Kick that queued `37998753277` (#1260); terminal failure 01:06:51Z |
 | `486d5a17` | Revert that salt; same-slot `language_models --rebuild` (wrong Nix flag) |
 | `414eab18` | Kick that queued `38011931476` (#1261); terminal failure 02:52:41Z |
-| this head | Delete+`--no-substitute` the extension_host family on rust_zed slots |
+| `21eaab03` | Delete+`--no-substitute` the extension_host family on rust_zed slots |
+| this head | Kick that queues the force-local Update |
 
 #222 is **closed as superseded** (2026-10-08T21:40:26Z). The rust_zed fix and
 5-wide split live on this branch, not on `cursor/fix-zed-out-lib-cycle-6614`.
