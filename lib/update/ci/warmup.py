@@ -1205,7 +1205,11 @@ def is_source_fetch_store_path(path: str) -> bool:
 # stdenv. The tarball substitutes; the package drv must compile locally.
 # #1270 canary: patchutils-0.3.3.drv was 1 local + 1 fetch, then
 # ``--max-jobs 0`` fatal'd Cannot build before rust_settings.
-_COMPILER_LOCAL_HELPER_PREFIXES = ("patchutils-",)
+_COMPILER_LOCAL_HELPER_PREFIXES = (
+    "patchutils-",
+    "pbzx-",
+    "xar-",
+)
 
 
 def is_compiler_local_helper_store_path(path: str) -> bool:

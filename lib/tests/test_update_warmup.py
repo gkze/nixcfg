@@ -1138,21 +1138,23 @@ def test_is_source_fetch_store_path_classifies_archives(
 
 
 def test_1270_canary_patchutils_is_local_compiler_helper() -> None:
-    """#1270 canary: patchutils was 1 drv after its tarball substituted.
+    """#1270 canary: patchutils then pbzx were 1-drv helpers after FODs.
 
-    Hosted job 114284201109: ``this derivation will be built``
-    patchutils-0.3.3.drv, fetched the tar.xz, then ``--max-jobs 0``
-    fatal'd Cannot build. rustc/stdenv stay substitute-only.
+    Jobs 114284201109 / 114290145820: ``this derivation will be built``
+    plus one fetched source, then ``--max-jobs 0`` fatal'd Cannot build.
+    rustc/stdenv stay substitute-only.
     """
     patchutils = "/nix/store/m6399k05aaqiz3mx4cdpkdqr4hp05kmj-patchutils-0.3.3.drv"
+    pbzx = "/nix/store/9wq7n6729mdhisgxjyahy0cpjm4aq85p-pbzx-1.0.2.drv"
     rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
     stdenv = "/nix/store/1gx3hvygaaaaaaaaaaaaaaaaaaaaaaaa-stdenv-darwin.drv"
     assert is_compiler_local_helper_store_path(patchutils)
+    assert is_compiler_local_helper_store_path(pbzx)
     assert not is_compiler_local_helper_store_path(rustc)
     assert not is_compiler_local_helper_store_path(stdenv)
-    assert partition_compiler_input_drvs((rustc, stdenv, patchutils)) == (
+    assert partition_compiler_input_drvs((rustc, stdenv, patchutils, pbzx)) == (
         (rustc, stdenv),
-        (patchutils,),
+        (patchutils, pbzx),
     )
 
 
