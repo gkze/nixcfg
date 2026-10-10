@@ -74,6 +74,7 @@ from lib.update.ci.warmup import (
     plan_darwin_warmup,
     raise_if_warmup_fatal,
     realize_warmup_outputs,
+    rust_compile_input_drvs,
     rust_crate_input_drvs,
     rustc_generation_ids,
     settings_family_warmup_outputs,
@@ -678,6 +679,7 @@ def _realize_svh_family(
     """
     if not family:
         return (), True
+    family = tuple(dict.fromkeys((*family, *rust_compile_input_drvs(family))))
     extension_host = tuple(
         drv for drv in family if is_rust_extension_host_store_path(drv)
     )

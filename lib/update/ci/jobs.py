@@ -1399,12 +1399,19 @@ def flush_cachix() -> None:
         record_runner_storage("flush-end", log)
 
 
+_UPDATE_PLAN_FALLBACK_BRANCH = "cursor/no-skip-darwin-shards-6614"
+
+
 def restore_canary_plan(
     *,
     dest: Path | None = None,
     run: Callable[..., object] | None = None,
 ) -> Path:
-    """Download the latest ``plan-shards-x86_64-linux`` artifact on this ref."""
+    """Download the latest ``plan-shards-x86_64-linux`` artifact on this ref.
+
+    Feature-branch Zed kicks have no Update runs; fall back to the
+    no-skip parent so the family loop can reuse that plan.
+    """
     target = dest if dest is not None else Path(os.environ["NIXCFG_CANARY_PLAN_DIR"])
     target.mkdir(parents=True, exist_ok=True)
     runner: Callable[..., object] = _run if run is None else run
@@ -1413,45 +1420,50 @@ def restore_canary_plan(
     if not repo or not branch:
         msg = "Canary plan restore requires GITHUB_REPOSITORY and GITHUB_REF_NAME"
         raise ValueError(msg)
-    listed = runner(
-        "gh",
-        "run",
-        "list",
-        "-R",
-        repo,
-        "--workflow=Update",
-        "--branch",
-        branch,
-        "--limit",
-        "20",
-        "--json",
-        "databaseId,status,conclusion",
-        capture=True,
-        check=True,
-    )
-    payload = getattr(listed, "stdout", listed)
-    if not isinstance(payload, (str, bytes, bytearray)):
-        msg = "Canary plan listing must return JSON text"
-        raise TypeError(msg)
-    runs = json.loads(payload)
-    for run_row in runs:
-        run_id = run_row["databaseId"]
-        downloaded = runner(
+    branches = tuple(dict.fromkeys((branch, _UPDATE_PLAN_FALLBACK_BRANCH)))
+    searched: list[str] = []
+    for candidate in branches:
+        searched.append(candidate)
+        listed = runner(
             "gh",
             "run",
-            "download",
-            str(run_id),
-            "-n",
-            "plan-shards-x86_64-linux",
-            "-D",
-            str(target),
-            check=False,
+            "list",
+            "-R",
+            repo,
+            "--workflow=Update",
+            "--branch",
+            candidate,
+            "--limit",
+            "20",
+            "--json",
+            "databaseId,status,conclusion",
             capture=True,
+            check=True,
         )
-        code = downloaded.returncode if hasattr(downloaded, "returncode") else 0
-        if code == 0 and (target / "warmup-plan.json").is_file():
-            return target
-    msg = f"No current warmup plan artifact on {repo}@{branch}"
+        payload = getattr(listed, "stdout", listed)
+        if not isinstance(payload, (str, bytes, bytearray)):
+            msg = "Canary plan listing must return JSON text"
+            raise TypeError(msg)
+        runs = json.loads(payload)
+        for run_row in runs:
+            run_id = run_row["databaseId"]
+            downloaded = runner(
+                "gh",
+                "run",
+                "download",
+                str(run_id),
+                "-n",
+                "plan-shards-x86_64-linux",
+                "-D",
+                str(target),
+                check=False,
+                capture=True,
+            )
+            code = downloaded.returncode if hasattr(downloaded, "returncode") else 0
+            if code == 0 and (target / "warmup-plan.json").is_file():
+                return target
+    loc = ", ".join(f"{repo}@{name}" for name in searched)
+    msg = f"No current warmup plan artifact on {loc}"
     raise RuntimeError(msg)
 
 

@@ -1091,11 +1091,15 @@ def rustc_generation_ids(
     *,
     run: _StoreRun | None = None,
 ) -> tuple[str, ...]:
-    """Return rustc ``.drv`` references of *drvs*, first-seen."""
+    """Return rustc / rust-default ``.drv`` references of *drvs*, first-seen.
+
+    Hosted Darwin crate2nix uses ``rust-default-1.98.1``, not ``rustc-``.
+    Matching only ``rustc-`` left the generation-mix guard a no-op.
+    """
     found: list[str] = []
     for path in _query_drv_graph(drvs, "references", run=run):
         rest = _store_output_rest(path).removesuffix(".drv")
-        if rest.startswith("rustc-"):
+        if rest.startswith(("rustc-", "rust-default-")):
             found.append(path)
     return tuple(dict.fromkeys(found))
 
@@ -1243,22 +1247,43 @@ def rust_crate_input_drvs(
     )
 
 
+def rust_compile_input_drvs(
+    parent_drvs: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return every crate2nix ``rust_*`` ``.drv`` the family intern's.
+
+    #1270 canary 114295702356: ``--max-jobs 0`` substituted
+    ``rust_tree-sitter`` as a compiler input, then force-local
+    ``rust_settings_json`` E0463'd with that rlib on the rustc line
+    (nixpkgs#482646). Workspace-only family is not enough.
+    """
+    return tuple(
+        path
+        for path in drv_input_references(parent_drvs, run=run)
+        if is_crate2nix_rust_output(path)
+    )
+
+
 def compiler_input_drvs(
     parent_drvs: Sequence[str],
     *,
     run: _StoreRun | None = None,
 ) -> tuple[str, ...]:
-    """Return the non-family ``.drv`` closure that must be substituted first.
+    """Return the non-rust ``.drv`` closure that must be substituted first.
 
     ``#1263`` used direct ``--references`` plus ``--fallback``, then
     ``--no-substitute`` on ``extension_host`` rebuilt 406 bootstrap
     drvs (bmake 404). Query ``--requisites`` and realize them with
-    ``--max-jobs 0`` so only the SVH-sensitive rust_* compile.
+    ``--max-jobs 0`` so only rust_* compile. rust_* requisites stay
+    out of this set: substituting ``rust_tree-sitter`` then force-local
+    ``settings_json`` is the #1270 canary E0463 mix.
     """
     return tuple(
         path
         for path in drv_input_requisites(parent_drvs, run=run)
-        if not is_svh_sensitive_store_path(path)
+        if not is_svh_sensitive_store_path(path) and not is_crate2nix_rust_output(path)
     )
 
 
@@ -1396,7 +1421,7 @@ _DRV_PATH = re.compile(r"/nix/store/[0-9a-z]{32}-[^/\s]+\.drv")
 
 def is_force_local_allowed_build(path: str) -> bool:
     """Return whether a ``--dry-run --no-substitute`` build may compile *path*."""
-    if is_svh_sensitive_store_path(path):
+    if is_svh_sensitive_store_path(path) or is_crate2nix_rust_output(path):
         return True
     rest = _store_output_rest(path)
     if "-src" not in rest:

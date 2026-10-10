@@ -121,3 +121,28 @@ def test_zed_workspace_svh_family_matches_pinned_cargo_toml() -> None:
     )
     assert "settings" in host
     assert {"extension_host", "settings"} <= models
+
+
+def test_zed_settings_json_crate2nix_depends_on_tree_sitter() -> None:
+    """#1270 canary E0463 is not a missing crate2nix edge.
+
+    ``settings_json`` lists ``tree-sitter`` and ``tree-sitter-json``.
+    Hosted canary 114295702356 passed ``--extern tree_sitter=...rlib``
+    and still E0463'd — rustc intern of a substituted rlib, same class
+    as #1269 settings vs Cachix content/json.
+    """
+    settings_json = _internal_crate("settings_json")
+    crate_name = expect_instance(
+        expect_binding(settings_json.values, "crateName").value,
+        StringPrimitive,
+    )
+    assert crate_name.value == "settings_json"
+    package_ids = set(
+        _package_ids(
+            expect_instance(
+                expect_binding(settings_json.values, "dependencies").value,
+                NixList,
+            )
+        )
+    )
+    assert {"tree-sitter", "tree-sitter-json"} <= package_ids

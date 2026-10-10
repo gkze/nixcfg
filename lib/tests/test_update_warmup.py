@@ -67,6 +67,7 @@ from lib.update.ci.warmup import (
     query_drv_outputs,
     raise_if_warmup_fatal,
     realize_warmup_outputs,
+    rust_compile_input_drvs,
     rust_warmup_layers,
     rustc_generation_ids,
     settings_family_warmup_outputs,
@@ -881,7 +882,11 @@ def test_rust_agent_ui_partition_and_realize_print_logs(tmp_path: Path) -> None:
 
 
 def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
-    """#1263: substitute the full non-family closure, including crate -src."""
+    """#1263: substitute the non-rust closure, including crate -src.
+
+    rust_* requisites (tree-sitter, language_models) stay out so
+    force-local cannot intern a Cachix rlib (#1270 canary E0463).
+    """
     agent = "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv"
     models = (
         "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0.drv"
@@ -897,6 +902,9 @@ def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
         "/nix/store/n2g2dzs3aaaaaaaaaaaaaaaaaaaaaaaaa-"
         "zed-editor-nightly-extension_host-src.drv"
     )
+    tree_sitter = (
+        "/nix/store/1zsfiw8m72a6ql2wx3f5bpq3mn7vnw77-rust_tree-sitter-0.27.0.drv"
+    )
     assert is_zed_editor_nightly_store_path(nightly)
     assert not is_zed_editor_nightly_store_path(src)
     assert partition_zed_editor_nightly_drvs((models, nightly, nightly)) == (
@@ -910,10 +918,14 @@ def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
     ) -> subprocess.CompletedProcess[str]:
         seen_query.append(args)
         return subprocess.CompletedProcess(
-            args, 0, "\n".join((rustc, models, nightly, bmake, src)), ""
+            args,
+            0,
+            "\n".join((rustc, models, nightly, bmake, src, tree_sitter)),
+            "",
         )
 
     assert compiler_input_drvs((zed,), run=query_run) == (rustc, bmake, src)
+    assert rust_compile_input_drvs((zed,), run=query_run) == (models, tree_sitter)
     assert partition_compiler_input_drvs((rustc, bmake, src, bmake)) == (
         (rustc,),
         (bmake, src),
@@ -1058,6 +1070,12 @@ def test_1269_slot3_settings_svh_mix_under_fatal_limit() -> None:
     assert is_settings_family_store_path(macros)
     assert is_svh_sensitive_store_path(settings)
     assert is_force_local_allowed_build(settings)
+    tree_sitter = (
+        "/nix/store/1zsfiw8m72a6ql2wx3f5bpq3mn7vnw77-rust_tree-sitter-0.27.0.drv"
+    )
+    assert is_crate2nix_rust_output(tree_sitter)
+    assert not is_settings_family_store_path(tree_sitter)
+    assert is_force_local_allowed_build(tree_sitter)
     assert WARMUP_FATAL_BUILD_LIMIT >= 6
 
 
@@ -1199,12 +1217,24 @@ def test_zed_family_policy_is_atomic_all_or_force_local() -> None:
     layers = ((content,), (settings,))
     assert zed_family_warmup_outputs(layers) == family
     rustc = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    rust_default = (
+        "/nix/store/dq17vrzvx74ismp4s6xicxirkmlshw1b-rust-default-1.98.1.drv"
+    )
     clang = "/nix/store/cccccccccccccccccccccccccccccccc-clang-21.1.8.drv"
 
     def query(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args, 0, f"{rustc}\n{clang}\n", "")
 
     assert rustc_generation_ids((f"{settings}.drv",), run=query) == (rustc,)
+
+    def query_default(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, f"{rust_default}\n{clang}\n", "")
+
+    assert rustc_generation_ids((f"{settings}.drv",), run=query_default) == (
+        rust_default,
+    )
 
 
 def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:

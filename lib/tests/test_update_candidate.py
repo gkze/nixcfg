@@ -41,6 +41,12 @@ from lib.update.updaters.metadata import GitHubReleaseMetadata, MappingMetadata
 _HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 
 
+@pytest.fixture(autouse=True)
+def _default_rust_compile_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hosted tests use fake .drv paths; nix-store --query would fail closed."""
+    monkeypatch.setattr(pipeline, "rust_compile_input_drvs", lambda *_a, **_k: ())
+
+
 @dataclass(frozen=True)
 class ExampleMetadata(MappingMetadata):
     """Representative nested updater metadata, including non-mapping state."""
@@ -847,6 +853,85 @@ def test_rust_warmup_settings_family_force_locals_content_cluster(
     assert force_local == [(content_drv, settings_drv)]
     others = [paths for paths, _logs, force, _sub in realized if not force]
     assert others == [(other_drv,)]
+
+
+def test_rust_warmup_settings_json_force_locals_tree_sitter(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1270 canary: do not compile rust_settings_json against Cachix tree_sitter."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings_json = (
+        "/nix/store/jsonaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_settings_json-0.1.0"
+    )
+    tree_sitter = "/nix/store/1zsfiw8m72a6ql2wx3f5bpq3mn7vnw77-rust_tree-sitter-0.27.0"
+    settings_json_drv = f"{settings_json}.drv"
+    tree_sitter_drv = f"{tree_sitter}.drv"
+    monkeypatch.setattr(
+        pipeline,
+        "rust_compile_input_drvs",
+        lambda _parents, **_k: (tree_sitter_drv,),
+    )
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(settings_json,),
+            rustLayers=((settings_json,),),
+            outputDrvs={settings_json: settings_json_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == ()
+    force_local = [paths for paths, _logs, force, _sub in realized if force]
+    assert force_local == [(settings_json_drv, tree_sitter_drv)]
 
 
 def test_rust_warmup_settings_family_builds_patchutils_helper(

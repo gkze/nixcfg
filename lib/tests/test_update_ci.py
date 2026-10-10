@@ -1045,6 +1045,7 @@ def test_zed_darwin_workflow_is_one_macos_runner_and_not_update() -> None:
     assert workflow["name"] == "Zed Darwin"
     assert "workflow_dispatch" in workflow["on"]
     assert ".github/zed-kick" in workflow["on"]["push"]["paths"]
+    assert "cursor/*-fa49" in workflow["on"]["push"]["branches"]
     assert workflow["concurrency"]["group"] == "nixcfg-zed-darwin-${{ github.ref }}"
     update = yaml.load(
         (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
@@ -2773,6 +2774,41 @@ def test_restore_canary_plan_downloads_latest_warmup_artifact(
     assert (dest / "warmup-plan.json").is_file()
     assert calls[1][:4] == ("gh", "run", "download", "1")
     assert calls[2][:4] == ("gh", "run", "download", "2")
+
+
+def test_restore_canary_plan_falls_back_to_no_skip_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Feature-branch Zed kicks reuse the parent Update plan artifact."""
+    dest = tmp_path / "canary-plan"
+    listed: list[str] = []
+
+    def run(*args: str, capture: bool = False, check: bool = True) -> object:
+        if args[:3] == ("gh", "run", "list"):
+            listed.append(args[args.index("--branch") + 1])
+            if listed[-1] == "cursor/zed-family-tree-sitter-fa49":
+                return subprocess.CompletedProcess(args, 0, stdout="[]")
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=json.dumps([
+                    {"databaseId": 7, "status": "completed", "conclusion": "success"},
+                ]),
+            )
+        if args[:3] == ("gh", "run", "download"):
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / "warmup-plan.json").write_text("{}", encoding="utf-8")
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        raise AssertionError(args)
+
+    monkeypatch.setenv("GITHUB_REPOSITORY", "gkze/nixcfg")
+    monkeypatch.setenv("GITHUB_REF_NAME", "cursor/zed-family-tree-sitter-fa49")
+    assert jobs.restore_canary_plan(dest=dest, run=run) == dest
+    assert listed == [
+        "cursor/zed-family-tree-sitter-fa49",
+        "cursor/no-skip-darwin-shards-6614",
+    ]
+    assert (dest / "warmup-plan.json").is_file()
 
 
 def test_restore_canary_plan_fails_closed_without_current_plan(
