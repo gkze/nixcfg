@@ -186,8 +186,14 @@ def warmup_fatal_line(
     if "cannot download" in lowered and "from any mirror" in lowered:
         return "cannot download from any mirror"
     match = _WILL_BE_BUILT.search(line)
-    if match and int(match.group(1)) > WARMUP_FATAL_BUILD_LIMIT:
-        return f"unexpectedly large will-be-built count ({match.group(1)})"
+    if match:
+        # 32 catches #1263's 406-drv bootstrap on rust-warmup. Zed-only
+        # keep_going builds the whole rust_* family on one runner
+        # (parent 38081612138 died at 37). Still fail closed at the
+        # packages-scale shard ceiling.
+        limit = MAX_SHARD_LOCAL_BUILDS if keep_going else WARMUP_FATAL_BUILD_LIMIT
+        if int(match.group(1)) > limit:
+            return f"unexpectedly large will-be-built count ({match.group(1)})"
     return None
 
 

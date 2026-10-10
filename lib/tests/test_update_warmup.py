@@ -1217,9 +1217,7 @@ def test_zed_family_policy_is_atomic_all_or_force_local() -> None:
     layers = ((content,), (settings,))
     assert zed_family_warmup_outputs(layers) == family
     rustc = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
-    rust_default = (
-        "/nix/store/dq17vrzvx74ismp4s6xicxirkmlshw1b-rust-default-1.98.1.drv"
-    )
+    rust_default = "/nix/store/dq17vrzvx74ismp4s6xicxirkmlshw1b-rust-default-1.98.1.drv"
     clang = "/nix/store/cccccccccccccccccccccccccccccccc-clang-21.1.8.drv"
 
     def query(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -1256,6 +1254,10 @@ def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:
     svh_keep = "error[E0463]: can't find crate for `settings_content`"
     assert warmup_fatal_line(svh_keep, keep_going=True) is None
     raise_if_warmup_fatal(svh_keep, keep_going=True)
+    family = "these 37 derivations will be built:"
+    assert warmup_fatal_line(family) is not None
+    assert warmup_fatal_line(family, keep_going=True) is None
+    raise_if_warmup_fatal(family, keep_going=True)
     assert warmup_fatal_line(huge, keep_going=True) is not None
 
 
