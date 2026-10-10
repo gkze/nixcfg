@@ -2,10 +2,9 @@
 
 Lane for `cursor/no-skip-darwin-shards-6614` / [PR #221](https://github.com/gkze/nixcfg/pull/221).
 George approved handing this to a fresh agent once `37809856116` ended.
-This note is the stop point after the #1260 mixed-generation / intern
-fix is on the branch: **do not kick a second Update from that commit
-until `37998753277` has fully ended (including repair), and do not
-self-schedule checks.** The manager routine watches the run.
+This note is the stop point after the #1260 same-slot `--rebuild`
+kick: **do not queue a second Update, and do not self-schedule
+checks.** The manager routine watches the run.
 
 ## Done bar (standing rules, verbatim)
 
@@ -54,8 +53,9 @@ already contains:
 | `950a8812` | Kick that queued `37976189014` (#1259); terminal, cause 11 |
 | `85c7f526` | ruff-format of the diagnostic helpers |
 | `493c899b` | Darwin `language_models` extra `-C metadata` (wrong; caused #1260 mix) |
-| `2ff8fb84` | Kick that queued `37998753277` (#1260) |
-| this head | Revert that salt; same-slot `language_models --rebuild` before `agent_ui` |
+| `2ff8fb84` | Kick that queued `37998753277` (#1260); terminal failure 01:06:51Z |
+| `486d5a17` | Revert that salt; same-slot `language_models --rebuild` before `agent_ui` |
+| this head | Kick that queues the same-slot `--rebuild` Update |
 
 #222 is **closed as superseded** (2026-10-08T21:40:26Z). The rust_zed fix and
 5-wide split live on this branch, not on `cursor/fix-zed-out-lib-cycle-6614`.
@@ -353,12 +353,13 @@ creation if never accessed) is firing. Pins are immune with `--keep-revisions`
 
 ## Already queued (do not double-kick)
 
-`37998753277` (#1260) @ `2ff8fb84` is the run this fix waits on. Do
-not kick until that run's conclusion is set, including repair. Warm-rust
-3/4 succeeded; 0/1/2 failed (cause 12); Darwin packages/closures/roots
-and linux-deps skipped. `37976189014` (#1259), `37947952083` (#1258),
-and `37890830675` (#1257) are also terminal (causes 8–11). The next
-Update is the same-slot language_models `--rebuild` kick
+`37998753277` (#1260) @ `2ff8fb84` is **terminal failure** (ended
+01:06:51Z, including repair). Warm-rust 3/4 succeeded; 0/1/2 failed
+(cause 12); Darwin packages/closures/roots and linux-deps skipped;
+assert-coverage and repair failed; publish skipped. `37976189014`
+(#1259), `37947952083` (#1258), and `37890830675` (#1257) are also
+terminal (causes 8–11). The next Update is the same-slot
+language_models `--rebuild` kick from `486d5a17`
 (`.github/update-kick`). Do not queue a second one.
 
 ## Open questions
@@ -374,11 +375,11 @@ Update is the same-slot language_models `--rebuild` kick
 
 ## Exact next step
 
-**After `37998753277` fully ends, kick exactly one Update** (this head).
-Watch warm-rust agent_ui slots for `nix build …rust_language_models… --rebuild`
-on the same runner as `rust_agent_ui`, then agent_ui succeeding without
-E0460 on title_bar/recent_projects. Do not evict `h3crq11a` or
-`aqsm7q08`. Do not change flake inputs without George. Do not merge
-#221. Do not drive `main` Update until the done bar above is green.
-Do not schedule self-check-ins or timers; the manager routine watches
-the run.
+Watch the same-slot `--rebuild` Update from this kick. Warm-rust
+agent_ui slots should `nix build …rust_language_models… --rebuild` on
+the same runner as `rust_agent_ui`, then compile agent_ui without
+E0463 / E0460 on title_bar/recent_projects. Do not evict `h3crq11a`
+or `aqsm7q08`. Do not change flake inputs without George. Do not
+merge #221. Do not drive `main` Update until the done bar above is
+green. Do not schedule self-check-ins or timers; the manager routine
+watches the run.
