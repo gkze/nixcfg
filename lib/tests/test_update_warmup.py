@@ -1404,7 +1404,7 @@ def test_zed_family_policy_is_atomic_all_or_force_local() -> None:
 
 
 def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:
-    """#1270: --max-jobs 0 Cannot-build is retried; SVH and rustc counts stay fatal."""
+    """#1270: --max-jobs 0 Cannot-build is retried; 406-drv rustc counts stay fatal."""
     cannot = "error: Cannot build '/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cpio-2.15.drv'."
     assert warmup_fatal_line(cannot, substitute_only=True) is None
     raise_if_warmup_fatal(cannot, substitute_only=True)
@@ -1419,6 +1419,9 @@ def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:
     assert warmup_fatal_line(huge, substitute_only=True) is not None
     with pytest.raises(WarmupFatalError, match="will-be-built"):
         raise_if_warmup_fatal(huge, substitute_only=True)
+    cranelift = "these 40 derivations will be built:"
+    assert warmup_fatal_line(cranelift, substitute_only=True) is None
+    raise_if_warmup_fatal(cranelift, substitute_only=True)
     svh_keep = "error[E0463]: can't find crate for `settings_content`"
     assert warmup_fatal_line(svh_keep, keep_going=True) is None
     raise_if_warmup_fatal(svh_keep, keep_going=True)

@@ -3054,21 +3054,49 @@ def test_hosted_validation_streams_nix_logs_to_stderr(
 def test_hosted_zed_warmup_progress_keeps_going_past_workspace_family(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """38086720924: compiler substitutes logged rust-warmup, so 37 > 32 fatal.
+    """38126388469: --max-jobs 0 cranelift 40 must defer, not abort at 32.
 
-    zed-warmup keep_going uses the 400-drv ceiling. The same 37-drv
-    workspace line must not abort populate when source is zed-warmup.
+    rust-warmup others still fail closed at 32. Family keep_going and
+    zed-warmup use the 400-drv ceiling so the 37-crate workspace compiles.
+    Bootstrap-scale 406 still aborts on substitute-only rust-warmup.
     """
     monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
     rust = pipeline._hosted_validation_progress("rust-warmup")
-    rust(ValidationCommandStarted("nix build --max-jobs 0 /nix/store/git_ui.drv"))
+    rust(ValidationCommandStarted("nix build --max-jobs 0 /nix/store/cranelift.drv"))
+    rust(
+        ValidationCommandOutput(
+            "nix build --max-jobs 0 /nix/store/cranelift.drv",
+            "these 40 derivations will be built:",
+        )
+    )
     with pytest.raises(WarmupFatalError, match="will-be-built"):
         rust(
             ValidationCommandOutput(
-                "nix build --max-jobs 0 /nix/store/git_ui.drv",
+                "nix build --max-jobs 0 /nix/store/cranelift.drv",
+                "these 406 derivations will be built:",
+            )
+        )
+    others = pipeline._hosted_validation_progress("rust-warmup")
+    others(ValidationCommandStarted("nix build --keep-going /nix/store/other.drv"))
+    with pytest.raises(WarmupFatalError, match="will-be-built"):
+        others(
+            ValidationCommandOutput(
+                "nix build --keep-going /nix/store/other.drv",
                 "these 37 derivations will be built:",
             )
         )
+    family = pipeline._hosted_validation_progress("rust-warmup", keep_going=True)
+    family(
+        ValidationCommandStarted(
+            "nix build --keep-going --no-substitute /nix/store/settings.drv"
+        )
+    )
+    family(
+        ValidationCommandOutput(
+            "nix build --keep-going --no-substitute /nix/store/settings.drv",
+            "these 37 derivations will be built:",
+        )
+    )
     zed = pipeline._hosted_validation_progress("zed-warmup")
     zed(ValidationCommandStarted("nix build --max-jobs 0 /nix/store/git_ui.drv"))
     zed(
@@ -3078,6 +3106,26 @@ def test_hosted_zed_warmup_progress_keeps_going_past_workspace_family(
         )
     )
     assert "these 37 derivations will be built" in capsys.readouterr().err
+
+
+def test_realize_svh_family_keeps_going_on_hosted_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Family --keep-going must lift rust-warmup's 32-drv streamed ceiling."""
+    seen: list[tuple[str, bool]] = []
+    real = pipeline._hosted_validation_progress
+
+    def spy(source: str, *, keep_going: bool = False) -> object:
+        seen.append((source, keep_going))
+        return real(source, keep_going=keep_going)
+
+    monkeypatch.setattr(pipeline, "_hosted_validation_progress", spy)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", lambda *_a, **_k: ())
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0.drv"
+    pipeline._realize_svh_family((settings,), flake_root=tmp_path, keep_going=True)
+    assert ("rust-warmup", True) in seen
 
 
 def test_hosted_warmup_progress_fails_fast_on_fatal_patterns(

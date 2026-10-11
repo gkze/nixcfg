@@ -208,9 +208,12 @@ _FAIL_FAST_PROGRESS_SOURCES = frozenset({
 })
 
 
-def _hosted_validation_progress(source: str) -> validation.ValidationProgress:
+def _hosted_validation_progress(
+    source: str, *, keep_going: bool = False
+) -> validation.ValidationProgress:
     """Stream Nix validation output to the live hosted job log."""
     substitute_only = False
+    stream_keep_going = keep_going or source == "zed-warmup"
 
     def emit(event: validation.ValidationProgressEvent) -> None:
         nonlocal substitute_only
@@ -228,12 +231,12 @@ def _hosted_validation_progress(source: str) -> validation.ValidationProgress:
             return
         sys.stderr.write(f"[{source}] {redact_urls(text)}\n")
         sys.stderr.flush()
-        if source == "zed-warmup":
+        if source in _FAIL_FAST_PROGRESS_SOURCES or source == "zed-warmup":
             raise_if_warmup_fatal(
-                text, substitute_only=substitute_only, keep_going=True
+                text,
+                substitute_only=substitute_only,
+                keep_going=stream_keep_going,
             )
-        elif source in _FAIL_FAST_PROGRESS_SOURCES:
-            raise_if_warmup_fatal(text, substitute_only=substitute_only)
 
     return emit
 
@@ -724,7 +727,9 @@ def _realize_svh_family(
         if fetch_failures:
             return tuple(failures), False
     assert_force_local_dry_run((*extension_host, *family_rest))
-    family_progress = _hosted_validation_progress(progress_source)
+    family_progress = _hosted_validation_progress(
+        progress_source, keep_going=keep_going
+    )
     if extension_host:
         failures.extend(
             realize_warmup_outputs(
