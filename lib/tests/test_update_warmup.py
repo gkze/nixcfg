@@ -64,6 +64,7 @@ from lib.update.ci.warmup import (
     partition_rust_warmup_others,
     partition_rust_zed_drvs,
     partition_settings_family_drvs,
+    partition_svh_sensitive_drvs,
     partition_zed_editor_nightly_drvs,
     plan_darwin_warmup,
     query_drv_outputs,
@@ -1224,6 +1225,30 @@ def test_1270_canary_patchutils_is_local_compiler_helper() -> None:
     assert partition_compiler_input_drvs((rustc, stdenv, patchutils, pbzx, cpio)) == (
         (rustc, stdenv),
         (patchutils, pbzx, cpio),
+    )
+
+
+def test_partition_svh_sensitive_peels_workspace_before_serde() -> None:
+    """38121661811 slots 1/2 built feature_flags before rust_settings."""
+    feature_flags = (
+        "/nix/store/0anpp4kml0bzvpjm2i4ykqgdbl00rn23-rust_feature_flags-0.1.0.drv"
+    )
+    git_hosting = "/nix/store/2h87371ygf9p3v3xc5kvgv5ci769dhz5-rust_git_hosting_providers-0.1.0.drv"
+    settings = "/nix/store/hwlj8la2ply5al3dhkz0d84z4rj3j61m-rust_settings-0.1.0.drv"
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229.drv"
+    assert is_zed_workspace_crate_store_path(feature_flags)
+    assert is_svh_sensitive_store_path(feature_flags)
+    assert is_svh_sensitive_store_path(git_hosting)
+    assert not is_svh_sensitive_store_path(serde)
+    assert partition_svh_sensitive_drvs((
+        serde,
+        feature_flags,
+        settings,
+        git_hosting,
+        serde,
+    )) == (
+        (serde,),
+        (feature_flags, settings, git_hosting),
     )
 
 

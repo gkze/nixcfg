@@ -71,6 +71,7 @@ from lib.update.ci.warmup import (
     partition_rust_warmup_others,
     partition_rust_zed_drvs,
     partition_settings_family_drvs,
+    partition_svh_sensitive_drvs,
     partition_zed_editor_nightly_drvs,
     plan_darwin_warmup,
     raise_if_warmup_fatal,
@@ -825,6 +826,32 @@ def _canary_or_slot_paths(
     return slot_warmup_paths(plan.rust_layers, warmup_slot)
 
 
+def _expand_svh_family_from_stripe(
+    family: tuple[str, ...],
+    settings: tuple[str, ...],
+    stripe_svh: tuple[str, ...],
+    others: tuple[str, ...],
+    plan: WarmupPlan,
+) -> tuple[str, ...]:
+    """Merge settings, workspace SVH, and others' settings/tree-sitter intern."""
+    family = _merge_settings_family(family, settings, plan)
+    family = tuple(dict.fromkeys((*family, *stripe_svh)))
+    rust_others = tuple(drv for drv in others if is_crate2nix_rust_output(drv))
+    if not rust_others:
+        return family
+    family = _merge_settings_family(
+        family,
+        rust_crate_input_drvs(rust_others, SETTINGS_MEMBER_CRATES),
+        plan,
+    )
+    return tuple(
+        dict.fromkeys((
+            *family,
+            *rust_crate_input_drvs(rust_others, TREE_SITTER_MEMBER_CRATES),
+        ))
+    )
+
+
 def _realize_rust_warmup(
     warmup_plan: Path,
     warmup_slot: int,
@@ -844,6 +871,7 @@ def _realize_rust_warmup(
     drvs = unique_drvs_for_outputs(missing, plan.output_drvs)
     others, agent_ui, rust_zed, zed_nightly = _partition_rust_warmup_stripe(drvs)
     others, settings = partition_settings_family_drvs(others)
+    others, stripe_svh = partition_svh_sensitive_drvs(others)
     # Update #1258/#1263: Darwin rustc intern of a Cachix
     # language_models rlib is bare E0463 (nixpkgs#482646). rust_zed
     # then E0460s when target/deps/libextension_host is a newer SVH
@@ -899,8 +927,15 @@ def _realize_rust_warmup(
         if not family:
             msg = "agent_ui drv has no rust_language_models input"
             raise WarmupError(msg)
-    family = _merge_settings_family(family, settings, plan)
+    family = _expand_svh_family_from_stripe(family, settings, stripe_svh, others, plan)
     failures: list[validation.DerivationValidationFailure] = []
+    # Force-local SVH first. 38121661811 slots 1/2 built feature_flags /
+    # git_hosting_providers before settings and fatal'd Cannot build
+    # rust_settings after fetching Cachix content/json.
+    family_failures, compiled = _realize_svh_family(
+        family, flake_root=flake_root, keep_going=True
+    )
+    failures.extend(family_failures)
     if others:
         failures.extend(
             realize_warmup_outputs(
@@ -909,8 +944,6 @@ def _realize_rust_warmup(
                 progress=_hosted_validation_progress("rust-warmup"),
             )
         )
-    family_failures, compiled = _realize_svh_family(family, flake_root=flake_root)
-    failures.extend(family_failures)
     if compiled:
         if agent_ui and not zed_slot:
             failures.extend(_realize_logged_warmup(agent_ui, flake_root=flake_root))

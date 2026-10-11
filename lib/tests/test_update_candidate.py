@@ -800,7 +800,7 @@ def test_rust_warmup_settings_family_force_locals_content_cluster(
 
     settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
     content = "/nix/store/ma14flyg1v5b4vhinb2l0klw1xmdg9nz-rust_settings_content-0.1.0"
-    other = "/nix/store/otheraaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-0.1.0"
+    other = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229"
     settings_drv = f"{settings}.drv"
     content_drv = f"{content}.drv"
     other_drv = f"{other}.drv"
@@ -847,6 +847,92 @@ def test_rust_warmup_settings_family_force_locals_content_cluster(
     assert force_local == [(content_drv, settings_drv)]
     others = [paths for paths, _logs, force, _sub in realized if not force]
     assert others == [(other_drv,)]
+    assert [force for _paths, _logs, force, _sub in realized] == [True, False]
+
+
+def test_rust_warmup_peels_workspace_svh_before_others(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38121661811 slots 1/2: do not compile feature_flags before settings."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings = "/nix/store/hwlj8la2ply5al3dhkz0d84z4rj3j61m-rust_settings-0.1.0"
+    flags = "/nix/store/0anpp4kml0bzvpjm2i4ykqgdbl00rn23-rust_feature_flags-0.1.0"
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229"
+    settings_drv = f"{settings}.drv"
+    flags_drv = f"{flags}.drv"
+    serde_drv = f"{serde}.drv"
+    monkeypatch.setattr(
+        pipeline,
+        "rust_crate_input_drvs",
+        lambda _parents, _crates: (settings_drv,),
+    )
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(serde, flags, settings),
+            rustLayers=((serde,), (flags,), (settings,)),
+            outputDrvs={
+                serde: serde_drv,
+                flags: flags_drv,
+                settings: settings_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=3, missing=3, warmup=3, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == ()
+    force_local = [paths for paths, _logs, force, _sub in realized if force]
+    assert force_local == [(settings_drv, flags_drv)]
+    others = [paths for paths, _logs, force, _sub in realized if not force]
+    assert others == [(serde_drv,)]
+    assert [force for _paths, _logs, force, _sub in realized] == [True, False]
 
 
 def test_rust_warmup_settings_json_force_locals_tree_sitter(
@@ -1682,8 +1768,7 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
     )
     assert rust.gates == ()
     assert realized == [
-        ((other_drv,), False, False, False),
-        ((language_models_drv,), True, True, False),
+        ((language_models_drv, other_drv), True, True, False),
         ((agent_ui_drv,), True, False, False),
     ]
     realized.clear()
@@ -1736,8 +1821,7 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
     )
     assert rust.gates == ()
     assert realized == [
-        ((other_drv,), False, False, False),
-        ((language_models_drv,), True, True, False),
+        ((language_models_drv, other_drv), True, True, False),
         ((agent_ui_drv,), True, False, False),
     ]
     realized.clear()
@@ -1773,7 +1857,7 @@ def test_rust_warmup_agent_ui_slot_realizes_agent_ui_last(
         candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
     )
     assert rust.gates == ()
-    assert realized == [((language_models_drv,), False, False, False)]
+    assert realized == [((language_models_drv,), True, True, False)]
     monkeypatch.setattr(pipeline, "language_models_input_drvs", lambda _drvs: ())
     write_warmup_plan(
         warmup_plan,

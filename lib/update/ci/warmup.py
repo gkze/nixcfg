@@ -1055,6 +1055,25 @@ def partition_settings_family_drvs(
     return tuple(others), tuple(settings)
 
 
+def partition_svh_sensitive_drvs(
+    drvs: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Split SVH-sensitive rust_* out of others so they force-local first.
+
+    38121661811 slots 1/2 ``nix build`` rust_feature_flags /
+    rust_git_hosting_providers (workspace 0.1.0) which then compiled
+    rust_settings against Cachix content/json and fatal'd Cannot build.
+    """
+    others: list[str] = []
+    sensitive: list[str] = []
+    for drv in dict.fromkeys(drvs):
+        if is_svh_sensitive_store_path(drv):
+            sensitive.append(drv)
+        else:
+            others.append(drv)
+    return tuple(others), tuple(sensitive)
+
+
 def settings_family_warmup_outputs(layers: Sequence[Sequence[str]]) -> tuple[str, ...]:
     """Return rust_settings-family outputs from every warmup layer."""
     return _warmup_outputs_matching(layers, is_settings_family_store_path)
