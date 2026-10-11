@@ -13,8 +13,8 @@ from lib.update.ci.warmup import (
     DARWIN_GRAPH_EVAL_WORKERS,
     MAX_SHARD_LOCAL_BUILDS,
     RUST_WARMUP_SLOTS,
-    SHARED_MISSING_MIN_ROOTS,
     SETTINGS_MEMBER_CRATES,
+    SHARED_MISSING_MIN_ROOTS,
     WARMUP_DRVS_CACHE_INFO,
     WARMUP_DRVS_NAME,
     WARMUP_DRVS_ROOTS,
@@ -235,9 +235,10 @@ def test_intersection_and_shard_remainder_are_cache_aware() -> None:
         shared,
         rust,
     })
-    assert intersect_missing(
-        {"darwin-argus": frozenset({unique})}, substitutable
-    ) == frozenset()
+    assert (
+        intersect_missing({"darwin-argus": frozenset({unique})}, substitutable)
+        == frozenset()
+    )
     with pytest.raises(WarmupError, match="at least 1"):
         intersect_missing(per_root, substitutable, min_roots=0)
     shard = ClosureShard(
@@ -490,19 +491,16 @@ def test_plan_darwin_warmup_peels_two_plus_darwin_only_shared(
             roots=("darwin-rocinante", "darwin-zeus"),
         ),
     )
-    assert (
-        intersect_missing(
-            {
-                "darwin-argus": frozenset({all4, rust, unique, *darwin_only}),
-                "darwin-rocinante": frozenset({all4, rust, *darwin_only}),
-                "darwin-zeus": frozenset({all4, rust, *darwin_only}),
-                "home-george": frozenset({all4, rust}),
-            },
-            frozenset(),
-            min_roots=4,
-        )
-        == frozenset({all4, rust})
-    )
+    assert intersect_missing(
+        {
+            "darwin-argus": frozenset({all4, rust, unique, *darwin_only}),
+            "darwin-rocinante": frozenset({all4, rust, *darwin_only}),
+            "darwin-zeus": frozenset({all4, rust, *darwin_only}),
+            "home-george": frozenset({all4, rust}),
+        },
+        frozenset(),
+        min_roots=4,
+    ) == frozenset({all4, rust})
     plan = plan_darwin_warmup(
         tmp_path,
         manifest=_live_manifest(),
