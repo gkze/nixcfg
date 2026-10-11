@@ -5,4 +5,4 @@
 # One macos-15 runner; realize these crates from every rust layer.
 canary-crates: settings settings_content settings_json settings_macros
 canary-slots: 0
-2026-10-11T11:55:05Z shared-cascade-warmup after 38130420607 remaining=1724/1733
+2026-10-11T13:10:36Z linux-image-wbb after 38137325241 arm 50-wbb nixos-disk-image
