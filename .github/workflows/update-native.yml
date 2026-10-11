@@ -56,7 +56,7 @@ on:
         default: ""
         type: string
       warmup_slot:
-        description: rust-warmup matrix slot 0-4
+        description: rust-warmup or cascade-warmup matrix slot 0-4
         default: ""
         type: string
     outputs:

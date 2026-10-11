@@ -922,6 +922,16 @@ def test_plan_shards_and_coverage_native_stages(native_job, monkeypatch) -> None
         "/warmup/warmup-plan.json"
     )
     assert shard_args[shard_args.index("--shard") + 1] == "darwin-argus"
+    _assert_warmup_scope_native_args(monkeypatch, artifacts)
+    monkeypatch.delenv("NIXCFG_PREVIOUS_CANDIDATE")
+    with pytest.raises(ValueError, match="Unknown native stage"):
+        jobs._native_args("unexpected", artifacts)
+
+
+def _assert_warmup_scope_native_args(
+    monkeypatch: pytest.MonkeyPatch, artifacts: Path
+) -> None:
+    """rust-warmup and cascade-warmup need a plan+slot; slots stay off packages."""
     monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "rust-warmup")
     monkeypatch.delenv("NIXCFG_CLOSURE_ROOTS")
     monkeypatch.delenv("NIXCFG_CLOSURE_BUDGET_SECONDS")
@@ -930,12 +940,27 @@ def test_plan_shards_and_coverage_native_stages(native_job, monkeypatch) -> None
     rust_args = jobs._native_args("validate", artifacts)
     assert rust_args[rust_args.index("--warmup-slot") + 1] == "0"
     assert "--shard" not in rust_args
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "cascade-warmup")
+    monkeypatch.setenv("NIXCFG_CLOSURE_SHARD", "cascade-0")
+    cascade_args = jobs._native_args("validate", artifacts)
+    assert cascade_args[cascade_args.index("--scope") + 1] == "cascade-warmup"
+    assert cascade_args[cascade_args.index("--warmup-slot") + 1] == "0"
     monkeypatch.delenv("NIXCFG_WARMUP_SLOT")
-    with pytest.raises(ValueError, match="WARMUP_SLOT"):
+    with pytest.raises(ValueError, match="cascade-warmup requires NIXCFG_WARMUP"):
         jobs._native_args("validate", artifacts)
-    monkeypatch.delenv("NIXCFG_PREVIOUS_CANDIDATE")
-    with pytest.raises(ValueError, match="Unknown native stage"):
-        jobs._native_args("unexpected", artifacts)
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "rust-warmup")
+    monkeypatch.setenv("NIXCFG_CLOSURE_SHARD", "rust-0")
+    with pytest.raises(ValueError, match="rust-warmup requires NIXCFG_WARMUP"):
+        jobs._native_args("validate", artifacts)
+    monkeypatch.setenv("NIXCFG_WARMUP_SLOT", "0")
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "packages")
+    monkeypatch.delenv("NIXCFG_CLOSURE_SHARD")
+    with pytest.raises(ValueError, match="warmup slots are only valid"):
+        jobs._native_args("validate", artifacts)
+    monkeypatch.delenv("NIXCFG_WARMUP_SLOT")
+    monkeypatch.setenv("NIXCFG_CLOSURE_SHARD", "packages-0")
+    with pytest.raises(ValueError, match="Named closure roots"):
+        jobs._native_args("validate", artifacts)
 
 
 def test_native_args_merge_candidates_and_canary_validate(
@@ -1182,15 +1207,17 @@ def _assert_parallel_linux_prepare(jobs: dict, matrix: list[dict]) -> None:
 def _assert_canary_jobs(workflow_jobs: dict) -> None:
     """Kick-file or dispatch canary realizes selected rust-warmup slots."""
     canary = workflow_jobs["canary-warm-rust"]
-    assert set(canary["needs"]) == {"canary-slots", "canary-plan"}
+    assert set(canary["needs"]) == {"canary-slots", "plan-darwin-closures"}
     assert canary["with"]["canary"] == "true"
-    assert canary["with"]["warmup_artifact"] == "canary-plan"
+    assert canary["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"
+    assert canary["with"]["previous"] == "prepare-x86_64-linux"
     assert canary["with"]["scope"] == "rust-warmup"
     assert canary["with"]["canary_slots"] == ("${{ needs.canary-slots.outputs.slots }}")
     assert canary["with"]["canary_crates"] == (
         "${{ needs.canary-slots.outputs.crates }}"
     )
     assert "outputs.enabled" in canary["if"]
+    assert "plan-darwin-closures.result == 'success'" in canary["if"]
     slots = workflow_jobs["canary-slots"]
     assert "github.event_name == 'push'" in slots["if"]
     assert "workflow_dispatch" in slots["if"]
@@ -1205,9 +1232,24 @@ def _assert_canary_jobs(workflow_jobs: dict) -> None:
     assert "canary-crates:" in slot_step["run"]
     assert "if crates:" in slot_step["run"]
     assert "[0, 1, 2, 3, 4]" not in slot_step["run"]
-    plan = workflow_jobs["canary-plan"]
-    assert plan["needs"] == ["canary-slots"]
-    assert "outputs.enabled" in plan["if"]
+    assert "canary-plan" not in workflow_jobs
+
+
+def _assert_cascade_warmup_job(workflow_jobs: dict) -> None:
+    """Shared non-rust cascade is 5-wide per-derivation after rust-warmup."""
+    cascade = workflow_jobs["validate-darwin-cascade-warmup"]
+    assert set(cascade["needs"]) == {
+        "prepare-merge",
+        "plan-darwin-closures",
+        "validate-darwin-warm-rust",
+    }
+    assert cascade["with"]["scope"] == "cascade-warmup"
+    assert cascade["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"
+    assert cascade["with"]["warmup_slot"] == "${{ matrix.slot }}"
+    assert cascade["with"]["shard"] == "cascade-${{ matrix.slot }}"
+    assert cascade["strategy"]["fail-fast"] == "false"
+    assert cascade["strategy"]["max-parallel"] == "5"
+    assert cascade["strategy"]["matrix"]["slot"] == ["0", "1", "2", "3", "4"]
 
 
 def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
@@ -1228,6 +1270,7 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
     assert rust["strategy"]["fail-fast"] == "false"
     assert rust["strategy"]["max-parallel"] == "5"
     assert rust["strategy"]["matrix"]["slot"] == ["0", "1", "2", "3", "4"]
+    _assert_cascade_warmup_job(workflow_jobs)
     packages = workflow_jobs["validate-darwin-packages"]
     assert set(packages["needs"]) == {
         "prepare-merge",
@@ -1247,11 +1290,13 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
         "cache-darwin-linux-deps-arm",
         "cache-darwin-linux-deps-x86",
         "validate-darwin-warm-rust",
+        "validate-darwin-cascade-warmup",
     }
     roots_if = " ".join(roots["if"].split())
     assert "always() && !cancelled()" in roots_if
     assert "needs.plan-darwin-closures.result == 'success'" in roots_if
     assert "needs.validate-darwin-warm-rust.result == 'success'" in roots_if
+    assert "needs.validate-darwin-cascade-warmup.result == 'success'" in roots_if
     assert "validate-darwin-packages.result" not in roots_if
     assert "closure_complete" not in roots_if
     assert roots["strategy"]["fail-fast"] == "false"
@@ -1293,6 +1338,7 @@ def _assert_coverage_and_publish(workflow_jobs: dict) -> None:
         "validate-arm",
         "validate-x86",
         "validate-darwin-warm-rust",
+        "validate-darwin-cascade-warmup",
         "validate-darwin-packages",
         "validate-darwin-roots",
         "validate-darwin-closures",
@@ -1311,6 +1357,7 @@ def _assert_coverage_and_publish(workflow_jobs: dict) -> None:
         "validate-arm",
         "validate-x86",
         "validate-darwin-warm-rust",
+        "validate-darwin-cascade-warmup",
         "validate-darwin-packages",
         "validate-darwin-roots",
         "validate-darwin-closures",
@@ -1452,7 +1499,11 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         "cache-darwin-linux-deps-x86",
     }
     for job in cache_jobs.values():
-        assert set(job["needs"]) == {"prepare-merge", "validate-darwin-warm-rust"}
+        assert set(job["needs"]) == {
+            "prepare-merge",
+            "validate-darwin-warm-rust",
+            "validate-darwin-cascade-warmup",
+        }
         assert job["with"]["stage"] == "cache-root-deps"
         assert job["with"]["previous"] == "prepare-x86_64-linux"
     assert (

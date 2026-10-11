@@ -15,8 +15,13 @@ shortcut.
 Until hydra publishes that stdenv, every downstream drv whose hash
 depends on it misses cache.nixos.org. Warmup therefore realizes the
 intersection of per-root Darwin output closures that are on neither
-cache.nixos.org nor gkze, and the planner fails closed if a shard would
-still compile more than a packages-scale remainder locally.
+cache.nixos.org nor gkze: rust_* plus safe FODs on the rust-warmup
+slots, and the remaining shared non-rust cascade as sharded
+per-derivation work pushed to gkze. The planner fails closed if a
+shard would still compile more than a packages-scale *host-unique*
+remainder locally. 38130420607 left that cascade in the root shards
+(remaining=1724/1733, rust_*=0) because the rust-only filter peeled
+only rust_* / cargo-package.
 """
 
 import json
@@ -41,6 +46,7 @@ from lib.update.derivation_validation import (
     DerivationValidationFailure,
     DerivationValidationRequest,
     RootClosureManifest,
+    RootClosureManifestRoot,
     root_closure_installable,
     validate_derivation_requests,
 )
@@ -68,6 +74,9 @@ MAX_SHARD_LOCAL_BUILDS = 400
 # Public macos-15 cap is 5. rust_* warmup owns those slots, partitioned by
 # crate2nix dependency layers so later crates can substitute earlier ones.
 RUST_WARMUP_SLOTS = 5
+# Shared non-rust intersection (#38130420607: ~1300 outputs after rust_*
+# peel). Five slots stripe each dependency layer; each path is one drv.
+CASCADE_WARMUP_SLOTS = 5
 
 
 def parse_canary_slots(raw: str) -> tuple[int, ...]:
@@ -246,6 +255,10 @@ class WarmupPlan(BaseModel):
     substituters: tuple[str, ...]
     warmup_outputs: tuple[str, ...] = Field(alias="warmupOutputs")
     rust_layers: tuple[tuple[str, ...], ...] = Field(alias="rustLayers", default=())
+    cascade_outputs: tuple[str, ...] = Field(alias="cascadeOutputs", default=())
+    cascade_layers: tuple[tuple[str, ...], ...] = Field(
+        alias="cascadeLayers", default=()
+    )
     output_drvs: dict[str, str] = Field(alias="outputDrvs", default_factory=dict)
     per_root: dict[str, RootWarmupStats] = Field(alias="perRoot")
     shards: tuple[ShardLocalBuildReport, ...]
@@ -257,6 +270,11 @@ def is_crate2nix_rust_output(store_path: str) -> bool:
     name = store_path.rsplit("/", 1)[-1]
     _hash, separator, rest = name.partition("-")
     return bool(separator) and rest.startswith("rust_")
+
+
+def is_planned_rust_warmup_output(store_path: str) -> bool:
+    """Return whether rust-warmup (not cascade) owns *store_path*."""
+    return is_crate2nix_rust_output(store_path) or is_safe_rust_warmup_other(store_path)
 
 
 def _absolute_store_path(path: str) -> str | None:
@@ -417,6 +435,68 @@ def _input_drv_keys(drv: Mapping[str, object]) -> frozenset[str]:
     return frozenset()
 
 
+def output_dependency_layers(
+    outputs: frozenset[str],
+    payloads: Sequence[Mapping[str, object]],
+    *,
+    kind: str,
+) -> tuple[tuple[str, ...], ...]:
+    """Layer *outputs* by Darwin ``inputDrvs`` so later paths can substitute."""
+    if not outputs:
+        return ()
+    path_to_drv: dict[str, str] = {}
+    drv_outputs: dict[str, set[str]] = {}
+    drv_inputs: dict[str, set[str]] = {}
+    for payload in payloads:
+        derivations = payload.get("derivations")
+        if not isinstance(derivations, dict):
+            msg = "derivation graph missing derivations"
+            raise WarmupError(msg)
+        for raw_name, drv in derivations.items():
+            if not isinstance(raw_name, str) or not isinstance(drv, dict):
+                continue
+            if drv.get("system") != _DARWIN_SYSTEM:
+                continue
+            output_map = drv.get("outputs")
+            if not isinstance(output_map, dict):
+                continue
+            key = _drv_basename(raw_name)
+            for output in output_map.values():
+                if not isinstance(output, dict):
+                    continue
+                raw = output.get("path")
+                if not isinstance(raw, str):
+                    continue
+                path = _absolute_store_path(raw)
+                if path is None or path not in outputs:
+                    continue
+                path_to_drv[path] = key
+                drv_outputs.setdefault(key, set()).add(path)
+            drv_inputs.setdefault(key, set()).update(_input_drv_keys(drv))
+    missing = outputs - frozenset(path_to_drv)
+    if missing:
+        sample = ", ".join(sorted(missing)[:8])
+        msg = f"{kind} warmup paths missing from Darwin graphs: {sample}"
+        raise WarmupError(msg)
+    owned = frozenset(drv_outputs)
+    deps = {
+        drv: frozenset(dep for dep in drv_inputs.get(drv, set()) if dep in owned)
+        for drv in owned
+    }
+    remaining = set(owned)
+    layers: list[tuple[str, ...]] = []
+    while remaining:
+        ready = sorted(drv for drv in remaining if not (deps[drv] & remaining))
+        if not ready:
+            sample = ", ".join(sorted(remaining)[:8])
+            msg = f"{kind} warmup dependency cycle: {sample}"
+            raise WarmupError(msg)
+        layer_paths = tuple(path for drv in ready for path in sorted(drv_outputs[drv]))
+        layers.append(layer_paths)
+        remaining.difference_update(ready)
+    return tuple(layers)
+
+
 def rust_warmup_layers(
     warmup: frozenset[str],
     payloads: Sequence[Mapping[str, object]],
@@ -433,61 +513,18 @@ def rust_warmup_layers(
             if path not in rust_warmup and is_safe_rust_warmup_other(path)
         )
     )
-    if not rust_warmup:
-        return (prelude,) if prelude else ()
-    path_to_drv: dict[str, str] = {}
-    drv_outputs: dict[str, set[str]] = {}
-    drv_inputs: dict[str, set[str]] = {}
-    for payload in payloads:
-        derivations = payload.get("derivations")
-        if not isinstance(derivations, dict):
-            msg = "derivation graph missing derivations"
-            raise WarmupError(msg)
-        for raw_name, drv in derivations.items():
-            if not isinstance(raw_name, str) or not isinstance(drv, dict):
-                continue
-            if drv.get("system") != _DARWIN_SYSTEM:
-                continue
-            outputs = drv.get("outputs")
-            if not isinstance(outputs, dict):
-                continue
-            key = _drv_basename(raw_name)
-            for output in outputs.values():
-                if not isinstance(output, dict):
-                    continue
-                raw = output.get("path")
-                if not isinstance(raw, str):
-                    continue
-                path = _absolute_store_path(raw)
-                if path is None or path not in rust_warmup:
-                    continue
-                path_to_drv[path] = key
-                drv_outputs.setdefault(key, set()).add(path)
-            drv_inputs.setdefault(key, set()).update(_input_drv_keys(drv))
-    missing = rust_warmup - frozenset(path_to_drv)
-    if missing:
-        sample = ", ".join(sorted(missing)[:8])
-        msg = f"rust_* warmup paths missing from Darwin graphs: {sample}"
-        raise WarmupError(msg)
-    rust_drvs = frozenset(drv_outputs)
-    deps = {
-        drv: frozenset(dep for dep in drv_inputs.get(drv, set()) if dep in rust_drvs)
-        for drv in rust_drvs
-    }
-    remaining = set(rust_drvs)
-    layers: list[tuple[str, ...]] = []
-    while remaining:
-        ready = sorted(drv for drv in remaining if not (deps[drv] & remaining))
-        if not ready:
-            sample = ", ".join(sorted(remaining)[:8])
-            msg = f"rust_* warmup dependency cycle: {sample}"
-            raise WarmupError(msg)
-        layer_paths = tuple(path for drv in ready for path in sorted(drv_outputs[drv]))
-        layers.append(layer_paths)
-        remaining.difference_update(ready)
+    layers = output_dependency_layers(rust_warmup, payloads, kind="rust_*")
     if prelude:
         return (prelude, *layers)
-    return tuple(layers)
+    return layers
+
+
+def cascade_warmup_layers(
+    cascade: frozenset[str],
+    payloads: Sequence[Mapping[str, object]],
+) -> tuple[tuple[str, ...], ...]:
+    """Layer the shared non-rust intersection so umbrellas compile last."""
+    return output_dependency_layers(cascade, payloads, kind="cascade")
 
 
 def warmup_output_drvs(
@@ -798,6 +835,22 @@ def slot_warmup_paths(
     return tuple(path for layer in layers for path in tuple(layer)[slot::width])
 
 
+def slot_cascade_paths(
+    layers: Sequence[Sequence[str]],
+    slot: int,
+    *,
+    width: int = CASCADE_WARMUP_SLOTS,
+) -> tuple[str, ...]:
+    """Return this cascade-warmup slot's stripe of each cascade layer."""
+    if width < 1:
+        msg = "cascade warmup width must be at least 1"
+        raise WarmupError(msg)
+    if not 0 <= slot < width:
+        msg = f"cascade warmup slot must be in 0..{width - 1}, got {slot}"
+        raise WarmupError(msg)
+    return slot_warmup_paths(layers, slot, width=width)
+
+
 def skip_cached_warmup_paths(
     paths: Sequence[str],
     *,
@@ -835,6 +888,31 @@ def default_cache_present(
     )
 
 
+def _eval_root_darwin_graphs(
+    flake_root: Path,
+    roots: Sequence[RootClosureManifestRoot],
+    *,
+    run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+) -> tuple[dict[str, dict[str, object]], dict[str, frozenset[str]]]:
+    """Instantiate Darwin roots in parallel; graph eval is the plan-shards cost."""
+    names = tuple(composed_root_name(root) for root in roots)
+
+    def one(name: str) -> tuple[str, dict[str, object], frozenset[str]]:
+        payload = eval_root_darwin_graph(flake_root, name, run=run)
+        return name, payload, darwin_output_paths(payload)
+
+    graphs: dict[str, dict[str, object]] = {}
+    per_root: dict[str, frozenset[str]] = {}
+    if not names:
+        return graphs, per_root
+    workers = min(4, len(names))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for name, payload, outputs in pool.map(one, names):
+            graphs[name] = payload
+            per_root[name] = outputs
+    return graphs, per_root
+
+
 def plan_darwin_warmup(
     flake_root: Path,
     *,
@@ -845,30 +923,30 @@ def plan_darwin_warmup(
     threshold: int = MAX_SHARD_LOCAL_BUILDS,
 ) -> WarmupPlan:
     """Plan the missing shared Darwin outputs and fail closed on huge remainders."""
-    roots = darwin_roots(manifest)
-    graphs: dict[str, dict[str, object]] = {}
-    per_root: dict[str, frozenset[str]] = {}
-    for root in roots:
-        name = composed_root_name(root)
-        payload = eval_root_darwin_graph(flake_root, name, run=run)
-        graphs[name] = payload
-        per_root[name] = darwin_output_paths(payload)
+    graphs, per_root = _eval_root_darwin_graphs(
+        flake_root, darwin_roots(manifest), run=run
+    )
     all_outputs = frozenset().union(*per_root.values()) if per_root else frozenset()
     checker = present if present is not None else default_cache_present
     substitutable = substitutable_paths(all_outputs, present=checker)
     missing_shared = intersect_missing(per_root, substitutable)
     warmup = frozenset(
-        path
-        for path in missing_shared
-        if is_crate2nix_rust_output(path) or is_safe_rust_warmup_other(path)
+        path for path in missing_shared if is_planned_rust_warmup_output(path)
     )
-    rust_layers = rust_warmup_layers(warmup, tuple(graphs.values()))
-    output_drvs = warmup_output_drvs(warmup, tuple(graphs.values()))
+    # 38130420607: rust_* peel left 1724/1733 shared non-rust in both
+    # root shards (rust_*=0). That intersection is the cascade; host-unique
+    # leaves stay in remaining and still face the 400 gate.
+    cascade = missing_shared - warmup
+    payloads = tuple(graphs.values())
+    rust_layers = rust_warmup_layers(warmup, payloads)
+    cascade_layers = cascade_warmup_layers(cascade, payloads)
+    output_drvs = warmup_output_drvs(warmup | cascade, payloads)
+    covered = warmup | cascade
     reports: list[ShardLocalBuildReport] = []
     stats: dict[str, RootWarmupStats] = {}
     for name, outputs in per_root.items():
         missing = outputs - substitutable
-        remaining = missing - warmup
+        remaining = missing - covered
         stats[name] = RootWarmupStats(
             outputs=len(outputs),
             missing=len(missing),
@@ -877,7 +955,7 @@ def plan_darwin_warmup(
         )
     for shard in shards:
         remaining = shard_remaining_outputs(
-            shard, per_root, substitutable=substitutable, warmup=warmup
+            shard, per_root, substitutable=substitutable, warmup=covered
         )
         reports.append(
             ShardLocalBuildReport(
@@ -889,27 +967,40 @@ def plan_darwin_warmup(
                 ),
             )
         )
-    assert_local_build_threshold(reports, threshold=threshold)
+    try:
+        assert_local_build_threshold(reports, threshold=threshold)
+    except WarmupError as error:
+        sample = ", ".join(sorted(cascade)[:8])
+        msg = (
+            f"{error} cascade={len(cascade)} rust_warmup={len(warmup)} "
+            f"cascade_sample={sample}"
+        )
+        raise WarmupError(msg) from error
     ordered = tuple(sorted(warmup))
+    ordered_cascade = tuple(sorted(cascade))
     return WarmupPlan(
         schemaVersion=1,
         system=_DARWIN_SYSTEM,
         substituters=(_NIXOS_CACHE, _GKZE_CACHE),
         warmupOutputs=ordered,
         rustLayers=rust_layers,
+        cascadeOutputs=ordered_cascade,
+        cascadeLayers=cascade_layers,
         outputDrvs=output_drvs,
         perRoot=stats,
         shards=tuple(reports),
         notes=(
-            "Intersection of per-root aarch64-darwin rust_* and safe FOD "
-            "outputs absent from cache.nixos.org and gkze.cachix.org. "
-            "Leaf packages (goose-cli, vendor-cargo-deps) stay in remaining "
-            "and realize after rust_* is in gkze. Five macos-15 rust-warmup "
-            "slots realize rust_* by dependency layer (skip-if-in-gkze); "
-            "packages inventory stays certify evidence and does not serialize "
-            "this set. "
+            "Intersection of per-root aarch64-darwin outputs absent from "
+            "cache.nixos.org and gkze.cachix.org. rust_* and safe FODs go "
+            "to rust-warmup. The remaining shared non-rust cascade "
+            "(38130420607 left it in the root shards at remaining=1724/1733) "
+            "is five macos-15 cascade-warmup slots, one drv at a time, "
+            "skip-if-in-gkze, pushed to gkze. Host-unique leaves stay in "
+            "remaining after both peels. "
             f"warmup={len(ordered)} rustLayers={len(rust_layers)} "
-            f"slots={RUST_WARMUP_SLOTS} threshold={threshold} "
+            f"cascade={len(ordered_cascade)} cascadeLayers={len(cascade_layers)} "
+            f"slots={RUST_WARMUP_SLOTS} cascadeSlots={CASCADE_WARMUP_SLOTS} "
+            f"threshold={threshold} "
             "(provisional 2-wide root shards; revisit 4-wide vs 2-wide by "
             "bytes written and update-runtime after this warmup lands)."
         ),
@@ -1656,6 +1747,7 @@ def realize_warmup_outputs(
     force_local: bool = False,
     substitute_only: bool = False,
     keep_going: bool = False,
+    chunk: int = _WARMUP_REALIZE_CHUNK,
 ) -> tuple[DerivationValidationFailure, ...]:
     """Build the warmup outputs so Cachix's post-build-hook pushes each path.
 
@@ -1663,14 +1755,19 @@ def realize_warmup_outputs(
     ``force_local`` is ``--no-substitute`` on SVH-sensitive rust_* only.
     Do not combine them: #1263 ``--no-substitute`` on ``extension_host``
     rebuilt 406 bootstrap drvs after a partial ``--fallback``.
+    Cascade warmup uses ``chunk=1`` so each shared non-rust path is one
+    drv (38130420607 / #1268: umbrella goose-cli was 1759 will-be-built).
     """
     if force_local and substitute_only:
         msg = "realize_warmup_outputs cannot be force_local and substitute_only"
         raise WarmupError(msg)
+    if chunk < 1:
+        msg = "realize_warmup_outputs chunk must be at least 1"
+        raise WarmupError(msg)
     failures: list[DerivationValidationFailure] = []
     ordered = tuple(dict.fromkeys(paths))
-    for start in range(0, len(ordered), _WARMUP_REALIZE_CHUNK):
-        chunk = ordered[start : start + _WARMUP_REALIZE_CHUNK]
+    for start in range(0, len(ordered), chunk):
+        window = ordered[start : start + chunk]
         requests = tuple(
             DerivationValidationRequest(
                 source="root-warmup",
@@ -1680,7 +1777,7 @@ def realize_warmup_outputs(
                 substitute_only=substitute_only,
                 keep_going=keep_going,
             )
-            for path in chunk
+            for path in window
         )
         failures.extend(
             validate_derivation_requests(

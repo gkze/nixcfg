@@ -127,6 +127,7 @@ jobs:
     needs:
       - prepare-merge
       - validate-darwin-warm-rust
+      - validate-darwin-cascade-warmup
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04-arm
@@ -138,6 +139,7 @@ jobs:
     needs:
       - prepare-merge
       - validate-darwin-warm-rust
+      - validate-darwin-cascade-warmup
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04
@@ -236,46 +238,17 @@ jobs:
               fh.write(f"crates={' '.join(crate_names)}\n")
               fh.write(f"matrix={json.dumps({'slot': slots})}\n")
         shell: python
-  canary-plan:
-    needs:
-      - canary-slots
-    if: |-
-      always() && !cancelled() &&
-      needs.canary-slots.result == 'success' &&
-      needs.canary-slots.outputs.enabled == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - name: Restore current warmup plan
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NIXCFG_CI_STAGE: restore-canary-plan
-          NIXCFG_CANARY_PLAN_DIR: ${{ runner.temp }}/canary-plan
-        run: |
-          import runpy
-          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
-        shell: python
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: canary-plan
-          path: ${{ runner.temp }}/canary-plan
-          if-no-files-found: error
-          overwrite: true
-          retention-days: 7
+  # Budget and rust layers come from plan-shards on the merged
+  # candidate. A restored prior plan (38130420607: remaining 392/396)
+  # cannot see a Zed/lock cascade shift and must not gate canary.
   canary-warm-rust:
     needs:
       - canary-slots
-      - canary-plan
+      - plan-darwin-closures
     if: |-
       always() && !cancelled() &&
       needs.canary-slots.result == 'success' &&
-      needs.canary-plan.result == 'success' &&
+      needs.plan-darwin-closures.result == 'success' &&
       needs.canary-slots.outputs.enabled == 'true'
     strategy:
       fail-fast: false
@@ -286,9 +259,10 @@ jobs:
       runner: macos-15
       system: aarch64-darwin
       stage: validate
+      previous: prepare-x86_64-linux
       scope: rust-warmup
       shard: rust-${{ matrix.slot }}
-      warmup_artifact: canary-plan
+      warmup_artifact: plan-shards-x86_64-linux
       warmup_slot: ${{ matrix.slot }}
       canary: true
       canary_slots: ${{ needs.canary-slots.outputs.slots }}
@@ -327,6 +301,35 @@ jobs:
       previous: prepare-x86_64-linux
       scope: rust-warmup
       shard: rust-${{ matrix.slot }}
+      warmup_artifact: plan-shards-x86_64-linux
+      warmup_slot: ${{ matrix.slot }}
+    secrets: inherit
+  # Shared non-rust intersection left in the root shards on 38130420607
+  # (remaining=1724/1733, rust_*=0). Five slots stripe each cascade
+  # layer; each path is one drv, skip-if-in-gkze, pushed to gkze.
+  validate-darwin-cascade-warmup:
+    needs:
+      - prepare-merge
+      - plan-darwin-closures
+      - validate-darwin-warm-rust
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success' &&
+      needs.plan-darwin-closures.result == 'success' &&
+      needs.validate-darwin-warm-rust.result == 'success'
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        slot: [0, 1, 2, 3, 4]
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: cascade-warmup
+      shard: cascade-${{ matrix.slot }}
       warmup_artifact: plan-shards-x86_64-linux
       warmup_slot: ${{ matrix.slot }}
     secrets: inherit
@@ -369,13 +372,15 @@ jobs:
       - cache-darwin-linux-deps-arm
       - cache-darwin-linux-deps-x86
       - validate-darwin-warm-rust
+      - validate-darwin-cascade-warmup
     if: |-
       always() && !cancelled() &&
       needs.plan-darwin-closures.result == 'success' &&
       needs.prepare-merge.result == 'success' &&
       needs.cache-darwin-linux-deps-arm.result == 'success' &&
       needs.cache-darwin-linux-deps-x86.result == 'success' &&
-      needs.validate-darwin-warm-rust.result == 'success'
+      needs.validate-darwin-warm-rust.result == 'success' &&
+      needs.validate-darwin-cascade-warmup.result == 'success'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan-darwin-closures.outputs.darwin_closure_shards) }}
@@ -423,6 +428,7 @@ jobs:
       - validate-arm
       - validate-x86
       - validate-darwin-warm-rust
+      - validate-darwin-cascade-warmup
       - validate-darwin-packages
       - validate-darwin-roots
       - validate-darwin-closures
@@ -461,6 +467,7 @@ jobs:
             validate-arm=${{ needs.validate-arm.result }}
             validate-x86=${{ needs.validate-x86.result }}
             validate-darwin-warm-rust=${{ needs.validate-darwin-warm-rust.result }}
+            validate-darwin-cascade-warmup=${{ needs.validate-darwin-cascade-warmup.result }}
             validate-darwin-packages=${{ needs.validate-darwin-packages.result }}
             validate-darwin-roots=${{ needs.validate-darwin-roots.result }}
             validate-darwin-closures=${{ needs.validate-darwin-closures.result }}
@@ -481,6 +488,7 @@ jobs:
       - validate-arm
       - validate-x86
       - validate-darwin-warm-rust
+      - validate-darwin-cascade-warmup
       - validate-darwin-packages
       - validate-darwin-roots
       - validate-darwin-closures
@@ -490,6 +498,7 @@ jobs:
       needs.validate-arm.result == 'success' &&
       needs.validate-x86.result == 'success' &&
       needs.validate-darwin-warm-rust.result == 'success' &&
+      needs.validate-darwin-cascade-warmup.result == 'success' &&
       needs.validate-darwin-packages.result == 'success' &&
       needs.validate-darwin-roots.result == 'success' &&
       needs.validate-darwin-closures.result == 'success' &&
@@ -561,6 +570,7 @@ jobs:
       - validate-arm
       - validate-x86
       - validate-darwin-warm-rust
+      - validate-darwin-cascade-warmup
       - validate-darwin-packages
       - plan-darwin-closures
       - validate-darwin-roots

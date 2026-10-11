@@ -698,6 +698,115 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
         pipeline.validate_candidate(candidate, scope="packages", warmup_slot=0)
 
 
+def test_cascade_warmup_realizes_uncached_stripe_per_derivation(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38130420607: shared non-rust cascade is one drv at a time, skip-if-in-gkze."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, object]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((paths, kwargs.get("chunk"), kwargs.get("keep_going")))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    cached = "/nix/store/cccccccccccccccccccccccccccccccc-coreutils-9.10"
+    missing = "/nix/store/dddddddddddddddddddddddddddddddd-libiconv-1"
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda path: path == cached)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(),
+            rustLayers=(),
+            cascadeOutputs=(cached, missing),
+            cascadeLayers=(
+                (cached,),
+                (missing,),
+            ),
+            outputDrvs={cached: f"{cached}.drv", missing: f"{missing}.drv"},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=0, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="cascade-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.gates == ()
+    assert realized == [((missing,), 1, True)]
+    skipped = pipeline.validate_candidate(
+        candidate, scope="cascade-warmup", warmup_plan=warmup_plan, warmup_slot=1
+    )
+    assert skipped.failures == ()
+    assert realized == [((missing,), 1, True)]
+    with pytest.raises(ValueError, match="cascade-warmup requires a warmup plan"):
+        pipeline.validate_candidate(candidate, scope="cascade-warmup")
+    with pytest.raises(ValueError, match="cascade-warmup requires a warmup plan"):
+        pipeline._realize_requested_warmup(
+            "cascade-warmup", None, None, flake_root=tmp_path
+        )
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    missing_cli = CliRunner().invoke(
+        pipeline.app,
+        [
+            "validate",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(tmp_path / "validation.json"),
+            "--scope",
+            "cascade-warmup",
+        ],
+    )
+    assert missing_cli.exit_code != 0
+    assert "cascade-warmup requires --warmup-plan" in str(missing_cli.exception)
+    slot_on_packages = CliRunner().invoke(
+        pipeline.app,
+        [
+            "validate",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(tmp_path / "validation.json"),
+            "--scope",
+            "packages",
+            "--warmup-slot",
+            "0",
+        ],
+    )
+    assert slot_on_packages.exit_code != 0
+    assert "--warmup-slot is only valid" in str(slot_on_packages.exception)
+
+
 def test_rust_warmup_defers_leaf_packages_from_others(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

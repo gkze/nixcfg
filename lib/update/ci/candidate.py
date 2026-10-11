@@ -80,6 +80,7 @@ from lib.update.ci.warmup import (
     rustc_generation_ids,
     settings_family_warmup_outputs,
     skip_cached_warmup_paths,
+    slot_cascade_paths,
     slot_warmup_paths,
     unique_drvs_for_outputs,
     write_warmup_plan,
@@ -112,7 +113,13 @@ def repair(
 
 
 ValidationScope = Literal[
-    "all", "packages", "closures", "closure-shard", "rust-warmup", "zed-warmup"
+    "all",
+    "packages",
+    "closures",
+    "closure-shard",
+    "rust-warmup",
+    "cascade-warmup",
+    "zed-warmup",
 ]
 ValidationGate = Literal["packages", "closures"]
 # Graph discovery is minutes, not the build. Keep it inside the job cap so a
@@ -203,6 +210,7 @@ def prepare_candidate(
 
 _FAIL_FAST_PROGRESS_SOURCES = frozenset({
     "rust-warmup",
+    "cascade-warmup",
     "root-deps",
     "root-closures",
 })
@@ -591,7 +599,7 @@ def _gates_for_scope(scope: str) -> tuple[ValidationGate, ...]:
         return ("closures",)
     if scope == "all":
         return ("packages", "closures")
-    if scope in {"closure-shard", "rust-warmup", "zed-warmup"}:
+    if scope in {"closure-shard", "rust-warmup", "cascade-warmup", "zed-warmup"}:
         return ()
     msg = f"Unknown validation scope: {scope}"
     raise ValueError(msg)
@@ -1046,6 +1054,35 @@ def _realize_zed_warmup(
     return tuple(failures)
 
 
+def _realize_cascade_warmup(
+    warmup_plan: Path,
+    warmup_slot: int,
+    *,
+    flake_root: Path,
+) -> tuple[validation.DerivationValidationFailure, ...]:
+    """Realize one cascade-warmup stripe, one drv at a time, skip-if-in-gkze."""
+    plan = load_warmup_plan(warmup_plan)
+    slot_paths = slot_cascade_paths(plan.cascade_layers, warmup_slot)
+    missing = skip_cached_warmup_paths(
+        slot_paths,
+        present=check_path_in_cachix,
+    )
+    if not missing:
+        jobs.record_runner_storage("after-cascade-warmup")
+        return ()
+    drvs = unique_drvs_for_outputs(missing, plan.output_drvs)
+    import_warmup_drvs(drvs, warmup_plan.with_name(WARMUP_DRVS_NAME))
+    failures = realize_warmup_outputs(
+        missing,
+        flake_root=flake_root,
+        progress=_hosted_validation_progress("cascade-warmup", keep_going=True),
+        keep_going=True,
+        chunk=1,
+    )
+    jobs.record_runner_storage("after-cascade-warmup")
+    return failures
+
+
 def _realize_requested_warmup(
     scope: str,
     warmup_plan: Path | None,
@@ -1053,12 +1090,17 @@ def _realize_requested_warmup(
     *,
     flake_root: Path,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
-    """Dispatch rust-warmup or zed-warmup; other scopes realize nothing here."""
+    """Dispatch rust-warmup, cascade-warmup, or zed-warmup."""
     if scope == "rust-warmup":
         if warmup_plan is None or warmup_slot is None:
             msg = "rust-warmup requires a warmup plan and slot"
             raise ValueError(msg)
         return _realize_rust_warmup(warmup_plan, warmup_slot, flake_root=flake_root)
+    if scope == "cascade-warmup":
+        if warmup_plan is None or warmup_slot is None:
+            msg = "cascade-warmup requires a warmup plan and slot"
+            raise ValueError(msg)
+        return _realize_cascade_warmup(warmup_plan, warmup_slot, flake_root=flake_root)
     if scope == "zed-warmup":
         if warmup_plan is None:
             msg = "zed-warmup requires a warmup plan"
@@ -1081,9 +1123,10 @@ def validate_candidate(
     ``packages`` and ``closures`` split one platform across runners. A combined
     ``all`` scope is what Linux validators and local updates use. ``closure-shard``
     realizes named Darwin roots and is not certify evidence; the aggregate
-    ``closures`` gate still proves ``root-closures``. ``rust-warmup`` realizes
+    ``closures`` gate still proves ``root-closures``.     ``rust-warmup`` realizes
     one 5-wide stripe of the planner rust_* layers and is not certify
-    evidence. Hosted Darwin shards GC before the root-closure fetch: a
+    evidence. ``cascade-warmup`` realizes the shared non-rust
+    intersection one drv at a time. Hosted Darwin shards GC before the root-closure fetch: a
     cache-miss rust_* subtree can fill macos-15 and ``min-free`` then GCs
     mid-rustc, which tears rlibs (E0786 / SIGBUS). The combined scope GCs
     after package outputs share the disk.
@@ -1098,11 +1141,14 @@ def validate_candidate(
     if scope == "rust-warmup" and (warmup_plan is None or warmup_slot is None):
         msg = "rust-warmup requires a warmup plan and slot"
         raise ValueError(msg)
+    if scope == "cascade-warmup" and (warmup_plan is None or warmup_slot is None):
+        msg = "cascade-warmup requires a warmup plan and slot"
+        raise ValueError(msg)
     if scope == "zed-warmup" and warmup_plan is None:
         msg = "zed-warmup requires a warmup plan"
         raise ValueError(msg)
-    if scope != "rust-warmup" and warmup_slot is not None:
-        msg = "warmup slots are only valid for the rust-warmup scope"
+    if scope not in {"rust-warmup", "cascade-warmup"} and warmup_slot is not None:
+        msg = "warmup slots are only valid for rust-warmup or cascade-warmup"
         raise ValueError(msg)
     gates = _gates_for_scope(scope)
     budget = _require_closure_budget(closure_budget_seconds)
@@ -1344,11 +1390,14 @@ def validate(
     if scope == "rust-warmup" and (warmup_plan is None or warmup_slot is None):
         msg = "rust-warmup requires --warmup-plan and --warmup-slot"
         raise ValueError(msg)
+    if scope == "cascade-warmup" and (warmup_plan is None or warmup_slot is None):
+        msg = "cascade-warmup requires --warmup-plan and --warmup-slot"
+        raise ValueError(msg)
     if scope == "zed-warmup" and warmup_plan is None:
         msg = "zed-warmup requires --warmup-plan"
         raise ValueError(msg)
-    if scope != "rust-warmup" and warmup_slot is not None:
-        msg = "--warmup-slot is only valid for rust-warmup"
+    if scope not in {"rust-warmup", "cascade-warmup"} and warmup_slot is not None:
+        msg = "--warmup-slot is only valid for rust-warmup or cascade-warmup"
         raise ValueError(msg)
     output = _output_path(output, get_repo_root())
     roots = None if closure_roots is None else tuple(closure_roots.split())

@@ -8,6 +8,7 @@ import pytest
 
 from lib.update.ci.shard_plan import ClosureShard
 from lib.update.ci.warmup import (
+    CASCADE_WARMUP_SLOTS,
     MAX_SHARD_LOCAL_BUILDS,
     RUST_WARMUP_SLOTS,
     SETTINGS_MEMBER_CRATES,
@@ -77,6 +78,7 @@ from lib.update.ci.warmup import (
     settings_family_warmup_outputs,
     shard_remaining_outputs,
     skip_cached_warmup_paths,
+    slot_cascade_paths,
     slot_warmup_paths,
     substitutable_paths,
     unique_drvs_for_outputs,
@@ -309,14 +311,20 @@ def test_plan_darwin_warmup_writes_intersection_and_rejects_huge_remainder(
         "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1": (
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1.drv"
         ),
+        "/nix/store/ffffffffffffffffffffffffffffffff-goose-cli-1.51.0": (
+            "/nix/store/ffffffffffffffffffffffffffffffff-goose-cli-1.51.0.drv"
+        ),
     }
     assert (
         "/nix/store/ffffffffffffffffffffffffffffffff-goose-cli-1.51.0"
         not in plan.warmup_outputs
     )
-    assert plan.per_root["darwin-argus"].remaining == 2
-    assert plan.shards[0].remaining == 2
-    assert plan.shards[1].remaining == 1
+    assert plan.cascade_outputs == (
+        "/nix/store/ffffffffffffffffffffffffffffffff-goose-cli-1.51.0",
+    )
+    assert plan.per_root["darwin-argus"].remaining == 1
+    assert plan.shards[0].remaining == 1
+    assert plan.shards[1].remaining == 0
     path = tmp_path / WARMUP_PLAN_NAME
     write_warmup_plan(path, plan)
     loaded = load_warmup_plan(path)
@@ -328,7 +336,7 @@ def test_plan_darwin_warmup_writes_intersection_and_rejects_huge_remainder(
         "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
         *huge_unique,
     )
-    with pytest.raises(WarmupError, match="local-build budget"):
+    with pytest.raises(WarmupError, match="local-build budget.*cascade="):
         plan_darwin_warmup(
             tmp_path,
             manifest=_manifest(),
@@ -336,6 +344,66 @@ def test_plan_darwin_warmup_writes_intersection_and_rejects_huge_remainder(
             run=run,
             present=lambda _path: False,
         )
+
+
+def test_plan_darwin_warmup_peels_shared_non_rust_cascade_from_remaining(
+    tmp_path: Path,
+) -> None:
+    """38130420607: rust_* peel left 1724/1733 shared non-rust in both shards.
+
+    Zed a34a062→93d7456 plus lock moves shifted the shared Darwin cascade.
+    The rust-only filter kept rust_*=0 remaining while both shards sat
+    over the 400 gate. Peel that intersection into cascade-warmup; the
+    400 gate still fails closed on host-unique remainders.
+    """
+    rust = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1"
+    unique = "/nix/store/dddddddddddddddddddddddddddddddd-argus-only"
+    cascade = tuple(
+        f"/nix/store/{index:032d}-coreutils-cascade-{index}" for index in range(401)
+    )
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        name = args[-1].rsplit("root-closure-", 1)[-1]
+        paths = (*cascade, rust)
+        if name == "darwin-argus":
+            paths = (*paths, unique)
+        return subprocess.CompletedProcess(
+            args, 0, stdout=json.dumps(_graph(*paths)), stderr=""
+        )
+
+    shards = (
+        ClosureShard(
+            shard="darwin-argus+home-george",
+            system="aarch64-darwin",
+            roots=("darwin-argus", "home-george"),
+        ),
+        ClosureShard(
+            shard="darwin-rocinante",
+            system="aarch64-darwin",
+            roots=("darwin-rocinante",),
+        ),
+    )
+    plan = plan_darwin_warmup(
+        tmp_path,
+        manifest=_manifest(),
+        shards=shards,
+        run=run,
+        present=lambda _path: False,
+    )
+    assert rust in plan.warmup_outputs
+    assert plan.cascade_outputs == cascade
+    assert unique not in plan.cascade_outputs
+    assert plan.shards[0].remaining == 1
+    assert plan.shards[0].remaining_rust_crates == 0
+    assert plan.shards[1].remaining == 0
+    assert slot_cascade_paths(plan.cascade_layers, 0)
+    assert CASCADE_WARMUP_SLOTS == 5
+    striped = {
+        path
+        for slot in range(CASCADE_WARMUP_SLOTS)
+        for path in slot_cascade_paths(plan.cascade_layers, slot)
+    }
+    assert striped == set(cascade)
 
 
 def test_eval_root_darwin_outputs_and_substituters_fail_closed(
@@ -486,6 +554,23 @@ def test_realize_warmup_outputs_batches_store_paths(
     ]
     assert failures[0].source == "root-warmup"
     assert "boom" in failures[0].message
+    per_drv = realize_warmup_outputs(
+        [
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ok",
+            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-fail",
+        ],
+        flake_root=tmp_path,
+        run=run,
+        chunk=1,
+    )
+    assert len(per_drv) == 1
+    with pytest.raises(WarmupError, match="chunk must be at least 1"):
+        realize_warmup_outputs(
+            ["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ok"],
+            flake_root=tmp_path,
+            run=run,
+            chunk=0,
+        )
 
 
 def test_realize_warmup_outputs_builds_drv_outputs(tmp_path: Path) -> None:
@@ -790,6 +875,10 @@ def test_rust_warmup_layers_and_slots_keep_dependency_order() -> None:
         slot_warmup_paths(layers, 5)
     with pytest.raises(WarmupError, match="width must be"):
         slot_warmup_paths(layers, 0, width=0)
+    with pytest.raises(WarmupError, match="cascade warmup slot"):
+        slot_cascade_paths(layers, 5)
+    with pytest.raises(WarmupError, match="cascade warmup width"):
+        slot_cascade_paths(layers, 0, width=0)
     cycle = _graph(rust_a, rust_b, edges={rust_a: (rust_b,), rust_b: (rust_a,)})
     with pytest.raises(WarmupError, match="dependency cycle"):
         rust_warmup_layers(frozenset({rust_a, rust_b}), (cycle,))

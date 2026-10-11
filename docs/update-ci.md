@@ -14,10 +14,11 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    only) and `prepare-merge` 3-way-merges the two extensions. Overlapping file
    edits with different contents fail closed. `plan-darwin-closures` waits for
    the merged tree because `root-out-paths.json` and certify bind to that
-   candidate. A dispatch-only `canary_warm_rust` / `canary_slots` /
+   candidate.    A dispatch-only `canary_warm_rust` / `canary_slots` /
    `canary_crates` path realizes selected rust-warmup slots or crates against
-   the current branch plan and skips prepare, Linux validate, Darwin roots,
-   publish, and coverage. The push and schedule no-skip run remains the
+   the merged-tree `plan-shards` warmup plan and skips Linux validate,
+   Darwin roots, publish, and coverage. It does not restore a prior
+   run's plan. The push and schedule no-skip run remains the
    done-bar proof. Dependent updaters still recompute metadata from their
    pinned prerequisites.
 2. Validate the final identical tree on all three native builders. After
@@ -31,22 +32,27 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    candidate because certify binds reports to that tree. The planner
    instantiates each Darwin root's drv graph, queries cache.nixos.org and
    gkze, and writes the intersection of missing aarch64-darwin outputs as
-   `warmup-plan.json`. Any shard that would still compile more than 400
-   of those outputs locally (packages-scale on 37740898487 was 132; home
+   `warmup-plan.json`. rust_* and safe FODs go to rust-warmup. The
+   remaining shared non-rust intersection is cascade-warmup (38130420607
+   left that cascade in the root shards at remaining=1724/1733,
+   rust_*=0). Any shard that would still compile more than 400
+   *host-unique* outputs locally (packages-scale on 37740898487 was 132; home
    compiled 1534 `rust_*` from a divergent stdenv graph) fails at plan
-   time.    Five `macos-15` `rust-warmup` slots then `nix copy --derivation`
+   time. The canary rust probe uses that merged-tree plan, not a restored
+   prior artifact.    Five `macos-15` `rust-warmup` slots then `nix copy --derivation`
    the planner's `file://` warmup cache (`warmup-drvs/`), GC-root each
    imported `.drv` with `nix build --out-link` (not `nix-store --add-root`
    alone; that is not an operation on Determinate Nix), and `nix build`
    `foo.drv^*` by dependency layer
-   (skip-if-in-gkze) so Cachix has the shared
+   (skip-if-in-gkze). Five `cascade-warmup` slots then realize the shared
+   non-rust intersection one drv at a time so Cachix has the shared
    stdenv/rust graph before root shards start; the packages inventory
-   itself remains certify evidence and waits for that matrix. The CVE-2026-56391/56392
+   itself remains certify evidence and waits for rust-warmup. The CVE-2026-56391/56392
    coreutils patches live in nixpkgs, not a repo overlay; they change
    every stdenv-dependent drv versus hydra until hydra publishes them.
    `coreutils-full` in the home packages module is a leaf. Do not drop
    those patches here.    Always-run Darwin shards start after rust-warmup
-   succeeds and after the Linux
+   and cascade-warmup succeed and after the Linux
    VM-image cache jobs. Width is provisionally 2, not a 2-VMs-per-host
    cap: revisit 4-wide versus 2-wide by bytes written and update-runtime
    once warmup cuts local builds. A generated matrix from

@@ -47,6 +47,7 @@ _REQUIRED_JOBS = (
     "validate-arm",
     "validate-x86",
     "validate-darwin-warm-rust",
+    "validate-darwin-cascade-warmup",
     "validate-darwin-packages",
     "validate-darwin-roots",
     "validate-darwin-closures",
