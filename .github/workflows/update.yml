@@ -337,9 +337,10 @@ jobs:
       warmup_artifact: plan-shards-x86_64-linux
       warmup_slot: ${{ matrix.slot }}
     secrets: inherit
-  # Shared non-rust intersection left in the root shards on 38130420607
-  # (remaining=1724/1733, rust_*=0). Five slots stripe each cascade
-  # layer; each path is one drv, skip-if-in-gkze, pushed to gkze.
+  # Shared non-rust outputs present in two or more Darwin roots. All-root
+  # intersection left remaining=1724/1733 on 38130420607 (rust peel only)
+  # and remaining=829/836 on 38146388927 (darwin-only shared, not home).
+  # Five slots stripe each cascade layer; each path is one drv.
   validate-darwin-cascade-warmup:
     needs:
       - prepare-merge

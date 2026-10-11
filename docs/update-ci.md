@@ -46,14 +46,16 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    instantiates each Darwin root's drv graph one at a time (38137325241
    and 38142145131: 4-wide `nix derivation show --recursive` SIGTERM'd
    the ubuntu-24.04 runner at ~800s), queries cache.nixos.org and
-   gkze, and writes the intersection of missing aarch64-darwin outputs as
-   `warmup-plan.json`. rust_* and safe FODs go to rust-warmup. The
-   remaining shared non-rust intersection is cascade-warmup (38130420607
-   left that cascade in the root shards at remaining=1724/1733,
-   rust_*=0). Any shard that would still compile more than 400
-   *host-unique* outputs locally (packages-scale on 37740898487 was 132; home
-   compiled 1534 `rust_*` from a divergent stdenv graph) fails at plan
-   time. The canary rust probe uses that merged-tree plan, not a restored
+   gkze, and writes missing aarch64-darwin outputs shared by two or more
+   roots as `warmup-plan.json`. rust_* and safe FODs go to rust-warmup. The
+   remaining shared non-rust set is cascade-warmup (38130420607
+   left the all-root cascade in the root shards at remaining=1724/1733,
+   rust_*=0; 38146388927 then left remaining=829/836 because
+   darwin-system-only shared outputs — argus∩rocinante∩zeus, not
+   home-george — were not in the all-root intersection). Any shard that
+   would still compile more than 400 *one-root* outputs locally
+   (packages-scale on 37740898487 was 132; home compiled 1534 `rust_*`
+   from a divergent stdenv graph) fails at plan time. The canary rust probe uses that merged-tree plan, not a restored
    prior artifact.    Five `macos-15` `rust-warmup` slots then `nix copy --derivation`
    the planner's `file://` warmup cache (`warmup-drvs/`), GC-root each
    imported `.drv` with `nix build --out-link` (not `nix-store --add-root`

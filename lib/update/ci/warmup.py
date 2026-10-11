@@ -14,14 +14,16 @@ shortcut.
 
 Until hydra publishes that stdenv, every downstream drv whose hash
 depends on it misses cache.nixos.org. Warmup therefore realizes the
-intersection of per-root Darwin output closures that are on neither
+outputs shared by two or more Darwin roots that are on neither
 cache.nixos.org nor gkze: rust_* plus safe FODs on the rust-warmup
 slots, and the remaining shared non-rust cascade as sharded
 per-derivation work pushed to gkze. The planner fails closed if a
 shard would still compile more than a packages-scale *host-unique*
 remainder locally. 38130420607 left that cascade in the root shards
 (remaining=1724/1733, rust_*=0) because the rust-only filter peeled
-only rust_* / cargo-package.
+only rust_* / cargo-package. 38146388927 then left remaining=829/836
+because all-root intersection skipped darwin-system-only shared
+outputs (argus∩rocinante∩zeus, not home-george).
 """
 
 import json
@@ -74,9 +76,14 @@ MAX_SHARD_LOCAL_BUILDS = 400
 # Public macos-15 cap is 5. rust_* warmup owns those slots, partitioned by
 # crate2nix dependency layers so later crates can substitute earlier ones.
 RUST_WARMUP_SLOTS = 5
-# Shared non-rust intersection (#38130420607: ~1300 outputs after rust_*
-# peel). Five slots stripe each dependency layer; each path is one drv.
+# Shared non-rust outputs present in two or more Darwin roots
+# (#38130420607: ~1300 after rust_* peel; #38146388927: all-root
+# intersection left remaining=829/836 because darwin-only shared
+# stayed in both 2-wide shards). Five slots stripe each layer.
 CASCADE_WARMUP_SLOTS = 5
+# Two-plus, not all-roots. home-george is a fourth root and does not
+# contain the darwin-system graph; requiring every root hid that set.
+SHARED_MISSING_MIN_ROOTS = 2
 # 38137325241 and 38142145131: 4-wide `nix derivation show --recursive`
 # of Darwin roots on ubuntu-24.04 (16 GiB) got runner SIGTERM at
 # ~800s with ~100G disk free. One graph at a time.
@@ -329,12 +336,30 @@ def darwin_output_paths(payload: Mapping[str, object]) -> frozenset[str]:
 def intersect_missing(
     per_root: Mapping[str, frozenset[str]],
     substitutable: frozenset[str],
+    *,
+    min_roots: int = SHARED_MISSING_MIN_ROOTS,
 ) -> frozenset[str]:
-    """Return outputs every root needs that neither substituter has."""
+    """Return outputs at least *min_roots* roots need that caches lack.
+
+    38146388927: all-root intersection left remaining=829/836 (rust_*=0)
+    because darwin-system-only shared outputs (argus∩rocinante∩zeus, not
+    home-george) stayed in both 2-wide shards. Two-plus is the cascade
+    peel; one-root leaves still face the 400 gate.
+    """
+    if min_roots < 1:
+        msg = "min_roots must be at least 1"
+        raise WarmupError(msg)
     if not per_root:
         return frozenset()
-    shared = frozenset.intersection(*per_root.values())
-    return shared - substitutable
+    counts: dict[str, int] = {}
+    for outputs in per_root.values():
+        for path in outputs:
+            counts[path] = counts.get(path, 0) + 1
+    return frozenset(
+        path
+        for path, count in counts.items()
+        if count >= min_roots and path not in substitutable
+    )
 
 
 def shard_remaining_outputs(
@@ -949,7 +974,9 @@ def plan_darwin_warmup(
         path for path in missing_shared if is_planned_rust_warmup_output(path)
     )
     # 38130420607: rust_* peel left 1724/1733 shared non-rust in both
-    # root shards (rust_*=0). That intersection is the cascade; host-unique
+    # root shards (rust_*=0). 38146388927: all-root intersection then
+    # left remaining=829/836 because darwin-system-only shared (3 of 4
+    # roots) stayed in both shards. Two-plus is the cascade; one-root
     # leaves stay in remaining and still face the 400 gate.
     cascade = missing_shared - warmup
     payloads = tuple(graphs.values())
@@ -958,6 +985,7 @@ def plan_darwin_warmup(
     output_drvs = warmup_output_drvs(warmup | cascade, payloads)
     covered = warmup | cascade
     reports: list[ShardLocalBuildReport] = []
+    leftover_by_shard: list[frozenset[str]] = []
     stats: dict[str, RootWarmupStats] = {}
     for name, outputs in per_root.items():
         missing = outputs - substitutable
@@ -972,6 +1000,7 @@ def plan_darwin_warmup(
         remaining = shard_remaining_outputs(
             shard, per_root, substitutable=substitutable, warmup=covered
         )
+        leftover_by_shard.append(remaining)
         reports.append(
             ShardLocalBuildReport(
                 shard=shard.shard,
@@ -985,10 +1014,19 @@ def plan_darwin_warmup(
     try:
         assert_local_build_threshold(reports, threshold=threshold)
     except WarmupError as error:
+        leftover = next(
+            (
+                leftover_by_shard[index]
+                for index, report in enumerate(reports)
+                if report.remaining > threshold
+            ),
+            frozenset(),
+        )
         sample = ", ".join(sorted(cascade)[:8])
+        remaining_sample = ", ".join(sorted(leftover)[:8])
         msg = (
             f"{error} cascade={len(cascade)} rust_warmup={len(warmup)} "
-            f"cascade_sample={sample}"
+            f"cascade_sample={sample} remaining_sample={remaining_sample}"
         )
         raise WarmupError(msg) from error
     ordered = tuple(sorted(warmup))
@@ -1005,13 +1043,14 @@ def plan_darwin_warmup(
         perRoot=stats,
         shards=tuple(reports),
         notes=(
-            "Intersection of per-root aarch64-darwin outputs absent from "
+            "Outputs shared by two or more Darwin roots and absent from "
             "cache.nixos.org and gkze.cachix.org. rust_* and safe FODs go "
             "to rust-warmup. The remaining shared non-rust cascade "
-            "(38130420607 left it in the root shards at remaining=1724/1733) "
-            "is five macos-15 cascade-warmup slots, one drv at a time, "
-            "skip-if-in-gkze, pushed to gkze. Host-unique leaves stay in "
-            "remaining after both peels. "
+            "(38130420607 left the all-root set in the root shards at "
+            "remaining=1724/1733; 38146388927 left darwin-only shared at "
+            "remaining=829/836) is five macos-15 cascade-warmup slots, "
+            "one drv at a time, skip-if-in-gkze, pushed to gkze. "
+            "One-root leaves stay in remaining after both peels. "
             f"warmup={len(ordered)} rustLayers={len(rust_layers)} "
             f"cascade={len(ordered_cascade)} cascadeLayers={len(cascade_layers)} "
             f"slots={RUST_WARMUP_SLOTS} cascadeSlots={CASCADE_WARMUP_SLOTS} "

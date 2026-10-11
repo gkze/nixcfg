@@ -13,6 +13,7 @@ from lib.update.ci.warmup import (
     DARWIN_GRAPH_EVAL_WORKERS,
     MAX_SHARD_LOCAL_BUILDS,
     RUST_WARMUP_SLOTS,
+    SHARED_MISSING_MIN_ROOTS,
     SETTINGS_MEMBER_CRATES,
     WARMUP_DRVS_CACHE_INFO,
     WARMUP_DRVS_NAME,
@@ -112,6 +113,21 @@ def _manifest() -> RootClosureManifest:
     })
 
 
+def _live_manifest() -> RootClosureManifest:
+    """Four Darwin roots as packed on 38146388927."""
+    return RootClosureManifest.model_validate({
+        "schemaVersion": 2,
+        "requiredKinds": ["darwin", "home"],
+        "requiredRoots": [],
+        "roots": [
+            {"kind": "darwin", "name": "argus", "system": "aarch64-darwin"},
+            {"kind": "darwin", "name": "rocinante", "system": "aarch64-darwin"},
+            {"kind": "darwin", "name": "zeus", "system": "aarch64-darwin"},
+            {"kind": "home", "name": "george", "system": "aarch64-darwin"},
+        ],
+    })
+
+
 def _graph(
     *darwin: str,
     linux: str | None = None,
@@ -200,8 +216,30 @@ def test_intersection_and_shard_remainder_are_cache_aware() -> None:
     }
     substitutable = frozenset({cached})
     warmup = intersect_missing(per_root, substitutable)
+    assert SHARED_MISSING_MIN_ROOTS == 2
     assert warmup == frozenset({shared, rust})
     assert intersect_missing({}, substitutable) == frozenset()
+    darwin_only = "/nix/store/ffffffffffffffffffffffffffffffff-darwin-only"
+    four = {
+        "darwin-argus": frozenset({shared, rust, unique, cached, darwin_only}),
+        "darwin-rocinante": frozenset({shared, rust, cached, darwin_only}),
+        "darwin-zeus": frozenset({shared, rust, cached, darwin_only}),
+        "home-george": frozenset({shared, rust, cached}),
+    }
+    assert intersect_missing(four, substitutable) == frozenset({
+        shared,
+        rust,
+        darwin_only,
+    })
+    assert intersect_missing(four, substitutable, min_roots=4) == frozenset({
+        shared,
+        rust,
+    })
+    assert intersect_missing(
+        {"darwin-argus": frozenset({unique})}, substitutable
+    ) == frozenset()
+    with pytest.raises(WarmupError, match="at least 1"):
+        intersect_missing(per_root, substitutable, min_roots=0)
     shard = ClosureShard(
         shard="darwin-argus",
         system="aarch64-darwin",
@@ -340,7 +378,9 @@ def test_plan_darwin_warmup_writes_intersection_and_rejects_huge_remainder(
         "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
         *huge_unique,
     )
-    with pytest.raises(WarmupError, match="local-build budget.*cascade="):
+    with pytest.raises(
+        WarmupError, match="local-build budget.*cascade=.*remaining_sample="
+    ):
         plan_darwin_warmup(
             tmp_path,
             manifest=_manifest(),
@@ -408,6 +448,96 @@ def test_plan_darwin_warmup_peels_shared_non_rust_cascade_from_remaining(
         for path in slot_cascade_paths(plan.cascade_layers, slot)
     }
     assert striped == set(cascade)
+
+
+def test_plan_darwin_warmup_peels_two_plus_darwin_only_shared(
+    tmp_path: Path,
+) -> None:
+    """38146388927: all-4 peel left remaining=829/836 (rust_*=0).
+
+    darwin-argus∩rocinante∩zeus is shared by three roots but not
+    home-george, so all-root intersection kept ~400 of those outputs in
+    *both* 2-wide shards. Two-plus peels that set into cascade; one-root
+    leaves still fail the 400 gate.
+    """
+    rust = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-1"
+    all4 = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-notion-app-7.25.1"
+    unique = "/nix/store/dddddddddddddddddddddddddddddddd-argus-only"
+    darwin_only = tuple(
+        f"/nix/store/{index:032d}-darwin-only-{index}" for index in range(401)
+    )
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        name = args[-1].rsplit("root-closure-", 1)[-1]
+        paths = (all4, rust)
+        if name != "home-george":
+            paths = (*paths, *darwin_only)
+        if name == "darwin-argus":
+            paths = (*paths, unique)
+        return subprocess.CompletedProcess(
+            args, 0, stdout=json.dumps(_graph(*paths)), stderr=""
+        )
+
+    shards = (
+        ClosureShard(
+            shard="darwin-argus+home-george",
+            system="aarch64-darwin",
+            roots=("darwin-argus", "home-george"),
+        ),
+        ClosureShard(
+            shard="darwin-rocinante+darwin-zeus",
+            system="aarch64-darwin",
+            roots=("darwin-rocinante", "darwin-zeus"),
+        ),
+    )
+    assert (
+        intersect_missing(
+            {
+                "darwin-argus": frozenset({all4, rust, unique, *darwin_only}),
+                "darwin-rocinante": frozenset({all4, rust, *darwin_only}),
+                "darwin-zeus": frozenset({all4, rust, *darwin_only}),
+                "home-george": frozenset({all4, rust}),
+            },
+            frozenset(),
+            min_roots=4,
+        )
+        == frozenset({all4, rust})
+    )
+    plan = plan_darwin_warmup(
+        tmp_path,
+        manifest=_live_manifest(),
+        shards=shards,
+        run=run,
+        present=lambda _path: False,
+    )
+    assert rust in plan.warmup_outputs
+    assert all4 in plan.cascade_outputs
+    assert set(darwin_only) <= set(plan.cascade_outputs)
+    assert unique not in plan.cascade_outputs
+    assert plan.shards[0].remaining == 1
+    assert plan.shards[0].remaining_rust_crates == 0
+    assert plan.shards[1].remaining == 0
+    huge_unique = [f"/nix/store/{index:032d}-unique-{index}" for index in range(401)]
+
+    def run_unique(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        name = args[-1].rsplit("root-closure-", 1)[-1]
+        paths = (all4, rust, *darwin_only)
+        if name == "darwin-argus":
+            paths = (*paths, *huge_unique)
+        return subprocess.CompletedProcess(
+            args, 0, stdout=json.dumps(_graph(*paths)), stderr=""
+        )
+
+    with pytest.raises(WarmupError, match="remaining_sample=.*unique-0"):
+        plan_darwin_warmup(
+            tmp_path,
+            manifest=_live_manifest(),
+            shards=shards,
+            run=run_unique,
+            present=lambda _path: False,
+        )
 
 
 def test_eval_root_darwin_graphs_is_serial_on_hosted_16g(
