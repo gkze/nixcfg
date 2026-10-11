@@ -5,4 +5,4 @@
 # One macos-15 runner; realize these crates from every rust layer.
 canary-crates: settings settings_content settings_json settings_macros
 canary-slots: 0
-2026-10-11T09:00:00Z peel-svh-before-others-after-38121661811
+2026-10-11T09:23:24Z defer-wbb-after-38126388469-canary-40
