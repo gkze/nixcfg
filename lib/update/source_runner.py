@@ -275,6 +275,9 @@ async def update_source_task(
                 context.preparation.resolved(name) if context.preparation else None
             ),
             preparing=context.preparation is not None,
+            pins_only=context.preparation.pins_only
+            if context.preparation is not None
+            else False,
         )
 
         await put(

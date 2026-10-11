@@ -19,6 +19,10 @@ on:
         description: Second prepare artifact for merge-candidates
         default: ""
         type: string
+      previous_third:
+        description: Third prepare artifact for merge-candidates
+        default: ""
+        type: string
       canary:
         description: Dispatch-only rust-warmup canary (checkout tree + current plan)
         default: false
@@ -97,6 +101,11 @@ jobs:
           name: ${{ inputs.previous_extra }}
           path: ${{ runner.temp }}/previous-extra
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: inputs.previous_third != ''
+        with:
+          name: ${{ inputs.previous_third }}
+          path: ${{ runner.temp }}/previous-third
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         if: inputs.warmup_artifact != ''
         with:
           name: ${{ inputs.warmup_artifact }}
@@ -122,6 +131,9 @@ jobs:
           NIXCFG_MERGE_RIGHT: |-
             ${{ inputs.previous_extra != '' &&
             format('{0}/previous-extra/candidate.json', runner.temp) || '' }}
+          NIXCFG_MERGE_EXTRA: |-
+            ${{ inputs.previous_third != '' &&
+            format('{0}/previous-third/candidate.json', runner.temp) || '' }}
           NIXCFG_CANARY: ${{ inputs.canary }}
           NIXCFG_CANARY_SLOTS: ${{ inputs.canary_slots }}
           NIXCFG_CANARY_CRATES: ${{ inputs.canary_crates }}
@@ -145,6 +157,7 @@ jobs:
         with:
           name: |-
             ${{ inputs.stage == 'merge-candidates' && 'prepare-x86_64-linux' ||
+            inputs.stage == 'prepare-pins' && 'prepare-pins' ||
             inputs.shard != '' &&
             format('{0}-{1}-{2}-{3}', inputs.stage, inputs.system, inputs.scope, inputs.shard) ||
             inputs.scope == 'all' &&

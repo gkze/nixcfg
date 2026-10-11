@@ -855,13 +855,14 @@ def _publish_prefetched_receipts(
 
 
 def _merge_candidate_args(artifacts: Path) -> list[str]:
-    """Return argv that 3-way-merges two native prepare artifacts."""
+    """Return argv that folds two or three native prepare artifacts."""
     previous = os.environ.get("NIXCFG_PREVIOUS_CANDIDATE", "")
     right = os.environ.get("NIXCFG_MERGE_RIGHT", "")
+    extra = os.environ.get("NIXCFG_MERGE_EXTRA", "").strip()
     if not previous or not right:
         msg = "Merge requires NIXCFG_PREVIOUS_CANDIDATE and NIXCFG_MERGE_RIGHT"
         raise ValueError(msg)
-    return [
+    args = [
         _runtime(),
         "ci",
         "update",
@@ -873,6 +874,9 @@ def _merge_candidate_args(artifacts: Path) -> list[str]:
         "--output",
         str(artifacts / "candidate.json"),
     ]
+    if extra:
+        args.extend(("--extra", extra))
+    return args
 
 
 def _validate_native_args(args: list[str], artifacts: Path, previous: str) -> list[str]:
@@ -896,10 +900,13 @@ def _native_args(stage: str, artifacts: Path) -> list[str]:
         return _merge_candidate_args(artifacts)
     args = [_runtime(), "ci", "update", stage]
     previous = os.environ.get("NIXCFG_PREVIOUS_CANDIDATE", "")
-    if stage == "prepare":
+    if stage in {"prepare", "prepare-pins"}:
+        args[-1] = "prepare"
         args.extend(("--output", str(artifacts / "candidate.json")))
         if previous:
             args.extend(("--previous", previous))
+        if stage == "prepare-pins":
+            args.append("--pins-only")
         if os.environ.get("NIXCFG_VALIDATE_ALL_PACKAGES") == "true":
             args.append("--validate-all-packages")
         raw_targets = os.environ.get("NIXCFG_UPDATE_TARGETS", "")
@@ -1484,6 +1491,7 @@ def main(stage: str) -> int:
     """Dispatch the finite set of Actions operations, preserving process failures."""
     native_stages = {
         "prepare",
+        "prepare-pins",
         "validate",
         "cache-root-deps",
         "plan-shards",

@@ -9,12 +9,16 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
 
 ## Execution and ownership
 
-1. Darwin prepare pins flake refs and shared generated files. Linux ARM64 and
-   Linux x86_64 then extend that Darwin candidate in parallel (native hashes
-   only) and `prepare-merge` 3-way-merges the two extensions. Overlapping file
-   edits with different contents fail closed. `plan-darwin-closures` waits for
-   the merged tree because `root-out-paths.json` and certify bind to that
-   candidate.    A dispatch-only `canary_warm_rust` / `canary_slots` /
+1. `prepare-pins` refreshes flake refs and source versions and keeps
+   existing hashes (a version bump cannot persist without a later native
+   hash job). Linux native hashes must be computed against that pin, not
+   HEAD; Darwin hashes are not an input to Linux. The three native
+   prepares then extend the pin in parallel. `prepare-merge` folds the
+   three platform candidates. Overlapping file edits with different
+   contents fail closed. `plan-darwin-closures` waits for the merged tree
+   because `root-out-paths.json` and certify bind to that complete
+   three-system candidate (`require_complete_candidate`). It already
+   starts the moment merge finishes.    A dispatch-only `canary_warm_rust` / `canary_slots` /
    `canary_crates` path realizes selected rust-warmup slots or crates against
    the merged-tree `plan-shards` warmup plan and skips Linux validate,
    Darwin roots, publish, and coverage. It does not restore a prior

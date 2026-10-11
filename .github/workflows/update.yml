@@ -51,23 +51,26 @@ concurrency:
   # so a newer HEAD can start instead of waiting on a doomed older SHA.
   cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
 jobs:
-  # Darwin is the real pin: flake refs and shared generated files.
-  # Linux prepares only add native hashes, so arm and x86 both extend
-  # Darwin in parallel. prepare-merge 3-way-merges those extensions
-  # into the complete candidate. plan-darwin-closures's true input is
-  # that merged tree because root-out-paths and certify bind to it.
+  # Linux native hashes must be computed against Darwin's updated
+  # flake.lock, source versions, and generated files — not HEAD.
+  # Those pins cannot ride along with Darwin hashes: a version bump
+  # without hashes is an illegal persist, so the pin job refreshes
+  # refs/versions and keeps existing hashes. The three native prepares
+  # then hash in parallel from that pin. plan-darwin-closures still
+  # waits for prepare-merge because root-out-paths and certify bind to
+  # the complete three-system tree (require_complete_candidate).
   # #1263 force-local dry-runs the will-be-built set so a 406-drv
   # bootstrap compile fails the slot immediately.
-  prepare-darwin:
+  prepare-pins:
     if: |-
       github.event_name != 'workflow_dispatch' ||
       (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
       inputs.canary_slots == '' && inputs.canary_crates == '')
     uses: ./.github/workflows/update-native.yml
     with:
-      runner: macos-15
-      system: aarch64-darwin
-      stage: prepare
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: prepare-pins
       targets: ${{ inputs.targets || '' }}
       # workflow_dispatch inputs are unset on push/schedule. A kick-file
       # push must match EM's dispatch: repair (job if) + validate_all.
@@ -75,29 +78,53 @@ jobs:
         ${{ github.event_name == 'push' ||
         inputs.validate_all_packages || false }}
     secrets: inherit
-  prepare-arm:
-    needs: prepare-darwin
+  prepare-darwin:
+    needs: prepare-pins
     if: |-
       always() && !cancelled() &&
-      needs.prepare-darwin.result == 'success'
+      needs.prepare-pins.result == 'success'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ inputs.targets || '' }}
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
+    secrets: inherit
+  prepare-arm:
+    needs: prepare-pins
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04-arm
       system: aarch64-linux
       stage: prepare
-      previous: prepare-aarch64-darwin
+      previous: prepare-pins
+      targets: ${{ inputs.targets || '' }}
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
     secrets: inherit
   prepare-x86:
-    needs: prepare-darwin
+    needs: prepare-pins
     if: |-
       always() && !cancelled() &&
-      needs.prepare-darwin.result == 'success'
+      needs.prepare-pins.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04
       system: x86_64-linux
       stage: prepare
-      previous: prepare-aarch64-darwin
+      previous: prepare-pins
+      targets: ${{ inputs.targets || '' }}
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
     secrets: inherit
   prepare-merge:
     needs:
@@ -114,8 +141,9 @@ jobs:
       runner: ubuntu-24.04
       system: x86_64-linux
       stage: merge-candidates
-      previous: prepare-aarch64-linux
-      previous_extra: prepare-x86_64-linux
+      previous: prepare-aarch64-darwin
+      previous_extra: prepare-aarch64-linux
+      previous_third: prepare-x86_64-linux
     secrets: inherit
   # Recache the Linux native boundary of Darwin roots (the Rosetta VM
   # image) after rust-warmup. Doing this from the Darwin-prepare tree
@@ -561,6 +589,7 @@ jobs:
         shell: python
   repair:
     needs:
+      - prepare-pins
       - prepare-darwin
       - prepare-arm
       - prepare-x86

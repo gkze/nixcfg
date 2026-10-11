@@ -126,6 +126,7 @@ class UpdateContext:
     effective_sources: dict[str, SourceEntry] = field(default_factory=dict)
     resolved_version: VersionInfo | None = None
     preparing: bool = False
+    pins_only: bool = False
 
 
 async def stream_url_hash_mapping(
@@ -638,15 +639,20 @@ class Updater(ABC):
                 )
             )
 
-        await emit(
-            UpdateEvent.status(
-                self.name,
-                "Fetching hashes for all platforms...",
-                operation="compute_hash",
-                status=StatusInfo(kind=StatusKind.FETCHING_HASHES),
+        if context.pins_only:
+            hashes = (
+                {} if context.current is None else context.current.hashes.to_json()
             )
-        )
-        hashes = await self.fetch_hashes(info, session, context=context, emit=emit)
+        else:
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    "Fetching hashes for all platforms...",
+                    operation="compute_hash",
+                    status=StatusInfo(kind=StatusKind.FETCHING_HASHES),
+                )
+            )
+            hashes = await self.fetch_hashes(info, session, context=context, emit=emit)
         result = self.build_result(info, hashes)
         result = await self._finalize_result(
             result, info=info, context=context, emit=emit
@@ -657,6 +663,7 @@ class Updater(ABC):
             current is not None
             and not context.hashes_fully_computed
             and not context.preparing
+            and not context.pins_only
         ):
             native_only = getattr(self, "native_only", False)
             effective_result = self._comparison_result(result, context=context)

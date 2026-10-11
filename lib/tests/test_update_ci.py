@@ -977,6 +977,14 @@ def test_native_args_merge_candidates_and_canary_validate(
     monkeypatch.setenv("NIXCFG_MERGE_RIGHT", "/right.json")
     merge_args = jobs._native_args("merge-candidates", artifacts)
     assert merge_args[1:4] == ["ci", "update", "merge-candidates"]
+    assert "--extra" not in merge_args
+    monkeypatch.setenv("NIXCFG_MERGE_EXTRA", "/extra.json")
+    three = jobs._native_args("merge-candidates", artifacts)
+    assert three[three.index("--extra") + 1] == "/extra.json"
+    monkeypatch.delenv("NIXCFG_MERGE_EXTRA")
+    pin_args = jobs._native_args("prepare-pins", artifacts)
+    assert pin_args[1:4] == ["ci", "update", "prepare"]
+    assert "--pins-only" in pin_args
     assert merge_args[merge_args.index("--left") + 1] == "/left.json"
     assert merge_args[merge_args.index("--right") + 1] == "/right.json"
     monkeypatch.delenv("NIXCFG_PREVIOUS_CANDIDATE")
@@ -1128,6 +1136,8 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     assert "warmup_slot" in native["on"]["workflow_call"]["inputs"]
     assert "NIXCFG_CLOSURE_YIELD" not in step["env"]
     assert "warmup_artifact" in native["on"]["workflow_call"]["inputs"]
+    assert "previous_third" in native["on"]["workflow_call"]["inputs"]
+    assert step["env"]["NIXCFG_MERGE_EXTRA"].startswith("${{ inputs.previous_third")
     downloads = [
         step
         for step in native["jobs"]["native"]["steps"]
@@ -1173,35 +1183,38 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
     )
     assert "inputs.shard" in artifact
     assert "inputs.stage == 'merge-candidates' && 'prepare-x86_64-linux'" in artifact
+    assert "inputs.stage == 'prepare-pins' && 'prepare-pins'" in artifact
 
 
 def _assert_parallel_linux_prepare(jobs: dict, matrix: list[dict]) -> None:
-    """Darwin pins; Linux arm and x86 extend it in parallel; merge is the complete tree."""
-    preparation = [
+    """Pin job first; all three native prepares hash that pin in parallel."""
+    pins = jobs["prepare-pins"]
+    assert "needs" not in pins
+    assert pins["with"]["stage"] == "prepare-pins"
+    assert pins["with"]["system"] == "x86_64-linux"
+    natives = [
         (name, job)
         for name, job in jobs.items()
-        if name.startswith("prepare-") and name != "prepare-merge"
+        if name in {"prepare-darwin", "prepare-arm", "prepare-x86"}
     ]
-    assert [job["with"]["system"] for _, job in preparation] == list(
-        supported_systems()
-    )
-    assert {job["with"]["system"]: job["with"]["runner"] for _, job in preparation} == {
+    assert [job["with"]["system"] for _, job in natives] == list(supported_systems())
+    assert {job["with"]["system"]: job["with"]["runner"] for _, job in natives} == {
         row["system"]: row["runner"] for row in matrix
     }
-    assert [name for name, _ in preparation] == [
+    assert [name for name, _ in natives] == [
         "prepare-darwin",
         "prepare-arm",
         "prepare-x86",
     ]
-    assert "needs" not in jobs["prepare-darwin"]
-    for name in ("prepare-arm", "prepare-x86"):
-        assert jobs[name]["needs"] == "prepare-darwin"
-        assert jobs[name]["with"]["previous"] == "prepare-aarch64-darwin"
+    for name in ("prepare-darwin", "prepare-arm", "prepare-x86"):
+        assert jobs[name]["needs"] == "prepare-pins"
+        assert jobs[name]["with"]["previous"] == "prepare-pins"
     merge = jobs["prepare-merge"]
     assert set(merge["needs"]) == {"prepare-darwin", "prepare-arm", "prepare-x86"}
     assert merge["with"]["stage"] == "merge-candidates"
-    assert merge["with"]["previous"] == "prepare-aarch64-linux"
-    assert merge["with"]["previous_extra"] == "prepare-x86_64-linux"
+    assert merge["with"]["previous"] == "prepare-aarch64-darwin"
+    assert merge["with"]["previous_extra"] == "prepare-aarch64-linux"
+    assert merge["with"]["previous_third"] == "prepare-x86_64-linux"
 
 
 def _assert_canary_jobs(workflow_jobs: dict) -> None:
@@ -1525,7 +1538,9 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     _assert_darwin_closure_shards(jobs)
     assert set(jobs["publish"]["needs"]) == set(validators) | {"assert-coverage"}
     assert set(validators) <= set(jobs["repair"]["needs"])
-    assert {"plan-darwin-closures", "assert-coverage"} <= set(jobs["repair"]["needs"])
+    assert {"plan-darwin-closures", "assert-coverage", "prepare-pins"} <= set(
+        jobs["repair"]["needs"]
+    )
     assert set(cache_jobs) <= set(jobs["repair"]["needs"])
     assert set(cache_jobs).isdisjoint(jobs["publish"]["needs"])
     assert jobs["repair"]["permissions"] == {

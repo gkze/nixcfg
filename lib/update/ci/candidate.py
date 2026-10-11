@@ -172,17 +172,27 @@ def prepare_candidate(
     *,
     previous: Candidate | None = None,
     validate_all_packages: bool = False,
+    pins_only: bool = False,
 ) -> tuple[Candidate, int]:
-    """Extend one pinned candidate on the current system without live writes."""
+    """Extend one pinned candidate on the current system without live writes.
+
+    ``pins_only`` refreshes flake refs and source versions without native
+    hashes and records no platform. Linux/Darwin hash jobs then extend that
+    pin in parallel so they hash the updated lock, not HEAD.
+    """
     system = get_current_nix_platform()
     if system not in supported_systems():
         msg = f"No configured builder policy for {system}"
+        raise ValueError(msg)
+    if pins_only and previous is not None:
+        msg = "Pin refresh cannot extend a previous candidate"
         raise ValueError(msg)
     preparation = Preparation(
         system=system,
         targets=targets,
         previous=previous,
         validate_all_packages=validate_all_packages,
+        pins_only=pins_only,
     )
     options = UpdateOptions(
         targets=targets,
@@ -579,6 +589,18 @@ def merge_prepared_candidates(
         prepared=True,
         patch=patch,
     )
+
+
+def fold_prepared_candidates(
+    first: Candidate,
+    *rest: Candidate,
+    repo: Path,
+) -> Candidate:
+    """Fold same-baseline native extensions left-to-right."""
+    merged = first
+    for next_candidate in rest:
+        merged = merge_prepared_candidates(merged, next_candidate, repo=repo)
+    return merged
 
 
 def require_complete_candidate(candidate: Candidate) -> None:
@@ -1288,14 +1310,20 @@ def merge_candidates_cmd(
     output: Annotated[
         Path, typer.Option(help="Merged candidate JSON outside the repository.")
     ],
+    extra: Annotated[
+        Path | None,
+        typer.Option(help="Optional third native candidate JSON."),
+    ] = None,
 ) -> None:
-    """Merge two same-baseline native prepare artifacts into one candidate."""
+    """Merge two or three same-baseline native prepare artifacts."""
     output = _output_path(output, get_repo_root())
-    merged = merge_prepared_candidates(
+    candidates = [
         Candidate.model_validate_json(left.read_bytes()),
         Candidate.model_validate_json(right.read_bytes()),
-        repo=get_repo_root(),
-    )
+    ]
+    if extra is not None:
+        candidates.append(Candidate.model_validate_json(extra.read_bytes()))
+    merged = fold_prepared_candidates(*candidates, repo=get_repo_root())
     atomic_write_text(output, merged.model_dump_json(indent=2) + "\n")
 
 
@@ -1315,6 +1343,12 @@ def prepare(
     previous: Annotated[
         Path | None, typer.Option(help="Previous native candidate.")
     ] = None,
+    pins_only: Annotated[
+        bool,
+        typer.Option(
+            help="Refresh flake refs and source versions without native hashes."
+        ),
+    ] = False,
 ) -> None:
     """Resolve and materialize updates on this runner's native platform."""
     output = _output_path(output, get_repo_root())
@@ -1327,7 +1361,10 @@ def prepare(
     if prior is not None and not selected:
         selected = prior.targets
     candidate, status = prepare_candidate(
-        selected, previous=prior, validate_all_packages=validate_all_packages
+        selected,
+        previous=prior,
+        validate_all_packages=validate_all_packages,
+        pins_only=pins_only,
     )
     atomic_write_text(output, candidate.model_dump_json(indent=2) + "\n")
     raise typer.Exit(status)

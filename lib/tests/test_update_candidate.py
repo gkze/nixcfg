@@ -216,6 +216,48 @@ def test_native_stages_pin_versions_preserve_hashes_and_never_promote(
         )
 
 
+def test_pin_then_parallel_native_matches_serial_darwin_then_linux(
+    prepared_run,
+) -> None:
+    """38137325241: Linux hashes the pin, not HEAD; merge equals today's serial tree."""
+    root, operations, state = prepared_run
+    state["system"] = "aarch64-darwin"
+    darwin = pipeline.prepare_candidate(("example",))[0]
+    state["system"] = "aarch64-linux"
+    arm = pipeline.prepare_candidate(("example",), previous=darwin)[0]
+    state["system"] = "x86_64-linux"
+    x86 = pipeline.prepare_candidate(("example",), previous=darwin)[0]
+    serial = pipeline.merge_prepared_candidates(arm, x86, repo=root)
+    operations.clear()
+    state["system"] = "x86_64-linux"
+    pin_out = root.parent / "pin.json"
+    pinned = CliRunner().invoke(
+        pipeline.app,
+        ["prepare", "--output", str(pin_out), "--pins-only", "example"],
+    )
+    assert pinned.exit_code == 0, pinned.output
+    pin = Candidate.model_validate_json(pin_out.read_bytes())
+    assert pin.systems == ()
+    assert pin.prepared
+    assert operations == ["resolve"]
+    with pytest.raises(ValueError, match="cannot extend"):
+        pipeline.prepare_candidate(("example",), previous=pin, pins_only=True)
+    natives: list[Candidate] = []
+    for system in pipeline.supported_systems():
+        state["system"] = system
+        natives.append(pipeline.prepare_candidate(("example",), previous=pin)[0])
+    parallel = pipeline.fold_prepared_candidates(*natives, repo=root)
+    assert parallel.tree == serial.tree
+    assert set(parallel.systems) == set(serial.systems)
+    with IsolatedUpdateWorkspace(root) as workspace:
+        parallel.apply(workspace.root)
+        result = SourceEntry.model_validate_json(
+            (workspace.root / "packages/example/sources.json").read_bytes()
+        )
+    assert result.version == "2"
+    assert set(result.hashes.mapping) == set(pipeline.supported_systems())
+
+
 def test_preparation_streams_progress_separately_from_json(
     prepared_run, monkeypatch, capsys
 ) -> None:
@@ -4037,6 +4079,49 @@ def test_merge_candidates_command_writes_outside_the_checkout(
     assert result.exit_code == 0, result.output
     merged = Candidate.model_validate_json(output.read_bytes())
     assert set(merged.systems) == {
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-linux",
+    }
+    darwin = _candidate_with_file(
+        root,
+        "darwin.txt",
+        "darwin\n",
+        systems=("aarch64-darwin",),
+    )
+    arm_only = _candidate_with_file(
+        root,
+        "arm-only.txt",
+        "arm\n",
+        systems=("aarch64-linux",),
+    )
+    x86_only = _candidate_with_file(
+        root,
+        "x86-only.txt",
+        "x86\n",
+        systems=("x86_64-linux",),
+    )
+    extra_path = tmp_path / "extra.json"
+    left.write_text(darwin.model_dump_json(), encoding="utf-8")
+    right.write_text(arm_only.model_dump_json(), encoding="utf-8")
+    extra_path.write_text(x86_only.model_dump_json(), encoding="utf-8")
+    folded = tmp_path / "artifacts" / "folded.json"
+    extra = CliRunner().invoke(
+        pipeline.app,
+        [
+            "merge-candidates",
+            "--left",
+            str(left),
+            "--right",
+            str(right),
+            "--extra",
+            str(extra_path),
+            "--output",
+            str(folded),
+        ],
+    )
+    assert extra.exit_code == 0, extra.output
+    assert set(Candidate.model_validate_json(folded.read_bytes()).systems) == {
         "aarch64-darwin",
         "aarch64-linux",
         "x86_64-linux",
