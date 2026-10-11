@@ -384,6 +384,8 @@ jobs:
   # One generated matrix from lib.rootClosureManifest plus shard_costs.json.
   # The plan job evaluates the candidate tree, not a hand-maintained host list.
   # Sibling of validate-arm / validate-x86 (separate uses:, not a matrix).
+  # Darwin graph eval is serial: 4-wide SIGTERM'd ubuntu-24.04 at ~800s
+  # (38137325241, 38142145131).
   plan-darwin-closures:
     needs: prepare-merge
     if: |-

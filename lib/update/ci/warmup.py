@@ -77,6 +77,10 @@ RUST_WARMUP_SLOTS = 5
 # Shared non-rust intersection (#38130420607: ~1300 outputs after rust_*
 # peel). Five slots stripe each dependency layer; each path is one drv.
 CASCADE_WARMUP_SLOTS = 5
+# 38137325241 and 38142145131: 4-wide `nix derivation show --recursive`
+# of Darwin roots on ubuntu-24.04 (16 GiB) got runner SIGTERM at
+# ~800s with ~100G disk free. One graph at a time.
+DARWIN_GRAPH_EVAL_WORKERS = 1
 
 
 def parse_canary_slots(raw: str) -> tuple[int, ...]:
@@ -905,7 +909,7 @@ def _eval_root_darwin_graphs(
     *,
     run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
 ) -> tuple[dict[str, dict[str, object]], dict[str, frozenset[str]]]:
-    """Instantiate Darwin roots in parallel; graph eval is the plan-shards cost."""
+    """Instantiate Darwin roots one at a time; graph eval is the plan-shards cost."""
     names = tuple(composed_root_name(root) for root in roots)
 
     def one(name: str) -> tuple[str, dict[str, object], frozenset[str]]:
@@ -916,7 +920,7 @@ def _eval_root_darwin_graphs(
     per_root: dict[str, frozenset[str]] = {}
     if not names:
         return graphs, per_root
-    workers = min(4, len(names))
+    workers = min(DARWIN_GRAPH_EVAL_WORKERS, len(names))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for name, payload, outputs in pool.map(one, names):
             graphs[name] = payload

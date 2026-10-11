@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from lib.update.ci.shard_plan import ClosureShard
 from lib.update.ci.warmup import (
     CASCADE_WARMUP_SLOTS,
+    DARWIN_GRAPH_EVAL_WORKERS,
     MAX_SHARD_LOCAL_BUILDS,
     RUST_WARMUP_SLOTS,
     SETTINGS_MEMBER_CRATES,
@@ -20,6 +22,7 @@ from lib.update.ci.warmup import (
     ShardLocalBuildReport,
     WarmupError,
     WarmupFatalError,
+    _eval_root_darwin_graphs,
     _store_output_rest,
     assert_force_local_dry_run,
     assert_local_build_threshold,
@@ -405,6 +408,48 @@ def test_plan_darwin_warmup_peels_shared_non_rust_cascade_from_remaining(
         for path in slot_cascade_paths(plan.cascade_layers, slot)
     }
     assert striped == set(cascade)
+
+
+def test_eval_root_darwin_graphs_is_serial_on_hosted_16g(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38142145131: 4-wide derivation-show SIGTERM'd ubuntu-24.04 at ~800s."""
+    assert DARWIN_GRAPH_EVAL_WORKERS == 1
+    seen: list[int] = []
+    calls: list[str] = []
+
+    class _Pool:
+        def __init__(self, *, max_workers: int) -> None:
+            seen.append(max_workers)
+
+        def __enter__(self) -> _Pool:
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def map(
+            self,
+            fn: Callable[[str], tuple[str, dict[str, object], frozenset[str]]],
+            names: Iterable[str],
+        ) -> list[tuple[str, dict[str, object], frozenset[str]]]:
+            return [fn(name) for name in names]
+
+    monkeypatch.setattr("lib.update.ci.warmup.ThreadPoolExecutor", _Pool)
+
+    def fake_eval(
+        _flake_root: Path, name: str, *, run: object | None = None
+    ) -> dict[str, object]:
+        del run
+        calls.append(name)
+        return {"derivations": {}}
+
+    monkeypatch.setattr("lib.update.ci.warmup.eval_root_darwin_graph", fake_eval)
+    graphs, per_root = _eval_root_darwin_graphs(tmp_path, _manifest().roots)
+    assert seen == [1]
+    assert calls == ["darwin-argus", "darwin-rocinante", "home-george"]
+    assert set(graphs) == set(calls)
+    assert set(per_root) == set(calls)
 
 
 def test_eval_root_darwin_outputs_and_substituters_fail_closed(

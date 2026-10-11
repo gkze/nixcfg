@@ -42,8 +42,10 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    cap, not rust-warmup's 32. `cache-root-deps` still recaches after
    rust-warmup so Darwin can substitute (`#1257`). Closures still wait
    for the final three-system candidate because certify binds reports
-   to that tree. The planner
-   instantiates each Darwin root's drv graph, queries cache.nixos.org and
+   to that tree.    The planner
+   instantiates each Darwin root's drv graph one at a time (38137325241
+   and 38142145131: 4-wide `nix derivation show --recursive` SIGTERM'd
+   the ubuntu-24.04 runner at ~800s), queries cache.nixos.org and
    gkze, and writes the intersection of missing aarch64-darwin outputs as
    `warmup-plan.json`. rust_* and safe FODs go to rust-warmup. The
    remaining shared non-rust intersection is cascade-warmup (38130420607

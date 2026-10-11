@@ -640,9 +640,7 @@ class Updater(ABC):
             )
 
         if context.pins_only:
-            hashes = (
-                {} if context.current is None else context.current.hashes.to_json()
-            )
+            hashes = {} if context.current is None else context.current.hashes.to_json()
         else:
             await emit(
                 UpdateEvent.status(
