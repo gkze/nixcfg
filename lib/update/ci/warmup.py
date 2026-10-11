@@ -1006,9 +1006,14 @@ SETTINGS_MEMBER_CRATES = (
 
 # rust_settings_json --externs these. Canary 114295702356 substituted
 # rust_tree-sitter then E0463'd with the rlib on the rustc line.
+# 38096149800: local tree-sitter E0463'd with Cachix
+# rust_wasmtime-c-api-impl on the rustc --extern line.
 TREE_SITTER_MEMBER_CRATES = (
     "tree-sitter",
     "tree-sitter-json",
+    "wasmtime-c-api-impl",
+    "wasmtime-c-api",
+    "wasmtime",
 )
 
 
@@ -1020,7 +1025,7 @@ def is_settings_family_store_path(path: str) -> bool:
 
 
 def is_tree_sitter_family_store_path(path: str) -> bool:
-    """Return whether *path* is rust_tree-sitter / rust_tree-sitter-json."""
+    """Return whether *path* is rust_tree-sitter or its wasmtime intern."""
     return any(
         is_named_rust_crate_store_path(path, crate)
         for crate in TREE_SITTER_MEMBER_CRATES

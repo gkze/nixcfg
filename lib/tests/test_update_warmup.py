@@ -1093,11 +1093,17 @@ def test_1269_slot3_settings_svh_mix_under_fatal_limit() -> None:
     tree_sitter = (
         "/nix/store/1zsfiw8m72a6ql2wx3f5bpq3mn7vnw77-rust_tree-sitter-0.27.0.drv"
     )
+    wasmtime_c_api = "/nix/store/28lrlw473ahihpdrzxawclg7r6hvbj25-rust_wasmtime-c-api-impl-48.0.1.drv"
+    wasmtime = "/nix/store/2v5460cwzb51v43iqz8ihvqb36d4a18a-rust_wasmtime-48.0.1.drv"
     assert is_crate2nix_rust_output(tree_sitter)
     assert not is_settings_family_store_path(tree_sitter)
     assert is_tree_sitter_family_store_path(tree_sitter)
     assert is_svh_sensitive_store_path(tree_sitter)
     assert is_force_local_allowed_build(tree_sitter)
+    assert is_tree_sitter_family_store_path(wasmtime_c_api)
+    assert is_tree_sitter_family_store_path(wasmtime)
+    assert is_svh_sensitive_store_path(wasmtime_c_api)
+    assert is_force_local_allowed_build(wasmtime_c_api)
     assert WARMUP_FATAL_BUILD_LIMIT >= 6
 
 
@@ -1206,6 +1212,37 @@ def test_1270_canary_patchutils_is_local_compiler_helper() -> None:
     assert partition_compiler_input_drvs((rustc, stdenv, patchutils, pbzx, cpio)) == (
         (rustc, stdenv),
         (patchutils, pbzx, cpio),
+    )
+
+
+def test_tree_sitter_wasmtime_c_api_is_svh_not_compiler_input() -> None:
+    """38096149800: local tree-sitter E0463'd with Cachix wasmtime_c_api.
+
+    The rlib was already on the rustc --extern line. Cargo.nix already
+    lists wasmtime-c-api-impl. Force-local the wasmtime intern with
+    tree-sitter; do not --max-jobs 0 a Cachix rlib.
+    """
+    wasmtime_c_api = "/nix/store/28lrlw473ahihpdrzxawclg7r6hvbj25-rust_wasmtime-c-api-impl-48.0.1.drv"
+    wasmtime = "/nix/store/2v5460cwzb51v43iqz8ihvqb36d4a18a-rust_wasmtime-48.0.1.drv"
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229.drv"
+    assert is_named_rust_crate_store_path(wasmtime_c_api, "wasmtime-c-api-impl")
+    assert is_named_rust_crate_store_path(wasmtime, "wasmtime")
+    assert not is_named_rust_crate_store_path(wasmtime_c_api, "wasmtime")
+    assert is_tree_sitter_family_store_path(wasmtime_c_api)
+    assert is_svh_sensitive_store_path(wasmtime_c_api)
+    assert not is_svh_sensitive_store_path(serde)
+    rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+
+    def query_run(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args, 0, "\n".join((rustc, wasmtime_c_api, serde)), ""
+        )
+
+    assert compiler_input_drvs(("/nix/store/zed.drv",), run=query_run) == (
+        rustc,
+        serde,
     )
 
 
