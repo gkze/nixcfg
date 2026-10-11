@@ -5,4 +5,4 @@
 # One macos-15 runner; realize these crates from every rust layer.
 canary-crates: settings settings_content settings_json settings_macros
 canary-slots: 0
-2026-10-11T14:14:38Z plan-shards-serial after 38142145131 143 at 840s
+2026-10-11T15:25:31Z two-plus cascade after 38146388927 remaining=829/836
