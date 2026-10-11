@@ -1423,6 +1423,13 @@ _COMPILER_MUST_SUBSTITUTE_PREFIXES = (
     "compiler-rt-",
     "bmake-",
 )
+# rust-overlay rustc-1.98.1-aarch64-apple-darwin is a tarball unpack
+# (38128207590 canary: zed.cachix.org fetched the tar.xz, then
+# --max-jobs 0 refused the 1-drv unpack). rustc-1.98.1 without a
+# target triple stays must-substitute so nixpkgs rustc never compiles.
+_RUST_OVERLAY_TARGET = re.compile(
+    r"-(?:aarch64|x86_64)-(?:apple-darwin|unknown-linux-gnu)$"
+)
 
 
 def is_compiler_local_helper_store_path(path: str) -> bool:
@@ -1433,8 +1440,16 @@ def is_compiler_local_helper_store_path(path: str) -> bool:
     return rest.startswith(_COMPILER_LOCAL_HELPER_PREFIXES)
 
 
+def is_rust_overlay_binary_component(path: str) -> bool:
+    """Return whether *path* is a rust-overlay target tarball unpack."""
+    rest = _store_output_rest(path).removesuffix(".drv")
+    return bool(_RUST_OVERLAY_TARGET.search(rest))
+
+
 def is_compiler_must_substitute_store_path(path: str) -> bool:
     """Return whether a compiler input must stay ``--max-jobs 0``."""
+    if is_rust_overlay_binary_component(path):
+        return False
     rest = _store_output_rest(path).removesuffix(".drv")
     return rest.startswith(_COMPILER_MUST_SUBSTITUTE_PREFIXES)
 

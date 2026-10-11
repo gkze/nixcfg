@@ -1102,6 +1102,7 @@ def test_retry_substitute_only_helpers_skips_toolchain_and_rust() -> None:
     cpio = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cpio-2.15.drv"
     unknown = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-diffutils-3.12.drv"
     rustc = "/nix/store/cccccccccccccccccccccccccccccccc-rustc-1.98.1.drv"
+    rustc_darwin = "/nix/store/l2nj43cyy37grnkh3m8h4jzhpsx8yp8b-rustc-1.98.1-aarch64-apple-darwin.drv"
     settings = "/nix/store/dddddddddddddddddddddddddddddddd-rust_settings-0.1.0.drv"
     num_cpus = "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-rust_num_cpus-1.16.0.drv"
     assert pipeline._retry_substitute_only_helpers((
@@ -1114,6 +1115,11 @@ def test_retry_substitute_only_helpers_skips_toolchain_and_rust() -> None:
             source="root-warmup",
             installable=f"{unknown}^*",
             message="error: Cannot build '/nix/store/...-diffutils-3.12.drv'.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{rustc_darwin}^*",
+            message="error: Cannot build '/nix/store/...-rustc-1.98.1-aarch64-apple-darwin.drv'.",
         ),
         DerivationValidationFailure(
             source="root-warmup",
@@ -1135,7 +1141,7 @@ def test_retry_substitute_only_helpers_skips_toolchain_and_rust() -> None:
             installable=f"{unknown}^*",
             message="error: hash mismatch in fixed-output derivation",
         ),
-    )) == (cpio, unknown)
+    )) == (cpio, unknown, rustc_darwin)
 
 
 def test_deferred_compiler_rust_miss_skips_toolchain() -> None:

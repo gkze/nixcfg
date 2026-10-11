@@ -43,6 +43,7 @@ from lib.update.ci.warmup import (
     is_rust_agent_ui_store_path,
     is_rust_extension_host_store_path,
     is_rust_language_models_store_path,
+    is_rust_overlay_binary_component,
     is_rust_zed_store_path,
     is_safe_rust_warmup_other,
     is_settings_family_store_path,
@@ -1213,6 +1214,7 @@ def test_1270_canary_patchutils_is_local_compiler_helper() -> None:
     pbzx = "/nix/store/9wq7n6729mdhisgxjyahy0cpjm4aq85p-pbzx-1.0.2.drv"
     cpio = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cpio-2.15.drv"
     rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    rustc_darwin = "/nix/store/l2nj43cyy37grnkh3m8h4jzhpsx8yp8b-rustc-1.98.1-aarch64-apple-darwin.drv"
     stdenv = "/nix/store/1gx3hvygaaaaaaaaaaaaaaaaaaaaaaaa-stdenv-darwin.drv"
     assert is_compiler_local_helper_store_path(patchutils)
     assert is_compiler_local_helper_store_path(pbzx)
@@ -1222,6 +1224,9 @@ def test_1270_canary_patchutils_is_local_compiler_helper() -> None:
     assert is_compiler_must_substitute_store_path(rustc)
     assert is_compiler_must_substitute_store_path(stdenv)
     assert not is_compiler_must_substitute_store_path(cpio)
+    assert is_rust_overlay_binary_component(rustc_darwin)
+    assert not is_rust_overlay_binary_component(rustc)
+    assert not is_compiler_must_substitute_store_path(rustc_darwin)
     assert partition_compiler_input_drvs((rustc, stdenv, patchutils, pbzx, cpio)) == (
         (rustc, stdenv),
         (patchutils, pbzx, cpio),

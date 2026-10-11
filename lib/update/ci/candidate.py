@@ -616,9 +616,11 @@ def _retry_substitute_only_helpers(
     """Retry ``--max-jobs 0`` Cannot-build helpers as 1-drv local compiles.
 
     #1270 canary: patchutils, then pbzx, then cpio each fetched their
-    source and died on ``Cannot build`` under substitute-only. rustc /
-    stdenv / rust_* stay refused so the next Unix helper does not need
-    another prefix + kick.
+    source and died on ``Cannot build`` under substitute-only. rustc
+    without a rust-overlay target triple / stdenv / rust_* stay refused
+    so the next Unix helper does not need another prefix + kick.
+    38128207590: rustc-1.98.1-aarch64-apple-darwin fetched its tar.xz
+    from zed.cachix.org, then --max-jobs 0 refused the unpack.
     """
     retry: list[str] = []
     for failure in failures:
