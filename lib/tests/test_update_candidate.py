@@ -1622,6 +1622,7 @@ def test_zed_warmup_force_locals_whole_family_when_cachix_is_mixed(
     monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
     monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_a, **_k: ())
     monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline, "rust_svh_input_drvs", lambda *_a, **_k: ())
     monkeypatch.setattr(pipeline, "rustc_generation_ids", lambda *_a, **_k: ())
     from lib.update.ci.warmup import (
         RootWarmupStats,
@@ -1702,6 +1703,7 @@ def test_zed_warmup_substitutes_whole_family_from_one_generation(
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
     monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_a, **_k: ())
     monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline, "rust_svh_input_drvs", lambda *_a, **_k: ())
     monkeypatch.setattr(
         pipeline,
         "rustc_generation_ids",
@@ -2098,11 +2100,7 @@ def test_rust_warmup_zed_slot_force_locals_extension_host_family(
     settings_drv = (
         "/nix/store/setuiaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_settings_ui-0.1.0.drv"
     )
-    monkeypatch.setattr(
-        pipeline,
-        "rust_crate_input_drvs",
-        lambda *_args, **_kwargs: (extension_host_drv, activity_drv),
-    )
+    monkeypatch.setattr(pipeline, "rust_svh_input_drvs", lambda *_args, **_kwargs: ())
     warmup_plan = tmp_path / "warmup-plan.json"
     write_warmup_plan(
         warmup_plan,
@@ -2173,7 +2171,7 @@ def test_rust_warmup_zed_slot_force_locals_extension_host_family(
     )
     monkeypatch.setattr(
         pipeline,
-        "rust_crate_input_drvs",
+        "rust_svh_input_drvs",
         lambda *_args, **_kwargs: (extension_host_drv, activity_drv, settings_drv),
     )
     rust = pipeline.validate_candidate(
@@ -2185,7 +2183,7 @@ def test_rust_warmup_zed_slot_force_locals_extension_host_family(
         ((activity_drv, settings_drv), True, True, False),
         ((rust_zed_drv,), True, False, False),
     ]
-    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(pipeline, "rust_svh_input_drvs", lambda *_args, **_kwargs: ())
     write_warmup_plan(
         warmup_plan,
         WarmupPlan(
@@ -2215,6 +2213,176 @@ def test_rust_warmup_zed_slot_force_locals_extension_host_family(
         pipeline.validate_candidate(
             candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
         )
+
+
+def test_rust_warmup_zed_slot_force_locals_cached_collab_ui_from_layers(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38151215158: skip_cached collab_ui still force-locals from rust_layers."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        pipeline,
+        "check_path_in_cachix",
+        lambda path: "collab_ui" in path or "extension_host" in path,
+    )
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "rust_svh_input_drvs", lambda *_args, **_kwargs: ())
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    extension_host = (
+        "/nix/store/5crb9axiaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0-lib"
+    )
+    extension_host_drv = (
+        "/nix/store/exthostaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0.drv"
+    )
+    collab_ui = "/nix/store/in05ddj652lyxf7fddyphh6npd2qd52c-rust_collab_ui-0.1.0-lib"
+    collab_ui_drv = (
+        "/nix/store/in05ddj652lyxf7fddyphh6npd2qd52c-rust_collab_ui-0.1.0.drv"
+    )
+    rust_zed = "/nix/store/dya03z7ahr923gj36783368fimlqvlqd-rust_zed-1.25.0"
+    rust_zed_drv = "/nix/store/dya03z7ahr923gj36783368fimlqvlqd-rust_zed-1.25.0.drv"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(extension_host, collab_ui, rust_zed),
+            rustLayers=((extension_host, collab_ui), (rust_zed,)),
+            outputDrvs={
+                extension_host: extension_host_drv,
+                collab_ui: collab_ui_drv,
+                rust_zed: rust_zed_drv,
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=3, missing=1, warmup=3, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [
+        ((extension_host_drv,), True, True, False),
+        ((collab_ui_drv,), True, True, False),
+        ((rust_zed_drv,), True, False, False),
+    ]
+
+
+def test_rust_warmup_zed_slot_force_locals_collab_ui_from_input_drvs(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38151215158: cached collab_ui absent from rust_layers still force-locals."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    extension_host_drv = (
+        "/nix/store/exthostaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0.drv"
+    )
+    collab_ui_drv = (
+        "/nix/store/in05ddj652lyxf7fddyphh6npd2qd52c-rust_collab_ui-0.1.0.drv"
+    )
+    rust_zed = "/nix/store/dya03z7ahr923gj36783368fimlqvlqd-rust_zed-1.25.0"
+    rust_zed_drv = "/nix/store/dya03z7ahr923gj36783368fimlqvlqd-rust_zed-1.25.0.drv"
+    monkeypatch.setattr(
+        pipeline,
+        "rust_svh_input_drvs",
+        lambda *_args, **_kwargs: (extension_host_drv, collab_ui_drv),
+    )
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(rust_zed,),
+            rustLayers=((rust_zed,),),
+            outputDrvs={rust_zed: rust_zed_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    rust = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert rust.gates == ()
+    assert realized == [
+        ((extension_host_drv,), True, True, False),
+        ((collab_ui_drv,), True, True, False),
+        ((rust_zed_drv,), True, False, False),
+    ]
 
 
 def test_rust_warmup_zed_nightly_waits_for_family(
@@ -2269,7 +2437,7 @@ def test_rust_warmup_zed_nightly_waits_for_family(
     )
     monkeypatch.setattr(
         pipeline,
-        "rust_crate_input_drvs",
+        "rust_svh_input_drvs",
         lambda *_args, **_kwargs: (extension_host_drv, settings_drv),
     )
     warmup_plan = tmp_path / "warmup-plan.json"
@@ -2345,9 +2513,14 @@ def test_rust_warmup_zed_nightly_waits_for_family(
     ) -> tuple[str, ...]:
         if tuple(crates) == ("zed",):
             return (rust_zed_drv,)
-        return (extension_host_drv, settings_drv)
+        return ()
 
     monkeypatch.setattr(pipeline, "rust_crate_input_drvs", crate_inputs)
+    monkeypatch.setattr(
+        pipeline,
+        "rust_svh_input_drvs",
+        lambda *_args, **_kwargs: (extension_host_drv, settings_drv),
+    )
     rust = pipeline.validate_candidate(
         candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
     )
@@ -2407,7 +2580,7 @@ def test_rust_warmup_zed_nightly_waits_for_family(
     )
     monkeypatch.setattr(
         pipeline,
-        "rust_crate_input_drvs",
+        "rust_svh_input_drvs",
         lambda *_args, **_kwargs: (extension_host_drv, settings_drv),
     )
     rust = pipeline.validate_candidate(
@@ -2464,11 +2637,7 @@ def test_rust_warmup_downloads_source_fods_before_force_local(
         "compiler_input_drvs",
         lambda *_args, **_kwargs: (rustc_drv, crate_src),
     )
-    monkeypatch.setattr(
-        pipeline,
-        "rust_crate_input_drvs",
-        lambda *_args, **_kwargs: (extension_host_drv,),
-    )
+    monkeypatch.setattr(pipeline, "rust_svh_input_drvs", lambda *_args, **_kwargs: ())
     warmup_plan = tmp_path / "warmup-plan.json"
     write_warmup_plan(
         warmup_plan,

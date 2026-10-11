@@ -61,7 +61,11 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    imported `.drv` with `nix build --out-link` (not `nix-store --add-root`
    alone; that is not an operation on Determinate Nix), and `nix build`
    `foo.drv^*` by dependency layer
-   (skip-if-in-gkze). Five `cascade-warmup` slots then realize the shared
+   (skip-if-in-gkze). A rust_zed stripe force-locals every
+   SVH-sensitive input (workspace `rust_*-0.1.0`, not only named
+   `extension_host` members) so skip-cached `collab_ui` cannot be
+   substituted under a local rust_zed (38151215158 E0463 /
+   nixpkgs#482646). Five `cascade-warmup` slots then realize the shared
    non-rust intersection one drv at a time so Cachix has the shared
    stdenv/rust graph before root shards start; the packages inventory
    itself remains certify evidence and waits for rust-warmup. The CVE-2026-56391/56392

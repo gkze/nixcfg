@@ -78,7 +78,9 @@ from lib.update.ci.warmup import (
     raise_if_warmup_fatal,
     realize_warmup_outputs,
     rust_compile_input_drvs,
+    rust_svh_input_drvs,
     rust_warmup_layers,
+    rust_zed_member_warmup_outputs,
     rustc_generation_ids,
     settings_family_warmup_outputs,
     shard_remaining_outputs,
@@ -1600,6 +1602,43 @@ def test_zed_workspace_0_1_0_crates_are_svh_not_compiler_inputs() -> None:
     assert is_svh_sensitive_store_path(tree_sitter)
     assert not is_zed_workspace_crate_store_path(rust_zed)
     assert is_svh_sensitive_store_path(rust_zed)
+
+
+def test_rust_svh_input_drvs_keeps_workspace_and_drops_zed_leaf() -> None:
+    """38151215158: rust_zed inputs include cached rust_collab_ui-0.1.0."""
+    rust_zed = "/nix/store/dya03z7ahr923gj36783368fimlqvlqd-rust_zed-1.25.0.drv"
+    nightly = (
+        "/nix/store/rlcwld41aaaaaaaaaaaaaaaaaaaaaaaaa-"
+        "zed-editor-nightly-unstable-f16f965.drv"
+    )
+    collab_ui = "/nix/store/in05ddj652lyxf7fddyphh6npd2qd52c-rust_collab_ui-0.1.0.drv"
+    extension_host = (
+        "/nix/store/exthostaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_extension_host-0.1.0.drv"
+    )
+    rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229.drv"
+    collab_lib = "/nix/store/in05ddj652lyxf7fddyphh6npd2qd52c-rust_collab_ui-0.1.0-lib"
+    assert is_zed_workspace_crate_store_path(collab_ui)
+    assert is_zed_workspace_crate_store_path(collab_lib)
+    assert is_svh_sensitive_store_path(collab_ui)
+    assert rust_zed_member_warmup_outputs(((collab_lib, rust_zed, nightly),)) == (
+        collab_lib,
+    )
+
+    def query_run(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            "\n".join((rustc, collab_ui, extension_host, rust_zed, nightly, serde)),
+            "",
+        )
+
+    assert rust_svh_input_drvs((rust_zed,), run=query_run) == (
+        collab_ui,
+        extension_host,
+    )
 
 
 def test_zed_family_policy_is_atomic_all_or_force_local() -> None:

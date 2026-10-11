@@ -39,7 +39,6 @@ from lib.update.ci.shard_plan import (
     write_github_actions_output,
 )
 from lib.update.ci.warmup import (
-    EXTENSION_HOST_MEMBER_CRATES,
     SETTINGS_MEMBER_CRATES,
     TREE_SITTER_MEMBER_CRATES,
     WARMUP_DRVS_NAME,
@@ -51,7 +50,6 @@ from lib.update.ci.warmup import (
     canary_crate_warmup_paths,
     compiler_input_drvs,
     export_warmup_drvs,
-    extension_host_family_warmup_outputs,
     import_warmup_drvs,
     is_compiler_must_substitute_store_path,
     is_crate2nix_rust_output,
@@ -78,6 +76,8 @@ from lib.update.ci.warmup import (
     raise_if_warmup_fatal,
     realize_warmup_outputs,
     rust_crate_input_drvs,
+    rust_svh_input_drvs,
+    rust_zed_member_warmup_outputs,
     rustc_generation_ids,
     settings_family_warmup_outputs,
     skip_cached_warmup_paths,
@@ -930,7 +930,7 @@ def _realize_rust_warmup(
         others = tuple(
             drv for drv in others if not is_extension_host_family_store_path(drv)
         )
-        planned_family = extension_host_family_warmup_outputs(plan.rust_layers)
+        planned_family = rust_zed_member_warmup_outputs(plan.rust_layers)
         family = (
             unique_drvs_for_outputs(planned_family, plan.output_drvs)
             if planned_family
@@ -958,7 +958,7 @@ def _realize_rust_warmup(
         family = tuple(
             dict.fromkeys((
                 *family,
-                *rust_crate_input_drvs(parents, EXTENSION_HOST_MEMBER_CRATES),
+                *rust_svh_input_drvs(parents),
             ))
         )
         if not any(is_rust_extension_host_store_path(drv) for drv in family):
@@ -1033,9 +1033,7 @@ def _realize_zed_warmup(
         member_drvs = tuple(
             dict.fromkeys((
                 *member_drvs,
-                *rust_crate_input_drvs(parents, EXTENSION_HOST_MEMBER_CRATES),
-                *rust_crate_input_drvs(parents, SETTINGS_MEMBER_CRATES),
-                *rust_crate_input_drvs(parents, TREE_SITTER_MEMBER_CRATES),
+                *rust_svh_input_drvs(parents),
             ))
         )
     family_drvs = tuple(dict.fromkeys((*member_drvs, *rust_zed, *zed_nightly)))

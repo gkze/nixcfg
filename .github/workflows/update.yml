@@ -303,9 +303,11 @@ jobs:
     secrets: inherit
   # rust_* warmup owns all 5 public macos-15 slots, striped across the
   # planner's crate2nix dependency layers. Packages inventory waits so it
-  # does not steal a slot. Each slot skip-if-in-gkze resumes. Root shards
-  # still build full closures after this job succeeds; the 400-local-drv
-  # gate is unchanged.
+  # does not steal a slot. Each slot skip-if-in-gkze resumes. A rust_zed
+  # stripe force-locals every SVH-sensitive rust_zed input (workspace
+  # rust_*-0.1.0, 38151215158 collab_ui E0463), not only named
+  # extension_host members. Root shards still build full closures after
+  # this job succeeds; the 400-local-drv gate is unchanged.
   # Wait for canary to finish (success, failure, or skip) so the five
   # validate slots never share the free-tier macos-15 pool with it.
   # #1269 canary 3/4 held two runners for 80+ min and starved slots 0/1.

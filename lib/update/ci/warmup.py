@@ -1484,6 +1484,46 @@ def rust_crate_input_drvs(
     )
 
 
+def rust_svh_input_drvs(
+    parent_drvs: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return SVH-sensitive ``.drv`` inputs of *parent_drvs* after import.
+
+    38151215158 slot 1 compiled rust_zed locally against Cachix
+    ``rust_collab_ui-0.1.0`` (skip_cached dropped it from the missing
+    stripe; family merge only pulled ``EXTENSION_HOST_MEMBER_CRATES``)
+    and E0463'd (nixpkgs#482646). Workspace ``rust_*-0.1.0`` inputs
+    must force-local with rust_zed, not only named extension_host
+    members. rust_zed / nightly stay out so the logged leaf realize
+    owns them.
+    """
+    return tuple(
+        path
+        for path in drv_input_references(parent_drvs, run=run)
+        if is_svh_sensitive_store_path(path)
+        and not is_rust_zed_store_path(path)
+        and not is_zed_editor_nightly_store_path(path)
+    )
+
+
+def rust_zed_member_warmup_outputs(
+    layers: Sequence[Sequence[str]],
+) -> tuple[str, ...]:
+    """Return planned SVH-sensitive rust_* that must compile before rust_zed.
+
+    Includes cached workspace crates still listed in ``rust_layers``.
+    rust_zed / nightly are realized after this set.
+    """
+    return tuple(
+        path
+        for path in zed_family_warmup_outputs(layers)
+        if not is_rust_zed_store_path(path)
+        and not is_zed_editor_nightly_store_path(path)
+    )
+
+
 def rust_compile_input_drvs(
     parent_drvs: Sequence[str],
     *,
