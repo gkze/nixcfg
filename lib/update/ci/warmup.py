@@ -186,8 +186,14 @@ def warmup_fatal_line(
     if "cannot download" in lowered and "from any mirror" in lowered:
         return "cannot download from any mirror"
     match = _WILL_BE_BUILT.search(line)
-    if match and int(match.group(1)) > WARMUP_FATAL_BUILD_LIMIT:
-        return f"unexpectedly large will-be-built count ({match.group(1)})"
+    if match:
+        # 32 catches #1263's 406-drv bootstrap on rust-warmup. Zed-only
+        # keep_going builds the whole rust_* family on one runner
+        # (parent 38081612138 died at 37). Still fail closed at the
+        # packages-scale shard ceiling.
+        limit = MAX_SHARD_LOCAL_BUILDS if keep_going else WARMUP_FATAL_BUILD_LIMIT
+        if int(match.group(1)) > limit:
+            return f"unexpectedly large will-be-built count ({match.group(1)})"
     return None
 
 
@@ -998,11 +1004,40 @@ SETTINGS_MEMBER_CRATES = (
     "settings_macros",
 )
 
+# rust_settings_json --externs these. Canary 114295702356 substituted
+# rust_tree-sitter then E0463'd with the rlib on the rustc line.
+# 38096149800: local tree-sitter E0463'd with Cachix
+# rust_wasmtime-c-api-impl on the rustc --extern line.
+# 38103781962: local extension_host E0463'd with Cachix
+# rust_wasmtime-wasi on the rustc --extern line. wasmtime-wasi
+# --externs wasmtime-wasi-io (Cargo.nix); force-local both.
+TREE_SITTER_MEMBER_CRATES = (
+    "tree-sitter",
+    "tree-sitter-json",
+    "wasmtime-c-api-impl",
+    "wasmtime-c-api",
+    "wasmtime",
+    "wasmtime-wasi",
+    "wasmtime-wasi-io",
+)
+
 
 def is_settings_family_store_path(path: str) -> bool:
     """Return whether *path* is a rust_settings SVH-family crate."""
     return any(
         is_named_rust_crate_store_path(path, crate) for crate in SETTINGS_MEMBER_CRATES
+    )
+
+
+def is_tree_sitter_family_store_path(path: str) -> bool:
+    """Return whether *path* is rust_tree-sitter or its wasmtime intern.
+
+    Includes wasmtime-wasi / wasmtime-wasi-io so extension_host and
+    wasmtime-wasi do not compile locally against Cachix rlibs.
+    """
+    return any(
+        is_named_rust_crate_store_path(path, crate)
+        for crate in TREE_SITTER_MEMBER_CRATES
     )
 
 
@@ -1028,9 +1063,11 @@ def settings_family_warmup_outputs(layers: Sequence[Sequence[str]]) -> tuple[str
 def zed_family_warmup_outputs(layers: Sequence[Sequence[str]]) -> tuple[str, ...]:
     """Return the atomic Zed rust_* family from every warmup layer.
 
-    rust_zed, zed-editor-nightly, settings*, and extension_host* share one
+    rust_zed, zed-editor-nightly, settings*, tree-sitter,
+    rust_*-0.1.0 workspace members, and extension_host* share one
     rustc intern / SVH generation. skip_cached on a subset is the mix
-    that produced #1269 rust_settings E0463 against Cachix content/json.
+    that produced #1269 rust_settings E0463 against Cachix content/json
+    and #1270 settings_json vs tree_sitter.
     """
     return _warmup_outputs_matching(layers, is_svh_sensitive_store_path)
 
@@ -1091,13 +1128,25 @@ def rustc_generation_ids(
     *,
     run: _StoreRun | None = None,
 ) -> tuple[str, ...]:
-    """Return rustc ``.drv`` references of *drvs*, first-seen."""
-    found: list[str] = []
+    """Return one rustc generation key per distinct compiler ``.drv``.
+
+    Hosted crate2nix references both ``rustc-wrapper-1.98.1`` and
+    ``rust-default-1.98.1``. Those are one toolchain (38086011709
+    false-mixed them). Prefer wrapper, then rustc, then rust-default.
+    Distinct wrapper hashes still fail closed.
+    """
+    wrappers: list[str] = []
+    rustcs: list[str] = []
+    defaults: list[str] = []
     for path in _query_drv_graph(drvs, "references", run=run):
         rest = _store_output_rest(path).removesuffix(".drv")
-        if rest.startswith("rustc-"):
-            found.append(path)
-    return tuple(dict.fromkeys(found))
+        if rest.startswith("rustc-wrapper-"):
+            wrappers.append(path)
+        elif rest.startswith("rustc-"):
+            rustcs.append(path)
+        elif rest.startswith("rust-default-"):
+            defaults.append(path)
+    return tuple(dict.fromkeys(wrappers or rustcs or defaults))
 
 
 def is_rust_extension_host_store_path(path: str) -> bool:
@@ -1147,11 +1196,33 @@ def partition_zed_editor_nightly_drvs(
     return tuple(others), tuple(nightly)
 
 
+def is_zed_workspace_crate_store_path(path: str) -> bool:
+    """Return whether *path* is a Zed workspace ``rust_*-0.1.0`` crate.
+
+    38086720924 put ``rust_git_ui_core`` in compiler substitutes. Its
+    --max-jobs 0 closure was the 37 workspace members and tripped the
+    32-drv gate before force-local. crates.io rust_* keep their
+    published versions (serde-1.0.229, lsp-types-0.95.1). The digit
+    guard keeps ``rust_foo-10.1.0`` from matching ``-0.1.0``.
+    """
+    rest = _store_output_rest(path).removesuffix(".drv")
+    if not rest.startswith("rust_"):
+        return False
+    marker = "-0.1.0"
+    index = rest.find(marker)
+    if index <= 0 or rest[index - 1].isdigit():
+        return False
+    version = rest[index + len(marker) :]
+    return version == "" or version.startswith("-")
+
+
 def is_svh_sensitive_store_path(path: str) -> bool:
     """Return whether substituting *path* can mix extension_host-family SVHs."""
     return (
         is_extension_host_family_store_path(path)
         or is_settings_family_store_path(path)
+        or is_tree_sitter_family_store_path(path)
+        or is_zed_workspace_crate_store_path(path)
         or is_rust_zed_store_path(path)
         or is_zed_editor_nightly_store_path(path)
         or is_rust_agent_ui_store_path(path)
@@ -1243,17 +1314,39 @@ def rust_crate_input_drvs(
     )
 
 
+def rust_compile_input_drvs(
+    parent_drvs: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return every crate2nix ``rust_*`` ``.drv`` the family intern's.
+
+    #1270 canary 114295702356: ``--max-jobs 0`` substituted
+    ``rust_tree-sitter`` as a compiler input, then force-local
+    ``rust_settings_json`` E0463'd with that rlib on the rustc line
+    (nixpkgs#482646). Workspace-only family is not enough.
+    """
+    return tuple(
+        path
+        for path in drv_input_references(parent_drvs, run=run)
+        if is_crate2nix_rust_output(path)
+    )
+
+
 def compiler_input_drvs(
     parent_drvs: Sequence[str],
     *,
     run: _StoreRun | None = None,
 ) -> tuple[str, ...]:
-    """Return the non-family ``.drv`` closure that must be substituted first.
+    """Return the non-rust ``.drv`` closure that must be substituted first.
 
     ``#1263`` used direct ``--references`` plus ``--fallback``, then
     ``--no-substitute`` on ``extension_host`` rebuilt 406 bootstrap
     drvs (bmake 404). Query ``--requisites`` and realize them with
     ``--max-jobs 0`` so only the SVH-sensitive rust_* compile.
+    Excluding every rust_* (eab3998a) made extension_host --no-substitute
+    will-be-built 682 on 38083709508. Third-party rust_* stay here;
+    tree-sitter and rust_*-0.1.0 workspace crates are SVH-sensitive.
     """
     return tuple(
         path
@@ -1397,6 +1490,12 @@ _DRV_PATH = re.compile(r"/nix/store/[0-9a-z]{32}-[^/\s]+\.drv")
 def is_force_local_allowed_build(path: str) -> bool:
     """Return whether a ``--dry-run --no-substitute`` build may compile *path*."""
     if is_svh_sensitive_store_path(path):
+        return True
+    # 38092942461: deferred rust_lsp-types / rust_merman / rust_accesskit
+    # compile as --no-substitute family deps after rustc already substituted.
+    if is_crate2nix_rust_output(path) and not is_compiler_must_substitute_store_path(
+        path
+    ):
         return True
     rest = _store_output_rest(path)
     if "-src" not in rest:

@@ -121,3 +121,59 @@ def test_zed_workspace_svh_family_matches_pinned_cargo_toml() -> None:
     )
     assert "settings" in host
     assert {"extension_host", "settings"} <= models
+
+
+def test_zed_settings_json_crate2nix_depends_on_tree_sitter() -> None:
+    """#1270 canary E0463 is not a missing crate2nix edge.
+
+    ``settings_json`` lists ``tree-sitter`` and ``tree-sitter-json``.
+    Hosted canary 114295702356 passed ``--extern tree_sitter=...rlib``
+    and still E0463'd — rustc intern of a substituted rlib, same class
+    as #1269 settings vs Cachix content/json.
+    """
+    settings_json = _internal_crate("settings_json")
+    crate_name = expect_instance(
+        expect_binding(settings_json.values, "crateName").value,
+        StringPrimitive,
+    )
+    assert crate_name.value == "settings_json"
+    package_ids = set(
+        _package_ids(
+            expect_instance(
+                expect_binding(settings_json.values, "dependencies").value,
+                NixList,
+            )
+        )
+    )
+    assert {"tree-sitter", "tree-sitter-json"} <= package_ids
+
+
+def test_zed_extension_host_crate2nix_depends_on_wasmtime_wasi() -> None:
+    """38103781962 E0463 is not a missing crate2nix edge.
+
+    ``extension_host`` lists ``wasmtime`` and ``wasmtime-wasi``.
+    Hosted job 114364961030 passed ``--extern wasmtime_wasi=...rlib``
+    and still E0463'd. ``wasmtime-wasi`` lists ``wasmtime-wasi-io``.
+    """
+    host = set(
+        _package_ids(
+            expect_instance(
+                expect_binding(
+                    _internal_crate("extension_host").values, "dependencies"
+                ).value,
+                NixList,
+            )
+        )
+    )
+    wasi = set(
+        _package_ids(
+            expect_instance(
+                expect_binding(
+                    _internal_crate("wasmtime-wasi").values, "dependencies"
+                ).value,
+                NixList,
+            )
+        )
+    )
+    assert {"wasmtime", "wasmtime-wasi"} <= host
+    assert "wasmtime-wasi-io" in wasi

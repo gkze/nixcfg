@@ -41,6 +41,7 @@ from lib.update.ci.shard_plan import (
 from lib.update.ci.warmup import (
     EXTENSION_HOST_MEMBER_CRATES,
     SETTINGS_MEMBER_CRATES,
+    TREE_SITTER_MEMBER_CRATES,
     WARMUP_DRVS_NAME,
     WARMUP_PLAN_NAME,
     WarmupError,
@@ -630,21 +631,38 @@ def _retry_substitute_only_helpers(
     return tuple(dict.fromkeys(retry))
 
 
+def _is_deferred_compiler_rust_miss(
+    failure: validation.DerivationValidationFailure,
+) -> bool:
+    """Return whether a substitute-only rust_* miss should force-local later.
+
+    38088756238 substituted rustc/stdenv, then --max-jobs 0'd 80 third-party
+    rust_* (lsp-types, but-*, gix-*) that were not in gkze. Those
+    ``will be built`` lines aborted before ``--no-substitute``. rustc /
+    stdenv misses stay fatal. Missing rust_* compile with the family.
+    """
+    drv = failure.installable.removesuffix("^*")
+    if is_compiler_must_substitute_store_path(drv):
+        return False
+    return is_crate2nix_rust_output(drv)
+
+
 def _realize_compiler_substitutes(
     substitute: tuple[str, ...],
     *,
     flake_root: Path,
+    progress_source: str = "rust-warmup",
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     """``--max-jobs 0`` first; retry cache-miss 1-drv Unix helpers locally.
 
-    Keep rustc/stdenv/rust_* failures. Do not overwrite them with a
-    successful helper retry — that would let force-local run after a
-    bootstrap miss.
+    Keep rustc/stdenv failures. Defer crate2nix rust_* cache misses so
+    force-local can compile them with the SVH family. Do not overwrite
+    a rustc miss with a successful helper retry.
     """
     failures = realize_warmup_outputs(
         substitute,
         flake_root=flake_root,
-        progress=_hosted_validation_progress("rust-warmup"),
+        progress=_hosted_validation_progress(progress_source),
         substitute_only=True,
     )
     retry = _retry_substitute_only_helpers(failures)
@@ -652,15 +670,16 @@ def _realize_compiler_substitutes(
         failure
         for failure in failures
         if failure.installable.removesuffix("^*") not in retry
+        and not _is_deferred_compiler_rust_miss(failure)
     )
     if stubborn:
         return failures
     if not retry:
-        return failures
+        return ()
     return realize_warmup_outputs(
         retry,
         flake_root=flake_root,
-        progress=_hosted_validation_progress("rust-warmup"),
+        progress=_hosted_validation_progress(progress_source),
     )
 
 
@@ -689,7 +708,7 @@ def _realize_svh_family(
     failures: list[validation.DerivationValidationFailure] = []
     if substitute:
         compiler_failures = _realize_compiler_substitutes(
-            substitute, flake_root=flake_root
+            substitute, flake_root=flake_root, progress_source=progress_source
         )
         failures.extend(compiler_failures)
         if compiler_failures:
@@ -698,7 +717,7 @@ def _realize_svh_family(
         fetch_failures = realize_warmup_outputs(
             fetches,
             flake_root=flake_root,
-            progress=_hosted_validation_progress("rust-warmup"),
+            progress=_hosted_validation_progress(progress_source),
         )
         failures.extend(fetch_failures)
         if fetch_failures:
@@ -781,6 +800,7 @@ def _merge_settings_family(
             *_settings_plan_drvs(settings, plan),
             *settings,
             *rust_crate_input_drvs(settings, SETTINGS_MEMBER_CRATES),
+            *rust_crate_input_drvs(settings, TREE_SITTER_MEMBER_CRATES),
         ))
     )
 
@@ -940,6 +960,7 @@ def _realize_zed_warmup(
                 *member_drvs,
                 *rust_crate_input_drvs(parents, EXTENSION_HOST_MEMBER_CRATES),
                 *rust_crate_input_drvs(parents, SETTINGS_MEMBER_CRATES),
+                *rust_crate_input_drvs(parents, TREE_SITTER_MEMBER_CRATES),
             ))
         )
     family_drvs = tuple(dict.fromkeys((*member_drvs, *rust_zed, *zed_nightly)))

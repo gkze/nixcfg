@@ -849,6 +849,87 @@ def test_rust_warmup_settings_family_force_locals_content_cluster(
     assert others == [(other_drv,)]
 
 
+def test_rust_warmup_settings_json_force_locals_tree_sitter(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1270 canary: do not compile rust_settings_json against Cachix tree_sitter."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings_json = (
+        "/nix/store/jsonaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_settings_json-0.1.0"
+    )
+    tree_sitter = "/nix/store/1zsfiw8m72a6ql2wx3f5bpq3mn7vnw77-rust_tree-sitter-0.27.0"
+    settings_json_drv = f"{settings_json}.drv"
+    tree_sitter_drv = f"{tree_sitter}.drv"
+
+    def crate_inputs(_parents: object, crates: object, **_k: object) -> tuple[str, ...]:
+        names = tuple(crates) if isinstance(crates, tuple) else ()
+        if "tree-sitter" in names:
+            return (tree_sitter_drv,)
+        return ()
+
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", crate_inputs)
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(settings_json,),
+            rustLayers=((settings_json,),),
+            outputDrvs={settings_json: settings_json_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == ()
+    force_local = [paths for paths, _logs, force, _sub in realized if force]
+    assert force_local == [(settings_json_drv, tree_sitter_drv)]
+
+
 def test_rust_warmup_settings_family_builds_patchutils_helper(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -969,6 +1050,38 @@ def test_retry_substitute_only_helpers_skips_toolchain_and_rust() -> None:
             message="error: hash mismatch in fixed-output derivation",
         ),
     )) == (cpio, unknown)
+
+
+def test_deferred_compiler_rust_miss_skips_toolchain() -> None:
+    """38088756238: lsp-types / but-* --max-jobs 0 misses are not rustc."""
+    lsp_types = "/nix/store/v11pzry7z3p0d8pvkhqiclf5h2q0knqb-rust_lsp-types-0.95.1.drv"
+    but_core = "/nix/store/akcscbhmgl5vwzznyazlglrjswbs27dk-rust_but-core-0.0.0.drv"
+    rustc = "/nix/store/cccccccccccccccccccccccccccccccc-rustc-1.98.1.drv"
+    stdenv = "/nix/store/1gx3hvygaaaaaaaaaaaaaaaaaaaaaaaa-stdenv-darwin.drv"
+    rust_miss = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{lsp_types}^*",
+        message="these 1 derivations will be built:",
+    )
+    but_miss = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{but_core}^*",
+        message="error: Cannot build '/nix/store/...-rust_but-core-0.0.0.drv'.",
+    )
+    rustc_miss = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{rustc}^*",
+        message="error: Cannot build '/nix/store/...-rustc-1.98.1.drv'.",
+    )
+    stdenv_miss = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{stdenv}^*",
+        message="error: Cannot build '/nix/store/...-stdenv-darwin.drv'.",
+    )
+    assert pipeline._is_deferred_compiler_rust_miss(rust_miss)
+    assert pipeline._is_deferred_compiler_rust_miss(but_miss)
+    assert not pipeline._is_deferred_compiler_rust_miss(rustc_miss)
+    assert not pipeline._is_deferred_compiler_rust_miss(stdenv_miss)
 
 
 def test_rust_warmup_retries_unknown_1drv_helper_after_max_jobs_zero(
@@ -1144,6 +1257,91 @@ def test_rust_warmup_refuses_force_local_after_rustc_substitute_miss(
     )
     assert report.failures == (rustc_fail, unknown_fail)
     assert realized == [((rustc_drv, unknown_drv), False, False, True)]
+
+
+def test_compiler_rust_cache_miss_still_force_locals_family(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38088756238: rust_lsp-types --max-jobs 0 miss must not skip force-local."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, bool, bool, bool]] = []
+    rustc_drv = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    lsp_drv = "/nix/store/v11pzry7z3p0d8pvkhqiclf5h2q0knqb-rust_lsp-types-0.95.1.drv"
+    lsp_fail = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{lsp_drv}^*",
+        message="these 1 derivations will be built:",
+    )
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> object:
+        realized.append((
+            paths,
+            bool(kwargs.get("print_build_logs")),
+            bool(kwargs.get("force_local")),
+            bool(kwargs.get("substitute_only")),
+        ))
+        if kwargs.get("substitute_only"):
+            return (lsp_fail,)
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(
+        pipeline,
+        "compiler_input_drvs",
+        lambda *_args, **_kwargs: (rustc_drv, lsp_drv),
+    )
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    settings_drv = f"{settings}.drv"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(settings,),
+            rustLayers=((settings,),),
+            outputDrvs={settings: settings_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == ()
+    assert realized == [
+        ((rustc_drv, lsp_drv), False, False, True),
+        ((settings_drv,), True, True, False),
+    ]
 
 
 def test_zed_warmup_force_locals_whole_family_when_cachix_is_mixed(
@@ -2767,6 +2965,35 @@ def test_hosted_validation_streams_nix_logs_to_stderr(
         in err
     )
     assert "[derivations] \n" not in err
+
+
+def test_hosted_zed_warmup_progress_keeps_going_past_workspace_family(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38086720924: compiler substitutes logged rust-warmup, so 37 > 32 fatal.
+
+    zed-warmup keep_going uses the 400-drv ceiling. The same 37-drv
+    workspace line must not abort populate when source is zed-warmup.
+    """
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
+    rust = pipeline._hosted_validation_progress("rust-warmup")
+    rust(ValidationCommandStarted("nix build --max-jobs 0 /nix/store/git_ui.drv"))
+    with pytest.raises(WarmupFatalError, match="will-be-built"):
+        rust(
+            ValidationCommandOutput(
+                "nix build --max-jobs 0 /nix/store/git_ui.drv",
+                "these 37 derivations will be built:",
+            )
+        )
+    zed = pipeline._hosted_validation_progress("zed-warmup")
+    zed(ValidationCommandStarted("nix build --max-jobs 0 /nix/store/git_ui.drv"))
+    zed(
+        ValidationCommandOutput(
+            "nix build --max-jobs 0 /nix/store/git_ui.drv",
+            "these 37 derivations will be built:",
+        )
+    )
+    assert "these 37 derivations will be built" in capsys.readouterr().err
 
 
 def test_hosted_warmup_progress_fails_fast_on_fatal_patterns(

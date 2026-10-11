@@ -48,7 +48,9 @@ from lib.update.ci.warmup import (
     is_settings_family_store_path,
     is_source_fetch_store_path,
     is_svh_sensitive_store_path,
+    is_tree_sitter_family_store_path,
     is_zed_editor_nightly_store_path,
+    is_zed_workspace_crate_store_path,
     language_models_input_drvs,
     language_models_warmup_outputs,
     load_warmup_plan,
@@ -67,6 +69,7 @@ from lib.update.ci.warmup import (
     query_drv_outputs,
     raise_if_warmup_fatal,
     realize_warmup_outputs,
+    rust_compile_input_drvs,
     rust_warmup_layers,
     rustc_generation_ids,
     settings_family_warmup_outputs,
@@ -881,7 +884,11 @@ def test_rust_agent_ui_partition_and_realize_print_logs(tmp_path: Path) -> None:
 
 
 def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
-    """#1263: substitute the full non-family closure, including crate -src."""
+    """#1263: substitute the non-rust closure, including crate -src.
+
+    rust_* requisites (tree-sitter, language_models) stay out so
+    force-local cannot intern a Cachix rlib (#1270 canary E0463).
+    """
     agent = "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv"
     models = (
         "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0.drv"
@@ -897,6 +904,13 @@ def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
         "/nix/store/n2g2dzs3aaaaaaaaaaaaaaaaaaaaaaaaa-"
         "zed-editor-nightly-extension_host-src.drv"
     )
+    tree_sitter = (
+        "/nix/store/1zsfiw8m72a6ql2wx3f5bpq3mn7vnw77-rust_tree-sitter-0.27.0.drv"
+    )
+    git_ui_core = (
+        "/nix/store/vr7hj25vd3073rylxr7p82jl02i9gpaq-rust_git_ui_core-0.1.0.drv"
+    )
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229.drv"
     assert is_zed_editor_nightly_store_path(nightly)
     assert not is_zed_editor_nightly_store_path(src)
     assert partition_zed_editor_nightly_drvs((models, nightly, nightly)) == (
@@ -910,10 +924,28 @@ def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
     ) -> subprocess.CompletedProcess[str]:
         seen_query.append(args)
         return subprocess.CompletedProcess(
-            args, 0, "\n".join((rustc, models, nightly, bmake, src)), ""
+            args,
+            0,
+            "\n".join((
+                rustc,
+                models,
+                nightly,
+                bmake,
+                src,
+                tree_sitter,
+                git_ui_core,
+                serde,
+            )),
+            "",
         )
 
-    assert compiler_input_drvs((zed,), run=query_run) == (rustc, bmake, src)
+    assert compiler_input_drvs((zed,), run=query_run) == (rustc, bmake, src, serde)
+    assert rust_compile_input_drvs((zed,), run=query_run) == (
+        models,
+        tree_sitter,
+        git_ui_core,
+        serde,
+    )
     assert partition_compiler_input_drvs((rustc, bmake, src, bmake)) == (
         (rustc,),
         (bmake, src),
@@ -1058,6 +1090,32 @@ def test_1269_slot3_settings_svh_mix_under_fatal_limit() -> None:
     assert is_settings_family_store_path(macros)
     assert is_svh_sensitive_store_path(settings)
     assert is_force_local_allowed_build(settings)
+    tree_sitter = (
+        "/nix/store/1zsfiw8m72a6ql2wx3f5bpq3mn7vnw77-rust_tree-sitter-0.27.0.drv"
+    )
+    wasmtime_c_api = "/nix/store/28lrlw473ahihpdrzxawclg7r6hvbj25-rust_wasmtime-c-api-impl-48.0.1.drv"
+    wasmtime = "/nix/store/2v5460cwzb51v43iqz8ihvqb36d4a18a-rust_wasmtime-48.0.1.drv"
+    wasmtime_wasi = (
+        "/nix/store/bnsdl4aygysiwj06qbl0v0gg0qaqxpaf-rust_wasmtime-wasi-48.0.1.drv"
+    )
+    wasmtime_wasi_io = (
+        "/nix/store/wasiioaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_wasmtime-wasi-io-48.0.1.drv"
+    )
+    assert is_crate2nix_rust_output(tree_sitter)
+    assert not is_settings_family_store_path(tree_sitter)
+    assert is_tree_sitter_family_store_path(tree_sitter)
+    assert is_svh_sensitive_store_path(tree_sitter)
+    assert is_force_local_allowed_build(tree_sitter)
+    assert is_tree_sitter_family_store_path(wasmtime_c_api)
+    assert is_tree_sitter_family_store_path(wasmtime)
+    assert is_tree_sitter_family_store_path(wasmtime_wasi)
+    assert is_tree_sitter_family_store_path(wasmtime_wasi_io)
+    assert is_svh_sensitive_store_path(wasmtime_c_api)
+    assert is_svh_sensitive_store_path(wasmtime_wasi)
+    assert is_force_local_allowed_build(wasmtime_c_api)
+    assert is_force_local_allowed_build(wasmtime_wasi)
+    assert not is_named_rust_crate_store_path(wasmtime_wasi, "wasmtime")
+    assert not is_named_rust_crate_store_path(wasmtime_wasi_io, "wasmtime-wasi")
     assert WARMUP_FATAL_BUILD_LIMIT >= 6
 
 
@@ -1169,6 +1227,88 @@ def test_1270_canary_patchutils_is_local_compiler_helper() -> None:
     )
 
 
+def test_tree_sitter_wasmtime_c_api_is_svh_not_compiler_input() -> None:
+    """38096149800 / 38103781962: local crates E0463'd Cachix wasmtime*.
+
+    The rlib was already on the rustc --extern line. Cargo.nix already
+    lists wasmtime-c-api-impl and wasmtime-wasi. Force-local the
+    wasmtime intern with tree-sitter; do not --max-jobs 0 a Cachix rlib.
+    """
+    wasmtime_c_api = "/nix/store/28lrlw473ahihpdrzxawclg7r6hvbj25-rust_wasmtime-c-api-impl-48.0.1.drv"
+    wasmtime = "/nix/store/2v5460cwzb51v43iqz8ihvqb36d4a18a-rust_wasmtime-48.0.1.drv"
+    wasmtime_wasi = (
+        "/nix/store/bnsdl4aygysiwj06qbl0v0gg0qaqxpaf-rust_wasmtime-wasi-48.0.1.drv"
+    )
+    wasmtime_wasi_io = (
+        "/nix/store/wasiioaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_wasmtime-wasi-io-48.0.1.drv"
+    )
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229.drv"
+    assert is_named_rust_crate_store_path(wasmtime_c_api, "wasmtime-c-api-impl")
+    assert is_named_rust_crate_store_path(wasmtime, "wasmtime")
+    assert is_named_rust_crate_store_path(wasmtime_wasi, "wasmtime-wasi")
+    assert is_named_rust_crate_store_path(wasmtime_wasi_io, "wasmtime-wasi-io")
+    assert not is_named_rust_crate_store_path(wasmtime_c_api, "wasmtime")
+    assert not is_named_rust_crate_store_path(wasmtime_wasi, "wasmtime")
+    assert not is_named_rust_crate_store_path(wasmtime_wasi_io, "wasmtime-wasi")
+    assert is_tree_sitter_family_store_path(wasmtime_c_api)
+    assert is_tree_sitter_family_store_path(wasmtime_wasi)
+    assert is_tree_sitter_family_store_path(wasmtime_wasi_io)
+    assert is_svh_sensitive_store_path(wasmtime_c_api)
+    assert is_svh_sensitive_store_path(wasmtime_wasi)
+    assert not is_svh_sensitive_store_path(serde)
+    rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+
+    def query_run(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args, 0, "\n".join((rustc, wasmtime_c_api, wasmtime_wasi, serde)), ""
+        )
+
+    assert compiler_input_drvs(("/nix/store/zed.drv",), run=query_run) == (
+        rustc,
+        serde,
+    )
+
+
+def test_zed_workspace_0_1_0_crates_are_svh_not_compiler_inputs() -> None:
+    """38086720924: rust_git_ui_core --max-jobs 0 built the 37 workspace.
+
+    Workspace rust_*-0.1.0 force-local with the family. crates.io
+    rust_serde-1.0.229 / rust_lsp-types-0.95.1 stay compiler substitutes.
+    rust_foo-10.1.0 must not match the 0.1.0 marker.
+    """
+    git_ui_core = (
+        "/nix/store/vr7hj25vd3073rylxr7p82jl02i9gpaq-rust_git_ui_core-0.1.0.drv"
+    )
+    git_ui_lib = (
+        "/nix/store/vr7hj25vd3073rylxr7p82jl02i9gpaq-rust_git_ui_core-0.1.0-lib"
+    )
+    gpui = "/nix/store/otheraaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-0.1.0"
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229.drv"
+    lsp_types = (
+        "/nix/store/lspaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_lsp-types-0.95.1.drv"
+    )
+    ten = "/nix/store/tenaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_foo-10.1.0.drv"
+    tree_sitter = (
+        "/nix/store/1zsfiw8m72a6ql2wx3f5bpq3mn7vnw77-rust_tree-sitter-0.27.0.drv"
+    )
+    rust_zed = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0.drv"
+    assert is_zed_workspace_crate_store_path(git_ui_core)
+    assert is_zed_workspace_crate_store_path(git_ui_lib)
+    assert is_zed_workspace_crate_store_path(gpui)
+    assert is_svh_sensitive_store_path(git_ui_core)
+    assert is_force_local_allowed_build(git_ui_core)
+    assert not is_zed_workspace_crate_store_path(serde)
+    assert not is_zed_workspace_crate_store_path(lsp_types)
+    assert not is_zed_workspace_crate_store_path(ten)
+    assert not is_svh_sensitive_store_path(serde)
+    assert not is_zed_workspace_crate_store_path(tree_sitter)
+    assert is_svh_sensitive_store_path(tree_sitter)
+    assert not is_zed_workspace_crate_store_path(rust_zed)
+    assert is_svh_sensitive_store_path(rust_zed)
+
+
 def test_zed_family_policy_is_atomic_all_or_force_local() -> None:
     """Mixed Cachix presence must not substitute a subset of the family."""
     settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
@@ -1196,15 +1336,46 @@ def test_zed_family_policy_is_atomic_all_or_force_local() -> None:
     assert_zed_family_realize_set(family, ())
     with pytest.raises(WarmupError, match="mixes generations"):
         assert_zed_family_realize_set(family, (settings,))
-    layers = ((content,), (settings,))
-    assert zed_family_warmup_outputs(layers) == family
+    tree_sitter = "/nix/store/1zsfiw8m72a6ql2wx3f5bpq3mn7vnw77-rust_tree-sitter-0.27.0"
+    git_ui_core = "/nix/store/vr7hj25vd3073rylxr7p82jl02i9gpaq-rust_git_ui_core-0.1.0"
+    layers = ((content,), (tree_sitter,), (settings,), (git_ui_core,))
+    assert zed_family_warmup_outputs(layers) == (
+        content,
+        tree_sitter,
+        settings,
+        git_ui_core,
+    )
     rustc = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    rust_default = "/nix/store/dq17vrzvx74ismp4s6xicxirkmlshw1b-rust-default-1.98.1.drv"
     clang = "/nix/store/cccccccccccccccccccccccccccccccc-clang-21.1.8.drv"
 
     def query(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args, 0, f"{rustc}\n{clang}\n", "")
 
     assert rustc_generation_ids((f"{settings}.drv",), run=query) == (rustc,)
+
+    def query_default(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, f"{rust_default}\n{clang}\n", "")
+
+    assert rustc_generation_ids((f"{settings}.drv",), run=query_default) == (
+        rust_default,
+    )
+    wrapper = "/nix/store/sqbzbgwqqn62fcwayrm0yk3778fdhmyj-rustc-wrapper-1.98.1.drv"
+
+    def query_hosted(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args, 0, f"{wrapper}\n{rust_default}\n{clang}\n", ""
+        )
+
+    assert rustc_generation_ids((f"{settings}.drv",), run=query_hosted) == (wrapper,)
+    assert (
+        zed_family_realize_policy(family, present=lambda _p: True, rustc_ids=(wrapper,))
+        == "substitute"
+    )
 
 
 def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:
@@ -1226,6 +1397,10 @@ def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:
     svh_keep = "error[E0463]: can't find crate for `settings_content`"
     assert warmup_fatal_line(svh_keep, keep_going=True) is None
     raise_if_warmup_fatal(svh_keep, keep_going=True)
+    family = "these 37 derivations will be built:"
+    assert warmup_fatal_line(family) is not None
+    assert warmup_fatal_line(family, keep_going=True) is None
+    raise_if_warmup_fatal(family, keep_going=True)
     assert warmup_fatal_line(huge, keep_going=True) is not None
 
 
@@ -1300,10 +1475,14 @@ def test_force_local_dry_run_rejects_bootstrap_builds() -> None:
         "/nix/store/n2g2dzs3aaaaaaaaaaaaaaaaaaaaaaaa-"
         "zed-editor-nightly-extension_host-src.drv"
     )
+    lsp_types = "/nix/store/v11pzry7z3p0d8pvkhqiclf5h2q0knqb-rust_lsp-types-0.95.1.drv"
+    merman = "/nix/store/s39xn12r5kn7jp29m7fnzcrqgx3qnhlb-rust_merman-0.8.0-alpha.5.drv"
     bmake = "/nix/store/fcy73hrwaaaaaaaaaaaaaaaaaaaaaaaa-bmake-20260313.tar.gz.drv"
     stdenv = "/nix/store/1gx3hvygaaaaaaaaaaaaaaaaaaaaaaaa-stdenv-darwin.drv"
     assert is_force_local_allowed_build(host)
     assert is_force_local_allowed_build(src)
+    assert is_force_local_allowed_build(lsp_types)
+    assert is_force_local_allowed_build(merman)
     assert not is_force_local_allowed_build(bmake)
     assert not is_force_local_allowed_build(stdenv)
     stderr = (
@@ -1331,6 +1510,19 @@ def test_force_local_dry_run_rejects_bootstrap_builds() -> None:
     assert_force_local_dry_run(
         (host,),
         run=lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "", ok),
+    )
+    third_party = (
+        "these 4 derivations will be built:\n"
+        f"  {host}\n"
+        f"  {src}\n"
+        f"  {lsp_types}\n"
+        f"  {merman}\n"
+    )
+    assert_force_local_dry_run(
+        (host,),
+        run=lambda args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, "", third_party
+        ),
     )
     with pytest.raises(WarmupError, match="failed to dry-run force-local"):
         assert_force_local_dry_run(
