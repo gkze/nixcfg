@@ -40,6 +40,7 @@ from lib.update.ci.warmup import (
     is_crate2nix_rust_output,
     is_extension_host_family_store_path,
     is_force_local_allowed_build,
+    is_linux_builder_image_command,
     is_named_rust_crate_store_path,
     is_rust_agent_ui_store_path,
     is_rust_extension_host_store_path,
@@ -1699,3 +1700,25 @@ def test_warmup_fatal_line_ignores_nonfatal_noise(line: str) -> None:
     """Fetched-only closures, small rust families, and flake fetch noise stay live."""
     assert warmup_fatal_line(line) is None
     raise_if_warmup_fatal(line)
+
+
+def test_linux_builder_image_command_matches_arm_validate_drv() -> None:
+    """38137325241 streamed this exact installable before the 50-wbb abort."""
+    command = (
+        "nix build --no-link --keep-going --fallback -L "
+        "'/nix/store/6xczfl5hgl4yb7p9p997l6hmlwgpfhdj-nixos-disk-image.drv^*'"
+    )
+    assert is_linux_builder_image_command(command)
+    assert is_linux_builder_image_command(
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-nixos-disk-image.drv^*"
+    )
+    assert not is_linux_builder_image_command(
+        "nix build path:.#checks.aarch64-darwin.root-closures"
+    )
+    assert not is_linux_builder_image_command(
+        "nix build /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_settings-0.1.0.drv"
+    )
+    fifty = "these 50 derivations will be built:"
+    assert warmup_fatal_line(fifty) is not None
+    assert warmup_fatal_line(fifty, keep_going=True) is None
+    raise_if_warmup_fatal(fifty, keep_going=True)

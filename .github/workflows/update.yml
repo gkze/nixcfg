@@ -175,6 +175,11 @@ jobs:
       stage: cache-root-deps
       previous: prepare-x86_64-linux
     secrets: inherit
+  # Independent reusable-workflow calls, not one matrix. 38137325241
+  # validate-arm failed at 50-wbb on nixos-disk-image; validate-x86
+  # kept running until the run was cancelled. plan-darwin-closures is
+  # also a sibling here (not fail-fast collateral). Do not fold these
+  # three into a strategy.matrix.
   validate-arm:
     needs: prepare-merge
     if: |-
@@ -378,6 +383,7 @@ jobs:
     secrets: inherit
   # One generated matrix from lib.rootClosureManifest plus shard_costs.json.
   # The plan job evaluates the candidate tree, not a hand-maintained host list.
+  # Sibling of validate-arm / validate-x86 (separate uses:, not a matrix).
   plan-darwin-closures:
     needs: prepare-merge
     if: |-

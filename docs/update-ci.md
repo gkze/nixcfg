@@ -32,8 +32,17 @@ exercise runs cancel an older in-progress run so a newer HEAD can start.
    warmup lets rust_* LRU-evict the image (`#1257`). Those jobs are not
    publication evidence. Darwin packages start in parallel and do not wait.
    After the last prepare, the two Linux validators and Darwin shard
-   planning run in parallel. Closures still wait for the final three-system
-   candidate because certify binds reports to that tree. The planner
+   planning run in parallel as three independent reusable-workflow jobs
+   (not one `strategy.matrix`; 38137325241 plan-shards 143 was runner
+   SIGTERM, while validate-x86 kept running after validate-arm failed).
+   Linux `scope=all` closures include the native boundary of Darwin
+   roots (`nixos-disk-image.drv`, the linux-builder VM). That image
+   rebuilds locally when hydra has not published the CVE-patched
+   stdenv; a 50-drv will-be-built there is expected and uses the 400
+   cap, not rust-warmup's 32. `cache-root-deps` still recaches after
+   rust-warmup so Darwin can substitute (`#1257`). Closures still wait
+   for the final three-system candidate because certify binds reports
+   to that tree. The planner
    instantiates each Darwin root's drv graph, queries cache.nixos.org and
    gkze, and writes the intersection of missing aarch64-darwin outputs as
    `warmup-plan.json`. rust_* and safe FODs go to rust-warmup. The

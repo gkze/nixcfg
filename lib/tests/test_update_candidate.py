@@ -3315,6 +3315,69 @@ def test_hosted_warmup_progress_fails_fast_on_fatal_patterns(
     )
 
 
+_ARM_DISK_IMAGE_BUILD = (
+    "nix build --no-link --keep-going --fallback -L "
+    "'/nix/store/6xczfl5hgl4yb7p9p997l6hmlwgpfhdj-nixos-disk-image.drv^*'"
+)
+
+
+def test_hosted_linux_builder_image_50_wbb_is_not_fatal(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38137325241: arm root-closures died at 50 wbb on nixos-disk-image.
+
+    That rebuild is the linux-builder VM, expected when hydra has not
+    published the CVE-patched stdenv. The 32-limit stays for Darwin
+    roots and rust-warmup; the image uses the 400 cap.
+    """
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
+    roots = pipeline._hosted_validation_progress("root-closures")
+    roots(ValidationCommandStarted(_ARM_DISK_IMAGE_BUILD))
+    roots(
+        ValidationCommandOutput(
+            _ARM_DISK_IMAGE_BUILD,
+            "these 50 derivations will be built:",
+        )
+    )
+    with pytest.raises(WarmupFatalError, match="will-be-built"):
+        roots(
+            ValidationCommandOutput(
+                _ARM_DISK_IMAGE_BUILD,
+                "these 406 derivations will be built:",
+            )
+        )
+    err = capsys.readouterr().err
+    assert "[root-closures] these 50 derivations will be built:" in err
+
+
+def test_hosted_root_deps_50_wbb_is_not_fatal(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """cache-root-deps exists to realize the VM; 50 wbb must not abort it."""
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
+    deps = pipeline._hosted_validation_progress("root-deps")
+    deps(ValidationCommandStarted("nix build --keep-going /nix/store/vm.drv^*"))
+    deps(
+        ValidationCommandOutput(
+            "nix build --keep-going /nix/store/vm.drv^*",
+            "these 50 derivations will be built:",
+        )
+    )
+    assert "these 50 derivations will be built" in capsys.readouterr().err
+
+
+def test_hosted_root_closures_50_without_image_still_fatal() -> None:
+    """Darwin/host root-closures keep the rust-warmup 32-drv fail-fast."""
+    roots = pipeline._hosted_validation_progress("root-closures")
+    with pytest.raises(WarmupFatalError, match="will-be-built"):
+        roots(
+            ValidationCommandOutput(
+                "nix build path:.#checks.aarch64-darwin.root-closures",
+                "these 50 derivations will be built:",
+            )
+        )
+
+
 def test_hosted_warmup_progress_skips_cannot_build_during_max_jobs_zero(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

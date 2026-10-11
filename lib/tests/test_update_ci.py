@@ -1296,6 +1296,13 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
     assert plan["needs"] == "prepare-merge"
     assert plan["with"]["stage"] == "plan-shards"
     assert plan["with"]["runner"] == "ubuntu-24.04"
+    # 38137325241: plan-shards 143 was runner SIGTERM, not matrix
+    # fail-fast. validate-x86 kept running after validate-arm failed.
+    for name in ("validate-arm", "validate-x86", "plan-darwin-closures"):
+        job = workflow_jobs[name]
+        assert job["needs"] == "prepare-merge"
+        assert "strategy" not in job
+        assert job["uses"] == "./.github/workflows/update-native.yml"
     roots = workflow_jobs["validate-darwin-roots"]
     assert set(roots["needs"]) == {
         "plan-darwin-closures",

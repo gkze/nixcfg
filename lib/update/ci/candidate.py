@@ -56,6 +56,7 @@ from lib.update.ci.warmup import (
     is_compiler_must_substitute_store_path,
     is_crate2nix_rust_output,
     is_extension_host_family_store_path,
+    is_linux_builder_image_command,
     is_rust_extension_host_store_path,
     is_rust_language_models_store_path,
     is_rust_zed_store_path,
@@ -231,15 +232,19 @@ def _hosted_validation_progress(
 ) -> validation.ValidationProgress:
     """Stream Nix validation output to the live hosted job log."""
     substitute_only = False
-    stream_keep_going = keep_going or source == "zed-warmup"
+    # root-deps exists to realize the linux-builder image. zed-warmup
+    # compiles the workspace family. Both use the 400-drv ceiling.
+    stream_keep_going = keep_going or source in {"zed-warmup", "root-deps"}
 
     def emit(event: validation.ValidationProgressEvent) -> None:
-        nonlocal substitute_only
+        nonlocal substitute_only, stream_keep_going
         if isinstance(event, validation.ValidationCommandFinished):
             return
         if isinstance(event, validation.ValidationCommandStarted):
             text = f"$ {event.command}"
             substitute_only = "--max-jobs 0" in event.command
+            if is_linux_builder_image_command(event.command):
+                stream_keep_going = True
             jobs.record_runner_storage(f"before-{source}")
         elif isinstance(event, validation.ValidationCommandOutput):
             text = event.line.replace("\r", "")

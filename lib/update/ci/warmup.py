@@ -167,7 +167,18 @@ _STORE_BASENAME = re.compile(r"^[0-9a-z]{32}-.+$")
 # rust_* family is a handful of crates. #1263 compiled 406 bootstrap
 # drvs; fail the hosted job on the dry-run line instead of --keep-going.
 WARMUP_FATAL_BUILD_LIMIT = 32
+# 38137325241: Linux validate root-closures realized
+# nixos-disk-image.drv (linux-builder / Rosetta VM). That rebuild is
+# the native boundary of Darwin roots when hydra has not published the
+# CVE-patched stdenv. The 32-limit is for rust-warmup bootstrap, not
+# this image; keep_going lifts the cap to MAX_SHARD_LOCAL_BUILDS.
+_LINUX_BUILDER_IMAGE = "nixos-disk-image"
 _WILL_BE_BUILT = re.compile(r"these (\d+) derivations? will be built", re.IGNORECASE)
+
+
+def is_linux_builder_image_command(command: str) -> bool:
+    """Return whether this hosted command realizes the linux-builder VM."""
+    return _LINUX_BUILDER_IMAGE in command
 
 
 class WarmupError(ValueError):
