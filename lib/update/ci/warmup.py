@@ -1008,12 +1008,17 @@ SETTINGS_MEMBER_CRATES = (
 # rust_tree-sitter then E0463'd with the rlib on the rustc line.
 # 38096149800: local tree-sitter E0463'd with Cachix
 # rust_wasmtime-c-api-impl on the rustc --extern line.
+# 38103781962: local extension_host E0463'd with Cachix
+# rust_wasmtime-wasi on the rustc --extern line. wasmtime-wasi
+# --externs wasmtime-wasi-io (Cargo.nix); force-local both.
 TREE_SITTER_MEMBER_CRATES = (
     "tree-sitter",
     "tree-sitter-json",
     "wasmtime-c-api-impl",
     "wasmtime-c-api",
     "wasmtime",
+    "wasmtime-wasi",
+    "wasmtime-wasi-io",
 )
 
 
@@ -1025,7 +1030,11 @@ def is_settings_family_store_path(path: str) -> bool:
 
 
 def is_tree_sitter_family_store_path(path: str) -> bool:
-    """Return whether *path* is rust_tree-sitter or its wasmtime intern."""
+    """Return whether *path* is rust_tree-sitter or its wasmtime intern.
+
+    Includes wasmtime-wasi / wasmtime-wasi-io so extension_host and
+    wasmtime-wasi do not compile locally against Cachix rlibs.
+    """
     return any(
         is_named_rust_crate_store_path(path, crate)
         for crate in TREE_SITTER_MEMBER_CRATES
