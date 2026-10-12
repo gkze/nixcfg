@@ -803,12 +803,12 @@ def test_cascade_warmup_realizes_uncached_stripe_per_derivation(
         candidate, scope="cascade-warmup", warmup_plan=warmup_plan, warmup_slot=0
     )
     assert report.gates == ()
-    assert realized == [((missing,), 1, True)]
+    assert realized == [((f"{missing}.drv",), 1, True)]
     skipped = pipeline.validate_candidate(
         candidate, scope="cascade-warmup", warmup_plan=warmup_plan, warmup_slot=1
     )
     assert skipped.failures == ()
-    assert realized == [((missing,), 1, True)]
+    assert realized == [((f"{missing}.drv",), 1, True)]
     with pytest.raises(ValueError, match="cascade-warmup requires a warmup plan"):
         pipeline.validate_candidate(candidate, scope="cascade-warmup")
     with pytest.raises(ValueError, match="cascade-warmup requires a warmup plan"):

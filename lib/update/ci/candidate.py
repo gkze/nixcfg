@@ -1085,7 +1085,14 @@ def _realize_cascade_warmup(
     *,
     flake_root: Path,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
-    """Realize one cascade-warmup stripe, one drv at a time, skip-if-in-gkze."""
+    """Realize one cascade-warmup stripe, one drv at a time, skip-if-in-gkze.
+
+    38174166107 slots 1/2/3 ``nix build``'d output paths after importing
+    the ``.drv`` cache and fatal'd ``don't know how to build these
+    paths`` / no substituter (vimplugin queries, bun-cache-shard,
+    rust crate FODs). ``foo.drv^*`` is the output set; rust-warmup
+    already passes ``.drv`` paths.
+    """
     plan = load_warmup_plan(warmup_plan)
     slot_paths = slot_cascade_paths(plan.cascade_layers, warmup_slot)
     missing = skip_cached_warmup_paths(
@@ -1098,7 +1105,7 @@ def _realize_cascade_warmup(
     drvs = unique_drvs_for_outputs(missing, plan.output_drvs)
     import_warmup_drvs(drvs, warmup_plan.with_name(WARMUP_DRVS_NAME))
     failures = realize_warmup_outputs(
-        missing,
+        drvs,
         flake_root=flake_root,
         progress=_hosted_validation_progress("cascade-warmup", keep_going=True),
         keep_going=True,
