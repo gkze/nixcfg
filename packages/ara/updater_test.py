@@ -92,18 +92,10 @@ def test_reason_feed_rejects_missing_version(
         )
 
 
-@pytest.mark.parametrize(
-    "headers",
-    [
-        {"x-ara-desktop-version": "0.1.66"},
-        {"X-Ara-Desktop-Version": " 0.1.66 "},
-    ],
-)
-def test_reason_uses_download_header_when_feed_lags(
+def test_reason_uses_location_version_when_feed_and_header_lag(
     monkeypatch: pytest.MonkeyPatch,
-    headers: dict[str, str],
 ) -> None:
-    """Nix hashes the redirect; its x-ara-desktop-version is the pin."""
+    """Nix GETs the signed Location; /desktop/stable/<ver>/ is the pin."""
     _feed(
         monkeypatch,
         {"name": "0.1.64", "url": "https://example.test/private?signature=test"},
@@ -113,10 +105,10 @@ def test_reason_uses_download_header_when_feed_lags(
             _FakeSession(
                 _FakeResponse(
                     headers={
-                        **headers,
+                        "x-ara-desktop-version": "0.1.64",
                         "location": (
                             "https://ara-desktop-releases.t3.storage.dev"
-                            "/desktop/stable/0.1.66/Reason.dmg?signature=test"
+                            "/desktop/stable/0.1.84/Reason.dmg?signature=test"
                         ),
                     }
                 )
@@ -124,15 +116,38 @@ def test_reason_uses_download_header_when_feed_lags(
             context=UpdateContext(current=None),
         )
     )
-    assert info.version == "0.1.66"
+    assert info.version == "0.1.84"
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "https://ara-desktop-releases.t3.storage.dev/desktop/stable/0.1.84",
+        "https://ara-desktop-releases.t3.storage.dev/desktop/stable/",
+        "https://ara-desktop-releases.t3.storage.dev/desktop/stable//Reason.dmg",
+    ],
+)
+def test_reason_rejects_location_without_versioned_object_segment(
+    monkeypatch: pytest.MonkeyPatch,
+    location: str,
+) -> None:
+    """A stable prefix without /<ver>/ is not an immutable pin."""
+    _feed(monkeypatch, {"name": "0.1.84"})
+    with pytest.raises(RuntimeError, match="not a versioned object"):
+        run_async(
+            updater.AraUpdater().fetch_latest(
+                _FakeSession(_FakeResponse(headers={"location": location})),
+                context=UpdateContext(current=None),
+            )
+        )
 
 
 def test_reason_rejects_location_that_is_not_the_versioned_object(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The public redirect is latest-only; refuse a Location for another release."""
+    """The public redirect is latest-only; refuse a Location without a pin."""
     _feed(monkeypatch, {"name": "0.1.71"})
-    with pytest.raises(RuntimeError, match="versioned object for 0.1.73"):
+    with pytest.raises(RuntimeError, match="not a versioned object"):
         run_async(
             updater.AraUpdater().fetch_latest(
                 _FakeSession(
@@ -141,7 +156,7 @@ def test_reason_rejects_location_that_is_not_the_versioned_object(
                             "x-ara-desktop-version": "0.1.73",
                             "location": (
                                 "https://ara-desktop-releases.t3.storage.dev"
-                                "/desktop/stable/0.1.71/Reason.dmg?signature=test"
+                                "/desktop/latest/Reason.dmg?signature=test"
                             ),
                         }
                     )
@@ -156,7 +171,7 @@ def test_reason_rejects_missing_versioned_location(
 ) -> None:
     """A version header without the Tigris object path is not an immutable pin."""
     _feed(monkeypatch, {"name": "0.1.73"})
-    with pytest.raises(RuntimeError, match="versioned object for 0.1.73"):
+    with pytest.raises(RuntimeError, match="not a versioned object"):
         run_async(
             updater.AraUpdater().fetch_latest(
                 _FakeSession(

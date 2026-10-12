@@ -219,13 +219,9 @@ def test_ara_fetch_dmg_fail_closes_on_latest_redirect_drift() -> None:
         for node in iter_nodes(shell.tree.root_node, "variable_assignment")
     ]
     assert assignments == [
-        "found_version=$(tr -d '\\r' < headers | awk 'BEGIN{IGNORECASE=1} "
-        "/^x-ara-desktop-version:/ {print $2; exit}')",
         "location=$(tr -d '\\r' < headers | awk 'BEGIN{IGNORECASE=1} "
         "/^location:/ {print $2; exit}')",
     ]
-    tests = command_texts(shell)
-    assert '[ "$found_version" != "$version" ]' in tests
     cases = [
         node_text(node, shell.sanitized)
         for node in iter_nodes(shell.tree.root_node, "case_statement")
@@ -239,17 +235,11 @@ def test_ara_fetch_dmg_fail_closes_on_latest_redirect_drift() -> None:
         for node in iter_nodes(shell.tree.root_node, "command")
         if command_name(node, shell.sanitized) in {"curl", "exit"}
     ]
-    if_gate = next(iter_nodes(shell.tree.root_node, "if_statement"))
     case_gate = next(iter_nodes(shell.tree.root_node, "case_statement"))
     head_curl, get_curl = (
         node for node in commands if command_name(node, shell.sanitized) == "curl"
     )
-    assert (
-        head_curl.end_byte
-        < if_gate.start_byte
-        < case_gate.start_byte
-        < get_curl.start_byte
-    )
+    assert head_curl.end_byte < case_gate.start_byte < get_curl.start_byte
 
 
 def test_ara_fetch_dmg_script_rejects_version_and_location_drift(
@@ -266,14 +256,13 @@ def test_ara_fetch_dmg_script_rejects_version_and_location_drift(
         "/desktop/stable/0.1.71/Reason.dmg?X-Amz-Expires=900"
     )
 
-    mismatch = _run_fetch_dmg(
-        tmp_path / "version",
+    header_lag = _run_fetch_dmg(
+        tmp_path / "header",
         version="0.1.73",
-        headers=_redirect_headers(version="0.1.71", location=signed),
+        headers=_redirect_headers(version="0.1.64", location=signed),
     )
-    assert mismatch.returncode == 1
-    assert (tmp_path / "version" / "curl.get.log").read_text(encoding="utf-8") == ""
-    assert not (tmp_path / "version" / "Reason.dmg").exists()
+    assert header_lag.returncode == 0
+    assert (tmp_path / "header" / "Reason.dmg").read_bytes() == b"reason-dmg-bytes"
 
     wrong_object = _run_fetch_dmg(
         tmp_path / "location",
