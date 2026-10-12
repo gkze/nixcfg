@@ -9,3 +9,4 @@ canary-slots: 0
 2026-10-11T20:54:30Z rust_zed SVH workspace peel after 38151215158 collab_ui E0463
 2026-10-12T01:13:51Z cascade .drv^* after 38174166107 don't-know-how-to-build outputs
 2026-10-12T04:26:40Z pin-hash + cascade umbrella skip after 38191092497 slot 0 1297 wbb
+2026-10-12T04:37:52Z pins_only replace after 38203865711 merge entries/mapping
