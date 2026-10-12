@@ -33,9 +33,11 @@ from lib.update.ci.warmup import (
     compiler_input_drvs,
     darwin_output_paths,
     default_cache_present,
+    dry_run_will_be_built_count,
     eval_root_darwin_outputs,
     export_warmup_drvs,
     extension_host_family_warmup_outputs,
+    filter_cascade_realize_drvs,
     force_local_dry_run_builds,
     import_warmup_drvs,
     intersect_missing,
@@ -1934,3 +1936,65 @@ def test_linux_builder_image_command_matches_arm_validate_drv() -> None:
     assert warmup_fatal_line(fifty) is not None
     assert warmup_fatal_line(fifty, keep_going=True) is None
     raise_if_warmup_fatal(fifty, keep_going=True)
+
+
+def test_dry_run_will_be_built_count_parses_nix_dry_run_lines() -> None:
+    """Hosted Darwin logs are the count oracle; this workspace cannot nix-build them."""
+    drv = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-linear-cli-jsr-manifest.tsv.drv"
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        text = args[-1]
+        if "linear-cli" in text:
+            return subprocess.CompletedProcess(
+                args, 0, "", "these 1297 derivations will be built:\n"
+            )
+        if "libiconv" in text:
+            return subprocess.CompletedProcess(
+                args, 0, "", "this derivation will be built:\n"
+            )
+        return subprocess.CompletedProcess(
+            args, 0, "", "these 13 paths will be fetched:\n"
+        )
+
+    assert dry_run_will_be_built_count(drv, run=run) == 1297
+    assert (
+        dry_run_will_be_built_count(
+            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-libiconv-1.drv", run=run
+        )
+        == 1
+    )
+    assert (
+        dry_run_will_be_built_count(
+            "/nix/store/cccccccccccccccccccccccccccccccc-already-cached.drv", run=run
+        )
+        == 0
+    )
+    with pytest.raises(WarmupError, match="failed to dry-run cascade"):
+        dry_run_will_be_built_count(
+            drv,
+            run=lambda args, **_kwargs: subprocess.CompletedProcess(
+                args, 1, "", "no drv"
+            ),
+        )
+
+
+def test_filter_cascade_realize_drvs_drops_umbrellas_over_ceiling() -> None:
+    """38191092497: skip linear-cli-jsr-manifest.tsv, keep the 1-3 drv FODs."""
+    leaf = "/nix/store/dddddddddddddddddddddddddddddddd-libiconv-1.drv"
+    umbrella = (
+        "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-linear-cli-jsr-manifest.tsv.drv"
+    )
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        text = args[-1]
+        if "linear-cli" in text:
+            return subprocess.CompletedProcess(
+                args, 0, "", "these 1297 derivations will be built:\n"
+            )
+        return subprocess.CompletedProcess(
+            args, 0, "", "these 2 derivations will be built:\n"
+        )
+
+    assert filter_cascade_realize_drvs((leaf, umbrella, leaf), run=run) == (leaf,)
+    with pytest.raises(WarmupError, match="at least 1"):
+        filter_cascade_realize_drvs((leaf,), run=run, limit=0)

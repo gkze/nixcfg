@@ -50,6 +50,7 @@ from lib.update.ci.warmup import (
     canary_crate_warmup_paths,
     compiler_input_drvs,
     export_warmup_drvs,
+    filter_cascade_realize_drvs,
     import_warmup_drvs,
     is_compiler_must_substitute_store_path,
     is_crate2nix_rust_output,
@@ -1104,6 +1105,14 @@ def _realize_cascade_warmup(
         return ()
     drvs = unique_drvs_for_outputs(missing, plan.output_drvs)
     import_warmup_drvs(drvs, warmup_plan.with_name(WARMUP_DRVS_NAME))
+    # 38191092497 slot 0: linear-cli-jsr-manifest.tsv.drv^* printed
+    # 1297 will-be-built after ~75m of 1-3 drv FODs. Fatal'ing the
+    # slot threw away the rest of the stripe. Root shards still own
+    # umbrellas; cascade only realizes items under the 400 ceiling.
+    drvs = filter_cascade_realize_drvs(drvs)
+    if not drvs:
+        jobs.record_runner_storage("after-cascade-warmup")
+        return ()
     failures = realize_warmup_outputs(
         drvs,
         flake_root=flake_root,

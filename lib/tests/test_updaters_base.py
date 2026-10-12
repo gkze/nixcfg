@@ -323,7 +323,13 @@ def test_download_updater_skips_prepare_reprefetch_when_hashes_are_complete() ->
 
     async def _run_incomplete() -> list[UpdateEvent]:
         updater = _ConfiguredDownloadUpdater()
-        with patch.object(updater, "fetch_hashes", _refetch):
+        with (
+            patch.object(updater, "fetch_hashes", _refetch),
+            patch(
+                "lib.update.updaters.core.update_nix.get_current_nix_platform",
+                return_value="aarch64-darwin",
+            ),
+        ):
             async with aiohttp.ClientSession() as session:
                 return await collect_events(
                     lambda emit: updater.update_stream(
@@ -371,6 +377,188 @@ def test_download_updater_cannot_reuse_hashes_without_a_persisted_mapping() -> N
         UpdateContext(current=missing_mapping, preparing=True),
         info,
     )
+
+
+def test_download_updater_native_hasher_rejects_fake_hashes() -> None:
+    """38191092497: placeholder pin hashes must not look reusable on Darwin."""
+    updater = _ConfiguredDownloadUpdater()
+    info = VersionInfo(version="2026.9.0")
+    fake = SourceEntry.model_validate({
+        "version": "2026.9.0",
+        "hashes": {"aarch64-darwin": HashCollection.FAKE_HASH_PREFIX},
+        "urls": {"aarch64-darwin": "https://example.com/Yaak_2026.9.0_aarch64.dmg"},
+    })
+    with patch(
+        "lib.update.updaters.core.update_nix.get_current_nix_platform",
+        return_value="aarch64-darwin",
+    ):
+        assert not updater._can_reuse_persisted_hashes(
+            UpdateContext(current=fake, preparing=True),
+            info,
+        )
+    with patch(
+        "lib.update.updaters.core.update_nix.get_current_nix_platform",
+        return_value="aarch64-linux",
+    ):
+        assert updater._can_reuse_persisted_hashes(
+            UpdateContext(current=fake, preparing=True),
+            info,
+        )
+
+
+def test_pins_only_drops_stale_hashes_on_version_bump() -> None:
+    """38191092497: pins_only kept HQ/Arc/Yaak/Antigravity sha256s across bumps."""
+    current = SourceEntry.model_validate({
+        "version": "2026.8.1",
+        "hashes": {
+            "aarch64-darwin": "sha256-XtR5f/vaVCTXMnGy5cbHOw7X68p/j5dys0lK8p0JyE0="
+        },
+        "urls": {"aarch64-darwin": "https://example.com/Yaak_2026.8.1_aarch64.dmg"},
+    })
+    new_hash = "sha256-3tf4vXnPxtVX0ECX+HAw9J+yZtcBtRHNZuAwBMx/lAg="
+    hash_calls: list[object] = []
+
+    class _BumpingDownloadUpdater(_ConfiguredDownloadUpdater):
+        async def fetch_latest(
+            self, session: aiohttp.ClientSession, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = (session, context)
+            return VersionInfo(version="2026.9.0")
+
+        def get_download_url(self, platform: str, info: VersionInfo) -> str:
+            _ = platform
+            return f"https://example.com/Yaak_{info.version}_aarch64.dmg"
+
+    async def _run_pins() -> SourceEntry | None:
+        updater = _BumpingDownloadUpdater()
+        async with aiohttp.ClientSession() as session:
+            return await updater.update_stream(
+                current,
+                session,
+                context=UpdateContext(current=current, preparing=True, pins_only=True),
+            )
+
+    pinned = asyncio.run(_run_pins())
+    assert pinned is not None
+    assert pinned.version == "2026.9.0"
+    assert pinned.urls == {
+        "aarch64-darwin": "https://example.com/Yaak_2026.9.0_aarch64.dmg"
+    }
+    assert pinned.hashes.to_json() == {}
+
+    async def _refetch(*_args: object, **_kwargs: object) -> SourceHashes:
+        hash_calls.append(_args)
+        return {"aarch64-darwin": new_hash}
+
+    async def _run_native(entry: SourceEntry) -> SourceEntry | None:
+        updater = _BumpingDownloadUpdater()
+        with (
+            patch.object(updater, "fetch_hashes", _refetch),
+            patch(
+                "lib.update.updaters.core.update_nix.get_current_nix_platform",
+                return_value="aarch64-darwin",
+            ),
+        ):
+            async with aiohttp.ClientSession() as session:
+                return await updater.update_stream(
+                    entry,
+                    session,
+                    context=UpdateContext(current=entry, preparing=True),
+                )
+
+    hashed = asyncio.run(_run_native(pinned))
+    assert hash_calls
+    assert hashed is not None
+    assert hashed.hashes.mapping == {"aarch64-darwin": new_hash}
+
+    linux_calls: list[object] = []
+
+    async def _forbidden(*_args: object, **_kwargs: object) -> SourceHashes:
+        linux_calls.append(_args)
+        raise AssertionError("Linux ARM must not re-prefetch Darwin DMGs")
+
+    async def _run_linux(entry: SourceEntry) -> SourceEntry | None:
+        updater = _BumpingDownloadUpdater()
+        with (
+            patch.object(updater, "fetch_hashes", _forbidden),
+            patch(
+                "lib.update.updaters.core.update_nix.get_current_nix_platform",
+                return_value="aarch64-linux",
+            ),
+        ):
+            async with aiohttp.ClientSession() as session:
+                return await updater.update_stream(
+                    entry,
+                    session,
+                    context=UpdateContext(current=entry, preparing=True),
+                )
+
+    skipped = asyncio.run(_run_linux(pinned))
+    assert linux_calls == []
+    assert skipped is None
+
+
+def test_pins_only_keeps_current_hashes_when_identity_is_unchanged() -> None:
+    """pins_only must copy mapping, entry, or empty hashes when the pin matches."""
+    mapping_hash = "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo="
+
+    async def _run(entry: SourceEntry | None) -> SourceEntry | None:
+        updater = _ConfiguredDownloadUpdater()
+        async with aiohttp.ClientSession() as session:
+            return await updater.update_stream(
+                entry,
+                session,
+                context=UpdateContext(current=entry, preparing=True, pins_only=True),
+            )
+
+    mapped = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "hashes": {"x86_64-darwin": mapping_hash},
+        "urls": {"aarch64-darwin": "https://example.com/archive.tar.gz"},
+    })
+    recorded: list[SourceHashes] = []
+    original_build = _ConfiguredDownloadUpdater.build_result
+
+    def _record_build(
+        self: _ConfiguredDownloadUpdater,
+        info: VersionInfo,
+        hashes: SourceHashes,
+    ) -> SourceEntry:
+        recorded.append(hashes)
+        return original_build(self, info, hashes)
+
+    with (
+        patch.object(_ConfiguredDownloadUpdater, "build_result", _record_build),
+        patch(
+            "lib.update.updaters.core.update_nix.get_current_nix_platform",
+            return_value="aarch64-darwin",
+        ),
+    ):
+        kept_mapping = asyncio.run(_run(mapped))
+    assert recorded == [{"x86_64-darwin": mapping_hash}]
+    assert kept_mapping is None
+
+    listed_hash = HashEntry.create("sha256", mapping_hash)
+    listed = SourceEntry(
+        version="1.0.0",
+        hashes=HashCollection(entries=[listed_hash]),
+        urls={"aarch64-darwin": "https://example.com/archive.tar.gz"},
+    )
+    kept_entries = asyncio.run(_run(listed))
+    assert kept_entries is None
+
+    empty = SourceEntry(
+        version="1.0.0",
+        hashes=HashCollection(),
+        urls={"aarch64-darwin": "https://example.com/archive.tar.gz"},
+    )
+    kept_empty = asyncio.run(_run(empty))
+    assert kept_empty is None
+
+    fresh = asyncio.run(_run(None))
+    assert fresh is not None
+    assert fresh.version == "1.0.0"
+    assert fresh.hashes.to_json() == {}
 
 
 def test_updater_keeps_current_when_version_discovery_hits_transient_dns() -> None:

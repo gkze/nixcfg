@@ -640,7 +640,22 @@ class Updater(ABC):
             )
 
         if context.pins_only:
-            hashes = {} if context.current is None else context.current.hashes.to_json()
+            # 38191092497: copying HEAD hashes onto a new version/URL made
+            # every native hasher `_can_reuse_persisted_hashes` and ship
+            # Yaak 2026.8.1 / HQ 0.10.399 / Arc 1.167.1 / Antigravity
+            # 2.19.1 sha256s for the bumped artifacts. Empty hashes force
+            # the native platform to re-prefetch; foreign builders keep
+            # the pin and do not re-download Darwin DMGs (37539644019).
+            hashes: SourceHashes
+            pinned = context.current
+            if pinned is None or not is_latest:
+                hashes = {}
+            elif pinned.hashes.mapping is not None:
+                hashes = pinned.hashes.mapping
+            elif pinned.hashes.entries is not None:
+                hashes = list(pinned.hashes.entries)
+            else:
+                hashes = {}
         else:
             await emit(
                 UpdateEvent.status(
@@ -917,10 +932,16 @@ class DownloadHashUpdater(Updater):
         current = context.current
         if current is None or current.hashes.mapping is None:
             return False
-        return all(
-            current.hashes.mapping.get(platform)
-            for platform in self._platform_urls(info)
-        )
+        platforms = self._platform_urls(info)
+        native = update_nix.get_current_nix_platform()
+        if native in platforms:
+            existing = current.hashes.mapping.get(native)
+            return bool(existing) and not existing.startswith(
+                HashCollection.FAKE_HASH_PREFIX
+            )
+        # Foreign builder: keep the pin (real, empty, or fake) so Linux
+        # ARM does not re-prefetch Darwin DMGs (37539644019).
+        return True
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build a result including generated platform URLs."""

@@ -185,6 +185,7 @@ WARMUP_FATAL_BUILD_LIMIT = 32
 # this image; keep_going lifts the cap to MAX_SHARD_LOCAL_BUILDS.
 _LINUX_BUILDER_IMAGE = "nixos-disk-image"
 _WILL_BE_BUILT = re.compile(r"these (\d+) derivations? will be built", re.IGNORECASE)
+_THIS_WILL_BE_BUILT = re.compile(r"this derivation will be built", re.IGNORECASE)
 
 
 def is_linux_builder_image_command(command: str) -> bool:
@@ -1804,6 +1805,64 @@ def language_models_input_drvs(
 ) -> tuple[str, ...]:
     """Return ``rust_language_models`` ``.drv`` inputs of *agent_ui_drvs*."""
     return rust_crate_input_drvs(agent_ui_drvs, ("language_models",), run=run)
+
+
+def dry_run_will_be_built_count(
+    drv: str,
+    *,
+    run: _StoreRun | None = None,
+) -> int:
+    """Return how many derivations ``nix build --dry-run`` would compile."""
+    runner = subprocess.run if run is None else run
+    result = runner(
+        [
+            "nix",
+            "build",
+            "--dry-run",
+            "--no-link",
+            warmup_build_installable(drv),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode:
+        detail = _store_command_detail(result, fallback="nix build --dry-run failed")
+        msg = f"failed to dry-run cascade {drv}: {detail}"
+        raise WarmupError(msg)
+    stdout = result.stdout
+    stderr = result.stderr
+    out = stdout.decode() if isinstance(stdout, bytes) else stdout
+    err = stderr.decode() if isinstance(stderr, bytes) else stderr
+    text = f"{out}\n{err}"
+    match = _WILL_BE_BUILT.search(text)
+    if match:
+        return int(match.group(1))
+    if _THIS_WILL_BE_BUILT.search(text):
+        return 1
+    return 0
+
+
+def filter_cascade_realize_drvs(
+    drvs: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+    limit: int = MAX_SHARD_LOCAL_BUILDS,
+) -> tuple[str, ...]:
+    """Keep cascade items whose dry-run will-be-built stays under *limit*.
+
+    38191092497 slot 0: ``linear-cli-jsr-manifest.tsv.drv^*`` printed
+    1297 will-be-built after ~75m of 1-3 drv FODs. Fatal'ing the slot
+    threw away the rest of the stripe. Root shards still own umbrellas.
+    """
+    if limit < 1:
+        msg = "cascade will-be-built limit must be at least 1"
+        raise WarmupError(msg)
+    return tuple(
+        drv
+        for drv in dict.fromkeys(drvs)
+        if dry_run_will_be_built_count(drv, run=run) <= limit
+    )
 
 
 def query_drv_outputs(

@@ -758,6 +758,9 @@ def test_cascade_warmup_realizes_uncached_stripe_per_derivation(
 
     monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
     monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        pipeline, "filter_cascade_realize_drvs", lambda drvs, **_kwargs: drvs
+    )
     cached = "/nix/store/cccccccccccccccccccccccccccccccc-coreutils-9.10"
     missing = "/nix/store/dddddddddddddddddddddddddddddddd-libiconv-1"
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda path: path == cached)
@@ -847,6 +850,74 @@ def test_cascade_warmup_realizes_uncached_stripe_per_derivation(
     )
     assert slot_on_packages.exit_code != 0
     assert "--warmup-slot is only valid" in str(slot_on_packages.exception)
+
+
+def test_cascade_warmup_skips_umbrella_over_shard_ceiling(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38191092497: linear-cli-jsr-manifest.tsv 1297 will-be-built must not abort the stripe."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[object] = []
+
+    def warmup_realize(paths: object, *_args: object, **_kwargs: object) -> tuple[()]:
+        realized.append(paths)
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    leaf = "/nix/store/dddddddddddddddddddddddddddddddd-libiconv-1"
+    umbrella = "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-linear-cli-jsr-manifest.tsv"
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    from lib.update.ci import warmup as warmup_mod
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    def fake_count(drv: str, **_kwargs: object) -> int:
+        return 1297 if "linear-cli-jsr-manifest" in drv else 2
+
+    monkeypatch.setattr(warmup_mod, "dry_run_will_be_built_count", fake_count)
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(),
+            rustLayers=(),
+            cascadeOutputs=(leaf, umbrella),
+            cascadeLayers=((leaf, umbrella),),
+            outputDrvs={leaf: f"{leaf}.drv", umbrella: f"{umbrella}.drv"},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=0, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="cascade-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.gates == ()
+    assert realized == [(f"{leaf}.drv",)]
 
 
 def test_rust_warmup_defers_leaf_packages_from_others(
