@@ -1710,7 +1710,13 @@ def partition_compiler_input_drvs(
     return tuple(substitute), tuple(fetches)
 
 
-_DRV_PATH = re.compile(r"/nix/store/[0-9a-z]{32}-[^/\s]+\.drv")
+_DRV_PATH = re.compile(r"/nix/store/[0-9a-z]{32}-[^/\s']+\.drv")
+
+
+def command_store_drv(command: str) -> str:
+    """Return the first ``.drv`` store path in a Nix command, or empty."""
+    match = _DRV_PATH.search(command)
+    return match.group(0) if match else ""
 
 
 def is_force_local_allowed_build(path: str) -> bool:

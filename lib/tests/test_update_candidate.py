@@ -1398,6 +1398,78 @@ def test_deferred_compiler_rust_miss_skips_toolchain() -> None:
     assert not pipeline._is_deferred_compiler_rust_miss(stdenv_miss)
 
 
+def test_deferred_compiler_rust_drvs_keep_probe_order() -> None:
+    """38231309175: compile rust_xet-runtime before rust_xet-client."""
+    runtime = "/nix/store/r9pr51ll4a8b9m5yavl6njzanbvbilmq-rust_xet-runtime-1.6.0.drv"
+    client = "/nix/store/i60xdbbjfssbgmc8vv9pi2zrv21mk5l7-rust_xet-client-1.6.0.drv"
+    rustc = "/nix/store/cccccccccccccccccccccccccccccccc-rustc-1.98.1.drv"
+    assert pipeline._deferred_compiler_rust_drvs((
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{runtime}^*",
+            message="error: Cannot build rust_xet-runtime.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{rustc}^*",
+            message="these 406 derivations will be built:",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{client}^*",
+            message="these 406 derivations will be built:",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{runtime}^*",
+            message="duplicate probe",
+        ),
+    )) == (runtime, client)
+
+
+def test_realize_compiler_substitutes_compiles_deferred_rust_leaves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38231309175 slot 3: probe rust_xet-client 406, then compile leaves."""
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
+    runtime = "/nix/store/r9pr51ll4a8b9m5yavl6njzanbvbilmq-rust_xet-runtime-1.6.0.drv"
+    client = "/nix/store/i60xdbbjfssbgmc8vv9pi2zrv21mk5l7-rust_xet-client-1.6.0.drv"
+    rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    calls: list[tuple[object, bool, bool, object]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> object:
+        calls.append((
+            paths,
+            bool(kwargs.get("substitute_only")),
+            bool(kwargs.get("keep_going")),
+            kwargs.get("chunk"),
+        ))
+        if kwargs.get("substitute_only"):
+            return (
+                DerivationValidationFailure(
+                    source="root-warmup",
+                    installable=f"{runtime}^*",
+                    message="error: Cannot build rust_xet-runtime.",
+                ),
+                DerivationValidationFailure(
+                    source="root-warmup",
+                    installable=f"{client}^*",
+                    message="these 406 derivations will be built:",
+                ),
+            )
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    assert (
+        pipeline._realize_compiler_substitutes(
+            (rustc, runtime, client), flake_root=tmp_path
+        )
+        == ()
+    )
+    assert calls[0] == ((rustc, runtime, client), True, False, None)
+    assert calls[1] == ((runtime, client), False, True, 1)
+
+
 def test_rust_warmup_retries_unknown_1drv_helper_after_max_jobs_zero(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1576,7 +1648,7 @@ def test_rust_warmup_refuses_force_local_after_rustc_substitute_miss(
 def test_compiler_rust_cache_miss_still_force_locals_family(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """38088756238: rust_lsp-types --max-jobs 0 miss must not skip force-local."""
+    """38088756238: rust_lsp-types --max-jobs 0 miss compiles, then force-local."""
     candidate = _candidate_for_scope(prepared_run)
     monkeypatch.setattr(
         pipeline.validation,
@@ -1654,6 +1726,7 @@ def test_compiler_rust_cache_miss_still_force_locals_family(
     assert report.failures == ()
     assert realized == [
         ((rustc_drv, lsp_drv), False, False, True),
+        ((lsp_drv,), True, False, False),
         ((settings_drv,), True, True, False),
     ]
 
@@ -3455,7 +3528,8 @@ def test_hosted_zed_warmup_progress_keeps_going_past_workspace_family(
 
     rust-warmup others still fail closed at 32. Family keep_going and
     zed-warmup use the 400-drv ceiling so the 37-crate workspace compiles.
-    Bootstrap-scale 406 still aborts on substitute-only rust-warmup.
+    Bootstrap-scale 406 still aborts on substitute-only rustc/bmake.
+    rust_* 406 (38231309175 rust_xet-client) defers like cranelift 40.
     """
     monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
     rust = pipeline._hosted_validation_progress("rust-warmup")
@@ -3473,6 +3547,25 @@ def test_hosted_zed_warmup_progress_keeps_going_past_workspace_family(
                 "these 406 derivations will be built:",
             )
         )
+    xet = (
+        "nix build --no-link --max-jobs 0 "
+        "'/nix/store/i60xdbbjfssbgmc8vv9pi2zrv21mk5l7-rust_xet-client-1.6.0.drv^*'"
+    )
+    rust(ValidationCommandStarted(xet))
+    rust(ValidationCommandOutput(xet, "these 406 derivations will be built:"))
+    rust(
+        ValidationCommandOutput(
+            xet,
+            "error: Cannot build '/nix/store/i60xdbbjfssbgmc8vv9pi2zrv21mk5l7-rust_xet-client-1.6.0.drv'.",
+        )
+    )
+    rustc = (
+        "nix build --no-link --max-jobs 0 "
+        "'/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv^*'"
+    )
+    rust(ValidationCommandStarted(rustc))
+    with pytest.raises(WarmupFatalError, match="will-be-built"):
+        rust(ValidationCommandOutput(rustc, "these 406 derivations will be built:"))
     others = pipeline._hosted_validation_progress("rust-warmup")
     others(ValidationCommandStarted("nix build --keep-going /nix/store/other.drv"))
     with pytest.raises(WarmupFatalError, match="will-be-built"):

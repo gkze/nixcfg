@@ -30,6 +30,7 @@ from lib.update.ci.warmup import (
     assert_zed_family_realize_set,
     canary_crate_warmup_paths,
     classify_slot_warmup_will_be_built,
+    command_store_drv,
     compiler_input_drvs,
     darwin_output_paths,
     default_cache_present,
@@ -767,6 +768,16 @@ def test_realize_warmup_outputs_builds_drv_outputs(tmp_path: Path) -> None:
     assert realize_warmup_outputs((drv,), flake_root=tmp_path, run=drv_run) == ()
     assert f"{drv}^*" in drv_calls[0]
     assert drv not in drv_calls[0]
+
+
+def test_command_store_drv_reads_quoted_drv_star() -> None:
+    """Hosted rust-warmup logs quote foo.drv^*; the .drv identity is enough."""
+    drv = "/nix/store/i60xdbbjfssbgmc8vv9pi2zrv21mk5l7-rust_xet-client-1.6.0.drv"
+    assert command_store_drv(f"nix build --no-link --max-jobs 0 '{drv}^*'") == drv
+    assert command_store_drv("nix build --max-jobs 0 /nix/store/cranelift.drv") == ""
+    assert (
+        command_store_drv("nix build path:.#checks.aarch64-darwin.root-closures") == ""
+    )
 
 
 def test_warmup_drvs_map_outputs_and_import_register_files(tmp_path: Path) -> None:

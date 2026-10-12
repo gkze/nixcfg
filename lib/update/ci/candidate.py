@@ -48,6 +48,7 @@ from lib.update.ci.warmup import (
     assert_force_local_dry_run,
     assert_zed_family_realize_set,
     canary_crate_warmup_paths,
+    command_store_drv,
     compiler_input_drvs,
     export_warmup_drvs,
     filter_cascade_realize_drvs,
@@ -236,14 +237,16 @@ def _hosted_validation_progress(
     # root-deps exists to realize the linux-builder image. zed-warmup
     # compiles the workspace family. Both use the 400-drv ceiling.
     stream_keep_going = keep_going or source in {"zed-warmup", "root-deps"}
+    current_drv = ""
 
     def emit(event: validation.ValidationProgressEvent) -> None:
-        nonlocal substitute_only, stream_keep_going
+        nonlocal substitute_only, stream_keep_going, current_drv
         if isinstance(event, validation.ValidationCommandFinished):
             return
         if isinstance(event, validation.ValidationCommandStarted):
             text = f"$ {event.command}"
             substitute_only = "--max-jobs 0" in event.command
+            current_drv = command_store_drv(event.command)
             if is_linux_builder_image_command(event.command):
                 stream_keep_going = True
             jobs.record_runner_storage(f"before-{source}")
@@ -256,11 +259,21 @@ def _hosted_validation_progress(
         sys.stderr.write(f"[{source}] {redact_urls(text)}\n")
         sys.stderr.flush()
         if source in _FAIL_FAST_PROGRESS_SOURCES or source == "zed-warmup":
-            raise_if_warmup_fatal(
-                text,
-                substitute_only=substitute_only,
-                keep_going=stream_keep_going,
+            # 38231309175 slot 3: rust_xet-client --max-jobs 0 printed
+            # 406 because sibling rust_* were only probed. That is the
+            # cranelift-40 deferral, not rustc/bmake bootstrap. Those
+            # toolchain 406s still fail closed.
+            rust_substitute_miss = (
+                substitute_only
+                and is_crate2nix_rust_output(current_drv)
+                and "will be built" in text.lower()
             )
+            if not rust_substitute_miss:
+                raise_if_warmup_fatal(
+                    text,
+                    substitute_only=substitute_only,
+                    keep_going=stream_keep_going,
+                )
 
     return emit
 
@@ -676,17 +689,30 @@ def _retry_substitute_only_helpers(
 def _is_deferred_compiler_rust_miss(
     failure: validation.DerivationValidationFailure,
 ) -> bool:
-    """Return whether a substitute-only rust_* miss should force-local later.
+    """Return whether a substitute-only rust_* miss should compile locally.
 
     38088756238 substituted rustc/stdenv, then --max-jobs 0'd 80 third-party
-    rust_* (lsp-types, but-*, gix-*) that were not in gkze. Those
-    ``will be built`` lines aborted before ``--no-substitute``. rustc /
-    stdenv misses stay fatal. Missing rust_* compile with the family.
+    rust_* (lsp-types, but-*, gix-*) that were not in gkze. 38231309175
+    slot 3: rust_xet-client printed 406 will-be-built for that same
+    uncompiled sibling graph. rustc / stdenv misses stay fatal.
     """
     drv = failure.installable.removesuffix("^*")
     if is_compiler_must_substitute_store_path(drv):
         return False
     return is_crate2nix_rust_output(drv)
+
+
+def _deferred_compiler_rust_drvs(
+    failures: tuple[validation.DerivationValidationFailure, ...],
+) -> tuple[str, ...]:
+    """Return substitute-only rust_* misses in first-seen probe order."""
+    return tuple(
+        dict.fromkeys(
+            failure.installable.removesuffix("^*")
+            for failure in failures
+            if _is_deferred_compiler_rust_miss(failure)
+        )
+    )
 
 
 def _realize_compiler_substitutes(
@@ -695,11 +721,13 @@ def _realize_compiler_substitutes(
     flake_root: Path,
     progress_source: str = "rust-warmup",
 ) -> tuple[validation.DerivationValidationFailure, ...]:
-    """``--max-jobs 0`` first; retry cache-miss 1-drv Unix helpers locally.
+    """``--max-jobs 0`` first; retry helpers; compile deferred rust_* leaves.
 
-    Keep rustc/stdenv failures. Defer crate2nix rust_* cache misses so
-    force-local can compile them with the SVH family. Do not overwrite
-    a rustc miss with a successful helper retry.
+    Keep rustc/stdenv failures. 38231309175 slot 3: rust_xet-client's
+    406 will-be-built was the uncompiled sibling rust_* graph, not
+    rustc bootstrap. Compile those rust_* one drv at a time so the
+    umbrella drops under 400 before force-local extension_host. Do not
+    overwrite a rustc miss with a successful helper retry.
     """
     failures = realize_warmup_outputs(
         substitute,
@@ -708,21 +736,36 @@ def _realize_compiler_substitutes(
         substitute_only=True,
     )
     retry = _retry_substitute_only_helpers(failures)
+    deferred = _deferred_compiler_rust_drvs(failures)
     stubborn = tuple(
         failure
         for failure in failures
         if failure.installable.removesuffix("^*") not in retry
-        and not _is_deferred_compiler_rust_miss(failure)
+        and failure.installable.removesuffix("^*") not in deferred
     )
     if stubborn:
         return failures
-    if not retry:
-        return ()
-    return realize_warmup_outputs(
-        retry,
-        flake_root=flake_root,
-        progress=_hosted_validation_progress(progress_source),
-    )
+    compiled: list[validation.DerivationValidationFailure] = []
+    if retry:
+        compiled.extend(
+            realize_warmup_outputs(
+                retry,
+                flake_root=flake_root,
+                progress=_hosted_validation_progress(progress_source),
+            )
+        )
+    if deferred:
+        compiled.extend(
+            realize_warmup_outputs(
+                deferred,
+                flake_root=flake_root,
+                progress=_hosted_validation_progress(progress_source, keep_going=True),
+                print_build_logs=True,
+                keep_going=True,
+                chunk=1,
+            )
+        )
+    return tuple(compiled)
 
 
 def _realize_svh_family(
