@@ -7,3 +7,4 @@ canary-crates: settings settings_content settings_json settings_macros
 canary-slots: 0
 2026-10-11T15:25:31Z two-plus cascade after 38146388927 remaining=829/836
 2026-10-11T20:54:30Z rust_zed SVH workspace peel after 38151215158 collab_ui E0463
+2026-10-12T01:13:51Z cascade .drv^* after 38174166107 don't-know-how-to-build outputs
