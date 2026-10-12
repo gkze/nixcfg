@@ -1,16 +1,23 @@
 """Reason release discovery and realized bundle identity contracts."""
 
+from __future__ import annotations
+
 import plistlib
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from lib.tests._updater_helpers import run_async
 from lib.update.candidate import ResolvedVersion
+from lib.update.events import EventSink, ignore_event
 from lib.update.updaters import UpdateContext
 from packages.ara import updater, validate_artifact
+
+if TYPE_CHECKING:
+    from lib.update.config import UpdateConfig
 
 
 @dataclass(slots=True)
@@ -180,6 +187,48 @@ def test_reason_rejects_missing_versioned_location(
                 context=UpdateContext(current=None),
             )
         )
+
+
+def test_reason_fod_name_matches_fetch_dmg() -> None:
+    """Prefetch and fetch-dmg must share one store name."""
+    assert updater.AraUpdater().fod_name("0.1.84") == "Reason_0.1.84_aarch64.dmg"
+
+
+def test_reason_prefetch_uses_fod_name_not_url_basename(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """38215834334 hashed desktop-download; cascade then rebuilt after 0.1.85."""
+    seen: list[tuple[str, str | None]] = []
+
+    async def fake_hash(
+        source: str,
+        url: str,
+        *,
+        config: UpdateConfig,
+        emit: EventSink = ignore_event,
+        name: str | None = None,
+    ) -> str:
+        _ = (source, config, emit)
+        seen.append((url, name))
+        return "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+    monkeypatch.setattr(updater, "compute_sri_hash", fake_hash)
+    hashes = run_async(
+        updater.AraUpdater().fetch_hashes(
+            updater.VersionInfo(version="0.1.84"),
+            _FakeSession(_FakeResponse()),
+            context=UpdateContext(current=None),
+        )
+    )
+    assert hashes == {
+        "aarch64-darwin": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    }
+    assert seen == [
+        (
+            updater.AraUpdater.PLATFORMS["aarch64-darwin"],
+            "Reason_0.1.84_aarch64.dmg",
+        )
+    ]
 
 
 def test_reason_validates_aarch64_darwin_package() -> None:

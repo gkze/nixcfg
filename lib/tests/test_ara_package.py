@@ -189,6 +189,10 @@ def test_ara_fetch_dmg_fail_closes_on_latest_redirect_drift() -> None:
     derivation = expect_instance(package.output, FunctionCall)
     assert_nix_ast_equal(derivation.name, "stdenvNoCC.mkDerivation")
     args = expect_instance(derivation.argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(args.values, "name").value,
+        '"Reason_${version}_aarch64.dmg"',
+    )
     assert_nix_ast_equal(expect_binding(args.values, "outputHashMode").value, '"flat"')
     assert_nix_ast_equal(expect_binding(args.values, "outputHash").value, "hash")
     assert_nix_ast_equal(expect_binding(args.values, "preferLocalBuild").value, "true")

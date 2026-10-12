@@ -1,15 +1,20 @@
 """Resolve Reason (formerly Ara) through its official desktop update feed."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, ClassVar
 
 import aiohttp
 
 from lib import json_utils
 from lib.update.derivation_validation import DerivationValidation
+from lib.update.events import EventSink, ignore_event
 from lib.update.net import HTTP_BAD_REQUEST, fetch_json
+from lib.update.process import compute_sri_hash
 from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 
 if TYPE_CHECKING:
+    from lib.nix.models.sources import SourceHashes
     from lib.update.updaters import UpdateContext
 
 
@@ -104,3 +109,31 @@ class AraUpdater(DownloadHashUpdater):
                 )
                 raise RuntimeError(msg)
         return VersionInfo(version=pin_version)
+
+    def fod_name(self, version: str) -> str:
+        """Match fetch-dmg.nix so prefetch lands on the FOD output path."""
+        return f"Reason_{version}_aarch64.dmg"
+
+    async def fetch_hashes(
+        self,
+        info: VersionInfo,
+        session: aiohttp.ClientSession,
+        *,
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceHashes:
+        """Prefetch under the FOD name so later jobs substitute instead of re-GET.
+
+        Update 38215834334 hashed ``desktop-download`` then cascade rebuilt
+        ``Reason_0.1.84_aarch64.dmg`` after latest moved to 0.1.85.
+        """
+        _ = (session, context)
+        url = self.get_download_url("aarch64-darwin", info)
+        hash_value = await compute_sri_hash(
+            self.name,
+            url,
+            name=self.fod_name(info.version),
+            config=self.config,
+            emit=emit,
+        )
+        return {"aarch64-darwin": hash_value}
