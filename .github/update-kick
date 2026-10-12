@@ -13,3 +13,4 @@ canary-slots: 0
 2026-10-12T06:54:21Z persist pins_only replace after 38204580181 cascade slot 4 FODs
 2026-10-12T07:05:00Z Reason Location pin after 38214877123 header 0.1.64 vs 0.1.84
 2026-10-12T09:38:46Z Reason FOD name + nested pkg Contents after 38215834334
+2026-10-12T13:45:54Z rust_xet-client leaf compile + reason rename after 38231309175 slot 3 406 wbb
