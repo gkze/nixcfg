@@ -14,7 +14,7 @@
 # Location so the second hop cannot race to a newer latest. Do not
 # require x-ara-desktop-version: Update 38214877123 saw header 0.1.64
 # while Location named 0.1.84. The object path is the pin. The FOD
-# name must match AraUpdater.fod_name so prepare-darwin prefetch is
+# name must match ReasonUpdater.fod_name so prepare-darwin prefetch is
 # substitutable (Update 38215834334 rebuilt after latest moved).
 #
 # Do not pass SSL_CERT_FILE through impureEnvVars. Hosted Darwin Nix

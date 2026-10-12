@@ -47,7 +47,6 @@ def test_full_inventory_respects_package_platforms(
     }
     darwin = {
         "antigravity",
-        "ara",
         "baseten-switch",
         "bb",
         "buzz",
@@ -60,6 +59,7 @@ def test_full_inventory_respects_package_platforms(
         "mach-studio",
         "openchamber",
         "paseo",
+        "reason",
         "reflect-open",
         "rio",
         "unsloth",

@@ -371,9 +371,9 @@ def test_native_job_heartbeats_while_publishing_prefetched_paths(
 
 def test_failure_summary_names_failed_sources(tmp_path: Path) -> None:
     result = tmp_path / "result.json"
-    result.write_text(json.dumps({"success": False, "errors": ["ara", "buzz"]}))
+    result.write_text(json.dumps({"success": False, "errors": ["reason", "buzz"]}))
     assert jobs._failure_summary(result) == (
-        "Updater failed for: ara, buzz. Inspect the retained result and run-log artifacts."
+        "Updater failed for: reason, buzz. Inspect the retained result and run-log artifacts."
     )
 
 
@@ -1706,7 +1706,7 @@ def test_pr_quality_certify_covers_prepare_updater_contracts() -> None:
                 pytest_files = values[3:]
                 break
     assert "lib/tests/test_overlay_lane_updaters.py" in pytest_files
-    assert "lib/tests/test_ara_package.py" in pytest_files
+    assert "lib/tests/test_reason_package.py" in pytest_files
     assert "packages/linear-cli/updater_test.py" in pytest_files
 
 

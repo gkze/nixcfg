@@ -14,7 +14,7 @@ from lib.tests._updater_helpers import run_async
 from lib.update.candidate import ResolvedVersion
 from lib.update.events import EventSink, ignore_event
 from lib.update.updaters import UpdateContext
-from packages.ara import updater, validate_artifact
+from packages.reason import updater, validate_artifact
 
 if TYPE_CHECKING:
     from lib.update.config import UpdateConfig
@@ -45,7 +45,7 @@ class _FakeSession:
 
 def _feed(monkeypatch: pytest.MonkeyPatch, payload: object) -> None:
     async def feed(_session, url, *, config):
-        assert url == updater.AraUpdater.FEED_URL
+        assert url == updater.ReasonUpdater.FEED_URL
         assert config is not None
         return payload
 
@@ -60,7 +60,7 @@ def test_reason_feed_does_not_persist_signed_urls(
         monkeypatch,
         {"name": "0.1.57", "url": "https://example.test/private?signature=test"},
     )
-    instance = updater.AraUpdater()
+    instance = updater.ReasonUpdater()
     session = _FakeSession(
         _FakeResponse(
             headers={
@@ -95,7 +95,9 @@ def test_reason_feed_rejects_missing_version(
     _feed(monkeypatch, payload)
     with pytest.raises((TypeError, ValueError)):
         run_async(
-            updater.AraUpdater().fetch_latest(None, context=UpdateContext(current=None))
+            updater.ReasonUpdater().fetch_latest(
+                None, context=UpdateContext(current=None)
+            )
         )
 
 
@@ -108,7 +110,7 @@ def test_reason_uses_location_version_when_feed_and_header_lag(
         {"name": "0.1.64", "url": "https://example.test/private?signature=test"},
     )
     info = run_async(
-        updater.AraUpdater().fetch_latest(
+        updater.ReasonUpdater().fetch_latest(
             _FakeSession(
                 _FakeResponse(
                     headers={
@@ -142,7 +144,7 @@ def test_reason_rejects_location_without_versioned_object_segment(
     _feed(monkeypatch, {"name": "0.1.84"})
     with pytest.raises(RuntimeError, match="not a versioned object"):
         run_async(
-            updater.AraUpdater().fetch_latest(
+            updater.ReasonUpdater().fetch_latest(
                 _FakeSession(_FakeResponse(headers={"location": location})),
                 context=UpdateContext(current=None),
             )
@@ -156,7 +158,7 @@ def test_reason_rejects_location_that_is_not_the_versioned_object(
     _feed(monkeypatch, {"name": "0.1.71"})
     with pytest.raises(RuntimeError, match="not a versioned object"):
         run_async(
-            updater.AraUpdater().fetch_latest(
+            updater.ReasonUpdater().fetch_latest(
                 _FakeSession(
                     _FakeResponse(
                         headers={
@@ -180,7 +182,7 @@ def test_reason_rejects_missing_versioned_location(
     _feed(monkeypatch, {"name": "0.1.73"})
     with pytest.raises(RuntimeError, match="not a versioned object"):
         run_async(
-            updater.AraUpdater().fetch_latest(
+            updater.ReasonUpdater().fetch_latest(
                 _FakeSession(
                     _FakeResponse(headers={"x-ara-desktop-version": "0.1.73"})
                 ),
@@ -191,7 +193,7 @@ def test_reason_rejects_missing_versioned_location(
 
 def test_reason_fod_name_matches_fetch_dmg() -> None:
     """Prefetch and fetch-dmg must share one store name."""
-    assert updater.AraUpdater().fod_name("0.1.84") == "Reason_0.1.84_aarch64.dmg"
+    assert updater.ReasonUpdater().fod_name("0.1.84") == "Reason_0.1.84_aarch64.dmg"
 
 
 def test_reason_prefetch_uses_fod_name_not_url_basename(
@@ -214,7 +216,7 @@ def test_reason_prefetch_uses_fod_name_not_url_basename(
 
     monkeypatch.setattr(updater, "compute_sri_hash", fake_hash)
     hashes = run_async(
-        updater.AraUpdater().fetch_hashes(
+        updater.ReasonUpdater().fetch_hashes(
             updater.VersionInfo(version="0.1.84"),
             _FakeSession(_FakeResponse()),
             context=UpdateContext(current=None),
@@ -225,7 +227,7 @@ def test_reason_prefetch_uses_fod_name_not_url_basename(
     }
     assert seen == [
         (
-            updater.AraUpdater.PLATFORMS["aarch64-darwin"],
+            updater.ReasonUpdater.PLATFORMS["aarch64-darwin"],
             "Reason_0.1.84_aarch64.dmg",
         )
     ]
@@ -233,7 +235,7 @@ def test_reason_prefetch_uses_fod_name_not_url_basename(
 
 def test_reason_validates_aarch64_darwin_package() -> None:
     """Closures was the first Nix fetch; packages must realize the FOD too."""
-    validations = updater.AraUpdater.get_derivation_validations()
+    validations = updater.ReasonUpdater.get_derivation_validations()
     assert len(validations) == 1
     assert validations[0].mode == "build"
     assert validations[0].systems == ("aarch64-darwin",)
@@ -249,7 +251,7 @@ def test_reason_download_discovery_does_not_hide_http_errors(
     _feed(monkeypatch, {"name": "0.1.64"})
     with pytest.raises(RuntimeError, match=f"discovery failed with HTTP {status}"):
         run_async(
-            updater.AraUpdater().fetch_latest(
+            updater.ReasonUpdater().fetch_latest(
                 _FakeSession(_FakeResponse(status=status, reason="Unavailable")),
                 context=UpdateContext(current=None),
             )

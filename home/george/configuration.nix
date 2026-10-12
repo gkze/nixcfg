@@ -176,7 +176,6 @@
         antigravity.package = pkgs.antigravity;
         appcleaner.package = pkgs.appcleaner;
         arc.package = pkgs.arc;
-        ara.package = pkgs.ara;
         betterdisplay.package = pkgs.betterdisplay;
         capy.package = pkgs.capy;
         claude.package = pkgs.claude;
@@ -224,6 +223,7 @@
         pica.package = pkgs.pica;
         postman.package = pkgs.postman;
         raycast.package = pkgs.raycast;
+        reason.package = pkgs.reason;
         rectangle.package = pkgs.rectangle;
         rio.package = pkgs.rio;
         "signal-beta" = {

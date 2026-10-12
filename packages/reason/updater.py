@@ -41,10 +41,10 @@ def _versioned_object_version(location: str, prefix: str) -> str:
 
 
 @register_updater
-class AraUpdater(DownloadHashUpdater):
-    """Keep the existing package identity while following the vendor rebrand."""
+class ReasonUpdater(DownloadHashUpdater):
+    """Pin Reason's latest-only Darwin desktop download."""
 
-    name = "ara"
+    name = "reason"
     FEED_URL = (
         "https://reasonmachines.com/api/desktop-update"
         "?target=darwin&arch=aarch64&current_version=0.0.0&channel=stable"

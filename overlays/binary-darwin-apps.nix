@@ -19,7 +19,6 @@ in
   airfoil = callDarwinAppPackage "airfoil";
   antigravity = callDarwinAppPackage "antigravity";
   arc = callDarwinAppPackage "arc";
-  ara = callDarwinAppPackage "ara";
   aside = callDarwinAppPackage "aside";
   # checkPhase skip for the hosted macos-15 SIGTRAP lives on the package
   # (selfSource.pins.checkSkipVersion), not a handwritten overlay pin.
@@ -67,6 +66,7 @@ in
   pants-preview = callDarwinAppPackage "pants-preview";
   paseo = callDarwinAppPackage "paseo";
   pica = callDarwinAppPackage "pica";
+  reason = callDarwinAppPackage "reason";
   reflect-open = callDarwinAppPackage "reflect-open";
   screen-studio = callDarwinAppPackage "screen-studio";
   signal-beta = callDarwinAppPackage "signal-beta";

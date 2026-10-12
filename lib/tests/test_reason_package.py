@@ -1,4 +1,4 @@
-"""Structural tests for the Reason (ara) version-pinned DMG fetch."""
+"""Structural tests for the Reason version-pinned DMG fetch."""
 
 import os
 import shutil
@@ -81,7 +81,7 @@ fi
 
 def _fetch_dmg_build_command() -> str:
     package = expect_instance(
-        nix_file_expr("packages/ara/fetch-dmg.nix"), FunctionDefinition
+        nix_file_expr("packages/reason/fetch-dmg.nix"), FunctionDefinition
     )
     derivation = expect_instance(package.output, FunctionCall)
     args = expect_instance(derivation.argument, AttributeSet)
@@ -152,7 +152,7 @@ def _assert_pin_current_reason(source: SourceEntry) -> None:
         assert query == {"arch": "aarch64"}
 
 
-def test_ara_sources_pin_current_reason_stable() -> None:
+def test_reason_sources_pin_current_stable() -> None:
     """37385596458 hashed 0.1.71 then fetched different latest bytes.
 
     Persist the public latest-only redirect plus an opaque version/hash.
@@ -161,13 +161,13 @@ def test_ara_sources_pin_current_reason_stable() -> None:
     """
     _assert_pin_current_reason(
         SourceEntry.model_validate_json(
-            (REPO_ROOT / "packages/ara/sources.json").read_text(encoding="utf-8")
+            (REPO_ROOT / "packages/reason/sources.json").read_text(encoding="utf-8")
         )
     )
 
 
-def test_ara_pin_current_contract_accepts_a_later_reason_pin() -> None:
-    """A successful ara bump must not fail publish by freezing the last pin."""
+def test_reason_pin_current_contract_accepts_a_later_pin() -> None:
+    """A successful Reason bump must not fail publish by freezing the last pin."""
     _assert_pin_current_reason(
         SourceEntry.model_validate({
             "version": "0.1.74",
@@ -181,10 +181,10 @@ def test_ara_pin_current_contract_accepts_a_later_reason_pin() -> None:
     )
 
 
-def test_ara_fetch_dmg_fail_closes_on_latest_redirect_drift() -> None:
+def test_reason_fetch_dmg_fail_closes_on_latest_redirect_drift() -> None:
     """Unsigned Tigris keys 403; signed ones expire; check version before GET."""
     package = expect_instance(
-        nix_file_expr("packages/ara/fetch-dmg.nix"), FunctionDefinition
+        nix_file_expr("packages/reason/fetch-dmg.nix"), FunctionDefinition
     )
     derivation = expect_instance(package.output, FunctionCall)
     assert_nix_ast_equal(derivation.name, "stdenvNoCC.mkDerivation")
@@ -246,7 +246,7 @@ def test_ara_fetch_dmg_fail_closes_on_latest_redirect_drift() -> None:
     assert head_curl.end_byte < case_gate.start_byte < get_curl.start_byte
 
 
-def test_ara_fetch_dmg_script_rejects_version_and_location_drift(
+def test_reason_fetch_dmg_script_rejects_version_and_location_drift(
     tmp_path: Path,
 ) -> None:
     """The fail-closed HEAD must run; a later latest must not be fetched."""
@@ -292,9 +292,9 @@ def test_ara_fetch_dmg_script_rejects_version_and_location_drift(
     assert (tmp_path / "ok" / "Reason.dmg").read_bytes() == b"reason-dmg-bytes"
 
 
-def test_ara_package_overrides_moving_url_src() -> None:
+def test_reason_package_overrides_moving_url_src() -> None:
     """mkDmgApp7zz would fetch the latest-only URL without a version guard."""
-    src = nix_file_binding_expr("packages/ara/default.nix", "src")
+    src = nix_file_binding_expr("packages/reason/default.nix", "src")
     assert_nix_ast_equal(
         src,
         """callPackage ./fetch-dmg.nix {
