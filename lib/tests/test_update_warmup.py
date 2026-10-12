@@ -97,6 +97,7 @@ from lib.update.ci.warmup import (
     slot_warmup_paths,
     source_fetch_input_drvs,
     source_fetch_network_ready,
+    source_fetch_publish_leftover_line,
     source_fetch_retry_drvs,
     substitutable_paths,
     unique_drvs_for_outputs,
@@ -1974,9 +1975,17 @@ def test_realize_source_fetch_drvs_fails_closed_after_retry_miss(
 
 
 def test_publish_warmup_source_fetches_realizes_rust_fods(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """plan-shards must push rust_* source FODs before warmup slots start."""
+    """plan-shards substitutes rust_* source FODs; leftovers do not fail the plan.
+
+    38296208698 fail-closed plan-shards on 562 leftover crate2nix FODs
+    after ~50 min of Linux fetch and skipped every Darwin job. Hits
+    still push via the post-build-hook. Darwin rust-warmup fail-closes
+    a needed source after DNS-gated retry.
+    """
     from lib.update.ci.warmup import RootWarmupStats, WarmupPlan
 
     rust = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0"
@@ -2005,30 +2014,51 @@ def test_publish_warmup_source_fetches_realizes_rust_fods(
         notes="fixture",
     )
     assert rust_warmup_output_drvs(plan) == (rust_drv,)
+
+    def refuse_realize(*_args: object, **_kwargs: object) -> tuple[()]:
+        msg = "empty FOD set must not realize"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(
+        "lib.update.ci.warmup.source_fetch_input_drvs", lambda *_a, **_k: ()
+    )
+    assert (
+        publish_warmup_source_fetches(plan, flake_root=tmp_path, realize=refuse_realize)
+        == ()
+    )
     monkeypatch.setattr(
         "lib.update.ci.warmup.source_fetch_input_drvs",
         lambda *_a, **_k: (source, convert_case),
     )
-    seen: list[tuple[str, ...]] = []
-
-    def realize(paths: object, *_args: object, **_kwargs: object) -> tuple[()]:
-        seen.append(tuple(paths))
-        return ()
-
-    monkeypatch.setattr("lib.update.ci.warmup.realize_source_fetch_drvs", realize)
-    publish_warmup_source_fetches(plan, flake_root=tmp_path)
-    assert seen == [(source, convert_case)]
+    seen: list[tuple[tuple[str, ...], bool, bool]] = []
     leftover = DerivationValidationFailure(
         source="root-warmup",
         installable=f"{source}^*",
         message="error: Cannot build '/nix/store/...-source.drv'.",
     )
-    monkeypatch.setattr(
-        "lib.update.ci.warmup.realize_source_fetch_drvs",
-        lambda *_a, **_k: (leftover,),
+
+    def realize(
+        paths: object, *_args: object, **kwargs: object
+    ) -> tuple[DerivationValidationFailure, ...]:
+        seen.append((
+            tuple(paths),
+            bool(kwargs.get("substitute_only")),
+            bool(kwargs.get("keep_going")),
+        ))
+        return (leftover,)
+
+    published = publish_warmup_source_fetches(
+        plan, flake_root=tmp_path, realize=realize
     )
-    with pytest.raises(WarmupError, match="source FOD publish failed"):
-        publish_warmup_source_fetches(plan, flake_root=tmp_path)
+    assert seen == [((source, convert_case), True, True)]
+    assert published == (leftover,)
+    assert source_fetch_publish_leftover_line(published) in capsys.readouterr().err
+    assert (
+        publish_warmup_source_fetches(
+            plan, flake_root=tmp_path, realize=lambda *_a, **_k: ()
+        )
+        == ()
+    )
 
 
 def test_realize_warmup_substitute_only_is_max_jobs_zero(tmp_path: Path) -> None:

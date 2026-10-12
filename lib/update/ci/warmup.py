@@ -30,6 +30,7 @@ import json
 import re
 import socket
 import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -1821,40 +1822,55 @@ def realize_source_fetch_drvs(
     return (*stubborn, *retried)
 
 
+def source_fetch_publish_leftover_line(
+    failures: Sequence[DerivationValidationFailure],
+) -> str:
+    """Return the planner leftover line; Darwin still fail-closes a needed miss."""
+    sample = ", ".join(failure.installable for failure in failures[:4])
+    return (
+        f"source FOD publish leftover ({len(failures)}): {sample}. "
+        "Darwin rust-warmup fetches misses after DNS-gated retry."
+    )
+
+
 def publish_warmup_source_fetches(
     plan: WarmupPlan,
     *,
     flake_root: Path,
     progress: ValidationProgress | None = None,
-    resolve: Callable[[str, int], object] | None = None,
-    sleep: Callable[[float], None] | None = None,
     run: _StoreRun | None = None,
-) -> None:
-    """Realize rust-warmup source FODs on plan-shards so Cachix has them.
+    realize: Callable[..., tuple[DerivationValidationFailure, ...]] | None = None,
+) -> tuple[DerivationValidationFailure, ...]:
+    """Substitute rust-warmup source FODs on plan-shards; never fail the plan.
 
     Compiled ``rust_*`` outputs do not retain source tarballs in their
     runtime closure. 38258066093 substituted ``rust_convert_case-0.11.0``
     from gkze, then had to fetch ``convert_case-0.11.0.tar.gz`` and
-    sphinx ``source.drv`` from upstream. Push the FODs from the planner
-    (post-build-hook) so warmup substitutes instead of hitting GitHub
-    or crates.io.
+    sphinx ``source.drv`` from upstream. Push cache hits from the
+    planner (post-build-hook) so warmup can substitute them.
+
+    38296208698 then fail-closed plan-shards on 562 leftover crate2nix
+    FODs after ~50 min of Linux fetch. Those hashes often miss
+    cache.nixos.org and were never on gkze; the planner is not the
+    owner of a needed source. ``--max-jobs 0 --keep-going`` pushes
+    hits. Darwin rust-warmup still DNS-gates and fail-closes a miss
+    so the parent rust_* never compiles against a missing source.
     """
     fods = source_fetch_input_drvs(rust_warmup_output_drvs(plan), run=run)
-    failures = realize_source_fetch_drvs(
+    if not fods:
+        return ()
+    builder = realize_warmup_outputs if realize is None else realize
+    failures = builder(
         fods,
         flake_root=flake_root,
         progress=progress,
-        resolve=resolve,
-        sleep=sleep,
+        substitute_only=True,
+        keep_going=True,
     )
-    if not failures:
-        return
-    sample = ", ".join(failure.installable for failure in failures[:4])
-    msg = (
-        f"source FOD publish failed ({len(failures)}): {sample}. "
-        "Warmup must not compile rust_* against a missing source."
-    )
-    raise WarmupError(msg)
+    if failures:
+        sys.stderr.write(source_fetch_publish_leftover_line(failures) + "\n")
+        sys.stderr.flush()
+    return failures
 
 
 _DRV_PATH = re.compile(r"/nix/store/[0-9a-z]{32}-[^/\s']+\.drv")
