@@ -23,6 +23,7 @@ from lib.update.events import (
     ignore_event,
 )
 from lib.update.nix import PreparedProbe, _build_package_path_attr_expr
+from lib.update.source_runner import publish_source_update
 from lib.update.updaters import (
     DenoDepsHashUpdater,
     DenoManifestUpdater,
@@ -498,6 +499,43 @@ def test_pins_only_drops_stale_hashes_on_version_bump() -> None:
     assert skipped is None
 
 
+def test_pins_only_drops_entry_hashes_on_version_bump() -> None:
+    """38203865711: empty mapping hashes cannot merge onto HashEntry sources."""
+    listed_hash = HashEntry.create(
+        "sha256", "sha256-XtR5f/vaVCTXMnGy5cbHOw7X68p/j5dys0lK8p0JyE0="
+    )
+    current = SourceEntry(
+        version="2026.8.1",
+        hashes=HashCollection(entries=[listed_hash]),
+        urls={"aarch64-darwin": "https://example.com/Yaak_2026.8.1_aarch64.dmg"},
+    )
+
+    class _BumpingDownloadUpdater(_ConfiguredDownloadUpdater):
+        async def fetch_latest(
+            self, session: aiohttp.ClientSession, *, context: UpdateContext
+        ) -> VersionInfo:
+            _ = (session, context)
+            return VersionInfo(version="2026.9.0")
+
+        def get_download_url(self, platform: str, info: VersionInfo) -> str:
+            _ = platform
+            return f"https://example.com/Yaak_{info.version}_aarch64.dmg"
+
+    async def _run_pins() -> SourceEntry | None:
+        updater = _BumpingDownloadUpdater()
+        async with aiohttp.ClientSession() as session:
+            return await updater.update_stream(
+                current,
+                session,
+                context=UpdateContext(current=current, preparing=True, pins_only=True),
+            )
+
+    pinned = asyncio.run(_run_pins())
+    assert pinned is not None
+    assert pinned.version == "2026.9.0"
+    assert pinned.hashes.to_json() == []
+
+
 def test_pins_only_keeps_current_hashes_when_identity_is_unchanged() -> None:
     """pins_only must copy mapping, entry, or empty hashes when the pin matches."""
     mapping_hash = "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo="
@@ -559,6 +597,42 @@ def test_pins_only_keeps_current_hashes_when_identity_is_unchanged() -> None:
     assert fresh is not None
     assert fresh.version == "1.0.0"
     assert fresh.hashes.to_json() == {}
+
+
+def test_publish_source_update_pins_only_replaces_stale_hashes() -> None:
+    """38203865711: merge_native_update restored HEAD hashes or crashed entries."""
+    mapping_hash = "sha256-XtR5f/vaVCTXMnGy5cbHOw7X68p/j5dys0lK8p0JyE0="
+    current = SourceEntry.model_validate({
+        "version": "2026.8.1",
+        "hashes": {"aarch64-darwin": mapping_hash},
+    })
+    update = SourceEntry.model_validate({"version": "2026.9.0", "hashes": {}})
+    published = publish_source_update(current, update, native_only=True, pins_only=True)
+    assert published.version == "2026.9.0"
+    assert published.hashes.to_json() == {}
+    merged = current.merge_native_update(update)
+    assert merged.hashes.mapping == {"aarch64-darwin": mapping_hash}
+
+    listed_hash = HashEntry.create("sha256", mapping_hash)
+    listed = SourceEntry(
+        version="1.0.0",
+        hashes=HashCollection(entries=[listed_hash]),
+    )
+    emptied = SourceEntry(version="2.0.0", hashes={})
+    with pytest.raises(ValueError, match="Cannot merge hash entries"):
+        listed.merge_native_update(emptied)
+    replaced = publish_source_update(listed, emptied, native_only=True, pins_only=True)
+    assert replaced.version == "2.0.0"
+    assert replaced.hashes.to_json() == {}
+    native = publish_source_update(current, update, native_only=True, pins_only=False)
+    assert native.hashes.mapping == {"aarch64-darwin": mapping_hash}
+    assert (
+        publish_source_update(None, update, native_only=True, pins_only=False) is update
+    )
+    assert (
+        publish_source_update(current, update, native_only=False, pins_only=False)
+        is update
+    )
 
 
 def test_updater_keeps_current_when_version_discovery_hits_transient_dns() -> None:

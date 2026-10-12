@@ -649,7 +649,11 @@ class Updater(ABC):
             hashes: SourceHashes
             pinned = context.current
             if pinned is None or not is_latest:
-                hashes = {}
+                hashes = (
+                    []
+                    if pinned is not None and pinned.hashes.entries is not None
+                    else {}
+                )
             elif pinned.hashes.mapping is not None:
                 hashes = pinned.hashes.mapping
             elif pinned.hashes.entries is not None:
