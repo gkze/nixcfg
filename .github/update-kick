@@ -11,3 +11,4 @@ canary-slots: 0
 2026-10-12T04:26:40Z pin-hash + cascade umbrella skip after 38191092497 slot 0 1297 wbb
 2026-10-12T04:37:52Z pins_only replace after 38203865711 merge entries/mapping
 2026-10-12T06:54:21Z persist pins_only replace after 38204580181 cascade slot 4 FODs
+2026-10-12T07:05:00Z Reason Location pin after 38214877123 header 0.1.64 vs 0.1.84
