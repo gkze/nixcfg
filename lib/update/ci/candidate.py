@@ -60,6 +60,7 @@ from lib.update.ci.warmup import (
     is_rust_extension_host_store_path,
     is_rust_language_models_store_path,
     is_rust_zed_store_path,
+    is_source_fetch_store_path,
     is_svh_sensitive_store_path,
     is_zed_editor_nightly_store_path,
     language_models_input_drvs,
@@ -75,7 +76,9 @@ from lib.update.ci.warmup import (
     partition_svh_sensitive_drvs,
     partition_zed_editor_nightly_drvs,
     plan_darwin_warmup,
+    publish_warmup_source_fetches,
     raise_if_warmup_fatal,
+    realize_source_fetch_drvs,
     realize_warmup_outputs,
     rust_crate_input_drvs,
     rust_svh_input_drvs,
@@ -799,14 +802,28 @@ def _realize_svh_family(
         if compiler_failures:
             return tuple(failures), False
     if fetches:
-        fetch_failures = realize_warmup_outputs(
-            fetches,
-            flake_root=flake_root,
-            progress=_hosted_validation_progress(progress_source),
-        )
-        failures.extend(fetch_failures)
-        if fetch_failures:
-            return tuple(failures), False
+        helpers = tuple(drv for drv in fetches if not is_source_fetch_store_path(drv))
+        source_fods = tuple(drv for drv in fetches if is_source_fetch_store_path(drv))
+        fetch_progress = _hosted_validation_progress(progress_source)
+        if helpers:
+            helper_failures = realize_warmup_outputs(
+                helpers,
+                flake_root=flake_root,
+                progress=fetch_progress,
+            )
+            failures.extend(helper_failures)
+            if helper_failures:
+                return tuple(failures), False
+        if source_fods:
+            fetch_failures = realize_source_fetch_drvs(
+                source_fods,
+                flake_root=flake_root,
+                progress=fetch_progress,
+                realize=realize_warmup_outputs,
+            )
+            failures.extend(fetch_failures)
+            if fetch_failures:
+                return tuple(failures), False
     assert_force_local_dry_run((*extension_host, *family_rest))
     family_progress = _hosted_validation_progress(
         progress_source, keep_going=keep_going
@@ -1605,6 +1622,7 @@ def plan_shards(
     export_warmup_drvs(
         tuple(warmup.output_drvs.values()), output.with_name(WARMUP_DRVS_NAME)
     )
+    publish_warmup_source_fetches(warmup, flake_root=get_repo_root())
     matrix = github_actions_matrix(shards)
     atomic_write_text(output, json.dumps(matrix, indent=2) + "\n")
     target = github_output

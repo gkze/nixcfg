@@ -15,6 +15,8 @@ from lib.update.ci.warmup import (
     RUST_WARMUP_SLOTS,
     SETTINGS_MEMBER_CRATES,
     SHARED_MISSING_MIN_ROOTS,
+    SOURCE_FETCH_DNS_HOSTS,
+    SOURCE_FETCH_RETRY_BACKOFF_SECONDS,
     WARMUP_DRVS_CACHE_INFO,
     WARMUP_DRVS_NAME,
     WARMUP_DRVS_ROOTS,
@@ -77,12 +79,15 @@ from lib.update.ci.warmup import (
     partition_svh_sensitive_drvs,
     partition_zed_editor_nightly_drvs,
     plan_darwin_warmup,
+    publish_warmup_source_fetches,
     query_drv_outputs,
     raise_if_warmup_fatal,
+    realize_source_fetch_drvs,
     realize_warmup_outputs,
     rust_compile_input_drvs,
     rust_svh_input_drvs,
     rust_warmup_layers,
+    rust_warmup_output_drvs,
     rust_zed_member_warmup_outputs,
     rustc_generation_ids,
     settings_family_warmup_outputs,
@@ -90,8 +95,12 @@ from lib.update.ci.warmup import (
     skip_cached_warmup_paths,
     slot_cascade_paths,
     slot_warmup_paths,
+    source_fetch_input_drvs,
+    source_fetch_network_ready,
+    source_fetch_retry_drvs,
     substitutable_paths,
     unique_drvs_for_outputs,
+    wait_for_source_fetch_network,
     warmup_build_installable,
     warmup_drv_root_args,
     warmup_fatal_line,
@@ -101,7 +110,10 @@ from lib.update.ci.warmup import (
     zed_family_realize_policy,
     zed_family_warmup_outputs,
 )
-from lib.update.derivation_validation import RootClosureManifest
+from lib.update.derivation_validation import (
+    DerivationValidationFailure,
+    RootClosureManifest,
+)
 from lib.update.paths import REPO_ROOT
 
 
@@ -1481,6 +1493,107 @@ def test_is_source_fetch_store_path_classifies_archives(
     assert is_source_fetch_store_path(path) is expected
 
 
+def test_source_fetch_input_drvs_drops_helpers_and_toolchain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Planner publish is rust_* crate/nixpkgs FODs, not cpio or rustc."""
+    rustc = "/nix/store/cccccccccccccccccccccccccccccccc-rustc-1.98.1.drv"
+    cpio = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cpio-2.15.drv"
+    source = "/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv"
+    convert_case = (
+        "/nix/store/d64pffww4zyr1ggfcihjh7hb5njx0342-convert_case-0.11.0.tar.gz.drv"
+    )
+    parent = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0.drv"
+    monkeypatch.setattr(
+        "lib.update.ci.warmup.compiler_input_drvs",
+        lambda *_a, **_k: (rustc, cpio, source, convert_case),
+    )
+    assert source_fetch_input_drvs((parent,)) == (source, convert_case)
+
+
+def test_source_fetch_retry_drvs_refuse_compiler_and_rust() -> None:
+    """38258066093: retry source.drv / convert_case tarball, not rustc."""
+    source = "/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv"
+    convert_case = (
+        "/nix/store/d64pffww4zyr1ggfcihjh7hb5njx0342-convert_case-0.11.0.tar.gz.drv"
+    )
+    rustc = "/nix/store/cccccccccccccccccccccccccccccccc-rustc-1.98.1.drv"
+    settings = "/nix/store/dddddddddddddddddddddddddddddddd-rust_settings-0.1.0.drv"
+    assert source_fetch_retry_drvs((
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{source}^*",
+            message="error: Cannot build '/nix/store/...-source.drv'.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{convert_case}^*",
+            message="error: Cannot build '/nix/store/...-convert_case-0.11.0.tar.gz.drv'.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{rustc}^*",
+            message="error: Cannot build '/nix/store/...-rustc-1.98.1.drv'.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{settings}^*",
+            message="error: Cannot build '/nix/store/...-rust_settings-0.1.0.drv'.",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{source}^*",
+            message="error: hash mismatch in fixed-output derivation",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{source}^*",
+            message="error: Cannot build '/nix/store/...-source.drv'.",
+        ),
+    )) == (source, convert_case)
+
+
+def test_source_fetch_network_ready_requires_both_hosts() -> None:
+    """Prove github.com and crates.io before retrying a FOD fetch."""
+    seen: list[str] = []
+
+    def resolve(host: str, port: int) -> object:
+        assert port == 443
+        seen.append(host)
+        return [("AF_INET", host)]
+
+    assert SOURCE_FETCH_DNS_HOSTS == ("github.com", "static.crates.io")
+    assert source_fetch_network_ready(resolve=resolve)
+    assert seen == list(SOURCE_FETCH_DNS_HOSTS)
+
+    def dead_crates(host: str, port: int) -> object:
+        if host == "static.crates.io":
+            raise OSError("Could not resolve host")
+        return [("AF_INET", host)]
+
+    assert source_fetch_network_ready(resolve=dead_crates) is False
+
+
+def test_wait_for_source_fetch_network_backs_off_before_probe() -> None:
+    """Immediate retry would hit the same dead DNS as 38258066093 18:53Z."""
+    sleeps: list[float] = []
+
+    def resolve(host: str, port: int) -> object:
+        assert sleeps == [SOURCE_FETCH_RETRY_BACKOFF_SECONDS]
+        return [("AF_INET", host)]
+
+    assert wait_for_source_fetch_network(resolve=resolve, sleep=sleeps.append)
+    assert sleeps == [SOURCE_FETCH_RETRY_BACKOFF_SECONDS]
+    assert (
+        wait_for_source_fetch_network(
+            resolve=lambda *_a: (_ for _ in ()).throw(OSError("dns")),
+            sleep=lambda _seconds: None,
+            backoff=3.0,
+        )
+        is False
+    )
+
+
 def test_1270_canary_patchutils_is_local_compiler_helper() -> None:
     """#1270 canary: patchutils, pbzx, then cpio were 1-drv helpers after FODs.
 
@@ -1731,6 +1844,25 @@ def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:
     assert warmup_fatal_line(cannot) == "cannot build"
     with pytest.raises(WarmupFatalError, match="cannot build"):
         raise_if_warmup_fatal(cannot)
+    source = (
+        "error: Cannot build '/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv'."
+    )
+    convert_case = (
+        "error: Cannot build "
+        "'/nix/store/d64pffww4zyr1ggfcihjh7hb5njx0342-"
+        "convert_case-0.11.0.tar.gz.drv'."
+    )
+    settings = (
+        "error: Cannot build "
+        "'/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0.drv'."
+    )
+    assert warmup_fatal_line(source) is None
+    assert warmup_fatal_line(convert_case) is None
+    raise_if_warmup_fatal(source)
+    raise_if_warmup_fatal(convert_case)
+    assert warmup_fatal_line(settings) == "cannot build"
+    with pytest.raises(WarmupFatalError, match="cannot build"):
+        raise_if_warmup_fatal(settings)
     svh = "error[E0463]: can't find crate for `settings_content`"
     assert warmup_fatal_line(svh, substitute_only=True) is not None
     with pytest.raises(WarmupFatalError, match="SVH"):
@@ -1750,6 +1882,153 @@ def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:
     assert warmup_fatal_line(family, keep_going=True) is None
     raise_if_warmup_fatal(family, keep_going=True)
     assert warmup_fatal_line(huge, keep_going=True) is not None
+
+
+def test_realize_source_fetch_drvs_retries_after_dns_recovers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Backoff, prove DNS, retry once; leftover FOD still fails the slot."""
+    source = "/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv"
+    convert_case = (
+        "/nix/store/d64pffww4zyr1ggfcihjh7hb5njx0342-convert_case-0.11.0.tar.gz.drv"
+    )
+    cannot = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{source}^*",
+        message="error: Cannot build '/nix/store/...-source.drv'.",
+    )
+    calls: list[tuple[str, ...]] = []
+    sleeps: list[float] = []
+
+    def realize(
+        paths: object, *_args: object, **_kwargs: object
+    ) -> tuple[DerivationValidationFailure, ...]:
+        ordered = tuple(paths)
+        calls.append(ordered)
+        if len(calls) == 1:
+            return (cannot,)
+        return ()
+
+    monkeypatch.setattr("lib.update.ci.warmup.realize_warmup_outputs", realize)
+    assert (
+        realize_source_fetch_drvs(
+            (source, convert_case, source),
+            flake_root=tmp_path,
+            resolve=lambda *_a: [("AF_INET", "ok")],
+            sleep=sleeps.append,
+        )
+        == ()
+    )
+    assert calls == [(source, convert_case), (source,)]
+    assert sleeps == [SOURCE_FETCH_RETRY_BACKOFF_SECONDS]
+
+
+def test_realize_source_fetch_drvs_fails_closed_when_dns_stays_dead(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Do not retry a FOD while github.com / crates.io still fail DNS."""
+    source = "/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv"
+    cannot = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{source}^*",
+        message="error: Cannot build '/nix/store/...-source.drv'.",
+    )
+
+    def realize(
+        paths: object, *_args: object, **_kwargs: object
+    ) -> tuple[DerivationValidationFailure, ...]:
+        return (cannot,)
+
+    monkeypatch.setattr("lib.update.ci.warmup.realize_warmup_outputs", realize)
+    assert realize_source_fetch_drvs(
+        (source,),
+        flake_root=tmp_path,
+        resolve=lambda *_a: (_ for _ in ()).throw(OSError("dns")),
+        sleep=lambda _seconds: None,
+    ) == (cannot,)
+
+
+def test_realize_source_fetch_drvs_fails_closed_after_retry_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second Cannot-build must not let the parent rust_* proceed."""
+    source = "/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv"
+    cannot = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{source}^*",
+        message="error: Cannot build '/nix/store/...-source.drv'.",
+    )
+
+    def realize(
+        paths: object, *_args: object, **_kwargs: object
+    ) -> tuple[DerivationValidationFailure, ...]:
+        return (cannot,)
+
+    monkeypatch.setattr("lib.update.ci.warmup.realize_warmup_outputs", realize)
+    assert realize_source_fetch_drvs(
+        (source,),
+        flake_root=tmp_path,
+        resolve=lambda *_a: [("AF_INET", "ok")],
+        sleep=lambda _seconds: None,
+    ) == (cannot,)
+
+
+def test_publish_warmup_source_fetches_realizes_rust_fods(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """plan-shards must push rust_* source FODs before warmup slots start."""
+    from lib.update.ci.warmup import RootWarmupStats, WarmupPlan
+
+    rust = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0"
+    rust_drv = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0.drv"
+    source = "/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv"
+    convert_case = (
+        "/nix/store/d64pffww4zyr1ggfcihjh7hb5njx0342-convert_case-0.11.0.tar.gz.drv"
+    )
+    plan = WarmupPlan(
+        schemaVersion=1,
+        system="aarch64-darwin",
+        substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+        warmupOutputs=(rust,),
+        outputDrvs={rust: rust_drv},
+        perRoot={
+            "darwin-argus": RootWarmupStats(outputs=1, missing=1, warmup=1, remaining=0)
+        },
+        shards=(
+            ShardLocalBuildReport(
+                shard="darwin-argus",
+                roots=("darwin-argus",),
+                remaining=0,
+                remaining_rust_crates=0,
+            ),
+        ),
+        notes="fixture",
+    )
+    assert rust_warmup_output_drvs(plan) == (rust_drv,)
+    monkeypatch.setattr(
+        "lib.update.ci.warmup.source_fetch_input_drvs",
+        lambda *_a, **_k: (source, convert_case),
+    )
+    seen: list[tuple[str, ...]] = []
+
+    def realize(paths: object, *_args: object, **_kwargs: object) -> tuple[()]:
+        seen.append(tuple(paths))
+        return ()
+
+    monkeypatch.setattr("lib.update.ci.warmup.realize_source_fetch_drvs", realize)
+    publish_warmup_source_fetches(plan, flake_root=tmp_path)
+    assert seen == [(source, convert_case)]
+    leftover = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{source}^*",
+        message="error: Cannot build '/nix/store/...-source.drv'.",
+    )
+    monkeypatch.setattr(
+        "lib.update.ci.warmup.realize_source_fetch_drvs",
+        lambda *_a, **_k: (leftover,),
+    )
+    with pytest.raises(WarmupError, match="source FOD publish failed"):
+        publish_warmup_source_fetches(plan, flake_root=tmp_path)
 
 
 def test_realize_warmup_substitute_only_is_max_jobs_zero(tmp_path: Path) -> None:

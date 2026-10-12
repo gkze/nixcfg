@@ -3148,6 +3148,12 @@ def test_plan_shards_writes_generated_matrix(
         )
 
     monkeypatch.setattr(pipeline, "plan_darwin_warmup", fake_warmup)
+    published: list[object] = []
+
+    def fake_publish(plan: object, *, flake_root: Path, **_kwargs: object) -> None:
+        published.append((plan, flake_root))
+
+    monkeypatch.setattr(pipeline, "publish_warmup_source_fetches", fake_publish)
     result = CliRunner().invoke(
         pipeline.app,
         [
@@ -3161,6 +3167,7 @@ def test_plan_shards_writes_generated_matrix(
         ],
     )
     assert result.exit_code == 0, result.output
+    assert published
     matrix = json.loads(output.read_text())
     assert {row["shard"] for row in matrix["include"]} == {
         "darwin-argus",
@@ -3618,6 +3625,41 @@ def test_realize_svh_family_keeps_going_on_hosted_progress(
     assert ("rust-warmup", True) in seen
 
 
+def test_realize_svh_family_retries_source_fods_not_helpers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Helpers compile immediately; source FODs use the DNS-gated retry."""
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0.drv"
+    rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    cpio = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cpio-2.15.drv"
+    source = "/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv"
+    realized: list[tuple[object, str]] = []
+
+    def warmup_realize(paths: object, *_args: object, **_kwargs: object) -> tuple[()]:
+        realized.append((paths, "warmup"))
+        return ()
+
+    def fod_realize(paths: object, *_args: object, **_kwargs: object) -> tuple[()]:
+        realized.append((paths, "source"))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "realize_source_fetch_drvs", fod_realize)
+    monkeypatch.setattr(
+        pipeline, "compiler_input_drvs", lambda *_a, **_k: (rustc, cpio, source)
+    )
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "_realize_compiler_substitutes", lambda *_a, **_k: ())
+    failures, compiled = pipeline._realize_svh_family((settings,), flake_root=tmp_path)
+    assert failures == ()
+    assert compiled is True
+    assert realized == [
+        ((cpio,), "warmup"),
+        ((source,), "source"),
+        ((settings,), "warmup"),
+    ]
+
+
 def test_hosted_warmup_progress_fails_fast_on_fatal_patterns(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -3742,6 +3784,28 @@ def test_hosted_warmup_progress_skips_cannot_build_during_max_jobs_zero(
                 "Cannot build '/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0.drv'",
             )
         )
+    progress(
+        ValidationCommandStarted(
+            "nix build --keep-going --fallback "
+            "'/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv^*'"
+        )
+    )
+    progress(
+        ValidationCommandOutput(
+            "nix build --keep-going --fallback "
+            "'/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv^*'",
+            "error: Cannot build "
+            "'/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv'.",
+        )
+    )
+    progress(
+        ValidationCommandOutput(
+            "nix build --keep-going --fallback "
+            "'/nix/store/d64pffww4zyr1ggfcihjh7hb5njx0342-convert_case-0.11.0.tar.gz.drv^*'",
+            "error: Cannot build "
+            "'/nix/store/d64pffww4zyr1ggfcihjh7hb5njx0342-convert_case-0.11.0.tar.gz.drv'.",
+        )
+    )
 
 
 def test_noop_candidate_still_validates_repaired_baseline_roots(

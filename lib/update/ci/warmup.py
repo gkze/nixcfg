@@ -28,7 +28,9 @@ outputs (argus∩rocinante∩zeus, not home-george).
 
 import json
 import re
+import socket
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -211,7 +213,15 @@ def warmup_fatal_line(
     if "Cannot build" in line:
         # --max-jobs 0 cache miss on a 1-drv helper (patchutils/pbzx/cpio).
         # keep_going surfaces every broken Zed crate instead of one/run.
-        return None if substitute_only or keep_going else "cannot build"
+        # 38258066093 slots 0/1: source.drv / convert_case-*.tar.gz
+        # Cannot-build after curl (6) on github.com / static.crates.io.
+        # Stream-skip so realize_source_fetch_drvs can backoff, prove
+        # DNS, and retry. rustc / rust_* / helpers stay fatal.
+        skip = substitute_only or keep_going
+        if not skip:
+            drv = command_store_drv(line)
+            skip = bool(drv and is_source_fetch_store_path(drv))
+        return None if skip else "cannot build"
     if "liveness" in line.lower():
         return "liveness"
     lowered = line.lower()
@@ -1708,6 +1718,143 @@ def partition_compiler_input_drvs(
         else:
             substitute.append(drv)
     return tuple(substitute), tuple(fetches)
+
+
+SOURCE_FETCH_DNS_HOSTS = ("github.com", "static.crates.io")
+SOURCE_FETCH_RETRY_BACKOFF_SECONDS = 15.0
+
+
+def rust_warmup_output_drvs(plan: WarmupPlan) -> tuple[str, ...]:
+    """Return planned rust-warmup output ``.drv`` paths, first-seen order."""
+    return tuple(
+        drv
+        for path, drv in plan.output_drvs.items()
+        if is_planned_rust_warmup_output(path)
+    )
+
+
+def source_fetch_input_drvs(
+    parent_drvs: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return source FODs in *parent_drvs*' non-SVH compiler requisites."""
+    _substitute, fetches = partition_compiler_input_drvs(
+        compiler_input_drvs(parent_drvs, run=run)
+    )
+    return tuple(drv for drv in fetches if is_source_fetch_store_path(drv))
+
+
+def source_fetch_retry_drvs(
+    failures: Sequence[DerivationValidationFailure],
+) -> tuple[str, ...]:
+    """Return streamed FOD Cannot-build installables; refuse rustc / rust_*."""
+    retry: list[str] = []
+    for failure in failures:
+        drv = failure.installable.removesuffix("^*")
+        if not is_source_fetch_store_path(drv):
+            continue
+        if "Cannot build" not in failure.message:
+            continue
+        retry.append(drv)
+    return tuple(dict.fromkeys(retry))
+
+
+def source_fetch_network_ready(
+    *,
+    resolve: Callable[[str, int], object] | None = None,
+) -> bool:
+    """Return whether github.com and static.crates.io resolve."""
+    lookup = socket.getaddrinfo if resolve is None else resolve
+    try:
+        for host in SOURCE_FETCH_DNS_HOSTS:
+            lookup(host, 443)
+    except OSError:
+        return False
+    return True
+
+
+def wait_for_source_fetch_network(
+    *,
+    resolve: Callable[[str, int], object] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    backoff: float = SOURCE_FETCH_RETRY_BACKOFF_SECONDS,
+) -> bool:
+    """Sleep, then prove source-fetch DNS before retrying a FOD."""
+    waiter = time.sleep if sleep is None else sleep
+    waiter(backoff)
+    return source_fetch_network_ready(resolve=resolve)
+
+
+def realize_source_fetch_drvs(
+    drvs: Sequence[str],
+    *,
+    flake_root: Path,
+    progress: ValidationProgress | None = None,
+    resolve: Callable[[str, int], object] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    realize: Callable[..., tuple[DerivationValidationFailure, ...]] | None = None,
+) -> tuple[DerivationValidationFailure, ...]:
+    """Realize source FODs; backoff and prove DNS once; fail closed after that.
+
+    38258066093 slots 0/1 lost github.com / static.crates.io in the same
+    minute after a 2h58m compile. An immediate retry hits that same
+    dead network. A fetch that still fails must fail the slot so the
+    parent rust_* never compiles against a missing source.
+    """
+    builder = realize_warmup_outputs if realize is None else realize
+    ordered = tuple(dict.fromkeys(drvs))
+    if not ordered:
+        return ()
+    failures = builder(ordered, flake_root=flake_root, progress=progress)
+    retry = source_fetch_retry_drvs(failures)
+    if not retry:
+        return failures
+    if not wait_for_source_fetch_network(resolve=resolve, sleep=sleep):
+        return failures
+    retried = builder(retry, flake_root=flake_root, progress=progress)
+    stubborn = tuple(
+        failure
+        for failure in failures
+        if failure.installable.removesuffix("^*") not in retry
+    )
+    return (*stubborn, *retried)
+
+
+def publish_warmup_source_fetches(
+    plan: WarmupPlan,
+    *,
+    flake_root: Path,
+    progress: ValidationProgress | None = None,
+    resolve: Callable[[str, int], object] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    run: _StoreRun | None = None,
+) -> None:
+    """Realize rust-warmup source FODs on plan-shards so Cachix has them.
+
+    Compiled ``rust_*`` outputs do not retain source tarballs in their
+    runtime closure. 38258066093 substituted ``rust_convert_case-0.11.0``
+    from gkze, then had to fetch ``convert_case-0.11.0.tar.gz`` and
+    sphinx ``source.drv`` from upstream. Push the FODs from the planner
+    (post-build-hook) so warmup substitutes instead of hitting GitHub
+    or crates.io.
+    """
+    fods = source_fetch_input_drvs(rust_warmup_output_drvs(plan), run=run)
+    failures = realize_source_fetch_drvs(
+        fods,
+        flake_root=flake_root,
+        progress=progress,
+        resolve=resolve,
+        sleep=sleep,
+    )
+    if not failures:
+        return
+    sample = ", ".join(failure.installable for failure in failures[:4])
+    msg = (
+        f"source FOD publish failed ({len(failures)}): {sample}. "
+        "Warmup must not compile rust_* against a missing source."
+    )
+    raise WarmupError(msg)
 
 
 _DRV_PATH = re.compile(r"/nix/store/[0-9a-z]{32}-[^/\s']+\.drv")
