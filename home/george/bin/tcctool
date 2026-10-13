@@ -1,0 +1,20 @@
+#!/Users/george/.config/nixcfg/.venv/bin/python
+# vi: set ft=python
+"""Top-level CLI for TCC privacy-list auditing and removal.
+
+Thin launcher: resolves the nixcfg repo root so the typed
+``lib.macos.tcc_audit`` package imports, then dispatches to its Typer
+app. The interpreter is the nixcfg project venv, which carries typer and
+the pyobjc frameworks.
+"""
+
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT))
+
+from lib.macos.tcc_audit.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    raise SystemExit(main())
