@@ -32,7 +32,7 @@ from lib.github_actions.client import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping
+    from collections.abc import AsyncIterator
 
     from lib.github_actions.web_auth import GitHubWebCookieProvider
 
@@ -728,49 +728,6 @@ def _html_has_attr(node: object, *names: str) -> bool:
     if not callable(has_attr):
         return False
     return any(has_attr(name) for name in names)
-
-
-class _CheckStepsHTMLParser:
-    """Compatibility wrapper around BeautifulSoup-backed job-page extraction."""
-
-    def __init__(self) -> None:
-        self.steps_url: str | None = None
-        self.streaming_url: str | None = None
-        self.backscroll_urls: dict[str, str] = {}
-
-    def feed(self, html: str) -> None:
-        """Parse a full job page and record embedded live-log attributes."""
-        soup = BeautifulSoup(html, "html.parser")
-        for check_steps in soup.find_all("check-steps"):
-            self._record_check_steps(check_steps.attrs)
-        for check_step in soup.find_all("check-step"):
-            self._record_check_step(check_step.attrs)
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        """Record one start tag in the shape previously exposed by HTMLParser."""
-        mapping = {key: value for key, value in attrs if value is not None}
-        if tag == "check-steps":
-            self._record_check_steps(mapping)
-        elif tag == "check-step":
-            self._record_check_step(mapping)
-
-    def _record_check_steps(self, attrs: Mapping[str, object]) -> None:
-        for attribute in _JOB_STEPS_URL_ATTRIBUTES:
-            value = attrs.get(attribute)
-            if isinstance(value, str):
-                self.steps_url = value
-                break
-        for attribute in _STREAMING_URL_ATTRIBUTES:
-            value = attrs.get(attribute)
-            if isinstance(value, str):
-                self.streaming_url = value
-                break
-
-    def _record_check_step(self, attrs: Mapping[str, object]) -> None:
-        step_id = attrs.get(_STEP_ID_ATTRIBUTE)
-        backscroll_url = attrs.get(_STEP_BACKSCROLL_URL_ATTRIBUTE)
-        if isinstance(step_id, str) and isinstance(backscroll_url, str):
-            self.backscroll_urls[step_id] = backscroll_url
 
 
 def _parse_live_job_page_from_html(html: str, *, job_url: str) -> LiveJobPageInfo:

@@ -1,4 +1,13 @@
-"""Helpers for nixcfg macOS application activation scripts."""
+"""Helpers for nixcfg macOS application activation scripts.
+
+This file is also shipped standalone: ``lib/mac-apps.nix`` writes it into the
+store with ``writeText "nixcfg-mac-apps-helper.py" (readFile ./mac_apps_helper.py)``
+and runs it under ``python3.withPackages (ps: [ ps.packaging ])``. It may
+therefore import only the standard library and ``packaging`` -- never ``lib.*``,
+which is not on that interpreter's path. ``_as_object_dict`` is deliberately
+kept in step with ``lib.json_utils.as_object_dict`` for that reason: dedup by
+importing the shared helper would pass the test suite and then fail activation.
+"""
 
 import json
 import os

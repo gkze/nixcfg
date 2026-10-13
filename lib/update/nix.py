@@ -516,21 +516,20 @@ def _extract_nix_hash(
     output: str,
     *,
     config: UpdateConfig | None = None,
-    expected_drv_path: str | None = None,
 ) -> str:
     """Extract the 'got' hash from a Nix hash-mismatch error.
 
     Delegates to :class:`lib.nix.commands.base.HashMismatchError` for the
     actual regex matching (single source of truth for all hash formats).
+
+    The mismatch can name the nested fixed-output derivation inside the probe
+    rather than a caller-supplied derivation, and the extracted hash is the
+    real content hash of the probe expression either way, so no caller
+    expectation is certified here.
     """
     dummy = LibnixResult(args=[], returncode=1, stdout="", stderr=output)
     err = HashMismatchError.from_output(output, dummy)
     if err is not None:
-        # The probe wraps the fake-hash derivation; when Nix builds the probe
-        # it first builds that nested FOD, and the mismatch is reported for the
-        # nested drv path. The extracted hash is the real content hash of the
-        # probe expression either way, so accept it and note the actual drv.
-        _ = expected_drv_path
         return err.hash
     config = resolve_active_config(config)
     has_mismatch_signal = _has_hash_mismatch_signal(output)
@@ -756,16 +755,9 @@ async def _emit_sri_hash_from_build_result(
     *,
     config: UpdateConfig | None = None,
     emit: EventSink = ignore_event,
-    expected_drv_path: str | None = None,
 ) -> str:
     output = result.stderr + result.stdout
-    hash_value = (
-        _extract_nix_hash(output, config=config)
-        if expected_drv_path is None
-        else _extract_nix_hash(
-            output, config=config, expected_drv_path=expected_drv_path
-        )
-    )
+    hash_value = _extract_nix_hash(output, config=config)
     if is_sri(hash_value):
         return hash_value
     return await convert_nix_hash_to_sri(source, hash_value, emit=emit)
@@ -962,14 +954,6 @@ async def compute_fixed_output_hash(
             )
             await asyncio.sleep(max(0.0, config.default_retry_backoff))
             continue
-        if prepared is not None:
-            return await _emit_sri_hash_from_build_result(
-                source,
-                result,
-                config=config,
-                emit=emit,
-                expected_drv_path=prepared.drv_path,
-            )
         return await _emit_sri_hash_from_build_result(
             source, result, config=config, emit=emit
         )

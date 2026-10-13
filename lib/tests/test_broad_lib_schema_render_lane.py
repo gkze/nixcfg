@@ -148,12 +148,15 @@ def test_http_utils_additional_branches(
     assert "Failed to parse" in caplog.text
 
     response = type("Response", (), {"status_code": 500, "reason_phrase": "Boom"})()
-    assert http_utils._format_http_error(response, b"") == "HTTP 500 Boom"
+    assert (
+        http_utils.format_http_error(response.status_code, response.reason_phrase, b"")
+        == "HTTP 500 Boom"
+    )
 
-    with pytest.raises(http_utils._RetryableStatusError, match="retry"):
-        http_utils._raise_status_error(503, "retry")
-    with pytest.raises(http_utils._NonRetryableStatusError, match="stop"):
-        http_utils._raise_status_error(418, "stop")
+    with pytest.raises(http_utils.RetryableStatusError, match="retry"):
+        http_utils.raise_status_error(503, "retry")
+    with pytest.raises(http_utils.NonRetryableStatusError, match="stop"):
+        http_utils.raise_status_error(418, "stop")
 
     with pytest.raises(TypeError, match="Unsupported request error type"):
         http_utils._as_request_error(

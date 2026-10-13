@@ -2,17 +2,74 @@
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from lib.nix.commands.eval import nix_eval_raw
+from lib.nix.models.sources import IMMUTABLE_COMMIT_PATTERN as _PERSISTED_COMMIT_PATTERN
 from lib.update.config import default_config
 from lib.update.flake import flake_source_path_expr
 from lib.update.runtime import memoize, resource_slot
 
 if TYPE_CHECKING:
     from lib.nix.models.flake_lock import FlakeLockNode
+
+# The single owner of "this revision is an immutable commit" for updaters and
+# release fetches: they validate revisions through this pattern and
+# is_immutable_commit(), so a future object format (for example SHA-256 commits)
+# changes in one place. That one place is the persisted model constraint
+# (lib.nix.models.sources.IMMUTABLE_COMMIT_PATTERN), which must not import this
+# layer, so the pattern is compiled from it rather than restated here.
+IMMUTABLE_COMMIT_PATTERN = re.compile(_PERSISTED_COMMIT_PATTERN)
+
+
+class LockedGitHubSource(NamedTuple):
+    """Validated immutable GitHub coordinates from a flake lock node."""
+
+    owner: str
+    repo: str
+    rev: str
+
+
+def is_immutable_commit(value: str | None) -> bool:
+    """Return whether ``value`` is a full lowercase 40-hex commit revision."""
+    return value is not None and IMMUTABLE_COMMIT_PATTERN.fullmatch(value) is not None
+
+
+def locked_github_source(
+    node: FlakeLockNode,
+    *,
+    context: str,
+    expected: tuple[str, str] | None = None,
+) -> LockedGitHubSource:
+    """Return immutable GitHub coordinates from a complete flake lock node.
+
+    ``context`` names the caller in every diagnostic, so each updater keeps its
+    own wording while sharing this rule. ``expected`` additionally pins the
+    owner/repository pair when the caller knows which upstream it requires.
+    """
+    locked = node.locked
+    if (
+        locked is None
+        or locked.type != "github"
+        or not locked.owner
+        or not locked.repo
+        or not locked.rev
+    ):
+        msg = f"{context} must resolve to a complete GitHub source"
+        raise RuntimeError(msg)
+    if expected is not None and (locked.owner, locked.repo) != expected:
+        msg = (
+            f"{context} must resolve to {expected[0]}/{expected[1]}, "
+            f"got {locked.owner}/{locked.repo}"
+        )
+        raise RuntimeError(msg)
+    if not is_immutable_commit(locked.rev):
+        msg = f"{context} revision must be an immutable commit, got {locked.rev!r}"
+        raise RuntimeError(msg)
+    return LockedGitHubSource(locked.owner, locked.repo, locked.rev)
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,4 +234,11 @@ async def resolve_locked_source(
     )
 
 
-__all__ = ["LockedSource", "resolve_locked_source"]
+__all__ = [
+    "IMMUTABLE_COMMIT_PATTERN",
+    "LockedGitHubSource",
+    "LockedSource",
+    "is_immutable_commit",
+    "locked_github_source",
+    "resolve_locked_source",
+]

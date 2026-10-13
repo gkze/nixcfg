@@ -7,6 +7,8 @@ updaters are a bare class body of attributes, and updaters that need extra
 logic override the relevant hook method on the same class.
 """
 
+import urllib.parse
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 from lib import json_utils
@@ -205,14 +207,36 @@ class ElectronBuilderAssetURLsUpdater(DownloadHashUpdater):
         return super().get_download_url(platform, info)
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedArtifact:
+    """One per-platform download artifact and the version it carries."""
+
+    version: str
+    url: str
+
+
+def url_without_query(url: str) -> str:
+    """Return ``url`` with its query and fragment removed."""
+    parsed = urllib.parse.urlsplit(url)
+    return urllib.parse.urlunsplit((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        "",
+        "",
+    ))
+
+
 __all__ = [
     "ElectronAssetSelector",
     "ElectronBuilderAssetURLsUpdater",
     "HeadArtifactDownloadUpdater",
     "JsonFieldDownloadUpdater",
     "PinnedSourceDownloadUpdater",
+    "ResolvedArtifact",
     "SparkleAppcastUpdater",
     "SparkleAppcastUrlUpdater",
     "SparkleVersionField",
     "VersionEndpointDownloadUpdater",
+    "url_without_query",
 ]

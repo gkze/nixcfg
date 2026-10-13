@@ -2520,7 +2520,7 @@ def build_tab(
     tab.zen_is_glance = False
     tab.zen_live_folder_item_id = None
     tab.search_mode = None
-    tab.attributes = dict(tab.attributes)
+    tab.attributes = tab.attributes.copy()
     tab.last_accessed = tab.last_accessed or int(time.time() * 1000)
     tab.zen_default_user_context_id = "true" if user_context_id else None
     return tab
@@ -4404,7 +4404,10 @@ def build_state_apply_plan(args: CommandArgs) -> StateApplyPlan:
     container_plan = build_desired_containers(containers, config, session)
     desired_state = build_desired_state(session, config, container_plan)
     favicon_count = 0
-    if getattr(args, "resolve_favicons", True) and isinstance(
+    # Opaque state objects are part of the tested contract for this command:
+    # test_zentool_finishing.py drives it with `desired_state = object()` and
+    # pins that favicon resolution is skipped, so the runtime guard stays.
+    if getattr(args, "resolve_favicons", True) and isinstance(  # ty: ignore[redundant-condition-strict]
         desired_state, SessionState
     ):
         favicon_count = resolve_missing_tab_images(
@@ -4432,8 +4435,7 @@ def build_state_apply_plan(args: CommandArgs) -> StateApplyPlan:
         diff_text = f"Resolved favicon images for {favicon_count} tab(s)."
     if (
         diff_text is None
-        and isinstance(session, SessionState)
-        and isinstance(desired_state, SessionState)
+        and isinstance(desired_state, SessionState)  # ty: ignore[redundant-condition-strict]
         and session != desired_state
     ):
         diff_text = "Updated runtime session fields."

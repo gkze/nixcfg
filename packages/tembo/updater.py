@@ -4,6 +4,7 @@ import re
 from typing import TYPE_CHECKING, ClassVar
 
 from lib import json_utils
+from lib.update.locked_source import is_immutable_commit
 from lib.update.net import fetch_json
 from lib.update.updaters import (
     ChecksumProvidedUpdater,
@@ -25,7 +26,6 @@ _RELEASES_ORIGIN = (
 )
 _MANIFEST_URL = f"{_RELEASES_ORIGIN}/releases/manifest.json"
 _VERSION = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
-_GIT_SHA = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _UPLOADED_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 _DMG_CONTENT_TYPE = "application/x-apple-diskimage"
@@ -184,7 +184,7 @@ class TemboUpdater(ChecksumProvidedUpdater):
             "gitSha",
             context="latestByPlatform.macos",
         )
-        if _GIT_SHA.fullmatch(commit) is None:
+        if not is_immutable_commit(commit):
             msg = f"Invalid Tembo release manifest: invalid gitSha {commit!r}"
             raise RuntimeError(msg)
         uploaded_at = _require_string(
@@ -252,7 +252,7 @@ class TemboUpdater(ChecksumProvidedUpdater):
         if set(metadata.platform_info) != set(cls.PLATFORMS):
             msg = "Invalid Tembo updater metadata: incomplete platform map"
             raise RuntimeError(msg)
-        if metadata.commit is None or _GIT_SHA.fullmatch(metadata.commit) is None:
+        if not is_immutable_commit(metadata.commit):
             msg = "Invalid Tembo updater metadata: missing or invalid commit"
             raise RuntimeError(msg)
         return metadata

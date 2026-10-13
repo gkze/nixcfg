@@ -5,8 +5,9 @@ from typing import TYPE_CHECKING, ClassVar
 import aiohttp
 
 from lib import json_utils
+from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.derivation_validation import DerivationValidation
-from lib.update.net import HTTP_BAD_REQUEST, fetch_json
+from lib.update.net import fetch_json
 from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 
 if TYPE_CHECKING:
@@ -64,10 +65,12 @@ class AraUpdater(DownloadHashUpdater):
             payload, "name", context="Reason desktop feed"
         )
         # The public redirect can race ahead of the feed (Update 37037587993
-        # hashed 0.1.66 bytes while the feed still named 0.1.64). Pin the
-        # version of the bytes Nix will hash. That version lives on the public
-        # 307; the signed Location authorizes GET only, so a following HEAD
-        # returns HTTP 403 (Update 37067759340).
+        # hashed 0.1.66 bytes while the feed still named 0.1.64). Update
+        # 38220443819 still named 0.1.64 while Location was 0.1.85, and the
+        # 307 no longer sends x-ara-desktop-version. Pin x-desktop-version,
+        # then the legacy header, then the feed. The signed Location
+        # authorizes GET only, so a following HEAD returns HTTP 403
+        # (Update 37067759340).
         download_url = self.PLATFORMS["aarch64-darwin"]
         async with session.head(
             download_url,
@@ -81,7 +84,9 @@ class AraUpdater(DownloadHashUpdater):
                 )
                 raise RuntimeError(msg)
             headers = dict(response.headers)
-            download_version = _header(headers, "x-ara-desktop-version")
+            download_version = _header(headers, "x-desktop-version") or _header(
+                headers, "x-ara-desktop-version"
+            )
             pin_version = download_version or feed_version
             location = _header(headers, "location")
             expected_object = f"{self.VERSIONED_OBJECT_PREFIX}{pin_version}/"

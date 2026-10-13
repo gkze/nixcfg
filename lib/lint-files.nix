@@ -2,6 +2,9 @@ let
   pythonScriptPaths = [
     "home/george/bin/git-ignore"
     "home/george/bin/zentool"
+    # Extensionless entrypoint: without this it is checked by ruff/ty (via
+    # pyproject's extend-include) but skipped by the compile and pyupgrade passes.
+    "home/george/bin/tcctool"
   ];
   pythonPyupgradeExcludes = [
     "lib/exact_text_patch.py"
@@ -10,13 +13,13 @@ let
   ];
   ruffMutationExcludes =
     (builtins.fromTOML (builtins.readFile ../pyproject.toml)).tool.ruff.format.exclude;
-  pythonRuntimeSensitiveHelpers = builtins.filter (
-    path: !(builtins.elem path pythonScriptPaths)
-  ) ruffMutationExcludes;
 in
 {
+  # File selection is glob-driven: every consumer (treefmt, repo-checks,
+  # flake.nix) reads `globs`/`excludeGlobs`. Regex fields used to shadow these
+  # without a reader, which made the regex look authoritative when it was not.
   python = {
-    inherit pythonPyupgradeExcludes pythonScriptPaths pythonRuntimeSensitiveHelpers;
+    inherit pythonPyupgradeExcludes pythonScriptPaths;
     pyupgradePaths = [
       "*.py"
       "*.pyi"
@@ -31,7 +34,6 @@ in
   };
 
   ruff = {
-    regex = "(\\.(py|pyi)$|home/[^/]+/bin/(git-ignore|zentool))";
     # Keep extensionless Python entrypoints in Ruff discovery via pyproject.toml.
     globs = [
       "*.py"
@@ -40,14 +42,11 @@ in
   };
 
   nix = {
-    regex = "\\.nix$";
     globs = [ "*.nix" ];
-    excludeRegex = [ "(^|.*/)Cargo\\.nix$" ];
     excludeGlobs = [ "**/Cargo.nix" ];
   };
 
   yaml = {
-    regex = "(\\.ya?ml$|(^|.*/)\\.(yamlfmt|yamllint)$)";
     globs = [
       "*.yaml"
       "*.yml"
@@ -57,7 +56,6 @@ in
   };
 
   toml = {
-    regex = "(\\.toml$|(^|.*/)uv\\.lock$)";
     globs = [
       "*.toml"
       "uv.lock"
@@ -66,7 +64,6 @@ in
   };
 
   css = {
-    regex = "\\.css$";
     globs = [ "*.css" ];
     excludeGlobs = [
       ".direnv/**"
@@ -77,7 +74,6 @@ in
   };
 
   oxfmt = {
-    regex = "(\\.(cjs|css|js|json|jsonc|ts)$|(^|.*/)flake\\.lock$)";
     globs = [
       "*.css"
       "*.js"
@@ -100,7 +96,6 @@ in
   };
 
   oxlint = {
-    regex = "\\.(cjs|js|ts)$";
     globs = [
       "*.js"
       "*.cjs"
@@ -117,17 +112,14 @@ in
   };
 
   jsonl = {
-    regex = "\\.jsonl$";
     globs = [ "*.jsonl" ];
   };
 
   go = {
-    regex = "\\.go$";
     globs = [ "*.go" ];
   };
 
   goMod = {
-    regex = "(^|.*/)go\\.mod$";
     globs = [
       "go.mod"
       "**/go.mod"
@@ -135,18 +127,15 @@ in
   };
 
   markdown = {
-    regex = "\\.md$";
     globs = [ "*.md" ];
     excludeGlobs = [ ];
   };
 
   protobuf = {
-    regex = "\\.proto$";
     globs = [ "*.proto" ];
   };
 
   shell = {
-    regex = "(\\.envrc|.*\\.(bash|sh|zsh))";
     globs = [
       ".envrc"
       "*.sh"
@@ -156,7 +145,6 @@ in
   };
 
   twilightAutoconfig = {
-    regex = "(^|.*/)twilight\\.cfg$";
     globs = [ "home/george/zen/autoconfig/twilight.cfg" ];
   };
 

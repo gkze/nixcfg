@@ -1,5 +1,7 @@
 """Semantic checks for evaluator-visible Stylix theme inputs."""
 
+import os
+import shutil
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -16,6 +18,58 @@ from lib.update.paths import REPO_ROOT
 
 if TYPE_CHECKING:
     from nix_manipulator.expressions.expression import NixExpression
+
+_PROBE_TIMEOUT_SECONDS = 120
+
+
+def _raw_eval_command() -> list[str] | None:
+    """Return the raw-value eval invocation, or None when Nix is unavailable."""
+    nix_instantiate = shutil.which("nix-instantiate")
+    if nix_instantiate is not None:
+        return [nix_instantiate, "--eval", "--strict", "--raw"]
+    nix = shutil.which("nix")
+    if nix is None:
+        return None
+    return [nix, "eval", "--impure", "--raw"]
+
+
+def _nixpkgs_lib_is_evaluable() -> bool:
+    """Return whether the harness can resolve nixpkgs lib in this environment.
+
+    Inside the Nix gate ``NIXCFG_NIXPKGS_PATH`` supplies nixpkgs as a store path
+    (flake.nix). Outside it the harness falls back to ``builtins.fetchTree``,
+    which needs a writable Nix fetcher cache or network access. Probe that
+    prerequisite once, so a developer run reports a skip with this reason
+    instead of failing as if the theme input itself regressed.
+    """
+    if os.environ.get("NIXCFG_NIXPKGS_PATH", "").strip():
+        return True
+    command = _raw_eval_command()
+    if command is None:
+        return False
+    try:
+        expression = f'builtins.seq ({nixpkgs_lib_expression().rebuild()}) "ok"'
+        probe = subprocess.run(  # noqa: S603 -- fixed Nix executable, owned expression
+            [*command, "--expr", expression],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_PROBE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    except OSError:
+        return False
+    return probe.returncode == 0 and probe.stdout.strip() == "ok"
+
+
+requires_nixpkgs_lib = pytest.mark.skipif(
+    not _nixpkgs_lib_is_evaluable(),
+    reason=(
+        "nixpkgs lib is not evaluable here: set NIXCFG_NIXPKGS_PATH (the Nix "
+        "gate does) or provide a writable Nix fetcher cache for builtins.fetchTree"
+    ),
+)
 
 
 def _stylix_harness_expression(**arguments: object) -> NixExpression:
@@ -73,12 +127,14 @@ def test_default_base16_scheme_pin_tracks_nixpkgs_source_metadata() -> None:
     )
 
 
+@requires_nixpkgs_lib
 @pytest.mark.nix_eval(reason="Only evaluation proves the unused default remains lazy.")
 def test_explicit_base16_scheme_bypasses_default_source_metadata_check() -> None:
     """AST checks cannot prove the unused default metadata check remains lazy."""
     assert nix_eval_raw(_stylix_harness_expression()) == "/etc/hosts"
 
 
+@requires_nixpkgs_lib
 @pytest.mark.nix_eval(
     reason="Only evaluation resolves the default through the module system."
 )
@@ -95,6 +151,7 @@ def test_default_base16_scheme_uses_evaluator_visible_flake_input() -> None:
     )
 
 
+@requires_nixpkgs_lib
 @pytest.mark.nix_eval(reason="Only evaluation reaches the throwing module branch.")
 def test_default_base16_scheme_rejects_mismatched_source_metadata() -> None:
     """AST checks cannot prove the default branch rejects mismatched metadata."""

@@ -20,6 +20,7 @@ from lib.update.events import (
     ignore_event,
 )
 from lib.update.generated_artifact_commands import stream_command_materialized_artifacts
+from lib.update.locked_source import locked_github_source
 from lib.update.net import fetch_json, fetch_url, github_raw_url
 from lib.update.nix import _build_package_path_attr_expr
 from lib.update.npm_semver import require_npm_version_matches_spec
@@ -101,7 +102,6 @@ class SupersetUpdater(MaterializesArtifactsMixin, GitHubReleaseAssetURLsUpdater)
         """Return the immutable Superset input commit for ``tag_name``."""
         node = update_flake.get_flake_input_node(cls.input_name)
         original = node.original
-        locked = node.locked
         if (
             original is None
             or original.type != "github"
@@ -114,17 +114,11 @@ class SupersetUpdater(MaterializesArtifactsMixin, GitHubReleaseAssetURLsUpdater)
                 f"release tag as the binary asset: expected {tag_name!r}"
             )
             raise RuntimeError(msg)
-        if (
-            locked is None
-            or locked.type != "github"
-            or locked.owner != cls.GITHUB_OWNER
-            or locked.repo != cls.GITHUB_REPO
-            or locked.rev is None
-            or cls._COMMIT_PATTERN.fullmatch(locked.rev) is None
-        ):
-            msg = "Superset flake input has no immutable GitHub source commit"
-            raise RuntimeError(msg)
-        return locked.rev
+        return locked_github_source(
+            node,
+            context="Superset flake input",
+            expected=(cls.GITHUB_OWNER, cls.GITHUB_REPO),
+        ).rev
 
     @staticmethod
     def _electron_spec(manifest: object) -> tuple[str, str]:

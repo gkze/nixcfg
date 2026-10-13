@@ -5,6 +5,8 @@ import re
 from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlsplit
 
+from lib.update.locked_source import IMMUTABLE_COMMIT_PATTERN
+
 if TYPE_CHECKING:
     from lib.nix.models.sources import SourceEntry
 
@@ -12,7 +14,6 @@ _RELEASE_VERSION = re.compile(
     r"^[0-9]+(?:\.[0-9]+)*"
     r"(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?(?:\+[0-9A-Za-z][0-9A-Za-z.-]*)?$"
 )
-_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 
 
 def assert_release_version(version: str | None) -> str:
@@ -25,7 +26,7 @@ def assert_release_version(version: str | None) -> str:
 def assert_immutable_commit(commit: str | None) -> str:
     """Require a lowercase immutable Git commit without freezing its value."""
     assert commit is not None
-    assert _COMMIT.fullmatch(commit) is not None
+    assert IMMUTABLE_COMMIT_PATTERN.fullmatch(commit) is not None
     return commit
 
 

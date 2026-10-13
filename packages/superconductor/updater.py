@@ -2,29 +2,23 @@
 
 import re
 import urllib.parse
-from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, ClassVar
 
 import aiohttp
 
+from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.updaters import (
     AssetURLsMetadataUpdater,
     VersionInfo,
     register_updater,
 )
+from lib.update.updaters.core import verify_platform_versions
 from lib.update.updaters.metadata import AssetURLsMetadata
+from lib.update.updaters.strategies import ResolvedArtifact, url_without_query
 
 if TYPE_CHECKING:
     from lib.update.updaters import UpdateContext
-
-HTTP_BAD_REQUEST = 400
-
-
-@dataclass(frozen=True, slots=True)
-class _ResolvedArtifact:
-    version: str
-    url: str
 
 
 @register_updater
@@ -36,17 +30,6 @@ class SuperconductorUpdater(AssetURLsMetadataUpdater):
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "arm64",
     }
-
-    @staticmethod
-    def _url_without_query(url: str) -> str:
-        parsed = urllib.parse.urlsplit(url)
-        return urllib.parse.urlunsplit((
-            parsed.scheme,
-            parsed.netloc,
-            parsed.path,
-            "",
-            "",
-        ))
 
     @staticmethod
     def _version_from_url(url: str, last_modified: str | None) -> str:
@@ -68,7 +51,7 @@ class SuperconductorUpdater(AssetURLsMetadataUpdater):
         self,
         session: aiohttp.ClientSession,
         platform: str,
-    ) -> _ResolvedArtifact:
+    ) -> ResolvedArtifact:
         query = urllib.parse.urlencode({"arch": self.PLATFORMS[platform]})
         timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
         async with session.head(
@@ -82,8 +65,8 @@ class SuperconductorUpdater(AssetURLsMetadataUpdater):
                     f"HTTP {response.status}"
                 )
                 raise RuntimeError(msg)
-            url = self._url_without_query(str(response.url))
-            return _ResolvedArtifact(
+            url = url_without_query(str(response.url))
+            return ResolvedArtifact(
                 version=self._version_from_url(
                     url,
                     response.headers.get("Last-Modified"),
@@ -100,18 +83,15 @@ class SuperconductorUpdater(AssetURLsMetadataUpdater):
             platform: await self._fetch_resolved_artifact(session, platform)
             for platform in self.PLATFORMS
         }
-        versions = {artifact.version for artifact in artifacts.values()}
-        if len(versions) != 1:
-            version_map = {
-                platform: artifact.version for platform, artifact in artifacts.items()
-            }
-            msg = (
-                "Superconductor release metadata returned mismatched versions: "
-                f"{version_map}"
-            )
-            raise RuntimeError(msg)
+        version_map = {
+            platform: artifact.version for platform, artifact in artifacts.items()
+        }
+        version = verify_platform_versions(
+            version_map,
+            context="Superconductor release metadata returned mismatched versions",
+        )
         return VersionInfo(
-            version=versions.pop(),
+            version=version,
             metadata=AssetURLsMetadata({
                 platform: artifact.url for platform, artifact in artifacts.items()
             }),

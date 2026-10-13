@@ -6,6 +6,7 @@ from lib.update.crate2nix import TARGETS, stream_crate2nix_artifact_updates
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import EventSink, ignore_event
 from lib.update.runtime import resource_slot, workspace_access
+from lib.update.updaters.core import as_source_hashes
 from lib.update.updaters.flake_backed import FlakeInputMetadataUpdater
 
 if TYPE_CHECKING:
@@ -80,9 +81,7 @@ class Crate2NixMetadataUpdater(Crate2NixArtifactsMixin, FlakeInputMetadataUpdate
         """Return persisted hashes in the structured updater representation."""
         if source is None:
             return []
-        if source.hashes.entries is not None:
-            return list(source.hashes.entries)
-        return dict(source.hashes.mapping or {})
+        return as_source_hashes(source.hashes)
 
     def materialization_source_overrides(
         self,

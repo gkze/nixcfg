@@ -1122,3 +1122,83 @@ def test_ci_update_flags_preserve_idempotency_and_literal_targets(
     assert options.strict
     assert options.json
     assert options.tty == "off"
+
+
+def test_repair_option_after_a_target_reaches_the_updater(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An option placed after a target is recovered, not swallowed as a target.
+
+    `--repair` used to be missing from the trailing-option registries, so
+    `update demo --repair codex` requested no repair and reported both
+    `--repair` and `codex` as unknown targets.
+    """
+    from lib.update import cli
+    from lib.update.cli_options import RepairAgent
+
+    received = []
+
+    def run(**kwargs):
+        received.append(cli.UpdateOptions.from_mapping(kwargs))
+        return 0
+
+    monkeypatch.setattr(cli, "run_update_command", run)
+    result = CliRunner().invoke(nixcfg.app, ["update", "demo", "--repair", "codex"])
+    assert result.exit_code == 0, result.output
+    assert len(received) == 1
+    options = received[0]
+    # Identity, not equality: `RepairAgent` is a `StrEnum`, so `==` also accepts
+    # the bare string the trailing position used to pass through.
+    assert options.repair is RepairAgent.CODEX
+    assert options.target_names == ("demo",)
+
+
+def test_trailing_repair_option_rejects_an_unknown_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both option positions reject the same invalid value identically."""
+    from lib.update import cli
+
+    called = []
+
+    def run(**kwargs):
+        called.append(kwargs)
+        return 0
+
+    monkeypatch.setattr(cli, "run_update_command", run)
+    trailing = CliRunner().invoke(
+        nixcfg.app,
+        ["update", "demo", "--repair", "bogus"],
+    )
+    leading = CliRunner().invoke(
+        nixcfg.app,
+        ["update", "--repair", "bogus", "demo"],
+    )
+
+    assert called == []
+    assert trailing.exit_code == 2, trailing.output
+    assert leading.exit_code == 2, leading.output
+    assert "'bogus' is not one of" in leading.output
+    assert "expects one of" in trailing.output
+
+
+def test_trailing_option_registries_cover_every_declared_option() -> None:
+    """Every declared update option must be recoverable after a target.
+
+    The recovery tables are kept by hand, so this binds them to the command's
+    real parameter list: an option added to the CLI but not to a registry is
+    silently absorbed as a target name instead of being honoured.
+    """
+    from lib.update import cli
+
+    command = get_command(cli.app)
+    declared = {
+        opt
+        for param in command.params
+        if isinstance(param, click.Option) and param.name != "help"
+        for opt in (*param.opts, *param.secondary_opts)
+    }
+    covered = set(cli._TRAILING_TARGET_FLAG_OPTIONS) | set(
+        cli._TRAILING_TARGET_VALUE_OPTIONS
+    )
+    assert declared - covered == set()

@@ -429,6 +429,61 @@ def test_native_validation_and_certification(
         pipeline.certified_patch(candidate.model_copy(update={"systems": ()}), reports)
 
 
+@pytest.mark.parametrize("hosted_darwin", [True, False])
+def test_hosted_darwin_validates_root_closures_without_streaming_build_logs(
+    prepared_run,
+    monkeypatch: pytest.MonkeyPatch,
+    hosted_darwin: bool,
+) -> None:
+    """Hosted macos-15 validates root closures but must not stream their build logs.
+
+    The closure is still built on a hosted runner: only the ``-L`` log streaming
+    is suppressed, because Cachix's daemon cannot upload a realized path while
+    the runner streams 4000+ derivation logs (lib/update/ci/candidate.py). Both
+    halves are pinned so neither "skip the closure" nor "always stream" can
+    regress unnoticed.
+    """
+    _, _, state = prepared_run
+    candidate = None
+    for system in pipeline.supported_systems():
+        state["system"] = system
+        candidate, _ = pipeline.prepare_candidate(("example",), previous=candidate)
+    assert candidate is not None
+    order: list[str] = []
+    streamed: list[bool] = []
+    monkeypatch.setattr(pipeline.jobs.sys, "platform", "darwin")
+    if hosted_darwin:
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    else:
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        monkeypatch.delenv("RUNNER_ENVIRONMENT", raising=False)
+    monkeypatch.setattr(
+        pipeline.jobs, "reclaim_hosted_store", lambda: order.append("reclaim")
+    )
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+
+    def validate_roots(*, print_build_logs, **_kwargs):
+        streamed.append(print_build_logs)
+        order.append("roots")
+        return ()
+
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_root_closures",
+        validate_roots,
+    )
+    state["system"] = "aarch64-darwin"
+    report = pipeline.validate_candidate(candidate)
+    assert report.failures == ()
+    assert order == ["reclaim", "roots"]
+    assert streamed == [not hosted_darwin]
+
+
 def _candidate_for_scope(prepared_run) -> Candidate:
     root, _, state = prepared_run
     tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
@@ -1140,70 +1195,6 @@ def test_noop_candidate_still_validates_repaired_baseline_roots(
     monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
     assert pipeline.validate_candidate(candidate).failures == ()
     assert checked == [(state["system"],)]
-
-
-def test_hosted_darwin_builds_root_closures_without_derivation_logs(
-    prepared_run, monkeypatch
-) -> None:
-    """The Mac runner must realize the closure; -L logs previously killed the job."""
-    root, _, _state = prepared_run
-    tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
-    candidate = Candidate(
-        base_tree=tree,
-        tree=tree,
-        targets=(),
-        sources=(),
-        systems=pipeline.supported_systems(),
-        resolutions={},
-        prepared=True,
-        patch=b"",
-    )
-    seen: list[bool] = []
-    monkeypatch.setattr(pipeline.jobs, "is_hosted_darwin_runner", lambda: True)
-    monkeypatch.setattr(pipeline.jobs, "reclaim_hosted_store", lambda: None)
-    monkeypatch.setattr(
-        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
-    )
-
-    def roots(**kwargs):
-        seen.append(kwargs["print_build_logs"])
-        return ()
-
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
-    assert pipeline.validate_candidate(candidate).failures == ()
-    assert seen == [False]
-
-
-def test_non_hosted_builders_print_root_closure_derivation_logs(
-    prepared_run, monkeypatch
-) -> None:
-    """Linux and dedicated Darwin builders still stream -L for closure triage."""
-    root, _, _state = prepared_run
-    tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()
-    candidate = Candidate(
-        base_tree=tree,
-        tree=tree,
-        targets=(),
-        sources=(),
-        systems=pipeline.supported_systems(),
-        resolutions={},
-        prepared=True,
-        patch=b"",
-    )
-    seen: list[bool] = []
-    monkeypatch.setattr(pipeline.jobs, "is_hosted_darwin_runner", lambda: False)
-    monkeypatch.setattr(pipeline.jobs, "reclaim_hosted_store", lambda: None)
-    monkeypatch.setattr(
-        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
-    )
-
-    def roots(**kwargs):
-        seen.append(kwargs["print_build_logs"])
-        return ()
-
-    monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
-    assert pipeline.validate_candidate(candidate).failures == ()
-    assert seen == [True]
 
 
 @pytest.mark.parametrize(

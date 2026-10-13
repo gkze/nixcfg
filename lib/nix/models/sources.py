@@ -7,7 +7,7 @@ top-level sources file used by the update machinery.
 import json
 import os
 import re
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -16,6 +16,11 @@ from lib.update import io as update_io
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
+
+# The persisted authority for "this revision is an immutable commit". Updater
+# release checks compile this same pattern (lib/update/locked_source.py), so a
+# future object format changes here and nowhere else.
+IMMUTABLE_COMMIT_PATTERN = r"^[0-9a-f]{40}$"
 
 # ---------------------------------------------------------------------------
 # SRI hash validation (sha256-only, matching the existing sources.json format)
@@ -246,6 +251,19 @@ class HashCollection(BaseModel):
         msg = "Hashes must be a list or dict"
         raise ValueError(msg)
 
+    @model_validator(mode="after")
+    def reject_dual_representation(self) -> Self:
+        """Reject a value that carries both hash representations.
+
+        ``to_json`` keeps only ``entries``, so accepting a value with both would
+        silently discard every mapping hash the next time ``sources.json`` is
+        rewritten - data loss on an authoritative artifact.
+        """
+        if self.entries is not None and self.mapping is not None:
+            msg = "hashes must carry either entries or mapping, never both"
+            raise ValueError(msg)
+        return self
+
     def to_json(self) -> HashMapping | list[JsonObject]:
         """Return hashes in their canonical JSON representation."""
         if self.entries is not None:
@@ -325,7 +343,7 @@ class SourceEntry(BaseModel):
     input: str | None = None
     urls: dict[str, str] | None = None
     pins: dict[str, str] | None = None
-    commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
+    commit: str | None = Field(default=None, pattern=IMMUTABLE_COMMIT_PATTERN)
     electron_version: str | None = Field(
         default=None,
         alias="electronVersion",

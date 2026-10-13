@@ -13,7 +13,7 @@ from lib.nix.models.flake_lock import (
 )
 from lib.system_policy import supported_systems
 from lib.update.derivation_validation import DerivationValidation
-from lib.update.locked_source import resolve_locked_source
+from lib.update.locked_source import locked_github_source, resolve_locked_source
 from lib.update.npm_semver import (
     require_exact_semantic_version,
     require_npm_version_matches_spec,
@@ -35,7 +35,6 @@ if TYPE_CHECKING:
     from lib.nix.models.sources import SourceEntry, SourceHashes
     from lib.update.updaters.core import UpdateContext
 
-_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _PNPM_PACKAGE_MANAGER_PATTERN = re.compile(
     r"^pnpm@(?P<version>[^+]+)"
     r"(?:\+sha512\.[A-Za-z0-9_+/=-]+)?$"
@@ -104,23 +103,6 @@ def _require_exact_version(value: str, *, context: str) -> str:
 
 def _release_version(version: str) -> str:
     return _require_exact_version(version.removeprefix("v"), context="flake input ref")
-
-
-def _locked_github_source(node: FlakeLockNode) -> tuple[str, str, str]:
-    locked = node.locked
-    if (
-        locked is None
-        or locked.type != "github"
-        or not locked.owner
-        or not locked.repo
-        or not locked.rev
-    ):
-        msg = "Emdash flake input must resolve to a complete GitHub source"
-        raise RuntimeError(msg)
-    if _COMMIT_PATTERN.fullmatch(locked.rev) is None:
-        msg = f"Emdash flake input revision must be an immutable commit, got {locked.rev!r}"
-        raise RuntimeError(msg)
-    return locked.owner, locked.repo, locked.rev
 
 
 def _manifest_contract(payload: object) -> tuple[str, str]:
@@ -380,7 +362,7 @@ class EmdashUpdater(NpmDepsHashUpdater):
         """Resolve Electron from manifests at the immutable refreshed input commit."""
         info = await super().fetch_latest(session, context=context)
         node = self._resolve_flake_node(info)
-        _, _, commit = _locked_github_source(node)
+        _, _, commit = locked_github_source(node, context="Emdash flake input")
 
         source = await resolve_locked_source(
             node,

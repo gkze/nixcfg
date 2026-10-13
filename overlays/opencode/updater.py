@@ -7,6 +7,7 @@ from lib.update.updaters import (
     VersionInfo,
     register_updater,
 )
+from lib.update.updaters.core import hashes_by_platform
 
 
 @register_updater
@@ -30,15 +31,5 @@ class OpencodeUpdater(BunNodeModulesHashUpdater):
         if entry is None:
             return False
 
-        hashes = entry.hashes
-        platforms = (
-            {
-                hash_entry.platform
-                for hash_entry in hashes.entries
-                if hash_entry.platform is not None
-                and hash_entry.hash_type == self.hash_type
-            }
-            if hashes.entries
-            else set(hashes.mapping or {})
-        )
+        platforms = set(hashes_by_platform(entry.hashes, hash_type=self.hash_type))
         return platforms == set(self.SUPPORTED_PLATFORMS)

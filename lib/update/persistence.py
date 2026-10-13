@@ -467,7 +467,7 @@ def _restore_process_context(cwd: Path, repo_root: str | None) -> None:
                 os.environ["REPO_ROOT"] = repo_root
         finally:
             try:
-                update_paths._clear_root_cache()  # noqa: SLF001 -- root switch
+                update_paths.clear_root_cache()
             finally:
                 update_flake.invalidate_flake_lock()
 
@@ -1298,7 +1298,7 @@ class IsolatedUpdateWorkspace:
             cleanup.callback(_restore_process_context, old_cwd, old_repo_root)
             os.environ["REPO_ROOT"] = os.fspath(root)
             os.chdir(root)
-            update_paths._clear_root_cache()  # noqa: SLF001 -- process-global root switch
+            update_paths.clear_root_cache()
             update_flake.invalidate_flake_lock()
         except BaseException:
             cleanup.close()

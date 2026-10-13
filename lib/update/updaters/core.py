@@ -28,6 +28,7 @@ from lib.update.events import (
     gather_results,
     ignore_event,
 )
+from lib.update.locked_source import is_immutable_commit
 from lib.update.nix import _build_overlay_expr
 from lib.update.updaters.metadata import metadata_get, require_metadata_str
 
@@ -50,12 +51,54 @@ class FixedOutputHashStep:
     expr: Callable[[dict[str, str]], str]
 
 
-def _verify_platform_versions(versions: dict[str, str], source_name: str) -> str:
+def verify_platform_versions(versions: dict[str, str], *, context: str) -> str:
+    """Return the one version every platform reports, or raise.
+
+    ``context`` is the caller's own sentence for the failure, so each updater
+    keeps package-specific wording while sharing this rule.
+    """
     unique = set(versions.values())
     if len(unique) != 1:
-        msg = f"{source_name} version mismatch across platforms: {versions}"
+        msg = f"{context}: {versions}"
         raise RuntimeError(msg)
     return unique.pop()
+
+
+def hashes_by_platform(
+    hashes: HashCollection,
+    *,
+    hash_type: HashType | None = None,
+) -> dict[str, str]:
+    """Return a source's hashes as a ``platform -> hash`` mapping.
+
+    The structured ``entries`` form may hold several algorithms; pass
+    ``hash_type`` to select one. The legacy bare ``mapping`` form has no
+    algorithm field, so it is returned exactly as stored. This is the single
+    owner of that normalisation for updater and materialization callers:
+    ``lib/nix/models/sources.py`` normalises the same shape for its own
+    certificate merge and must not import this layer.
+    """
+    if hashes.entries:
+        return {
+            entry.platform: entry.hash
+            for entry in hashes.entries
+            if entry.platform and (hash_type is None or entry.hash_type == hash_type)
+        }
+    if hashes.mapping:
+        return dict(hashes.mapping)
+    return {}
+
+
+def as_source_hashes(hashes: HashCollection) -> SourceHashes:
+    """Return hashes in the persisted ``SourceHashes`` representation.
+
+    An explicitly empty ``entries`` list stays a list; only a missing entries
+    field falls back to the legacy mapping form. This is the single owner of
+    that round-trip shape.
+    """
+    if hashes.entries is not None:
+        return list(hashes.entries)
+    return dict(hashes.mapping or {})
 
 
 def _ensure_str_mapping(values: object) -> dict[str, str]:
@@ -81,7 +124,6 @@ _SOURCE_IDENTITY_FIELDS = (
     ("commit", "commit"),
     ("electron_version", "electronVersion"),
 )
-_IMMUTABLE_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _HEX_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 type CompatibilitySourceDigests = dict[str, dict[str, str]]
@@ -314,7 +356,7 @@ class SourceThenOverlayHashMixin:
     def _source_commit(self, info: VersionInfo) -> str:
         """Return the immutable commit required by source-backed updaters."""
         commit = info.commit
-        if commit is None or _IMMUTABLE_COMMIT_PATTERN.fullmatch(commit) is None:
+        if commit is None or not is_immutable_commit(commit):
             msg = f"{self.name} release metadata is missing an immutable source commit"
             raise RuntimeError(msg)
         return commit
@@ -1010,8 +1052,10 @@ __all__ = [
     "UpdateContext",
     "Updater",
     "_ensure_str_mapping",
-    "_verify_platform_versions",
+    "as_source_hashes",
+    "hashes_by_platform",
     "stream_fixed_output_hashes",
     "stream_source_then_overlay_hashes",
     "stream_url_hash_mapping",
+    "verify_platform_versions",
 ]

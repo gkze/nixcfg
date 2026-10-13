@@ -220,7 +220,8 @@ def test_ara_fetch_dmg_fail_closes_on_latest_redirect_drift() -> None:
     ]
     assert assignments == [
         "found_version=$(tr -d '\\r' < headers | awk 'BEGIN{IGNORECASE=1} "
-        "/^x-ara-desktop-version:/ {print $2; exit}')",
+        "/^x-desktop-version:/ {desktop=$2} /^x-ara-desktop-version:/ {ara=$2} "
+        "END {print desktop ? desktop : ara}')",
         "location=$(tr -d '\\r' < headers | awk 'BEGIN{IGNORECASE=1} "
         "/^location:/ {print $2; exit}')",
     ]
@@ -297,6 +298,32 @@ def test_ara_fetch_dmg_script_rejects_version_and_location_drift(
         encoding="utf-8"
     ) == f"{signed}\n"
     assert (tmp_path / "ok" / "Reason.dmg").read_bytes() == b"reason-dmg-bytes"
+
+
+def test_ara_fetch_dmg_prefers_x_desktop_version(tmp_path: Path) -> None:
+    """Update 38220443819 dropped x-ara-desktop-version; pin the renamed header."""
+    signed = (
+        "https://ara-desktop-releases.t3.storage.dev"
+        "/desktop/stable/0.1.88/Reason.dmg?X-Amz-Expires=900"
+    )
+    headers = (
+        "HTTP/2 307\r\n"
+        "x-desktop-version: 0.1.88\r\n"
+        "x-ara-desktop-version: 0.1.64\r\n"
+        f"location: {signed}\r\n"
+        "\r\n"
+    )
+    pinned = _run_fetch_dmg(tmp_path / "ok", version="0.1.88", headers=headers)
+    assert pinned.returncode == 0, pinned.stderr
+    assert (tmp_path / "ok" / "curl.get.log").read_text(encoding="utf-8") == (
+        f"{signed}\n"
+    )
+    assert (tmp_path / "ok" / "Reason.dmg").read_bytes() == b"reason-dmg-bytes"
+
+    stale = _run_fetch_dmg(tmp_path / "stale", version="0.1.64", headers=headers)
+    assert stale.returncode == 1
+    assert (tmp_path / "stale" / "curl.get.log").read_text(encoding="utf-8") == ""
+    assert not (tmp_path / "stale" / "Reason.dmg").exists()
 
 
 def test_ara_package_overrides_moving_url_src() -> None:

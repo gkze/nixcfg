@@ -1,32 +1,31 @@
 """Recover arbitrary repo files from realised generation source snapshots."""
 
-import asyncio
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from lib.recover._cli import emit_error, emit_success, require_apply_for_stage
-from lib.recover._common import apply_recovery_paths, files_equal
+from lib.recover._common import (
+    RecoveryPlan,
+    apply_recovery,
+    compute_recovery_paths,
+    run_recovery,
+)
 from lib.recover.snapshot import DEFAULT_GENERATION, plan_snapshot_recovery
 from lib.update.paths import REPO_ROOT
 
 
 @dataclass(frozen=True)
-class FileRecoveryPlan:
+class FileRecoveryPlan(RecoveryPlan):
     """Recovery plan for explicitly selected repo files."""
 
-    generation: str
-    resolved_target: str
-    deriver: str
-    snapshot: str
-    repo_root: str
-    path_selectors: tuple[str, ...]
-    glob_selectors: tuple[str, ...]
-    write_paths: tuple[str, ...]
-    remove_paths: tuple[str, ...]
+    path_selectors: tuple[str, ...] = ()
+    glob_selectors: tuple[str, ...] = ()
 
-    def to_dict(self) -> dict[str, object]:
-        """Return a JSON-serialisable representation."""
-        return asdict(self)
+    def selector_sections(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        """Return the labelled selector lists this plan reports."""
+        return (
+            ("Path selectors", self.path_selectors),
+            ("Glob selectors", self.glob_selectors),
+        )
 
 
 def _normalise_selector(selector: str, *, kind: str) -> str:
@@ -109,17 +108,17 @@ async def plan_file_recovery(
         repo_root,
         glob_selectors,
     )
-    selected_paths = snapshot_matches | current_matches
-    if not selected_paths:
+    if not (snapshot_matches | current_matches):
         msg = "No files matched the requested selectors"
         raise RuntimeError(msg)
 
-    write_paths = tuple(
-        relative_path
-        for relative_path in sorted(snapshot_matches)
-        if not files_equal(snapshot_root / relative_path, repo_root / relative_path)
+    write_paths, remove_paths = compute_recovery_paths(
+        snapshot_root=snapshot_root,
+        repo_root=repo_root,
+        snapshot_paths=snapshot_matches,
+        current_paths=current_matches,
+        sync=sync,
     )
-    remove_paths = tuple(sorted(current_matches - snapshot_matches)) if sync else ()
 
     return FileRecoveryPlan(
         generation=snapshot_plan.generation,
@@ -140,59 +139,7 @@ def apply_file_recovery(
     stage: bool = False,
 ) -> tuple[str, ...]:
     """Apply a file recovery plan and optionally stage the changes."""
-    return apply_recovery_paths(
-        repo_root=Path(plan.repo_root),
-        snapshot_root=Path(plan.snapshot),
-        write_paths=plan.write_paths,
-        remove_paths=plan.remove_paths,
-        stage=stage,
-    )
-
-
-def _render_plain(
-    plan: FileRecoveryPlan,
-    *,
-    apply: bool,
-    stage: bool,
-    sync: bool,
-    changed_paths: tuple[str, ...] | None = None,
-) -> str:
-    """Render a human-readable summary of the file recovery plan/result."""
-    lines = [
-        f"Generation: {plan.generation}",
-        f"Resolved path: {plan.resolved_target}",
-        f"Deriver: {plan.deriver}",
-        f"Source snapshot: {plan.snapshot}",
-        f"Repo root: {plan.repo_root}",
-        f"Sync mode: {'on' if sync else 'off'}",
-    ]
-    if plan.path_selectors:
-        lines.append(f"Path selectors ({len(plan.path_selectors)}):")
-        lines.extend(f"  {selector}" for selector in plan.path_selectors)
-    if plan.glob_selectors:
-        lines.append(f"Glob selectors ({len(plan.glob_selectors)}):")
-        lines.extend(f"  {selector}" for selector in plan.glob_selectors)
-
-    action = "Will restore" if not apply else "Restored"
-    if plan.write_paths:
-        lines.append(f"{action} ({len(plan.write_paths)}):")
-        lines.extend(f"  {path}" for path in plan.write_paths)
-    else:
-        lines.append(f"{action}: none")
-
-    remove_action = "Will remove" if not apply else "Removed"
-    if plan.remove_paths:
-        lines.append(f"{remove_action} ({len(plan.remove_paths)}):")
-        lines.extend(f"  {path}" for path in plan.remove_paths)
-    elif sync:
-        lines.append(f"{remove_action}: none")
-
-    if apply:
-        changed = changed_paths or ()
-        lines.append(f"Applied changes: {len(changed)}")
-        if stage:
-            lines.append("Staged changes: yes")
-    return "\n".join(lines)
+    return apply_recovery(plan, stage=stage)
 
 
 def run_file_recovery(
@@ -206,45 +153,16 @@ def run_file_recovery(
     sync: bool = False,
 ) -> int:
     """Plan or apply recovery for selected repo files."""
-    stage_validation = require_apply_for_stage(
+    return run_recovery(
+        plan_fn=lambda: plan_file_recovery(
+            generation,
+            globs=globs,
+            paths=paths,
+            sync=sync,
+        ),
+        apply_fn=apply_file_recovery,
         apply=apply,
         json_output=json_output,
         stage=stage,
+        sync=sync,
     )
-    if stage_validation is not None:
-        return stage_validation
-
-    try:
-        plan = asyncio.run(
-            plan_file_recovery(
-                generation,
-                globs=globs,
-                paths=paths,
-                sync=sync,
-            )
-        )
-        changed_paths: tuple[str, ...] | None = None
-        if apply:
-            changed_paths = apply_file_recovery(plan, stage=stage)
-
-        payload = {
-            "success": True,
-            "apply": apply,
-            "stage": stage,
-            "sync": sync,
-            "changed_paths": list(changed_paths or ()),
-            "plan": plan.to_dict(),
-        }
-        return emit_success(
-            json_output=json_output,
-            payload=payload,
-            plain=_render_plain(
-                plan,
-                apply=apply,
-                stage=stage,
-                sync=sync,
-                changed_paths=changed_paths,
-            ),
-        )
-    except Exception as exc:  # noqa: BLE001
-        return emit_error(json_output=json_output, message=str(exc))

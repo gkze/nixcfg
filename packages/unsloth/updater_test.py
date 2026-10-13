@@ -323,11 +323,11 @@ def _oxc_source_payloads(
         "type": "module",
         "dependencies": dependencies,
     }
-    lock = {
+    lock: dict[str, object] = {
         "name": "unsloth-oxc-validator-runtime",
         "version": "0.0.1",
         "lockfileVersion": 3,
-        "packages": {
+        "packages": dict[str, object]({
             "": {
                 "name": "unsloth-oxc-validator-runtime",
                 "version": "0.0.1",
@@ -406,9 +406,9 @@ def _oxc_source_payloads(
                 ),
                 "version": parser_version,
             },
-        },
+        }),
     }
-    locked_packages = cast("dict[str, object]", lock["packages"])
+    locked_packages = lock["packages"]
     fallback_integrity = f"sha512-{base64.b64encode(b'x' * 64).decode()}"
     for namespace, version, targets in (
         ("oxc-parser", parser_version, (*binding_targets, "wasm32-wasi")),
@@ -1863,6 +1863,40 @@ def test_unsloth_rejects_re_pinned_oxc_non_sha512_integrity(
         )
 
 
+def _locked_oxc_source_payloads() -> dict[str, bytes]:
+    """Use setup blocks from upstream commit 1b588389b488eb9f8a9cb8ad5ca3073c7661f073."""
+    payloads = _oxc_source_payloads()
+    for path in (_SETUP_SH_PATH, _SETUP_PS1_PATH):
+        payloads[path] = (
+            _PACKAGE_DIR / "tests/fixtures" / f"oxc-0.1.902-beta-{Path(path).name}.txt"
+        ).read_bytes()
+    return payloads
+
+
+def test_unsloth_accepts_locked_oxc_setup() -> None:
+    """Both setup paths may use npm ci with the reviewed mirror retry."""
+    _load_updater_module()._audit_oxc_runtime_sources(_locked_oxc_source_payloads())
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (_SETUP_SH_PATH, b"_NPM_INSTALL=ci", b"_NPM_INSTALL=update"),
+        (_SETUP_SH_PATH, b"_npm_mirror_retry", b"unreviewed_retry"),
+        (_SETUP_PS1_PATH, b'{ "ci" }', b'{ "update" }'),
+        (_SETUP_PS1_PATH, b"Invoke-NpmMirrorRetry", b"Invoke-UnreviewedRetry"),
+    ],
+)
+def test_unsloth_rejects_locked_oxc_setup_drift(
+    path: str, old: bytes, new: bytes
+) -> None:
+    """Indirect install verbs and retry paths remain part of the audited contract."""
+    payloads = _locked_oxc_source_payloads()
+    payloads[path] = payloads[path].replace(old, new)
+    with pytest.raises(RuntimeError, match="OXC setup.* npm install mutation drifted"):
+        _load_updater_module()._audit_oxc_runtime_sources(payloads)
+
+
 def test_unsloth_accepts_removed_oxc_windows_comment() -> None:
     """Release 0.1.807-beta removed an explanation without changing npm behavior."""
     module = _load_updater_module()
@@ -2941,6 +2975,27 @@ def test_unsloth_rejects_invalid_backend_upload_time(value: str) -> None:
     module = _load_updater_module()
     with pytest.raises(RuntimeError, match="invalid upload time"):
         module._canonical_pypi_upload_time(value)
+
+
+def test_unsloth_build_toolchain_override_is_updater_owned() -> None:
+    """A release whose own lockfile needs a newer compiler is recorded, not restated in Nix."""
+    module = _load_updater_module()
+    source = _candidate_source(module)
+    metadata = {**_metadata(), "rustToolchainVersion": "1.89.0"}
+
+    overridden = module._closure_plan_payload(
+        VersionInfo("0.1.902-beta", metadata),
+        source,
+        metadata,
+    )
+    assert overridden["app"]["rustToolchainVersion"] == "1.90.0"
+
+    declared_only = module._closure_plan_payload(
+        VersionInfo("0.1.813-beta", metadata),
+        source,
+        metadata,
+    )
+    assert declared_only["app"]["rustToolchainVersion"] == "1.89.0"
 
 
 def test_unsloth_closure_plan_is_derived_from_candidate_source() -> None:
@@ -4228,14 +4283,14 @@ def test_unsloth_policy_patch_applies_fail_closed_backend_replacements(
         assert (tmp_path / relative_path).read_text(encoding="utf-8") == source
 
 
+@pytest.mark.parametrize("resolved_venv", [False, True])
 def test_unsloth_policy_patch_runs_the_packaged_studio_backend_in_process(
     tmp_path: Path,
+    resolved_venv: bool,
 ) -> None:
     """Managed Studio launches use the packaged interpreter without installer state."""
     module = _load_patch_module()
     _write_backend_patch_fixture(tmp_path, module)
-
-    module.patch_backend_tree(tmp_path)
 
     policy_patch = next(
         patch
@@ -4243,9 +4298,15 @@ def test_unsloth_policy_patch_runs_the_packaged_studio_backend_in_process(
         if patch.path == Path("unsloth_cli/commands/studio.py")
         and "studio_venv_dir" in patch.old
     )
+    source_file = tmp_path / policy_patch.path
+    expected = policy_patch.new
+    if resolved_venv:
+        old, expected = policy_patch.alternatives[0]
+        source_file.write_text(source_file.read_text().replace(policy_patch.old, old))
+    module.patch_backend_tree(tmp_path)
     patched_source = (tmp_path / policy_patch.path).read_text(encoding="utf-8")
-    assert patched_source.count(policy_patch.new) == 2
-    assignment = ast.parse(textwrap.dedent(policy_patch.new)).body[1]
+    assert patched_source.count(expected) == 2
+    assignment = ast.parse(textwrap.dedent(expected)).body[1]
     assert isinstance(assignment, ast.Assign)
 
     expression = compile(ast.Expression(assignment.value), "<studio-policy>", "eval")
@@ -4261,6 +4322,9 @@ def test_unsloth_policy_patch_runs_the_packaged_studio_backend_in_process(
                     ),
                     "studio_venv_dir": studio_venv,
                     "sys": SimpleNamespace(prefix=prefix),
+                    "_running_in_studio_venv": lambda path: prefix.startswith(
+                        str(path)
+                    ),
                 },
             )
         )
@@ -4268,6 +4332,51 @@ def test_unsloth_policy_patch_runs_the_packaged_studio_backend_in_process(
     assert is_in_process(managed=True, prefix="/nix/store/backend-venv")
     assert is_in_process(managed=False, prefix=f"{studio_venv}/bin/python")
     assert not is_in_process(managed=False, prefix="/nix/store/backend-venv")
+
+
+def test_unsloth_rejects_mixed_studio_venv_contracts(tmp_path: Path) -> None:
+    """A partially migrated CLI must not silently receive only half the policy."""
+    module = _load_patch_module()
+    _write_backend_patch_fixture(tmp_path, module)
+    patch = next(patch for patch in module._BACKEND_PATCHES if patch.alternatives)
+    path = tmp_path / patch.path
+    path.write_text(path.read_text().replace(patch.old, patch.alternatives[0][0], 1))
+    with pytest.raises(RuntimeError, match="ambiguous Unsloth patch variants"):
+        module.patch_backend_tree(tmp_path)
+
+
+@pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize("usable", [False, True])
+def test_unsloth_sd_cpp_policy_prevents_managed_installs(
+    managed: bool,
+    usable: bool,
+) -> None:
+    """Changing upstream reinstall heuristics cannot enable managed downloads."""
+    module = _load_patch_module()
+    path = Path("studio/backend/core/inference/sd_cpp_backend.py")
+    patch = next(patch for patch in module._BACKEND_PATCHES if patch.path == path)
+    source = (
+        "def ensure_binary():\n"
+        "    if not allow_install:\n"
+        "        return found\n"
+        "    with _install_lock:\n"
+        "        return 'installed'\n"
+    )
+    # Execute the policy at the installer boundary with both usability outcomes.
+    namespace: dict[str, object] = {
+        "os": SimpleNamespace(environ={"UNSLOTH_NIX_MANAGED": "1"} if managed else {}),
+        "allow_install": True,
+        "found": "/nix/store/sd-cli",
+        "usable": usable,
+        "_install_lock": nullcontext(),
+    }
+    exec(  # noqa: S102 -- executes a fixed policy fixture with inert installer state
+        compile(source.replace(patch.old, patch.new), "<sd-policy>", "exec"), namespace
+    )
+    expected = ("/nix/store/sd-cli" if usable else None) if managed else "installed"
+    ensure_binary = namespace["ensure_binary"]
+    assert callable(ensure_binary)
+    assert ensure_binary() == expected
 
 
 def test_unsloth_nix_managed_capabilities_use_the_validated_immutable_closure() -> None:

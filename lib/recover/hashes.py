@@ -1,30 +1,21 @@
 """Recover ``flake.lock`` and ``sources.json`` from generation build inputs."""
 
-import asyncio
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
-from lib.recover._cli import emit_error, emit_success, require_apply_for_stage
-from lib.recover._common import apply_recovery_paths, files_equal
+from lib.recover._common import (
+    RecoveryPlan,
+    apply_recovery,
+    compute_recovery_paths,
+    run_recovery,
+)
 from lib.recover.snapshot import DEFAULT_GENERATION, plan_snapshot_recovery
 from lib.update.paths import REPO_ROOT, SOURCES_FILE_NAME, package_file_map_in
 
 
 @dataclass(frozen=True)
-class HashRecoveryPlan:
+class HashRecoveryPlan(RecoveryPlan):
     """One recovery plan for tracked hash files."""
-
-    generation: str
-    resolved_target: str
-    deriver: str
-    snapshot: str
-    repo_root: str
-    write_paths: tuple[str, ...]
-    remove_paths: tuple[str, ...]
-
-    def to_dict(self) -> dict[str, object]:
-        """Return a JSON-serialisable representation."""
-        return asdict(self)
 
 
 def _managed_relative_paths(root: Path) -> set[str]:
@@ -48,12 +39,13 @@ async def plan_hash_recovery(
     snapshot_paths = _managed_relative_paths(snapshot_root)
     current_paths = _managed_relative_paths(repo_root)
 
-    write_paths = tuple(
-        relative_path
-        for relative_path in sorted(snapshot_paths)
-        if not files_equal(snapshot_root / relative_path, repo_root / relative_path)
+    write_paths, remove_paths = compute_recovery_paths(
+        snapshot_root=snapshot_root,
+        repo_root=repo_root,
+        snapshot_paths=snapshot_paths,
+        current_paths=current_paths,
+        sync=sync,
     )
-    remove_paths = tuple(sorted(current_paths - snapshot_paths)) if sync else ()
 
     return HashRecoveryPlan(
         generation=snapshot_plan.generation,
@@ -72,53 +64,7 @@ def apply_hash_recovery(
     stage: bool = False,
 ) -> tuple[str, ...]:
     """Apply a hash recovery plan and optionally stage the changed files."""
-    return apply_recovery_paths(
-        repo_root=Path(plan.repo_root),
-        snapshot_root=Path(plan.snapshot),
-        write_paths=plan.write_paths,
-        remove_paths=plan.remove_paths,
-        stage=stage,
-    )
-
-
-def _render_plain(
-    plan: HashRecoveryPlan,
-    *,
-    apply: bool,
-    stage: bool,
-    sync: bool,
-    changed_paths: tuple[str, ...] | None = None,
-) -> str:
-    """Render a human-readable summary of the recovery plan/result."""
-    lines = [
-        f"Generation: {plan.generation}",
-        f"Resolved path: {plan.resolved_target}",
-        f"Deriver: {plan.deriver}",
-        f"Source snapshot: {plan.snapshot}",
-        f"Repo root: {plan.repo_root}",
-        f"Sync mode: {'on' if sync else 'off'}",
-    ]
-
-    action = "Will restore" if not apply else "Restored"
-    if plan.write_paths:
-        lines.append(f"{action} ({len(plan.write_paths)}):")
-        lines.extend(f"  {path}" for path in plan.write_paths)
-    else:
-        lines.append(f"{action}: none")
-
-    remove_action = "Will remove" if not apply else "Removed"
-    if plan.remove_paths:
-        lines.append(f"{remove_action} ({len(plan.remove_paths)}):")
-        lines.extend(f"  {path}" for path in plan.remove_paths)
-    elif sync:
-        lines.append(f"{remove_action}: none")
-
-    if apply:
-        changed = changed_paths or ()
-        lines.append(f"Applied changes: {len(changed)}")
-        if stage:
-            lines.append("Staged changes: yes")
-    return "\n".join(lines)
+    return apply_recovery(plan, stage=stage)
 
 
 def run_hash_recovery(
@@ -130,38 +76,11 @@ def run_hash_recovery(
     sync: bool = False,
 ) -> int:
     """Plan or apply hash recovery for a realised generation."""
-    stage_validation = require_apply_for_stage(
+    return run_recovery(
+        plan_fn=lambda: plan_hash_recovery(generation, sync=sync),
+        apply_fn=apply_hash_recovery,
         apply=apply,
         json_output=json_output,
         stage=stage,
+        sync=sync,
     )
-    if stage_validation is not None:
-        return stage_validation
-
-    try:
-        plan = asyncio.run(plan_hash_recovery(generation, sync=sync))
-        changed_paths: tuple[str, ...] | None = None
-        if apply:
-            changed_paths = apply_hash_recovery(plan, stage=stage)
-
-        payload = {
-            "success": True,
-            "apply": apply,
-            "stage": stage,
-            "sync": sync,
-            "changed_paths": list(changed_paths or ()),
-            "plan": plan.to_dict(),
-        }
-        return emit_success(
-            json_output=json_output,
-            payload=payload,
-            plain=_render_plain(
-                plan,
-                apply=apply,
-                stage=stage,
-                sync=sync,
-                changed_paths=changed_paths,
-            ),
-        )
-    except Exception as exc:  # noqa: BLE001
-        return emit_error(json_output=json_output, message=str(exc))

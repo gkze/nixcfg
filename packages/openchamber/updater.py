@@ -26,6 +26,7 @@ from lib.update.events import (
     EventSink,
     ignore_event,
 )
+from lib.update.locked_source import is_immutable_commit
 from lib.update.net import fetch_github_api, fetch_json, fetch_url, github_raw_url
 from lib.update.nix import (
     _build_fetch_from_github_call,
@@ -51,7 +52,6 @@ if TYPE_CHECKING:
 
     from lib.update.config import UpdateConfig
 
-_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _EXACT_VERSION_PATTERN = re.compile(
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
@@ -120,7 +120,7 @@ def _require_prefixed_version(value: str, prefix: str, *, context: str) -> str:
 
 
 def _require_commit(value: str, *, context: str) -> str:
-    if _COMMIT_PATTERN.fullmatch(value) is None:
+    if not is_immutable_commit(value):
         msg = f"OpenChamber {context} must be an immutable commit, got {value!r}"
         raise RuntimeError(msg)
     return value
@@ -200,7 +200,7 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             "sha",
             context=f"{owner}/{repo} commit response",
         )
-        if _COMMIT_PATTERN.fullmatch(commit) is None:
+        if not is_immutable_commit(commit):
             msg = f"OpenChamber {owner}/{repo} tag {tag} is not an immutable commit"
             raise RuntimeError(msg)
         return commit

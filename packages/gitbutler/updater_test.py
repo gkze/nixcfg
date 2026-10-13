@@ -207,17 +207,30 @@ def test_gitbutler_updater_tracks_release_ref_and_metadata(
     ]
 
 
+@pytest.mark.parametrize(
+    ("rev", "match"),
+    [
+        (None, "must resolve to a complete GitHub source"),
+        ("main", "revision must be an immutable commit"),
+    ],
+)
 def test_gitbutler_updater_requires_immutable_locked_commit(
     monkeypatch: pytest.MonkeyPatch,
+    rev: str | None,
+    match: str,
 ) -> None:
-    """The manifest must come from the immutable tree used by the build."""
+    """The manifest must come from the immutable tree used by the build.
+
+    Both rejection shapes come from the shared locked-source owner: a missing
+    revision is an incomplete GitHub source, a mutable one is not a commit.
+    """
     module = _load_module("gitbutler_updater_no_locked_test")
     updater = module.GitButlerUpdater()
-    node = _flake_node(ref="release/0.19.9", rev=None)
+    node = _flake_node(ref="release/0.19.9", rev=rev)
 
     monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
 
-    with pytest.raises(RuntimeError, match="must resolve to an immutable"):
+    with pytest.raises(RuntimeError, match=match):
         _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 

@@ -9,9 +9,10 @@
 }:
 # The public download is a latest-only 307 onto a versioned Tigris object
 # (`/desktop/stable/<ver>/Reason.dmg`) whose signature expires in 900s.
-# Unsigned object URLs 403. HEAD the public URL, fail closed unless the
-# header/Location still name the pin, then GET that signed Location so
-# the second hop cannot race to a newer latest.
+# Unsigned object URLs 403. HEAD the public URL, fail closed unless
+# x-desktop-version (or legacy x-ara-desktop-version) and Location still
+# name the pin, then GET that signed Location so the second hop cannot
+# race to a newer latest.
 #
 # Do not pass SSL_CERT_FILE through impureEnvVars. Hosted Darwin Nix
 # injects /no-cert-file.crt there (Update 37406317879, curl 77 on the
@@ -33,7 +34,7 @@ stdenvNoCC.mkDerivation {
   buildCommand = ''
     set -eu
     curl -fsSI --dump-header headers "$url" -o /dev/null
-    found_version=$(tr -d '\r' < headers | awk 'BEGIN{IGNORECASE=1} /^x-ara-desktop-version:/ {print $2; exit}')
+    found_version=$(tr -d '\r' < headers | awk 'BEGIN{IGNORECASE=1} /^x-desktop-version:/ {desktop=$2} /^x-ara-desktop-version:/ {ara=$2} END {print desktop ? desktop : ara}')
     location=$(tr -d '\r' < headers | awk 'BEGIN{IGNORECASE=1} /^location:/ {print $2; exit}')
     if [ "$found_version" != "$version" ]; then
       echo "Reason download is $found_version, expected pinned $version" >&2

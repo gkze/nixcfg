@@ -235,7 +235,8 @@ def test_make_resource_uses_default_specification_and_aliases(
         resource=_FakeResource({}, resource_id=None),
     )
     aliases_ignore_unknown_values = _prepare._alias_uris_for_document(
-        aliases=(cast("AliasStrategy", "bogus"), AliasStrategy.BASENAME),
+        # Deliberately unknown alias value: the resolver must ignore it.
+        aliases=(cast("AliasStrategy", "bogus"), AliasStrategy.BASENAME),  # ty: ignore[disjoint-cast]
         document=_prepare._LoadedSchemaDocument(
             basename="ignored-unknown.json",
             contents={},
@@ -711,3 +712,44 @@ def test_generate_schema_codegen_target_preserves_existing_trailing_newline(
     codegen_runner.generate_schema_codegen_target(target_name="demo")
 
     assert output_path.read_text(encoding="utf-8").endswith("\n")
+
+
+def test_merge_allof_properties_prefers_the_constrained_side() -> None:
+    """A parent placeholder must not discard the branch that constrains it.
+
+    Object-shaped ``allOf`` branches carry the real constraints while the parent
+    often holds ``{}`` placeholders, so first-wins would degrade required wire
+    fields to ``Any`` in the generated models.
+    """
+    result: _prepare.JsonObject = {
+        "properties": {
+            "placeholder": {},
+            "constrained": {"type": "string"},
+            "both": {"type": "string"},
+            "scalar": 7,
+            "equal": {"type": "string"},
+        },
+    }
+    _prepare._merge_allof_properties(
+        result,
+        {
+            "placeholder": {"pattern": "^a"},
+            "constrained": {},
+            "both": {"minLength": 1},
+            "scalar": {"type": "integer"},
+            "equal": {"type": "string"},
+            "fresh": {"type": "boolean"},
+        },
+    )
+    assert result["properties"] == {
+        "placeholder": {"pattern": "^a"},
+        "constrained": {"type": "string"},
+        "both": {"type": "string", "minLength": 1},
+        "scalar": {"type": "integer"},
+        "equal": {"type": "string"},
+        "fresh": {"type": "boolean"},
+    }
+
+    untouched: _prepare.JsonObject = {"properties": {"kept": {"type": "string"}}}
+    _prepare._merge_allof_properties(untouched, {})
+    assert untouched == {"properties": {"kept": {"type": "string"}}}

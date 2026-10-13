@@ -43,9 +43,10 @@ def _expect_json_list(payload: JSONValue, *, context: str) -> JSONList:
         raise RuntimeError(msg) from exc
 
 
-HTTP_BAD_REQUEST = 400
-HTTP_FORBIDDEN = 403
-RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
+# Private to this module: only the aiohttp path escalates a 403 carrying a
+# Retry-After header into a retry. Every other status policy lives in
+# lib/http_utils.py.
+_HTTP_FORBIDDEN = 403
 # Version discovery already exhausts ``fetch_json`` retries. These leftovers
 # are runner/CDN resolver flakes, not a missing current pin or a bad payload.
 _DISCOVERY_TRANSIENT_MARKERS = (
@@ -84,18 +85,6 @@ def is_transient_discovery_failure(error: BaseException) -> bool:
 # Bound server-directed sleeps so an untrusted response cannot stall an update forever.
 _MAX_RETRY_AFTER_SECONDS = 300.0
 logger = logging.getLogger(__name__)
-
-
-class _RetryableStatusError(RuntimeError):
-    """HTTP status error that should be retried."""
-
-    def __init__(self, detail: str, *, retry_after: float | None = None) -> None:
-        self.retry_after = retry_after
-        super().__init__(detail)
-
-
-class _NonRetryableStatusError(RuntimeError):
-    """HTTP status error that should fail immediately."""
 
 
 def _get_github_token() -> str | None:
@@ -175,14 +164,6 @@ async def _fetch_github_commits(
         raise RuntimeError(msg) from exc
 
 
-def _format_http_error(response: aiohttp.ClientResponse, payload: bytes) -> str:
-    error_body = payload.decode(errors="ignore").strip()
-    detail = f"HTTP {response.status} {response.reason}"
-    if error_body:
-        detail = f"{detail}\n{error_body}"
-    return detail
-
-
 def _parse_retry_after(value: str | None, *, now: datetime) -> float | None:
     """Return a bounded retry delay for an RFC 9110 ``Retry-After`` value."""
     if value is None:
@@ -215,7 +196,7 @@ def _retry_wait(backoff: float) -> Callable[[RetryCallState], float]:
         if outcome is not None:
             exception = outcome.exception()
             if (
-                isinstance(exception, _RetryableStatusError)
+                isinstance(exception, http_utils.RetryableStatusError)
                 and exception.retry_after is not None
             ):
                 return exception.retry_after
@@ -342,27 +323,34 @@ async def _request(
             allow_redirects=True,
         ) as response:
             payload = await response.read()
-            if response.status < HTTP_BAD_REQUEST:
+            if response.status < http_utils.HTTP_BAD_REQUEST:
                 return payload, dict(response.headers)
-            detail = _format_http_error(response, payload)
+            detail = http_utils.format_http_error(
+                response.status,
+                # aiohttp types reason as str | None; str() keeps the existing
+                # diagnostic text for the unset case.
+                str(response.reason),
+                payload,
+            )
             retry_after = _parse_retry_after(
                 response.headers.get("Retry-After"),
                 now=datetime.now(tz=UTC),
             )
-            if response.status in RETRYABLE_STATUSES or (
-                response.status == HTTP_FORBIDDEN and retry_after is not None
+            if http_utils.is_retryable_status(response.status) or (
+                response.status == _HTTP_FORBIDDEN and retry_after is not None
             ):
-                raise _RetryableStatusError(
+                raise http_utils.RetryableStatusError(
+                    response.status,
                     detail,
                     retry_after=retry_after,
                 )
-            raise _NonRetryableStatusError(detail)
+            raise http_utils.NonRetryableStatusError(response.status, detail)
 
     retryer = AsyncRetrying(
         stop=stop_after_attempt(options.attempts),
         wait=_retry_wait(options.backoff),
         retry=retry_if_exception_type((
-            _RetryableStatusError,
+            http_utils.RetryableStatusError,
             aiohttp.ClientError,
             TimeoutError,
         )),
@@ -385,8 +373,8 @@ async def _request(
                     timing.input_bytes += len(response[0])
                     return response
     except (
-        _NonRetryableStatusError,
-        _RetryableStatusError,
+        http_utils.NonRetryableStatusError,
+        http_utils.RetryableStatusError,
         aiohttp.ClientError,
         TimeoutError,
     ) as exc:

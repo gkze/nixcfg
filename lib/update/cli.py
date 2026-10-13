@@ -137,6 +137,7 @@ _TRAILING_TARGET_VALUE_OPTIONS: dict[str, tuple[str, str]] = {
     "--resume": ("resume", "str"),
     "--run-id": ("run_id", "str"),
     "--patch": ("patch", "str"),
+    "--repair": ("repair", "repair_agent"),
     "--retry-backoff": ("retry_backoff", "float"),
     "-b": ("retry_backoff", "float"),
     "--sort": ("sort_by", "str"),
@@ -167,6 +168,13 @@ def _coerce_trailing_target_option(
             return float(raw_value)
         except ValueError as exc:
             msg = f"{option} expects a numeric value"
+            raise typer.BadParameter(msg) from exc
+    if value_kind == "repair_agent":
+        try:
+            return RepairAgent(raw_value)
+        except ValueError as exc:
+            choices = ", ".join(sorted(RepairAgent))
+            msg = f"{option} expects one of {choices}"
             raise typer.BadParameter(msg) from exc
     return raw_value
 
@@ -802,7 +810,7 @@ def _emit_summary(
 ) -> int:
     dropped = dropped or {}
     if out.json_output:
-        payload = cast("dict[str, object]", summary.to_dict())
+        payload = dict[str, object](summary.to_dict())
         payload["success"] = not had_errors
         payload["withheld"] = {
             redact_urls(k): redact_urls(v) for k, v in dropped.items()
@@ -1334,7 +1342,7 @@ def _emit_run_outcome(
     if out.timings and runtime is not None:
         timings = runtime.report()
     if out.json_output:
-        payload = cast("dict[str, object]", outcome.summary.to_dict())
+        payload = dict[str, object](outcome.summary.to_dict())
         if timings is not None:
             payload["timings"] = timings
         payload["success"] = not outcome.had_errors

@@ -36,7 +36,14 @@ from lib.update.events import (
     ignore_event,
     raise_failed_command,
 )
-from lib.update.net import fetch_github_api, fetch_json, fetch_url, github_raw_url
+from lib.update.locked_source import is_immutable_commit
+from lib.update.net import (
+    JSONValue,
+    fetch_github_api,
+    fetch_json,
+    fetch_url,
+    github_raw_url,
+)
 from lib.update.nix import (
     _build_fetch_from_github_expr,
     _build_nix_expr,
@@ -70,7 +77,6 @@ class _BinaryReader(Protocol):
     def read(self, size: int = -1) -> bytes: ...
 
 
-_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _HEX_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _PYPI_VERSION_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+){2}$")
 _PYPI_UPLOAD_TIME_PATTERN = re.compile(
@@ -78,7 +84,11 @@ _PYPI_UPLOAD_TIME_PATTERN = re.compile(
     r"(?:\.[0-9]+)?Z$"
 )
 _NIX_STORE_OUTPUT_PATTERN = re.compile(r"^/nix/store/[0-9a-z]{32}-[^/]+$")
-_NPM_COMMAND_PATTERN = re.compile(r"\bnpm\b", re.IGNORECASE)
+_NPM_COMMAND_PATTERN = re.compile(
+    r"\bnpm\b|\b_NPM_INSTALL\b|\bNpmInstallVerb\b|"
+    r"\b_npm_mirror_retry\b|\bInvoke-NpmMirrorRetry\b",
+    re.IGNORECASE,
+)
 _MANIFEST_ASSET_NAME = "latest.json"
 _DARWIN_PLATFORM = "darwin-aarch64"
 _EXPECTED_HASH_ENTRY_COUNT = 3
@@ -87,6 +97,14 @@ _MAX_BACKEND_SDIST_BYTES = 256 * 1024 * 1024
 _MAX_BACKEND_SDIST_MEMBERS = 50_000
 _MAX_BACKEND_SDIST_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
 _MAX_OXC_SOURCE_BYTES = 1024 * 1024
+# The compiler a release's own lockfile requires, when that is newer than the
+# `rust-version` the source declares. The updater verifies the declared minimum
+# against the source, so the compiler to *build* with is owned here instead of
+# being restated in Nix. Drop an entry once the release's own `rust-version`
+# reaches it.
+_RUST_TOOLCHAIN_BUILD_OVERRIDES: dict[str, str] = {
+    "0.1.902-beta": "1.90.0",
+}
 _OXC_PACKAGE_PATH = "studio/backend/core/data_recipe/oxc-validator/package.json"
 _OXC_LOCK_PATH = "studio/backend/core/data_recipe/oxc-validator/package-lock.json"
 _OXC_VALIDATE_PATH = OXC_VALIDATOR_PATH.as_posix()
@@ -171,6 +189,31 @@ _SETUP_SH_OXC_NPM_LINES = (
 _SETUP_PS1_OXC_NPM_LINES = (
     _SETUP_PS1_OXC_INSTALL,
     _SETUP_PS1_OXC_ERROR,
+    _SETUP_PS1_OXC_SKIP,
+)
+# 0.1.902-beta chooses the lockfile install verb and retries through the
+# upstream mirror helper. Managed-mode setup is still disabled by the patcher.
+# Audit the verb assignments and retry calls too, not only literal npm calls.
+_SETUP_SH_OXC_LOCKED_NPM_LINES = (
+    _SETUP_SH_OXC_INSTALL_COMMENT,
+    _SETUP_SH_OXC_GUARD,
+    "_NPM_INSTALL=install",
+    "[ -f package-lock.json ] && _NPM_INSTALL=ci",
+    'run_quiet_no_exit "npm $_NPM_INSTALL (oxc validator runtime)" '
+    'npm "$_NPM_INSTALL" --no-fund --no-audit --loglevel=error '
+    '"${_NPM_REGISTRY_ARGS[@]+"${_NPM_REGISTRY_ARGS[@]}"}" '
+    "|| _oxc_install_rc=$?",
+    'if [ "$_oxc_install_rc" -ne 0 ] && _npm_mirror_retry '
+    '"npm $_NPM_INSTALL (oxc validator runtime)"; then',
+    _SETUP_SH_OXC_SKIP_COMMENT,
+    _SETUP_SH_OXC_SKIP,
+)
+_SETUP_PS1_OXC_LOCKED_NPM_LINES = (
+    '$NpmInstallVerb = if (Test-Path "package-lock.json") { "ci" } else { "install" }',
+    "$oxcInstallExit = Invoke-SetupCommand { npm $NpmInstallVerb @NpmRegistryArgs }",
+    "if ($oxcInstallExit -ne 0 -and (Invoke-NpmMirrorRetry)) { $oxcInstallExit = 0 }",
+    'Write-StudioLine "[ERROR] OXC validator npm $NpmInstallVerb failed '
+    '(exit code $oxcInstallExit)" -ForegroundColor Red',
     _SETUP_PS1_OXC_SKIP,
 )
 _OXC_LOCKFILE_VERSION = 3
@@ -413,7 +456,10 @@ def _audit_oxc_runtime_sources(payloads: dict[str, bytes]) -> None:
         msg = "Unsloth OXC setup.sh npm install mutation drifted"
         raise RuntimeError(msg)
     setup_sh_installs = _npm_source_lines(setup_sh_blocks[0])
-    if setup_sh_installs != _SETUP_SH_OXC_NPM_LINES:
+    if setup_sh_installs not in (
+        _SETUP_SH_OXC_NPM_LINES,
+        _SETUP_SH_OXC_LOCKED_NPM_LINES,
+    ):
         msg = "Unsloth OXC setup.sh npm install mutation drifted"
         raise RuntimeError(msg)
 
@@ -433,7 +479,10 @@ def _audit_oxc_runtime_sources(payloads: dict[str, bytes]) -> None:
         for line in _npm_source_lines(setup_ps1_blocks[0])
         if line != _SETUP_PS1_OXC_SKIP_COMMENT
     )
-    if setup_ps1_installs != _SETUP_PS1_OXC_NPM_LINES:
+    if setup_ps1_installs not in (
+        _SETUP_PS1_OXC_NPM_LINES,
+        _SETUP_PS1_OXC_LOCKED_NPM_LINES,
+    ):
         msg = "Unsloth OXC setup.ps1 npm install mutation drifted"
         raise RuntimeError(msg)
 
@@ -528,10 +577,15 @@ def _audit_oxc_sources(payloads: dict[str, bytes]) -> None:
         msg = "Unsloth OXC validator package shape drifted"
         raise RuntimeError(msg)
 
+    # The guard above proved every value is a non-empty string; narrow the
+    # mapping so the audit receives concrete ``str`` values.
+    validated_dependencies = {
+        name: value for name, value in dependencies.items() if isinstance(value, str)
+    }
     _audit_oxc_lock(
         payloads[_OXC_LOCK_PATH],
         package_version=package_version,
-        dependencies=cast("dict[str, str]", dependencies),
+        dependencies=validated_dependencies,
     )
     _audit_oxc_runtime_sources(payloads)
 
@@ -721,6 +775,16 @@ def _source_hash(source: SourceEntry, hash_type: str, url: str | None = None) ->
     return matches[0]
 
 
+def _rust_toolchain_build_version(*, version: str, declared: str) -> str:
+    """Return the compiler this release's closure builds with.
+
+    ``declared`` is the source-owned ``rust-version`` the updater verifies
+    against the candidate; an override only widens it for releases whose own
+    lockfile needs a newer compiler.
+    """
+    return _RUST_TOOLCHAIN_BUILD_OVERRIDES.get(version, declared)
+
+
 def _closure_plan_payload(
     info: VersionInfo,
     source: SourceEntry,
@@ -736,7 +800,10 @@ def _closure_plan_payload(
     return {
         "app": {
             "commit": source.commit,
-            "rustToolchainVersion": metadata["rustToolchainVersion"],
+            "rustToolchainVersion": _rust_toolchain_build_version(
+                version=info.version,
+                declared=cast("str", metadata["rustToolchainVersion"]),
+            ),
             "sourceHash": _source_hash(source, "srcHash"),
             "tag": cast("str", metadata["tag"]),
             "version": info.version,
@@ -990,7 +1057,7 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
 
     @staticmethod
     def _release_manifest_asset(
-        payload: dict[str, object],
+        payload: dict[str, JSONValue],
         *,
         tag_name: str,
     ) -> tuple[str, str, int]:
@@ -1001,8 +1068,7 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         matches = [
             _require_object(asset, context="release asset")
             for asset in assets
-            if isinstance(asset, dict)
-            and cast("dict[str, object]", asset).get("name") == _MANIFEST_ASSET_NAME
+            if isinstance(asset, dict) and asset.get("name") == _MANIFEST_ASSET_NAME
         ]
         if len(matches) != 1:
             msg = (
@@ -1181,7 +1247,7 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         )
         commit_object = _require_object(commit_payload, context="commit response")
         commit = _require_string(commit_object, "sha", context="commit response")
-        if _COMMIT_PATTERN.fullmatch(commit) is None:
+        if not is_immutable_commit(commit):
             msg = f"Unsloth release {tag_name} has no immutable source commit"
             raise RuntimeError(msg)
 
@@ -1331,7 +1397,7 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         for key in ("backendSize", "manifestSize"):
             _require_positive_int(metadata, key, context="release metadata")
         commit = cast("str", metadata["commit"])
-        if _COMMIT_PATTERN.fullmatch(commit) is None:
+        if not is_immutable_commit(commit):
             msg = "Unsloth release metadata is missing an immutable source commit"
             raise RuntimeError(msg)
         _sri_from_hex(cast("str", metadata["backendDigestHex"]))

@@ -1,11 +1,11 @@
 """Shared helpers for GitHub latest-release updaters."""
 
-import re
 import urllib.parse
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar
 
 from lib.nix.models.sources import SourceEntry, SourceHashes
-from lib.update.net import fetch_github_api
+from lib.update.locked_source import is_immutable_commit
+from lib.update.net import JSONValue, fetch_github_api
 from lib.update.updaters.core import DownloadHashUpdater, UpdateContext, Updater
 from lib.update.updaters.metadata import (
     AssetURLsMetadata,
@@ -27,8 +27,6 @@ class GitHubReleaseUpdater(Updater):
     RESOLVE_TAG_COMMIT: ClassVar[bool] = False
     RELEASE_DISPLAY_NAME: ClassVar[str] = ""
 
-    _COMMIT_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"^[0-9a-f]{40}$")
-
     @property
     def _release_display_name(self) -> str:
         return self.RELEASE_DISPLAY_NAME or self.name
@@ -36,7 +34,7 @@ class GitHubReleaseUpdater(Updater):
     def _require_commit(self, info: VersionInfo) -> str:
         """Return validated immutable release metadata for source consumers."""
         commit = info.commit
-        if commit is None or self._COMMIT_PATTERN.fullmatch(commit) is None:
+        if commit is None or not is_immutable_commit(commit):
             msg = (
                 f"{self._release_display_name} release metadata is missing an "
                 "immutable source commit"
@@ -47,7 +45,7 @@ class GitHubReleaseUpdater(Updater):
     async def _fetch_latest_release_payload(
         self,
         session: aiohttp.ClientSession,
-    ) -> dict[str, object]:
+    ) -> dict[str, JSONValue]:
         payload = await fetch_github_api(
             session,
             f"repos/{self.GITHUB_OWNER}/{self.GITHUB_REPO}/releases/latest",
@@ -56,9 +54,9 @@ class GitHubReleaseUpdater(Updater):
         if not isinstance(payload, dict):
             msg = f"Unexpected release payload type: {type(payload).__name__}"
             raise TypeError(msg)
-        return cast("dict[str, object]", payload)
+        return payload
 
-    def _release_tag_from_payload(self, payload: dict[str, object]) -> str:
+    def _release_tag_from_payload(self, payload: dict[str, JSONValue]) -> str:
         tag_name = payload.get("tag_name")
         if not isinstance(tag_name, str) or not tag_name:
             msg = f"Missing tag_name in release payload: {payload!r}"
@@ -93,10 +91,7 @@ class GitHubReleaseUpdater(Updater):
         if not isinstance(payload, dict):
             raise TypeError(message)
         commit = payload.get("sha")
-        if (
-            not isinstance(commit, str)
-            or self._COMMIT_PATTERN.fullmatch(commit) is None
-        ):
+        if not isinstance(commit, str) or not is_immutable_commit(commit):
             raise RuntimeError(message)
         return commit
 
@@ -170,7 +165,7 @@ class GitHubReleaseAssetURLsUpdater(GitHubReleaseUpdater, DownloadHashUpdater):
 
     def _asset_urls_from_payload(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JSONValue],
         *,
         version: str,
         tag_name: str,
@@ -187,7 +182,7 @@ class GitHubReleaseAssetURLsUpdater(GitHubReleaseUpdater, DownloadHashUpdater):
             for asset in assets:
                 if not isinstance(asset, dict):
                     continue
-                asset_payload = cast("dict[str, object]", asset)
+                asset_payload = asset
                 if asset_payload.get("name") != expected_name:
                     continue
                 candidate = asset_payload.get("browser_download_url")

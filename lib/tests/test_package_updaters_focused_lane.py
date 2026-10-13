@@ -193,18 +193,21 @@ def test_wispr_flow_platform_urls_and_required_tools(
     )
 
 
-def test_codex_desktop_fetch_latest_and_download_urls(
+def test_chatgpt_fetch_latest_and_download_urls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Pick the newest common Codex appcast release and preserve ZIP URLs."""
-    module = _load_updater(
-        "packages/codex-desktop/updater.py", "codex_desktop_updater_test"
-    )
-    updater = module.CodexDesktopUpdater()
+    """Pick the newest common ChatGPT appcast release and preserve ZIP URLs."""
+    module = _load_updater("packages/chatgpt/updater.py", "chatgpt_updater_test")
+    updater = module.ChatGPTUpdater()
     newer_arm_url = "https://example.invalid/ChatGPT-darwin-arm64-26.429.61741.zip"
+    deb_version = "26.429.20946"
+    arm_deb_name = f"pool/main/c/chatgpt/chatgpt_{deb_version}_arm64.deb"
+    x64_deb_name = f"pool/main/c/chatgpt/chatgpt_{deb_version}_amd64.deb"
     urls = {
         "aarch64-darwin": "https://example.invalid/ChatGPT-darwin-arm64-26.429.20946.zip",
         "x86_64-darwin": "https://example.invalid/ChatGPT-darwin-x64-26.429.20946.zip",
+        "aarch64-linux": f"{updater.DEB_BASE_URL}/{arm_deb_name}",
+        "x86_64-linux": f"{updater.DEB_BASE_URL}/{x64_deb_name}",
     }
 
     def _item(version: str, build: str, download_url: str) -> str:
@@ -227,13 +230,25 @@ def test_codex_desktop_fetch_latest_and_download_urls(
             </rss>
         """.encode()
 
+    def _deb_index(deb_arch: str) -> bytes:
+        return (
+            "Package: chatgpt\n"
+            f"Version: {deb_version}\n"
+            f"Filename: pool/main/c/chatgpt/chatgpt_{deb_version}_{deb_arch}.deb\n"
+            "\n"
+        ).encode()
+
     async def _fetch_url(_session: object, url: str, **kwargs: object) -> bytes:
-        assert kwargs["user_agent"] == "Sparkle/2.0"
         assert kwargs["request_timeout"] == updater.config.default_timeout
         assert kwargs["config"] == updater.config
         for platform, appcast_url in updater.APPCASTS.items():
             if url == appcast_url:
+                assert kwargs["user_agent"] == "Sparkle/2.0"
                 return _appcast(platform)
+        if url == updater.DEB_INDEXES["aarch64-linux"]:
+            return _deb_index("arm64")
+        if url == updater.DEB_INDEXES["x86_64-linux"]:
+            return _deb_index("amd64")
         raise AssertionError(url)
 
     monkeypatch.setattr(module, "fetch_url", _fetch_url)
@@ -257,11 +272,11 @@ def test_codex_desktop_fetch_latest_and_download_urls(
 @pytest.mark.parametrize(
     ("xml", "match"),
     [
-        ("<", "Invalid Codex appcast XML"),
-        ("<rss><channel /></rss>", "No items found in Codex appcast"),
+        ("<", "Invalid ChatGPT appcast XML"),
+        ("<rss><channel /></rss>", "No items found in ChatGPT appcast"),
         (
             "<rss><channel><item /></channel></rss>",
-            "No enclosure found in Codex appcast",
+            "No enclosure found in ChatGPT appcast",
         ),
         (
             '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
@@ -275,20 +290,18 @@ def test_codex_desktop_fetch_latest_and_download_urls(
         (
             '<rss><channel><item><enclosure url="https://example.invalid" />'
             "</item></channel></rss>",
-            "No short version found in Codex appcast",
+            "No short version found in ChatGPT appcast",
         ),
     ],
 )
-def test_codex_desktop_rejects_invalid_appcast_shapes(
+def test_chatgpt_rejects_invalid_appcast_shapes(
     monkeypatch: pytest.MonkeyPatch,
     xml: str,
     match: str,
 ) -> None:
-    """Raise clear errors for malformed Codex appcast payloads."""
-    module = _load_updater(
-        "packages/codex-desktop/updater.py", "codex_desktop_updater_test_errors"
-    )
-    updater = module.CodexDesktopUpdater()
+    """Raise clear errors for malformed ChatGPT appcast payloads."""
+    module = _load_updater("packages/chatgpt/updater.py", "chatgpt_updater_test_errors")
+    updater = module.ChatGPTUpdater()
     monkeypatch.setattr(
         module,
         "fetch_url",

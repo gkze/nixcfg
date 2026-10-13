@@ -153,6 +153,10 @@ def test_ensure_updaters_loaded_resolves_repo_package_helpers(
         name: list(sys.modules[name].__path__)
         for name in ("lib", "lib.update", "lib.update.updaters")
     }
+    # Removing the real `packages` namespace root without restoring it leaves
+    # later `packages.*` imports failing inside `_NamespacePath._recalculate`
+    # with KeyError('packages'), which made the whole suite order-dependent.
+    original_packages = sys.modules.get("packages")
     monkeypatch.setattr("lib.update.updaters.REPO_ROOT", tmp_path)
     monkeypatch.setattr(
         "lib.update.updaters._updater_module_paths",
@@ -172,6 +176,8 @@ def test_ensure_updaters_loaded_resolves_repo_package_helpers(
         sys.path[:] = original_sys_path
         for name in ("packages.demo.helper", "packages.demo", "packages"):
             sys.modules.pop(name, None)
+        if original_packages is not None:
+            sys.modules["packages"] = original_packages
         sys.modules.pop("_updater_pkg.demo", None)
         UPDATERS.clear()
         UPDATERS.update(original_registry)
@@ -198,7 +204,10 @@ def test_ensure_updaters_loaded_fast_path_skips_discovery(monkeypatch) -> None:
     """Return the existing registry immediately when discovery already ran."""
     complete = True
     monkeypatch.setitem(_DISCOVERY_STATE, "complete", complete)
-    monkeypatch.setitem(cast("dict[str, object]", UPDATERS), "demo", object)
+    # A plain sentinel entry is enough to prove discovery was skipped; the
+    # registry's value type is an updater class, so the placeholder needs a cast.
+    registry = cast("dict[str, object]", UPDATERS)  # ty: ignore[disjoint-cast]
+    monkeypatch.setitem(registry, "demo", object)
 
     calls: list[str] = []
     monkeypatch.setattr(
@@ -217,7 +226,8 @@ def test_ensure_updaters_loaded_rediscovers_empty_registry(monkeypatch) -> None:
     UPDATERS.clear()
 
     def _discover() -> None:
-        cast("dict[str, object]", UPDATERS)["demo"] = object
+        registry = cast("dict[str, object]", UPDATERS)  # ty: ignore[disjoint-cast]
+        registry["demo"] = object
 
     monkeypatch.setattr("lib.update.updaters._discover_updaters", _discover)
 
@@ -232,7 +242,8 @@ def test_ensure_updaters_loaded_rechecks_state_inside_lock(monkeypatch) -> None:
     class _Lock:
         def __enter__(self) -> None:
             _DISCOVERY_STATE["complete"] = True
-            cast("dict[str, object]", UPDATERS)["demo"] = object
+            registry = cast("dict[str, object]", UPDATERS)  # ty: ignore[disjoint-cast]
+            registry["demo"] = object
 
         def __exit__(self, exc_type, exc, tb) -> bool:
             return False

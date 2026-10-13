@@ -45,6 +45,8 @@ from lib.update.platform_hashes import (
 from lib.update.updaters.core import (
     UpdateContext,
     Updater,
+    as_source_hashes,
+    hashes_by_platform,
 )
 from lib.update.updaters.metadata import (
     FlakeInputMetadata,
@@ -330,17 +332,7 @@ class FlakeInputHashUpdater(FlakeInputUpdater):
         if entry is None:
             return {}
 
-        hashes = entry.hashes
-        if hashes.entries:
-            return {
-                hash_entry.platform: hash_entry.hash
-                for hash_entry in hashes.entries
-                if hash_entry.platform is not None
-                and hash_entry.hash_type == self.hash_type
-            }
-        if hashes.mapping:
-            return dict(hashes.mapping)
-        return {}
+        return hashes_by_platform(entry.hashes, hash_type=self.hash_type)
 
     async def _compute_hash_for_system(
         self,
@@ -649,13 +641,9 @@ class DenoDepsHashUpdater(FlakeInputHashUpdater):
     ) -> SourceEntry | None:
         if self.source_pins_for(info) is None:
             return None
-        hashes: SourceHashes
-        if current is None:
-            hashes = []
-        elif current.hashes.entries is not None:
-            hashes = list(current.hashes.entries)
-        else:
-            hashes = dict(current.hashes.mapping or {})
+        hashes: SourceHashes = (
+            [] if current is None else as_source_hashes(current.hashes)
+        )
         return self.build_result(info, hashes)
 
     async def fetch_hashes(

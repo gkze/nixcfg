@@ -68,7 +68,7 @@ class ContentAddress(BaseModel):
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             ],
             pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
-            title="Content Address",
+            title="Hash",
         ),
     ]
 
@@ -149,9 +149,23 @@ class BuildTraceEntry(BaseModel):
         extra="allow",
     )
     __pydantic_extra__: dict[str, Any]
-    id: Any
-    out_path: Annotated[Any, Field(alias="outPath")]
-    signatures: Any
+    id: Annotated[
+        str,
+        Field(
+            pattern="^sha256:[0-9a-f]{64}![a-zA-Z_][a-zA-Z0-9_-]*$",
+            title="Derivation Output ID",
+        ),
+    ]
+    out_path: Annotated[
+        str,
+        Field(
+            alias="outPath",
+            min_length=34,
+            pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
+            title="Store Path",
+        ),
+    ]
+    signatures: Annotated[list[str], Field(title="Build Signatures")]
 
 
 class Key(BaseModel):
@@ -166,20 +180,12 @@ class Key(BaseModel):
 
 class Value(BaseModel):
     out_path: Annotated[
-        dict[
-            Annotated[
-                str,
-                StringConstraints(
-                    pattern=r"^sha256:[0-9a-f]{64}![a-zA-Z_][a-zA-Z0-9_-]*$"
-                ),
-            ],
-            dict[str, Any],
-        ],
+        str,
         Field(
             alias="outPath",
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Output Store Path",
+            title="Store Path",
         ),
     ]
     signatures: Annotated[list[str], Field(title="Build Signatures")]
@@ -198,9 +204,23 @@ class BuiltOutputs(BaseModel):
         extra="allow",
     )
     __pydantic_extra__: dict[str, Any]
-    id: Any
-    out_path: Annotated[Any, Field(alias="outPath")]
-    signatures: Any
+    id: Annotated[
+        str,
+        Field(
+            pattern="^sha256:[0-9a-f]{64}![a-zA-Z_][a-zA-Z0-9_-]*$",
+            title="Derivation Output ID",
+        ),
+    ]
+    out_path: Annotated[
+        str,
+        Field(
+            alias="outPath",
+            min_length=34,
+            pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
+            title="Store Path",
+        ),
+    ]
+    signatures: Annotated[list[str], Field(title="Build Signatures")]
 
 
 class BuildResult1(BaseModel):
@@ -315,7 +335,7 @@ class DerivingPath1(RootModel[str]):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Constant",
+            title="Store Path",
         ),
     ]
 
@@ -345,7 +365,7 @@ class Outputs(BaseModel):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Output path",
+            title="Store Path",
         ),
     ]
 
@@ -354,8 +374,18 @@ class Outputs1(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    method: Any
-    hash: Annotated[Any, Field(title="Expected hash value")]
+    method: Annotated[Method, Field(title="Content-Addressing Method")]
+    hash: Annotated[
+        str,
+        Field(
+            examples=[
+                "sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=",
+                "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
+            ],
+            pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
+            title="Hash",
+        ),
+    ]
 
 
 class HashAlgo(StrEnum):
@@ -481,7 +511,7 @@ class AllowedReferences1(RootModel[str]):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Constant",
+            title="Store Path",
         ),
     ]
 
@@ -502,7 +532,7 @@ class AllowedRequisites1(RootModel[str]):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Constant",
+            title="Store Path",
         ),
     ]
 
@@ -523,7 +553,7 @@ class DisallowedReferences1(RootModel[str]):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Constant",
+            title="Store Path",
         ),
     ]
 
@@ -544,7 +574,7 @@ class DisallowedRequisites1(RootModel[str]):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Constant",
+            title="Store Path",
         ),
     ]
 
@@ -565,7 +595,7 @@ class AllowedReferences4(RootModel[str]):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Constant",
+            title="Store Path",
         ),
     ]
 
@@ -586,7 +616,7 @@ class AllowedRequisites4(RootModel[str]):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Constant",
+            title="Store Path",
         ),
     ]
 
@@ -607,7 +637,7 @@ class DisallowedReferences4(RootModel[str]):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Constant",
+            title="Store Path",
         ),
     ]
 
@@ -628,7 +658,7 @@ class DisallowedRequisites4(RootModel[str]):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Constant",
+            title="Store Path",
         ),
     ]
 
@@ -639,7 +669,7 @@ class ExportReferencesGraph(RootModel[str]):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Constant",
+            title="Store Path",
         ),
     ]
 
@@ -660,7 +690,7 @@ class AllowedReferences7(RootModel[str]):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Constant",
+            title="Store Path",
         ),
     ]
 
@@ -681,7 +711,7 @@ class AllowedRequisites7(RootModel[str]):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Constant",
+            title="Store Path",
         ),
     ]
 
@@ -702,7 +732,7 @@ class DisallowedReferences7(RootModel[str]):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Constant",
+            title="Store Path",
         ),
     ]
 
@@ -723,7 +753,7 @@ class DisallowedRequisites7(RootModel[str]):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Constant",
+            title="Store Path",
         ),
     ]
 
@@ -744,7 +774,7 @@ class DrvRef2(RootModel[str]):
         Field(
             min_length=34,
             pattern="^[0123456789abcdfghijklmnpqrsvwxyz]{32}-.+$",
-            title="Constant",
+            title="Store Path",
         ),
     ]
 
@@ -977,7 +1007,7 @@ class Ca(BaseModel):
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             ],
             pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
-            title="Content Address",
+            title="Hash",
         ),
     ]
 
@@ -1004,7 +1034,7 @@ class StoreObjectInfoV21(BaseModel):
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             ],
             pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
-            title="NAR Hash",
+            title="Hash",
         ),
     ]
     nar_size: Annotated[int, Field(alias="narSize", ge=0, title="NAR Size")]
@@ -1026,7 +1056,7 @@ class Ca1(BaseModel):
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             ],
             pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
-            title="Content Address",
+            title="Hash",
         ),
     ]
 
@@ -1064,7 +1094,7 @@ class StoreObjectInfoV22(BaseModel):
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             ],
             pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
-            title="NAR Hash",
+            title="Hash",
         ),
     ]
     nar_size: Annotated[int, Field(alias="narSize", ge=0, title="NAR Size")]
@@ -1095,7 +1125,7 @@ class Ca2(BaseModel):
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             ],
             pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
-            title="Content Address",
+            title="Hash",
         ),
     ]
 
@@ -1122,7 +1152,7 @@ class StoreObjectInfoV23(BaseModel):
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             ],
             pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
-            title="NAR Hash",
+            title="Hash",
         ),
     ]
     nar_size: Annotated[int, Field(alias="narSize", ge=0, title="NAR Size")]
@@ -1149,7 +1179,7 @@ class StoreObjectInfoV23(BaseModel):
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             ],
             pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
-            title="Download Hash",
+            title="Hash",
         ),
     ]
     download_size: Annotated[
@@ -1183,7 +1213,7 @@ class Ca3(BaseModel):
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             ],
             pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
-            title="Content Address",
+            title="Hash",
         ),
     ]
 
@@ -1210,7 +1240,7 @@ class Base(BaseModel):
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             ],
             pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
-            title="NAR Hash",
+            title="Hash",
         ),
     ]
     nar_size: Annotated[int, Field(alias="narSize", ge=0, title="NAR Size")]
@@ -1232,7 +1262,7 @@ class Ca4(BaseModel):
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             ],
             pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
-            title="Content Address",
+            title="Hash",
         ),
     ]
 
@@ -1259,7 +1289,7 @@ class Impure(BaseModel):
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             ],
             pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
-            title="NAR Hash",
+            title="Hash",
         ),
     ]
     nar_size: Annotated[int, Field(alias="narSize", ge=0, title="NAR Size")]
@@ -1290,7 +1320,7 @@ class Ca5(BaseModel):
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             ],
             pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
-            title="Content Address",
+            title="Hash",
         ),
     ]
 
@@ -1317,7 +1347,7 @@ class NarInfo(BaseModel):
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             ],
             pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
-            title="NAR Hash",
+            title="Hash",
         ),
     ]
     nar_size: Annotated[int, Field(alias="narSize", ge=0, title="NAR Size")]
@@ -1344,7 +1374,7 @@ class NarInfo(BaseModel):
                 "sha512-IEqPxt2oLwoM7XvrjgikFlfBbvRosiioJ5vjMacDwzWW/RXBOxsH+aodO+pXeJygMa2Fx6cd1wNU7GMSOMo0RQ==",
             ],
             pattern="^(blake3|md5|sha1|sha256|sha512)-[A-Za-z0-9+/]+=*$",
-            title="Download Hash",
+            title="Hash",
         ),
     ]
     download_size: Annotated[

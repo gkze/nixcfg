@@ -69,6 +69,7 @@ class _SourcePatch:
     old: str
     new: str
     expected_matches: int = 1
+    alternatives: tuple[tuple[str, str], ...] = ()
 
 
 def _table_span(source: str, header: str) -> tuple[int, int]:
@@ -910,6 +911,15 @@ _BACKEND_PATCHES = (
     )
 """,
         expected_matches=2,
+        alternatives=((
+            '    studio_venv_dir = STUDIO_HOME / "unsloth_studio"\n'
+            "    in_studio_venv = _running_in_studio_venv(studio_venv_dir)\n",
+            '    studio_venv_dir = STUDIO_HOME / "unsloth_studio"\n'
+            "    in_studio_venv = (\n"
+            '        os.environ.get("UNSLOTH_NIX_MANAGED") == "1"\n'
+            "        or _running_in_studio_venv(studio_venv_dir)\n"
+            "    )\n",
+        ),),
     ),
     _SourcePatch(
         Path("unsloth_cli/commands/studio.py"),
@@ -1190,15 +1200,11 @@ _BACKEND_PATCHES = (
     ),
     _SourcePatch(
         Path("studio/backend/core/inference/sd_cpp_backend.py"),
-        """    if usable and not _accelerator_changed(found, accelerator):
-        return found
-    if not allow_install:
+        """    if not allow_install:
         return found
     with _install_lock:
 """,
-        """    if usable and not _accelerator_changed(found, accelerator):
-        return found
-    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+        """    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
         return found if usable else None
     if not allow_install:
         return found
@@ -1283,19 +1289,21 @@ def _validated_replacements(
     source_root: Path,
     patches: tuple[_SourcePatch, ...],
 ) -> dict[Path, str]:
-    exact_patches = tuple(
-        ExactTextPatch(
-            patch.path,
-            patch.old,
-            patch.new,
-            patch.expected_matches,
-        )
-        for patch in patches
-    )
     originals = {
         path: (source_root / path).read_text(encoding="utf-8")
-        for path in dict.fromkeys(patch.path for patch in exact_patches)
+        for path in dict.fromkeys(patch.path for patch in patches)
     }
+    exact_patches = []
+    for patch in patches:
+        variants = ((patch.old, patch.new), *patch.alternatives)
+        matches = [pair for pair in variants if pair[0] in originals[patch.path]]
+        if len(matches) > 1:
+            msg = f"ambiguous Unsloth patch variants in {patch.path}"
+            raise RuntimeError(msg)
+        old, new = matches[0] if matches else variants[0]
+        exact_patches.append(
+            ExactTextPatch(patch.path, old, new, patch.expected_matches)
+        )
     return plan_exact_text_patches(
         originals,
         exact_patches,

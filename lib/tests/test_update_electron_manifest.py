@@ -10,6 +10,7 @@ from lib.tests._updater_helpers import run_async as _run
 from lib.update import electron_manifest, locked_source
 from lib.update.config import resolve_config
 from lib.update.flake import flake_source_path_expression
+from lib.update.locked_source import locked_github_source
 from lib.update.updaters.metadata import FlakeInputMetadata
 
 _COMMIT = "a" * 40
@@ -406,13 +407,13 @@ def test_locked_github_source_requires_complete_github_coordinates(
 ) -> None:
     """Reject mutable or incomplete flake source identities."""
     with pytest.raises(RuntimeError, match="complete GitHub source"):
-        electron_manifest.locked_github_source(node, context="Desktop input")
+        locked_github_source(node, context="Desktop input")
 
 
 def test_locked_github_source_requires_an_immutable_commit() -> None:
     """Do not fetch manifests through a movable branch or abbreviated revision."""
     with pytest.raises(RuntimeError, match="immutable commit"):
-        electron_manifest.locked_github_source(
+        locked_github_source(
             _node(rev="main"),
             context="Desktop input",
         )
