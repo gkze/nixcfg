@@ -39,6 +39,11 @@ rec {
             desc = "Clear search highlight";
           }
           {
+            key = "<leader>p";
+            action = ":Format<CR>";
+            desc = "Format buffer";
+          }
+          {
             key = ";";
             action = ":";
             desc = "Open command line";
@@ -136,12 +141,30 @@ rec {
         items = [
           {
             key = "<leader>I";
-            action = ":LspInfo<CR>";
+            action = {
+              __raw = ''
+                function()
+                  local clients = vim.lsp.get_clients({ bufnr = 0 })
+                  if #clients == 0 then
+                    vim.notify("No LSP clients for this buffer", vim.log.levels.WARN)
+                    return
+                  end
+                  local lines = {}
+                  for _, client in ipairs(clients) do
+                    local root = client.root_dir or client.config.root_dir
+                    local suffix = root and (" " .. root) or ""
+                    lines[#lines + 1] = string.format("%s (id %d)%s", client.name, client.id, suffix)
+                  end
+                  vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
+                end
+              '';
+            };
+            displayAction = "vim.lsp.get_clients({ bufnr = 0 })";
             desc = "LSP info";
           }
           {
             key = "<leader>R";
-            action = ":LspRestart<CR>";
+            action = ":lsp restart<CR>";
             desc = "Restart LSP";
           }
         ];
@@ -216,11 +239,6 @@ rec {
             key = "<leader>x";
             action = ":Neotree toggle git_status<CR>";
             desc = "Neo-tree git status";
-          }
-          {
-            key = "<leader>n";
-            action = ":Navbuddy<CR>";
-            desc = "Navbuddy";
           }
           {
             key = "<leader>A";
@@ -331,13 +349,6 @@ rec {
             };
             desc = "OpenCode select";
           }
-          {
-            key = "<leader>o";
-            action = {
-              __raw = ''function() require("opencode").toggle() end'';
-            };
-            desc = "OpenCode toggle";
-          }
         ];
       }
     ];
@@ -382,13 +393,13 @@ rec {
           {
             key = "gd";
             action = "definition";
-            displayAction = "<CMD>Lspsaga goto_definition<Enter>";
+            displayAction = "vim.lsp.buf.definition()";
             desc = "Go to definition";
           }
           {
             key = "gr";
             action = "references";
-            displayAction = "<CMD>Lspsaga finder_ref<Enter>";
+            displayAction = "vim.lsp.buf.references()";
             desc = "Find references";
           }
           {
@@ -422,41 +433,49 @@ rec {
 
   treesitterSelection = {
     id = "treesitter-selection";
-    label = "Treesitter incremental selection";
+    label = "Treesitter selection";
+    mode = "v";
     attrPath = [
-      "programs"
-      "nixvim"
-      "plugins"
-      "treesitter"
-      "settings"
-      "incremental_selection"
-      "keymaps"
+      "home"
+      "george"
+      "nvim-keymaps"
+      "treesitterSelection"
     ];
-    kind = "keymap-attrset";
-    context = "normal mode";
+    kind = "cheat-sheet";
+    context = "built into Neovim 0.12 (visual mode); nothing to configure";
     sections = [
       {
-        title = "Selection";
+        title = "Native keys";
         items = [
           {
-            key = "init_selection";
-            action = "gnn";
-            desc = "Init selection";
+            key = "an";
+            action = "parent";
+            desc = "Select the [count]th parent node.";
           }
           {
-            key = "node_incremental";
-            action = "grn";
-            desc = "Node incremental";
+            key = "in";
+            action = "child";
+            desc = "Select the [count]th previous (or first) child node.";
           }
           {
-            key = "scope_incremental";
-            action = "grc";
-            desc = "Scope incremental";
+            key = "]n";
+            action = "next";
+            desc = "Select the [count]th next node.";
           }
           {
-            key = "node_decremental";
-            action = "grm";
-            desc = "Node decremental";
+            key = "[n";
+            action = "prev";
+            desc = "Select the [count]th previous node.";
+          }
+          {
+            key = "]N";
+            action = "extend_next";
+            desc = "Expand the selection to the [count]th next node.";
+          }
+          {
+            key = "[N";
+            action = "extend_prev";
+            desc = "Expand the selection to the [count]th previous node.";
           }
         ];
       }
@@ -599,7 +618,6 @@ rec {
       "plugins"
       "gitlinker"
       "settings"
-      "opts"
       "mappings"
     ];
     kind = "string-binding";
@@ -759,16 +777,13 @@ rec {
     attrPath = [
       "programs"
       "nixvim"
-      "plugins"
-      "treesitter-textobjects"
-      "settings"
-      "move"
+      "keymaps"
     ];
-    kind = "nested-map";
-    context = "normal mode";
+    kind = "keymap-list";
+    context = "normal mode; each section is an nvim-treesitter-textobjects.move function";
     sections = [
       {
-        title = "gotoNextStart";
+        title = "goto_next_start";
         items = [
           (mkMapItem "]sa" "@attribute.outer" "Next attribute start")
           (mkMapItem "]sb" "@block.outer" "Next block start")
@@ -785,7 +800,7 @@ rec {
         ];
       }
       {
-        title = "gotoNextEnd";
+        title = "goto_next_end";
         items = [
           (mkMapItem "]ea" "@attribute.outer" "Next attribute end")
           (mkMapItem "]eb" "@block.outer" "Next block end")
@@ -802,7 +817,7 @@ rec {
         ];
       }
       {
-        title = "gotoPreviousStart";
+        title = "goto_previous_start";
         items = [
           (mkMapItem "[sa" "@attribute.outer" "Previous attribute start")
           (mkMapItem "[sb" "@block.outer" "Previous block start")
@@ -819,7 +834,7 @@ rec {
         ];
       }
       {
-        title = "gotoPreviousEnd";
+        title = "goto_previous_end";
         items = [
           (mkMapItem "[ea" "@attribute.outer" "Previous attribute end")
           (mkMapItem "[eb" "@block.outer" "Previous block end")
@@ -845,17 +860,13 @@ rec {
     attrPath = [
       "programs"
       "nixvim"
-      "plugins"
-      "treesitter-textobjects"
-      "settings"
-      "select"
       "keymaps"
     ];
-    kind = "keymap-attrset";
-    context = "operator-pending / visual textobjects";
+    kind = "keymap-list";
+    context = "visual / operator-pending; nvim-treesitter-textobjects.select.select_textobject";
     sections = [
       {
-        title = "keymaps";
+        title = "select_textobject";
         items = [
           (mkMapItem "aC" "@class.outer" "Select class outer")
           (mkMapItem "aa" "@parameter.outer" "Select parameter outer")

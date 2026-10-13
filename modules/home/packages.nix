@@ -160,7 +160,7 @@ let
       ++ lib.optionals stdenv.hostPlatform.isDarwin [
         appcleaner
         commander
-        codex-desktop
+        chatgpt
         conductor
         opencode-desktop-dev
         container

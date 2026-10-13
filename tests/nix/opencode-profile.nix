@@ -53,13 +53,19 @@ let
     (lib.evalModules {
       specialArgs = {
         primaryUser = "alice";
-        pkgs = { };
+        # base.nix reads pkgs.zsh for environment.shells and the user shell, and
+        # pkgs.stdenv.hostPlatform.isDarwin to gate the Homebrew module.
+        pkgs = {
+          zsh = "zsh";
+          stdenv.hostPlatform.isDarwin = true;
+        };
       };
       modules = [
         (src + "/modules/darwin/base.nix")
         {
           options =
             lib.genAttrs [
+              "environment"
               "system"
               "users"
               "networking"
@@ -68,6 +74,7 @@ let
               "launchd"
               "homebrew"
               "home-manager"
+              "nix-homebrew"
             ] (_: lib.mkOption { type = lib.types.attrs; })
             // {
               assertions = lib.mkOption { type = lib.types.listOf lib.types.attrs; };

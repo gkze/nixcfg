@@ -55,8 +55,24 @@ let
     zo = systemApp pkgs.zo;
   };
   projection = macApps.managedMacAppRoutingProjection routing;
+  # The route decides which copy of the bundle is authoritative, so substitute
+  # the path the declaration resolves to instead of hardcoding one.
+  tailscaleCli = pkgs.writeTextFile {
+    name = "tailscale";
+    executable = true;
+    text =
+      builtins.replaceStrings
+        [ "@TAILSCALE_BIN@" ]
+        [ "${config.nixcfg.macApps.resolved.tailscale.targetPath}/Contents/MacOS/Tailscale" ]
+        (builtins.readFile ./bin/tailscale);
+  };
 in
 {
+  home.file.".local/bin/tailscale" = {
+    source = tailscaleCli;
+    executable = true;
+  };
+
   home.packages = with pkgs; [
     _1password-cli
     anthropic-cli

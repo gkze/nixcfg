@@ -1,11 +1,14 @@
 """Regression checks for macOS application bundle management."""
 
+import ast
 import json
 import os
 import plistlib
+import shlex
 import shutil
 import stat
 import subprocess
+import sys
 import threading
 from contextlib import redirect_stderr
 from functools import cache
@@ -3280,29 +3283,67 @@ def test_netnewswire_package_exposes_copy_mode_mac_app_metadata() -> None:
     )
 
 
-def test_codex_desktop_package_ships_the_unified_chatgpt_bundle() -> None:
-    """Codex Desktop should install the merged app under its upstream ChatGPT name."""
-    package_source = Path(REPO_ROOT / "packages/codex-desktop/default.nix").read_text(
+def test_chatgpt_package_ships_the_unified_chatgpt_bundle() -> None:
+    """The chatgpt package installs the merged app on Darwin and a deb on Linux."""
+    package_source = Path(REPO_ROOT / "packages/chatgpt/default.nix").read_text(
         encoding="utf-8"
     )
     package = expect_instance(parse_nix_expr(package_source), FunctionDefinition)
-    derivation = expect_instance(package.output, FunctionCall)
-    derivation_args = expect_instance(derivation.argument, AttributeSet)
+    platform_branch = expect_instance(package.output, IfExpression)
+    assert_nix_ast_equal(platform_branch.condition, Identifier(name="isDarwin"))
 
-    assert_nix_ast_equal(derivation.name, Identifier(name="mkZipApp"))
-    assert_nix_ast_equal(
-        expect_binding(derivation_args.values, "appName").value,
-        StringPrimitive(value="ChatGPT"),
-    )
     # The zip's ChatGPT.app payload must flow through mkZipApp defaults so the
     # bundle, executable, and source path all stay on the upstream name.
     # Leave sourceName unset so fetchurl uses the ZIP basename and hits the
     # prepare prefetch Cachix path (Update 37586805620).
-    derivation_bindings = binding_map(derivation_args.values)
-    assert "sourceAppPath" not in derivation_bindings
-    assert "executableName" not in derivation_bindings
-    assert "bundleName" not in derivation_bindings
-    assert "sourceName" not in derivation_bindings
+    darwin_call = expect_instance(platform_branch.consequence, FunctionCall)
+    assert_nix_ast_equal(darwin_call.name, Identifier(name="mkZipApp"))
+    darwin_args = expect_instance(darwin_call.argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(darwin_args.values, "appName").value,
+        StringPrimitive(value="ChatGPT"),
+    )
+    darwin_bindings = binding_map(darwin_args.values)
+    assert "sourceAppPath" not in darwin_bindings
+    assert "executableName" not in darwin_bindings
+    assert "bundleName" not in darwin_bindings
+    assert "sourceName" not in darwin_bindings
+
+    # Linux repacks OpenAI's Debian artifact: the version comes from the pool
+    # filename, and the patchelf pass must stay scoped to the optional Qt shims
+    # and the Android NDK prebuilds that can never load on Linux.
+    linux_call = expect_instance(platform_branch.alternative, FunctionCall)
+    assert_nix_ast_equal(linux_call.name, Identifier(name="stdenv.mkDerivation"))
+    linux_args = expect_instance(linux_call.argument, AttributeSet)
+    linux_bindings = binding_map(linux_args.values)
+    assert set(linux_bindings) >= {
+        "pname",
+        "version",
+        "src",
+        "nativeBuildInputs",
+        "buildInputs",
+        "unpackPhase",
+        "installPhase",
+        "autoPatchelfIgnoreMissingDeps",
+    }
+    assert_nix_ast_equal(
+        expect_binding(linux_args.values, "version").value,
+        Identifier(name="debVersion"),
+    )
+    ignore_deps = expect_instance(
+        expect_binding(linux_args.values, "autoPatchelfIgnoreMissingDeps").value,
+        NixList,
+    )
+    assert [item.value for item in ignore_deps.value] == [
+        "libQt5Core.so.5",
+        "libQt5Gui.so.5",
+        "libQt5Widgets.so.5",
+        "libQt6Core.so.6",
+        "libQt6Gui.so.6",
+        "libQt6Widgets.so.6",
+        "liblog.so",
+        "libc++_shared.so",
+    ]
 
 
 def test_zen_twilight_package_embeds_autoconfig_and_resigns_app() -> None:
@@ -3597,7 +3638,7 @@ def test_george_config_manages_mutable_gui_apps_via_scoped_applications() -> Non
     if exclude_packages_binding is not None:
         assert_nix_ast_equal(
             exclude_packages_binding.value,
-            "managedMacAppProjection.excludePackagesByName",
+            'managedMacAppProjection.excludePackagesByName ++ [ "opencode-desktop-dev" ]',
         )
     else:
         exclude_packages_inherit = next(
@@ -3965,12 +4006,12 @@ def test_george_config_routes_only_the_unified_chatgpt_app() -> None:
         AttributeSet,
     )
 
-    assert "chatgpt" not in binding_map(routing.values)
+    assert "codex-desktop" not in binding_map(routing.values)
 
     codex = expect_instance(expect_binding(routing.values, "codex").value, AttributeSet)
     assert_nix_ast_equal(
         expect_binding(codex.values, "package").value,
-        identifier_attr_path("pkgs", "codex-desktop"),
+        identifier_attr_path("pkgs", "chatgpt"),
     )
     assert "bundleName" not in binding_map(codex.values)
 
@@ -4004,10 +4045,10 @@ def test_darwin_gui_package_set_retains_only_unified_chatgpt_app() -> None:
     }
 
     assert_nix_ast_equal(
-        packages_by_name["codex-desktop"],
-        Identifier(name="codex-desktop"),
+        packages_by_name["chatgpt"],
+        Identifier(name="chatgpt"),
     )
-    assert "chatgpt" not in packages_by_name
+    assert "codex-desktop" not in packages_by_name
 
 
 def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
@@ -4119,15 +4160,13 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
         town_dock,
         """
         [
-          "/System/Applications/Calendar.app"
           "/System/Applications/Messages.app"
           (appPath "slack" "Slack.app")
           (appPath "onepassword" "1Password.app")
-          (appPath "zen-twilight" "Twilight.app")
+          (appPath "aside" "Aside.app")
           (appPath "google-chrome" "Google Chrome.app")
           (appPath "claude" "Claude.app")
           (appPath "codex" "ChatGPT.app")
-          (appPath "capy" "Capy.app")
           (appPath "capy-nightly" "Capy Nightly.app")
           (appPath "code-cursor" "Cursor.app")
           (appPath "town-assistant" "Town Assistant.app")
@@ -4135,7 +4174,6 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
           (appPath "zed" "Zed Nightly.app")
           (appPath "linear" "Linear.app")
           (appPath "ghostty" "Ghostty.app")
-          (appPath "datagrip" "DataGrip.app")
           (appPath "notion" "Notion.app")
           "/System/Applications/Notes.app"
           (appPath "spotify" "Spotify.app")
@@ -4145,8 +4183,8 @@ def test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit() -> None:
     )
 
 
-def test_dock_activation_updates_and_orders_items_without_clearing_the_dock() -> None:
-    """Dock activation should enforce list order without risking an empty Dock."""
+def test_dock_activation_adds_items_in_declaration_order() -> None:
+    """Dock activation should add available entries at their declared positions."""
     mk_dock_module = expect_instance(
         nix_source_fragment_expr(
             "modules/darwin/george/dock-lib.nix",
@@ -4205,35 +4243,60 @@ def test_dock_activation_updates_and_orders_items_without_clearing_the_dock() ->
     ]
 
 
-@pytest.mark.parametrize("failed_label", ["", "Figma"])
-def test_town_dock_activation_retires_only_named_apps(
-    tmp_path: Path, failed_label: str
+def _rendered_dock_additions(activation: str, *, section: str) -> list[Path]:
+    """Read the paths a rendered Dock activation adds to one pinned section.
+
+    Deriving the expectation from the rendered program keeps the module
+    declaration as the single authority, so a declaration change moves this list
+    with it instead of failing against a hand-copied literal. The declaration's
+    exact contents are pinned separately by
+    ``test_dock_configs_keep_the_targeted_gc_mitigation_scope_explicit``.
+    """
+    paths: list[Path] = []
+    for text in command_texts(parse_shell(activation), '"$dockutil"'):
+        attributes = shlex.split(text)
+        if "--add" not in attributes or "--section" not in attributes:
+            continue
+        if attributes[attributes.index("--section") + 1] != section:
+            continue
+        paths.append(Path(attributes[attributes.index("--add") + 1]))
+    return paths
+
+
+@pytest.mark.parametrize("fail_clear", [False, True])
+def test_town_dock_activation_enforces_declaration(
+    tmp_path: Path, fail_clear: bool
 ) -> None:
-    """Run rendered shell: AST checks cannot prove upgrade, retry, or quoting behavior."""
+    """Run rendered shell: AST checks cannot prove reconciliation, retry, or quoting."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     state = tmp_path / "state"
     state.mkdir()
-    (state / "apps").mkdir()
-    (state / "others").mkdir()
-    retired = {"OpenCode Desktop Dev", "Visual Studio Code - Insiders", "Figma"}
-    retained = {"Capy", "User pinned app"}
-    for label in retired | retained:
-        (state / "apps" / label).touch()
-    (state / "others" / "Figma").touch()
-    (state / "others" / "Applications").touch()
+    old_apps = "Calendar\nTwilight\nCapy\nDataGrip\nUser pinned app\n"
+    (state / "apps").write_text(old_apps)
+    (state / "others").write_text("User pinned folder\n")
+    home = tmp_path / "User's home"
+    for name in ("Slack.app", "Capy Nightly.app"):
+        (home / "Applications" / name).mkdir(parents=True)
+    (home / "Downloads").mkdir()
     fake_dockutil = bin_dir / "dockutil"
     fake_dockutil.write_text(
         """#!/bin/sh
 set -eu
 operation=$1
 label=$2
-target="$DOCK_STATE/$4/${label##*/}"
 case "$operation" in
-  --find) test -f "$target" ;;
   --remove)
-    if [ "$label" = "$FAIL_LABEL" ]; then exit 1; fi
-    rm "$target"
+    test "$label" = all
+    test "$3" = --no-restart
+    if [ "$FAIL_CLEAR" = 1 ]; then exit 1; fi
+    : > "$DOCK_STATE/apps"
+    : > "$DOCK_STATE/others"
+    ;;
+  --add)
+    shift 2
+    while [ "$1" != --section ]; do shift; done
+    printf '%s\\n' "$label" >> "$DOCK_STATE/$2"
     ;;
   *) exit 2 ;;
 esac
@@ -4251,34 +4314,56 @@ esac
                 ),
                 argument=nix_attrset({
                     "dockutil": str(tmp_path),
-                    "homeDirectory": str(tmp_path / "User's home"),
+                    "homeDirectory": str(home),
                 }),
             )
         )
     # Stub the absolute restart command as a shell function to leave the live Dock untouched.
     script = "/usr/bin/killall() { :; }\n" + activation
-    environment = os.environ | {"DOCK_STATE": str(state), "FAIL_LABEL": failed_label}
+    environment = os.environ | {
+        "DOCK_STATE": str(state),
+        "FAIL_CLEAR": str(int(fail_clear)),
+    }
     bash = shutil.which("bash")
     assert bash is not None
-    for _ in range(2):
+    if fail_clear:
         result = subprocess.run(  # noqa: S603 -- Executes owned activation against a fake Dock.
+            [bash, "-c", script],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 1
+        assert "failed to clear Dock items" in result.stderr
+        assert (state / "apps").read_text() == old_apps
+        assert (state / "others").read_text() == "User pinned folder\n"
+    environment["FAIL_CLEAR"] = "0"
+    expected_apps = [
+        path
+        for path in _rendered_dock_additions(activation, section="apps")
+        if path.exists()
+    ]
+    expected_others = [
+        path
+        for path in _rendered_dock_additions(activation, section="others")
+        if path.exists()
+    ]
+    for _ in range(2):
+        result = subprocess.run(  # noqa: S603 -- Reconciles the fake Dock, including repeat activation.
             [bash, "-c", script],
             env=environment,
             capture_output=True,
             text=True,
             check=True,
         )
-        assert {path.name for path in (state / "apps").iterdir()} == retained | (
-            {failed_label} if failed_label else set()
-        )
-        assert {path.name for path in (state / "others").iterdir()} == {"Figma"}
-        if failed_label:
-            assert f"failed to remove stale Dock item {failed_label}" in result.stderr
-    environment["FAIL_LABEL"] = ""
-    subprocess.run(  # noqa: S603 -- Retries the owned activation against the same fake Dock.
-        [bash, "-c", script], env=environment, capture_output=True, check=True
-    )
-    assert {path.name for path in (state / "apps").iterdir()} == retained
+        assert (state / "apps").read_text().splitlines() == [
+            str(path) for path in expected_apps
+        ]
+        assert (state / "others").read_text().splitlines() == [
+            str(path) for path in expected_others
+        ]
+        assert "warning: skipping missing Dock app" in result.stderr
 
 
 def test_george_config_does_not_install_repo_managed_editor_cli_wrappers() -> None:
@@ -4286,3 +4371,84 @@ def test_george_config_does_not_install_repo_managed_editor_cli_wrappers() -> No
     assert not (REPO_ROOT / "home/george/bin/_managed-app-cli-wrapper").exists()
     assert not (REPO_ROOT / "home/george/bin/code-insiders").exists()
     assert not (REPO_ROOT / "home/george/bin/cursor").exists()
+
+
+def test_mac_apps_helper_stays_runnable_as_a_standalone_store_copy(
+    tmp_path: Path,
+) -> None:
+    """lib/mac-apps.nix ships this file alone under a packaging-only interpreter.
+
+    Importing anything from ``lib`` would still pass the rest of the suite (the
+    repository is importable here) and then fail during activation, so the
+    import set is pinned and the shipped copy is loaded with ``lib`` blocked.
+    """
+    source = (REPO_ROOT / "lib/mac_apps_helper.py").read_text(encoding="utf-8")
+    imported: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            imported.add(node.module.split(".")[0])
+
+    assert "lib" not in imported
+    assert imported <= {
+        "collections",
+        "concurrent",
+        "json",
+        "os",
+        "packaging",
+        "pathlib",
+        "plistlib",
+        "shutil",
+        "stat",
+        "subprocess",
+        "sys",
+        "tempfile",
+        "time",
+        "typing",
+    }
+
+    shipped = tmp_path / "nixcfg-mac-apps-helper.py"
+    shipped.write_text(source, encoding="utf-8")
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "import importlib.abc\n"
+        "import importlib.util\n"
+        "import sys\n"
+        "\n"
+        "\n"
+        "class BlockRepositoryLib(importlib.abc.MetaPathFinder):\n"
+        "    def find_spec(self, fullname, path=None, target=None):\n"
+        "        if fullname == 'lib' or fullname.startswith('lib.'):\n"
+        "            raise ModuleNotFoundError(fullname)\n"
+        "        return None\n"
+        "\n"
+        "\n"
+        "sys.meta_path.insert(0, BlockRepositoryLib())\n"
+        "spec = importlib.util.spec_from_file_location('standalone', sys.argv[1])\n"
+        "module = importlib.util.module_from_spec(spec)\n"
+        "sys.modules['standalone'] = module\n"
+        "spec.loader.exec_module(module)\n"
+        "assert 'lib' not in sys.modules\n"
+        "assert module._as_object_dict({'a': 1}, context='probe') == {'a': 1}\n"
+        "try:\n"
+        "    module._as_object_dict({'a': 1, 2: 3}, context='probe')\n"
+        "except TypeError as error:\n"
+        "    assert 'Expected string key' in str(error)\n"
+        "else:\n"
+        "    raise AssertionError('non-string keys must be rejected')\n",
+        encoding="utf-8",
+    )
+    environment = {
+        key: value for key, value in os.environ.items() if key != "PYTHONPATH"
+    }
+    result = subprocess.run(  # noqa: S603 -- owned probe, fixed interpreter
+        [sys.executable, "-I", str(probe), str(shipped)],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr

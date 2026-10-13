@@ -45,8 +45,7 @@ let
         path =
           let
             paletteName = "catppuccin_${appearance.variant}";
-            palette =
-              (lib.importTOML "${starshipThemes}/${appearance.variant}.toml").palettes.${paletteName};
+            palette = (lib.importTOML "${starshipThemes}/${appearance.variant}.toml").palettes.${paletteName};
             # Preserve Starship's default styles, which use ANSI color names.
             colors = palette // {
               purple = palette.mauve;

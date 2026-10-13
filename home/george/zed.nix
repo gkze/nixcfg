@@ -31,6 +31,12 @@ in
       };
       agent = {
         button = true;
+        default_model = {
+          effort = "high";
+          enable_thinking = true;
+          model = "gpt-6-astra";
+          provider = "copilot_chat";
+        };
         dock = "left";
         expand_edit_card = false;
         expand_terminal_card = false;
@@ -39,11 +45,12 @@ in
           provider = "anthropic";
         };
         model_parameters = [ ];
-        sidebar_side = "left";
         thinking_display = "always_expanded";
+        threads_sidebar.position = "left";
         tool_permissions = {
           default = "confirm";
           tools = {
+            create_directory.default = "allow";
             edit_file = {
               always_allow = [
                 {
@@ -54,12 +61,14 @@ in
             };
             fetch.default = "allow";
             search_web.default = "allow";
+            skill.default = "allow";
             terminal.default = "allow";
           };
         };
       };
       buffer_font_family = config.fonts.monospace.name;
       buffer_font_size = 12.0;
+      cli_default_open_behavior = "existing_window";
       collaboration_panel.dock = "left";
       font_family = config.fonts.monospace.name;
       context_servers = mcpCatalog.zed;
@@ -75,6 +84,13 @@ in
           capabilities.chat_completions = false;
         }
       ];
+      lsp.vtsls = {
+        enable_lsp_tasks = true;
+        settings = {
+          javascript.updateImportsOnFileMove.enabled = "always";
+          typescript.updateImportsOnFileMove.enabled = "always";
+        };
+      };
       edit_predictions = {
         provider = "zed";
         mode = "eager";
@@ -83,7 +99,10 @@ in
         "Shell Script" = [ ".envrc" ];
       };
       format_on_save = "on";
-      git_panel.dock = "right";
+      git_panel = {
+        dock = "right";
+        tree_view = true;
+      };
       icon_theme = {
         mode = "system";
         light = config.theme.appearances.light.displayNameAccented;
@@ -91,7 +110,7 @@ in
       };
       minimap.show = "always";
       outline_panel.dock = "right";
-      project_panel.dock = "right";
+      project_panel.dock = "left";
       session.trust_all_worktrees = true;
       show_whitespaces = "all";
       theme = {

@@ -119,7 +119,10 @@ rec {
   sourceUrl =
     name: hashType:
     let
-      entry = sourceHashEntry name hashType;
+      # The fake-hash contract covers hashes only: the update probe still needs
+      # the real download URL, and the fake record carries none. Resolve the
+      # entry with fake mode off so both modes report the same url.
+      entry = selectSourceHashEntry sourceEntry false name hashType { };
     in
     entry.url or (throw "sources.json for '${name}' missing url for ${hashType}");
 

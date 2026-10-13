@@ -25,22 +25,14 @@ dock.mkDockModule {
     pkgs
     ;
   activationName = "nixcfgTownDock";
-  # Home Manager preserves unlisted Dock items; retire these managed entries explicitly.
-  removeApps = [
-    "OpenCode Desktop Dev"
-    "Visual Studio Code - Insiders"
-    "Figma"
-  ];
   apps = [
-    "/System/Applications/Calendar.app"
     "/System/Applications/Messages.app"
     (appPath "slack" "Slack.app")
     (appPath "onepassword" "1Password.app")
-    (appPath "zen-twilight" "Twilight.app")
+    (appPath "aside" "Aside.app")
     (appPath "google-chrome" "Google Chrome.app")
     (appPath "claude" "Claude.app")
     (appPath "codex" "ChatGPT.app")
-    (appPath "capy" "Capy.app")
     (appPath "capy-nightly" "Capy Nightly.app")
     (appPath "code-cursor" "Cursor.app")
     (appPath "town-assistant" "Town Assistant.app")
@@ -48,7 +40,6 @@ dock.mkDockModule {
     (appPath "zed" "Zed Nightly.app")
     (appPath "linear" "Linear.app")
     (appPath "ghostty" "Ghostty.app")
-    (appPath "datagrip" "DataGrip.app")
     (appPath "notion" "Notion.app")
     "/System/Applications/Notes.app"
     (appPath "spotify" "Spotify.app")

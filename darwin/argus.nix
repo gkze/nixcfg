@@ -31,6 +31,18 @@ lib.mkDarwinHost {
   extraSystemModules = [
     "${lib.modulesPath}/darwin/george/caches.nix"
     "${lib.modulesPath}/darwin/george/work.nix"
+    (
+      { lib, ... }:
+      {
+        # Tailscale fallback for paths rocinante already built. The short name
+        # resolves through MagicDNS. Unsigned paths are accepted only from this
+        # pinned host. Mass query stays off so an unreachable rocinante does not
+        # stall cache hits.
+        nixcfg.common.nix.substituters = lib.mkBefore [
+          "ssh-ng://george@rocinante?trusted=true&want-mass-query=false&max-connections=4&ssh-key=%2FUsers%2Fgeorge%2F.ssh%2Frocinante-nix-substituter&base64-ssh-public-host-key=AAAAC3NzaC1lZDI1NTE5AAAAIBeJLuJMiS2O9ZdBzDWRpZQqMt%2BSyH8ku6tLuvVvp2fW"
+        ];
+      }
+    )
     {
       # Home Manager initializes completion after adding plugin directories to fpath.
       darwinDefaults.zsh.deferCompletionInitToHomeManager = true;

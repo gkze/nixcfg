@@ -24,6 +24,9 @@
     "JavaScript": {
       "language_servers": ["!biome", "..."]
     },
+    "Python": {
+      "language_servers": ["ty", "ruff"]
+    },
     "Svelte": {
       "language_servers": ["!biome", "..."]
     },
