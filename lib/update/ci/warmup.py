@@ -1631,19 +1631,40 @@ _COMPILER_MUST_SUBSTITUTE_PREFIXES = (
 _MIRROR_DOWNLOAD = re.compile(r"cannot download (\S+) from any mirror", re.IGNORECASE)
 
 
+def _compiler_must_substitute_name(name: str) -> bool:
+    """Return whether *name* is a rustc/clang/stdenv bootstrap, not clang-sys.
+
+    38344741255 slot 1: ``clang-sys-1.9.1.tar.gz`` starts with ``clang-``
+    so the prefix deny treated a crates.io FOD as a compiler tarball
+    and WarmupFatalError'd the mirror line before DNS retry. pin-project
+    and libloading had already substituted from gkze. Versioned compiler
+    sources (``rustc-1.98.1``, ``clang-19.1.7.src``, ``bmake-20260313``)
+    still match; crate suffixes after the prefix (``sys``, ``hash``)
+    do not. ``stdenv-*`` has no crate collision and stays must-substitute.
+    """
+    for prefix in _COMPILER_MUST_SUBSTITUTE_PREFIXES:
+        if not name.startswith(prefix):
+            continue
+        rest = name.removeprefix(prefix)
+        if prefix == "stdenv-" or (rest and rest[0].isdigit()):
+            return True
+    return False
+
+
 def is_source_fetch_mirror_line(line: str) -> bool:
     """Return whether a mirror-fail line is a crate/source FOD.
 
     38307411499 slots 2/4 printed ``cannot download pin-project-1.1.13.tar.gz
     from any mirror`` after curl (6) on static.crates.io. That is the
     same source-FOD miss as Cannot-build, not a rustc/bmake bootstrap
-    mirror failure.
+    mirror failure. 38344741255 slot 1: ``clang-sys-1.9.1.tar.gz`` is
+    the same class; a bare ``clang-`` prefix must not hide it.
     """
     match = _MIRROR_DOWNLOAD.search(line)
     if match is None:
         return False
     name = match.group(1)
-    if name.startswith(_COMPILER_MUST_SUBSTITUTE_PREFIXES):
+    if _compiler_must_substitute_name(name):
         return False
     if name.endswith(_SOURCE_FETCH_ARCHIVES):
         return True
@@ -1679,7 +1700,7 @@ def is_compiler_must_substitute_store_path(path: str) -> bool:
     if is_rust_overlay_binary_component(path):
         return False
     rest = _store_output_rest(path).removesuffix(".drv")
-    return rest.startswith(_COMPILER_MUST_SUBSTITUTE_PREFIXES)
+    return _compiler_must_substitute_name(rest)
 
 
 # rust-warmup others may realize these without compiling a crate graph.

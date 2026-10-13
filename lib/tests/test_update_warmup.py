@@ -1526,8 +1526,15 @@ def test_is_source_fetch_mirror_line_skips_crate_fod() -> None:
     convert_case = "error: cannot download convert_case-0.11.0.tar.gz from any mirror"
     bmake = "error: cannot download bmake-20260313.tar.gz from any mirror"
     rustc = "error: cannot download rustc-1.98.1.tar.gz from any mirror"
+    clang_sys = "       > error: cannot download clang-sys-1.9.1.tar.gz from any mirror"
+    llvm_sys = "error: cannot download llvm-sys-180.1.0.tar.gz from any mirror"
+    rustc_hash = "error: cannot download rustc-hash-2.1.1.tar.gz from any mirror"
+    clang_src = "error: cannot download clang-19.1.7.src.tar.xz from any mirror"
     assert is_source_fetch_mirror_line(pin_project)
     assert is_source_fetch_mirror_line(libloading)
+    assert is_source_fetch_mirror_line(clang_sys)
+    assert is_source_fetch_mirror_line(llvm_sys)
+    assert is_source_fetch_mirror_line(rustc_hash)
     assert is_source_fetch_mirror_line(source)
     assert is_source_fetch_mirror_line(convert_case)
     assert is_source_fetch_mirror_line(
@@ -1538,16 +1545,26 @@ def test_is_source_fetch_mirror_line_skips_crate_fod() -> None:
     )
     assert not is_source_fetch_mirror_line(bmake)
     assert not is_source_fetch_mirror_line(rustc)
+    assert not is_source_fetch_mirror_line(clang_src)
     assert not is_source_fetch_mirror_line("error: cannot download foo from any mirror")
     assert not is_source_fetch_mirror_line("unable to download 'https://example'")
     assert warmup_fatal_line(pin_project) is None
     assert warmup_fatal_line(libloading) is None
+    assert warmup_fatal_line(clang_sys) is None
+    assert (
+        warmup_fatal_line(
+            "error: Cannot build '/nix/store/mfrnbrs6xyj0fz76nz31a3r028ip420p-clang-sys-1.9.1.tar.gz.drv'."
+        )
+        is None
+    )
     raise_if_warmup_fatal(pin_project)
     raise_if_warmup_fatal(libloading)
+    raise_if_warmup_fatal(clang_sys)
     assert warmup_fatal_line(bmake) == "cannot download from any mirror"
     with pytest.raises(WarmupFatalError, match="cannot download from any mirror"):
         raise_if_warmup_fatal(bmake)
     assert warmup_fatal_line(rustc) == "cannot download from any mirror"
+    assert warmup_fatal_line(clang_src) == "cannot download from any mirror"
 
 
 def test_source_fetch_retry_drvs_refuse_compiler_and_rust() -> None:
@@ -1564,6 +1581,7 @@ def test_source_fetch_retry_drvs_refuse_compiler_and_rust() -> None:
     libloading = (
         "/nix/store/clbp5wbnz9r88lngchd67lpxkk7y6my9-libloading-0.8.9.tar.gz.drv"
     )
+    clang_sys = "/nix/store/mfrnbrs6xyj0fz76nz31a3r028ip420p-clang-sys-1.9.1.tar.gz.drv"
     assert source_fetch_retry_drvs((
         DerivationValidationFailure(
             source="root-warmup",
@@ -1604,10 +1622,15 @@ def test_source_fetch_retry_drvs_refuse_compiler_and_rust() -> None:
         ),
         DerivationValidationFailure(
             source="root-warmup",
+            installable=f"{clang_sys}^*",
+            message="error: cannot download clang-sys-1.9.1.tar.gz from any mirror",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
             installable=f"{source}^*",
             message="error: Cannot build '/nix/store/...-source.drv'.",
         ),
-    )) == (source, convert_case, pin_project, libloading)
+    )) == (source, convert_case, pin_project, libloading, clang_sys)
 
 
 def test_source_fetch_network_ready_requires_both_hosts() -> None:
@@ -1664,6 +1687,10 @@ def test_1270_canary_patchutils_is_local_compiler_helper() -> None:
     rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
     rustc_darwin = "/nix/store/l2nj43cyy37grnkh3m8h4jzhpsx8yp8b-rustc-1.98.1-aarch64-apple-darwin.drv"
     stdenv = "/nix/store/1gx3hvygaaaaaaaaaaaaaaaaaaaaaaaa-stdenv-darwin.drv"
+    clang_sys = "/nix/store/mfrnbrs6xyj0fz76nz31a3r028ip420p-clang-sys-1.9.1.tar.gz.drv"
+    clang_src = (
+        "/nix/store/cccccccccccccccccccccccccccccccc-clang-19.1.7.src.tar.xz.drv"
+    )
     assert is_compiler_local_helper_store_path(patchutils)
     assert is_compiler_local_helper_store_path(pbzx)
     assert is_compiler_local_helper_store_path(cpio)
@@ -1671,7 +1698,10 @@ def test_1270_canary_patchutils_is_local_compiler_helper() -> None:
     assert not is_compiler_local_helper_store_path(stdenv)
     assert is_compiler_must_substitute_store_path(rustc)
     assert is_compiler_must_substitute_store_path(stdenv)
+    assert is_compiler_must_substitute_store_path(clang_src)
     assert not is_compiler_must_substitute_store_path(cpio)
+    assert not is_compiler_must_substitute_store_path(clang_sys)
+    assert is_source_fetch_store_path(clang_sys)
     assert is_rust_overlay_binary_component(rustc_darwin)
     assert not is_rust_overlay_binary_component(rustc)
     assert not is_compiler_must_substitute_store_path(rustc_darwin)
@@ -2058,6 +2088,7 @@ def test_publish_warmup_source_fetches_realizes_rust_fods(
     libloading = (
         "/nix/store/clbp5wbnz9r88lngchd67lpxkk7y6my9-libloading-0.8.9.tar.gz.drv"
     )
+    clang_sys = "/nix/store/mfrnbrs6xyj0fz76nz31a3r028ip420p-clang-sys-1.9.1.tar.gz.drv"
     plan = WarmupPlan(
         schemaVersion=1,
         system="aarch64-darwin",
@@ -2092,7 +2123,7 @@ def test_publish_warmup_source_fetches_realizes_rust_fods(
     )
     monkeypatch.setattr(
         "lib.update.ci.warmup.source_fetch_input_drvs",
-        lambda *_a, **_k: (source, convert_case, pin_project, libloading),
+        lambda *_a, **_k: (source, convert_case, pin_project, libloading, clang_sys),
     )
     seen: list[tuple[tuple[str, ...], bool, bool]] = []
     leftover = DerivationValidationFailure(
@@ -2110,16 +2141,22 @@ def test_publish_warmup_source_fetches_realizes_rust_fods(
         installable=f"{libloading}^*",
         message="error: cannot download libloading-0.8.9.tar.gz from any mirror",
     )
+    clang_miss = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{clang_sys}^*",
+        message="error: cannot download clang-sys-1.9.1.tar.gz from any mirror",
+    )
     rust_miss = DerivationValidationFailure(
         source="root-warmup",
         installable="/nix/store/dddddddddddddddddddddddddddddddd-rust_settings-0.1.0.drv^*",
         message="error: Cannot build '/nix/store/...-rust_settings-0.1.0.drv'.",
     )
-    substitute_misses = (leftover, pin_miss, lib_miss)
+    substitute_misses = (leftover, pin_miss, lib_miss, clang_miss)
     assert source_fetch_leftover_drvs((*substitute_misses, rust_miss)) == (
         source,
         pin_project,
         libloading,
+        clang_sys,
     )
 
     def realize(
@@ -2138,8 +2175,8 @@ def test_publish_warmup_source_fetches_realizes_rust_fods(
         plan, flake_root=tmp_path, realize=realize
     )
     assert seen == [
-        ((source, convert_case, pin_project, libloading), True, True),
-        ((source, pin_project, libloading), False, True),
+        ((source, convert_case, pin_project, libloading, clang_sys), True, True),
+        ((source, pin_project, libloading, clang_sys), False, True),
     ]
     assert published == ()
 
@@ -2148,12 +2185,12 @@ def test_publish_warmup_source_fetches_realizes_rust_fods(
     ) -> tuple[DerivationValidationFailure, ...]:
         if kwargs.get("substitute_only"):
             return substitute_misses
-        return (pin_miss, lib_miss)
+        return (pin_miss, lib_miss, clang_miss)
 
     stubborn = publish_warmup_source_fetches(
         plan, flake_root=tmp_path, realize=realize_still_missing
     )
-    assert stubborn == (pin_miss, lib_miss)
+    assert stubborn == (pin_miss, lib_miss, clang_miss)
     assert source_fetch_publish_leftover_line(stubborn) in capsys.readouterr().err
     assert (
         publish_warmup_source_fetches(
