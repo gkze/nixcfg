@@ -2,6 +2,7 @@
   final,
   inputs,
   outputs,
+  prev,
   sources,
   ...
 }:
@@ -13,7 +14,11 @@ let
       selfSource = sources.${name};
     };
 in
-{
+# These are macOS app bundles, and several are aarch64-darwin only (see
+# packages/registry.nix). Without this guard the overlay exports attributes on
+# Linux that throw when forced, instead of being absent like the registry's
+# per-system filtering says they should be.
+prev.lib.optionalAttrs prev.stdenv.hostPlatform.isDarwin {
   agentastic-dev = callDarwinAppPackage "agentastic-dev";
   agentlog = callDarwinAppPackage "agentlog";
   airfoil = callDarwinAppPackage "airfoil";

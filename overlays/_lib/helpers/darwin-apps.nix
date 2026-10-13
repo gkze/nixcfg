@@ -58,6 +58,15 @@ let
 
   guardedBinLink = import ./guarded-bin-link.nix;
 
+  # Archives can carry read-only payloads: ChatGPT 26.1007.21159 ships a 0444
+  # `.mcp.json` inside its bundled plugins, and clearing an extended attribute
+  # needs write access to the file. Make the copied bundle writable before the
+  # sweep; the store normalizes modes again on the way out.
+  clearBundleXattrs = bundlePath: ''
+    chmod -R u+w ${bundlePath}
+    ${prev.darwin.xattr}/bin/xattr -cr ${bundlePath}
+  '';
+
   # Shared derivation assembly for every mk*App builder below. Each builder is
   # a thin wrapper that resolves its naming defaults and supplies an `unpack`
   # strategy: the unpack tooling, any strategy-specific derivation attributes
@@ -218,7 +227,7 @@ in
           mkdir -p "$out/Applications"
           ${prev.lib.optionalString makeBinary ''mkdir -p "$out/bin"''}
           cp -R . "$out/Applications/${resolvedBundleName}"
-          ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${resolvedBundleName}"
+          ${clearBundleXattrs ''"$out/Applications/${resolvedBundleName}"''}
           ${postInstallApp}
           ${prev.lib.optionalString codesignApp ''
             /usr/bin/codesign --force --deep --sign - "$out/Applications/${resolvedBundleName}"
@@ -306,7 +315,7 @@ in
           fi
 
           cp -R "$app_bundle" "$out/Applications/${bundleName}"
-          ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${bundleName}"
+          ${clearBundleXattrs ''"$out/Applications/${bundleName}"''}
           ${postInstallApp}
           ${prev.lib.optionalString createBin (guardedBinLink {
             inherit bundleName;
@@ -419,7 +428,7 @@ in
             fi
 
             cp -R "$dmg_dir/${resolvedBundleName}" "$out/Applications/${resolvedBundleName}"
-            ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${resolvedBundleName}"
+            ${clearBundleXattrs ''"$out/Applications/${resolvedBundleName}"''}
             ${postInstallApp}
             ${prev.lib.optionalString codesignApp ''
               /usr/bin/codesign --force --deep --sign - "$out/Applications/${resolvedBundleName}"
@@ -503,7 +512,7 @@ in
           fi
 
           cp -R "$app_bundle" "$out/Applications/${resolvedBundleName}"
-          ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${resolvedBundleName}"
+          ${clearBundleXattrs ''"$out/Applications/${resolvedBundleName}"''}
           ${postInstallApp}
           ${prev.lib.optionalString makeBinary (guardedBinLink {
             bundleName = resolvedBundleName;
@@ -608,7 +617,7 @@ in
           fi
 
           ${copyPayload}
-          ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${bundleName}"
+          ${clearBundleXattrs ''"$out/Applications/${bundleName}"''}
           ${postInstallApp}
           ${prev.lib.optionalString createBin (guardedBinLink {
             inherit bundleName binaryName;
@@ -661,7 +670,7 @@ in
           fi
 
           cp -R "$app_bundle" "$out/Applications/${bundleName}"
-          ${prev.darwin.xattr}/bin/xattr -cr "$out/Applications/${bundleName}"
+          ${clearBundleXattrs ''"$out/Applications/${bundleName}"''}
           ${postInstallApp}
           ${prev.lib.optionalString createBin (guardedBinLink {
             inherit bundleName;
