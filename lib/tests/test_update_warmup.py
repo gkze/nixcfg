@@ -31,6 +31,7 @@ from lib.update.ci.warmup import (
     assert_local_build_threshold,
     assert_zed_family_realize_set,
     canary_crate_warmup_paths,
+    cascade_canary_paths,
     classify_slot_warmup_will_be_built,
     command_store_drv,
     compiler_input_drvs,
@@ -44,6 +45,7 @@ from lib.update.ci.warmup import (
     force_local_dry_run_builds,
     import_warmup_drvs,
     intersect_missing,
+    is_cascade_canary_store_path,
     is_compiler_local_helper_store_path,
     is_compiler_must_substitute_store_path,
     is_crate2nix_rust_output,
@@ -1092,6 +1094,21 @@ def test_rust_warmup_layers_and_slots_keep_dependency_order() -> None:
     assert rust_warmup_layers(frozenset({shared}), (_graph(shared),)) == ((shared,),)
     assert rust_warmup_layers(frozenset({leaf}), (_graph(leaf),)) == ()
     assert rust_warmup_layers(frozenset(), (_graph(shared),)) == ()
+
+
+def test_cascade_canary_paths_select_buzz_onnxruntime() -> None:
+    """Cascade canary owns buzz-onnxruntime, not src or sibling cascade paths."""
+    onnx = "/nix/store/4jjnjbsw4a0ysny10x9p57r057k25nhz-buzz-onnxruntime-1.27.0"
+    onnx_drv = f"{onnx}.drv"
+    other = "/nix/store/dddddddddddddddddddddddddddddddd-libiconv-1"
+    assert is_cascade_canary_store_path(onnx)
+    assert is_cascade_canary_store_path(onnx_drv)
+    assert not is_cascade_canary_store_path(
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-buzz-onnxruntime-src"
+    )
+    assert not is_cascade_canary_store_path(other)
+    assert cascade_canary_paths(((other, onnx), (onnx_drv,))) == (onnx, onnx_drv)
+    assert cascade_canary_paths(((other,),)) == ()
 
 
 def test_rust_agent_ui_partition_and_realize_print_logs(tmp_path: Path) -> None:

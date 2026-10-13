@@ -852,6 +852,105 @@ def test_cascade_warmup_realizes_uncached_stripe_per_derivation(
     assert "--warmup-slot is only valid" in str(slot_on_packages.exception)
 
 
+def test_cascade_canary_realizes_buzz_onnxruntime_once(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38394692516: canary publishes buzz-onnxruntime; stripe slots skip it."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, object]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((paths, kwargs.get("chunk"), kwargs.get("keep_going")))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        pipeline, "filter_cascade_realize_drvs", lambda drvs, **_kwargs: drvs
+    )
+    onnx = "/nix/store/4jjnjbsw4a0ysny10x9p57r057k25nhz-buzz-onnxruntime-1.27.0"
+    other = "/nix/store/dddddddddddddddddddddddddddddddd-libiconv-1"
+    cached = "/nix/store/cccccccccccccccccccccccccccccccc-coreutils-9.10"
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda path: path == cached)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(),
+            rustLayers=(),
+            cascadeOutputs=(cached, onnx, other),
+            cascadeLayers=((cached, onnx), (other,)),
+            outputDrvs={
+                cached: f"{cached}.drv",
+                onnx: f"{onnx}.drv",
+                other: f"{other}.drv",
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=3, missing=3, warmup=0, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="cascade-canary", warmup_plan=warmup_plan
+    )
+    assert report.gates == ()
+    assert realized == [((f"{onnx}.drv",), 1, True)]
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda path: path == onnx)
+    skipped = pipeline.validate_candidate(
+        candidate, scope="cascade-canary", warmup_plan=warmup_plan
+    )
+    assert skipped.failures == ()
+    assert realized == [((f"{onnx}.drv",), 1, True)]
+    with pytest.raises(ValueError, match="cascade-canary requires a warmup plan"):
+        pipeline.validate_candidate(candidate, scope="cascade-canary")
+    with pytest.raises(ValueError, match="cascade-canary requires a warmup plan"):
+        pipeline._realize_requested_warmup(
+            "cascade-canary", None, None, flake_root=tmp_path
+        )
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    missing_cli = CliRunner().invoke(
+        pipeline.app,
+        [
+            "validate",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(tmp_path / "validation.json"),
+            "--scope",
+            "cascade-canary",
+        ],
+    )
+    assert missing_cli.exit_code != 0
+    assert "cascade-canary requires --warmup-plan" in str(missing_cli.exception)
+
+
 def test_cascade_warmup_skips_umbrella_over_shard_ceiling(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

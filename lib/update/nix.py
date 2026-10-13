@@ -139,12 +139,24 @@ _CANNOT_DOWNLOAD_FROM_MIRROR = re.compile(
 # ``_nix_output_has_vanished_store_build_input``). Bare E0463 with a store
 # ``--extern`` and no I/O note is a builder failure (#1258). None of the
 # store-fault signals are derivation failures.
+#
+# 38394692516 slot 4: APFS ``(IOStorageFamily) disk2s7: I/O error`` while
+# clang-wrapper ranlib wrote ``libonnxruntime_common.a``. The builder
+# then exited 2. That write-EIO is a host storage fault, not a
+# deterministic cctools race: the same volume, Data, and container all
+# logged I/O errors, and ``/nix`` still had tens of GiB free.
 _NIX_STORE_TRANSIENT_MARKERS = (
     "Illegal byte sequence",
+    "Input/output error",
+    "can't write to output file",
     "Nix daemon disconnected unexpectedly",
     "cannot open connection to remote store 'daemon'",
     # #1257: EILSEQ unlink of an active-builds lock, then the daemon died.
     'opening lock file "/nix/var/nix/active-builds/',
+)
+_FAILED_DRV_PATH = re.compile(
+    r"(?:cannot build|builder for) '(/nix/store/[0-9a-z]{32}-[^']+\.drv)'",
+    re.IGNORECASE,
 )
 _STORE_BUS_SIGNALS = frozenset({10, signal.SIGBUS})
 _STORE_EXTERN_RLIB = re.compile(
@@ -650,11 +662,31 @@ def _nix_output_has_vanished_store_artifact(output: str) -> bool:
     ) or _nix_output_has_unreadable_store_rlib(output)
 
 
+def _nix_output_has_write_eio(output: str) -> bool:
+    """Return whether a builder died while writing a store output.
+
+    cctools ``ranlib`` / ``ld`` print ``can't write to output file
+    (Input/output error)``. That is the same hosted APFS I/O fault as
+    EILSEQ unlink, not a deterministic archive race. EILSEQ plus a
+    real builder exit stays a permanent failure: this signal is only
+    the write-EIO itself.
+    """
+    folded = output.casefold()
+    return "input/output error" in folded or "can't write to output file" in folded
+
+
 def _nix_output_has_builder_exit(output: str) -> bool:
     if _nix_output_has_vanished_store_artifact(output):
         return False
+    if _nix_output_has_write_eio(output):
+        return False
     folded = output.casefold()
     return any(marker in folded for marker in _BUILDER_EXIT_MARKERS)
+
+
+def failed_derivation_paths(output: str) -> tuple[str, ...]:
+    """Return ``.drv`` paths Nix named in Cannot-build / builder-for lines."""
+    return tuple(dict.fromkeys(_FAILED_DRV_PATH.findall(output)))
 
 
 def _nix_output_has_missing_store_drv(output: str) -> bool:
@@ -782,6 +814,29 @@ def is_retryable_nix_store_failure(*, stdout: str, stderr: str) -> bool:
     return _nix_output_has_store_transient_signal(output)
 
 
+def should_consult_nix_builder_logs(*, stdout: str, stderr: str) -> bool:
+    """Return whether streamed Nix output may have truncated a write-EIO.
+
+    Nix prints the last 25 builder lines. Parallel cmake (38394692516
+    buzz-onnxruntime ranlib EIO at 41%) then scrolls that line out,
+    leaving only ``Cannot build`` + exit 2. Fetch ``nix log`` before
+    treating that as a permanent derivation failure.
+    """
+    output = f"{stderr}\n{stdout}"
+    if _has_hash_mismatch_signal(output):
+        return False
+    if _nix_output_has_write_eio(output):
+        return False
+    if is_retryable_nix_store_failure(stdout=stdout, stderr=stderr):
+        return False
+    folded = output.casefold()
+    if not any(marker in folded for marker in _PERMANENT_BUILD_FAILURE_MARKERS):
+        return False
+    return _nix_output_has_builder_exit(output) and bool(
+        failed_derivation_paths(output)
+    )
+
+
 def _mentions_store_bus_signal(text: str) -> bool:
     """Return whether *text* names SIGBUS without matching a longer signal number."""
     folded = text.casefold()
@@ -800,15 +855,17 @@ def is_transient_store_interruption(text: str) -> bool:
     """Return whether validation stopped on a runner store fault.
 
     Hosted macOS jobs lose the store mid-build (``Illegal byte sequence``,
-    a vanished store ``.drv``, a vanished store build input, an unreadable
-    Cachix-substituted crate2nix rlib, a crashed Nix daemon, or SIGBUS). A
-    hash mismatch or a builder that actually exited (``failed with exit
-    code``, ``error: builder for``) must not continue as if the store had
-    only faulted. ``error: Cannot build`` / ``Reason: 1 dependency failed``
-    after a substitute EILSEQ is still a store fault, as is ``builder
-    failed with exit code 1`` when the only builder log is a vanished
-    ``/nix/store/`` build input or rustc E0463 after ``--extern`` named a
-    store rlib that rustc then reported missing or unreadable.
+    write-EIO / ``can't write to output file``, a vanished store ``.drv``,
+    a vanished store build input, an unreadable Cachix-substituted
+    crate2nix rlib, a crashed Nix daemon, or SIGBUS). A hash mismatch or
+    a builder that actually exited (``failed with exit code``,
+    ``error: builder for``) must not continue as if the store had only
+    faulted, unless that exit is the write-EIO itself. ``error: Cannot
+    build`` / ``Reason: 1 dependency failed`` after a substitute EILSEQ
+    is still a store fault, as is ``builder failed with exit code 1``
+    when the only builder log is a vanished ``/nix/store/`` build input
+    or rustc E0463 after ``--extern`` named a store rlib that rustc then
+    reported missing or unreadable.
     """
     if _nix_output_has_permanent_build_failure(text):
         return False
@@ -1404,6 +1461,7 @@ __all__ = [
     "compute_expr_drv_fingerprint",
     "compute_fixed_output_hash",
     "compute_overlay_hash",
+    "failed_derivation_paths",
     "get_current_nix_platform",
     "is_retryable_nix_network_failure",
     "is_retryable_nix_store_failure",
@@ -1411,5 +1469,6 @@ __all__ = [
     "normalize_nix_platform",
     "prepare_fixed_output_probes",
     "recover_nix_store_after_fault",
+    "should_consult_nix_builder_logs",
     "should_restart_nix_daemon",
 ]

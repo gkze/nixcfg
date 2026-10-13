@@ -926,6 +926,30 @@ def slot_cascade_paths(
     return slot_warmup_paths(layers, slot, width=width)
 
 
+def is_cascade_canary_store_path(path: str) -> bool:
+    """Return whether cascade canary must realize *path* before the 5-wide stripe.
+
+    ``buzz-onnxruntime`` is a heavy Darwin-only C++ static archive. Hosted
+    macos-15 APFS I/O-faulted ranlib mid-link (38394692516 slot 4) while
+    five cascade slots plus packages oversubscribed the free-tier pool.
+    Build it once on a dedicated runner, push via the Cachix
+    post-build-hook, then stripe slots substitute.
+    """
+    rest = _store_output_rest(path)
+    prefix = "buzz-onnxruntime-"
+    if not rest.startswith(prefix):
+        return False
+    after = rest[len(prefix) :]
+    return bool(after) and after[0].isdigit()
+
+
+def cascade_canary_paths(layers: Sequence[Sequence[str]]) -> tuple[str, ...]:
+    """Return planned cascade canary outputs, first-seen order."""
+    return tuple(
+        path for layer in layers for path in layer if is_cascade_canary_store_path(path)
+    )
+
+
 def skip_cached_warmup_paths(
     paths: Sequence[str],
     *,

@@ -958,6 +958,16 @@ def _assert_warmup_scope_native_args(
     with pytest.raises(ValueError, match="warmup slots are only valid"):
         jobs._native_args("validate", artifacts)
     monkeypatch.delenv("NIXCFG_WARMUP_SLOT")
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "cascade-canary")
+    monkeypatch.setenv("NIXCFG_CLOSURE_SHARD", "cascade-canary")
+    canary_args = jobs._native_args("validate", artifacts)
+    assert canary_args[canary_args.index("--scope") + 1] == "cascade-canary"
+    assert "--warmup-slot" not in canary_args
+    monkeypatch.delenv("NIXCFG_WARMUP_PLAN")
+    with pytest.raises(ValueError, match="cascade-canary requires NIXCFG_WARMUP"):
+        jobs._native_args("validate", artifacts)
+    monkeypatch.setenv("NIXCFG_WARMUP_PLAN", "/warmup/warmup-plan.json")
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "packages")
     monkeypatch.setenv("NIXCFG_CLOSURE_SHARD", "packages-0")
     with pytest.raises(ValueError, match="Named closure roots"):
         jobs._native_args("validate", artifacts)
@@ -1249,13 +1259,28 @@ def _assert_canary_jobs(workflow_jobs: dict) -> None:
 
 
 def _assert_cascade_warmup_job(workflow_jobs: dict) -> None:
-    """Shared non-rust cascade is 5-wide per-derivation after rust-warmup."""
+    """Shared non-rust cascade is 5-wide per-derivation after the canary."""
+    canary = workflow_jobs["canary-warm-cascade"]
+    assert set(canary["needs"]) == {
+        "prepare-merge",
+        "plan-darwin-closures",
+        "validate-darwin-warm-rust",
+    }
+    assert canary["with"]["scope"] == "cascade-canary"
+    assert canary["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"
+    assert canary["with"]["shard"] == "cascade-canary"
+    assert "warmup_slot" not in canary["with"]
+    assert "canary-warm-cascade" not in workflow_jobs["assert-coverage"]["needs"]
     cascade = workflow_jobs["validate-darwin-cascade-warmup"]
     assert set(cascade["needs"]) == {
         "prepare-merge",
         "plan-darwin-closures",
         "validate-darwin-warm-rust",
+        "canary-warm-cascade",
     }
+    cascade_if = " ".join(cascade["if"].split())
+    assert "canary-warm-cascade.result == 'skipped'" in cascade_if
+    assert "canary-warm-cascade.result == 'failure'" in cascade_if
     assert cascade["with"]["scope"] == "cascade-warmup"
     assert cascade["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"
     assert cascade["with"]["warmup_slot"] == "${{ matrix.slot }}"
@@ -1288,7 +1313,7 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
     assert set(packages["needs"]) == {
         "prepare-merge",
         "plan-darwin-closures",
-        "validate-darwin-warm-rust",
+        "validate-darwin-cascade-warmup",
     }
     assert packages["with"]["scope"] == "packages"
     assert "warmup_artifact" not in packages["with"]

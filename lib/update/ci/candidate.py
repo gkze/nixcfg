@@ -48,6 +48,7 @@ from lib.update.ci.warmup import (
     assert_force_local_dry_run,
     assert_zed_family_realize_set,
     canary_crate_warmup_paths,
+    cascade_canary_paths,
     command_store_drv,
     compiler_input_drvs,
     export_warmup_drvs,
@@ -126,6 +127,7 @@ ValidationScope = Literal[
     "closure-shard",
     "rust-warmup",
     "cascade-warmup",
+    "cascade-canary",
     "zed-warmup",
 ]
 ValidationGate = Literal["packages", "closures"]
@@ -228,6 +230,7 @@ def prepare_candidate(
 _FAIL_FAST_PROGRESS_SOURCES = frozenset({
     "rust-warmup",
     "cascade-warmup",
+    "cascade-canary",
     "root-deps",
     "root-closures",
 })
@@ -652,7 +655,13 @@ def _gates_for_scope(scope: str) -> tuple[ValidationGate, ...]:
         return ("closures",)
     if scope == "all":
         return ("packages", "closures")
-    if scope in {"closure-shard", "rust-warmup", "cascade-warmup", "zed-warmup"}:
+    if scope in {
+        "closure-shard",
+        "rust-warmup",
+        "cascade-warmup",
+        "cascade-canary",
+        "zed-warmup",
+    }:
         return ()
     msg = f"Unknown validation scope: {scope}"
     raise ValueError(msg)
@@ -1149,6 +1158,43 @@ def _realize_zed_warmup(
     return tuple(failures)
 
 
+def _realize_cascade_paths(
+    warmup_plan: Path,
+    paths: tuple[str, ...],
+    *,
+    flake_root: Path,
+    label: str,
+) -> tuple[validation.DerivationValidationFailure, ...]:
+    """Realize planned cascade outputs one drv at a time, skip-if-in-gkze."""
+    plan = load_warmup_plan(warmup_plan)
+    missing = skip_cached_warmup_paths(
+        paths,
+        present=check_path_in_cachix,
+    )
+    if not missing:
+        jobs.record_runner_storage(f"after-{label}")
+        return ()
+    drvs = unique_drvs_for_outputs(missing, plan.output_drvs)
+    import_warmup_drvs(drvs, warmup_plan.with_name(WARMUP_DRVS_NAME))
+    # 38191092497 slot 0: linear-cli-jsr-manifest.tsv.drv^* printed
+    # 1297 will-be-built after ~75m of 1-3 drv FODs. Fatal'ing the
+    # slot threw away the rest of the stripe. Root shards still own
+    # umbrellas; cascade only realizes items under the 400 ceiling.
+    drvs = filter_cascade_realize_drvs(drvs)
+    if not drvs:
+        jobs.record_runner_storage(f"after-{label}")
+        return ()
+    failures = realize_warmup_outputs(
+        drvs,
+        flake_root=flake_root,
+        progress=_hosted_validation_progress(label, keep_going=True),
+        keep_going=True,
+        chunk=1,
+    )
+    jobs.record_runner_storage(f"after-{label}")
+    return failures
+
+
 def _realize_cascade_warmup(
     warmup_plan: Path,
     warmup_slot: int,
@@ -1164,33 +1210,32 @@ def _realize_cascade_warmup(
     already passes ``.drv`` paths.
     """
     plan = load_warmup_plan(warmup_plan)
-    slot_paths = slot_cascade_paths(plan.cascade_layers, warmup_slot)
-    missing = skip_cached_warmup_paths(
-        slot_paths,
-        present=check_path_in_cachix,
-    )
-    if not missing:
-        jobs.record_runner_storage("after-cascade-warmup")
-        return ()
-    drvs = unique_drvs_for_outputs(missing, plan.output_drvs)
-    import_warmup_drvs(drvs, warmup_plan.with_name(WARMUP_DRVS_NAME))
-    # 38191092497 slot 0: linear-cli-jsr-manifest.tsv.drv^* printed
-    # 1297 will-be-built after ~75m of 1-3 drv FODs. Fatal'ing the
-    # slot threw away the rest of the stripe. Root shards still own
-    # umbrellas; cascade only realizes items under the 400 ceiling.
-    drvs = filter_cascade_realize_drvs(drvs)
-    if not drvs:
-        jobs.record_runner_storage("after-cascade-warmup")
-        return ()
-    failures = realize_warmup_outputs(
-        drvs,
+    return _realize_cascade_paths(
+        warmup_plan,
+        slot_cascade_paths(plan.cascade_layers, warmup_slot),
         flake_root=flake_root,
-        progress=_hosted_validation_progress("cascade-warmup", keep_going=True),
-        keep_going=True,
-        chunk=1,
+        label="cascade-warmup",
     )
-    jobs.record_runner_storage("after-cascade-warmup")
-    return failures
+
+
+def _realize_cascade_canary(
+    warmup_plan: Path,
+    *,
+    flake_root: Path,
+) -> tuple[validation.DerivationValidationFailure, ...]:
+    """Realize buzz-onnxruntime once so cascade slots substitute it.
+
+    38394692516 slot 4 compiled it from source (not in gkze or
+    cache.nixos.org) and APFS write-EIO'd ranlib. A dedicated canary
+    runner publishes the NAR before the 5-wide stripe starts.
+    """
+    plan = load_warmup_plan(warmup_plan)
+    return _realize_cascade_paths(
+        warmup_plan,
+        cascade_canary_paths(plan.cascade_layers),
+        flake_root=flake_root,
+        label="cascade-canary",
+    )
 
 
 def _realize_requested_warmup(
@@ -1200,7 +1245,7 @@ def _realize_requested_warmup(
     *,
     flake_root: Path,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
-    """Dispatch rust-warmup, cascade-warmup, or zed-warmup."""
+    """Dispatch rust-warmup, cascade-warmup, cascade-canary, or zed-warmup."""
     if scope == "rust-warmup":
         if warmup_plan is None or warmup_slot is None:
             msg = "rust-warmup requires a warmup plan and slot"
@@ -1211,6 +1256,11 @@ def _realize_requested_warmup(
             msg = "cascade-warmup requires a warmup plan and slot"
             raise ValueError(msg)
         return _realize_cascade_warmup(warmup_plan, warmup_slot, flake_root=flake_root)
+    if scope == "cascade-canary":
+        if warmup_plan is None:
+            msg = "cascade-canary requires a warmup plan"
+            raise ValueError(msg)
+        return _realize_cascade_canary(warmup_plan, flake_root=flake_root)
     if scope == "zed-warmup":
         if warmup_plan is None:
             msg = "zed-warmup requires a warmup plan"
@@ -1235,9 +1285,11 @@ def validate_candidate(
     realizes named Darwin roots and is not certify evidence; the aggregate
     ``closures`` gate still proves ``root-closures``.     ``rust-warmup`` realizes
     one 5-wide stripe of the planner rust_* layers and is not certify
-    evidence. ``cascade-warmup`` realizes the shared non-rust
-    intersection one drv at a time. Hosted Darwin shards GC before the root-closure fetch: a
-    cache-miss rust_* subtree can fill macos-15 and ``min-free`` then GCs
+    evidence. ``cascade-canary`` realizes ``buzz-onnxruntime`` once so
+    the 5-wide stripe can substitute it. ``cascade-warmup`` realizes the
+    shared non-rust intersection one drv at a time. Hosted Darwin shards
+    GC before the root-closure fetch: a cache-miss rust_* subtree can
+    fill macos-15 and ``min-free`` then GCs
     mid-rustc, which tears rlibs (E0786 / SIGBUS). The combined scope GCs
     after package outputs share the disk.
     """
@@ -1254,8 +1306,8 @@ def validate_candidate(
     if scope == "cascade-warmup" and (warmup_plan is None or warmup_slot is None):
         msg = "cascade-warmup requires a warmup plan and slot"
         raise ValueError(msg)
-    if scope == "zed-warmup" and warmup_plan is None:
-        msg = "zed-warmup requires a warmup plan"
+    if scope in {"cascade-canary", "zed-warmup"} and warmup_plan is None:
+        msg = f"{scope} requires a warmup plan"
         raise ValueError(msg)
     if scope not in {"rust-warmup", "cascade-warmup"} and warmup_slot is not None:
         msg = "warmup slots are only valid for rust-warmup or cascade-warmup"
@@ -1518,8 +1570,8 @@ def validate(
     if scope == "cascade-warmup" and (warmup_plan is None or warmup_slot is None):
         msg = "cascade-warmup requires --warmup-plan and --warmup-slot"
         raise ValueError(msg)
-    if scope == "zed-warmup" and warmup_plan is None:
-        msg = "zed-warmup requires --warmup-plan"
+    if scope in {"cascade-canary", "zed-warmup"} and warmup_plan is None:
+        msg = f"{scope} requires --warmup-plan"
         raise ValueError(msg)
     if scope not in {"rust-warmup", "cascade-warmup"} and warmup_slot is not None:
         msg = "--warmup-slot is only valid for rust-warmup or cascade-warmup"

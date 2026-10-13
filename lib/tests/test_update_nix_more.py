@@ -26,12 +26,14 @@ from lib.update.nix import (
     compute_drv_fingerprint,
     compute_fixed_output_hash,
     compute_overlay_hash,
+    failed_derivation_paths,
     get_current_nix_platform,
     is_retryable_nix_network_failure,
     is_retryable_nix_store_failure,
     is_transient_store_interruption,
     normalize_nix_platform,
     recover_nix_store_after_fault,
+    should_consult_nix_builder_logs,
     should_restart_nix_daemon,
 )
 
@@ -299,6 +301,47 @@ def test_retryable_fixed_output_hash_failure_classification() -> None:
     )
     assert is_transient_store_interruption(
         "Reason: builder failed\nOutput paths:\nIllegal byte sequence"
+    )
+
+
+def test_ranlib_write_eio_is_retryable_store_fault() -> None:
+    """38394692516: ranlib EIO is a host storage fault; last-25 omits it."""
+    drv = "/nix/store/4jjnjbsw4a0ysny10x9p57r057k25nhz-buzz-onnxruntime-1.27.0.drv"
+    ranlib_eio = (
+        f"error: Cannot build '{drv}'.\n"
+        "Reason: builder failed with exit code 2.\n"
+        "fatal error: /nix/store/2yfrcmkvspsrjhj283gdawqp37aghxva-"
+        "clang-wrapper-21.1.8/bin/ranlib: can't write to output file "
+        "(Input/output error)"
+    )
+    assert is_retryable_nix_store_failure(stdout="", stderr=ranlib_eio)
+    assert is_transient_store_interruption(ranlib_eio)
+    assert failed_derivation_paths(ranlib_eio) == (drv,)
+    assert not should_consult_nix_builder_logs(stdout="", stderr=ranlib_eio)
+    truncated = (
+        f"error: Cannot build '{drv}'.\n"
+        "Reason: builder failed with exit code 2.\n"
+        "make: *** [Makefile:146: all] Error 2"
+    )
+    assert not is_retryable_nix_store_failure(stdout="", stderr=truncated)
+    assert not is_transient_store_interruption(truncated)
+    assert should_consult_nix_builder_logs(stdout="", stderr=truncated)
+    assert not should_consult_nix_builder_logs(
+        stdout="",
+        stderr=(
+            "error: builder for '/nix/store/abc-replay.drv' failed with "
+            "exit code 1\n"
+            'error: cannot unlink "/nix/store/abc-replay.tgz": '
+            "Illegal byte sequence"
+        ),
+    )
+    assert not should_consult_nix_builder_logs(
+        stdout="",
+        stderr=(
+            "error: hash mismatch in fixed-output derivation\n"
+            "failed with exit code 2\n"
+            f"error: Cannot build '{drv}'."
+        ),
     )
 
 

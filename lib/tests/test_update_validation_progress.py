@@ -1030,6 +1030,111 @@ print("complete")
     _assert_reader_stopped()
 
 
+def test_validation_retries_truncated_ranlib_write_eio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38394692516: last-25 omitted ranlib EIO; nix log makes the store fault retryable."""
+    truncated = (
+        "error: Cannot build '/nix/store/"
+        "4jjnjbsw4a0ysny10x9p57r057k25nhz-buzz-onnxruntime-1.27.0.drv'.\n"
+        "Reason: builder failed with exit code 2.\n"
+        "make: *** [Makefile:146: all] Error 2"
+    )
+    attempts = {"n": 0}
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr=truncated)
+        return subprocess.CompletedProcess(args, 0, stdout="complete\n", stderr="")
+
+    monkeypatch.setattr(
+        validation,
+        "_builder_log_supplement",
+        lambda _result, **_kwargs: (
+            "fatal error: /nix/store/2yfrcmkvspsrjhj283gdawqp37aghxva-"
+            "clang-wrapper-21.1.8/bin/ranlib: can't write to output file "
+            "(Input/output error)"
+        ),
+    )
+    sleeps: list[float] = []
+    result = validation._run_validation_command(
+        [
+            "nix",
+            "build",
+            "/nix/store/4jjnjbsw4a0ysny10x9p57r057k25nhz-buzz-onnxruntime-1.27.0.drv^*",
+        ],
+        cwd=tmp_path,
+        timeout=None,
+        run=run,
+        sleep=sleeps.append,
+    )
+    assert result.returncode == 0
+    assert attempts["n"] == 2
+    assert sleeps == [1.0]
+    monkeypatch.setattr(validation, "_builder_log_supplement", lambda *_a, **_k: "")
+    attempts["n"] = 0
+    permanent = validation._run_validation_command(
+        ["nix", "build", "path:.#demo"],
+        cwd=tmp_path,
+        timeout=None,
+        run=run,
+        sleep=sleeps.append,
+    )
+    assert permanent.returncode == 1
+    assert attempts["n"] == 1
+
+
+def test_builder_log_supplement_reads_nix_log_outside_pytest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hosted validation consults ``nix log``; pytest does not shell out."""
+    drv = "/nix/store/4jjnjbsw4a0ysny10x9p57r057k25nhz-buzz-onnxruntime-1.27.0.drv"
+    result = subprocess.CompletedProcess(
+        ["nix", "build", f"{drv}^*"],
+        1,
+        stdout="",
+        stderr=f"error: Cannot build '{drv}'.\nReason: builder failed with exit code 2.",
+    )
+    assert validation._builder_log_supplement(result, cwd=tmp_path) == ""
+    monkeypatch.setattr(validation.shutil, "which", lambda _name: None)
+    assert validation._read_nix_builder_log(drv, cwd=tmp_path) == ""
+    monkeypatch.setattr(validation.shutil, "which", lambda _name: "/bin/nix")
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("nix log unavailable")
+
+    monkeypatch.setattr(validation.subprocess, "run", boom)
+    assert validation._read_nix_builder_log(drv, cwd=tmp_path) == ""
+
+    def timeout(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(["nix", "log", drv], 30)
+
+    monkeypatch.setattr(validation.subprocess, "run", timeout)
+    assert validation._read_nix_builder_log(drv, cwd=tmp_path) == ""
+
+    def ok(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            ["nix", "log", drv], 0, stdout="ranlib eio\n", stderr=""
+        )
+
+    monkeypatch.setattr(validation.subprocess, "run", ok)
+    assert "ranlib eio" in validation._read_nix_builder_log(drv, cwd=tmp_path)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    fetched: list[str] = []
+
+    def fake_log(path: str, *, cwd: Path) -> str:
+        fetched.append(path)
+        assert cwd == tmp_path
+        return "can't write to output file (Input/output error)"
+
+    monkeypatch.setattr(validation, "_read_nix_builder_log", fake_log)
+    assert "Input/output error" in validation._builder_log_supplement(
+        result, cwd=tmp_path
+    )
+    assert fetched == [drv]
+
+
 def test_root_validation_streams_manifest_and_failed_batch_fallback(
     tmp_path: Path,
 ) -> None:

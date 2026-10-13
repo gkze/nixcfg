@@ -3,6 +3,7 @@
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -26,10 +27,12 @@ from lib.nix.models.derivation import DerivationInputs  # noqa: TC001 -- Pydanti
 from lib.system_policy import RootClosureKind, required_root_kinds
 from lib.update import persistence as update_persistence
 from lib.update.nix import (
+    failed_derivation_paths,
     get_current_nix_platform,
     is_retryable_nix_network_failure,
     is_retryable_nix_store_failure,
     recover_nix_store_after_fault,
+    should_consult_nix_builder_logs,
     should_restart_nix_daemon,
 )
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
@@ -489,14 +492,64 @@ def _retryable_store_signal(returncode: int) -> bool:
     return returncode == -signal.SIGBUS
 
 
-def _retryable_validation_output(result: _RunResult) -> bool:
+_NIX_LOG_TIMEOUT_SECONDS = 30.0
+
+
+def _read_nix_builder_log(drv: str, *, cwd: Path) -> str:
+    """Return ``nix log`` for *drv*, or empty when the log cannot be read."""
+    nix = shutil.which("nix")
+    if nix is None:
+        return ""
+    try:
+        log = subprocess.run(  # noqa: S603 -- resolved nix from PATH
+            [nix, "log", drv],
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=_NIX_LOG_TIMEOUT_SECONDS,
+        )
+    except OSError, subprocess.TimeoutExpired:
+        return ""
+    return f"{log.stdout}\n{log.stderr}"
+
+
+def _builder_log_supplement(result: _RunResult, *, cwd: Path) -> str:
+    """Fetch truncated builder tails Nix omitted from the last-25 window.
+
+    Pytest must not shell out to ``nix log`` for fixture ``.drv`` paths.
+    Hosted validation consults the real log so a write-EIO that scrolled
+    out of streamed stderr can still retry.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return ""
+    return "\n".join(
+        _read_nix_builder_log(drv, cwd=cwd)
+        for drv in failed_derivation_paths(f"{result.stderr}\n{result.stdout}")
+    )
+
+
+def _retryable_validation_output(result: _RunResult, *, cwd: Path) -> bool:
     """Return whether a completed Nix command failed on a transient fault."""
-    return is_retryable_nix_network_failure(
+    if is_retryable_nix_network_failure(
         stdout=result.stdout,
         stderr=result.stderr,
     ) or is_retryable_nix_store_failure(
         stdout=result.stdout,
         stderr=result.stderr,
+    ):
+        return True
+    if not should_consult_nix_builder_logs(
+        stdout=result.stdout,
+        stderr=result.stderr,
+    ):
+        return False
+    extra = _builder_log_supplement(result, cwd=cwd)
+    if not extra.strip():
+        return False
+    return is_retryable_nix_store_failure(
+        stdout=result.stdout,
+        stderr=f"{result.stderr}\n{extra}",
     )
 
 
@@ -602,7 +655,7 @@ def _run_validation_command_impl(
                 progress(ValidationCommandFinished(command, succeeded))
         retryable = _retryable_store_signal(
             result.returncode
-        ) or _retryable_validation_output(result)
+        ) or _retryable_validation_output(result, cwd=cwd)
         if result.returncode == 0 or attempt + 1 == max_attempts or not retryable:
             if result.returncode < 0:
                 raise _incomplete_validation_error(
