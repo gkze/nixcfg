@@ -2114,6 +2114,33 @@ def test_publish_raises_other_auto_merge_failures(job_repository, monkeypatch) -
     assert "Protected branch" in exc_info.value.stderr
 
 
+def test_bootstrap_falls_back_after_stalled_substitutes(
+    job_repository, tmp_path, monkeypatch
+) -> None:
+    """38330944599 slot 3: Cachix NAR timeout/416 must not fail-close bootstrap."""
+    calls: list[tuple[str, ...]] = []
+
+    def run(*args: str, **_kwargs: object):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="")
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs.main("bootstrap") == 0
+    build = next(call for call in calls if call[:2] == ("nix", "build"))
+    assert build == (
+        "nix",
+        "build",
+        "--no-write-lock-file",
+        "--fallback",
+        "--option",
+        "stalled-download-timeout",
+        "60",
+        "--out-link",
+        str(tmp_path / "nixcfg-runtime"),
+        ".#nixcfg",
+    )
+
+
 def test_bootstrap_and_failure_evidence(job_repository, tmp_path, monkeypatch) -> None:
     calls = []
 

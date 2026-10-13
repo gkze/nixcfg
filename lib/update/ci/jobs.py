@@ -110,7 +110,22 @@ def bootstrap() -> None:
     """Keep the baseline executable and tools as GC roots for this job."""
     record_runner_storage("before-bootstrap")
     runtime, devshell = _temp() / "nixcfg-runtime", _temp() / "nixcfg-devshell"
-    _run("nix", "build", "--no-write-lock-file", "--out-link", str(runtime), ".#nixcfg")
+    # 38330944599 slot 3: gkze NAR timeouts then HTTP 416 left
+    # exit-codes-1.3.0 unrealized; nix build .#nixcfg died without
+    # --fallback after ~44 min. Prefer substitutes; build from source
+    # after a stalled NAR instead of failing the job.
+    _run(
+        "nix",
+        "build",
+        "--no-write-lock-file",
+        "--fallback",
+        "--option",
+        "stalled-download-timeout",
+        "60",
+        "--out-link",
+        str(runtime),
+        ".#nixcfg",
+    )
     _run(
         "nix",
         "develop",
