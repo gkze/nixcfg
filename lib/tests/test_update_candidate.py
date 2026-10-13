@@ -3808,6 +3808,49 @@ def test_hosted_warmup_progress_skips_cannot_build_during_max_jobs_zero(
     )
 
 
+def test_hosted_warmup_skips_rust_cannot_build_after_source_fod_miss(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38359636482 slot 2: rust_markup5ever follows markup5ever.tar.gz DNS miss."""
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
+    progress = pipeline._hosted_validation_progress("rust-warmup")
+    command = (
+        "nix build --no-link --keep-going --fallback "
+        "'/nix/store/fa0ic3pgpb37rrh8akp5f54wmrml4bn6-rust_markup5ever-0.38.0.drv^*'"
+    )
+    progress(ValidationCommandStarted(command))
+    progress(
+        ValidationCommandOutput(
+            command,
+            "error: Cannot build "
+            "'/nix/store/5j7k6mw5vgchgibgvasm60nzm0cnvcqz-markup5ever-0.38.0.tar.gz.drv'.",
+        )
+    )
+    progress(
+        ValidationCommandOutput(
+            command,
+            "       > error: cannot download markup5ever-0.38.0.tar.gz from any mirror",
+        )
+    )
+    progress(
+        ValidationCommandOutput(
+            command,
+            "error: Cannot build "
+            "'/nix/store/fa0ic3pgpb37rrh8akp5f54wmrml4bn6-rust_markup5ever-0.38.0.drv'.",
+        )
+    )
+    assert "markup5ever" in capsys.readouterr().err
+    progress(ValidationCommandStarted("nix build --no-link /nix/store/settings.drv"))
+    with pytest.raises(WarmupFatalError, match="cannot build"):
+        progress(
+            ValidationCommandOutput(
+                "nix build --no-link /nix/store/settings.drv",
+                "Cannot build "
+                "'/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0.drv'",
+            )
+        )
+
+
 def test_noop_candidate_still_validates_repaired_baseline_roots(
     prepared_run,
     monkeypatch,

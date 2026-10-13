@@ -205,7 +205,11 @@ class WarmupFatalError(WarmupError):
 
 
 def warmup_fatal_line(
-    line: str, *, substitute_only: bool = False, keep_going: bool = False
+    line: str,
+    *,
+    substitute_only: bool = False,
+    keep_going: bool = False,
+    source_fetch_miss: bool = False,
 ) -> str | None:
     """Return why a live warmup/root log line must fail the job."""
     if "error[E04" in line:
@@ -217,11 +221,15 @@ def warmup_fatal_line(
         # 38258066093 slots 0/1: source.drv / convert_case-*.tar.gz
         # Cannot-build after curl (6) on github.com / static.crates.io.
         # Stream-skip so realize_source_fetch_drvs can backoff, prove
-        # DNS, and retry. rustc / rust_* / helpers stay fatal.
+        # DNS, and retry. rustc / rust_* / helpers stay fatal unless
+        # the same nix invocation already missed a source FOD
+        # (38359636482 slot 2: markup5ever.tar.gz then rust_markup5ever).
         skip = substitute_only or keep_going
         if not skip:
             drv = command_store_drv(line)
             skip = bool(drv and is_source_fetch_store_path(drv))
+            if not skip and source_fetch_miss and drv and is_crate2nix_rust_output(drv):
+                skip = True
         return None if skip else "cannot build"
     if "liveness" in line.lower():
         return "liveness"
@@ -255,11 +263,18 @@ def warmup_fatal_line(
 
 
 def raise_if_warmup_fatal(
-    line: str, *, substitute_only: bool = False, keep_going: bool = False
+    line: str,
+    *,
+    substitute_only: bool = False,
+    keep_going: bool = False,
+    source_fetch_miss: bool = False,
 ) -> None:
     """Abort as soon as a fatal warmup/root pattern is streamed."""
     if reason := warmup_fatal_line(
-        line, substitute_only=substitute_only, keep_going=keep_going
+        line,
+        substitute_only=substitute_only,
+        keep_going=keep_going,
+        source_fetch_miss=source_fetch_miss,
     ):
         msg = f"{reason}: {line}"
         raise WarmupFatalError(msg)

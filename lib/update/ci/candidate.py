@@ -60,6 +60,7 @@ from lib.update.ci.warmup import (
     is_rust_extension_host_store_path,
     is_rust_language_models_store_path,
     is_rust_zed_store_path,
+    is_source_fetch_mirror_line,
     is_source_fetch_store_path,
     is_svh_sensitive_store_path,
     is_zed_editor_nightly_store_path,
@@ -241,15 +242,17 @@ def _hosted_validation_progress(
     # compiles the workspace family. Both use the 400-drv ceiling.
     stream_keep_going = keep_going or source in {"zed-warmup", "root-deps"}
     current_drv = ""
+    source_fetch_miss = False
 
     def emit(event: validation.ValidationProgressEvent) -> None:
-        nonlocal substitute_only, stream_keep_going, current_drv
+        nonlocal substitute_only, stream_keep_going, current_drv, source_fetch_miss
         if isinstance(event, validation.ValidationCommandFinished):
             return
         if isinstance(event, validation.ValidationCommandStarted):
             text = f"$ {event.command}"
             substitute_only = "--max-jobs 0" in event.command
             current_drv = command_store_drv(event.command)
+            source_fetch_miss = False
             if is_linux_builder_image_command(event.command):
                 stream_keep_going = True
             jobs.record_runner_storage(f"before-{source}")
@@ -271,11 +274,17 @@ def _hosted_validation_progress(
                 and is_crate2nix_rust_output(current_drv)
                 and "will be built" in text.lower()
             )
+            drv = command_store_drv(text)
+            if is_source_fetch_mirror_line(text) or (
+                "Cannot build" in text and drv and is_source_fetch_store_path(drv)
+            ):
+                source_fetch_miss = True
             if not rust_substitute_miss:
                 raise_if_warmup_fatal(
                     text,
                     substitute_only=substitute_only,
                     keep_going=stream_keep_going,
+                    source_fetch_miss=source_fetch_miss,
                 )
 
     return emit

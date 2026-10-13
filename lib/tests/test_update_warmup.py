@@ -1567,6 +1567,29 @@ def test_is_source_fetch_mirror_line_skips_crate_fod() -> None:
     assert warmup_fatal_line(clang_src) == "cannot download from any mirror"
 
 
+def test_rust_cannot_build_after_source_fod_miss_is_not_fatal() -> None:
+    """38359636482 slot 2: rust_markup5ever Cannot-build follows the tarball miss.
+
+    markup5ever-0.38.0.tar.gz curl (6)'d static.crates.io. The source
+    FOD line stream-skipped; the parent rust_* Cannot-build then aborted
+    before DNS retry. A lone rust_* Cannot-build stays fatal.
+    """
+    rust = (
+        "error: Cannot build "
+        "'/nix/store/fa0ic3pgpb37rrh8akp5f54wmrml4bn6-rust_markup5ever-0.38.0.drv'."
+    )
+    rustc = (
+        "error: Cannot build "
+        "'/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv'."
+    )
+    assert warmup_fatal_line(rust) == "cannot build"
+    assert warmup_fatal_line(rust, source_fetch_miss=True) is None
+    raise_if_warmup_fatal(rust, source_fetch_miss=True)
+    with pytest.raises(WarmupFatalError, match="cannot build"):
+        raise_if_warmup_fatal(rust)
+    assert warmup_fatal_line(rustc, source_fetch_miss=True) == "cannot build"
+
+
 def test_source_fetch_retry_drvs_refuse_compiler_and_rust() -> None:
     """38258066093: retry source.drv / convert_case tarball, not rustc."""
     source = "/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv"
