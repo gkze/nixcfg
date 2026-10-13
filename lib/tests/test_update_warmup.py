@@ -58,6 +58,7 @@ from lib.update.ci.warmup import (
     is_rust_zed_store_path,
     is_safe_rust_warmup_other,
     is_settings_family_store_path,
+    is_source_fetch_mirror_line,
     is_source_fetch_store_path,
     is_svh_sensitive_store_path,
     is_tree_sitter_family_store_path,
@@ -96,6 +97,7 @@ from lib.update.ci.warmup import (
     slot_cascade_paths,
     slot_warmup_paths,
     source_fetch_input_drvs,
+    source_fetch_leftover_drvs,
     source_fetch_network_ready,
     source_fetch_publish_leftover_line,
     source_fetch_retry_drvs,
@@ -1512,6 +1514,42 @@ def test_source_fetch_input_drvs_drops_helpers_and_toolchain(
     assert source_fetch_input_drvs((parent,)) == (source, convert_case)
 
 
+def test_is_source_fetch_mirror_line_skips_crate_fod() -> None:
+    """38307411499 slots 2/4: crate tarball mirror lines retry; bmake stays fatal."""
+    pin_project = (
+        "       > error: cannot download pin-project-1.1.13.tar.gz from any mirror"
+    )
+    libloading = (
+        "       > error: cannot download libloading-0.8.9.tar.gz from any mirror"
+    )
+    source = "error: cannot download source from any mirror"
+    convert_case = "error: cannot download convert_case-0.11.0.tar.gz from any mirror"
+    bmake = "error: cannot download bmake-20260313.tar.gz from any mirror"
+    rustc = "error: cannot download rustc-1.98.1.tar.gz from any mirror"
+    assert is_source_fetch_mirror_line(pin_project)
+    assert is_source_fetch_mirror_line(libloading)
+    assert is_source_fetch_mirror_line(source)
+    assert is_source_fetch_mirror_line(convert_case)
+    assert is_source_fetch_mirror_line(
+        "error: cannot download crate-src from any mirror"
+    )
+    assert is_source_fetch_mirror_line(
+        "error: cannot download vendor-source from any mirror"
+    )
+    assert not is_source_fetch_mirror_line(bmake)
+    assert not is_source_fetch_mirror_line(rustc)
+    assert not is_source_fetch_mirror_line("error: cannot download foo from any mirror")
+    assert not is_source_fetch_mirror_line("unable to download 'https://example'")
+    assert warmup_fatal_line(pin_project) is None
+    assert warmup_fatal_line(libloading) is None
+    raise_if_warmup_fatal(pin_project)
+    raise_if_warmup_fatal(libloading)
+    assert warmup_fatal_line(bmake) == "cannot download from any mirror"
+    with pytest.raises(WarmupFatalError, match="cannot download from any mirror"):
+        raise_if_warmup_fatal(bmake)
+    assert warmup_fatal_line(rustc) == "cannot download from any mirror"
+
+
 def test_source_fetch_retry_drvs_refuse_compiler_and_rust() -> None:
     """38258066093: retry source.drv / convert_case tarball, not rustc."""
     source = "/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv"
@@ -1520,6 +1558,12 @@ def test_source_fetch_retry_drvs_refuse_compiler_and_rust() -> None:
     )
     rustc = "/nix/store/cccccccccccccccccccccccccccccccc-rustc-1.98.1.drv"
     settings = "/nix/store/dddddddddddddddddddddddddddddddd-rust_settings-0.1.0.drv"
+    pin_project = (
+        "/nix/store/72ws9414aaaaaaaaaaaaaaaaaaaaaaaa-pin-project-1.1.13.tar.gz.drv"
+    )
+    libloading = (
+        "/nix/store/clbp5wbnz9r88lngchd67lpxkk7y6my9-libloading-0.8.9.tar.gz.drv"
+    )
     assert source_fetch_retry_drvs((
         DerivationValidationFailure(
             source="root-warmup",
@@ -1548,10 +1592,22 @@ def test_source_fetch_retry_drvs_refuse_compiler_and_rust() -> None:
         ),
         DerivationValidationFailure(
             source="root-warmup",
+            installable=f"{pin_project}^*",
+            message=(
+                "error: cannot download pin-project-1.1.13.tar.gz from any mirror"
+            ),
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{libloading}^*",
+            message="error: cannot download libloading-0.8.9.tar.gz from any mirror",
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
             installable=f"{source}^*",
             message="error: Cannot build '/nix/store/...-source.drv'.",
         ),
-    )) == (source, convert_case)
+    )) == (source, convert_case, pin_project, libloading)
 
 
 def test_source_fetch_network_ready_requires_both_hosts() -> None:
@@ -1979,12 +2035,14 @@ def test_publish_warmup_source_fetches_realizes_rust_fods(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """plan-shards substitutes rust_* source FODs; leftovers do not fail the plan.
+    """plan-shards substitutes hits, then fetches leftover crate FODs.
 
     38296208698 fail-closed plan-shards on 562 leftover crate2nix FODs
     after ~50 min of Linux fetch and skipped every Darwin job. Hits
-    still push via the post-build-hook. Darwin rust-warmup fail-closes
-    a needed source after DNS-gated retry.
+    still push via the post-build-hook. 38307411499 then missed
+    pin-project-1.1.13 / libloading-0.8.9 because substitute-only
+    never fetched crate2nix-named tarballs. Fetch leftovers; never
+    fail-close the plan. Darwin still fail-closes a needed miss.
     """
     from lib.update.ci.warmup import RootWarmupStats, WarmupPlan
 
@@ -1993,6 +2051,12 @@ def test_publish_warmup_source_fetches_realizes_rust_fods(
     source = "/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv"
     convert_case = (
         "/nix/store/d64pffww4zyr1ggfcihjh7hb5njx0342-convert_case-0.11.0.tar.gz.drv"
+    )
+    pin_project = (
+        "/nix/store/72ws9414aaaaaaaaaaaaaaaaaaaaaaaa-pin-project-1.1.13.tar.gz.drv"
+    )
+    libloading = (
+        "/nix/store/clbp5wbnz9r88lngchd67lpxkk7y6my9-libloading-0.8.9.tar.gz.drv"
     )
     plan = WarmupPlan(
         schemaVersion=1,
@@ -2028,13 +2092,34 @@ def test_publish_warmup_source_fetches_realizes_rust_fods(
     )
     monkeypatch.setattr(
         "lib.update.ci.warmup.source_fetch_input_drvs",
-        lambda *_a, **_k: (source, convert_case),
+        lambda *_a, **_k: (source, convert_case, pin_project, libloading),
     )
     seen: list[tuple[tuple[str, ...], bool, bool]] = []
     leftover = DerivationValidationFailure(
         source="root-warmup",
         installable=f"{source}^*",
         message="error: Cannot build '/nix/store/...-source.drv'.",
+    )
+    pin_miss = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{pin_project}^*",
+        message="error: cannot download pin-project-1.1.13.tar.gz from any mirror",
+    )
+    lib_miss = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{libloading}^*",
+        message="error: cannot download libloading-0.8.9.tar.gz from any mirror",
+    )
+    rust_miss = DerivationValidationFailure(
+        source="root-warmup",
+        installable="/nix/store/dddddddddddddddddddddddddddddddd-rust_settings-0.1.0.drv^*",
+        message="error: Cannot build '/nix/store/...-rust_settings-0.1.0.drv'.",
+    )
+    substitute_misses = (leftover, pin_miss, lib_miss)
+    assert source_fetch_leftover_drvs((*substitute_misses, rust_miss)) == (
+        source,
+        pin_project,
+        libloading,
     )
 
     def realize(
@@ -2045,14 +2130,31 @@ def test_publish_warmup_source_fetches_realizes_rust_fods(
             bool(kwargs.get("substitute_only")),
             bool(kwargs.get("keep_going")),
         ))
-        return (leftover,)
+        if kwargs.get("substitute_only"):
+            return substitute_misses
+        return ()
 
     published = publish_warmup_source_fetches(
         plan, flake_root=tmp_path, realize=realize
     )
-    assert seen == [((source, convert_case), True, True)]
-    assert published == (leftover,)
-    assert source_fetch_publish_leftover_line(published) in capsys.readouterr().err
+    assert seen == [
+        ((source, convert_case, pin_project, libloading), True, True),
+        ((source, pin_project, libloading), False, True),
+    ]
+    assert published == ()
+
+    def realize_still_missing(
+        paths: object, *_args: object, **kwargs: object
+    ) -> tuple[DerivationValidationFailure, ...]:
+        if kwargs.get("substitute_only"):
+            return substitute_misses
+        return (pin_miss, lib_miss)
+
+    stubborn = publish_warmup_source_fetches(
+        plan, flake_root=tmp_path, realize=realize_still_missing
+    )
+    assert stubborn == (pin_miss, lib_miss)
+    assert source_fetch_publish_leftover_line(stubborn) in capsys.readouterr().err
     assert (
         publish_warmup_source_fetches(
             plan, flake_root=tmp_path, realize=lambda *_a, **_k: ()

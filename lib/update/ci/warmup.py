@@ -227,7 +227,15 @@ def warmup_fatal_line(
         return "liveness"
     lowered = line.lower()
     if "cannot download" in lowered and "from any mirror" in lowered:
-        return "cannot download from any mirror"
+        # 38307411499 slots 2/4: Cannot-build on pin-project / libloading
+        # was stream-skipped, then the builder tail "cannot download
+        # *.tar.gz from any mirror" (curl 6 on static.crates.io) aborted
+        # before DNS retry. bmake/rustc mirrors stay fatal.
+        return (
+            None
+            if is_source_fetch_mirror_line(line)
+            else "cannot download from any mirror"
+        )
     match = _WILL_BE_BUILT.search(line)
     if match:
         # 32 catches #1263's 406-drv bootstrap on a real compile.
@@ -1620,6 +1628,29 @@ _COMPILER_MUST_SUBSTITUTE_PREFIXES = (
     "compiler-rt-",
     "bmake-",
 )
+_MIRROR_DOWNLOAD = re.compile(r"cannot download (\S+) from any mirror", re.IGNORECASE)
+
+
+def is_source_fetch_mirror_line(line: str) -> bool:
+    """Return whether a mirror-fail line is a crate/source FOD.
+
+    38307411499 slots 2/4 printed ``cannot download pin-project-1.1.13.tar.gz
+    from any mirror`` after curl (6) on static.crates.io. That is the
+    same source-FOD miss as Cannot-build, not a rustc/bmake bootstrap
+    mirror failure.
+    """
+    match = _MIRROR_DOWNLOAD.search(line)
+    if match is None:
+        return False
+    name = match.group(1)
+    if name.startswith(_COMPILER_MUST_SUBSTITUTE_PREFIXES):
+        return False
+    if name.endswith(_SOURCE_FETCH_ARCHIVES):
+        return True
+    stem = name.rsplit(".", 1)[0]
+    return stem == "source" or stem.endswith(("-src", "-source"))
+
+
 # rust-overlay rustc-1.98.1-aarch64-apple-darwin is a tarball unpack
 # (38128207590 canary: zed.cachix.org fetched the tar.xz, then
 # --max-jobs 0 refused the 1-drv unpack). rustc-1.98.1 without a
@@ -1755,10 +1786,25 @@ def source_fetch_retry_drvs(
         drv = failure.installable.removesuffix("^*")
         if not is_source_fetch_store_path(drv):
             continue
-        if "Cannot build" not in failure.message:
+        if (
+            "Cannot build" not in failure.message
+            and "from any mirror" not in failure.message
+        ):
             continue
         retry.append(drv)
     return tuple(dict.fromkeys(retry))
+
+
+def source_fetch_leftover_drvs(
+    failures: Sequence[DerivationValidationFailure],
+) -> tuple[str, ...]:
+    """Return source-FOD installables that missed substitute-only publish."""
+    leftover: list[str] = []
+    for failure in failures:
+        drv = failure.installable.removesuffix("^*")
+        if is_source_fetch_store_path(drv):
+            leftover.append(drv)
+    return tuple(dict.fromkeys(leftover))
 
 
 def source_fetch_network_ready(
@@ -1850,11 +1896,15 @@ def publish_warmup_source_fetches(
     planner (post-build-hook) so warmup can substitute them.
 
     38296208698 then fail-closed plan-shards on 562 leftover crate2nix
-    FODs after ~50 min of Linux fetch. Those hashes often miss
-    cache.nixos.org and were never on gkze; the planner is not the
-    owner of a needed source. ``--max-jobs 0 --keep-going`` pushes
-    hits. Darwin rust-warmup still DNS-gates and fail-closes a miss
-    so the parent rust_* never compiles against a missing source.
+    FODs after ~50 min of Linux fetch. ``--max-jobs 0 --keep-going``
+    still pushes hits. 38307411499 then died on
+    ``pin-project-1.1.13.tar.gz`` / ``libloading-0.8.9.tar.gz`` because
+    crate2nix FOD names miss hydra/gkze, substitute-only never fetched
+    them, and Darwin aborted on the mirror line before DNS retry.
+
+    Fetch leftover source FODs with keep-going so those tarballs land
+    in gkze before rust-warmup. Never fail-close the plan; Darwin
+    still DNS-gates and fail-closes a needed miss.
     """
     fods = source_fetch_input_drvs(rust_warmup_output_drvs(plan), run=run)
     if not fods:
@@ -1867,6 +1917,14 @@ def publish_warmup_source_fetches(
         substitute_only=True,
         keep_going=True,
     )
+    leftovers = source_fetch_leftover_drvs(failures)
+    if leftovers:
+        failures = builder(
+            leftovers,
+            flake_root=flake_root,
+            progress=progress,
+            keep_going=True,
+        )
     if failures:
         sys.stderr.write(source_fetch_publish_leftover_line(failures) + "\n")
         sys.stderr.flush()

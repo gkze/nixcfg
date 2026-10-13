@@ -37,12 +37,15 @@ on:
   # (HTTP 403, missing actions:write). Touching .github/update-kick on
   # main or a listed feature branch queues one Update run. Prefer
   # `gh workflow run` when the App has Actions write.
+  # lib/update/** also queues so a pipeline fix can start Update
+  # without a kick-file bump.
   push:
     branches:
       - main
       - cursor/no-skip-darwin-shards-6614
     paths:
       - .github/update-kick
+      - lib/update/**
 permissions:
   contents: read
 concurrency:

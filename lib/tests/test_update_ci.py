@@ -1500,7 +1500,10 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         "main",
         "cursor/no-skip-darwin-shards-6614",
     ]
-    assert workflow["on"]["push"]["paths"] == [".github/update-kick"]
+    assert workflow["on"]["push"]["paths"] == [
+        ".github/update-kick",
+        "lib/update/**",
+    ]
     assert workflow["permissions"] == {"contents": "read"}
     assert (
         "github.event_name == 'push'"
