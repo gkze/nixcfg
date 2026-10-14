@@ -9,6 +9,7 @@ import json
 import math
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -43,6 +44,14 @@ _CACHIX_DAEMON_SOCKET_NAME = "daemon.sock"
 _CACHIX_DAEMON_READY_SECONDS = 60.0
 _CACHIX_DAEMON_READY_POLL_SECONDS = 0.1
 _CACHIX_DAEMON_READY_SECONDS_ENV = "NIXCFG_CACHIX_DAEMON_READY_SECONDS"
+# cachix daemon stop waits 60s then DaemonPushFailure / exit 3
+# ("Failed to push some store paths"). 38577749898 canary-warm-rust:
+# rust_litemap-0.8.0 logged Pushing at 16:40:35 and never Pushed;
+# drain timed out at 17:15:19. A direct `cachix push` recovers leftovers.
+_CACHIX_PUSH_FAILURE = "Failed to push some store paths"
+_CACHIX_DRAIN_TIMEOUT = "drain timed out"
+_CACHIX_STUCK_JOBS = "stuck jobs after drain timeout"
+_STORE_PATH_RE = re.compile(r"/nix/store/[0-9a-z]{32}-[^\s]+")
 _STORAGE_MOUNTS = ("/", "/nix", "/nix/store")
 # Live-written on hosted macOS; rmtree can lose a race (ENOTEMPTY) after children
 # are gone. Cleanup is disk reclaim, not a correctness gate for these trees.
@@ -1364,6 +1373,49 @@ def require_cachix_daemon() -> None:
         )
 
 
+def unfinished_cachix_daemon_paths(daemon_log: str) -> tuple[str, ...]:
+    """Return store paths still in flight in a cachix daemon.log.
+
+    38577749898 canary-warm-rust: ``Pushing rust_litemap-0.8.0`` never
+    gained a matching ``Pushed`` line. ``daemon stop`` then hit the 60s
+    drain timeout and exited 3. Those leftovers are still on disk and
+    can be published with a direct ``cachix push``.
+    """
+    pushing: list[str] = []
+    pushed: set[str] = set()
+    for line in daemon_log.splitlines():
+        if "[Info] Pushing " in line:
+            match = _STORE_PATH_RE.search(line)
+            if match:
+                pushing.append(match.group(0))
+        elif "[Info] Pushed " in line:
+            match = _STORE_PATH_RE.search(line)
+            if match:
+                pushed.add(match.group(0))
+    return tuple(path for path in dict.fromkeys(pushing) if path not in pushed)
+
+
+def _cachix_stop_left_unpushed_paths(*, stderr: str, daemon_log: str) -> bool:
+    """Return whether stop failed on Cachix's 60s drain timeout."""
+    combined = f"{stderr}\n{daemon_log}"
+    return (
+        _CACHIX_PUSH_FAILURE in combined
+        or _CACHIX_DRAIN_TIMEOUT in combined
+        or _CACHIX_STUCK_JOBS in combined
+    )
+
+
+def _push_unfinished_cachix_paths(
+    leftover: tuple[str, ...], log: TextIO
+) -> subprocess.CompletedProcess[str]:
+    """Publish leftover paths after ``cachix daemon stop`` drain timeout."""
+    _write_diagnostic(
+        log,
+        f"retrying {len(leftover)} unpushed Cachix paths after drain timeout",
+    )
+    return _run("cachix", "push", _BINARY_CACHE, *leftover, check=False, capture=True)
+
+
 def flush_cachix() -> None:
     """Push leftover prefetch receipts and drain the Cachix daemon.
 
@@ -1383,6 +1435,9 @@ def flush_cachix() -> None:
       post hooks; the explicit flush is the mitigation and does not survive a
       cancel that kills the runner first.
     - Runner loss: only paths Cachix already acknowledged.
+    - Drain timeout (38577749898): ``daemon stop`` exits 3 after 60s with
+      one stuck job. Recover identifiable ``Pushing`` leftovers with
+      ``cachix push``; fail closed if none can be named or the retry fails.
     """
     artifacts = _temp() / "update-artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -1421,13 +1476,43 @@ def flush_cachix() -> None:
             f"socket={socket} stdout={stop.stdout.strip()} "
             f"stderr={stop.stderr.strip()}",
         )
+        _retain_cachix_daemon_evidence(artifacts, log)
+        daemon_log = artifacts / "cachix-daemon" / "daemon.log"
+        daemon_log_text = (
+            daemon_log.read_text(encoding="utf-8", errors="replace")
+            if daemon_log.is_file()
+            else ""
+        )
         if stop.returncode:
+            leftover = unfinished_cachix_daemon_paths(daemon_log_text)
+            if leftover and _cachix_stop_left_unpushed_paths(
+                stderr=stop.stderr, daemon_log=daemon_log_text
+            ):
+                push = _push_unfinished_cachix_paths(leftover, log)
+                _write_diagnostic(
+                    log,
+                    f"cachix push leftover returncode={push.returncode} "
+                    f"paths={' '.join(leftover)} stderr={push.stderr.strip()}",
+                )
+                if push.returncode == 0:
+                    _release_cachix_daemon_dir()
+                    _write_diagnostic(
+                        log,
+                        "cleared CACHIX_DAEMON_DIR so cachix-action "
+                        "post skips a second stop",
+                    )
+                    record_runner_storage("flush-end", log)
+                    return
             msg = (
                 "Cachix daemon stop failed; cannot confirm a clean drain "
                 f"socket={socket} returncode={stop.returncode} "
                 f"stderr={stop.stderr.strip()}"
             )
             _write_diagnostic(log, msg)
+            # Stop already ran. Hide the dead daemon from cachix-action's
+            # post hook so a closed socket does not fail the job again
+            # (38577749898 post hook exit 1 after this flush).
+            _clear_cachix_daemon_env()
             raise CachixFlushError(msg)
         _release_cachix_daemon_dir()
         _write_diagnostic(
