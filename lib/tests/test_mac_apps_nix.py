@@ -3379,7 +3379,7 @@ def test_chatgpt_package_ships_the_unified_chatgpt_bundle() -> None:
 
     # Linux repacks OpenAI's Debian artifact: the version comes from the pool
     # filename, and the patchelf pass must stay scoped to the optional Qt shims
-    # and the Android NDK prebuilds that can never load on Linux.
+    # and the Android NDK / musl prebuilds that can never load on glibc Linux.
     linux_call = expect_instance(platform_branch.alternative, FunctionCall)
     assert_nix_ast_equal(linux_call.name, Identifier(name="stdenv.mkDerivation"))
     linux_args = expect_instance(linux_call.argument, AttributeSet)
@@ -3411,6 +3411,8 @@ def test_chatgpt_package_ships_the_unified_chatgpt_bundle() -> None:
         "libQt6Widgets.so.6",
         "liblog.so",
         "libc++_shared.so",
+        "libc.musl-x86_64.so.1",
+        "libc.musl-aarch64.so.1",
     ]
 
 
