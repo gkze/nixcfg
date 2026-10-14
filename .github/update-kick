@@ -16,3 +16,4 @@ canary-slots: 0
 2026-10-12T13:45:54Z rust_xet-client leaf compile + reason rename after 38231309175 slot 3 406 wbb
 2026-10-12T19:12:51Z source-FOD publish + DNS-gated retry after 38258066093 slots 0/1 (2h59m rust-warmup vs 2h54m pipeline baseline; time in deferred rust_* leaf compile then FOD DNS)
 2026-10-12T20:55:45Z best-effort leftover FOD publish after 38296208698 plan-shards 562 fail-close
+2026-10-14T12:29:49Z nest-safe ChatGPT Linux launch-check sandbox after 38553752589 validate-arm No usable sandbox
