@@ -870,6 +870,8 @@
             # repacked from OpenAI's Debian artifact, so only actually starting
             # it proves the package works: this runs the app under a private
             # Xvfb display and fails unless it presents a window and holds it.
+            # The check adds Chromium --no-sandbox flags because nix-daemon's
+            # sandbox cannot nest Chromium's (38553752589 validate-arm).
             "chatgpt-linux-launch" =
               { pkgs, ... }:
               if pkgs.stdenv.hostPlatform.isLinux then
