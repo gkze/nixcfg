@@ -72,7 +72,9 @@ def test_chatgpt_user_wrapper_keeps_chromium_sandbox() -> None:
     )
     wrappers = [
         command
-        for command in command_texts(parse_shell(indented_string_body(install.rebuild())))
+        for command in command_texts(
+            parse_shell(indented_string_body(install.rebuild()))
+        )
         if command.startswith(("makeWrapper", "wrapProgram"))
     ]
     assert len(wrappers) == 1
