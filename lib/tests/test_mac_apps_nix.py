@@ -1189,7 +1189,7 @@ def test_pkg_app_packages_use_shared_helper() -> None:
     """Direct macOS pkg app packages should use the shared helper."""
     cases: tuple[tuple[str, str, str, bool | None], ...] = (
         ("packages/nordvpn/default.nix", "nordvpn", "NordVPN.app", None),
-        ("packages/tailscale-app/default.nix", "tailscale-app", "Tailscale.app", True),
+        ("packages/tailscale-app/default.nix", "tailscale-app", "Tailscale.app", None),
     )
 
     for relative_path, pname, bundle_name, copy_contents in cases:
@@ -3538,6 +3538,7 @@ def test_work_mac_app_routes_preserve_system_and_user_scopes() -> None:
         "paseo": "pkgs.paseo",
         "reflect": "pkgs.reflect-open",
         "screen-studio": "pkgs.screen-studio",
+        "tailscale": "pkgs.tailscale-app",
         "thorium": "pkgs.thorium",
         "unsloth": "pkgs.unsloth",
         "voiceos": "pkgs.voiceos",
@@ -3553,18 +3554,18 @@ def test_work_mac_app_routes_preserve_system_and_user_scopes() -> None:
             StringPrimitive(value="system"),
         )
 
-    gemini = expect_instance(_routing_entry(routing, "gemini"), AttributeSet)
-    assert_nix_ast_equal(
-        expect_binding(gemini.values, "preventDowngrade").value,
-        Primitive(value=True),
-    )
+    for name in ("gemini", "tailscale"):
+        protected_app = expect_instance(_routing_entry(routing, name), AttributeSet)
+        assert_nix_ast_equal(
+            expect_binding(protected_app.values, "preventDowngrade").value,
+            Primitive(value=True),
+        )
 
     expected_user_routes = {
         "claude-code-url-handler": "pkgs.claude-code-url-handler",
         "cleanshot": "pkgs.cleanshot",
         "freelens": "pkgs.freelens",
         "grok-build": "pkgs.grok-build",
-        "tailscale": "pkgs.tailscale-app",
         "town-assistant": "pkgs.town-assistant-nightly",
         "warp-preview": "pkgs.warp-preview",
     }
