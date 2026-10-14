@@ -68,10 +68,11 @@ let
   # every platform (Update #1235). Do not skip Darwin packages, closures,
   # or installCheck to paper over this.
   zedBuildRustCrate = (import ./build-rust-crate.nix { inherit lib; }).wrapBuildRustCrate (
-    pkgs.buildRustCrate.override {
-      cargo = rustToolchain;
-      rustc = rustToolchain;
-    }
+    pkgs.buildRustCrate.override
+      {
+        cargo = rustToolchain;
+        rustc = rustToolchain;
+      }
   ) pkgs.stdenv.hostPlatform.isDarwin;
   generatedLicenses = destination: ''
     {

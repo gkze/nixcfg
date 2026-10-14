@@ -17,12 +17,10 @@
             stripExclude = [ "*.rlib" ];
           }
         );
-      wrap =
-        inner:
-        {
-          __functor = self: args: applyDarwinRlibMetadata (inner args);
-          override = f: wrap (inner.override f);
-        };
+      wrap = inner: {
+        __functor = _self: args: applyDarwinRlibMetadata (inner args);
+        override = f: wrap (inner.override f);
+      };
     in
     wrap builder;
 }

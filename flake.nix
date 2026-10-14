@@ -1067,10 +1067,9 @@
               _: import ./tests/nix/rio-overlay-platforms { }
             );
 
-            "test-nix-binary-darwin-apps-platforms" =
-              mkEvalOnlyCheck "test-nix-binary-darwin-apps-platforms" (
-                _: import ./tests/nix/binary-darwin-apps-platforms { }
-              );
+            "test-nix-binary-darwin-apps-platforms" = mkEvalOnlyCheck "test-nix-binary-darwin-apps-platforms" (
+              _: import ./tests/nix/binary-darwin-apps-platforms { }
+            );
 
             "test-zsh-gpg-tty" =
               { pkgs, ... }:

@@ -7,10 +7,10 @@ Use this as the standing instruction set for code, architecture, technical desig
 Use these layers in order when instructions differ:
 
 1. **ED-A.1** Explicit task requirements and supported product contracts define the required outcome and scope.
-2. **ED-A.2** Repository instructions and domain documentation define local constraints, established mechanics, and supported conventions.
-3. **ED-A.3** The core principles below define the personal engineering quality bar where higher layers leave a choice.
-4. **ED-A.4** Conditional defaults apply only when the higher layers do not select a different approach.
-5. **ED-A.5** Report an unresolved conflict instead of silently discarding a core principle or repository contract.
+1. **ED-A.2** Repository instructions and domain documentation define local constraints, established mechanics, and supported conventions.
+1. **ED-A.3** The core principles below define the personal engineering quality bar where higher layers leave a choice.
+1. **ED-A.4** Conditional defaults apply only when the higher layers do not select a different approach.
+1. **ED-A.5** Report an unresolved conflict instead of silently discarding a core principle or repository contract.
 
 A lower layer does not override a higher layer. This standard does not grant authority to mutate code, repositories, external systems, or production.
 
@@ -31,8 +31,11 @@ Build the simplest model that preserves known required semantics and supported c
 ### 2. Minimize accidental complexity, preserve essential complexity
 
 - **ED-2.1** Remove boilerplate, duplicated declarations, unnecessary wrappers, conversions, indirection, and machinery. Do not optimize for line count or code golf.
+
 - **ED-2.2** Preserve meaningful distinctions in identity, ownership, lifecycle, state, failure, authorization, and public behavior. Audit large reductions for erased cases and overcompression.
+
 - **ED-2.3** Optimize for local reasoning. A reader should find an invariant and its enforcement near its owner.
+
 - **ED-2.4** **Choose implementation sources by required semantics and total ownership cost.** Establish the supported behavior, failure and lifecycle requirements, environment constraints, and expected lifetime before selecting a solution. Search proportionately across repository helpers, the language's standard library, runtime and platform facilities, existing dependencies, SDKs, generators, and third-party packages. Inspect suitable existing capabilities early; discovery order is not a mandatory ranking.
 
   Exclude choices that cannot preserve the required contracts. Compare plausible remaining choices by semantic fit, correctness and security assurance, clarity, stability, supported environments, licensing, and total ownership cost. Include implementation, integration and adaptation, validation, operational footprint, transitive dependencies, provenance, upgrades, and eventual migration or replacement. Custom code also incurs testing, documentation, expertise, and ongoing maintenance costs; copied or vendored code and forks retain ownership obligations. Package count, popularity, existing installation, and local line count do not establish suitability.
@@ -42,9 +45,13 @@ Build the simplest model that preserves known required semantics and supported c
   For security-sensitive algorithms or subtle standardized behavior, such as cryptography, structured formats, Unicode, or calendar and time-zone rules, prefer a suitable maintained implementation with relevant correctness evidence. A short implementation can conceal a large contract. Neither standard-library status nor package reputation proves adequacy: verify the required behavior in the supported version and environment. A custom substitute needs a concrete unmet requirement and proportionate expertise and validation; dependency avoidance alone is not justification. This does not prohibit bounded operations whose contracts do not require those broader semantics.
 
   Scale discovery, comparison, and recorded rationale to uncertainty, failure impact, expected lifetime, and reversal cost. Stop when the material requirements are covered and no unresolved risk warrants further investigation. For a material choice, record the required capability, selected source, strongest plausible alternative, decisive tradeoff, and relevant validation evidence or remaining uncertainty in an existing durable location. Routine use of an established capability needs no package survey or separate design record. Revisit the choice when requirements or evidence materially change; this principle alone does not justify replacing working code.
+
 - **ED-2.5** Introduce an abstraction when it centralizes a rule that must stay consistent, isolates a volatile or effectful boundary, or serves multiple uses with the same semantics. Thin adapters are justified for versioning, lifecycle, test seams, observability, or error normalization. Do not abstract merely to move lines, rename an API, or speculate about future reuse.
+
 - **ED-2.6** Own domain invariants and stable internal meaning; reuse generic mechanics. Owning an invariant means owning its policy and enforcement, not necessarily implementing its underlying algorithms. Keep provider vocabulary and translation at the interop seam unless the domain intentionally adopts them.
+
 - **ED-2.7** Do not destructure by reflex. Preserve qualified access when the qualifier communicates ownership, provenance, or field relationships. Destructure trusted or validated objects only when repeated access is materially noisier and the resulting local names remain unambiguous.
+
 - **ED-2.8** **Evaluate factoring explicitly.** Before choosing an implementation and again before declaring implementation or review complete, assess whether the affected code is optimally factored for its supported requirements. Examine the changed code and relevant callers, helpers, representations, tests, and build configuration. Do not assume the existing decomposition is appropriate.
 
   Look for duplicated semantic rules, reconstructed derived state, custom mechanics already supplied by suitable existing capabilities, unnecessary wrappers or conversions, misplaced responsibilities, and concerns that vary independently but are coupled together. For a representative supported change, trace which locations would need coordinated edits and whether that coordination has a necessary semantic reason.
@@ -137,13 +144,13 @@ Apply these only in their stated context. They are subordinate to repository aut
 Apply the questions relevant to the affected risks. Mark any material item that is not applicable.
 
 1. **ED-F.1** What invariant owns the change, and are all necessary enforcement points addressed?
-2. **ED-F.2** Does the design cover affected projections, failure behavior, and supported consumers without unrelated complexity?
-3. **ED-F.3** Are invalid states constrained and trust transitions validated without redundant ceremony?
-4. **ED-F.4** Does each concept have a clear owner without collapsing independent concerns or splitting cross-concern invariants?
-5. **ED-F.5** Are effects, failure, retry, concurrency, cleanup, and recovery behavior explicit where relevant?
-6. **ED-F.6** Can the selected tests falsify each material risk, including integration behavior when it is part of the contract?
-7. **ED-F.7** Was the closest faithful consumer boundary exercised when required by the risk?
-8. **ED-F.8** Where performance matters, are measurements causal, reproducible, and scoped?
-9. **ED-F.9** Can a future reader locate the domain meaning, rationale, and enforcement without reconstructing the whole system?
-10. **ED-F.10** Is the affected code optimally factored for its supported requirements and scope? What concrete ownership, call-site, or capability evidence supports that conclusion? Where a material alternative exists, why was it adopted or rejected? Identify any remaining material concern.
-11. **ED-F.11** Where implementation-source selection is material, does the chosen combination of standard facilities, dependencies, and custom code cover the required semantics with justified total ownership cost? What evidence supports it over the strongest plausible alternative, and have both dependency and custom-code obligations been considered without expanding the task's scope?
+1. **ED-F.2** Does the design cover affected projections, failure behavior, and supported consumers without unrelated complexity?
+1. **ED-F.3** Are invalid states constrained and trust transitions validated without redundant ceremony?
+1. **ED-F.4** Does each concept have a clear owner without collapsing independent concerns or splitting cross-concern invariants?
+1. **ED-F.5** Are effects, failure, retry, concurrency, cleanup, and recovery behavior explicit where relevant?
+1. **ED-F.6** Can the selected tests falsify each material risk, including integration behavior when it is part of the contract?
+1. **ED-F.7** Was the closest faithful consumer boundary exercised when required by the risk?
+1. **ED-F.8** Where performance matters, are measurements causal, reproducible, and scoped?
+1. **ED-F.9** Can a future reader locate the domain meaning, rationale, and enforcement without reconstructing the whole system?
+1. **ED-F.10** Is the affected code optimally factored for its supported requirements and scope? What concrete ownership, call-site, or capability evidence supports that conclusion? Where a material alternative exists, why was it adopted or rejected? Identify any remaining material concern.
+1. **ED-F.11** Where implementation-source selection is material, does the chosen combination of standard facilities, dependencies, and custom code cover the required semantics with justified total ownership cost? What evidence supports it over the strongest plausible alternative, and have both dependency and custom-code obligations been considered without expanding the task's scope?
