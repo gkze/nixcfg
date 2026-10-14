@@ -336,11 +336,17 @@ def test_validate_source_package_exact_versions_accepts_matching_override(
         """,
         encoding="utf-8",
     )
+    fetched: list[str] = []
 
-    bun_lock.validate_source_package_exact_versions(
-        lock_file,
-        fetch_bytes=lambda _url: _tarball_bytes({"name": "dep", "version": "1.2.3"}),
-    )
+    def fetch(url: str) -> bytes:
+        fetched.append(url)
+        return _tarball_bytes({"name": "dep", "version": "1.2.3"})
+
+    bun_lock.validate_source_package_exact_versions(lock_file, fetch_bytes=fetch)
+    # Acceptance only proves something because the override tarball is the thing
+    # inspected: a validator that stopped resolving it could not reject a
+    # mismatched override either.
+    assert fetched == ["https://example.test/dep.tgz"]
 
 
 def test_validate_source_package_exact_versions_rejects_version_mismatch(
@@ -499,11 +505,16 @@ def test_validate_source_package_exact_versions_skips_irrelevant_shapes(
         """,
         encoding="utf-8",
     )
+    fetched: list[str] = []
 
-    bun_lock.validate_source_package_exact_versions(
-        lock_file,
-        fetch_bytes=lambda _url: _tarball_bytes({"name": "dep", "version": "1.2.3"}),
-    )
+    def fetch(url: str) -> bytes:
+        fetched.append(url)
+        return _tarball_bytes({"name": "dep", "version": "1.2.3"})
+
+    bun_lock.validate_source_package_exact_versions(lock_file, fetch_bytes=fetch)
+    # Only the one real override is resolved: the malformed package entries must
+    # neither abort validation nor add fetches for their own tarballs.
+    assert fetched == ["https://example.test/dep.tgz"]
 
 
 def test_read_source_package_manifest_rejects_invalid_archive() -> None:

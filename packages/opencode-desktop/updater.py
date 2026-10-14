@@ -9,9 +9,8 @@ from lib.update import nix as update_nix
 from lib.update.bun_lock import parse_bun_lock_text
 from lib.update.electron_manifest import (
     ElectronManifestMetadata,
-    locked_github_source,
 )
-from lib.update.locked_source import resolve_locked_source
+from lib.update.locked_source import locked_github_source, resolve_locked_source
 from lib.update.npm_semver import require_npm_version_matches_spec
 from lib.update.updaters import (
     FlakeInputHashUpdater,
@@ -19,11 +18,12 @@ from lib.update.updaters import (
     VersionInfo,
     register_updater,
 )
+from lib.update.updaters.core import hashes_by_platform
 
 if TYPE_CHECKING:
     import aiohttp
 
-    from lib.nix.models.sources import SourceEntry, SourceHashes
+    from lib.nix.models.sources import HashType, SourceEntry, SourceHashes
 
 _LOCK_PATH = "bun.lock"
 _MAX_LOCK_BYTES = 32 * 1024 * 1024
@@ -190,7 +190,7 @@ class OpencodeDesktopUpdater(FlakeInputHashUpdater):
     name = "opencode-desktop"
     aggregate_into = ("electron-runtimes",)
     input_name = "opencode"
-    hash_type = "nodeModulesHash"
+    hash_type: HashType = "nodeModulesHash"
     hash_attr_path = ".node_modules"
     platform_specific = True
     native_only = False
@@ -270,17 +270,7 @@ class OpencodeDesktopUpdater(FlakeInputHashUpdater):
         if entry is None:
             return False
 
-        hashes = entry.hashes
-        platforms = (
-            {
-                hash_entry.platform
-                for hash_entry in hashes.entries
-                if hash_entry.platform is not None
-                and hash_entry.hash_type == self.hash_type
-            }
-            if hashes.entries
-            else set(hashes.mapping or {})
-        )
+        platforms = set(hashes_by_platform(entry.hashes, hash_type=self.hash_type))
         expected_platforms = set(
             self._platform_targets(update_nix.get_current_nix_platform())
         )

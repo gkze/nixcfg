@@ -398,7 +398,10 @@ def patch_bundle_integrity(
                 raise
             return digest
     finally:
-        if not retain_original:
+        # ty's flow analysis drops the assignment made on the raising rollback
+        # path, so it reads this guard as constant. The double-failure branch is
+        # pinned by test_bundle_publication_retains_original_when_rollback_fails.
+        if not retain_original:  # ty: ignore[redundant-condition-strict]
             archive_staging.cleanup()
 
 

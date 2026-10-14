@@ -9,6 +9,7 @@ from packaging.version import InvalidVersion, Version
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import EventSink, ignore_event
+from lib.update.locked_source import is_immutable_commit
 from lib.update.net import fetch_github_api_paginated, fetch_url, github_raw_url
 from lib.update.nix import (
     _build_fetch_from_github_expr,
@@ -129,10 +130,7 @@ class ClearlyUpdater(GitHubReleaseUpdater):
             if not isinstance(tag_name, str) or not isinstance(commit, dict):
                 continue
             commit_sha = commit.get("sha")
-            if (
-                not isinstance(commit_sha, str)
-                or self._COMMIT_PATTERN.fullmatch(commit_sha) is None
-            ):
+            if not isinstance(commit_sha, str) or not is_immutable_commit(commit_sha):
                 continue
             try:
                 candidate = Version(tag_name.removeprefix("v"))

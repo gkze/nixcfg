@@ -169,8 +169,11 @@ let
       ;
   };
 
-  # The updater verifies this source-owned value against desktopSource before
-  # publishing the closure plan. Reading that derivation here would cause IFD.
+  # The updater owns which compiler can build this release. The closure plan
+  # records the compiler this closure uses: the source-owned `rust-version` it
+  # verifies against the candidate, widened by the updater for a release whose
+  # own lockfile needs a newer one. Read the plan instead of restating a release
+  # in Nix.
   rustToolchainVersion = closurePlan.app.rustToolchainVersion;
   rustToolchain = (inputs.rust-overlay.lib.mkRustBin { } pkgs).stable.${rustToolchainVersion}.default;
   exactRustPlatform = makeRustPlatform {

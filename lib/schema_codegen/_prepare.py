@@ -27,6 +27,7 @@ from lib.schema_codegen.config import (
 )
 
 type JsonValue = json_utils.JsonValue
+type JsonObject = json_utils.JsonObject
 type ReadURLSource = Callable[[URLSource], str]
 
 
@@ -86,7 +87,7 @@ class _LoadedSchemaDocument:
     source_uri: str | None
 
 
-_as_object_dict = json_utils.as_object_dict
+_coerce_json_object = json_utils.coerce_json_object
 _coerce_json_value = json_utils.coerce_json_value
 
 
@@ -264,7 +265,7 @@ def build_registry(
     return registry.crawl() if profile.registry.crawl else registry
 
 
-def _merge_allof_extras(result: dict[str, object], branch: dict[str, object]) -> None:
+def _merge_allof_extras(result: JsonObject, branch: JsonObject) -> None:
     excluded = frozenset({"properties", "required", "type", "title", "description"})
     for key, value in branch.items():
         if key in excluded or key in result:
@@ -272,32 +273,46 @@ def _merge_allof_extras(result: dict[str, object], branch: dict[str, object]) ->
         result[key] = value
 
 
-def _merge_allof_properties(
-    result: dict[str, object], merged: dict[str, object]
-) -> None:
+def _merge_allof_properties(result: JsonObject, merged: JsonObject) -> None:
+    """Merge ``allOf`` branch properties into the parent object schema.
+
+    A parent may carry placeholder entries (``id: {}``) for properties its
+    branches constrain. Taking the parent first would keep the placeholder and
+    silently degrade the field to ``Any`` in the generated model, so the
+    constrained side wins and independent keywords combine.
+    """
     if not merged:
         return
     existing = result.get("properties")
-    properties = (
-        _as_object_dict(existing, context="schema properties")
+    properties: JsonObject = (
+        _coerce_json_object(existing, context="schema properties")
         if isinstance(existing, dict)
         else {}
     )
     for key, value in merged.items():
-        properties.setdefault(key, value)
+        current = properties.get(key)
+        if current is None or current == {}:
+            properties[key] = value
+        elif value in ({}, current):
+            continue
+        elif isinstance(current, dict) and isinstance(value, dict):
+            properties[key] = {
+                **_coerce_json_object(current, context="property schema"),
+                **_coerce_json_object(value, context="property schema"),
+            }
+        else:
+            properties[key] = value
     result["properties"] = properties
 
 
-def _merge_allof_required(result: dict[str, object], merged: list[str]) -> None:
+def _merge_allof_required(result: JsonObject, merged: list[str]) -> None:
     if not merged:
         return
     existing = result.get("required")
-    required = (
-        [item for item in existing if isinstance(item, str)]
-        if isinstance(existing, list)
-        else []
-    )
-    seen = set(required)
+    required: list[JsonValue] = []
+    if isinstance(existing, list):
+        required.extend(item for item in existing if isinstance(item, str))
+    seen = {item for item in required if isinstance(item, str)}
     for item in merged:
         if item in seen:
             continue
@@ -306,25 +321,27 @@ def _merge_allof_required(result: dict[str, object], merged: list[str]) -> None:
     result["required"] = required
 
 
-def _merge_allof_branches(result: dict[str, object]) -> None:
+def _merge_allof_branches(result: JsonObject) -> None:
     """Inline object-shaped ``allOf`` branches into their parent object."""
     all_of = result.get("allOf")
     if not isinstance(all_of, list):
         return
 
-    merged_properties: dict[str, object] = {}
+    merged_properties: JsonObject = {}
     merged_required: list[str] = []
-    remaining: list[object] = []
+    remaining: list[JsonValue] = []
     for branch in all_of:
         if not isinstance(branch, dict):
             remaining.append(branch)
             continue
-        branch_dict = _as_object_dict(branch, context="allOf branch")
+        branch_dict = _coerce_json_object(branch, context="allOf branch")
         props_obj = branch_dict.get("properties")
         if not isinstance(props_obj, dict):
             remaining.append(branch)
             continue
-        merged_properties.update(_as_object_dict(props_obj, context="allOf properties"))
+        merged_properties.update(
+            _coerce_json_object(props_obj, context="allOf properties")
+        )
         required_obj = branch_dict.get("required")
         if isinstance(required_obj, list):
             merged_required.extend(
@@ -355,11 +372,11 @@ def _apply_schema_transforms(
     result: dict[str, JsonValue] = {
         key: _apply_schema_transforms(value, transforms=transforms)
         for key, value in obj.items()
-        if isinstance(key, str) and not (drop_description and key == "description")
+        if not (drop_description and key == "description")
     }
 
     if SchemaTransform.INLINE_MERGEABLE_ALLOF in transforms:
-        _merge_allof_branches(cast("dict[str, object]", result))
+        _merge_allof_branches(result)
     if (
         SchemaTransform.CONST_NULL_TO_TYPE_NULL in transforms
         and result.get("const") is None
@@ -407,7 +424,6 @@ def _inline_references(
                 stack=stack,
             )
             for key, value in obj.items()
-            if isinstance(key, str)
         }
     if ref_obj == "#" and preserve_root_ref:
         return _coerce_json_value(obj, context="preserved recursive schema ref")

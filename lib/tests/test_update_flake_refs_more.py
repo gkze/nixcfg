@@ -3,7 +3,7 @@
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import aiohttp
 import pytest
@@ -220,37 +220,42 @@ def test_resolve_root_input_node_handles_incomplete_follows_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Return ``None`` when a follows chain cannot be resolved cleanly."""
-    broken_start = SimpleNamespace(
-        root_node=SimpleNamespace(inputs={"broken": ["missing", "nixpkgs"]}),
-        nodes={},
+    broken_start = FlakeLock.model_construct(
+        nodes={
+            "root": FlakeLockNode.model_construct(
+                inputs={"broken": ["missing", "nixpkgs"]}
+            )
+        },
     )
-    node, follows = resolve_root_input_node(cast("FlakeLock", broken_start), "broken")
+    node, follows = resolve_root_input_node(broken_start, "broken")
     assert node is None
     assert follows == "missing/nixpkgs"
 
-    missing_inputs = SimpleNamespace(
-        root_node=SimpleNamespace(inputs={"broken": ["wrapper", "nixpkgs"]}),
-        nodes={"wrapper": SimpleNamespace(inputs=None)},
+    missing_inputs = FlakeLock.model_construct(
+        nodes={
+            "root": FlakeLockNode.model_construct(
+                inputs={"broken": ["wrapper", "nixpkgs"]}
+            ),
+            "wrapper": FlakeLockNode.model_construct(inputs=None),
+        },
     )
-    node, follows = resolve_root_input_node(cast("FlakeLock", missing_inputs), "broken")
+    node, follows = resolve_root_input_node(missing_inputs, "broken")
     assert node is None
     assert follows == "wrapper/nixpkgs"
 
-    empty_follows = SimpleNamespace(
-        root_node=SimpleNamespace(inputs={"broken": []}),
-        nodes={},
+    empty_follows = FlakeLock.model_construct(
+        nodes={"root": FlakeLockNode.model_construct(inputs={"broken": []})},
     )
-    node, follows = resolve_root_input_node(cast("FlakeLock", empty_follows), "broken")
+    node, follows = resolve_root_input_node(empty_follows, "broken")
     assert node is None
     assert follows == ""
 
-    malformed_start = SimpleNamespace(
-        root_node=SimpleNamespace(inputs={"broken": [None, "nixpkgs"]}),
-        nodes={},
+    malformed_start = FlakeLock.model_construct(
+        nodes={
+            "root": FlakeLockNode.model_construct(inputs={"broken": [None, "nixpkgs"]})
+        },
     )
-    node, follows = resolve_root_input_node(
-        cast("FlakeLock", malformed_start), "broken"
-    )
+    node, follows = resolve_root_input_node(malformed_start, "broken")
     assert node is None
     assert follows is None
 

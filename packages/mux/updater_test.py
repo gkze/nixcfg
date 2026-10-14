@@ -13,7 +13,7 @@ from lib.update.config import resolve_config
 from lib.update.events import EventSink, UpdateEvent, ignore_event
 from lib.update.net import github_raw_url
 from lib.update.nix import PreparedProbe, _build_package_path_attr_expr
-from lib.update.updaters import UpdateContext, VersionInfo
+from lib.update.updaters import BunNodeModulesHashUpdater, UpdateContext, VersionInfo
 
 _VERSION = "2.3.4"
 _REF = f"v{_VERSION}"
@@ -323,11 +323,26 @@ def test_bun_lock_requires_its_root_workspace(updater_module: ModuleType) -> Non
 )
 def test_source_resolution_requires_an_immutable_github_commit(
     updater_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
     node: FlakeLockNode,
     message: str,
 ) -> None:
+    """The updater's own resolution rejects a mutable Electron source.
+
+    Exercising ``fetch_latest`` keeps the call-site context and wiring under
+    test; asserting the shared helper directly would not.
+    """
+    updater = updater_module.MuxUpdater()
+
+    async def parent_latest(_updater: object, _session: object, *, context: object):
+        _ = context
+        return _release_info(updater_module)
+
+    monkeypatch.setattr(BunNodeModulesHashUpdater, "fetch_latest", parent_latest)
+    monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
+
     with pytest.raises(RuntimeError, match=message):
-        updater_module._locked_github_source(node)
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_version_and_source_identity_metadata_fail_closed(

@@ -3,6 +3,7 @@
 from collections.abc import Iterable
 from dataclasses import fields, is_dataclass
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 from nix_manipulator import parse
 from nix_manipulator.expressions.binding import Binding
@@ -15,7 +16,10 @@ from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 from nix_manipulator.expressions.source_code import NixSourceCode
 
-from lib.tests._assertions import expect_not_none
+from lib.tests._assertions import expect_instance, expect_not_none
+
+if TYPE_CHECKING:
+    from nix_manipulator.expressions.function.definition import FunctionDefinition
 
 _NON_SEMANTIC_FIELD_NAMES = {
     "after",
@@ -314,3 +318,25 @@ def expect_binding(bindings: Iterable[Binding | Inherit], name: str) -> Binding:
 def expect_scope_binding(expr: NixExpression, name: str) -> Binding:
     """Return the scoped let-binding named *name* from *expr*."""
     return expect_binding(expr.scope, name)
+
+
+# The shared Darwin app overlay publishes its exports behind a platform guard, so
+# its output is the guard call rather than the export set itself. Both shapes
+# live here so one reader cannot accept a guard while another rejects it.
+DARWIN_GUARD_CALL = "prev.lib.optionalAttrs prev.stdenv.hostPlatform.isDarwin"
+
+
+def darwin_guarded_call(overlay: FunctionDefinition) -> FunctionCall:
+    """Return the Darwin-only platform guard wrapping an overlay's exports."""
+    guarded = expect_instance(overlay.output, FunctionCall)
+    assert_nix_ast_equal(guarded.name, DARWIN_GUARD_CALL)
+    expect_not_none(
+        guarded.argument,
+        "Darwin-only overlay guard carries no export argument",
+    )
+    return guarded
+
+
+def darwin_guarded_exports(overlay: FunctionDefinition) -> AttributeSet:
+    """Return the export set behind an overlay's Darwin-only platform guard."""
+    return expect_instance(darwin_guarded_call(overlay).argument, AttributeSet)

@@ -7,8 +7,9 @@ from urllib.parse import urlparse
 
 import aiohttp
 
-from lib.update.net import HTTP_BAD_REQUEST
+from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
+from lib.update.updaters.core import verify_platform_versions
 from lib.update.updaters.metadata import NO_METADATA
 
 if TYPE_CHECKING:
@@ -78,14 +79,13 @@ class ZoomUsUpdater(DownloadHashUpdater):
         versions = {
             platform: self._extract_version(url) for platform, url in resolved_pairs
         }
-        unique_versions = set(versions.values())
-        if len(unique_versions) != 1:
-            msg = "Zoom latest URLs resolved to mismatched versions: " + ", ".join(
-                f"{platform}={version}"
-                for platform, version in sorted(versions.items())
-            )
-            raise RuntimeError(msg)
-        return VersionInfo(version=unique_versions.pop(), metadata=NO_METADATA)
+        return VersionInfo(
+            version=verify_platform_versions(
+                versions,
+                context="Zoom latest URLs resolved to mismatched versions",
+            ),
+            metadata=NO_METADATA,
+        )
 
     async def _resolve_platform_latest(
         self,

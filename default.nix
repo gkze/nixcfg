@@ -126,6 +126,11 @@ let
         default = self.mkOverlay { };
       };
 
+    # Precondition: `pkgs` must already carry this repo's overlays, which the
+    # flake's own legacyPackages do. Five entries (rio, raycast, gogcli,
+    # goose-cli, worktrunk) are overlay-owned attributes re-exported from
+    # packages/, so a bare nixpkgs instance yields upstream's `rio` silently
+    # and an attribute-missing error for the rest. `packages/rio` fails loudly.
     mkPackages =
       {
         pkgs,

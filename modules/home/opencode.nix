@@ -83,6 +83,19 @@ in
       default = true;
     };
 
+    linkConfigs = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Materialize the generated OpenCode configuration into
+        {file}`$XDG_CONFIG_HOME/opencode`.
+
+        Set this to false to leave the live OpenCode profile alone while every
+        definition in the Nix configuration stays on standby. The client
+        package is still installed; only the generated files are withheld.
+      '';
+    };
+
     activeProfile = mkOption {
       type = types.str;
       default = "personal";
@@ -128,46 +141,55 @@ in
     );
 
     home = {
-      activation.removeStaleOpencodeProfiles = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-        ${builtins.concatStringsSep "\n        " (
-          map (path: "run rm -f ${lib.escapeShellArg path}") staleProfileJsonPaths
-        )}
-      '';
+      activation.removeStaleOpencodeProfiles = mkIf cfg.linkConfigs (
+        lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          ${builtins.concatStringsSep "\n        " (
+            map (path: "run rm -f ${lib.escapeShellArg path}") staleProfileJsonPaths
+          )}
+        ''
+      );
       # OpenCode 2 reads cli.json; tui.json is only imported during migration.
       # Merge appearance into the mutable file so unrelated CLI preferences survive.
-      activation.opencodeSystemAppearance = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
-        run ${pkgs.writeShellScript "opencode-system-appearance" ''
-          set -eu
-          appearance_config=${lib.escapeShellArg "${config.xdg.configHome}/opencode/cli.json"}
-          # Leave first-run migration to OpenCode so it can import all legacy settings.
-          if [ ! -f "$appearance_config" ]; then
-            exit 0
-          fi
-          appearance_tmp=$(mktemp "$appearance_config.XXXXXX")
-          trap 'rm -f "$appearance_tmp"' EXIT
-          ${lib.getExe pkgs.jq} --arg name ${lib.escapeShellArg baseOpencodeTui.theme} \
-            '.theme = {name: $name, mode: "system"}' \
-            "$appearance_config" > "$appearance_tmp"
-          chmod 600 "$appearance_tmp"
-          mv "$appearance_tmp" "$appearance_config"
-        ''}
-      '';
-      sessionVariables.OPENCODE_CONFIG = selectedProfilePath;
+      activation.opencodeSystemAppearance = mkIf cfg.linkConfigs (
+        lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+          run ${pkgs.writeShellScript "opencode-system-appearance" ''
+            set -eu
+            appearance_config=${lib.escapeShellArg "${config.xdg.configHome}/opencode/cli.json"}
+            # Leave first-run migration to OpenCode so it can import all legacy settings.
+            if [ ! -f "$appearance_config" ]; then
+              exit 0
+            fi
+            appearance_tmp=$(mktemp "$appearance_config.XXXXXX")
+            trap 'rm -f "$appearance_tmp"' EXIT
+            ${lib.getExe pkgs.jq} --arg name ${lib.escapeShellArg baseOpencodeTui.theme} \
+              '.theme = {name: $name, mode: "system"}' \
+              "$appearance_config" > "$appearance_tmp"
+            chmod 600 "$appearance_tmp"
+            mv "$appearance_tmp" "$appearance_config"
+          ''}
+        ''
+      );
+      sessionVariables.OPENCODE_CONFIG = mkIf cfg.linkConfigs selectedProfilePath;
     };
 
     programs.opencode = {
       enable = true;
-      settings = baseOpencodeSettings // {
-        mcp = opencodeMcpLib.renderMcpServers cfg.mcpServers;
-      };
-      tui = baseOpencodeTui;
+      settings = mkIf cfg.linkConfigs (
+        baseOpencodeSettings
+        // {
+          mcp = opencodeMcpLib.renderMcpServers cfg.mcpServers;
+        }
+      );
+      tui = mkIf cfg.linkConfigs baseOpencodeTui;
     };
 
-    xdg.configFile."opencode/${cfg.activeProfile}.json".text = builtins.toJSON (
-      mkProfileOverlayConfig selectedProfileConfig
-    );
-    xdg.configFile."opencode/themes/catppuccin-system.json" = mkIf (config.theme.name == "catppuccin") {
-      text = builtins.toJSON catppuccinTheme;
+    xdg.configFile."opencode/${cfg.activeProfile}.json" = mkIf cfg.linkConfigs {
+      text = builtins.toJSON (mkProfileOverlayConfig selectedProfileConfig);
     };
+    xdg.configFile."opencode/themes/catppuccin-system.json" =
+      mkIf (cfg.linkConfigs && config.theme.name == "catppuccin")
+        {
+          text = builtins.toJSON catppuccinTheme;
+        };
   };
 }

@@ -131,6 +131,17 @@ stdenvNoCC.mkDerivation {
       "$SWIFTPM_MODULECACHE_OVERRIDE"
 
     xcodegen generate
+
+    # xcode-select on a builder can point at Command Line Tools. That
+    # xcodebuild refuses this project. Use the full Xcode.app the build needs.
+    xcodeDeveloper=/Applications/Xcode.app/Contents/Developer
+    if [ ! -x "$xcodeDeveloper/usr/bin/xcodebuild" ]; then
+      echo "Clearly requires the full Xcode.app at /Applications/Xcode.app." >&2
+      echo "Command Line Tools cannot build this Xcode project." >&2
+      exit 1
+    fi
+    export DEVELOPER_DIR="$xcodeDeveloper"
+
     /usr/bin/xcodebuild \
       -IDEPackageSupportDisableManifestSandbox=1 \
       -quiet \

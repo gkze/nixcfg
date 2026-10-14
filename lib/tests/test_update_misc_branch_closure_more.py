@@ -442,6 +442,23 @@ def test_deno_lock_retry_classifier_and_exhaustion(
     assert deno_lock._is_retryable_jsr_fetch_error(retryable_response)
     assert not deno_lock._is_retryable_jsr_fetch_error(non_retryable_response)
     assert deno_lock._is_retryable_jsr_fetch_error(aiohttp.ClientError("network"))
+    # Any 5xx stays retryable for JSR fetches, including statuses outside the
+    # shared enumerated set; 408 comes from the shared classification.
+    for status in (408, 500, 501, 505, 507, 520, 599):
+        assert deno_lock._is_retryable_jsr_fetch_error(
+            aiohttp.ClientResponseError(
+                request_info=request_info,
+                history=(),
+                status=status,
+            )
+        ), status
+    assert not deno_lock._is_retryable_jsr_fetch_error(
+        aiohttp.ClientResponseError(
+            request_info=request_info,
+            history=(),
+            status=400,
+        )
+    )
 
     class RaisingClient:
         def get(self, _url: str) -> object:

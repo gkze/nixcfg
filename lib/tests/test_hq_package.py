@@ -22,6 +22,7 @@ from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
+    darwin_guarded_exports,
     expect_binding,
     parse_nix_expr,
 )
@@ -367,6 +368,14 @@ def test_hq_artifact_validator_accepts_rebased_patch_output(tmp_path: Path) -> N
         main_executable=executable,
         expected_version=_VERSION,
     )
+    # The accept above only means something if the same artifact is rejected
+    # once a required property drifts, so pin that half against the same fixture.
+    with pytest.raises(ValueError, match="CFBundleShortVersionString expected"):
+        module.validate_artifact(
+            info_plist=info_plist,
+            main_executable=executable,
+            expected_version="0.0.0",
+        )
 
 
 @pytest.mark.parametrize("displacement", [-38, 0x7FFFFFFF])
@@ -1314,7 +1323,9 @@ def test_hq_overlay_and_system_route_replace_the_unmanaged_app() -> None:
         nix_file_expr("overlays/binary-darwin-apps.nix"),
         FunctionDefinition,
     )
-    exports = expect_instance(overlay.output, AttributeSet)
+    # The fragment exports are the argument of the Darwin-only guard, so a
+    # non-Darwin system does not receive these attributes at all.
+    exports = darwin_guarded_exports(overlay)
     assert_nix_ast_equal(
         expect_binding(exports.values, "hq").value,
         'callDarwinAppPackage "hq"',

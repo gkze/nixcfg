@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING, ClassVar
 import aiohttp
 
 from lib import json_utils
+from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import EventSink, ignore_event
-from lib.update.net import HTTP_BAD_REQUEST, fetch_json
+from lib.update.net import fetch_json
 from lib.update.process import compute_sri_hash
 from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
 

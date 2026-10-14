@@ -2,12 +2,14 @@
   "hashes": [
     {
       "hash": "sha256-unqualified",
-      "hashType": "srcHash"
+      "hashType": "srcHash",
+      "url": "https://example.test/demo-src.tar.gz"
     },
     {
       "hash": "sha256-platform",
       "hashType": "srcHash",
-      "platform": "aarch64-darwin"
+      "platform": "aarch64-darwin",
+      "url": "https://example.test/demo-src-darwin.tar.gz"
     },
     {
       "hash": "sha256-null-platform",

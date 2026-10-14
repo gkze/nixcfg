@@ -28,6 +28,9 @@ dependencies = [
   "nix-manipulator",
   "node-semver>=0.9.1,<1",
   "packaging>=26.0",
+  "pyobjc-core>=12.2.2; sys_platform == 'darwin'",
+  "pyobjc-framework-ApplicationServices>=12.2.2; sys_platform == 'darwin'",
+  "pyobjc-framework-Cocoa>=12.2.2; sys_platform == 'darwin'",
   "pydantic-settings>=2.13.1",
   "pydantic>=2.12.5",
   "pyyaml>=6.0.3",
@@ -44,6 +47,9 @@ dependencies = [
 [project.scripts]
 # Expose `nixcfg` as a CLI command from the `nixcfg:main` entrypoint.
 nixcfg = "nixcfg:main"
+# Top-level CLI for the TCC privacy-list auditor (lib/macos/tcc_audit); the
+# audit-tcc skill documents this command and nothing else.
+tcctool = "lib.macos.tcc_audit.cli:main"
 
 [project.optional-dependencies]
 # Install these only for schema/code-generation workflows.
@@ -63,7 +69,11 @@ extend-exclude = [
 # Treat these directories as namespace package roots during resolution.
 namespace-packages = ["overlays", "packages"]
 # Explicitly include all extensionless Python entrypoints in Ruff discovery.
-extend-include = ["home/george/bin/git-ignore", "home/george/bin/zentool"]
+extend-include = [
+  "home/george/bin/git-ignore",
+  "home/george/bin/zentool",
+  "home/george/bin/tcctool",
+]
 
 [tool.ruff.per-file-target-version]
 # Actions invokes this bootstrap before Nix supplies the Python 3.14 runtime.
@@ -216,6 +226,7 @@ include = [
   "modules/**/*.pyi",
   "home/george/bin/git-ignore",
   "home/george/bin/zentool",
+  "home/george/bin/tcctool",
 ]
 
 [tool.ty.rules]

@@ -479,6 +479,61 @@ def test_native_validation_and_certification(
         pipeline.certified_patch(candidate.model_copy(update={"systems": ()}), reports)
 
 
+@pytest.mark.parametrize("hosted_darwin", [True, False])
+def test_hosted_darwin_validates_root_closures_without_streaming_build_logs(
+    prepared_run,
+    monkeypatch: pytest.MonkeyPatch,
+    hosted_darwin: bool,
+) -> None:
+    """Hosted macos-15 validates root closures but must not stream their build logs.
+
+    The closure is still built on a hosted runner: only the ``-L`` log streaming
+    is suppressed, because Cachix's daemon cannot upload a realized path while
+    the runner streams 4000+ derivation logs (lib/update/ci/candidate.py). Both
+    halves are pinned so neither "skip the closure" nor "always stream" can
+    regress unnoticed.
+    """
+    _, _, state = prepared_run
+    candidate = None
+    for system in pipeline.supported_systems():
+        state["system"] = system
+        candidate, _ = pipeline.prepare_candidate(("example",), previous=candidate)
+    assert candidate is not None
+    order: list[str] = []
+    streamed: list[bool] = []
+    monkeypatch.setattr(pipeline.jobs.sys, "platform", "darwin")
+    if hosted_darwin:
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    else:
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        monkeypatch.delenv("RUNNER_ENVIRONMENT", raising=False)
+    monkeypatch.setattr(
+        pipeline.jobs, "reclaim_hosted_store", lambda: order.append("reclaim")
+    )
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+
+    def validate_roots(*, print_build_logs, **_kwargs):
+        streamed.append(print_build_logs)
+        order.append("roots")
+        return ()
+
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_root_closures",
+        validate_roots,
+    )
+    state["system"] = "aarch64-darwin"
+    report = pipeline.validate_candidate(candidate)
+    assert report.failures == ()
+    assert order == ["reclaim", "roots"]
+    assert streamed == [not hosted_darwin]
+
+
 def _candidate_for_scope(prepared_run) -> Candidate:
     root, _, state = prepared_run
     tree = git(root, "rev-parse", "HEAD^{tree}").decode().strip()

@@ -53,6 +53,17 @@ let
     )
     (assertEq "explicit source override" "override" (updateLib.sourceEntry "demo").version)
     (assertEq "explicit fake hash mode" lib.fakeHash (updateLib.sourceHash "demo" "srcHash"))
+    # The fake-hash contract covers hashes only: the update probe still has to
+    # fetch the real URL, so fake mode must resolve it exactly as real mode does.
+    (assertEq "source url" "https://example.test/demo-src.tar.gz" (
+      nixcfgLib.sourceUrl "demo" "srcHash"
+    ))
+    (assertEq "source url under fake hash mode" "https://example.test/demo-src.tar.gz" (
+      updateLib.sourceUrl "demo" "srcHash"
+    ))
+    (assertEq "missing source url fails" false
+      (builtins.tryEval (nixcfgLib.sourceUrl "demo" "nullPlatform")).success
+    )
   ];
 in
 builtins.deepSeq checks true

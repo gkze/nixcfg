@@ -144,6 +144,7 @@ def test_treefmt_markdown_tables_use_supported_gfm_plugin() -> None:
             ps: with ps; [
               mdformat
               mdformat-gfm
+              mdformat-frontmatter
             ]
           )) "mdformat";
           includes = lintFiles.markdown.globs;

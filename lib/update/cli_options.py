@@ -143,7 +143,7 @@ class UpdateOptions:
     @classmethod
     def from_mapping(cls, values: UpdateOptionsKwargs) -> UpdateOptions:
         """Build :class:`UpdateOptions` from CLI call parameters."""
-        values_map = cast("dict[str, UpdateOptionValue]", dict(values))
+        values_map: dict[str, object] = dict(values)
         payload = {
             field_name: values_map[field_name]
             for field_name in cls.__dataclass_fields__

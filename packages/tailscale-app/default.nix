@@ -11,7 +11,6 @@ mkPkgApp {
   bundleName = "Tailscale.app";
   executableName = "Tailscale";
   binaryName = "tailscale";
-  copyContents = true;
 
   description = "Tailscale GUI client for macOS";
   homepage = "https://tailscale.com/";

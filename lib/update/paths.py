@@ -3,16 +3,9 @@
 import os
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from typing import cast
 
 ROOT_MARKER = ".root"
-
-
-class _CacheClearable(Protocol):
-    cache_clear: Callable[[], None]
 
 
 def _search_anchor(start: os.PathLike[str] | str | None = None) -> Path:
@@ -41,8 +34,13 @@ def _find_root_cached(env_root: str | None, start: str) -> Path:
     raise RuntimeError(msg)
 
 
-def _clear_root_cache() -> None:
-    """Clear the shared cached repo-root lookup."""
+def clear_root_cache() -> None:
+    """Clear the shared cached repo-root lookup.
+
+    Callers that must observe a changed ``$REPO_ROOT`` or working directory call
+    this directly; the public lookups stay plain functions rather than carrying a
+    patched-on ``cache_clear`` attribute.
+    """
     _find_root_cached.cache_clear()
 
 
@@ -56,15 +54,9 @@ def find_root(start: os.PathLike[str] | str | None = None) -> Path:
     return _find_root_cached(os.environ.get("REPO_ROOT"), os.fspath(anchor))
 
 
-cast("_CacheClearable", find_root).cache_clear = _clear_root_cache
-
-
 def get_repo_root() -> Path:
     """Return the current repository root."""
     return find_root()
-
-
-cast("_CacheClearable", get_repo_root).cache_clear = _clear_root_cache
 
 
 def local_flake_url(root: os.PathLike[str] | str | None = None) -> str:

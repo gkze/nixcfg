@@ -28,6 +28,7 @@ from lib.update.platform_hashes import (
     require_complete_platform_hashes,
 )
 from lib.update.sources import load_source_entry
+from lib.update.updaters.core import hashes_by_platform
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -112,13 +113,14 @@ async def _compute_deno_deps_hash_for_platform(
 
 
 def _existing_platform_hashes(original_entry: SourceEntry | None) -> dict[str, str]:
+    """Return persisted platform hashes for a source, if it has any.
+
+    Deno hashes are stored without an algorithm split, so no ``hash_type``
+    filter applies here (unlike the flake-backed path).
+    """
     if original_entry is None:
         return {}
-    if entries := original_entry.hashes.entries:
-        return {entry.platform: entry.hash for entry in entries if entry.platform}
-    if mapping := original_entry.hashes.mapping:
-        return dict(mapping)
-    return {}
+    return hashes_by_platform(original_entry.hashes)
 
 
 @dataclass

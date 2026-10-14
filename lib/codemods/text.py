@@ -1,4 +1,11 @@
-"""Exact-count text rewrite helpers for last-resort source codemods."""
+"""Exact-count text rewrite helpers for last-resort source codemods.
+
+This module owns the count-and-raise rule for scripts shipped through
+``lib/codemods-pythonpath.nix``. ``lib/exact_text_patch.py`` carries the same
+rule for build-time patch scripts that receive it as a two-file PYTHONPATH, and
+the two filesets are disjoint, so the duplication is deliberate until those
+filesets include a common module. Keep both implementations in step.
+"""
 
 import re
 from collections.abc import Callable

@@ -971,8 +971,9 @@ def test_token_discovery_without_netrc_auth_and_rate_limit_unknown_reset(
             "https://api.github.com/x",
         )
 
-    detail = object.__getattribute__(net, "_format_http_error")(
-        _FakeResponse(status=404, reason="Not Found", payload=b""),
+    detail = net.http_utils.format_http_error(
+        404,
+        "Not Found",
         b"",
     )
     assert detail == "HTTP 404 Not Found"

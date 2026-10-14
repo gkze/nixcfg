@@ -67,6 +67,11 @@ def _add_feature(attributes: AttributeSet, name: str) -> bool:
 
 
 def _dependencies(crate: AttributeSet, name: str) -> list[AttributeSet]:
+    """Return the crate's live dependency list, validating every entry.
+
+    The result is the list the parsed AST node owns: callers insert into it to
+    change the generated output.
+    """
     binding = _binding(crate, name)
     if binding is None:
         return []
@@ -75,7 +80,9 @@ def _dependencies(crate: AttributeSet, name: str) -> list[AttributeSet]:
     ):
         msg = f"Expected GitButler {name} to be a list of dependency sets"
         raise ValueError(msg)
-    return cast("list[AttributeSet]", binding.value.value)
+    # The all() check above proves every element is an AttributeSet, but the AST
+    # field is declared as a union list, so the narrowing cannot be expressed.
+    return cast("list[AttributeSet]", binding.value.value)  # ty: ignore[disjoint-cast]
 
 
 def _is_package(dependency: AttributeSet, package_id: str) -> bool:

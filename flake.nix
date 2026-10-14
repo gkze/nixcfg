@@ -217,7 +217,7 @@
       flake = false;
     };
     openai-cli = {
-      url = "github:openai/openai-cli/v1.37.0";
+      url = "github:openai/openai-cli/v1.38.0";
       flake = false;
     };
     github-desktop = {
@@ -820,6 +820,10 @@
                           ps: with ps; [
                             mdformat
                             mdformat-gfm
+                            # Skill files start with YAML frontmatter; without
+                            # this plugin mdformat rewrites the `---` fences as
+                            # a thematic break and destroys the metadata.
+                            mdformat-frontmatter
                           ]
                         )) "mdformat";
                         includes = lintFiles.markdown.globs;
@@ -862,6 +866,19 @@
             );
 
           checks = {
+            # Runtime launch check for the Linux desktop app. The bundle is
+            # repacked from OpenAI's Debian artifact, so only actually starting
+            # it proves the package works: this runs the app under a private
+            # Xvfb display and fails unless it presents a window and holds it.
+            "chatgpt-linux-launch" =
+              { pkgs, ... }:
+              if pkgs.stdenv.hostPlatform.isLinux then
+                pkgs.callPackage ./tests/nix/chatgpt-linux-launch.nix { }
+              else
+                pkgs.runCommand "check-chatgpt-linux-launch-skipped" { } ''
+                  touch $out
+                '';
+
             "format-repo" = lib.mkForce (
               { lib, outputs', ... }:
               ''
@@ -899,14 +916,12 @@
               }
             );
 
-            "test-nix-zed-build-rust-crate-functor" =
-              mkEvalOnlyCheck "test-nix-zed-build-rust-crate-functor"
-                (
-                  { pkgs, ... }:
-                  import ./tests/nix/zed-build-rust-crate-functor.nix {
-                    inherit (pkgs) lib;
-                  }
-                );
+            "test-nix-zed-build-rust-crate-functor" = mkEvalOnlyCheck "test-nix-zed-build-rust-crate-functor" (
+              { pkgs, ... }:
+              import ./tests/nix/zed-build-rust-crate-functor.nix {
+                inherit (pkgs) lib;
+              }
+            );
 
             "test-nix-codex-bundled-plugin-repair" =
               { pkgs, ... }:
@@ -1069,6 +1084,11 @@
             "test-nix-rio-overlay-platforms" = mkEvalOnlyCheck "test-nix-rio-overlay-platforms" (
               _: import ./tests/nix/rio-overlay-platforms { }
             );
+
+            "test-nix-binary-darwin-apps-platforms" =
+              mkEvalOnlyCheck "test-nix-binary-darwin-apps-platforms" (
+                _: import ./tests/nix/binary-darwin-apps-platforms { }
+              );
 
             "test-zsh-gpg-tty" =
               { pkgs, ... }:

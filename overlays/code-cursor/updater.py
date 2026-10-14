@@ -7,6 +7,7 @@ from urllib.parse import urljoin
 
 import aiohttp
 
+from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.net import fetch_url
 from lib.update.updaters import VersionInfo, register_updater
 from lib.update.updaters.metadata import PlatformAPIMetadata
@@ -16,7 +17,6 @@ if TYPE_CHECKING:
     from lib.update.updaters.core import UpdateContext
 
 HTTP_REDIRECT_MIN = 300
-HTTP_BAD_REQUEST = 400
 
 _CURSOR_API_URL_RE = re.compile(
     r"https://api2\.cursor\.sh/updates/download/golden/"

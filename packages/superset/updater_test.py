@@ -692,7 +692,7 @@ def test_locked_source_commit_requires_immutable_github_commit(
         lambda _name: node,
     )
 
-    with pytest.raises(RuntimeError, match="no immutable GitHub source commit"):
+    with pytest.raises(RuntimeError, match="revision must be an immutable commit"):
         module.SupersetUpdater._locked_source_commit(_TAG)
 
 

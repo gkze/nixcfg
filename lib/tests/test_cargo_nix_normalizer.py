@@ -1,7 +1,9 @@
 """Tests for the shared crate2nix Cargo.nix normalizer helpers."""
 
+import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +19,7 @@ from lib.cargo_nix_normalizer import (
 )
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal
+from lib.update import crate2nix
 
 
 def test_normalize_rewrites_local_workspace_paths() -> None:
@@ -438,3 +441,52 @@ rec {
     assert rewrites == 1
     assert normalized.count("rootSrc ? ./.") == 1
     assert '"${rootSrc}/foo"' in normalized
+
+
+def test_root_src_rewriting_requires_prefixes_from_this_module(tmp_path) -> None:
+    """Pin both halves of the shared ${rootSrc} rewrite.
+
+    The per-package normalisers rely on this module's AST rewriting, which is
+    inert without ``local_path_prefixes``; the update pipeline therefore depends
+    on ``crate2nix._stabilize_generated_root_src_paths`` for the same concept.
+    A change to either half must fail here rather than silently leaving one
+    entry family without a rewrite.
+    """
+    patched_src = Path("/nix/store/demo-src")
+    generated_cargo = tmp_path / "Cargo.nix"
+    relative_src = os.path.relpath(
+        patched_src / "crates/demo",
+        generated_cargo.parent,
+    ).replace(os.sep, "/")
+    sample = f"""{{ nixpkgs ? <nixpkgs>
+, crateConfig
+  ? if builtins.pathExists ./crate-config.nix
+    then pkgs.callPackage ./crate-config.nix {{}}
+    else {{}}
+}}:
+rec {{
+  foo = {{ src = lib.cleanSourceWith {{ filter = sourceFilter;  src = {relative_src}; }}; }};
+}}
+"""
+
+    without_prefixes, rewrites, added_root_src = normalize(sample)
+
+    assert added_root_src is True
+    assert rewrites == 0
+    assert relative_src in without_prefixes
+
+    stabilized = crate2nix._stabilize_generated_root_src_paths(
+        without_prefixes,
+        patched_src=patched_src,
+        generated_cargo=generated_cargo,
+    )
+
+    assert '"${rootSrc}/crates/demo"' in stabilized
+
+    with_prefixes, prefixed_rewrites, _ = normalize(
+        sample,
+        local_path_prefixes=("crates",),
+    )
+
+    assert prefixed_rewrites == 1
+    assert '"${rootSrc}/crates/demo"' in with_prefixes

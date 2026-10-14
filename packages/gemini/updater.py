@@ -7,7 +7,7 @@ from typing import ClassVar
 import aiohttp
 
 from lib import json_utils
-from lib.update.net import HTTP_BAD_REQUEST
+from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.updaters import (
     DownloadUrlMetadataUpdater,
     UpdateContext,

@@ -17,8 +17,8 @@ from lib import json_utils
 from lib.update.net import fetch_json
 from lib.update.updaters.core import (
     ChecksumProvidedUpdater,
-    _verify_platform_versions,
     stream_url_hash_mapping,
+    verify_platform_versions,
 )
 from lib.update.updaters.metadata import (
     PlatformAPIMetadata,
@@ -97,12 +97,14 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
             platform_info,
             field=self.VERSION_KEY,
         )
-        version = _verify_platform_versions(versions, self.name)
+        version = verify_platform_versions(
+            versions, context=f"{self.name} version mismatch across platforms"
+        )
         equality_fields: dict[str, str] = {}
         for key in self.EXTRA_EQUALITY_KEYS:
             values = self._require_platform_str_field(platform_info, field=key)
-            equality_fields[key] = _verify_platform_versions(
-                values, f"{self.name} {key}"
+            equality_fields[key] = verify_platform_versions(
+                values, context=f"{self.name} {key} version mismatch across platforms"
             )
         commit: str | None = None
         if self.COMMIT_METADATA_KEY:
@@ -110,7 +112,9 @@ class PlatformAPIUpdater(ChecksumProvidedUpdater):
                 platform_info,
                 field=self.COMMIT_METADATA_KEY,
             )
-            commit = _verify_platform_versions(commits, f"{self.name} commit")
+            commit = verify_platform_versions(
+                commits, context=f"{self.name} commit version mismatch across platforms"
+            )
         return VersionInfo(
             version=version,
             metadata=PlatformAPIMetadata(

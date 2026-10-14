@@ -23,6 +23,7 @@ from lib.update.events import (
     EventSink,
     ignore_event,
 )
+from lib.update.locked_source import locked_github_source
 from lib.update.net import fetch_json, fetch_url, github_raw_url
 from lib.update.npm_semver import require_npm_version_matches_spec
 from lib.update.updaters import (
@@ -38,7 +39,6 @@ if TYPE_CHECKING:
 
     from lib.nix.models.sources import SourceEntry, SourceHashes
 
-_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _EXACT_VERSION_PATTERN = re.compile(
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
@@ -79,25 +79,6 @@ def _require_exact_version(value: str, *, context: str) -> str:
 
 def _release_version(version: str) -> str:
     return _require_exact_version(version.removeprefix("v"), context="flake input ref")
-
-
-def _locked_github_source(node: FlakeLockNode) -> tuple[str, str, str]:
-    locked = node.locked
-    if (
-        locked is None
-        or locked.type != "github"
-        or not locked.owner
-        or not locked.repo
-        or not locked.rev
-    ):
-        msg = "Mux flake input must resolve to a complete GitHub source"
-        raise RuntimeError(msg)
-    if _COMMIT_PATTERN.fullmatch(locked.rev) is None:
-        msg = (
-            f"Mux flake input revision must be an immutable commit, got {locked.rev!r}"
-        )
-        raise RuntimeError(msg)
-    return locked.owner, locked.repo, locked.rev
 
 
 def _manifest_contract(payload: object) -> tuple[str, str, str, str]:
@@ -248,7 +229,7 @@ class MuxUpdater(BunNodeModulesHashUpdater):
         """Resolve Electron from manifests at the immutable refreshed input commit."""
         info = await super().fetch_latest(session, context=context)
         node = self._resolve_flake_node(info)
-        owner, repo, commit = _locked_github_source(node)
+        owner, repo, commit = locked_github_source(node, context="Mux flake input")
         manifest = await fetch_json(
             session,
             github_raw_url(owner, repo, commit, _MANIFEST_PATH),

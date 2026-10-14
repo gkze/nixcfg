@@ -130,6 +130,29 @@ def test_sparkle_package_updaters(
         assert _download_url(info) == expected_url
 
 
+def test_tailscale_app_preserves_unstable_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Discovery and pkg downloads must match the live app's release channel."""
+    module = _load("packages/tailscale-app/updater.py")
+
+    async def fake_fetch(
+        _session: object, url: str, **_kwargs: object
+    ) -> tuple[SparkleAppcastItem, ...]:
+        assert url == "https://pkgs.tailscale.com/unstable/appcast.xml"
+        return (SparkleAppcastItem("101.105.59", "1.105.59", None),)
+
+    _patch_dependency(monkeypatch, module, "fetch_sparkle_appcast_items", fake_fetch)
+    updater = _updater(module)
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
+    assert info.version == "1.105.59"
+    assert updater.get_download_url("aarch64-darwin", info) == (
+        "https://pkgs.tailscale.com/unstable/Tailscale-1.105.59-macos.pkg"
+    )
+
+
 def test_ghostty_tip_requires_commit_url(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load("packages/ghostty-tip/updater.py")
 

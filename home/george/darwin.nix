@@ -6,8 +6,9 @@
 }:
 let
   localZshSiteFuncsPath = "zsh/site-functions";
-  codexBundledCliPath = "${config.nixcfg.macApps.resolved.codex.targetPath}/Contents/Resources/codex";
-  codexBundledResPath = "${config.nixcfg.macApps.resolved.codex.targetPath}/Contents/Resources";
+  # The app ships its Codex CLI under Resources/codex-cli and declares
+  # entrypoint "bin/codex" in codex-cli/codex-package.json.
+  codexBundledCliPath = "${config.nixcfg.macApps.resolved.codex.targetPath}/Contents/Resources/codex-cli/bin";
   codexBundledPluginRepair = pkgs.writeShellApplication {
     name = "codex-bundled-plugin-repair";
     runtimeInputs = [
@@ -204,7 +205,7 @@ in
         "nixcfgUserApplications"
       ]
       ''
-        codex_res_dir=${lib.escapeShellArg codexBundledResPath}
+        codex_res_dir=${lib.escapeShellArg codexBundledCliPath}
         codex_bin_dir=${lib.escapeShellArg "${config.home.homeDirectory}/.local/bin"}
         for codex_link_name in codex codex-code-mode-host; do
           codex_target="$codex_res_dir/$codex_link_name"

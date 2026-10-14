@@ -9,7 +9,7 @@ from lib.update.events import (
     EventSink,
     ignore_event,
 )
-from lib.update.locked_source import resolve_locked_source
+from lib.update.locked_source import locked_github_source, resolve_locked_source
 from lib.update.npm_semver import require_npm_version_matches_spec
 from lib.update.updaters import (
     Crate2NixArtifactsMixin,
@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     import aiohttp
 
 
-_IMMUTABLE_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _MAX_MANIFEST_BYTES = 1024 * 1024
 _PNPM_PACKAGE_MANAGER_PATTERN = re.compile(
     r"^pnpm@(?P<version>(?P<major>0|[1-9][0-9]*)"
@@ -137,21 +136,12 @@ class GitButlerUpdater(Crate2NixArtifactsMixin, FlakeInputHashUpdater):
         if not isinstance(ref, str) or not ref.startswith("release/"):
             msg = "gitbutler flake input must be pinned to a release/<version> ref"
             raise RuntimeError(msg)
-        locked = node.locked
-        commit = locked.rev if locked is not None else None
-        if (
-            locked is None
-            or locked.type != "github"
-            or locked.owner != self.GITHUB_OWNER
-            or locked.repo != self.GITHUB_REPO
-            or not isinstance(commit, str)
-            or _IMMUTABLE_COMMIT_PATTERN.fullmatch(commit) is None
-        ):
-            msg = (
-                "gitbutler flake input must resolve to an immutable "
-                f"{self.GITHUB_OWNER}/{self.GITHUB_REPO} commit"
-            )
-            raise RuntimeError(msg)
+        locked_github = locked_github_source(
+            node,
+            context="gitbutler flake input",
+            expected=(self.GITHUB_OWNER, self.GITHUB_REPO),
+        )
+        commit = locked_github.rev
         source = await resolve_locked_source(
             node,
             context="GitButler flake input",

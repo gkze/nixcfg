@@ -641,9 +641,6 @@ def test_tailer_named_job_and_data_helpers(monkeypatch: pytest.MonkeyPatch) -> N
         )._step_backscroll_url(job_page=None, step_id="x")
         is None
     )
-    parser = gha_tail._CheckStepsHTMLParser()
-    parser.handle_starttag("check-step", [("data-external-id", "only-id")])
-    assert parser.backscroll_urls == {}
 
     with pytest.raises(ValueError, match="steps URL path"):
         gha_tail._parse_steps_url_candidate(
@@ -677,23 +674,6 @@ def test_live_parser_and_payload_error_edges() -> None:
     ):
         gha_tail._parse_live_line({"id": "line"})
 
-    parser = gha_tail._CheckStepsHTMLParser()
-    parser.feed(
-        '<check-steps job-steps-url="/steps" data-streaming-url="/stream">'
-        '<check-step data-external-id="step-1" '
-        'data-job-step-backscroll-url="/backscroll"></check-step>'
-        "</check-steps>"
-    )
-    assert parser.steps_url == "/steps"
-    assert parser.streaming_url == "/stream"
-    assert parser.backscroll_urls == {"step-1": "/backscroll"}
-    parser.handle_starttag("check-steps", [("job-steps-url", "/other-steps")])
-    assert parser.steps_url == "/other-steps"
-    parser.handle_starttag("check-step", [("data-external-id", "only-id")])
-    assert parser.backscroll_urls == {"step-1": "/backscroll"}
-    parser.handle_starttag("check-steps", [])
-    parser.handle_starttag("div", [])
-    assert parser.steps_url == "/other-steps"
     partial_step_info = gha_tail._parse_live_job_page_from_html(
         '<check-steps><check-step data-external-id="step-1"></check-step></check-steps>',
         job_url="https://github.com/acme/demo/actions/runs/9/job/42",

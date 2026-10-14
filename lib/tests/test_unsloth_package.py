@@ -29,6 +29,7 @@ from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
+    darwin_guarded_exports,
     expect_binding,
     parse_nix_expr,
 )
@@ -417,7 +418,8 @@ def test_unsloth_binary_darwin_overlay_exports_the_audited_package() -> None:
         nix_file_expr("overlays/binary-darwin-apps.nix"),
         FunctionDefinition,
     )
-    exports = expect_instance(overlay.output, AttributeSet)
+    # The exports are the argument of the Darwin-only guard.
+    exports = darwin_guarded_exports(overlay)
 
     assert_nix_ast_equal(
         expect_binding(exports.values, "unsloth").value,

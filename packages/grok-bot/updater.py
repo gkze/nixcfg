@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from lib import json_utils
 from lib.update.net import fetch_json
 from lib.update.updaters import VersionInfo, register_updater
+from lib.update.updaters.core import verify_platform_versions
 from lib.update.updaters.metadata import PlatformAPIMetadata
 from lib.update.updaters.platform_api import DownloadingPlatformAPIUpdater
 
@@ -155,10 +156,9 @@ class GrokBotUpdater(DownloadingPlatformAPIUpdater):
         )
         releases = {platform: release for platform, _payload, release in results}
         versions = {platform: release.version for platform, release in releases.items()}
-        if len(set(versions.values())) != 1:
-            msg = f"Grok Bot feed returned mismatched versions: {versions}"
-            raise RuntimeError(msg)
-        version = next(iter(versions.values()))
+        version = verify_platform_versions(
+            versions, context="Grok Bot feed returned mismatched versions"
+        )
         return VersionInfo(
             version=version,
             metadata=PlatformAPIMetadata(

@@ -11,7 +11,7 @@ from lib.nix.models.flake_lock import FlakeLockNode
 from lib.nix.models.sources import SourceEntry
 from lib.tests._updater_helpers import load_repo_module, run_async
 from lib.update.locked_source import LockedSource
-from lib.update.updaters import UpdateContext, VersionInfo
+from lib.update.updaters import NpmDepsHashUpdater, UpdateContext, VersionInfo
 from lib.update.updaters.node_compatibility import NodejsSelection
 
 _VERSION = "1.2.3"
@@ -554,11 +554,26 @@ def test_pnpm_lock_requires_the_desktop_electron_resolution(
 )
 def test_source_resolution_requires_an_immutable_github_commit(
     updater_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
     node: FlakeLockNode,
     message: str,
 ) -> None:
+    """The updater's own resolution rejects a mutable Electron source.
+
+    Exercising ``fetch_latest`` keeps the call-site context and wiring under
+    test; asserting the shared helper directly would not.
+    """
+    updater = updater_module.EmdashUpdater()
+
+    async def parent_latest(_updater: object, _session: object, *, context: object):
+        _ = context
+        return VersionInfo(version=_REF)
+
+    monkeypatch.setattr(NpmDepsHashUpdater, "fetch_latest", parent_latest)
+    monkeypatch.setattr(updater, "_resolve_flake_node", lambda _info: node)
+
     with pytest.raises(RuntimeError, match=message):
-        updater_module._locked_github_source(node)
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))
 
 
 def test_version_and_source_identity_metadata_fail_closed(

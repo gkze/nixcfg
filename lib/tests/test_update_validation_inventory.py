@@ -74,6 +74,11 @@ def test_full_inventory_respects_package_platforms(
     crate2nix_builds = {
         "zed-editor-nightly",
     }
+    # Validations that only make sense on the Linux repack, so they are sharded
+    # to the Linux systems instead of following the runner's own platform.
+    linux = {
+        "chatgpt",
+    }
     builds = [request for request in captured if request.mode == "build"]
     expected = portable | (
         darwin if system == "aarch64-darwin" or not native_builds_only else set()
@@ -82,11 +87,15 @@ def test_full_inventory_respects_package_platforms(
         expected |= non_x86
     if not native_builds_only or system in {"aarch64-darwin", "x86_64-linux"}:
         expected |= crate2nix_builds
+    if system in {"aarch64-linux", "x86_64-linux"} or not native_builds_only:
+        expected |= linux
     assert {request.source for request in builds} == expected
     for request in builds:
         target = request.installable.partition("#")[2].split(".")[1]
         if request.source in darwin:
             assert target == "aarch64-darwin"
+        elif request.source in linux:
+            assert target in {"aarch64-linux", "x86_64-linux"}
         elif request.source in non_x86:
             assert target in {"aarch64-darwin", "aarch64-linux"}
         elif request.source in crate2nix_builds:

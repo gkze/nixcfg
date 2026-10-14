@@ -1,4 +1,14 @@
-"""Plan fail-closed, exact-text source patches without performing I/O."""
+"""Plan fail-closed, exact-text source patches without performing I/O.
+
+The count-and-raise rule here is also implemented by
+:func:`lib.codemods.text.replace_exactly`. That duplication is deliberate for
+now: this module reaches build-time patch scripts as a two-file PYTHONPATH
+(``lib/__init__.py`` plus this file, see ``packages/paseo/package.nix`` and its
+siblings), while ``lib.codemods.text`` reaches a different script family through
+``lib/codemods-pythonpath.nix``. Neither closure can import the other, so
+unifying them means widening those filesets, not editing one module. Keep the
+two implementations in step until that happens.
+"""
 
 from __future__ import annotations
 

@@ -48,10 +48,9 @@ def _build_command_args(
     impure = effective_options.impure
     no_link = effective_options.no_link
     json_output = effective_options.json_output
-    extra_args_obj = effective_options.extra_args
-    extra_cli_args: list[str] = []
-    if isinstance(extra_args_obj, list):
-        extra_cli_args.extend(item for item in extra_args_obj if isinstance(item, str))
+    # ``extra_args`` is validated to a list of strings by the public entry points
+    # before it reaches this builder, so no per-item filtering is needed here.
+    extra_cli_args: list[str] = list(effective_options.extra_args or [])
 
     args: list[str] = ["nix", "build"]
     if json_output:

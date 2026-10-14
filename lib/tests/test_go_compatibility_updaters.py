@@ -16,6 +16,7 @@ from lib.tests._updater_helpers import collect_events, load_repo_module, run_asy
 from lib.update import locked_source, runtime
 from lib.update.config import resolve_config
 from lib.update.flake import flake_source_path_expression
+from lib.update.locked_source import locked_github_source
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.updaters import UpdateContext
 from lib.update.updaters.go_compatibility import (
@@ -23,7 +24,6 @@ from lib.update.updaters.go_compatibility import (
     GoModCompatibilityUpdater,
     _extract_go_requirement,
     _go_version_triplet,
-    _locked_github_source,
 )
 
 _COMMIT = "a" * 40
@@ -216,11 +216,10 @@ def test_go_mod_requirement_rejects_ambiguous_or_invalid_input(
 def test_locked_source_requires_expected_immutable_github_repository() -> None:
     node = _flake_node()
 
-    assert _locked_github_source(
+    assert locked_github_source(
         node,
-        source_name="axiom-cli",
-        expected_owner="axiomhq",
-        expected_repo="cli",
+        context="axiom-cli flake input",
+        expected=("axiomhq", "cli"),
     ) == ("axiomhq", "cli", _COMMIT)
 
 
@@ -238,11 +237,10 @@ def test_locked_source_rejects_mutable_or_unexpected_identity(
     message: str,
 ) -> None:
     with pytest.raises(RuntimeError, match=message):
-        _locked_github_source(
+        locked_github_source(
             node,
-            source_name="axiom-cli",
-            expected_owner="axiomhq",
-            expected_repo="cli",
+            context="axiom-cli flake input",
+            expected=("axiomhq", "cli"),
         )
 
 

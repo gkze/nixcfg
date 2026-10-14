@@ -671,11 +671,13 @@ def test_thread_resource_rejects_blocking_its_owner_loop() -> None:
 
     async def run() -> None:
         async with runtime.runtime_scope(default_config()):
-            with pytest.raises(RuntimeError, match="worker without an event loop"):
-                with runtime.thread_resource_slot(
+            with (
+                pytest.raises(RuntimeError, match="worker without an event loop"),
+                runtime.thread_resource_slot(
                     "eval", source="invalid", config=default_config()
-                ):
-                    pytest.fail("event-loop calls cannot enter a blocking lease")
+                ),
+            ):
+                pytest.fail("event-loop calls cannot enter a blocking lease")
 
     run_async(run())
 
