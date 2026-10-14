@@ -73,15 +73,6 @@ let
 
   mkAttrset = scope: mkAttrsetFromSections scope (scopeSectionTitles scope);
 
-  mkNestedAttrset =
-    scope:
-    listToAttrs (
-      map (section: {
-        name = section.title;
-        value = mkAttrsetFromItems section.items;
-      }) scope.sections
-    );
-
   itemDisplayAction =
     item:
     item.displayAction or (
@@ -149,10 +140,50 @@ let
   globalKeymaps = mkKeymapList keymapData.global;
   lspExtraKeymaps = mkKeymapListFromSections keymapData.lsp [ "Docs / diagnostics" ];
   lspBufKeymaps = mkAttrsetFromSections keymapData.lsp [ "Navigation" ];
-  treesitterSelectionKeymaps = mkAttrset keymapData.treesitterSelection;
-  treesitterTextobjectsMoveMappings = mkNestedAttrset keymapData.treesitterTextobjectsMove;
-  treesitterTextobjectsSelectKeymaps = mkAttrset keymapData.treesitterTextobjectsSelect;
   blinkCmpKeymaps = mkAttrset keymapData.blinkCmp;
+
+  # nvim-treesitter-textobjects dropped the `settings.*.keymaps` schema in its
+  # main-branch rewrite; mappings must now call the module API directly. The
+  # section titles of the move scope are the upstream function names.
+  mkTextobjectMoveKeymaps =
+    scope:
+    flatten (
+      map (
+        section:
+        map (item: {
+          inherit (item) key;
+          mode = "n";
+          action.__raw = ''
+            function()
+              require("nvim-treesitter-textobjects.move").${section.title}("${item.action}", "textobjects")
+            end
+          '';
+          options.desc = item.desc or "";
+        }) section.items
+      ) scope.sections
+    );
+
+  mkTextobjectSelectKeymaps =
+    items:
+    map (item: {
+      inherit (item) key;
+      mode = [
+        "x"
+        "o"
+      ];
+      action.__raw = ''
+        function()
+          require("nvim-treesitter-textobjects.select").select_textobject("${item.action}", "textobjects")
+        end
+      '';
+      options.desc = item.desc or "";
+    }) items;
+
+  textobjectKeymaps =
+    mkTextobjectMoveKeymaps keymapData.treesitterTextobjectsMove
+    ++ mkTextobjectSelectKeymaps (
+      sectionItems keymapData.treesitterTextobjectsSelect [ "select_textobject" ]
+    );
   telescopeEnterRaw = (head (sectionItems keymapData.telescope [ "Prompt" ])).action.__raw;
   gitlinkerMapping = (head (sectionItems keymapData.gitlinker [ "Linking" ])).action;
   alphaButtons = sectionItems keymapData.alpha [ "Buttons" ];
@@ -354,11 +385,8 @@ in
           integrations = {
             aerial = true;
             alpha = true;
-            barbecue = {
-              alt_background = true;
-              bold_basename = true;
-              dim_context = true;
-              dim_dirname = true;
+            dropbar = {
+              enabled = true;
             };
             dap = {
               enabled = true;
@@ -482,6 +510,7 @@ in
                 ruff_format.command = ruffCmd;
                 ruff_organize_imports.command = ruffCmd;
                 jsonnetfmt.command = lib.getExe' pkgs.jsonnet "jsonnetfmt";
+                stylua.command = lib.getExe pkgs.stylua;
                 taplo.command = lib.getExe pkgs.taplo;
               };
             formatters_by_ft = {
@@ -514,7 +543,15 @@ in
                 "oxfmt"
               ];
             };
+            # Format every buffer with a configured conform formatter on write.
+            # `never` keeps LSP formatting (jsonls is already disabled) out of it.
+            format_on_save = {
+              lsp_format = "never";
+            };
           };
+        };
+        dropbar = {
+          enable = true;
         };
         gitlinker = {
           enable = true;
@@ -532,7 +569,10 @@ in
               "try.gitea.io" = "get_gitea_type_url";
               "try.gogs.io" = "get_gogs_type_url";
             };
-            opts.mappings = gitlinkerMapping;
+            # `mappings` is a top-level key of gitlinker.nvim's setup table;
+            # nesting it under `opts` silently left the plugin on its
+            # `<leader>gy` default.
+            mappings = gitlinkerMapping;
           };
         };
         gitsigns = {
@@ -604,6 +644,59 @@ in
               };
             };
             tailwindcss.enable = true;
+            # TypeScript/JavaScript servers are gated by whether the project
+            # provides its own TypeScript (node_modules or a yarn SDK):
+            #   - project TS present -> ts_ls drives the project's own tsserver
+            #   - otherwise          -> tsgo (TypeScript 7 "Corsa", the Go port)
+            # typescript-tools.nvim was removed: it cannot drive tsgo (it bridges
+            # the legacy tsserver protocol only) and an explicit tsserver_path
+            # would override project-local TypeScript.
+            ts_ls = {
+              enable = true;
+              extraOptions.root_dir.__raw = ''
+                function(bufnr, on_dir)
+                  local fname = vim.api.nvim_buf_get_name(bufnr)
+                  local has_local_ts = vim.fs.find(
+                    { "node_modules/typescript/lib/tsserver.js", ".yarn/sdks/typescript/lib/tsserver.js" },
+                    { path = fname, upward = true }
+                  )[1] ~= nil
+                  if has_local_ts then
+                    local root = vim.fs.root(bufnr, { "tsconfig.json", "jsconfig.json", "package.json", ".git" })
+                    on_dir(root or vim.fs.dirname(fname))
+                  end
+                  -- No project TypeScript: leave this buffer to tsgo.
+                end
+              '';
+            };
+            tsgo = {
+              enable = true;
+              # nixvim's server package map still points at the removed
+              # `typescript-go` alias; nixpkgs renamed it to `typescript`
+              # (TS7 "Corsa"). Its binary is now `tsc` (same Go binary), so
+              # lspconfig's default `tsgo` cmd would not resolve.
+              # LSP mode is `--lsp --stdio`: bare `--stdio` is rejected as an
+              # unknown compiler option (TS5023) and the server exits 1.
+              package = pkgs.typescript;
+              extraOptions.cmd = [
+                (lib.getExe' pkgs.typescript "tsc")
+                "--lsp"
+                "--stdio"
+              ];
+              extraOptions.root_dir.__raw = ''
+                function(bufnr, on_dir)
+                  local fname = vim.api.nvim_buf_get_name(bufnr)
+                  local has_local_ts = vim.fs.find(
+                    { "node_modules/typescript/lib/tsserver.js", ".yarn/sdks/typescript/lib/tsserver.js" },
+                    { path = fname, upward = true }
+                  )[1] ~= nil
+                  if not has_local_ts then
+                    local root = vim.fs.root(bufnr, { "tsconfig.json", "jsconfig.json", "package.json", ".git" })
+                    on_dir(root or vim.fs.dirname(fname))
+                  end
+                  -- Project specifies its own TypeScript: tsgo stays out of the way.
+                end
+              '';
+            };
             typos_lsp.enable = true;
             yamlls = {
               enable = true;
@@ -652,10 +745,10 @@ in
             ];
           };
         };
-        navbuddy = {
-          enable = true;
-          settings.lsp.auto_attach = true;
-        };
+        # Disabled: upstream dormant since 2025-05, overlaps aerial, and its
+        # `:Navbuddy` command is created buffer-locally on LspAttach, so a
+        # global keymap errors in buffers without a symbol-capable LSP.
+        navbuddy.enable = false;
         neo-tree = {
           enable = true;
           settings = {
@@ -745,6 +838,8 @@ in
         };
         telescope = {
           enable = true;
+          # telescope-backed `vim.ui.select`; replaces the archived dressing.nvim
+          extensions.ui-select.enable = true;
           settings.defaults = {
             layout_config.preview_width = 0.5;
             mappings.i."<CR>".__raw = telescopeEnterRaw;
@@ -763,37 +858,21 @@ in
         treesitter = {
           enable = true;
           folding.enable = true;
+          highlight.enable = true;
           highlight.disable = [ "alpha" ];
+          # Direct translation of the old `settings.highlight.additional_vim_regex_highlighting`
+          # (a legacy key that the main-branch nvim-treesitter ignores). Keeping it
+          # means Vim regex syntax also runs for filetypes that have a treesitter
+          # parser; flip to `false` for treesitter-only highlighting.
+          highlight.enableVimSyntax = true;
           nixvimInjections = true;
-          settings = {
-            highlight = {
-              enable = true;
-              additional_vim_regex_highlighting = true;
-            };
-            incremental_selection = {
-              enable = true;
-              keymaps = treesitterSelectionKeymaps;
-            };
-          };
         };
+        # Only `select.lookahead` is still read by the main-branch rewrite. The
+        # textobject keymaps live in `programs.nixvim.keymaps` (textobjectKeymaps)
+        # because upstream no longer accepts keymaps through `settings`.
         treesitter-textobjects = {
           enable = true;
-          settings = {
-            lsp_interop.enable = true;
-            move = {
-              enable = true;
-            }
-            // treesitterTextobjectsMoveMappings;
-            select = {
-              enable = true;
-              lookahead = true;
-              keymaps = treesitterTextobjectsSelectKeymaps;
-            };
-          };
-        };
-        typescript-tools = {
-          enable = true;
-          settings.expose_as_code_action = "all";
+          settings.select.lookahead = true;
         };
         aerial = {
           enable = true;
@@ -810,35 +889,56 @@ in
             };
           };
         };
-        barbecue.enable = true;
-        bufdelete.enable = true;
         comment.enable = true;
         dap-python.enable = true;
         dap-ui.enable = true;
         dap.enable = true;
         diffview.enable = true;
-        dressing.enable = true;
         fidget.enable = true;
-        firenvim.enable = true;
-        fugitive.enable = true;
-        fzf-lua.enable = true;
+        # Disabled: no browser native-messaging host is installed for the
+        # Firenvim extension, so the browser side can never reach Neovim.
+        # Run `:call firenvim#install(0)` (or drop the plugin) to make it real.
+        firenvim.enable = false;
+        # Disabled: second git client — neogit is the daily driver, gitsigns
+        # covers blame, diffview covers history. Flip back for :Git muscle memory.
+        fugitive.enable = false;
+        # Disabled: duplicate fuzzy finder — every entry point uses telescope
+        # (alpha dashboard, keymaps, vim.ui.select).
+        fzf-lua.enable = false;
         git-conflict.enable = true;
-        git-worktree.enable = true;
-        hex.enable = true;
+        # Disabled: no bindings or config references anywhere.
+        git-worktree.enable = false;
+        # Disabled: niche binary editing, no references in keymaps or config.
+        hex.enable = false;
         illuminate.enable = true;
         inc-rename.enable = true;
         indent-blankline.enable = true;
-        # Disabled: using rest.nvim instead (see rest.enable below)
+        # Disabled: kulala and rest.nvim are alternatives; both are currently off.
         # kulala.enable = true;
         lazydev.enable = true;
-        lsp-format.enable = true;
+        # Disabled: conflicts with conform-nvim, which owns formatting
+        # (lsp-format's own docs say to use one or the other).
+        lsp-format.enable = false;
         lspsaga.enable = true;
-        luasnip.enable = true;
-        markdown-preview.enable = true;
-        marks.enable = true;
-        mini.modules.align = { };
+        # Disabled: no snippet collections configured; blink-cmp completes fine
+        # without it. Re-enable together with friendly-snippets or personal snippets.
+        luasnip.enable = false;
+        # Disabled: overlaps render-markdown (in-buffer preview); the nixpkgs
+        # pin also dates to a 2023 rev.
+        markdown-preview.enable = false;
+        # Disabled: no references anywhere; upstream dormant since 2025-05.
+        marks.enable = false;
+        # `plugins.mini.enable` gates the whole module: `mini.modules.*` alone
+        # emits nothing (no plugin, no setup). bufremove backs the
+        # :Bdelete/:Bwipeout user commands below.
+        mini = {
+          enable = true;
+          modules.bufremove = { };
+        };
         neoconf.enable = true;
-        nix.enable = true;
+        # Disabled: LnL7/vim-nix is legacy regex syntax; the treesitter nix
+        # grammar handles highlighting and nil_ls provides the LSP.
+        nix.enable = false;
         nui.enable = true;
         nvim-autopairs.enable = true;
         nvim-surround.enable = true;
@@ -847,7 +947,9 @@ in
         orgmode.enable = true;
         overseer.enable = true;
         render-markdown.enable = true;
-        rest.enable = true;
+        # Disabled: no real usage found — earlier keymap hits were `:LspRestart`
+        # substrings, not rest.nvim references.
+        rest.enable = false;
         scope.enable = true;
         smart-splits.enable = true;
         spectre.enable = true;
@@ -857,12 +959,13 @@ in
         web-devicons.enable = true;
         which-key.enable = true;
       };
-      extraLuaPackages =
-        luaPkgs: with luaPkgs; [
-          # rest.nvim optional dependencies; without these Neovim warns on startup.
-          mimetypes
-          xml2lua
-        ];
+      # rest.nvim optional dependencies; only needed while rest is enabled
+      # (without them Neovim warns on startup when rest loads).
+      # extraLuaPackages =
+      #   luaPkgs: with luaPkgs; [
+      #     mimetypes
+      #     xml2lua
+      #   ];
       extraPlugins =
         with pkgs.vimPlugins;
         [
@@ -910,7 +1013,21 @@ in
             ''
           ]
         );
-      keymaps = globalKeymaps;
+      userCommands = {
+        Format = {
+          command = "lua require('conform').format({ async = true })";
+          desc = "Format buffer with conform";
+        };
+        Bdelete = {
+          command = "lua require('mini.bufremove').delete(0, false)";
+          desc = "Delete current buffer, keeping window layout";
+        };
+        Bwipeout = {
+          command = "lua require('mini.bufremove').wipeout(0, false)";
+          desc = "Wipe out current buffer, keeping window layout";
+        };
+      };
+      keymaps = globalKeymaps ++ textobjectKeymaps;
     };
   };
 

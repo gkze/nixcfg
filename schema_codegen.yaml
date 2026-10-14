@@ -78,7 +78,10 @@ targets:
       regenerate_command: python -m lib.nix.schemas._codegen
     prepare:
       dereference: inline-refs
-      merge_ref_siblings: true
+      # The vendored Nix schemas are draft-04, where siblings of `$ref` are
+      # ignored. Merging them turns e.g. build-trace `outPath` (a store-path
+      # string) into the sibling patternProperties object.
+      merge_ref_siblings: false
       preserve_root_ref: true
       recursive_ref: as-object
       schema_transforms:

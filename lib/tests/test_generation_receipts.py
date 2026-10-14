@@ -137,6 +137,16 @@ def test_generation_identity_tracks_options_config_and_environment(
     monkeypatch.setenv("CARGO_BUILD_TARGET", "different-platform")
     assert crate2nix._generation_identity(generation_target, source) != configured
 
+    # A configured-but-absent config path is still part of the identity, so a
+    # different missing path cannot silently authorize reuse of a receipt.
+    monkeypatch.setenv("NIX_USER_CONF_FILES", str(tmp_path / "absent-a.conf"))
+    missing_a = crate2nix._generation_identity(generation_target, source)
+    monkeypatch.setenv("NIX_USER_CONF_FILES", str(tmp_path / "absent-b.conf"))
+    missing_b = crate2nix._generation_identity(generation_target, source)
+    assert missing_a is not None
+    assert missing_b is not None
+    assert missing_a != missing_b
+
 
 def test_generation_identity_normalizes_nix_user_conf_files_by_content(
     monkeypatch: pytest.MonkeyPatch,

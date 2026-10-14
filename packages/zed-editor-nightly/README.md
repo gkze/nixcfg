@@ -1,14 +1,17 @@
 # Zed Nightly crate2nix packaging notes
 
-This package keeps Zed Nightly on the repo's `crate2nix` build path.
+This package keeps Zed Nightly on the
+[crate2nix](https://github.com/nix-community/crate2nix) build path of this
+repository.
 
-It does **not** delegate runtime builds to upstream Zed's coarse-grained Nix
-package. The repo-local package expression is responsible for:
+The package does **not** delegate runtime builds to the coarse-grained upstream
+Zed Nix package. The repo-local package expression has these
+responsibilities:
 
-- preparing crate-local sources for the crates that need workspace-relative
+- crate-local source preparation for the crates that need workspace-relative
   assets or packaging patches
-- building the actual app from the checked-in `Cargo.nix`
-- handling the platform-specific install phases for Darwin and Linux
+- the app build from the checked-in `Cargo.nix`
+- the platform-specific install phases for Darwin and Linux
 
 ## File ownership
 
@@ -21,23 +24,27 @@ package. The repo-local package expression is responsible for:
 
 - `default.nix`
   - evaluator-visible crate2nix graph rooted at the locked Zed input
-  - crate-local source preparation for workspace-relative assets/build scripts
+  - crate-local source preparation for workspace-relative assets and build
+    scripts
   - shared crate overrides and platform-specific install logic
 - `normalize_cargo_nix.py`
-  - pure package-specific callback loaded by the central crate2nix normalizer
+  - pure package-specific callback that the central crate2nix normalizer loads
 - `install_zed_nightly_app.sh`
   - Darwin app bundle installer used by the crate2nix build
 
 ## Current strategy
 
-- evaluate `Cargo.nix` against the locked Zed input, so package evaluation never
-  needs to realize a source-preparation derivation
-- preserve crate2nix's per-crate source filtering by preparing only the crates
-  that need source surgery; unaffected crates keep their original cache boundary
+- evaluate `Cargo.nix` against the locked Zed input, so package evaluation
+  never needs to realize a source-preparation derivation
+- preserve the per-crate source filtering of crate2nix and prepare only the
+  crates that need source surgery. Unaffected crates keep their original cache
+  boundary.
 - retain the full `patchedSrc` tree only for update-time Cargo.nix generation
-- keep the checked-in `Cargo.nix` / `crate-hashes.json` refresh flow for update automation
+- keep the checked-in `Cargo.nix` and `crate-hashes.json` refresh flow for
+  update automation
 - use one package expression for both Darwin and Linux
-- keep `crate2nixSourceOnly` available for CI/update tooling that only needs the prepared workspace source
+- keep `crate2nixSourceOnly` available for CI tooling and update tooling that
+  needs the prepared workspace source only
 
 ## Regenerating `Cargo.nix`
 
@@ -47,8 +54,8 @@ Fast path:
 nix run .#nixcfg -- ci pipeline crate2nix --write --package zed-editor-nightly
 ```
 
-The `.#` form evaluates Git's tracked source set. Stage new or renamed artifacts before invoking it
-so Nix can see them.
+The `.#` form evaluates the Git tracked source set. Stage new or renamed
+artifacts before this command, so Nix can see them.
 
 Manual flow:
 
@@ -57,7 +64,7 @@ nix build --impure --no-link --print-out-paths \
   .#zed-editor-nightly-crate2nix-src
 ```
 
-Save the printed path as `PATCHED_SRC`, then:
+Save the printed path as `PATCHED_SRC`. Then run:
 
 ```bash
 crate2nix generate \
@@ -88,4 +95,13 @@ ZED=$(nix path-info .#pkgs.aarch64-darwin.zed-editor-nightly)/bin/zed
 "$ZED" --help
 ```
 
-For broader crate2nix guidance in this repo, see `docs/crate2nix-rust-workspaces.md`.
+For broader crate2nix guidance in this repo, see the
+[packaging documentation](../../docs/packaging.md).
+
+## Related
+
+- [Packaging](../../docs/packaging.md)
+- [Source modifications](../../docs/source-modifications.md)
+- [Development](../../docs/development.md)
+- [Update pipeline](../../docs/update/README.md)
+- [Update safety](../../docs/update/safety.md)

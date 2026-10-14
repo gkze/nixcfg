@@ -1,6 +1,5 @@
 """Contracts for updater-owned MCP runtime package pins."""
 
-from pathlib import Path
 from types import ModuleType
 
 import pytest
@@ -231,33 +230,47 @@ def test_latest_check_uses_current_source_context() -> None:
     assert run_async(updater._is_latest(context, info)) is True
 
 
-@pytest.mark.parametrize(
-    ("path", "source_path"),
-    [
-        (
-            REPO_ROOT / "home/george/mcp-catalog.nix",
-            "../../packages/mcp-runtime-tools/sources.json",
-        ),
-        (
-            REPO_ROOT / "lib/mcp-remote-wrapper.nix",
-            "../packages/mcp-runtime-tools/sources.json",
-        ),
-    ],
+_CONSUMER_SCAN_EXCLUDES = (
+    ".claude/worktrees",
+    ".direnv",
+    ".venv",
+    "node_modules",
+    "result",
 )
-def test_nix_consumers_load_updater_owned_runtime_pins(
-    path: Path,
-    source_path: str,
-) -> None:
-    """Both MCP Nix consumers read the updater surface structurally."""
+
+
+def _nix_consumers_of_runtime_pins() -> list[str]:
+    """Return the repo-relative Nix files that read the updater-owned pins."""
+    consumers = []
+    for path in REPO_ROOT.rglob("*.nix"):
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        if any(excluded in relative for excluded in _CONSUMER_SCAN_EXCLUDES):
+            continue
+        if "mcp-runtime-tools/sources.json" in path.read_text(encoding="utf-8"):
+            consumers.append(relative)
+    return sorted(consumers)
+
+
+def test_nix_consumers_load_updater_owned_runtime_pins() -> None:
+    """The runtime pins have exactly one Nix consumer, read structurally.
+
+    The ChatGPT catalog stopped consuming these pins when it moved to Executor
+    gateway endpoints, so the consumer *set* is asserted rather than listed: a
+    second consumer has to be a deliberate decision, not a stale entry.
+    """
+    assert _nix_consumers_of_runtime_pins() == ["lib/mcp-remote-wrapper.nix"]
+
     function = expect_instance(
-        parse_nix_expr(path.read_text(encoding="utf-8")),
+        parse_nix_expr(
+            (REPO_ROOT / "lib/mcp-remote-wrapper.nix").read_text(encoding="utf-8")
+        ),
         FunctionDefinition,
     )
     body = expect_instance(function.output, AttributeSet)
 
     assert_nix_ast_equal(
         expect_binding(body.scope, "mcpRuntimeSource").value,
-        f"builtins.fromJSON (builtins.readFile {source_path})",
+        "builtins.fromJSON (builtins.readFile ../packages/mcp-runtime-tools/sources.json)",
     )
     assert_nix_ast_equal(
         expect_binding(body.scope, "mcpRuntimePins").value,

@@ -65,6 +65,43 @@ _HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
             f"download '{_URL}' failed\nretry {_URL}",
             f"download '{_SAFE}' failed\nretry {_SAFE}",
         ),
+        # Regression: the candidate match used to stop at the first space or
+        # quote and emit the remainder - including the query - verbatim.
+        (
+            "curl /tmp/out https://user:SYNTHETIC@host/my file.zip?token=SYNTHETIC",
+            "curl /tmp/out https://REDACTED@host/my file.zip?REDACTED",
+        ),
+        (
+            "see https://user:SY'NTHETIC@host/p?token=SYNTHETIC for details",
+            "see https://REDACTED@host/p?REDACTED for details",
+        ),
+        # A following question mark in prose is not a query and stays readable.
+        (
+            "see https://example.test and What? nothing",
+            "see https://example.test and What? nothing",
+        ),
+        # A continuation that itself contains a URL is folded into the first
+        # candidate, so the second start must not be re-scanned or re-emitted.
+        (
+            "https://a.test/x https://b.test/y?k=SYNTHETIC",
+            "https://a.test/x https://b.test/y?REDACTED",
+        ),
+        # A closing quote ends the candidate, so the punctuation around it in a
+        # serialized payload survives redaction intact.
+        (
+            '{"url": "https://cdn.test/a.dmg?sig=SYNTHETIC", "size": 12}',
+            '{"url": "https://cdn.test/a.dmg?REDACTED", "size": 12}',
+        ),
+        (
+            'pair "https://a.test/x?k=SYNTHETIC","https://b.test/y?sig=SYNTHETIC"',
+            'pair "https://a.test/x?REDACTED","https://b.test/y?REDACTED"',
+        ),
+        # A quote followed by punctuation and a query still belongs to one URL,
+        # so the credential after it cannot be left verbatim.
+        (
+            'https://x.test/a",b?sig=SYNTHETIC',
+            'https://x.test/a",b?REDACTED',
+        ),
     ],
 )
 def test_url_diagnostics_hide_all_credentials(message: str, expected: str) -> None:

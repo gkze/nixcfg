@@ -88,7 +88,6 @@ let
         "cleanshot"
         "clearly"
         "codeedit"
-        "codex-desktop"
         "comet"
         "commander"
         "conductor"

@@ -151,6 +151,70 @@ def test_reason_rejects_location_without_versioned_object_segment(
         )
 
 
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"x-desktop-version": "0.1.88"},
+        {"X-Desktop-Version": " 0.1.88 "},
+        {
+            "x-desktop-version": "0.1.88",
+            "x-ara-desktop-version": "0.1.64",
+        },
+    ],
+)
+def test_reason_prefers_x_desktop_version_over_stale_feed(
+    monkeypatch: pytest.MonkeyPatch,
+    headers: dict[str, str],
+) -> None:
+    """Update 38220443819: the feed stayed on 0.1.64; the 307 names the object."""
+    _feed(
+        monkeypatch,
+        {"name": "0.1.64", "url": "https://example.test/private?signature=test"},
+    )
+    info = run_async(
+        updater.AraUpdater().fetch_latest(
+            _FakeSession(
+                _FakeResponse(
+                    headers={
+                        **headers,
+                        "location": (
+                            "https://ara-desktop-releases.t3.storage.dev"
+                            "/desktop/stable/0.1.88/Reason.dmg?signature=test"
+                        ),
+                    }
+                )
+            ),
+            context=UpdateContext(current=None),
+        )
+    )
+    assert info.version == "0.1.88"
+
+
+def test_reason_rejects_x_desktop_version_location_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A new version header still has to name the same object as Location."""
+    _feed(monkeypatch, {"name": "0.1.64"})
+    with pytest.raises(RuntimeError, match="versioned object for 0.1.88"):
+        run_async(
+            updater.AraUpdater().fetch_latest(
+                _FakeSession(
+                    _FakeResponse(
+                        headers={
+                            "x-desktop-version": "0.1.88",
+                            "x-ara-desktop-version": "0.1.64",
+                            "location": (
+                                "https://ara-desktop-releases.t3.storage.dev"
+                                "/desktop/stable/0.1.64/Reason.dmg?signature=test"
+                            ),
+                        }
+                    )
+                ),
+                context=UpdateContext(current=None),
+            )
+        )
+
+
 def test_reason_rejects_location_that_is_not_the_versioned_object(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

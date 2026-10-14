@@ -6,6 +6,17 @@ import tempfile
 from pathlib import Path
 
 
+def discard_temp_file(tmp_path: Path | None) -> None:
+    """Remove a leftover temp file when a write did not complete.
+
+    The parameter stays optional because the caller assigns it only after the
+    temp file exists: a failure inside the write leaves it ``None`` and there is
+    nothing to unlink.
+    """
+    if tmp_path is not None and tmp_path.exists():
+        tmp_path.unlink()
+
+
 def atomic_write_text(path: Path, content: str, *, mkdir: bool = False) -> None:
     """Atomically write *content* to *path* via temp-file, fsync, and rename.
 
@@ -35,8 +46,7 @@ def atomic_write_text(path: Path, content: str, *, mkdir: bool = False) -> None:
                 os.fchmod(tmp_file.fileno(), mode)
         tmp_path.replace(path)
     finally:
-        if tmp_path is not None and tmp_path.exists():
-            tmp_path.unlink()
+        discard_temp_file(tmp_path)
 
 
 def atomic_write_bytes(path: Path, content: bytes, *, mkdir: bool = False) -> None:
@@ -62,8 +72,7 @@ def atomic_write_bytes(path: Path, content: bytes, *, mkdir: bool = False) -> No
                 os.fchmod(tmp_file.fileno(), mode)
         tmp_path.replace(path)
     finally:
-        if tmp_path is not None and tmp_path.exists():
-            tmp_path.unlink()
+        discard_temp_file(tmp_path)
 
 
 def atomic_write_json(

@@ -26,6 +26,7 @@ from lib.update.events import (
 from lib.update.nix import _build_package_path_attr_expr
 from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
+from lib.update.updaters.strategies import url_without_query
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -898,7 +899,7 @@ def test_conductor_updater_paths(
         == "1.2.3"
     )
     assert (
-        updater._url_without_query(
+        url_without_query(
             "https://cdn.crabnebula.app/asset/example?from=latest#fragment"
         )
         == "https://cdn.crabnebula.app/asset/example"
@@ -943,7 +944,7 @@ def test_conductor_updater_paths(
         url="https://cdn.crabnebula.app/asset/conductor-arm64.dmg?token=ephemeral",
     )
     resolved = _run(updater._fetch_resolved_artifact(head_session, "aarch64-darwin"))
-    assert resolved == conductor_module._ResolvedArtifact(
+    assert resolved == conductor_module.ResolvedArtifact(
         "1.2.3",
         "https://cdn.crabnebula.app/asset/conductor-arm64.dmg",
     )
@@ -964,7 +965,7 @@ def test_conductor_updater_paths(
         _run(updater._fetch_resolved_artifact(failed_head_session, "x86_64-darwin"))
 
     async def _artifact(_session: object, platform: str) -> object:
-        return conductor_module._ResolvedArtifact(
+        return conductor_module.ResolvedArtifact(
             "1.2.3",
             f"https://cdn.crabnebula.app/asset/{platform}",
         )
@@ -989,7 +990,7 @@ def test_conductor_updater_paths(
 
     async def _mismatched_artifact(_session: object, platform: str) -> object:
         version = "1.2.3" if platform == "aarch64-darwin" else "1.2.4"
-        return conductor_module._ResolvedArtifact(
+        return conductor_module.ResolvedArtifact(
             version,
             f"https://cdn.crabnebula.app/asset/{platform}",
         )

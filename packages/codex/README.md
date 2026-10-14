@@ -1,6 +1,8 @@
 # Codex crate2nix packaging notes
 
-This package builds Codex with `crate2nix` from the upstream Rust workspace.
+This package builds Codex with
+[crate2nix](https://github.com/nix-community/crate2nix) from the upstream Rust
+workspace.
 
 ## File ownership
 
@@ -14,24 +16,37 @@ This package builds Codex with `crate2nix` from the upstream Rust workspace.
 - `default.nix`
   - update-time source preparation for the checked-in workspace layout
   - build-time patches for the individual crates that need them
-  - crate overrides and install/smoke checks
+  - crate overrides, install checks, and smoke checks
   - final package assembly
 - `normalize_cargo_nix.py`
-  - pure package-specific callback loaded by the central crate2nix normalizer
+  - pure package-specific callback that the central crate2nix normalizer loads
 
 ## Current strategy
 
-- import checked-in `Cargo.nix` with the evaluator-visible `codex` flake input as `rootSrc`
-- let `Cargo.nix` retain its per-crate source filters, so unrelated workspace changes do not
-  invalidate every local crate
+- import the checked-in `Cargo.nix` with the evaluator-visible `codex` flake
+  input as `rootSrc`
+- let `Cargo.nix` keep its per-crate source filters, so unrelated workspace
+  changes do not invalidate every local crate
 - apply production source surgery only in the affected crate overrides
-- keep the complete `patchedSrc` workspace solely as the crate2nix regeneration artifact
+- keep the complete `patchedSrc` workspace only as the crate2nix regeneration
+  artifact
 - keep compatibility shims centralized in `crateOverrides`
-- fail evaluation early if the checked-in `Cargo.nix` version no longer matches the upstream
-  `codex-cli` crate version
+- fail evaluation early if the checked-in `Cargo.nix` version no longer matches
+  the upstream `codex-cli` crate version
 
-This split is deliberate: evaluation never needs to realize and inspect `patchedSrc`, while the
-updater still regenerates `Cargo.nix` from exactly the workspace shape it expects.
+The split is deliberate. Evaluation never needs to realize and inspect
+`patchedSrc`. The updater still regenerates `Cargo.nix` from exactly the
+workspace shape that it expects.
+
+```mermaid
+flowchart TD
+  A["codex flake input<br/>evaluator-visible"] --> B["Cargo.nix<br/>checked in"]
+  B --> C["crate overrides<br/>build-time patches"]
+  C --> D["codex package"]
+  E["update-time source preparation"] --> F["patchedSrc<br/>regeneration only"]
+  F --> G["crate2nix generate"]
+  G --> B
+```
 
 ## Regenerating `Cargo.nix`
 
@@ -39,8 +54,8 @@ updater still regenerates `Cargo.nix` from exactly the workspace shape it expect
 nix run .#nixcfg -- ci pipeline crate2nix --write --package codex
 ```
 
-The `.#` form evaluates Git's tracked source set. Stage new or renamed artifacts before invoking it
-so Nix can see them.
+The `.#` form evaluates the Git tracked source set. Stage new or renamed
+artifacts before this command, so Nix can see them.
 
 For the lower-level manual flow:
 
@@ -64,3 +79,11 @@ CODEX=$(nix path-info .#codex)/bin/codex
 "$CODEX" --version
 "$CODEX" --help >/dev/null
 ```
+
+## Related
+
+- [Packaging](../../docs/packaging.md)
+- [Source modifications](../../docs/source-modifications.md)
+- [Development](../../docs/development.md)
+- [Update pipeline](../../docs/update/README.md)
+- [Update safety](../../docs/update/safety.md)

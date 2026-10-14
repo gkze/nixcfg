@@ -181,7 +181,7 @@
         claude.package = pkgs.claude;
         codeedit.package = pkgs.codeedit;
         "code-cursor".package = pkgs.code-cursor;
-        codex.package = pkgs.codex-desktop;
+        codex.package = pkgs.chatgpt;
         cogito.package = pkgs.cogito;
         comet.package = pkgs.comet;
         commander.package = pkgs.commander;
@@ -215,7 +215,6 @@
           scope = "system";
         };
         notion.package = pkgs.notion-app;
-        opencode.package = pkgs.opencode-desktop-dev;
         orbstack = {
           package = pkgs.orbstack;
           scope = "system";
@@ -304,8 +303,13 @@
         # optional apps just to evaluate unrelated checks.
         heavyOptional.enable = lib.mkDefault false;
         cloud.enable = lib.mkDefault false;
-        inherit (managedMacAppProjection) excludePackagesByName;
+        excludePackagesByName = managedMacAppProjection.excludePackagesByName ++ [ "opencode-desktop-dev" ];
         extraPackages = with pkgs; [
+          # Topgrade's cargo step needs cargo-install-update; without it the
+          # step skips and the cargo-installed binaries never get upgraded.
+          # cargo-cache covers the cleanup half of that step.
+          cargo-cache
+          cargo-update
           claude-code
           docker
           docker-compose
@@ -316,6 +320,12 @@
         ];
       };
       macApps.applications = managedMacAppProjection.applications;
+      # OpenCode is installed from the fork's releases: Bun manages the CLI,
+      # and the desktop app is installed separately. Keep live profiles intact.
+      opencode = {
+        enable = false;
+        linkConfigs = false;
+      };
       git = {
         signingKey = userMeta.gpg.keys.signing;
         identities = {
@@ -551,7 +561,14 @@
           "home_manager"
           # "cursor"
         ];
-        git.repos = [ (slib.srcDirBase system) ];
+        # `git.repos` entries are glob patterns, not directory names. A bare
+        # "Development" matched only that directory, which is not itself a
+        # repository, so Topgrade reported "No repositories to pull" and pulled
+        # nothing. Match the <host>/<owner>/<repo> layout instead, and keep it
+        # fixed-depth: `**` walks every directory and also picks up build-cache
+        # `.git` directories.
+        git.repos = [ "~/${slib.srcDirBase system}/*/*/*" ];
+        git.pull_predefined = false;
         misc = {
           assume_yes = true;
           cleanup = true;

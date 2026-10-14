@@ -121,8 +121,14 @@ in
           "nix-command"
           "flakes"
         ];
-        keep-derivations = true;
-        keep-outputs = true;
+        # Keep neither derivations nor their outputs alive for GC roots.
+        # With both true, every path reachable from a generation pins its
+        # full build graph, which kept /nix near 135 GiB despite daily GC
+        # (audit 2026-10-13: 134.5 GB live vs 13.6 GB dead). Trade-off:
+        # GC'd packages re-download from a substituter instead of being
+        # rebuilt from a retained derivation.
+        keep-derivations = false;
+        keep-outputs = false;
       }
       // storeHeadroomSettings
       // lib.optionalAttrs (cfg.nix.substituters != [ ]) {

@@ -8,7 +8,7 @@ from lib import json_utils
 from lib.nix.models.flake_lock import (
     FlakeLockNode,  # noqa: TC001 -- candidate metadata is validated at runtime
 )
-from lib.update.locked_source import resolve_locked_source
+from lib.update.locked_source import locked_github_source, resolve_locked_source
 from lib.update.updaters.metadata import MappingMetadata
 
 if TYPE_CHECKING:
@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
     from lib.update.config import UpdateConfig
 
-_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _EXACT_VERSION_PATTERN = re.compile(
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
 )
@@ -43,28 +42,6 @@ class ElectronManifestMetadata(MappingMetadata):
             "manifestPath": self.manifest_path,
             "manifestVersion": self.manifest_version,
         }
-
-
-def locked_github_source(
-    node: FlakeLockNode,
-    *,
-    context: str,
-) -> tuple[str, str, str]:
-    """Return immutable GitHub coordinates from a complete flake lock node."""
-    locked = node.locked
-    if (
-        locked is None
-        or locked.type != "github"
-        or not locked.owner
-        or not locked.repo
-        or not locked.rev
-    ):
-        msg = f"{context} must resolve to a complete GitHub source"
-        raise RuntimeError(msg)
-    if _COMMIT_PATTERN.fullmatch(locked.rev) is None:
-        msg = f"{context} revision must be an immutable commit, got {locked.rev!r}"
-        raise RuntimeError(msg)
-    return locked.owner, locked.repo, locked.rev
 
 
 def electron_manifest_contract(
@@ -130,5 +107,4 @@ __all__ = [
     "ElectronManifestMetadata",
     "electron_manifest_contract",
     "fetch_flake_electron_manifest",
-    "locked_github_source",
 ]

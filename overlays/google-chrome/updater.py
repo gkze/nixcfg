@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING, ClassVar
 import aiohttp
 
 from lib import json_utils
+from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.events import EventSink, ignore_event
-from lib.update.net import HTTP_BAD_REQUEST, fetch_json, fetch_url
+from lib.update.net import fetch_json, fetch_url
 from lib.update.updaters import (
     UpdateContext,
     Updater,
@@ -70,7 +71,7 @@ class _ChromeReleaseMetadata(MappingMetadata):
 
 
 @dataclass(frozen=True, slots=True)
-class _ResolvedArtifact:
+class _ResolvedOmahaArtifact:
     url: str
     sri_hash: str
 
@@ -203,7 +204,7 @@ def _parse_omaha_artifact(
     payload: bytes,
     *,
     expected_version: str,
-) -> _ResolvedArtifact:
+) -> _ResolvedOmahaArtifact:
     """Return the immutable DMG URL when Omaha agrees with VersionHistory."""
     if not payload.startswith(_ANTI_XSSI_PREFIX):
         msg = "Google Chrome Omaha response omitted its anti-XSSI prefix"
@@ -334,7 +335,7 @@ def _parse_omaha_artifact(
             f"{len(artifact_urls)} immutable Google DMG URLs"
         )
         raise RuntimeError(msg)
-    return _ResolvedArtifact(
+    return _ResolvedOmahaArtifact(
         url=artifact_urls.pop(),
         sri_hash=_sri_sha256(
             package_hash,
@@ -368,7 +369,7 @@ def _parse_linux_artifact(
     payload: bytes,
     *,
     expected_version: str,
-) -> _ResolvedArtifact:
+) -> _ResolvedOmahaArtifact:
     """Return the immutable DEB URL matching VersionHistory and apt metadata."""
     try:
         text = payload.decode()
@@ -430,7 +431,7 @@ def _parse_linux_artifact(
             f"version: expected {expected_version}, observed {package_version!r}"
         )
         raise ChromeLinuxRolloutLagError(msg)
-    return _ResolvedArtifact(
+    return _ResolvedOmahaArtifact(
         url=f"{_LINUX_REPOSITORY_URL}{filename}",
         sri_hash=sri_hash,
     )
@@ -470,7 +471,7 @@ class GoogleChromeUpdater(Updater):
         session: aiohttp.ClientSession,
         *,
         expected_version: str,
-    ) -> _ResolvedArtifact:
+    ) -> _ResolvedOmahaArtifact:
         os_version, os_arch = _darwin_host_identity()
         headers = {
             "User-Agent": self.config.default_user_agent,
@@ -506,7 +507,7 @@ class GoogleChromeUpdater(Updater):
         session: aiohttp.ClientSession,
         *,
         expected_version: str,
-    ) -> _ResolvedArtifact:
+    ) -> _ResolvedOmahaArtifact:
         payload = await fetch_url(
             session,
             _LINUX_PACKAGES_URL,

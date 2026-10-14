@@ -17,6 +17,8 @@ from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
+    darwin_guarded_call,
+    darwin_guarded_exports,
     expect_binding,
     expect_scope_binding,
 )
@@ -256,7 +258,8 @@ def test_binary_darwin_overlay_exports_migrated_app(
         nix_file_expr("overlays/binary-darwin-apps.nix"),
         FunctionDefinition,
     )
-    exports = expect_instance(overlay.output, AttributeSet)
+    # The exports are the argument of the Darwin-only guard.
+    exports = darwin_guarded_exports(overlay)
 
     assert_nix_ast_equal(
         expect_binding(exports.values, package_name).value,
@@ -288,12 +291,14 @@ def test_binary_darwin_overlay_forwards_flake_context_to_source_apps(
         "final",
         "inputs",
         "outputs",
+        "prev",
         "sources",
     }
-    assert len(overlay.argument_set) == 5
+    assert len(overlay.argument_set) == 6
     assert sum(isinstance(argument, Ellipses) for argument in overlay.argument_set) == 1
+    guarded = darwin_guarded_call(overlay)
     helper = expect_instance(
-        expect_scope_binding(overlay.output, "callDarwinAppPackage").value,
+        expect_scope_binding(guarded, "callDarwinAppPackage").value,
         FunctionDefinition,
     )
     helper_call = expect_instance(helper.output, FunctionCall)
@@ -317,7 +322,8 @@ def test_binary_darwin_overlay_forwards_flake_context_to_source_apps(
         if isinstance(argument, Identifier)
     }
     assert required_context <= package_arguments
-    exports = expect_instance(overlay.output, AttributeSet)
+    assert guarded.argument is not None
+    exports = expect_instance(guarded.argument, AttributeSet)
     assert_nix_ast_equal(
         expect_binding(exports.values, package_name).value,
         f'callDarwinAppPackage "{package_name}"',

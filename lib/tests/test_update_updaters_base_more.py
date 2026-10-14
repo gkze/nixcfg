@@ -51,7 +51,7 @@ from lib.update.updaters import (
 )
 from lib.update.updaters import flake_backed as flake_backed_module
 from lib.update.updaters import materialization as materialization_module
-from lib.update.updaters.core import _verify_platform_versions
+from lib.update.updaters.core import verify_platform_versions
 from lib.update.updaters.flake_backed import (
     BunNodeModulesHashUpdater,
     CargoVendorHashUpdater,
@@ -600,9 +600,9 @@ async def _with_session[T](
 
 def test_verify_platform_versions() -> None:
     """Accept matching platform versions and reject mismatches."""
-    assert _verify_platform_versions({"a": "1", "b": "1"}, "x") == "1"
-    with pytest.raises(RuntimeError, match="version mismatch"):
-        _verify_platform_versions({"a": "1", "b": "2"}, "x")
+    assert verify_platform_versions({"a": "1", "b": "1"}, context="x") == "1"
+    with pytest.raises(RuntimeError, match="x: "):
+        verify_platform_versions({"a": "1", "b": "2"}, context="x")
 
 
 def test_updater_is_latest_and_update_stream_paths() -> None:

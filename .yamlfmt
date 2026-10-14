@@ -13,5 +13,9 @@ formatter:
   indent: 2
   include_document_start: true
   max_line_length: 100
+  # Reflowing folded scalars joins authored breaks into lines longer than the
+  # yamllint `line-length` rule (max 100) allows. Scanning them as literal
+  # keeps the authored wrapping, so the formatter and the linter agree.
+  scan_folded_as_literal: true
   trim_trailing_whitespace: true
   eof_newline: true

@@ -1,8 +1,6 @@
 """Updater for Melty Conductor release artifacts."""
 
 import re
-import urllib.parse
-from dataclasses import dataclass
 from email.message import Message
 from typing import TYPE_CHECKING, ClassVar
 
@@ -11,20 +9,15 @@ import aiohttp
 if TYPE_CHECKING:
     from lib.update.updaters import UpdateContext
 
+from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.updaters import (
     AssetURLsMetadataUpdater,
     VersionInfo,
     register_updater,
 )
+from lib.update.updaters.core import verify_platform_versions
 from lib.update.updaters.metadata import AssetURLsMetadata
-
-HTTP_BAD_REQUEST = 400
-
-
-@dataclass(frozen=True, slots=True)
-class _ResolvedArtifact:
-    version: str
-    url: str
+from lib.update.updaters.strategies import ResolvedArtifact, url_without_query
 
 
 @register_updater
@@ -49,22 +42,11 @@ class ConductorUpdater(AssetURLsMetadataUpdater):
             raise RuntimeError(err)
         return match.group(1)
 
-    @staticmethod
-    def _url_without_query(url: str) -> str:
-        parsed = urllib.parse.urlsplit(url)
-        return urllib.parse.urlunsplit((
-            parsed.scheme,
-            parsed.netloc,
-            parsed.path,
-            "",
-            "",
-        ))
-
     async def _fetch_resolved_artifact(
         self,
         session: aiohttp.ClientSession,
         platform: str,
-    ) -> _ResolvedArtifact:
+    ) -> ResolvedArtifact:
         discovery_url = f"{self.BASE_URL}/{self.PLATFORMS[platform]}"
         timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
         async with session.head(
@@ -81,9 +63,9 @@ class ConductorUpdater(AssetURLsMetadataUpdater):
             version = self._version_from_header(
                 response.headers.get("Content-Disposition", "")
             )
-            return _ResolvedArtifact(
+            return ResolvedArtifact(
                 version=version,
-                url=self._url_without_query(str(response.url)),
+                url=url_without_query(str(response.url)),
             )
 
     async def fetch_latest(
@@ -95,15 +77,15 @@ class ConductorUpdater(AssetURLsMetadataUpdater):
             platform: await self._fetch_resolved_artifact(session, platform)
             for platform in self.PLATFORMS
         }
-        versions = {artifact.version for artifact in artifacts.values()}
-        if len(versions) != 1:
-            version_map = {
-                platform: artifact.version for platform, artifact in artifacts.items()
-            }
-            msg = f"Conductor release metadata returned mismatched versions: {version_map}"
-            raise RuntimeError(msg)
+        version_map = {
+            platform: artifact.version for platform, artifact in artifacts.items()
+        }
+        version = verify_platform_versions(
+            version_map,
+            context="Conductor release metadata returned mismatched versions",
+        )
         return VersionInfo(
-            version=versions.pop(),
+            version=version,
             metadata=AssetURLsMetadata({
                 platform: artifact.url for platform, artifact in artifacts.items()
             }),

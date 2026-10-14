@@ -14,9 +14,6 @@ let
       sort = "datemodified";
     }
   ];
-  standardRemoveOthers = homeDirectory: [
-    "${homeDirectory}/Applications"
-  ];
 in
 {
   mkDockContext =
@@ -56,8 +53,6 @@ in
       options,
       others ? standardOthers homeDirectory,
       pkgs ? null,
-      removeApps ? [ ],
-      removeOthers ? standardRemoveOthers homeDirectory,
     }:
     let
       inherit (lib)
@@ -78,19 +73,6 @@ in
         datecreated = "date-created";
         kind = "kind";
       };
-
-      removeCommands =
-        section: items:
-        concatMapStringsSep "\n" (item: ''
-          if "$dockutil" --find ${escapeShellArg item} --section ${escapeShellArg section} >/dev/null 2>&1; then
-            if ! "$dockutil" --remove ${escapeShellArg item} --section ${escapeShellArg section} --no-restart >/dev/null; then
-              echo ${escapeShellArg "warning: failed to remove stale Dock item ${item}"} >&2
-            fi
-          fi
-        '') items;
-
-      removeAppCommands = removeCommands "apps" removeApps;
-      removeOtherCommands = removeCommands "others" removeOthers;
 
       positionedApps = lib.imap1 (position: app: { inherit app position; }) apps;
       positionedOthers = lib.imap1 (position: other: other // { inherit position; }) others;
@@ -143,8 +125,15 @@ in
               exit 0
             fi
 
-            ${removeOtherCommands}
-            ${removeAppCommands}
+            # The declaration owns both pinned sections: reset, then add exactly
+            # what is declared, so the Dock cannot drift from this module. The
+            # reset is deliberately destructive - every item the user pinned by
+            # hand is removed on each activation - and a failed reset is fatal,
+            # because a partially built Dock is worse than a stale one.
+            if ! "$dockutil" --remove all --no-restart; then
+              echo "error: failed to clear Dock items" >&2
+              exit 1
+            fi
             ${addAppCommands}
             ${addOtherCommands}
             /usr/bin/killall Dock >/dev/null 2>&1 || true

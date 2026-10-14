@@ -124,10 +124,10 @@ def test_find_root_prefers_env_and_root_marker_search(
     env_root = tmp_path / "env-root"
     env_root.mkdir()
     monkeypatch.setenv("REPO_ROOT", str(env_root))
-    update_paths.find_root.cache_clear()
+    update_paths.clear_root_cache()
     assert update_paths.find_root() == env_root.resolve()
     monkeypatch.delenv("REPO_ROOT", raising=False)
-    update_paths.find_root.cache_clear()
+    update_paths.clear_root_cache()
 
     repo_root = tmp_path / "repo"
     nested = repo_root / "nested" / "work"
@@ -140,7 +140,7 @@ def test_find_root_prefers_env_and_root_marker_search(
     assert update_paths.find_root() == repo_root.resolve()
     assert update_paths.find_root(existing_tool) == repo_root.resolve()
 
-    update_paths.find_root.cache_clear()
+    update_paths.clear_root_cache()
     with pytest.raises(RuntimeError, match=r"Could not find repo root"):
         update_paths.find_root(tmp_path / "missing")
 
@@ -190,7 +190,7 @@ def test_repo_root_proxy_string_helpers(
     This covers the lazy repo-root proxy helpers used across update modules.
     """
     monkeypatch.setenv("REPO_ROOT", str(tmp_path))
-    update_paths.get_repo_root.cache_clear()
+    update_paths.clear_root_cache()
 
     relative_proxy = update_paths._RepoPathProxy("flake.nix")
     resolved_root = tmp_path.resolve()

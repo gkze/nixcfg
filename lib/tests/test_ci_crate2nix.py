@@ -1058,7 +1058,6 @@ def test_package_registry_metadata_overrides_are_intentional() -> None:
         "cleanshot",
         "clearly",
         "codeedit",
-        "codex-desktop",
         "comet",
         "commander",
         "conductor",

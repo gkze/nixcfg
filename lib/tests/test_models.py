@@ -356,7 +356,8 @@ class TestFlakeLock:
             nodes={
                 "root": FlakeLockNode.model_construct(
                     inputs={
-                        "broken": cast("list[str]", [None, "leaf"]),
+                        # Deliberately malformed: a None entry must exit early.
+                        "broken": [None, "leaf"],
                     }
                 ),
                 "leaf": FlakeLockNode.model_construct(
@@ -477,6 +478,14 @@ class TestSourcesFile:
             HashCollection.model_validate(1)
 
         assert HashCollection().to_json() == {}
+
+        # `to_json` emits entries only, so a value carrying both representations
+        # would lose every mapping hash on the next sources.json rewrite.
+        with pytest.raises(ValueError, match="never both"):
+            HashCollection.model_validate({
+                "entries": [entry.to_dict()],
+                "mapping": {"darwin": h2},
+            })
 
     def test_hash_entry_create_validates_optional_fields(self) -> None:
         """HashEntry.create validates optional string and urls kwargs."""
@@ -837,7 +846,8 @@ class TestSourcesFile:
             match=r"sources\.json top-level keys must be strings",
         ):
             SourcesFile.from_dict(
-                cast("dict[str, object]", {1: {"hashes": {"linux": h1}}})
+                # Deliberately malformed: a non-string top-level key must raise.
+                cast("dict[str, object]", {1: {"hashes": {"linux": h1}}})  # ty: ignore[disjoint-cast]
             )
 
         bad_json = tmp_path / "bad-sources.json"

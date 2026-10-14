@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 import aiohttp
 
-from lib.update.net import HTTP_BAD_REQUEST
+from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.updaters import (
     DownloadUrlMetadataUpdater,
     VersionInfo,

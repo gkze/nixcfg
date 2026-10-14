@@ -17,6 +17,21 @@ def _no_persistent_run_log(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolated_crate2nix_cargo_home(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """Keep crate2nix's Cargo home inside the test's temporary directory.
+
+    A real target refresh creates this directory eagerly
+    (``crate2nix._crate2nix_cargo_home``), so without a redirect the suite
+    writes into the developer's ``~/.cache/nixcfg`` and fails on any read-only
+    home. Tests that assert the default/override resolution set these variables
+    themselves and still win, because monkeypatch unwinds in reverse order.
+    """
+    monkeypatch.setenv(
+        "NIXCFG_CRATE2NIX_CARGO_HOME", str(tmp_path / "crate2nix-cargo-home")
+    )
+
+
+@pytest.fixture(autouse=True)
 def _stable_cli_help_geometry(monkeypatch: pytest.MonkeyPatch) -> None:
     """Hosted macos-15 quality sees a degenerate TTY; Rich then omits flags."""
     monkeypatch.setenv("COLUMNS", "200")

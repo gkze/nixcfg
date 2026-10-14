@@ -461,3 +461,27 @@ def test_clearly_package_rewrites_liquid_glass_before_xcodebuild() -> None:
         '__NIX_INTERP__ __NIX_INTERP__ "$PWD"',
     ]
     assert command_texts(shell, "ln") == ["ln -s __NIX_INTERP__ nix-swift-deps"]
+
+
+def test_clearly_package_pins_full_xcode_before_xcodebuild() -> None:
+    """Command Line Tools cannot build this project, so the derivation pins Xcode.app."""
+    package = expect_instance(
+        nix_file_expr("packages/clearly/default.nix"),
+        FunctionDefinition,
+    )
+    derivation = expect_instance(package.output, FunctionCall)
+    arguments = expect_instance(derivation.argument, AttributeSet)
+    build_phase = expect_instance(
+        expect_binding(arguments.values, "buildPhase").value,
+        IndentedString,
+    )
+    shell = parse_shell(indented_string_body(build_phase.rebuild()))
+    texts = command_texts(shell)
+    export_at = texts.index('export DEVELOPER_DIR="$xcodeDeveloper"')
+    build_at = next(
+        index
+        for index, text in enumerate(texts)
+        if text.startswith("/usr/bin/xcodebuild ")
+    )
+    assert any("xcodeDeveloper/usr/bin/xcodebuild" in text for text in texts)
+    assert export_at < build_at

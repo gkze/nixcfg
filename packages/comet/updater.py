@@ -4,10 +4,11 @@ import asyncio
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 import aiohttp
 
+from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.events import EventSink, ignore_event
 from lib.update.updaters import (
     DownloadHashUpdater,
@@ -15,6 +16,8 @@ from lib.update.updaters import (
     register_updater,
     stream_url_hash_mapping,
 )
+from lib.update.updaters.core import verify_platform_versions
+from lib.update.updaters.strategies import url_without_query
 
 if TYPE_CHECKING:
     from lib.nix.models.sources import SourceHashes
@@ -22,7 +25,6 @@ if TYPE_CHECKING:
 
 
 _HTTP_REDIRECT_MIN = 300
-_HTTP_BAD_REQUEST = 400
 _ARTIFACT_HOST = (
     "pplx-browser-binaries.a0adf9b772aecba4fa8883581f3c9180.r2.cloudflarestorage.com"
 )
@@ -30,7 +32,7 @@ _ARTIFACT_PATH = re.compile(r"/(?P<version>\d+(?:\.\d+){3})/comet_latest\.dmg")
 
 
 @dataclass(frozen=True, slots=True)
-class _ResolvedArtifact:
+class _ResolvedInstaller:
     version: str
     signed_url: str
     identity_url: str
@@ -54,20 +56,14 @@ class CometUpdater(DownloadHashUpdater):
     }
 
     @staticmethod
-    def _parse_artifact(url: str) -> _ResolvedArtifact:
+    def _parse_artifact(url: str) -> _ResolvedInstaller:
         parsed = urlsplit(url)
         match = _ARTIFACT_PATH.fullmatch(parsed.path)
         if parsed.scheme != "https" or parsed.netloc != _ARTIFACT_HOST or match is None:
             msg = f"Could not extract Comet version from download redirect: {url}"
             raise RuntimeError(msg)
-        identity_url = urlunsplit((
-            parsed.scheme,
-            parsed.netloc,
-            parsed.path,
-            "",
-            "",
-        ))
-        return _ResolvedArtifact(
+        identity_url = url_without_query(url)
+        return _ResolvedInstaller(
             version=match.group("version"),
             signed_url=url,
             identity_url=identity_url,
@@ -77,7 +73,7 @@ class CometUpdater(DownloadHashUpdater):
         self,
         session: aiohttp.ClientSession,
         download_url: str,
-    ) -> _ResolvedArtifact:
+    ) -> _ResolvedInstaller:
         timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
         async with session.request(
             "GET",
@@ -85,7 +81,7 @@ class CometUpdater(DownloadHashUpdater):
             allow_redirects=False,
             timeout=timeout,
         ) as response:
-            if not _HTTP_REDIRECT_MIN <= response.status < _HTTP_BAD_REQUEST:
+            if not _HTTP_REDIRECT_MIN <= response.status < HTTP_BAD_REQUEST:
                 msg = (
                     f"Expected Comet download redirect from {download_url}, "
                     f"got HTTP {response.status} {response.reason}"
@@ -100,7 +96,7 @@ class CometUpdater(DownloadHashUpdater):
     async def _resolve_artifacts(
         self,
         session: aiohttp.ClientSession,
-    ) -> dict[str, _ResolvedArtifact]:
+    ) -> dict[str, _ResolvedInstaller]:
         artifacts = await asyncio.gather(
             *(
                 self._resolve_latest_url(session, download_url)
@@ -110,22 +106,18 @@ class CometUpdater(DownloadHashUpdater):
         return dict(zip(self.PLATFORMS, artifacts, strict=True))
 
     @staticmethod
-    def _uniform_version(artifacts: dict[str, _ResolvedArtifact]) -> str:
+    def _uniform_version(artifacts: dict[str, _ResolvedInstaller]) -> str:
         versions = {
             platform: artifact.version for platform, artifact in artifacts.items()
         }
-        unique_versions = set(versions.values())
-        if len(unique_versions) != 1:
-            msg = "Comet download redirects returned mismatched versions: " + ", ".join(
-                f"{platform}={version}"
-                for platform, version in sorted(versions.items())
-            )
-            raise RuntimeError(msg)
-        return unique_versions.pop()
+        return verify_platform_versions(
+            versions,
+            context="Comet download redirects returned mismatched versions",
+        )
 
     @staticmethod
     def _deduplicated_hash_urls(
-        artifacts: dict[str, _ResolvedArtifact],
+        artifacts: dict[str, _ResolvedInstaller],
     ) -> dict[str, str]:
         signed_urls_by_identity: dict[str, str] = {}
         urls_by_platform: dict[str, str] = {}

@@ -27,15 +27,35 @@ class TestGeneratedModels:
                 "status": "Built",
                 "builtOutputs": {
                     "out": {
-                        "id": {"drv": "hello"},
-                        "outPath": {"output": "nix/store/path"},
-                        "signatures": [],
+                        # Wire-shaped values: the schema constrains all three of
+                        # these fields, so only a fully typed model accepts them.
+                        "id": f"sha256:{'a' * 64}!out",
+                        "outPath": f"{'0' * 32}-hello",
+                        "signatures": ["cache.example-1:AAAA"],
                     },
                 },
             },
         )
         assert success.root.success is True
         assert success.root.status == generated_models.Status.BUILT
+
+        # Regression guard: an unconstrained model used to accept these
+        # placeholder shapes, which is how the allOf merge silently degraded
+        # required wire fields to `Any`.
+        with pytest.raises(ValidationError):
+            generated_models.BuildResult.model_validate(
+                {
+                    "success": True,
+                    "status": "Built",
+                    "builtOutputs": {
+                        "out": {
+                            "id": {"drv": "hello"},
+                            "outPath": {"output": "nix/store/path"},
+                            "signatures": [],
+                        },
+                    },
+                },
+            )
 
         failure = generated_models.BuildResult.model_validate(
             {

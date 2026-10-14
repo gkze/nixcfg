@@ -1,30 +1,55 @@
 # System appearance
 
-macOS uses automatic appearance. Applications with native system-theme support
-select Catppuccin Latte for light and Frappé for dark where available.
+macOS uses automatic appearance. An application with native system-theme
+support selects [Catppuccin](https://github.com/catppuccin/catppuccin) Latte for
+light mode and Frappé for dark mode, where the application offers those themes.
 
-`home/george/appearance.nix` bridges terminal tools without native paired-theme
-settings using the `dark-mode-notify` launch agent. It initializes on login and
-updates files in `$XDG_STATE_HOME/nixcfg/appearance` on macOS appearance events.
-Files are replaced atomically and unchanged files are left alone.
+Read [architecture.md](architecture.md) for the Home Manager module layers.
 
-- Alacritty imports the current palette and uses its configuration watcher.
-- Helix uses the current configuration; the agent requests reload with SIGUSR1.
-- git-delta includes the current palette on each invocation.
-- ptpython uses a dynamic style, refreshed once per second while open.
-- Starship reads the current Catppuccin palette on each new prompt, preserving
-  the existing prompt layout. Already printed prompts keep their original colors.
-- Superfile reads the current palette when launched; reopen existing instances.
+## Appearance bridge
 
-Element's system mode selects its built-in light/dark themes. Both Catppuccin
-palettes remain available as manual alternatives; Element does not pair custom
-themes in system mode. Its device preference can override configuration defaults.
+`home/george/appearance.nix` bridges terminal tools that have no native
+paired-theme setting. It uses the `dark-mode-notify` launch agent. The agent
+initializes on login and updates files in `$XDG_STATE_HOME/nixcfg/appearance` on
+macOS appearance events. The bridge replaces a file atomically and leaves an
+unchanged file alone.
 
-The inspected Wispr Flow version exposes no supported system-theme setting.
-Do not write an unsupported `system` value to its light/dark theme preference.
+| Tool      | Mechanism                                                              |
+| --------- | ---------------------------------------------------------------------- |
+| Alacritty | Imports the current palette and uses its configuration watcher         |
+| Helix     | Uses the current configuration; the agent requests reload with SIGUSR1 |
+| git-delta | Includes the current palette on each invocation                        |
+| ptpython  | Uses a dynamic style, refreshed once per second while open             |
+| Starship  | Reads the current Catppuccin palette on each new prompt                |
+| Superfile | Reads the current palette when launched                                |
 
-Validation on 2026-09-26 covered actual macOS Light and Dark events, runtime files,
-Git's effective palette, and ptpython's real DynamicStyle. macOS Auto was restored.
-This was an appearance-only live apply, not a full nix-darwin activation. Element's
-config default was updated, but its live UI could not be inspected because app
-control timed out; an existing device override remains unverified.
+Starship preserves the existing prompt layout. An already printed prompt keeps
+its original colors. For Superfile, reopen an existing instance to pick up a
+palette change.
+
+## Applications with their own theme logic
+
+Element's system mode selects its built-in light and dark themes. Both
+Catppuccin palettes remain available as manual alternatives. Element does not
+pair custom themes in system mode. Its device preference can override
+configuration defaults.
+
+The inspected Wispr Flow version exposes no supported system-theme setting. Do
+not write an unsupported `system` value to its light or dark theme preference.
+
+## Validation history
+
+Validation on 2026-09-26 covered actual macOS Light and Dark events, the runtime
+files, Git's effective palette, and ptpython's real `DynamicStyle`. macOS Auto
+was restored afterwards.
+
+That validation was an appearance-only live apply. It was not a full nix-darwin
+activation. The Element config default changed, but app control timed out during
+validation, so the live UI stayed unchecked. An existing device override remains
+unverified.
+
+## Related
+
+- [architecture.md](architecture.md): module layers and host entrypoints
+- [development.md](development.md): checks and validation ladder
+- [`home/george/appearance.nix`](../home/george/appearance.nix): the bridge module

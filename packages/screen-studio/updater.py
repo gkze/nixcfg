@@ -3,20 +3,21 @@
 import asyncio
 import json
 import re
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlsplit
 
 import aiohttp
 
 from lib import json_utils
-from lib.update.net import HTTP_BAD_REQUEST
+from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.updaters import (
     AssetURLsMetadataUpdater,
     VersionInfo,
     register_updater,
 )
+from lib.update.updaters.core import verify_platform_versions
 from lib.update.updaters.metadata import AssetURLsMetadata
+from lib.update.updaters.strategies import ResolvedArtifact
 
 if TYPE_CHECKING:
     from lib.update.updaters.core import UpdateContext
@@ -37,12 +38,6 @@ _ARTIFACT_PATHS: dict[str, re.Pattern[str]] = {
 }
 
 
-@dataclass(frozen=True, slots=True)
-class _ResolvedArtifact:
-    version: str
-    url: str
-
-
 @register_updater
 class ScreenStudioUpdater(AssetURLsMetadataUpdater):
     """Resolve stable Screen Studio ZIPs from its Squirrel.Mac update feed."""
@@ -55,7 +50,7 @@ class ScreenStudioUpdater(AssetURLsMetadataUpdater):
     }
 
     @staticmethod
-    def _parse_artifact_url(platform: str, url: str) -> _ResolvedArtifact:
+    def _parse_artifact_url(platform: str, url: str) -> ResolvedArtifact:
         parsed = urlsplit(url)
         match = _ARTIFACT_PATHS[platform].fullmatch(parsed.path)
         if (
@@ -69,13 +64,13 @@ class ScreenStudioUpdater(AssetURLsMetadataUpdater):
                 f"Screen Studio feed returned an invalid {platform} artifact URL: {url}"
             )
             raise RuntimeError(msg)
-        return _ResolvedArtifact(version=match.group("version"), url=url)
+        return ResolvedArtifact(version=match.group("version"), url=url)
 
     async def _fetch_artifact(
         self,
         session: aiohttp.ClientSession,
         platform: str,
-    ) -> _ResolvedArtifact:
+    ) -> ResolvedArtifact:
         headers = {
             "User-Agent": self.config.default_user_agent,
             "x-screen-studio-architecture": self.PLATFORMS[platform],
@@ -148,11 +143,11 @@ class ScreenStudioUpdater(AssetURLsMetadataUpdater):
         versions = {
             platform: artifact.version for platform, artifact in artifacts.items()
         }
-        if len(set(versions.values())) != 1:
-            msg = f"Screen Studio update feed returned mismatched versions: {versions}"
-            raise RuntimeError(msg)
         return VersionInfo(
-            version=next(iter(versions.values())),
+            version=verify_platform_versions(
+                versions,
+                context="Screen Studio update feed returned mismatched versions",
+            ),
             metadata=AssetURLsMetadata({
                 platform: artifact.url for platform, artifact in artifacts.items()
             }),

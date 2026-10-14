@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, ClassVar
 from lib import json_utils
 from lib.update.net import fetch_json
 from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
+from lib.update.updaters.core import verify_platform_versions
 from lib.update.updaters.metadata import AssetURLsMetadata
 
 if TYPE_CHECKING:
@@ -54,12 +55,11 @@ class FigmaUpdater(DownloadHashUpdater):
             version, url = await self._fetch_platform(session, channel)
             versions[platform] = version
             asset_urls[platform] = url
-        unique_versions = set(versions.values())
-        if len(unique_versions) != 1:
-            msg = f"Figma release metadata returned mismatched versions: {versions}"
-            raise RuntimeError(msg)
         return VersionInfo(
-            version=unique_versions.pop(),
+            version=verify_platform_versions(
+                versions,
+                context="Figma release metadata returned mismatched versions",
+            ),
             metadata=AssetURLsMetadata(asset_urls),
         )
 

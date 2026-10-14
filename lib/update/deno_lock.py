@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import aiohttp
 from pydantic import TypeAdapter, ValidationError
 
-from lib import json_utils
+from lib import http_utils, json_utils
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -36,7 +36,9 @@ NPM_REGISTRY = "https://registry.npmjs.org"
 # Concurrency limit for fetching JSR meta files.
 JSR_FETCH_CONCURRENCY = 20
 JSR_FETCH_ATTEMPTS = 3
-RETRYABLE_HTTP_STATUS_MIN = 500
+# Any 5xx is a server-side fault worth another attempt here; the shared set
+# enumerates only the statuses both HTTP paths classify identically.
+SERVER_ERROR_STATUS_MIN = 500
 
 _as_object_dict = json_utils.as_object_dict
 _as_object_list = json_utils.as_object_list
@@ -181,7 +183,12 @@ def _is_retryable_jsr_fetch_error(exc: BaseException) -> bool:
     if isinstance(exc, TimeoutError):
         return True
     if isinstance(exc, aiohttp.ClientResponseError):
-        return exc.status in {408, 429} or exc.status >= RETRYABLE_HTTP_STATUS_MIN
+        # Any 5xx here is a server-side fault worth another attempt, which is
+        # broader than the shared enumerated set; 408 and 429 come from the
+        # shared classification so both HTTP paths agree on those.
+        return exc.status >= SERVER_ERROR_STATUS_MIN or http_utils.is_retryable_status(
+            exc.status
+        )
     return isinstance(exc, aiohttp.ClientError)
 
 

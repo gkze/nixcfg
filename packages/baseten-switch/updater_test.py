@@ -13,6 +13,7 @@ from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
+    darwin_guarded_exports,
     expect_binding,
     expect_scope_binding,
     parse_nix_expr,
@@ -106,7 +107,7 @@ def test_overlay_does_not_restate_the_hosted_checkphase_skip() -> None:
         nix_file_expr("overlays/binary-darwin-apps.nix"),
         FunctionDefinition,
     )
-    exports = expect_instance(overlay.output, AttributeSet)
+    exports = darwin_guarded_exports(overlay)
     assert_nix_ast_equal(
         expect_binding(exports.values, "baseten-switch").value,
         'callDarwinAppPackage "baseten-switch"',

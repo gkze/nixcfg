@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from lib.recover import files as rf
+from lib.recover._common import render_plan
 from lib.recover.snapshot import SnapshotPlan
 
 
@@ -265,7 +266,7 @@ def test_apply_file_recovery_skips_missing_removals_without_staging(
     assert (repo_root / "docs/new.md").read_text(encoding="utf-8") == "new\n"
 
 
-def test_render_plain_covers_empty_selectors_and_apply_remove_branches() -> None:
+def test_render_plan_covers_empty_selectors_and_apply_remove_branches() -> None:
     """Render the remaining plain-text summary branches for file recovery."""
     empty_plan = rf.FileRecoveryPlan(
         generation="/run/current-system",
@@ -279,7 +280,7 @@ def test_render_plain_covers_empty_selectors_and_apply_remove_branches() -> None
         remove_paths=(),
     )
 
-    plain = rf._render_plain(empty_plan, apply=False, stage=False, sync=False)
+    plain = render_plan(empty_plan, apply=False, stage=False, sync=False)
     assert "Path selectors" not in plain
     assert "Glob selectors" not in plain
     assert "Will restore: none" in plain
@@ -296,7 +297,7 @@ def test_render_plain_covers_empty_selectors_and_apply_remove_branches() -> None
         remove_paths=("docs/remove.md",),
     )
 
-    applied = rf._render_plain(
+    applied = render_plan(
         remove_plan,
         apply=True,
         stage=False,

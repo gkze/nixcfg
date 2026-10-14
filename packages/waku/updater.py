@@ -26,6 +26,7 @@ from nix_manipulator.expressions.set import AttributeSet
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import EventSink, ignore_event
+from lib.update.locked_source import is_immutable_commit
 from lib.update.net import fetch_github_api, fetch_url, github_raw_url
 from lib.update.nix import (
     _build_fetch_from_github_expr,
@@ -58,7 +59,6 @@ _SEMVER_PATTERN = re.compile(
     r"(?P<minor>0|[1-9][0-9]*)\."
     r"(?P<patch>0|[1-9][0-9]*)$"
 )
-_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,7 +225,7 @@ class WakuUpdater(Updater):
     @staticmethod
     def _require_commit(info: VersionInfo) -> str:
         commit = info.commit
-        if commit is None or _COMMIT_PATTERN.fullmatch(commit) is None:
+        if commit is None or not is_immutable_commit(commit):
             msg = "Waku release metadata is missing an immutable source commit"
             raise RuntimeError(msg)
         return commit
@@ -253,7 +253,7 @@ class WakuUpdater(Updater):
             msg = f"Waku release {tag} has no immutable source commit"
             raise TypeError(msg)
         commit = commit_payload.get("sha")
-        if not isinstance(commit, str) or _COMMIT_PATTERN.fullmatch(commit) is None:
+        if not isinstance(commit, str) or not is_immutable_commit(commit):
             msg = f"Waku release {tag} has no immutable source commit"
             raise RuntimeError(msg)
 

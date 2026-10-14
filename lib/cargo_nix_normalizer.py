@@ -1,4 +1,22 @@
-"""Shared helpers for normalizing checked-in crate2nix Cargo.nix files."""
+"""Shared helpers for normalizing checked-in crate2nix Cargo.nix files.
+
+Rewriting a source root to ``${rootSrc}`` is reached from two entry families
+whose inputs differ, so it has two implementations. They are never both active
+on one input and are not interchangeable:
+
+* ``normalize`` (this module): AST-based over ``NixPath`` nodes. It rewrites
+  paths only when the caller passes ``local_path_prefixes``; the per-package
+  ``normalize_cargo_nix.py`` normalisers (gitbutler, codex, goose-cli) do.
+* ``lib.update.crate2nix._stabilize_generated_root_src_paths``: string/regex
+  based, rewriting the same concept inside ``lib.cleanSourceWith`` bindings of
+  freshly generated text, with prefixes derived from the patched source and the
+  generated file's parent. The update pipeline calls ``normalize`` without
+  prefixes -- it only wants the ``rootSrc`` argument installed -- and leaves
+  the path rewrite to that pass.
+
+Change one and check the other. ``tests/test_cargo_nix_normalizer.py`` and
+``tests/test_ci_crate2nix.py`` pin both halves.
+"""
 
 import re
 from dataclasses import fields, is_dataclass

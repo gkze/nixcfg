@@ -1,8 +1,11 @@
 """Fail-closed updater for official Zo desktop releases."""
 
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from lib.update.updaters import GitHubReleaseAssetURLsUpdater, register_updater
+
+if TYPE_CHECKING:
+    from lib.update.net import JSONValue
 
 
 @register_updater
@@ -21,7 +24,7 @@ class ZoUpdater(GitHubReleaseAssetURLsUpdater):
 
     def _asset_urls_from_payload(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JSONValue],
         *,
         version: str,
         tag_name: str,

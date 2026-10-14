@@ -14,11 +14,9 @@ from lib.update.updaters.flake_backed import GoVendorHashUpdater
 if TYPE_CHECKING:
     import aiohttp
 
-    from lib.nix.models.flake_lock import FlakeLockNode
     from lib.update.updaters.core import UpdateContext
     from lib.update.updaters.metadata import VersionInfo
 
-_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _GO_VERSION_COMPONENT = r"(?:0|[1-9][0-9]*)"
 _GO_VERSION_PATTERN = re.compile(
     rf"^{_GO_VERSION_COMPONENT}\.{_GO_VERSION_COMPONENT}"
@@ -126,39 +124,6 @@ def _extract_go_requirement(go_mod: bytes, *, source_name: str) -> str:
     return go_requirement
 
 
-def _locked_github_source(
-    node: FlakeLockNode,
-    *,
-    source_name: str,
-    expected_owner: str,
-    expected_repo: str,
-) -> tuple[str, str, str]:
-    """Return the expected repository and immutable commit from a lock node."""
-    locked = node.locked
-    if (
-        locked is None
-        or locked.type != "github"
-        or not locked.owner
-        or not locked.repo
-        or not locked.rev
-    ):
-        msg = f"{source_name} flake input must resolve to a complete GitHub source"
-        raise RuntimeError(msg)
-    if (locked.owner, locked.repo) != (expected_owner, expected_repo):
-        msg = (
-            f"{source_name} flake input must resolve to "
-            f"{expected_owner}/{expected_repo}, got {locked.owner}/{locked.repo}"
-        )
-        raise RuntimeError(msg)
-    if _COMMIT_PATTERN.fullmatch(locked.rev) is None:
-        msg = (
-            f"{source_name} flake input revision must be an immutable commit, "
-            f"got {locked.rev!r}"
-        )
-        raise RuntimeError(msg)
-    return locked.owner, locked.repo, locked.rev
-
-
 class GoModCompatibilityUpdater(GoVendorHashUpdater):
     """Validate a locked release against its package-selected Go toolchain."""
 
@@ -241,11 +206,10 @@ class GoModCompatibilityUpdater(GoVendorHashUpdater):
         """Validate ``go.mod`` at the immutable refreshed input commit."""
         info = await super().fetch_latest(session, context=context)
         node = self._resolve_flake_node(info)
-        _locked_github_source(
+        update_locked_source.locked_github_source(
             node,
-            source_name=self.name,
-            expected_owner=self.GITHUB_OWNER,
-            expected_repo=self.GITHUB_REPO,
+            context=f"{self.name} flake input",
+            expected=(self.GITHUB_OWNER, self.GITHUB_REPO),
         )
         source = await update_locked_source.resolve_locked_source(
             node,

@@ -26,22 +26,35 @@ if TYPE_CHECKING:
     from tenacity.wait import WaitBaseT
 
 HTTP_BAD_REQUEST = 400
-RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
+# RFC 9110: a 408 means the server did not receive a complete request in time,
+# so retrying is correct. Keeping it in the shared set makes the aiohttp and
+# httpx paths classify the same failure identically.
+HTTP_REQUEST_TIMEOUT = 408
+RETRYABLE_STATUSES = frozenset({HTTP_REQUEST_TIMEOUT, 429, 500, 502, 503, 504})
 _GO_KEYRING_PREFIX = "go-keyring-base64:"
 
 
-class _RetryableStatusError(RuntimeError):
+class RetryableStatusError(RuntimeError):
     """HTTP status error that should be retried."""
 
-    def __init__(self, status: int, detail: str) -> None:
+    def __init__(
+        self,
+        status: int,
+        detail: str,
+        *,
+        retry_after: float | None = None,
+    ) -> None:
+        """Record the failing status, its detail, and any server retry delay."""
         self.status = status
+        self.retry_after = retry_after
         super().__init__(detail)
 
 
-class _NonRetryableStatusError(RuntimeError):
+class NonRetryableStatusError(RuntimeError):
     """HTTP status error that should fail immediately."""
 
     def __init__(self, status: int, detail: str) -> None:
+        """Record the failing status and its detail."""
         self.status = status
         super().__init__(detail)
 
@@ -132,19 +145,29 @@ def build_github_headers(
     return headers
 
 
-def _format_http_error(response: httpx.Response, payload: bytes) -> str:
-    detail = f"HTTP {response.status_code} {response.reason_phrase}"
+def is_retryable_status(status: int) -> bool:
+    """Return whether an HTTP status warrants another attempt."""
+    return status in RETRYABLE_STATUSES
+
+
+def format_http_error(status: int, reason: str, payload: bytes) -> str:
+    """Render ``HTTP <status> <reason>`` plus any non-empty decoded body.
+
+    Client-agnostic on purpose: the aiohttp and httpx paths must produce the
+    same diagnostic text for the same failure.
+    """
+    detail = f"HTTP {status} {reason}"
     body = payload.decode(errors="ignore").strip()
     if body:
         detail = f"{detail}\n{body}"
     return detail
 
 
-def _raise_status_error(status: int, detail: str) -> None:
+def raise_status_error(status: int, detail: str) -> None:
     """Raise the appropriate status exception for ``status``."""
-    if status in RETRYABLE_STATUSES:
-        raise _RetryableStatusError(status, detail)
-    raise _NonRetryableStatusError(status, detail)
+    if is_retryable_status(status):
+        raise RetryableStatusError(status, detail)
+    raise NonRetryableStatusError(status, detail)
 
 
 def _validate_request_target(
@@ -202,7 +225,7 @@ def _as_request_error(
     attempts: int,
     exc: Exception,
 ) -> RequestError:
-    if isinstance(exc, (_NonRetryableStatusError, _RetryableStatusError)):
+    if isinstance(exc, (NonRetryableStatusError, RetryableStatusError)):
         return RequestError(
             url=url,
             attempts=attempts,
@@ -248,7 +271,7 @@ def fetch_url_bytes(
         stop=stop_after_attempt(attempts),
         wait=_retry_wait(backoff=backoff, max_backoff=max_backoff),
         retry=retry_if_exception_type((
-            _RetryableStatusError,
+            RetryableStatusError,
             httpx.TransportError,
         )),
         reraise=True,
@@ -263,11 +286,15 @@ def fetch_url_bytes(
                     payload = response.content
                     if response.status_code < HTTP_BAD_REQUEST:
                         return payload, dict(response.headers)
-                    detail = _format_http_error(response, payload)
-                    _raise_status_error(response.status_code, detail)
+                    detail = format_http_error(
+                        response.status_code,
+                        response.reason_phrase,
+                        payload,
+                    )
+                    raise_status_error(response.status_code, detail)
     except (
-        _NonRetryableStatusError,
-        _RetryableStatusError,
+        NonRetryableStatusError,
+        RetryableStatusError,
         httpx.TimeoutException,
         httpx.TransportError,
     ) as exc:
@@ -299,7 +326,7 @@ async def fetch_url_bytes_async(
         stop=stop_after_attempt(attempts),
         wait=_retry_wait(backoff=backoff, max_backoff=max_backoff),
         retry=retry_if_exception_type((
-            _RetryableStatusError,
+            RetryableStatusError,
             httpx.TransportError,
         )),
         reraise=True,
@@ -320,8 +347,12 @@ async def fetch_url_bytes_async(
                 payload = response.content
                 if response.status_code < HTTP_BAD_REQUEST:
                     return payload, dict(response.headers)
-                detail = _format_http_error(response, payload)
-                _raise_status_error(response.status_code, detail)
+                detail = format_http_error(
+                    response.status_code,
+                    response.reason_phrase,
+                    payload,
+                )
+                raise_status_error(response.status_code, detail)
         msg = f"Failed fetching {url}"
         raise RuntimeError(msg)
 
@@ -334,8 +365,8 @@ async def fetch_url_bytes_async(
         ) as async_client:
             return await _run(async_client)
     except (
-        _NonRetryableStatusError,
-        _RetryableStatusError,
+        NonRetryableStatusError,
+        RetryableStatusError,
         httpx.TimeoutException,
         httpx.TransportError,
     ) as exc:

@@ -43,7 +43,12 @@ let
     paseo = systemApp pkgs.paseo;
     reflect = systemApp pkgs.reflect-open;
     screen-studio = systemApp pkgs.screen-studio;
-    tailscale.package = pkgs.tailscale-app;
+    # macOS requires the system extension's parent app in /Applications.
+    tailscale = {
+      package = pkgs.tailscale-app;
+      preventDowngrade = true;
+      scope = "system";
+    };
     thorium = systemApp pkgs.thorium;
     "town-assistant".package = pkgs.town-assistant-nightly;
     unsloth = systemApp pkgs.unsloth;
@@ -55,8 +60,24 @@ let
     zo = systemApp pkgs.zo;
   };
   projection = macApps.managedMacAppRoutingProjection routing;
+  # The route decides which copy of the bundle is authoritative, so substitute
+  # the path the declaration resolves to instead of hardcoding one.
+  tailscaleCli = pkgs.writeTextFile {
+    name = "tailscale";
+    executable = true;
+    text =
+      builtins.replaceStrings
+        [ "@TAILSCALE_BIN@" ]
+        [ "${config.nixcfg.macApps.resolved.tailscale.targetPath}/Contents/MacOS/Tailscale" ]
+        (builtins.readFile ./bin/tailscale);
+  };
 in
 {
+  home.file.".local/bin/tailscale" = {
+    source = tailscaleCli;
+    executable = true;
+  };
+
   home.packages = with pkgs; [
     _1password-cli
     anthropic-cli

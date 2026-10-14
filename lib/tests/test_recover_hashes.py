@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lib.recover import hashes as rh
+from lib.recover._common import render_plan
 from lib.recover.snapshot import SnapshotPlan
 
 if TYPE_CHECKING:
@@ -228,7 +229,7 @@ def test_plan_hash_recovery_to_dict_and_managed_paths(
     assert plan.to_dict()["write_paths"] == ()
 
 
-def test_render_plain_covers_empty_restore_and_apply_remove_branches() -> None:
+def test_render_plan_covers_empty_restore_and_apply_remove_branches() -> None:
     """Render the remaining plain-text summary branches for hash recovery."""
     empty_plan = rh.HashRecoveryPlan(
         generation="/run/current-system",
@@ -240,7 +241,7 @@ def test_render_plain_covers_empty_restore_and_apply_remove_branches() -> None:
         remove_paths=(),
     )
 
-    plain = rh._render_plain(empty_plan, apply=False, stage=False, sync=False)
+    plain = render_plan(empty_plan, apply=False, stage=False, sync=False)
     assert "Will restore: none" in plain
 
     remove_plan = rh.HashRecoveryPlan(
@@ -253,7 +254,7 @@ def test_render_plain_covers_empty_restore_and_apply_remove_branches() -> None:
         remove_paths=("packages/demo/sources.json",),
     )
 
-    applied = rh._render_plain(
+    applied = render_plan(
         remove_plan,
         apply=True,
         stage=False,

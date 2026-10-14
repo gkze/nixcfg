@@ -2821,7 +2821,7 @@ def test_update_workspace_owns_flake_cache_switching(
     from lib.update import paths as update_paths
 
     monkeypatch.setenv("REPO_ROOT", os.fspath(live))
-    update_paths._clear_root_cache()
+    update_paths.clear_root_cache()
     update_flake.invalidate_flake_lock()
     monkeypatch.setattr(
         update_flake.FlakeLock,
@@ -2834,7 +2834,7 @@ def test_update_workspace_owns_flake_cache_switching(
         assert update_flake.load_flake_lock().path == workspace.root / "flake.lock"
     assert update_flake.load_flake_lock().path == live / "flake.lock"
     update_flake.invalidate_flake_lock()
-    update_paths._clear_root_cache()
+    update_paths.clear_root_cache()
 
 
 def test_update_workspace_cleans_temporary_file_after_install_failure(
@@ -2919,7 +2919,7 @@ def test_update_workspace_restores_context_after_setup_failure(
     monkeypatch.setenv("REPO_ROOT", "previous-root")
     from lib.update import persistence as persistence_module
 
-    original_clear = persistence_module.update_paths._clear_root_cache
+    original_clear = persistence_module.update_paths.clear_root_cache
     calls = 0
 
     def _fail_once() -> None:
@@ -2931,7 +2931,7 @@ def test_update_workspace_restores_context_after_setup_failure(
 
     monkeypatch.setattr(
         persistence_module.update_paths,
-        "_clear_root_cache",
+        "clear_root_cache",
         _fail_once,
     )
 
@@ -2945,7 +2945,7 @@ def test_update_workspace_restores_context_after_setup_failure(
     assert os.environ["REPO_ROOT"] == "previous-root"
     monkeypatch.setattr(
         persistence_module.update_paths,
-        "_clear_root_cache",
+        "clear_root_cache",
         original_clear,
     )
     with IsolatedUpdateWorkspace(live):

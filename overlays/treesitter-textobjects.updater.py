@@ -1,12 +1,12 @@
 """Updater for the flat treesitter-textobjects source metadata."""
 
 # ruff: noqa: N999 -- updater discovery intentionally uses a flat dotted sidecar.
-import re
 from typing import TYPE_CHECKING, cast
 
 from lib.nix.models.sources import HashCollection, SourceEntry, SourceHashes
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import EventSink, ignore_event
+from lib.update.locked_source import is_immutable_commit
 from lib.update.net import fetch_github_api
 from lib.update.nix import _build_fetch_from_github_expr
 from lib.update.updaters import (
@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 
 
 _BRANCH = "main"
-_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _OWNER = "gkze"
 _REPO = "nvim-treesitter-textobjects"
 
@@ -47,7 +46,7 @@ class TreesitterTextobjectsUpdater(Updater):
             msg = "Treesitter textobjects branch response must be a JSON object"
             raise TypeError(msg)
         commit = cast("dict[str, object]", payload).get("sha")
-        if not isinstance(commit, str) or _COMMIT_PATTERN.fullmatch(commit) is None:
+        if not isinstance(commit, str) or not is_immutable_commit(commit):
             msg = "Treesitter textobjects branch response has no immutable commit"
             raise RuntimeError(msg)
         return commit
@@ -59,7 +58,7 @@ class TreesitterTextobjectsUpdater(Updater):
             "commit",
             context="Treesitter textobjects metadata",
         )
-        if _COMMIT_PATTERN.fullmatch(commit) is None:
+        if not is_immutable_commit(commit):
             msg = "Treesitter textobjects metadata has no immutable commit"
             raise RuntimeError(msg)
         return commit

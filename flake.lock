@@ -1727,11 +1727,11 @@
     },
     "nixpkgs_5": {
       "locked": {
-        "lastModified": 1784555310,
-        "narHash": "sha256-/FCliTPgiuV1owejZFNx3Ch9irdvkOfOFl+HHZ+DrtM=",
+        "lastModified": 1789724158,
+        "narHash": "sha256-nlKgrm0dsVhOSopKheVBCcOpiIticufPPVLdVOI0euA=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "421eebfd0ec7bccd4abe826ce62d7e6e83129493",
+        "rev": "0a3468a402c449992505b6a9fc5b06580141b750",
         "type": "github"
       },
       "original": {
@@ -1761,11 +1761,11 @@
         "systems": "systems_8"
       },
       "locked": {
-        "lastModified": 1785001306,
-        "narHash": "sha256-xWqmquUtqKXLeDZ1oQUO+rV4sjA9TShIJhLL8M5Bozo=",
+        "lastModified": 1790541651,
+        "narHash": "sha256-/496IQz8qNWHHLnc3Zvr0l4uxJ34igNhJhn7ZKAefFk=",
         "owner": "nix-community",
         "repo": "nixvim",
-        "rev": "48409beb41e8e28b64e8160ca82d8a93fb628963",
+        "rev": "5980a626794486abad69fca7667f9c11dfbc3bd7",
         "type": "github"
       },
       "original": {
@@ -1839,16 +1839,16 @@
     "openai-cli": {
       "flake": false,
       "locked": {
-        "lastModified": 1791098757,
-        "narHash": "sha256-mfWpvtavVMmhlQ7PdbZ0unPolCdy3MqxEOdhaeeyZe8=",
+        "lastModified": 1791478521,
+        "narHash": "sha256-NEIy1tFCvZp3oIopRcx0col7UKbxzFXJ7KwcnAo57bQ=",
         "owner": "openai",
         "repo": "openai-cli",
-        "rev": "e446aa4c4601ed60409213d526c7c91423a87cef",
+        "rev": "babc0e001e2def850d66303c08330ee704e6886c",
         "type": "github"
       },
       "original": {
         "owner": "openai",
-        "ref": "v1.37.0",
+        "ref": "v1.38.0",
         "repo": "openai-cli",
         "type": "github"
       }
