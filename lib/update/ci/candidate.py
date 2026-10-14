@@ -246,9 +246,17 @@ def _hosted_validation_progress(
     stream_keep_going = keep_going or source in {"zed-warmup", "root-deps"}
     current_drv = ""
     source_fetch_miss = False
+    # Darwin host closures realize remaining system/home after rust+cascade.
+    # 38506525442 job 115804595478: 2-wide rocinante+zeus streamed
+    # "these 470 derivations will be built" and the rust-warmup 32-limit
+    # aborted before --keep-going could substitute/build. The linux-builder
+    # image still uses the 400 cap; Darwin root-closure installables do not
+    # treat will-be-built as a warmup abort.
+    apply_wbb_limit = source != "root-closures"
 
     def emit(event: validation.ValidationProgressEvent) -> None:
-        nonlocal substitute_only, stream_keep_going, current_drv, source_fetch_miss
+        nonlocal substitute_only, stream_keep_going, current_drv
+        nonlocal source_fetch_miss, apply_wbb_limit
         if isinstance(event, validation.ValidationCommandFinished):
             return
         if isinstance(event, validation.ValidationCommandStarted):
@@ -258,6 +266,9 @@ def _hosted_validation_progress(
             source_fetch_miss = False
             if is_linux_builder_image_command(event.command):
                 stream_keep_going = True
+                apply_wbb_limit = True
+            elif source == "root-closures":
+                apply_wbb_limit = False
             jobs.record_runner_storage(f"before-{source}")
         elif isinstance(event, validation.ValidationCommandOutput):
             text = event.line.replace("\r", "")
@@ -288,6 +299,7 @@ def _hosted_validation_progress(
                     substitute_only=substitute_only,
                     keep_going=stream_keep_going,
                     source_fetch_miss=source_fetch_miss,
+                    apply_wbb_limit=apply_wbb_limit,
                 )
 
     return emit

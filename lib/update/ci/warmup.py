@@ -210,6 +210,7 @@ def warmup_fatal_line(
     substitute_only: bool = False,
     keep_going: bool = False,
     source_fetch_miss: bool = False,
+    apply_wbb_limit: bool = True,
 ) -> str | None:
     """Return why a live warmup/root log line must fail the job."""
     if "error[E04" in line:
@@ -245,13 +246,17 @@ def warmup_fatal_line(
             else "cannot download from any mirror"
         )
     match = _WILL_BE_BUILT.search(line)
-    if match:
+    if match and apply_wbb_limit:
         # 32 catches #1263's 406-drv bootstrap on a real compile.
         # --max-jobs 0 rust_* misses (38126388469 canary: cranelift 40)
         # must reach _is_deferred_compiler_rust_miss, not abort here.
         # keep_going builds the whole rust_* family on one runner
         # (parent 38081612138 died at 37). Still fail closed at the
         # packages-scale shard ceiling.
+        # 38506525442: Darwin root-closure installables turn this off.
+        # After rust+cascade the 2-wide rocinante+zeus shard streamed
+        # 470 wbb (CVE-stdenv vs hydra / gkze miss). That is the host
+        # closure, not rust-warmup bootstrap; --keep-going must finish.
         limit = (
             MAX_SHARD_LOCAL_BUILDS
             if keep_going or substitute_only
@@ -268,6 +273,7 @@ def raise_if_warmup_fatal(
     substitute_only: bool = False,
     keep_going: bool = False,
     source_fetch_miss: bool = False,
+    apply_wbb_limit: bool = True,
 ) -> None:
     """Abort as soon as a fatal warmup/root pattern is streamed."""
     if reason := warmup_fatal_line(
@@ -275,6 +281,7 @@ def raise_if_warmup_fatal(
         substitute_only=substitute_only,
         keep_going=keep_going,
         source_fetch_miss=source_fetch_miss,
+        apply_wbb_limit=apply_wbb_limit,
     ):
         msg = f"{reason}: {line}"
         raise WarmupFatalError(msg)

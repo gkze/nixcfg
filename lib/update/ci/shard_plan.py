@@ -31,13 +31,14 @@ _INSTALLED_COSTS_PATH = Path(__file__).with_name("shard_costs.json")
 _REPO_COSTS_PATH = REPO_ROOT / "lib" / "update" / "ci" / "shard_costs.json"
 _DARWIN_SYSTEM = "aarch64-darwin"
 _DEFAULT_WEIGHT = 1
-# Provisional width for this kick, not a 2-VMs-per-host cap. Nothing
-# proves four shards land on two Apple hosts. After structural warmup
-# cuts local builds to roughly the packages job, measure 4-wide versus
-# 2-wide by bytes written and update-runtime and revisit this number.
-# Public macos-15 cap is 5; rust-warmup occupies those slots by crate
-# layer, then root shards use the remaining slots.
-MAX_PARALLEL_DARWIN_ROOT_SHARDS = 2
+# 38506525442 measured 2-wide: rocinante+zeus streamed 470 will-be-built
+# after green rust+cascade and the rust-warmup 32-limit aborted the shard.
+# Four Darwin roots fit the public macos-15 cap of 5 once warmup returns
+# the slots (packages may still occupy the fifth). One root per shard
+# isolates a host failure and keeps each installable under the 400-drv
+# packages-scale ceiling when WBB limits apply. Extra roots still
+# bin-pack onto the lightest shard by measured weight.
+MAX_PARALLEL_DARWIN_ROOT_SHARDS = 4
 
 
 class ShardCosts(BaseModel):

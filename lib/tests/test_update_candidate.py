@@ -3773,13 +3773,12 @@ def test_hosted_warmup_progress_fails_fast_on_fatal_patterns(
         )
     assert "[rust-warmup] error[E0460]" in capsys.readouterr().err
     roots = pipeline._hosted_validation_progress("root-closures")
-    with pytest.raises(WarmupFatalError, match="will-be-built"):
-        roots(
-            ValidationCommandOutput(
-                "nix build",
-                "these 406 derivations will be built:",
-            )
+    roots(
+        ValidationCommandOutput(
+            "nix build path:.#checks.aarch64-darwin.root-closure-darwin-rocinante",
+            "these 470 derivations will be built:",
         )
+    )
     packages = pipeline._hosted_validation_progress("derivations")
     packages(
         ValidationCommandOutput(
@@ -3840,16 +3839,37 @@ def test_hosted_root_deps_50_wbb_is_not_fatal(
     assert "these 50 derivations will be built" in capsys.readouterr().err
 
 
-def test_hosted_root_closures_50_without_image_still_fatal() -> None:
-    """Darwin/host root-closures keep the rust-warmup 32-drv fail-fast."""
+def test_hosted_root_closures_host_wbb_is_not_a_warmup_abort(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38506525442: Darwin root-closures streamed 470 wbb after rust+cascade.
+
+    That is the host closure, not rust-warmup bootstrap. The 32-limit
+    aborted rocinante+zeus before --keep-going could finish. Cannot-build
+    and rust-warmup 32 stay fatal; the linux-builder image keeps 400.
+    """
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
     roots = pipeline._hosted_validation_progress("root-closures")
+    roots(
+        ValidationCommandStarted(
+            "nix build --keep-going path:.#checks.aarch64-darwin.root-closure-darwin-rocinante"
+        )
+    )
+    roots(
+        ValidationCommandOutput(
+            "nix build --keep-going path:.#checks.aarch64-darwin.root-closure-darwin-rocinante",
+            "these 470 derivations will be built:",
+        )
+    )
+    rust = pipeline._hosted_validation_progress("rust-warmup")
     with pytest.raises(WarmupFatalError, match="will-be-built"):
-        roots(
+        rust(
             ValidationCommandOutput(
-                "nix build path:.#checks.aarch64-darwin.root-closures",
+                "nix build --keep-going /nix/store/other.drv",
                 "these 50 derivations will be built:",
             )
         )
+    assert "these 470 derivations will be built" in capsys.readouterr().err
 
 
 def test_hosted_warmup_progress_skips_cannot_build_during_max_jobs_zero(

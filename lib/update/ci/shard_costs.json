@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "measuredFrom": "37657691147",
-  "notes": "Update #1246 realized checks.aarch64-darwin.root-closures in one shard (job 112939234263): 77m of nix build+fetch after 23.6 GiB substituted. Per-root wall-clock was not separated. Weights pack extra roots only; they do not choose the warmup set. validate-darwin-warm-rust realizes the planner rust_* layers 5-wide with skip-if-in-gkze; packages inventory stays certify evidence. nixpkgs CVE-2026-56391/56392 coreutils patches change stdenv versus hydra; they are not a repo overlay. 2-wide root shards are provisional until 4-wide vs 2-wide is measured by bytes written and update-runtime after that warmup. Weights are relative only; they do not claim minutes.",
+  "notes": "Update #1246 realized checks.aarch64-darwin.root-closures in one shard (job 112939234263): 77m of nix build+fetch after 23.6 GiB substituted. Per-root wall-clock was not separated. Weights pack extra roots only; they do not choose the warmup set. validate-darwin-warm-rust realizes the planner rust_* layers 5-wide with skip-if-in-gkze; packages inventory stays certify evidence. nixpkgs CVE-2026-56391/56392 coreutils patches change stdenv versus hydra; they are not a repo overlay. 38506525442 measured 2-wide: rocinante+zeus streamed 470 wbb after green rust+cascade and the rust-warmup 32-limit aborted; 4-wide is one root per shard. Weights are relative only; they do not claim minutes.",
   "sharedPackages": ["zed-editor-nightly"],
   "rootWeights": {
     "darwin-argus": 3,
