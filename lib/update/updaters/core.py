@@ -519,6 +519,23 @@ class Updater(ABC):
         _ = (context, info)
         return False
 
+    def _native_platform_owns_hashes(self) -> bool:
+        """Return whether this host is a platform whose artifact hashes we own."""
+        return True
+
+    def _should_refresh_current_hashes(
+        self, context: UpdateContext, info: VersionInfo
+    ) -> bool:
+        """Return whether a current version still needs hash rematerialization.
+
+        Mutable vendor FODs (``materialize_when_current``) rematerialize on a
+        native hash platform. Foreign prepare keeps Darwin-written hashes so
+        Linux ARM does not prefetch R2 DMGs (comet, Update 38479406823).
+        """
+        if self.materialize_when_current:
+            return (not context.preparing) or self._native_platform_owns_hashes()
+        return context.preparing and not self._can_reuse_persisted_hashes(context, info)
+
     def _comparison_result(
         self,
         result: SourceEntry,
@@ -609,13 +626,7 @@ class Updater(ABC):
     ) -> SourceEntry | None:
         """Hash and finalize one resolved candidate source."""
         is_latest = await self._is_latest(context, info)
-        if (
-            is_latest
-            and not self.materialize_when_current
-            and (
-                not context.preparing or self._can_reuse_persisted_hashes(context, info)
-            )
-        ):
+        if is_latest and not self._should_refresh_current_hashes(context, info):
             await emit(
                 UpdateEvent.status(
                     self.name,
@@ -921,6 +932,10 @@ class DownloadHashUpdater(Updater):
         if not await super()._is_latest(context, info):
             return False
         return current.urls == self._platform_urls(info)
+
+    def _native_platform_owns_hashes(self) -> bool:
+        """Rematerialize mutable DMGs only on a platform that owns those URLs."""
+        return update_nix.get_current_nix_platform() in self.PLATFORMS
 
     def _can_reuse_persisted_hashes(
         self,

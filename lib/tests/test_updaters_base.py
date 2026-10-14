@@ -34,7 +34,11 @@ from lib.update.updaters import (
     UvLockUpdater,
     VersionInfo,
 )
-from lib.update.updaters.core import UpdateContext, stream_source_then_overlay_hashes
+from lib.update.updaters.core import (
+    UpdateContext,
+    Updater,
+    stream_source_then_overlay_hashes,
+)
 from lib.update.updaters.metadata import require_metadata_str
 
 
@@ -347,6 +351,132 @@ def test_download_updater_skips_prepare_reprefetch_when_hashes_are_complete() ->
         event.kind is UpdateEventKind.RESULT and isinstance(event.payload, SourceEntry)
         for event in incomplete_events
     )
+
+
+def test_materialize_when_current_skips_foreign_prepare_prefetch() -> None:
+    """Mutable DMGs rematerialize on Darwin prepare; Linux ARM keeps the pin.
+
+    Update 38479406823: comet's bulk hold skipped Darwin rematerialize, then
+    cascade failed a same-version ``comet_latest.dmg`` FOD hash mismatch.
+    """
+
+    class _MutableDownloadUpdater(_ConfiguredDownloadUpdater):
+        materialize_when_current = True
+
+    complete = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "hashes": {
+            "aarch64-darwin": "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo="
+        },
+        "urls": {"aarch64-darwin": "https://example.com/archive.tar.gz"},
+    })
+    foreign_calls: list[object] = []
+
+    async def _forbidden_hashes(*_args: object, **_kwargs: object) -> SourceHashes:
+        foreign_calls.append(_args)
+        raise AssertionError("foreign prepare must not re-prefetch Darwin DMGs")
+
+    async def _run_foreign() -> list[UpdateEvent]:
+        updater = _MutableDownloadUpdater()
+        with (
+            patch.object(updater, "fetch_hashes", _forbidden_hashes),
+            patch(
+                "lib.update.updaters.core.update_nix.get_current_nix_platform",
+                return_value="aarch64-linux",
+            ),
+        ):
+            async with aiohttp.ClientSession() as session:
+                return await collect_events(
+                    lambda emit: updater.update_stream(
+                        complete,
+                        session,
+                        context=UpdateContext(current=complete, preparing=True),
+                        emit=emit,
+                    )
+                )
+
+    foreign_events = asyncio.run(_run_foreign())
+    assert foreign_calls == []
+    assert any(
+        event.message and event.message.startswith("Up to date")
+        for event in foreign_events
+    )
+
+    native_calls: list[object] = []
+
+    async def _refresh(*_args: object, **_kwargs: object) -> SourceHashes:
+        native_calls.append(_args)
+        return {"aarch64-darwin": "sha256-XgGJwonKkoKUrOT4+JOiFxu4pDOVLAObe/PJZY3Yij8="}
+
+    async def _run_native() -> list[UpdateEvent]:
+        updater = _MutableDownloadUpdater()
+        with (
+            patch.object(updater, "fetch_hashes", _refresh),
+            patch(
+                "lib.update.updaters.core.update_nix.get_current_nix_platform",
+                return_value="aarch64-darwin",
+            ),
+        ):
+            async with aiohttp.ClientSession() as session:
+                return await collect_events(
+                    lambda emit: updater.update_stream(
+                        complete,
+                        session,
+                        context=UpdateContext(current=complete, preparing=True),
+                        emit=emit,
+                    )
+                )
+
+    native_events = asyncio.run(_run_native())
+    assert native_calls
+    assert any(
+        event.message and "refreshing generated artifacts" in event.message
+        for event in native_events
+    )
+
+
+def test_should_refresh_current_hashes_distinguishes_native_and_foreign() -> None:
+    """Stable pins skip when reusable; mutable pins refresh only on Darwin."""
+    info = VersionInfo(version="1.0.0")
+    stable = _ConfiguredDownloadUpdater()
+    current = SourceEntry.model_validate({
+        "version": "1.0.0",
+        "hashes": {
+            "aarch64-darwin": "sha256-4TE4PIBEUDUalSRf8yPdc8fM7E7fRJsODG+1DgxhDEo="
+        },
+        "urls": {"aarch64-darwin": "https://example.com/archive.tar.gz"},
+    })
+    preparing = UpdateContext(current=current, preparing=True)
+    idle = UpdateContext(current=current, preparing=False)
+    assert Updater._native_platform_owns_hashes(stable)
+    assert stable._should_refresh_current_hashes(
+        UpdateContext(current=None, preparing=True), info
+    )
+    assert not stable._should_refresh_current_hashes(idle, info)
+    with patch(
+        "lib.update.updaters.core.update_nix.get_current_nix_platform",
+        return_value="aarch64-linux",
+    ):
+        assert not stable._should_refresh_current_hashes(preparing, info)
+        assert not stable._native_platform_owns_hashes()
+
+    class _MutableDownloadUpdater(_ConfiguredDownloadUpdater):
+        materialize_when_current = True
+
+    mutable = _MutableDownloadUpdater()
+    assert mutable._should_refresh_current_hashes(idle, info)
+    with patch(
+        "lib.update.updaters.core.update_nix.get_current_nix_platform",
+        return_value="aarch64-darwin",
+    ):
+        assert mutable._native_platform_owns_hashes()
+        assert mutable._should_refresh_current_hashes(preparing, info)
+    with patch(
+        "lib.update.updaters.core.update_nix.get_current_nix_platform",
+        return_value="aarch64-linux",
+    ):
+        assert not mutable._native_platform_owns_hashes()
+        assert not mutable._should_refresh_current_hashes(preparing, info)
 
 
 def test_download_updater_cannot_reuse_hashes_without_a_persisted_mapping() -> None:

@@ -107,8 +107,8 @@ derivation is in the `gkze` cache.
 
 Run 36672202468 failed Darwin closure builds that a later shard would still
 rebuild. Those pins stay in the closure, with the build corrected in tree:
-Comet's aarch64 DMG hash is the bytes that run fetched, while the Linux ARM
-prefetch hold remains. Superconductor's app executable is
+Comet rematerializes the mutable ``comet_latest.dmg`` hashes on Darwin
+prepare; Linux ARM reuses those hashes instead of prefetching R2. Superconductor's app executable is
 `super.engineering`. Reason's `CFBundleExecutable` is `Reason`. OpenCode 1.18
 ships `packages/cli/package.json` without the Effect updater service, so
 OpenChamber keeps the 1.x upgrade patch. Baseten Switch stays on 0.5.1;
