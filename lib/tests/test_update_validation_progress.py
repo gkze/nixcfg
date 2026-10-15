@@ -791,6 +791,55 @@ print("complete")
     assert sleeps == [1.0]
 
 
+def test_validation_repairs_leftover_pnpm_deps_before_fetcher_version_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """38606641679: attempt 2 cat .fetcher-version must repair then retry."""
+    repaired: list[object] = []
+    monkeypatch.setattr(
+        validation,
+        "repair_corrupt_nix_store_paths",
+        lambda **kwargs: repaired.append(kwargs),
+    )
+    pnpm_deps = "/nix/store/5xacb06gxg1yzpr852gkv57cxqlm6lpq-emdash-pnpm-deps"
+    marker = tmp_path / "attempt"
+    script = f"""
+import pathlib, sys
+marker = pathlib.Path(sys.argv[1])
+count = int(marker.read_text()) if marker.exists() else 0
+count += 1
+marker.write_text(str(count))
+if count == 1:
+    print(
+        "error: Cannot build '/nix/store/phfbayk4ivrm3df7z2yngmszmwj146k8-"
+        "emdash-1.2.6.drv'.",
+        file=sys.stderr,
+    )
+    print("Reason: builder failed with exit code 1.", file=sys.stderr)
+    print(
+        "> cat: {pnpm_deps}/.fetcher-version: No such file or directory",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+print("complete")
+"""
+    sleeps: list[float] = []
+    result = validation._run_validation_command(
+        [sys.executable, "-c", script, str(marker)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=sleeps.append,
+    )
+    assert result.returncode == 0
+    assert repaired
+    assert repaired[0]["stderr"].endswith(
+        f"> cat: {pnpm_deps}/.fetcher-version: No such file or directory\n"
+    )
+    assert sleeps == [1.0]
+
+
 def test_validation_retries_named_fetchurl_mirror_failure(
     tmp_path: Path,
 ) -> None:

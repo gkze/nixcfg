@@ -32,6 +32,7 @@ from lib.update.nix import (
     is_retryable_nix_network_failure,
     is_retryable_nix_store_failure,
     recover_nix_store_after_fault,
+    repair_corrupt_nix_store_paths,
     should_consult_nix_builder_logs,
     should_restart_nix_daemon,
 )
@@ -667,6 +668,14 @@ def _run_validation_command_impl(
             return result
         if should_restart_nix_daemon(stdout=result.stdout, stderr=result.stderr):
             recover_nix_store_after_fault(sleep=sleep)
+        if is_retryable_nix_store_failure(
+            stdout=result.stdout,
+            stderr=result.stderr,
+        ):
+            repair_corrupt_nix_store_paths(
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
         if progress is not None:
             progress(
                 f"Retrying transient Nix failure (attempt {attempt + 2}/{max_attempts})"

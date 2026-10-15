@@ -26,6 +26,7 @@ from lib.update.nix import (
     compute_drv_fingerprint,
     compute_fixed_output_hash,
     compute_overlay_hash,
+    corrupt_nix_store_paths,
     failed_derivation_paths,
     get_current_nix_platform,
     is_retryable_nix_network_failure,
@@ -33,6 +34,7 @@ from lib.update.nix import (
     is_transient_store_interruption,
     normalize_nix_platform,
     recover_nix_store_after_fault,
+    repair_corrupt_nix_store_paths,
     should_consult_nix_builder_logs,
     should_restart_nix_daemon,
 )
@@ -444,6 +446,86 @@ def test_vanished_store_build_input_and_daemon_disconnect_are_retryable() -> Non
             "       > error: linker command failed with exit code 1"
         ),
     )
+
+
+def test_missing_pnpm_fetcher_version_is_retryable_store_fault() -> None:
+    """38606641679 slot 2: leftover emdash-pnpm-deps after APFS pread EILSEQ."""
+    pnpm_deps = "/nix/store/5xacb06gxg1yzpr852gkv57cxqlm6lpq-emdash-pnpm-deps"
+    missing_fetcher = (
+        "error: Cannot build '/nix/store/phfbayk4ivrm3df7z2yngmszmwj146k8-"
+        "emdash-1.2.6.drv'.\n"
+        "       Reason: builder failed with exit code 1.\n"
+        "       Last 12 log lines:\n"
+        "       > Executing pnpmConfigHook\n"
+        f"       > cat: {pnpm_deps}/.fetcher-version: No such file or directory\n"
+    )
+    assert is_retryable_nix_store_failure(stdout="", stderr=missing_fetcher)
+    assert is_transient_store_interruption(missing_fetcher)
+    assert corrupt_nix_store_paths(missing_fetcher) == (pnpm_deps,)
+    assert not should_consult_nix_builder_logs(stdout="", stderr=missing_fetcher)
+    assert not is_retryable_nix_store_failure(
+        stdout="",
+        stderr="cat: /tmp/emdash-pnpm-deps/.fetcher-version: No such file or directory",
+    )
+    assert (
+        corrupt_nix_store_paths(
+            "cat: /tmp/emdash-pnpm-deps/.fetcher-version: No such file or directory"
+        )
+        == ()
+    )
+    assert not is_retryable_nix_store_failure(
+        stdout="",
+        stderr=f"error: hash mismatch in fixed-output derivation\n{missing_fetcher}",
+    )
+    assert not is_transient_store_interruption(
+        f"error: hash mismatch in fixed-output derivation\n{missing_fetcher}"
+    )
+
+
+def test_repair_corrupt_nix_store_paths_repairs_leftover_pnpm_deps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hosted Nix forbids --ignore-liveness; repair-path re-fetches the NAR."""
+    pnpm_deps = "/nix/store/5xacb06gxg1yzpr852gkv57cxqlm6lpq-emdash-pnpm-deps"
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(args))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    repair_corrupt_nix_store_paths(stdout="", stderr="ok", run=run)
+    assert calls == []
+    repair_corrupt_nix_store_paths(
+        stdout="",
+        stderr=(
+            "error: Cannot build '/nix/store/phfbayk4ivrm3df7z2yngmszmwj146k8-"
+            "emdash-1.2.6.drv'.\n"
+            f"       > cat: {pnpm_deps}/.fetcher-version: No such file or directory\n"
+        ),
+        run=run,
+    )
+    assert calls == [["nix-store", "--repair-path", pnpm_deps]]
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "hosted")
+    repair_corrupt_nix_store_paths(
+        stdout="",
+        stderr=f"cat: {pnpm_deps}/.fetcher-version: No such file or directory",
+    )
+    assert calls == [["nix-store", "--repair-path", pnpm_deps]]
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    hosted_calls: list[list[str]] = []
+
+    def hosted_run(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        hosted_calls.append(list(args))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr("lib.update.nix.subprocess.run", hosted_run)
+    repair_corrupt_nix_store_paths(
+        stdout="",
+        stderr=f"cat: {pnpm_deps}/.fetcher-version: No such file or directory",
+    )
+    assert hosted_calls == [["nix-store", "--repair-path", pnpm_deps]]
 
 
 def test_recover_nix_store_after_fault_restarts_determinate_daemon(

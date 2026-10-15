@@ -181,6 +181,13 @@ _STORE_RLIB_EILSEQ = re.compile(
     r"/nix/store/\S+\.rlib[^\n]*illegal byte sequence",
     re.IGNORECASE,
 )
+# 38606641679 slot 2: APFS pread EILSEQ while substituting emdash-pnpm-deps,
+# then pnpmConfigHook `cat $pnpmDeps/.fetcher-version` on the leftover path.
+_MISSING_STORE_FETCHER_VERSION = re.compile(
+    r"(/nix/store/[0-9a-z]{32}-[A-Za-z0-9+._?=-]+)/\.fetcher-version: "
+    r"no such file or directory",
+    re.IGNORECASE,
+)
 
 _PLATFORM_HASH_PAYLOAD_SIZE = 2
 
@@ -654,11 +661,65 @@ def _nix_output_has_unreadable_store_rlib(output: str) -> bool:
     )
 
 
+def _nix_output_has_vanished_fetcher_version(output: str) -> bool:
+    """Return whether pnpmConfigHook died on a corrupt substituted pnpm-deps FOD.
+
+    Hosted macos-15 can register a Cachix NAR after APFS EILSEQ (38606641679
+    cascade-warmup slot 2: ``pread of 65536 bytes at offset 0: Illegal byte
+    sequence``). The next ``nix build --fallback`` then starts emdash against
+    that leftover path; nixpkgs ``pnpmConfigHook`` exits 1 with::
+
+        cat: /nix/store/<hash>-<name>-pnpm-deps/.fetcher-version: No such file
+        or directory
+
+    That is the same store fault as a vanished stdenv hook, not a missing
+    fetcherVersion in the derivation. Other ENOENT text is not this signal.
+    """
+    return _MISSING_STORE_FETCHER_VERSION.search(output) is not None
+
+
 def _nix_output_has_vanished_store_artifact(output: str) -> bool:
     """Return whether a builder died only because a store input vanished."""
-    return _nix_output_has_vanished_store_build_input(
-        output
-    ) or _nix_output_has_unreadable_store_rlib(output)
+    return (
+        _nix_output_has_vanished_store_build_input(output)
+        or _nix_output_has_unreadable_store_rlib(output)
+        or _nix_output_has_vanished_fetcher_version(output)
+    )
+
+
+def corrupt_nix_store_paths(output: str) -> tuple[str, ...]:
+    """Return hashed store paths a store-fault retry must repair before rebuild.
+
+    A leftover substituted FOD stays live as a derivation input, so
+    ``nix-store --delete`` is refused without ``--ignore-liveness`` (forbidden
+    on hosted Nix, #1262). ``nix-store --repair-path`` re-fetches the NAR.
+    """
+    return tuple(
+        dict.fromkeys(
+            match.group(1) for match in _MISSING_STORE_FETCHER_VERSION.finditer(output)
+        )
+    )
+
+
+def repair_corrupt_nix_store_paths(
+    *,
+    stdout: str,
+    stderr: str,
+    run: Callable[..., CompletedProcess[str]] | None = None,
+) -> None:
+    """Re-fetch leftover store paths so a store-fault retry does not reuse them."""
+    paths = corrupt_nix_store_paths(f"{stderr}\n{stdout}")
+    if not paths:
+        return
+    if run is None and os.environ.get("PYTEST_CURRENT_TEST"):
+        return
+    runner = subprocess.run if run is None else run
+    runner(
+        ["nix-store", "--repair-path", *paths],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
 
 def _nix_output_has_write_eio(output: str) -> bool:
@@ -862,9 +923,10 @@ def is_transient_store_interruption(text: str) -> bool:
     faulted, unless that exit is the write-EIO itself. ``error: Cannot
     build`` / ``Reason: 1 dependency failed`` after a substitute EILSEQ
     is still a store fault, as is ``builder failed with exit code 1``
-    when the only builder log is a vanished ``/nix/store/`` build input
-    or rustc E0463 after ``--extern`` named a store rlib that rustc then
-    reported missing or unreadable.
+    when the only builder log is a vanished ``/nix/store/`` build input,
+    a missing ``/nix/store/.../.fetcher-version`` after a leftover
+    pnpm-deps substitute, or rustc E0463 after ``--extern`` named a
+    store rlib that rustc then reported missing or unreadable.
     """
     if _nix_output_has_permanent_build_failure(text):
         return False
@@ -1445,6 +1507,7 @@ __all__ = [
     "compute_expr_drv_fingerprint",
     "compute_fixed_output_hash",
     "compute_overlay_hash",
+    "corrupt_nix_store_paths",
     "failed_derivation_paths",
     "get_current_nix_platform",
     "is_retryable_nix_network_failure",
@@ -1453,6 +1516,7 @@ __all__ = [
     "normalize_nix_platform",
     "prepare_fixed_output_probes",
     "recover_nix_store_after_fault",
+    "repair_corrupt_nix_store_paths",
     "should_consult_nix_builder_logs",
     "should_restart_nix_daemon",
 ]
