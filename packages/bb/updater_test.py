@@ -421,6 +421,27 @@ def test_bb_main_process_uses_nix_managed_encryption_adapter(
     }
 
 
+def test_bb_rechecks_same_version_pnpm_closure_hashes() -> None:
+    """pnpm-deps can drift at a pinned desktop tag (38669200592)."""
+    module = _load_module()
+    updater = module.BbUpdater()
+    assert updater.materialize_when_current is True
+    current = SourceEntry(
+        version="0.43.4",
+        commit=_COMMIT,
+        electron_version=_ELECTRON_VERSION,
+        hashes=[
+            HashEntry.create("srcHash", _SRC_HASH),
+            HashEntry.create("npmDepsHash", updater.config.fake_hash),
+        ],
+    )
+    info = VersionInfo(
+        version="0.43.4",
+        metadata={"commit": _COMMIT, "electronVersion": _ELECTRON_VERSION},
+    )
+    assert run_async(updater._is_latest(UpdateContext(current=current), info)) is False
+
+
 def test_bb_update_pins_release_source_and_pnpm_closure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

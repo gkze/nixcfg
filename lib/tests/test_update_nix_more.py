@@ -448,6 +448,25 @@ def test_vanished_store_build_input_and_daemon_disconnect_are_retryable() -> Non
     )
 
 
+def test_bb_pnpm_deps_hash_mismatch_is_stale_pin_not_store_fault() -> None:
+    """38669200592 darwin-argus: live bb-pnpm-deps bytes drifted from the pin."""
+    stderr = (
+        "error: hash mismatch in fixed-output derivation "
+        "'/nix/store/rh642465ycbcn689wx8yzd754174wrzw-bb-pnpm-deps.drv':\n"
+        "         specified: sha256-wb2dZ6Ki2+gC4XnHYOUUVcYfK1t3G8+dFeOlmRb2o84=\n"
+        "            got:    sha256-Wap+NC0xMgKHslKdl896QG6wje31HqZRFozQ1R4tAAQ=\n"
+        "error: Cannot build '/nix/store/0czgx4z0jf1xxy9h6864g08hghrbbkvs-"
+        "bb-0.43.4.drv'.\n"
+        "       Reason: 1 dependency failed.\n"
+    )
+    assert not is_retryable_nix_store_failure(stdout="", stderr=stderr)
+    assert not is_transient_store_interruption(stderr)
+    assert not is_retryable_nix_network_failure(stdout="", stderr=stderr)
+    assert not _is_retryable_fixed_output_hash_failure(
+        CommandResult(args=["nix"], returncode=1, stdout="", stderr=stderr)
+    )
+
+
 def test_missing_pnpm_fetcher_version_is_retryable_store_fault() -> None:
     """38606641679 slot 2: leftover emdash-pnpm-deps after APFS pread EILSEQ."""
     pnpm_deps = "/nix/store/5xacb06gxg1yzpr852gkv57cxqlm6lpq-emdash-pnpm-deps"

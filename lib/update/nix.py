@@ -926,7 +926,9 @@ def is_transient_store_interruption(text: str) -> bool:
     when the only builder log is a vanished ``/nix/store/`` build input,
     a missing ``/nix/store/.../.fetcher-version`` after a leftover
     pnpm-deps substitute, or rustc E0463 after ``--extern`` named a
-    store rlib that rustc then reported missing or unreadable.
+    store rlib that rustc then reported missing or unreadable. A
+    fixed-output hash mismatch (38669200592 darwin-argus ``bb-pnpm-deps``)
+    is a stale pin, not a store fault.
     """
     if _nix_output_has_permanent_build_failure(text):
         return False
