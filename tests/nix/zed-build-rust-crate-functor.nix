@@ -8,39 +8,15 @@ let
     wrapBuildRustCrate
     ;
 
-  fakeDrv =
-    attrs:
-    {
-      inherit attrs;
-      overrideAttrs =
-        f:
-        fakeDrv (
-          attrs
-          // (
-            if builtins.isFunction f then
-              f attrs
-            else
-              f
-          )
-        );
-    };
+  fakeDrv = attrs: {
+    inherit attrs;
+    overrideAttrs = f: fakeDrv (attrs // (if builtins.isFunction f then f attrs else f));
+  };
 
-  mkBuilder =
-    extras:
-    {
-      __functor = self: args: fakeDrv (extras // args);
-      override =
-        f:
-        mkBuilder (
-          extras
-          // (
-            if builtins.isFunction f then
-              f extras
-            else
-              f
-          )
-        );
-    };
+  mkBuilder = extras: {
+    __functor = _self: args: fakeDrv (extras // args);
+    override = f: mkBuilder (extras // (if builtins.isFunction f then f extras else f));
+  };
 
   checkPlatform =
     {
@@ -62,19 +38,25 @@ let
       darwinMetadata =
         crate.attrs.dontStrip or false == true && crate.attrs.stripExclude or [ ] == [ "*.rlib" ];
     in
-    assert lib.assertMsg (builtins.isAttrs wrapped) "${label}: wrapper must be a set, not a bare lambda";
+    assert lib.assertMsg (builtins.isAttrs wrapped)
+      "${label}: wrapper must be a set, not a bare lambda";
     assert lib.assertMsg (wrapped ? override) "${label}: crate2nix needs .override";
     assert lib.assertMsg (wrapped ? __functor) "${label}: wrapper must stay callable";
-    assert lib.assertMsg (overridden ? override && overridden ? __functor)
-      "${label}: .override must return another functor set";
-    assert lib.assertMsg (functionOverride ? override && functionOverride ? __functor)
-      "${label}: function-form .override must return a functor set";
-    assert lib.assertMsg (crate.attrs.crateName == "rust_command_palette_hooks")
-      "${label}: crate attrs must reach the inner builder";
-    assert lib.assertMsg (overriddenCrate.attrs.crateName == "rust_command_palette_hooks")
-      "${label}: overridden builder must still receive crate attrs";
-    assert lib.assertMsg (if isDarwin then darwinMetadata else !(crate.attrs ? dontStrip))
-      "${label}: Darwin rlib metadata policy is wrong";
+    assert lib.assertMsg (
+      overridden ? override && overridden ? __functor
+    ) "${label}: .override must return another functor set";
+    assert lib.assertMsg (
+      functionOverride ? override && functionOverride ? __functor
+    ) "${label}: function-form .override must return a functor set";
+    assert lib.assertMsg (
+      crate.attrs.crateName == "rust_command_palette_hooks"
+    ) "${label}: crate attrs must reach the inner builder";
+    assert lib.assertMsg (
+      overriddenCrate.attrs.crateName == "rust_command_palette_hooks"
+    ) "${label}: overridden builder must still receive crate attrs";
+    assert lib.assertMsg (
+      if isDarwin then darwinMetadata else !(crate.attrs ? dontStrip)
+    ) "${label}: Darwin rlib metadata policy is wrong";
     assert lib.assertMsg (
       if isDarwin then
         overriddenCrate.attrs.dontStrip or false == true

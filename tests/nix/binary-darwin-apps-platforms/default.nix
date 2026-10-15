@@ -31,21 +31,11 @@ let
 
   darwin = fragmentFor "aarch64-darwin";
   checks = [
-    (
-      assertEq "x86_64-linux receives no Darwin-only app attributes" { } (
-        fragmentFor "x86_64-linux"
-      )
-    )
-    (
-      assertEq "aarch64-linux receives no Darwin-only app attributes" { } (
-        fragmentFor "aarch64-linux"
-      )
-    )
-    (
-      assertEq "aarch64-darwin keeps the app attributes" true (
-        builtins.isAttrs darwin && darwin ? airfoil && darwin ? baseten-switch
-      )
-    )
+    (assertEq "x86_64-linux receives no Darwin-only app attributes" { } (fragmentFor "x86_64-linux"))
+    (assertEq "aarch64-linux receives no Darwin-only app attributes" { } (fragmentFor "aarch64-linux"))
+    (assertEq "aarch64-darwin keeps the app attributes" true (
+      builtins.isAttrs darwin && darwin ? airfoil && darwin ? baseten-switch
+    ))
     (assertEq "a Darwin export resolves its own package directory" "airfoil" darwin.airfoil)
   ];
 in

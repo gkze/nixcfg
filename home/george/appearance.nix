@@ -95,19 +95,25 @@ let
     name = "nixcfg-appearance-sync";
     runtimeInputs = [ pkgs.coreutils ];
     text = ''
-      # dark-mode-notify sets DARKMODE on launch and on each macOS appearance event.
-      case "''${DARKMODE:-}" in
-        0) source_dir=${templates.light} ;;
-        1) source_dir=${templates.dark} ;;
-        "")
-          if [ "$(/usr/bin/defaults read -g AppleInterfaceStyle 2>/dev/null || true)" = Dark ]; then
-            source_dir=${templates.dark}
-          else
-            source_dir=${templates.light}
-          fi
-          ;;
-        *) echo "Invalid DARKMODE: expected 0 or 1" >&2; exit 64 ;;
-      esac
+      # Derive the appearance from the system. macOS 26+ no longer writes
+      # AppleInterfaceStyle to .GlobalPreferences, so dark-mode-notify (which
+      # computes DARKMODE from that key) reports 0 even in dark mode; the
+      # notification stays useful only as the trigger that runs this script.
+      # AppleIconAppearanceTheme is the key this macOS does write.
+      appearance_is_dark() {
+        if [ "$(/usr/bin/defaults read -g AppleInterfaceStyle 2>/dev/null || true)" = Dark ]; then
+          return 0
+        fi
+        case "$(/usr/bin/defaults read -g AppleIconAppearanceTheme 2>/dev/null || true)" in
+          *Dark) return 0 ;;
+        esac
+        return 1
+      }
+      if appearance_is_dark; then
+        source_dir=${templates.dark}
+      else
+        source_dir=${templates.light}
+      fi
       state=${lib.escapeShellArg state}
       mkdir -p "$state"
       appearance_tmp=""
