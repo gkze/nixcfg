@@ -1006,6 +1006,58 @@ def test_cascade_canary_realizes_buzz_onnxruntime_once(
     assert "cascade-canary requires --warmup-plan" in str(missing_cli.exception)
 
 
+def test_fod_canary_realizes_darwin_fods_and_stops_on_hash_mismatch(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38739788947: two Darwin hosts realize pnpm-deps/DMGs before rust-warmup."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    seen: list[str] = []
+    mismatch = DerivationValidationFailure(
+        source="fod-canary",
+        installable="path:.#pkgs.aarch64-darwin.bb.pnpmDeps",
+        message=(
+            "error: hash mismatch in fixed-output derivation "
+            "'/nix/store/qbvbj2w3qxhn5c0x43f929k28plr1r8s-bb-pnpm-deps.drv'"
+        ),
+    )
+
+    def realize(requests: object, *_args: object, **_kwargs: object) -> tuple[object, ...]:
+        installable = next(iter(requests)).installable
+        seen.append(installable)
+        if "bb.pnpmDeps" in installable:
+            return (mismatch,)
+        return ()
+
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivation_requests", realize
+    )
+    report = pipeline.validate_candidate(candidate, scope="fod-canary")
+    assert report.gates == ()
+    assert report.failures == (mismatch,)
+    assert seen == ["path:.#pkgs.aarch64-darwin.bb.pnpmDeps"]
+    seen.clear()
+
+    def succeed(requests: object, *_args: object, **_kwargs: object) -> tuple[()]:
+        seen.append(next(iter(requests)).installable)
+        return ()
+
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivation_requests", succeed
+    )
+    ok = pipeline.validate_candidate(candidate, scope="fod-canary")
+    assert ok.failures == ()
+    assert seen == [
+        "path:.#pkgs.aarch64-darwin.bb.pnpmDeps",
+        "path:.#pkgs.aarch64-darwin.emdash.pnpmDeps",
+        "path:.#pkgs.aarch64-darwin.comet.src",
+    ]
+
+
 def test_cascade_warmup_skips_umbrella_over_shard_ceiling(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3742,6 +3794,21 @@ def test_hosted_zed_warmup_progress_keeps_going_past_workspace_family(
             "nix build --keep-going --no-substitute /nix/store/settings.drv"
         )
     )
+    cascade = pipeline._hosted_validation_progress("cascade-warmup", keep_going=True)
+    cascade(ValidationCommandStarted("nix build --keep-going /nix/store/bb.drv"))
+    with pytest.raises(WarmupFatalError, match="fixed-output hash mismatch"):
+        cascade(
+            ValidationCommandOutput(
+                "nix build --keep-going /nix/store/bb.drv",
+                "error: hash mismatch in fixed-output derivation "
+                "'/nix/store/qbvbj2w3qxhn5c0x43f929k28plr1r8s-bb-pnpm-deps.drv'",
+            )
+        )
+    family(
+        ValidationCommandStarted(
+            "nix build --keep-going --no-substitute /nix/store/settings.drv"
+        )
+    )
     family(
         ValidationCommandOutput(
             "nix build --keep-going --no-substitute /nix/store/settings.drv",
@@ -3841,6 +3908,15 @@ def test_hosted_warmup_progress_fails_fast_on_fatal_patterns(
             "error[E0460]: packages inventory is not a warmup abort",
         )
     )
+    cascade = pipeline._hosted_validation_progress("cascade-warmup", keep_going=True)
+    with pytest.raises(WarmupFatalError, match="fixed-output hash mismatch"):
+        cascade(
+            ValidationCommandOutput(
+                "nix build --keep-going",
+                "error: hash mismatch in fixed-output derivation "
+                "'/nix/store/qbvbj2w3qxhn5c0x43f929k28plr1r8s-bb-pnpm-deps.drv'",
+            )
+        )
 
 
 _ARM_DISK_IMAGE_BUILD = (

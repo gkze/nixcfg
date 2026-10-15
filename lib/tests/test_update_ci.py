@@ -1092,6 +1092,16 @@ def _assert_warmup_scope_native_args(
     with pytest.raises(ValueError, match="cascade-canary requires NIXCFG_WARMUP"):
         jobs._native_args("validate", artifacts)
     monkeypatch.setenv("NIXCFG_WARMUP_PLAN", "/warmup/warmup-plan.json")
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "fod-canary")
+    monkeypatch.setenv("NIXCFG_CLOSURE_SHARD", "fod-0")
+    monkeypatch.delenv("NIXCFG_WARMUP_SLOT", raising=False)
+    fod_args = jobs._native_args("validate", artifacts)
+    assert fod_args[fod_args.index("--scope") + 1] == "fod-canary"
+    assert "--warmup-slot" not in fod_args
+    monkeypatch.delenv("NIXCFG_WARMUP_PLAN")
+    no_plan = jobs._native_args("validate", artifacts)
+    assert no_plan[no_plan.index("--scope") + 1] == "fod-canary"
+    monkeypatch.setenv("NIXCFG_WARMUP_PLAN", "/warmup/warmup-plan.json")
     monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "packages")
     monkeypatch.setenv("NIXCFG_CLOSURE_SHARD", "packages-0")
     with pytest.raises(ValueError, match="Named closure roots"):
@@ -1354,8 +1364,23 @@ def _assert_parallel_linux_prepare(jobs: dict, matrix: list[dict]) -> None:
 
 def _assert_canary_jobs(workflow_jobs: dict) -> None:
     """Kick-file or dispatch canary realizes selected rust-warmup slots."""
+    fods = workflow_jobs["canary-darwin-fods"]
+    assert set(fods["needs"]) == {"prepare-merge"}
+    assert fods["with"]["scope"] == "fod-canary"
+    assert fods["with"]["previous"] == "prepare-x86_64-linux"
+    assert fods["with"]["shard"] == "fod-${{ matrix.host }}"
+    assert fods["strategy"]["fail-fast"] == "true"
+    assert fods["strategy"]["max-parallel"] == "2"
+    assert fods["strategy"]["matrix"]["host"] == ["0", "1"]
     canary = workflow_jobs["canary-warm-rust"]
-    assert set(canary["needs"]) == {"canary-slots", "plan-darwin-closures"}
+    assert set(canary["needs"]) == {
+        "canary-slots",
+        "plan-darwin-closures",
+        "canary-darwin-fods",
+    }
+    assert "canary-darwin-fods.result == 'success'" in canary["if"]
+    rust = workflow_jobs["validate-darwin-warm-rust"]
+    assert "canary-darwin-fods.result == 'success'" in rust["if"]
     assert canary["with"]["canary"] == "true"
     assert canary["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"
     assert canary["with"]["previous"] == "prepare-x86_64-linux"
@@ -1421,6 +1446,7 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
     assert set(rust["needs"]) == {
         "prepare-merge",
         "plan-darwin-closures",
+        "canary-darwin-fods",
         "canary-warm-rust",
     }
     assert "canary-warm-rust.result == 'skipped'" in rust["if"]

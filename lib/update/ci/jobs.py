@@ -28,6 +28,7 @@ _VALIDATION_SCOPES = frozenset({
     "rust-warmup",
     "cascade-warmup",
     "cascade-canary",
+    "fod-canary",
     "zed-warmup",
 })
 _HEARTBEAT_INTERVAL_SECONDS = 60
@@ -790,7 +791,7 @@ def _append_validation_scope(args: list[str]) -> str:
         msg = (
             "Validation scope must be all, packages, closures, "
             "closure-shard, rust-warmup, cascade-warmup, cascade-canary, "
-            "or zed-warmup"
+            "fod-canary, or zed-warmup"
         )
         raise ValueError(msg)
     if scope != "all":
@@ -827,6 +828,7 @@ def _append_validation_scope(args: list[str]) -> str:
             "rust-warmup",
             "cascade-warmup",
             "cascade-canary",
+            "fod-canary",
             "zed-warmup",
         }
         and shard

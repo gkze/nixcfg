@@ -30,10 +30,10 @@ class BbUpdater(GitHubReleaseUpdater):
 
     name = "bb"
     aggregate_into = ("electron-runtimes",)
-    # 38669200592 darwin-argus: the pnpm FOD drifted at desktop-v0.43.4 after
-    # auto-GC deleted a leftover bb-pnpm-deps path and the live fetch no longer
-    # matched sources.json. Rehash on Darwin prepare even if the tag is current.
-    materialize_when_current = True
+    # 38739788947: rematerializing npmDepsHash after a leftover GC produced
+    # Wap+; two independent Darwin cascade hosts then produced the original
+    # wb2d pin. Do not chase a single-host "got" hash. The dual Darwin
+    # fod-canary realizes bb.pnpmDeps before rust-warmup.
     GITHUB_OWNER = "get-bb"
     GITHUB_REPO = "bb"
     TAG_PREFIX = "desktop-v"
@@ -138,15 +138,6 @@ class BbUpdater(GitHubReleaseUpdater):
                 "tag": tag_name,
             },
         )
-
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Recompute the pnpm closure before deciding metadata is unchanged."""
-        _ = (context, info)
-        return False
 
     @classmethod
     def _src_expr(cls, commit: str) -> str:

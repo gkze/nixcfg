@@ -204,6 +204,29 @@ class WarmupFatalError(WarmupError):
     """A streamed warmup/root line that must fail the hosted job immediately."""
 
 
+_FIXED_OUTPUT_HASH_MISMATCH = "hash mismatch in fixed-output derivation"
+# 38739788947: leftover-contaminated rematerialize pinned Wap+; two
+# independent Darwin cascade hosts then produced wb2d. Realize these
+# FODs on two macos-15 runners before the 5h rust-warmup fan-out.
+_DARWIN_FOD_CANARY_ATTRS = (
+    "bb.pnpmDeps",
+    "emdash.pnpmDeps",
+    "comet.src",
+)
+
+
+def is_fixed_output_hash_mismatch(text: str) -> bool:
+    """Return whether Nix streamed a FOD content-hash disagreement."""
+    return _FIXED_OUTPUT_HASH_MISMATCH in text.casefold()
+
+
+def darwin_fod_canary_installables(
+    system: str = _DARWIN_SYSTEM,
+) -> tuple[str, ...]:
+    """Return flake attrs for Darwin warmup-path FODs (pnpm-deps, DMGs)."""
+    return tuple(f"path:.#pkgs.{system}.{attr}" for attr in _DARWIN_FOD_CANARY_ATTRS)
+
+
 def warmup_fatal_line(
     line: str,
     *,
@@ -213,6 +236,10 @@ def warmup_fatal_line(
     apply_wbb_limit: bool = True,
 ) -> str | None:
     """Return why a live warmup/root log line must fail the job."""
+    if is_fixed_output_hash_mismatch(line):
+        # 38739788947: cascade --keep-going spent 19m after bb-pnpm-deps
+        # mismatch. A FOD pin error cannot recover by building siblings.
+        return "fixed-output hash mismatch"
     if "error[E04" in line:
         # Zed-only keep_going collects every crate error in one pass.
         return None if keep_going else "rustc SVH/crate mismatch"
@@ -2226,14 +2253,18 @@ def realize_warmup_outputs(
             )
             for path in window
         )
-        failures.extend(
-            validate_derivation_requests(
-                requests,
-                flake_root=flake_root,
-                run=run,
-                progress=progress,
-                timeout=timeout,
-                print_build_logs=print_build_logs,
-            )
+        window_failures = validate_derivation_requests(
+            requests,
+            flake_root=flake_root,
+            run=run,
+            progress=progress,
+            timeout=timeout,
+            print_build_logs=print_build_logs,
         )
+        failures.extend(window_failures)
+        if any(
+            is_fixed_output_hash_mismatch(failure.message)
+            for failure in window_failures
+        ):
+            return tuple(failures)
     return tuple(failures)

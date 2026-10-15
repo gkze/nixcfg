@@ -35,6 +35,7 @@ from lib.update.ci.warmup import (
     classify_slot_warmup_will_be_built,
     command_store_drv,
     compiler_input_drvs,
+    darwin_fod_canary_installables,
     darwin_output_paths,
     default_cache_present,
     dry_run_will_be_built_count,
@@ -50,6 +51,7 @@ from lib.update.ci.warmup import (
     is_compiler_must_substitute_store_path,
     is_crate2nix_rust_output,
     is_extension_host_family_store_path,
+    is_fixed_output_hash_mismatch,
     is_force_local_allowed_build,
     is_linux_builder_image_command,
     is_named_rust_crate_store_path,
@@ -767,6 +769,44 @@ def test_realize_warmup_outputs_batches_store_paths(
             run=run,
             chunk=0,
         )
+
+
+def test_realize_warmup_outputs_stops_on_fixed_output_hash_mismatch(
+    tmp_path: Path,
+) -> None:
+    """38739788947: do not keep-going the cascade stripe after a FOD flip."""
+    calls: list[str] = []
+    mismatch = (
+        "error: hash mismatch in fixed-output derivation "
+        "'/nix/store/qbvbj2w3qxhn5c0x43f929k28plr1r8s-bb-pnpm-deps.drv':\n"
+        "         specified: sha256-Wap+NC0xMgKHslKdl896QG6wje31HqZRFozQ1R4tAAQ=\n"
+        "            got:    sha256-wb2dZ6Ki2+gC4XnHYOUUVcYfK1t3G8+dFeOlmRb2o84="
+    )
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        target = next(
+            arg for arg in args if arg.startswith(("/nix/store/", "path:"))
+        )
+        calls.append(target)
+        if "bb-pnpm-deps" in target:
+            return subprocess.CompletedProcess(args, 1, "", mismatch)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    failures = realize_warmup_outputs(
+        [
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bb-pnpm-deps",
+            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-later",
+        ],
+        flake_root=tmp_path,
+        run=run,
+        keep_going=True,
+        chunk=1,
+    )
+    assert [failure.installable for failure in failures] == [
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bb-pnpm-deps"
+    ]
+    assert is_fixed_output_hash_mismatch(failures[0].message)
+    assert calls == ["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bb-pnpm-deps"]
 
 
 def test_realize_warmup_outputs_builds_drv_outputs(tmp_path: Path) -> None:
@@ -2015,6 +2055,18 @@ def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:
     assert warmup_fatal_line(host) is not None
     assert warmup_fatal_line(host, apply_wbb_limit=False) is None
     raise_if_warmup_fatal(host, apply_wbb_limit=False)
+    mismatch = (
+        "error: hash mismatch in fixed-output derivation "
+        "'/nix/store/qbvbj2w3qxhn5c0x43f929k28plr1r8s-bb-pnpm-deps.drv':"
+    )
+    assert warmup_fatal_line(mismatch, keep_going=True) == "fixed-output hash mismatch"
+    with pytest.raises(WarmupFatalError, match="fixed-output hash mismatch"):
+        raise_if_warmup_fatal(mismatch, keep_going=True)
+    assert darwin_fod_canary_installables() == (
+        "path:.#pkgs.aarch64-darwin.bb.pnpmDeps",
+        "path:.#pkgs.aarch64-darwin.emdash.pnpmDeps",
+        "path:.#pkgs.aarch64-darwin.comet.src",
+    )
 
 
 def test_realize_source_fetch_drvs_retries_after_dns_recovers(

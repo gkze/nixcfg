@@ -51,12 +51,14 @@ from lib.update.ci.warmup import (
     cascade_canary_paths,
     command_store_drv,
     compiler_input_drvs,
+    darwin_fod_canary_installables,
     export_warmup_drvs,
     filter_cascade_realize_drvs,
     import_warmup_drvs,
     is_compiler_must_substitute_store_path,
     is_crate2nix_rust_output,
     is_extension_host_family_store_path,
+    is_fixed_output_hash_mismatch,
     is_linux_builder_image_command,
     is_rust_extension_host_store_path,
     is_rust_language_models_store_path,
@@ -128,6 +130,7 @@ ValidationScope = Literal[
     "rust-warmup",
     "cascade-warmup",
     "cascade-canary",
+    "fod-canary",
     "zed-warmup",
 ]
 ValidationGate = Literal["packages", "closures"]
@@ -231,6 +234,7 @@ _FAIL_FAST_PROGRESS_SOURCES = frozenset({
     "rust-warmup",
     "cascade-warmup",
     "cascade-canary",
+    "fod-canary",
     "root-deps",
     "root-closures",
 })
@@ -672,6 +676,7 @@ def _gates_for_scope(scope: str) -> tuple[ValidationGate, ...]:
         "rust-warmup",
         "cascade-warmup",
         "cascade-canary",
+        "fod-canary",
         "zed-warmup",
     }:
         return ()
@@ -1250,6 +1255,37 @@ def _realize_cascade_canary(
     )
 
 
+def _realize_fod_canary(
+    *,
+    flake_root: Path,
+) -> tuple[validation.DerivationValidationFailure, ...]:
+    """Realize Darwin warmup-path FODs one attr at a time; abort on hash flip.
+
+    38739788947: bb-pnpm-deps flip-flopped after a leftover-contaminated
+    rematerialize. Two independent Darwin hosts must agree on the pin
+    before rust-warmup occupies the macos-15 pool for hours.
+    """
+    failures: list[validation.DerivationValidationFailure] = []
+    progress = _hosted_validation_progress("fod-canary")
+    for installable in darwin_fod_canary_installables():
+        window = validation.validate_derivation_requests(
+            (
+                validation.DerivationValidationRequest(
+                    source="fod-canary",
+                    installable=installable,
+                    mode="build",
+                ),
+            ),
+            flake_root=flake_root,
+            progress=progress,
+            print_build_logs=True,
+        )
+        failures.extend(window)
+        if any(is_fixed_output_hash_mismatch(failure.message) for failure in window):
+            return tuple(failures)
+    return tuple(failures)
+
+
 def _realize_requested_warmup(
     scope: str,
     warmup_plan: Path | None,
@@ -1257,7 +1293,7 @@ def _realize_requested_warmup(
     *,
     flake_root: Path,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
-    """Dispatch rust-warmup, cascade-warmup, cascade-canary, or zed-warmup."""
+    """Dispatch rust-warmup, cascade-warmup, cascade-canary, fod-canary, or zed-warmup."""
     if scope == "rust-warmup":
         if warmup_plan is None or warmup_slot is None:
             msg = "rust-warmup requires a warmup plan and slot"
@@ -1273,6 +1309,8 @@ def _realize_requested_warmup(
             msg = "cascade-canary requires a warmup plan"
             raise ValueError(msg)
         return _realize_cascade_canary(warmup_plan, flake_root=flake_root)
+    if scope == "fod-canary":
+        return _realize_fod_canary(flake_root=flake_root)
     if scope == "zed-warmup":
         if warmup_plan is None:
             msg = "zed-warmup requires a warmup plan"
@@ -1297,7 +1335,9 @@ def validate_candidate(
     realizes named Darwin roots and is not certify evidence; the aggregate
     ``closures`` gate still proves ``root-closures``.     ``rust-warmup`` realizes
     one 5-wide stripe of the planner rust_* layers and is not certify
-    evidence. ``cascade-canary`` realizes ``buzz-onnxruntime`` once so
+    evidence. ``fod-canary`` realizes Darwin warmup-path FODs
+    (pnpm-deps, DMG src) on two hosts before rust-warmup. ``cascade-canary``
+    realizes ``buzz-onnxruntime`` once so
     the 5-wide stripe can substitute it. ``cascade-warmup`` realizes the
     shared non-rust intersection one drv at a time. Hosted Darwin shards
     GC before the root-closure fetch: a cache-miss rust_* subtree can
