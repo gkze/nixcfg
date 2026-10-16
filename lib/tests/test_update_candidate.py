@@ -3270,6 +3270,28 @@ def test_successful_root_closures_record_realized_paths_for_flush(
     assert remembered[0][0].endswith(f"#checks.{closures.system}.root-closures")
 
 
+def test_linux_closures_do_not_record_realized_root_paths(
+    prepared_run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Linux validate builds Darwin-root deps; it never realizes the Darwin check."""
+    candidate = _candidate_for_scope(prepared_run)
+    _root, _operations, state = prepared_run
+    state["system"] = "x86_64-linux"
+    remembered: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", lambda **_k: ())
+    monkeypatch.setattr(pipeline.jobs, "reclaim_hosted_store", lambda: None)
+    monkeypatch.setattr(
+        pipeline.jobs,
+        "remember_realized_installable_paths",
+        lambda installables, **_k: remembered.append(installables) or installables,
+    )
+    pipeline.validate_candidate(candidate, scope="closures")
+    assert remembered == []
+
+
 def test_failed_root_closures_do_not_record_realized_paths(
     prepared_run, monkeypatch: pytest.MonkeyPatch
 ) -> None:

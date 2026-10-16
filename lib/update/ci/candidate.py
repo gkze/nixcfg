@@ -1331,8 +1331,12 @@ def _remember_successful_root_paths(
 
     38821223775 built ``darwin-system-26.11.57a3171`` wrappers, then
     ``cachix daemon stop`` returned 0 without publishing those tops.
+    Linux jobs only realize those roots' native deps.
     """
-    if failures:
+    if failures or not system.endswith("-darwin"):
+        # Linux validate-all realizes Darwin-root *deps*, not
+        # checks.<linux>.root-closures. 38861101992 path-info'd that
+        # missing attr and failed after a successful realize.
         return
     names = closure_roots if closure_roots is not None else (None,)
     jobs.remember_realized_installable_paths(
