@@ -1026,16 +1026,16 @@ def test_fod_canary_realizes_darwin_fods_and_stops_on_hash_mismatch(
         ),
     )
 
-    def realize(requests: object, *_args: object, **_kwargs: object) -> tuple[object, ...]:
+    def realize(
+        requests: object, *_args: object, **_kwargs: object
+    ) -> tuple[object, ...]:
         installable = next(iter(requests)).installable
         seen.append(installable)
         if "bb.pnpmDeps" in installable:
             return (mismatch,)
         return ()
 
-    monkeypatch.setattr(
-        pipeline.validation, "validate_derivation_requests", realize
-    )
+    monkeypatch.setattr(pipeline.validation, "validate_derivation_requests", realize)
     report = pipeline.validate_candidate(candidate, scope="fod-canary")
     assert report.gates == ()
     assert report.failures == (mismatch,)
@@ -1046,9 +1046,7 @@ def test_fod_canary_realizes_darwin_fods_and_stops_on_hash_mismatch(
         seen.append(next(iter(requests)).installable)
         return ()
 
-    monkeypatch.setattr(
-        pipeline.validation, "validate_derivation_requests", succeed
-    )
+    monkeypatch.setattr(pipeline.validation, "validate_derivation_requests", succeed)
     ok = pipeline.validate_candidate(candidate, scope="fod-canary")
     assert ok.failures == ()
     assert seen == [

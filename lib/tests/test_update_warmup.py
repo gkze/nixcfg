@@ -784,9 +784,7 @@ def test_realize_warmup_outputs_stops_on_fixed_output_hash_mismatch(
     )
 
     def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        target = next(
-            arg for arg in args if arg.startswith(("/nix/store/", "path:"))
-        )
+        target = next(arg for arg in args if arg.startswith(("/nix/store/", "path:")))
         calls.append(target)
         if "bb-pnpm-deps" in target:
             return subprocess.CompletedProcess(args, 1, "", mismatch)
