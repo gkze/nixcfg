@@ -98,6 +98,7 @@ from lib.update.ci.warmup import (
     zed_family_warmup_outputs,
 )
 from lib.update.cli_options import RepairAgent, UpdateOptions
+from lib.update.derivation_validation import root_closure_check_attr
 from lib.update.io import atomic_write_text
 from lib.update.nix import get_current_nix_platform
 from lib.update.paths import get_repo_root
@@ -1319,6 +1320,70 @@ def _realize_requested_warmup(
     return ()
 
 
+def _remember_successful_root_paths(
+    *,
+    flake_root: Path,
+    system: str,
+    closure_roots: tuple[str, ...] | None,
+    failures: tuple[object, ...],
+) -> None:
+    """Record realized Darwin-root out paths so flush can ``cachix push`` them.
+
+    38821223775 built ``darwin-system-26.11.57a3171`` wrappers, then
+    ``cachix daemon stop`` returned 0 without publishing those tops.
+    """
+    if failures:
+        return
+    names = closure_roots if closure_roots is not None else (None,)
+    jobs.remember_realized_installable_paths(
+        tuple(
+            f"path:{flake_root}#checks.{system}.{root_closure_check_attr(name)}"
+            for name in names
+        )
+    )
+
+
+def _realize_root_closures(
+    *,
+    flake_root: Path,
+    system: str,
+    scope: str,
+    closure_roots: tuple[str, ...] | None,
+    budget: float | None,
+    prior: tuple[validation.DerivationValidationFailure, ...],
+) -> tuple[validation.DerivationValidationFailure, ...]:
+    """GC, realize root closures, and record tops for an explicit Cachix push."""
+    jobs.record_runner_storage(f"before-gc-{scope}")
+    jobs.reclaim_hosted_store()
+    jobs.record_runner_storage(f"after-gc-{scope}")
+    # Hosted macos-15 died mid-build when -L streamed 4000+ derivation
+    # logs. Build without those logs so Cachix can upload every path.
+    closure_progress = _hosted_validation_progress("root-closures")
+    if budget is not None:
+        closure_progress(
+            f"Root-closure build budget is {budget:.0f}s; "
+            "realized paths stay in the gkze cache"
+        )
+    failures = prior + validation.validate_root_closures(
+        flake_root=flake_root,
+        systems=(system,),
+        root_names=closure_roots,
+        include_dependencies=True,
+        print_build_logs=not jobs.is_hosted_darwin_runner(),
+        progress=closure_progress,
+        timeout=_CLOSURE_DISCOVERY_TIMEOUT_SECONDS if budget is not None else None,
+        build_timeout=budget,
+    )
+    _remember_successful_root_paths(
+        flake_root=flake_root,
+        system=system,
+        closure_roots=closure_roots,
+        failures=failures,
+    )
+    jobs.record_runner_storage(f"after-closures-{scope}")
+    return failures
+
+
 def validate_candidate(
     candidate: Candidate,
     *,
@@ -1417,35 +1482,16 @@ def validate_candidate(
                 # GC first when free is below max-free+min-free so min-free
                 # does not fire mid-rustc. Skip when image cleanup already
                 # left that headroom; closure shards do not inherit a
-                # package store.
-                jobs.record_runner_storage(f"before-gc-{scope}")
-                jobs.reclaim_hosted_store()
-                jobs.record_runner_storage(f"after-gc-{scope}")
-                # Root checks come from the independently verified manifest.
-                # Hosted macos-15 died mid-build when -L streamed 4000+
-                # derivation logs. Build without those logs so Cachix can
-                # upload every realized path.
-                closure_progress = _hosted_validation_progress("root-closures")
-                if budget is not None:
-                    closure_progress(
-                        f"Root-closure build budget is {budget:.0f}s; "
-                        "realized paths stay in the gkze cache"
-                    )
-                failures += validation.validate_root_closures(
+                # package store. Root checks come from the independently
+                # verified manifest.
+                failures = _realize_root_closures(
                     flake_root=snapshot.root,
-                    systems=(system,),
-                    root_names=closure_roots,
-                    include_dependencies=True,
-                    print_build_logs=not jobs.is_hosted_darwin_runner(),
-                    progress=closure_progress,
-                    timeout=(
-                        _CLOSURE_DISCOVERY_TIMEOUT_SECONDS
-                        if budget is not None
-                        else None
-                    ),
-                    build_timeout=budget,
+                    system=system,
+                    scope=scope,
+                    closure_roots=closure_roots,
+                    budget=budget,
+                    prior=failures,
                 )
-                jobs.record_runner_storage(f"after-closures-{scope}")
         workspace.validate_changes(allowed)
     return ValidationReport(
         tree=candidate.tree,

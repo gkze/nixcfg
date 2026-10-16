@@ -41,6 +41,14 @@ from lib.update.updaters.metadata import GitHubReleaseMetadata, MappingMetadata
 _HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 
 
+@pytest.fixture(autouse=True)
+def _noop_realized_root_publish(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Closure tests mock realization; they must not call real ``nix path-info``."""
+    monkeypatch.setattr(
+        pipeline.jobs, "remember_realized_installable_paths", lambda *_a, **_k: ()
+    )
+
+
 @dataclass(frozen=True)
 class ExampleMetadata(MappingMetadata):
     """Representative nested updater metadata, including non-mapping state."""
@@ -3226,6 +3234,75 @@ def test_closure_store_faults_fail_closed(
     assert result.exit_code == 1
     written = json.loads(output.read_text())
     assert written["failures"][0]["message"] == message
+
+
+def test_successful_root_closures_record_realized_paths_for_flush(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38821223775: flush must know the locally built darwin-system wrapper."""
+    candidate = _candidate_for_scope(prepared_run)
+    remembered: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", lambda **_k: ())
+    monkeypatch.setattr(pipeline.jobs, "reclaim_hosted_store", lambda: None)
+    monkeypatch.setattr(
+        pipeline.jobs,
+        "remember_realized_installable_paths",
+        lambda installables, **_k: remembered.append(installables) or installables,
+    )
+    shard = pipeline.validate_candidate(
+        candidate,
+        scope="closure-shard",
+        closure_roots=("darwin-argus",),
+    )
+    assert len(remembered) == 1
+    assert remembered[0][0].endswith(
+        f"#checks.{shard.system}.root-closure-darwin-argus"
+    )
+    remembered.clear()
+    closures = pipeline.validate_candidate(
+        candidate,
+        scope="closures",
+        closure_budget_seconds=pipeline.HOSTED_DARWIN_CLOSURE_BUILD_BUDGET_SECONDS,
+    )
+    assert remembered[0][0].endswith(f"#checks.{closures.system}.root-closures")
+
+
+def test_failed_root_closures_do_not_record_realized_paths(
+    prepared_run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed shard must not publish a root the runner never realized."""
+    candidate = _candidate_for_scope(prepared_run)
+    remembered: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        pipeline.validation, "validate_derivations", lambda *_args, **_kwargs: ()
+    )
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_root_closures",
+        lambda **_k: (
+            DerivationValidationFailure(
+                "darwin-argus",
+                "path:.#checks.aarch64-darwin.root-closure-darwin-argus",
+                "build failed",
+            ),
+        ),
+    )
+    monkeypatch.setattr(pipeline.jobs, "reclaim_hosted_store", lambda: None)
+    monkeypatch.setattr(
+        pipeline.jobs,
+        "remember_realized_installable_paths",
+        lambda installables, **_k: remembered.append(installables) or installables,
+    )
+    report = pipeline.validate_candidate(
+        candidate,
+        scope="closure-shard",
+        closure_roots=("darwin-argus",),
+    )
+    assert report.failures
+    assert remembered == []
 
 
 def test_closure_shard_writes_receipt_instead_of_validation_report(

@@ -53,6 +53,11 @@ _CACHIX_PUSH_FAILURE = "Failed to push some store paths"
 _CACHIX_DRAIN_TIMEOUT = "drain timed out"
 _CACHIX_STUCK_JOBS = "stuck jobs after drain timeout"
 _STORE_PATH_RE = re.compile(r"/nix/store/[0-9a-z]{32}-[^\s]+")
+# 38821223775: each Darwin root shard built darwin-system-26.11.57a3171
+# locally, then `cachix daemon stop` returned 0. assert-coverage still
+# 404'd those paths on gkze.cachix.org. The post-build-hook queue did
+# not publish the thin wrapper. Flush `cachix push`es this receipt.
+_REALIZED_ROOT_PATHS_NAME = "realized-root-paths.json"
 _STORAGE_MOUNTS = ("/", "/nix", "/nix/store")
 # Live-written on hosted macOS; rmtree can lose a race (ENOTEMPTY) after children
 # are gone. Cleanup is disk reclaim, not a correctness gate for these trees.
@@ -1418,6 +1423,103 @@ def _push_unfinished_cachix_paths(
     return _run("cachix", "push", _BINARY_CACHE, *leftover, check=False, capture=True)
 
 
+def remember_realized_installable_paths(
+    installables: tuple[str, ...],
+    *,
+    run: Callable[..., object] | None = None,
+) -> tuple[str, ...]:
+    """Record realized installable out paths so flush can ``cachix push`` them.
+
+    38821223775 argus built ``darwin-system-26.11.57a3171`` at 05:31:46
+    and finished validate at 05:31:51. Daemon stop returned 0 ten seconds
+    later. ``https://gkze.cachix.org`` still 404'd
+    ``/nix/store/98bwk8gpzhmr12navdg9knjscv09k2nm-darwin-system-26.11.57a3171``.
+    """
+    if not installables:
+        return ()
+    runner = _run if run is None else run
+    result = runner(
+        "nix",
+        "path-info",
+        "--no-update-lock-file",
+        *installables,
+        check=False,
+        capture=True,
+    )
+    stdout = str(getattr(result, "stdout", ""))
+    returncode = int(getattr(result, "returncode", 1))
+    paths = tuple(
+        line.strip()
+        for line in stdout.splitlines()
+        if line.strip().startswith("/nix/store/")
+    )
+    if returncode or len(paths) != len(installables):
+        detail = str(getattr(result, "stderr", "")).strip() or "nix path-info failed"
+        msg = (
+            "could not resolve realized root out paths for "
+            f"{' '.join(installables)}: {detail}"
+        )
+        raise CachixFlushError(msg)
+    artifacts = _temp() / "update-artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    (artifacts / _REALIZED_ROOT_PATHS_NAME).write_text(
+        json.dumps({"storePaths": list(paths)}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return paths
+
+
+def _store_path_exists(path: str) -> bool:
+    """Return whether a realized store path is still on this runner."""
+    return Path(path).exists()
+
+
+def load_realized_root_paths(artifacts: Path | None = None) -> tuple[str, ...]:
+    """Return store paths recorded after a successful root-closure realize."""
+    root = artifacts if artifacts is not None else _temp() / "update-artifacts"
+    path = root / _REALIZED_ROOT_PATHS_NAME
+    if not path.is_file():
+        return ()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        msg = f"invalid {_REALIZED_ROOT_PATHS_NAME}: {path}"
+        raise CachixFlushError(msg) from error
+    raw = payload.get("storePaths") if isinstance(payload, dict) else None
+    if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+        msg = f"invalid {_REALIZED_ROOT_PATHS_NAME}: {path}"
+        raise CachixFlushError(msg)
+    return tuple(item for item in raw if item.startswith("/nix/store/"))
+
+
+def _push_realized_root_paths(log: TextIO) -> None:
+    """Publish locally realized Darwin roots that the daemon hook missed."""
+    recorded = load_realized_root_paths()
+    if not recorded:
+        return
+    missing = [path for path in recorded if not _store_path_exists(path)]
+    if missing:
+        msg = f"realized root paths missing locally: {', '.join(missing)}"
+        _write_diagnostic(log, msg)
+        raise CachixFlushError(msg)
+    _write_diagnostic(
+        log,
+        f"pushing {len(recorded)} realized root paths after daemon drain",
+    )
+    push = _run("cachix", "push", _BINARY_CACHE, *recorded, check=False, capture=True)
+    _write_diagnostic(
+        log,
+        f"cachix push realized-roots returncode={push.returncode} "
+        f"paths={' '.join(recorded)} stderr={push.stderr.strip()}",
+    )
+    if push.returncode:
+        msg = (
+            "cachix push of realized Darwin roots failed "
+            f"returncode={push.returncode} stderr={push.stderr.strip()}"
+        )
+        raise CachixFlushError(msg)
+
+
 def flush_cachix() -> None:
     """Push leftover prefetch receipts and drain the Cachix daemon.
 
@@ -1440,6 +1542,10 @@ def flush_cachix() -> None:
     - Drain timeout (38577749898): ``daemon stop`` exits 3 after 60s with
       one stuck job. Recover identifiable ``Pushing`` leftovers with
       ``cachix push``; fail closed if none can be named or the retry fails.
+    - Silent hook miss (38821223775): ``daemon stop`` returned 0 after
+      each Darwin root shard built ``darwin-system-26.11.57a3171``, but
+      gkze.cachix.org 404'd those paths. Flush then ``cachix push``es
+      ``realized-root-paths.json``.
     """
     artifacts = _temp() / "update-artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -1497,6 +1603,7 @@ def flush_cachix() -> None:
                     f"paths={' '.join(leftover)} stderr={push.stderr.strip()}",
                 )
                 if push.returncode == 0:
+                    _push_realized_root_paths(log)
                     _release_cachix_daemon_dir()
                     _write_diagnostic(
                         log,
@@ -1516,6 +1623,7 @@ def flush_cachix() -> None:
             # (38577749898 post hook exit 1 after this flush).
             _clear_cachix_daemon_env()
             raise CachixFlushError(msg)
+        _push_realized_root_paths(log)
         _release_cachix_daemon_dir()
         _write_diagnostic(
             log,
