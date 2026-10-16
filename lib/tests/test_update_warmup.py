@@ -37,13 +37,17 @@ from lib.update.ci.warmup import (
     compiler_input_drvs,
     darwin_fod_canary_installables,
     darwin_output_paths,
+    darwin_package_installable,
     default_cache_present,
     dry_run_will_be_built_count,
+    eval_darwin_package_graph,
     eval_root_darwin_outputs,
     export_warmup_drvs,
     extension_host_family_warmup_outputs,
     filter_cascade_realize_drvs,
     force_local_dry_run_builds,
+    gitbutler_family_package_outputs,
+    gitbutler_family_slot_from_package,
     import_warmup_drvs,
     intersect_missing,
     is_cascade_canary_store_path,
@@ -53,6 +57,7 @@ from lib.update.ci.warmup import (
     is_extension_host_family_store_path,
     is_fixed_output_hash_mismatch,
     is_force_local_allowed_build,
+    is_gitbutler_family_store_path,
     is_linux_builder_image_command,
     is_named_rust_crate_store_path,
     is_rust_agent_ui_store_path,
@@ -93,6 +98,7 @@ from lib.update.ci.warmup import (
     rust_svh_input_drvs,
     rust_warmup_layers,
     rust_warmup_output_drvs,
+    rust_warmup_realize_paths,
     rust_zed_member_warmup_outputs,
     rustc_generation_ids,
     settings_family_warmup_outputs,
@@ -361,6 +367,7 @@ def test_plan_darwin_warmup_writes_intersection_and_rejects_huge_remainder(
         manifest=_manifest(),
         shards=shards,
         run=run,
+        package_graphs={},
         present=cached.__contains__,
     )
     assert plan.warmup_outputs == (
@@ -411,6 +418,7 @@ def test_plan_darwin_warmup_writes_intersection_and_rejects_huge_remainder(
             manifest=_manifest(),
             shards=shards,
             run=run,
+            package_graphs={},
             present=lambda _path: False,
         )
 
@@ -457,6 +465,7 @@ def test_plan_darwin_warmup_peels_shared_non_rust_cascade_from_remaining(
         manifest=_manifest(),
         shards=shards,
         run=run,
+        package_graphs={},
         present=lambda _path: False,
     )
     assert rust in plan.warmup_outputs
@@ -530,6 +539,7 @@ def test_plan_darwin_warmup_peels_two_plus_darwin_only_shared(
         manifest=_live_manifest(),
         shards=shards,
         run=run,
+        package_graphs={},
         present=lambda _path: False,
     )
     assert rust in plan.warmup_outputs
@@ -558,8 +568,108 @@ def test_plan_darwin_warmup_peels_two_plus_darwin_only_shared(
             manifest=_live_manifest(),
             shards=shards,
             run=run_unique,
+            package_graphs={},
             present=lambda _path: False,
         )
+
+
+def test_gitbutler_family_store_path_matches_workspace_crates() -> None:
+    """Workspace crates are rust_<name>-<member>, not rust_<name>-<digit>."""
+    assert is_gitbutler_family_store_path(
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_but-0.0.0"
+    )
+    assert is_gitbutler_family_store_path(
+        "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_but-core-0.0.0.drv"
+    )
+    assert is_gitbutler_family_store_path(
+        "/nix/store/cccccccccccccccccccccccccccccccc-rust_gitbutler-branch-actions-0.0.0"
+    )
+    assert is_gitbutler_family_store_path(
+        "/nix/store/dddddddddddddddddddddddddddddddd-rust_sqlx-macros-0.9.0"
+    )
+    assert is_gitbutler_family_store_path(
+        "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-rust_gix-features-0.70.0"
+    )
+    assert not is_gitbutler_family_store_path(
+        "/nix/store/ffffffffffffffffffffffffffffffff-rust_gpui-1"
+    )
+    assert not is_gitbutler_family_store_path(
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_butter-1.0.0"
+    )
+    assert darwin_package_installable("gitbutler") == (
+        "path:.#packages.aarch64-darwin.gitbutler"
+    )
+
+
+def test_plan_darwin_warmup_peels_gitbutler_family_even_when_cached(
+    tmp_path: Path,
+) -> None:
+    """38867194218: two-plus rust peel was empty; package graph still warms but."""
+    but = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_but-core-0.0.0"
+    sqlx = "/nix/store/cccccccccccccccccccccccccccccccc-rust_sqlx-0.9.0"
+    tarball = "/nix/store/dddddddddddddddddddddddddddddddd-node-releases-2.0.56.tgz"
+    gpui = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-1"
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, json.dumps(_graph(gpui)), "")
+
+    shards = (
+        ClosureShard(
+            shard="darwin-argus",
+            system="aarch64-darwin",
+            roots=("darwin-argus",),
+        ),
+    )
+    plan = plan_darwin_warmup(
+        tmp_path,
+        manifest=_manifest(),
+        shards=shards,
+        run=run,
+        present=lambda _path: True,
+        package_graphs={"gitbutler": _graph(but, sqlx, tarball, gpui)},
+    )
+    assert but in plan.warmup_outputs
+    assert sqlx in plan.warmup_outputs
+    assert tarball not in plan.warmup_outputs
+    assert gpui not in plan.warmup_outputs
+    assert plan.output_drvs[but] == f"{but}.drv"
+    assert "38867194218" in plan.notes
+
+
+def test_rust_warmup_realize_paths_keeps_gitbutler_family() -> None:
+    """path-info is not the realize oracle for rust_gitbutler / rust_but."""
+    but = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_but-core-0.0.0"
+    gpui = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-1"
+    cached = rust_warmup_realize_paths((but, gpui), present=lambda _path: True)
+    assert cached == (but,)
+    missing = rust_warmup_realize_paths((but, gpui), present=lambda _path: False)
+    assert missing == (but, gpui)
+
+
+def test_gitbutler_family_slot_from_package_stripes(tmp_path: Path) -> None:
+    """Empty Linux plan still stripes the Darwin gitbutler package graph."""
+    but = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_but-core-0.0.0"
+    sqlx = "/nix/store/cccccccccccccccccccccccccccccccc-rust_sqlx-0.9.0"
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert "packages.aarch64-darwin.gitbutler" in args[-1]
+        return subprocess.CompletedProcess(args, 0, json.dumps(_graph(but, sqlx)), "")
+
+    assert gitbutler_family_package_outputs((_graph(but, sqlx),)) == frozenset({
+        but,
+        sqlx,
+    })
+    paths, drvs = gitbutler_family_slot_from_package(tmp_path, 0, run=run)
+    striped = {
+        path
+        for slot in range(RUST_WARMUP_SLOTS)
+        for path in gitbutler_family_slot_from_package(tmp_path, slot, run=run)[0]
+    }
+    assert striped == {but, sqlx}
+    assert set(paths) <= {but, sqlx}
+    assert drvs[but] == f"{but}.drv"
+    payload = eval_darwin_package_graph(tmp_path, "gitbutler", run=run)
+    assert but in darwin_output_paths(payload)
 
 
 def test_eval_root_darwin_graphs_is_serial_on_hosted_16g(
@@ -698,6 +808,7 @@ def test_plan_defaults_to_subprocess_and_cache_helpers(
         manifest=_manifest(),
         shards=shards,
         run=run,
+        package_graphs={},
     )
     assert plan.warmup_outputs == (
         "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
@@ -716,6 +827,7 @@ def test_plan_defaults_to_subprocess_and_cache_helpers(
         manifest=linux_only,
         shards=(),
         run=run,
+        package_graphs={},
         present=lambda _path: False,
     )
     assert empty.warmup_outputs == ()

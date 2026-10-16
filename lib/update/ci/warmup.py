@@ -87,6 +87,20 @@ CASCADE_WARMUP_SLOTS = 5
 # Two-plus, not all-roots. home-george is a fourth root and does not
 # contain the darwin-system graph; requiring every root hid that set.
 SHARED_MISSING_MIN_ROOTS = 2
+# 38867194218: rust-warmup / cascade went green with warmupOutputs=[]
+# (remaining_rust_crates=0) because path-info marked the crate2nix
+# graph substitutable. Darwin machine roots then compiled rust_gitbutler-*
+# / rust_but-* / rust_sqlx-* / rust_gix-* from source until the 5h
+# budget. home-george finished; argus/rocinante/zeus did not. Peel this
+# family from packages.aarch64-darwin.gitbutler even when two-plus is
+# empty or path-info says the outputs are already in gkze.
+DARWIN_RUST_FAMILY_PACKAGES = ("gitbutler",)
+_GITBUTLER_FAMILY_PREFIXES = (
+    "rust_gitbutler-",
+    "rust_but-",
+    "rust_sqlx-",
+    "rust_gix-",
+)
 # 38137325241 and 38142145131: 4-wide `nix derivation show --recursive`
 # of Darwin roots on ubuntu-24.04 (16 GiB) got runner SIGTERM at
 # ~800s with ~100G disk free. One graph at a time.
@@ -363,6 +377,12 @@ def is_crate2nix_rust_output(store_path: str) -> bool:
     return bool(separator) and rest.startswith("rust_")
 
 
+def is_gitbutler_family_store_path(path: str) -> bool:
+    """Return whether *path* is a GitButler/but/sqlx/gix crate2nix rust_*."""
+    rest = _store_output_rest(path)
+    return rest.startswith(_GITBUTLER_FAMILY_PREFIXES)
+
+
 def is_planned_rust_warmup_output(store_path: str) -> bool:
     """Return whether rust-warmup (not cascade) owns *store_path*."""
     return is_crate2nix_rust_output(store_path) or is_safe_rust_warmup_other(store_path)
@@ -470,17 +490,20 @@ def assert_local_build_threshold(
     raise WarmupError(msg)
 
 
-def eval_root_darwin_graph(
-    flake_root: Path,
-    root_name: str,
+def darwin_package_installable(name: str, *, flake_root: Path | None = None) -> str:
+    """Return ``path:.#packages.aarch64-darwin.<name>`` for a Darwin package."""
+    prefix = f"path:{flake_root}#" if flake_root is not None else "path:.#"
+    return f"{prefix}packages.{_DARWIN_SYSTEM}.{name}"
+
+
+def eval_darwin_installable_graph(
+    installable: str,
     *,
-    run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+    label: str,
+    run: _StoreRun | None = None,
 ) -> dict[str, object]:
-    """Instantiate one Darwin root and return the recursive derivation JSON."""
+    """Instantiate one Darwin installable and return recursive derivation JSON."""
     runner = subprocess.run if run is None else run
-    installable = root_closure_installable(_DARWIN_SYSTEM, root_name).replace(
-        "path:.#", f"path:{flake_root}#"
-    )
     result = runner(
         [
             "nix",
@@ -503,17 +526,44 @@ def eval_root_darwin_graph(
             or result.stdout.strip()
             or "nix derivation show failed"
         )
-        msg = f"warmup graph for {root_name} failed: {detail}"
+        msg = f"warmup graph for {label} failed: {detail}"
         raise WarmupError(msg)
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError as error:
-        msg = f"warmup graph for {root_name} is not JSON"
+        msg = f"warmup graph for {label} is not JSON"
         raise WarmupError(msg) from error
     if not isinstance(payload, dict):
-        msg = f"warmup graph for {root_name} is not an object"
+        msg = f"warmup graph for {label} is not an object"
         raise WarmupError(msg)
     return payload
+
+
+def eval_root_darwin_graph(
+    flake_root: Path,
+    root_name: str,
+    *,
+    run: _StoreRun | None = None,
+) -> dict[str, object]:
+    """Instantiate one Darwin root and return the recursive derivation JSON."""
+    installable = root_closure_installable(_DARWIN_SYSTEM, root_name).replace(
+        "path:.#", f"path:{flake_root}#"
+    )
+    return eval_darwin_installable_graph(installable, label=root_name, run=run)
+
+
+def eval_darwin_package_graph(
+    flake_root: Path,
+    name: str,
+    *,
+    run: _StoreRun | None = None,
+) -> dict[str, object]:
+    """Instantiate one Darwin package and return the recursive derivation JSON."""
+    return eval_darwin_installable_graph(
+        darwin_package_installable(name, flake_root=flake_root),
+        label=name,
+        run=run,
+    )
 
 
 def eval_root_darwin_outputs(
@@ -993,6 +1043,27 @@ def skip_cached_warmup_paths(
     return tuple(path for path in dict.fromkeys(paths) if not present(path))
 
 
+def rust_warmup_realize_paths(
+    paths: Sequence[str],
+    *,
+    present: Callable[[str], bool],
+) -> tuple[str, ...]:
+    """Skip cached rust-warmup paths except the GitButler crate family.
+
+    38867194218: ``nix path-info --store https://gkze.cachix.org`` treated
+    rust_gitbutler-* / rust_but-* / rust_sqlx-* as present (plan
+    warmupOutputs=[], rust-warmup no-op'd) while ``nix build`` of the
+    machine roots compiled those exact .drv files from source. path-info
+    is not the realize oracle for this family; ``nix build`` substitutes
+    when the NAR is real.
+    """
+    missing = skip_cached_warmup_paths(paths, present=present)
+    family = tuple(
+        path for path in dict.fromkeys(paths) if is_gitbutler_family_store_path(path)
+    )
+    return tuple(dict.fromkeys((*missing, *family)))
+
+
 def substitutable_paths(
     paths: Iterable[str],
     *,
@@ -1046,6 +1117,31 @@ def _eval_root_darwin_graphs(
     return graphs, per_root
 
 
+def _eval_darwin_package_graphs(
+    flake_root: Path,
+    names: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> dict[str, dict[str, object]]:
+    """Instantiate Darwin rust-family packages one at a time."""
+    graphs: dict[str, dict[str, object]] = {}
+    for name in names:
+        graphs[name] = eval_darwin_package_graph(flake_root, name, run=run)
+    return graphs
+
+
+def gitbutler_family_package_outputs(
+    payloads: Sequence[Mapping[str, object]],
+) -> frozenset[str]:
+    """Return GitButler-family rust_* and safe FODs from package graphs."""
+    paths: set[str] = set()
+    for payload in payloads:
+        for path in darwin_output_paths(payload):
+            if is_gitbutler_family_store_path(path) or is_safe_rust_warmup_other(path):
+                paths.add(path)
+    return frozenset(paths)
+
+
 def plan_darwin_warmup(
     flake_root: Path,
     *,
@@ -1054,6 +1150,7 @@ def plan_darwin_warmup(
     run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
     present: Callable[[str], bool] | None = None,
     threshold: int = MAX_SHARD_LOCAL_BUILDS,
+    package_graphs: Mapping[str, Mapping[str, object]] | None = None,
 ) -> WarmupPlan:
     """Plan the missing shared Darwin outputs and fail closed on huge remainders."""
     graphs, per_root = _eval_root_darwin_graphs(
@@ -1072,7 +1169,29 @@ def plan_darwin_warmup(
     # roots) stayed in both shards. Two-plus is the cascade; one-root
     # leaves stay in remaining and still face the 400 gate.
     cascade = missing_shared - warmup
-    payloads = tuple(graphs.values())
+    extra_payloads: tuple[Mapping[str, object], ...] = ()
+    if per_root:
+        extra_graphs = (
+            package_graphs
+            if package_graphs is not None
+            else _eval_darwin_package_graphs(
+                flake_root, DARWIN_RUST_FAMILY_PACKAGES, run=run
+            )
+        )
+        extra_payloads = tuple(extra_graphs.values())
+        family = gitbutler_family_package_outputs(extra_payloads)
+        # Family rust_* stay in rust-warmup even when path-info says
+        # they are cached (38867194218). Safe FODs stay cache-aware.
+        family_rust = frozenset(
+            path for path in family if is_gitbutler_family_store_path(path)
+        )
+        family_fods = frozenset(
+            path
+            for path in family
+            if is_safe_rust_warmup_other(path) and not checker(path)
+        )
+        warmup = warmup | family_rust | family_fods
+    payloads = (*graphs.values(), *extra_payloads)
     rust_layers = rust_warmup_layers(warmup, payloads)
     cascade_layers = cascade_warmup_layers(cascade, payloads)
     output_drvs = warmup_output_drvs(warmup | cascade, payloads)
@@ -1144,6 +1263,9 @@ def plan_darwin_warmup(
             "remaining=829/836) is five macos-15 cascade-warmup slots, "
             "one drv at a time, skip-if-in-gkze, pushed to gkze. "
             "One-root leaves stay in remaining after both peels. "
+            "38867194218: also peel rust_gitbutler-* / rust_but-* / "
+            "rust_sqlx-* / rust_gix-* from packages.aarch64-darwin.gitbutler "
+            "even when two-plus is empty or path-info says cached. "
             f"warmup={len(ordered)} rustLayers={len(rust_layers)} "
             f"cascade={len(ordered_cascade)} cascadeLayers={len(cascade_layers)} "
             f"slots={RUST_WARMUP_SLOTS} cascadeSlots={CASCADE_WARMUP_SLOTS} "
@@ -1504,6 +1626,31 @@ def _warmup_outputs_matching(
 def language_models_warmup_outputs(layers: Sequence[Sequence[str]]) -> tuple[str, ...]:
     """Return rust_language_models outputs from every warmup layer, first-seen."""
     return _warmup_outputs_matching(layers, is_rust_language_models_store_path)
+
+
+def gitbutler_family_warmup_outputs(
+    layers: Sequence[Sequence[str]],
+) -> tuple[str, ...]:
+    """Return GitButler-family rust_* from every warmup layer, first-seen."""
+    return _warmup_outputs_matching(layers, is_gitbutler_family_store_path)
+
+
+def gitbutler_family_slot_from_package(
+    flake_root: Path,
+    slot: int,
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[tuple[str, ...], dict[str, str]]:
+    """Stripe GitButler-family rust_* from the Darwin package graph.
+
+    38867194218 rust-warmup no-op'd because the Linux two-plus plan had
+    warmupOutputs=[]. Darwin instantiate of packages.gitbutler is the
+    realize-time canary when the planner peel is empty.
+    """
+    payload = eval_darwin_package_graph(flake_root, "gitbutler", run=run)
+    outputs = gitbutler_family_package_outputs((payload,))
+    layers = rust_warmup_layers(outputs, (payload,))
+    return slot_warmup_paths(layers, slot), warmup_output_drvs(outputs, (payload,))
 
 
 def extension_host_family_warmup_outputs(

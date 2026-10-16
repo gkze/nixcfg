@@ -803,6 +803,137 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
         pipeline.validate_candidate(candidate, scope="packages", warmup_slot=0)
 
 
+def test_rust_warmup_realizes_gitbutler_family_even_when_path_info_says_cached(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38867194218: path-info said rust_but-* was in gkze; roots compiled it."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[object] = []
+
+    def warmup_realize(paths: object, *_args: object, **_kwargs: object) -> tuple[()]:
+        realized.append(paths)
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    but = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_but-core-0.0.0"
+    but_drv = f"{but}.drv"
+    gpui = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-1"
+    gpui_drv = f"{gpui}.drv"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(but, gpui),
+            rustLayers=((but, gpui),),
+            outputDrvs={but: but_drv, gpui: gpui_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    result = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert result.failures == ()
+    assert realized == [(but_drv,)]
+
+
+def test_rust_warmup_empty_plan_canaries_gitbutler_package_graph(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38867194218 rustLayers=[] still instantiates packages.gitbutler."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[object] = []
+
+    def warmup_realize(paths: object, *_args: object, **_kwargs: object) -> tuple[()]:
+        realized.append(paths)
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    but = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_but-core-0.0.0"
+    but_drv = f"{but}.drv"
+    monkeypatch.setattr(
+        pipeline,
+        "gitbutler_family_slot_from_package",
+        lambda _root, _slot: ((but,), {but: but_drv}),
+    )
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(),
+            rustLayers=(),
+            outputDrvs={},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=0, warmup=0, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    result = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert result.failures == ()
+    assert realized == [(but_drv,)]
+
+
 def test_cascade_warmup_realizes_uncached_stripe_per_derivation(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

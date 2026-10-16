@@ -54,6 +54,7 @@ from lib.update.ci.warmup import (
     darwin_fod_canary_installables,
     export_warmup_drvs,
     filter_cascade_realize_drvs,
+    gitbutler_family_slot_from_package,
     import_warmup_drvs,
     is_compiler_must_substitute_store_path,
     is_crate2nix_rust_output,
@@ -86,6 +87,7 @@ from lib.update.ci.warmup import (
     realize_warmup_outputs,
     rust_crate_input_drvs,
     rust_svh_input_drvs,
+    rust_warmup_realize_paths,
     rust_zed_member_warmup_outputs,
     rustc_generation_ids,
     settings_family_warmup_outputs,
@@ -991,6 +993,27 @@ def _expand_svh_family_from_stripe(
     )
 
 
+def _slot_paths_with_gitbutler_canary(
+    plan: WarmupPlan,
+    warmup_slot: int,
+    requested_crates: tuple[str, ...],
+    *,
+    flake_root: Path,
+) -> tuple[tuple[str, ...], dict[str, str]]:
+    """Return this stripe plus a gitbutler package canary when rust peel is empty."""
+    slot_paths = _canary_or_slot_paths(plan, warmup_slot, requested_crates)
+    output_drvs = dict(plan.output_drvs)
+    if plan.warmup_outputs or requested_crates:
+        return slot_paths, output_drvs
+    family_paths, family_drvs = gitbutler_family_slot_from_package(
+        flake_root, warmup_slot
+    )
+    return tuple(dict.fromkeys((*slot_paths, *family_paths))), {
+        **output_drvs,
+        **family_drvs,
+    }
+
+
 def _realize_rust_warmup(
     warmup_plan: Path,
     warmup_slot: int,
@@ -1002,12 +1025,14 @@ def _realize_rust_warmup(
     if requested_slots and warmup_slot not in requested_slots:
         return ()
     plan = load_warmup_plan(warmup_plan)
-    slot_paths = _canary_or_slot_paths(plan, warmup_slot, requested_crates)
-    missing = skip_cached_warmup_paths(
+    slot_paths, output_drvs = _slot_paths_with_gitbutler_canary(
+        plan, warmup_slot, requested_crates, flake_root=flake_root
+    )
+    missing = rust_warmup_realize_paths(
         slot_paths,
         present=check_path_in_cachix,
     )
-    drvs = unique_drvs_for_outputs(missing, plan.output_drvs)
+    drvs = unique_drvs_for_outputs(missing, output_drvs)
     others, agent_ui, rust_zed, zed_nightly = _partition_rust_warmup_stripe(drvs)
     others, settings = partition_settings_family_drvs(others)
     others, stripe_svh = partition_svh_sensitive_drvs(others)
@@ -1043,8 +1068,17 @@ def _realize_rust_warmup(
             if planned_models
             else ()
         )
+    planned_drvs = frozenset(plan.output_drvs.values())
     import_warmup_drvs(
-        tuple(dict.fromkeys((*family, *drvs, *_settings_plan_drvs(settings, plan)))),
+        tuple(
+            drv
+            for drv in dict.fromkeys((
+                *family,
+                *drvs,
+                *_settings_plan_drvs(settings, plan),
+            ))
+            if drv in planned_drvs
+        ),
         warmup_plan.with_name(WARMUP_DRVS_NAME),
     )
     # Planned family is only the still-missing warmup stripe. Cached
