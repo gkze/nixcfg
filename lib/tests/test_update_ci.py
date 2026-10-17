@@ -880,6 +880,7 @@ def test_flush_cachix_pushes_realized_roots_after_leftover_recovery(
     monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "3")
     monkeypatch.setenv("TEST_CACHE_STOP_STDERR", "Failed to push some store paths")
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
+    monkeypatch.setattr(jobs, "_realized_root_path_in_cachix", lambda path: path == store)
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
     assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
@@ -967,8 +968,8 @@ def test_remember_realized_installable_paths_writes_receipt(
     installable = "path:/tmp/repo#checks.aarch64-darwin.root-closure-darwin-argus"
 
     def run(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert args[:3] == ("nix", "path-info", "--no-update-lock-file")
-        assert args[3:] == (installable,)
+        assert args[:4] == ("nix", "eval", "--raw", "--no-write-lock-file")
+        assert args[4:] == (f"{installable}.outPath",)
         return subprocess.CompletedProcess(args, 0, stdout=f"{store}\n", stderr="")
 
     monkeypatch.setattr(jobs, "_run", run)
@@ -1001,7 +1002,7 @@ def test_load_realized_root_paths_fails_closed_on_invalid_receipt(
         jobs.load_realized_root_paths()
 
 
-def test_remember_realized_installable_paths_fails_closed_on_path_info(
+def test_remember_realized_installable_paths_fails_closed_on_eval(
     native_job, monkeypatch
 ) -> None:
     env, _checkout = native_job
@@ -1036,6 +1037,7 @@ def test_flush_cachix_pushes_realized_root_paths(native_job, monkeypatch) -> Non
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
+    monkeypatch.setattr(jobs, "_realized_root_path_in_cachix", lambda path: path == store)
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
     assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
@@ -1088,6 +1090,67 @@ def test_flush_cachix_fails_closed_when_realized_root_push_fails(
     monkeypatch.chdir(checkout)
     with pytest.raises(jobs.CachixFlushError, match="realized Darwin roots failed"):
         jobs.main("flush-cachix")
+
+
+def test_remember_records_eval_outpath_not_stale_path_info(
+    native_job, monkeypatch
+) -> None:
+    """38934724529: path-info returned a stale darwin-system already on Cachix."""
+    env, _checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    stale = "/nix/store/g20bg0xk1g28fh8r4imhpa3v6s6ngifv-darwin-system-26.11.57a3171"
+    wanted = "/nix/store/5a5dpbxqyvvhpnrhs4p3a0f4i48dn3ia-darwin-system-26.11.57a3171"
+    installable = "path:/tmp/snap#checks.aarch64-darwin.root-closure-darwin-rocinante"
+    seen: list[tuple[str, ...]] = []
+
+    def run(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen.append(args)
+        if args[:2] == ("nix", "path-info"):
+            return subprocess.CompletedProcess(args, 0, stdout=f"{stale}\n", stderr="")
+        assert args[:4] == ("nix", "eval", "--raw", "--no-write-lock-file")
+        assert args[4:] == (f"{installable}.outPath",)
+        return subprocess.CompletedProcess(args, 0, stdout=f"{wanted}\n", stderr="")
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs.remember_realized_installable_paths((installable,)) == (wanted,)
+    assert all(args[:2] != ("nix", "path-info") for args in seen)
+    payload = json.loads(
+        (
+            Path(env["RUNNER_TEMP"]) / "update-artifacts" / "realized-root-paths.json"
+        ).read_text()
+    )
+    assert payload["storePaths"] == [wanted]
+
+
+def test_flush_fails_closed_when_nothing_to_push_but_remote_misses(
+    native_job, monkeypatch
+) -> None:
+    """38934724529: cachix exit 0 'Nothing to push' still 404'd the eval path."""
+    env, checkout = native_job
+    store = "/nix/store/5a5dpbxqyvvhpnrhs4p3a0f4i48dn3ia-darwin-system-26.11.57a3171"
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "realized-root-paths.json").write_text(
+        json.dumps({"storePaths": [store]}) + "\n"
+    )
+    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
+    monkeypatch.setenv(
+        "TEST_CACHE_STOP_STDERR",
+        "Nothing to push - all store paths are already on Cachix.",
+    )
+    monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
+    monkeypatch.setattr(jobs, "_realized_root_path_in_cachix", lambda _path: False)
+    monkeypatch.chdir(checkout)
+    with pytest.raises(jobs.CachixFlushError, match="missing from gkze.cachix.org"):
+        jobs.main("flush-cachix")
+    flush_log = (artifacts / "cachix-flush.log").read_text()
+    assert "pushing 1 realized root paths after daemon drain" in flush_log
+    assert store in flush_log
 
 
 def test_cachix_daemon_socket_reads_action_env_only(

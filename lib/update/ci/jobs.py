@@ -57,7 +57,12 @@ _STORE_PATH_RE = re.compile(r"/nix/store/[0-9a-z]{32}-[^\s]+")
 # locally, then `cachix daemon stop` returned 0. assert-coverage still
 # 404'd those paths on gkze.cachix.org. The post-build-hook queue did
 # not publish the thin wrapper. Flush `cachix push`es this receipt.
+# 38934724529: `nix path-info <installable>` recorded a stale
+# darwin-system / home-manager-generation already on Cachix
+# ("Nothing to push") while coverage's `eval .outPath` was the
+# newly built wrapper. Remember must use the same eval as coverage.
 _REALIZED_ROOT_PATHS_NAME = "realized-root-paths.json"
+_BINARY_CACHE_STORE = "https://gkze.cachix.org"
 _STORAGE_MOUNTS = ("/", "/nix", "/nix/store")
 # Live-written on hosted macOS; rmtree can lose a race (ENOTEMPTY) after children
 # are gone. Cleanup is disk reclaim, not a correctness gate for these trees.
@@ -1423,6 +1428,34 @@ def _push_unfinished_cachix_paths(
     return _run("cachix", "push", _BINARY_CACHE, *leftover, check=False, capture=True)
 
 
+def _eval_installable_out_path(
+    installable: str,
+    *,
+    run: Callable[..., object],
+) -> str:
+    """Return ``installable.outPath`` — the same query ``assert-coverage`` uses.
+
+    38934724529: ``nix path-info`` on the flake installable printed a
+    substituted ``home-manager-generation`` or a stale ``darwin-system``
+    already on Cachix. Coverage then 404'd the check's eval'd outPath.
+    """
+    result = run(
+        "nix",
+        "eval",
+        "--raw",
+        "--no-write-lock-file",
+        f"{installable}.outPath",
+        check=False,
+        capture=True,
+    )
+    path = str(getattr(result, "stdout", "")).strip()
+    if int(getattr(result, "returncode", 1)) or not path.startswith("/nix/store/"):
+        detail = str(getattr(result, "stderr", "")).strip() or "nix eval failed"
+        msg = f"could not resolve realized root out paths for {installable}: {detail}"
+        raise CachixFlushError(msg)
+    return path
+
+
 def remember_realized_installable_paths(
     installables: tuple[str, ...],
     *,
@@ -1434,32 +1467,17 @@ def remember_realized_installable_paths(
     and finished validate at 05:31:51. Daemon stop returned 0 ten seconds
     later. ``https://gkze.cachix.org`` still 404'd
     ``/nix/store/98bwk8gpzhmr12navdg9knjscv09k2nm-darwin-system-26.11.57a3171``.
+
+    38934724529 recorded ``nix path-info`` results that were already on
+    Cachix (``Nothing to push``) instead of each check's ``.outPath``.
     """
     if not installables:
         return ()
     runner = _run if run is None else run
-    result = runner(
-        "nix",
-        "path-info",
-        "--no-update-lock-file",
-        *installables,
-        check=False,
-        capture=True,
-    )
-    stdout = str(getattr(result, "stdout", ""))
-    returncode = int(getattr(result, "returncode", 1))
     paths = tuple(
-        line.strip()
-        for line in stdout.splitlines()
-        if line.strip().startswith("/nix/store/")
+        _eval_installable_out_path(installable, run=runner)
+        for installable in installables
     )
-    if returncode or len(paths) != len(installables):
-        detail = str(getattr(result, "stderr", "")).strip() or "nix path-info failed"
-        msg = (
-            "could not resolve realized root out paths for "
-            f"{' '.join(installables)}: {detail}"
-        )
-        raise CachixFlushError(msg)
     artifacts = _temp() / "update-artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
     (artifacts / _REALIZED_ROOT_PATHS_NAME).write_text(
@@ -1492,6 +1510,20 @@ def load_realized_root_paths(artifacts: Path | None = None) -> tuple[str, ...]:
     return tuple(item for item in raw if item.startswith("/nix/store/"))
 
 
+def _realized_root_path_in_cachix(store_path: str) -> bool:
+    """Return whether *store_path* is present on gkze.cachix.org."""
+    result = _run(
+        "nix",
+        "path-info",
+        "--store",
+        _BINARY_CACHE_STORE,
+        store_path,
+        check=False,
+        capture=True,
+    )
+    return result.returncode == 0
+
+
 def _push_realized_root_paths(log: TextIO) -> None:
     """Publish locally realized Darwin roots that the daemon hook missed."""
     recorded = load_realized_root_paths()
@@ -1517,6 +1549,18 @@ def _push_realized_root_paths(log: TextIO) -> None:
             "cachix push of realized Darwin roots failed "
             f"returncode={push.returncode} stderr={push.stderr.strip()}"
         )
+        raise CachixFlushError(msg)
+    # 38934724529: cachix exit 0 + "Nothing to push" meant the *wrong*
+    # stale path was already on gkze. Coverage still 404'd the eval path.
+    missing_remote = [
+        path for path in recorded if not _realized_root_path_in_cachix(path)
+    ]
+    if missing_remote:
+        msg = (
+            "realized root paths missing from gkze.cachix.org after push: "
+            f"{', '.join(missing_remote)}"
+        )
+        _write_diagnostic(log, msg)
         raise CachixFlushError(msg)
 
 
@@ -1546,6 +1590,10 @@ def flush_cachix() -> None:
       each Darwin root shard built ``darwin-system-26.11.57a3171``, but
       gkze.cachix.org 404'd those paths. Flush then ``cachix push``es
       ``realized-root-paths.json``.
+    - Stale path-info (38934724529): flush pushed a substituted
+      ``darwin-system`` / ``home-manager-generation`` already on Cachix
+      (``Nothing to push``). Receipts must be each check's ``.outPath``,
+      and flush fail-closes unless ``nix path-info --store`` sees them.
     """
     artifacts = _temp() / "update-artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
