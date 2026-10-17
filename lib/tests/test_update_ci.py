@@ -880,7 +880,9 @@ def test_flush_cachix_pushes_realized_roots_after_leftover_recovery(
     monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "3")
     monkeypatch.setenv("TEST_CACHE_STOP_STDERR", "Failed to push some store paths")
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
-    monkeypatch.setattr(jobs, "_realized_root_path_in_cachix", lambda path: path == store)
+    monkeypatch.setattr(
+        jobs, "_realized_root_path_in_cachix", lambda path: path == store
+    )
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
     assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
@@ -1037,7 +1039,9 @@ def test_flush_cachix_pushes_realized_root_paths(native_job, monkeypatch) -> Non
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
-    monkeypatch.setattr(jobs, "_realized_root_path_in_cachix", lambda path: path == store)
+    monkeypatch.setattr(
+        jobs, "_realized_root_path_in_cachix", lambda path: path == store
+    )
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
     assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
