@@ -56,6 +56,23 @@ let
         stages = [ "manual" ];
       };
 
+      # The full suite and its 100% coverage floor are the executable spec.
+      # Commit hooks only lint, so run the suite once before anything leaves
+      # the machine; a formatter-only commit once broke two tests unseen.
+      test-python-pytest = {
+        enable = true;
+        name = "test-python-pytest";
+        # Not the venv itself: its bin/nixcfg would collide with the packaged
+        # nixcfg wrapper in the shell's buildEnv. The entry runs the venv's
+        # python by store path regardless.
+        package = pythonToolBins;
+        entry = "${nixcfgVenv}/bin/python -m pytest -q -n auto -p no:cacheprovider";
+        pass_filenames = false;
+        always_run = true;
+        priority = hookPriority;
+        stages = [ "pre-push" ];
+      };
+
       commit-message-commitlint = {
         enable = true;
         name = "commit-message-commitlint";

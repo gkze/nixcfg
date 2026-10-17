@@ -25,11 +25,11 @@ from lib.diagnostics import redact_urls
 from lib.nix.models.derivation import DerivationInputs  # noqa: TC001 -- Pydantic field
 from lib.system_policy import RootClosureKind, required_root_kinds
 from lib.update import persistence as update_persistence
-from lib.update.nix import (
-    get_current_nix_platform,
+from lib.update.failures import (
     is_retryable_nix_network_failure,
     is_retryable_nix_store_failure,
 )
+from lib.update.nix import get_current_nix_platform
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.paths import get_repo_root
 from lib.update.runtime import measure

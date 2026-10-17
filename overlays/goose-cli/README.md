@@ -130,8 +130,16 @@ flowchart TD
 - `prebuiltV8`
   - Linux only. The builder uses `mkRustyV8PrebuiltArtifacts` with the
     `rustyV8ArchiveHash` and `rustyV8BindingHash` entries for the platform in
-    `overlays/goose-v8/sources.json`. Darwin builds V8 natively with
-    `v8NativeDrv`.
+    `overlays/goose-v8/sources.json`.
+  - It is a fallback only. `mkRustyV8Build` returns a `v8NativeDrv` on both
+    Darwin and Linux, and a native build takes precedence, so both platforms
+    build V8 from source today. The comment above `v8Build` in `default.nix`
+    records why Darwin keeps the source build.
+- `rustyV8Src`
+  - `final.goose-v8` from `overlays/goose-v8` is the only recursive fetch of
+    the fork. The `goose-v8` flake input stays because `GooseV8Updater` tracks
+    it and `default.nix` reads its `Cargo.toml` version without
+    import-from-derivation.
 - `patchedSrc`
   - prepares the Goose workspace, then copies in `patchedV8Src` under
     `vendor/v8-goose-src`

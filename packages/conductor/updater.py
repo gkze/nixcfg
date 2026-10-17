@@ -30,6 +30,8 @@ class ConductorUpdater(AssetURLsMetadataUpdater):
         "aarch64-darwin": "dmg-aarch64",
         "x86_64-darwin": "dmg-x86_64",
     }
+    # Recompute hashes for mutable latest-channel artifacts before comparing.
+    always_rehash = True
 
     @staticmethod
     def _version_from_header(header: str) -> str:
@@ -90,12 +92,3 @@ class ConductorUpdater(AssetURLsMetadataUpdater):
                 platform: artifact.url for platform, artifact in artifacts.items()
             }),
         )
-
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Recompute hashes for mutable latest-channel artifacts before comparing."""
-        _ = (context, info)
-        return False

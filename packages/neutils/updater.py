@@ -27,10 +27,10 @@ from lib.update.events import (
     UpdateEvent,
     raise_failed_command,
 )
+from lib.update.failures import is_retryable_nix_network_failure
 from lib.update.nix import (
     _build_fetch_from_github_expr,
     _build_flake_attr_expr,
-    is_retryable_nix_network_failure,
 )
 from lib.update.paths import get_repo_file, local_flake_url
 from lib.update.process import RunCommandOptions, run_command

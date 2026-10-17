@@ -170,12 +170,13 @@ def raise_status_error(status: int, detail: str) -> None:
     raise NonRetryableStatusError(status, detail)
 
 
-def _validate_request_target(
+def validate_request_target(
     url: str,
     *,
     allowed_schemes: frozenset[str],
     attempts: int,
 ) -> None:
+    """Validate a URL before sending a retrying HTTP request."""
     parsed = urlsplit(url)
     if parsed.scheme not in allowed_schemes or not parsed.netloc:
         schemes = "/".join(sorted(allowed_schemes))
@@ -187,20 +188,6 @@ def _validate_request_target(
     if attempts < 1:
         msg = f"Expected at least one HTTP attempt for {url}"
         raise RuntimeError(msg)
-
-
-def validate_request_target(
-    url: str,
-    *,
-    allowed_schemes: frozenset[str],
-    attempts: int,
-) -> None:
-    """Validate a URL before sending a retrying HTTP request."""
-    _validate_request_target(
-        url,
-        allowed_schemes=allowed_schemes,
-        attempts=attempts,
-    )
 
 
 def _retry_wait(
@@ -263,7 +250,7 @@ def fetch_url_bytes(
     timeout: float = 30.0,
 ) -> tuple[bytes, dict[str, str]]:
     """Fetch ``url`` and return response bytes plus response headers."""
-    _validate_request_target(url, allowed_schemes=allowed_schemes, attempts=attempts)
+    validate_request_target(url, allowed_schemes=allowed_schemes, attempts=attempts)
 
     all_headers = dict(headers or {})
     attempt_count = 0
@@ -318,7 +305,7 @@ async def fetch_url_bytes_async(
     client: httpx.AsyncClient | None = None,
 ) -> tuple[bytes, dict[str, str]]:
     """Fetch ``url`` asynchronously and return response bytes plus headers."""
-    _validate_request_target(url, allowed_schemes=allowed_schemes, attempts=attempts)
+    validate_request_target(url, allowed_schemes=allowed_schemes, attempts=attempts)
 
     all_headers = dict(headers or {})
     attempt_count = 0

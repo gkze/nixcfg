@@ -83,6 +83,8 @@ class GooeyPiUpdater(GitHubReleaseUpdater):
     APP_ID: ClassVar[str] = "app.gooeypi.desktop"
     NODEJS_VERSION_PASSTHRU: ClassVar[str] = "nodejsVersion"
     supported_platforms = (DARWIN_PLATFORM,)
+    # Recompute both fixed-output closures even when metadata is unchanged.
+    always_rehash = True
 
     @staticmethod
     def _manifest_version(payload: object, *, label: str) -> str:
@@ -290,15 +292,6 @@ class GooeyPiUpdater(GitHubReleaseUpdater):
                 "tag": tag_name,
             },
         )
-
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Recompute both fixed-output closures even when metadata is unchanged."""
-        _ = (context, info)
-        return False
 
     @classmethod
     def _src_expr(cls, commit: str) -> str:

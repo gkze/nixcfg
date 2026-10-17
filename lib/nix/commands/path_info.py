@@ -3,7 +3,6 @@
 from lib.nix.models.store_object_info import ImpureStoreObjectInfo
 
 from ._json import as_model_list, run_nix_json
-from .base import _resolve_timeout_alias
 
 
 async def nix_path_info(
@@ -11,7 +10,6 @@ async def nix_path_info(
     *,
     closure_size: bool = False,
     command_timeout: float = 60.0,
-    **kwargs: object,
 ) -> list[ImpureStoreObjectInfo]:
     """Query store path information.
 
@@ -20,9 +18,5 @@ async def nix_path_info(
     args = ["nix", "path-info", "--json", *paths]
     if closure_size:
         args.append("--closure-size")
-    timeout_seconds = _resolve_timeout_alias(
-        command_timeout=command_timeout,
-        kwargs=kwargs,
-    )
-    raw = await run_nix_json(args, timeout=timeout_seconds)
+    raw = await run_nix_json(args, command_timeout=command_timeout)
     return as_model_list(raw, ImpureStoreObjectInfo)

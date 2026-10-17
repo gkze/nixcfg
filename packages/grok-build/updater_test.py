@@ -24,6 +24,7 @@ from lib.asar_integrity import (
 )
 from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
+from lib.tests._darwin_signing import sign_and_verify_bundle_arguments
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     expect_binding,
@@ -487,22 +488,21 @@ def test_grok_build_package_owns_update_policy_and_resigns_bundle() -> None:
     )
     shell = parse_shell(indented_string_body(post_install.rebuild()))
     patch_commands = command_texts(shell, "__NIX_INTERP__")
-    sign_commands = command_texts(shell, "/usr/bin/codesign")
 
     assert patch_commands == [
         "PYTHONPATH=__NIX_INTERP__ __NIX_INTERP__ __NIX_INTERP__ \\\n"
         '      "$app_bundle/Contents/Resources/app.asar" \\\n'
-        '      "$app_bundle/Contents/Info.plist"'
+        '      "$app_bundle/Contents/Info.plist"',
+        # The bare interpolation is the re-sign call checked below: it must
+        # run after the bundle is patched.
+        "__NIX_INTERP__",
     ]
-    assert sign_commands == [
-        "/usr/bin/codesign \\\n"
-        "      --force \\\n"
-        "      --deep \\\n"
-        "      --sign - \\\n"
-        "      --preserve-metadata=identifier,flags,runtime \\\n"
-        "      --entitlements __NIX_INTERP__ \\\n"
-        '      "$app_bundle"'
-    ]
+    [sign_arguments] = sign_and_verify_bundle_arguments(post_install)
+    assert_nix_ast_equal(
+        sign_arguments,
+        '{ bundle = \'\'"$app_bundle"\'\'; preserveMetadata = [ "identifier" "flags" "runtime" ]; entitlements = ./Entitlements.plist; verify = false; }',
+    )
+    assert command_texts(shell, "/usr/bin/codesign") == []
 
 
 def test_grok_build_sources_pin_the_official_stable_zip() -> None:

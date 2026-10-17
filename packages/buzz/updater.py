@@ -15,6 +15,7 @@ from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib import json_utils
 from lib.nix.models.sources import (
     HashCollection,
     HashEntry,
@@ -363,28 +364,6 @@ _SHERPA_STATIC_LINK_LIBRARIES = (
 )
 
 
-def _require_object(value: object, *, context: str) -> dict[str, object]:
-    if not isinstance(value, dict):
-        msg = f"Buzz {context} is not an object"
-        raise TypeError(msg)
-    return cast("dict[str, object]", value)
-
-
-def _require_list(value: object, *, context: str) -> list[object]:
-    if not isinstance(value, list):
-        msg = f"Buzz {context} is not a list"
-        raise TypeError(msg)
-    return cast("list[object]", value)
-
-
-def _require_string(mapping: dict[str, object], key: str, *, context: str) -> str:
-    value = mapping.get(key)
-    if not isinstance(value, str) or not value:
-        msg = f"Buzz {context} is missing {key}"
-        raise TypeError(msg)
-    return value
-
-
 def _require_exact(actual: object, expected: object, *, context: str) -> None:
     if actual != expected:
         msg = f"Buzz {context} drifted: expected {expected!r}, got {actual!r}"
@@ -418,7 +397,7 @@ def _decode_json(payload: bytes, *, context: str) -> dict[str, object]:
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         msg = f"Buzz {context} is not valid UTF-8 JSON"
         raise RuntimeError(msg) from exc
-    return _require_object(decoded, context=context)
+    return json_utils.as_object_dict(decoded, context=context)
 
 
 def _decode_toml(payload: bytes, *, context: str) -> dict[str, object]:
@@ -427,7 +406,7 @@ def _decode_toml(payload: bytes, *, context: str) -> dict[str, object]:
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         msg = f"Buzz {context} is not valid UTF-8 TOML"
         raise RuntimeError(msg) from exc
-    return _require_object(decoded, context=context)
+    return json_utils.as_object_dict(decoded, context=context)
 
 
 def _validate_digest_contract(
@@ -455,9 +434,13 @@ def _feature_tuple(
     *,
     context: str,
 ) -> tuple[object, ...]:
-    features = _require_object(manifest.get("features"), context=f"{context} features")
+    features = json_utils.as_object_dict(
+        manifest.get("features"), context=f"{context} features"
+    )
     return tuple(
-        _require_list(features.get(feature), context=f"{context} {feature} feature")
+        json_utils.as_object_list(
+            features.get(feature), context=f"{context} {feature} feature"
+        )
     )
 
 
@@ -842,13 +825,17 @@ def _package_rows(
     *,
     context: str,
 ) -> tuple[dict[str, object], ...]:
-    packages = _require_list(lock.get("package"), context=f"{context} package table")
+    packages = json_utils.as_object_list(
+        lock.get("package"), context=f"{context} package table"
+    )
     return tuple(
         package
         for item in packages
-        if (package := _require_object(item, context=f"{context} package entry")).get(
-            "name"
-        )
+        if (
+            package := json_utils.as_object_dict(
+                item, context=f"{context} package entry"
+            )
+        ).get("name")
         == name
     )
 
@@ -883,7 +870,9 @@ def _locked_package_version(
         msg = f"Buzz {context} must lock exactly one {name} package"
         raise RuntimeError(msg)
     return _require_exact_version(
-        _require_string(rows[0], "version", context=f"{context} {name}"),
+        json_utils.get_required_nonempty_str(
+            rows[0], "version", context=f"{context} {name}"
+        ),
         context=f"{context} {name} version",
     )
 
@@ -958,18 +947,18 @@ def _validate_sidecar_manifest(
     package_name: str,
     binary_name: str,
 ) -> None:
-    package = _require_object(
+    package = json_utils.as_object_dict(
         manifest.get("package"), context=f"{package_name} package table"
     )
     _require_exact(
         package.get("name"), package_name, context=f"{package_name} package name"
     )
-    binaries = _require_list(
+    binaries = json_utils.as_object_list(
         manifest.get("bin"), context=f"{package_name} binary table"
     )
     binary_names = {
-        _require_string(
-            _require_object(binary, context=f"{package_name} binary entry"),
+        json_utils.get_required_nonempty_str(
+            json_utils.as_object_dict(binary, context=f"{package_name} binary entry"),
             "name",
             context=f"{package_name} binary entry",
         )
@@ -1003,16 +992,20 @@ def _validate_release_metadata_contract(
         context="release version",
     )
     pnpm_version = _require_prefixed_version(
-        _require_string(root_package, "packageManager", context="root package.json"),
+        json_utils.get_required_nonempty_str(
+            root_package, "packageManager", context="root package.json"
+        ),
         "pnpm@",
         context="pnpm package manager",
     )
-    toolchain = _require_object(
+    toolchain = json_utils.as_object_dict(
         rust_toolchain.get("toolchain"),
         context="Rust toolchain table",
     )
     rust_version = _require_exact_version(
-        _require_string(toolchain, "channel", context="Rust toolchain table"),
+        json_utils.get_required_nonempty_str(
+            toolchain, "channel", context="Rust toolchain table"
+        ),
         context="Rust toolchain channel",
     )
     _require_exact(
@@ -1028,14 +1021,18 @@ def _validate_release_metadata_contract(
     _require_exact(tauri.get("productName"), "Buzz", context="Tauri product name")
     _require_exact(tauri.get("version"), release_version, context="Tauri version")
     _require_exact(tauri.get("identifier"), _APP_ID, context="Tauri identifier")
-    bundle = _require_object(tauri.get("bundle"), context="Tauri bundle")
+    bundle = json_utils.as_object_dict(tauri.get("bundle"), context="Tauri bundle")
     _require_exact(
-        tuple(_require_list(bundle.get("externalBin"), context="Tauri externalBin")),
+        tuple(
+            json_utils.as_object_list(
+                bundle.get("externalBin"), context="Tauri externalBin"
+            )
+        ),
         _TAURI_SIDECARS,
         context="Tauri externalBin",
     )
-    plugins = _require_object(tauri.get("plugins"), context="Tauri plugins")
-    updater = _require_object(plugins.get("updater"), context="Tauri updater")
+    plugins = json_utils.as_object_dict(tauri.get("plugins"), context="Tauri plugins")
+    updater = json_utils.as_object_dict(plugins.get("updater"), context="Tauri updater")
     _require_exact(updater.get("endpoints"), [], context="base updater endpoints")
     return _ReleaseMetadataContract(
         pnpm_version=pnpm_version,
@@ -1057,11 +1054,13 @@ def _validate_cargo_contract(
         context="desktop Cargo manifest",
     )
     desktop_lock = _decode_toml(payloads[_DESKTOP_LOCK], context="desktop Cargo lock")
-    workspace = _require_object(
+    workspace = json_utils.as_object_dict(
         root_manifest.get("workspace"), context="root workspace"
     )
     members = set(
-        _require_list(workspace.get("members"), context="root workspace members")
+        json_utils.as_object_list(
+            workspace.get("members"), context="root workspace members"
+        )
     )
     expected_members = {f"crates/{package}" for package, _binary in _SIDECAR_SPECS}
     if not expected_members.issubset(members):
@@ -1069,7 +1068,7 @@ def _validate_cargo_contract(
         msg = f"Buzz root workspace is missing sidecar crates: {', '.join(missing_members)}"
         raise RuntimeError(msg)
 
-    desktop_package_table = _require_object(
+    desktop_package_table = json_utils.as_object_dict(
         desktop_manifest.get("package"),
         context="desktop Cargo package",
     )
@@ -1078,14 +1077,14 @@ def _validate_cargo_contract(
         release_version,
         context="desktop Cargo version",
     )
-    desktop_dependencies = _require_object(
+    desktop_dependencies = json_utils.as_object_dict(
         desktop_manifest.get("dependencies"),
         context="desktop Cargo dependencies",
     )
     if "sherpa-onnx" not in desktop_dependencies:
         msg = "Buzz desktop Cargo dependencies are missing sherpa-onnx"
         raise RuntimeError(msg)
-    desktop_features = _require_object(
+    desktop_features = json_utils.as_object_dict(
         desktop_manifest.get("features"),
         context="desktop Cargo features",
     )
@@ -1099,7 +1098,7 @@ def _validate_cargo_contract(
     )
     _require_exact(
         tuple(
-            _require_list(
+            json_utils.as_object_list(
                 desktop_features.get("mesh-llm"),
                 context="desktop mesh-llm feature",
             )
@@ -1107,12 +1106,12 @@ def _validate_cargo_contract(
         tuple(f"dep:{name}" for name in ("iroh", *mesh_dependency_names)),
         context="desktop mesh-llm feature graph",
     )
-    sdk_dependency = _require_object(
+    sdk_dependency = json_utils.as_object_dict(
         desktop_dependencies.get("mesh-llm-sdk"),
         context="desktop mesh-llm-sdk dependency",
     )
     mesh_version = _require_prefixed_version(
-        _require_string(
+        json_utils.get_required_nonempty_str(
             sdk_dependency,
             "tag",
             context="desktop mesh-llm-sdk dependency",
@@ -1146,7 +1145,7 @@ def _validate_cargo_contract(
     }
     for dependency_name, expected_dependency in expected_mesh_dependencies.items():
         _require_exact(
-            _require_object(
+            json_utils.as_object_dict(
                 desktop_dependencies.get(dependency_name),
                 context=f"desktop {dependency_name} dependency",
             ),
@@ -1171,7 +1170,7 @@ def _validate_cargo_contract(
     if len(mesh_row) != 1:
         msg = "Buzz desktop lock must lock exactly one mesh-llm-sdk package"
         raise RuntimeError(msg)
-    mesh_source = _require_string(
+    mesh_source = json_utils.get_required_nonempty_str(
         mesh_row[0],
         "source",
         context="desktop lock mesh-llm-sdk",
@@ -1319,11 +1318,11 @@ def _validate_sherpa_source_contract(
         payloads["sherpa-onnx/rust/sherpa-onnx/Cargo.toml"],
         context="sherpa-onnx Cargo manifest",
     )
-    wrapper_dependencies = _require_object(
+    wrapper_dependencies = json_utils.as_object_dict(
         wrapper_manifest.get("dependencies"),
         context="sherpa-onnx Cargo dependencies",
     )
-    sys_dependency = _require_object(
+    sys_dependency = json_utils.as_object_dict(
         wrapper_dependencies.get("sherpa-onnx-sys"),
         context="sherpa-onnx-sys wrapper dependency",
     )
@@ -1489,6 +1488,8 @@ class BuzzUpdater(GitHubReleaseUpdater):
             mode="build",
         ),
     )
+    # Never skip the dual-lock/source audit on metadata equality.
+    always_rehash = True
 
     @staticmethod
     async def _resolve_tag_commit(
@@ -1504,8 +1505,10 @@ class BuzzUpdater(GitHubReleaseUpdater):
             f"repos/{owner}/{repo}/commits/{urllib.parse.quote(tag, safe='')}",
             config=config,
         )
-        commit = _require_string(
-            _require_object(payload, context=f"{owner}/{repo} commit response"),
+        commit = json_utils.get_required_nonempty_str(
+            json_utils.as_object_dict(
+                payload, context=f"{owner}/{repo} commit response"
+            ),
             "sha",
             context=f"{owner}/{repo} commit response",
         )
@@ -1595,7 +1598,9 @@ class BuzzUpdater(GitHubReleaseUpdater):
     def _required_metadata(cls, info: VersionInfo) -> dict[str, str]:
         metadata = metadata_as_mapping(info.metadata, context="Buzz release metadata")
         result = {
-            key: _require_string(metadata, key, context="release metadata")
+            key: json_utils.get_required_nonempty_str(
+                metadata, key, context="release metadata"
+            )
             for key in (
                 "buzzUrl",
                 "commit",
@@ -1855,15 +1860,6 @@ class BuzzUpdater(GitHubReleaseUpdater):
                 "tag": tag,
             },
         )
-
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Never skip the dual-lock/source audit on metadata equality."""
-        _ = (context, info)
-        return False
 
     @classmethod
     def _src_expr(cls, commit: str) -> str:

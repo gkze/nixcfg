@@ -71,7 +71,7 @@ namespace-packages = ["overlays", "packages"]
 # Explicitly include all extensionless Python entrypoints in Ruff discovery.
 extend-include = [
   "home/george/bin/git-ignore",
-  "home/george/bin/zentool",
+  "modules/home/zen/zentool",
   "home/george/bin/tcctool",
 ]
 
@@ -86,7 +86,7 @@ extend-include = [
 # formatter bug is fixed.
 exclude = [
   "home/george/bin/git-ignore",
-  "home/george/bin/zentool",
+  "modules/home/zen/zentool",
   "lib/crate2nix_tauri_env_rewrite.py",
   "lib/nix/schemas/_fetch.py",
   "lib/update/persistence.py",
@@ -222,7 +222,7 @@ include = [
   "modules/**/*.py",
   "modules/**/*.pyi",
   "home/george/bin/git-ignore",
-  "home/george/bin/zentool",
+  "modules/home/zen/zentool",
   "home/george/bin/tcctool",
 ]
 

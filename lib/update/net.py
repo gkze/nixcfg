@@ -20,8 +20,8 @@ from tenacity import (
 from tenacity.wait import wait_exponential
 
 from lib import http_utils, json_utils
+from lib.update import failures
 from lib.update.config import UpdateConfig, resolve_active_config
-from lib.update.constants import resolve_timeout_alias
 from lib.update.runtime import active_runtime, current_source, resource_slot
 
 if TYPE_CHECKING:
@@ -49,15 +49,12 @@ def _expect_json_list(payload: JSONValue, *, context: str) -> JSONList:
 _HTTP_FORBIDDEN = 403
 # Version discovery already exhausts ``fetch_json`` retries. These leftovers
 # are runner/CDN resolver flakes, not a missing current pin or a bad payload.
+# Discovery runs in-process over aiohttp, so it matches Python resolver and
+# aiohttp spellings rather than curl transfer faults.
 _DISCOVERY_TRANSIENT_MARKERS = (
-    "cannot connect to host",
-    "clientconnectorerror",
-    "could not resolve host",
-    "getaddrinfo failed",
-    "name or service not known",
-    "no address associated with hostname",
-    "nodename nor servname provided, or not known",
-    "temporary failure in name resolution",
+    *failures.DNS_RESOLUTION_MARKERS,
+    *failures.PYTHON_RESOLVER_MARKERS,
+    *failures.AIOHTTP_CONNECT_MARKERS,
 )
 
 
@@ -78,8 +75,10 @@ def is_transient_discovery_failure(error: BaseException) -> bool:
         isinstance(exc, TimeoutError | aiohttp.ClientConnectorError) for exc in seen
     ):
         return True
-    folded = " ".join(f"{type(exc).__name__} {exc}" for exc in seen).casefold()
-    return any(marker in folded for marker in _DISCOVERY_TRANSIENT_MARKERS)
+    return failures.contains_marker(
+        " ".join(f"{type(exc).__name__} {exc}" for exc in seen),
+        _DISCOVERY_TRANSIENT_MARKERS,
+    )
 
 
 # Bound server-directed sleeps so an untrusted response cannot stall an update forever.
@@ -205,58 +204,6 @@ def _retry_wait(backoff: float) -> Callable[[RetryCallState], float]:
     return _wait
 
 
-def _resolve_timeout_alias(
-    *,
-    request_timeout: float | None,
-    kwargs: dict[str, object],
-) -> float | None:
-    return resolve_timeout_alias(
-        named_timeout=request_timeout,
-        named_timeout_label="request_timeout",
-        kwargs=kwargs,
-    )
-
-
-def _pop_optional_str(kwargs: dict[str, object], key: str) -> str | None:
-    value = kwargs.pop(key, None)
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    msg = f"{key} must be a string"
-    raise TypeError(msg)
-
-
-def _pop_optional_numeric(kwargs: dict[str, object], key: str) -> float | None:
-    value = kwargs.pop(key, None)
-    if value is None:
-        return None
-    if isinstance(value, int | float):
-        return float(value)
-    msg = f"{key} must be numeric"
-    raise TypeError(msg)
-
-
-def _pop_optional_int(kwargs: dict[str, object], key: str) -> int | None:
-    value = kwargs.pop(key, None)
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return value
-    msg = f"{key} must be an integer"
-    raise TypeError(msg)
-
-
-def _pop_optional_config(kwargs: dict[str, object]) -> UpdateConfig | None:
-    value = kwargs.pop("config", None)
-    if value is None:
-        return None
-    if isinstance(value, UpdateConfig):
-        return value
-    msg = "config must be an UpdateConfig"
-    raise TypeError(msg)
-
-
 @dataclass(frozen=True)
 class _RequestOptions:
     method: str
@@ -266,44 +213,50 @@ class _RequestOptions:
     backoff: float
 
 
-def _parse_request_options(kwargs: dict[str, object]) -> _RequestOptions:
-    user_agent = _pop_optional_str(kwargs, "user_agent")
-    request_timeout = _pop_optional_numeric(kwargs, "request_timeout")
-    method = kwargs.pop("method", "GET")
-    if not isinstance(method, str):
-        msg = "method must be a string"
-        raise TypeError(msg)
-    retries = _pop_optional_int(kwargs, "retries")
-    backoff = _pop_optional_numeric(kwargs, "backoff")
-    config = resolve_active_config(_pop_optional_config(kwargs))
-
-    if kwargs:
-        unknown = ", ".join(sorted(kwargs))
-        msg = f"Unexpected keyword argument(s): {unknown}"
-        raise TypeError(msg)
-
-    timeout = request_timeout or config.default_timeout
-    attempts = max(1, retries if retries is not None else config.default_retries)
-    resolved_backoff = (
-        max(0.0, backoff)
-        if backoff is not None
-        else max(0.0, config.default_retry_backoff)
-    )
+def _resolve_request_options(
+    *,
+    method: str,
+    user_agent: str | None,
+    request_timeout: float | None,
+    retries: int | None,
+    backoff: float | None,
+    config: UpdateConfig | None,
+) -> _RequestOptions:
+    """Fill unset request knobs from the active update config."""
+    resolved_config = resolve_active_config(config)
     return _RequestOptions(
         method=method,
         user_agent=user_agent,
-        request_timeout=timeout,
-        attempts=attempts,
-        backoff=resolved_backoff,
+        request_timeout=request_timeout or resolved_config.default_timeout,
+        attempts=max(
+            1, retries if retries is not None else resolved_config.default_retries
+        ),
+        backoff=max(
+            0.0,
+            backoff if backoff is not None else resolved_config.default_retry_backoff,
+        ),
     )
 
 
 async def _request(
     session: aiohttp.ClientSession,
     url: str,
-    **kwargs: object,
+    *,
+    method: str = "GET",
+    user_agent: str | None = None,
+    request_timeout: float | None = None,
+    retries: int | None = None,
+    backoff: float | None = None,
+    config: UpdateConfig | None = None,
 ) -> tuple[bytes, dict[str, str]]:
-    options = _parse_request_options(kwargs)
+    options = _resolve_request_options(
+        method=method,
+        user_agent=user_agent,
+        request_timeout=request_timeout,
+        retries=retries,
+        backoff=backoff,
+        config=config,
+    )
     http_utils.validate_request_target(
         url,
         allowed_schemes=frozenset({"https"}),
@@ -391,13 +344,8 @@ async def fetch_url(
     user_agent: str | None = None,
     request_timeout: float | None = None,
     config: UpdateConfig | None = None,
-    **kwargs: object,
 ) -> bytes:
     """Fetch raw bytes from ``url`` with retry and timeout config."""
-    request_timeout = _resolve_timeout_alias(
-        request_timeout=request_timeout,
-        kwargs=kwargs,
-    )
     config = resolve_active_config(config)
     payload, _ = await _request(
         session,
@@ -435,13 +383,8 @@ async def fetch_json(
     user_agent: str | None = None,
     request_timeout: float | None = None,
     config: UpdateConfig | None = None,
-    **kwargs: object,
 ) -> JSONValue:
     """Fetch and decode JSON data from ``url``."""
-    request_timeout = _resolve_timeout_alias(
-        request_timeout=request_timeout,
-        kwargs=kwargs,
-    )
     config = resolve_active_config(config)
     if url.startswith("https://api.github.com/"):
         payload, headers = await _request(

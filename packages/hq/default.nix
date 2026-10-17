@@ -12,6 +12,10 @@
   ...
 }:
 assert stdenv.hostPlatform.system == "aarch64-darwin";
+# Not mkTgzApp: the install strips the vendor signature, compiles and injects
+# a launcher, patches the updater, and re-signs every Mach-O with hardened
+# runtime entitlements, then audits the result. The helpers copy and link a
+# bundle; they own none of that per-file signing contract.
 stdenv.mkDerivation {
   pname = "hq";
   inherit (selfSource) version;

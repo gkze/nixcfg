@@ -1,25 +1,17 @@
 """Apply Reflect's fail-closed Nix update and entitlement policy."""
 
-import argparse
 import json
 import sys
 import tarfile
-from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
+from lib.codemods.source_patch import SourcePatch, plan_sources, source_tree_parser
+
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
+    from pathlib import Path
     from typing import BinaryIO
-
-
-@dataclass(frozen=True, slots=True)
-class SourcePatch:
-    """One exact upstream source anchor and its Nix-owned replacement."""
-
-    relative_path: str
-    old: str
-    new: str
 
 
 _UPDATER_PUBKEY = (
@@ -129,35 +121,16 @@ def _validate_package_manager(source: str, package_manager: str) -> None:
         raise RuntimeError(message)
 
 
-def _replace_anchor(source: str, patch: SourcePatch) -> str:
-    matches = source.count(patch.old)
-    if matches != 1:
-        msg = (
-            f"expected one Reflect source anchor in {patch.relative_path}, "
-            f"found {matches}"
-        )
-        raise RuntimeError(msg)
-    start = source.index(patch.old)
-    end = start + len(patch.old)
-    return f"{source[:start]}{patch.new}{source[end:]}"
-
-
 def patch_sources(
     sources: Mapping[str, str], *, package_manager: str
 ) -> dict[str, str]:
     """Return a fully validated Nix-owned source view without mutating input."""
-    patched = dict(sources)
     for relative_path in _REQUIRED_PATHS:
-        if relative_path not in patched:
+        if relative_path not in sources:
             msg = f"missing Reflect source file: {relative_path}"
             raise RuntimeError(msg)
-    _validate_package_manager(patched["package.json"], package_manager)
-    for patch in _PATCHES:
-        patched[patch.relative_path] = _replace_anchor(
-            patched[patch.relative_path],
-            patch,
-        )
-    return patched
+    _validate_package_manager(sources["package.json"], package_manager)
+    return plan_sources(sources, _PATCHES)
 
 
 def patch_tree(source_root: Path, *, package_manager: str) -> None:
@@ -195,10 +168,9 @@ def check_tar_stream(stream: BinaryIO, *, package_manager: str) -> None:
     patch_sources(sources, package_manager=package_manager)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """Patch a source tree, or dry-check an exact tarball from standard input."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source_root", nargs="?", type=Path)
+    parser = source_tree_parser(__doc__, optional_root=True)
     parser.add_argument("--check-tar-stdin", action="store_true")
     parser.add_argument("--package-manager", required=True)
     args = parser.parse_args(argv)

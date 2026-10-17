@@ -328,6 +328,7 @@ def test_goose_desktop_updater_hashes_flake_package_pnpm_deps(
         f"""
         (import {REPO_ROOT}/overlays/goose-cli/default.nix {{
           inputs = rootFlake.inputs;
+          final = pkgs;
           prev = pkgs;
           slib = flake.lib;
           sources = flake.lib.sources;

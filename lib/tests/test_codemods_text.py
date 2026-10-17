@@ -79,3 +79,14 @@ def test_regex_replace_file_exactly_rewrites_file(tmp_path: Path) -> None:
         is True
     )
     assert path.read_text(encoding="utf-8") == "item = new\n"
+
+
+def test_regex_replace_file_exactly_reports_an_identity_rewrite(tmp_path: Path) -> None:
+    """A matched rewrite that changes nothing is reported and does not write."""
+    path = tmp_path / "source.txt"
+    path.write_text("item = same\n", encoding="utf-8")
+    before = path.stat().st_mtime_ns
+
+    assert regex_replace_file_exactly(path, r"same", "same") is False
+    assert path.read_text(encoding="utf-8") == "item = same\n"
+    assert path.stat().st_mtime_ns == before

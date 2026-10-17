@@ -4,7 +4,7 @@ import re
 import urllib.parse
 from collections import Counter
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar
 
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.function.call import FunctionCall
@@ -12,6 +12,7 @@ from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib import json_utils
 from lib.nix.models.sources import (
     HashCollection,
     HashEntry,
@@ -83,21 +84,6 @@ class _CompanionManifestContract:
     opencode_node_modules_hash: str
 
 
-def _require_object(value: object, *, context: str) -> dict[str, object]:
-    if not isinstance(value, dict):
-        msg = f"OpenChamber {context} is not a JSON object"
-        raise TypeError(msg)
-    return cast("dict[str, object]", value)
-
-
-def _require_string(mapping: dict[str, object], key: str, *, context: str) -> str:
-    value = mapping.get(key)
-    if not isinstance(value, str) or not value:
-        msg = f"OpenChamber {context} is missing {key}"
-        raise TypeError(msg)
-    return value
-
-
 def _require_exact(actual: str, expected: str, *, context: str) -> str:
     if actual != expected:
         msg = f"OpenChamber {context} must be {expected!r}, got {actual!r}"
@@ -127,8 +113,10 @@ def _require_commit(value: str, *, context: str) -> str:
 
 
 def _dependency(mapping: dict[str, object], name: str, *, context: str) -> str:
-    dependencies = _require_object(mapping.get("dependencies"), context=context)
-    return _require_string(dependencies, name, context=context)
+    dependencies = json_utils.as_object_dict(
+        mapping.get("dependencies"), context=context
+    )
+    return json_utils.get_required_nonempty_str(dependencies, name, context=context)
 
 
 def _locked_package_version(packages: dict[str, object], package: str) -> str:
@@ -172,6 +160,8 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             mode="build",
         ),
     )
+    # Recompute every fixed-output closure before accepting current metadata.
+    always_rehash = True
 
     @staticmethod
     def _bun_url(version: str) -> str:
@@ -195,8 +185,10 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             f"repos/{owner}/{repo}/commits/{tag_path}",
             config=config,
         )
-        commit = _require_string(
-            _require_object(payload, context=f"{owner}/{repo} commit response"),
+        commit = json_utils.get_required_nonempty_str(
+            json_utils.as_object_dict(
+                payload, context=f"{owner}/{repo} commit response"
+            ),
             "sha",
             context=f"{owner}/{repo} commit response",
         )
@@ -237,41 +229,49 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             release_version,
             context="release version",
         )
-        root = _require_object(root_payload, context="root manifest")
+        root = json_utils.as_object_dict(root_payload, context="root manifest")
         _require_exact(
             _require_exact_version(
-                _require_string(root, "version", context="root manifest"),
+                json_utils.get_required_nonempty_str(
+                    root, "version", context="root manifest"
+                ),
                 context="root version",
             ),
             release_version,
             context="root version",
         )
         bun_version = _require_prefixed_version(
-            _require_string(root, "packageManager", context="root manifest"),
+            json_utils.get_required_nonempty_str(
+                root, "packageManager", context="root manifest"
+            ),
             "bun@",
             context="package manager",
         )
-        engines = _require_object(root.get("engines"), context="root engines")
+        engines = json_utils.as_object_dict(root.get("engines"), context="root engines")
         require_supported_node_engine(
-            _require_string(engines, "node", context="root engines"),
+            json_utils.get_required_nonempty_str(
+                engines, "node", context="root engines"
+            ),
             selected_attr=(f"{cls.name}.passthru.{cls.NODEJS_VERSION_PASSTHRU}"),
             selected_version=selected_node_version,
             source_name="OpenChamber",
         )
 
         lock = parse_bun_lock_text(lock_text, context="OpenChamber bun.lock")
-        lock_packages = _require_object(
+        lock_packages = json_utils.as_object_dict(
             lock.get("packages"),
             context="bun.lock packages",
         )
 
-        electron = _require_object(electron_payload, context="Electron manifest")
-        electron_cli_manifest = _require_object(
+        electron = json_utils.as_object_dict(
+            electron_payload, context="Electron manifest"
+        )
+        electron_cli_manifest = json_utils.as_object_dict(
             electron.get("opencodeCli"),
             context="Electron opencodeCli manifest",
         )
         opencode_version = _require_exact_version(
-            _require_string(
+            json_utils.get_required_nonempty_str(
                 electron_cli_manifest,
                 "version",
                 context="Electron opencodeCli version",
@@ -280,24 +280,32 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
         )
         _require_exact(
             _require_exact_version(
-                _require_string(electron, "version", context="Electron manifest"),
+                json_utils.get_required_nonempty_str(
+                    electron, "version", context="Electron manifest"
+                ),
                 context="Electron package version",
             ),
             release_version,
             context="Electron package version",
         )
-        build = _require_object(electron.get("build"), context="Electron build")
+        build = json_utils.as_object_dict(
+            electron.get("build"), context="Electron build"
+        )
         _require_exact(
-            _require_string(build, "appId", context="Electron build"),
+            json_utils.get_required_nonempty_str(
+                build, "appId", context="Electron build"
+            ),
             cls.APP_ID,
             context="bundle identifier",
         )
         _require_exact(
-            _require_string(build, "productName", context="Electron build"),
+            json_utils.get_required_nonempty_str(
+                build, "productName", context="Electron build"
+            ),
             cls.PRODUCT_NAME,
             context="product name",
         )
-        dev_dependencies = _require_object(
+        dev_dependencies = json_utils.as_object_dict(
             electron.get("devDependencies"),
             context="Electron devDependencies",
         )
@@ -307,7 +315,7 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
         )
         require_npm_version_matches_spec(
             electron_version,
-            _require_string(
+            json_utils.get_required_nonempty_str(
                 dev_dependencies,
                 "electron",
                 context="Electron devDependencies",
@@ -315,10 +323,12 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             context="OpenChamber Electron dependency",
         )
 
-        web = _require_object(web_payload, context="web manifest")
+        web = json_utils.as_object_dict(web_payload, context="web manifest")
         _require_exact(
             _require_exact_version(
-                _require_string(web, "version", context="web manifest"),
+                json_utils.get_required_nonempty_str(
+                    web, "version", context="web manifest"
+                ),
                 context="web package version",
             ),
             release_version,
@@ -353,22 +363,28 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
         opencode_hashes_payload: object,
         sherpa_payload: object,
     ) -> _CompanionManifestContract:
-        opencode = _require_object(opencode_payload, context="OpenCode manifest")
+        opencode = json_utils.as_object_dict(
+            opencode_payload, context="OpenCode manifest"
+        )
         # OpenCode and OpenChamber release their own bun requirements on
         # independent schedules. Record the companion's declared bun version so
         # each component builds with the bun its own manifest pins, rather than
         # forcing one shared version across both.
         companion_bun_version = _require_prefixed_version(
-            _require_string(opencode, "packageManager", context="OpenCode manifest"),
+            json_utils.get_required_nonempty_str(
+                opencode, "packageManager", context="OpenCode manifest"
+            ),
             "bun@",
             context="OpenCode package manager",
         )
-        hashes = _require_object(opencode_hashes_payload, context="OpenCode hashes")
-        node_modules = _require_object(
+        hashes = json_utils.as_object_dict(
+            opencode_hashes_payload, context="OpenCode hashes"
+        )
+        node_modules = json_utils.as_object_dict(
             hashes.get("nodeModules"),
             context="OpenCode nodeModules hashes",
         )
-        opencode_node_modules_hash = _require_string(
+        opencode_node_modules_hash = json_utils.get_required_nonempty_str(
             node_modules,
             cls.DARWIN_PLATFORM,
             context="OpenCode nodeModules hashes",
@@ -376,7 +392,9 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
         # Validate SRI form through the canonical sources model.
         HashEntry.create("nodeModulesHash", opencode_node_modules_hash)
 
-        sherpa = _require_object(sherpa_payload, context="sherpa Node addon manifest")
+        sherpa = json_utils.as_object_dict(
+            sherpa_payload, context="sherpa Node addon manifest"
+        )
         node_addon_api_version = _require_prefixed_version(
             _dependency(sherpa, "node-addon-api", context="sherpa dependencies"),
             "^",
@@ -541,15 +559,6 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             },
         )
 
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Recompute every fixed-output closure before accepting current metadata."""
-        _ = (context, info)
-        return False
-
     @staticmethod
     def _fetchurl_expr(url: str) -> str:
         expression = FunctionCall(
@@ -679,7 +688,9 @@ class OpenChamberUpdater(GitHubReleaseUpdater):
             "tag",
         )
         result = {
-            key: _require_string(metadata, key, context="release metadata")
+            key: json_utils.get_required_nonempty_str(
+                metadata, key, context="release metadata"
+            )
             for key in keys
         }
         version = _require_exact_version(info.version, context="release version")

@@ -116,6 +116,8 @@ class CoastLocalUpdater(DownloadHashUpdater):
     name = "coast-local"
     supported_platforms = ("aarch64-darwin",)
     PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": _DOWNLOAD_URL}
+    # Rehash every time because the public Coast URL is mutable.
+    always_rehash = True
 
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext
@@ -146,15 +148,6 @@ class CoastLocalUpdater(DownloadHashUpdater):
                 raise RuntimeError(msg)
             version = _parse_artifact_identity(response.headers)
         return VersionInfo(version=version)
-
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Rehash every time because the public Coast URL is mutable."""
-        _ = (context, info)
-        return False
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist the complete content digest rather than mutable CDN metadata."""

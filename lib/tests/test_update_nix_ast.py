@@ -24,7 +24,6 @@ from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
 from lib.tests._nix_source import nix_file_binding_expr, nix_source_fragment_expr
 from lib.update.flake import (
-    flake_fetch_expr,
     flake_fetch_expression,
     flake_source_path_expr,
     flake_source_path_expression,
@@ -90,8 +89,8 @@ def test_simple_derivation_locks_come_from_updater_metadata(
     assert_nix_ast_equal(expect_binding(package.output.scope, binding).value, expected)
 
 
-def test_flake_fetch_expr_builds_parseable_fetch_tree() -> None:
-    """flake_fetch_expr should emit valid fetchTree Nix."""
+def test_flake_fetch_expression_builds_github_fetch_tree() -> None:
+    """Hosted forge inputs pin owner, repo, rev, and narHash in fetchTree."""
     node = FlakeLockNode(
         locked=LockedRef(
             type="github",
@@ -102,9 +101,24 @@ def test_flake_fetch_expr_builds_parseable_fetch_tree() -> None:
         ),
     )
 
-    expr = flake_fetch_expr(node)
-
-    assert_nix_ast_equal(expr, flake_fetch_expression(node))
+    assert_nix_ast_equal(
+        flake_fetch_expression(node),
+        FunctionCall(
+            name=identifier_attr_path("builtins", "fetchTree"),
+            argument=AttributeSet(
+                values=[
+                    Binding(name="type", value="github"),
+                    Binding(name="owner", value="NixOS"),
+                    Binding(name="repo", value="nixpkgs"),
+                    Binding(name="rev", value="abc123"),
+                    Binding(
+                        name="narHash",
+                        value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    ),
+                ]
+            ),
+        ),
+    )
 
 
 def test_flake_source_path_expr_normalizes_fetch_tree_results() -> None:
@@ -142,7 +156,7 @@ def test_flake_source_path_expr_normalizes_fetch_tree_results() -> None:
     )
 
 
-def test_flake_fetch_expr_builds_git_fetch_tree_with_submodules() -> None:
+def test_flake_fetch_expression_builds_git_fetch_tree_with_submodules() -> None:
     """Generic git flake inputs should retain submodule fetch metadata."""
     node = FlakeLockNode(
         locked=LockedRef.model_validate({
@@ -155,7 +169,7 @@ def test_flake_fetch_expr_builds_git_fetch_tree_with_submodules() -> None:
     )
 
     assert_nix_ast_equal(
-        flake_fetch_expr(node),
+        flake_fetch_expression(node),
         FunctionCall(
             name=identifier_attr_path("builtins", "fetchTree"),
             argument=AttributeSet(
@@ -174,7 +188,7 @@ def test_flake_fetch_expr_builds_git_fetch_tree_with_submodules() -> None:
     )
 
 
-def test_flake_fetch_expr_builds_git_fetch_tree_without_submodules() -> None:
+def test_flake_fetch_expression_builds_git_fetch_tree_without_submodules() -> None:
     """Generic git flake inputs should not invent submodule metadata."""
     node = FlakeLockNode(
         locked=LockedRef.model_validate({
@@ -186,7 +200,7 @@ def test_flake_fetch_expr_builds_git_fetch_tree_without_submodules() -> None:
     )
 
     assert_nix_ast_equal(
-        flake_fetch_expr(node),
+        flake_fetch_expression(node),
         FunctionCall(
             name=identifier_attr_path("builtins", "fetchTree"),
             argument=AttributeSet(
@@ -204,10 +218,10 @@ def test_flake_fetch_expr_builds_git_fetch_tree_without_submodules() -> None:
     )
 
 
-def test_flake_fetch_expr_rejects_incomplete_git_locked_ref() -> None:
+def test_flake_fetch_expression_rejects_incomplete_git_locked_ref() -> None:
     """Generic git fetchTree expressions need both a repository URL and revision."""
     with pytest.raises(ValueError, match="missing url/rev"):
-        flake_fetch_expr(
+        flake_fetch_expression(
             FlakeLockNode(
                 locked=LockedRef.model_validate({
                     "type": "git",
@@ -487,7 +501,7 @@ def test_build_fetch_from_github_expr_is_parseable() -> None:
     )
 
 
-def test_build_fetch_from_github_expr_supports_tag_post_fetch_and_expr_hash() -> None:
+def test_build_fetch_from_github_expr_supports_tag_and_expr_hash() -> None:
     """FetchFromGitHub helper should handle non-default optional fields."""
     expr = _build_fetch_from_github_expr(
         "getsentry",
@@ -496,7 +510,6 @@ def test_build_fetch_from_github_expr_supports_tag_post_fetch_and_expr_hash() ->
         hash_value=StringPrimitive(
             value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
         ),
-        post_fetch="rm -rf $out/*.xcarchive",
     )
 
     assert_nix_ast_equal(
@@ -508,7 +521,6 @@ def test_build_fetch_from_github_expr_supports_tag_post_fetch_and_expr_hash() ->
             hash_value=StringPrimitive(
                 value="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
             ),
-            post_fetch="rm -rf $out/*.xcarchive",
         ),
     )
 

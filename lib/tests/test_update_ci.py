@@ -1045,6 +1045,31 @@ def job_repository(tmp_path, monkeypatch) -> Path:
     return root
 
 
+def _write_certified_identity(
+    runner_temp: Path,
+    *,
+    base_tree: str = "certified-base",
+    tree: str = "certified-tree",
+) -> None:
+    """Record the candidate identity the publish job reads back from evidence."""
+    evidence = runner_temp / "evidence" / "prepare-x86_64-linux"
+    evidence.mkdir(parents=True, exist_ok=True)
+    (evidence / "candidate.json").write_text(
+        json.dumps({"base_tree": base_tree, "tree": tree})
+    )
+
+
+def _published_stdout(
+    args: tuple[str, ...], *, target_tree: str = "certified-base"
+) -> str:
+    """Return the git plumbing answers one publish run reads."""
+    if args[:2] == ("git", "write-tree"):
+        return "certified-tree\n"
+    if args[:2] == ("git", "rev-parse"):
+        return f"{target_tree}\n"
+    return ""
+
+
 @pytest.mark.parametrize("failure", [None, "prek", "coverage", "untracked"])
 def test_quality_stops_at_first_failed_gate(
     job_repository, monkeypatch, failure
@@ -1160,15 +1185,15 @@ def test_publication_uses_signed_commit_and_bounded_repair(
         "GITHUB_REF_NAME", "codex/update-repair-100-1" if changed else "main"
     )
     monkeypatch.setenv("NIXCFG_UPDATE_TARGETS", "example")
+    _write_certified_identity(tmp_path)
     calls = []
 
     def run(*args, capture=False, check=True):
         calls.append(args)
-        stdout = "certified-tree\n" if args[:2] == ("git", "write-tree") else ""
         return subprocess.CompletedProcess(
             args,
             int(changed) if args[:2] == ("git", "diff") else 0,
-            stdout=stdout,
+            stdout=_published_stdout(args),
         )
 
     monkeypatch.setattr(jobs, "_run", run)
@@ -1227,16 +1252,16 @@ def test_commit_and_push_from_base_requires_a_certified_tree(
 
 
 def test_publication_from_a_feature_branch_still_targets_default_branch(
-    job_repository, monkeypatch
+    job_repository, tmp_path, monkeypatch
 ) -> None:
     """Exercise runs must not merge into the reviewed branch; the product PR is on main."""
     monkeypatch.setenv("GITHUB_REF_NAME", "feature")
+    _write_certified_identity(tmp_path)
     calls = []
 
     def run(*args, capture=False, check=True):
         calls.append(args)
-        stdout = "certified-tree\n" if args[:2] == ("git", "write-tree") else ""
-        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+        return subprocess.CompletedProcess(args, 0, stdout=_published_stdout(args))
 
     monkeypatch.setattr(jobs, "_run", run)
     assert jobs.main("publish") == 0
@@ -1252,14 +1277,14 @@ def test_publication_from_a_feature_branch_still_targets_default_branch(
 
 
 def test_publish_merges_immediately_when_the_pull_request_is_already_clean(
-    job_repository, monkeypatch
+    job_repository, tmp_path, monkeypatch
 ) -> None:
     """A clean certified PR must merge now; --auto cannot queue without checks."""
+    _write_certified_identity(tmp_path)
     calls: list[tuple[str, ...]] = []
 
     def run(*args, capture=False, check=True):
         calls.append(args)
-        stdout = "certified-tree\n" if args[:2] == ("git", "write-tree") else ""
         if args[:3] == ("gh", "pr", "merge") and "--auto" in args:
             return subprocess.CompletedProcess(
                 args,
@@ -1268,7 +1293,7 @@ def test_publish_merges_immediately_when_the_pull_request_is_already_clean(
                 stderr="GraphQL: Pull request Pull request is in clean status "
                 "(enablePullRequestAutoMerge)\n",
             )
-        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+        return subprocess.CompletedProcess(args, 0, stdout=_published_stdout(args))
 
     monkeypatch.setattr(jobs, "_run", run)
     assert jobs.main("publish") == 0
@@ -1278,11 +1303,13 @@ def test_publish_merges_immediately_when_the_pull_request_is_already_clean(
     assert merges[1][4:] == ("--squash",)
 
 
-def test_publish_raises_other_auto_merge_failures(job_repository, monkeypatch) -> None:
+def test_publish_raises_other_auto_merge_failures(
+    job_repository, tmp_path, monkeypatch
+) -> None:
     """A real merge failure must still fail publication."""
+    _write_certified_identity(tmp_path)
 
     def run(*args, capture=False, check=True):
-        stdout = "certified-tree\n" if args[:2] == ("git", "write-tree") else ""
         if args[:3] == ("gh", "pr", "merge"):
             return subprocess.CompletedProcess(
                 args,
@@ -1290,13 +1317,33 @@ def test_publish_raises_other_auto_merge_failures(job_repository, monkeypatch) -
                 stdout="",
                 stderr="GraphQL: Protected branch rules not configured\n",
             )
-        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+        return subprocess.CompletedProcess(args, 0, stdout=_published_stdout(args))
 
     monkeypatch.setattr(jobs, "_run", run)
     with pytest.raises(subprocess.CalledProcessError) as exc_info:
         jobs.main("publish")
     assert exc_info.value.returncode == 1
     assert "Protected branch" in exc_info.value.stderr
+
+
+def test_publish_refuses_a_base_that_moved_past_the_certified_baseline(
+    job_repository, tmp_path, monkeypatch
+) -> None:
+    """A moved base must fail, not silently revert the commits that landed."""
+    _write_certified_identity(tmp_path)
+    calls: list[tuple[str, ...]] = []
+
+    def run(*args, capture=False, check=True):
+        calls.append(args)
+        stdout = _published_stdout(args, target_tree="moved-base")
+        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+
+    monkeypatch.setattr(jobs, "_run", run)
+    with pytest.raises(ValueError, match="certified baseline"):
+        jobs.main("publish")
+    assert not any(args[:3] == ("git", "switch", "--discard-changes") for args in calls)
+    assert not any(args[:2] == ("git", "restore") for args in calls)
+    assert not any(args[:3] == ("gh", "pr", "create") for args in calls)
 
 
 def test_bootstrap_and_failure_evidence(job_repository, tmp_path, monkeypatch) -> None:

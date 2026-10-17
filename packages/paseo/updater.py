@@ -12,6 +12,7 @@ from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib import json_utils
 from lib.nix.models.sources import (
     HashCollection,
     HashEntry,
@@ -221,21 +222,6 @@ class _ManifestContract:
     sherpa_version: str
 
 
-def _require_object(value: object, *, context: str) -> dict[str, object]:
-    if not isinstance(value, dict):
-        msg = f"Paseo {context} is not a JSON object"
-        raise TypeError(msg)
-    return cast("dict[str, object]", value)
-
-
-def _require_string(mapping: dict[str, object], key: str, *, context: str) -> str:
-    value = mapping.get(key)
-    if not isinstance(value, str) or not value:
-        msg = f"Paseo {context} is missing {key}"
-        raise TypeError(msg)
-    return value
-
-
 def _require_exact(actual: str, expected: str, *, context: str) -> str:
     if actual != expected:
         msg = f"Paseo {context} must be {expected!r}, got {actual!r}"
@@ -265,13 +251,15 @@ def _require_sha512_integrity(value: str, *, context: str) -> str:
 
 
 def _dependency(mapping: dict[str, object], name: str, *, context: str) -> str:
-    dependencies = _require_object(mapping.get("dependencies"), context=context)
-    return _require_string(dependencies, name, context=context)
+    dependencies = json_utils.as_object_dict(
+        mapping.get("dependencies"), context=context
+    )
+    return json_utils.get_required_nonempty_str(dependencies, name, context=context)
 
 
 def _candidate_sherpa_version(server_payload: object) -> str:
     """Derive the sherpa release selected by an immutable Paseo manifest."""
-    server = _require_object(server_payload, context="server manifest")
+    server = json_utils.as_object_dict(server_payload, context="server manifest")
     return _require_exact_version(
         _dependency(server, "sherpa-onnx-node", context="server dependencies"),
         context="sherpa wrapper dependency",
@@ -292,12 +280,12 @@ def _locked_path_version(
     *,
     context: str,
 ) -> str:
-    packages = _require_object(lock.get("packages"), context="lock packages")
-    entry = _require_object(
+    packages = json_utils.as_object_dict(lock.get("packages"), context="lock packages")
+    entry = json_utils.as_object_dict(
         packages.get(package_path),
         context=context,
     )
-    return _require_string(entry, "version", context=context)
+    return json_utils.get_required_nonempty_str(entry, "version", context=context)
 
 
 def _first_locked_entry(
@@ -306,11 +294,11 @@ def _first_locked_entry(
     *,
     context: str,
 ) -> tuple[str, dict[str, object]]:
-    packages = _require_object(lock.get("packages"), context="lock packages")
+    packages = json_utils.as_object_dict(lock.get("packages"), context="lock packages")
     for package_path in package_paths:
         entry = packages.get(package_path)
         if entry is not None:
-            return package_path, _require_object(entry, context=context)
+            return package_path, json_utils.as_object_dict(entry, context=context)
     msg = f"Paseo {context} is missing from the lock manifest"
     raise RuntimeError(msg)
 
@@ -348,6 +336,8 @@ class PaseoUpdater(GitHubReleaseUpdater):
             mode="build",
         ),
     )
+    # Recompute closure hashes before considering this source current.
+    always_rehash = True
 
     @classmethod
     def _app_builder_lib_backport_commit(cls) -> str:
@@ -379,8 +369,10 @@ class PaseoUpdater(GitHubReleaseUpdater):
             f"repos/{owner}/{repo}/commits/{tag_path}",
             config=config,
         )
-        commit = _require_string(
-            _require_object(payload, context=f"{owner}/{repo} commit response"),
+        commit = json_utils.get_required_nonempty_str(
+            json_utils.as_object_dict(
+                payload, context=f"{owner}/{repo} commit response"
+            ),
             "sha",
             context=f"{owner}/{repo} commit response",
         )
@@ -471,27 +463,33 @@ class PaseoUpdater(GitHubReleaseUpdater):
             context="locked Claude Agent SDK",
         )
         _require_exact(
-            _require_string(sdk_lock, "version", context="locked Claude Agent SDK"),
+            json_utils.get_required_nonempty_str(
+                sdk_lock, "version", context="locked Claude Agent SDK"
+            ),
             version,
             context="locked Claude Agent SDK version",
         )
         _require_exact(
-            _require_string(sdk_lock, "resolved", context="locked Claude Agent SDK"),
+            json_utils.get_required_nonempty_str(
+                sdk_lock, "resolved", context="locked Claude Agent SDK"
+            ),
             cls._npm_url("@anthropic-ai/claude-agent-sdk", version),
             context="locked Claude Agent SDK URL",
         )
         _require_sha512_integrity(
-            _require_string(sdk_lock, "integrity", context="locked Claude Agent SDK"),
+            json_utils.get_required_nonempty_str(
+                sdk_lock, "integrity", context="locked Claude Agent SDK"
+            ),
             context="locked Claude Agent SDK integrity",
         )
 
         platform_package = "@anthropic-ai/claude-agent-sdk-darwin-arm64"
-        sdk_optional_dependencies = _require_object(
+        sdk_optional_dependencies = json_utils.as_object_dict(
             sdk_lock.get("optionalDependencies"),
             context="locked Claude Agent SDK optionalDependencies",
         )
         _require_exact(
-            _require_string(
+            json_utils.get_required_nonempty_str(
                 sdk_optional_dependencies,
                 platform_package,
                 context="locked Claude Agent SDK optionalDependencies",
@@ -509,7 +507,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
             context="locked Claude Agent SDK darwin-arm64",
         )
         _require_exact(
-            _require_string(
+            json_utils.get_required_nonempty_str(
                 platform_lock,
                 "version",
                 context="locked Claude Agent SDK darwin-arm64",
@@ -518,7 +516,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
             context="locked Claude Agent SDK darwin-arm64 version",
         )
         _require_exact(
-            _require_string(
+            json_utils.get_required_nonempty_str(
                 platform_lock,
                 "resolved",
                 context="locked Claude Agent SDK darwin-arm64",
@@ -527,7 +525,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
             context="locked Claude Agent SDK darwin-arm64 URL",
         )
         _require_sha512_integrity(
-            _require_string(
+            json_utils.get_required_nonempty_str(
                 platform_lock,
                 "integrity",
                 context="locked Claude Agent SDK darwin-arm64",
@@ -562,24 +560,43 @@ class PaseoUpdater(GitHubReleaseUpdater):
             release_version,
             context="release version",
         )
-        root = _require_object(root_payload, context="root manifest")
-        desktop = _require_object(desktop_payload, context="desktop manifest")
-        server = _require_object(server_payload, context="server manifest")
-        lock = _require_object(lock_payload, context="lock manifest")
-        sherpa = _require_object(sherpa_payload, context="sherpa addon manifest")
+        root = json_utils.as_object_dict(root_payload, context="root manifest")
+        desktop = json_utils.as_object_dict(desktop_payload, context="desktop manifest")
+        server = json_utils.as_object_dict(server_payload, context="server manifest")
+        lock = json_utils.as_object_dict(lock_payload, context="lock manifest")
+        sherpa = json_utils.as_object_dict(
+            sherpa_payload, context="sherpa addon manifest"
+        )
 
         manifest_versions = (
-            ("lock", _require_string(lock, "version", context="lock manifest")),
+            (
+                "lock",
+                json_utils.get_required_nonempty_str(
+                    lock, "version", context="lock manifest"
+                ),
+            ),
             (
                 "lock root package",
                 _locked_path_version(lock, "", context="locked root package"),
             ),
-            ("root", _require_string(root, "version", context="root manifest")),
+            (
+                "root",
+                json_utils.get_required_nonempty_str(
+                    root, "version", context="root manifest"
+                ),
+            ),
             (
                 "desktop",
-                _require_string(desktop, "version", context="desktop manifest"),
+                json_utils.get_required_nonempty_str(
+                    desktop, "version", context="desktop manifest"
+                ),
             ),
-            ("server", _require_string(server, "version", context="server manifest")),
+            (
+                "server",
+                json_utils.get_required_nonempty_str(
+                    server, "version", context="server manifest"
+                ),
+            ),
         )
         for label, manifest_version in manifest_versions:
             _require_exact(
@@ -591,12 +608,12 @@ class PaseoUpdater(GitHubReleaseUpdater):
                 context=f"{label} version",
             )
 
-        dev_dependencies = _require_object(
+        dev_dependencies = json_utils.as_object_dict(
             desktop.get("devDependencies"),
             context="desktop devDependencies",
         )
         electron_version = _require_exact_version(
-            _require_string(
+            json_utils.get_required_nonempty_str(
                 dev_dependencies,
                 "electron",
                 context="desktop devDependencies",
@@ -610,7 +627,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
         )
 
         electron_builder_version = _require_exact_version(
-            _require_string(
+            json_utils.get_required_nonempty_str(
                 dev_dependencies,
                 "electron-builder",
                 context="desktop devDependencies",
@@ -622,8 +639,10 @@ class PaseoUpdater(GitHubReleaseUpdater):
             electron_builder_version,
             context="locked electron-builder",
         )
-        lock_packages = _require_object(lock.get("packages"), context="lock packages")
-        electron_builder_lock = _require_object(
+        lock_packages = json_utils.as_object_dict(
+            lock.get("packages"), context="lock packages"
+        )
+        electron_builder_lock = json_utils.as_object_dict(
             lock_packages.get("node_modules/electron-builder"),
             context="locked electron-builder",
         )
@@ -646,8 +665,8 @@ class PaseoUpdater(GitHubReleaseUpdater):
             context="supported app-builder-lib version",
         )
         node_abi_version = _require_exact_version(
-            _require_string(
-                _require_object(
+            json_utils.get_required_nonempty_str(
+                json_utils.as_object_dict(
                     lock_packages.get("node_modules/node-abi"),
                     context="locked node-abi",
                 ),
@@ -887,15 +906,6 @@ class PaseoUpdater(GitHubReleaseUpdater):
             },
         )
 
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Recompute closure hashes before considering this source current."""
-        _ = (context, info)
-        return False
-
     @staticmethod
     def _fetchurl_expr(url: str) -> str:
         expression = FunctionCall(
@@ -1068,7 +1078,9 @@ class PaseoUpdater(GitHubReleaseUpdater):
     def _required_metadata(cls, info: VersionInfo) -> dict[str, str]:
         metadata = metadata_as_mapping(info.metadata, context="Paseo release metadata")
         result = {
-            key: _require_string(metadata, key, context="release metadata")
+            key: json_utils.get_required_nonempty_str(
+                metadata, key, context="release metadata"
+            )
             for key in (
                 "appBuilderLibVersion",
                 "claudeAgentSdkVersion",
@@ -1150,7 +1162,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
         info: VersionInfo,
     ) -> dict[str, dict[str, str]]:
         metadata = metadata_as_mapping(info.metadata, context="Paseo release metadata")
-        raw_dependencies = _require_object(
+        raw_dependencies = json_utils.as_object_dict(
             metadata.get("onnxDependencies"),
             context="release ONNX dependencies",
         )
@@ -1160,7 +1172,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
 
         result: dict[str, dict[str, str]] = {}
         for name, expected in _ONNX_NATIVE_DEPENDENCIES.items():
-            dependency = _require_object(
+            dependency = json_utils.as_object_dict(
                 raw_dependencies[name],
                 context=f"release ONNX dependency {name}",
             )
@@ -1168,7 +1180,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
                 msg = f"Paseo release ONNX dependency {name} has unexpected fields"
                 raise RuntimeError(msg)
             normalized = {
-                key: _require_string(
+                key: json_utils.get_required_nonempty_str(
                     dependency,
                     key,
                     context=f"release ONNX dependency {name}",
@@ -1182,7 +1194,7 @@ class PaseoUpdater(GitHubReleaseUpdater):
                     context=f"ONNX dependency {name} {key}",
                 )
             normalized["commit"] = _require_commit(
-                _require_string(
+                json_utils.get_required_nonempty_str(
                     dependency,
                     "commit",
                     context=f"release ONNX dependency {name}",

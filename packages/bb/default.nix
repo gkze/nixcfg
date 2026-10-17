@@ -83,6 +83,8 @@ stdenv.mkDerivation {
   patches = [
     ./patches/nix-managed-updates.patch
     ./patches/nix-managed-connect-credential-cache.patch
+    # Hoisted transitive dependencies can be omitted by electron-builder's
+    # collector. Make the SQLite loader and logger closure explicit roots.
     ./patches/nix-managed-runtime-closure.patch
     ./patches/pnpm-10-hoisted-runtime-manifest.patch
   ];
@@ -247,9 +249,28 @@ stdenv.mkDerivation {
       process.env.out
       + "/Applications/${appBundleName}/Contents/Resources/app.asar/node_modules";
 
-    for (const packageName of ["@parcel/watcher", "better-sqlite3", "node-pty"]) {
+    for (const packageName of ["@parcel/watcher", "node-pty"]) {
       require(nodeModules + "/" + packageName);
       console.log(packageName + " ok");
+    }
+
+    // SQLite loads bindings lazily on construction. Exercise both Electron's
+    // ASAR path and the unpacked path used by the local server.
+    for (const layout of ["app.asar", "app.asar.unpacked"]) {
+      const Database = require(
+        process.env.out
+          + "/Applications/${appBundleName}/Contents/Resources/"
+          + layout + "/node_modules/better-sqlite3",
+      );
+      const database = new Database(":memory:");
+      try {
+        require("node:assert/strict").deepEqual(
+          database.prepare("SELECT 1 AS ok").get(), { ok: 1 },
+        );
+      } finally {
+        database.close();
+      }
+      console.log(layout + " SQLite runtime query ok");
     }
 
     // Load the logger transport through its real transitive chain. A mere

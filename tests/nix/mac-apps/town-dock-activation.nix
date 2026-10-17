@@ -24,7 +24,7 @@ let
       builtins.substring 0 ((builtins.stringLength value) - (builtins.stringLength suffix)) value;
     hm.dag.entryAfter = _: text: { inherit text; };
   };
-  result = import ../../../modules/darwin/george/town-dock-apps.nix {
+  result = import ../../../darwin/george/town-dock-apps.nix {
     inherit lib;
     config.home = { inherit homeDirectory; };
     options.home.activation = { };

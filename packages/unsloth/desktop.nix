@@ -16,21 +16,13 @@
 }:
 assert stdenv.hostPlatform.system == "aarch64-darwin";
 let
-  patchSupport = lib.fileset.toSource {
-    root = ../..;
-    fileset = lib.fileset.unions [
-      ../../lib/__init__.py
-      ../../lib/exact_text_patch.py
-      ./patch_nix_managed.py
-    ];
-  };
+  codemodsPythonPath = import ../../lib/codemods-pythonpath.nix { inherit lib; };
+  # Only the Cargo identity stamp edits TOML; tomlkit keeps it format-preserving.
+  cargoStampPython = python3.withPackages (ps: [ ps.tomlkit ]);
   cargoConsistencyPatch =
     runCommand "unsloth-${version}-cargo-consistency.patch"
       {
-        nativeBuildInputs = [
-          diffutils
-          python3
-        ];
+        nativeBuildInputs = [ diffutils ];
       }
       ''
         for tree in before after; do
@@ -40,9 +32,9 @@ let
           chmod -R u+w "$tree"
         done
 
-        PYTHONPATH=${patchSupport} ${lib.getExe python3} \
-          ${patchSupport}/packages/unsloth/patch_nix_managed.py after \
-          --cargo-only --desktop-version ${lib.escapeShellArg version}
+        PYTHONPATH=${codemodsPythonPath} ${lib.getExe cargoStampPython} \
+          ${./stamp_cargo_identity.py} after \
+          --desktop-version ${lib.escapeShellArg version}
 
         : > "$out"
         for cargoFile in Cargo.toml Cargo.lock; do
@@ -88,8 +80,8 @@ rustPlatform.buildRustPackage {
   };
 
   postPatch = ''
-    PYTHONPATH=${patchSupport} ${lib.getExe python3} \
-      ${patchSupport}/packages/unsloth/patch_nix_managed.py "$PWD"
+    PYTHONPATH=${codemodsPythonPath} ${lib.getExe python3} \
+      ${./patch_nix_managed.py} "$PWD"
     rm -rf studio/frontend/dist
     mkdir -p studio/frontend/dist
     cp -R ${frontend}/dist/. studio/frontend/dist/

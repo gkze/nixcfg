@@ -29,12 +29,14 @@ from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
-    darwin_guarded_exports,
     expect_binding,
     parse_nix_expr,
 )
 from lib.tests._nix_source import nix_file_expr, nix_source_fragment_expr
-from lib.tests._package_registry import registry_override_metadata
+from lib.tests._package_registry import (
+    is_darwin_overlay_export,
+    registry_override_metadata,
+)
 from lib.tests._shell_ast import (
     command_texts,
     indented_string_body,
@@ -413,17 +415,12 @@ def test_unsloth_registry_exports_only_on_arm64_darwin() -> None:
 
 
 def test_unsloth_binary_darwin_overlay_exports_the_audited_package() -> None:
-    """The shared overlay must expose the same source-backed package path."""
-    overlay = expect_instance(
-        nix_file_expr("overlays/binary-darwin-apps.nix"),
-        FunctionDefinition,
+    """The registry-driven overlay must expose the audited package."""
+    registry = expect_instance(
+        nix_file_expr("packages/registry.nix"), FunctionDefinition
     )
-    # The exports are the argument of the Darwin-only guard.
-    exports = darwin_guarded_exports(overlay)
-
-    assert_nix_ast_equal(
-        expect_binding(exports.values, "unsloth").value,
-        'callDarwinAppPackage "unsloth"',
+    assert is_darwin_overlay_export(
+        expect_instance(registry.output, AttributeSet), "unsloth"
     )
 
 
@@ -464,10 +461,20 @@ def test_unsloth_desktop_cargo_consistency_patches_are_shared_with_vendoring() -
         expect_binding(output.scope, "cargoConsistencyPatch").value,
         FunctionCall,
     )
+    # The stamp is the only TOML editor, so only it gets tomlkit, and it runs
+    # on the shared codemods closure rather than a package-local fileset.
+    assert_nix_ast_equal(
+        expect_binding(output.scope, "cargoStampPython").value,
+        "python3.withPackages (ps: [ ps.tomlkit ])",
+    )
+    assert_nix_ast_equal(
+        expect_binding(output.scope, "codemodsPythonPath").value,
+        "import ../../lib/codemods-pythonpath.nix { inherit lib; }",
+    )
     assert_nix_ast_equal(
         cargo_patch.name,
         """runCommand "unsloth-${version}-cargo-consistency.patch" {
-          nativeBuildInputs = [ diffutils python3 ];
+          nativeBuildInputs = [ diffutils ];
         }""",
     )
     assert_nix_ast_equal(
@@ -480,9 +487,9 @@ def test_unsloth_desktop_cargo_consistency_patches_are_shared_with_vendoring() -
             chmod -R u+w "$tree"
           done
 
-          PYTHONPATH=${patchSupport} ${lib.getExe python3} \
-            ${patchSupport}/packages/unsloth/patch_nix_managed.py after \
-            --cargo-only --desktop-version ${lib.escapeShellArg version}
+          PYTHONPATH=${codemodsPythonPath} ${lib.getExe cargoStampPython} \
+            ${./stamp_cargo_identity.py} after \
+            --desktop-version ${lib.escapeShellArg version}
 
           : > "$out"
           for cargoFile in Cargo.toml Cargo.lock; do

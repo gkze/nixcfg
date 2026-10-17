@@ -27,7 +27,6 @@ from lib.tests._nix_source import nix_file_binding_expr
 from lib.tests._updater_helpers import collect_events as _collect_events
 from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
-from lib.update.cli import _runtime_source_policy, _runtime_source_relpaths
 from lib.update.events import (
     CommandResult,
     EventSink,
@@ -40,6 +39,7 @@ from lib.update.events import (
 )
 from lib.update.nix_expr import identifier_attr_path
 from lib.update.paths import REPO_ROOT
+from lib.update.runtime_source import runtime_source_policy, runtime_source_relpaths
 from lib.update.updaters import UpdateContext, VersionInfo
 
 COMMIT = "a" * 40
@@ -215,7 +215,7 @@ def test_native_zon_helper_is_in_packaged_runtime_source() -> None:
     """Ship and fingerprint the helper alongside the installed updater."""
     root = Path(REPO_ROOT)
     assert Path("packages/neutils/read_minimum_zig_version.zig") in (
-        _runtime_source_relpaths(root, _runtime_source_policy(root))
+        runtime_source_relpaths(root, runtime_source_policy(root))
     )
 
 
@@ -958,10 +958,12 @@ def test_run_zon2nix_retries_with_bounded_ordered_progress(
     timeline: list[UpdateEventKind | str] = []
     retry_events: list[UpdateEvent] = []
 
-    async def _stream_process(args, *, timeout: float, env, output_limit: int | None):
+    async def _stream_process(
+        args, *, command_timeout: float, env, output_limit: int | None
+    ):
         nonlocal calls
         assert output_limit is None
-        assert timeout == updater._ZON2NIX_TIMEOUT_SECONDS
+        assert command_timeout == updater._ZON2NIX_TIMEOUT_SECONDS
         assert env == {"HOME": str(tmp_path)}
         assert not output_path.exists()
         calls += 1

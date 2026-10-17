@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import TextIO
+from typing import TextIO, cast
 
 _BINARY_CACHE = "gkze"
 # lib.update.ci.candidate.CLOSURE_YIELD_EXIT. Kept literal so this launcher
@@ -500,6 +500,12 @@ def native(stage: str) -> int:
         return _finish_closure_shard(scope, returncode, log)
 
 
+def _candidate_identity() -> dict[str, str]:
+    """Return the identity of the candidate the Linux prepare runner certified."""
+    candidate = _temp() / "evidence" / "prepare-x86_64-linux" / "candidate.json"
+    return cast("dict[str, str]", json.loads(candidate.read_bytes()))
+
+
 def certify() -> None:
     """Require native evidence and quality checks for the exact published tree."""
     evidence = _temp() / "evidence"
@@ -526,7 +532,7 @@ def certify() -> None:
     ):
         _outputs(changed="false")
         return
-    identity = json.loads(candidate.read_bytes())
+    identity = _candidate_identity()
     if _run("git", "write-tree", capture=True).stdout.strip() != identity["base_tree"]:
         msg = "Publication checkout does not match the candidate baseline"
         raise ValueError(msg)
@@ -548,15 +554,32 @@ def _commit_and_push(
     *,
     base: str | None = None,
     tree: str | None = None,
+    baseline_tree: str | None = None,
 ) -> str:
     branch = f"codex/update-{kind}{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
     if base is None:
         _run("git", "switch", "-c", branch)
     else:
-        if tree is None:
-            msg = "Publishing from a base requires a certified tree"
+        if tree is None or baseline_tree is None:
+            msg = (
+                "Publishing from a base requires a certified tree and the "
+                "baseline it was certified against"
+            )
             raise ValueError(msg)
         _run("git", "fetch", "origin", base)
+        # The certified tree is published whole, so the branch it lands on must
+        # still be the baseline it was certified against. Otherwise the commit
+        # silently reverts everything the base gained in the meantime.
+        target_tree = _run(
+            "git", "rev-parse", f"origin/{base}^{{tree}}", capture=True
+        ).stdout.strip()
+        if target_tree != baseline_tree:
+            msg = (
+                f"Base branch {base} no longer matches the certified baseline; "
+                "publishing the certified tree would revert the commits that "
+                "landed since certification"
+            )
+            raise ValueError(msg)
         _run(
             "git",
             "switch",
@@ -616,6 +639,7 @@ def publish() -> None:
         "chore(update): refresh validated sources",
         base=base,
         tree=tree,
+        baseline_tree=_candidate_identity()["base_tree"],
     )
     body = _temp() / "update-body.md"
     run_url = (

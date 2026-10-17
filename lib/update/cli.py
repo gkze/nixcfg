@@ -1,21 +1,19 @@
 """CLI entry point for update workflows."""
 
 import asyncio
-import copy
 import json
 import os
 import shutil
-import subprocess
 import sys
-import tomllib
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Unpack, cast
+from typing import TYPE_CHECKING, Annotated, Unpack, cast
 
 import click
 import typer
 from dbos import DBOS
+from pydantic import ValidationError
 from rich.console import Console
 from rich.text import Text
 from typer import _click as typer_click
@@ -27,8 +25,10 @@ from lib.nix.models.sources import SourcesFile
 from lib.update import derivation_validation as update_derivation_validation
 from lib.update import durable
 from lib.update import flake as update_flake
+from lib.update import lock_policy as update_lock_policy
 from lib.update import persistence as update_persistence
 from lib.update import planner as update_planner
+from lib.update import runtime_source as update_runtime_source
 from lib.update import source_runner as update_source_runner
 from lib.update import updaters as updater_module
 from lib.update.cli_inventory import handle_list_targets_request
@@ -56,7 +56,6 @@ from lib.update.derivation_validation import (
 )
 from lib.update.errors import format_exception
 from lib.update.event_queue import EVENT_QUEUE_SIZE, run_event_pipeline
-from lib.update.outcomes import SummaryStatus, merge_statuses
 from lib.update.paths import get_repo_root
 from lib.update.refs import (
     FlakeInputRef,
@@ -71,6 +70,7 @@ from lib.update.run_monitor import (
 )
 from lib.update.runtime import active_runtime, runtime_scope
 from lib.update.sources import load_all_sources
+from lib.update.summary import UpdateSummary, emit_summary
 from lib.update.ui_consumer import ConsumeEventsOptions, consume_events
 from lib.update.ui_render import ValidationDisplay
 from lib.update.ui_state import ItemMeta, OperationKind
@@ -235,261 +235,12 @@ __all__ = (
     "OutputOptions",
     "ResolvedTargets",
     "UpdateOptions",
-    "UpdateSummary",
     "app",
     "check_required_tools",
     "cli",
     "run_update_command",
     "run_updates",
 )
-
-_REEXEC_ENV = "NIXCFG_UPDATE_REEXECED_FROM_CHECKOUT"
-_EXECUTION_SOURCE_ENV = "NIXCFG_UPDATE_EXECUTION_SOURCE"
-
-
-class _UpdateSourceChangedError(update_persistence.UpdateWorkspaceError):
-    """The update runtime no longer matches the stable workspace snapshot."""
-
-
-@dataclass(frozen=True, slots=True)
-class _RuntimeSourcePolicy:
-    root_paths: tuple[str, ...]
-    library_extensions: tuple[str, ...]
-    library_names: tuple[str, ...]
-    excluded_library_paths: tuple[str, ...]
-    dynamic_roots: tuple[str, ...]
-    dynamic_extensions: tuple[str, ...]
-    dynamic_excluded_file_suffixes: tuple[str, ...]
-
-
-def _runtime_source_policy(root: Path) -> _RuntimeSourcePolicy:
-    """Load the cross-language runtime source policy from project metadata."""
-    with (root / "pyproject.toml").open("rb") as handle:
-        project = tomllib.load(handle)
-    raw_value = project["tool"]["nixcfg"]["runtimeSource"]
-    if not isinstance(raw_value, dict):
-        msg = "Invalid nixcfg runtime source policy table"
-        raise TypeError(msg)
-    raw = cast("dict[str, object]", raw_value)
-    schema_version = raw.get("schemaVersion")
-    if (
-        not isinstance(schema_version, int)
-        or isinstance(schema_version, bool)
-        or schema_version != 1
-    ):
-        msg = "Unsupported nixcfg runtime source policy schema"
-        raise RuntimeError(msg)
-
-    def _strings(name: str) -> tuple[str, ...]:
-        values = raw[name]
-        if not isinstance(values, list) or not all(
-            isinstance(value, str) and value for value in values
-        ):
-            msg = f"Invalid nixcfg runtime source policy field: {name}"
-            raise TypeError(msg)
-        return tuple(values)
-
-    def _paths(name: str) -> tuple[str, ...]:
-        values = _strings(name)
-        if any(
-            Path(value).is_absolute() or ".." in Path(value).parts for value in values
-        ):
-            msg = f"Invalid nixcfg runtime source policy path field: {name}"
-            raise TypeError(msg)
-        return values
-
-    return _RuntimeSourcePolicy(
-        root_paths=_paths("rootPaths"),
-        library_extensions=_strings("libraryExtensions"),
-        library_names=_strings("libraryNames"),
-        excluded_library_paths=_paths("excludedLibraryPaths"),
-        dynamic_roots=_paths("dynamicRoots"),
-        dynamic_extensions=_strings("dynamicExtensions"),
-        dynamic_excluded_file_suffixes=_strings("dynamicExcludedFileSuffixes"),
-    )
-
-
-def _runtime_source_relpaths(
-    root: Path,
-    policy: _RuntimeSourcePolicy,
-) -> set[Path]:
-    """Return the source files admitted by the shared runtime policy."""
-    runtime_paths: set[Path] = set()
-    for raw_path in policy.root_paths:
-        relative_root = Path(raw_path)
-        source_root = root / relative_root
-        if source_root.is_file() or source_root.is_symlink():
-            runtime_paths.add(relative_root)
-            continue
-        if not source_root.is_dir():
-            msg = f"Declared runtime source root does not exist: {raw_path}"
-            raise RuntimeError(msg)
-        runtime_paths.update(
-            relative_root / path.relative_to(source_root)
-            for path in source_root.rglob("*")
-            if path.is_file() or path.is_symlink()
-        )
-    library_root = root / "lib"
-    for path in library_root.rglob("*"):
-        if not path.is_file() and not path.is_symlink():
-            continue
-        relative_path = path.relative_to(library_root)
-        if any(
-            relative_path.is_relative_to(excluded)
-            for excluded in map(Path, policy.excluded_library_paths)
-        ):
-            continue
-        if (
-            path.suffix.removeprefix(".") in policy.library_extensions
-            or path.name in policy.library_names
-        ):
-            runtime_paths.add(Path("lib") / relative_path)
-    for raw_root in policy.dynamic_roots:
-        relative_root = Path(raw_root)
-        dynamic_root = root / relative_root
-        if dynamic_root.is_file() or dynamic_root.is_symlink():
-            dynamic_paths = (dynamic_root,)
-        elif dynamic_root.is_dir():
-            dynamic_paths = dynamic_root.rglob("*")
-        else:
-            msg = f"Declared dynamic runtime source root does not exist: {raw_root}"
-            raise RuntimeError(msg)
-        for path in dynamic_paths:
-            if not path.is_file() and not path.is_symlink():
-                continue
-            if path.suffix.removeprefix(".") not in policy.dynamic_extensions:
-                continue
-            if any(
-                path.name.endswith(suffix)
-                for suffix in policy.dynamic_excluded_file_suffixes
-            ):
-                continue
-            runtime_paths.add(
-                relative_root
-                if path == dynamic_root
-                else relative_root / path.relative_to(dynamic_root)
-            )
-    return runtime_paths
-
-
-def _same_source_path(left: Path, right: Path) -> bool:
-    """Compare one packaged path without hiding symlink identity changes."""
-    if left.is_symlink() or right.is_symlink():
-        return (
-            left.is_symlink()
-            and right.is_symlink()
-            and left.readlink() == right.readlink()
-        )
-    return (
-        left.is_file() and right.is_file() and left.read_bytes() == right.read_bytes()
-    )
-
-
-def _update_library_matches_checkout(
-    repo_root: Path,
-    *,
-    runtime_source_root: Path | None = None,
-) -> bool:
-    """Return whether the complete packaged runtime matches the checkout."""
-    checkout_root = repo_root.expanduser().resolve()
-    configured_runtime_root = os.environ.get(_EXECUTION_SOURCE_ENV)
-    runtime_root = (
-        Path(configured_runtime_root).expanduser().resolve()
-        if runtime_source_root is None and configured_runtime_root
-        else (
-            Path(__file__).resolve().parents[2]
-            if runtime_source_root is None
-            else runtime_source_root.expanduser().resolve()
-        )
-    )
-    try:
-        if runtime_root.samefile(checkout_root):
-            return True
-    except OSError:
-        return False
-
-    try:
-        repo_policy = _runtime_source_policy(checkout_root)
-        runtime_policy = _runtime_source_policy(runtime_root)
-    except KeyError, OSError, RuntimeError, TypeError, tomllib.TOMLDecodeError:
-        return False
-    if repo_policy != runtime_policy:
-        return False
-
-    try:
-        repo_files = _runtime_source_relpaths(checkout_root, repo_policy)
-        runtime_files = _runtime_source_relpaths(runtime_root, runtime_policy)
-    except OSError, RuntimeError:
-        return False
-    try:
-        return repo_files == runtime_files and all(
-            _same_source_path(checkout_root / relpath, runtime_root / relpath)
-            for relpath in repo_files
-        )
-    except OSError:
-        return False
-
-
-def _argv_runs_top_level_update(argv: list[str]) -> bool:
-    return len(argv) > 1 and argv[1] == "update"
-
-
-def _revalidate_runtime_source_snapshot(workspace_root: Path) -> None:
-    """Reject a source race between runtime selection and workspace capture."""
-    if not (
-        _argv_runs_top_level_update(sys.argv) or os.environ.get(_EXECUTION_SOURCE_ENV)
-    ):
-        return
-    if _update_library_matches_checkout(workspace_root):
-        return
-    msg = (
-        "Update source changed while preparing the isolated workspace. "
-        "No changes were applied; retry `nixcfg update`."
-    )
-    raise _UpdateSourceChangedError(msg)
-
-
-def _maybe_reexec_checkout_update() -> int | None:
-    """Run update commands with checkout-matching update code when needed."""
-    if not _argv_runs_top_level_update(sys.argv):
-        return None
-
-    repo_root = get_repo_root()
-    if _update_library_matches_checkout(repo_root):
-        return None
-
-    if os.environ.get(_REEXEC_ENV):
-        sys.stderr.write(
-            "Error: running nixcfg update code still differs from this checkout "
-            "after re-exec. Run `nix run path:.#nixcfg -- update ...` directly.\n"
-        )
-        return 1
-
-    nix = shutil.which("nix")
-    if nix is None:
-        sys.stderr.write(
-            "Error: installed nixcfg update code differs from this checkout, "
-            "but `nix` was not found for a checkout re-exec.\n"
-        )
-        return 1
-
-    env = dict(os.environ)
-    env[_REEXEC_ENV] = "1"
-    env["REPO_ROOT"] = os.fspath(repo_root)
-    with update_persistence.visible_source_snapshot(repo_root) as snapshot_root:
-        result = subprocess.run(  # noqa: S603 -- fixed local Nix executable
-            [
-                nix,
-                "run",
-                f"path:{snapshot_root}#nixcfg",
-                "--",
-                *sys.argv[1:],
-            ],
-            cwd=repo_root,
-            env=env,
-            check=False,
-        )
-    return result.returncode
 
 
 def _get_updaters() -> dict[str, UpdaterClass]:
@@ -666,47 +417,6 @@ _ORIGIN_SOURCES_ONLY = "(sources.json)"
 _ORIGIN_BOTH = "(flake.nix + sources.json)"
 
 
-@dataclass
-class UpdateSummary:
-    """Final outcomes, with presentation lists derived from one ordered map."""
-
-    statuses: dict[str, SummaryStatus] = field(default_factory=dict)
-
-    @property
-    def updated(self) -> list[str]:
-        """Targets whose candidate changed."""
-        return [name for name, status in self.statuses.items() if status == "updated"]
-
-    @property
-    def errors(self) -> list[str]:
-        """Targets with an execution or validation failure."""
-        return [name for name, status in self.statuses.items() if status == "error"]
-
-    @property
-    def dropped(self) -> list[str]:
-        """Targets whose candidate was withheld because a coupled target failed."""
-        return [name for name, status in self.statuses.items() if status == "dropped"]
-
-    @property
-    def no_change(self) -> list[str]:
-        """Targets that completed without a candidate change."""
-        return [name for name, status in self.statuses.items() if status == "no_change"]
-
-    def to_dict(self) -> dict[str, list[str] | bool]:
-        """Return the stable JSON summary projection."""
-        return {
-            "updated": [redact_urls(name) for name in self.updated],
-            "dropped": [redact_urls(name) for name in self.dropped],
-            "errors": [redact_urls(name) for name in self.errors],
-            "noChange": [redact_urls(name) for name in self.no_change],
-            "success": not self.errors,
-        }
-
-    def accumulate(self, details: dict[str, SummaryStatus]) -> None:
-        """Merge outcomes without downgrading failures or changing target order."""
-        self.statuses = merge_statuses(self.statuses, details)
-
-
 @dataclass(frozen=True)
 class ResolvedTargets:
     """Resolved source/input targets and effective mode flags."""
@@ -796,65 +506,6 @@ def _build_item_meta(
 
     order = sorted(item_meta, key=lambda name: f"{item_meta[name].origin} {name}")
     return item_meta, order
-
-
-def _emit_summary(
-    summary: UpdateSummary,
-    *,
-    had_errors: bool,
-    out: OutputOptions,
-    dry_run: bool,
-    discarded_updates: tuple[str, ...] = (),
-    indeterminate_updates: tuple[str, ...] = (),
-    dropped: Mapping[str, str] | None = None,
-) -> int:
-    dropped = dropped or {}
-    if out.json_output:
-        payload = dict[str, object](summary.to_dict())
-        payload["success"] = not had_errors
-        payload["withheld"] = {
-            redact_urls(k): redact_urls(v) for k, v in dropped.items()
-        }
-        sys.stdout.write(f"{json.dumps(payload)}\n")
-        return 1 if had_errors else 0
-
-    if dry_run:
-        if summary.updated:
-            out.print(
-                f"\nAvailable updates: {', '.join(summary.updated)}",
-                style="green",
-            )
-        else:
-            out.print("\nNo updates available.", style="dim")
-    elif discarded_updates:
-        out.print(
-            f"\nCandidate updates discarded: {', '.join(discarded_updates)}",
-            style="yellow",
-        )
-    elif indeterminate_updates:
-        out.print(
-            "\nCandidate updates have unknown promotion state: "
-            f"{', '.join(indeterminate_updates)}",
-            style="yellow",
-        )
-    elif summary.updated:
-        out.print(
-            f"\nUpdated: {', '.join(summary.updated)}",
-            style="green",
-        )
-    elif had_errors:
-        out.print("\nNo updates promoted.", style="yellow")
-    else:
-        out.print("\nNo updates needed.", style="dim")
-
-    if dropped:
-        rendered = ", ".join(f"{name} ({reason})" for name, reason in dropped.items())
-        out.print(f"\nWithheld from promotion: {rendered}", style="yellow")
-
-    if summary.errors:
-        out.print_error(f"\nFailed: {', '.join(summary.errors)}")
-
-    return 1 if had_errors else 0
 
 
 def _resolve_runtime_config(opts: UpdateOptions) -> UpdateConfig:
@@ -1403,7 +1054,7 @@ def _emit_run_outcome(
         out.print_error(f"Error: {workspace_error}")
     if plan_error is not None:
         return 1
-    exit_code = _emit_summary(
+    exit_code = emit_summary(
         outcome.summary,
         had_errors=outcome.had_errors,
         out=out,
@@ -1555,15 +1206,13 @@ def _rollback_failed_input_locks(
     plan: _RunPlan,
     failed: Iterable[str],
     updaters: Mapping[str, UpdaterClass],
-) -> tuple[str, ...]:
+) -> update_lock_policy.LockRollback | update_lock_policy.RollbackUnavailable:
     """Restore failed targets' lock-only input nodes in flake.lock.
 
-    Each failed target's root input edge is pointed back at the baseline node
-    and the node content is restored, so the rest of the lock — including
-    inputs updated by still-promoted targets — keeps describing the candidate.
     Ref-backed inputs are pinned by a URL in flake.nix, which cannot be rolled
-    back per-input, so those stay on the whole-file revert path. Returns the
-    names of inputs that were rolled back.
+    back per-input, so those stay on the whole-file revert path. The graph
+    policy lives in :mod:`lib.update.lock_policy`; this function owns only the
+    reads and the write.
     """
     ref_names = {ref.name for ref in plan.resolved.all_ref_inputs}
     candidates: set[str] = set()
@@ -1571,78 +1220,30 @@ def _rollback_failed_input_locks(
         candidates.update(_target_input_names(name, plan, updaters))
     candidates -= ref_names
     if not candidates:
-        return ()
+        return update_lock_policy.RollbackUnavailable(
+            "failed targets have no lock-only inputs"
+        )
     baseline_lock = workspace.baseline_content(Path("flake.lock"))
     if baseline_lock is None:
-        return ()
+        return update_lock_policy.RollbackUnavailable("no baseline flake.lock")
+    lock_path = workspace.root / "flake.lock"
     try:
-        baseline = json.loads(baseline_lock)
-        lock_path = workspace.root / "flake.lock"
-        current = json.loads(lock_path.read_text(encoding="utf-8"))
-    except OSError, json.JSONDecodeError:
-        return ()
-    baseline_nodes = baseline.get("nodes")
-    current_nodes = current.get("nodes")
-    baseline_root = baseline.get("root")
-    current_root = current.get("root")
-    if not (
-        isinstance(baseline_nodes, dict)
-        and isinstance(current_nodes, dict)
-        and isinstance(baseline_root, str)
-        and isinstance(current_root, str)
-    ):
-        return ()
-    baseline_root_inputs = baseline_nodes.get(baseline_root, {}).get("inputs", {})
-    current_root_inputs = current_nodes.get(current_root, {}).get("inputs", {})
-    if not isinstance(baseline_root_inputs, dict) or not isinstance(
-        current_root_inputs, dict
-    ):
-        return ()
-    rolled: list[str] = []
-    for input_name in sorted(candidates):
-        base_edge = baseline_root_inputs.get(input_name)
-        if not isinstance(base_edge, str):
-            continue
-        base_node = baseline_nodes.get(base_edge)
-        if not isinstance(base_node, dict):
-            continue
-        if (
-            current_root_inputs.get(input_name) == base_edge
-            and current_nodes.get(base_edge) == base_node
-        ):
-            continue
-        current_root_inputs[input_name] = base_edge
-        current_nodes[base_edge] = copy.deepcopy(base_node)
-        rolled.append(input_name)
-    if not rolled:
-        return ()
-    _prune_unreachable_lock_nodes(current)
-    lock_path.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
-    return tuple(rolled)
-
-
-def _prune_unreachable_lock_nodes(lock: dict[str, Any]) -> None:
-    """Drop flake.lock nodes that no longer participate in the input graph."""
-    nodes = lock.get("nodes")
-    root = lock.get("root")
-    if not isinstance(nodes, dict) or not isinstance(root, str):
-        return
-    reachable: set[str] = set()
-    stack = [root]
-    while stack:
-        node_id = stack.pop()
-        if node_id in reachable or node_id not in nodes:
-            continue
-        reachable.add(node_id)
-        node = nodes[node_id]
-        if not isinstance(node, dict):
-            continue
-        inputs = node.get("inputs")
-        if not isinstance(inputs, dict):
-            continue
-        stack.extend(edge for edge in inputs.values() if isinstance(edge, str))
-    for node_id in [key for key in nodes if key not in reachable]:
-        del nodes[node_id]
+        baseline = FlakeLock.model_validate_json(baseline_lock)
+        current = FlakeLock.model_validate_json(lock_path.read_bytes())
+    except (OSError, ValidationError) as exc:
+        return update_lock_policy.RollbackUnavailable(
+            f"flake.lock is unreadable: {type(exc).__name__}"
+        )
+    result = update_lock_policy.rollback_input_locks(
+        baseline, current, frozenset(candidates)
+    )
+    if isinstance(result, update_lock_policy.LockRollback):
+        payload = result.lock.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        # Nix writes flake.lock as sorted, two-space-indented JSON.
+        lock_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+    return result
 
 
 def _input_backed_targets(
@@ -1686,36 +1287,34 @@ def _withhold_failed_clusters(
     touched = _failed_targets_touched_flake(workspace, plan, failed, updaters)
     rolled_back_inputs: frozenset[str] = frozenset()
     global_flake_revert = False
+    rollback_unavailable: str | None = None
     if touched:
-        rolled_back_inputs = frozenset(
-            _rollback_failed_input_locks(workspace, plan, failed, updaters)
-        )
+        rollback = _rollback_failed_input_locks(workspace, plan, failed, updaters)
+        if isinstance(rollback, update_lock_policy.LockRollback):
+            rolled_back_inputs = frozenset(rollback.inputs)
+        else:
+            rollback_unavailable = rollback.reason
         global_flake_revert = any(
             bool(_target_input_names(name, plan, updaters) - rolled_back_inputs)
             for name in touched
         )
         if global_flake_revert:
             closure.update(_input_backed_targets(plan, updaters))
-    dropped: dict[str, str] = {}
-    for name in plan.order:
-        if name in failed or statuses.get(name) != "updated":
-            continue
-        if name in closure:
-            culprit = next(
-                (item for item in failed if item in clusters.get(name, ())), None
-            )
-            dropped[name] = (
-                f"coupled to failed target {culprit}"
-                if culprit is not None
-                else f"flake inputs reverted after {touched[0]} failed"
-            )
-        elif rolled_back_inputs and (
-            _target_input_names(name, plan, updaters) & rolled_back_inputs
-        ):
-            culprit = next(
-                (item for item in failed if item in clusters.get(name, ())), None
-            )
-            dropped[name] = f"input rolled back after {culprit or touched[0]} failed"
+    dropped = update_planner.withheld_targets(
+        plan.order,
+        statuses=statuses,
+        failed=failed,
+        clusters=clusters,
+        closure=frozenset(closure),
+        target_inputs={
+            name: frozenset(_target_input_names(name, plan, updaters))
+            for name in plan.order
+        }
+        if rolled_back_inputs
+        else {},
+        rolled_back_inputs=rolled_back_inputs,
+        flake_culprit=touched[0] if touched else None,
+    )
     outcome.summary.accumulate(dict.fromkeys(dropped, "dropped"))
     outcome.dropped.update(dropped)
 
@@ -1764,6 +1363,11 @@ def _withhold_failed_clusters(
             withheld=sorted(dropped),
             flakeReverted=bool(touched),
         )
+        if rollback_unavailable is not None:
+            monitor.note(
+                f"rollback unavailable: {rollback_unavailable}",
+                failed=failed,
+            )
 
 
 def _update_cancellation_check() -> (
@@ -2035,7 +1639,7 @@ async def _run_updates(
     try:
         with durable.workspace(get_repo_root()) as workspace:
             restored_paths = _restore_preparation(workspace, preparation)
-            _revalidate_runtime_source_snapshot(workspace.root)
+            update_runtime_source.revalidate_runtime_source_snapshot(workspace.root)
             if (
                 check_tools
                 and (tool_check := _handle_required_tool_check(opts)) is not None
@@ -2170,7 +1774,7 @@ def run_update_command(
     **overrides: Unpack[UpdateOptionsKwargs],
 ) -> int:
     """Run the update workflow from one options object or keyword overrides."""
-    reexec_result = _maybe_reexec_checkout_update()
+    reexec_result = update_runtime_source.maybe_reexec_checkout_update()
     if reexec_result is not None:
         return reexec_result
 

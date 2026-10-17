@@ -143,14 +143,10 @@ in
       nixPath = lib.mapAttrsToList (n: _: "${n}=flake:${n}") flakeInputs;
     };
 
-    nixpkgs = {
-      hostPlatform = system;
-      config = {
-        allowUnfree = true;
-        # Per-package insecure overrides should be used instead of global allowInsecure
-        # Note: allowInsecurePredicate is set in flake.nix at the flakelight level
-      };
-    };
+    # Nixpkgs `config` (unfree and insecure policy) is site policy: the code
+    # that instantiates Nixpkgs owns it. For this flake that is `nixpkgsConfig`
+    # in flake.nix, and mkSystem passes the resulting set as `nixpkgs.pkgs`.
+    nixpkgs.hostPlatform = system;
 
     environment.pathsToLink = [ "/share/zsh" ];
 

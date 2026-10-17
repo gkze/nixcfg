@@ -1,25 +1,34 @@
 """Make Zeron's source updater fail closed under Nix ownership."""
 
-import argparse
-from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-_UPDATE_SOURCE = Path("crates/update/src/lib.rs")
+from lib.codemods.source_patch import (
+    SourcePatch,
+    apply_patches,
+    require_absent,
+    run_source_tree_cli,
+    select_variant,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
+
+_UPDATE_SOURCE = "crates/update/src/lib.rs"
 _PATCH_SENTINEL = (
     'const NIX_MANAGED: bool = option_env!("ZERON_NIX_MANAGED").is_some();'
 )
 
 
-@dataclass(frozen=True, slots=True)
-class _SourcePatch:
-    old: str
-    new: str
+def _update(old: str, new: str) -> SourcePatch:
+    """Declare one exact single-occurrence edit of the updater crate."""
+    return SourcePatch(_UPDATE_SOURCE, old, new)
 
 
 # Ownership scaffolding shared by the supported updater layouts: the
 # sentinel header, the headless apply hook, and the relaunch, auto-update,
 # background-task, and install guards.
-_OWNERSHIP_HEADER = _SourcePatch(
+_OWNERSHIP_HEADER = _update(
     "use tokio::sync::watch;\n",
     """use tokio::sync::watch;
 
@@ -34,7 +43,7 @@ fn ensure_updates_mutable() -> anyhow::Result<()> {
 }
 """,
 )
-_APPLY_HEADLESS = _SourcePatch(
+_APPLY_HEADLESS = _update(
     """pub fn apply_headless(app_root: &Path, version: &str) -> anyhow::Result<()> {
     #[cfg(unix)]
 """,
@@ -44,7 +53,7 @@ _APPLY_HEADLESS = _SourcePatch(
 """,
 )
 _SHARED_TAIL = (
-    _SourcePatch(
+    _update(
         """pub fn relaunch_app_after_exit(bundle: &Path) {
     #[cfg(unix)]
 """,
@@ -55,7 +64,7 @@ _SHARED_TAIL = (
     #[cfg(unix)]
 """,
     ),
-    _SourcePatch(
+    _update(
         """fn auto_update_enabled() -> bool {
     std::env::var("ZERON_AUTO_UPDATE")
 """,
@@ -66,7 +75,7 @@ _SHARED_TAIL = (
     std::env::var("ZERON_AUTO_UPDATE")
 """,
     ),
-    _SourcePatch(
+    _update(
         """        let for_loop = updater.clone();
         let task = tokio::spawn(async move { for_loop.check_loop().await });
         *updater.check_task.lock().unwrap() = Some(task);
@@ -80,7 +89,7 @@ _SHARED_TAIL = (
         updater
 """,
     ),
-    _SourcePatch(
+    _update(
         """    pub async fn apply(&self) -> anyhow::Result<String> {
         let InstallKind::Managed { app_root } = detect_install() else {
 """,
@@ -94,7 +103,7 @@ _SHARED_TAIL = (
 # Primary layout: release_base() helper plus explicit platform-guard calls.
 _PATCHES = (
     _OWNERSHIP_HEADER,
-    _SourcePatch(
+    _update(
         """pub async fn fetch_latest(edge_url: &str) -> anyhow::Result<Manifest> {
     let base = release_base(edge_url)?;
 """,
@@ -103,7 +112,7 @@ _PATCHES = (
     let base = release_base(edge_url)?;
 """,
     ),
-    _SourcePatch(
+    _update(
         """pub async fn download_release_file(
     edge_url: &str,
     manifest: &Manifest,
@@ -122,7 +131,7 @@ _PATCHES = (
     let url = format!("{}/{file}", release_base(edge_url)?);
 """,
     ),
-    _SourcePatch(
+    _update(
         """pub async fn stage_headless(
     edge_url: &str,
     manifest: &Manifest,
@@ -144,7 +153,7 @@ _PATCHES = (
 """,
     ),
     _APPLY_HEADLESS,
-    _SourcePatch(
+    _update(
         """pub fn restart_service() -> anyhow::Result<()> {
     require_managed_update_platform()?;
     if cfg!(target_os = "macos") {
@@ -155,7 +164,7 @@ _PATCHES = (
     if cfg!(target_os = "macos") {
 """,
     ),
-    _SourcePatch(
+    _update(
         """pub async fn stage_mac_app(
     edge_url: &str,
     manifest: &Manifest,
@@ -176,7 +185,7 @@ _PATCHES = (
     let version = &manifest.version;
 """,
     ),
-    _SourcePatch(
+    _update(
         """pub fn apply_mac_app(staged: &Path, bundle: &Path) -> anyhow::Result<()> {
     require_mac_app_update_platform()?;
     let parent = bundle
@@ -193,7 +202,7 @@ _PATCHES = (
 # Fallback layout: inline URL trimming and no platform-guard calls to anchor.
 _PATCHES_FALLBACK = (
     _OWNERSHIP_HEADER,
-    _SourcePatch(
+    _update(
         """pub async fn fetch_latest(edge_url: &str) -> anyhow::Result<Manifest> {
     let base = edge_url.trim_end_matches('/');
 """,
@@ -202,7 +211,7 @@ _PATCHES_FALLBACK = (
     let base = edge_url.trim_end_matches('/');
 """,
     ),
-    _SourcePatch(
+    _update(
         """pub async fn download_release_file(
     edge_url: &str,
     manifest: &Manifest,
@@ -221,7 +230,7 @@ _PATCHES_FALLBACK = (
     let url = format!("{}/releases/{file}", edge_url.trim_end_matches('/'));
 """,
     ),
-    _SourcePatch(
+    _update(
         """pub async fn stage_headless(
     edge_url: &str,
     manifest: &Manifest,
@@ -239,7 +248,7 @@ _PATCHES_FALLBACK = (
 """,
     ),
     _APPLY_HEADLESS,
-    _SourcePatch(
+    _update(
         """pub fn restart_service() -> anyhow::Result<()> {
     if cfg!(target_os = "macos") {
 """,
@@ -248,7 +257,7 @@ _PATCHES_FALLBACK = (
     if cfg!(target_os = "macos") {
 """,
     ),
-    _SourcePatch(
+    _update(
         """pub async fn stage_mac_app(
     edge_url: &str,
     manifest: &Manifest,
@@ -265,7 +274,7 @@ _PATCHES_FALLBACK = (
     let version = &manifest.version;
 """,
     ),
-    _SourcePatch(
+    _update(
         """pub fn apply_mac_app(staged: &Path, bundle: &Path) -> anyhow::Result<()> {
     let parent = bundle
 """,
@@ -281,7 +290,7 @@ _PATCHES_FALLBACK = (
 # 0.2.94 subscribes before spawning and shares manual/automatic apply admission.
 _PATCHES_094 = (
     *_PATCHES[:-2],
-    _SourcePatch(
+    _update(
         """        let checks = updater.check_tx.subscribe();
         let for_loop = updater.clone();
         let task = tokio::spawn(async move { for_loop.check_loop(checks).await });
@@ -297,7 +306,7 @@ _PATCHES_094 = (
         updater
 """,
     ),
-    _SourcePatch(
+    _update(
         (
             "    async fn apply_inner(&self, require_quiescent: bool)"
             " -> anyhow::Result<Option<String>> {\n"
@@ -317,7 +326,7 @@ _PATCHES_094 = (
 # the relaunch helper. Desktop auto-update now defaults to enabled.
 _PATCHES_097 = (
     *_PATCHES[:8],
-    _SourcePatch(
+    _update(
         """pub fn relaunch_after_exit(program: &Path, argument: &Path) {
     #[cfg(unix)]
 """,
@@ -329,7 +338,7 @@ _PATCHES_097 = (
 """,
     ),
     _SHARED_TAIL[1],
-    _SourcePatch(
+    _update(
         """pub fn desktop_auto_update_enabled() -> bool {
     std::env::var("ZERON_AUTO_UPDATE")
 """,
@@ -340,7 +349,7 @@ _PATCHES_097 = (
     std::env::var("ZERON_AUTO_UPDATE")
 """,
     ),
-    _SourcePatch(
+    _update(
         """        let wakes = updater.wake_tx.subscribe();
         let for_loop = updater.clone();
         let task = tokio::spawn(async move { for_loop.check_loop(wakes, initial_delay).await });
@@ -360,46 +369,30 @@ _PATCHES_097 = (
 )
 
 
-def _matching_patch_group(
-    source: str,
-) -> tuple[str, tuple[_SourcePatch, ...]]:
-    """Return the first anchor group whose anchors each match exactly once."""
-    groups = (
-        ("0.2.97", _PATCHES_097),
-        ("0.2.94", _PATCHES_094),
-        ("primary", _PATCHES),
-        ("fallback", _PATCHES_FALLBACK),
-    )
-    for label, patches in groups:
-        if all(source.count(patch.old) == 1 for patch in patches):
-            return label, patches
-    msg = "no Zeron updater anchor set matches this source tree"
-    raise RuntimeError(msg)
+# Supported updater layouts, newest first. Exactly one must match the tree.
+_LAYOUTS = {
+    "0.2.97": _PATCHES_097,
+    "0.2.94": _PATCHES_094,
+    "primary": _PATCHES,
+    "fallback": _PATCHES_FALLBACK,
+}
 
 
 def patch_tree(source_root: Path) -> None:
     """Disable every update network, staging, apply, and relaunch surface."""
-    update_path = source_root / _UPDATE_SOURCE
-    source = update_path.read_text(encoding="utf-8")
-    if _PATCH_SENTINEL in source:
-        msg = "Zeron update ownership patch was already applied"
-        raise RuntimeError(msg)
-
-    _label, patches = _matching_patch_group(source)
-    patched = source
-    for patch in patches:
-        before, _, after = patched.partition(patch.old)
-        patched = f"{before}{patch.new}{after}"
-    update_path.write_text(patched, encoding="utf-8")
+    require_absent(
+        source_root,
+        (_UPDATE_SOURCE,),
+        _PATCH_SENTINEL,
+        message="Zeron update ownership patch was already applied",
+    )
+    _layout, patches = select_variant(source_root, _LAYOUTS)
+    apply_patches(source_root, patches)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """Apply the Nix update-ownership patch to one Zeron source tree."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source_root", type=Path)
-    args = parser.parse_args(argv)
-    patch_tree(args.source_root)
-    return 0
+    return run_source_tree_cli(argv, description=__doc__, patch_tree=patch_tree)
 
 
 if __name__ == "__main__":  # pragma: no cover -- packaged CLI guard

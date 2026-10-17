@@ -1315,7 +1315,7 @@ def test_run_writes_refreshed_files(
     )
     demo_dir = repo / "demo"
 
-    monkeypatch.setattr(crate2nix, "REPO_ROOT", repo)
+    monkeypatch.setenv("REPO_ROOT", str(repo))
     monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
     monkeypatch.setattr(
@@ -1363,7 +1363,6 @@ def test_write_target_rejects_incomplete_source_set_before_writing(
     cargo_path.write_text("old cargo\n", encoding="utf-8")
     hashes_path.write_text('{"old": 1}\n', encoding="utf-8")
     sources_path.write_text('{"old": true}\n', encoding="utf-8")
-    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
 
     with pytest.raises(RuntimeError, match="Incomplete crate source artifact metadata"):
         crate2nix._write_target(
@@ -1372,6 +1371,7 @@ def test_write_target_rejects_incomplete_source_set_before_writing(
                 cargo_nix="new cargo\n",
                 crate_hashes='{"new": 2}\n',
             ),
+            tmp_path,
         )
 
     assert cargo_path.read_text(encoding="utf-8") == "old cargo\n"
@@ -1401,7 +1401,7 @@ def test_run_write_failure_does_not_partially_promote_artifacts(
         normalizer_path=Path("demo/normalize.py"),
         supported_platforms=("linux",),
     )
-    monkeypatch.setattr(crate2nix, "REPO_ROOT", repo)
+    monkeypatch.setenv("REPO_ROOT", str(repo))
     monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
     monkeypatch.setattr(
@@ -1417,12 +1417,14 @@ def test_run_write_failure_does_not_partially_promote_artifacts(
     def _fail_third_write(
         failing_target: crate2nix.Crate2NixTarget,
         refreshed: crate2nix.RefreshResult,
+        root: Path,
     ) -> None:
-        (crate2nix.REPO_ROOT / failing_target.cargo_nix).write_text(
+        assert root != repo.resolve()
+        (root / failing_target.cargo_nix).write_text(
             refreshed.cargo_nix,
             encoding="utf-8",
         )
-        (crate2nix.REPO_ROOT / failing_target.crate_hashes).write_text(
+        (root / failing_target.crate_hashes).write_text(
             refreshed.crate_hashes,
             encoding="utf-8",
         )
@@ -1460,7 +1462,7 @@ def test_run_write_validation_failure_discards_isolated_changes(
             "demo/crate-hashes.json": '{"old": 1}\n',
         },
     )
-    monkeypatch.setattr(crate2nix, "REPO_ROOT", repo)
+    monkeypatch.setenv("REPO_ROOT", str(repo))
     monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
 
@@ -1492,7 +1494,7 @@ def test_run_write_reports_workspace_setup_failure(
         raise RuntimeError("workspace snapshot failed")
 
     monkeypatch.setattr(persistence, "IsolatedUpdateWorkspace", _workspace_failure)
-    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
+    monkeypatch.setenv("REPO_ROOT", str(tmp_path))
 
     assert crate2nix.run(write=True) == 1
     assert capsys.readouterr().err == "Error: workspace snapshot failed\n"
@@ -1520,7 +1522,7 @@ def test_run_write_with_current_artifacts_has_nothing_to_promote(
             "demo/crate-hashes.json": "{}\n",
         },
     )
-    monkeypatch.setattr(crate2nix, "REPO_ROOT", repo)
+    monkeypatch.setenv("REPO_ROOT", str(repo))
     monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
     monkeypatch.setattr(
@@ -1555,7 +1557,7 @@ def test_run_fails_when_drift_is_detected(monkeypatch, tmp_path: Path) -> None:
     (demo_dir / "Cargo.nix").write_text("old cargo\n", encoding="utf-8")
     (demo_dir / "crate-hashes.json").write_text('{"old": 1}\n', encoding="utf-8")
 
-    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
+    monkeypatch.setenv("REPO_ROOT", str(tmp_path))
     monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "linux")
     monkeypatch.setattr(
@@ -2453,7 +2455,6 @@ source = "git+https://example.com/stale?rev=dddddddd#dddddddd"
         normalizer_path=Path("demo/normalize.py"),
         supported_platforms=("linux",),
     )
-    monkeypatch.setattr(crate2nix, "REPO_ROOT", repo)
     monkeypatch.setattr(crate2nix, "_build_patched_src", lambda _target: patched_src)
     monkeypatch.setattr(
         crate2nix,
@@ -2483,7 +2484,7 @@ source = "git+https://example.com/stale?rev=dddddddd#dddddddd"
 
     monkeypatch.setattr(crate2nix, "_run_crate2nix_generate", _generate)
 
-    crate2nix._refresh_target(target)
+    crate2nix._refresh_target(target, root=repo)
 
     assert checked_hash_path.read_text(encoding="utf-8") == json.dumps(checked_hashes)
 
@@ -2655,15 +2656,17 @@ def test_run_reports_live_crate2nix_progress(
     package_dir.mkdir()
     (package_dir / "Cargo.nix").write_text("same\n", encoding="utf-8")
     (package_dir / "crate-hashes.json").write_text("{}\n", encoding="utf-8")
-    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
+    monkeypatch.setenv("REPO_ROOT", str(tmp_path))
     monkeypatch.setattr(crate2nix, "TARGETS", {target.name: target})
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "test-system")
 
     def _refresh(
         _target: crate2nix.Crate2NixTarget,
         *,
+        root: Path,
         progress,
     ) -> crate2nix.RefreshResult:
+        assert root == tmp_path.resolve()
         progress("Prefetching cached Git sources")
         return crate2nix.RefreshResult(cargo_nix="same\n", crate_hashes="{}\n")
 
@@ -2696,7 +2699,7 @@ def test_resolve_targets_and_run_cover_remaining_control_flow(
     (demo_dir / "Cargo.nix").write_text("same\n", encoding="utf-8")
     (demo_dir / "crate-hashes.json").write_text('{\n  "a": 1\n}\n', encoding="utf-8")
 
-    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
+    monkeypatch.setenv("REPO_ROOT", str(tmp_path))
     monkeypatch.setattr(crate2nix, "TARGETS", {"demo": target})
 
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "darwin")

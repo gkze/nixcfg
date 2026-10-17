@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,7 @@ from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.codemods.errors import CodemodError
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
@@ -1026,12 +1028,8 @@ def test_paseo_rejects_malformed_manifest_payloads() -> None:
     """Malformed JSON shapes and missing strings fail before hash promotion."""
     module = _load_updater_module()
 
-    with pytest.raises(TypeError, match="root manifest is not a JSON object"):
+    with pytest.raises(TypeError, match="Expected JSON object for root manifest"):
         _validate_manifests(module, root_payload=[])
-    with pytest.raises(TypeError, match="test payload is missing version"):
-        module._require_string({}, "version", context="test payload")
-    with pytest.raises(TypeError, match="test payload is missing version"):
-        module._require_string({"version": ""}, "version", context="test payload")
     with pytest.raises(RuntimeError, match="exact semantic version"):
         module._require_exact_version("latest", context="test version")
     with pytest.raises(RuntimeError, match="immutable commit"):
@@ -1835,7 +1833,13 @@ def test_paseo_patcher_is_transactional_and_covers_all_mutation_surfaces(
     for relative_path, originals in _ORIGINAL_MUTATION_FRAGMENTS.items():
         source = (root / relative_path).read_text(encoding="utf-8")
         assert all(original not in source for original in originals)
-    with pytest.raises(RuntimeError, match="managed-source patch anchor"):
+    # Re-running on the patched tree is upstream drift: the unmodified anchors
+    # still match, but the first patch target is gone, so the check-only run
+    # fails before writing anything.
+    with pytest.raises(
+        CodemodError,
+        match=r"^expected 1 match for (?!anchor in ).*, found 0$",
+    ):
         module.patch_tree(
             root,
             claude_code_executable=_TEST_CLAUDE_CODE_EXECUTABLE,
@@ -1884,7 +1888,13 @@ def test_paseo_patcher_rejects_missing_independent_anchor(tmp_path: Path) -> Non
         encoding="utf-8",
     )
 
-    with pytest.raises(RuntimeError, match="expected 1 managed-source anchor"):
+    with pytest.raises(
+        CodemodError,
+        match=(
+            rf"^expected 1 match for anchor in .*{re.escape(_MISSING_ANCHOR_PATH)}, "
+            r"found 0$"
+        ),
+    ):
         module.patch_tree(
             root,
             claude_code_executable=_TEST_CLAUDE_CODE_EXECUTABLE,
@@ -4108,11 +4118,7 @@ def test_paseo_nix_files_are_structurally_parseable() -> None:
 
 def test_paseo_revalidates_current_metadata() -> None:
     """Current version metadata must still refresh every fixed-output closure."""
-    updater = _load_updater_module().PaseoUpdater()
-    assert (
-        run_async(updater._is_latest(UpdateContext(current=None), _version_info()))
-        is False
-    )
+    assert _load_updater_module().PaseoUpdater.always_rehash
 
 
 def test_paseo_raw_urls_are_commit_pinned() -> None:

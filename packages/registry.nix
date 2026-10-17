@@ -237,6 +237,51 @@ let
   packagePaths = packagePathsMatching (_meta: true);
   helperEntries = packageNamesMatching (meta: meta.helper);
   darwinOnly = packageNamesMatching (meta: meta.constraint == "darwin");
+  # Which packages `overlays.default` exposes (overlays/registry-packages.nix).
+  # The flake's own package set already contains every registry package; the
+  # bare overlay is what the default.nix compatibility API and the update
+  # probes in lib/update/nix.py apply. It carries the macOS packages, meaning
+  # every package that no Linux root system supports, on the systems the
+  # package's constraint allows.
+  overlayExposure = {
+    # Also exposed, on every system, although they build on Linux. Update
+    # probes evaluate baseten's dependency hash through the overlay
+    # (lib/update/updaters/core.py), and the others were exposed before the
+    # registry owned this list. Every system is deliberate: on a system the
+    # registry does not support (codex and gitbutler on aarch64-linux) the
+    # attribute throws instead of silently falling back to the different
+    # nixpkgs package of the same name.
+    extraPackages = [
+      "baseten"
+      "codex"
+      "gitbutler"
+      "opencode-desktop"
+      "pants-preview"
+    ];
+    # An overlay fragment (overlays/raycast, overlays/rio) or the tinyOverlays
+    # in overlays/default.nix (commander) already defines the attribute; the
+    # registry entry forwards to it, so exposing it again would collide.
+    overlayOwnedPackages = [
+      "commander"
+      "raycast"
+      "rio"
+    ];
+  };
+  linuxRootSystems = builtins.filter (hasKernel "linux") rootSystems;
+  isDarwinOnly =
+    constraint: constraint != null && !(builtins.any (supportsSystem constraint) linuxRootSystems);
+  unknownOverlayNames = builtins.filter (name: !(builtins.hasAttr name packagePaths)) (
+    overlayExposure.extraPackages ++ overlayExposure.overlayOwnedPackages
+  );
+  darwinOverlayPackageNames =
+    if unknownOverlayNames != [ ] then
+      throw "packages/registry.nix: overlayExposure names no package: ${builtins.concatStringsSep ", " unknownOverlayNames}"
+    else
+      builtins.filter (
+        name:
+        !(builtins.elem name overlayExposure.overlayOwnedPackages)
+        && !(builtins.elem name overlayExposure.extraPackages)
+      ) (packageNamesMatching (meta: meta ? path && !meta.helper && isDarwinOnly meta.constraint));
 in
 {
   inherit
@@ -247,4 +292,12 @@ in
     ;
 
   forSystem = system: packagePathsMatching (meta: supportsSystem meta.constraint system);
+
+  overlayPackageNamesFor =
+    system:
+    let
+      supported = packagePathsMatching (meta: supportsSystem meta.constraint system);
+    in
+    builtins.filter (name: builtins.hasAttr name supported) darwinOverlayPackageNames
+    ++ overlayExposure.extraPackages;
 }

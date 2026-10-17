@@ -2,6 +2,7 @@
   cargoNixFn ? import ./Cargo.nix,
   cargoNixSha256 ? builtins.hashFile "sha256" ./Cargo.nix,
   crateSourceInfo ? builtins.fromJSON (builtins.readFile ./crate-sources.json),
+  final,
   inputs,
   prev,
   slib,
@@ -34,9 +35,10 @@ let
   };
 
   v8Source = sources.goose-v8;
-  v8HashEntry = builtins.head (
-    builtins.filter (entry: entry.hashType == "srcHash") (v8Source.hashes or [ ])
-  );
+  # The goose-v8 flake input is the evaluator-visible copy of the fork: it is
+  # what GooseV8Updater tracks, and its Cargo.toml supplies the crate version
+  # without import-from-derivation. The build uses the submodule-complete
+  # overlays/goose-v8 fetch instead, which the flake input cannot provide.
   v8ManifestVersion =
     (builtins.fromTOML (builtins.readFile "${inputs.goose-v8}/Cargo.toml")).package.version;
   v8SourceVersionCheck =
@@ -64,12 +66,22 @@ let
     else
       null;
 
-  rustyV8Src = prev.fetchgit {
-    url = "https://github.com/jh-block/rusty_v8.git";
-    rev = v8Source.version;
-    fetchSubmodules = true;
-    inherit (v8HashEntry) hash;
-  };
+  # Single owner of the recursive fork fetch, mirroring codex and codex-v8.
+  rustyV8Src = final.goose-v8;
+
+  # librusty_v8 platform policy. mkRustyV8Build returns a GN/Ninja nativeDrv
+  # on both Darwin and Linux, and a non-null nativeDrv takes precedence, so
+  # both platforms currently build V8 from source and `prebuiltV8` (Linux)
+  # is a fallback only. On Darwin the source build is kept because:
+  # - the denoland v145.0.0 release archives are built with Chromium's own
+  #   rust/clang toolchain, while this build pins rust_sysroot_absolute and
+  #   clang_base_path to the Nix toolchain that links the rest of goose-cli;
+  # - the shared allocator, whole-archive, and Apple host-build-tools patches
+  #   in lib/rusty-v8 only apply to a source build.
+  # The fork (jh-block/rusty_v8 dbb64c2) is v145.0.0 plus one build.rs-only
+  # commit (MSVC CRT detection), so the upstream aarch64-apple-darwin archive
+  # may be ABI-compatible. Switching requires a full aarch64-darwin goose-cli
+  # build and link against it; that has not been verified.
 
   v8Build = slib.mkRustyV8Build {
     pkgs = prev;

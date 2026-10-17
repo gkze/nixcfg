@@ -15,6 +15,7 @@ from nix_manipulator.expressions.set import AttributeSet
 
 from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
+from lib.tests._darwin_signing import sign_and_verify_bundle_arguments
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     expect_binding,
@@ -232,17 +233,17 @@ def test_copilot_package_patches_then_resigns_the_exact_executable() -> None:
     shell = parse_shell(indented_string_body(post_install.rebuild()))
     assert command_texts(shell, "__NIX_INTERP__") == [
         '__NIX_INTERP__ __NIX_INTERP__ "$main_executable"',
+        # The bare interpolation is the re-sign call checked below: it runs
+        # between the patch and the post-signing check of the executable.
+        "__NIX_INTERP__",
         '__NIX_INTERP__ __NIX_INTERP__ --check "$main_executable"',
     ]
-    assert command_texts(shell, "/usr/bin/codesign") == [
-        "/usr/bin/codesign \\\n"
-        "      --force \\\n"
-        "      --deep \\\n"
-        "      --sign - \\\n"
-        "      --preserve-metadata=identifier,entitlements,flags,runtime \\\n"
-        '      "$app_bundle"',
-        '/usr/bin/codesign --verify --deep --strict "$app_bundle"',
-    ]
+    [sign_arguments] = sign_and_verify_bundle_arguments(post_install)
+    assert_nix_ast_equal(
+        sign_arguments,
+        '{ bundle = \'\'"$app_bundle"\'\'; preserveMetadata = [ "identifier" "entitlements" "flags" "runtime" ]; }',
+    )
+    assert command_texts(shell, "/usr/bin/codesign") == []
 
 
 def test_copilot_registry_exports_only_on_arm64_darwin() -> None:

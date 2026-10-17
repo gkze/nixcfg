@@ -129,7 +129,7 @@ flowchart TD
    all output digests must also match. Only digests are persisted.
    (`generated_artifact_commands`, `generation_receipts`)
 
-## Disposable builders and repair (20–22)
+## Disposable builders and repair (20–23)
 
 1. **Preparation cannot authorize publication.** A native stage can
    temporarily carry an incomplete platform hash. The stages extend one
@@ -143,6 +143,14 @@ flowchart TD
    The publication job verifies the baseline, the applied tree, and the
    post-check tree. Formatter drift and generator drift require a new
    validation attempt. (`ci.jobs.certify`, `lib/tests/test_update_ci.py`)
+
+1. **A publication target must still be the certified baseline.** The
+   certified tree is published whole, so publication refuses a default branch
+   whose tree no longer matches the tree the candidate was certified against.
+   Publishing onto a moved base would silently revert every commit that landed
+   after certification, including hand-authored patches that no updater owns.
+   (`ci.jobs._commit_and_push`, `ci.jobs.publish`,
+   `lib/tests/test_update_ci.py`)
 
 1. **Repair is bounded and has no validation authority.** One isolated
    agent proposal can change packaging, flake references, and

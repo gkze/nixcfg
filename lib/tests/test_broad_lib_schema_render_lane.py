@@ -822,6 +822,7 @@ def test_mac_apps_helper_additional_paths(  # noqa: PLR0915
             "--copy-unsafe-links",
             "--archive",
             "--delete",
+            "--filter=P /Icon\r",
             "--chmod=+w",
             "--no-group",
             "--no-owner",

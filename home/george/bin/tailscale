@@ -1,9 +1,0 @@
-#!/bin/sh
-# Force CLI mode: this executable otherwise starts another menu-bar app.
-export TAILSCALE_BE_CLI=1
-app="@TAILSCALE_BIN@"
-if [ ! -x "$app" ]; then
-  echo "tailscale: $app is missing; run 'nh darwin switch' first" >&2
-  exit 127
-fi
-exec "$app" "$@"

@@ -43,11 +43,25 @@ let
     paseo = systemApp pkgs.paseo;
     reflect = systemApp pkgs.reflect-open;
     screen-studio = systemApp pkgs.screen-studio;
+    # Sculptor was a plain package, so it launched from the store bundle and
+    # macOS attached com.apple.macl to that store path, which made it
+    # undeletable and broke GC and the next rebuild. A managed app is copied to
+    # /Applications and launched from there instead; the shim keeps the CLI.
+    sculptor = {
+      package = pkgs.sculptor;
+      scope = "system";
+      cli.sculptor.path = "Contents/MacOS/Sculptor";
+    };
     # macOS requires the system extension's parent app in /Applications.
     tailscale = {
       package = pkgs.tailscale-app;
       preventDowngrade = true;
       scope = "system";
+      # The bundled executable otherwise starts a second menu-bar app.
+      cli.tailscale = {
+        path = "Contents/MacOS/Tailscale";
+        env.TAILSCALE_BE_CLI = "1";
+      };
     };
     thorium = systemApp pkgs.thorium;
     "town-assistant".package = pkgs.town-assistant-nightly;
@@ -60,24 +74,8 @@ let
     zo = systemApp pkgs.zo;
   };
   projection = macApps.managedMacAppRoutingProjection routing;
-  # The route decides which copy of the bundle is authoritative, so substitute
-  # the path the declaration resolves to instead of hardcoding one.
-  tailscaleCli = pkgs.writeTextFile {
-    name = "tailscale";
-    executable = true;
-    text =
-      builtins.replaceStrings
-        [ "@TAILSCALE_BIN@" ]
-        [ "${config.nixcfg.macApps.resolved.tailscale.targetPath}/Contents/MacOS/Tailscale" ]
-        (builtins.readFile ./bin/tailscale);
-  };
 in
 {
-  home.file.".local/bin/tailscale" = {
-    source = tailscaleCli;
-    executable = true;
-  };
-
   home.packages = with pkgs; [
     _1password-cli
     anthropic-cli

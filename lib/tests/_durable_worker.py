@@ -11,7 +11,7 @@ import pytest
 
 from lib.nix.commands.base import CommandResult, NixCommandError
 from lib.tests._run_updates_helpers import make_run_plan
-from lib.update import cli, durable, flake, refs, source_runner
+from lib.update import cli, durable, flake, refs, runtime_source, source_runner
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import resolve_config
 from lib.update.events import UpdateEvent
@@ -125,7 +125,7 @@ async def run_fixture(
     patch.setenv("UPDATE_RUN_LOG_DIR", str(run_root))
     patch.setenv("UPDATE_RUN_LOG", "1")
     patch.setattr(durable, "runtime_identity", lambda _: "test-runtime")
-    patch.setattr(cli, "_maybe_reexec_checkout_update", lambda: None)
+    patch.setattr(runtime_source, "maybe_reexec_checkout_update", lambda: None)
     patch.setattr(cli, "_handle_required_tool_check", lambda _: None)
     updaters = {"alpha": Alpha, "beta": Beta}
     scenario = os.environ.get("TEST_SCENARIO")

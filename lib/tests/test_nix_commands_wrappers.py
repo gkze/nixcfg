@@ -33,20 +33,16 @@ class _Model:
 def test_json_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run this test case."""
 
-    async def _run_nix(args: list[str], **kwargs: object) -> CommandResult:
-        timeout = kwargs.get("timeout")
+    async def _run_nix(args: list[str], *, command_timeout: float) -> CommandResult:
         assert args == ["nix", "eval", "--json"]
-        assert timeout == _THREE_SECONDS
+        assert command_timeout == _THREE_SECONDS
         return CommandResult(args=args, returncode=0, stdout='{"x": 1}', stderr="")
 
     monkeypatch.setattr(json_mod, "run_nix", _run_nix)
     parsed = asyncio.run(
-        json_mod.run_nix_json(["nix", "eval", "--json"], timeout=_THREE_SECONDS)
+        json_mod.run_nix_json(["nix", "eval", "--json"], command_timeout=_THREE_SECONDS)
     )
     assert parsed == {"x": 1}
-
-    with pytest.raises(TypeError, match="command_timeout is required"):
-        asyncio.run(json_mod.run_nix_json(["nix", "eval", "--json"]))
 
     assert json_mod.as_model_mapping({"a": 1}, _Model) == {"a": {"wrapped": 1}}
     with pytest.raises(TypeError, match="Expected JSON object"):
@@ -153,21 +149,6 @@ def test_nix_build_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         asyncio.run(build_mod.nix_build(expr="1"))
 
 
-def test_nix_build_rejects_invalid_option_types() -> None:
-    """Run this test case."""
-    with pytest.raises(TypeError, match="impure must be a boolean"):
-        asyncio.run(build_mod.nix_build(expr="1", impure="yes"))
-
-    with pytest.raises(TypeError, match="no_link must be a boolean"):
-        asyncio.run(build_mod.nix_build(expr="1", no_link="yes"))
-
-    with pytest.raises(TypeError, match="json_output must be a boolean"):
-        asyncio.run(build_mod.nix_build(expr="1", json_output="yes"))
-
-    with pytest.raises(TypeError, match="extra_args must be a list of strings"):
-        asyncio.run(build_mod.nix_build(expr="1", extra_args=["--flag", 1]))
-
-
 def test_nix_build_dry_run_respects_section_boundaries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -224,7 +205,7 @@ def test_derivation_eval_flake_wrappers(
     """Run this test case."""
 
     async def _run_nix_json(args: list[str], **kwargs: object) -> object:
-        timeout = kwargs.get("timeout")
+        timeout = kwargs.get("command_timeout")
         if args[:3] == ["nix", "derivation", "show"]:
             return {"/nix/store/x.drv": {"x": 1}}
         if args[:2] == ["nix", "eval"]:
@@ -343,7 +324,7 @@ def test_hash_and_path_info_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
     seen_path_info_args: list[list[str]] = []
 
     async def _run_nix_json(args: list[str], **kwargs: object) -> object:
-        timeout = kwargs.get("timeout")
+        timeout = kwargs.get("command_timeout")
         if args[:2] == ["nix", "path-info"]:
             seen_path_info_args.append(args)
             return [{"path": "/nix/store/x"}]

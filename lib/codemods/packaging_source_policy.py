@@ -186,6 +186,7 @@ SOURCE_PATCH_SCRIPT_NAMES: Final = frozenset(
         "patch_allocator_weak_linkage.py",
         "patch_node_addon_api.py",
         "patch_node_addon_api_binding_gyp.py",
+        "patch_nix_managed.py",
         "patch_source.py",
         "patch_sources.py",
     },

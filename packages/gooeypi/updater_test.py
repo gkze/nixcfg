@@ -16,6 +16,7 @@ from nix_manipulator.expressions.list import NixList
 from nix_manipulator.expressions.primitive import StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.codemods.errors import CodemodError
 from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
@@ -843,13 +844,12 @@ def test_gooeypi_nix_policy_patch_rejects_source_drift(
     module = _load_patch_module()
     index_path = tmp_path / module._INDEX_PATH
     index_path.parent.mkdir(parents=True)
-    index_path.write_text(
-        "\n".join([module._UPDATER_ANCHOR] * copies),
-        encoding="utf-8",
-    )
+    original = "\n".join([module._UPDATER_ANCHOR] * copies)
+    index_path.write_text(original, encoding="utf-8")
 
     with pytest.raises(
-        RuntimeError,
-        match=f"expected one GooeyPi updater anchor, found {copies}",
+        CodemodError,
+        match=rf"expected 1 match for .*electron/main/index\.ts, found {copies}$",
     ):
         module.patch_tree(tmp_path)
+    assert index_path.read_text(encoding="utf-8") == original

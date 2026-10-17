@@ -182,7 +182,13 @@
         claude.package = pkgs.claude;
         codeedit.package = pkgs.codeedit;
         "code-cursor".package = pkgs.code-cursor;
-        codex.package = pkgs.chatgpt;
+        codex = {
+          package = pkgs.chatgpt;
+          cli = {
+            codex.path = "Contents/Resources/codex-cli/bin/codex";
+            codex-code-mode-host.path = "Contents/Resources/codex-cli/bin/codex-code-mode-host";
+          };
+        };
         cogito.package = pkgs.cogito;
         comet.package = pkgs.comet;
         commander.package = pkgs.commander;
@@ -202,7 +208,10 @@
         "google-chrome".package = pkgs.google-chrome;
         "google-drive".package = pkgs.google-drive;
         goose.package = pkgs.goose-desktop;
-        granola.package = pkgs.granola;
+        granola = {
+          package = pkgs.granola;
+          cli.granola.path = "Contents/MacOS/Granola";
+        };
         hoppscotch.package = pkgs.hoppscotch;
         iina.package = pkgs.iina;
         jacq.package = pkgs.jacq;
@@ -239,12 +248,21 @@
         t3code.package = pkgs.t3code-desktop;
         todoist.package = pkgs.todoist-desktop;
         tolaria.package = pkgs.tolaria;
-        utm.package = pkgs.utm;
-        "vscode-insiders".package = pkgs.vscode-insiders;
+        utm = {
+          package = pkgs.utm;
+          cli.utmctl.path = "Contents/MacOS/utmctl";
+        };
+        "vscode-insiders" = {
+          package = pkgs.vscode-insiders;
+          cli.code-insiders.path = "Contents/Resources/app/bin/code";
+        };
         wave.package = pkgs.wave;
         "wispr-flow".package = pkgs.wispr-flow;
         yaak.package = pkgs.yaak-beta;
-        zed.package = pkgs.zed-editor-nightly;
+        zed = {
+          package = pkgs.zed-editor-nightly;
+          cli.zed.path = "Contents/MacOS/cli";
+        };
         zen-twilight = {
           package = config.nixcfg.zen.finalPackage;
           scope = "system";

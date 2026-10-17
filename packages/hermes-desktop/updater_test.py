@@ -16,6 +16,7 @@ from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.set import AttributeSet
 
+from lib.codemods.errors import CodemodError
 from lib.nix.models.flake_lock import FlakeLock
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
@@ -912,7 +913,10 @@ def test_nix_policy_patch_rejects_late_drift_without_writing_any_file(
         for relative_path in _PINNED_SOURCE_FIXTURES
     }
 
-    with pytest.raises(RuntimeError, match="expected one Hermes source match"):
+    with pytest.raises(
+        CodemodError,
+        match=r"^expected 1 match for .*/use-statusbar-items\.tsx, found 0$",
+    ):
         module.patch_tree(tmp_path, _HERMES_EXECUTABLE, _HERMES_VERSION)
 
     after = {
@@ -1035,15 +1039,7 @@ def test_hermes_desktop_package_is_a_source_built_managed_mac_app() -> None:
         f"{{ lib, python3 }}: {{ postPatch = {post_patch.rebuild()}; }}",
         """{ lib, python3 }: {
           postPatch = ''
-            PYTHONPATH=${
-              lib.fileset.toSource {
-                root = ../..;
-                fileset = lib.fileset.unions [
-                  ../../lib/__init__.py
-                  ../../lib/exact_text_patch.py
-                ];
-              }
-            } ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD" ${
+            PYTHONPATH=${import ../../lib/codemods-pythonpath.nix { inherit lib; }} ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD" ${
               lib.escapeShellArg hermesExecutable
             } ${lib.escapeShellArg hermesVersion}
           '';

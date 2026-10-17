@@ -407,6 +407,12 @@ class Updater(ABC):
     required_tools: ClassVar[tuple[str, ...]] = ("nix",)
     # A non-empty reason opts this source out of untargeted update runs.
     bulk_update_hold: ClassVar[str | None] = None
+    # Never trust version/pin equality as proof that the persisted entry is
+    # current: recompute hashes every run and let ``results_equivalent`` decide.
+    # Set this for mutable artifact URLs and for closures whose metadata does not
+    # identify their content. A class that sets it must not also define
+    # ``_is_latest``; that override would never run.
+    always_rehash: ClassVar[bool] = False
     materialize_when_current: ClassVar[bool] = False
     shows_materialize_artifacts_phase: ClassVar[bool] = False
     generated_artifact_files: ClassVar[tuple[str, ...]] = ()
@@ -432,6 +438,12 @@ class Updater(ABC):
             msg = (
                 f"{cls.__name__} must declare static metadata as compatibility_pins "
                 "with compatibility_pin_rationale, or derive it in source_pins_for()"
+            )
+            raise TypeError(msg)
+        if cls.always_rehash and "_is_latest" in cls.__dict__:
+            msg = (
+                f"{cls.__name__} sets always_rehash, so its _is_latest override "
+                "would never run; remove one of them"
             )
             raise TypeError(msg)
         _validated_compatibility_pins(cls)
@@ -649,7 +661,7 @@ class Updater(ABC):
         emit: EventSink = ignore_event,
     ) -> SourceEntry | None:
         """Hash and finalize one resolved candidate source."""
-        is_latest = await self._is_latest(context, info)
+        is_latest = not self.always_rehash and await self._is_latest(context, info)
         if (
             is_latest
             and not self.materialize_when_current
@@ -1021,6 +1033,9 @@ class HashEntryUpdater(Updater):
 
     input_name: str | None = None
     required_tools: ClassVar[tuple[str, ...]] = ("nix", "nix-prefetch-url")
+    # Hash entries are not identified by the version alone; recompute them
+    # before comparing semantic equality.
+    always_rehash: ClassVar[bool] = True
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build a source entry containing hash entries and optional input."""
@@ -1030,15 +1045,6 @@ class HashEntryUpdater(Updater):
             input=self.input_name,
             pins=self.source_pins_for(info),
         )
-
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Hash-entry updaters must recompute before comparing semantic equality."""
-        _ = (context, info)
-        return False
 
 
 __all__ = [

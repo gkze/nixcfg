@@ -25,6 +25,7 @@ from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.path import NixPath
 from nix_manipulator.expressions.primitive import StringPrimitive
 
+from lib import json_utils
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.update import nix as update_nix
 from lib.update import process as update_process
@@ -232,27 +233,12 @@ _OXC_DARWIN_BINDINGS = {
 }
 
 
-def _require_string(mapping: dict[str, object], key: str, *, context: str) -> str:
-    value = mapping.get(key)
-    if not isinstance(value, str) or not value:
-        msg = f"Unsloth {context} is missing {key}"
-        raise TypeError(msg)
-    return value
-
-
 def _require_positive_int(mapping: dict[str, object], key: str, *, context: str) -> int:
     value = mapping.get(key)
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         msg = f"Unsloth {context} has invalid {key}"
         raise TypeError(msg)
     return value
-
-
-def _require_object(value: object, *, context: str) -> dict[str, object]:
-    if not isinstance(value, dict):
-        msg = f"Unsloth {context} is not a JSON object"
-        raise TypeError(msg)
-    return cast("dict[str, object]", value)
 
 
 def _sri_from_hex(digest: str) -> str:
@@ -268,7 +254,7 @@ def _require_sha512_sri(
     *,
     context: str,
 ) -> str:
-    value = _require_string(mapping, key, context=context)
+    value = json_utils.get_required_nonempty_str(mapping, key, context=context)
     if not value.startswith("sha512-"):
         msg = f"Unsloth {context} has invalid {key}"
         raise RuntimeError(msg)
@@ -329,8 +315,8 @@ def _audit_locked_npm_package(
 ) -> tuple[dict[str, object], str]:
     """Validate one source-owned lock entry and return its exact version."""
     path = f"node_modules/{package}"
-    locked = _require_object(locked_packages.get(path), context=context)
-    version = _require_string(locked, "version", context=context)
+    locked = json_utils.as_object_dict(locked_packages.get(path), context=context)
+    version = json_utils.get_required_nonempty_str(locked, "version", context=context)
     try:
         require_npm_version_matches_spec(version, spec, context=f"Unsloth {context}")
     except RuntimeError as exc:
@@ -349,7 +335,7 @@ def _audit_oxc_lock(
     package_version: str,
     dependencies: dict[str, str],
 ) -> None:
-    lock = _require_object(
+    lock = json_utils.as_object_dict(
         json.loads(payload.decode("utf-8")),
         context="OXC validator package-lock.json",
     )
@@ -360,11 +346,11 @@ def _audit_oxc_lock(
     ):
         msg = "Unsloth OXC validator lock identity drifted"
         raise RuntimeError(msg)
-    locked_packages = _require_object(
+    locked_packages = json_utils.as_object_dict(
         lock.get("packages"),
         context="OXC validator locked packages",
     )
-    lock_root = _require_object(
+    lock_root = json_utils.as_object_dict(
         locked_packages.get(""),
         context="OXC validator lock root",
     )
@@ -384,7 +370,7 @@ def _audit_oxc_lock(
             spec=dependencies[runtime],
             context=f"OXC locked runtime {runtime_path}",
         )
-        optional_dependencies = _require_object(
+        optional_dependencies = json_utils.as_object_dict(
             locked_runtime.get("optionalDependencies"),
             context=f"OXC optional dependencies for {runtime_path}",
         )
@@ -421,7 +407,7 @@ def _audit_oxc_lock(
             msg = f"Unsloth OXC darwin-arm64 binding drifted: {binding_path}"
             raise RuntimeError(msg)
 
-        runtime_dependencies = _require_object(
+        runtime_dependencies = json_utils.as_object_dict(
             locked_runtime.get("dependencies", {}),
             context=f"OXC dependencies for {runtime_path}",
         )
@@ -539,7 +525,7 @@ def _audit_oxc_runtime_sources(payloads: dict[str, bytes]) -> None:
 
 
 def _audit_oxc_sources(payloads: dict[str, bytes]) -> None:
-    package = _require_object(
+    package = json_utils.as_object_dict(
         json.loads(payloads[_OXC_PACKAGE_PATH].decode("utf-8")),
         context="OXC validator package.json",
     )
@@ -550,7 +536,7 @@ def _audit_oxc_sources(payloads: dict[str, bytes]) -> None:
     ):
         msg = "Unsloth OXC validator package identity drifted"
         raise RuntimeError(msg)
-    package_version = _require_string(
+    package_version = json_utils.get_required_nonempty_str(
         package,
         "version",
         context="OXC validator package identity",
@@ -564,7 +550,7 @@ def _audit_oxc_sources(payloads: dict[str, bytes]) -> None:
     except RuntimeError as exc:
         msg = "Unsloth OXC validator package identity drifted"
         raise RuntimeError(msg) from exc
-    dependencies = _require_object(
+    dependencies = json_utils.as_object_dict(
         package.get("dependencies"),
         context="OXC validator dependencies",
     )
@@ -609,9 +595,13 @@ def _rust_toolchain_version(cargo_manifest: bytes) -> str:
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         msg = "Unsloth Cargo manifest is invalid"
         raise RuntimeError(msg) from exc
-    manifest = _require_object(parsed, context="Cargo manifest")
-    package = _require_object(manifest.get("package"), context="Cargo package")
-    minimum = _require_string(package, "rust-version", context="Cargo package")
+    manifest = json_utils.as_object_dict(parsed, context="Cargo manifest")
+    package = json_utils.as_object_dict(
+        manifest.get("package"), context="Cargo package"
+    )
+    minimum = json_utils.get_required_nonempty_str(
+        package, "rust-version", context="Cargo package"
+    )
     return _canonical_rust_toolchain_version(minimum)
 
 
@@ -850,7 +840,9 @@ def _runtime_store_identity(
     suffix: str = "",
 ) -> str:
     """Require one runtime identity to name an exact Nix store output or file."""
-    value = _require_string(evidence, key, context="runtime evidence")
+    value = json_utils.get_required_nonempty_str(
+        evidence, key, context="runtime evidence"
+    )
     if suffix and not value.endswith(suffix):
         msg = f"Unsloth runtime evidence has invalid {key}"
         raise RuntimeError(msg)
@@ -863,7 +855,7 @@ def _runtime_store_identity(
 
 def _runtime_evidence(payload: object) -> dict[str, object]:
     """Validate raw host evidence, then retain only deterministic semantics."""
-    evidence = _require_object(payload, context="runtime evidence")
+    evidence = json_utils.as_object_dict(payload, context="runtime evidence")
     expected_fields = {
         "appCandidate",
         "appPid",
@@ -922,7 +914,7 @@ def _runtime_evidence(payload: object) -> dict[str, object]:
     if port not in range(8888, 8909):
         msg = "Unsloth runtime evidence has invalid port"
         raise RuntimeError(msg)
-    listener_address = _require_string(
+    listener_address = json_utils.get_required_nonempty_str(
         evidence,
         "listenerAddress",
         context="runtime evidence",
@@ -948,7 +940,7 @@ def _runtime_evidence(payload: object) -> dict[str, object]:
         "protectedListenerCount",
         context="runtime evidence",
     )
-    protected_digest = _require_string(
+    protected_digest = json_utils.get_required_nonempty_str(
         evidence,
         "protectedListenerIdentitySha256",
         context="runtime evidence",
@@ -957,13 +949,17 @@ def _runtime_evidence(payload: object) -> dict[str, object]:
         msg = "Unsloth runtime evidence has invalid protected listener identity"
         raise RuntimeError(msg)
 
-    health = _require_object(evidence.get("health"), context="runtime health")
+    health = json_utils.as_object_dict(evidence.get("health"), context="runtime health")
     if set(health) != {"service", "status", "studio_root_id"}:
         msg = "Unsloth runtime health does not match its schema"
         raise RuntimeError(msg)
-    service = _require_string(health, "service", context="runtime health")
-    health_status = _require_string(health, "status", context="runtime health")
-    studio_root_id = _require_string(
+    service = json_utils.get_required_nonempty_str(
+        health, "service", context="runtime health"
+    )
+    health_status = json_utils.get_required_nonempty_str(
+        health, "status", context="runtime health"
+    )
+    studio_root_id = json_utils.get_required_nonempty_str(
         health,
         "studio_root_id",
         context="runtime health",
@@ -1024,7 +1020,7 @@ def _json_object_output(stdout: str, *, context: str) -> dict[str, object]:
     except json.JSONDecodeError as exc:
         msg = f"{context} did not return JSON"
         raise RuntimeError(msg) from exc
-    return _require_object(payload, context=context)
+    return json_utils.as_object_dict(payload, context=context)
 
 
 @register_updater
@@ -1054,6 +1050,8 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             mode="build",
         ),
     )
+    # Revalidate release evidence even when the version has not changed.
+    always_rehash = True
 
     @staticmethod
     def _release_manifest_asset(
@@ -1066,7 +1064,7 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             msg = f"Unsloth release {tag_name} has no asset list"
             raise TypeError(msg)
         matches = [
-            _require_object(asset, context="release asset")
+            json_utils.as_object_dict(asset, context="release asset")
             for asset in assets
             if isinstance(asset, dict) and asset.get("name") == _MANIFEST_ASSET_NAME
         ]
@@ -1077,7 +1075,9 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             )
             raise RuntimeError(msg)
         asset = matches[0]
-        url = _require_string(asset, "browser_download_url", context="release asset")
+        url = json_utils.get_required_nonempty_str(
+            asset, "browser_download_url", context="release asset"
+        )
         expected_url = (
             f"https://github.com/{UnslothUpdater.GITHUB_OWNER}/"
             f"{UnslothUpdater.GITHUB_REPO}/releases/download/{tag_name}/"
@@ -1086,7 +1086,9 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         if url != expected_url:
             msg = f"Unsloth release manifest URL is not tag-pinned: {url}"
             raise RuntimeError(msg)
-        digest = _require_string(asset, "digest", context="release asset")
+        digest = json_utils.get_required_nonempty_str(
+            asset, "digest", context="release asset"
+        )
         digest_prefix = "sha256:"
         if not digest.startswith(digest_prefix):
             msg = "Unsloth release manifest has no authoritative SHA-256 digest"
@@ -1111,11 +1113,11 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         if hashlib.sha256(payload).hexdigest() != digest_hex:
             msg = "Unsloth release manifest digest does not match GitHub metadata"
             raise RuntimeError(msg)
-        manifest = _require_object(
+        manifest = json_utils.as_object_dict(
             json.loads(payload.decode("utf-8")),
             context="release manifest",
         )
-        manifest_version = _require_string(
+        manifest_version = json_utils.get_required_nonempty_str(
             manifest, "version", context="release manifest"
         )
         if manifest_version != version:
@@ -1124,7 +1126,7 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
                 f"release version {version!r}"
             )
             raise RuntimeError(msg)
-        backend_version = _require_string(
+        backend_version = json_utils.get_required_nonempty_str(
             manifest,
             "pypi_version",
             context="release manifest",
@@ -1132,16 +1134,18 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         if _PYPI_VERSION_PATTERN.fullmatch(backend_version) is None:
             msg = f"Unsloth manifest has invalid PyPI version {backend_version!r}"
             raise RuntimeError(msg)
-        platforms = _require_object(
+        platforms = json_utils.as_object_dict(
             manifest.get("platforms"),
             context="release manifest platforms",
         )
-        darwin = _require_object(
+        darwin = json_utils.as_object_dict(
             platforms.get(_DARWIN_PLATFORM),
             context="darwin-aarch64 manifest entry",
         )
-        artifact_url = _require_string(darwin, "url", context="darwin manifest entry")
-        signature = _require_string(
+        artifact_url = json_utils.get_required_nonempty_str(
+            darwin, "url", context="darwin manifest entry"
+        )
+        signature = json_utils.get_required_nonempty_str(
             darwin,
             "signature",
             context="darwin manifest entry",
@@ -1165,9 +1169,12 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
         version: str,
     ) -> tuple[str, str, int, str] | None:
         """Prefer the published source archive, rejecting ambiguous source metadata."""
-        metadata = _require_object(payload, context="PyPI response")
-        info = _require_object(metadata.get("info"), context="PyPI info")
-        if _require_string(info, "version", context="PyPI info") != version:
+        metadata = json_utils.as_object_dict(payload, context="PyPI response")
+        info = json_utils.as_object_dict(metadata.get("info"), context="PyPI info")
+        if (
+            json_utils.get_required_nonempty_str(info, "version", context="PyPI info")
+            != version
+        ):
             msg = f"Unsloth PyPI response does not describe backend {version}"
             raise RuntimeError(msg)
         urls = metadata.get("urls")
@@ -1176,7 +1183,7 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             raise TypeError(msg)
         expected_filename = f"unsloth-{version}.tar.gz"
         source_files = [
-            _require_object(item, context="PyPI file")
+            json_utils.as_object_dict(item, context="PyPI file")
             for item in urls
             if isinstance(item, dict)
             and cast("dict[str, object]", item).get("packagetype") == "sdist"
@@ -1190,26 +1197,32 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             msg = f"Unsloth backend {version} must have exactly one public source sdist"
             raise RuntimeError(msg)
         sdist = candidates[0]
-        url = _require_string(sdist, "url", context="PyPI sdist")
+        url = json_utils.get_required_nonempty_str(sdist, "url", context="PyPI sdist")
         if not url.startswith("https://files.pythonhosted.org/"):
             msg = f"Unsloth backend sdist is not hosted by PyPI: {url}"
             raise RuntimeError(msg)
-        digests = _require_object(sdist.get("digests"), context="PyPI sdist digests")
-        digest_hex = _require_string(digests, "sha256", context="PyPI sdist digests")
+        digests = json_utils.as_object_dict(
+            sdist.get("digests"), context="PyPI sdist digests"
+        )
+        digest_hex = json_utils.get_required_nonempty_str(
+            digests, "sha256", context="PyPI sdist digests"
+        )
         _sri_from_hex(digest_hex)
         size = _require_positive_int(sdist, "size", context="PyPI sdist")
         if size > _MAX_BACKEND_SDIST_BYTES:
             msg = "Unsloth backend sdist exceeds the audit size limit"
             raise RuntimeError(msg)
         upload_time = _canonical_pypi_upload_time(
-            _require_string(sdist, "upload_time_iso_8601", context="PyPI sdist")
+            json_utils.get_required_nonempty_str(
+                sdist, "upload_time_iso_8601", context="PyPI sdist"
+            )
         )
         return url, digest_hex, size, upload_time
 
     @staticmethod
     def _backend_publication_time(payload: object, *, version: str) -> str:
         """Use the published backend's timestamp without consuming its wheel."""
-        metadata = _require_object(payload, context="PyPI response")
+        metadata = json_utils.as_object_dict(payload, context="PyPI response")
         files = cast("list[object]", metadata["urls"])
         wheels = [
             item
@@ -1223,7 +1236,9 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             msg = f"Unsloth backend {version} has no unique published release timestamp"
             raise RuntimeError(msg)
         return _canonical_pypi_upload_time(
-            _require_string(wheels[0], "upload_time_iso_8601", context="PyPI release")
+            json_utils.get_required_nonempty_str(
+                wheels[0], "upload_time_iso_8601", context="PyPI release"
+            )
         )
 
     @classmethod
@@ -1245,8 +1260,12 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             f"repos/{self.GITHUB_OWNER}/{self.GITHUB_REPO}/commits/{tag_path}",
             config=self.config,
         )
-        commit_object = _require_object(commit_payload, context="commit response")
-        commit = _require_string(commit_object, "sha", context="commit response")
+        commit_object = json_utils.as_object_dict(
+            commit_payload, context="commit response"
+        )
+        commit = json_utils.get_required_nonempty_str(
+            commit_object, "sha", context="commit response"
+        )
         if not is_immutable_commit(commit):
             msg = f"Unsloth release {tag_name} has no immutable source commit"
             raise RuntimeError(msg)
@@ -1357,15 +1376,6 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             },
         )
 
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Revalidate release evidence even when the version has not changed."""
-        _ = (context, info)
-        return False
-
     @classmethod
     def _src_expr(cls, commit: str) -> str:
         return _build_fetch_from_github_expr(
@@ -1393,7 +1403,9 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
             "tag",
         )
         for key in required_strings:
-            _require_string(metadata, key, context="release metadata")
+            json_utils.get_required_nonempty_str(
+                metadata, key, context="release metadata"
+            )
         for key in ("backendSize", "manifestSize"):
             _require_positive_int(metadata, key, context="release metadata")
         commit = cast("str", metadata["commit"])

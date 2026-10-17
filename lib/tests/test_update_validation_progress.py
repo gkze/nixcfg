@@ -374,7 +374,7 @@ def test_update_async_host_single_sigint_reaps_before_snapshot_or_promotion(
     script = """
 import asyncio, json, os, pathlib, signal, sys, threading, time
 from contextlib import contextmanager
-from lib.update import cli, derivation_validation as validation
+from lib.update import cli, runtime_source, derivation_validation as validation
 from lib.update.persistence import UpdateValidationSnapshot
 root = pathlib.Path(sys.argv[1])
 mode = sys.argv[2]
@@ -416,7 +416,7 @@ def interrupt():
 
 cli.update_persistence.IsolatedUpdateWorkspace = Workspace
 cli._handle_preflight_requests = lambda *_: None
-cli._revalidate_runtime_source_snapshot = lambda *_: None
+runtime_source.revalidate_runtime_source_snapshot = lambda *_: None
 cli._build_run_plan = lambda *_: None
 cli._requires_root_closure_validation = lambda *_: True
 validation.validate_root_closures = roots

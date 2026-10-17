@@ -5,6 +5,7 @@ import base64
 import hashlib
 import io
 import json
+import re
 import subprocess
 import sys
 import tarfile
@@ -22,6 +23,7 @@ from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
 from packaging.markers import Marker
 
+from lib.codemods.errors import CodemodError
 from lib.nix.models.sources import HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, expect_binding, parse_nix_expr
@@ -42,6 +44,8 @@ from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
     from typing import Any
+
+    from lib.codemods.source_patch import SourcePatch
 
 _PACKAGE_DIR = REPO_ROOT / "packages/unsloth"
 _VERSION = "0.1.804-beta"
@@ -168,6 +172,13 @@ def _load_patch_module() -> ModuleType:
     return load_repo_module(
         "packages/unsloth/patch_nix_managed.py",
         "unsloth_nix_policy_patch_test",
+    )
+
+
+def _load_stamp_module() -> ModuleType:
+    return load_repo_module(
+        "packages/unsloth/stamp_cargo_identity.py",
+        "unsloth_cargo_identity_stamp_test",
     )
 
 
@@ -875,22 +886,34 @@ def test_unsloth_cargo_transform_derives_release_and_git_identities(
     tmp_path: Path,
 ) -> None:
     """Vendoring inputs must come from the candidate version and immutable lock."""
-    module = _load_patch_module()
+    module = _load_stamp_module()
     cargo_root = _write_cargo_identity_fixture(tmp_path)
+    original = {
+        name: (cargo_root / name).read_text(encoding="utf-8")
+        for name in ("Cargo.toml", "Cargo.lock")
+    }
     candidate_version = "9.8.7-beta.2"
 
-    assert (
-        module.main([
-            str(tmp_path),
-            "--cargo-only",
-            "--desktop-version",
-            candidate_version,
-        ])
-        == 0
-    )
+    assert module.main([str(tmp_path), "--desktop-version", candidate_version]) == 0
 
     revision = "c4c45d503ea115a839aae718d02f79e7c7f0f673"
     url = "https://github.com/tauri-apps/fix-path-env-rs"
+    # The stamp is format-preserving: only the three stamped values change, so
+    # the derived cargoPatches stay minimal and reviewable.
+    assert (cargo_root / "Cargo.toml").read_text(encoding="utf-8") == (
+        original["Cargo.toml"]
+        .replace('version = "2026.4.8"', f'version = "{candidate_version}"', 1)
+        .replace(
+            f'fix-path-env = {{ git = "{url}" }}',
+            f'fix-path-env = {{ git = "{url}", rev = "{revision}" }}',
+            1,
+        )
+    )
+    assert (cargo_root / "Cargo.lock").read_text(encoding="utf-8") == (
+        original["Cargo.lock"]
+        .replace('version = "2026.4.8"', f'version = "{candidate_version}"', 1)
+        .replace(f"{url}#{revision}", f"{url}?rev={revision}#{revision}", 1)
+    )
     manifest = tomllib.loads((cargo_root / "Cargo.toml").read_text(encoding="utf-8"))
     lock = tomllib.loads((cargo_root / "Cargo.lock").read_text(encoding="utf-8"))
     assert manifest["package"] == {
@@ -912,7 +935,7 @@ def test_unsloth_cargo_transform_rejects_incoherent_release_identity(
     tmp_path: Path,
 ) -> None:
     """Source drift must fail before the transformer writes either Cargo file."""
-    module = _load_patch_module()
+    module = _load_stamp_module()
     cargo_root = _write_cargo_identity_fixture(tmp_path)
     original_manifest = (cargo_root / "Cargo.toml").read_text(encoding="utf-8")
     lock_path = cargo_root / "Cargo.lock"
@@ -924,7 +947,7 @@ def test_unsloth_cargo_transform_rejects_incoherent_release_identity(
     drifted_lock = lock_path.read_text(encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="desktop versions disagree"):
-        module.patch_cargo_tree(tmp_path, _VERSION)
+        module.stamp_tree(tmp_path, _VERSION)
 
     assert (cargo_root / "Cargo.toml").read_text(encoding="utf-8") == original_manifest
     assert lock_path.read_text(encoding="utf-8") == drifted_lock
@@ -933,28 +956,6 @@ def test_unsloth_cargo_transform_rejects_incoherent_release_identity(
 @pytest.mark.parametrize(
     ("document", "anchor", "replacement", "error_type", "message"),
     [
-        ("Cargo.toml", "[package]", '["package"]', RuntimeError, r"one \[package\]"),
-        (
-            "Cargo.toml",
-            'version = "2026.4.8"',
-            '"version" = "2026.4.8"',
-            RuntimeError,
-            "one version assignment",
-        ),
-        (
-            "Cargo.lock",
-            "[[package]]",
-            '[["package"]]',
-            RuntimeError,
-            "one Cargo.lock package named unsloth-studio",
-        ),
-        (
-            "Cargo.lock",
-            'version = "2026.4.8"',
-            '"version" = "2026.4.8"',
-            RuntimeError,
-            "one version assignment",
-        ),
         (
             "Cargo.toml",
             'name = "unsloth-studio"',
@@ -1062,7 +1063,7 @@ def test_unsloth_cargo_transform_fails_closed_on_structural_drift(
     message: str,
 ) -> None:
     """Every ambiguous or incoherent Cargo identity must block all writes."""
-    module = _load_patch_module()
+    module = _load_stamp_module()
     cargo_root = _write_cargo_identity_fixture(tmp_path)
     target = cargo_root / document
     source = target.read_text(encoding="utf-8")
@@ -1075,7 +1076,7 @@ def test_unsloth_cargo_transform_fails_closed_on_structural_drift(
     }
 
     with pytest.raises(error_type, match=message):
-        module.patch_cargo_tree(tmp_path, _VERSION)
+        module.stamp_tree(tmp_path, _VERSION)
 
     assert {
         name: (cargo_root / name).read_text(encoding="utf-8")
@@ -1083,32 +1084,70 @@ def test_unsloth_cargo_transform_fails_closed_on_structural_drift(
     } == original
 
 
+@pytest.mark.parametrize(
+    ("document", "anchor", "replacement"),
+    [
+        ("Cargo.toml", "[package]", '["package"]'),
+        ("Cargo.toml", 'version = "2026.4.8"', '"version" = "2026.4.8"'),
+        ("Cargo.lock", "[[package]]", '[["package"]]'),
+        ("Cargo.lock", 'version = "2026.4.8"', '"version" = "2026.4.8"'),
+    ],
+)
+def test_unsloth_cargo_transform_reads_equivalent_toml_spellings(
+    tmp_path: Path,
+    document: str,
+    anchor: str,
+    replacement: str,
+) -> None:
+    """Quoted TOML keys are the same document and keep their authored spelling."""
+    module = _load_stamp_module()
+    cargo_root = _write_cargo_identity_fixture(tmp_path)
+    target = cargo_root / document
+    target.write_text(
+        target.read_text(encoding="utf-8").replace(anchor, replacement, 1),
+        encoding="utf-8",
+    )
+
+    module.stamp_tree(tmp_path, _VERSION)
+
+    manifest = tomllib.loads((cargo_root / "Cargo.toml").read_text(encoding="utf-8"))
+    lock = tomllib.loads((cargo_root / "Cargo.lock").read_text(encoding="utf-8"))
+    packages = {package["name"]: package for package in lock["package"]}
+    assert manifest["package"]["version"] == _VERSION
+    assert packages["unsloth-studio"]["version"] == _VERSION
+    stamped = target.read_text(encoding="utf-8")
+    assert replacement.replace("2026.4.8", _VERSION) in stamped
+
+
 def test_unsloth_cargo_transform_rejects_invalid_release_version(
     tmp_path: Path,
 ) -> None:
     """The generated Cargo patch accepts only release-like desktop versions."""
-    module = _load_patch_module()
-    _write_cargo_identity_fixture(tmp_path)
+    module = _load_stamp_module()
+    cargo_root = _write_cargo_identity_fixture(tmp_path)
+    original = (cargo_root / "Cargo.toml").read_text(encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="invalid Unsloth desktop version"):
-        module.patch_cargo_tree(tmp_path, "release/latest")
+        module.stamp_tree(tmp_path, "release/latest")
+    assert (cargo_root / "Cargo.toml").read_text(encoding="utf-8") == original
 
 
 @pytest.mark.parametrize(
-    "arguments",
+    ("load_module", "arguments"),
     [
-        ["--cargo-only", "--backend-root", "backend", "--desktop-version", _VERSION],
-        ["--cargo-only"],
-        ["--desktop-version", _VERSION],
+        (_load_stamp_module, []),
+        (_load_patch_module, ["--cargo-only", "--desktop-version", _VERSION]),
+        (_load_patch_module, ["--desktop-version", _VERSION]),
     ],
 )
-def test_unsloth_cargo_only_cli_rejects_ambiguous_modes(
+def test_unsloth_cargo_stamp_and_policy_patch_clis_stay_separate(
     tmp_path: Path,
+    load_module: Callable[[], ModuleType],
     arguments: list[str],
 ) -> None:
-    """Cargo-only generation must not silently select an incomplete patch mode."""
+    """Stamping needs an explicit version; the policy patch has no Cargo mode."""
     with pytest.raises(SystemExit) as raised:
-        _load_patch_module().main([str(tmp_path), *arguments])
+        load_module().main([str(tmp_path), *arguments])
 
     assert raised.value.code == 2
 
@@ -1119,7 +1158,7 @@ def test_unsloth_desktop_patch_uses_the_materialized_frontend_dist() -> None:
     build_patch = next(
         patch
         for patch in module._PATCHES
-        if patch.path == Path("studio/src-tauri/tauri.conf.json")
+        if patch.relative_path == "studio/src-tauri/tauri.conf.json"
         and '"beforeBuildCommand"' in patch.old
     )
 
@@ -2567,7 +2606,7 @@ def test_unsloth_validates_release_manifest_identity() -> None:
             _TAG,
             None,
             None,
-            "missing url",
+            "non-empty string field 'url'",
         ),
         (
             _manifest_bytes(
@@ -2731,7 +2770,7 @@ def test_unsloth_hashes_only_public_source_foundation(
         ("unsloth", (_MANIFEST_URL, _BACKEND_URL), updater.config),
     ]
     assert events.result == _foundation_hashes()
-    assert run_async(updater._is_latest(UpdateContext(current=None), info)) is False
+    assert updater.always_rehash
 
 
 def test_unsloth_full_hash_pass_materializes_candidate_artifacts(
@@ -4150,12 +4189,14 @@ def test_unsloth_persistence_rejects_incoherent_release_metadata(
         )
 
 
-def _write_patch_fixture(root: Path, module: ModuleType) -> dict[Path, str]:
-    originals: dict[Path, str] = {}
-    paths = {patch.path for patch in module._PATCHES}
+def _write_patch_fixture(root: Path, module: ModuleType) -> dict[str, str]:
+    originals: dict[str, str] = {}
+    paths = {patch.relative_path for patch in module._PATCHES}
     for relative_path in paths:
         source = "\n/* fixture boundary */\n".join(
-            patch.old for patch in module._PATCHES if patch.path == relative_path
+            patch.old
+            for patch in module._PATCHES
+            if patch.relative_path == relative_path
         )
         path = root / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -4164,15 +4205,17 @@ def _write_patch_fixture(root: Path, module: ModuleType) -> dict[Path, str]:
     return originals
 
 
-def _write_backend_patch_fixture(root: Path, module: ModuleType) -> dict[Path, str]:
-    originals: dict[Path, str] = {}
-    paths = {patch.path for patch in module._BACKEND_PATCHES}
+def _write_backend_patch_fixture(root: Path, module: ModuleType) -> dict[str, str]:
+    """Write the released ``studio-venv-sys-prefix`` backend layout."""
+    originals: dict[str, str] = {}
+    patches = module._BACKEND_LAYOUTS["studio-venv-sys-prefix"]
+    paths = {patch.relative_path for patch in patches}
     for relative_path in paths:
         source = "\n# backend fixture boundary\n".join(
             patch.old
-            for patch in module._BACKEND_PATCHES
-            if patch.path == relative_path
-            for _ in range(patch.expected_matches)
+            for patch in patches
+            if patch.relative_path == relative_path
+            for _ in range(patch.expected_count)
         )
         path = root / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -4189,7 +4232,9 @@ def test_unsloth_policy_patch_applies_declared_desktop_ownership_replacements(
     originals = _write_patch_fixture(tmp_path, module)
     expected = dict(originals)
     for patch in module._PATCHES:
-        expected[patch.path] = expected[patch.path].replace(patch.old, patch.new)
+        expected[patch.relative_path] = expected[patch.relative_path].replace(
+            patch.old, patch.new
+        )
 
     assert module.main([str(tmp_path)]) == 0
 
@@ -4198,7 +4243,9 @@ def test_unsloth_policy_patch_applies_declared_desktop_ownership_replacements(
     assert (tmp_path / module._NIX_MODULE).read_text(encoding="utf-8") == (
         module._NIX_MODULE_SOURCE
     )
-    with pytest.raises(RuntimeError, match="already applied"):
+    with pytest.raises(
+        RuntimeError, match="^Unsloth Nix ownership patch was already applied$"
+    ):
         module.patch_tree(tmp_path)
 
 
@@ -4275,7 +4322,9 @@ def test_unsloth_policy_patch_applies_fail_closed_backend_replacements(
     originals = _write_backend_patch_fixture(tmp_path, module)
     expected = dict(originals)
     for patch in module._BACKEND_PATCHES:
-        expected[patch.path] = expected[patch.path].replace(patch.old, patch.new)
+        expected[patch.relative_path] = expected[patch.relative_path].replace(
+            patch.old, patch.new
+        )
 
     module.patch_backend_tree(tmp_path)
 
@@ -4292,19 +4341,25 @@ def test_unsloth_policy_patch_runs_the_packaged_studio_backend_in_process(
     module = _load_patch_module()
     _write_backend_patch_fixture(tmp_path, module)
 
-    policy_patch = next(
-        patch
-        for patch in module._BACKEND_PATCHES
-        if patch.path == Path("unsloth_cli/commands/studio.py")
-        and "studio_venv_dir" in patch.old
-    )
-    source_file = tmp_path / policy_patch.path
-    expected = policy_patch.new
+    def studio_venv_patch(layout: str) -> SourcePatch:
+        return next(
+            patch
+            for patch in module._BACKEND_LAYOUTS[layout]
+            if patch.relative_path == "unsloth_cli/commands/studio.py"
+            and "studio_venv_dir" in patch.old
+        )
+
+    released = studio_venv_patch("studio-venv-sys-prefix")
+    policy_patch = released
     if resolved_venv:
-        old, expected = policy_patch.alternatives[0]
-        source_file.write_text(source_file.read_text().replace(policy_patch.old, old))
+        policy_patch = studio_venv_patch("studio-venv-helper")
+        source_file = tmp_path / released.relative_path
+        source_file.write_text(
+            source_file.read_text().replace(released.old, policy_patch.old)
+        )
+    expected = policy_patch.new
     module.patch_backend_tree(tmp_path)
-    patched_source = (tmp_path / policy_patch.path).read_text(encoding="utf-8")
+    patched_source = (tmp_path / policy_patch.relative_path).read_text(encoding="utf-8")
     assert patched_source.count(expected) == 2
     assignment = ast.parse(textwrap.dedent(expected)).body[1]
     assert isinstance(assignment, ast.Assign)
@@ -4337,12 +4392,31 @@ def test_unsloth_policy_patch_runs_the_packaged_studio_backend_in_process(
 def test_unsloth_rejects_mixed_studio_venv_contracts(tmp_path: Path) -> None:
     """A partially migrated CLI must not silently receive only half the policy."""
     module = _load_patch_module()
-    _write_backend_patch_fixture(tmp_path, module)
-    patch = next(patch for patch in module._BACKEND_PATCHES if patch.alternatives)
-    path = tmp_path / patch.path
-    path.write_text(path.read_text().replace(patch.old, patch.alternatives[0][0], 1))
-    with pytest.raises(RuntimeError, match="ambiguous Unsloth patch variants"):
+    originals = _write_backend_patch_fixture(tmp_path, module)
+    released, helper = (
+        next(
+            patch
+            for patch in module._BACKEND_LAYOUTS[layout]
+            if patch.relative_path == "unsloth_cli/commands/studio.py"
+            and "studio_venv_dir" in patch.old
+        )
+        for layout in ("studio-venv-sys-prefix", "studio-venv-helper")
+    )
+    path = tmp_path / released.relative_path
+    mixed = path.read_text().replace(released.old, helper.old, 1)
+    path.write_text(mixed)
+    originals[released.relative_path] = mixed
+
+    with pytest.raises(
+        CodemodError,
+        match=(
+            r"^expected exactly one supported source layout in .* "
+            r"\(studio-venv-sys-prefix, studio-venv-helper\), found none$"
+        ),
+    ):
         module.patch_backend_tree(tmp_path)
+    for relative_path, source in originals.items():
+        assert (tmp_path / relative_path).read_text(encoding="utf-8") == source
 
 
 @pytest.mark.parametrize("managed", [False, True])
@@ -4353,8 +4427,10 @@ def test_unsloth_sd_cpp_policy_prevents_managed_installs(
 ) -> None:
     """Changing upstream reinstall heuristics cannot enable managed downloads."""
     module = _load_patch_module()
-    path = Path("studio/backend/core/inference/sd_cpp_backend.py")
-    patch = next(patch for patch in module._BACKEND_PATCHES if patch.path == path)
+    path = "studio/backend/core/inference/sd_cpp_backend.py"
+    patch = next(
+        patch for patch in module._BACKEND_PATCHES if patch.relative_path == path
+    )
     source = (
         "def ensure_binary():\n"
         "    if not allow_install:\n"
@@ -4385,7 +4461,7 @@ def test_unsloth_nix_managed_capabilities_use_the_validated_immutable_closure() 
     policy_patch = next(
         patch
         for patch in module._BACKEND_PATCHES
-        if patch.path == Path("unsloth_cli/commands/studio.py")
+        if patch.relative_path == "unsloth_cli/commands/studio.py"
         and '"manifest_ok": True' in patch.new
     )
     upstream_source = textwrap.dedent(
@@ -4481,7 +4557,7 @@ def test_unsloth_nix_policy_guards_low_level_backend_installers() -> None:
         (path, function)
         for path, function in required_guards
         if not any(
-            patch.path == Path(path)
+            patch.relative_path == path
             and f"def {function}" in patch.old
             and 'os.environ.get("UNSLOTH_NIX_MANAGED") == "1"' in patch.new
             for patch in module._BACKEND_PATCHES
@@ -4507,7 +4583,7 @@ def test_unsloth_nix_policy_guards_setup_and_helper_installer_entrypoints() -> N
         (path, anchor)
         for path, anchor in required_guards
         if not any(
-            patch.path == Path(path)
+            patch.relative_path == path
             and anchor in patch.old
             and "UNSLOTH_NIX_MANAGED" in patch.new
             for patch in module._BACKEND_PATCHES
@@ -4523,13 +4599,14 @@ def test_unsloth_nix_policy_packages_and_invokes_the_owned_oxc_runtime() -> None
     pyproject_patch = next(
         patch
         for patch in module._BACKEND_PATCHES
-        if patch.path == Path("pyproject.toml") and "oxc-validator/*.mjs" in patch.old
+        if patch.relative_path == "pyproject.toml"
+        and "oxc-validator/*.mjs" in patch.old
     )
     validator_patch = next(
         patch
         for patch in module._BACKEND_PATCHES
-        if patch.path
-        == Path("studio/backend/core/data_recipe/oxc-validator/validate.mjs")
+        if patch.relative_path
+        == "studio/backend/core/data_recipe/oxc-validator/validate.mjs"
     )
 
     assert "oxc-validator/node_modules/**/*" in pyproject_patch.new
@@ -4548,12 +4625,15 @@ def test_unsloth_combined_policy_patch_validates_both_trees_before_writing(
     desktop_originals = _write_patch_fixture(desktop_root, module)
     backend_originals = _write_backend_patch_fixture(backend_root, module)
     target = module._BACKEND_PATCHES[-1]
-    target_path = backend_root / target.path
-    drifted = backend_originals[target.path].replace(target.old, "")
+    target_path = backend_root / target.relative_path
+    drifted = backend_originals[target.relative_path].replace(target.old, "")
     target_path.write_text(drifted, encoding="utf-8")
-    backend_originals[target.path] = drifted
+    backend_originals[target.relative_path] = drifted
 
-    with pytest.raises(RuntimeError, match="found 0"):
+    # Every backend layout carries the drifted surface, so none is selected.
+    with pytest.raises(
+        CodemodError, match=r"^expected exactly one supported source layout .* none$"
+    ):
         module.main([str(desktop_root), "--backend-root", str(backend_root)])
 
     assert not (desktop_root / module._NIX_MODULE).exists()
@@ -4573,13 +4653,13 @@ def test_unsloth_combined_policy_patch_writes_both_validated_trees(
     desktop_expected = _write_patch_fixture(desktop_root, module)
     backend_expected = _write_backend_patch_fixture(backend_root, module)
     for patch in module._PATCHES:
-        desktop_expected[patch.path] = desktop_expected[patch.path].replace(
-            patch.old, patch.new
-        )
+        desktop_expected[patch.relative_path] = desktop_expected[
+            patch.relative_path
+        ].replace(patch.old, patch.new)
     for patch in module._BACKEND_PATCHES:
-        backend_expected[patch.path] = backend_expected[patch.path].replace(
-            patch.old, patch.new
-        )
+        backend_expected[patch.relative_path] = backend_expected[
+            patch.relative_path
+        ].replace(patch.old, patch.new)
 
     assert module.main([str(desktop_root), "--backend-root", str(backend_root)]) == 0
 
@@ -4601,12 +4681,18 @@ def test_unsloth_policy_patch_rejects_source_drift_before_writing(
     module = _load_patch_module()
     originals = _write_patch_fixture(tmp_path, module)
     target = module._PATCHES[-1]
-    target_path = tmp_path / target.path
-    changed = originals[target.path].replace(target.old, target.old * copies)
+    target_path = tmp_path / target.relative_path
+    changed = originals[target.relative_path].replace(target.old, target.old * copies)
     target_path.write_text(changed, encoding="utf-8")
-    originals[target.path] = changed
+    originals[target.relative_path] = changed
 
-    with pytest.raises(RuntimeError, match=f"found {copies}"):
+    with pytest.raises(
+        CodemodError,
+        match=(
+            rf"^expected 1 match for .*{re.escape(target.relative_path)}, "
+            rf"found {copies}$"
+        ),
+    ):
         module.patch_tree(tmp_path)
 
     assert not (tmp_path / module._NIX_MODULE).exists()

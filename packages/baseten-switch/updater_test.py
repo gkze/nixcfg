@@ -13,12 +13,12 @@ from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
-    darwin_guarded_exports,
     expect_binding,
     expect_scope_binding,
     parse_nix_expr,
 )
 from lib.tests._nix_source import nix_file_expr
+from lib.tests._package_registry import is_darwin_overlay_export
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
 from lib.tests._updater_helpers import load_repo_module
 from lib.update.nix import _build_fetch_from_github_call
@@ -102,15 +102,12 @@ def test_package_disables_checkphase_for_0_5_1_sigtrap() -> None:
 
 
 def test_overlay_does_not_restate_the_hosted_checkphase_skip() -> None:
-    """The Darwin overlay must not hand-write the version-specific check skip."""
-    overlay = expect_instance(
-        nix_file_expr("overlays/binary-darwin-apps.nix"),
-        FunctionDefinition,
+    """The Darwin overlay exposes the package itself, with no hand-written skip."""
+    registry = expect_instance(
+        nix_file_expr("packages/registry.nix"), FunctionDefinition
     )
-    exports = darwin_guarded_exports(overlay)
-    assert_nix_ast_equal(
-        expect_binding(exports.values, "baseten-switch").value,
-        'callDarwinAppPackage "baseten-switch"',
+    assert is_darwin_overlay_export(
+        expect_instance(registry.output, AttributeSet), "baseten-switch"
     )
 
 

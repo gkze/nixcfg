@@ -126,7 +126,35 @@ def _discover_updaters() -> None:
             continue
         mod = importlib.util.module_from_spec(spec)
         sys.modules[mod_name] = mod
+        before = dict(UPDATERS)
         spec.loader.exec_module(mod)
+        _require_directory_identity(
+            name,
+            updater_file,
+            registered={
+                key for key, cls in UPDATERS.items() if before.get(key) is not cls
+            },
+        )
+
+
+def _require_directory_identity(
+    name: str, updater_file: Path, *, registered: set[str]
+) -> None:
+    """Require a discovered module to register exactly its directory's updater.
+
+    The package directory (or ``<name>.updater.py`` stem) is the source
+    identity that ``sources.json``, Nix discovery, and CI all key on. An
+    updater whose ``name`` drifts from it would register under a key no other
+    surface uses.
+    """
+    if registered == {name}:
+        return
+    found = ", ".join(sorted(registered)) or "nothing"
+    msg = (
+        f"{updater_file} must register exactly one updater named {name!r} "
+        f"(its package directory); it registered {found}"
+    )
+    raise RuntimeError(msg)
 
 
 def ensure_updaters_loaded() -> dict[str, type[Updater]]:

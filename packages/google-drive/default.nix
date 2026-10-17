@@ -15,6 +15,9 @@ let
     }
     .${system};
 in
+# Not mkDmgApp7zz/mkPkgApp: the DMG wraps an installer pkg whose payload sits
+# in a per-architecture sub-package, so neither the DMG-bundle nor the
+# pkg-source helper can locate the app without a nested-unpack mode.
 stdenvNoCC.mkDerivation {
   pname = "google-drive";
   inherit (selfSource) version;

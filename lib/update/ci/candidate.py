@@ -19,8 +19,9 @@ from lib.update import derivation_validation as validation
 from lib.update.candidate import Candidate, Preparation
 from lib.update.ci import jobs
 from lib.update.cli_options import RepairAgent, UpdateOptions
+from lib.update.failures import is_transient_store_interruption
 from lib.update.io import atomic_write_text
-from lib.update.nix import get_current_nix_platform, is_transient_store_interruption
+from lib.update.nix import get_current_nix_platform
 from lib.update.paths import get_repo_root
 from lib.update.persistence import IsolatedUpdateWorkspace, planned_update_paths
 from lib.update.repair import propose_repair

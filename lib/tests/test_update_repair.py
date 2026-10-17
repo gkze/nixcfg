@@ -370,7 +370,9 @@ def test_update_cli_dispatches_the_explicit_repair_option(monkeypatch, status) -
     from lib.update import cli
 
     observed = []
-    monkeypatch.setattr(cli, "_maybe_reexec_checkout_update", lambda: None)
+    monkeypatch.setattr(
+        "lib.update.runtime_source.maybe_reexec_checkout_update", lambda: None
+    )
     monkeypatch.setattr(cli, "_handle_preflight_requests", lambda *_args: None)
 
     def run(options, root):

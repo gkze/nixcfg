@@ -1,13 +1,12 @@
 let
   pythonScriptPaths = [
     "home/george/bin/git-ignore"
-    "home/george/bin/zentool"
+    "modules/home/zen/zentool"
     # Extensionless entrypoint: without this it is checked by ruff/ty (via
     # pyproject's extend-include) but skipped by the compile and pyupgrade passes.
     "home/george/bin/tcctool"
   ];
   pythonPyupgradeExcludes = [
-    "lib/exact_text_patch.py"
     # Actions bootstraps Nix with the hosted image's Python 3.12.
     "lib/update/ci/jobs.py"
   ];

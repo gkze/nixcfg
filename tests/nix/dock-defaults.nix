@@ -3,7 +3,7 @@
   src ? ../..,
 }:
 let
-  dock = import (src + "/modules/darwin/george/dock-lib.nix") {
+  dock = import (src + "/darwin/george/dock-lib.nix") {
     lib = lib // {
       hm.dag.entryAfter = _after: script: script;
     };
