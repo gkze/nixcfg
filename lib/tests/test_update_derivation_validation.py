@@ -858,6 +858,7 @@ def test_linux_dependencies_only_builds_the_vm_and_not_foreign_roots(
 ) -> None:
     """An ARM Linux warmup realizes the VM image and stops there."""
     _, calls, run = native_root_graph
+    captured: list[tuple[str, ...]] = []
     assert (
         validation.validate_root_closures(
             flake_root=tmp_path,
@@ -866,11 +867,13 @@ def test_linux_dependencies_only_builds_the_vm_and_not_foreign_roots(
             dependencies_only=True,
             timeout=42,
             run=run,
+            on_dependency_installables=captured.append,
         )
         == ()
     )
     builds = [args[-1] for args in calls if args[1] == "build"]
     assert builds == ["/nix/store/vm.drv^*"]
+    assert captured == [("/nix/store/vm.drv^*",)]
 
 
 @pytest.mark.parametrize(

@@ -22,6 +22,7 @@ from lib.update.candidate import Candidate, Preparation, git
 from lib.update.ci import jobs
 from lib.update.ci.coverage import (
     ROOT_OUT_PATHS_NAME,
+    assert_cached_darwin_boundary,
     assert_update_coverage,
     check_path_in_cachix,
     load_planned_root_out_paths,
@@ -44,6 +45,7 @@ from lib.update.ci.warmup import (
     WARMUP_DRVS_NAME,
     WARMUP_PLAN_NAME,
     WarmupError,
+    WarmupFatalError,
     WarmupPlan,
     assert_force_local_dry_run,
     assert_zed_family_realize_set,
@@ -70,6 +72,7 @@ from lib.update.ci.warmup import (
     is_zed_editor_nightly_store_path,
     language_models_input_drvs,
     language_models_warmup_outputs,
+    linux_builder_substitute_miss_reason,
     load_warmup_plan,
     parse_canary_crates,
     parse_canary_slots,
@@ -170,6 +173,7 @@ class RootDependencyCacheReport(BaseModel):
     tree: str
     system: str
     failures: tuple[validation.DerivationValidationFailure, ...]
+    store_paths: tuple[str, ...] = ()
 
 
 def _output_path(output: Path, root: Path) -> Path:
@@ -253,6 +257,7 @@ def _hosted_validation_progress(
     stream_keep_going = keep_going or source in {"zed-warmup", "root-deps"}
     current_drv = ""
     source_fetch_miss = False
+    linux_builder_substitute = False
     # Darwin host closures realize remaining system/home after rust+cascade.
     # 38506525442 job 115804595478: 2-wide rocinante+zeus streamed
     # "these 470 derivations will be built" and the rust-warmup 32-limit
@@ -263,7 +268,7 @@ def _hosted_validation_progress(
 
     def emit(event: validation.ValidationProgressEvent) -> None:
         nonlocal substitute_only, stream_keep_going, current_drv
-        nonlocal source_fetch_miss, apply_wbb_limit
+        nonlocal source_fetch_miss, apply_wbb_limit, linux_builder_substitute
         if isinstance(event, validation.ValidationCommandFinished):
             return
         if isinstance(event, validation.ValidationCommandStarted):
@@ -271,7 +276,15 @@ def _hosted_validation_progress(
             substitute_only = "--max-jobs 0" in event.command
             current_drv = command_store_drv(event.command)
             source_fetch_miss = False
-            if is_linux_builder_image_command(event.command):
+            linux_builder_substitute = (
+                substitute_only and is_linux_builder_image_command(event.command)
+            )
+            if linux_builder_substitute:
+                # 39006154683: Darwin cannot compile aarch64-linux
+                # etc-fstab. 50 wbb under --max-jobs 0 is a cache miss.
+                stream_keep_going = False
+                apply_wbb_limit = True
+            elif is_linux_builder_image_command(event.command):
                 stream_keep_going = True
                 apply_wbb_limit = True
             elif source == "root-closures":
@@ -290,6 +303,10 @@ def _hosted_validation_progress(
             # 406 because sibling rust_* were only probed. That is the
             # cranelift-40 deferral, not rustc/bmake bootstrap. Those
             # toolchain 406s still fail closed.
+            if linux_builder_substitute and (
+                reason := linux_builder_substitute_miss_reason(text)
+            ):
+                raise WarmupFatalError(reason)
             rust_substitute_miss = (
                 substitute_only
                 and is_crate2nix_rust_output(current_drv)
@@ -336,6 +353,11 @@ def cache_root_dependencies(candidate: Candidate) -> RootDependencyCacheReport:
             Path("flake.lock"),
         )
         workspace.validate_changes(allowed)
+        installables: list[str] = []
+
+        def capture_dependencies(found: tuple[str, ...]) -> None:
+            installables.extend(found)
+
         with workspace.validation_snapshot() as snapshot:
             failures = validation.validate_root_closures(
                 flake_root=snapshot.root,
@@ -346,12 +368,21 @@ def cache_root_dependencies(candidate: Candidate) -> RootDependencyCacheReport:
                 progress=_hosted_validation_progress("root-deps"),
                 timeout=_CLOSURE_DISCOVERY_TIMEOUT_SECONDS,
                 build_timeout=_ROOT_DEPS_BUILD_TIMEOUT_SECONDS,
+                on_dependency_installables=capture_dependencies,
             )
         workspace.validate_changes(allowed)
+    store_paths = ()
+    if not failures and installables:
+        # 39006154683: substituting the VM from gkze does not fire the
+        # post-build hook. Record outputs so flush `cachix push`es them
+        # and refreshes LRU / pin even on a cache hit.
+        store_paths = jobs.drv_output_store_paths(tuple(installables))
+        jobs.remember_realized_store_paths(store_paths)
     return RootDependencyCacheReport(
         tree=candidate.tree,
         system=system,
         failures=failures,
+        store_paths=store_paths,
     )
 
 
@@ -1830,6 +1861,22 @@ def plan_shards(
         target = Path(raw) if raw else None
     if target is not None:
         write_github_actions_output(shards, target)
+
+
+@app.command("assert-cached-boundary")
+def assert_cached_boundary(
+    candidate: Annotated[Path, typer.Option(help="Prepared candidate JSON.")],
+    evidence: Annotated[Path, typer.Option(help="Downloaded Update artifacts.")],
+) -> None:
+    """Fail unless the linux-builder image and one Darwin root are in Cachix.
+
+    39006154683: Darwin closures spent 5h after ``--max-jobs 0`` missed
+    ``nixos-disk-image``. This path-info canary runs after linux-deps
+    flush and one Darwin root shard, before the aggregate closures job.
+    """
+    prepared = Candidate.model_validate_json(candidate.read_bytes())
+    require_complete_candidate(prepared)
+    assert_cached_darwin_boundary(evidence, tree=prepared.tree)
 
 
 @app.command("assert-coverage")

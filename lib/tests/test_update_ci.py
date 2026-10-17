@@ -959,6 +959,48 @@ def test_flush_cachix_fails_closed_when_leftover_push_fails(
     assert "CACHIX_DAEMON_DIR" not in os.environ
 
 
+def test_remember_realized_store_paths_writes_receipt(native_job, monkeypatch) -> None:
+    """39006154683: substituted nixos-disk-image must still reach flush."""
+    env, _checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    store = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+    assert jobs.remember_realized_store_paths((store,)) == (store,)
+    payload = json.loads(
+        (
+            Path(env["RUNNER_TEMP"]) / "update-artifacts" / "realized-root-paths.json"
+        ).read_text()
+    )
+    assert payload["storePaths"] == [store]
+    assert jobs.remember_realized_store_paths(()) == ()
+    with pytest.raises(jobs.CachixFlushError, match="not Nix store paths"):
+        jobs.remember_realized_store_paths(("relative",))
+
+
+def test_drv_output_store_paths_resolves_substituted_vm(
+    native_job, monkeypatch
+) -> None:
+    env, _checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    drv = "/nix/store/6xczfl5hgl4yb7p9p997l6hmlwgpfhdj-nixos-disk-image.drv^*"
+    store = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+
+    def run(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert args[:2] == ("nix", "path-info")
+        assert args[2:] == (drv,)
+        return subprocess.CompletedProcess(args, 0, stdout=f"{store}\n", stderr="")
+
+    assert jobs.drv_output_store_paths((drv,), run=run) == (store,)
+    assert jobs.drv_output_store_paths(()) == ()
+
+    def fail(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="missing")
+
+    with pytest.raises(jobs.CachixFlushError, match="could not resolve"):
+        jobs.drv_output_store_paths((drv,), run=fail)
+
+
 def test_remember_realized_installable_paths_writes_receipt(
     native_job, monkeypatch
 ) -> None:
@@ -1052,6 +1094,44 @@ def test_flush_cachix_pushes_realized_root_paths(native_job, monkeypatch) -> Non
     flush_log = (artifacts / "cachix-flush.log").read_text()
     assert "pushing 1 realized root paths after daemon drain" in flush_log
     assert "cachix push realized-roots returncode=0" in flush_log
+    assert "cachix pin" not in flush_log
+
+
+def test_flush_cachix_pins_substituted_linux_builder_image(
+    native_job, monkeypatch
+) -> None:
+    """39006154683: re-push is not enough; rust_* LRU still dropped the VM."""
+    env, checkout = native_job
+    store = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "realized-root-paths.json").write_text(
+        json.dumps({"storePaths": [store]}) + "\n"
+    )
+    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
+    github_env = Path(env["RUNNER_TEMP"]) / "github-env"
+    github_env.write_text("KEEP=1\n")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
+    monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    monkeypatch.setenv("RUNNER_ARCH", "ARM64")
+    monkeypatch.setenv("RUNNER_OS", "Linux")
+    monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
+    monkeypatch.setattr(
+        jobs, "_realized_root_path_in_cachix", lambda path: path == store
+    )
+    monkeypatch.chdir(checkout)
+    assert jobs.main("flush-cachix") == 0
+    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
+        "pin",
+        "gkze",
+        "linux-builder-aarch64-linux",
+        store,
+    ]
+    flush_log = (artifacts / "cachix-flush.log").read_text()
+    assert "cachix pin linux-builder-aarch64-linux returncode=0" in flush_log
 
 
 def test_flush_cachix_fails_closed_when_realized_root_missing_locally(
@@ -1264,9 +1344,13 @@ def test_plan_shards_and_coverage_native_stages(native_job, monkeypatch) -> None
         jobs.native("plan-shards")
     with pytest.raises(ValueError, match="Coverage requires a previous"):
         jobs.native("assert-coverage")
+    with pytest.raises(ValueError, match="Cached-boundary canary requires a previous"):
+        jobs.native("assert-cached-boundary")
     monkeypatch.setenv("NIXCFG_PREVIOUS_CANDIDATE", "/candidate.json")
     with pytest.raises(ValueError, match="NIXCFG_COVERAGE_EVIDENCE"):
         jobs.native("assert-coverage")
+    with pytest.raises(ValueError, match="Cached-boundary canary requires NIXCFG"):
+        jobs.native("assert-cached-boundary")
     monkeypatch.setenv("NIXCFG_COVERAGE_EVIDENCE", "/evidence")
     monkeypatch.setenv("NIXCFG_JOB_RESULTS", "validate-arm=success")
     monkeypatch.setenv("GITHUB_OUTPUT", str(Path(env["RUNNER_TEMP"]) / "github-output"))
@@ -1278,6 +1362,9 @@ def test_plan_shards_and_coverage_native_stages(native_job, monkeypatch) -> None
     coverage_args = jobs._native_args("assert-coverage", artifacts)
     assert coverage_args[1:4] == ["ci", "update", "assert-coverage"]
     assert coverage_args[coverage_args.index("--evidence") + 1] == "/evidence"
+    boundary_args = jobs._native_args("assert-cached-boundary", artifacts)
+    assert boundary_args[1:4] == ["ci", "update", "assert-cached-boundary"]
+    assert boundary_args[boundary_args.index("--evidence") + 1] == "/evidence"
     monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "closure-shard")
     monkeypatch.setenv("NIXCFG_CLOSURE_BUDGET_SECONDS", "18000")
     monkeypatch.setenv("NIXCFG_CLOSURE_ROOTS", "darwin-argus")
@@ -1750,19 +1837,45 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
     assert roots["with"]["closure_roots"] == "${{ matrix.roots }}"
     assert roots["with"]["shard"] == "${{ matrix.shard }}"
     assert "closure_yield" not in roots["with"]
+    _assert_linux_builder_cache_canary(workflow_jobs)
+    _assert_coverage_and_publish(workflow_jobs)
+
+
+def _assert_linux_builder_cache_canary(workflow_jobs: dict) -> None:
+    """39006154683: path-info the VM and one Darwin root before closures."""
     closures = workflow_jobs["validate-darwin-closures"]
     assert set(closures["needs"]) == {
         "prepare-merge",
         "cache-darwin-linux-deps-arm",
         "cache-darwin-linux-deps-x86",
         "validate-darwin-roots",
+        "canary-darwin-cache",
     }
     closures_if = " ".join(closures["if"].split())
     assert "always() && !cancelled()" in closures_if
     assert "needs.validate-darwin-roots.result == 'success'" in closures_if
+    assert "needs.canary-darwin-cache.result == 'success'" in closures_if
     assert closures["with"]["scope"] == "closures"
     assert "closure_yield" not in closures["with"]
-    _assert_coverage_and_publish(workflow_jobs)
+    canary = workflow_jobs["canary-darwin-cache"]
+    assert set(canary["needs"]) == {
+        "prepare-merge",
+        "cache-darwin-linux-deps-arm",
+        "cache-darwin-linux-deps-x86",
+        "plan-darwin-closures",
+        "validate-darwin-roots",
+    }
+    canary_if = " ".join(canary["if"].split())
+    assert "always() && !cancelled()" in canary_if
+    assert "needs.validate-darwin-roots.result == 'success'" in canary_if
+    assert canary["runs-on"] == "ubuntu-24.04"
+    assert canary["timeout-minutes"] == "20"
+    canary_step = next(
+        step
+        for step in canary["steps"]
+        if step.get("name") == "Assert linux-builder and one Darwin root in Cachix"
+    )
+    assert canary_step["env"]["NIXCFG_CI_STAGE"] == "assert-cached-boundary"
 
 
 def _assert_coverage_and_publish(workflow_jobs: dict) -> None:
@@ -1899,6 +2012,7 @@ def test_cachix_flush_is_last_step_of_every_update_runtime_cachix_job() -> None:
         "cachix-flush-proof.yml:fail-after-push",
         "update-native.yml:native",
         "update.yml:assert-coverage",
+        "update.yml:canary-darwin-cache",
         "update.yml:publish",
         "update.yml:repair",
     ]
@@ -1967,9 +2081,12 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     _assert_darwin_closure_shards(jobs)
     assert set(jobs["publish"]["needs"]) == set(validators) | {"assert-coverage"}
     assert set(validators) <= set(jobs["repair"]["needs"])
-    assert {"plan-darwin-closures", "assert-coverage", "prepare-pins"} <= set(
-        jobs["repair"]["needs"]
-    )
+    assert {
+        "plan-darwin-closures",
+        "assert-coverage",
+        "prepare-pins",
+        "canary-darwin-cache",
+    } <= set(jobs["repair"]["needs"])
     assert set(cache_jobs) <= set(jobs["repair"]["needs"])
     assert set(cache_jobs).isdisjoint(jobs["publish"]["needs"])
     assert jobs["repair"]["permissions"] == {

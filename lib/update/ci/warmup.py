@@ -210,6 +210,29 @@ def is_linux_builder_image_command(command: str) -> bool:
     return _LINUX_BUILDER_IMAGE in command
 
 
+def is_linux_builder_output_store_path(path: str) -> bool:
+    """Return whether *path* is the linux-builder / Rosetta VM image output."""
+    return _LINUX_BUILDER_IMAGE in path
+
+
+def linux_builder_substitute_miss_reason(line: str) -> str | None:
+    """Return why Darwin ``--max-jobs 0`` cannot recover a missing VM image.
+
+    39006154683: Linux cache-root-deps substituted
+    ``wy15yizd…-nixos-disk-image`` from gkze (post-build hook silent) and
+    finished 0. Darwin closures then
+    ``nix build --max-jobs 0 nixos-disk-image.drv^*``, streamed 50 wbb,
+    copied inners from cache.nixos.org, and Cannot-build'd ``etc-fstab``
+    (platform mismatch). Keep-going then spent 5h on the host closures.
+    Any local rebuild here is a binary-cache miss, not a native compile.
+    """
+    if "Cannot build" in line:
+        return "linux-builder image missing from binary cache"
+    if _WILL_BE_BUILT.search(line) or _THIS_WILL_BE_BUILT.search(line):
+        return "linux-builder image missing from binary cache"
+    return None
+
+
 class WarmupError(ValueError):
     """The planner could not produce a safe Darwin warmup set."""
 

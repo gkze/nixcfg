@@ -62,6 +62,7 @@ _STORE_PATH_RE = re.compile(r"/nix/store/[0-9a-z]{32}-[^\s]+")
 # ("Nothing to push") while coverage's `eval .outPath` was the
 # newly built wrapper. Remember must use the same eval as coverage.
 _REALIZED_ROOT_PATHS_NAME = "realized-root-paths.json"
+_LINUX_BUILDER_OUTPUT = "nixos-disk-image"
 _BINARY_CACHE_STORE = "https://gkze.cachix.org"
 _STORAGE_MOUNTS = ("/", "/nix", "/nix/store")
 # Live-written on hosted macOS; rmtree can lose a race (ENOTEMPTY) after children
@@ -967,8 +968,12 @@ def _native_args(stage: str, artifacts: Path) -> list[str]:
             msg = "Foreign-root dependency cache requires a previous candidate"
         elif stage == "plan-shards":
             msg = "Shard planning requires a previous candidate"
-        elif stage == "assert-coverage":
-            msg = "Coverage requires a previous candidate"
+        elif stage in {"assert-cached-boundary", "assert-coverage"}:
+            msg = (
+                "Cached-boundary canary requires a previous candidate"
+                if stage == "assert-cached-boundary"
+                else "Coverage requires a previous candidate"
+            )
         else:
             msg = f"Unknown native stage: {stage}"
         raise ValueError(msg)
@@ -993,22 +998,26 @@ def _native_args(stage: str, artifacts: Path) -> list[str]:
         if github_output:
             args.extend(("--github-output", github_output))
         return args
-    if stage == "assert-coverage":
-        evidence = os.environ.get("NIXCFG_COVERAGE_EVIDENCE", "")
-        if not evidence:
-            msg = "Coverage requires NIXCFG_COVERAGE_EVIDENCE"
-            raise ValueError(msg)
-        args.extend((
-            "--candidate",
-            previous,
-            "--evidence",
-            evidence,
-            "--job-results",
-            os.environ.get("NIXCFG_JOB_RESULTS", ""),
-        ))
-        return args
+    if stage in {"assert-cached-boundary", "assert-coverage"}:
+        return _coverage_native_args(args, previous, stage)
     msg = f"Unknown native stage: {stage}"
     raise ValueError(msg)
+
+
+def _coverage_native_args(args: list[str], previous: str, stage: str) -> list[str]:
+    """Append evidence flags for coverage and the pre-closures cache canary."""
+    evidence = os.environ.get("NIXCFG_COVERAGE_EVIDENCE", "")
+    if not evidence:
+        msg = (
+            "Cached-boundary canary requires NIXCFG_COVERAGE_EVIDENCE"
+            if stage == "assert-cached-boundary"
+            else "Coverage requires NIXCFG_COVERAGE_EVIDENCE"
+        )
+        raise ValueError(msg)
+    args.extend(("--candidate", previous, "--evidence", evidence))
+    if stage == "assert-coverage":
+        args.extend(("--job-results", os.environ.get("NIXCFG_JOB_RESULTS", "")))
+    return args
 
 
 def native(stage: str) -> int:
@@ -1456,6 +1465,57 @@ def _eval_installable_out_path(
     return path
 
 
+def drv_output_store_paths(
+    installables: tuple[str, ...],
+    *,
+    run: Callable[..., object] | None = None,
+) -> tuple[str, ...]:
+    """Return realized output paths for ``drv^*`` installables.
+
+    39006154683: ``nix build nixos-disk-image.drv^*`` substituted
+    ``wy15yizd…-nixos-disk-image`` from gkze. The post-build hook does
+    not fire on substitutes, so flush must ``cachix push`` these outputs
+    explicitly.
+    """
+    if not installables:
+        return ()
+    runner = _run if run is None else run
+    result = runner("nix", "path-info", *installables, check=False, capture=True)
+    if int(getattr(result, "returncode", 1)):
+        detail = str(getattr(result, "stderr", "")).strip() or "nix path-info failed"
+        msg = f"could not resolve realized dependency outputs: {detail}"
+        raise CachixFlushError(msg)
+    paths = tuple(
+        line.strip()
+        for line in str(getattr(result, "stdout", "")).splitlines()
+        if line.strip().startswith("/nix/store/")
+    )
+    if len(paths) != len(installables):
+        msg = (
+            "nix path-info returned "
+            f"{len(paths)} outputs for {len(installables)} dependency installables"
+        )
+        raise CachixFlushError(msg)
+    return paths
+
+
+def remember_realized_store_paths(paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Record already-resolved store paths so flush can ``cachix push`` them."""
+    if not paths:
+        return ()
+    bad = [path for path in paths if not path.startswith("/nix/store/")]
+    if bad:
+        msg = f"realized store paths are not Nix store paths: {', '.join(bad)}"
+        raise CachixFlushError(msg)
+    artifacts = _temp() / "update-artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    (artifacts / _REALIZED_ROOT_PATHS_NAME).write_text(
+        json.dumps({"storePaths": list(paths)}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return paths
+
+
 def remember_realized_installable_paths(
     installables: tuple[str, ...],
     *,
@@ -1524,6 +1584,57 @@ def _realized_root_path_in_cachix(store_path: str) -> bool:
     return result.returncode == 0
 
 
+def _linux_builder_pin_name() -> str:
+    """Return the Cachix pin name for this hosted linux-builder image."""
+    arch = {"ARM64": "aarch64", "X64": "x86_64"}.get(os.environ.get("RUNNER_ARCH", ""))
+    os_name = {"Linux": "linux"}.get(os.environ.get("RUNNER_OS", ""))
+    if not arch or not os_name:
+        msg = (
+            "cannot name linux-builder pin without hosted RUNNER_ARCH/RUNNER_OS "
+            f"(arch={os.environ.get('RUNNER_ARCH')!r} "
+            f"os={os.environ.get('RUNNER_OS')!r})"
+        )
+        raise CachixFlushError(msg)
+    return f"linux-builder-{arch}-{os_name}"
+
+
+def _pin_linux_builder_paths(paths: tuple[str, ...], log: TextIO) -> None:
+    """Pin the Rosetta VM so gkze LRU cannot drop a substituted recache.
+
+    39006154683: cache-root-deps copied the image from gkze at 08:22 and
+    did not re-upload. Concurrent Darwin packages then LRU-evicted it
+    before closures ``--max-jobs 0`` at 08:57.
+    """
+    images = [path for path in paths if _LINUX_BUILDER_OUTPUT in path]
+    if not images:
+        return
+    if len(images) != 1:
+        msg = f"expected one linux-builder image to pin, got {len(images)}: {images}"
+        _write_diagnostic(log, msg)
+        raise CachixFlushError(msg)
+    name = _linux_builder_pin_name()
+    pin = _run(
+        "cachix",
+        "pin",
+        _BINARY_CACHE,
+        name,
+        images[0],
+        check=False,
+        capture=True,
+    )
+    _write_diagnostic(
+        log,
+        f"cachix pin {name} returncode={pin.returncode} path={images[0]} "
+        f"stderr={pin.stderr.strip()}",
+    )
+    if pin.returncode:
+        msg = (
+            "cachix pin of linux-builder image failed "
+            f"returncode={pin.returncode} stderr={pin.stderr.strip()}"
+        )
+        raise CachixFlushError(msg)
+
+
 def _push_realized_root_paths(log: TextIO) -> None:
     """Publish locally realized Darwin roots that the daemon hook missed."""
     recorded = load_realized_root_paths()
@@ -1550,6 +1661,7 @@ def _push_realized_root_paths(log: TextIO) -> None:
             f"returncode={push.returncode} stderr={push.stderr.strip()}"
         )
         raise CachixFlushError(msg)
+    _pin_linux_builder_paths(recorded, log)
     # 38934724529: cachix exit 0 + "Nothing to push" meant the *wrong*
     # stale path was already on gkze. Coverage still 404'd the eval path.
     missing_remote = [
@@ -1594,6 +1706,10 @@ def flush_cachix() -> None:
       ``darwin-system`` / ``home-manager-generation`` already on Cachix
       (``Nothing to push``). Receipts must be each check's ``.outPath``,
       and flush fail-closes unless ``nix path-info --store`` sees them.
+    - Substituted linux-builder (39006154683): cache-root-deps copied
+      ``nixos-disk-image`` from gkze, so the hook uploaded nothing.
+      Flush ``cachix push``es those outputs and ``cachix pin``s them
+      so rust_* LRU cannot drop the VM before Darwin ``--max-jobs 0``.
     """
     artifacts = _temp() / "update-artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -1756,6 +1872,7 @@ def main(stage: str) -> int:
         "validate",
         "cache-root-deps",
         "plan-shards",
+        "assert-cached-boundary",
         "assert-coverage",
         "merge-candidates",
     }

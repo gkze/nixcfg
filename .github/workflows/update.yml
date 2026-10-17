@@ -496,6 +496,61 @@ jobs:
       closure_roots: ${{ matrix.roots }}
       shard: ${{ matrix.shard }}
     secrets: inherit
+  # 39006154683: linux-deps substituted nixos-disk-image from gkze
+  # (no post-build hook) and Darwin closures --max-jobs 0 then spent
+  # 5h after 50 wbb. Path-info the recached VM and one Darwin root
+  # before occupying macos-15 for the aggregate.
+  canary-darwin-cache:
+    needs:
+      - prepare-merge
+      - cache-darwin-linux-deps-arm
+      - cache-darwin-linux-deps-x86
+      - plan-darwin-closures
+      - validate-darwin-roots
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success' &&
+      needs.cache-darwin-linux-deps-arm.result == 'success' &&
+      needs.cache-darwin-linux-deps-x86.result == 'success' &&
+      needs.plan-darwin-closures.result == 'success' &&
+      needs.validate-darwin-roots.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/update-runtime
+        id: runtime
+        with:
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: prepare-x86_64-linux
+          path: ${{ runner.temp }}/previous
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: ${{ runner.temp }}/evidence
+      - name: Assert linux-builder and one Darwin root in Cachix
+        env:
+          NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          NIXCFG_CI_STAGE: assert-cached-boundary
+          NIXCFG_PREVIOUS_CANDIDATE: ${{ runner.temp }}/previous/candidate.json
+          NIXCFG_COVERAGE_EVIDENCE: ${{ runner.temp }}/evidence
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
   # Aggregate proof. Mostly substitution of the per-root checks.
   validate-darwin-closures:
     needs:
@@ -503,12 +558,14 @@ jobs:
       - cache-darwin-linux-deps-arm
       - cache-darwin-linux-deps-x86
       - validate-darwin-roots
+      - canary-darwin-cache
     if: |-
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
       needs.cache-darwin-linux-deps-arm.result == 'success' &&
       needs.cache-darwin-linux-deps-x86.result == 'success' &&
-      needs.validate-darwin-roots.result == 'success'
+      needs.validate-darwin-roots.result == 'success' &&
+      needs.canary-darwin-cache.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -676,6 +733,7 @@ jobs:
       - validate-darwin-packages
       - plan-darwin-closures
       - validate-darwin-roots
+      - canary-darwin-cache
       - validate-darwin-closures
       - assert-coverage
       - publish

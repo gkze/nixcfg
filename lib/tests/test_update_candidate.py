@@ -606,6 +606,7 @@ def test_cache_root_dependencies_skips_complete_candidate_and_own_roots(
     assert result.exit_code == 0
     receipt = json.loads((tmp_path / "cache-root-deps.json").read_text())
     assert receipt["tree"] == tree
+    assert receipt["store_paths"] == []
     assert "gates" not in receipt
 
 
@@ -640,6 +641,56 @@ def test_cache_root_deps_cli_propagates_dependency_failures(
     assert result.exit_code == 1
     receipt = json.loads((tmp_path / "cache-root-deps.json").read_text())
     assert receipt["failures"][0]["message"] == "VM build failed"
+    assert receipt["store_paths"] == []
+
+
+def test_cache_root_deps_records_substituted_linux_builder_outputs(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """39006154683: substituting the VM from gkze did not fire the push hook.
+
+    Darwin closures then ``--max-jobs 0``'d the same drv and streamed 50 wbb.
+    Recache must path-info the output and leave it for flush to push/pin.
+    """
+    candidate = _candidate_for_scope(prepared_run)
+    drv = "/nix/store/6xczfl5hgl4yb7p9p997l6hmlwgpfhdj-nixos-disk-image.drv^*"
+    output = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+    remembered: list[tuple[str, ...]] = []
+
+    def roots(**kwargs: object) -> tuple[()]:
+        capture = kwargs.get("on_dependency_installables")
+        assert callable(capture)
+        capture((drv,))
+        return ()
+
+    monkeypatch.setattr(pipeline.validation, "validate_root_closures", roots)
+    monkeypatch.setattr(
+        pipeline.jobs, "drv_output_store_paths", lambda installables: (output,)
+    )
+    monkeypatch.setattr(
+        pipeline.jobs,
+        "remember_realized_store_paths",
+        lambda paths: remembered.append(paths) or paths,
+    )
+    report = pipeline.cache_root_dependencies(candidate)
+    assert report.failures == ()
+    assert report.store_paths == (output,)
+    assert remembered == [(output,)]
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "cache-root-deps",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(tmp_path / "cache-root-deps.json"),
+        ],
+    )
+    assert result.exit_code == 0
+    receipt = json.loads((tmp_path / "cache-root-deps.json").read_text())
+    assert receipt["store_paths"] == [output]
 
 
 def test_validation_scopes_split_packages_from_closures(
@@ -4151,6 +4202,44 @@ _ARM_DISK_IMAGE_BUILD = (
     "nix build --no-link --keep-going --fallback -L "
     "'/nix/store/6xczfl5hgl4yb7p9p997l6hmlwgpfhdj-nixos-disk-image.drv^*'"
 )
+
+
+_DARWIN_DISK_IMAGE_SUBSTITUTE = (
+    "nix build --no-link --max-jobs 0 "
+    "'/nix/store/6xczfl5hgl4yb7p9p997l6hmlwgpfhdj-nixos-disk-image.drv^*'"
+)
+
+
+def test_hosted_darwin_linux_builder_substitute_miss_is_fatal(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """39006154683: Darwin --max-jobs 0 streamed 50 wbb then spent 5h.
+
+    Linux cache-root-deps had already substituted the same drv from gkze.
+    Cannot-build etc-fstab is platform mismatch, not a recoverable helper.
+    """
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
+    roots = pipeline._hosted_validation_progress("root-closures")
+    roots(ValidationCommandStarted(_DARWIN_DISK_IMAGE_SUBSTITUTE))
+    with pytest.raises(WarmupFatalError, match="linux-builder image missing"):
+        roots(
+            ValidationCommandOutput(
+                _DARWIN_DISK_IMAGE_SUBSTITUTE,
+                "these 50 derivations will be built:",
+            )
+        )
+    err = capsys.readouterr().err
+    assert "[root-closures] these 50 derivations will be built:" in err
+    roots = pipeline._hosted_validation_progress("root-closures")
+    roots(ValidationCommandStarted(_DARWIN_DISK_IMAGE_SUBSTITUTE))
+    with pytest.raises(WarmupFatalError, match="linux-builder image missing"):
+        roots(
+            ValidationCommandOutput(
+                _DARWIN_DISK_IMAGE_SUBSTITUTE,
+                "error: Cannot build "
+                "'/nix/store/wgyazfmqvg0z06ydkhgpnrkgyrzbqawj-etc-fstab.drv'.",
+            )
+        )
 
 
 def test_hosted_linux_builder_image_50_wbb_is_not_fatal(

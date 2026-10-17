@@ -7,10 +7,12 @@ from pathlib import Path
 import pytest
 
 from lib.update.ci.coverage import (
+    CACHE_ROOT_DEPS_NAME,
     ROOT_OUT_PATHS_NAME,
     ClosureShardReceipt,
     CoverageError,
     RootOutPathCache,
+    assert_cached_darwin_boundary,
     assert_update_coverage,
     binary_cache_store,
     check_path_in_cachix,
@@ -410,3 +412,80 @@ def test_gate_shape_failures(tmp_path: Path) -> None:
     )
     with pytest.raises(CoverageError, match="not publishable"):
         require_validation_reports(tmp_path, tree="tree", validate_all_packages=True)
+
+
+def _write_linux_builder_receipt(
+    evidence: Path,
+    *,
+    system: str,
+    store_paths: list[str] | None,
+    tree: str = "tree",
+) -> None:
+    receipt = evidence / f"cache-root-deps-{system}" / CACHE_ROOT_DEPS_NAME
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {
+        "tree": tree,
+        "system": system,
+        "failures": [],
+    }
+    if store_paths is not None:
+        payload["store_paths"] = store_paths
+    receipt.write_text(json.dumps(payload) + "\n")
+
+
+def test_assert_cached_boundary_fails_when_linux_deps_omitted_store_paths(
+    tmp_path: Path,
+) -> None:
+    """39006154683: cache-root-deps substituted the VM and wrote no outputs.
+
+    Darwin closures then missed ``nixos-disk-image`` under ``--max-jobs 0``.
+    The canary must fail closed on the old receipt shape.
+    """
+    manifest = _manifest()
+    write_root_out_path_cache(
+        tmp_path / "plan-shards-x86_64-linux" / ROOT_OUT_PATHS_NAME,
+        tree="tree",
+        root_paths={
+            "darwin-argus": "/nix/store/argus",
+            "home-george": "/nix/store/home",
+            "aggregate:aarch64-darwin": "/nix/store/farm",
+        },
+        manifest=manifest,
+    )
+    _write_linux_builder_receipt(tmp_path, system="aarch64-linux", store_paths=None)
+    with pytest.raises(CoverageError, match="substituted paths were not re-pushed"):
+        assert_cached_darwin_boundary(
+            tmp_path, tree="tree", cachix_present=lambda _: True
+        )
+
+
+def test_assert_cached_boundary_requires_image_and_one_darwin_root(
+    tmp_path: Path,
+) -> None:
+    manifest = _manifest()
+    image = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+    argus = "/nix/store/argus"
+    write_root_out_path_cache(
+        tmp_path / "plan-shards-x86_64-linux" / ROOT_OUT_PATHS_NAME,
+        tree="tree",
+        root_paths={
+            "darwin-argus": argus,
+            "home-george": "/nix/store/home",
+            "aggregate:aarch64-darwin": "/nix/store/farm",
+        },
+        manifest=manifest,
+    )
+    _write_linux_builder_receipt(tmp_path, system="aarch64-linux", store_paths=[image])
+    _write_linux_builder_receipt(tmp_path, system="x86_64-linux", store_paths=[])
+    seen: list[str] = []
+
+    def present(path: str) -> bool:
+        seen.append(path)
+        return True
+
+    assert_cached_darwin_boundary(tmp_path, tree="tree", cachix_present=present)
+    assert seen == [image, argus]
+    with pytest.raises(CoverageError, match="linux-builder:aarch64-linux"):
+        assert_cached_darwin_boundary(
+            tmp_path, tree="tree", cachix_present=lambda path: path != image
+        )

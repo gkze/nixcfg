@@ -42,6 +42,8 @@ if TYPE_CHECKING:
 _BINARY_CACHE_STORE = "https://gkze.cachix.org"
 _NIXOS_CACHE_STORE = "https://cache.nixos.org"
 ROOT_OUT_PATHS_NAME = "root-out-paths.json"
+CACHE_ROOT_DEPS_NAME = "cache-root-deps.json"
+_LINUX_BUILDER_OUTPUT = "nixos-disk-image"
 _REQUIRED_JOBS = (
     "plan-darwin-closures",
     "validate-arm",
@@ -263,6 +265,89 @@ def require_cachix_paths(
     if missing:
         msg = f"required paths missing from gkze.cachix.org: {', '.join(missing)}"
         raise CoverageError(msg)
+
+
+def linux_builder_store_paths(evidence: Path, *, tree: str) -> dict[str, str]:
+    """Return recorded linux-builder outputs from cache-root-deps receipts."""
+    if not evidence.is_dir():
+        msg = f"coverage evidence is not a directory: {evidence}"
+        raise CoverageError(msg)
+    receipts = sorted(
+        path for path in evidence.rglob(CACHE_ROOT_DEPS_NAME) if path.is_file()
+    )
+    if not receipts:
+        msg = f"no {CACHE_ROOT_DEPS_NAME} under {evidence}"
+        raise CoverageError(msg)
+    paths: dict[str, str] = {}
+    for receipt in receipts:
+        try:
+            payload = json.loads(receipt.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            msg = f"invalid {CACHE_ROOT_DEPS_NAME}: {receipt}"
+            raise CoverageError(msg) from error
+        if not isinstance(payload, dict):
+            msg = f"invalid {CACHE_ROOT_DEPS_NAME}: {receipt}"
+            raise CoverageError(msg)
+        reported_tree = payload.get("tree")
+        if reported_tree != tree:
+            msg = f"{receipt} tree {reported_tree!r} does not match candidate {tree!r}"
+            raise CoverageError(msg)
+        system = payload.get("system")
+        raw = payload.get("store_paths")
+        if not isinstance(system, str) or not system:
+            msg = f"{receipt} is missing a native system"
+            raise CoverageError(msg)
+        if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+            # 39006154683: receipts had no store_paths because substituting
+            # the VM from gkze never fired the post-build hook.
+            msg = (
+                f"{receipt} did not record realized linux-builder outputs "
+                "(substituted paths were not re-pushed)"
+            )
+            raise CoverageError(msg)
+        images = [item for item in raw if _LINUX_BUILDER_OUTPUT in item]
+        if len(images) > 1:
+            msg = f"{receipt} recorded multiple linux-builder outputs: {images}"
+            raise CoverageError(msg)
+        if images:
+            paths[f"linux-builder:{system}"] = images[0]
+    if "linux-builder:aarch64-linux" not in paths:
+        msg = (
+            "cache-root-deps did not record the aarch64-linux linux-builder "
+            "image output"
+        )
+        raise CoverageError(msg)
+    return paths
+
+
+def one_darwin_root_store_path(cache: RootOutPathCache) -> dict[str, str]:
+    """Return one Darwin host root outPath for a pre-closures path-info canary."""
+    if "darwin-argus" in cache.root_paths:
+        return {"darwin-argus": cache.root_paths["darwin-argus"]}
+    darwin = {
+        name: path
+        for name, path in cache.root_paths.items()
+        if name.startswith("darwin-")
+    }
+    if not darwin:
+        msg = "root out-path cache has no Darwin host root"
+        raise CoverageError(msg)
+    name = min(darwin)
+    return {name: darwin[name]}
+
+
+def assert_cached_darwin_boundary(
+    evidence: Path,
+    *,
+    tree: str,
+    cachix_present: Callable[[str], bool] | None = None,
+) -> None:
+    """Fail unless the linux-builder image and one Darwin root are in Cachix."""
+    present = check_path_in_cachix if cachix_present is None else cachix_present
+    cache = load_planned_root_out_paths(evidence, tree=tree)
+    required = linux_builder_store_paths(evidence, tree=tree)
+    required.update(one_darwin_root_store_path(cache))
+    require_cachix_paths(required, present=present)
 
 
 def _path_on_store(

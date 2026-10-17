@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, CancelledError, ThreadPoolExecutor, wait
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -41,7 +42,7 @@ from lib.update.paths import get_repo_root
 from lib.update.runtime import measure
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
     from concurrent.futures import Future
     from pathlib import Path
 
@@ -1270,6 +1271,7 @@ def validate_root_closures(
     check_cancelled: ValidationCancellationCheck = _ignore_validation_cancellation,
     print_build_logs: bool = False,
     build_timeout: float | None = None,
+    on_dependency_installables: Callable[[tuple[str, ...]], None] | None = None,
 ) -> tuple[DerivationValidationFailure, ...]:
     """Build roots with a six-hour default or the caller's per-process bound.
 
@@ -1279,6 +1281,9 @@ def validate_root_closures(
     *root_names* selects ``checks.<system>.root-closure-<name>`` attributes.
     An explicit empty list is a hard error. *dependencies_only* realizes the
     native boundary of foreign roots and skips this platform's own root closures.
+    *on_dependency_installables* receives the native-boundary ``drv^*``
+    installables after graph discovery so a substitute-only recache can
+    still publish those outputs.
     """
     if dependencies_only and not include_dependencies:
         msg = "dependencies_only requires include_dependencies"
@@ -1395,6 +1400,8 @@ def validate_root_closures(
                 )
                 graph = _RootDerivationGraph.from_result(result)
                 dependencies = graph.dependencies(systems or root_systems)
+                if on_dependency_installables is not None:
+                    on_dependency_installables(dependencies)
             except ValueError as exc:
                 return (
                     DerivationValidationFailure(

@@ -59,6 +59,7 @@ from lib.update.ci.warmup import (
     is_force_local_allowed_build,
     is_gitbutler_family_store_path,
     is_linux_builder_image_command,
+    is_linux_builder_output_store_path,
     is_named_rust_crate_store_path,
     is_rust_agent_ui_store_path,
     is_rust_extension_host_store_path,
@@ -75,6 +76,7 @@ from lib.update.ci.warmup import (
     is_zed_workspace_crate_store_path,
     language_models_input_drvs,
     language_models_warmup_outputs,
+    linux_builder_substitute_miss_reason,
     load_warmup_plan,
     nix_store_argv_has_operation,
     parse_canary_crates,
@@ -2617,6 +2619,23 @@ def test_linux_builder_image_command_matches_arm_validate_drv() -> None:
     assert warmup_fatal_line(fifty) is not None
     assert warmup_fatal_line(fifty, keep_going=True) is None
     raise_if_warmup_fatal(fifty, keep_going=True)
+    output = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+    assert is_linux_builder_output_store_path(output)
+    assert not is_linux_builder_output_store_path(
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-darwin-system-26.11.57a3171"
+    )
+    assert linux_builder_substitute_miss_reason(fifty) == (
+        "linux-builder image missing from binary cache"
+    )
+    assert (
+        linux_builder_substitute_miss_reason(
+            "error: Cannot build '/nix/store/wgyazfmqvg0z06ydkhgpnrkgyrzbqawj-etc-fstab.drv'."
+        )
+        == "linux-builder image missing from binary cache"
+    )
+    assert (
+        linux_builder_substitute_miss_reason("these 50 paths will be fetched:") is None
+    )
 
 
 def test_dry_run_will_be_built_count_parses_nix_dry_run_lines() -> None:
