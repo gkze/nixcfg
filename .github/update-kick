@@ -1,4 +1,20 @@
-# Touch this file to queue one Update run on main (or the WIP branch).
+# Touch this file to queue one Update run on main (or a listed feature branch).
 # Cloud-agent ghs_ tokens cannot workflow_dispatch (HTTP 403, actions:write).
 # Remove this kick path after E2E prepare → validate → publish is proven.
-2026-10-07T17:20:00Z after-1244-zed-e0463-store-rlib
+# canary-crates: settings family (#1269 slot 3 E0463 vs Cachix content/json).
+# One macos-15 runner; realize these crates from every rust layer.
+canary-crates: settings settings_content settings_json settings_macros
+canary-slots: 0
+2026-10-11T15:25:31Z two-plus cascade after 38146388927 remaining=829/836
+2026-10-11T20:54:30Z rust_zed SVH workspace peel after 38151215158 collab_ui E0463
+2026-10-12T01:13:51Z cascade .drv^* after 38174166107 don't-know-how-to-build outputs
+2026-10-12T04:26:40Z pin-hash + cascade umbrella skip after 38191092497 slot 0 1297 wbb
+2026-10-12T04:37:52Z pins_only replace after 38203865711 merge entries/mapping
+2026-10-12T06:54:21Z persist pins_only replace after 38204580181 cascade slot 4 FODs
+2026-10-12T07:05:00Z Reason Location pin after 38214877123 header 0.1.64 vs 0.1.84
+2026-10-12T09:38:46Z Reason FOD name + nested pkg Contents after 38215834334
+2026-10-12T13:45:54Z rust_xet-client leaf compile + reason rename after 38231309175 slot 3 406 wbb
+2026-10-12T19:12:51Z source-FOD publish + DNS-gated retry after 38258066093 slots 0/1 (2h59m rust-warmup vs 2h54m pipeline baseline; time in deferred rust_* leaf compile then FOD DNS)
+2026-10-12T20:55:45Z best-effort leftover FOD publish after 38296208698 plan-shards 562 fail-close
+2026-10-14T12:29:49Z nest-safe ChatGPT Linux launch-check sandbox after 38553752589 validate-arm No usable sandbox
+2026-10-14T14:07:36Z ignore ChatGPT musl patchelf after 38564429681 validate-x86 libc.musl-x86_64.so.1

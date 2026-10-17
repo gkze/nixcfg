@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourcesFile
-from lib.update.persistence import persist_source_updates
+from lib.update.persistence import persist_materialized_updates, persist_source_updates
 from lib.update.sources import (
     load_all_sources,
     load_source_entry,
@@ -408,3 +408,77 @@ def test_persist_source_updates_replaces_single_platform_pins(
     persisted = load_source_entry(source_path)
     assert persisted.hashes.mapping == {"aarch64-darwin": "sha256-newDarwin"}
     assert persisted.pins == {"runtimeVersion": "2.0.0"}
+
+
+def test_persist_source_updates_pins_only_replaces_stale_hashes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """38204580181: native merge kept granola/ghostty/thorium/claude-code sha256s."""
+    source_path = tmp_path / "packages" / "granola" / "sources.json"
+    source_path.parent.mkdir(parents=True)
+    stale = "sha256-b1TrdxmnhA8RBQsozrPxSFduBj1tjyHXIbjMSZPwQZY="
+    source_path.write_text(
+        json.dumps({
+            "hashes": {"aarch64-darwin": stale, "x86_64-darwin": stale},
+            "urls": {
+                "aarch64-darwin": "https://example.com/Granola-7.626.3.zip",
+                "x86_64-darwin": "https://example.com/Granola-7.626.3.zip",
+            },
+            "version": "7.626.3",
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "lib.update.sources._source_file_map",
+        lambda: {"granola": source_path},
+    )
+    sources = load_all_sources()
+
+    persist_source_updates(
+        do_sources=True,
+        source_names=["granola"],
+        native_only=True,
+        pins_only=True,
+        sources=sources,
+        source_updates={
+            "granola": SourceEntry(
+                hashes={},
+                urls={
+                    "aarch64-darwin": "https://example.com/Granola-7.637.0.zip",
+                    "x86_64-darwin": "https://example.com/Granola-7.637.0.zip",
+                },
+                version="7.637.0",
+            )
+        },
+        details={"granola": "updated"},
+    )
+
+    persisted = load_source_entry(source_path)
+    assert persisted.version == "7.637.0"
+    assert persisted.hashes.to_json() == {}
+    assert persisted.urls == {
+        "aarch64-darwin": "https://example.com/Granola-7.637.0.zip",
+        "x86_64-darwin": "https://example.com/Granola-7.637.0.zip",
+    }
+
+    source_path.write_text(
+        json.dumps({
+            "hashes": {"aarch64-darwin": stale},
+            "version": "7.626.3",
+        }),
+        encoding="utf-8",
+    )
+    persist_materialized_updates(
+        do_sources=True,
+        source_names=["granola"],
+        native_only=True,
+        pins_only=True,
+        sources=load_all_sources(),
+        source_updates={
+            "granola": SourceEntry(hashes={}, version="7.637.0"),
+        },
+        artifact_updates={},
+        details={"granola": "updated"},
+    )
+    assert load_source_entry(source_path).hashes.to_json() == {}

@@ -26,6 +26,8 @@ _CDP_VERSION_PATH: Final[str] = "/json/version"
 _DEVTOOLS_ACTIVE_PORT_FILES: Final[tuple[Path, ...]] = (
     Path.home() / "Library/Application Support/Google/Chrome/DevToolsActivePort",
     Path.home() / "Library/Application Support/Chromium/DevToolsActivePort",
+    Path.home() / ".config/google-chrome/DevToolsActivePort",
+    Path.home() / ".config/chromium/DevToolsActivePort",
 )
 _GITHUB_AUTH_COOKIE_NAMES: Final[frozenset[str]] = frozenset({
     "user_session",

@@ -402,11 +402,16 @@ def _record_prefetch_receipt(store_path: str) -> None:
 
 
 async def compute_sri_hash(
-    source: str, url: str, *, config: UpdateConfig, emit: EventSink = ignore_event
+    source: str,
+    url: str,
+    *,
+    config: UpdateConfig,
+    emit: EventSink = ignore_event,
+    name: str | None = None,
 ) -> str:
     """Prefetch a URL and return its SRI hash via :func:`lib.nix.commands.hash.nix_prefetch_url`."""
     args = ["nix", "store", "prefetch-file", "--json", "--hash-type", "sha256"]
-    prefetch_name = _nix_prefetch_name(url)
+    prefetch_name = _nix_prefetch_name(url) if name is None else name
     if prefetch_name is not None:
         args.extend(["--name", prefetch_name])
     args.append(url)

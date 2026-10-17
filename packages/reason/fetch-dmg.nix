@@ -10,9 +10,12 @@
 # The public download is a latest-only 307 onto a versioned Tigris object
 # (`/desktop/stable/<ver>/Reason.dmg`) whose signature expires in 900s.
 # Unsigned object URLs 403. HEAD the public URL, fail closed unless
-# x-desktop-version (or legacy x-ara-desktop-version) and Location still
-# name the pin, then GET that signed Location so the second hop cannot
-# race to a newer latest.
+# Location still names /desktop/stable/<pin>/, then GET that signed
+# Location so the second hop cannot race to a newer latest. Do not
+# require x-ara-desktop-version: Update 38214877123 saw header 0.1.64
+# while Location named 0.1.84. The object path is the pin. The FOD
+# name must match ReasonUpdater.fod_name so prepare-darwin prefetch is
+# substitutable (Update 38215834334 rebuilt after latest moved).
 #
 # Do not pass SSL_CERT_FILE through impureEnvVars. Hosted Darwin Nix
 # injects /no-cert-file.crt there (Update 37406317879, curl 77 on the
@@ -34,13 +37,7 @@ stdenvNoCC.mkDerivation {
   buildCommand = ''
     set -eu
     curl -fsSI --dump-header headers "$url" -o /dev/null
-    found_version=$(tr -d '\r' < headers | awk 'BEGIN{IGNORECASE=1} /^x-desktop-version:/ {desktop=$2} /^x-ara-desktop-version:/ {ara=$2} END {print desktop ? desktop : ara}')
     location=$(tr -d '\r' < headers | awk 'BEGIN{IGNORECASE=1} /^location:/ {print $2; exit}')
-    if [ "$found_version" != "$version" ]; then
-      echo "Reason download is $found_version, expected pinned $version" >&2
-      echo "public redirect is latest-only; Update must re-pin the new version" >&2
-      exit 1
-    fi
     case "$location" in
       *"/desktop/stable/$version/"*) ;;
       *)

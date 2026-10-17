@@ -97,12 +97,6 @@ _X86_64_AUTO_UPDATE_GATE = _exact(
     )
 )
 _DISABLED_X86_64_AUTO_UPDATE_GATE = _exact(bytes.fromhex("31 c0 c3") + (b"\x90" * 24))
-_ARM64_AUTO_UPDATE_GATE = _exact(
-    bytes.fromhex(
-        "ff 43 03 d1 f8 5f 09 a9 f6 57 0a a9 f4 4f 0b a9 "
-        "fd 7b 0c a9 fd 03 03 91 e8 23 01 91"
-    )
-)
 # 0.10.373+ already contains three compiler `mov w0,#0; ret; nop*` stubs in
 # the arm64 slice. Keep the live return-false/ret pair and brand the unused
 # tail with writes to xzr so the disabled signature stays unique.
@@ -114,6 +108,10 @@ _DISABLED_ARM64_AUTO_UPDATE_GATE = _exact(
         "3f 20 a0 f2 "  # movk xzr, #0x101, lsl #16
         "5f 40 c0 f2 "  # movk xzr, #0x202, lsl #32
         "7f 60 e0 f2 "  # movk xzr, #0x303, lsl #48
+        "9f 80 80 d2 "  # movz xzr, #0x404
+        "bf a0 a0 f2 "  # movk xzr, #0x505, lsl #16
+        "df c0 c0 f2 "  # movk xzr, #0x606, lsl #32
+        "ff e0 e0 f2 "  # movk xzr, #0x707, lsl #48
         "1f 20 03 d5"  # nop
     )
 )
@@ -249,6 +247,25 @@ _AARCH64_STRB_STATE_MASK = 0xFFC003FF
 _AARCH64_ADD_IMMEDIATE_MASK = 0xFFC003FF
 _AARCH64_PAIR_OFFSET_MASK = 0xFFC07FFF
 _AARCH64_EXACT_MASK = 0xFFFFFFFF
+
+# 0.11.13 grew a second menubar.json reader with the same 0xc0-frame
+# prologue (machineIdentityOptOut / updater path). 38986213199 cascade
+# slot 1 then fail-closed: expected 1, got 2. Keep the BL operand
+# relocatable and pin the autoUpdate Result-unwrap (ldr w8, tbz bit0,
+# ldr x8) so the gate stays unique. That body is unchanged from 0.10.399.
+_ARM64_AUTO_UPDATE_GATE = _aarch64_words(
+    (0xD10343FF, _AARCH64_EXACT_MASK),  # sub sp, sp, #0xc0
+    (0xA9095FF8, _AARCH64_EXACT_MASK),  # stp x24, x23, [sp, #0x90]
+    (0xA90A57F6, _AARCH64_EXACT_MASK),  # stp x22, x21, [sp, #0xa0]
+    (0xA90B4FF4, _AARCH64_EXACT_MASK),  # stp x20, x19, [sp, #0xb0]
+    (0xA90C7BFD, _AARCH64_EXACT_MASK),  # stp x29, x30, [sp, #0xc0]
+    (0x910303FD, _AARCH64_EXACT_MASK),  # add x29, sp, #0xc0
+    (0x910123E8, _AARCH64_EXACT_MASK),  # add x8, sp, #0x48
+    (0x94000000, _AARCH64_BRANCH26_MASK),  # bl menubar.json read
+    (0xB9404BE8, _AARCH64_EXACT_MASK),  # ldr w8, [sp, #0x48]
+    (0x360000A8, _AARCH64_EXACT_MASK),  # tbz w8, #0, +0x14
+    (0xF9402BE8, _AARCH64_EXACT_MASK),  # ldr x8, [sp, #0x50]
+)
 
 # Preserve each BL while converting only the reviewed forward conditional
 # branch to an unconditional branch. The guarded state base (x19) and the

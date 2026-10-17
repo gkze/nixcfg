@@ -24,7 +24,6 @@ prev.lib.optionalAttrs prev.stdenv.hostPlatform.isDarwin {
   airfoil = callDarwinAppPackage "airfoil";
   antigravity = callDarwinAppPackage "antigravity";
   arc = callDarwinAppPackage "arc";
-  ara = callDarwinAppPackage "ara";
   aside = callDarwinAppPackage "aside";
   # checkPhase skip for the hosted macos-15 SIGTRAP lives on the package
   # (selfSource.pins.checkSkipVersion), not a handwritten overlay pin.
@@ -72,6 +71,7 @@ prev.lib.optionalAttrs prev.stdenv.hostPlatform.isDarwin {
   pants-preview = callDarwinAppPackage "pants-preview";
   paseo = callDarwinAppPackage "paseo";
   pica = callDarwinAppPackage "pica";
+  reason = callDarwinAppPackage "reason";
   reflect-open = callDarwinAppPackage "reflect-open";
   screen-studio = callDarwinAppPackage "screen-studio";
   signal-beta = callDarwinAppPackage "signal-beta";

@@ -1312,9 +1312,9 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         "continue",
         'grep -q \'Command::new("swift")\' "$build_rs"',
         "continue",
-        '/usr/bin/sed -i.bak \\\n          \'s/Command::new("swift")/Command::new(std::env::var("CUA_XCODE_SWIFT").expect("CUA_XCODE_SWIFT")).env("DEVELOPER_DIR", std::env::var("CUA_XCODE_DEVELOPER_DIR").expect("CUA_XCODE_DEVELOPER_DIR")).env("SDKROOT", std::env::var("CUA_XCODE_SDKROOT").expect("CUA_XCODE_SDKROOT")).env("HOME", std::env::var("CUA_XCODE_HOME").expect("CUA_XCODE_HOME")).env("CFFIXED_USER_HOME", std::env::var("CUA_XCODE_HOME").expect("CUA_XCODE_HOME"))/\' \\\n          "$build_rs"',
+        '/usr/bin/sed -i.bak \\\n              \'s/Command::new("swift")/Command::new(std::env::var("CUA_XCODE_SWIFT").expect("CUA_XCODE_SWIFT")).env("DEVELOPER_DIR", std::env::var("CUA_XCODE_DEVELOPER_DIR").expect("CUA_XCODE_DEVELOPER_DIR")).env("SDKROOT", std::env::var("CUA_XCODE_SDKROOT").expect("CUA_XCODE_SDKROOT")).env("HOME", std::env::var("CUA_XCODE_HOME").expect("CUA_XCODE_HOME")).env("CFFIXED_USER_HOME", std::env::var("CUA_XCODE_HOME").expect("CUA_XCODE_HOME"))/\' \\\n              "$build_rs"',
         'grep -q \'"build",\' "$build_rs"',
-        '/usr/bin/sed -i.bak \\\n            \'s/"build",/"build", "--disable-sandbox",/\' \\\n            "$build_rs"',
+        '/usr/bin/sed -i.bak \\\n                \'s/"build",/"build", "--disable-sandbox",/\' \\\n                "$build_rs"',
         'rm -f "$build_rs.bak"',
         "grep -q -- '--disable-sandbox' \"$build_rs\"",
         'echo "failed to add --disable-sandbox to $build_rs"',
@@ -1355,8 +1355,8 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         if "CUA-LICENSE" in command
     ] == [
         "install -m0644 \\\n"
-        "      resources/computer-use/CUA-LICENSE \\\n"
-        '      "$helperContents/Resources/CUA-LICENSE"',
+        "          resources/computer-use/CUA-LICENSE \\\n"
+        '          "$helperContents/Resources/CUA-LICENSE"',
     ]
     assert [
         command
@@ -1364,33 +1364,33 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         if "libcua_driver_sdk.dylib" in command or command.endswith('"$cuaLibrary"')
     ] == [
         "install -m0755 \\\n"
-        "      __NIX_INTERP__/lib/libcua_driver_sdk.dylib \\\n"
-        '      "$cuaLibrary"',
+        "          __NIX_INTERP__/lib/libcua_driver_sdk.dylib \\\n"
+        '          "$cuaLibrary"',
     ]
     assert all("menubar-cursor.png" not in text for text in install_texts)
     assert all("overlay-cursor.svg" not in text for text in install_texts)
     assert all("standalone-service-v2" not in text for text in install_texts)
     assert command_texts(install_commands, "/usr/bin/swiftc") == [
         "/usr/bin/swiftc \\\n"
-        "      -O \\\n"
-        "      -parse-as-library \\\n"
-        '      -module-cache-path "$swiftModuleCache" \\\n'
-        "      -target __NIX_INTERP__ \\\n"
-        "      -import-objc-header __NIX_INTERP__/include/cua-host.h \\\n"
-        '      -L "$helperFrameworks" -lcua_driver_sdk \\\n'
-        "      -Xlinker -rpath -Xlinker @executable_path/../Frameworks \\\n"
-        "      resources/computer-use/WakuComputerUse.swift \\\n"
-        "      resources/computer-use/CuaDriver.swift \\\n"
-        '      -o "$helperExecutable"',
+        "          -O \\\n"
+        "          -parse-as-library \\\n"
+        '          -module-cache-path "$swiftModuleCache" \\\n'
+        "          -target __NIX_INTERP__ \\\n"
+        "          -import-objc-header __NIX_INTERP__/include/cua-host.h \\\n"
+        '          -L "$helperFrameworks" -lcua_driver_sdk \\\n'
+        "          -Xlinker -rpath -Xlinker @executable_path/../Frameworks \\\n"
+        "          resources/computer-use/WakuComputerUse.swift \\\n"
+        "          resources/computer-use/CuaDriver.swift \\\n"
+        '          -o "$helperExecutable"',
         "/usr/bin/swiftc -version",
     ]
     assert command_texts(install_commands, "printf") == [
         "printf '%s\\n' \\\n"
-        '        "cua-in-process-v1" \\\n'
-        '        "__NIX_INTERP__" \\\n'
-        '        "sh.waku.computer-use" \\\n'
-        '        "-" \\\n'
-        '        "__NIX_INTERP__"',
+        '            "cua-in-process-v1" \\\n'
+        '            "__NIX_INTERP__" \\\n'
+        '            "sh.waku.computer-use" \\\n'
+        '            "-" \\\n'
+        '            "__NIX_INTERP__"',
         "printf '%s\\n' \"$helperFingerprint\"",
     ]
     signing_commands = [

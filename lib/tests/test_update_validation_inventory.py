@@ -47,7 +47,6 @@ def test_full_inventory_respects_package_platforms(
     }
     darwin = {
         "antigravity",
-        "ara",
         "baseten-switch",
         "bb",
         "buzz",
@@ -60,6 +59,7 @@ def test_full_inventory_respects_package_platforms(
         "mach-studio",
         "openchamber",
         "paseo",
+        "reason",
         "reflect-open",
         "rio",
         "unsloth",
@@ -70,6 +70,9 @@ def test_full_inventory_respects_package_platforms(
     }
     non_x86 = {
         "emdash",
+    }
+    crate2nix_builds = {
+        "zed-editor-nightly",
     }
     # Validations that only make sense on the Linux repack, so they are sharded
     # to the Linux systems instead of following the runner's own platform.
@@ -82,6 +85,8 @@ def test_full_inventory_respects_package_platforms(
     )
     if system in {"aarch64-darwin", "aarch64-linux"} or not native_builds_only:
         expected |= non_x86
+    if not native_builds_only or system in {"aarch64-darwin", "x86_64-linux"}:
+        expected |= crate2nix_builds
     if system in {"aarch64-linux", "x86_64-linux"} or not native_builds_only:
         expected |= linux
     assert {request.source for request in builds} == expected
@@ -93,6 +98,10 @@ def test_full_inventory_respects_package_platforms(
             assert target in {"aarch64-linux", "x86_64-linux"}
         elif request.source in non_x86:
             assert target in {"aarch64-darwin", "aarch64-linux"}
+        elif request.source in crate2nix_builds:
+            assert target in {"aarch64-darwin", "x86_64-linux"}
+            if native_builds_only:
+                assert target == system
         else:
             assert target == system
 

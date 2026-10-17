@@ -168,6 +168,7 @@ class UpdateContext:
     effective_sources: dict[str, SourceEntry] = field(default_factory=dict)
     resolved_version: VersionInfo | None = None
     preparing: bool = False
+    pins_only: bool = False
 
 
 async def stream_url_hash_mapping(
@@ -560,6 +561,23 @@ class Updater(ABC):
         _ = (context, info)
         return False
 
+    def _native_platform_owns_hashes(self) -> bool:
+        """Return whether this host is a platform whose artifact hashes we own."""
+        return True
+
+    def _should_refresh_current_hashes(
+        self, context: UpdateContext, info: VersionInfo
+    ) -> bool:
+        """Return whether a current version still needs hash rematerialization.
+
+        Mutable vendor FODs (``materialize_when_current``) rematerialize on a
+        native hash platform. Foreign prepare keeps Darwin-written hashes so
+        Linux ARM does not prefetch R2 DMGs (comet, Update 38479406823).
+        """
+        if self.materialize_when_current:
+            return (not context.preparing) or self._native_platform_owns_hashes()
+        return context.preparing and not self._can_reuse_persisted_hashes(context, info)
+
     def _comparison_result(
         self,
         result: SourceEntry,
@@ -650,13 +668,7 @@ class Updater(ABC):
     ) -> SourceEntry | None:
         """Hash and finalize one resolved candidate source."""
         is_latest = await self._is_latest(context, info)
-        if (
-            is_latest
-            and not self.materialize_when_current
-            and (
-                not context.preparing or self._can_reuse_persisted_hashes(context, info)
-            )
-        ):
+        if is_latest and not self._should_refresh_current_hashes(context, info):
             await emit(
                 UpdateEvent.status(
                     self.name,
@@ -680,15 +692,37 @@ class Updater(ABC):
                 )
             )
 
-        await emit(
-            UpdateEvent.status(
-                self.name,
-                "Fetching hashes for all platforms...",
-                operation="compute_hash",
-                status=StatusInfo(kind=StatusKind.FETCHING_HASHES),
+        if context.pins_only:
+            # 38191092497: copying HEAD hashes onto a new version/URL made
+            # every native hasher `_can_reuse_persisted_hashes` and ship
+            # Yaak 2026.8.1 / HQ 0.10.399 / Arc 1.167.1 / Antigravity
+            # 2.19.1 sha256s for the bumped artifacts. Empty hashes force
+            # the native platform to re-prefetch; foreign builders keep
+            # the pin and do not re-download Darwin DMGs (37539644019).
+            hashes: SourceHashes
+            pinned = context.current
+            if pinned is None or not is_latest:
+                hashes = (
+                    []
+                    if pinned is not None and pinned.hashes.entries is not None
+                    else {}
+                )
+            elif pinned.hashes.mapping is not None:
+                hashes = pinned.hashes.mapping
+            elif pinned.hashes.entries is not None:
+                hashes = list(pinned.hashes.entries)
+            else:
+                hashes = {}
+        else:
+            await emit(
+                UpdateEvent.status(
+                    self.name,
+                    "Fetching hashes for all platforms...",
+                    operation="compute_hash",
+                    status=StatusInfo(kind=StatusKind.FETCHING_HASHES),
+                )
             )
-        )
-        hashes = await self.fetch_hashes(info, session, context=context, emit=emit)
+            hashes = await self.fetch_hashes(info, session, context=context, emit=emit)
         result = self.build_result(info, hashes)
         result = await self._finalize_result(
             result, info=info, context=context, emit=emit
@@ -699,6 +733,7 @@ class Updater(ABC):
             current is not None
             and not context.hashes_fully_computed
             and not context.preparing
+            and not context.pins_only
         ):
             native_only = getattr(self, "native_only", False)
             effective_result = self._comparison_result(result, context=context)
@@ -940,6 +975,10 @@ class DownloadHashUpdater(Updater):
             return False
         return current.urls == self._platform_urls(info)
 
+    def _native_platform_owns_hashes(self) -> bool:
+        """Rematerialize mutable DMGs only on a platform that owns those URLs."""
+        return update_nix.get_current_nix_platform() in self.PLATFORMS
+
     def _can_reuse_persisted_hashes(
         self,
         context: UpdateContext,
@@ -954,10 +993,16 @@ class DownloadHashUpdater(Updater):
         current = context.current
         if current is None or current.hashes.mapping is None:
             return False
-        return all(
-            current.hashes.mapping.get(platform)
-            for platform in self._platform_urls(info)
-        )
+        platforms = self._platform_urls(info)
+        native = update_nix.get_current_nix_platform()
+        if native in platforms:
+            existing = current.hashes.mapping.get(native)
+            return bool(existing) and not existing.startswith(
+                HashCollection.FAKE_HASH_PREFIX
+            )
+        # Foreign builder: keep the pin (real, empty, or fake) so Linux
+        # ARM does not re-prefetch Darwin DMGs (37539644019).
+        return True
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Build a result including generated platform URLs."""

@@ -52,7 +52,11 @@ from lib.tests._nix_eval import (
     nix_let,
     nix_list,
 )
-from lib.tests._nix_source import nix_file_expr, nix_source_fragment_expr
+from lib.tests._nix_source import (
+    nix_file_binding_expr,
+    nix_file_expr,
+    nix_source_fragment_expr,
+)
 from lib.tests._shell_ast import (
     command_texts,
     indented_string_body,
@@ -1236,6 +1240,70 @@ def test_pkg_app_helper_expands_pkg_into_fresh_destination() -> None:
     assert command_texts(install_shell, "/usr/sbin/pkgutil") == [
         '/usr/sbin/pkgutil --expand-full "$src" "$pkg_dir"'
     ]
+
+
+def test_pkg_app_find_payload_accepts_nested_app_contents() -> None:
+    """Tailscale 1.104.1 is Payload/App/Contents; the old Payload/Contents miss."""
+    find_payload = expect_instance(
+        nix_file_binding_expr(
+            "overlays/_lib/helpers/darwin-apps.nix",
+            "findPayload",
+        ),
+        IfExpression,
+    )
+    copy_contents_find = expect_instance(find_payload.consequence, IfExpression)
+    find_shell = parse_shell(
+        indented_string_body(
+            expect_instance(copy_contents_find.consequence, IndentedString).rebuild()
+        )
+    )
+    assert command_texts(find_shell, "find") == [
+        'find "$pkg_dir" -maxdepth 6 -type d -name Contents -path "*/Payload/*" -print -quit'
+    ]
+
+
+def test_pkg_app_finds_nested_distribution_payload_contents(tmp_path: Path) -> None:
+    """Tailscale 1.104.1 ships Payload/Tailscale.app/Contents, not Payload/Contents."""
+    pkg_dir = tmp_path / "tailscale-app-pkg"
+    nested = pkg_dir / "Distribution.pkg" / "Payload" / "Tailscale.app" / "Contents"
+    nested.mkdir(parents=True)
+    (pkg_dir / "Resources").mkdir()
+    find = shutil.which("find")
+    assert find is not None
+    found = subprocess.check_output(  # noqa: S603 -- owned find against a fixture tree
+        [
+            find,
+            str(pkg_dir),
+            "-maxdepth",
+            "6",
+            "-type",
+            "d",
+            "-name",
+            "Contents",
+            "-path",
+            "*/Payload/*",
+            "-print",
+            "-quit",
+        ],
+        text=True,
+    ).strip()
+    assert Path(found) == nested
+    flat = subprocess.check_output(  # noqa: S603 -- prove the old path misses 1.104.1
+        [
+            find,
+            str(pkg_dir),
+            "-maxdepth",
+            "4",
+            "-type",
+            "d",
+            "-path",
+            "*/Payload/Contents",
+            "-print",
+            "-quit",
+        ],
+        text=True,
+    ).strip()
+    assert flat == ""
 
 
 def test_manifest_cleanup_checks_other_mac_app_managers_first(tmp_path: Path) -> None:
@@ -3311,7 +3379,7 @@ def test_chatgpt_package_ships_the_unified_chatgpt_bundle() -> None:
 
     # Linux repacks OpenAI's Debian artifact: the version comes from the pool
     # filename, and the patchelf pass must stay scoped to the optional Qt shims
-    # and the Android NDK prebuilds that can never load on Linux.
+    # and the Android NDK / musl prebuilds that can never load on glibc Linux.
     linux_call = expect_instance(platform_branch.alternative, FunctionCall)
     assert_nix_ast_equal(linux_call.name, Identifier(name="stdenv.mkDerivation"))
     linux_args = expect_instance(linux_call.argument, AttributeSet)
@@ -3343,6 +3411,8 @@ def test_chatgpt_package_ships_the_unified_chatgpt_bundle() -> None:
         "libQt6Widgets.so.6",
         "liblog.so",
         "libc++_shared.so",
+        "libc.musl-x86_64.so.1",
+        "libc.musl-aarch64.so.1",
     ]
 
 

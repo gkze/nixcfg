@@ -68,6 +68,14 @@ def test_build_github_cookies_requires_authenticated_session() -> None:
     assert jar is None
 
 
+def test_devtools_active_port_files_include_linux_chrome_paths() -> None:
+    """Discover DevToolsActivePort on Linux Chrome/Chromium profiles too."""
+    paths = web_auth._DEVTOOLS_ACTIVE_PORT_FILES
+    home = web_auth.Path.home()
+    assert home / ".config/google-chrome/DevToolsActivePort" in paths
+    assert home / ".config/chromium/DevToolsActivePort" in paths
+
+
 def test_candidate_cdp_urls_include_websocket_from_devtools_file(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

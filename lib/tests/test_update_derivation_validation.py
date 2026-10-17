@@ -469,6 +469,142 @@ def test_validate_root_closures_builds_flake_owned_aggregate(
     )
 
 
+def test_validate_root_closures_builds_named_root_checks(
+    tmp_path: Path,
+) -> None:
+    """A shard builds ``root-closure-<name>`` checks, not the aggregate farm."""
+    calls: list[list[str]] = []
+
+    def _run(
+        args: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if args[:2] == ["nix", "eval"]:
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout="""
+                {
+                  "schemaVersion": 2,
+                  "requiredKinds": ["darwin", "home"],
+                  "requiredRoots": [],
+                  "roots": [
+                    {"kind": "darwin", "name": "argus", "system": "aarch64-darwin"},
+                    {"kind": "home", "name": "george", "system": "aarch64-darwin"}
+                  ]
+                }
+                """,
+                stderr="",
+            )
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    assert (
+        validation.validate_root_closures(
+            flake_root=tmp_path,
+            systems=("aarch64-darwin",),
+            root_names=("darwin-argus",),
+            timeout=42,
+            run=_run,
+        )
+        == ()
+    )
+    builds = [args for args in calls if args[1] == "build"]
+    assert builds[-1][-1] == (
+        f"path:{tmp_path}#checks.aarch64-darwin.root-closure-darwin-argus"
+    )
+    graph_calls: list[list[str]] = []
+
+    def _graph(
+        args: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        graph_calls.append(args)
+        if args[:2] == ["nix", "eval"]:
+            return _run(args)
+        if args[1] == "derivation":
+            assert (
+                f"path:{tmp_path}#checks.aarch64-darwin.root-closure-darwin-argus"
+                in args
+            )
+            return subprocess.CompletedProcess(
+                args, 0, stdout='{"version": 4, "derivations": {}}', stderr=""
+            )
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    assert (
+        validation.validate_root_closures(
+            flake_root=tmp_path,
+            systems=("aarch64-darwin",),
+            root_names=("darwin-argus",),
+            include_dependencies=True,
+            timeout=42,
+            run=_graph,
+        )
+        == ()
+    )
+
+    def _graph_fail(
+        args: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        if args[:2] == ["nix", "eval"]:
+            return _run(args)
+        return subprocess.CompletedProcess(
+            args, 1, stdout="", stderr="graph unavailable"
+        )
+
+    failed = validation.validate_root_closures(
+        flake_root=tmp_path,
+        systems=("aarch64-darwin",),
+        root_names=("darwin-argus",),
+        include_dependencies=True,
+        timeout=42,
+        run=_graph_fail,
+    )
+    assert failed[0].installable == (
+        "path:.#checks.aarch64-darwin.root-closure-darwin-argus"
+    )
+    empty = validation.validate_root_closures(
+        flake_root=tmp_path,
+        systems=("aarch64-darwin",),
+        root_names=(),
+        timeout=42,
+        run=_run,
+    )
+    assert empty[0].message == "closure shard root list is empty"
+    unknown = validation.validate_root_closures(
+        flake_root=tmp_path,
+        systems=("aarch64-darwin",),
+        root_names=("darwin-missing",),
+        timeout=42,
+        run=_run,
+    )
+    assert "darwin-missing" in unknown[0].message
+    assert validation.composed_root_name("darwin", "argus") == "darwin-argus"
+    assert (
+        validation.root_closure_installable("aarch64-darwin", "home-george")
+        == "path:.#checks.aarch64-darwin.root-closure-home-george"
+    )
+
+
+def test_resolve_derivation_validations_honors_native_system() -> None:
+    """Coverage on one host can compute another system's package inventory."""
+    updaters = {"demo": _DarwinAndLinuxUpdater}
+    darwin = validation.resolve_derivation_validations(
+        ["demo"],
+        updaters=updaters,
+        native_builds_only=True,
+        native_system="x86_64-linux",
+    )
+    assert darwin == (
+        DerivationValidationRequest(
+            source="demo",
+            installable=".#pkgs.x86_64-linux.demo.drvPath",
+        ),
+    )
+
+
 def test_root_closure_build_budget_does_not_shorten_discovery(
     tmp_path: Path,
 ) -> None:
@@ -667,15 +803,24 @@ def test_native_validator_builds_the_foreign_root_dependency_boundary(
         "false",
         f"path:{tmp_path}#checks.aarch64-darwin.root-closures",
     ]
-    builds = [args[-1] for args in calls if args[1] == "build"]
+    build_calls = [args for args in calls if args[1] == "build"]
+    builds = [args[-1] for args in build_calls]
     assert (
         builds
         == {
             "aarch64-linux": ["/nix/store/vm.drv^*"],
-            "aarch64-darwin": [f"path:{tmp_path}#checks.aarch64-darwin.root-closures"],
+            "aarch64-darwin": [
+                "/nix/store/vm.drv^*",
+                f"path:{tmp_path}#checks.aarch64-darwin.root-closures",
+            ],
             "x86_64-linux": [],
         }[system]
     )
+    if system == "aarch64-darwin":
+        assert "--max-jobs" in build_calls[0]
+        assert "0" in build_calls[0]
+        assert "--fallback" not in build_calls[0]
+        assert "--fallback" in build_calls[1]
 
 
 def test_dependencies_only_skips_this_platform_root_closures(
@@ -1305,6 +1450,111 @@ def test_snapshot_evaluations_share_one_flake_output(tmp_path: Path) -> None:
         "check": False,
         "timeout": 42,
     }
+
+
+def test_store_path_builds_batch_together(tmp_path: Path) -> None:
+    """Warmup outputs share one nix build so post-build-hook sees each path."""
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    assert (
+        validation.validate_derivation_requests(
+            (
+                DerivationValidationRequest(
+                    "root-warmup",
+                    "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-one",
+                    "build",
+                ),
+                DerivationValidationRequest(
+                    "root-warmup",
+                    "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-two",
+                    "build",
+                ),
+            ),
+            flake_root=tmp_path,
+            timeout=42,
+            run=run,
+        )
+        == ()
+    )
+    assert len(calls) == 1
+    assert calls[0][1] == "build"
+    assert "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-one" in calls[0]
+    assert "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-two" in calls[0]
+
+
+def test_no_substitute_request_is_unbatched_and_skips_fallback(
+    tmp_path: Path,
+) -> None:
+    """#1261 force-local compile uses --no-substitute, not --rebuild/--check."""
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    models = (
+        "/nix/store/h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0.drv^*"
+    )
+    other = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_gpui-0.1.0.drv^*"
+    assert (
+        validation.validate_derivation_requests(
+            (
+                DerivationValidationRequest(
+                    "root-warmup",
+                    models,
+                    "build",
+                    no_substitute=True,
+                ),
+                DerivationValidationRequest("root-warmup", other, "build"),
+            ),
+            flake_root=tmp_path,
+            run=run,
+        )
+        == ()
+    )
+    local_call = next(args for args in calls if "--no-substitute" in args)
+    assert models in local_call
+    assert "--rebuild" not in local_call
+    assert "--fallback" not in local_call
+    assert "--keep-going" not in local_call
+    assert other not in local_call
+    other_call = next(args for args in calls if other in args)
+    assert "--no-substitute" not in other_call
+    assert "--fallback" in other_call
+    assert "--keep-going" in other_call
+
+
+def test_zed_family_keep_going_survives_force_local(tmp_path: Path) -> None:
+    """Zed-only family builds collect every crate error in one --keep-going pass."""
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0.drv^*"
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    assert (
+        validation.validate_derivation_requests(
+            (
+                DerivationValidationRequest(
+                    "root-warmup",
+                    settings,
+                    "build",
+                    no_substitute=True,
+                    keep_going=True,
+                ),
+            ),
+            flake_root=tmp_path,
+            run=run,
+        )
+        == ()
+    )
+    local = next(args for args in calls if "--no-substitute" in args)
+    assert "--keep-going" in local
 
 
 def test_failed_batch_rechecks_each_target_with_original_retry_policy(

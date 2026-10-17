@@ -3,6 +3,7 @@
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -26,9 +27,14 @@ from lib.nix.models.derivation import DerivationInputs  # noqa: TC001 -- Pydanti
 from lib.system_policy import RootClosureKind, required_root_kinds
 from lib.update import persistence as update_persistence
 from lib.update.nix import (
+    failed_derivation_paths,
     get_current_nix_platform,
     is_retryable_nix_network_failure,
     is_retryable_nix_store_failure,
+    recover_nix_store_after_fault,
+    repair_corrupt_nix_store_paths,
+    should_consult_nix_builder_logs,
+    should_restart_nix_daemon,
 )
 from lib.update.nix_expr import compact_nix_expr, identifier_attr_path
 from lib.update.paths import get_repo_root
@@ -59,6 +65,9 @@ class DerivationValidationRequest:
     source: str
     installable: str
     mode: DerivationValidationMode = "eval"
+    substitute_only: bool = False
+    no_substitute: bool = False
+    keep_going: bool = False
 
 
 @dataclass(frozen=True)
@@ -484,14 +493,64 @@ def _retryable_store_signal(returncode: int) -> bool:
     return returncode == -signal.SIGBUS
 
 
-def _retryable_validation_output(result: _RunResult) -> bool:
+_NIX_LOG_TIMEOUT_SECONDS = 30.0
+
+
+def _read_nix_builder_log(drv: str, *, cwd: Path) -> str:
+    """Return ``nix log`` for *drv*, or empty when the log cannot be read."""
+    nix = shutil.which("nix")
+    if nix is None:
+        return ""
+    try:
+        log = subprocess.run(  # noqa: S603 -- resolved nix from PATH
+            [nix, "log", drv],
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=_NIX_LOG_TIMEOUT_SECONDS,
+        )
+    except OSError, subprocess.TimeoutExpired:
+        return ""
+    return f"{log.stdout}\n{log.stderr}"
+
+
+def _builder_log_supplement(result: _RunResult, *, cwd: Path) -> str:
+    """Fetch truncated builder tails Nix omitted from the last-25 window.
+
+    Pytest must not shell out to ``nix log`` for fixture ``.drv`` paths.
+    Hosted validation consults the real log so a write-EIO that scrolled
+    out of streamed stderr can still retry.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return ""
+    return "\n".join(
+        _read_nix_builder_log(drv, cwd=cwd)
+        for drv in failed_derivation_paths(f"{result.stderr}\n{result.stdout}")
+    )
+
+
+def _retryable_validation_output(result: _RunResult, *, cwd: Path) -> bool:
     """Return whether a completed Nix command failed on a transient fault."""
-    return is_retryable_nix_network_failure(
+    if is_retryable_nix_network_failure(
         stdout=result.stdout,
         stderr=result.stderr,
     ) or is_retryable_nix_store_failure(
         stdout=result.stdout,
         stderr=result.stderr,
+    ):
+        return True
+    if not should_consult_nix_builder_logs(
+        stdout=result.stdout,
+        stderr=result.stderr,
+    ):
+        return False
+    extra = _builder_log_supplement(result, cwd=cwd)
+    if not extra.strip():
+        return False
+    return is_retryable_nix_store_failure(
+        stdout=result.stdout,
+        stderr=f"{result.stderr}\n{extra}",
     )
 
 
@@ -597,7 +656,7 @@ def _run_validation_command_impl(
                 progress(ValidationCommandFinished(command, succeeded))
         retryable = _retryable_store_signal(
             result.returncode
-        ) or _retryable_validation_output(result)
+        ) or _retryable_validation_output(result, cwd=cwd)
         if result.returncode == 0 or attempt + 1 == max_attempts or not retryable:
             if result.returncode < 0:
                 raise _incomplete_validation_error(
@@ -607,6 +666,16 @@ def _run_validation_command_impl(
                     stderr=result.stderr,
                 )
             return result
+        if should_restart_nix_daemon(stdout=result.stdout, stderr=result.stderr):
+            recover_nix_store_after_fault(sleep=sleep)
+        if is_retryable_nix_store_failure(
+            stdout=result.stdout,
+            stderr=result.stderr,
+        ):
+            repair_corrupt_nix_store_paths(
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
         if progress is not None:
             progress(
                 f"Retrying transient Nix failure (attempt {attempt + 2}/{max_attempts})"
@@ -668,9 +737,10 @@ def resolve_derivation_validations(
     updaters: Mapping[str, type[object]],
     all_declared_systems: bool = False,
     native_builds_only: bool = False,
+    native_system: str | None = None,
 ) -> tuple[DerivationValidationRequest, ...]:
     """Resolve concrete validation requests for selected updater targets."""
-    current_system = get_current_nix_platform()
+    current_system = native_system or get_current_nix_platform()
     requests: list[DerivationValidationRequest] = []
     seen: set[tuple[str, str, DerivationValidationMode]] = set()
 
@@ -740,12 +810,40 @@ def _validation_args(
         *(
             # keep-going lets one batch report every failing derivation instead
             # of stopping at the first, so later isolation rounds are cheap.
+            # Warmup force-local / substitute-only must go red on the first
+            # fatal pattern (#1263 406-drv compile) instead of draining the
+            # rest of the graph.
             [
                 "--no-link",
-                "--keep-going",
-                # Substitute EILSEQ on hosted macos-15 is not a derivation
-                # failure; Nix can rebuild that path from source.
-                "--fallback",
+                *(
+                    ["--keep-going"]
+                    if request.keep_going
+                    else (
+                        []
+                        if request.no_substitute or request.substitute_only
+                        else ["--keep-going"]
+                    )
+                ),
+                *(
+                    # Linux VM image inside Darwin roots cannot compile here
+                    # (#1257 platform mismatch). Substitute only.
+                    ["--max-jobs", "0"]
+                    if request.substitute_only
+                    # Update #1261: nix build --rebuild is --check and
+                    # keeps the cached NAR. Delete+--no-substitute
+                    # compiles language_models / extension_host on
+                    # this runner so rustc intern/SVH match.
+                    else (
+                        ["--no-substitute"]
+                        if request.no_substitute
+                        else [
+                            # Substitute EILSEQ on hosted macos-15 is not a
+                            # derivation failure; Nix can rebuild that path
+                            # from source.
+                            "--fallback",
+                        ]
+                    )
+                ),
                 *(["-L"] if print_build_logs else []),
             ]
             if request.mode == "build"
@@ -761,6 +859,18 @@ def _batch_key(
     flake_root: Path | None,
 ) -> tuple[DerivationValidationMode, str] | None:
     """Only batch explicit local attribute paths from one immutable snapshot."""
+    # Warmup realizes missing Darwin *outputs*. Do not batch `/nix/store/*.drv^*`
+    # graph nodes: those share a deadline as one build each. Substitute-only
+    # foreign Linux deps must not share a --fallback batch with Darwin roots.
+    if request.substitute_only or request.no_substitute:
+        return None
+    name = request.installable.removeprefix("/nix/store/")
+    if (
+        request.installable.startswith("/nix/store/")
+        and "/" not in name
+        and ".drv" not in name
+    ):
+        return request.mode, "store-path"
     if flake_root is None or not request.installable.startswith((".#", "path:.#")):
         return None
     attributes = request.installable.split("#", 1)[1]
@@ -1131,10 +1241,26 @@ def _load_root_closure_manifest(
     return manifest
 
 
+def composed_root_name(kind: str, name: str) -> str:
+    """Return the ``forSystem`` root name ``<kind>-<name>``."""
+    return f"{kind}-{name}"
+
+
+def root_closure_check_attr(root_name: str | None = None) -> str:
+    """Return the flake check attribute for one root or the aggregate farm."""
+    return "root-closures" if root_name is None else f"root-closure-{root_name}"
+
+
+def root_closure_installable(system: str, root_name: str | None = None) -> str:
+    """Return ``path:.#checks.<system>.<attr>`` for a root or the aggregate."""
+    return f"path:.#checks.{system}.{root_closure_check_attr(root_name)}"
+
+
 def validate_root_closures(
     *,
     flake_root: Path | None = None,
     systems: tuple[str, ...] | None = None,
+    root_names: tuple[str, ...] | None = None,
     include_dependencies: bool = False,
     dependencies_only: bool = False,
     timeout: float | None = None,
@@ -1148,10 +1274,11 @@ def validate_root_closures(
     """Build roots with a six-hour default or the caller's per-process bound.
 
     *build_timeout* limits only the realization commands. Discovery keeps
-    *timeout*, so a continuation shard can stop the build and still flush
-    uploads without shortening manifest evaluation to the same budget.
-    *dependencies_only* realizes the native boundary of foreign roots and
-    skips this platform's own root closures.
+    *timeout*, so a shard can stop the build and still flush uploads without
+    shortening manifest evaluation to the same budget.
+    *root_names* selects ``checks.<system>.root-closure-<name>`` attributes.
+    An explicit empty list is a hard error. *dependencies_only* realizes the
+    native boundary of foreign roots and skips this platform's own root closures.
     """
     if dependencies_only and not include_dependencies:
         msg = "dependencies_only requires include_dependencies"
@@ -1193,14 +1320,48 @@ def validate_root_closures(
                 if systems is None or root.system in systems
             )
         )
-        requests = tuple(
-            DerivationValidationRequest(
-                source=_ROOT_CLOSURE_VALIDATION_SOURCE,
-                installable=f"path:.#checks.{system}.root-closures",
-                mode="build",
+        available = {
+            composed_root_name(root.kind, root.name)
+            for root in manifest.roots
+            if systems is None or root.system in systems
+        }
+        if root_names is not None:
+            if not root_names:
+                return (
+                    DerivationValidationFailure(
+                        source=_ROOT_CLOSURE_VALIDATION_SOURCE,
+                        installable=_ROOT_CLOSURE_MANIFEST_INSTALLABLE,
+                        message="closure shard root list is empty",
+                    ),
+                )
+            unknown = tuple(name for name in root_names if name not in available)
+            if unknown:
+                rendered = ", ".join(unknown)
+                return (
+                    DerivationValidationFailure(
+                        source=_ROOT_CLOSURE_VALIDATION_SOURCE,
+                        installable=_ROOT_CLOSURE_MANIFEST_INSTALLABLE,
+                        message=f"unknown root-closure shard members: {rendered}",
+                    ),
+                )
+            requests = tuple(
+                DerivationValidationRequest(
+                    source=_ROOT_CLOSURE_VALIDATION_SOURCE,
+                    installable=root_closure_installable(system, name),
+                    mode="build",
+                )
+                for name in root_names
+                for system in root_systems
             )
-            for system in root_systems
-        )
+        else:
+            requests = tuple(
+                DerivationValidationRequest(
+                    source=_ROOT_CLOSURE_VALIDATION_SOURCE,
+                    installable=root_closure_installable(system),
+                    mode="build",
+                )
+                for system in root_systems
+            )
         if include_dependencies:
             # A Darwin root may contain a Linux VM image. Build the native
             # boundary of every root's graph, even on a runner with no roots.
@@ -1217,8 +1378,9 @@ def validate_root_closures(
                 "allow-import-from-derivation",
                 "false",
                 *(
-                    f"path:{snapshot_root}#checks.{system}.root-closures"
+                    f"path:{snapshot_root}#checks.{system}.{root_closure_check_attr(name)}"
                     for system in graph_systems
+                    for name in (root_names if root_names is not None else (None,))
                 ),
             ]
             try:
@@ -1238,8 +1400,11 @@ def validate_root_closures(
                     DerivationValidationFailure(
                         source=_ROOT_CLOSURE_VALIDATION_SOURCE,
                         installable=" ".join(
-                            f"path:.#checks.{system}.root-closures"
+                            root_closure_installable(system, name)
                             for system in graph_systems
+                            for name in (
+                                root_names if root_names is not None else (None,)
+                            )
                         ),
                         message=str(exc),
                     ),
@@ -1252,10 +1417,32 @@ def validate_root_closures(
                 )
                 for installable in dependencies
             )
+            runner_systems = systems or root_systems
+            on_darwin = any(system.endswith("-darwin") for system in runner_systems)
+            foreign_linux = (
+                ()
+                if dependencies_only or not on_darwin
+                else tuple(
+                    system
+                    for system in ("aarch64-linux", "x86_64-linux")
+                    if system not in runner_systems
+                )
+            )
+            substitute_requests = tuple(
+                DerivationValidationRequest(
+                    source=_ROOT_CLOSURE_VALIDATION_SOURCE,
+                    installable=installable,
+                    mode="build",
+                    substitute_only=True,
+                )
+                for installable in (
+                    graph.dependencies(foreign_linux) if foreign_linux else ()
+                )
+            )
             requests = (
                 dependency_requests
                 if dependencies_only
-                else dependency_requests + requests
+                else substitute_requests + dependency_requests + requests
             )
         # Discovery above keeps root_timeout. The build budget starts here, so
         # a slow manifest eval does not consume the shard's realization time,
@@ -1284,7 +1471,10 @@ __all__ = [
     "RootClosureManifestIdentity",
     "RootClosureManifestRoot",
     "ValidationIncompleteError",
+    "composed_root_name",
     "resolve_derivation_validations",
+    "root_closure_check_attr",
+    "root_closure_installable",
     "validate_derivation_requests",
     "validate_derivations",
     "validate_root_closures",

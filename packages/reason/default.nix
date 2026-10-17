@@ -7,7 +7,7 @@
   ...
 }:
 (mkDmgApp7zz {
-  pname = "ara";
+  pname = "reason";
   bundleName = "Reason.app";
   sourceName = "Reason_${selfSource.version}_aarch64.dmg";
   executableName = "Reason";

@@ -1,16 +1,23 @@
 """Reason release discovery and realized bundle identity contracts."""
 
+from __future__ import annotations
+
 import plistlib
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from lib.tests._updater_helpers import run_async
 from lib.update.candidate import ResolvedVersion
+from lib.update.events import EventSink, ignore_event
 from lib.update.updaters import UpdateContext
-from packages.ara import updater, validate_artifact
+from packages.reason import updater, validate_artifact
+
+if TYPE_CHECKING:
+    from lib.update.config import UpdateConfig
 
 
 @dataclass(slots=True)
@@ -38,7 +45,7 @@ class _FakeSession:
 
 def _feed(monkeypatch: pytest.MonkeyPatch, payload: object) -> None:
     async def feed(_session, url, *, config):
-        assert url == updater.AraUpdater.FEED_URL
+        assert url == updater.ReasonUpdater.FEED_URL
         assert config is not None
         return payload
 
@@ -53,7 +60,7 @@ def test_reason_feed_does_not_persist_signed_urls(
         monkeypatch,
         {"name": "0.1.57", "url": "https://example.test/private?signature=test"},
     )
-    instance = updater.AraUpdater()
+    instance = updater.ReasonUpdater()
     session = _FakeSession(
         _FakeResponse(
             headers={
@@ -88,35 +95,29 @@ def test_reason_feed_rejects_missing_version(
     _feed(monkeypatch, payload)
     with pytest.raises((TypeError, ValueError)):
         run_async(
-            updater.AraUpdater().fetch_latest(None, context=UpdateContext(current=None))
+            updater.ReasonUpdater().fetch_latest(
+                None, context=UpdateContext(current=None)
+            )
         )
 
 
-@pytest.mark.parametrize(
-    "headers",
-    [
-        {"x-ara-desktop-version": "0.1.66"},
-        {"X-Ara-Desktop-Version": " 0.1.66 "},
-    ],
-)
-def test_reason_uses_download_header_when_feed_lags(
+def test_reason_uses_location_version_when_feed_and_header_lag(
     monkeypatch: pytest.MonkeyPatch,
-    headers: dict[str, str],
 ) -> None:
-    """Nix hashes the redirect; its x-ara-desktop-version is the pin."""
+    """Nix GETs the signed Location; /desktop/stable/<ver>/ is the pin."""
     _feed(
         monkeypatch,
         {"name": "0.1.64", "url": "https://example.test/private?signature=test"},
     )
     info = run_async(
-        updater.AraUpdater().fetch_latest(
+        updater.ReasonUpdater().fetch_latest(
             _FakeSession(
                 _FakeResponse(
                     headers={
-                        **headers,
+                        "x-ara-desktop-version": "0.1.64",
                         "location": (
                             "https://ara-desktop-releases.t3.storage.dev"
-                            "/desktop/stable/0.1.66/Reason.dmg?signature=test"
+                            "/desktop/stable/0.1.84/Reason.dmg?signature=test"
                         ),
                     }
                 )
@@ -124,7 +125,30 @@ def test_reason_uses_download_header_when_feed_lags(
             context=UpdateContext(current=None),
         )
     )
-    assert info.version == "0.1.66"
+    assert info.version == "0.1.84"
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "https://ara-desktop-releases.t3.storage.dev/desktop/stable/0.1.84",
+        "https://ara-desktop-releases.t3.storage.dev/desktop/stable/",
+        "https://ara-desktop-releases.t3.storage.dev/desktop/stable//Reason.dmg",
+    ],
+)
+def test_reason_rejects_location_without_versioned_object_segment(
+    monkeypatch: pytest.MonkeyPatch,
+    location: str,
+) -> None:
+    """A stable prefix without /<ver>/ is not an immutable pin."""
+    _feed(monkeypatch, {"name": "0.1.84"})
+    with pytest.raises(RuntimeError, match="not a versioned object"):
+        run_async(
+            updater.ReasonUpdater().fetch_latest(
+                _FakeSession(_FakeResponse(headers={"location": location})),
+                context=UpdateContext(current=None),
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -142,13 +166,13 @@ def test_reason_prefers_x_desktop_version_over_stale_feed(
     monkeypatch: pytest.MonkeyPatch,
     headers: dict[str, str],
 ) -> None:
-    """Update 38220443819: the feed stayed on 0.1.64; the 307 names the object."""
+    """The feed stayed on 0.1.64; Location `/desktop/stable/<ver>/` is the pin."""
     _feed(
         monkeypatch,
         {"name": "0.1.64", "url": "https://example.test/private?signature=test"},
     )
     info = run_async(
-        updater.AraUpdater().fetch_latest(
+        updater.ReasonUpdater().fetch_latest(
             _FakeSession(
                 _FakeResponse(
                     headers={
@@ -166,46 +190,46 @@ def test_reason_prefers_x_desktop_version_over_stale_feed(
     assert info.version == "0.1.88"
 
 
-def test_reason_rejects_x_desktop_version_location_mismatch(
+def test_reason_pins_location_when_headers_lag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A new version header still has to name the same object as Location."""
+    """Update 38214877123: header 0.1.64 while Location named 0.1.84."""
     _feed(monkeypatch, {"name": "0.1.64"})
-    with pytest.raises(RuntimeError, match="versioned object for 0.1.88"):
-        run_async(
-            updater.AraUpdater().fetch_latest(
-                _FakeSession(
-                    _FakeResponse(
-                        headers={
-                            "x-desktop-version": "0.1.88",
-                            "x-ara-desktop-version": "0.1.64",
-                            "location": (
-                                "https://ara-desktop-releases.t3.storage.dev"
-                                "/desktop/stable/0.1.64/Reason.dmg?signature=test"
-                            ),
-                        }
-                    )
-                ),
-                context=UpdateContext(current=None),
-            )
+    info = run_async(
+        updater.ReasonUpdater().fetch_latest(
+            _FakeSession(
+                _FakeResponse(
+                    headers={
+                        "x-desktop-version": "0.1.88",
+                        "x-ara-desktop-version": "0.1.64",
+                        "location": (
+                            "https://ara-desktop-releases.t3.storage.dev"
+                            "/desktop/stable/0.1.84/Reason.dmg?signature=test"
+                        ),
+                    }
+                )
+            ),
+            context=UpdateContext(current=None),
         )
+    )
+    assert info.version == "0.1.84"
 
 
 def test_reason_rejects_location_that_is_not_the_versioned_object(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The public redirect is latest-only; refuse a Location for another release."""
+    """The public redirect is latest-only; refuse a Location without a pin."""
     _feed(monkeypatch, {"name": "0.1.71"})
-    with pytest.raises(RuntimeError, match="versioned object for 0.1.73"):
+    with pytest.raises(RuntimeError, match="not a versioned object"):
         run_async(
-            updater.AraUpdater().fetch_latest(
+            updater.ReasonUpdater().fetch_latest(
                 _FakeSession(
                     _FakeResponse(
                         headers={
                             "x-ara-desktop-version": "0.1.73",
                             "location": (
                                 "https://ara-desktop-releases.t3.storage.dev"
-                                "/desktop/stable/0.1.71/Reason.dmg?signature=test"
+                                "/desktop/latest/Reason.dmg?signature=test"
                             ),
                         }
                     )
@@ -220,9 +244,9 @@ def test_reason_rejects_missing_versioned_location(
 ) -> None:
     """A version header without the Tigris object path is not an immutable pin."""
     _feed(monkeypatch, {"name": "0.1.73"})
-    with pytest.raises(RuntimeError, match="versioned object for 0.1.73"):
+    with pytest.raises(RuntimeError, match="not a versioned object"):
         run_async(
-            updater.AraUpdater().fetch_latest(
+            updater.ReasonUpdater().fetch_latest(
                 _FakeSession(
                     _FakeResponse(headers={"x-ara-desktop-version": "0.1.73"})
                 ),
@@ -231,9 +255,51 @@ def test_reason_rejects_missing_versioned_location(
         )
 
 
+def test_reason_fod_name_matches_fetch_dmg() -> None:
+    """Prefetch and fetch-dmg must share one store name."""
+    assert updater.ReasonUpdater().fod_name("0.1.84") == "Reason_0.1.84_aarch64.dmg"
+
+
+def test_reason_prefetch_uses_fod_name_not_url_basename(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """38215834334 hashed desktop-download; cascade then rebuilt after 0.1.85."""
+    seen: list[tuple[str, str | None]] = []
+
+    async def fake_hash(
+        source: str,
+        url: str,
+        *,
+        config: UpdateConfig,
+        emit: EventSink = ignore_event,
+        name: str | None = None,
+    ) -> str:
+        _ = (source, config, emit)
+        seen.append((url, name))
+        return "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+    monkeypatch.setattr(updater, "compute_sri_hash", fake_hash)
+    hashes = run_async(
+        updater.ReasonUpdater().fetch_hashes(
+            updater.VersionInfo(version="0.1.84"),
+            _FakeSession(_FakeResponse()),
+            context=UpdateContext(current=None),
+        )
+    )
+    assert hashes == {
+        "aarch64-darwin": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    }
+    assert seen == [
+        (
+            updater.ReasonUpdater.PLATFORMS["aarch64-darwin"],
+            "Reason_0.1.84_aarch64.dmg",
+        )
+    ]
+
+
 def test_reason_validates_aarch64_darwin_package() -> None:
     """Closures was the first Nix fetch; packages must realize the FOD too."""
-    validations = updater.AraUpdater.get_derivation_validations()
+    validations = updater.ReasonUpdater.get_derivation_validations()
     assert len(validations) == 1
     assert validations[0].mode == "build"
     assert validations[0].systems == ("aarch64-darwin",)
@@ -249,7 +315,7 @@ def test_reason_download_discovery_does_not_hide_http_errors(
     _feed(monkeypatch, {"name": "0.1.64"})
     with pytest.raises(RuntimeError, match=f"discovery failed with HTTP {status}"):
         run_async(
-            updater.AraUpdater().fetch_latest(
+            updater.ReasonUpdater().fetch_latest(
                 _FakeSession(_FakeResponse(status=status, reason="Unavailable")),
                 context=UpdateContext(current=None),
             )

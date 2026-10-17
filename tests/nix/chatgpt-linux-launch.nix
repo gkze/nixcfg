@@ -2,9 +2,16 @@
 #
 # The Linux package is repacked from OpenAI's Debian artifact, so nothing short
 # of starting the Electron app proves the bundle is usable. This runs the
-# installed wrapper unchanged — no extra sandbox or GPU flags — under a private
-# Xvfb display, and fails unless the app presents a window and survives holding
-# it, so a wrapper regression fails here rather than on a user's machine.
+# installed wrapper under a private Xvfb display and fails unless the app
+# presents a window and survives holding it, so a wrapper regression fails
+# here rather than on a user's machine.
+#
+# Chromium's user-namespace sandbox cannot nest inside nix-daemon's build
+# sandbox (hosted Ubuntu 24.04 Update validate, including
+# chatgpt-linux-launch-check on 38553752589: "No usable sandbox!" /
+# zygote_host_impl_linux). The user-facing wrapper stays unchanged; only
+# this check adds --no-sandbox / --disable-setuid-sandbox so the window
+# assertion can run.
 {
   lib,
   runCommand,
@@ -66,6 +73,8 @@ runCommand "chatgpt-linux-launch-check"
     "$CHATGPT_APP" \
       --disable-gpu \
       --disable-dev-shm-usage \
+      --no-sandbox \
+      --disable-setuid-sandbox \
       --user-data-dir="$HOME/.config/chatgpt-launch-check" \
       >"$app_log" 2>&1 &
     app_pid=$!

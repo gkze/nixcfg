@@ -552,7 +552,7 @@ in
         if copyContents then
           if sourcePayloadPath == null then
             ''
-              payload_path="$(find "$pkg_dir" -maxdepth 4 -type d -path "*/Payload/Contents" -print -quit)"
+              payload_path="$(find "$pkg_dir" -maxdepth 6 -type d -name Contents -path "*/Payload/*" -print -quit)"
             ''
           else
             ''

@@ -1227,6 +1227,7 @@ async def _execute_run_plan_result(
                 source_updates=phase_result.source_updates,
                 artifact_updates=phase_result.artifact_updates,
                 details=phase_result.details,
+                pins_only=preparation is not None and preparation.pins_only,
             )
             or ()
         )
