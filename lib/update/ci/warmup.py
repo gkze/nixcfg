@@ -1018,13 +1018,19 @@ def is_cascade_canary_store_path(path: str) -> bool:
     five cascade slots plus packages oversubscribed the free-tier pool.
     Build it once on a dedicated runner, push via the Cachix
     post-build-hook, then stripe slots substitute.
+
+    ``hq-<version>`` is a fail-closed authenticated-binary patcher. 38986213199
+    cascade slot 1 died on HQ 0.11.13 arm64 automatic-update gate inventory
+    (expected 1, got 2) after canary had already gone green. Realize HQ in
+    canary so patcher drift fails before the 5-wide stripe starts.
     """
     rest = _store_output_rest(path)
-    prefix = "buzz-onnxruntime-"
-    if not rest.startswith(prefix):
-        return False
-    after = rest[len(prefix) :]
-    return bool(after) and after[0].isdigit()
+    for prefix in ("buzz-onnxruntime-", "hq-"):
+        if not rest.startswith(prefix):
+            continue
+        after = rest[len(prefix) :]
+        return bool(after) and after[0].isdigit()
+    return False
 
 
 def cascade_canary_paths(layers: Sequence[Sequence[str]]) -> tuple[str, ...]:

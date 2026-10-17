@@ -1275,11 +1275,13 @@ def _realize_cascade_canary(
     *,
     flake_root: Path,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
-    """Realize buzz-onnxruntime once so cascade slots substitute it.
+    """Realize cascade-canary outputs once so stripe slots substitute them.
 
-    38394692516 slot 4 compiled it from source (not in gkze or
-    cache.nixos.org) and APFS write-EIO'd ranlib. A dedicated canary
-    runner publishes the NAR before the 5-wide stripe starts.
+    38394692516 slot 4 compiled buzz-onnxruntime from source (not in gkze
+    or cache.nixos.org) and APFS write-EIO'd ranlib. 38986213199 slot 1
+    fail-closed HQ 0.11.13's arm64 automatic-update gate inventory after
+    canary had already gone green. A dedicated canary runner publishes
+    those NARs before the 5-wide stripe starts.
     """
     plan = load_warmup_plan(warmup_plan)
     return _realize_cascade_paths(
@@ -1440,8 +1442,8 @@ def validate_candidate(
     one 5-wide stripe of the planner rust_* layers and is not certify
     evidence. ``fod-canary`` realizes Darwin warmup-path FODs
     (pnpm-deps, DMG src) on two hosts before rust-warmup. ``cascade-canary``
-    realizes ``buzz-onnxruntime`` once so
-    the 5-wide stripe can substitute it. ``cascade-warmup`` realizes the
+    realizes ``buzz-onnxruntime`` and versioned ``hq-*`` once so
+    the 5-wide stripe can substitute them. ``cascade-warmup`` realizes the
     shared non-rust intersection one drv at a time. Hosted Darwin shards
     GC before the root-closure fetch: a cache-miss rust_* subtree can
     fill macos-15 and ``min-free`` then GCs

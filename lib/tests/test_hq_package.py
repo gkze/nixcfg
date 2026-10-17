@@ -463,7 +463,8 @@ _CURRENT_AUTOMATIC_MUTATION_PATHS = (
     bytes.fromhex(
         "ff 43 03 d1 f8 5f 09 a9 f6 57 0a a9 "
         "f4 4f 0b a9 fd 7b 0c a9 fd 03 03 91 "
-        "e8 23 01 91"
+        "e8 23 01 91 ae 97 01 94 e8 4b 40 b9 "
+        "a8 00 00 36 e8 2b 40 f9"
     ),
     bytes.fromhex(
         "48 8d bb 30 02 00 00 e8 3f 43 22 00 "
@@ -510,7 +511,8 @@ _CURRENT_DISABLED_MUTATION_PATHS = (
     bytes.fromhex(
         "00 00 80 52 c0 03 5f d6 1f 00 80 d2 "
         "3f 20 a0 f2 5f 40 c0 f2 7f 60 e0 f2 "
-        "1f 20 03 d5"
+        "9f 80 80 d2 bf a0 a0 f2 df c0 c0 f2 "
+        "ff e0 e0 f2 1f 20 03 d5"
     ),
     bytes.fromhex(
         "48 8d bb 30 02 00 00 e8 3f 43 22 00 "
@@ -557,7 +559,8 @@ _REBASED_AUTOMATIC_MUTATION_PATHS = (
     bytes.fromhex(
         "ff 43 03 d1 f8 5f 09 a9 f6 57 0a a9 "
         "f4 4f 0b a9 fd 7b 0c a9 fd 03 03 91 "
-        "e8 23 01 91"
+        "e8 23 01 91 85 6c 07 94 e8 4b 40 b9 "
+        "a8 00 00 36 e8 2b 40 f9"
     ),
     bytes.fromhex(
         "48 8d bb 41 13 11 11 e8 50 54 33 11 "

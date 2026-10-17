@@ -1261,6 +1261,20 @@ def test_cascade_canary_paths_select_buzz_onnxruntime() -> None:
     assert cascade_canary_paths(((other,),)) == ()
 
 
+def test_cascade_canary_paths_select_versioned_hq() -> None:
+    """38986213199: HQ patcher inventory belongs in canary, not the stripe."""
+    hq = "/nix/store/qmlzzifp0qqpzgm5lmldpd1jsf4ra2cw-hq-0.11.13"
+    hq_drv = f"{hq}.drv"
+    helper = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hq-tray-helper"
+    other = "/nix/store/dddddddddddddddddddddddddddddddd-libiconv-1"
+    assert is_cascade_canary_store_path(hq)
+    assert is_cascade_canary_store_path(hq_drv)
+    assert not is_cascade_canary_store_path(helper)
+    assert not is_cascade_canary_store_path(other)
+    assert cascade_canary_paths(((other, hq), (hq_drv, helper))) == (hq, hq_drv)
+    assert cascade_canary_paths(((other, helper),)) == ()
+
+
 def test_rust_agent_ui_partition_and_realize_print_logs(tmp_path: Path) -> None:
     """agent_ui drvs realize last with ``-L`` so rustc logs are not truncated."""
     agent = "/nix/store/ks6dzvchaaaaaaaaaaaaaaaaaaaaaaaa-rust_agent_ui-0.1.0.drv"
