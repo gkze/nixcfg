@@ -6,8 +6,9 @@ whether a run covered that inventory. A missing, skipped, unbuilt, or
 unpushed root fails the run.
 
 ``plan-shards`` evaluates root ``outPath``s once and writes
-``root-out-paths.json``. ``assert-coverage`` reuses that cache after
-checking required-job results; it never re-evaluates Darwin out paths.
+``root-out-paths.json``. Darwin host Cachix queries use each shard's
+``realized-root-paths.json`` (native eval + flush), not the Linux
+planner hashes. Coverage never re-evaluates Darwin out paths.
 """
 
 import json
@@ -43,6 +44,7 @@ _BINARY_CACHE_STORE = "https://gkze.cachix.org"
 _NIXOS_CACHE_STORE = "https://cache.nixos.org"
 ROOT_OUT_PATHS_NAME = "root-out-paths.json"
 CACHE_ROOT_DEPS_NAME = "cache-root-deps.json"
+REALIZED_ROOT_PATHS_NAME = "realized-root-paths.json"
 _LINUX_BUILDER_OUTPUT = "nixos-disk-image"
 _REQUIRED_JOBS = (
     "plan-darwin-closures",
@@ -320,20 +322,89 @@ def linux_builder_store_paths(evidence: Path, *, tree: str) -> dict[str, str]:
     return paths
 
 
-def one_darwin_root_store_path(cache: RootOutPathCache) -> dict[str, str]:
-    """Return one Darwin host root outPath for a pre-closures path-info canary."""
-    if "darwin-argus" in cache.root_paths:
-        return {"darwin-argus": cache.root_paths["darwin-argus"]}
-    darwin = {
-        name: path
-        for name, path in cache.root_paths.items()
-        if name.startswith("darwin-")
-    }
-    if not darwin:
-        msg = "root out-path cache has no Darwin host root"
+def _realized_flush_store_paths(path: Path) -> tuple[str, ...]:
+    """Return store paths flush recorded next to a Darwin shard receipt."""
+    if not path.is_file():
+        return ()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        msg = f"invalid {REALIZED_ROOT_PATHS_NAME}: {path}"
+        raise CoverageError(msg) from error
+    raw = payload.get("storePaths") if isinstance(payload, dict) else None
+    if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+        msg = f"invalid {REALIZED_ROOT_PATHS_NAME}: {path}"
         raise CoverageError(msg)
-    name = min(darwin)
-    return {name: darwin[name]}
+    return tuple(item for item in raw if item.startswith("/nix/store/"))
+
+
+def realized_darwin_root_store_paths(evidence: Path) -> dict[str, str]:
+    """Return Darwin-flushed root out paths keyed by shard root name.
+
+    39041243758: ``plan-shards`` on x86_64-linux eval'd
+    ``qd427pyva2w…-darwin-system`` while macos-15 realized
+    ``3jid4n7w…-darwin-system``. Flush published the Darwin path; a
+    Linux-eval phantom 404'd the canary and skipped closures.
+    """
+    if not evidence.is_dir():
+        msg = f"coverage evidence is not a directory: {evidence}"
+        raise CoverageError(msg)
+    paths: dict[str, str] = {}
+    for receipt_path in sorted(
+        path for path in evidence.rglob("shard-receipt.json") if path.is_file()
+    ):
+        receipt = load_shard_receipt(receipt_path)
+        if not receipt.system.endswith("-darwin") or receipt.failures:
+            continue
+        realized = _realized_flush_store_paths(
+            receipt_path.parent / REALIZED_ROOT_PATHS_NAME
+        )
+        if len(receipt.roots) == 1 and len(realized) == 1:
+            paths[receipt.roots[0]] = realized[0]
+            continue
+        if len(receipt.roots) == 1 and not realized:
+            continue
+        msg = (
+            f"{receipt_path} Darwin shard realized {len(realized)} store paths "
+            f"for roots {list(receipt.roots)}"
+        )
+        raise CoverageError(msg)
+    return paths
+
+
+def one_darwin_root_store_path(evidence: Path) -> dict[str, str]:
+    """Return one Darwin-flushed root outPath for the pre-closures canary."""
+    realized = realized_darwin_root_store_paths(evidence)
+    if "darwin-argus" in realized:
+        return {"darwin-argus": realized["darwin-argus"]}
+    if not realized:
+        msg = "no realized Darwin root store path under evidence"
+        raise CoverageError(msg)
+    name = min(realized)
+    return {name: realized[name]}
+
+
+def cachix_root_paths(
+    *,
+    planned: Mapping[str, str],
+    evidence: Path,
+    darwin_root_names: set[str],
+) -> dict[str, str]:
+    """Prefer Darwin-flushed out paths over Linux-eval'd planner hashes."""
+    flushed = realized_darwin_root_store_paths(evidence)
+    missing = darwin_root_names - set(flushed)
+    if missing:
+        msg = "Darwin shards did not record realized store paths for: " + ", ".join(
+            sorted(missing)
+        )
+        raise CoverageError(msg)
+    paths = {
+        name: path
+        for name, path in planned.items()
+        if not name.startswith("aggregate:")
+    }
+    paths.update(flushed)
+    return paths
 
 
 def assert_cached_darwin_boundary(
@@ -344,9 +415,9 @@ def assert_cached_darwin_boundary(
 ) -> None:
     """Fail unless the linux-builder image and one Darwin root are in Cachix."""
     present = check_path_in_cachix if cachix_present is None else cachix_present
-    cache = load_planned_root_out_paths(evidence, tree=tree)
+    load_planned_root_out_paths(evidence, tree=tree)
     required = linux_builder_store_paths(evidence, tree=tree)
-    required.update(one_darwin_root_store_path(cache))
+    required.update(one_darwin_root_store_path(evidence))
     require_cachix_paths(required, present=present)
 
 
@@ -531,7 +602,17 @@ def assert_update_coverage(
     if missing_paths:
         msg = f"coverage is missing out paths for: {', '.join(sorted(missing_paths))}"
         raise CoverageError(msg)
-    require_cachix_paths(root_paths, present=cachix_present)
+    require_cachix_paths(
+        cachix_root_paths(
+            planned=root_paths,
+            evidence=evidence,
+            darwin_root_names={
+                compose_kind_name(root.kind, root.name)
+                for root in darwin_roots(manifest)
+            },
+        ),
+        present=cachix_present,
+    )
 
 
 def binary_cache_store() -> str:

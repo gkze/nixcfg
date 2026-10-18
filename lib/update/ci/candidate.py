@@ -1891,8 +1891,9 @@ def assert_coverage(
     """Fail unless every planned root and package is present in Cachix.
 
     Required-job results are checked first so a failed or cancelled shard
-    farm exits in seconds. Root out paths come from the planner cache;
-    this command never re-evaluates them.
+    farm exits in seconds. Darwin Cachix queries use each shard's flushed
+    ``realized-root-paths.json``, not Linux-eval'd planner hashes. This
+    command never re-evaluates Darwin out paths.
     """
     prepared = Candidate.model_validate_json(candidate.read_bytes())
     require_complete_candidate(prepared)

@@ -8,6 +8,7 @@ import pytest
 
 from lib.update.ci.coverage import (
     CACHE_ROOT_DEPS_NAME,
+    REALIZED_ROOT_PATHS_NAME,
     ROOT_OUT_PATHS_NAME,
     ClosureShardReceipt,
     CoverageError,
@@ -26,8 +27,10 @@ from lib.update.ci.coverage import (
     load_shard_receipt,
     load_validation_report,
     nixos_cache_store,
+    one_darwin_root_store_path,
     parse_job_results,
     read_json,
+    realized_darwin_root_store_paths,
     require_cachix_paths,
     require_package_inventory,
     require_required_jobs,
@@ -100,15 +103,18 @@ def _write_reports(evidence: Path) -> None:
 
 def _write_shards(evidence: Path, shards: tuple[ClosureShard, ...]) -> None:
     for shard in shards:
-        path = evidence / shard_artifact_name(shard) / "shard-receipt.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
+        parent = evidence / shard_artifact_name(shard)
+        parent.mkdir(parents=True, exist_ok=True)
+        (parent / "shard-receipt.json").write_text(
             ClosureShardReceipt(
                 tree="tree",
                 system=shard.system,
                 shard=shard.shard,
                 roots=shard.roots,
             ).model_dump_json()
+        )
+        (parent / REALIZED_ROOT_PATHS_NAME).write_text(
+            json.dumps({"storePaths": [f"/nix/store/flushed-{shard.shard}"]}) + "\n"
         )
 
 
@@ -464,12 +470,13 @@ def test_assert_cached_boundary_requires_image_and_one_darwin_root(
 ) -> None:
     manifest = _manifest()
     image = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
-    argus = "/nix/store/argus"
+    linux_eval = "/nix/store/qd427pyva2w1ck6blh3kd5ra50g9rych-darwin-system"
+    flushed = "/nix/store/3jid4n7w542fwisq3265agwvs02icj8s-darwin-system"
     write_root_out_path_cache(
         tmp_path / "plan-shards-x86_64-linux" / ROOT_OUT_PATHS_NAME,
         tree="tree",
         root_paths={
-            "darwin-argus": argus,
+            "darwin-argus": linux_eval,
             "home-george": "/nix/store/home",
             "aggregate:aarch64-darwin": "/nix/store/farm",
         },
@@ -477,6 +484,12 @@ def test_assert_cached_boundary_requires_image_and_one_darwin_root(
     )
     _write_linux_builder_receipt(tmp_path, system="aarch64-linux", store_paths=[image])
     _write_linux_builder_receipt(tmp_path, system="x86_64-linux", store_paths=[])
+    shards = plan_darwin_closure_shards(manifest)
+    _write_shards(tmp_path, shards)
+    argus = next(shard for shard in shards if shard.shard == "darwin-argus")
+    (tmp_path / shard_artifact_name(argus) / REALIZED_ROOT_PATHS_NAME).write_text(
+        json.dumps({"storePaths": [flushed]}) + "\n"
+    )
     seen: list[str] = []
 
     def present(path: str) -> bool:
@@ -484,8 +497,173 @@ def test_assert_cached_boundary_requires_image_and_one_darwin_root(
         return True
 
     assert_cached_darwin_boundary(tmp_path, tree="tree", cachix_present=present)
-    assert seen == [image, argus]
+    assert seen == [image, flushed]
+    assert linux_eval not in seen
     with pytest.raises(CoverageError, match="linux-builder:aarch64-linux"):
         assert_cached_darwin_boundary(
             tmp_path, tree="tree", cachix_present=lambda path: path != image
+        )
+    with pytest.raises(CoverageError, match="darwin-argus"):
+        assert_cached_darwin_boundary(
+            tmp_path, tree="tree", cachix_present=lambda path: path != flushed
+        )
+
+
+def test_assert_update_coverage_queries_flushed_darwin_paths(
+    tmp_path: Path,
+) -> None:
+    """39041243758: Linux-eval'd darwin-system hashes were never pushed."""
+    manifest = _manifest()
+    shards = plan_darwin_closure_shards(manifest)
+    _write_reports(tmp_path)
+    _write_shards(tmp_path, shards)
+    seen: list[str] = []
+
+    def present(path: str) -> bool:
+        seen.append(path)
+        return True
+
+    assert_update_coverage(
+        job_results=_jobs(),
+        evidence=tmp_path,
+        tree="tree",
+        validate_all_packages=True,
+        manifest=manifest,
+        package_expected={
+            "aarch64-linux": frozenset({"pkg"}),
+            "x86_64-linux": frozenset({"pkg"}),
+            "aarch64-darwin": frozenset({"pkg"}),
+        },
+        root_paths={
+            "darwin-argus": "/nix/store/qd427pyva2w1ck6blh3kd5ra50g9rych-darwin-system",
+            "home-george": "/nix/store/home",
+            "aggregate:aarch64-darwin": "/nix/store/farm",
+        },
+        cachix_present=present,
+    )
+    assert "/nix/store/flushed-darwin-argus" in seen
+    assert "/nix/store/flushed-home-george" in seen
+    assert "/nix/store/qd427pyva2w1ck6blh3kd5ra50g9rych-darwin-system" not in seen
+    assert "/nix/store/farm" not in seen
+
+
+def test_assert_update_coverage_fails_without_realized_darwin_paths(
+    tmp_path: Path,
+) -> None:
+    manifest = _manifest()
+    shards = plan_darwin_closure_shards(manifest)
+    _write_reports(tmp_path)
+    _write_shards(tmp_path, shards)
+    argus = next(shard for shard in shards if shard.shard == "darwin-argus")
+    (tmp_path / shard_artifact_name(argus) / REALIZED_ROOT_PATHS_NAME).unlink()
+    with pytest.raises(CoverageError, match="did not record realized store paths"):
+        assert_update_coverage(
+            job_results=_jobs(),
+            evidence=tmp_path,
+            tree="tree",
+            validate_all_packages=True,
+            manifest=manifest,
+            package_expected={
+                "aarch64-linux": frozenset({"pkg"}),
+                "x86_64-linux": frozenset({"pkg"}),
+                "aarch64-darwin": frozenset({"pkg"}),
+            },
+            root_paths={
+                "darwin-argus": "/nix/store/argus",
+                "home-george": "/nix/store/home",
+                "aggregate:aarch64-darwin": "/nix/store/farm",
+            },
+            cachix_present=lambda _path: True,
+        )
+
+
+def test_realized_darwin_root_paths_fail_closed(tmp_path: Path) -> None:
+    with pytest.raises(CoverageError, match="not a directory"):
+        realized_darwin_root_store_paths(tmp_path / "missing")
+    linux_dir = tmp_path / "validate-x86_64-linux-closure-shard-linux"
+    linux_dir.mkdir()
+    (linux_dir / "shard-receipt.json").write_text(
+        ClosureShardReceipt(
+            tree="tree",
+            system="x86_64-linux",
+            shard="linux",
+            roots=("nixos-host",),
+        ).model_dump_json()
+    )
+    failed_dir = tmp_path / "validate-aarch64-darwin-closure-shard-failed"
+    failed_dir.mkdir()
+    (failed_dir / "shard-receipt.json").write_text(
+        ClosureShardReceipt(
+            tree="tree",
+            system="aarch64-darwin",
+            shard="failed",
+            roots=("darwin-failed",),
+            failures=("boom",),
+        ).model_dump_json()
+    )
+    (failed_dir / REALIZED_ROOT_PATHS_NAME).write_text(
+        json.dumps({"storePaths": ["/nix/store/failed"]}) + "\n"
+    )
+    manifest = _manifest()
+    shards = plan_darwin_closure_shards(manifest)
+    _write_shards(tmp_path, shards)
+    home = next(shard for shard in shards if shard.shard == "home-george")
+    argus = next(shard for shard in shards if shard.shard == "darwin-argus")
+    (tmp_path / shard_artifact_name(argus) / REALIZED_ROOT_PATHS_NAME).unlink()
+    assert one_darwin_root_store_path(tmp_path) == {
+        "home-george": "/nix/store/flushed-home-george"
+    }
+    bad = tmp_path / shard_artifact_name(home) / REALIZED_ROOT_PATHS_NAME
+    bad.write_text("{")
+    with pytest.raises(CoverageError, match="invalid realized-root-paths"):
+        realized_darwin_root_store_paths(tmp_path)
+    bad.write_text(json.dumps({"storePaths": [1]}) + "\n")
+    with pytest.raises(CoverageError, match="invalid realized-root-paths"):
+        realized_darwin_root_store_paths(tmp_path)
+    bad.write_text("[]\n")
+    with pytest.raises(CoverageError, match="invalid realized-root-paths"):
+        realized_darwin_root_store_paths(tmp_path)
+    receipt = tmp_path / shard_artifact_name(home) / "shard-receipt.json"
+    receipt.write_text(
+        ClosureShardReceipt(
+            tree="tree",
+            system="aarch64-darwin",
+            shard="home-george",
+            roots=("home-george", "darwin-argus"),
+        ).model_dump_json()
+    )
+    bad.write_text(json.dumps({"storePaths": ["/nix/store/a", "/nix/store/b"]}) + "\n")
+    with pytest.raises(CoverageError, match="realized 2 store paths"):
+        realized_darwin_root_store_paths(tmp_path)
+    receipt.write_text(
+        ClosureShardReceipt(
+            tree="tree",
+            system="aarch64-darwin",
+            shard="home-george",
+            roots=("home-george",),
+        ).model_dump_json()
+    )
+    bad.write_text(json.dumps({"storePaths": ["relative"]}) + "\n")
+    assert realized_darwin_root_store_paths(tmp_path) == {}
+
+
+def test_assert_cached_boundary_fails_without_realized_darwin(
+    tmp_path: Path,
+) -> None:
+    manifest = _manifest()
+    image = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+    write_root_out_path_cache(
+        tmp_path / "plan-shards-x86_64-linux" / ROOT_OUT_PATHS_NAME,
+        tree="tree",
+        root_paths={
+            "darwin-argus": "/nix/store/argus",
+            "home-george": "/nix/store/home",
+            "aggregate:aarch64-darwin": "/nix/store/farm",
+        },
+        manifest=manifest,
+    )
+    _write_linux_builder_receipt(tmp_path, system="aarch64-linux", store_paths=[image])
+    with pytest.raises(CoverageError, match="no realized Darwin root"):
+        assert_cached_darwin_boundary(
+            tmp_path, tree="tree", cachix_present=lambda _path: True
         )
