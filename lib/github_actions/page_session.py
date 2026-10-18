@@ -13,7 +13,6 @@ and ``X-Fetch-Nonce`` from ``<meta name="fetch-nonce">``). Evaluating
 instead of exporting cookies.
 """
 
-from __future__ import annotations
 
 import json
 from dataclasses import dataclass

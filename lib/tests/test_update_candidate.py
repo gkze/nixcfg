@@ -3,6 +3,7 @@
 import json
 import subprocess
 import traceback
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from lib.update.ci.warmup import WarmupFatalError
 from lib.update.derivation_validation import (
     DerivationValidation,
     DerivationValidationFailure,
+    DerivationValidationRequest,
     ValidationCommandFinished,
     ValidationCommandOutput,
     ValidationCommandStarted,
@@ -1217,7 +1219,9 @@ def test_fod_canary_realizes_darwin_fods_and_stops_on_hash_mismatch(
     )
 
     def realize(
-        requests: object, *_args: object, **_kwargs: object
+        requests: Iterable[DerivationValidationRequest],
+        *_args: object,
+        **_kwargs: object,
     ) -> tuple[object, ...]:
         installable = next(iter(requests)).installable
         seen.append(installable)
@@ -1232,7 +1236,11 @@ def test_fod_canary_realizes_darwin_fods_and_stops_on_hash_mismatch(
     assert seen == ["path:.#pkgs.aarch64-darwin.bb.pnpmDeps"]
     seen.clear()
 
-    def succeed(requests: object, *_args: object, **_kwargs: object) -> tuple[()]:
+    def succeed(
+        requests: Iterable[DerivationValidationRequest],
+        *_args: object,
+        **_kwargs: object,
+    ) -> tuple[()]:
         seen.append(next(iter(requests)).installable)
         return ()
 

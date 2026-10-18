@@ -1057,7 +1057,13 @@ def native(stage: str) -> int:
 
 
 def certify() -> None:
-    """Require native evidence and quality checks for the exact published tree."""
+    """Require native evidence and quality checks for the exact published tree.
+
+    39081529525: publish prek failed after green Darwin roots/closures/
+    coverage. ``pyupgrade --py314-plus`` rewrites redundant
+    ``from __future__ import annotations``, and ty fail-closes on
+    untyped ``iter()`` mocks in the Darwin Python suite.
+    """
     evidence = _temp() / "evidence"
     candidate = evidence / "prepare-x86_64-linux/candidate.json"
     patch = _temp() / "update.patch"

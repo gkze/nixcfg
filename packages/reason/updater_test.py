@@ -1,6 +1,5 @@
 """Reason release discovery and realized bundle identity contracts."""
 
-from __future__ import annotations
 
 import plistlib
 import sys
