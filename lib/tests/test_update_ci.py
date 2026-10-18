@@ -2217,6 +2217,43 @@ def test_pr_quality_checks_ruff_format_before_certify_pytest() -> None:
     ]
 
 
+def _blank_lines_after_module_docstring(path: Path) -> int:
+    """Count empty lines between the module docstring and the next statement."""
+    lines = path.read_text().splitlines()
+    if not lines or not lines[0].startswith('"""'):
+        msg = f"{path} does not start with a module docstring"
+        raise AssertionError(msg)
+    index = 1
+    if lines[0].count('"""') < 2:
+        while index < len(lines) and '"""' not in lines[index]:
+            index += 1
+        index += 1
+    blanks = 0
+    while index < len(lines) and lines[index] == "":
+        blanks += 1
+        index += 1
+    return blanks
+
+
+def test_pyupgrade_rewritten_modules_stay_ruff_formatted() -> None:
+    """39097503443: Darwin certify format-python-ruff failed after pyupgrade.
+
+    Dropping ``from __future__ import annotations`` left two blanks after
+    the module docstring. ruff format keeps exactly one.
+    """
+    files = (
+        ROOT / "lib/github_actions/page_session.py",
+        ROOT / "packages/reason/updater.py",
+        ROOT / "packages/reason/updater_test.py",
+    )
+    for path in files:
+        assert _blank_lines_after_module_docstring(path) == 1, path
+    doc = jobs.certify.__doc__
+    assert doc is not None
+    assert "39097503443" in doc
+    assert "format-python-ruff" in doc
+
+
 def test_pr_quality_certify_covers_prepare_updater_contracts() -> None:
     """#1234/#1240 pin contracts must run on every PR, not only publish."""
     path = ROOT / ".github/workflows/pr-quality.yml"

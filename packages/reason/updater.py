@@ -1,6 +1,5 @@
 """Resolve Reason (formerly Ara) through its official desktop update feed."""
 
-
 from typing import TYPE_CHECKING, ClassVar
 
 import aiohttp

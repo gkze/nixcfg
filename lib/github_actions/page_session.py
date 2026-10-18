@@ -13,7 +13,6 @@ and ``X-Fetch-Nonce`` from ``<meta name="fetch-nonce">``). Evaluating
 instead of exporting cookies.
 """
 
-
 import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol

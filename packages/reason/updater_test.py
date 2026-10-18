@@ -1,6 +1,5 @@
 """Reason release discovery and realized bundle identity contracts."""
 
-
 import plistlib
 import sys
 from dataclasses import dataclass, field

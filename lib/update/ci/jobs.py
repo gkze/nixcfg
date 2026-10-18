@@ -1063,6 +1063,11 @@ def certify() -> None:
     coverage. ``pyupgrade --py314-plus`` rewrites redundant
     ``from __future__ import annotations``, and ty fail-closes on
     untyped ``iter()`` mocks in the Darwin Python suite.
+
+    39097503443: pyupgrade left an extra blank after that drop;
+    Darwin ``format-python-ruff`` then rejected
+    ``lib/github_actions/page_session.py`` and ``packages/reason/updater*.py``.
+    Run ruff format after pyupgrade, not pyupgrade alone.
     """
     evidence = _temp() / "evidence"
     candidate = evidence / "prepare-x86_64-linux/candidate.json"
