@@ -1068,6 +1068,10 @@ def certify() -> None:
     Darwin ``format-python-ruff`` then rejected
     ``lib/github_actions/page_session.py`` and ``packages/reason/updater*.py``.
     Run ruff format after pyupgrade, not pyupgrade alone.
+
+    39113211468: Darwin certify pytest was 5979 passed / 1 skipped, then
+    ``coverage report`` failed ``fail-under=100``. The 100% gate is the
+    publish contract; new CI branches need behavior tests, not pragmas.
     """
     evidence = _temp() / "evidence"
     candidate = evidence / "prepare-x86_64-linux/candidate.json"
@@ -1321,7 +1325,16 @@ def _clear_cachix_daemon_env() -> None:
     github_env = os.environ.get("GITHUB_ENV", "").strip()
     for key in (_CACHIX_DAEMON_DIR_ENV, _CACHIX_DAEMON_SOCKET_ENV):
         os.environ.pop(key, None)
-        if github_env:
+        # 39113211468: pytest on Darwin certify inherited GITHUB_ENV from the
+        # publish job. Tests that call flush_cachix() set NIXCFG_CI_STAGE to
+        # flush-cachix and then emptied CACHIX_DAEMON_* in that live file, so
+        # the always() flush saw unset sockets and masked the coverage miss.
+        # Rewrite GITHUB_ENV only in the hosted flush-cachix process.
+        if (
+            github_env
+            and os.environ.get("NIXCFG_CI_STAGE") == "flush-cachix"
+            and not os.environ.get("PYTEST_CURRENT_TEST")
+        ):
             with Path(github_env).open("a", encoding="utf-8") as handle:
                 handle.write(f"{key}=\n")
 
@@ -1722,6 +1735,7 @@ def flush_cachix() -> None:
       Flush ``cachix push``es those outputs and ``cachix pin``s them
       so rust_* LRU cannot drop the VM before Darwin ``--max-jobs 0``.
     """
+    os.environ["NIXCFG_CI_STAGE"] = "flush-cachix"
     artifacts = _temp() / "update-artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
     receipts = artifacts / "prefetch-receipts.jsonl"

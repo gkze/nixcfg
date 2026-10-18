@@ -4168,6 +4168,307 @@ def test_realize_svh_family_retries_source_fods_not_helpers(
     ]
 
 
+def test_realize_svh_family_stops_when_compiler_helpers_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """39113211468: helper compile failure must not continue into source FODs."""
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0.drv"
+    cpio = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cpio-2.15.drv"
+    source = "/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv"
+    helper_fail = DerivationValidationFailure(
+        source="rust-warmup",
+        installable=f"{cpio}^*",
+        message="builder failed",
+    )
+    seen: list[object] = []
+
+    def warmup_realize(
+        paths: object, *_args: object, **_kwargs: object
+    ) -> tuple[object, ...]:
+        seen.append(paths)
+        return (helper_fail,)
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(
+        pipeline,
+        "realize_source_fetch_drvs",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("source FODs must not run after helper failure")
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline, "compiler_input_drvs", lambda *_a, **_k: (cpio, source)
+    )
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "_realize_compiler_substitutes", lambda *_a, **_k: ())
+    failures, compiled = pipeline._realize_svh_family((settings,), flake_root=tmp_path)
+    assert failures == (helper_fail,)
+    assert compiled is False
+    assert seen == [(cpio,)]
+
+
+def test_install_index_blob_chmod_executable(tmp_path: Path) -> None:
+    dest = tmp_path / "bin" / "tool"
+    pipeline._install_index_blob(
+        dest, pipeline._IndexBlob(mode="100755", content=b"#!/bin/sh\necho hi\n")
+    )
+    assert dest.is_file()
+    assert dest.stat().st_mode & 0o111
+
+
+def test_realize_requested_warmup_fail_closed_without_plan(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="rust-warmup requires a warmup plan"):
+        pipeline._realize_requested_warmup(
+            "rust-warmup", None, None, flake_root=tmp_path
+        )
+    with pytest.raises(ValueError, match="zed-warmup requires a warmup plan"):
+        pipeline._realize_requested_warmup(
+            "zed-warmup", None, None, flake_root=tmp_path
+        )
+    assert (
+        pipeline._realize_requested_warmup("packages", None, None, flake_root=tmp_path)
+        == ()
+    )
+
+
+def test_realize_zed_warmup_substitutes_or_compiles_the_family(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """39113211468: zed-warmup substitute vs compile branches had no tests."""
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    rust_zed = "/nix/store/av7xckfpaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.25.0"
+    nightly = (
+        "/nix/store/rlcwld41aaaaaaaaaaaaaaaaaaaaaaaaa-"
+        "zed-editor-nightly-unstable-f16f965"
+    )
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(settings, rust_zed, nightly),
+            rustLayers=((settings, rust_zed, nightly),),
+            outputDrvs={
+                settings: f"{settings}.drv",
+                rust_zed: f"{rust_zed}.drv",
+                nightly: f"{nightly}.drv",
+            },
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=3, missing=3, warmup=3, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    seen: list[tuple[object, object]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        seen.append((paths, kwargs.get("substitute_only")))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
+    monkeypatch.setattr(pipeline, "rust_svh_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline, "rustc_generation_ids", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: None)
+    assert pipeline._realize_zed_warmup(warmup_plan, flake_root=tmp_path) == ()
+    assert seen
+    assert seen[0][1] is True
+    seen.clear()
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    logged: list[object] = []
+
+    def family(
+        drvs: object, *_args: object, **_kwargs: object
+    ) -> tuple[tuple[()], bool]:
+        logged.append(("family", drvs))
+        return ((), True)
+
+    monkeypatch.setattr(pipeline, "_realize_svh_family", family)
+    monkeypatch.setattr(
+        pipeline,
+        "_realize_logged_warmup",
+        lambda drvs, **_k: logged.append(("logged", drvs)) or (),
+    )
+    assert pipeline._realize_zed_warmup(warmup_plan, flake_root=tmp_path) == ()
+    assert ("family", (f"{settings}.drv",)) in logged
+    assert ("logged", (f"{rust_zed}.drv",)) in logged
+    assert ("logged", (f"{nightly}.drv",)) in logged
+    helper_fail = DerivationValidationFailure(
+        source="zed-warmup",
+        installable=f"{settings}.drv^*",
+        message="builder failed",
+    )
+
+    def family_fail(
+        drvs: object, *_args: object, **_kwargs: object
+    ) -> tuple[tuple[object, ...], bool]:
+        logged.append(("family-fail", drvs))
+        return ((helper_fail,), False)
+
+    logged.clear()
+    monkeypatch.setattr(pipeline, "_realize_svh_family", family_fail)
+    assert pipeline._realize_zed_warmup(warmup_plan, flake_root=tmp_path) == (
+        helper_fail,
+    )
+    assert logged == [("family-fail", (f"{settings}.drv",))]
+    nightly_only = tmp_path / "nightly-plan.json"
+    write_warmup_plan(
+        nightly_only,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(nightly,),
+            rustLayers=((nightly,),),
+            outputDrvs={nightly: f"{nightly}.drv"},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    parents: list[object] = []
+    monkeypatch.setattr(
+        pipeline,
+        "rust_crate_input_drvs",
+        lambda drvs, *_a, **_k: parents.append(drvs) or (),
+    )
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
+    seen.clear()
+    assert pipeline._realize_zed_warmup(nightly_only, flake_root=tmp_path) == ()
+    assert parents == [(f"{nightly}.drv",)]
+
+
+def test_realize_cascade_paths_noops_when_filter_drops_every_drv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    path = "/nix/store/dddddddddddddddddddddddddddddddd-libiconv-1"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(),
+            rustLayers=(),
+            cascadeOutputs=(path,),
+            cascadeLayers=((path,),),
+            outputDrvs={path: f"{path}.drv"},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=0, remaining=1
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=1,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "filter_cascade_realize_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: None)
+    assert (
+        pipeline._realize_cascade_paths(
+            warmup_plan, (path,), flake_root=tmp_path, label="cascade-warmup"
+        )
+        == ()
+    )
+
+
+def test_validate_cli_requires_rust_warmup_plan(prepared_run, tmp_path: Path) -> None:
+    candidate = _candidate_for_scope(prepared_run)
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    missing = CliRunner().invoke(
+        pipeline.app,
+        [
+            "validate",
+            "--candidate",
+            str(candidate_path),
+            "--output",
+            str(tmp_path / "validation.json"),
+            "--scope",
+            "rust-warmup",
+        ],
+    )
+    assert missing.exit_code != 0
+    assert "rust-warmup requires --warmup-plan" in str(missing.exception)
+
+
+def test_assert_cached_boundary_cli_queries_flushed_evidence(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidate = _candidate_for_scope(prepared_run)
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json())
+    seen: list[tuple[Path, str]] = []
+    monkeypatch.setattr(
+        pipeline,
+        "assert_cached_darwin_boundary",
+        lambda evidence, tree: seen.append((evidence, tree)),
+    )
+    result = CliRunner().invoke(
+        pipeline.app,
+        [
+            "assert-cached-boundary",
+            "--candidate",
+            str(candidate_path),
+            "--evidence",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert seen == [(tmp_path, candidate.tree)]
+
+
 def test_hosted_warmup_progress_fails_fast_on_fatal_patterns(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

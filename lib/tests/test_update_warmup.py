@@ -11,6 +11,7 @@ from lib.update.ci.shard_plan import ClosureShard
 from lib.update.ci.warmup import (
     CASCADE_WARMUP_SLOTS,
     DARWIN_GRAPH_EVAL_WORKERS,
+    DARWIN_RUST_FAMILY_PACKAGES,
     MAX_SHARD_LOCAL_BUILDS,
     RUST_WARMUP_SLOTS,
     SETTINGS_MEMBER_CRATES,
@@ -25,6 +26,7 @@ from lib.update.ci.warmup import (
     ShardLocalBuildReport,
     WarmupError,
     WarmupFatalError,
+    _eval_darwin_package_graphs,
     _eval_root_darwin_graphs,
     _store_output_rest,
     assert_force_local_dry_run,
@@ -39,6 +41,7 @@ from lib.update.ci.warmup import (
     darwin_output_paths,
     darwin_package_installable,
     default_cache_present,
+    drv_input_references,
     dry_run_will_be_built_count,
     eval_darwin_package_graph,
     eval_root_darwin_outputs,
@@ -48,6 +51,7 @@ from lib.update.ci.warmup import (
     force_local_dry_run_builds,
     gitbutler_family_package_outputs,
     gitbutler_family_slot_from_package,
+    gitbutler_family_warmup_outputs,
     import_warmup_drvs,
     intersect_missing,
     is_cascade_canary_store_path,
@@ -235,6 +239,83 @@ def test_darwin_output_paths_keep_darwin_and_skip_linux_or_pathless() -> None:
     assert "not-a-store-path" not in paths
     with pytest.raises(WarmupError, match="missing derivations"):
         darwin_output_paths({"version": 4})
+
+
+def test_rust_warmup_layers_accept_v3_input_drvs_and_skip_malformed() -> None:
+    """39113211468: Darwin graphs still emit v3 inputDrvs and junk entries."""
+    rust_a = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_a-1"
+    rust_b = "/nix/store/cccccccccccccccccccccccccccccccc-rust_b-1"
+    payload = {
+        "derivations": {
+            1: {"system": "aarch64-darwin"},
+            "not-a-drv": "nope",
+            "linux.drv": {
+                "system": "x86_64-linux",
+                "outputs": {"out": {"path": rust_a}},
+                "inputDrvs": {},
+            },
+            "no-outputs.drv": {
+                "system": "aarch64-darwin",
+                "outputs": "nope",
+                "inputDrvs": {},
+            },
+            "no-output-map.drv": {
+                "system": "aarch64-darwin",
+                "outputs": {"out": "nope"},
+                "inputDrvs": {},
+            },
+            "no-path.drv": {
+                "system": "aarch64-darwin",
+                "outputs": {"out": {"path": 1}},
+                "inputDrvs": {},
+            },
+            "/nix/store/dddddddddddddddddddddddddddddddd-not-a-drv": {
+                "system": "aarch64-darwin",
+                "outputs": {
+                    "out": {
+                        "path": ("/nix/store/hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh-junk")
+                    }
+                },
+                "inputDrvs": "nope",
+                "inputs": {"drvs": "not-a-map"},
+            },
+            "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-no-outputs.drv": {
+                "system": "aarch64-darwin",
+                "outputs": "nope",
+                "inputDrvs": {},
+            },
+            "/nix/store/ffffffffffffffffffffffffffffffff-no-output-map.drv": {
+                "system": "aarch64-darwin",
+                "outputs": {"out": "nope"},
+                "inputDrvs": {},
+            },
+            "/nix/store/gggggggggggggggggggggggggggggggg-no-path.drv": {
+                "system": "aarch64-darwin",
+                "outputs": {"out": {"path": 1}},
+                "inputDrvs": {},
+            },
+            f"{rust_a.rsplit('/', 1)[-1]}.drv": {
+                "system": "aarch64-darwin",
+                "outputs": {"out": {"path": rust_a}},
+                "inputs": {"drvs": "not-a-map"},
+                "inputDrvs": {f"{rust_b.rsplit('/', 1)[-1]}.drv": ["out"]},
+            },
+            f"{rust_b.rsplit('/', 1)[-1]}.drv": {
+                "system": "aarch64-darwin",
+                "outputs": {"out": {"path": rust_b}},
+                "inputDrvs": {},
+            },
+        }
+    }
+    layers = rust_warmup_layers(frozenset({rust_a, rust_b}), (payload,))
+    assert layers[0] == (rust_b,)
+    assert layers[1] == (rust_a,)
+    mapping = warmup_output_drvs(frozenset({rust_a, rust_b}), (payload,))
+    assert mapping[rust_a].endswith(".drv")
+    with pytest.raises(WarmupError, match="missing derivations"):
+        rust_warmup_layers(frozenset({rust_a}), ({"version": 4},))
+    with pytest.raises(WarmupError, match="missing derivations"):
+        warmup_output_drvs(frozenset({rust_a}), ({"version": 4},))
 
 
 def test_intersection_and_shard_remainder_are_cache_aware() -> None:
@@ -672,6 +753,40 @@ def test_gitbutler_family_slot_from_package_stripes(tmp_path: Path) -> None:
     assert drvs[but] == f"{but}.drv"
     payload = eval_darwin_package_graph(tmp_path, "gitbutler", run=run)
     assert but in darwin_output_paths(payload)
+    assert gitbutler_family_warmup_outputs(((but,), (sqlx,))) == (but, sqlx)
+    graphs = _eval_darwin_package_graphs(tmp_path, DARWIN_RUST_FAMILY_PACKAGES, run=run)
+    assert "gitbutler" in graphs
+
+
+def test_plan_darwin_warmup_evals_package_graphs_when_not_injected(
+    tmp_path: Path,
+) -> None:
+    """39113211468: plan-shards instantiates gitbutler when package_graphs is omitted."""
+    gpui = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-1"
+    but = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_but-core-0.0.0"
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        expr = args[-1]
+        if "packages.aarch64-darwin.gitbutler" in expr:
+            return subprocess.CompletedProcess(args, 0, json.dumps(_graph(but)), "")
+        return subprocess.CompletedProcess(args, 0, json.dumps(_graph(gpui)), "")
+
+    shards = (
+        ClosureShard(
+            shard="darwin-argus",
+            system="aarch64-darwin",
+            roots=("darwin-argus",),
+        ),
+    )
+    plan = plan_darwin_warmup(
+        tmp_path,
+        manifest=_manifest(),
+        shards=shards,
+        run=run,
+        present=lambda _path: True,
+    )
+    assert but in plan.warmup_outputs
+    assert DARWIN_RUST_FAMILY_PACKAGES == ("gitbutler",)
 
 
 def test_eval_root_darwin_graphs_is_serial_on_hosted_16g(
@@ -2067,6 +2182,7 @@ def test_zed_family_policy_is_atomic_all_or_force_local() -> None:
     rustc_a = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
     rustc_b = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rustc-1.98.1.drv"
     family = (content, settings)
+    assert zed_family_cachix_presence((), present=lambda _p: True) == "none"
     assert zed_family_cachix_presence(family, present=lambda _p: False) == "none"
     assert zed_family_cachix_presence(family, present=lambda _p: True) == "all"
     assert (
@@ -2193,6 +2309,23 @@ def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:
         "path:.#pkgs.aarch64-darwin.emdash.pnpmDeps",
         "path:.#pkgs.aarch64-darwin.comet.src",
     )
+
+
+def test_realize_source_fetch_drvs_is_noop_without_drvs(tmp_path: Path) -> None:
+    assert realize_source_fetch_drvs((), flake_root=tmp_path) == ()
+
+
+def test_drv_input_references_ignore_non_drv_query_lines() -> None:
+    parent = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-1.drv"
+    child = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_settings-0.1.0.drv"
+    output = "/nix/store/cccccccccccccccccccccccccccccccc-rust_settings-0.1.0"
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args, 0, f"{child}\n{output}\nnot-a-store\n", ""
+        )
+
+    assert drv_input_references((parent,), run=run) == (child,)
 
 
 def test_realize_source_fetch_drvs_retries_after_dns_recovers(
@@ -2527,6 +2660,23 @@ def test_force_local_dry_run_rejects_bootstrap_builds() -> None:
         assert_force_local_dry_run((host,), run=run)
     assert any("--dry-run" in args and "--no-substitute" in args for args in seen)
     ok = f"these 2 derivations will be built:\n  {host}\n  {src}\n"
+    trailing = (
+        "these 1 derivations will be built:\n"
+        "  /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rustc\n"
+        "  not-a-store-drv\n"
+        "\n"
+        "these 2 paths will be fetched:\n"
+        "  /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rustc\n"
+    )
+    assert (
+        force_local_dry_run_builds(
+            (host,),
+            run=lambda args, **_kwargs: subprocess.CompletedProcess(
+                args, 0, "", trailing
+            ),
+        )
+        == ()
+    )
     assert_force_local_dry_run(
         (host,),
         run=lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "", ok),

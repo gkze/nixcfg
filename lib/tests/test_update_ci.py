@@ -103,7 +103,19 @@ def native_job(tmp_path: Path) -> tuple[dict[str, str], Path]:
         "NIXCFG_DEVSHELL": str(tmp_path / "devshell"),
         "NIXCFG_CI_STAGE": "prepare",
     }
+    # 39113211468: inheriting the publish job's GITHUB_ENV let flush tests
+    # empty CACHIX_DAEMON_* in the live Actions file. Hosted job files stay
+    # out of native_job unless a test opts in with an isolated path.
+    env.pop("GITHUB_ENV", None)
+    env.pop("GITHUB_OUTPUT", None)
     return env, checkout
+
+
+def test_native_job_env_omits_github_job_files(native_job) -> None:
+    """39113211468: certify pytest must not inherit the publish job env files."""
+    env, _checkout = native_job
+    assert "GITHUB_ENV" not in env
+    assert "GITHUB_OUTPUT" not in env
 
 
 def _wait_for_log_text(path: Path, needle: str, *, timeout: float = 5.0) -> str:
@@ -130,6 +142,11 @@ def invoke(env: dict[str, str], checkout: Path) -> subprocess.CompletedProcess[s
         text=True,
         check=False,
     )
+
+
+def _allow_hosted_github_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let flush rewrite an isolated GITHUB_ENV as the hosted job does."""
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
 
 @pytest.mark.parametrize("exit_code", [0, 17])
@@ -659,6 +676,7 @@ def test_flush_cachix_stops_daemon_and_republishes_receipts(
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    _allow_hosted_github_env(monkeypatch)
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
     assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
@@ -832,6 +850,7 @@ def test_flush_cachix_pushes_drain_timeout_leftovers(native_job, monkeypatch) ->
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    _allow_hosted_github_env(monkeypatch)
     monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "3")
     monkeypatch.setenv("TEST_CACHE_STOP_STDERR", "Failed to push some store paths")
     monkeypatch.chdir(checkout)
@@ -877,6 +896,7 @@ def test_flush_cachix_pushes_realized_roots_after_leftover_recovery(
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    _allow_hosted_github_env(monkeypatch)
     monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "3")
     monkeypatch.setenv("TEST_CACHE_STOP_STDERR", "Failed to push some store paths")
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
@@ -914,6 +934,7 @@ def test_flush_cachix_fails_closed_on_drain_timeout_without_named_leftovers(
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    _allow_hosted_github_env(monkeypatch)
     monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "3")
     monkeypatch.setenv("TEST_CACHE_STOP_STDERR", "Failed to push some store paths")
     monkeypatch.chdir(checkout)
@@ -945,6 +966,7 @@ def test_flush_cachix_fails_closed_when_leftover_push_fails(
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    _allow_hosted_github_env(monkeypatch)
     monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "3")
     monkeypatch.setenv("TEST_CACHE_STOP_STDERR", "Failed to push some store paths")
     monkeypatch.setenv("TEST_CACHE_EXIT", "1")
@@ -1080,6 +1102,7 @@ def test_flush_cachix_pushes_realized_root_paths(native_job, monkeypatch) -> Non
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    _allow_hosted_github_env(monkeypatch)
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
     monkeypatch.setattr(
         jobs, "_realized_root_path_in_cachix", lambda path: path == store
@@ -1116,6 +1139,7 @@ def test_flush_cachix_pins_substituted_linux_builder_image(
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    _allow_hosted_github_env(monkeypatch)
     monkeypatch.setenv("RUNNER_ARCH", "ARM64")
     monkeypatch.setenv("RUNNER_OS", "Linux")
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
@@ -1252,19 +1276,23 @@ def test_cachix_daemon_socket_reads_action_env_only(
 def test_cachix_daemon_helpers_tolerate_missing_or_busy_paths(
     tmp_path: Path, monkeypatch
 ) -> None:
+    github_env = tmp_path / "github-env"
+    github_env.write_text("KEEP=1\n")
+    monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    monkeypatch.setenv("NIXCFG_CI_STAGE", "certify")
     monkeypatch.delenv("CACHIX_DAEMON_DIR", raising=False)
     jobs._release_cachix_daemon_dir()
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(tmp_path / "absent"))
     jobs._retain_cachix_daemon_evidence(tmp_path / "artifacts", StringIO())
     jobs._release_cachix_daemon_dir()
+    assert github_env.read_text() == "KEEP=1\n"
     busy = tmp_path / "busy"
     busy.mkdir()
     (busy / "daemon.sock").mkdir()
     (busy / "daemon.pid").mkdir()
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(busy))
-    github_env = tmp_path / "github-env"
-    github_env.write_text("")
-    monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    monkeypatch.setenv("NIXCFG_CI_STAGE", "flush-cachix")
+    _allow_hosted_github_env(monkeypatch)
     jobs._release_cachix_daemon_dir()
     assert (busy / "daemon.sock").is_dir()
     assert "CACHIX_DAEMON_DIR=\n" in github_env.read_text()
@@ -1280,6 +1308,7 @@ def test_clear_cachix_daemon_env_is_the_action_post_hook_skip(
     throws if the file is gone. A missing socket fails ``daemon stop``
     after ~30s (cachix#726). The skip path is ``if (!daemonDir)``.
     """
+    monkeypatch.setenv("NIXCFG_CI_STAGE", "flush-cachix")
     daemon_dir = tmp_path / "cachixXXXX"
     daemon_dir.mkdir()
     socket = daemon_dir / "daemon.sock"
@@ -1290,6 +1319,7 @@ def test_clear_cachix_daemon_env_is_the_action_post_hook_skip(
     monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
     monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(socket))
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    _allow_hosted_github_env(monkeypatch)
     jobs._clear_cachix_daemon_env()
     assert "CACHIX_DAEMON_DIR" not in os.environ
     assert "CACHIX_DAEMON_SOCKET" not in os.environ
@@ -1299,6 +1329,85 @@ def test_clear_cachix_daemon_env_is_the_action_post_hook_skip(
     assert "CACHIX_DAEMON_SOCKET=\n" in written
     assert socket.exists()
     assert (daemon_dir / "daemon.pid").exists()
+    monkeypatch.setenv("NIXCFG_CI_STAGE", "certify")
+    poisoned = tmp_path / "poisoned-env"
+    poisoned.write_text("KEEP=1\n")
+    monkeypatch.setenv("GITHUB_ENV", str(poisoned))
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    jobs._clear_cachix_daemon_env()
+    assert poisoned.read_text() == "KEEP=1\n"
+    monkeypatch.setenv("NIXCFG_CI_STAGE", "flush-cachix")
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_clear_cachix_daemon_env")
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    jobs._clear_cachix_daemon_env()
+    assert poisoned.read_text() == "KEEP=1\n"
+
+
+def test_record_runner_storage_skips_artifact_write_without_runner_temp(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("RUNNER_TEMP", raising=False)
+    snapshot = jobs.record_runner_storage("no-temp", live=False)
+    assert snapshot["label"] == "no-temp"
+    assert not (tmp_path / "update-artifacts" / "storage.jsonl").exists()
+
+
+def test_unfinished_cachix_daemon_paths_ignores_non_store_push_lines() -> None:
+    log = (
+        "[Info] Pushing rust_litemap without a store path\n"
+        "[Info] Pushed rust_settings without a store path\n"
+        "[Info] Pushing /nix/store/p928kiq59rgwhynxma6ywfzpn9bbyq98-rust_litemap-0.8.0\n"
+    )
+    assert jobs.unfinished_cachix_daemon_paths(log) == (
+        "/nix/store/p928kiq59rgwhynxma6ywfzpn9bbyq98-rust_litemap-0.8.0",
+    )
+
+
+def test_drv_output_store_paths_fails_when_count_mismatches() -> None:
+    drv = "/nix/store/6xczfl5hgl4yb7p9p997l6hmlwgpfhdj-nixos-disk-image.drv^*"
+    store = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+
+    def run(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, stdout=f"{store}\n", stderr="")
+
+    with pytest.raises(jobs.CachixFlushError, match="1 outputs for 2"):
+        jobs.drv_output_store_paths((drv, drv), run=run)
+
+
+def test_linux_builder_pin_helpers_fail_closed(
+    tmp_path: Path, monkeypatch, native_job
+) -> None:
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    monkeypatch.delenv("RUNNER_ARCH", raising=False)
+    monkeypatch.setenv("RUNNER_OS", "Linux")
+    with pytest.raises(jobs.CachixFlushError, match="cannot name linux-builder pin"):
+        jobs._linux_builder_pin_name()
+    image = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+    log = StringIO()
+    jobs._pin_linux_builder_paths(("/nix/store/other",), log)
+    with pytest.raises(jobs.CachixFlushError, match="expected one linux-builder"):
+        jobs._pin_linux_builder_paths((image, f"{image}-copy"), log)
+    monkeypatch.setenv("RUNNER_ARCH", "ARM64")
+    monkeypatch.setenv("TEST_CACHE_EXIT", "1")
+    with pytest.raises(jobs.CachixFlushError, match="cachix pin of linux-builder"):
+        jobs._pin_linux_builder_paths((image,), log)
+    assert jobs._store_path_exists(str(tmp_path))
+    assert not jobs._store_path_exists(str(tmp_path / "missing"))
+
+    def run(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs._realized_root_path_in_cachix(image)
+    monkeypatch.setattr(
+        jobs,
+        "_run",
+        lambda *args, **_kwargs: subprocess.CompletedProcess(args, 1, "", "404"),
+    )
+    assert not jobs._realized_root_path_in_cachix(image)
 
 
 def test_record_runner_storage_writes_df_inodes_and_store_bytes(
@@ -1359,6 +1468,8 @@ def test_plan_shards_and_coverage_native_stages(native_job, monkeypatch) -> None
     assert args[:3] == ["ci", "update", "plan-shards"]
     assert "--github-output" in args
     artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    monkeypatch.delenv("GITHUB_OUTPUT")
+    assert "--github-output" not in jobs._native_args("plan-shards", artifacts)
     coverage_args = jobs._native_args("assert-coverage", artifacts)
     assert coverage_args[1:4] == ["ci", "update", "assert-coverage"]
     assert coverage_args[coverage_args.index("--evidence") + 1] == "/evidence"
@@ -2252,6 +2363,8 @@ def test_pyupgrade_rewritten_modules_stay_ruff_formatted() -> None:
     assert doc is not None
     assert "39097503443" in doc
     assert "format-python-ruff" in doc
+    assert "39113211468" in doc
+    assert "fail-under=100" in doc
 
 
 def test_pr_quality_certify_covers_prepare_updater_contracts() -> None:

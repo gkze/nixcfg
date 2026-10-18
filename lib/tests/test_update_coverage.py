@@ -22,6 +22,7 @@ from lib.update.ci.coverage import (
     dump_job_results,
     eval_check_out_path,
     find_root_out_path_cache,
+    linux_builder_store_paths,
     load_planned_root_out_paths,
     load_root_out_path_cache,
     load_shard_receipt,
@@ -437,6 +438,52 @@ def _write_linux_builder_receipt(
     if store_paths is not None:
         payload["store_paths"] = store_paths
     receipt.write_text(json.dumps(payload) + "\n")
+
+
+def test_linux_builder_store_paths_fail_closed_on_receipt_shape(
+    tmp_path: Path,
+) -> None:
+    """39113211468: canary/coverage loaded linux-builder receipts without tests."""
+    image = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+    with pytest.raises(CoverageError, match="not a directory"):
+        linux_builder_store_paths(tmp_path / "missing", tree="tree")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(CoverageError, match=CACHE_ROOT_DEPS_NAME):
+        linux_builder_store_paths(empty, tree="tree")
+    _write_linux_builder_receipt(tmp_path, system="aarch64-linux", store_paths=[image])
+    receipt = tmp_path / "cache-root-deps-aarch64-linux" / CACHE_ROOT_DEPS_NAME
+    receipt.write_text("{")
+    with pytest.raises(CoverageError, match=f"invalid {CACHE_ROOT_DEPS_NAME}"):
+        linux_builder_store_paths(tmp_path, tree="tree")
+    receipt.write_text("[]\n")
+    with pytest.raises(CoverageError, match=f"invalid {CACHE_ROOT_DEPS_NAME}"):
+        linux_builder_store_paths(tmp_path, tree="tree")
+    receipt.write_text(json.dumps({"tree": "other", "system": "aarch64-linux"}) + "\n")
+    with pytest.raises(CoverageError, match="does not match candidate"):
+        linux_builder_store_paths(tmp_path, tree="tree")
+    receipt.write_text(json.dumps({"tree": "tree", "store_paths": [image]}) + "\n")
+    with pytest.raises(CoverageError, match="missing a native system"):
+        linux_builder_store_paths(tmp_path, tree="tree")
+    receipt.write_text(
+        json.dumps({
+            "tree": "tree",
+            "system": "",
+            "store_paths": [image],
+        })
+        + "\n"
+    )
+    with pytest.raises(CoverageError, match="missing a native system"):
+        linux_builder_store_paths(tmp_path, tree="tree")
+    _write_linux_builder_receipt(
+        tmp_path, system="aarch64-linux", store_paths=[image, f"{image}-copy"]
+    )
+    with pytest.raises(CoverageError, match="multiple linux-builder outputs"):
+        linux_builder_store_paths(tmp_path, tree="tree")
+    _write_linux_builder_receipt(tmp_path, system="x86_64-linux", store_paths=[image])
+    (tmp_path / "cache-root-deps-aarch64-linux" / CACHE_ROOT_DEPS_NAME).unlink()
+    with pytest.raises(CoverageError, match="aarch64-linux linux-builder"):
+        linux_builder_store_paths(tmp_path, tree="tree")
 
 
 def test_assert_cached_boundary_fails_when_linux_deps_omitted_store_paths(

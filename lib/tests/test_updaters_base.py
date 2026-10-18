@@ -695,6 +695,17 @@ def test_pins_only_keeps_current_hashes_when_identity_is_unchanged() -> None:
         recorded.append(hashes)
         return original_build(self, info, hashes)
 
+    listed_hash = HashEntry.create("sha256", mapping_hash)
+    listed = SourceEntry(
+        version="1.0.0",
+        hashes=HashCollection(entries=[listed_hash]),
+        urls={"aarch64-darwin": "https://example.com/archive.tar.gz"},
+    )
+    empty = SourceEntry(
+        version="1.0.0",
+        hashes=HashCollection(mapping=None),
+        urls={"aarch64-darwin": "https://example.com/archive.tar.gz"},
+    )
     with (
         patch.object(_ConfiguredDownloadUpdater, "build_result", _record_build),
         patch(
@@ -703,24 +714,13 @@ def test_pins_only_keeps_current_hashes_when_identity_is_unchanged() -> None:
         ),
     ):
         kept_mapping = asyncio.run(_run(mapped))
-    assert recorded == [{"x86_64-darwin": mapping_hash}]
+        kept_entries = asyncio.run(_run(listed))
+        kept_empty = asyncio.run(_run(empty))
+    assert recorded[0] == {"x86_64-darwin": mapping_hash}
+    assert recorded[1] == [listed_hash]
+    assert recorded[2] == {}
     assert kept_mapping is None
-
-    listed_hash = HashEntry.create("sha256", mapping_hash)
-    listed = SourceEntry(
-        version="1.0.0",
-        hashes=HashCollection(entries=[listed_hash]),
-        urls={"aarch64-darwin": "https://example.com/archive.tar.gz"},
-    )
-    kept_entries = asyncio.run(_run(listed))
     assert kept_entries is None
-
-    empty = SourceEntry(
-        version="1.0.0",
-        hashes=HashCollection(),
-        urls={"aarch64-darwin": "https://example.com/archive.tar.gz"},
-    )
-    kept_empty = asyncio.run(_run(empty))
     assert kept_empty is None
 
     fresh = asyncio.run(_run(None))

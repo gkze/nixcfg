@@ -582,6 +582,22 @@ def test_recover_nix_store_after_fault_restarts_determinate_daemon(
         socket=socket,
         wait_seconds=1.0,
     )
+    failed_calls: list[list[str]] = []
+
+    def fail_all(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        failed_calls.append(args)
+        return subprocess.CompletedProcess(args, 1, "", "no such service")
+
+    present_after_fail = tmp_path / "present-after-fail"
+    present_after_fail.touch()
+    recover_nix_store_after_fault(
+        platform="darwin",
+        run=fail_all,
+        socket=present_after_fail,
+    )
+    assert len(failed_calls) == 2
     assert calls[0][:4] == ["sudo", "-n", "launchctl", "kickstart"]
     assert calls[0][-1] == "system/systems.determinate.nix-daemon"
     assert calls[1][-1] == "system/org.nixos.nix-daemon"
