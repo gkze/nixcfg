@@ -1085,6 +1085,24 @@ def skip_cached_warmup_paths(
     return tuple(path for path in dict.fromkeys(paths) if not present(path))
 
 
+def rust_warmup_probe_paths(
+    paths: Sequence[str],
+    *,
+    present: Callable[[str], bool],
+) -> tuple[str, ...]:
+    """Return GitButler-family paths path-info claims are already in gkze.
+
+    38867194218: path-info lied. ``--max-jobs 0`` is the cheap oracle:
+    substitute succeeds on a real NAR, then skip compile. Substitute
+    failure falls back to a local realize.
+    """
+    return tuple(
+        path
+        for path in dict.fromkeys(paths)
+        if is_gitbutler_family_store_path(path) and present(path)
+    )
+
+
 def rust_warmup_realize_paths(
     paths: Sequence[str],
     *,
@@ -1097,7 +1115,8 @@ def rust_warmup_realize_paths(
     warmupOutputs=[], rust-warmup no-op'd) while ``nix build`` of the
     machine roots compiled those exact .drv files from source. path-info
     is not the realize oracle for this family; ``nix build`` substitutes
-    when the NAR is real.
+    when the NAR is real. Prefer ``rust_warmup_probe_paths`` plus
+    substitute-only before compiling the cached family.
     """
     missing = skip_cached_warmup_paths(paths, present=present)
     family = tuple(

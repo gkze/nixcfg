@@ -93,7 +93,7 @@ from lib.update.ci.warmup import (
     realize_warmup_outputs,
     rust_crate_input_drvs,
     rust_svh_input_drvs,
-    rust_warmup_realize_paths,
+    rust_warmup_probe_paths,
     rust_zed_member_warmup_outputs,
     rustc_generation_ids,
     settings_family_warmup_outputs,
@@ -1090,6 +1090,45 @@ def _realize_rust_warmup_others(
     )
 
 
+def _compile_drvs_after_gitbutler_probe(
+    slot_paths: tuple[str, ...],
+    output_drvs: dict[str, str],
+    warmup_plan: Path,
+    *,
+    flake_root: Path,
+) -> tuple[str, ...] | None:
+    """Return rust-warmup .drv paths to compile, or None when the stripe is done.
+
+    Cached GitButler-family NARs are probed with ``--max-jobs 0``. A hit
+    skips compile. A miss (38867194218 path-info lie) joins the compile set.
+    None means the slot was fully cached and must not import the drv cache.
+    """
+    uncached = skip_cached_warmup_paths(slot_paths, present=check_path_in_cachix)
+    cached_family = rust_warmup_probe_paths(slot_paths, present=check_path_in_cachix)
+    if not uncached and not cached_family:
+        return None
+    drvs = unique_drvs_for_outputs(uncached, output_drvs) if uncached else ()
+    probe_drvs = (
+        unique_drvs_for_outputs(cached_family, output_drvs) if cached_family else ()
+    )
+    if not probe_drvs:
+        return drvs
+    import_warmup_drvs(probe_drvs, warmup_plan.with_name(WARMUP_DRVS_NAME))
+    probe_failures = realize_warmup_outputs(
+        probe_drvs,
+        flake_root=flake_root,
+        progress=_hosted_validation_progress("rust-warmup"),
+        substitute_only=True,
+        keep_going=True,
+    )
+    still = tuple(
+        dict.fromkeys(
+            failure.installable.removesuffix("^*") for failure in probe_failures
+        )
+    )
+    return tuple(dict.fromkeys((*drvs, *still)))
+
+
 def _realize_rust_warmup(
     warmup_plan: Path,
     warmup_slot: int,
@@ -1104,11 +1143,12 @@ def _realize_rust_warmup(
     slot_paths, output_drvs = _slot_paths_with_gitbutler_canary(
         plan, warmup_slot, requested_crates, flake_root=flake_root
     )
-    missing = rust_warmup_realize_paths(
-        slot_paths,
-        present=check_path_in_cachix,
+    drvs = _compile_drvs_after_gitbutler_probe(
+        slot_paths, output_drvs, warmup_plan, flake_root=flake_root
     )
-    drvs = unique_drvs_for_outputs(missing, output_drvs)
+    if not drvs:
+        jobs.record_runner_storage("after-rust-warmup")
+        return ()
     others, agent_ui, rust_zed, zed_nightly = _partition_rust_warmup_stripe(drvs)
     others, settings = partition_settings_family_drvs(others)
     others, stripe_svh = partition_svh_sensitive_drvs(others)

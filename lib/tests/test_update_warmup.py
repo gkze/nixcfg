@@ -108,6 +108,7 @@ from lib.update.ci.warmup import (
     rust_svh_input_drvs,
     rust_warmup_layers,
     rust_warmup_output_drvs,
+    rust_warmup_probe_paths,
     rust_warmup_realize_paths,
     rust_zed_member_warmup_outputs,
     rustc_generation_ids,
@@ -732,6 +733,9 @@ def test_rust_warmup_realize_paths_keeps_gitbutler_family() -> None:
     assert cached == (but,)
     missing = rust_warmup_realize_paths((but, gpui), present=lambda _path: False)
     assert missing == (but, gpui)
+    assert rust_warmup_probe_paths((but, gpui), present=lambda _path: True) == (but,)
+    assert rust_warmup_probe_paths((but, gpui), present=lambda _path: False) == ()
+    assert rust_warmup_probe_paths((gpui,), present=lambda _path: True) == ()
 
 
 def test_gitbutler_family_slot_from_package_stripes(tmp_path: Path) -> None:

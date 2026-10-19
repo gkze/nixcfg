@@ -870,12 +870,26 @@ def test_rust_warmup_realizes_gitbutler_family_even_when_path_info_says_cached(
         "validate_derivations",
         lambda *_args, **_kwargs: (),
     )
-    realized: list[tuple[object, bool]] = []
+    realized: list[tuple[object, object, object]] = []
     progress_calls: list[tuple[str, bool]] = []
     real_progress = pipeline._hosted_validation_progress
+    but = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_but-core-0.0.0"
+    but_drv = f"{but}.drv"
 
-    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
-        realized.append((paths, bool(kwargs.get("keep_going"))))
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> object:
+        realized.append((
+            paths,
+            kwargs.get("substitute_only"),
+            kwargs.get("keep_going"),
+        ))
+        if kwargs.get("substitute_only"):
+            return (
+                DerivationValidationFailure(
+                    source="root-warmup",
+                    installable=f"{but_drv}^*",
+                    message="error: Cannot build gitbutler; NAR missing",
+                ),
+            )
         return ()
 
     def spy_progress(source: str, *, keep_going: bool = False) -> object:
@@ -894,8 +908,6 @@ def test_rust_warmup_realizes_gitbutler_family_even_when_path_info_says_cached(
         write_warmup_plan,
     )
 
-    but = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_but-core-0.0.0"
-    but_drv = f"{but}.drv"
     gpui = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_gpui-1"
     gpui_drv = f"{gpui}.drv"
     warmup_plan = tmp_path / "warmup-plan.json"
@@ -928,7 +940,10 @@ def test_rust_warmup_realizes_gitbutler_family_even_when_path_info_says_cached(
         candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
     )
     assert result.failures == ()
-    assert realized == [((but_drv,), True)]
+    assert realized == [
+        ((but_drv,), True, True),
+        ((but_drv,), None, True),
+    ]
     assert ("rust-warmup", True) in progress_calls
 
 
@@ -1004,6 +1019,71 @@ def test_rust_warmup_realizes_crane_deps_before_svh_family(
     assert realized[-1] == ((settings_drv,), None, True)
 
 
+def test_rust_warmup_skips_cached_stripe_without_gitbutler(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fully cached non-gitbutler stripe must not import or compile."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[object] = []
+    imported: list[object] = []
+    monkeypatch.setattr(
+        pipeline,
+        "realize_warmup_outputs",
+        lambda paths, *_a, **_k: realized.append(paths) or (),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "import_warmup_drvs",
+        lambda paths, *_a, **_k: imported.append(paths),
+    )
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(serde,),
+            rustLayers=((serde,),),
+            outputDrvs={serde: f"{serde}.drv"},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=0, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    result = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert result.failures == ()
+    assert imported == []
+    assert realized == []
+
+
 def test_rust_warmup_empty_plan_canaries_gitbutler_package_graph(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1014,18 +1094,26 @@ def test_rust_warmup_empty_plan_canaries_gitbutler_package_graph(
         "validate_derivations",
         lambda *_args, **_kwargs: (),
     )
-    realized: list[object] = []
+    realized: list[tuple[object, object]] = []
+    but = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_but-core-0.0.0"
+    but_drv = f"{but}.drv"
 
-    def warmup_realize(paths: object, *_args: object, **_kwargs: object) -> tuple[()]:
-        realized.append(paths)
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> object:
+        realized.append((paths, kwargs.get("substitute_only")))
+        if kwargs.get("substitute_only"):
+            return (
+                DerivationValidationFailure(
+                    source="root-warmup",
+                    installable=f"{but_drv}^*",
+                    message="error: Cannot build gitbutler; NAR missing",
+                ),
+            )
         return ()
 
     monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
     monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
     monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
-    but = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_but-core-0.0.0"
-    but_drv = f"{but}.drv"
     monkeypatch.setattr(
         pipeline,
         "gitbutler_family_slot_from_package",
@@ -1068,7 +1156,68 @@ def test_rust_warmup_empty_plan_canaries_gitbutler_package_graph(
         candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
     )
     assert result.failures == ()
-    assert realized == [(but_drv,)]
+    assert realized == [((but_drv,), True), ((but_drv,), None)]
+
+
+def test_rust_warmup_skips_gitbutler_compile_when_substitute_hits(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real NAR in gkze must not recompile the GitButler family."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, object]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((paths, kwargs.get("substitute_only")))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
+    but = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_but-core-0.0.0"
+    but_drv = f"{but}.drv"
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(but,),
+            rustLayers=((but,),),
+            outputDrvs={but: but_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=0, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    result = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert result.failures == ()
+    assert realized == [((but_drv,), True)]
 
 
 def test_cascade_warmup_realizes_uncached_stripe_per_derivation(
