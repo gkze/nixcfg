@@ -1888,10 +1888,11 @@ def _assert_darwin_closure_shards(workflow_jobs: dict) -> None:
         "prepare-merge",
         "plan-darwin-closures",
         "canary-darwin-fods",
-        "canary-warm-rust",
     }
-    assert "canary-warm-rust.result == 'skipped'" in rust["if"]
-    assert "canary-warm-rust.result == 'failure'" in rust["if"]
+    assert "canary-warm-rust" not in rust["needs"]
+    rust_if = " ".join(rust["if"].split())
+    assert "canary-warm-rust.result" not in rust_if
+    assert "canary-darwin-fods.result == 'success'" in rust_if
     _assert_canary_jobs(workflow_jobs)
     assert rust["with"]["scope"] == "rust-warmup"
     assert rust["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"

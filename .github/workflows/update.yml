@@ -336,23 +336,21 @@ jobs:
   # rust_*-0.1.0, 38151215158 collab_ui E0463), not only named
   # extension_host members. Root shards still build full closures after
   # this job succeeds; the 400-local-drv gate is unchanged.
-  # Wait for canary to finish (success, failure, or skip) so the five
-  # validate slots never share the free-tier macos-15 pool with it.
-  # #1269 canary 3/4 held two runners for 80+ min and starved slots 0/1.
+  # Overlap the settings-family canary (one macos-15, kick-file slot 0)
+  # with the 5-wide stripe. #1269 starved the pool by holding two canary
+  # slots for 80+ min; the kick file is one slot, so at most one extra
+  # job queues if the public macos pool is still 5. 39166099302 waited
+  # 8m serially for a canary that does not fail-close the 5-wide.
   validate-darwin-warm-rust:
     needs:
       - prepare-merge
       - plan-darwin-closures
       - canary-darwin-fods
-      - canary-warm-rust
     if: |-
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
       needs.plan-darwin-closures.result == 'success' &&
-      needs.canary-darwin-fods.result == 'success' &&
-      (needs.canary-warm-rust.result == 'success' ||
-      needs.canary-warm-rust.result == 'skipped' ||
-      needs.canary-warm-rust.result == 'failure')
+      needs.canary-darwin-fods.result == 'success'
     strategy:
       fail-fast: false
       max-parallel: 5
