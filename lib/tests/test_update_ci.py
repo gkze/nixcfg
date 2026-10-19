@@ -906,14 +906,18 @@ def test_flush_cachix_pushes_realized_roots_after_leftover_recovery(
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
     assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
-        "push",
+        "pin",
         "gkze",
+        "darwin-system-98bwk8gp",
         store,
+        "--keep-days",
+        "14",
     ]
     flush_log = (artifacts / "cachix-flush.log").read_text()
     assert "retrying 1 unpushed Cachix paths after drain timeout" in flush_log
     assert "pushing 1 realized root paths after daemon drain" in flush_log
     assert "cachix push realized-roots returncode=0" in flush_log
+    assert "cachix pin darwin-system-98bwk8gp returncode=0" in flush_log
 
 
 def test_flush_cachix_fails_closed_on_drain_timeout_without_named_leftovers(
@@ -1110,14 +1114,17 @@ def test_flush_cachix_pushes_realized_root_paths(native_job, monkeypatch) -> Non
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
     assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
-        "push",
+        "pin",
         "gkze",
+        "darwin-system-98bwk8gp",
         store,
+        "--keep-days",
+        "14",
     ]
     flush_log = (artifacts / "cachix-flush.log").read_text()
     assert "pushing 1 realized root paths after daemon drain" in flush_log
     assert "cachix push realized-roots returncode=0" in flush_log
-    assert "cachix pin" not in flush_log
+    assert "cachix pin darwin-system-98bwk8gp returncode=0" in flush_log
 
 
 def test_flush_cachix_pins_substituted_linux_builder_image(
@@ -1153,6 +1160,8 @@ def test_flush_cachix_pins_substituted_linux_builder_image(
         "gkze",
         "linux-builder-aarch64-linux",
         store,
+        "--keep-days",
+        "14",
     ]
     flush_log = (artifacts / "cachix-flush.log").read_text()
     assert "cachix pin linux-builder-aarch64-linux returncode=0" in flush_log
@@ -1408,6 +1417,34 @@ def test_linux_builder_pin_helpers_fail_closed(
         lambda *args, **_kwargs: subprocess.CompletedProcess(args, 1, "", "404"),
     )
     assert not jobs._realized_root_path_in_cachix(image)
+
+
+def test_darwin_root_pin_names_are_stable_per_wrapper() -> None:
+    """Four shards pin distinct wrappers; rust_* and the VM image are not pinned."""
+    argus = "/nix/store/98bwk8gpzhmr12navdg9knjscv09k2nm-darwin-system-26.11.57a3171"
+    home = "/nix/store/cccccccccccccccccccccccccccccccc-home-manager-generation"
+    image = "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+    rust = "/nix/store/p928kiq59rgwhynxma6ywfzpn9bbyq98-rust_litemap-0.8.0"
+    assert jobs._darwin_root_pin_name(argus) == "darwin-system-98bwk8gp"
+    assert jobs._darwin_root_pin_name(home) == "home-generation-cccccccc"
+    assert jobs._darwin_root_pin_name(image) is None
+    assert jobs._darwin_root_pin_name(rust) is None
+    assert jobs._darwin_root_pin_name("relative") is None
+    assert jobs._darwin_root_pin_name("/nix/store/short-darwin-system") is None
+
+
+def test_pin_realized_darwin_roots_fail_closed(native_job, monkeypatch) -> None:
+    """A failed Darwin-root pin must not look like a successful flush."""
+    env, checkout = native_job
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.chdir(checkout)
+    store = "/nix/store/98bwk8gpzhmr12navdg9knjscv09k2nm-darwin-system-26.11.57a3171"
+    log = StringIO()
+    jobs._pin_realized_darwin_roots(("/nix/store/other-not-a-root",), log)
+    monkeypatch.setenv("TEST_CACHE_EXIT", "1")
+    with pytest.raises(jobs.CachixFlushError, match="cachix pin of darwin-system"):
+        jobs._pin_realized_darwin_roots((store,), log)
 
 
 def test_record_runner_storage_writes_df_inodes_and_store_bytes(
