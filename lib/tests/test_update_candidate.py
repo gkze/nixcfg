@@ -932,6 +932,78 @@ def test_rust_warmup_realizes_gitbutler_family_even_when_path_info_says_cached(
     assert ("rust-warmup", True) in progress_calls
 
 
+def test_rust_warmup_realizes_crane_deps_before_svh_family(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """crates.io rust_* populate the store before force-local rust_settings."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    realized: list[tuple[object, object, object]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((
+            paths,
+            kwargs.get("chunk"),
+            kwargs.get("force_local"),
+        ))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "assert_force_local_dry_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(pipeline, "compiler_input_drvs", lambda *_a, **_k: ())
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
+    from lib.update.ci.warmup import (
+        CRANE_DEP_CHUNK,
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229"
+    settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0"
+    serde_drv = f"{serde}.drv"
+    settings_drv = f"{settings}.drv"
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(serde, settings),
+            rustLayers=((serde,), (settings,)),
+            outputDrvs={serde: serde_drv, settings: settings_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=2, missing=2, warmup=2, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    result = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert result.failures == ()
+    assert realized[0] == ((serde_drv,), CRANE_DEP_CHUNK, None)
+    assert realized[-1] == ((settings_drv,), None, True)
+
+
 def test_rust_warmup_empty_plan_canaries_gitbutler_package_graph(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1647,7 +1719,7 @@ def test_rust_warmup_settings_family_force_locals_content_cluster(
     assert force_local == [(content_drv, settings_drv)]
     others = [paths for paths, _logs, force, _sub in realized if not force]
     assert others == [(other_drv,)]
-    assert [force for _paths, _logs, force, _sub in realized] == [True, False]
+    assert [force for _paths, _logs, force, _sub in realized] == [False, True]
 
 
 def test_rust_warmup_peels_workspace_svh_before_others(
@@ -1732,7 +1804,7 @@ def test_rust_warmup_peels_workspace_svh_before_others(
     assert force_local == [(settings_drv, flags_drv)]
     others = [paths for paths, _logs, force, _sub in realized if not force]
     assert others == [(serde_drv,)]
-    assert [force for _paths, _logs, force, _sub in realized] == [True, False]
+    assert [force for _paths, _logs, force, _sub in realized] == [False, True]
 
 
 def test_rust_warmup_settings_json_force_locals_tree_sitter(

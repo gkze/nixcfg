@@ -10,6 +10,7 @@ import pytest
 from lib.update.ci.shard_plan import ClosureShard
 from lib.update.ci.warmup import (
     CASCADE_WARMUP_SLOTS,
+    CRANE_DEP_CHUNK,
     DARWIN_GRAPH_EVAL_WORKERS,
     DARWIN_RUST_FAMILY_PACKAGES,
     MAX_SHARD_LOCAL_BUILDS,
@@ -57,6 +58,7 @@ from lib.update.ci.warmup import (
     is_cascade_canary_store_path,
     is_compiler_local_helper_store_path,
     is_compiler_must_substitute_store_path,
+    is_crane_dep_store_path,
     is_crate2nix_rust_output,
     is_extension_host_family_store_path,
     is_fixed_output_hash_mismatch,
@@ -90,6 +92,7 @@ from lib.update.ci.warmup import (
     parse_kick_canary_slots,
     partition_agent_ui_drvs,
     partition_compiler_input_drvs,
+    partition_crane_dep_drvs,
     partition_rust_warmup_others,
     partition_rust_zed_drvs,
     partition_settings_family_drvs,
@@ -2117,6 +2120,23 @@ def test_partition_svh_sensitive_peels_workspace_before_serde() -> None:
         (serde,),
         (feature_flags, settings, git_hosting),
     )
+
+
+def test_partition_crane_deps_peels_crates_io_before_workspace() -> None:
+    """Crane vendors crates.io rust_*; workspace 0.1.0 stays in the SVH family."""
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229.drv"
+    settings = "/nix/store/hwlj8la2ply5al3dhkz0d84z4rj3j61m-rust_settings-0.1.0.drv"
+    cargo = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9"
+    assert is_crane_dep_store_path(serde)
+    assert not is_crane_dep_store_path(settings)
+    assert not is_crane_dep_store_path(cargo)
+    assert CRANE_DEP_CHUNK == 8
+    assert partition_crane_dep_drvs((cargo, serde, settings, serde)) == (
+        (cargo, settings),
+        (serde,),
+    )
+    assert partition_crane_dep_drvs((cargo,)) == ((cargo,), ())
+    assert partition_crane_dep_drvs(()) == ((), ())
 
 
 def test_tree_sitter_wasmtime_c_api_is_svh_not_compiler_input() -> None:
