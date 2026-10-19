@@ -225,7 +225,10 @@ def test_writer_requires_commit_when_building_source_result() -> None:
 
 def test_writer_always_recomputes_source_closures_for_current_release() -> None:
     """Matching release metadata must still flow through all source hash probes."""
-    assert _load_module().WriterComputerUpdater.always_rehash
+    updater = _load_module().WriterComputerUpdater()
+    info = VersionInfo(_VERSION, {"commit": _COMMIT, "tag": f"v{_VERSION}"})
+
+    assert run_async(updater._is_latest(UpdateContext(current=None), info)) is False
 
 
 def test_writer_package_is_a_nix_owned_source_built_arm64_app() -> None:

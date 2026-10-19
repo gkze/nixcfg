@@ -124,6 +124,7 @@ let
         httpie
         hermes-agent
         linear-cli
+        sculptor
         sd
         sentry-cli
         taplo
@@ -165,6 +166,7 @@ let
         container
         cyberduck
         google-chrome
+        granola
         iina
         mas
         notion-app

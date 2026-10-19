@@ -1,18 +1,18 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-AEwDm1wMe+PWH6UlTisJXDclN4rhmcZT8yS3D0rtiUw=",
-    "x86_64-darwin": "sha256-AEwDm1wMe+PWH6UlTisJXDclN4rhmcZT8yS3D0rtiUw=",
-    "x86_64-linux": "sha256-xYqg8s1mF5yfBQ4GLIgtJ6qbn4wrfHP+40mFYLXtCzg="
+    "aarch64-darwin": "sha256-Kt+xNr6hnqn2OGo7QIquS4G1o8CVX8OjCTtq4YTFJ+c=",
+    "x86_64-darwin": "sha256-Kt+xNr6hnqn2OGo7QIquS4G1o8CVX8OjCTtq4YTFJ+c=",
+    "x86_64-linux": "sha256-j70q5pzffumLdRPDOWp7Xgb5dPhiX91ZDfMJHdDD6d4="
   },
   "pins": {
-    "aarch64-darwin": "155.0.8059.40",
-    "x86_64-darwin": "155.0.8059.40",
-    "x86_64-linux": "155.0.8059.39"
+    "aarch64-darwin": "155.0.8059.85",
+    "x86_64-darwin": "155.0.8059.85",
+    "x86_64-linux": "155.0.8059.84"
   },
   "urls": {
-    "aarch64-darwin": "https://dl.google.com/release2/chrome/lr7fpw3uxyyx5tnf7oone26c6m_155.0.8059.40/GoogleChrome-155.0.8059.40.dmg",
-    "x86_64-darwin": "https://dl.google.com/release2/chrome/lr7fpw3uxyyx5tnf7oone26c6m_155.0.8059.40/GoogleChrome-155.0.8059.40.dmg",
-    "x86_64-linux": "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_155.0.8059.39-1_amd64.deb"
+    "aarch64-darwin": "https://dl.google.com/release2/chrome/o2mzgo6gshgwjzckj3bvrpe4nm_155.0.8059.85/GoogleChrome-155.0.8059.85.dmg",
+    "x86_64-darwin": "https://dl.google.com/release2/chrome/o2mzgo6gshgwjzckj3bvrpe4nm_155.0.8059.85/GoogleChrome-155.0.8059.85.dmg",
+    "x86_64-linux": "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_155.0.8059.84-1_amd64.deb"
   },
-  "version": "155.0.8059.40"
+  "version": "155.0.8059.85"
 }

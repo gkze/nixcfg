@@ -71,7 +71,7 @@ namespace-packages = ["overlays", "packages"]
 # Explicitly include all extensionless Python entrypoints in Ruff discovery.
 extend-include = [
   "home/george/bin/git-ignore",
-  "modules/home/zen/zentool",
+  "home/george/bin/zentool",
   "home/george/bin/tcctool",
 ]
 
@@ -86,7 +86,7 @@ extend-include = [
 # formatter bug is fixed.
 exclude = [
   "home/george/bin/git-ignore",
-  "modules/home/zen/zentool",
+  "home/george/bin/zentool",
   "lib/crate2nix_tauri_env_rewrite.py",
   "lib/nix/schemas/_fetch.py",
   "lib/update/persistence.py",
@@ -190,6 +190,9 @@ exclude = ["lib.tests*"]
 [tool.setuptools.package-data]
 # Ship the cross-language system policy beside ``lib.system_policy``.
 "lib" = ["system-policy.json"]
+# Hosted nixcfg runs from site-packages; the Darwin shard planner must
+# find this table next to ``lib.update.ci.shard_plan``.
+"lib.update.ci" = ["shard_costs.json"]
 # Ship the type marker and schemas owned by the Nix model/codegen package.
 "lib.nix" = ["py.typed"]
 "lib.nix.schemas" = ["*.yaml", "_version.json"]
@@ -222,7 +225,7 @@ include = [
   "modules/**/*.py",
   "modules/**/*.pyi",
   "home/george/bin/git-ignore",
-  "modules/home/zen/zentool",
+  "home/george/bin/zentool",
   "home/george/bin/tcctool",
 ]
 

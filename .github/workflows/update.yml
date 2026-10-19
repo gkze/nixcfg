@@ -15,18 +15,37 @@ on:
         description: Allow one agent repair and a fresh fully validated attempt
         type: boolean
         default: true
+      canary_warm_rust:
+        description: >
+          Dispatch-only. Realize specified rust-warmup slot(s) or crate
+          family against the current plan on this branch. Skips prepare,
+          Linux validate, Darwin roots, publish, and coverage. The push
+          and schedule no-skip run is still the done-bar proof.
+        type: boolean
+        default: false
+      canary_slots:
+        description: Comma-separated rust-warmup slots (0-4). Default 0 when canary.
+        type: string
+        default: ""
+      canary_crates:
+        description: Space-separated crate2nix crate names to realize from the current plan.
+        type: string
+        default: ""
   schedule:
     - cron: "17 7 * * 1"
   # workflow_dispatch is unavailable to the Cursor GitHub App token
   # (HTTP 403, missing actions:write). Touching .github/update-kick on
-  # main or the WIP branch queues one Update run. Prefer
+  # main or a listed feature branch queues one Update run. Prefer
   # `gh workflow run` when the App has Actions write.
+  # lib/update/** also queues so a pipeline fix can start Update
+  # without a kick-file bump.
   push:
     branches:
       - main
-      - copilot/gkzenixcfg-update-automation
+      - cursor/no-skip-darwin-shards-6614
     paths:
       - .github/update-kick
+      - lib/update/**
 permissions:
   contents: read
 concurrency:
@@ -35,14 +54,26 @@ concurrency:
   # so a newer HEAD can start instead of waiting on a doomed older SHA.
   cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
 jobs:
-  # Generated artifacts can be shared between platforms. Extend one pinned
-  # candidate serially. Linux builds the VM dependencies before Darwin roots.
-  prepare-darwin:
+  # Linux native hashes must be computed against Darwin's updated
+  # flake.lock, source versions, and generated files — not HEAD.
+  # Those pins cannot ride along with Darwin hashes: a version bump
+  # without hashes is an illegal persist, so the pin job refreshes
+  # refs/versions and keeps existing hashes. The three native prepares
+  # then hash in parallel from that pin. plan-darwin-closures still
+  # waits for prepare-merge because root-out-paths and certify bind to
+  # the complete three-system tree (require_complete_candidate).
+  # #1263 force-local dry-runs the will-be-built set so a 406-drv
+  # bootstrap compile fails the slot immediately.
+  prepare-pins:
+    if: |-
+      github.event_name != 'workflow_dispatch' ||
+      (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
+      inputs.canary_slots == '' && inputs.canary_crates == '')
     uses: ./.github/workflows/update-native.yml
     with:
-      runner: macos-15
-      system: aarch64-darwin
-      stage: prepare
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: prepare-pins
       targets: ${{ inputs.targets || '' }}
       # workflow_dispatch inputs are unset on push/schedule. A kick-file
       # push must match EM's dispatch: repair (job if) + validate_all.
@@ -50,48 +81,113 @@ jobs:
         ${{ github.event_name == 'push' ||
         inputs.validate_all_packages || false }}
     secrets: inherit
+  prepare-darwin:
+    needs: prepare-pins
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ inputs.targets || '' }}
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
+    secrets: inherit
   prepare-arm:
-    needs: prepare-darwin
+    needs: prepare-pins
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04-arm
       system: aarch64-linux
       stage: prepare
-      previous: prepare-aarch64-darwin
+      previous: prepare-pins
+      targets: ${{ inputs.targets || '' }}
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
     secrets: inherit
   prepare-x86:
-    needs: prepare-arm
+    needs: prepare-pins
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-pins.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04
       system: x86_64-linux
       stage: prepare
-      previous: prepare-aarch64-linux
+      previous: prepare-pins
+      targets: ${{ inputs.targets || '' }}
+      validate_all_packages: |-
+        ${{ github.event_name == 'push' ||
+        inputs.validate_all_packages || false }}
     secrets: inherit
-  # Flake.lock freezes after prepare-darwin. Cache the Linux native boundary
-  # of Darwin roots (the Rosetta/linux-builder VM image) here so Darwin
-  # closures can start with Darwin packages instead of waiting for Linux
-  # package validation. These jobs are not publication evidence.
+  prepare-merge:
+    needs:
+      - prepare-darwin
+      - prepare-arm
+      - prepare-x86
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-darwin.result == 'success' &&
+      needs.prepare-arm.result == 'success' &&
+      needs.prepare-x86.result == 'success'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: merge-candidates
+      previous: prepare-aarch64-darwin
+      previous_extra: prepare-aarch64-linux
+      previous_third: prepare-x86_64-linux
+    secrets: inherit
+  # Recache the Linux native boundary of Darwin roots (the Rosetta VM
+  # image) after rust-warmup. Doing this from the Darwin-prepare tree
+  # before warmup (#1257) left the image in gkze for LRU eviction by
+  # rust_*, then macos-15 hit platform mismatch on aarch64-linux
+  # etc-fstab.drv. These jobs are not publication evidence. Packages
+  # inventory waits for cascade so it does not steal a macos-15 slot.
   cache-darwin-linux-deps-arm:
-    needs: prepare-darwin
+    needs:
+      - prepare-merge
+      - validate-darwin-warm-rust
+      - validate-darwin-cascade-warmup
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04-arm
       system: aarch64-linux
       stage: cache-root-deps
-      previous: prepare-aarch64-darwin
+      previous: prepare-x86_64-linux
     secrets: inherit
   cache-darwin-linux-deps-x86:
-    needs: prepare-darwin
+    needs:
+      - prepare-merge
+      - validate-darwin-warm-rust
+      - validate-darwin-cascade-warmup
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04
       system: x86_64-linux
       stage: cache-root-deps
-      previous: prepare-aarch64-darwin
+      previous: prepare-x86_64-linux
     secrets: inherit
+  # Independent reusable-workflow calls, not one matrix. 38137325241
+  # validate-arm failed at 50-wbb on nixos-disk-image; validate-x86
+  # kept running until the run was cancelled. plan-darwin-closures is
+  # also a sibling here (not fail-fast collateral). Do not fold these
+  # three into a strategy.matrix.
   validate-arm:
-    needs: prepare-x86
+    needs: prepare-merge
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04-arm
@@ -100,7 +196,10 @@ jobs:
       previous: prepare-x86_64-linux
     secrets: inherit
   validate-x86:
-    needs: prepare-x86
+    needs: prepare-merge
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04
@@ -108,14 +207,237 @@ jobs:
       stage: validate
       previous: prepare-x86_64-linux
     secrets: inherit
-  # Package validation does not need the Linux VM image, so it overlaps the
-  # Linux validators. Closures need that image in gkze; the cache-* jobs
-  # populate it during later prepare, so this shard no longer waits for
-  # Linux package validation. Public macos-15 concurrency is at least 2
-  # (run 37090922383 overlapped packages+closures), so these two Darwin
-  # jobs run together instead of queuing.
+  canary-slots:
+    if: |-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' &&
+      (inputs.canary_warm_rust == true || inputs.canary_warm_rust == 'true' ||
+      inputs.canary_slots != '' || inputs.canary_crates != ''))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.slots.outputs.matrix }}
+      slots: ${{ steps.slots.outputs.slots }}
+      crates: ${{ steps.slots.outputs.crates }}
+      enabled: ${{ steps.slots.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Compute canary rust-warmup matrix
+        id: slots
+        env:
+          CANARY_SLOTS: ${{ inputs.canary_slots }}
+          CANARY_CRATES: ${{ inputs.canary_crates }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          event = os.environ.get("EVENT_NAME", "")
+          raw = os.environ.get("CANARY_SLOTS", "").strip()
+          crates = os.environ.get("CANARY_CRATES", "").strip()
+          kick = Path(".github/update-kick")
+          kick_text = kick.read_text(encoding="utf-8") if kick.is_file() else ""
+          kick_slots = re.search(r"(?m)^canary-slots:\s*(.+?)\s*$", kick_text)
+          kick_crates = re.search(r"(?m)^canary-crates:\s*(.+?)\s*$", kick_text)
+          if event == "push":
+              raw = kick_slots.group(1) if kick_slots else ""
+              crates = kick_crates.group(1) if kick_crates else ""
+          # Named crates are a family probe realized from every rust
+          # layer. Expanding crates to slots 0-4 (#1269) hogged the
+          # five free-tier macos-15 runners for 2h+ and still missed
+          # rust_settings on the slot stripe filter.
+          if crates:
+              slots = [0]
+          elif raw:
+              slots = [int(part) for part in raw.replace(",", " ").split() if part]
+          else:
+              slots = [0]
+          unique: list[int] = []
+          for slot in slots:
+              if slot not in unique:
+                  unique.append(slot)
+          slots = unique
+          if any(slot < 0 or slot > 4 for slot in slots):
+              raise SystemExit(f"canary slot must be in 0..4, got {slots}")
+          crate_names: list[str] = []
+          for part in crates.replace(",", " ").split():
+              if part and part not in crate_names:
+                  crate_names.append(part)
+          enabled = bool(slots)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"enabled={'true' if enabled else 'false'}\n")
+              fh.write(f"slots={','.join(str(slot) for slot in slots)}\n")
+              fh.write(f"crates={' '.join(crate_names)}\n")
+              fh.write(f"matrix={json.dumps({'slot': slots})}\n")
+        shell: python
+  # Budget and rust layers come from plan-shards on the merged
+  # candidate. A restored prior plan (38130420607: remaining 392/396)
+  # cannot see a Zed/lock cascade shift and must not gate canary.
+  # 38739788947: leftover-contaminated rematerialize pinned Wap+;
+  # two Darwin cascade hosts then produced wb2d. Realize those FODs
+  # on two macos-15 hosts before rust-warmup takes the 5-wide pool.
+  canary-darwin-fods:
+    needs:
+      - prepare-merge
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success'
+    strategy:
+      fail-fast: true
+      max-parallel: 2
+      matrix:
+        host: [0, 1]
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: fod-canary
+      shard: fod-${{ matrix.host }}
+    secrets: inherit
+  canary-warm-rust:
+    needs:
+      - canary-slots
+      - plan-darwin-closures
+      - canary-darwin-fods
+    if: |-
+      always() && !cancelled() &&
+      needs.canary-slots.result == 'success' &&
+      needs.plan-darwin-closures.result == 'success' &&
+      needs.canary-darwin-fods.result == 'success' &&
+      needs.canary-slots.outputs.enabled == 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix: ${{ fromJSON(needs.canary-slots.outputs.matrix) }}
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: rust-warmup
+      shard: rust-${{ matrix.slot }}
+      warmup_artifact: plan-shards-x86_64-linux
+      warmup_slot: ${{ matrix.slot }}
+      canary: true
+      canary_slots: ${{ needs.canary-slots.outputs.slots }}
+      canary_crates: ${{ needs.canary-slots.outputs.crates }}
+    secrets: inherit
+  # rust_* warmup owns all 5 public macos-15 slots, striped across the
+  # planner's crate2nix dependency layers. Packages inventory waits so it
+  # does not steal a slot. Each slot skip-if-in-gkze resumes. A rust_zed
+  # stripe force-locals every SVH-sensitive rust_zed input (workspace
+  # rust_*-0.1.0, 38151215158 collab_ui E0463), not only named
+  # extension_host members. Root shards still build full closures after
+  # this job succeeds; the 400-local-drv gate is unchanged.
+  # Wait for canary to finish (success, failure, or skip) so the five
+  # validate slots never share the free-tier macos-15 pool with it.
+  # #1269 canary 3/4 held two runners for 80+ min and starved slots 0/1.
+  validate-darwin-warm-rust:
+    needs:
+      - prepare-merge
+      - plan-darwin-closures
+      - canary-darwin-fods
+      - canary-warm-rust
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success' &&
+      needs.plan-darwin-closures.result == 'success' &&
+      needs.canary-darwin-fods.result == 'success' &&
+      (needs.canary-warm-rust.result == 'success' ||
+      needs.canary-warm-rust.result == 'skipped' ||
+      needs.canary-warm-rust.result == 'failure')
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        slot: [0, 1, 2, 3, 4]
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: rust-warmup
+      shard: rust-${{ matrix.slot }}
+      warmup_artifact: plan-shards-x86_64-linux
+      warmup_slot: ${{ matrix.slot }}
+    secrets: inherit
+  # Shared non-rust outputs present in two or more Darwin roots. All-root
+  # intersection left remaining=1724/1733 on 38130420607 (rust peel only)
+  # and remaining=829/836 on 38146388927 (darwin-only shared, not home).
+  # Five slots stripe each cascade layer; each path is one drv.
+  # 38394692516: buzz-onnxruntime was not in gkze or cache.nixos.org.
+  # Slot 4 compiled it under APFS I/O and ranlib write-EIO'd. Build it
+  # once here, push via the Cachix hook, then the 5-wide stripe
+  # substitutes. Cascade still runs if this job fails so a canary EIO
+  # after retry does not skip the rest of the intersection.
+  canary-warm-cascade:
+    needs:
+      - prepare-merge
+      - plan-darwin-closures
+      - validate-darwin-warm-rust
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success' &&
+      needs.plan-darwin-closures.result == 'success' &&
+      needs.validate-darwin-warm-rust.result == 'success'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: cascade-canary
+      shard: cascade-canary
+      warmup_artifact: plan-shards-x86_64-linux
+    secrets: inherit
+  validate-darwin-cascade-warmup:
+    needs:
+      - prepare-merge
+      - plan-darwin-closures
+      - validate-darwin-warm-rust
+      - canary-warm-cascade
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success' &&
+      needs.plan-darwin-closures.result == 'success' &&
+      needs.validate-darwin-warm-rust.result == 'success' &&
+      (needs.canary-warm-cascade.result == 'success' ||
+      needs.canary-warm-cascade.result == 'skipped' ||
+      needs.canary-warm-cascade.result == 'failure')
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        slot: [0, 1, 2, 3, 4]
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: validate
+      previous: prepare-x86_64-linux
+      scope: cascade-warmup
+      shard: cascade-${{ matrix.slot }}
+      warmup_artifact: plan-shards-x86_64-linux
+      warmup_slot: ${{ matrix.slot }}
+    secrets: inherit
+  # Package inventory is certify evidence. It waits for cascade so the
+  # free-tier 5 macos-15 runners stay on the 5-wide stripe
+  # (38394692516 slot 2 queued ~2h20m when packages started in
+  # parallel with five cascade jobs). After cascade, buzz-onnxruntime
+  # is in gkze and packages substitutes it.
   validate-darwin-packages:
-    needs: prepare-x86
+    needs:
+      - prepare-merge
+      - plan-darwin-closures
+      - validate-darwin-cascade-warmup
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -124,63 +446,126 @@ jobs:
       previous: prepare-x86_64-linux
       scope: packages
     secrets: inherit
-  # One macos-15 job cannot both validate every package and realize
-  # checks.aarch64-darwin.root-closures inside GitHub's 360-minute cap.
-  # Each shard builds until its budget, the Cachix daemon flushes, and the
-  # next shard substitutes those paths. The last shard fails closed.
-  validate-darwin-closures:
+  # One generated matrix from lib.rootClosureManifest plus shard_costs.json.
+  # The plan job evaluates the candidate tree, not a hand-maintained host list.
+  # Sibling of validate-arm / validate-x86 (separate uses:, not a matrix).
+  # Darwin graph eval is serial: 4-wide SIGTERM'd ubuntu-24.04 at ~800s
+  # (38137325241, 38142145131).
+  plan-darwin-closures:
+    needs: prepare-merge
+    if: |-
+      always() && !cancelled() &&
+      needs.prepare-merge.result == 'success'
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: plan-shards
+      previous: prepare-x86_64-linux
+    secrets: inherit
+  # Always-run per-root Darwin shards. The if: only skips when a required
+  # input job failed; a planned shard cannot skip on the success path.
+  # rust-warmup is a success gate so shards start from a pushed rust_* set.
+  validate-darwin-roots:
     needs:
-      - prepare-x86
+      - plan-darwin-closures
+      - prepare-merge
       - cache-darwin-linux-deps-arm
       - cache-darwin-linux-deps-x86
-    uses: ./.github/workflows/update-native.yml
-    with:
-      runner: macos-15
-      system: aarch64-darwin
-      stage: validate
-      previous: prepare-x86_64-linux
-      scope: closures
-      closure_budget_seconds: "18000"
-      closure_yield: true
-    secrets: inherit
-  validate-darwin-closures-2:
-    needs: validate-darwin-closures
+      - validate-darwin-warm-rust
+      - validate-darwin-cascade-warmup
     if: |-
       always() && !cancelled() &&
-      needs.validate-darwin-closures.result == 'success' &&
-      needs.validate-darwin-closures.outputs.closure_complete == 'false'
+      needs.plan-darwin-closures.result == 'success' &&
+      needs.prepare-merge.result == 'success' &&
+      needs.cache-darwin-linux-deps-arm.result == 'success' &&
+      needs.cache-darwin-linux-deps-x86.result == 'success' &&
+      needs.validate-darwin-warm-rust.result == 'success' &&
+      needs.validate-darwin-cascade-warmup.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan-darwin-closures.outputs.darwin_closure_shards) }}
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
       system: aarch64-darwin
       stage: validate
       previous: prepare-x86_64-linux
-      scope: closures
+      scope: closure-shard
       closure_budget_seconds: "18000"
-      closure_yield: true
+      closure_roots: ${{ matrix.roots }}
+      shard: ${{ matrix.shard }}
     secrets: inherit
-  validate-darwin-closures-3:
-    needs: validate-darwin-closures-2
+  # 39006154683: linux-deps substituted nixos-disk-image from gkze
+  # (no post-build hook) and Darwin closures --max-jobs 0 then spent
+  # 5h after 50 wbb. Path-info the recached VM and one Darwin root
+  # before occupying macos-15 for the aggregate.
+  canary-darwin-cache:
+    needs:
+      - prepare-merge
+      - cache-darwin-linux-deps-arm
+      - cache-darwin-linux-deps-x86
+      - plan-darwin-closures
+      - validate-darwin-roots
     if: |-
       always() && !cancelled() &&
-      needs.validate-darwin-closures-2.result == 'success' &&
-      needs.validate-darwin-closures-2.outputs.closure_complete == 'false'
-    uses: ./.github/workflows/update-native.yml
-    with:
-      runner: macos-15
-      system: aarch64-darwin
-      stage: validate
-      previous: prepare-x86_64-linux
-      scope: closures
-      closure_budget_seconds: "18000"
-      closure_yield: true
-    secrets: inherit
-  validate-darwin-closures-4:
-    needs: validate-darwin-closures-3
+      needs.prepare-merge.result == 'success' &&
+      needs.cache-darwin-linux-deps-arm.result == 'success' &&
+      needs.cache-darwin-linux-deps-x86.result == 'success' &&
+      needs.plan-darwin-closures.result == 'success' &&
+      needs.validate-darwin-roots.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/update-runtime
+        id: runtime
+        with:
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: prepare-x86_64-linux
+          path: ${{ runner.temp }}/previous
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: ${{ runner.temp }}/evidence
+      - name: Assert linux-builder and one Darwin root in Cachix
+        env:
+          NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          NIXCFG_CI_STAGE: assert-cached-boundary
+          NIXCFG_PREVIOUS_CANDIDATE: ${{ runner.temp }}/previous/candidate.json
+          NIXCFG_COVERAGE_EVIDENCE: ${{ runner.temp }}/evidence
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+  # Aggregate proof. Mostly substitution of the per-root checks.
+  validate-darwin-closures:
+    needs:
+      - prepare-merge
+      - cache-darwin-linux-deps-arm
+      - cache-darwin-linux-deps-x86
+      - validate-darwin-roots
+      - canary-darwin-cache
     if: |-
       always() && !cancelled() &&
-      needs.validate-darwin-closures-3.result == 'success' &&
-      needs.validate-darwin-closures-3.outputs.closure_complete == 'false'
+      needs.prepare-merge.result == 'success' &&
+      needs.cache-darwin-linux-deps-arm.result == 'success' &&
+      needs.cache-darwin-linux-deps-x86.result == 'success' &&
+      needs.validate-darwin-roots.result == 'success' &&
+      needs.canary-darwin-cache.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -190,28 +575,92 @@ jobs:
       scope: closures
       closure_budget_seconds: "18000"
     secrets: inherit
+  # Fail closed: every manifest root valid and present in gkze.cachix.org,
+  # every planned shard ran, Linux + Darwin package inventories intact.
+  # Job results are checked first. Root outPaths come from the
+  # plan-darwin-closures artifact, not a second Darwin eval.
+  assert-coverage:
+    needs:
+      - prepare-merge
+      - plan-darwin-closures
+      - validate-arm
+      - validate-x86
+      - validate-darwin-warm-rust
+      - validate-darwin-cascade-warmup
+      - validate-darwin-packages
+      - validate-darwin-roots
+      - validate-darwin-closures
+    if: |-
+      always() && !cancelled() &&
+      (github.event_name != 'workflow_dispatch' ||
+      (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
+      inputs.canary_slots == '' && inputs.canary_crates == ''))
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/update-runtime
+        id: runtime
+        with:
+          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
+          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: prepare-x86_64-linux
+          path: ${{ runner.temp }}/previous
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: ${{ runner.temp }}/evidence
+      - name: Assert root and package coverage
+        env:
+          NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          NIXCFG_CI_STAGE: assert-coverage
+          NIXCFG_PREVIOUS_CANDIDATE: ${{ runner.temp }}/previous/candidate.json
+          NIXCFG_COVERAGE_EVIDENCE: ${{ runner.temp }}/evidence
+          NIXCFG_JOB_RESULTS: |-
+            plan-darwin-closures=${{ needs.plan-darwin-closures.result }}
+            validate-arm=${{ needs.validate-arm.result }}
+            validate-x86=${{ needs.validate-x86.result }}
+            validate-darwin-warm-rust=${{ needs.validate-darwin-warm-rust.result }}
+            validate-darwin-cascade-warmup=${{ needs.validate-darwin-cascade-warmup.result }}
+            validate-darwin-packages=${{ needs.validate-darwin-packages.result }}
+            validate-darwin-roots=${{ needs.validate-darwin-roots.result }}
+            validate-darwin-closures=${{ needs.validate-darwin-closures.result }}
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
   publish:
     needs:
       - validate-arm
       - validate-x86
+      - validate-darwin-warm-rust
+      - validate-darwin-cascade-warmup
       - validate-darwin-packages
+      - validate-darwin-roots
       - validate-darwin-closures
-      - validate-darwin-closures-2
-      - validate-darwin-closures-3
-      - validate-darwin-closures-4
+      - assert-coverage
     if: |-
       always() && !cancelled() &&
       needs.validate-arm.result == 'success' &&
       needs.validate-x86.result == 'success' &&
+      needs.validate-darwin-warm-rust.result == 'success' &&
+      needs.validate-darwin-cascade-warmup.result == 'success' &&
       needs.validate-darwin-packages.result == 'success' &&
-      (needs.validate-darwin-closures.result == 'success' &&
-      needs.validate-darwin-closures.outputs.closure_complete == 'true' ||
-      needs.validate-darwin-closures-2.result == 'success' &&
-      needs.validate-darwin-closures-2.outputs.closure_complete == 'true' ||
-      needs.validate-darwin-closures-3.result == 'success' &&
-      needs.validate-darwin-closures-3.outputs.closure_complete == 'true' ||
-      needs.validate-darwin-closures-4.result == 'success' &&
-      needs.validate-darwin-closures-4.outputs.closure_complete == 'true')
+      needs.validate-darwin-roots.result == 'success' &&
+      needs.validate-darwin-closures.result == 'success' &&
+      needs.assert-coverage.result == 'success'
     # The Python suite and its 100% coverage floor are maintained on Darwin.
     runs-on: macos-15
     timeout-minutes: 120
@@ -260,25 +709,40 @@ jobs:
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
         shell: python
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
   repair:
     needs:
+      - prepare-pins
       - prepare-darwin
       - prepare-arm
       - prepare-x86
+      - prepare-merge
       - cache-darwin-linux-deps-arm
       - cache-darwin-linux-deps-x86
       - validate-arm
       - validate-x86
+      - validate-darwin-warm-rust
+      - validate-darwin-cascade-warmup
       - validate-darwin-packages
+      - plan-darwin-closures
+      - validate-darwin-roots
+      - canary-darwin-cache
       - validate-darwin-closures
-      - validate-darwin-closures-2
-      - validate-darwin-closures-3
-      - validate-darwin-closures-4
+      - assert-coverage
       - publish
     if: |-
       always() && !cancelled() && contains(needs.*.result, 'failure') &&
       (github.event_name == 'schedule' || github.event_name == 'push' ||
-      inputs.repair == true || inputs.repair == 'true')
+      inputs.repair == true || inputs.repair == 'true') &&
+      (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
+      inputs.canary_slots == '' && inputs.canary_crates == '')
     # The repair gate runs the Darwin-maintained Python suite, as publish does.
     runs-on: macos-15
     timeout-minutes: 120
@@ -349,6 +813,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NIXCFG_CI_STAGE: start-repair
           NIXCFG_UPDATE_TARGETS: ${{ inputs.targets || '' }}
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
+      - name: Flush Cachix daemon
+        if: always()
+        env:
+          NIXCFG_CI_STAGE: flush-cachix
         run: |
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")

@@ -51,6 +51,25 @@ def _get_updaters() -> dict[str, UpdaterClass]:
     return updater_module.resolve_registry_alias(UPDATERS, ensure_updaters_loaded)
 
 
+def publish_source_update(
+    current: SourceEntry | None,
+    update: SourceEntry,
+    *,
+    native_only: bool,
+    pins_only: bool,
+) -> SourceEntry:
+    """Publish one updater result into the shared source map.
+
+    ``pins_only`` replaces the entry. Merging a version/URL bump onto HEAD
+    either restored stale platform hashes (38191092497) or raised
+    ``Cannot merge hash entries with hash mapping`` (38203865711).
+    Native hash jobs still merge onto the refreshed pin.
+    """
+    if pins_only or current is None or not native_only:
+        return update
+    return current.merge_native_update(update)
+
+
 @dataclass(frozen=True)
 class SourceTaskContext:
     """Context shared by one source update task.
@@ -275,6 +294,9 @@ async def update_source_task(
                 context.preparation.resolved(name) if context.preparation else None
             ),
             preparing=context.preparation is not None,
+            pins_only=context.preparation.pins_only
+            if context.preparation is not None
+            else False,
         )
 
         await put(
@@ -502,11 +524,12 @@ async def run_sources_phase(context: SourcesPhaseContext) -> UpdatePhaseResult:
                 for artifact in result.artifacts:
                     shared.generated_artifacts[artifact.path] = artifact.content
                 if result.source_update is not None:
-                    current = shared.effective_sources.get(name)
-                    shared.effective_sources[name] = (
-                        current.merge_native_update(result.source_update)
-                        if context.native_only and current is not None
-                        else result.source_update
+                    shared.effective_sources[name] = publish_source_update(
+                        shared.effective_sources.get(name),
+                        result.source_update,
+                        native_only=context.native_only,
+                        pins_only=context.preparation is not None
+                        and context.preparation.pins_only,
                     )
             return result
 

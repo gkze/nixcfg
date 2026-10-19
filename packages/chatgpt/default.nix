@@ -138,8 +138,9 @@ else
     ];
 
     # Electron dlopens the Qt shims only when the host provides a Qt platform
-    # theme, and the Android NDK prebuilds vendored inside serialport can never
-    # load on Linux. Neither may fail the patchelf pass.
+    # theme. Vendored node-hid / serialport prebuilds also ship Android NDK and
+    # musl objects that can never load on glibc Linux (38564429681 validate-x86:
+    # libc.musl-x86_64.so.1 on chatgpt-26.1007.71326). None may fail patchelf.
     autoPatchelfIgnoreMissingDeps = [
       "libQt5Core.so.5"
       "libQt5Gui.so.5"
@@ -149,6 +150,8 @@ else
       "libQt6Widgets.so.6"
       "liblog.so"
       "libc++_shared.so"
+      "libc.musl-x86_64.so.1"
+      "libc.musl-aarch64.so.1"
     ];
 
     dontConfigure = true;

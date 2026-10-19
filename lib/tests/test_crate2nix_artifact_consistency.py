@@ -153,16 +153,17 @@ def test_target_change_detection_tracks_the_manifest_file(
         crate_hashes="{}\n",
         crate_sources="manifest\n",
     )
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
     _write_current_artifacts(tmp_path, target)
     manifest = tmp_path / target.crate_sources
 
-    assert crate2nix._target_has_changes(target, refreshed, tmp_path)
+    assert crate2nix._target_has_changes(target, refreshed)
 
     manifest.write_text("manifest\n", encoding="utf-8")
-    assert not crate2nix._target_has_changes(target, refreshed, tmp_path)
+    assert not crate2nix._target_has_changes(target, refreshed)
 
     manifest.write_text("stale\n", encoding="utf-8")
-    assert crate2nix._target_has_changes(target, refreshed, tmp_path)
+    assert crate2nix._target_has_changes(target, refreshed)
 
 
 @pytest.mark.parametrize(
@@ -186,13 +187,14 @@ def test_target_change_detection_rejects_incomplete_manifest_metadata(
         crate_hashes="{}\n",
         crate_sources=rendered_sources,
     )
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
     _write_current_artifacts(tmp_path, target)
 
     with pytest.raises(
         RuntimeError,
         match="Incomplete crate source artifact metadata for demo",
     ):
-        crate2nix._target_has_changes(target, refreshed, tmp_path)
+        crate2nix._target_has_changes(target, refreshed)
 
 
 def test_write_target_persists_a_complete_manifest(
@@ -206,9 +208,10 @@ def test_write_target_persists_a_complete_manifest(
         crate_hashes="{}\n",
         crate_sources="manifest\n",
     )
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
     (tmp_path / "demo").mkdir()
 
-    crate2nix._write_target(target, refreshed, tmp_path)
+    crate2nix._write_target(target, refreshed)
 
     assert (tmp_path / target.cargo_nix).read_text(encoding="utf-8") == "cargo\n"
     assert (tmp_path / target.crate_hashes).read_text(encoding="utf-8") == "{}\n"
@@ -238,10 +241,11 @@ def test_write_target_rejects_incomplete_manifest_metadata(
         crate_hashes="{}\n",
         crate_sources=rendered_sources,
     )
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
     (tmp_path / "demo").mkdir()
 
     with pytest.raises(
         RuntimeError,
         match="Incomplete crate source artifact metadata for demo",
     ):
-        crate2nix._write_target(target, refreshed, tmp_path)
+        crate2nix._write_target(target, refreshed)

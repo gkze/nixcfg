@@ -11,13 +11,12 @@ from typer.testing import CliRunner
 
 from lib.tests._run_updates_helpers import configure_isolated_run, make_run_plan
 from lib.tests._update_workspace_helpers import init_update_workspace_repo
-from lib.update.cli import app, run_updates
+from lib.update.cli import UpdateSummary, app, run_updates
 from lib.update.config import resolve_active_config, resolve_config
 from lib.update.derivation_validation import (
     ROOT_CLOSURE_VALIDATION_TIMEOUT_SECONDS,
     validate_root_closures,
 )
-from lib.update.summary import UpdateSummary
 
 
 @pytest.mark.parametrize(
@@ -67,9 +66,7 @@ def test_cli_root_validation_honors_explicit_subprocess_bounds(
         return await run_updates(opts)
 
     monkeypatch.setattr("lib.update.durable.execute", execute)
-    monkeypatch.setattr(
-        "lib.update.runtime_source.maybe_reexec_checkout_update", lambda: None
-    )
+    monkeypatch.setattr("lib.update.cli._maybe_reexec_checkout_update", lambda: None)
     monkeypatch.setattr("lib.update.cli._handle_required_tool_check", lambda _: None)
     calls: list[tuple[list[str], object]] = []
 

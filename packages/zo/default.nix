@@ -4,7 +4,6 @@
   mkZipApp,
   python3,
   selfSource,
-  signAndVerifyBundle,
   ...
 }:
 mkSimpleDarwinApp {
@@ -27,16 +26,13 @@ mkSimpleDarwinApp {
     } ${lib.getExe python3} ${./patch_updater.py} \
       "$app_bundle/Contents/Resources/app.asar" \
       "$app_bundle/Contents/Info.plist"
-    ${signAndVerifyBundle {
-      bundle = ''"$app_bundle"'';
-      preserveMetadata = [
-        "identifier"
-        "flags"
-        "runtime"
-      ];
-      entitlements = ./Entitlements.plist;
-      verify = false;
-    }}
+    /usr/bin/codesign \
+      --force \
+      --deep \
+      --sign - \
+      --preserve-metadata=identifier,flags,runtime \
+      --entitlements ${./Entitlements.plist} \
+      "$app_bundle"
   '';
   description = "Desktop client for the Zo personal cloud computer";
   homepage = "https://zo.computer/";

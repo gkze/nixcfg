@@ -16,7 +16,6 @@ from urllib.parse import urlparse
 from rich.text import Text
 
 from lib.diagnostics import redact_urls
-from lib.update import failures
 from lib.update.events import EventSink, ignore_event
 
 if TYPE_CHECKING:
@@ -31,7 +30,7 @@ from lib.nix.commands.base import (
 from lib.nix.commands.hash import nix_hash_convert as libnix_hash_convert
 from lib.nix.commands.hash import nix_prefetch_url_result as libnix_prefetch_url_result
 from lib.update.config import UpdateConfig, resolve_active_config
-from lib.update.constants import NIX_BUILD_FAILURE_TAIL_LINES
+from lib.update.constants import NIX_BUILD_FAILURE_TAIL_LINES, resolve_timeout_alias
 from lib.update.errors import format_exception
 from lib.update.events import (
     CommandResult,
@@ -64,13 +63,21 @@ _TASK_ERROR_TYPES: tuple[type[Exception], ...] = (
 _TIMEOUT_MESSAGE_PREFIX = "command timed out after"
 _LOG = logging.getLogger(__name__)
 _NIX_STORE_NAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9+._?=-]+")
-# A prefetch is a pure transfer, so its transient set is every Nix network
-# fault plus transfer timeouts. Gateway spellings such as ``502 Bad Gateway``
-# and curl's ``returned error: 503`` used to be missing here although the same
-# condition spelled ``HTTP error 503`` already retried.
 _NIX_PREFETCH_TRANSIENT_MARKERS = (
-    *failures.NIX_NETWORK_TRANSIENT_MARKERS,
-    *failures.TRANSFER_TIMEOUT_MARKERS,
+    "Could not resolve host",
+    "Failure when receiving data from the peer",
+    "Failed to connect",
+    "HTTP error 502",
+    "HTTP error 503",
+    "HTTP error 504",
+    "HTTP protocol violation",
+    "HTTP/2 framing layer",
+    "HTTP/2 stream",
+    "Operation timed out",
+    "Operation too slow",
+    "Temporary failure in name resolution",
+    "connection reset",
+    "timed out",
 )
 
 
@@ -147,14 +154,30 @@ def _truncate_command(text: str, max_len: int = 80) -> str:
     return f"{trimmed}{suffix}"
 
 
+def _resolve_timeout_alias(
+    *,
+    command_timeout: float | None,
+    kwargs: dict[str, object],
+) -> float | None:
+    return resolve_timeout_alias(
+        named_timeout=command_timeout,
+        named_timeout_label="command_timeout",
+        kwargs=kwargs,
+    )
+
+
 async def _run_command(
     args: list[str],
     *,
     options: RunCommandOptions,
     emit: EventSink = ignore_event,
+    **kwargs: object,
 ) -> CommandResult:
     """Stream subprocess progress and return its outcome after cleanup."""
-    command_timeout = options.command_timeout
+    command_timeout = _resolve_timeout_alias(
+        command_timeout=options.command_timeout,
+        kwargs=kwargs,
+    )
     config = resolve_active_config(options.config)
     if command_timeout is None:
         command_timeout = config.default_subprocess_timeout
@@ -176,7 +199,7 @@ async def _run_command(
         async with aclosing(
             stream_process(
                 args,
-                command_timeout=command_timeout,
+                timeout=command_timeout,
                 env=options.env,
                 output_limit=options.output_limit,
             )
@@ -236,6 +259,7 @@ async def run_command(
     *,
     options: RunCommandOptions,
     emit: EventSink = ignore_event,
+    **kwargs: object,
 ) -> CommandResult:
     """Apply run-owned budgets at the process boundary, not around source work."""
     config = resolve_active_config(options.config)
@@ -251,7 +275,7 @@ async def run_command(
             timing = await stack.enter_async_context(
                 resource_slot(kind, source=options.source, config=config)
             )
-        result = await _run_command(args, options=options, emit=emit)
+        result = await _run_command(args, options=options, emit=emit, **kwargs)
     timing.stdout_bytes += len(result.stdout.encode())
     timing.stderr_bytes += len(result.stderr.encode())
     timing.nonzero_exits += result.returncode != 0
@@ -358,7 +382,10 @@ def _is_retryable_prefetch_error(exc: NixCommandError) -> bool:
     """
     if exc.message.startswith(_TIMEOUT_MESSAGE_PREFIX):
         return False
-    return failures.contains_marker(str(exc), _NIX_PREFETCH_TRANSIENT_MARKERS)
+    output = str(exc).casefold()
+    return any(
+        marker.casefold() in output for marker in _NIX_PREFETCH_TRANSIENT_MARKERS
+    )
 
 
 def _record_prefetch_receipt(store_path: str) -> None:
@@ -375,11 +402,16 @@ def _record_prefetch_receipt(store_path: str) -> None:
 
 
 async def compute_sri_hash(
-    source: str, url: str, *, config: UpdateConfig, emit: EventSink = ignore_event
+    source: str,
+    url: str,
+    *,
+    config: UpdateConfig,
+    emit: EventSink = ignore_event,
+    name: str | None = None,
 ) -> str:
     """Prefetch a URL and return its SRI hash via :func:`lib.nix.commands.hash.nix_prefetch_url`."""
     args = ["nix", "store", "prefetch-file", "--json", "--hash-type", "sha256"]
-    prefetch_name = _nix_prefetch_name(url)
+    prefetch_name = _nix_prefetch_name(url) if name is None else name
     if prefetch_name is not None:
         args.extend(["--name", prefetch_name])
     args.append(url)

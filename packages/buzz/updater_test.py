@@ -22,15 +22,13 @@ from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
+    darwin_guarded_exports,
     expect_binding,
     nix_attrset_call,
     parse_nix_expr,
 )
 from lib.tests._nix_source import nix_file_expr, nix_source_fragment_expr
-from lib.tests._package_registry import (
-    is_darwin_overlay_export,
-    registry_override_metadata,
-)
+from lib.tests._package_registry import registry_override_metadata
 from lib.tests._updater_helpers import (
     collect_events,
     install_fixed_hash_stream,
@@ -2139,6 +2137,12 @@ def test_buzz_contract_helpers_reject_malformed_or_incomplete_sources(
     payloads = _source_payloads()
     mesh_payloads = _mesh_source_payloads()
 
+    with pytest.raises(TypeError, match="not an object"):
+        module._require_object([], context="object")
+    with pytest.raises(TypeError, match="not a list"):
+        module._require_list({}, context="list")
+    with pytest.raises(TypeError, match="missing key"):
+        module._require_string({}, "key", context="mapping")
     with pytest.raises(RuntimeError, match="valid UTF-8 JSON"):
         module._decode_json(b"\xff", context="JSON")
     with pytest.raises(RuntimeError, match="valid UTF-8 TOML"):
@@ -2581,7 +2585,7 @@ def test_buzz_hashes_source_pnpm_and_both_cargo_locks_without_exporting(
         },
     )
     assert updater.build_result(info, hashes) == expected_result
-    assert updater.always_rehash
+    assert run_async(updater._is_latest(UpdateContext(current=None), info)) is False
 
 
 def test_buzz_hashing_requires_a_discovered_artifact_directory(
@@ -4121,11 +4125,15 @@ def test_buzz_enters_the_effective_arm64_darwin_app_graph() -> None:
         packageMaterialization.packageFunctionsForSystem resolvedSystem""",
     )
 
-    registry = expect_instance(
-        nix_file_expr("packages/registry.nix"), FunctionDefinition
+    overlay = expect_instance(
+        nix_file_expr("overlays/binary-darwin-apps.nix"),
+        FunctionDefinition,
     )
-    assert is_darwin_overlay_export(
-        expect_instance(registry.output, AttributeSet), "buzz"
+    # The exports are the argument of the Darwin-only guard.
+    overlay_exports = darwin_guarded_exports(overlay)
+    assert_nix_ast_equal(
+        expect_binding(overlay_exports.values, "buzz").value,
+        'callDarwinAppPackage "buzz"',
     )
 
     routing = expect_instance(

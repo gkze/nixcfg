@@ -4,7 +4,6 @@ import asyncio
 import dataclasses
 import os
 import subprocess
-from functools import partial
 from pathlib import Path
 
 import pytest
@@ -40,6 +39,7 @@ def generation_target(
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("original\n", encoding="utf-8")
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(crate2nix, "_xdg_cache_home", lambda: tmp_path / "cache")
     monkeypatch.setattr(crate2nix, "_crate2nix_cargo_home", lambda: tmp_path / "cargo")
     monkeypatch.setattr(crate2nix, "_current_platform", lambda: "test-system")
@@ -105,10 +105,10 @@ def test_generation_identity_tracks_code_toolchain_and_locked_inputs(
 ) -> None:
     """Same-source reuse is invalidated by every independently varying producer input."""
     source = Path("/nix/store/source")
-    before = crate2nix._generation_identity(generation_target, source, tmp_path)
+    before = crate2nix._generation_identity(generation_target, source)
     assert before is not None
     (tmp_path / changed).write_text("changed", encoding="utf-8")
-    assert crate2nix._generation_identity(generation_target, source, tmp_path) != before
+    assert crate2nix._generation_identity(generation_target, source) != before
 
 
 def test_generation_identity_tracks_options_config_and_environment(
@@ -118,36 +118,31 @@ def test_generation_identity_tracks_options_config_and_environment(
 ) -> None:
     """Generator options and Cargo configuration cannot be hidden by source equality."""
     source = Path("/nix/store/source")
-    before = crate2nix._generation_identity(generation_target, source, tmp_path)
+    before = crate2nix._generation_identity(generation_target, source)
     assert before is not None
     assert (
-        crate2nix._generation_identity(
-            generation_target, Path("/nix/store/other"), tmp_path
-        )
+        crate2nix._generation_identity(generation_target, Path("/nix/store/other"))
         != before
     )
     changed = dataclasses.replace(
         generation_target, cargo_manifest_relpath=Path("nested/Cargo.toml")
     )
-    assert crate2nix._generation_identity(changed, source, tmp_path) != before
+    assert crate2nix._generation_identity(changed, source) != before
     (tmp_path / "cargo").mkdir()
     (tmp_path / "cargo/config.toml").write_text(
         "[net]\noffline=true\n", encoding="utf-8"
     )
-    configured = crate2nix._generation_identity(generation_target, source, tmp_path)
+    configured = crate2nix._generation_identity(generation_target, source)
     assert configured != before
     monkeypatch.setenv("CARGO_BUILD_TARGET", "different-platform")
-    assert (
-        crate2nix._generation_identity(generation_target, source, tmp_path)
-        != configured
-    )
+    assert crate2nix._generation_identity(generation_target, source) != configured
 
     # A configured-but-absent config path is still part of the identity, so a
     # different missing path cannot silently authorize reuse of a receipt.
     monkeypatch.setenv("NIX_USER_CONF_FILES", str(tmp_path / "absent-a.conf"))
-    missing_a = crate2nix._generation_identity(generation_target, source, tmp_path)
+    missing_a = crate2nix._generation_identity(generation_target, source)
     monkeypatch.setenv("NIX_USER_CONF_FILES", str(tmp_path / "absent-b.conf"))
-    missing_b = crate2nix._generation_identity(generation_target, source, tmp_path)
+    missing_b = crate2nix._generation_identity(generation_target, source)
     assert missing_a is not None
     assert missing_b is not None
     assert missing_a != missing_b
@@ -166,7 +161,7 @@ def test_generation_identity_normalizes_nix_user_conf_files_by_content(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("substituters = https://cache.nixos.org\n", encoding="utf-8")
     monkeypatch.setenv("NIX_USER_CONF_FILES", f"{first}{os.pathsep}{second}")
-    baseline = crate2nix._generation_identity(generation_target, source, tmp_path)
+    baseline = crate2nix._generation_identity(generation_target, source)
     assert baseline is not None
     moved_first = tmp_path / "runner-c" / "nix.conf"
     moved_second = tmp_path / "runner-d" / "nix.conf"
@@ -176,16 +171,12 @@ def test_generation_identity_normalizes_nix_user_conf_files_by_content(
     monkeypatch.setenv(
         "NIX_USER_CONF_FILES", f"{moved_first}{os.pathsep}{moved_second}"
     )
-    assert (
-        crate2nix._generation_identity(generation_target, source, tmp_path) == baseline
-    )
+    assert crate2nix._generation_identity(generation_target, source) == baseline
     moved_second.write_text(
         "substituters = https://cache.nixos.org https://gkze.cachix.org\n",
         encoding="utf-8",
     )
-    assert (
-        crate2nix._generation_identity(generation_target, source, tmp_path) != baseline
-    )
+    assert crate2nix._generation_identity(generation_target, source) != baseline
 
 
 def test_generation_identity_fails_closed_for_unreadable_nix_user_conf(
@@ -206,7 +197,7 @@ def test_generation_identity_fails_closed_for_unreadable_nix_user_conf(
         return original(self)
 
     monkeypatch.setattr(Path, "read_bytes", boom)
-    assert crate2nix._generation_identity(generation_target, source, tmp_path) is None
+    assert crate2nix._generation_identity(generation_target, source) is None
 
 
 def test_generation_identity_ignores_empty_nix_user_conf_entries(
@@ -219,11 +210,9 @@ def test_generation_identity_ignores_empty_nix_user_conf_entries(
     conf = tmp_path / "nix.conf"
     conf.write_text("substituters = https://cache.nixos.org\n", encoding="utf-8")
     monkeypatch.setenv("NIX_USER_CONF_FILES", f"{conf}{os.pathsep}")
-    baseline = crate2nix._generation_identity(generation_target, source, tmp_path)
+    baseline = crate2nix._generation_identity(generation_target, source)
     monkeypatch.setenv("NIX_USER_CONF_FILES", str(conf))
-    assert (
-        crate2nix._generation_identity(generation_target, source, tmp_path) == baseline
-    )
+    assert crate2nix._generation_identity(generation_target, source) == baseline
 
 
 def test_generation_identity_fails_closed_for_uninspectable_inputs(
@@ -235,18 +224,16 @@ def test_generation_identity_fails_closed_for_uninspectable_inputs(
     source = Path("/nix/store/source")
     assert (
         crate2nix._generation_identity(
-            dataclasses.replace(generation_target, cache_generation=False),
-            source,
-            tmp_path,
+            dataclasses.replace(generation_target, cache_generation=False), source
         )
         is None
     )
-    assert crate2nix._generation_identity(generation_target, tmp_path, tmp_path) is None
+    assert crate2nix._generation_identity(generation_target, tmp_path) is None
     (tmp_path / "uv.lock").unlink()
-    assert crate2nix._generation_identity(generation_target, source, tmp_path) is None
+    assert crate2nix._generation_identity(generation_target, source) is None
     (tmp_path / "uv.lock").write_text("restored", encoding="utf-8")
     monkeypatch.setattr(crate2nix.shutil, "which", lambda _name: None)
-    assert crate2nix._generation_identity(generation_target, source, tmp_path) is None
+    assert crate2nix._generation_identity(generation_target, source) is None
 
 
 def test_generation_identity_checks_mutable_tool_contents(
@@ -259,13 +246,11 @@ def test_generation_identity_checks_mutable_tool_contents(
     executable.write_text("tool one", encoding="utf-8")
     monkeypatch.setattr(crate2nix.shutil, "which", lambda _name: str(executable))
     before = crate2nix._generation_identity(
-        generation_target, Path("/nix/store/source"), tmp_path
+        generation_target, Path("/nix/store/source")
     )
     executable.write_text("tool two", encoding="utf-8")
     assert (
-        crate2nix._generation_identity(
-            generation_target, Path("/nix/store/source"), tmp_path
-        )
+        crate2nix._generation_identity(generation_target, Path("/nix/store/source"))
         != before
     )
 
@@ -296,13 +281,11 @@ def test_crate_generation_reuses_verified_outputs_and_repairs_drift(
         return subprocess.CompletedProcess(args, 0, "", "")
 
     monkeypatch.setattr(crate2nix, "_run_crate2nix_generate", generate)
-    refreshed = crate2nix._refresh_target(generation_target, root=tmp_path)
-    crate2nix._write_target(generation_target, refreshed, tmp_path)
+    refreshed = crate2nix._refresh_target(generation_target)
+    crate2nix._write_target(generation_target, refreshed)
     progress: list[str] = []
     assert (
-        crate2nix._refresh_target(
-            generation_target, root=tmp_path, progress=progress.append
-        )
+        crate2nix._refresh_target(generation_target, progress=progress.append)
         == refreshed
     )
     assert calls == 1
@@ -311,7 +294,7 @@ def test_crate_generation_reuses_verified_outputs_and_repairs_drift(
     async def cached_refresh() -> crate2nix.RefreshResult:
         async with runtime_scope(resolve_config()) as runtime:
             result = await asyncio.to_thread(
-                partial(crate2nix._refresh_target, root=tmp_path), generation_target
+                crate2nix._refresh_target, generation_target
             )
             assert (
                 runtime.timing(
@@ -324,11 +307,11 @@ def test_crate_generation_reuses_verified_outputs_and_repairs_drift(
     assert asyncio.run(cached_refresh()) == refreshed
     assert calls == 1
     (tmp_path / generation_target.cargo_nix).write_text("drift\n", encoding="utf-8")
-    assert crate2nix._refresh_target(generation_target, root=tmp_path) == refreshed
+    assert crate2nix._refresh_target(generation_target) == refreshed
     assert calls == 2
-    crate2nix._write_target(generation_target, refreshed, tmp_path)
+    crate2nix._write_target(generation_target, refreshed)
     (tmp_path / "demo/normalize.py").write_text("updated\n", encoding="utf-8")
-    assert crate2nix._refresh_target(generation_target, root=tmp_path) == refreshed
+    assert crate2nix._refresh_target(generation_target) == refreshed
     assert calls == 3
 
 
@@ -345,9 +328,9 @@ def test_manifest_receipt_requires_the_manifest_and_valid_utf8(
     generation_receipts.save(
         crate2nix._generation_receipt_path(target), identity="key", outputs=outputs
     )
-    cached = crate2nix._cached_refresh(target, "key", tmp_path)
+    cached = crate2nix._cached_refresh(target, "key")
     assert cached is not None
     assert cached.crate_sources == "{}\n"
     (tmp_path / target.crate_hashes).write_bytes(b"\xff")
-    assert crate2nix._cached_refresh(target, "key", tmp_path) is None
-    assert crate2nix._cached_refresh(target, None, tmp_path) is None
+    assert crate2nix._cached_refresh(target, "key") is None
+    assert crate2nix._cached_refresh(target, None) is None

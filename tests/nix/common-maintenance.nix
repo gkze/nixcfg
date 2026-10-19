@@ -139,7 +139,7 @@ let
       }
       (maintenanceFor {
         system = "aarch64-darwin";
-        extraModules = [ (src + "/darwin/george/caches.nix") ];
+        extraModules = [ (src + "/modules/darwin/george/caches.nix") ];
       })
     )
     (assertEq "store headroom thresholds must be configured together" false partialHeadroom.success)

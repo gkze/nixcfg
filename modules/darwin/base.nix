@@ -130,11 +130,7 @@ in
       defaults = {
         NSGlobalDomain = {
           AppleEnableSwipeNavigateWithScrolls = true;
-          # Pin dark mode. SwitchesAutomatically must stay explicitly false:
-          # nix-darwin writes defaults but never deletes keys, so hosts that
-          # previously had `true` would keep auto-switching without this.
-          AppleInterfaceStyle = "Dark";
-          AppleInterfaceStyleSwitchesAutomatically = false;
+          AppleInterfaceStyleSwitchesAutomatically = true;
           "com.apple.mouse.tapBehavior" = 1;
           "com.apple.sound.beep.feedback" = 0;
           "com.apple.trackpad.enableSecondaryClick" = true;

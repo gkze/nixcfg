@@ -149,8 +149,8 @@ can be removed after that derivation is in the `gkze` cache.
 
 Run 36672202468 failed Darwin closure builds that a later shard still had
 to rebuild. Those pins stay in the closure, and the build correction is
-in tree. The aarch64 DMG hash of Comet is the bytes that run fetched. The
-Linux ARM prefetch hold remains.
+in tree. Comet rematerializes the mutable ``comet_latest.dmg`` hashes on
+Darwin prepare; Linux ARM reuses those hashes instead of prefetching R2.
 
 The app executable of Superconductor is `super.engineering`. The
 `CFBundleExecutable` of Reason is `Reason`. OpenCode 1.18 ships

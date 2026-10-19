@@ -3,8 +3,13 @@
 import asyncio
 import dataclasses
 import json
+import os
 import platform
 import re
+import signal
+import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -37,10 +42,6 @@ from lib.update.events import (
     UpdateEvent,
     ignore_event,
 )
-from lib.update.failures import (
-    has_hash_mismatch_signal,
-    is_retryable_fixed_output_failure,
-)
 from lib.update.flake import nixpkgs_expression
 from lib.update.nix_expr import compact_nix_expr, select_attrs
 from lib.update.paths import get_repo_file, local_flake_url
@@ -53,7 +54,8 @@ from lib.update.process import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
+    from subprocess import CompletedProcess
 
     from lib.nix.models.sources import SourceEntry
 
@@ -85,7 +87,107 @@ def get_current_nix_platform() -> str:
     return normalize_nix_platform(platform.machine(), platform.system())
 
 
+_HASH_MISMATCH_INDICATORS = (
+    "hash mismatch",
+    "HashMismatch",
+    "specified:",
+)
+
 _FIXED_OUTPUT_HASH_MAX_ATTEMPTS = 3
+_NIX_NETWORK_TRANSIENT_MARKERS = (
+    "502 Bad Gateway",
+    "503 Service Unavailable",
+    "504 Gateway Time-out",
+    "Could not resolve host",
+    "Failure when receiving data from the peer",
+    "Failed to connect",
+    "HTTP error 502",
+    "HTTP error 503",
+    "HTTP error 504",
+    "HTTP protocol violation",
+    "HTTP/2 framing layer",
+    "HTTP/2 stream",
+    "NameServerFailure",
+    "Operation too slow",
+    "Temporary failure in name resolution",
+    "connection reset",
+    "returned error: 502",
+    "returned error: 503",
+    "returned error: 504",
+)
+
+_FIXED_OUTPUT_ONLY_TRANSIENT_MARKERS = (
+    "Operation timed out",
+    "aborted due to timeout",
+    "Fail extracting tarball",
+    "timed out",
+)
+# fetchurl prints the derivation *name*, not the word "source". Deno JSR
+# files use names like `_std_collections-1.1.6-sum_of_test.ts` (#1257).
+_CANNOT_DOWNLOAD_FROM_MIRROR = re.compile(
+    r"cannot download \S+ from any mirror",
+    re.IGNORECASE,
+)
+
+# Hosted macos-15 store filesystems fault mid-build with EILSEQ. Nix reports
+# that as "Illegal byte sequence" on unlink or pread; the same machines also
+# die with SIGBUS (signal 10). After that I/O damage the next nix invocation
+# can fail only on a vanished store .drv, a vanished store build input, an
+# unreadable Cachix-substituted crate2nix rlib (rustc E0463 after --extern
+# /nix/store/...rlib *and* an I/O or existence note), or a crashed daemon
+# (see ``_nix_output_has_missing_store_drv`` and
+# ``_nix_output_has_vanished_store_build_input``). Bare E0463 with a store
+# ``--extern`` and no I/O note is a builder failure (#1258). None of the
+# store-fault signals are derivation failures.
+#
+# 38394692516 slot 4: APFS ``(IOStorageFamily) disk2s7: I/O error`` while
+# clang-wrapper ranlib wrote ``libonnxruntime_common.a``. The builder
+# then exited 2. That write-EIO is a host storage fault, not a
+# deterministic cctools race: the same volume, Data, and container all
+# logged I/O errors, and ``/nix`` still had tens of GiB free.
+_NIX_STORE_TRANSIENT_MARKERS = (
+    "Illegal byte sequence",
+    "Input/output error",
+    "can't write to output file",
+    "Nix daemon disconnected unexpectedly",
+    "cannot open connection to remote store 'daemon'",
+    # #1257: EILSEQ unlink of an active-builds lock, then the daemon died.
+    'opening lock file "/nix/var/nix/active-builds/',
+)
+_FAILED_DRV_PATH = re.compile(
+    r"(?:cannot build|builder for) '(/nix/store/[0-9a-z]{32}-[^']+\.drv)'",
+    re.IGNORECASE,
+)
+_STORE_BUS_SIGNALS = frozenset({10, signal.SIGBUS})
+_STORE_EXTERN_RLIB = re.compile(
+    r"--extern\s+\S+=/nix/store/[0-9a-z]{32}-[^\s]+\.rlib",
+    re.IGNORECASE,
+)
+_RUSTC_CANT_FIND_CRATE = re.compile(
+    r"error\[e0463\]:\s*can't find crate",
+    re.IGNORECASE,
+)
+# rustc locator notes for a missing or non-file --extern path. Bare E0463
+# (#1258 rust_agent_ui / language_models) does not emit these.
+_RUSTC_EXTERN_LOCATION_IO = re.compile(
+    r"extern location for \S+ (?:does not exist|is not a file):",
+    re.IGNORECASE,
+)
+_STORE_RLIB_ENOENT = re.compile(
+    r'opening file "/nix/store/[^"]+\.rlib": no such file or directory',
+    re.IGNORECASE,
+)
+_STORE_RLIB_EILSEQ = re.compile(
+    r"/nix/store/\S+\.rlib[^\n]*illegal byte sequence",
+    re.IGNORECASE,
+)
+# 38606641679 slot 2: APFS pread EILSEQ while substituting emdash-pnpm-deps,
+# then pnpmConfigHook `cat $pnpmDeps/.fetcher-version` on the leftover path.
+_MISSING_STORE_FETCHER_VERSION = re.compile(
+    r"(/nix/store/[0-9a-z]{32}-[A-Za-z0-9+._?=-]+)/\.fetcher-version: "
+    r"no such file or directory",
+    re.IGNORECASE,
+)
 
 _PLATFORM_HASH_PAYLOAD_SIZE = 2
 
@@ -118,6 +220,7 @@ def _build_fetch_from_github_call(
     rev: str | None = None,
     tag: str | None = None,
     hash_value: str | NixExpression | None = None,
+    post_fetch: str | None = None,
     fetch_submodules: bool | None = None,
 ) -> FunctionCall:
     if (rev is None) == (tag is None):
@@ -138,6 +241,8 @@ def _build_fetch_from_github_call(
         bindings.append(Binding(name="rev", value=rev))
     if tag is not None:
         bindings.append(Binding(name="tag", value=tag))
+    if post_fetch is not None:
+        bindings.append(Binding(name="postFetch", value=post_fetch))
     if fetch_submodules is not None:
         bindings.append(
             Binding(name="fetchSubmodules", value=Primitive(value=fetch_submodules))
@@ -155,6 +260,7 @@ def _build_fetch_from_github_expr(
     rev: str | None = None,
     tag: str | None = None,
     hash_value: str | NixExpression | None = None,
+    post_fetch: str | None = None,
     fetch_submodules: bool | None = None,
 ) -> str:
     return compact_nix_expr(
@@ -164,6 +270,7 @@ def _build_fetch_from_github_expr(
             rev=rev,
             tag=tag,
             hash_value=hash_value,
+            post_fetch=post_fetch,
             fetch_submodules=fetch_submodules,
         ).rebuild(),
     )
@@ -471,7 +578,8 @@ def _extract_nix_hash(
     if err is not None:
         return err.hash
     config = resolve_active_config(config)
-    if has_hash_mismatch_signal(output):
+    has_mismatch_signal = _has_hash_mismatch_signal(output)
+    if has_mismatch_signal:
         msg = (
             "Hash mismatch detected in nix output but could not extract the hash. "
             "This likely means Nix changed its error format — update the regex in "
@@ -484,6 +592,367 @@ def _extract_nix_hash(
             f"{_tail_output_excerpt(output, max_lines=config.default_log_tail_lines)}"
         )
     raise RuntimeError(msg)
+
+
+def _has_hash_mismatch_signal(output: str) -> bool:
+    return any(indicator in output for indicator in _HASH_MISMATCH_INDICATORS)
+
+
+# Legacy Nix says "error: builder for". Determinate Nix v3 says
+# "error: Cannot build" / "error: Build failed due to failed dependency".
+# Bare "Reason:" and "Output paths:" are log noise, not failure evidence.
+_PERMANENT_BUILD_FAILURE_MARKERS = (
+    "error: builder for",
+    "error: cannot build",
+    "error: build failed due to failed dependency",
+)
+# A builder that actually ran and exited. Substitute EILSEQ also makes
+# Determinate Nix print "Cannot build" / "Reason: 1 dependency failed".
+_BUILDER_EXIT_MARKERS = (
+    "failed with exit code",
+    "error: builder for",
+)
+
+
+def _nix_output_has_vanished_store_build_input(output: str) -> bool:
+    """Return whether a builder died because a store build input vanished.
+
+    Hosted macos-15 EILSEQ can delete stdenv hooks while realizing substitutes.
+    Determinate Nix then starts the derivation and the builder exits 1 with::
+
+        build input /nix/store/<hash>-move-lib64.sh does not exist
+
+    That is the same store fault as a vanished ``.drv``, not a package defect.
+    Other "does not exist" text is not this signal.
+    """
+    for line in output.splitlines():
+        folded = line.casefold()
+        if "build input /nix/store/" in folded and folded.rstrip().endswith(
+            "does not exist"
+        ):
+            return True
+    return False
+
+
+def _nix_output_has_unreadable_store_rlib(output: str) -> bool:
+    """Return whether rustc E0463 names a vanished or unreadable store rlib.
+
+    Hosted macos-15 can copy a crate2nix ``-lib`` output from Cachix and still
+    leave the hashed rlib missing or unreadable. rustc then exits 1 with
+    ``error[E0463]: can't find crate`` and a locator note that the
+    ``--extern`` store path does not exist, is not a file, vanished, or
+    hit EILSEQ.
+
+    Update #1244 is that store-fault shape. Update #1258 is not: Darwin
+    ``rust_agent_ui`` printed bare E0463 for ``language_models`` after
+    ``--extern`` named a readable substituted rlib, with no locator I/O
+    note, three identical times. Bare E0463 plus a store ``--extern`` is a
+    permanent builder failure. E0463 without a store rlib ``--extern``, or
+    E0786 (stripped ``.rmeta``), is not this signal either.
+    """
+    if _RUSTC_CANT_FIND_CRATE.search(output) is None:
+        return False
+    if _STORE_EXTERN_RLIB.search(output) is None:
+        return False
+    return (
+        _RUSTC_EXTERN_LOCATION_IO.search(output) is not None
+        or _STORE_RLIB_ENOENT.search(output) is not None
+        or _STORE_RLIB_EILSEQ.search(output) is not None
+    )
+
+
+def _nix_output_has_vanished_fetcher_version(output: str) -> bool:
+    """Return whether pnpmConfigHook died on a corrupt substituted pnpm-deps FOD.
+
+    Hosted macos-15 can register a Cachix NAR after APFS EILSEQ (38606641679
+    cascade-warmup slot 2: ``pread of 65536 bytes at offset 0: Illegal byte
+    sequence``). The next ``nix build --fallback`` then starts emdash against
+    that leftover path; nixpkgs ``pnpmConfigHook`` exits 1 with::
+
+        cat: /nix/store/<hash>-<name>-pnpm-deps/.fetcher-version: No such file
+        or directory
+
+    That is the same store fault as a vanished stdenv hook, not a missing
+    fetcherVersion in the derivation. Other ENOENT text is not this signal.
+    """
+    return _MISSING_STORE_FETCHER_VERSION.search(output) is not None
+
+
+def _nix_output_has_vanished_store_artifact(output: str) -> bool:
+    """Return whether a builder died only because a store input vanished."""
+    return (
+        _nix_output_has_vanished_store_build_input(output)
+        or _nix_output_has_unreadable_store_rlib(output)
+        or _nix_output_has_vanished_fetcher_version(output)
+    )
+
+
+def corrupt_nix_store_paths(output: str) -> tuple[str, ...]:
+    """Return hashed store paths a store-fault retry must repair before rebuild.
+
+    A leftover substituted FOD stays live as a derivation input, so
+    ``nix-store --delete`` is refused without ``--ignore-liveness`` (forbidden
+    on hosted Nix, #1262). ``nix-store --repair-path`` re-fetches the NAR.
+    """
+    return tuple(
+        dict.fromkeys(
+            match.group(1) for match in _MISSING_STORE_FETCHER_VERSION.finditer(output)
+        )
+    )
+
+
+def repair_corrupt_nix_store_paths(
+    *,
+    stdout: str,
+    stderr: str,
+    run: Callable[..., CompletedProcess[str]] | None = None,
+) -> None:
+    """Re-fetch leftover store paths so a store-fault retry does not reuse them."""
+    paths = corrupt_nix_store_paths(f"{stderr}\n{stdout}")
+    if not paths:
+        return
+    if run is None and os.environ.get("PYTEST_CURRENT_TEST"):
+        return
+    runner = subprocess.run if run is None else run
+    runner(
+        ["nix-store", "--repair-path", *paths],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _nix_output_has_write_eio(output: str) -> bool:
+    """Return whether a builder died while writing a store output.
+
+    cctools ``ranlib`` / ``ld`` print ``can't write to output file
+    (Input/output error)``. That is the same hosted APFS I/O fault as
+    EILSEQ unlink, not a deterministic archive race. EILSEQ plus a
+    real builder exit stays a permanent failure: this signal is only
+    the write-EIO itself.
+    """
+    folded = output.casefold()
+    return "input/output error" in folded or "can't write to output file" in folded
+
+
+def _nix_output_has_builder_exit(output: str) -> bool:
+    if _nix_output_has_vanished_store_artifact(output):
+        return False
+    if _nix_output_has_write_eio(output):
+        return False
+    folded = output.casefold()
+    return any(marker in folded for marker in _BUILDER_EXIT_MARKERS)
+
+
+def failed_derivation_paths(output: str) -> tuple[str, ...]:
+    """Return ``.drv`` paths Nix named in Cannot-build / builder-for lines."""
+    return tuple(dict.fromkeys(_FAILED_DRV_PATH.findall(output)))
+
+
+def _nix_output_has_missing_store_drv(output: str) -> bool:
+    """Return whether Nix could not open a store ``.drv`` after store I/O damage.
+
+    Hosted macos-15 EILSEQ substitute faults can drop ``.drv`` files. The next
+    ``nix`` invocation then reports only::
+
+        error: opening file "/nix/store/<hash>-<name>.drv": No such file or directory
+
+    That is the same store fault, not a missing package. Other ENOENT text,
+    including a vanished non-``.drv`` store path, is not this signal.
+    """
+    for line in output.splitlines():
+        folded = line.casefold()
+        if (
+            'error: opening file "/nix/store/' in folded
+            and '.drv": no such file or directory' in folded
+        ):
+            return True
+    return False
+
+
+def _nix_output_has_store_transient_signal(output: str) -> bool:
+    """Return whether *output* names a hosted-macOS store I/O fault."""
+    folded = output.casefold()
+    if any(marker.casefold() in folded for marker in _NIX_STORE_TRANSIENT_MARKERS):
+        return True
+    return _nix_output_has_missing_store_drv(
+        output
+    ) or _nix_output_has_vanished_store_artifact(output)
+
+
+def _nix_output_has_permanent_build_failure(output: str) -> bool:
+    """Return whether Nix attributed the output to a derivation, not the store."""
+    if _has_hash_mismatch_signal(output):
+        return True
+    folded = output.casefold()
+    if not any(marker in folded for marker in _PERMANENT_BUILD_FAILURE_MARKERS):
+        return False
+    # Hosted macos-15 can EILSEQ while realizing a substitute, then lose the
+    # .drv. Nix reports "Cannot build X / Reason: 1 dependency failed" for
+    # dependents. That is still a store fault unless a builder actually exited.
+    if _nix_output_has_store_transient_signal(output):
+        return _nix_output_has_builder_exit(output)
+    return True
+
+
+def is_retryable_nix_network_failure(*, stdout: str, stderr: str) -> bool:
+    """Return whether Nix reported a transient network or substituter failure."""
+    output = f"{stderr}\n{stdout}"
+    if _has_hash_mismatch_signal(output):
+        return False
+    folded = output.casefold()
+    if _CANNOT_DOWNLOAD_FROM_MIRROR.search(folded):
+        return True
+    return any(marker.casefold() in folded for marker in _NIX_NETWORK_TRANSIENT_MARKERS)
+
+
+_NIX_DAEMON_SOCKET = Path("/nix/var/nix/daemon-socket/socket")
+_NIX_DAEMON_LAUNCHD_LABELS = (
+    "system/systems.determinate.nix-daemon",
+    "system/org.nixos.nix-daemon",
+)
+_NIX_DAEMON_RESTART_MARKERS = (
+    "nix daemon disconnected",
+    "cannot open connection to remote store 'daemon'",
+    "/nix/var/nix/active-builds/",
+)
+_NIX_DAEMON_RESTART_WAIT_SECONDS = 15.0
+_NIX_DAEMON_RESTART_POLL_SECONDS = 0.2
+
+
+def should_restart_nix_daemon(*, stdout: str, stderr: str) -> bool:
+    """Return whether a retry must kick the Nix daemon back up first.
+
+    ``#1257`` retried ``nix build`` three times after ``Nix daemon
+    disconnected unexpectedly`` without restarting determinate-nixd, so every
+    isolation attempt died on the same dead socket.
+    """
+    text = f"{stderr}\n{stdout}".casefold()
+    return any(marker in text for marker in _NIX_DAEMON_RESTART_MARKERS)
+
+
+def recover_nix_store_after_fault(
+    *,
+    run: Callable[..., CompletedProcess[str]] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    platform: str | None = None,
+    socket: Path | None = None,
+    wait_seconds: float = _NIX_DAEMON_RESTART_WAIT_SECONDS,
+) -> None:
+    """Restart the hosted Darwin Nix daemon so a store-fault retry can reconnect."""
+    host = sys.platform if platform is None else platform
+    runner = subprocess.run if run is None else run
+    sleeper = time.sleep if sleep is None else sleep
+    daemon_socket = _NIX_DAEMON_SOCKET if socket is None else socket
+    if host != "darwin":
+        return
+    # Pytest on Darwin would otherwise kickstart the live daemon. Hosted
+    # Update validation does not import pytest.
+    if run is None and os.environ.get("PYTEST_CURRENT_TEST"):
+        return
+    for label in _NIX_DAEMON_LAUNCHD_LABELS:
+        result = runner(
+            ["sudo", "-n", "launchctl", "kickstart", "-k", label],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            break
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        if daemon_socket.exists():
+            return
+        sleeper(_NIX_DAEMON_RESTART_POLL_SECONDS)
+
+
+def is_retryable_nix_store_failure(*, stdout: str, stderr: str) -> bool:
+    """Return whether Nix hit a transient store I/O fault, not a bad derivation."""
+    output = f"{stderr}\n{stdout}"
+    if _nix_output_has_permanent_build_failure(output):
+        return False
+    return _nix_output_has_store_transient_signal(output)
+
+
+def should_consult_nix_builder_logs(*, stdout: str, stderr: str) -> bool:
+    """Return whether streamed Nix output may have truncated a write-EIO.
+
+    Nix prints the last 25 builder lines. Parallel cmake (38394692516
+    buzz-onnxruntime ranlib EIO at 41%) then scrolls that line out,
+    leaving only ``Cannot build`` + exit 2. Fetch ``nix log`` before
+    treating that as a permanent derivation failure.
+    """
+    output = f"{stderr}\n{stdout}"
+    if _has_hash_mismatch_signal(output):
+        return False
+    if _nix_output_has_write_eio(output):
+        return False
+    if is_retryable_nix_store_failure(stdout=stdout, stderr=stderr):
+        return False
+    folded = output.casefold()
+    if not any(marker in folded for marker in _PERMANENT_BUILD_FAILURE_MARKERS):
+        return False
+    return _nix_output_has_builder_exit(output) and bool(
+        failed_derivation_paths(output)
+    )
+
+
+def _mentions_store_bus_signal(text: str) -> bool:
+    """Return whether *text* names SIGBUS without matching a longer signal number."""
+    folded = text.casefold()
+    for number in _STORE_BUS_SIGNALS:
+        needle = f"terminated by signal {number}"
+        start = 0
+        while (index := folded.find(needle, start)) != -1:
+            end = index + len(needle)
+            if end == len(folded) or not folded[end].isdigit():
+                return True
+            start = end
+    return False
+
+
+def is_transient_store_interruption(text: str) -> bool:
+    """Return whether validation stopped on a runner store fault.
+
+    Hosted macOS jobs lose the store mid-build (``Illegal byte sequence``,
+    write-EIO / ``can't write to output file``, a vanished store ``.drv``,
+    a vanished store build input, an unreadable Cachix-substituted
+    crate2nix rlib, a crashed Nix daemon, or SIGBUS). A hash mismatch or
+    a builder that actually exited (``failed with exit code``,
+    ``error: builder for``) must not continue as if the store had only
+    faulted, unless that exit is the write-EIO itself. ``error: Cannot
+    build`` / ``Reason: 1 dependency failed`` after a substitute EILSEQ
+    is still a store fault, as is ``builder failed with exit code 1``
+    when the only builder log is a vanished ``/nix/store/`` build input,
+    a missing ``/nix/store/.../.fetcher-version`` after a leftover
+    pnpm-deps substitute, or rustc E0463 after ``--extern`` named a
+    store rlib that rustc then reported missing or unreadable. A
+    fixed-output hash mismatch (38669200592 darwin-argus ``bb-pnpm-deps``)
+    is a stale pin, not a store fault.
+    """
+    if _nix_output_has_permanent_build_failure(text):
+        return False
+    if is_retryable_nix_store_failure(stdout="", stderr=text):
+        return True
+    return _mentions_store_bus_signal(text)
+
+
+def _is_retryable_fixed_output_hash_failure(result: CommandResult) -> bool:
+    output = f"{result.stderr}\n{result.stdout}"
+    if _has_hash_mismatch_signal(output):
+        return False
+    if is_retryable_nix_network_failure(
+        stdout=result.stdout,
+        stderr=result.stderr,
+    ) or is_retryable_nix_store_failure(
+        stdout=result.stdout,
+        stderr=result.stderr,
+    ):
+        return True
+    folded = output.casefold()
+    return any(
+        marker.casefold() in folded for marker in _FIXED_OUTPUT_ONLY_TRANSIENT_MARKERS
+    )
 
 
 def _tail_output_excerpt(output: str, *, max_lines: int) -> str:
@@ -686,9 +1155,7 @@ async def compute_fixed_output_hash(
         )
         if (
             attempt < _FIXED_OUTPUT_HASH_MAX_ATTEMPTS
-            and is_retryable_fixed_output_failure(
-                stdout=result.stdout, stderr=result.stderr
-            )
+            and _is_retryable_fixed_output_hash_failure(result)
         ):
             attempt += 1
             await emit(
@@ -1042,7 +1509,16 @@ __all__ = [
     "compute_expr_drv_fingerprint",
     "compute_fixed_output_hash",
     "compute_overlay_hash",
+    "corrupt_nix_store_paths",
+    "failed_derivation_paths",
     "get_current_nix_platform",
+    "is_retryable_nix_network_failure",
+    "is_retryable_nix_store_failure",
+    "is_transient_store_interruption",
     "normalize_nix_platform",
     "prepare_fixed_output_probes",
+    "recover_nix_store_after_fault",
+    "repair_corrupt_nix_store_paths",
+    "should_consult_nix_builder_logs",
+    "should_restart_nix_daemon",
 ]

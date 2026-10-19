@@ -16,7 +16,7 @@ from pydantic import TypeAdapter
 
 from lib.nix.models.build_result import BuildResult
 
-from .base import HashMismatchError, NixCommandError, run_nix
+from .base import HashMismatchError, NixCommandError, _resolve_timeout_alias, run_nix
 
 _BUILD_RESULT_LIST = TypeAdapter(list[BuildResult])
 
@@ -75,10 +75,7 @@ async def nix_build(
     installable: str | None = None,
     *,
     command_timeout: float = 2400.0,
-    impure: bool = False,
-    no_link: bool = True,
-    json_output: bool = True,
-    extra_args: list[str] | None = None,
+    **kwargs: object,
 ) -> list[BuildResult]:
     """Run ``nix build`` and return parsed build results.
 
@@ -92,14 +89,9 @@ async def nix_build(
         Mutually exclusive with *expr*.
     command_timeout:
         Maximum wall-clock seconds before the process is killed.
-    impure:
-        Pass ``--impure``.
-    no_link:
-        Pass ``--no-link`` (default) so no ``result`` symlink is created.
-    json_output:
-        Pass ``--json`` and parse the build results (default).
-    extra_args:
-        Additional CLI arguments appended after the installable.
+    **kwargs:
+        Supports ``impure=...``, ``no_link=...``, ``json_output=...``,
+        ``extra_args=...`` and legacy ``timeout=...`` alias.
 
     Returns
     -------
@@ -114,11 +106,37 @@ async def nix_build(
         The build failed for any other reason.
 
     """
+    remaining_kwargs = dict(kwargs)
+
+    impure_obj = remaining_kwargs.pop("impure", False)
+    if not isinstance(impure_obj, bool):
+        msg = "impure must be a boolean"
+        raise TypeError(msg)
+
+    no_link_obj = remaining_kwargs.pop("no_link", True)
+    if not isinstance(no_link_obj, bool):
+        msg = "no_link must be a boolean"
+        raise TypeError(msg)
+
+    json_output_obj = remaining_kwargs.pop("json_output", True)
+    if not isinstance(json_output_obj, bool):
+        msg = "json_output must be a boolean"
+        raise TypeError(msg)
+
+    extra_args_obj = remaining_kwargs.pop("extra_args", None)
+    if extra_args_obj is not None and (
+        not isinstance(extra_args_obj, list)
+        or not all(isinstance(item, str) for item in extra_args_obj)
+    ):
+        msg = "extra_args must be a list of strings"
+        raise TypeError(msg)
+    validated_extra_args = cast("list[str] | None", extra_args_obj)
+
     build_options = _BuildCommandOptions(
-        impure=impure,
-        no_link=no_link,
-        json_output=json_output,
-        extra_args=extra_args,
+        impure=impure_obj,
+        no_link=no_link_obj,
+        json_output=json_output_obj,
+        extra_args=validated_extra_args,
     )
 
     args = _build_command_args(
@@ -127,7 +145,12 @@ async def nix_build(
         options=build_options,
     )
 
-    result = await run_nix(args, check=False, command_timeout=command_timeout)
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=remaining_kwargs,
+    )
+
+    result = await run_nix(args, check=False, timeout=timeout_seconds)
 
     if result.returncode != 0:
         hash_err = HashMismatchError.from_stderr(result.stderr, result)
@@ -148,6 +171,7 @@ async def nix_build_dry_run(
     impure: bool = True,
     command_timeout: float = 300.0,
     env: Mapping[str, str] | None = None,
+    **kwargs: object,
 ) -> set[str]:
     """Run ``nix build --dry-run`` and return derivations that would be built.
 
@@ -163,6 +187,8 @@ async def nix_build_dry_run(
         Maximum wall-clock seconds before the process is killed.
     env:
         Extra environment variables passed to the Nix process.
+    **kwargs:
+        Supports legacy ``timeout=...`` alias.
 
     Returns
     -------
@@ -178,7 +204,11 @@ async def nix_build_dry_run(
     args = ["nix", "build", installable, "--dry-run"]
     if impure:
         args.append("--impure")
-    result = await run_nix(args, check=True, command_timeout=command_timeout, env=env)
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
+    result = await run_nix(args, check=True, timeout=timeout_seconds, env=env)
 
     combined = result.stdout + result.stderr
     drvs: set[str] = set()

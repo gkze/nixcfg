@@ -44,6 +44,7 @@ def test_python_distribution_excludes_test_packages() -> None:
     assert package_find["include"] == ["lib*"]
     assert package_find["exclude"] == ["lib.tests*"]
     assert package_data["lib"] == ["system-policy.json"]
+    assert package_data["lib.update.ci"] == ["shard_costs.json"]
 
 
 def test_test_type_exceptions_are_rule_scoped() -> None:

@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-8DUtY4Bso+AXx+2epO8iLOCACtia4gKFTwZm5ufCIuk=",
-    "x86_64-darwin": "sha256-he4MiSc2kqnrwH1y/FcyLOT2vMLum80JHNVpiU+lUoU="
+    "aarch64-darwin": "sha256-biQ2MUzOU3fFhwFx8biH9kLfcucawd73Le/IlNOKjAc=",
+    "x86_64-darwin": "sha256-YLmts96UIejhG+q6wkg04oK/PyFwjS3g0CuiZ8iQt+Q="
   },
   "urls": {
-    "aarch64-darwin": "https://d1lfowv2t69uz0.cloudfront.net/nightly/Capy%20Nightly-0.4.3-nightly.20261006.233-arm64.zip",
-    "x86_64-darwin": "https://d1lfowv2t69uz0.cloudfront.net/nightly/Capy%20Nightly-0.4.3-nightly.20261006.233-x64.zip"
+    "aarch64-darwin": "https://d1lfowv2t69uz0.cloudfront.net/nightly/Capy%20Nightly-0.4.7-nightly.20261016.271-arm64.zip",
+    "x86_64-darwin": "https://d1lfowv2t69uz0.cloudfront.net/nightly/Capy%20Nightly-0.4.7-nightly.20261016.271-x64.zip"
   },
-  "version": "0.4.3-nightly.20261006.233"
+  "version": "0.4.7-nightly.20261016.271"
 }

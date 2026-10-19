@@ -121,7 +121,15 @@ def test_grok_bot_resolves_current_vendor_feed_payloads(
 
 def test_grok_bot_rehashes_same_version_republication() -> None:
     """Versioned URLs cannot prove that the vendor has not replaced the bytes."""
-    assert _load_module().GrokBotUpdater.always_rehash
+    updater = _load_module().GrokBotUpdater()
+    current = SourceEntry.model_validate({
+        "hashes": _HASHES,
+        "urls": _URLS,
+        "version": _VERSION,
+    })
+    unchanged = VersionInfo(version=_VERSION, metadata=_metadata())
+
+    assert _run(updater._is_latest(UpdateContext(current=current), unchanged)) is False
 
 
 @pytest.mark.parametrize(

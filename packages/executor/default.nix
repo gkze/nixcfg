@@ -409,7 +409,13 @@ let
     postPatch = ''
       patch -p1 < ${bunLockPatch}
       PYTHONPATH=${
-        import ../../lib/codemods-pythonpath.nix { inherit lib; }
+        lib.fileset.toSource {
+          root = ../..;
+          fileset = lib.fileset.unions [
+            ../../lib/__init__.py
+            ../../lib/exact_text_patch.py
+          ];
+        }
       } ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD"
     '';
 

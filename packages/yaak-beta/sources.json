@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-XtR5f/vaVCTXMnGy5cbHOw7X68p/j5dys0lK8p0JyE0="
+    "aarch64-darwin": "sha256-3tf4vXnPxtVX0ECX+HAw9J+yZtcBtRHNZuAwBMx/lAg="
   },
   "urls": {
-    "aarch64-darwin": "https://github.com/mountain-loop/yaak/releases/download/v2026.8.1/Yaak_2026.8.1_aarch64.dmg"
+    "aarch64-darwin": "https://github.com/mountain-loop/yaak/releases/download/v2026.9.0/Yaak_2026.9.0_aarch64.dmg"
   },
-  "version": "2026.8.1"
+  "version": "2026.9.0"
 }

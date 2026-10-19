@@ -38,6 +38,7 @@ let
   modulesPath = "${src}/modules";
   crate2nixTauri = import ./crate2nix-tauri.nix { inherit lib; };
   rustyV8 = import ./rusty-v8.nix { inherit lib; };
+  platformCompat = import ./pinned-input-platform-compat;
 
   scanSourcesIn =
     dir:
@@ -315,10 +316,12 @@ rec {
     }:
     {
       inherit system;
-      # The `pkgs` argument of `homeManagerConfiguration`: the configured
-      # package set from `pkgsFor` is the only Nixpkgs instance in play.
-      pkgs = pkgsFor.${system};
-      extraSpecialArgs = mkHomeModuleArgs { inherit system username; } // extraSpecialArgs;
+      extraSpecialArgs =
+        mkHomeModuleArgs { inherit system username; }
+        // {
+          pkgs = platformCompat.withLegacyPlatformAttrs pkgsFor.${system};
+        }
+        // extraSpecialArgs;
       modules = mkHomeModules {
         inherit
           includeDefaultUserModule
@@ -381,11 +384,6 @@ rec {
       }
       // extraSpecialArgs;
       modules = [
-        # One Nixpkgs instance per system: the system evaluation and Home
-        # Manager (through useGlobalPkgs) both use the already configured
-        # `pkgsFor` set. Its creator owns `config` and overlays; the
-        # nix-darwin and NixOS modules reject `nixpkgs.config` next to it.
-        { nixpkgs.pkgs = lib.mkDefault pkgsFor.${system}; }
         "${modulesPath}/common.nix"
         "${modulesPath}/${kernel system}/base.nix"
       ]
@@ -404,10 +402,7 @@ rec {
                 system
                 ;
               slib = outputs.lib;
-              # The same instance as `nixpkgs.pkgs` above. Some modules use
-              # `pkgs` to decide their own shape, so it must be a special
-              # argument; resolving it through `_module.args` recurses.
-              pkgs = pkgsFor.${system};
+              pkgs = platformCompat.withLegacyPlatformAttrs pkgsFor.${system};
             }
             // homeManagerExtraSpecialArgs;
             users = listToAttrs (

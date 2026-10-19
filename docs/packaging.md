@@ -122,58 +122,6 @@ Use the shared Darwin app pattern for a macOS GUI app:
 Do not add a bespoke activation hack for `/Applications` unless the shared
 pattern genuinely cannot express the need.
 
-### Command-line executables bundled inside an application
-
-Declare `cli` on the routing entry to put a bundled executable on PATH. The path
-stays bundle-relative, so the resolved route keeps deciding which copy of the
-bundle is authoritative:
-
-```nix
-zed = {
-  package = pkgs.zed-editor-nightly;
-  cli.zed.path = "Contents/MacOS/cli";
-};
-```
-
-The `nixcfg.macApps` module in `modules/home/darwin.nix` links each command into
-`~/.local/bin` through `home.file`. Importing `lib/mac-apps.nix` on its own only
-exposes `cliShimFiles`; the module performs the projection. Every shim is a
-generated script that execs the resolved bundle path, because a `home.file`
-source pointing straight at `~/Applications` would be an impure path at
-evaluation time. That also keeps shims invisible to the `home.packages` overlap
-assertion and the profile bundle-leak audit, which inspect package outputs rather
-than home files. Putting `~/.local/bin` on PATH stays the consumer's job.
-
-Declaring `env` adds export lines to the shim. Use it when the executable needs
-environment that the bundle does not set for itself:
-
-```nix
-tailscale = {
-  package = pkgs.tailscale-app;
-  scope = "system";
-  cli.tailscale = {
-    path = "Contents/MacOS/Tailscale";
-    env.TAILSCALE_BE_CLI = "1";
-  };
-};
-```
-
-Command names must be unique across applications and must be plain file names;
-paths must be bundle-relative; env names must be shell identifiers.
-`cliConfigError` in `lib/mac-apps.nix` reports each mistake at evaluation time.
-Nothing checks that the executable exists, so a moved or missing bundle degrades
-to an `exit 127` with a message on first use.
-
-`home.file` refuses to overwrite a file or symlink it does not own, so a
-`~/.local/bin/<command>` left behind by something other than `home.file` fails
-activation with `would be clobbered` instead of being replaced. When retiring a
-bespoke activation that created such links, remove them first, as
-`nixcfgDropLegacyBundledCodexLinks` in `home/george/darwin.nix` does.
-
-This mechanism covers executables that ship *inside* the bundle. A standalone
-store binary, such as GitButler's `but`, stays a plain `home.file` link to
-`${pkgs.gitbutler}/bin/but`.
-
 ## Related
 
 - [source-modifications.md](source-modifications.md): policy for upstream edits

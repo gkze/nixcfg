@@ -112,6 +112,7 @@ class Preparation:
     targets: tuple[str, ...]
     previous: Candidate | None = None
     validate_all_packages: bool = False
+    pins_only: bool = False
     resolutions: dict[str, ResolvedVersion] = field(default_factory=dict)
     dependent_sources: set[str] = field(default_factory=set)
     candidate: Candidate | None = None
@@ -160,8 +161,12 @@ class Preparation:
             sources=sources,
             validate_all_packages=self.validate_all_packages,
             systems=(
-                *(() if self.previous is None else self.previous.systems),
-                *((self.system,) if succeeded else ()),
+                ()
+                if self.pins_only
+                else (
+                    *(() if self.previous is None else self.previous.systems),
+                    *((self.system,) if succeeded else ()),
+                )
             ),
             resolutions=self.resolutions,
             prepared=succeeded,

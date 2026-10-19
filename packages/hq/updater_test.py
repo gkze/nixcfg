@@ -1,6 +1,7 @@
 """Behavioral tests for the HQ release updater."""
 
 import plistlib
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 
@@ -260,3 +261,101 @@ def test_hq_0375_staging_guard_is_unique_and_preserves_its_target(
     mixed = _mutation_fixture(module, (*paths, _CURRENT_AUTOMATIC_MUTATION_PATHS[5]))
     with pytest.raises(ValueError, match="inventory drifted: expected 1, got 2"):
         module.patch_payload(mixed)
+
+
+# HQ 0.11.13 arm64 at file offsets 0x301e6f0 (autoUpdate gate) and
+# 0x3072ad4 (menubar.json reader for machineIdentityOptOut). Both share
+# the 0xc0-frame prologue the 0.10.399 contract matched exactly.
+_HQ_01113_ARM64_AUTO_UPDATE_GATE = bytes.fromhex(
+    "ff 43 03 d1 f8 5f 09 a9 f6 57 0a a9 f4 4f 0b a9 "
+    "fd 7b 0c a9 fd 03 03 91 e8 23 01 91 29 ee 01 94 "
+    "e8 4b 40 b9 a8 00 00 36 e8 2b 40 f9"
+)
+_HQ_01113_ARM64_MENUBAR_READER_TWIN = bytes.fromhex(
+    "ff 43 03 d1 f8 5f 09 a9 f6 57 0a a9 f4 4f 0b a9 "
+    "fd 7b 0c a9 fd 03 03 91 e8 23 01 91 30 9d 00 94 "
+    "e8 4b 40 b9 f7 53 45 a9 c8 00 00 36"
+)
+_HQ_01113_SHARED_PROLOGUE = bytes.fromhex(
+    "ff 43 03 d1 f8 5f 09 a9 f6 57 0a a9 f4 4f 0b a9 "
+    "fd 7b 0c a9 fd 03 03 91 e8 23 01 91"
+)
+_HQ_01113_PROLOGUE_DISABLED = bytes.fromhex(
+    "00 00 80 52 c0 03 5f d6 1f 00 80 d2 "
+    "3f 20 a0 f2 5f 40 c0 f2 7f 60 e0 f2 "
+    "1f 20 03 d5"
+)
+
+
+def _hq_01113_gate_and_twin_paths() -> tuple[bytes, ...]:
+    return (
+        *_CURRENT_AUTOMATIC_MUTATION_PATHS[:1],
+        _HQ_01113_ARM64_AUTO_UPDATE_GATE,
+        *_CURRENT_AUTOMATIC_MUTATION_PATHS[2:],
+        _HQ_01113_ARM64_MENUBAR_READER_TWIN,
+    )
+
+
+def test_hq_01113_shared_prologue_inventory_reproduces_expected_1_got_2(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """38986213199: matching only the 0xc0 prologue sees both 0.11.13 sites."""
+    module = _load_hq_module("patch_updater.py", "hq_01113_prologue_drift_test")
+    patches = list(module.AUTOMATIC_MUTATION_PATCHES)
+    patches[1] = replace(
+        patches[1],
+        original=module.MaskedBytes(
+            pattern=_HQ_01113_SHARED_PROLOGUE,
+            mask=b"\xff" * len(_HQ_01113_SHARED_PROLOGUE),
+        ),
+        disabled=module.MaskedBytes(
+            pattern=_HQ_01113_PROLOGUE_DISABLED,
+            mask=b"\xff" * len(_HQ_01113_PROLOGUE_DISABLED),
+        ),
+    )
+    monkeypatch.setattr(module, "AUTOMATIC_MUTATION_PATCHES", tuple(patches))
+
+    with pytest.raises(
+        ValueError,
+        match="arm64 automatic-update gate inventory drifted: expected 1, got 2",
+    ):
+        module.patch_payload(_mutation_fixture(module, _hq_01113_gate_and_twin_paths()))
+
+
+def test_hq_01113_auto_update_gate_is_unique_against_menubar_reader_twin(
+    tmp_path: Path,
+) -> None:
+    """The Result-unwrap tail must select only the autoUpdate site in 0.11.13."""
+    module = _load_hq_module("patch_updater.py", "hq_01113_gate_unique_test")
+    validator = _load_hq_module("validate_artifact.py", "hq_01113_validator_test")
+    payload = _mutation_fixture(module, _hq_01113_gate_and_twin_paths())
+
+    patched = module.patch_payload(payload)
+
+    gate_offset = payload.index(_HQ_01113_ARM64_AUTO_UPDATE_GATE)
+    twin_offset = payload.index(_HQ_01113_ARM64_MENUBAR_READER_TWIN)
+    disabled = _CURRENT_DISABLED_MUTATION_PATHS[1]
+    assert patched[gate_offset : gate_offset + len(disabled)] == disabled
+    assert (
+        patched[twin_offset : twin_offset + len(_HQ_01113_ARM64_MENUBAR_READER_TWIN)]
+        == _HQ_01113_ARM64_MENUBAR_READER_TWIN
+    )
+
+    executable = tmp_path / "hq-sync-menubar"
+    executable.write_bytes(patched)
+    info = tmp_path / "Info.plist"
+    info.write_bytes(
+        plistlib.dumps({
+            "CFBundleExecutable": "hq-sync-menubar",
+            "CFBundleIdentifier": "ai.indigo.hq-sync-menubar",
+            "CFBundleShortVersionString": "0.11.13",
+            "CFBundleVersion": "0.11.13",
+            "LSMinimumSystemVersion": "13.0",
+            "LSUIElement": True,
+        })
+    )
+    validator.validate_artifact(
+        info_plist=info,
+        main_executable=executable,
+        expected_version="0.11.13",
+    )

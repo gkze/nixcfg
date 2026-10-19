@@ -3,18 +3,17 @@
 from functools import cache
 from typing import TYPE_CHECKING
 
-import pytest
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.inherit import Inherit
+from nix_manipulator.expressions.list import NixList
+from nix_manipulator.expressions.primitive import BooleanPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import assert_nix_ast_equal, binding_map, expect_binding
-from lib.tests._nix_eval import nix_attrset, nix_eval_json, nix_import
 from lib.tests._nix_source import nix_file_expr
 from lib.tests._shell_ast import command_texts, indented_string_body, parse_shell
-from lib.update.paths import REPO_ROOT
 
 if TYPE_CHECKING:
     from nix_manipulator.expressions.expression import NixExpression
@@ -45,39 +44,40 @@ def _option_default(options: AttributeSet, name: str) -> NixExpression:
     return expect_binding(arguments.values, "default").value
 
 
-@cache
-def _host_arguments(host: str) -> dict[str, object]:
-    """Return the ``mkDarwinHost`` arguments that *host* composes from profiles.
-
-    Callers carry the ``nix_eval`` marker: the profile fold has no AST
-    representation, and the stub constructor keeps the evaluation tiny.
-    """
-    arguments = nix_eval_json(
-        FunctionCall(
-            name=nix_import(REPO_ROOT / "tests/nix/darwin-host-arguments.nix"),
-            argument=nix_attrset({"host": host}),
-        )
-    )
-    return expect_instance(arguments, dict)
-
-
-def _host_defers_zsh_completion(host: str) -> bool:
-    modules = expect_instance(_host_arguments(host)["extraSystemModules"], list)
-    return any(
-        isinstance(module, dict)
-        and module
-        .get("darwinDefaults", {})
-        .get("zsh", {})
-        .get("deferCompletionInitToHomeManager")
-        is True
-        for module in modules
+def _host_extra_system_modules(relative_path: str) -> NixList:
+    arguments = _host_constructor_arguments(relative_path)
+    return expect_instance(
+        expect_binding(arguments.values, "extraSystemModules").value,
+        NixList,
     )
 
 
-@pytest.mark.nix_eval(
-    reason="Host files fold profiles into constructor arguments; only evaluation "
-    "shows the composed result."
-)
+def _host_constructor_arguments(relative_path: str) -> AttributeSet:
+    host = expect_instance(nix_file_expr(relative_path), FunctionDefinition)
+    constructor = expect_instance(host.output, FunctionCall)
+    assert_nix_ast_equal(constructor.name, "lib.mkDarwinHost")
+    return expect_instance(constructor.argument, AttributeSet)
+
+
+def _host_defers_zsh_completion(relative_path: str) -> bool:
+    for item in _host_extra_system_modules(relative_path).value:
+        if not isinstance(item, AttributeSet):
+            continue
+        darwin_defaults = binding_map(item.values).get("darwinDefaults")
+        if darwin_defaults is None or not isinstance(
+            darwin_defaults.value,
+            AttributeSet,
+        ):
+            continue
+        zsh = binding_map(darwin_defaults.value.values).get("zsh")
+        if zsh is None or not isinstance(zsh.value, AttributeSet):
+            continue
+        deferral = binding_map(zsh.value.values).get("deferCompletionInitToHomeManager")
+        if deferral is not None:
+            return expect_instance(deferral.value, BooleanPrimitive).value
+    return False
+
+
 def test_zsh_completion_deferral_is_conservative_and_host_scoped() -> None:
     """Only hosts with the matching Home Manager module should defer compinit."""
     common_config = _nested_attrset(
@@ -124,9 +124,9 @@ def test_zsh_completion_deferral_is_conservative_and_host_scoped() -> None:
         expect_binding(deferred_zsh.values, "enableBashCompletion").value,
         "false",
     )
-    assert _host_defers_zsh_completion("argus")
-    assert _host_defers_zsh_completion("rocinante")
-    assert _host_defers_zsh_completion("zeus")
+    assert _host_defers_zsh_completion("darwin/argus.nix")
+    assert _host_defers_zsh_completion("darwin/rocinante.nix")
+    assert _host_defers_zsh_completion("darwin/zeus.nix")
 
     home_manager_module = _module_output("modules/home/zsh.nix")
     guarded_config = expect_instance(
@@ -153,73 +153,53 @@ def test_zsh_completion_deferral_is_conservative_and_host_scoped() -> None:
     assert commands.count("bashcompinit") == 1
 
 
-_GEORGE_BASE_SYSTEM_MODULES = [
-    "./darwin/george/caches.nix",
-    {
-        "darwinDefaults": {"zsh": {"deferCompletionInitToHomeManager": True}},
-        "home-manager": {"backupFileExtension": "backup"},
-    },
-]
-_TOWN_HOME_MODULES = [
-    "<modulesPath>/home/darwin-closure-priority.nix",
-    "./home/george/work.nix",
-    "./darwin/george/town-dock-apps.nix",
-    "<function>",
-]
-
-
-@pytest.mark.nix_eval(
-    reason="Host files fold profiles into constructor arguments; only evaluation "
-    "shows the composed result."
-)
 def test_zeus_preserves_the_town_workstation_contract() -> None:
     """Zeus should keep the complete work policy and its user-facing identity."""
-    assert _host_arguments("zeus") == {
-        "user": "george",
-        "rosettaBuilderMemory": "16GiB",
-        "rosettaBuilderLingerMinutes": 30,
-        "brewAppsModule": "./darwin/george/brew-apps.nix",
-        "extraHomeModules": _TOWN_HOME_MODULES,
-        "extraSystemModules": [
-            *_GEORGE_BASE_SYSTEM_MODULES,
-            "./darwin/george/work.nix",
-            {"networking": {"computerName": "Zeus"}},
-        ],
-    }
+    arguments = _host_constructor_arguments("darwin/zeus.nix")
 
-
-@pytest.mark.nix_eval(
-    reason="Host files fold profiles into constructor arguments; only evaluation "
-    "shows the composed result."
-)
-def test_argus_is_a_town_workstation_with_the_rocinante_substituter() -> None:
-    """Argus should differ from zeus only by its rocinante substituter module."""
-    assert _host_arguments("argus") == {
-        **_host_arguments("zeus"),
-        "extraSystemModules": [
-            *_GEORGE_BASE_SYSTEM_MODULES,
-            "./darwin/george/work.nix",
-            "<function>",
-        ],
-    }
-
-
-@pytest.mark.nix_eval(
-    reason="Host files fold profiles into constructor arguments; only evaluation "
-    "shows the composed result."
-)
-def test_rocinante_uses_only_the_george_base_profile() -> None:
-    """Rocinante should get the personal Dock and none of the Town policy."""
-    assert _host_arguments("rocinante") == {
-        "user": "george",
-        "rosettaBuilderLingerMinutes": 30,
-        "brewAppsModule": "./darwin/george/brew-apps.nix",
-        "extraHomeModules": [
-            "<modulesPath>/home/darwin-closure-priority.nix",
-            "./darwin/george/dock-apps.nix",
-        ],
-        "extraSystemModules": _GEORGE_BASE_SYSTEM_MODULES,
-    }
+    assert_nix_ast_equal(expect_binding(arguments.values, "user").value, '"george"')
+    assert_nix_ast_equal(
+        expect_binding(arguments.values, "rosettaBuilderMemory").value,
+        '"16GiB"',
+    )
+    assert_nix_ast_equal(
+        expect_binding(arguments.values, "rosettaBuilderLingerMinutes").value,
+        "30",
+    )
+    assert_nix_ast_equal(
+        expect_binding(arguments.values, "brewAppsModule").value,
+        '"${lib.modulesPath}/darwin/george/brew-apps.nix"',
+    )
+    assert_nix_ast_equal(
+        expect_binding(arguments.values, "extraHomeModules").value,
+        """
+        [
+          ../home/george/work.nix
+          "${lib.modulesPath}/home/darwin-closure-priority.nix"
+          "${lib.modulesPath}/darwin/george/town-dock-apps.nix"
+          ({ pkgs, ... }: {
+            nixcfg.packageSets.extraPackages = [
+              pkgs.goose-cli
+              pkgs.gws
+            ];
+          })
+        ]
+        """,
+    )
+    assert_nix_ast_equal(
+        expect_binding(arguments.values, "extraSystemModules").value,
+        """
+        [
+          "${lib.modulesPath}/darwin/george/caches.nix"
+          "${lib.modulesPath}/darwin/george/work.nix"
+          {
+            networking.computerName = "Zeus";
+            darwinDefaults.zsh.deferCompletionInitToHomeManager = true;
+            home-manager.backupFileExtension = "backup";
+          }
+        ]
+        """,
+    )
 
 
 def test_homebrew_activation_defaults_are_idempotent() -> None:

@@ -18,7 +18,6 @@ from nix_manipulator.expressions.set import AttributeSet
 from lib.asar_integrity import check_info_plist_hash, read_packed_file
 from lib.nix.models.sources import SourceEntry
 from lib.tests._assertions import expect_instance
-from lib.tests._darwin_signing import sign_and_verify_bundle_arguments
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
@@ -708,17 +707,17 @@ def test_mach_studio_package_patches_updates_and_resigns_the_bundle() -> None:
     assert command_texts(shell, "__NIX_INTERP__") == [
         "PYTHONPATH=__NIX_INTERP__ __NIX_INTERP__ __NIX_INTERP__ \\\n"
         '      "$app_bundle/Contents/Resources/app.asar" \\\n'
-        '      "$app_bundle/Contents/Info.plist"',
-        # The bare interpolation is the re-sign call checked below: it must
-        # run after the bundle is patched.
-        "__NIX_INTERP__",
+        '      "$app_bundle/Contents/Info.plist"'
     ]
-    [sign_arguments] = sign_and_verify_bundle_arguments(post_install)
-    assert_nix_ast_equal(
-        sign_arguments,
-        '{ bundle = \'\'"$app_bundle"\'\'; preserveMetadata = [ "identifier" "entitlements" "flags" "runtime" ]; }',
-    )
-    assert command_texts(shell, "/usr/bin/codesign") == []
+    assert command_texts(shell, "/usr/bin/codesign") == [
+        "/usr/bin/codesign \\\n"
+        "      --force \\\n"
+        "      --deep \\\n"
+        "      --sign - \\\n"
+        "      --preserve-metadata=identifier,entitlements,flags,runtime \\\n"
+        '      "$app_bundle"',
+        '/usr/bin/codesign --verify --deep --strict "$app_bundle"',
+    ]
 
 
 @pytest.mark.parametrize("kind", ["source", "wheel", "neither"])

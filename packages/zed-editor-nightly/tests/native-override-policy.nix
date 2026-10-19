@@ -45,6 +45,9 @@ let
   gpuiAppleAttrs = overrideAttrsFor "gpui_apple";
   uiAttrs = overrideAttrsFor "ui";
   zedAttrs = overrideAttrsFor "zed";
+  x11Attrs = overrideAttrsFor "x11";
+  fontconfigSysAttrs = overrideAttrsFor "yeslogic-fontconfig-sys";
+  webrtcSysAttrs = overrideAttrsFor "webrtc-sys";
   opensslAttrs = overrideAttrsFor "openssl-sys";
   zstdAttrs = overrideAttrsFor "zstd-sys";
 
@@ -102,6 +105,42 @@ assert lib.assertMsg (
     && zedAttrs.dontPatchELF
   )
 ) "the Linux Zed runtime/link consumer lost pkg-config or rpath policy";
+assert lib.assertMsg (
+  pkgs.stdenv.hostPlatform.isLinux
+  || (
+    !(hasInput pkgs.pkg-config (x11Attrs.nativeBuildInputs or [ ]))
+    && !(hasInput pkgs.pkg-config (fontconfigSysAttrs.nativeBuildInputs or [ ]))
+    && !(hasInput pkgs.pkg-config (webrtcSysAttrs.nativeBuildInputs or [ ]))
+    && !(hasInput pkgs.libx11 (x11Attrs.buildInputs or [ ]))
+    && !(hasInput pkgs.fontconfig (fontconfigSysAttrs.buildInputs or [ ]))
+    && !(hasInput pkgs.glib (webrtcSysAttrs.buildInputs or [ ]))
+  )
+) "Darwin x11 / fontconfig-sys / webrtc-sys leaf crates inherited Linux pkg-config libraries";
+assert lib.assertMsg
+  (
+    pkgs.stdenv.hostPlatform.isDarwin
+    || (
+      hasInput pkgs.pkg-config (x11Attrs.nativeBuildInputs or [ ])
+      && hasInput pkgs.libx11 (x11Attrs.buildInputs or [ ])
+      && !(hasInput pkgs.alsa-lib (x11Attrs.buildInputs or [ ]))
+      && hasInput pkgs.pkg-config (fontconfigSysAttrs.nativeBuildInputs or [ ])
+      && hasInput pkgs.fontconfig (fontconfigSysAttrs.buildInputs or [ ])
+      && !(hasInput pkgs.alsa-lib (fontconfigSysAttrs.buildInputs or [ ]))
+      && hasInput pkgs.pkg-config (webrtcSysAttrs.nativeBuildInputs or [ ])
+      && hasInput pkgs.glib (webrtcSysAttrs.buildInputs or [ ])
+      && !(hasInput pkgs.alsa-lib (webrtcSysAttrs.buildInputs or [ ]))
+    )
+  )
+  ''
+    Linux x11 / yeslogic-fontconfig-sys / webrtc-sys lost pkg-config plus the probed library,
+    or inherited the full Zed system-library dump:
+      x11 native: ${showInputs (x11Attrs.nativeBuildInputs or [ ])}
+      x11 build: ${showInputs (x11Attrs.buildInputs or [ ])}
+      fontconfig-sys native: ${showInputs (fontconfigSysAttrs.nativeBuildInputs or [ ])}
+      fontconfig-sys build: ${showInputs (fontconfigSysAttrs.buildInputs or [ ])}
+      webrtc-sys native: ${showInputs (webrtcSysAttrs.nativeBuildInputs or [ ])}
+      webrtc-sys build: ${showInputs (webrtcSysAttrs.buildInputs or [ ])}
+  '';
 assert lib.assertMsg
   (
     hasInput pkgs.openssl (opensslAttrs.buildInputs or [ ])
@@ -134,6 +173,18 @@ assert lib.assertMsg
     zed = {
       buildInputs = inputNames (zedAttrs.buildInputs or [ ]);
       nativeBuildInputs = inputNames (zedAttrs.nativeBuildInputs or [ ]);
+    };
+    x11 = {
+      buildInputs = inputNames (x11Attrs.buildInputs or [ ]);
+      nativeBuildInputs = inputNames (x11Attrs.nativeBuildInputs or [ ]);
+    };
+    fontconfigSys = {
+      buildInputs = inputNames (fontconfigSysAttrs.buildInputs or [ ]);
+      nativeBuildInputs = inputNames (fontconfigSysAttrs.nativeBuildInputs or [ ]);
+    };
+    webrtcSys = {
+      buildInputs = inputNames (webrtcSysAttrs.buildInputs or [ ]);
+      nativeBuildInputs = inputNames (webrtcSysAttrs.nativeBuildInputs or [ ]);
     };
   };
   neutral = {

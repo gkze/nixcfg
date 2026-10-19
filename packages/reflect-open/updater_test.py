@@ -17,7 +17,6 @@ from nix_manipulator.expressions.identifier import Identifier
 from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.set import AttributeSet
 
-from lib.codemods.errors import CodemodError
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry, SourceHashes
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
@@ -559,7 +558,24 @@ def test_reflect_result_requires_one_structured_pnpm_source(
 
 def test_reflect_never_skips_dependency_closure_recomputation() -> None:
     """Even unchanged release metadata must refresh pnpm and Cargo closures."""
-    assert _load_updater_module().ReflectOpenUpdater.always_rehash
+    module = _load_updater_module()
+    info = VersionInfo(_VERSION, {"commit": _COMMIT, "tag": _TAG})
+    current = SourceEntry(
+        version=_VERSION,
+        commit=_COMMIT,
+        hashes=HashCollection.from_value([
+            HashEntry.create("srcHash", _SRC_HASH),
+            HashEntry.create("npmDepsHash", _NPM_DEPS_HASH),
+            HashEntry.create("cargoHash", _CARGO_HASH),
+        ]),
+    )
+
+    assert (
+        run_async(
+            module.ReflectOpenUpdater()._is_latest(UpdateContext(current=current), info)
+        )
+        is False
+    )
 
 
 def test_reflect_source_pin_contains_promoted_authoritative_hashes() -> None:
@@ -684,12 +700,7 @@ def test_reflect_nix_policy_rejects_drift_before_patching_any_source(
     )
     before = dict(drifted)
 
-    # The anchor spans the declaration line too, so a duplicated or missing
-    # `supported` line leaves no exact match for the multi-line anchor.
-    with pytest.raises(
-        CodemodError,
-        match=rf"expected 1 match for {provider_path}, found 0$",
-    ):
+    with pytest.raises(RuntimeError, match="expected one Reflect source anchor"):
         module.patch_sources(drifted, package_manager=_PACKAGE_MANAGER)
 
     assert drifted == before

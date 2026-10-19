@@ -92,14 +92,7 @@ let
         exec ${lib.getExe zenPython} ${lib.escapeShellArg script} "$@"
       '';
     };
-  # Copy only the script, so the wrapper does not depend on the whole
-  # repository source and stays usable by downstream consumers.
-  zenTool = mkZenWrapper "zentool" (
-    builtins.path {
-      name = "zentool";
-      path = ./zen/zentool;
-    }
-  );
+  zenTool = mkZenWrapper "zentool" ../../home/george/bin/zentool;
 in
 {
   options.nixcfg.zen = {
@@ -193,20 +186,12 @@ in
       '';
     };
 
-    toolPackage = mkOption {
-      type = types.package;
-      default = zenTool;
-      defaultText = lib.literalMD "the module's packaged `zentool` wrapper";
-      description = "Package that provides the zentool command. It is installed into home.packages.";
-    };
-
     toolCommand = mkOption {
       type = types.str;
-      default = lib.getExe cfg.toolPackage;
-      defaultText = lib.literalExpression "lib.getExe config.nixcfg.zen.toolPackage";
+      default = lib.getExe zenTool;
       description = ''
         Command used to inspect and reconcile Zen state and assets. Defaults to
-        the main program of toolPackage.
+        the packaged repo-managed zentool wrapper.
       '';
     };
 
@@ -252,7 +237,7 @@ in
     ];
 
     home.packages = [
-      cfg.toolPackage
+      zenTool
     ];
 
     xdg.configFile = mkMerge [

@@ -11,7 +11,6 @@ let
   managedEntries = attrValues cfg.resolved;
   userEntries = macApps.applicationsForScope "user" cfg.resolved;
   managedBundleNames = map (entry: entry.bundleName) managedEntries;
-  cliShimFiles = macApps.cliShimFiles { entries = managedEntries; };
 in
 {
   options.nixcfg.macApps = {
@@ -29,10 +28,6 @@ in
       copyApps.enable = false;
       linkApps.enable = false;
     };
-
-    # Command-line executables bundled inside managed applications are linked
-    # into ~/.local/bin. The consumer owns putting that directory on PATH.
-    home.file = lib.mkIf (cliShimFiles != { }) cliShimFiles;
 
     assertions = lib.optionals (managedEntries != [ ]) [
       (macApps.uniqueBundleNamesAssertion managedEntries)

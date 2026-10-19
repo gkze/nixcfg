@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Protocol
 from lib.update.updaters.flake_backed import FlakeInputUpdater
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping, Sequence
+    from collections.abc import Callable, Iterable, Mapping
 
     from lib.nix.models.sources import SourceEntry
     from lib.update.refs import FlakeInputRef
@@ -364,42 +364,6 @@ def failure_closure(
     return frozenset(closure)
 
 
-def withheld_targets(
-    order: Iterable[str],
-    *,
-    statuses: Mapping[str, str],
-    failed: Sequence[str],
-    clusters: Mapping[str, frozenset[str]],
-    closure: frozenset[str],
-    target_inputs: Mapping[str, frozenset[str]],
-    rolled_back_inputs: frozenset[str],
-    flake_culprit: str | None,
-) -> dict[str, str]:
-    """Return the updated targets that cannot be promoted, with the reason.
-
-    A target is withheld when it is coupled to a failure (``closure``) or when
-    it depends on an input whose lock node was rolled back. ``flake_culprit``
-    names the failed target that moved a flake input, for targets withheld
-    only because the flake files were reverted.
-    """
-    dropped: dict[str, str] = {}
-    for name in order:
-        if name in failed or statuses.get(name) != "updated":
-            continue
-        culprit = next(
-            (item for item in failed if item in clusters.get(name, ())), None
-        )
-        if name in closure:
-            dropped[name] = (
-                f"coupled to failed target {culprit}"
-                if culprit is not None
-                else f"flake inputs reverted after {flake_culprit} failed"
-            )
-        elif target_inputs.get(name, frozenset()) & rolled_back_inputs:
-            dropped[name] = f"input rolled back after {culprit or flake_culprit} failed"
-    return dropped
-
-
 def resolve_update_targets[ResolvedTargetsT](
     opts: _UpdateOptionsLike,
     *,
@@ -478,5 +442,4 @@ __all__ = [
     "source_backing_input_name",
     "source_dependency_order",
     "source_prerequisites",
-    "withheld_targets",
 ]

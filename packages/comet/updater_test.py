@@ -226,10 +226,12 @@ def test_comet_rechecks_same_version_download_hashes() -> None:
     assert module.CometUpdater.materialize_when_current is True
 
 
-def test_bulk_update_hold_skips_hosted_linux_arm_r2_prefetch() -> None:
-    """Linux ARM prefetch of the R2 DMG stalls; do not rematerialize until that works."""
+def test_bulk_update_hold_is_cleared_so_darwin_can_rehash() -> None:
+    """Linux ARM must reuse Darwin hashes; holding comet skipped rematerialize.
+
+    Update 38479406823: the R2 prefetch hold kept ``comet_latest.dmg`` pinned
+    while Perplexity replaced the same version, and cascade failed the FOD.
+    """
     module = _load_module()
-    hold = module.CometUpdater.bulk_update_hold
-    assert hold is not None
-    assert "ubuntu-24.04-arm" in hold
-    assert "2400s" in hold
+    assert module.CometUpdater.bulk_update_hold is None
+    assert module.CometUpdater.materialize_when_current is True

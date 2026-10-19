@@ -40,7 +40,7 @@ from nix_manipulator.expressions.select import Select
 from nix_manipulator.expressions.set import AttributeSet
 
 from lib.import_utils import load_module_from_path
-from lib.update import failures, generation_receipts
+from lib.update import generation_receipts
 from lib.update import runtime as update_runtime
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import resolve_active_config
@@ -90,23 +90,21 @@ _RETRYABLE_CRATE2NIX_NETWORK_CONTEXT_MARKERS = (
     "index.crates.io",
     "nix-prefetch-git",
 )
-# Only consulted together with a network context marker above. Beyond the
-# shared network and transfer-timeout sets, cargo/git fetches add libcurl and
-# git transport spellings, and concurrent cargo-home use races on lock files
-# and checkout directories. The shared sets used to be hand-copied here and had
-# drifted (DNS ``Temporary failure in name resolution`` and ``connection
-# reset`` never retried).
 _RETRYABLE_CRATE2NIX_TRANSIENT_MARKERS = (
-    *failures.NIX_NETWORK_TRANSIENT_MARKERS,
-    *failures.TRANSFER_TIMEOUT_MARKERS,
-    "Timeout was reached",
-    "TLS connection",
-    "RPC failed",
-    "early EOF",
-    "The requested URL returned error: 5",
-    "cannot create the lock file",
     "Directory not empty",
     "No such file or directory",
+    "Operation timed out",
+    "Operation too slow",
+    "Timeout was reached",
+    "cannot create the lock file",
+    "Connection timed out",
+    "Could not resolve host",
+    "Failed to connect",
+    "TLS connection",
+    "RPC failed",
+    "HTTP/2 stream",
+    "early EOF",
+    "The requested URL returned error: 5",
 )
 _ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|$))")
 _ENOSPC_MARKERS = ("no space left on device", "enospc")
@@ -841,11 +839,10 @@ def _hash_key_matches_locked_package(
 def _filtered_crate_hash_seed(
     target: Crate2NixTarget,
     patched_src: Path,
-    root: Path,
 ) -> bytes | None:
     """Build a safe temporary hash seed for the candidate's resolved Git graph."""
-    checked_hashes_path = root / target.crate_hashes
-    checked_cargo_path = root / target.cargo_nix
+    checked_hashes_path = REPO_ROOT / target.crate_hashes
+    checked_cargo_path = REPO_ROOT / target.cargo_nix
     candidate_lock_path = (
         patched_src / target.cargo_manifest_relpath.parent / "Cargo.lock"
     )
@@ -880,11 +877,7 @@ def _filtered_crate_hash_seed(
 
 
 def load_normalizer(path: Path) -> _Normalizer:
-    """Load and validate one registered Cargo.nix normalizer.
-
-    Relative paths resolve under the live repository root; absolute paths are
-    used as given so callers can load from an explicit (e.g. isolated) root.
-    """
+    """Load and validate one registered Cargo.nix normalizer."""
     module_path = (REPO_ROOT / path).resolve()
     try:
         module = load_module_from_path(
@@ -1274,9 +1267,13 @@ def _run(
 
 def _is_retryable_crate2nix_generate_failure(message: str) -> bool:
     """Return whether a crate2nix generation failure is likely transient."""
-    return failures.contains_marker(
-        message, _RETRYABLE_CRATE2NIX_NETWORK_CONTEXT_MARKERS
-    ) and failures.contains_marker(message, _RETRYABLE_CRATE2NIX_TRANSIENT_MARKERS)
+    output = message.casefold()
+    return any(
+        marker.casefold() in output
+        for marker in _RETRYABLE_CRATE2NIX_NETWORK_CONTEXT_MARKERS
+    ) and any(
+        marker.casefold() in output for marker in _RETRYABLE_CRATE2NIX_TRANSIENT_MARKERS
+    )
 
 
 def _raise_if_cancelled(cancel_event: threading.Event | None) -> None:
@@ -1451,9 +1448,7 @@ def _build_patched_src(
     return Path(out_paths[0])
 
 
-def _generation_identity(
-    target: Crate2NixTarget, patched_src: Path, root: Path
-) -> str | None:
+def _generation_identity(target: Crate2NixTarget, patched_src: Path) -> str | None:
     """Fingerprint the audited deterministic generator, never a mutable source.
 
     The patched store source includes manifests, patches, and local Cargo config.
@@ -1463,6 +1458,7 @@ def _generation_identity(
     """
     if not target.cache_generation or not patched_src.is_relative_to("/nix/store"):
         return None
+    root = Path(REPO_ROOT)
     output_paths = {root / path for path in target.artifact_paths}
     code_paths = {
         path
@@ -1563,13 +1559,13 @@ def _generation_receipt_path(target: Crate2NixTarget) -> Path:
 
 
 def _cached_refresh(
-    target: Crate2NixTarget, identity: str | None, root: Path
+    target: Crate2NixTarget, identity: str | None
 ) -> RefreshResult | None:
     if identity is None:
         return None
     try:
         outputs = {
-            str(path): (root / path).read_text(encoding="utf-8")
+            str(path): (REPO_ROOT / path).read_text(encoding="utf-8")
             for path in target.artifact_paths
         }
     except OSError, UnicodeError:
@@ -1590,12 +1586,10 @@ def _cached_refresh(
 def _refresh_target_impl(
     target: Crate2NixTarget,
     *,
-    root: Path = REPO_ROOT,
     source_overrides: dict[str, SourceEntry] | None = None,
     cancel_event: threading.Event | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> RefreshResult:
-    root = Path(root)
     if cancel_event is None and progress is None:
         patched_src = (
             _build_patched_src(target, source_overrides=source_overrides)
@@ -1610,15 +1604,15 @@ def _refresh_target_impl(
             progress=progress,
         )
     with update_runtime.measure(target.name, "crate2nix_identity"):
-        identity = _generation_identity(target, patched_src, root)
-    cached = _cached_refresh(target, identity, root)
+        identity = _generation_identity(target, patched_src)
+    cached = _cached_refresh(target, identity)
     if cached is not None:
         if runtime := update_runtime.active_runtime():
             runtime.timing(target.name, "crate2nix_generation").cache_hits += 1
         if progress is not None:
             progress("Reusing verified crate2nix artifacts")
         return cached
-    normalize = load_normalizer(root / target.normalizer_path)
+    normalize = load_normalizer(target.normalizer_path)
 
     with tempfile.TemporaryDirectory(prefix=f"crate2nix-{target.name}-") as tmp_dir:
         tmp_root = Path(tmp_dir)
@@ -1626,7 +1620,7 @@ def _refresh_target_impl(
         cargo_home.mkdir(parents=True, exist_ok=True)
         generated_cargo = tmp_root / "Cargo.nix"
         generated_hashes = tmp_root / "crate-hashes.json"
-        hash_seed = _filtered_crate_hash_seed(target, patched_src, root)
+        hash_seed = _filtered_crate_hash_seed(target, patched_src)
 
         generate_args = [
             "nix",
@@ -1721,21 +1715,14 @@ def _refresh_target_impl(
 def _refresh_target(
     target: Crate2NixTarget,
     *,
-    root: Path = REPO_ROOT,
     source_overrides: dict[str, SourceEntry] | None = None,
     cancel_event: threading.Event | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> RefreshResult:
-    """Refresh one target against artifacts under ``root``.
-
-    Local storage exhaustion is classified consistently. ``root`` only selects
-    the checked-in artifacts and generator code; Nix commands still resolve the
-    repository through the process context that an isolated workspace owns.
-    """
+    """Refresh one target and classify local storage exhaustion consistently."""
     try:
         return _refresh_target_impl(
             target,
-            root=root,
             source_overrides=source_overrides,
             cancel_event=cancel_event,
             progress=progress,
@@ -1936,16 +1923,14 @@ async def stream_crate2nix_artifact_updates(
     )
 
 
-def _target_has_changes(
-    target: Crate2NixTarget, refreshed: RefreshResult, root: Path
-) -> bool:
-    current_cargo = (root / target.cargo_nix).read_text(encoding="utf-8")
+def _target_has_changes(target: Crate2NixTarget, refreshed: RefreshResult) -> bool:
+    current_cargo = (REPO_ROOT / target.cargo_nix).read_text(encoding="utf-8")
     current_hashes = _normalize_json_text(
-        (root / target.crate_hashes).read_text(encoding="utf-8")
+        (REPO_ROOT / target.crate_hashes).read_text(encoding="utf-8")
     )
     crate_sources_changed = False
     if target.crate_sources is not None and refreshed.crate_sources is not None:
-        source_path = root / target.crate_sources
+        source_path = REPO_ROOT / target.crate_sources
         crate_sources_changed = (
             not source_path.exists()
             or source_path.read_text(encoding="utf-8") != refreshed.crate_sources
@@ -1980,12 +1965,10 @@ def _target_artifact_payloads(
     return tuple(payloads)
 
 
-def _write_target(
-    target: Crate2NixTarget, refreshed: RefreshResult, root: Path
-) -> None:
+def _write_target(target: Crate2NixTarget, refreshed: RefreshResult) -> None:
     """Atomically replace each validated artifact from a same-directory temp file."""
     for relative_path, content in _target_artifact_payloads(target, refreshed):
-        atomic_write_text(root / relative_path, content)
+        atomic_write_text(REPO_ROOT / relative_path, content)
 
 
 def _resolve_targets(
@@ -2015,9 +1998,8 @@ def _run_targets(
     *,
     packages: tuple[str, ...],
     write: bool,
-    root: Path,
 ) -> tuple[int, tuple[str, ...]]:
-    """Check or prepare target artifacts under ``root``."""
+    """Check or prepare target artifacts in the active repository root."""
     try:
         runnable, skipped = _resolve_targets(packages)
     except RuntimeError as exc:
@@ -2055,13 +2037,12 @@ def _run_targets(
         try:
             refreshed = _refresh_target(
                 target,
-                root=root,
                 progress=_progress,
             )
-            if _target_has_changes(target, refreshed, root):
+            if _target_has_changes(target, refreshed):
                 changed_targets.append(target.name)
                 if write:
-                    _write_target(target, refreshed, root)
+                    _write_target(target, refreshed)
                 else:
                     sys.stderr.write(f"STALE {target.name}\n")
                     failures = True
@@ -2087,6 +2068,9 @@ def _write_targets_transactionally(packages: tuple[str, ...]) -> int:
         IsolatedUpdateWorkspace,
     )
 
+    global REPO_ROOT  # noqa: PLW0603 -- isolate existing root-relative helpers
+
+    live_root = REPO_ROOT
     selected_names = packages or tuple(TARGETS)
     allowed_paths = tuple(
         dict.fromkeys(
@@ -2097,12 +2081,15 @@ def _write_targets_transactionally(packages: tuple[str, ...]) -> int:
         )
     )
     try:
-        with IsolatedUpdateWorkspace(Path(REPO_ROOT)) as workspace:
-            result, changed_targets = _run_targets(
-                packages=packages,
-                write=True,
-                root=workspace.root,
-            )
+        with IsolatedUpdateWorkspace(live_root) as workspace:
+            REPO_ROOT = workspace.root
+            try:
+                result, changed_targets = _run_targets(
+                    packages=packages,
+                    write=True,
+                )
+            finally:
+                REPO_ROOT = live_root
             if result != 0:
                 return result
             workspace.promote(allowed_paths)
@@ -2123,9 +2110,7 @@ def run(*, packages: tuple[str, ...] = (), write: bool = False) -> int:
     """Check or refresh checked-in crate2nix artifacts."""
     if write:
         return _write_targets_transactionally(packages)
-    result, _changed_targets = _run_targets(
-        packages=packages, write=False, root=Path(REPO_ROOT)
-    )
+    result, _changed_targets = _run_targets(packages=packages, write=False)
     return result
 
 

@@ -374,7 +374,7 @@ def test_update_async_host_single_sigint_reaps_before_snapshot_or_promotion(
     script = """
 import asyncio, json, os, pathlib, signal, sys, threading, time
 from contextlib import contextmanager
-from lib.update import cli, runtime_source, derivation_validation as validation
+from lib.update import cli, derivation_validation as validation
 from lib.update.persistence import UpdateValidationSnapshot
 root = pathlib.Path(sys.argv[1])
 mode = sys.argv[2]
@@ -416,7 +416,7 @@ def interrupt():
 
 cli.update_persistence.IsolatedUpdateWorkspace = Workspace
 cli._handle_preflight_requests = lambda *_: None
-runtime_source.revalidate_runtime_source_snapshot = lambda *_: None
+cli._revalidate_runtime_source_snapshot = lambda *_: None
 cli._build_run_plan = lambda *_: None
 cli._requires_root_closure_validation = lambda *_: True
 validation.validate_root_closures = roots
@@ -751,8 +751,135 @@ print("complete")
     assert sleeps == [1.0, 2.0]
 
 
+def test_validation_restarts_nix_daemon_before_disconnect_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#1257 isolation retried against a dead socket; kickstart first."""
+    recovered: list[object] = []
+    monkeypatch.setattr(
+        validation,
+        "recover_nix_store_after_fault",
+        lambda **kwargs: recovered.append(kwargs),
+    )
+    marker = tmp_path / "attempt"
+    script = """
+import pathlib, sys
+marker = pathlib.Path(sys.argv[1])
+count = int(marker.read_text()) if marker.exists() else 0
+count += 1
+marker.write_text(str(count))
+if count == 1:
+    print(
+        "error: cannot open connection to remote store 'daemon': "
+        "Nix daemon disconnected unexpectedly (maybe it crashed?)",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+print("complete")
+"""
+    sleeps: list[float] = []
+    result = validation._run_validation_command(
+        [sys.executable, "-c", script, str(marker)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=sleeps.append,
+    )
+    assert result.returncode == 0
+    assert recovered
+    assert sleeps == [1.0]
+
+
+def test_validation_repairs_leftover_pnpm_deps_before_fetcher_version_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """38606641679: attempt 2 cat .fetcher-version must repair then retry."""
+    repaired: list[object] = []
+    monkeypatch.setattr(
+        validation,
+        "repair_corrupt_nix_store_paths",
+        lambda **kwargs: repaired.append(kwargs),
+    )
+    pnpm_deps = "/nix/store/5xacb06gxg1yzpr852gkv57cxqlm6lpq-emdash-pnpm-deps"
+    marker = tmp_path / "attempt"
+    script = f"""
+import pathlib, sys
+marker = pathlib.Path(sys.argv[1])
+count = int(marker.read_text()) if marker.exists() else 0
+count += 1
+marker.write_text(str(count))
+if count == 1:
+    print(
+        "error: Cannot build '/nix/store/phfbayk4ivrm3df7z2yngmszmwj146k8-"
+        "emdash-1.2.6.drv'.",
+        file=sys.stderr,
+    )
+    print("Reason: builder failed with exit code 1.", file=sys.stderr)
+    print(
+        "> cat: {pnpm_deps}/.fetcher-version: No such file or directory",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+print("complete")
+"""
+    sleeps: list[float] = []
+    result = validation._run_validation_command(
+        [sys.executable, "-c", script, str(marker)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=sleeps.append,
+    )
+    assert result.returncode == 0
+    assert repaired
+    assert repaired[0]["stderr"].endswith(
+        f"> cat: {pnpm_deps}/.fetcher-version: No such file or directory\n"
+    )
+    assert sleeps == [1.0]
+
+
+def test_validation_retries_named_fetchurl_mirror_failure(
+    tmp_path: Path,
+) -> None:
+    """#1257: cannot download <filename> from any mirror is a fetch flake."""
+    marker = tmp_path / "attempt"
+    script = """
+import pathlib, sys
+marker = pathlib.Path(sys.argv[1])
+count = int(marker.read_text()) if marker.exists() else 0
+count += 1
+marker.write_text(str(count))
+if count == 1:
+    print(
+        "error: Cannot build "
+        "'/nix/store/7z11-_std_collections-1.1.6-sum_of_test.ts.drv'.",
+        file=sys.stderr,
+    )
+    print("Reason: builder failed with exit code 1.", file=sys.stderr)
+    print(
+        "> error: cannot download "
+        "_std_collections-1.1.6-sum_of_test.ts from any mirror",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+print("complete")
+"""
+    sleeps: list[float] = []
+    result = validation._run_validation_command(
+        [sys.executable, "-c", script, str(marker)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=sleeps.append,
+    )
+    assert result.returncode == 0
+    assert sleeps == [1.0]
+
+
 def test_validation_retries_unreadable_store_rlib_e0463(tmp_path: Path) -> None:
-    """Update 37599536875: rustc E0463 after --extern store rlib retries like EILSEQ."""
+    """E0463 after --extern store rlib retries only when rustc reports I/O."""
     marker = tmp_path / "attempt"
     script = """
 import pathlib, sys
@@ -770,6 +897,12 @@ if count == 1:
         file=sys.stderr,
     )
     print("error[E0463]: can't find crate for `settings`", file=sys.stderr)
+    print(
+        "note: extern location for settings does not exist: /nix/store/"
+        "l0sqrxbm7jiz24hjci8bpkl2mh9wwsvw-rust_settings-0.1.0-lib/lib/"
+        "libsettings-7be7f1170a.rlib",
+        file=sys.stderr,
+    )
     raise SystemExit(1)
 print("complete")
 """
@@ -783,6 +916,39 @@ print("complete")
     )
     assert result.returncode == 0
     assert sleeps == [1.0]
+
+
+def test_validation_does_not_retry_bare_e0463_store_extern(tmp_path: Path) -> None:
+    """#1258 rust_agent_ui: bare E0463 plus a store --extern is a builder failure."""
+    marker = tmp_path / "attempt"
+    script = """
+import pathlib, sys
+marker = pathlib.Path(sys.argv[1])
+count = int(marker.read_text()) if marker.exists() else 0
+count += 1
+marker.write_text(str(count))
+print("error: Cannot build '/nix/store/ks-rust_agent_ui-0.1.0.drv'.", file=sys.stderr)
+print("Reason: builder failed with exit code 1.", file=sys.stderr)
+print(
+    "> rustc --crate-name agent_ui --extern language_models=/nix/store/"
+    "h3crq11aaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_language_models-0.1.0-lib/lib/"
+    "liblanguage_models-f75b2474e2.rlib",
+    file=sys.stderr,
+)
+print("error[E0463]: can't find crate for `language_models`", file=sys.stderr)
+raise SystemExit(1)
+"""
+    sleeps: list[float] = []
+    result = validation._run_validation_command(
+        [sys.executable, "-c", script, str(marker)],
+        cwd=tmp_path,
+        timeout=5,
+        run=None,
+        sleep=sleeps.append,
+    )
+    assert result.returncode == 1
+    assert sleeps == []
+    assert marker.read_text() == "1"
 
 
 def test_store_fault_retry_keeps_the_remaining_closure_budget(
@@ -911,6 +1077,111 @@ print("complete")
         lifecycle[0].command, succeeded=True
     )
     _assert_reader_stopped()
+
+
+def test_validation_retries_truncated_ranlib_write_eio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """38394692516: last-25 omitted ranlib EIO; nix log makes the store fault retryable."""
+    truncated = (
+        "error: Cannot build '/nix/store/"
+        "4jjnjbsw4a0ysny10x9p57r057k25nhz-buzz-onnxruntime-1.27.0.drv'.\n"
+        "Reason: builder failed with exit code 2.\n"
+        "make: *** [Makefile:146: all] Error 2"
+    )
+    attempts = {"n": 0}
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr=truncated)
+        return subprocess.CompletedProcess(args, 0, stdout="complete\n", stderr="")
+
+    monkeypatch.setattr(
+        validation,
+        "_builder_log_supplement",
+        lambda _result, **_kwargs: (
+            "fatal error: /nix/store/2yfrcmkvspsrjhj283gdawqp37aghxva-"
+            "clang-wrapper-21.1.8/bin/ranlib: can't write to output file "
+            "(Input/output error)"
+        ),
+    )
+    sleeps: list[float] = []
+    result = validation._run_validation_command(
+        [
+            "nix",
+            "build",
+            "/nix/store/4jjnjbsw4a0ysny10x9p57r057k25nhz-buzz-onnxruntime-1.27.0.drv^*",
+        ],
+        cwd=tmp_path,
+        timeout=None,
+        run=run,
+        sleep=sleeps.append,
+    )
+    assert result.returncode == 0
+    assert attempts["n"] == 2
+    assert sleeps == [1.0]
+    monkeypatch.setattr(validation, "_builder_log_supplement", lambda *_a, **_k: "")
+    attempts["n"] = 0
+    permanent = validation._run_validation_command(
+        ["nix", "build", "path:.#demo"],
+        cwd=tmp_path,
+        timeout=None,
+        run=run,
+        sleep=sleeps.append,
+    )
+    assert permanent.returncode == 1
+    assert attempts["n"] == 1
+
+
+def test_builder_log_supplement_reads_nix_log_outside_pytest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hosted validation consults ``nix log``; pytest does not shell out."""
+    drv = "/nix/store/4jjnjbsw4a0ysny10x9p57r057k25nhz-buzz-onnxruntime-1.27.0.drv"
+    result = subprocess.CompletedProcess(
+        ["nix", "build", f"{drv}^*"],
+        1,
+        stdout="",
+        stderr=f"error: Cannot build '{drv}'.\nReason: builder failed with exit code 2.",
+    )
+    assert validation._builder_log_supplement(result, cwd=tmp_path) == ""
+    monkeypatch.setattr(validation.shutil, "which", lambda _name: None)
+    assert validation._read_nix_builder_log(drv, cwd=tmp_path) == ""
+    monkeypatch.setattr(validation.shutil, "which", lambda _name: "/bin/nix")
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("nix log unavailable")
+
+    monkeypatch.setattr(validation.subprocess, "run", boom)
+    assert validation._read_nix_builder_log(drv, cwd=tmp_path) == ""
+
+    def timeout(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(["nix", "log", drv], 30)
+
+    monkeypatch.setattr(validation.subprocess, "run", timeout)
+    assert validation._read_nix_builder_log(drv, cwd=tmp_path) == ""
+
+    def ok(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            ["nix", "log", drv], 0, stdout="ranlib eio\n", stderr=""
+        )
+
+    monkeypatch.setattr(validation.subprocess, "run", ok)
+    assert "ranlib eio" in validation._read_nix_builder_log(drv, cwd=tmp_path)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    fetched: list[str] = []
+
+    def fake_log(path: str, *, cwd: Path) -> str:
+        fetched.append(path)
+        assert cwd == tmp_path
+        return "can't write to output file (Input/output error)"
+
+    monkeypatch.setattr(validation, "_read_nix_builder_log", fake_log)
+    assert "Input/output error" in validation._builder_log_supplement(
+        result, cwd=tmp_path
+    )
+    assert fetched == [drv]
 
 
 def test_root_validation_streams_manifest_and_failed_batch_fallback(

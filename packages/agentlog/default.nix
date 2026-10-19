@@ -2,7 +2,6 @@
   mkDmgApp,
   mkSimpleDarwinApp,
   selfSource,
-  signAndVerifyBundle,
   ...
 }:
 mkSimpleDarwinApp {
@@ -23,19 +22,17 @@ mkSimpleDarwinApp {
     /usr/bin/plutil -replace CFBundleShortVersionString -string "${selfSource.version}" "$plist"
     /usr/bin/plutil -replace CFBundleVersion -string "${selfSource.version}" "$plist"
 
-    ${signAndVerifyBundle {
-      bundle = ''"$app_bundle"'';
-      preserveMetadata = [
-        "identifier"
-        "entitlements"
-        "flags"
-        "runtime"
-      ];
-    }}
+    /usr/bin/codesign \
+      --force \
+      --deep \
+      --sign - \
+      --preserve-metadata=identifier,entitlements,flags,runtime \
+      "$app_bundle"
 
     test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = \
       "${selfSource.version}"
     test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")" = \
       "${selfSource.version}"
+    /usr/bin/codesign --verify --deep --strict "$app_bundle"
   '';
 }

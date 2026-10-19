@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-xLRikIFTVG69amodaFDST836icBoZKjL6yd+nN4vJ3Y=",
-    "x86_64-darwin": "sha256-2UNZNRwnlC5E4qGFu1XwB35B30WgYrnq6AvRtsI8iGc="
+    "aarch64-darwin": "sha256-lCZwzcTcXpugNaJvzNUQYkBjtXCVNV/wXHlNcR1WfQA=",
+    "x86_64-darwin": "sha256-zzv3fqw4mT1UikbjsMQcY0+c1cRu4TICMaI8kdHV0OQ="
   },
   "urls": {
-    "aarch64-darwin": "https://packages.loom.com/desktop-packages/Loom-0.379.4-arm64.dmg",
-    "x86_64-darwin": "https://packages.loom.com/desktop-packages/Loom-0.379.4.dmg"
+    "aarch64-darwin": "https://packages.loom.com/desktop-packages/Loom-0.380.6-arm64.dmg",
+    "x86_64-darwin": "https://packages.loom.com/desktop-packages/Loom-0.380.6.dmg"
   },
-  "version": "0.379.4"
+  "version": "0.380.6"
 }

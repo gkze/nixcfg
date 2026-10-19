@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 
+_RESOLVED_TIMEOUT = 9.0
+_REQUEST_TIMEOUT = 3.0
 _DEFAULT_RETRIES = 4
 _DEFAULT_BACKOFF = 1.5
 _MIN_POSITIONAL_ARGS = 2
@@ -196,6 +198,23 @@ def test_build_headers_and_http_error_format(monkeypatch: pytest.MonkeyPatch) ->
         "https://example.com", None
     )
     assert "Authorization" not in nongh
+
+
+def test_resolve_timeout_alias_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run this test case."""
+    called: dict[str, object] = {}
+
+    def _resolver(**kwargs: object) -> float:
+        called.update(kwargs)
+        return _RESOLVED_TIMEOUT
+
+    monkeypatch.setattr(net, "resolve_timeout_alias", _resolver)
+    result = object.__getattribute__(net, "_resolve_timeout_alias")(
+        request_timeout=_REQUEST_TIMEOUT, kwargs={"timeout": 5}
+    )
+    assert result == _RESOLVED_TIMEOUT
+    assert called["named_timeout"] == _REQUEST_TIMEOUT
+    assert called["named_timeout_label"] == "request_timeout"
 
 
 def test_request_success_and_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -888,13 +907,40 @@ def test_fetch_github_api_paginated_requires_list_payload(
         )
 
 
-def test_json_list_type_errors() -> None:
-    """Validate list coercion errors."""
+def test_json_list_and_optional_type_errors() -> None:
+    """Validate list coercion and option parser type errors."""
     with pytest.raises(RuntimeError, match="Expected JSON array"):
         object.__getattribute__(net, "_expect_json_list")(
             [{"nested": {1, 2}}],
             context="ctx",
         )
+
+    with pytest.raises(TypeError, match="user_agent must be a string"):
+        object.__getattribute__(net, "_pop_optional_str")(
+            {"user_agent": 1},
+            "user_agent",
+        )
+
+    with pytest.raises(TypeError, match="request_timeout must be numeric"):
+        object.__getattribute__(net, "_pop_optional_numeric")(
+            {"request_timeout": "bad"},
+            "request_timeout",
+        )
+
+    with pytest.raises(TypeError, match="retries must be an integer"):
+        object.__getattribute__(net, "_pop_optional_int")(
+            {"retries": "bad"},
+            "retries",
+        )
+
+    with pytest.raises(TypeError, match="config must be an UpdateConfig"):
+        object.__getattribute__(net, "_pop_optional_config")({"config": object()})
+
+    with pytest.raises(TypeError, match="method must be a string"):
+        object.__getattribute__(net, "_parse_request_options")({"method": 1})
+
+    with pytest.raises(TypeError, match=r"Unexpected keyword argument\(s\): extra"):
+        object.__getattribute__(net, "_parse_request_options")({"extra": True})
 
 
 def test_token_discovery_without_netrc_auth_and_rate_limit_unknown_reset(
@@ -933,14 +979,18 @@ def test_token_discovery_without_netrc_auth_and_rate_limit_unknown_reset(
     assert detail == "HTTP 404 Not Found"
 
 
-def test_get_github_token_without_netrc(
+def test_get_github_token_without_netrc_and_optional_str_success(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Return ``None`` when netrc is absent."""
+    """Return ``None`` when netrc is absent and parse optional string values."""
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
     assert object.__getattribute__(net, "_get_github_token")() is None
+
+    payload = {"user_agent": "ua"}
+    value = object.__getattribute__(net, "_pop_optional_str")(payload, "user_agent")
+    assert value == "ua"
 
 
 def test_request_non_retryable_and_exhausted_retryer(

@@ -6,6 +6,7 @@ import pytest
 
 from lib.nix.models.sources import HashCollection, SourceEntry
 from lib.tests._updater_helpers import collect_events
+from lib.update import constants
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.config import (
     DEFAULT_CONFIG,
@@ -172,6 +173,39 @@ def test_resolve_config_ignores_none_overrides(
     monkeypatch.delenv("UPDATE_RUN_LOG_DIR", raising=False)
     cfg = resolve_config(http_timeout=None, retries=None, hash_build_platforms=None)
     assert cfg == DEFAULT_CONFIG
+
+
+def test_resolve_timeout_alias_success_and_errors() -> None:
+    """Handle timeout alias conversion and invalid argument combinations."""
+    kwargs: dict[str, object] = {"timeout": 2}
+    resolved = constants.resolve_timeout_alias(
+        named_timeout=None,
+        named_timeout_label="request_timeout",
+        kwargs=kwargs,
+    )
+    assert resolved == 2.0
+    assert kwargs == {}
+
+    with pytest.raises(TypeError, match="Pass only one"):
+        constants.resolve_timeout_alias(
+            named_timeout=1.0,
+            named_timeout_label="request_timeout",
+            kwargs={"timeout": 2.0},
+        )
+
+    with pytest.raises(TypeError, match="timeout must be a number"):
+        constants.resolve_timeout_alias(
+            named_timeout=None,
+            named_timeout_label="request_timeout",
+            kwargs={"timeout": "oops"},
+        )
+
+    with pytest.raises(TypeError, match=r"Unexpected keyword argument\(s\): extra"):
+        constants.resolve_timeout_alias(
+            named_timeout=None,
+            named_timeout_label="request_timeout",
+            kwargs={"extra": True},
+        )
 
 
 def test_update_event_expect_helpers_and_type_guards() -> None:

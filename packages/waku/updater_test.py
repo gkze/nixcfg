@@ -2,7 +2,6 @@
 
 import json
 import os
-import re
 import subprocess
 import tomllib
 from pathlib import Path
@@ -13,11 +12,11 @@ from nix_manipulator.expressions.assertion import Assertion
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
+from nix_manipulator.expressions.if_expression import IfExpression
 from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
-from lib.codemods.errors import CodemodError
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
@@ -76,33 +75,25 @@ def _load_updater_module() -> ModuleType:
     )
 
 
-def _waku_derivation() -> tuple[
-    FunctionDefinition, Assertion, FunctionCall, AttributeSet
-]:
-    """Return the package, its let-scoped version floor, and the derivation."""
+def _waku_derivation() -> tuple[FunctionDefinition, FunctionCall, AttributeSet]:
     package = expect_instance(
         parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),
         FunctionDefinition,
     )
-    platform = expect_instance(package.output, Assertion)
-    version_floor = expect_instance(platform.body, Assertion)
-    derivation = expect_instance(version_floor.body, FunctionCall)
+    assertion = expect_instance(package.output, Assertion)
+    derivation = expect_instance(assertion.body, FunctionCall)
     arguments = expect_instance(derivation.argument, AttributeSet)
-    return package, version_floor, derivation, arguments
+    return package, derivation, arguments
 
 
-def _phase(arguments: AttributeSet, name: str) -> IndentedString:
-    return expect_instance(expect_binding(arguments.values, name).value, IndentedString)
-
-
-def _cua_driver_sdk_arguments() -> AttributeSet:
-    _package, scope, _derivation, _arguments = _waku_derivation()
-    sdk = expect_instance(
-        expect_binding(scope.scope, "cuaDriverSdk").value,
-        FunctionCall,
+def _gated_phase(derivation: FunctionCall, name: str) -> IndentedString:
+    phase = expect_instance(
+        expect_binding(derivation.scope, name).value,
+        IfExpression,
     )
-    assert_nix_ast_equal(sdk.name, "rustPlatform.buildRustPackage")
-    return expect_instance(sdk.argument, AttributeSet)
+    assert_nix_ast_equal(phase.condition, "hasCuaHost")
+    assert_nix_ast_equal(phase.alternative, "null")
+    return expect_instance(phase.consequence, IndentedString)
 
 
 def _appcast(
@@ -601,7 +592,7 @@ def test_waku_validates_the_materialized_bootstrap_source() -> None:
 
 def test_waku_package_is_a_source_built_nix_owned_arm64_app() -> None:
     """The derivation must compile public source and enable runtime shaders."""
-    package, scope, derivation, arguments = _waku_derivation()
+    package, derivation, arguments = _waku_derivation()
     assertion = expect_instance(package.output, Assertion)
 
     formal_names = {
@@ -616,28 +607,19 @@ def test_waku_package_is_a_source_built_nix_owned_arm64_app() -> None:
     assert "libiconv" in formal_names
     assert "makeWrapper" not in formal_names
     assert_nix_ast_equal(
-        expect_binding(scope.scope, "source").value,
+        expect_binding(derivation.scope, "source").value,
         "outputs.lib.sourceEntry pname",
     )
     assert_nix_ast_equal(
-        expect_binding(scope.scope, "version").value,
+        expect_binding(derivation.scope, "version").value,
         "source.version",
     )
-    # Only the in-process Cua host layout (0.1.20+) is packaged; an older pin
-    # must fail evaluation instead of selecting a removed legacy layout.
     assert_nix_ast_equal(
-        expect_binding(scope.scope, "minimumCuaHostVersion").value,
-        StringPrimitive(value="0.1.20"),
+        expect_binding(derivation.scope, "hasCuaHost").value,
+        'lib.versionAtLeast version "0.1.20"',
     )
     assert_nix_ast_equal(
-        scope.expression,
-        """lib.assertMsg (lib.versionAtLeast version minimumCuaHostVersion)
-          "waku ${version} predates the in-process Cua Driver host (${minimumCuaHostVersion}+)"
-        """,
-    )
-    assert "hasCuaHost" not in binding_map(scope.scope)
-    assert_nix_ast_equal(
-        expect_binding(scope.scope, "buildNumber").value,
+        expect_binding(derivation.scope, "buildNumber").value,
         """toString (
           ((lib.elemAt versionParts 0) * 1000000)
           + ((lib.elemAt versionParts 1) * 1000)
@@ -645,11 +627,11 @@ def test_waku_package_is_a_source_built_nix_owned_arm64_app() -> None:
         )""",
     )
     assert_nix_ast_equal(
-        expect_binding(scope.scope, "minimumMacosVersion").value,
+        expect_binding(derivation.scope, "minimumMacosVersion").value,
         StringPrimitive(value="14.0"),
     )
     assert_nix_ast_equal(
-        expect_binding(scope.scope, "minimumMacosTarget").value,
+        expect_binding(derivation.scope, "minimumMacosTarget").value,
         '"arm64-apple-macos${minimumMacosVersion}"',
     )
 
@@ -662,7 +644,7 @@ def test_waku_package_is_a_source_built_nix_owned_arm64_app() -> None:
         Identifier(name="rustPlatform.buildRustPackage"),
     )
     assert_nix_ast_equal(
-        expect_binding(scope.scope, "wakuSrc").value,
+        expect_binding(derivation.scope, "wakuSrc").value,
         nix_attrset_call(
             Identifier(name="fetchFromGitHub"),
             owner="egoist",
@@ -731,10 +713,34 @@ def test_waku_package_is_a_source_built_nix_owned_arm64_app() -> None:
     )
     assert_nix_ast_equal(
         expect_binding(arguments.values, "buildInputs").value,
-        "[ cuaDriverSdk ]",
+        "lib.optionals hasCuaHost [ cuaDriverSdk ]",
     )
-    _phase(arguments, "installPhase")
-    _phase(arguments, "installCheckPhase")
+    install_phase = expect_instance(
+        expect_binding(arguments.values, "installPhase").value,
+        IfExpression,
+    )
+    assert_nix_ast_equal(install_phase.condition, "hasCuaHost")
+    assert_nix_ast_equal(
+        install_phase.consequence,
+        Identifier(name="cuaInstallPhase"),
+    )
+    assert_nix_ast_equal(
+        install_phase.alternative,
+        Identifier(name="legacyInstallPhase"),
+    )
+    check_phase = expect_instance(
+        expect_binding(arguments.values, "installCheckPhase").value,
+        IfExpression,
+    )
+    assert_nix_ast_equal(check_phase.condition, "hasCuaHost")
+    assert_nix_ast_equal(
+        check_phase.consequence,
+        Identifier(name="cuaInstallCheckPhase"),
+    )
+    assert_nix_ast_equal(
+        check_phase.alternative,
+        Identifier(name="legacyInstallCheckPhase"),
+    )
 
     assert_nix_ast_equal(
         expect_binding(arguments.values, "patches").value,
@@ -744,9 +750,12 @@ def test_waku_package_is_a_source_built_nix_owned_arm64_app() -> None:
 
 def test_waku_bundle_has_tcc_identity_no_sparkle_and_leaf_first_signing() -> None:
     """Bundle assembly must retain helper identity while suppressing self-update."""
-    _package, _scope, _derivation, arguments = _waku_derivation()
+    _package, derivation, arguments = _waku_derivation()
 
-    install = _phase(arguments, "installPhase")
+    install = expect_instance(
+        expect_binding(derivation.scope, "legacyInstallPhase").value,
+        IndentedString,
+    )
     install_commands = parse_shell(indented_string_body(install.rebuild()))
     install_texts = command_texts(install_commands)
     assert command_texts(install_commands, "env") == []
@@ -760,8 +769,26 @@ def test_waku_bundle_has_tcc_identity_no_sparkle_and_leaf_first_signing() -> Non
         "/usr/bin/plutil -replace LSMinimumSystemVersion -string \\\n"
         '      "__NIX_INTERP__" "$helperContents/Info.plist"',
     ]
+    assert command_texts(install_commands, "__NIX_INTERP__") == [
+        "__NIX_INTERP__ \\\n"
+        "      -O \\\n"
+        "      -parse-as-library \\\n"
+        '      -module-cache-path "$swiftModuleCache" \\\n'
+        "      -target __NIX_INTERP__ \\\n"
+        "      resources/computer-use/WakuComputerUse.swift \\\n"
+        '      -o "$helperExecutable"',
+        "__NIX_INTERP__ -version",
+    ]
+    assert command_texts(install_commands, "printf") == [
+        "printf '%s\\n' \\\n"
+        '        "standalone-service-v2" \\\n'
+        '        "__NIX_INTERP__" \\\n'
+        '        "sh.waku.computer-use" \\\n'
+        '        "-" \\\n'
+        '        "__NIX_INTERP__"',
+        "printf '%s\\n' \"$helperFingerprint\"",
+    ]
     signing_commands = [
-        '/usr/bin/codesign --force --sign - "$cuaLibrary"',
         '/usr/bin/codesign --force --identifier "sh.waku.computer-use" --sign - "$helper"',
         '/usr/bin/codesign --force --identifier "sh.waku.js-repl" --sign - "$repl"',
         '/usr/bin/codesign --force --identifier "sh.waku.daemon" --sign - "$daemon"',
@@ -772,7 +799,10 @@ def test_waku_bundle_has_tcc_identity_no_sparkle_and_leaf_first_signing() -> Non
         signing_commands[0]
     )
 
-    check = _phase(arguments, "installCheckPhase")
+    check = expect_instance(
+        expect_binding(derivation.scope, "legacyInstallCheckPhase").value,
+        IndentedString,
+    )
     check_commands = parse_shell(indented_string_body(check.rebuild()))
     minimum_version_loop = list(
         iter_nodes(check_commands.tree.root_node, "for_statement")
@@ -802,6 +832,19 @@ def test_waku_bundle_has_tcc_identity_no_sparkle_and_leaf_first_signing() -> Non
         "/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \"$helperInfoPlist\"",
         "/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' \"$helperInfoPlist\"",
     ]
+    assert command_texts(check_commands, "/usr/bin/codesign") == [
+        '/usr/bin/codesign --verify --strict --verbose=2 "$helper"',
+        '/usr/bin/codesign --verify --strict --verbose=2 "$repl"',
+        '/usr/bin/codesign --verify --strict --verbose=2 "$daemon"',
+        '/usr/bin/codesign --verify --deep --strict --verbose=2 "$app"',
+    ]
+    assert command_texts(check_commands, "/usr/bin/lipo") == [
+        '/usr/bin/lipo "$executable" -verify_arch arm64',
+        '/usr/bin/lipo "$repl" -verify_arch arm64',
+        '/usr/bin/lipo "$daemon" -verify_arch arm64',
+        '/usr/bin/lipo "$helperExecutable" -verify_arch arm64',
+    ]
+
     passthru_set = expect_instance(
         expect_binding(arguments.values, "passthru").value,
         AttributeSet,
@@ -810,7 +853,10 @@ def test_waku_bundle_has_tcc_identity_no_sparkle_and_leaf_first_signing() -> Non
         expect_binding(passthru_set.values, "buildNumber").value,
         "buildNumber",
     )
-    assert "hasCuaHost" not in binding_map(passthru_set.values)
+    assert_nix_ast_equal(
+        expect_binding(passthru_set.values, "hasCuaHost").value,
+        "hasCuaHost",
+    )
     mac_app = expect_instance(
         expect_binding(passthru_set.values, "macApp").value,
         AttributeSet,
@@ -838,12 +884,14 @@ def test_waku_bundle_has_tcc_identity_no_sparkle_and_leaf_first_signing() -> Non
     )
 
 
-def _normalized_shell_command(command: str) -> str:
-    return " ".join(command.replace("\\\n", " ").split())
-
-
 def _cua_pre_build_shell() -> str:
-    sdk_arguments = _cua_driver_sdk_arguments()
+    _package, derivation, _arguments = _waku_derivation()
+    sdk_gate = expect_instance(
+        expect_binding(derivation.scope, "cuaDriverSdk").value,
+        IfExpression,
+    )
+    sdk = expect_instance(sdk_gate.consequence, FunctionCall)
+    sdk_arguments = expect_instance(sdk.argument, AttributeSet)
     pre_build = expect_instance(
         expect_binding(sdk_arguments.values, "preBuild").value,
         IndentedString,
@@ -888,9 +936,7 @@ def test_waku_cua_discovers_host_xcode_swift_outside_nix_sdk(
     expect_developer_dir: str | None,
 ) -> None:
     """Host swift/SDK discovery must ignore Nix DEVELOPER_DIR/SDKROOT and reject store/CLT paths."""
-    discovery = _cua_pre_build_shell().split(
-        "# link host OS Swift runtime into rustc", 1
-    )[0]
+    discovery = _cua_pre_build_shell().split("patched=0", 1)[0]
     xcrun = tmp_path / "xcrun"
     xcrun.write_text(
         "#!/bin/sh\n"
@@ -954,140 +1000,54 @@ def test_waku_cua_discovers_host_xcode_swift_outside_nix_sdk(
     assert "Nix SDK selection" not in result.stderr
 
 
-def _load_swift_pin_module() -> ModuleType:
-    return load_repo_module(
-        "packages/waku/pin_cua_swift_build_rs.py",
-        "waku_pin_cua_swift_build_rs_test",
-    )
-
-
-_SWIFT_BUILD_RS = (
-    "fn main() {\n"
-    '    let _ = std::process::Command::new("swift")\n'
-    '        .args(&["build", "-c", "release"]);\n'
-    "}\n"
-)
-_RUSTC_ONLY_BUILD_RS = 'fn main() { println!("cargo:rerun-if-changed=build.rs"); }\n'
-_SWIFT_CRATES = ("apple-metal-0.6.0", "apple-cf-0.9.3", "screencapturekit-8.0.1")
-
-
-def _write_swift_vendor_fixture(vendor: Path) -> dict[str, str]:
-    sources = {f"{name}/build.rs": _SWIFT_BUILD_RS for name in _SWIFT_CRATES}
-    sources["serde-1.0.0/build.rs"] = _RUSTC_ONLY_BUILD_RS
-    for relative_path, source in sources.items():
-        path = vendor / relative_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(source, encoding="utf-8")
-    return sources
-
-
-def _vendor_sources(vendor: Path, sources: dict[str, str]) -> dict[str, str]:
-    return {name: (vendor / name).read_text(encoding="utf-8") for name in sources}
-
-
 def test_waku_cua_pins_every_vendor_swift_build_rs(tmp_path: Path) -> None:
     """Update 37156933929 compiled apple-cf/metal, then screencapturekit used Nix SDK."""
-    module = _load_swift_pin_module()
     vendor = tmp_path / "cargo-vendor-dir"
-    originals = _write_swift_vendor_fixture(vendor)
-
-    assert module.main([str(vendor)]) == 0
-
-    pinned_spawn = (
-        'Command::new(std::env::var("CUA_XCODE_SWIFT").expect("CUA_XCODE_SWIFT"))'
-        '.env("DEVELOPER_DIR", std::env::var("CUA_XCODE_DEVELOPER_DIR")'
-        '.expect("CUA_XCODE_DEVELOPER_DIR"))'
-        '.env("SDKROOT", std::env::var("CUA_XCODE_SDKROOT").expect("CUA_XCODE_SDKROOT"))'
-        '.env("HOME", std::env::var("CUA_XCODE_HOME").expect("CUA_XCODE_HOME"))'
-        '.env("CFFIXED_USER_HOME", std::env::var("CUA_XCODE_HOME")'
-        '.expect("CUA_XCODE_HOME"))'
+    swift_build = (
+        "fn main() {\n"
+        '    let _ = std::process::Command::new("swift")\n'
+        '        .args(&["build", "-c", "release"]);\n'
+        "}\n"
     )
-    expected = {
-        name: (
-            source.replace('Command::new("swift")', pinned_spawn).replace(
-                '"build",', '"build", "--disable-sandbox",'
-            )
-            if source == _SWIFT_BUILD_RS
-            else source
-        )
-        for name, source in originals.items()
-    }
-    assert _vendor_sources(vendor, originals) == expected
-    assert set(module.SWIFT_BUILD_CRATES) == {
-        "apple-cf",
-        "apple-metal",
-        "screencapturekit",
-    }
+    rustc_only = 'fn main() { println!("cargo:rerun-if-changed=build.rs"); }\n'
+    for name in ("apple-metal-0.6.0", "apple-cf-0.9.3", "screencapturekit-8.0.1"):
+        crate = vendor / name
+        crate.mkdir(parents=True)
+        (crate / "build.rs").write_text(swift_build, encoding="utf-8")
+    (vendor / "serde-1.0.0").mkdir()
+    (vendor / "serde-1.0.0" / "build.rs").write_text(rustc_only, encoding="utf-8")
 
-
-@pytest.mark.parametrize("copies", [0, 2])
-def test_waku_cua_swift_pin_rejects_count_drift_without_writing(
-    tmp_path: Path,
-    copies: int,
-) -> None:
-    """A reviewed crate whose swift spawn count changes must stop every write."""
-    module = _load_swift_pin_module()
-    vendor = tmp_path / "cargo-vendor-dir"
-    originals = _write_swift_vendor_fixture(vendor)
-    drifted = "screencapturekit-8.0.1/build.rs"
-    originals[drifted] = originals[drifted].replace(
-        'Command::new("swift")', 'Command::new("swift")' * copies
+    pin, _runtime = _cua_pre_build_shell().split(
+        "# link host OS Swift runtime into rustc", 1
     )
-    (vendor / drifted).write_text(originals[drifted], encoding="utf-8")
-
-    with pytest.raises(
-        CodemodError,
-        match=rf"^expected 1 match for .*/{re.escape(drifted)}, found {copies}$",
-    ):
-        module.main([str(vendor)])
-    assert _vendor_sources(vendor, originals) == originals
-
-
-def test_waku_cua_swift_pin_rejects_unreviewed_swift_spawners(tmp_path: Path) -> None:
-    """A new vendored crate that builds Swift must be reviewed, not silently built."""
-    module = _load_swift_pin_module()
-    vendor = tmp_path / "cargo-vendor-dir"
-    originals = _write_swift_vendor_fixture(vendor)
-    unreviewed = "apple-vision-0.1.0/build.rs"
-    originals[unreviewed] = _SWIFT_BUILD_RS
-    (vendor / unreviewed).parent.mkdir()
-    (vendor / unreviewed).write_text(_SWIFT_BUILD_RS, encoding="utf-8")
-
-    with pytest.raises(
-        CodemodError,
-        match="^unreviewed vendored crates spawn swift: apple-vision-0.1.0$",
-    ):
-        module.main([str(vendor)])
-    assert _vendor_sources(vendor, originals) == originals
-
-
-@pytest.mark.parametrize("duplicate", [False, True])
-def test_waku_cua_swift_pin_requires_exactly_one_vendored_crate_version(
-    tmp_path: Path,
-    duplicate: bool,
-) -> None:
-    """A missing or doubly-vendored reviewed crate is drift, not a no-op."""
-    module = _load_swift_pin_module()
-    vendor = tmp_path / "cargo-vendor-dir"
-    originals = _write_swift_vendor_fixture(vendor)
-    if duplicate:
-        extra = "apple-cf-0.9.4/build.rs"
-        originals[extra] = _SWIFT_BUILD_RS
-        (vendor / extra).parent.mkdir()
-        (vendor / extra).write_text(_SWIFT_BUILD_RS, encoding="utf-8")
-        found = r"\['apple-cf-0\.9\.3', 'apple-cf-0\.9\.4'\]"
-    else:
-        (vendor / "apple-cf-0.9.3/build.rs").unlink()
-        (vendor / "apple-cf-0.9.3").rmdir()
-        del originals["apple-cf-0.9.3/build.rs"]
-        found = r"\[\]"
-
-    with pytest.raises(
-        CodemodError,
-        match=rf"^expected one vendored apple-cf crate in .*, found {found}$",
-    ):
-        module.main([str(vendor)])
-    assert _vendor_sources(vendor, originals) == originals
+    patch = "patched=0" + pin.split("patched=0", 1)[1]
+    result = subprocess.run(  # noqa: S603 -- executes repository shell against temp vendor trees
+        ["bash", "-eu", "-c", patch],  # noqa: S607 -- resolves Bash from the test environment
+        cwd=tmp_path,
+        env=os.environ
+        | {
+            "TMPDIR": str(tmp_path),
+            "NIX_BUILD_TOP": str(tmp_path),
+            "CUA_XCODE_SWIFT": "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift",
+            "CUA_XCODE_DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
+            "CUA_XCODE_SDKROOT": "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+            "CUA_XCODE_HOME": str(tmp_path / "cua-swiftpm-home"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    for name in ("apple-metal-0.6.0", "apple-cf-0.9.3", "screencapturekit-8.0.1"):
+        patched = (vendor / name / "build.rs").read_text(encoding="utf-8")
+        assert 'Command::new(std::env::var("CUA_XCODE_SWIFT")' in patched
+        assert 'env("SDKROOT", std::env::var("CUA_XCODE_SDKROOT")' in patched
+        assert "--disable-sandbox" in patched
+        assert 'Command::new("swift")' not in patched
+    assert (vendor / "serde-1.0.0" / "build.rs").read_text(
+        encoding="utf-8"
+    ) == rustc_only
 
 
 def test_waku_cua_links_host_swift_runtime(tmp_path: Path) -> None:
@@ -1100,9 +1060,6 @@ def test_waku_cua_links_host_swift_runtime(tmp_path: Path) -> None:
     swift_lib = toolchain.parent / "lib/swift/macosx"
     swift_lib.mkdir(parents=True)
     (swift_lib / "libswiftCore.tbd").write_text("tbd\n", encoding="utf-8")
-    xcode_ld = toolchain / "ld"
-    xcode_ld.write_text("#!/bin/sh\n", encoding="utf-8")
-    xcode_ld.chmod(0o755)
 
     runtime = _cua_pre_build_shell().split(
         "# link host OS Swift runtime into rustc", 1
@@ -1112,7 +1069,7 @@ def test_waku_cua_links_host_swift_runtime(tmp_path: Path) -> None:
             "bash",
             "-eu",
             "-c",
-            runtime + 'printf "%s\\n%s\\n" "$NIX_LDFLAGS" "$NIX_CFLAGS_LINK"\n',
+            runtime + 'printf "%s\\n" "$NIX_LDFLAGS"\n',
         ],
         env=os.environ
         | {
@@ -1126,9 +1083,7 @@ def test_waku_cua_links_host_swift_runtime(tmp_path: Path) -> None:
         timeout=10,
     )
     assert result.returncode == 0, result.stderr
-    ldflags, cflags_link = result.stdout.splitlines()
-    # Xcode 27 SDK TBDs need the matching Xcode ld; nixpkgs ld64 rejects them.
-    assert cflags_link.split() == [f"-fuse-ld={xcode_ld}"]
+    [ldflags] = result.stdout.splitlines()
     assert ldflags.startswith("-L/nix/store/libiconv/lib -L")
     assert " -L/usr/lib/swift " in f"{ldflags} "
     flag_set = set(ldflags.split())
@@ -1160,31 +1115,6 @@ def test_waku_cua_rejects_unusable_host_swift_runtime(tmp_path: Path) -> None:
     )
     assert result.returncode == 1
     assert "host Xcode Swift runtime directory missing under" in result.stderr
-
-
-def test_waku_cua_rejects_a_toolchain_without_its_linker(tmp_path: Path) -> None:
-    """Fail closed rather than fall back to a Nix ld that rejects the host SDK."""
-    toolchain = tmp_path / "toolchain/usr/bin"
-    toolchain.mkdir(parents=True)
-    (toolchain.parent / "lib/swift/macosx").mkdir(parents=True)
-    runtime = _cua_pre_build_shell().split(
-        "# link host OS Swift runtime into rustc", 1
-    )[1]
-    result = subprocess.run(  # noqa: S603 -- executes repository shell against a fake toolchain
-        ["bash", "-eu", "-c", runtime],  # noqa: S607 -- resolves Bash from the test environment
-        env=os.environ
-        | {
-            "xcodeToolchain": str(toolchain),
-            "NIX_LDFLAGS": "-L/nix/store/libiconv/lib",
-            "TMPDIR": str(tmp_path),
-        },
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=10,
-    )
-    assert result.returncode == 1
-    assert f"host Xcode linker missing next to swift: {toolchain}/ld" in result.stderr
 
 
 def test_waku_cua_lock_is_an_isolated_crates_io_workspace() -> None:
@@ -1225,7 +1155,13 @@ def _unified_diff_file_edits(
 
 def test_waku_cua_links_dispatch_through_system_framework() -> None:
     """Update 37165499384: Xcode 16.4 ld rejected a direct libdispatch.tbd link."""
-    sdk_arguments = _cua_driver_sdk_arguments()
+    _package, derivation, _arguments = _waku_derivation()
+    sdk_gate = expect_instance(
+        expect_binding(derivation.scope, "cuaDriverSdk").value,
+        IfExpression,
+    )
+    sdk = expect_instance(sdk_gate.consequence, FunctionCall)
+    sdk_arguments = expect_instance(sdk.argument, AttributeSet)
     assert_nix_ast_equal(
         expect_binding(sdk_arguments.values, "patches").value,
         "[ ./cua-libsystem.patch ]",
@@ -1269,8 +1205,17 @@ def test_waku_cua_links_dispatch_through_system_framework() -> None:
 
 def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> None:
     """0.1.20+ must rebuild Cua, link both Swift files, and stop shipping cursor assets."""
-    _package, _scope, _derivation, arguments = _waku_derivation()
-    sdk_arguments = _cua_driver_sdk_arguments()
+    _package, derivation, arguments = _waku_derivation()
+
+    cua_sdk_gate = expect_instance(
+        expect_binding(derivation.scope, "cuaDriverSdk").value,
+        IfExpression,
+    )
+    assert_nix_ast_equal(cua_sdk_gate.condition, "hasCuaHost")
+    assert_nix_ast_equal(cua_sdk_gate.alternative, "null")
+    cua_sdk = expect_instance(cua_sdk_gate.consequence, FunctionCall)
+    assert_nix_ast_equal(cua_sdk.name, "rustPlatform.buildRustPackage")
+    sdk_arguments = expect_instance(cua_sdk.argument, AttributeSet)
     assert_nix_ast_equal(
         expect_binding(sdk_arguments.values, "version").value,
         identifier_attr_path("source", "pins", "cuaDriverSdkVersion"),
@@ -1328,21 +1273,6 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
     ] == [
         "cat __NIX_INTERP__/resources/computer-use/cua-host.rs >> crates/cua-driver-sdk/src/abi.rs",
     ]
-    # The swift pin runs in postPatch: cargoSetupPostPatchHook unsets
-    # $cargoDepsCopy before preBuild, so a preBuild call would see no vendor dir.
-    assert_nix_ast_equal(
-        f"{{ lib, python3, codemodsPythonPath }}: {post_patch.rebuild()}",
-        """{ lib, python3, codemodsPythonPath }: ''
-          cat ${wakuSrc}/resources/computer-use/cua-host.rs >> crates/cua-driver-sdk/src/abi.rs
-          PYTHONPATH=${codemodsPythonPath} ${lib.getExe python3} \\
-            ${./pin_cua_swift_build_rs.py} "$cargoDepsCopy"
-        ''""",
-    )
-    _package, scope, _derivation, _arguments = _waku_derivation()
-    assert_nix_ast_equal(
-        expect_binding(scope.scope, "codemodsPythonPath").value,
-        "import ../../lib/codemods-pythonpath.nix { inherit lib; }",
-    )
 
     sdk_install = expect_instance(
         expect_binding(sdk_arguments.values, "installPhase").value,
@@ -1353,12 +1283,7 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         IndentedString,
     )
     sdk_pre_build_shell = parse_shell(indented_string_body(sdk_pre_build.rebuild()))
-    # Compare whitespace-normalized argv so formatter-only re-indentation of the
-    # Nix string cannot break the contract (it once did on a format commit).
-    assert [
-        _normalized_shell_command(command)
-        for command in command_texts(sdk_pre_build_shell)
-    ] == [
+    assert command_texts(sdk_pre_build_shell) == [
         "env -u DEVELOPER_DIR -u SDKROOT /usr/bin/xcrun --sdk macosx --find swift",
         "env -u DEVELOPER_DIR -u SDKROOT /usr/bin/xcrun --sdk macosx --show-sdk-path",
         '/usr/bin/dirname "$xcodeSwift"',
@@ -1383,6 +1308,20 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         'export SWIFTPM_MODULECACHE_OVERRIDE="$TMPDIR/cua-swiftpm-module-cache"',
         'mkdir -p "$HOME" "$SWIFTPM_MODULECACHE_OVERRIDE"',
         'echo "cua-driver-sdk host Xcode swift=$xcodeSwift DEVELOPER_DIR=$developerDir SDKROOT=$xcodeSdk"',
+        '[ ! -f "$build_rs" ]',
+        "continue",
+        'grep -q \'Command::new("swift")\' "$build_rs"',
+        "continue",
+        '/usr/bin/sed -i.bak \\\n              \'s/Command::new("swift")/Command::new(std::env::var("CUA_XCODE_SWIFT").expect("CUA_XCODE_SWIFT")).env("DEVELOPER_DIR", std::env::var("CUA_XCODE_DEVELOPER_DIR").expect("CUA_XCODE_DEVELOPER_DIR")).env("SDKROOT", std::env::var("CUA_XCODE_SDKROOT").expect("CUA_XCODE_SDKROOT")).env("HOME", std::env::var("CUA_XCODE_HOME").expect("CUA_XCODE_HOME")).env("CFFIXED_USER_HOME", std::env::var("CUA_XCODE_HOME").expect("CUA_XCODE_HOME"))/\' \\\n              "$build_rs"',
+        'grep -q \'"build",\' "$build_rs"',
+        '/usr/bin/sed -i.bak \\\n                \'s/"build",/"build", "--disable-sandbox",/\' \\\n                "$build_rs"',
+        'rm -f "$build_rs.bak"',
+        "grep -q -- '--disable-sandbox' \"$build_rs\"",
+        'echo "failed to add --disable-sandbox to $build_rs"',
+        "exit 1",
+        '[ "$patched" -eq 0 ]',
+        'echo "failed to pin host Xcode swift on vendor build.rs"',
+        "exit 1",
         '[ ! -d "$xcodeToolchain/../lib/swift/macosx" ]',
         'echo "host Xcode Swift runtime directory missing under $xcodeToolchain"',
         "exit 1",
@@ -1390,11 +1329,6 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         "pwd",
         'echo "xcrun resolved a Nix store Swift runtime: $xcodeSwiftLib"',
         "exit 1",
-        '[ ! -x "$xcodeLd" ]',
-        'echo "host Xcode linker missing next to swift: $xcodeLd"',
-        "exit 1",
-        'export NIX_CFLAGS_LINK="-fuse-ld=$xcodeLd"',
-        'echo "cua-driver-sdk host Xcode ld=$xcodeLd"',
         'export NIX_LDFLAGS="$NIX_LDFLAGS -L$xcodeSwiftLib -L$hostSwiftLib$swiftLink"',
         'echo "cua-driver-sdk host OS Swift runtime=$hostSwiftLib$swiftLink"',
     ]
@@ -1412,7 +1346,7 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         "runHook postInstall",
     ]
 
-    install = _phase(arguments, "installPhase")
+    install = _gated_phase(derivation, "cuaInstallPhase")
     install_commands = parse_shell(indented_string_body(install.rebuild()))
     install_texts = command_texts(install_commands)
     assert [
@@ -1421,8 +1355,8 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         if "CUA-LICENSE" in command
     ] == [
         "install -m0644 \\\n"
-        "      resources/computer-use/CUA-LICENSE \\\n"
-        '      "$helperContents/Resources/CUA-LICENSE"',
+        "          resources/computer-use/CUA-LICENSE \\\n"
+        '          "$helperContents/Resources/CUA-LICENSE"',
     ]
     assert [
         command
@@ -1430,33 +1364,33 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         if "libcua_driver_sdk.dylib" in command or command.endswith('"$cuaLibrary"')
     ] == [
         "install -m0755 \\\n"
-        "      __NIX_INTERP__/lib/libcua_driver_sdk.dylib \\\n"
-        '      "$cuaLibrary"',
+        "          __NIX_INTERP__/lib/libcua_driver_sdk.dylib \\\n"
+        '          "$cuaLibrary"',
     ]
     assert all("menubar-cursor.png" not in text for text in install_texts)
     assert all("overlay-cursor.svg" not in text for text in install_texts)
     assert all("standalone-service-v2" not in text for text in install_texts)
     assert command_texts(install_commands, "/usr/bin/swiftc") == [
         "/usr/bin/swiftc \\\n"
-        "      -O \\\n"
-        "      -parse-as-library \\\n"
-        '      -module-cache-path "$swiftModuleCache" \\\n'
-        "      -target __NIX_INTERP__ \\\n"
-        "      -import-objc-header __NIX_INTERP__/include/cua-host.h \\\n"
-        '      -L "$helperFrameworks" -lcua_driver_sdk \\\n'
-        "      -Xlinker -rpath -Xlinker @executable_path/../Frameworks \\\n"
-        "      resources/computer-use/WakuComputerUse.swift \\\n"
-        "      resources/computer-use/CuaDriver.swift \\\n"
-        '      -o "$helperExecutable"',
+        "          -O \\\n"
+        "          -parse-as-library \\\n"
+        '          -module-cache-path "$swiftModuleCache" \\\n'
+        "          -target __NIX_INTERP__ \\\n"
+        "          -import-objc-header __NIX_INTERP__/include/cua-host.h \\\n"
+        '          -L "$helperFrameworks" -lcua_driver_sdk \\\n'
+        "          -Xlinker -rpath -Xlinker @executable_path/../Frameworks \\\n"
+        "          resources/computer-use/WakuComputerUse.swift \\\n"
+        "          resources/computer-use/CuaDriver.swift \\\n"
+        '          -o "$helperExecutable"',
         "/usr/bin/swiftc -version",
     ]
     assert command_texts(install_commands, "printf") == [
         "printf '%s\\n' \\\n"
-        '        "cua-in-process-v1" \\\n'
-        '        "__NIX_INTERP__" \\\n'
-        '        "sh.waku.computer-use" \\\n'
-        '        "-" \\\n'
-        '        "__NIX_INTERP__"',
+        '            "cua-in-process-v1" \\\n'
+        '            "__NIX_INTERP__" \\\n'
+        '            "sh.waku.computer-use" \\\n'
+        '            "-" \\\n'
+        '            "__NIX_INTERP__"',
         "printf '%s\\n' \"$helperFingerprint\"",
     ]
     signing_commands = [
@@ -1474,7 +1408,7 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         signing_commands[1]
     )
 
-    check = _phase(arguments, "installCheckPhase")
+    check = _gated_phase(derivation, "cuaInstallCheckPhase")
     check_commands = parse_shell(indented_string_body(check.rebuild()))
     check_texts = command_texts(check_commands)
     assert all("menubar-cursor.png" not in text for text in check_texts)
@@ -1498,4 +1432,7 @@ def test_waku_cua_helper_links_in_process_driver_and_drops_cursor_assets() -> No
         expect_binding(arguments.values, "passthru").value,
         AttributeSet,
     )
-    assert "hasCuaHost" not in binding_map(passthru_set.values)
+    assert_nix_ast_equal(
+        expect_binding(passthru_set.values, "hasCuaHost").value,
+        "hasCuaHost",
+    )

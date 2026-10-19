@@ -119,7 +119,7 @@ def test_coast_local_accepts_the_cdns_strong_multipart_etag() -> None:
     )
 
     assert info == VersionInfo(_MULTIPART_DISCOVERY_VERSION)
-    assert updater.always_rehash
+    assert not _run(updater._is_latest(UpdateContext(current=None), info))
 
 
 @pytest.mark.parametrize(
@@ -187,7 +187,11 @@ def test_coast_local_persists_full_sha256_content_identity() -> None:
     assert result.version == _CONTENT_VERSION
     assert result.hashes.to_json() == {"aarch64-darwin": _SRI_HASH}
     assert result.urls == {"aarch64-darwin": _DOWNLOAD_URL}
-    assert updater.always_rehash
+    assert not _run(
+        updater._is_latest(
+            UpdateContext(current=result), VersionInfo(_DISCOVERY_VERSION)
+        )
+    )
 
 
 @pytest.mark.parametrize(

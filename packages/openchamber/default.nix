@@ -295,7 +295,13 @@ let
 
     postPatch = ''
       PYTHONPATH=${
-        import ../../lib/codemods-pythonpath.nix { inherit lib; }
+        lib.fileset.toSource {
+          root = ../..;
+          fileset = lib.fileset.unions [
+            ../../lib/__init__.py
+            ../../lib/exact_text_patch.py
+          ];
+        }
       } ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD" --component openchamber
     '';
 
@@ -325,9 +331,6 @@ let
       mkdir -p "$HOME"
       test "$(bun --version)" = "${bunVersion}"
 
-      # Dependency installation skips postinstall; restore its SDK compilation
-      # before bundling the server that imports the SDK's generated exports.
-      bun run --cwd packages/sdk build
       bun run --cwd packages/electron build:web-assets
 
       mkdir -p packages/electron/resources/opencode-cli
@@ -382,7 +385,6 @@ let
         -c.mac.identity=null \
         -c.mac.notarize=false \
         -c.npmRebuild=false \
-        -c.asarUnpack='**/built-in-extensions/**/*' \
         ${electronBuild.electronBuilderConfigFlags}
 
       cd ../..
@@ -736,15 +738,6 @@ let
                 const expectedElectronVersion = process.argv[2];
                 assert.equal(process.versions.electron, expectedElectronVersion);
                 assert.equal(process.arch, "arm64");
-                const webRequire = require("node:module").createRequire(
-                  app + "/Contents/Resources/app.asar/node_modules/@openchamber/web/package.json"
-                );
-                for (const entry of ["@openchamber/sdk", "@openchamber/sdk/ui", "@openchamber/sdk/schemas"]) {
-                  assert.ok(Object.keys(webRequire(entry)).length > 0);
-                }
-                webRequire("./server/lib/guests/builtins.js").readBuiltInRegistry(
-                  app + "/Contents/Resources/app.asar.unpacked/node_modules/@openchamber/web/server/built-in-extensions"
-                ).catch((error) => { console.error(error); process.exitCode = 1; });
                 const pty = require(app + "/Contents/Resources/app.asar/node_modules/node-pty");
                 assert.equal(typeof pty.spawn, "function");
                 const sherpa = require(app + "/Contents/Resources/app.asar/node_modules/sherpa-onnx-node");

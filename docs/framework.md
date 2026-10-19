@@ -45,38 +45,6 @@ Version 2 makes these changes:
 - `nixcfgLanguageBun`, `nixcfgLanguageGo`, `nixcfgLanguagePython`,
   `nixcfgLanguageRust`
 
-## Required module arguments
-
-Some exported modules read module arguments in addition to the standard
-`config`, `lib`, `pkgs`, and `options`. The constructors `mkSystem`,
-`mkDarwinHost`, and `mkHome` supply all of them. A consumer that imports a
-module directly into its own `homeManagerConfiguration`, `darwinSystem`, or
-`nixosSystem` must supply them through `specialArgs` or `extraSpecialArgs`.
-
-| Module                             | Argument                               | Required content                                                       |
-| ---------------------------------- | -------------------------------------- | ---------------------------------------------------------------------- |
-| `homeModules.nixcfgBase`           | `slib`                                 | This flake's `lib`: `homeDirBase`                                      |
-| `homeModules.nixcfgBase`           | `src`                                  | A source tree with a `NIXOS_VERSION` file                              |
-| `homeModules.nixcfgBase`           | `system`                               | The Nix system string                                                  |
-| `homeModules.nixcfgBase`           | `username`                             | The Home Manager user name                                             |
-| `homeModules.nixcfgGit`            | `inputs`                               | `catppuccin-delta`, read when `includeCatppuccinDeltaTheme` is enabled |
-| `homeModules.nixcfgStylix`         | `inputs`                               | `base16-schemes-src`, read when `base16Scheme` is null                 |
-| `homeModules.nixcfgZsh`            | `slib`                                 | This flake's `lib`: `srcDirBase`                                       |
-| `homeModules.nixcfgZsh`            | `system`                               | The Nix system string                                                  |
-| `homeModules.nixcfgLanguagePython` | `slib`                                 | This flake's `lib`: `kernel`                                           |
-| `darwinModules.nixcfgBase`         | `primaryUser`                          | The primary Darwin user name                                           |
-| `darwinModules.nixcfgCommon`       | `inputs`, `slib`, `hostname`, `system` | Optional: flake registry entries, kernel lookup, and host name         |
-| `darwinModules.nixcfgHomebrew`     | `inputs`, `primaryUser`                | Optional: Homebrew source and taps, and the default Homebrew user      |
-
-Pass `slib = nixcfg.lib` and the flake inputs of this repository (or inputs
-with the same names) to satisfy them.
-
-## Module-owned tooling
-
-`homeModules.nixcfgZen` packages its own `zentool` from `modules/home/zen/`.
-Override `nixcfg.zen.toolPackage` to supply a different build, or
-`nixcfg.zen.toolCommand` to run a command outside the Nix store.
-
 ## Constructors
 
 `lib/lib.nix` exports these constructors:

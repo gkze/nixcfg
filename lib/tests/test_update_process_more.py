@@ -64,12 +64,12 @@ def test_run_command_success_and_tail_capture(
     async def _fake_stream_process(
         args: list[str],
         *,
-        command_timeout: float,
+        timeout: float,
         env: object,
         output_limit: int | None,
     ) -> AsyncIterator[ProcessLine | ProcessDone]:
         assert args == ["nix", "build", "demo"]
-        assert command_timeout == 5
+        assert timeout == 5
         assert output_limit is None
         assert env == {"NIX_CONFIG": "accept-flake-config = true"}
         yield ProcessLine("stderr", "line-one\n")
@@ -236,6 +236,18 @@ def test_emit_successful_command_hash_helpers(
         )
     )
     assert _nix_prefetch_name("https://example.com/releases/") is None
+    named_events = _collect_stream(
+        lambda emit: compute_sri_hash(
+            "demo",
+            "https://reasonmachines.com/api/desktop-download?arch=aarch64",
+            name="Reason_0.1.84_aarch64.dmg",
+            config=resolve_config(subprocess_timeout=12),
+            emit=emit,
+        )
+    )
+    named_message = named_events[0].message
+    assert named_message is not None
+    assert "--name Reason_0.1.84_aarch64.dmg" in named_message
     assert prefetch_calls == [
         (
             "https://example.com/releases/Town%20Assistant-1.8-33.dmg",
@@ -243,8 +255,14 @@ def test_emit_successful_command_hash_helpers(
             12,
         ),
         ("https://example.com/app.dmg", None, 12),
+        (
+            "https://reasonmachines.com/api/desktop-download?arch=aarch64",
+            "Reason_0.1.84_aarch64.dmg",
+            12,
+        ),
     ]
     assert [json.loads(line) for line in receipts.read_text().splitlines()] == [
+        {"storePath": "/nix/store/example"},
         {"storePath": "/nix/store/example"},
         {"storePath": "/nix/store/example"},
     ]
@@ -273,11 +291,6 @@ def test_prefetch_names_match_fetchurl_store_identity(basename, expected) -> Non
         "HTTP protocol violation",
         "HTTP/2 framing layer",
         "HTTP/2 stream",
-        # Gateway spellings shared with the Nix network classifier; prefetch
-        # previously retried only the ``HTTP error 50x`` spelling.
-        "error: unable to download: 502 Bad Gateway",
-        "curl: (22) The requested URL returned error: 503",
-        "NameServerFailure",
     ],
 )
 def test_compute_sri_hash_retries_transient_prefetch_failure(

@@ -30,8 +30,6 @@ class SuperconductorUpdater(AssetURLsMetadataUpdater):
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "arm64",
     }
-    # Recompute hashes because the nightly discovery endpoint is mutable.
-    always_rehash = True
 
     @staticmethod
     def _version_from_url(url: str, last_modified: str | None) -> str:
@@ -98,3 +96,12 @@ class SuperconductorUpdater(AssetURLsMetadataUpdater):
                 platform: artifact.url for platform, artifact in artifacts.items()
             }),
         )
+
+    async def _is_latest(
+        self,
+        context: UpdateContext,
+        info: VersionInfo,
+    ) -> bool:
+        """Recompute hashes because the nightly discovery endpoint is mutable."""
+        _ = (context, info)
+        return False
