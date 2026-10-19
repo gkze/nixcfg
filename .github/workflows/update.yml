@@ -152,13 +152,14 @@ jobs:
   # image) after rust-warmup. Doing this from the Darwin-prepare tree
   # before warmup (#1257) left the image in gkze for LRU eviction by
   # rust_*, then macos-15 hit platform mismatch on aarch64-linux
-  # etc-fstab.drv. These jobs are not publication evidence. Packages
-  # inventory waits for cascade so it does not steal a macos-15 slot.
+  # etc-fstab.drv. Cascade compile does not produce the VM image, so
+  # these jobs overlap cascade (39166099302 waited 15m). Packages
+  # inventory still waits for cascade so it does not steal a macos-15
+  # slot. These jobs are not publication evidence.
   cache-darwin-linux-deps-arm:
     needs:
       - prepare-merge
       - validate-darwin-warm-rust
-      - validate-darwin-cascade-warmup
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04-arm
@@ -170,7 +171,6 @@ jobs:
     needs:
       - prepare-merge
       - validate-darwin-warm-rust
-      - validate-darwin-cascade-warmup
     uses: ./.github/workflows/update-native.yml
     with:
       runner: ubuntu-24.04

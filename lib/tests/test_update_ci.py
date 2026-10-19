@@ -2130,7 +2130,7 @@ def test_cachix_flush_is_last_step_of_every_update_runtime_cachix_job() -> None:
 
 
 def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
-    """VM cache recaches after rust-warmup so gkze LRU cannot drop the image."""
+    """VM cache recaches after rust-warmup; cascade compile is not on this path."""
     workflow = yaml.load(
         (ROOT / ".github/workflows/update.yml").read_text(), Loader=yaml.BaseLoader
     )
@@ -2169,8 +2169,8 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
         assert set(job["needs"]) == {
             "prepare-merge",
             "validate-darwin-warm-rust",
-            "validate-darwin-cascade-warmup",
         }
+        assert "validate-darwin-cascade-warmup" not in job["needs"]
         assert job["with"]["stage"] == "cache-root-deps"
         assert job["with"]["previous"] == "prepare-x86_64-linux"
     assert (
