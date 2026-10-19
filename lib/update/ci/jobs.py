@@ -63,6 +63,7 @@ _STORE_PATH_RE = re.compile(r"/nix/store/[0-9a-z]{32}-[^\s]+")
 # newly built wrapper. Remember must use the same eval as coverage.
 _REALIZED_ROOT_PATHS_NAME = "realized-root-paths.json"
 _LINUX_BUILDER_OUTPUT = "nixos-disk-image"
+_CACHIX_PIN_KEEP_DAYS = 14
 _BINARY_CACHE_STORE = "https://gkze.cachix.org"
 _STORAGE_MOUNTS = ("/", "/nix", "/nix/store")
 # Live-written on hosted macOS; rmtree can lose a race (ENOTEMPTY) after children
@@ -1622,6 +1623,50 @@ def _linux_builder_pin_name() -> str:
     return f"linux-builder-{arch}-{os_name}"
 
 
+def _darwin_root_pin_name(path: str) -> str | None:
+    """Return a 14-day pin name for a Darwin-system or home-manager wrapper.
+
+    Four 4-wide shards each realize one root. Pin names include the store
+    hash prefix so argus/rocinante/zeus/home do not overwrite each other.
+    ``--keep-days 14`` drops stale hashes after the next green Update.
+    """
+    if not _STORE_PATH_RE.fullmatch(path.rstrip("/")):
+        return None
+    name = path.rstrip("/").rsplit("/", 1)[-1]
+    digest, _separator, rest = name.partition("-")
+    if rest.startswith("darwin-system"):
+        return f"darwin-system-{digest[:8]}"
+    if rest.startswith("home-manager-generation"):
+        return f"home-generation-{digest[:8]}"
+    return None
+
+
+def _cachix_pin(name: str, path: str, log: TextIO) -> None:
+    """Pin *path* on gkze for ``_CACHIX_PIN_KEEP_DAYS`` and fail closed."""
+    pin = _run(
+        "cachix",
+        "pin",
+        _BINARY_CACHE,
+        name,
+        path,
+        "--keep-days",
+        str(_CACHIX_PIN_KEEP_DAYS),
+        check=False,
+        capture=True,
+    )
+    _write_diagnostic(
+        log,
+        f"cachix pin {name} returncode={pin.returncode} path={path} "
+        f"stderr={pin.stderr.strip()}",
+    )
+    if pin.returncode:
+        msg = (
+            f"cachix pin of {name} failed "
+            f"returncode={pin.returncode} stderr={pin.stderr.strip()}"
+        )
+        raise CachixFlushError(msg)
+
+
 def _pin_linux_builder_paths(paths: tuple[str, ...], log: TextIO) -> None:
     """Pin the Rosetta VM so gkze LRU cannot drop a substituted recache.
 
@@ -1636,27 +1681,21 @@ def _pin_linux_builder_paths(paths: tuple[str, ...], log: TextIO) -> None:
         msg = f"expected one linux-builder image to pin, got {len(images)}: {images}"
         _write_diagnostic(log, msg)
         raise CachixFlushError(msg)
-    name = _linux_builder_pin_name()
-    pin = _run(
-        "cachix",
-        "pin",
-        _BINARY_CACHE,
-        name,
-        images[0],
-        check=False,
-        capture=True,
-    )
-    _write_diagnostic(
-        log,
-        f"cachix pin {name} returncode={pin.returncode} path={images[0]} "
-        f"stderr={pin.stderr.strip()}",
-    )
-    if pin.returncode:
-        msg = (
-            "cachix pin of linux-builder image failed "
-            f"returncode={pin.returncode} stderr={pin.stderr.strip()}"
-        )
-        raise CachixFlushError(msg)
+    _cachix_pin(_linux_builder_pin_name(), images[0], log)
+
+
+def _pin_realized_darwin_roots(paths: tuple[str, ...], log: TextIO) -> None:
+    """Pin Darwin-system and home-manager wrappers against gkze Starter LRU.
+
+    39166099302 closures spent 40m after four green roots. If that was
+    compile because LRU dropped the wrappers, a 14-day pin keeps the
+    next run on substitutes. Do not pin every rust_*.
+    """
+    for path in paths:
+        name = _darwin_root_pin_name(path)
+        if name is None:
+            continue
+        _cachix_pin(name, path, log)
 
 
 def _push_realized_root_paths(log: TextIO) -> None:
@@ -1686,6 +1725,7 @@ def _push_realized_root_paths(log: TextIO) -> None:
         )
         raise CachixFlushError(msg)
     _pin_linux_builder_paths(recorded, log)
+    _pin_realized_darwin_roots(recorded, log)
     # 38934724529: cachix exit 0 + "Nothing to push" meant the *wrong*
     # stale path was already on gkze. Coverage still 404'd the eval path.
     missing_remote = [
@@ -1734,6 +1774,10 @@ def flush_cachix() -> None:
       ``nixos-disk-image`` from gkze, so the hook uploaded nothing.
       Flush ``cachix push``es those outputs and ``cachix pin``s them
       so rust_* LRU cannot drop the VM before Darwin ``--max-jobs 0``.
+    - Darwin-root LRU (39166099302): four green shards still left
+      closures compiling for 40m if Starter evicted the wrappers.
+      Flush ``cachix pin --keep-days 14``s each darwin-system /
+      home-manager-generation after the push.
     """
     os.environ["NIXCFG_CI_STAGE"] = "flush-cachix"
     artifacts = _temp() / "update-artifacts"
