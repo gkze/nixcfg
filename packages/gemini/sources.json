@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-OHEIjwWdsaEaNIiKsK72ctR0ArDHobWyOntd9MJdGQY="
+    "aarch64-darwin": "sha256-xu5STNcqfwtISUUvZu0PddtKUvfKExNW8RObXDlaZ0A="
   },
   "urls": {
-    "aarch64-darwin": "https://dl.google.com/release2/gemini/hjkmppkcctccc22x2uqdszv5hi_1.128.2.1001/com-google-geminimacos_1.128.2.1001_all_erul36wajxswwv77jsmins2sjy.crx3"
+    "aarch64-darwin": "https://dl.google.com/release2/gemini/acdvemhgoa3op63ejdohpkw3iraa_1.131.4.1198/com-google-geminimacos_1.131.4.1198_all_e5hgoswahjhypumrearusrozae.crx3"
   },
-  "version": "1.128.2.1001"
+  "version": "1.131.4.1198"
 }

@@ -14,8 +14,6 @@ from nix_manipulator.expressions.indented_string import IndentedString
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
 
-from lib.codemods.errors import CodemodError
-from lib.codemods.source_patch import select_variant
 from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
@@ -238,67 +236,57 @@ def test_zeron_validates_the_materialized_bootstrap_source() -> None:
     )
 
 
-_LAYOUT_NAMES = ("0.2.97", "0.2.94", "primary", "fallback")
-_NO_LAYOUT = (
-    r"^expected exactly one supported source layout in .* "
-    r"\(0\.2\.97, 0\.2\.94, primary, fallback\), found none$"
+@pytest.mark.parametrize(
+    ("group_name", "group_attr"),
+    [
+        ("primary", "_PATCHES"),
+        ("fallback", "_PATCHES_FALLBACK"),
+        ("0.2.94", "_PATCHES_094"),
+        ("0.2.97", "_PATCHES_097"),
+    ],
 )
-
-
-def test_zeron_declares_every_supported_update_layout() -> None:
-    """Each audited upstream layout is an explicit, exactly-selected variant."""
-    module = _load_patch_module()
-
-    assert tuple(module._LAYOUTS) == _LAYOUT_NAMES
-    assert len(module._LAYOUTS["0.2.97"]) == 13
-    assert all(
-        patch.relative_path == "crates/update/src/lib.rs"
-        for patches in module._LAYOUTS.values()
-        for patch in patches
-    )
-
-
-@pytest.mark.parametrize("layout", _LAYOUT_NAMES)
 def test_zeron_nix_policy_patch_disables_every_update_path(
     tmp_path: Path,
-    layout: str,
+    group_name: str,
+    group_attr: str,
 ) -> None:
     """One fail-closed patch set must cover checks, downloads, installs, relaunch."""
     module = _load_patch_module()
-    patches: tuple[_Patch, ...] = module._LAYOUTS[layout]
+    patches: tuple[_Patch, ...] = getattr(module, group_attr)
     update_path = _write_patch_fixture(tmp_path, patches)
     original = update_path.read_text(encoding="utf-8")
     expected = original
     for patch in patches:
         expected = expected.replace(patch.old, patch.new)
 
-    assert select_variant(tmp_path, module._LAYOUTS)[0] == layout
+    assert module._matching_patch_group(original)[0] == group_name
     assert module.main([str(tmp_path)]) == 0
     assert update_path.read_text(encoding="utf-8") == expected
     assert module._PATCH_SENTINEL in expected
 
-    with pytest.raises(
-        CodemodError, match="^Zeron update ownership patch was already applied$"
-    ):
+    with pytest.raises(RuntimeError, match="already applied"):
         module.patch_tree(tmp_path)
 
 
 @pytest.mark.parametrize("copies", [0, 2])
-@pytest.mark.parametrize("layout", ["primary", "0.2.94"])
+@pytest.mark.parametrize("group_attr", ["_PATCHES", "_PATCHES_094"])
 def test_zeron_nix_policy_patch_rejects_source_drift_atomically(
     tmp_path: Path,
     copies: int,
-    layout: str,
+    group_attr: str,
 ) -> None:
     """No source file may be partially patched when an upstream anchor drifts."""
     module = _load_patch_module()
-    group = module._LAYOUTS[layout]
+    group = getattr(module, group_attr)
     target = group[-1]
     patches = [*group[:-1], *([target] * copies)]
     update_path = _write_patch_fixture(tmp_path, patches)
     original = update_path.read_text(encoding="utf-8")
 
-    with pytest.raises(CodemodError, match=_NO_LAYOUT):
+    with pytest.raises(
+        RuntimeError,
+        match="no Zeron updater anchor set matches this source tree",
+    ):
         module.patch_tree(tmp_path)
 
     assert update_path.read_text(encoding="utf-8") == original
@@ -313,7 +301,8 @@ def test_zeron_097_rejects_drift_in_every_ownership_guard(
 ) -> None:
     """New desktop and shared-checker paths must not escape atomic admission."""
     module = _load_patch_module()
-    group = module._LAYOUTS["0.2.97"]
+    group = module._PATCHES_097
+    assert len(group) == 13
     target = group[anchor_index]
     patches = [
         *group[:anchor_index],
@@ -323,7 +312,10 @@ def test_zeron_097_rejects_drift_in_every_ownership_guard(
     update_path = _write_patch_fixture(tmp_path, patches)
     original = update_path.read_text(encoding="utf-8")
 
-    with pytest.raises(CodemodError, match=_NO_LAYOUT):
+    with pytest.raises(
+        RuntimeError,
+        match="no Zeron updater anchor set matches this source tree",
+    ):
         module.patch_tree(tmp_path)
 
     assert update_path.read_text(encoding="utf-8") == original
@@ -411,14 +403,10 @@ def test_zeron_package_is_a_source_built_nix_owned_arm64_app() -> None:
         expect_binding(arguments.values, "postPatch").value,
         IndentedString,
     )
-    assert_nix_ast_equal(
-        f"{{ lib, python3 }}: {{ postPatch = {post_patch.rebuild()}; }}",
-        """{ lib, python3 }: {
-          postPatch = ''
-            PYTHONPATH=${import ../../lib/codemods-pythonpath.nix { inherit lib; }} ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD"
-          '';
-        }""",
-    )
+    assert command_texts(
+        parse_shell(indented_string_body(post_patch.rebuild())),
+        "__NIX_INTERP__",
+    ) == ['__NIX_INTERP__ __NIX_INTERP__ "$PWD"']
 
     post_fixup = expect_instance(
         expect_binding(arguments.values, "postFixup").value,

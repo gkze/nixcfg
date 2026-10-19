@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from nix_manipulator.expressions.assertion import Assertion
+from nix_manipulator.expressions.ellipses import Ellipses
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
@@ -16,11 +17,12 @@ from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
+    darwin_guarded_call,
+    darwin_guarded_exports,
     expect_binding,
     expect_scope_binding,
 )
 from lib.tests._nix_source import nix_file_expr, nix_source_fragment_expr
-from lib.tests._package_registry import is_darwin_overlay_export
 from lib.tests._updater_helpers import load_repo_module, run_async
 from lib.update.updaters import UpdateContext, VersionInfo
 from lib.update.updaters.metadata import AssetURLsMetadata
@@ -248,11 +250,21 @@ def test_source_built_apps_expose_copy_mode_mac_app_metadata(
         "zeron",
     ],
 )
-def test_registry_overlay_exports_migrated_app(
+def test_binary_darwin_overlay_exports_migrated_app(
     package_name: str,
 ) -> None:
-    """Each migrated app must remain reachable from the registry-driven overlay."""
-    assert is_darwin_overlay_export(_registry_output(), package_name)
+    """Each migrated app must remain reachable from the shared Darwin overlay."""
+    overlay = expect_instance(
+        nix_file_expr("overlays/binary-darwin-apps.nix"),
+        FunctionDefinition,
+    )
+    # The exports are the argument of the Darwin-only guard.
+    exports = darwin_guarded_exports(overlay)
+
+    assert_nix_ast_equal(
+        expect_binding(exports.values, package_name).value,
+        f'callDarwinAppPackage "{package_name}"',
+    )
 
 
 @pytest.mark.parametrize(
@@ -262,21 +274,43 @@ def test_registry_overlay_exports_migrated_app(
         ("executor", {"inputs", "outputs"}),
     ],
 )
-def test_registry_overlay_forwards_flake_context_to_source_apps(
+def test_binary_darwin_overlay_forwards_flake_context_to_source_apps(
     package_name: str,
     required_context: set[str],
 ) -> None:
     """Source-app exports must forward every flake argument their package needs."""
     overlay = expect_instance(
-        nix_file_expr("overlays/registry-packages.nix"),
+        nix_file_expr("overlays/binary-darwin-apps.nix"),
         FunctionDefinition,
     )
+    assert {
+        argument.name
+        for argument in overlay.argument_set
+        if isinstance(argument, Identifier)
+    } == {
+        "final",
+        "inputs",
+        "outputs",
+        "prev",
+        "sources",
+    }
+    assert len(overlay.argument_set) == 6
+    assert sum(isinstance(argument, Ellipses) for argument in overlay.argument_set) == 1
+    guarded = darwin_guarded_call(overlay)
     helper = expect_instance(
-        expect_scope_binding(overlay.output, "callRegistryPackage").value,
+        expect_scope_binding(guarded, "callDarwinAppPackage").value,
         FunctionDefinition,
     )
     helper_call = expect_instance(helper.output, FunctionCall)
-    assert_nix_ast_equal(helper_call.argument, "{ inherit inputs outputs; }")
+    assert_nix_ast_equal(
+        helper_call.argument,
+        """
+        {
+          inherit inputs outputs;
+          selfSource = sources.${name};
+        }
+        """,
+    )
 
     package = expect_instance(
         nix_file_expr(f"packages/{package_name}/default.nix"),
@@ -288,14 +322,12 @@ def test_registry_overlay_forwards_flake_context_to_source_apps(
         if isinstance(argument, Identifier)
     }
     assert required_context <= package_arguments
-    assert is_darwin_overlay_export(_registry_output(), package_name)
-
-
-def _registry_output() -> AttributeSet:
-    registry = expect_instance(
-        nix_file_expr("packages/registry.nix"), FunctionDefinition
+    assert guarded.argument is not None
+    exports = expect_instance(guarded.argument, AttributeSet)
+    assert_nix_ast_equal(
+        expect_binding(exports.values, package_name).value,
+        f'callDarwinAppPackage "{package_name}"',
     )
-    return expect_instance(registry.output, AttributeSet)
 
 
 @pytest.mark.parametrize(

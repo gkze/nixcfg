@@ -1,9 +1,10 @@
 """Exact-count text rewrite helpers for last-resort source codemods.
 
-This module is the single owner of the count-and-raise rule for build-time
-source rewrites. Package patch scripts receive it through
-``lib/codemods-pythonpath.nix``; :mod:`lib.codemods.source_patch` builds its
-declarative patch sets on :func:`require_count` and :func:`replace_exactly`.
+This module owns the count-and-raise rule for scripts shipped through
+``lib/codemods-pythonpath.nix``. ``lib/exact_text_patch.py`` carries the same
+rule for build-time patch scripts that receive it as a two-file PYTHONPATH, and
+the two filesets are disjoint, so the duplication is deliberate until those
+filesets include a common module. Keep both implementations in step.
 """
 
 import re
@@ -38,24 +39,6 @@ def _count_error(*, context: str, expected: int, actual: int) -> CodemodError:
     )
 
 
-def require_count(
-    text: str,
-    needle: str,
-    *,
-    expected_count: int = 1,
-    context: str = _DEFAULT_CONTEXT,
-) -> None:
-    """Raise unless needle occurs in text exactly expected_count times."""
-    _require_non_empty_needle(needle, context=context)
-    actual_count = text.count(needle)
-    if actual_count != expected_count:
-        raise _count_error(
-            context=context,
-            expected=expected_count,
-            actual=actual_count,
-        )
-
-
 def replace_exactly(
     text: str,
     old: str,
@@ -65,7 +48,14 @@ def replace_exactly(
     context: str = _DEFAULT_CONTEXT,
 ) -> str:
     """Replace old with new only when it appears exactly as expected."""
-    require_count(text, old, expected_count=expected_count, context=context)
+    _require_non_empty_needle(old, context=context)
+    actual_count = text.count(old)
+    if actual_count != expected_count:
+        raise _count_error(
+            context=context,
+            expected=expected_count,
+            actual=actual_count,
+        )
     return text.replace(old, new, expected_count)
 
 

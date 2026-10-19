@@ -1,21 +1,31 @@
 """Apply the fail-closed Nix ownership policy to Unsloth Desktop source."""
 
+import argparse
+import json
+import re
+import tomllib
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from lib.codemods.source_patch import (
-    SourcePatch,
-    plan_patches,
-    select_variant,
-    source_tree_parser,
-    write_planned,
-)
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+from lib.exact_text_patch import ExactTextPatch, plan_exact_text_patches
 
 _NIX_MODULE = Path("studio/src-tauri/src/nix_managed.rs")
 _PATCH_SENTINEL = 'option_env!("UNSLOTH_NIX_BACKEND")'
+_CARGO_MANIFEST = Path("studio/src-tauri/Cargo.toml")
+_CARGO_LOCK = Path("studio/src-tauri/Cargo.lock")
+_DESKTOP_PACKAGE = "unsloth-studio"
+_FIX_PATH_ENV_PACKAGE = "fix-path-env"
+_FIX_PATH_ENV_URL = "https://github.com/tauri-apps/fix-path-env-rs"
+_DESKTOP_VERSION = re.compile(
+    r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?",
+    re.ASCII,
+)
+_FIX_PATH_ENV_SOURCE = re.compile(
+    rf"git\+{re.escape(_FIX_PATH_ENV_URL)}"
+    r"(?:\?rev=(?P<revision>[0-9a-f]{40}))?#(?P<commit>[0-9a-f]{40})",
+    re.ASCII,
+)
 _NIX_MODULE_SOURCE = """// SPDX-License-Identifier: AGPL-3.0-only
 // Nix ownership policy injected from the nixcfg source package.
 
@@ -53,6 +63,242 @@ pub(crate) fn backend_binary() -> Result<std::path::PathBuf, String> {
 """
 
 
+@dataclass(frozen=True, slots=True)
+class _SourcePatch:
+    path: Path
+    old: str
+    new: str
+    expected_matches: int = 1
+    alternatives: tuple[tuple[str, str], ...] = ()
+
+
+def _table_span(source: str, header: str) -> tuple[int, int]:
+    """Return the unique textual span for one TOML table."""
+    header_pattern = re.compile(rf"(?m)^\[{re.escape(header)}\]\s*(?:#.*)?$")
+    matches = list(header_pattern.finditer(source))
+    if len(matches) != 1:
+        msg = f"expected one [{header}] table, found {len(matches)}"
+        raise RuntimeError(msg)
+    start = matches[0].end()
+    next_header = re.search(r"(?m)^\[", source[start:])
+    end = len(source) if next_header is None else start + next_header.start()
+    return start, end
+
+
+def _replace_table_assignment(
+    source: str,
+    *,
+    header: str,
+    key: str,
+    rendered_value: str,
+) -> str:
+    """Replace one assignment in a structurally selected TOML table."""
+    start, end = _table_span(source, header)
+    table = source[start:end]
+    assignment = re.compile(rf"(?m)^(?P<indent>\s*){re.escape(key)}\s*=.*$")
+    matches = list(assignment.finditer(table))
+    if len(matches) != 1:
+        msg = f"expected one {key} assignment in [{header}], found {len(matches)}"
+        raise RuntimeError(msg)
+    match = matches[0]
+    replacement = f"{match.group('indent')}{key} = {rendered_value}"
+    return (
+        source[:start]
+        + table[: match.start()]
+        + replacement
+        + table[match.end() :]
+        + source[end:]
+    )
+
+
+def _package_table_spans(source: str) -> tuple[tuple[int, int], ...]:
+    """Return every ``[[package]]`` span from a Cargo lock file."""
+    headers = tuple(re.finditer(r"(?m)^\[\[package\]\]\s*(?:#.*)?$", source))
+    return tuple(
+        (
+            match.start(),
+            headers[index + 1].start() if index + 1 < len(headers) else len(source),
+        )
+        for index, match in enumerate(headers)
+    )
+
+
+def _replace_lock_package_assignment(
+    source: str,
+    *,
+    package_name: str,
+    key: str,
+    rendered_value: str,
+) -> str:
+    """Replace one field in the uniquely named Cargo lock package."""
+    matches: list[tuple[int, int]] = []
+    for start, end in _package_table_spans(source):
+        payload = tomllib.loads(source[start:end])
+        packages = payload.get("package")
+        if (
+            isinstance(packages, list)
+            and len(packages) == 1
+            and isinstance(packages[0], Mapping)
+            and packages[0].get("name") == package_name
+        ):
+            matches.append((start, end))
+    if len(matches) != 1:
+        msg = (
+            f"expected one Cargo.lock package named {package_name}, "
+            f"found {len(matches)}"
+        )
+        raise RuntimeError(msg)
+    start, end = matches[0]
+    table = source[start:end]
+    assignment = re.compile(rf"(?m)^(?P<indent>\s*){re.escape(key)}\s*=.*$")
+    fields = list(assignment.finditer(table))
+    if len(fields) != 1:
+        msg = (
+            f"expected one {key} assignment for Cargo.lock package "
+            f"{package_name}, found {len(fields)}"
+        )
+        raise RuntimeError(msg)
+    field = fields[0]
+    replacement = f"{field.group('indent')}{key} = {rendered_value}"
+    return (
+        source[:start]
+        + table[: field.start()]
+        + replacement
+        + table[field.end() :]
+        + source[end:]
+    )
+
+
+def _lock_packages(lock: Mapping[str, object]) -> list[Mapping[str, object]]:
+    """Return typed Cargo lock packages."""
+    payload = lock.get("package")
+    if not isinstance(payload, list) or not all(
+        isinstance(entry, Mapping) for entry in payload
+    ):
+        msg = "Cargo.lock must contain object package entries"
+        raise TypeError(msg)
+    return list(payload)
+
+
+def _unique_lock_package(
+    packages: list[Mapping[str, object]],
+    name: str,
+) -> Mapping[str, object]:
+    """Return the uniquely named Cargo lock package."""
+    matches = [entry for entry in packages if entry.get("name") == name]
+    if len(matches) != 1:
+        msg = f"Cargo.lock must contain one {name} package, found {len(matches)}"
+        raise RuntimeError(msg)
+    return matches[0]
+
+
+def _fix_path_env_revision(
+    manifest: Mapping[str, object],
+    packages: list[Mapping[str, object]],
+) -> str:
+    """Derive and cross-check the locked fix-path-env commit."""
+    dependencies = manifest.get("dependencies")
+    if not isinstance(dependencies, Mapping):
+        msg = "Cargo.toml must contain object dependencies"
+        raise TypeError(msg)
+    fix_path_env = dependencies.get(_FIX_PATH_ENV_PACKAGE)
+    if not isinstance(fix_path_env, Mapping):
+        msg = "Cargo.toml fix-path-env dependency must be an inline table"
+        raise TypeError(msg)
+    if fix_path_env.get("git") != _FIX_PATH_ENV_URL:
+        msg = "Cargo.toml fix-path-env dependency uses an unexpected Git source"
+        raise RuntimeError(msg)
+    if set(fix_path_env) - {"git", "rev"}:
+        msg = "Cargo.toml fix-path-env dependency has unsupported source selectors"
+        raise RuntimeError(msg)
+
+    lock_source_id = _unique_lock_package(packages, _FIX_PATH_ENV_PACKAGE).get("source")
+    if not isinstance(lock_source_id, str):
+        msg = "Cargo.lock fix-path-env source must be a string"
+        raise TypeError(msg)
+    source_match = _FIX_PATH_ENV_SOURCE.fullmatch(lock_source_id)
+    if source_match is None:
+        msg = (
+            "Cargo.lock fix-path-env source is not an immutable supported Git identity"
+        )
+        raise RuntimeError(msg)
+    revision = source_match.group("commit")
+    pinned_revision = source_match.group("revision")
+    if pinned_revision is not None and pinned_revision != revision:
+        msg = "Cargo.lock fix-path-env rev selector disagrees with its locked commit"
+        raise RuntimeError(msg)
+    manifest_revision = fix_path_env.get("rev")
+    if manifest_revision is not None and manifest_revision != revision:
+        msg = "Cargo.toml fix-path-env rev selector disagrees with Cargo.lock"
+        raise RuntimeError(msg)
+    return revision
+
+
+def _cargo_consistency_replacements(
+    source_root: Path,
+    desktop_version: str,
+) -> dict[Path, str]:
+    """Derive Cargo release and Git identities from immutable candidate source."""
+    if _DESKTOP_VERSION.fullmatch(desktop_version) is None:
+        msg = f"invalid Unsloth desktop version: {desktop_version!r}"
+        raise RuntimeError(msg)
+
+    manifest_source = (source_root / _CARGO_MANIFEST).read_text(encoding="utf-8")
+    lock_source = (source_root / _CARGO_LOCK).read_text(encoding="utf-8")
+    manifest = tomllib.loads(manifest_source)
+    lock = tomllib.loads(lock_source)
+
+    package = manifest.get("package")
+    if not isinstance(package, Mapping) or package.get("name") != _DESKTOP_PACKAGE:
+        msg = f"Cargo.toml must define package {_DESKTOP_PACKAGE}"
+        raise RuntimeError(msg)
+    manifest_version = package.get("version")
+    if not isinstance(manifest_version, str):
+        msg = "Cargo.toml package version must be a string"
+        raise TypeError(msg)
+
+    packages = _lock_packages(lock)
+    desktop_package = _unique_lock_package(packages, _DESKTOP_PACKAGE)
+    if desktop_package.get("version") != manifest_version:
+        msg = "Cargo.toml and Cargo.lock desktop versions disagree before release stamping"
+        raise RuntimeError(msg)
+    revision = _fix_path_env_revision(manifest, packages)
+
+    manifest_source = _replace_table_assignment(
+        manifest_source,
+        header="package",
+        key="version",
+        rendered_value=json.dumps(desktop_version),
+    )
+    manifest_source = _replace_table_assignment(
+        manifest_source,
+        header="dependencies",
+        key=_FIX_PATH_ENV_PACKAGE,
+        rendered_value=(
+            f"{{ git = {json.dumps(_FIX_PATH_ENV_URL)}, rev = {json.dumps(revision)} }}"
+        ),
+    )
+    lock_source = _replace_lock_package_assignment(
+        lock_source,
+        package_name=_DESKTOP_PACKAGE,
+        key="version",
+        rendered_value=json.dumps(desktop_version),
+    )
+    lock_source = _replace_lock_package_assignment(
+        lock_source,
+        package_name=_FIX_PATH_ENV_PACKAGE,
+        key="source",
+        rendered_value=json.dumps(f"git+{_FIX_PATH_ENV_URL}?rev={revision}#{revision}"),
+    )
+    return {_CARGO_MANIFEST: manifest_source, _CARGO_LOCK: lock_source}
+
+
+def patch_cargo_tree(source_root: Path, desktop_version: str) -> None:
+    """Stamp release metadata and lock Git identity without release-specific patches."""
+    replacements = _cargo_consistency_replacements(source_root, desktop_version)
+    _write_replacements(source_root, replacements)
+
+
 RUNTIME_ENVIRONMENT = {
     "UNSLOTH_DIFFUSION_ATTENTION_INSTALL": "0",
     "UNSLOTH_DIFFUSION_SD_CPP_INSTALL": "0",
@@ -70,8 +316,8 @@ RUNTIME_ENVIRONMENT = {
 
 
 _PATCHES = (
-    SourcePatch(
-        "studio/src-tauri/tauri.conf.json",
+    _SourcePatch(
+        Path("studio/src-tauri/tauri.conf.json"),
         """    "beforeBuildCommand": {
       "cwd": "../frontend",
       "script": "npm run build"
@@ -83,21 +329,21 @@ _PATCHES = (
     },
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/tauri.macos.conf.json",
+    _SourcePatch(
+        Path("studio/src-tauri/tauri.macos.conf.json"),
         """    "resources": {
       "../../install.sh": "install.sh"
     },
 """,
         "",
     ),
-    SourcePatch(
-        "studio/src-tauri/src/main.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/main.rs"),
         "mod native_path_policy;\nmod preflight;\n",
         "mod native_path_policy;\nmod nix_managed;\nmod preflight;\n",
     ),
-    SourcePatch(
-        "studio/src-tauri/src/main.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/main.rs"),
         """fn set_launch_at_login(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
     use tauri_plugin_autostart::ManagerExt;
 """,
@@ -106,8 +352,8 @@ _PATCHES = (
     use tauri_plugin_autostart::ManagerExt;
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/main.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/main.rs"),
         """fn rewrite_macos_launch_agent(app: &tauri::AppHandle) {
     let Some(home_dir) = dirs::home_dir() else {
 """,
@@ -118,8 +364,8 @@ _PATCHES = (
     let Some(home_dir) = dirs::home_dir() else {
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/main.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/main.rs"),
         """fn reconcile_autostart_entry(app: &tauri::AppHandle) {
     use tauri_plugin_autostart::ManagerExt;
 """,
@@ -130,13 +376,13 @@ _PATCHES = (
     use tauri_plugin_autostart::ManagerExt;
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/main.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/main.rs"),
         "        .plugin(tauri_plugin_updater::Builder::new().build())\n",
         "        // Nix owns application updates; do not register the Tauri updater plugin.\n",
     ),
-    SourcePatch(
-        "studio/src-tauri/src/desktop_update_policy.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/desktop_update_policy.rs"),
         """const DESKTOP_UPDATER_MANIFEST_URL: &str =
     "https://github.com/unslothai/unsloth/releases/latest/download/latest.json";
 """,
@@ -144,8 +390,8 @@ _PATCHES = (
     "nix-managed://updates-disabled";
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/desktop_update_policy.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/desktop_update_policy.rs"),
         """pub(crate) enum DesktopUpdateMode {
     InApp,
     ManualLinuxPackage,
@@ -158,8 +404,8 @@ _PATCHES = (
 }
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/desktop_update_policy.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/desktop_update_policy.rs"),
         """fn desktop_update_mode() -> DesktopUpdateMode {
     #[cfg(target_os = "linux")]
 """,
@@ -170,8 +416,8 @@ _PATCHES = (
     #[cfg(target_os = "linux")]
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/desktop_update_policy.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/desktop_update_policy.rs"),
         """        assert_eq!(
             super::DESKTOP_UPDATER_MANIFEST_URL,
             "https://github.com/unslothai/unsloth/releases/latest/download/latest.json"
@@ -183,8 +429,8 @@ _PATCHES = (
         );
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/desktop_updater.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/desktop_updater.rs"),
         """) -> Result<Option<DesktopUpdateMetadata>, String> {
     let app = webview.app_handle().clone();
 """,
@@ -195,8 +441,8 @@ _PATCHES = (
     let app = webview.app_handle().clone();
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/commands.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/commands.rs"),
         """pub async fn start_install(
     app: AppHandle,
     state: tauri::State<'_, install::InstallState>,
@@ -217,8 +463,8 @@ _PATCHES = (
     if has_owned_backend(&backend_state)? {
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/commands.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/commands.rs"),
         """pub async fn start_backend_update(
     app: AppHandle,
     backend_state: tauri::State<'_, BackendState>,
@@ -241,8 +487,8 @@ _PATCHES = (
     info!("start_backend_update command called");
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/commands.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/commands.rs"),
         """) -> Result<(), String> {
     let force_installer = force_installer.unwrap_or(false);
 """,
@@ -251,8 +497,8 @@ _PATCHES = (
     let force_installer = force_installer.unwrap_or(false);
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/install.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/install.rs"),
         """fn run_install_with_event_mode(
     app: AppHandle,
     state: InstallState,
@@ -273,8 +519,8 @@ _PATCHES = (
     let attempt = match repair_group_id.as_deref() {
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/update.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/update.rs"),
         """) -> Result<(), String> {
     let attempt = match &kind {
 """,
@@ -283,8 +529,8 @@ _PATCHES = (
     let attempt = match &kind {
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/process.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/process.rs"),
         """pub fn find_unsloth_binary() -> Option<std::path::PathBuf> {
     let home = dirs::home_dir()?;
 """,
@@ -295,8 +541,8 @@ _PATCHES = (
     let home = dirs::home_dir()?;
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/process.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/process.rs"),
         """    pub(crate) fn to_command(&self) -> Command {
         let mut cmd = Command::new(&self.program);
         cmd.args(&self.args);
@@ -313,8 +559,8 @@ _PATCHES = (
     }
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/process.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/process.rs"),
         """    let mut cmd = tokio::process::Command::new(&invocation.program);
     cmd.args(&invocation.args);
     // PYTHONHOME / PYTHONPATH left alone, for the reason in the blocking flavour.
@@ -327,8 +573,8 @@ _PATCHES = (
     // PYTHONHOME / PYTHONPATH left alone, for the reason in the blocking flavour.
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/src/process.rs",
+    _SourcePatch(
+        Path("studio/src-tauri/src/process.rs"),
         """pub(crate) fn resolve_backend_binary() -> Result<std::path::PathBuf, String> {
     // In dev mode, check for local repo venv first
 """,
@@ -339,8 +585,8 @@ _PATCHES = (
     // In dev mode, check for local repo venv first
 """,
     ),
-    SourcePatch(
-        "studio/frontend/src/hooks/use-tauri-update.ts",
+    _SourcePatch(
+        Path("studio/frontend/src/hooks/use-tauri-update.ts"),
         'export type DesktopUpdatePolicyMode = "in_app" | "manual_linux_package";\n',
         """export type DesktopUpdatePolicyMode =
   | "in_app"
@@ -348,8 +594,8 @@ _PATCHES = (
   | "nix_managed";
 """,
     ),
-    SourcePatch(
-        "studio/frontend/src/hooks/use-tauri-update.ts",
+    _SourcePatch(
+        Path("studio/frontend/src/hooks/use-tauri-update.ts"),
         """      const { policy, resolved } = await resolveUpdatePolicy();
 
       if (policy.mode === "manual_linux_package") {
@@ -365,8 +611,8 @@ _PATCHES = (
       if (policy.mode === "manual_linux_package") {
 """,
     ),
-    SourcePatch(
-        "studio/frontend/src/hooks/use-tauri-update.ts",
+    _SourcePatch(
+        Path("studio/frontend/src/hooks/use-tauri-update.ts"),
         """      const { policy } = await resolveUpdatePolicy();
       if (policy.mode === "manual_linux_package") {
 """,
@@ -375,8 +621,8 @@ _PATCHES = (
       if (policy.mode === "manual_linux_package") {
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/tauri.conf.json",
+    _SourcePatch(
+        Path("studio/src-tauri/tauri.conf.json"),
         (
             "    },\n"
             '    "updater": {\n'
@@ -395,13 +641,13 @@ _PATCHES = (
         """    }
 """,
     ),
-    SourcePatch(
-        "studio/src-tauri/tauri.conf.json",
+    _SourcePatch(
+        Path("studio/src-tauri/tauri.conf.json"),
         '    "createUpdaterArtifacts": true,\n',
         '    "createUpdaterArtifacts": false,\n',
     ),
-    SourcePatch(
-        "studio/src-tauri/capabilities/default.json",
+    _SourcePatch(
+        Path("studio/src-tauri/capabilities/default.json"),
         '    "updater:default",\n',
         "",
     ),
@@ -446,40 +692,9 @@ OXC_VALIDATOR_PATCH_REPLACEMENT = """    const oxlintBin = process.execPath;
       join(TOOL_DIR, "node_modules", "oxlint", "bin", "oxlint"),
 """
 
-# Studio's in-venv test has two supported upstream shapes: the released
-# ``sys.prefix`` comparison and the ``_running_in_studio_venv`` helper that
-# replaces it upstream. They are complete, mutually exclusive backend layouts;
-# a partially migrated CLI matches neither and fails closed.
-_STUDIO_VENV_SYS_PREFIX = SourcePatch(
-    "unsloth_cli/commands/studio.py",
-    """    studio_venv_dir = STUDIO_HOME / "unsloth_studio"
-    in_studio_venv = sys.prefix.startswith(str(studio_venv_dir))
-""",
-    """    studio_venv_dir = STUDIO_HOME / "unsloth_studio"
-    in_studio_venv = (
-        os.environ.get("UNSLOTH_NIX_MANAGED") == "1"
-        or sys.prefix.startswith(str(studio_venv_dir))
-    )
-""",
-    expected_count=2,
-)
-_STUDIO_VENV_HELPER = SourcePatch(
-    "unsloth_cli/commands/studio.py",
-    """    studio_venv_dir = STUDIO_HOME / "unsloth_studio"
-    in_studio_venv = _running_in_studio_venv(studio_venv_dir)
-""",
-    """    studio_venv_dir = STUDIO_HOME / "unsloth_studio"
-    in_studio_venv = (
-        os.environ.get("UNSLOTH_NIX_MANAGED") == "1"
-        or _running_in_studio_venv(studio_venv_dir)
-    )
-""",
-    expected_count=2,
-)
-
 _BACKEND_PATCHES = (
-    SourcePatch(
-        "pyproject.toml",
+    _SourcePatch(
+        Path("pyproject.toml"),
         """    "backend/core/data_recipe/oxc-validator/*.json",
     "backend/core/data_recipe/oxc-validator/*.mjs",
 """,
@@ -488,19 +703,19 @@ _BACKEND_PATCHES = (
     "backend/core/data_recipe/oxc-validator/node_modules/**/*",
 """,
     ),
-    SourcePatch(
-        OXC_VALIDATOR_PATH.as_posix(),
+    _SourcePatch(
+        OXC_VALIDATOR_PATH,
         OXC_VALIDATOR_PATCH_SEAM,
         OXC_VALIDATOR_PATCH_REPLACEMENT,
     ),
-    SourcePatch(
-        "unsloth/chat_templates.py",
+    _SourcePatch(
+        Path("unsloth/chat_templates.py"),
         '        os.system("pip -qqq install git+https://github.com/lm-sys/FastChat.git")\n',
         f'        raise RuntimeError("Cannot install FastChat: {_MANAGED_ERROR}.")\n',
-        expected_count=2,
+        expected_matches=2,
     ),
-    SourcePatch(
-        "unsloth/save.py",
+    _SourcePatch(
+        Path("unsloth/save.py"),
         """def install_llama_cpp_clone_non_blocking():
     full_command = [
 """,
@@ -510,8 +725,8 @@ _BACKEND_PATCHES = (
     full_command = [
 """,
     ),
-    SourcePatch(
-        "unsloth/save.py",
+    _SourcePatch(
+        Path("unsloth/save.py"),
         """def install_llama_cpp_make_non_blocking():
 """,
         f"""def install_llama_cpp_make_non_blocking():
@@ -519,8 +734,8 @@ _BACKEND_PATCHES = (
         raise RuntimeError("Cannot build llama.cpp at runtime: {_MANAGED_ERROR}.")
 """,
     ),
-    SourcePatch(
-        "unsloth/save.py",
+    _SourcePatch(
+        Path("unsloth/save.py"),
         """def install_python_non_blocking(packages = []):
     full_command = ["pip", "install"] + packages
 """,
@@ -530,8 +745,8 @@ _BACKEND_PATCHES = (
     full_command = ["pip", "install"] + packages
 """,
     ),
-    SourcePatch(
-        "unsloth/save.py",
+    _SourcePatch(
+        Path("unsloth/save.py"),
         """def install_llama_cpp_old(version = -10):
 """,
         f"""def install_llama_cpp_old(version = -10):
@@ -539,8 +754,8 @@ _BACKEND_PATCHES = (
         raise RuntimeError("Cannot install llama.cpp at runtime: {_MANAGED_ERROR}.")
 """,
     ),
-    SourcePatch(
-        "unsloth/save.py",
+    _SourcePatch(
+        Path("unsloth/save.py"),
         """def install_llama_cpp_blocking(use_cuda = False):
 """,
         f"""def install_llama_cpp_blocking(use_cuda = False):
@@ -548,8 +763,8 @@ _BACKEND_PATCHES = (
         raise RuntimeError("Cannot install llama.cpp at runtime: {_MANAGED_ERROR}.")
 """,
     ),
-    SourcePatch(
-        "studio/install_python_stack.py",
+    _SourcePatch(
+        Path("studio/install_python_stack.py"),
         """def install_python_stack() -> int:
     global USE_UV, _STEP, _TOTAL, _PROGRESS_LINE_ACTIVE
 """,
@@ -563,8 +778,8 @@ _BACKEND_PATCHES = (
         return 1
 """,
     ),
-    SourcePatch(
-        "studio/install_sd_cpp_prebuilt.py",
+    _SourcePatch(
+        Path("studio/install_sd_cpp_prebuilt.py"),
         f"""def install(
     *,
     install_dir: Optional[Path] = None,
@@ -584,8 +799,8 @@ _BACKEND_PATCHES = (
     target = install_dir or default_install_dir()
 """,
     ),
-    SourcePatch(
-        "studio/install_node_prebuilt.py",
+    _SourcePatch(
+        Path("studio/install_node_prebuilt.py"),
         (
             "def install_prebuilt(install_dir: Path, *, channel: str, "
             "min_major: int, force: bool) -> int:\n"
@@ -601,8 +816,8 @@ _BACKEND_PATCHES = (
             "    host = detect_host()\n"
         ),
     ),
-    SourcePatch(
-        "studio/install_llama_prebuilt.py",
+    _SourcePatch(
+        Path("studio/install_llama_prebuilt.py"),
         """def install_prebuilt(
     install_dir: Path,
     llama_tag: str,
@@ -636,8 +851,8 @@ _BACKEND_PATCHES = (
     choice: AssetChoice | None = None
 """,
     ),
-    SourcePatch(
-        "studio/install_whisper_prebuilt.py",
+    _SourcePatch(
+        Path("studio/install_whisper_prebuilt.py"),
         """def install_prebuilt(
     install_dir: Path,
     *,
@@ -669,8 +884,8 @@ _BACKEND_PATCHES = (
     host = apply_host_overrides(
 """,
     ),
-    SourcePatch(
-        "unsloth_cli/commands/studio.py",
+    _SourcePatch(
+        Path("unsloth_cli/commands/studio.py"),
         """    return _studio_deps.install_state(
 """,
         """    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
@@ -684,9 +899,30 @@ _BACKEND_PATCHES = (
     return _studio_deps.install_state(
 """,
     ),
-    _STUDIO_VENV_SYS_PREFIX,
-    SourcePatch(
-        "unsloth_cli/commands/studio.py",
+    _SourcePatch(
+        Path("unsloth_cli/commands/studio.py"),
+        """    studio_venv_dir = STUDIO_HOME / "unsloth_studio"
+    in_studio_venv = sys.prefix.startswith(str(studio_venv_dir))
+""",
+        """    studio_venv_dir = STUDIO_HOME / "unsloth_studio"
+    in_studio_venv = (
+        os.environ.get("UNSLOTH_NIX_MANAGED") == "1"
+        or sys.prefix.startswith(str(studio_venv_dir))
+    )
+""",
+        expected_matches=2,
+        alternatives=((
+            '    studio_venv_dir = STUDIO_HOME / "unsloth_studio"\n'
+            "    in_studio_venv = _running_in_studio_venv(studio_venv_dir)\n",
+            '    studio_venv_dir = STUDIO_HOME / "unsloth_studio"\n'
+            "    in_studio_venv = (\n"
+            '        os.environ.get("UNSLOTH_NIX_MANAGED") == "1"\n'
+            "        or _running_in_studio_venv(studio_venv_dir)\n"
+            "    )\n",
+        ),),
+    ),
+    _SourcePatch(
+        Path("unsloth_cli/commands/studio.py"),
         """    \"\"\"Run Unsloth setup (called by install.ps1 / install.sh).\"\"\"
     runtime_gate_handoff = _studio_runtime_gate.consume_runtime_gate_handoff()
 """,
@@ -697,8 +933,8 @@ _BACKEND_PATCHES = (
     runtime_gate_handoff = _studio_runtime_gate.consume_runtime_gate_handoff()
 """,
     ),
-    SourcePatch(
-        "unsloth_cli/commands/studio.py",
+    _SourcePatch(
+        Path("unsloth_cli/commands/studio.py"),
         """    \"\"\"Update Unsloth Studio dependencies and rebuild.\"\"\"
 """,
         f"""    \"\"\"Update Unsloth Studio dependencies and rebuild.\"\"\"
@@ -707,8 +943,8 @@ _BACKEND_PATCHES = (
         raise typer.Exit(1)
 """,
     ),
-    SourcePatch(
-        "studio/backend/core/training/worker.py",
+    _SourcePatch(
+        Path("studio/backend/core/training/worker.py"),
         """def _uninstall_package(pypi_name: str, display_name: str) -> bool:
     \"\"\"Remove a distribution. True iff it is gone afterwards.\"\"\"
     if shutil.which("uv"):
@@ -721,8 +957,8 @@ _BACKEND_PATCHES = (
     if shutil.which("uv"):
 """,
     ),
-    SourcePatch(
-        "studio/backend/core/training/worker.py",
+    _SourcePatch(
+        Path("studio/backend/core/training/worker.py"),
         f"""def _install_package_wheel_first(
     *, event_queue: Any, import_name: str, display_name: str, pypi_name: str, **kwargs: Any
 ) -> bool:
@@ -746,8 +982,8 @@ _BACKEND_PATCHES = (
     if _model_offline_mode_enabled():
 """,
     ),
-    SourcePatch(
-        "studio/backend/core/training/worker.py",
+    _SourcePatch(
+        Path("studio/backend/core/training/worker.py"),
         """def _attempt_package_install(
     *,
     event_queue: Any,
@@ -786,8 +1022,8 @@ _BACKEND_PATCHES = (
     # Set when a wheel installed but would not import; see the uninstall before the fallback.
 """,
     ),
-    SourcePatch(
-        "studio/backend/utils/transformers_version.py",
+    _SourcePatch(
+        Path("studio/backend/utils/transformers_version.py"),
         """def _install_to_dir(pkg: str, target_dir: str) -> bool:
     \"\"\"Install a single package into *target_dir*, preferring uv then pip.\"\"\"
     # Try uv first (faster) if on PATH -- do NOT install uv at runtime.
@@ -800,8 +1036,8 @@ _BACKEND_PATCHES = (
     # Try uv first (faster) if on PATH -- do NOT install uv at runtime.
 """,
     ),
-    SourcePatch(
-        "studio/backend/utils/transformers_version.py",
+    _SourcePatch(
+        Path("studio/backend/utils/transformers_version.py"),
         """def _ensure_venv_dir(venv_dir: str, packages: tuple[str, ...], label: str) -> bool:
     \"\"\"Ensure *venv_dir* exists with all *packages*. Install if missing.\"\"\"
     if _venv_dir_is_valid_and_undamaged(venv_dir, packages):
@@ -820,8 +1056,8 @@ _BACKEND_PATCHES = (
         return False
 """,
     ),
-    SourcePatch(
-        "studio/backend/utils/wheel_utils.py",
+    _SourcePatch(
+        Path("studio/backend/utils/wheel_utils.py"),
         """def install_wheel(
     wheel_url: str,
     *,
@@ -846,8 +1082,8 @@ _BACKEND_PATCHES = (
     attempts: list[tuple[str, subprocess.CompletedProcess[str]]] = []
 """,
     ),
-    SourcePatch(
-        "studio/backend/utils/ssm_runtime.py",
+    _SourcePatch(
+        Path("studio/backend/utils/ssm_runtime.py"),
         f"""def _install_kernel(
     *,
     import_name: str,
@@ -886,8 +1122,8 @@ _BACKEND_PATCHES = (
     from utils.utils import hf_env_offline
 """,
     ),
-    SourcePatch(
-        "studio/backend/utils/ssm_runtime.py",
+    _SourcePatch(
+        Path("studio/backend/utils/ssm_runtime.py"),
         """    wants_causal_conv1d = model_wants_causal_conv1d(model_name)
     is_ssm = model_is_ssm(model_name)
 """,
@@ -898,8 +1134,8 @@ _BACKEND_PATCHES = (
     is_ssm = model_is_ssm(model_name)
 """,
     ),
-    SourcePatch(
-        "studio/backend/utils/whisper_cpp_update.py",
+    _SourcePatch(
+        Path("studio/backend/utils/whisper_cpp_update.py"),
         """def _install_latest(
     install_dir: Path,
     repo: str,
@@ -927,8 +1163,8 @@ _BACKEND_PATCHES = (
     try:
 """,
     ),
-    SourcePatch(
-        "studio/backend/cloudflare_tunnel.py",
+    _SourcePatch(
+        Path("studio/backend/cloudflare_tunnel.py"),
         """    existing = find_cloudflared()
     if existing:
         return existing
@@ -942,8 +1178,8 @@ _BACKEND_PATCHES = (
     asset = _asset_name()
 """,
     ),
-    SourcePatch(
-        "studio/backend/utils/llama_cpp_update.py",
+    _SourcePatch(
+        Path("studio/backend/utils/llama_cpp_update.py"),
         """def _start_llama_job(backend_request: Optional[str] = None) -> dict:
     \"\"\"Shared body of start_update() and start_backend_switch().\"\"\"
     if not _claim_operation(backend_request):
@@ -962,8 +1198,8 @@ _BACKEND_PATCHES = (
     if not _claim_operation(backend_request):
 """,
     ),
-    SourcePatch(
-        "studio/backend/core/inference/sd_cpp_backend.py",
+    _SourcePatch(
+        Path("studio/backend/core/inference/sd_cpp_backend.py"),
         """    if not allow_install:
         return found
     with _install_lock:
@@ -974,10 +1210,10 @@ _BACKEND_PATCHES = (
         return found
     with _install_lock:
 """,
-        expected_count=2,
+        expected_matches=2,
     ),
-    SourcePatch(
-        "studio/setup.sh",
+    _SourcePatch(
+        Path("studio/setup.sh"),
         """set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -992,8 +1228,8 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
 """,
     ),
-    SourcePatch(
-        "studio/setup.sh",
+    _SourcePatch(
+        Path("studio/setup.sh"),
         (
             'if [ -d "$_OXC_DIR" ] && '
             '[ "${NODE_SOURCE:-}" != skip ] && '
@@ -1006,8 +1242,8 @@ SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
             "command -v npm &>/dev/null; then\n"
         ),
     ),
-    SourcePatch(
-        "studio/setup.ps1",
+    _SourcePatch(
+        Path("studio/setup.ps1"),
         """$ErrorActionPreference = "Stop"
 
 # This script is spawned as powershell.exe -- Windows PowerShell 5.1 (see the PSModulePath note
@@ -1021,8 +1257,8 @@ if ($env:UNSLOTH_NIX_MANAGED -eq "1") {{
 # This script is spawned as powershell.exe -- Windows PowerShell 5.1 (see the PSModulePath note
 """,
     ),
-    SourcePatch(
-        "studio/setup.ps1",
+    _SourcePatch(
+        Path("studio/setup.ps1"),
         (
             "if ((Test-Path $OxcValidatorDir) -and "
             '$NodeSource -ne "skip" -and '
@@ -1049,51 +1285,83 @@ def _validate_module_path(source_root: Path) -> Path:
     return module_path
 
 
-_BACKEND_LAYOUTS = {
-    "studio-venv-sys-prefix": _BACKEND_PATCHES,
-    "studio-venv-helper": tuple(
-        _STUDIO_VENV_HELPER if patch is _STUDIO_VENV_SYS_PREFIX else patch
-        for patch in _BACKEND_PATCHES
-    ),
-}
+def _validated_replacements(
+    source_root: Path,
+    patches: tuple[_SourcePatch, ...],
+) -> dict[Path, str]:
+    originals = {
+        path: (source_root / path).read_text(encoding="utf-8")
+        for path in dict.fromkeys(patch.path for patch in patches)
+    }
+    exact_patches = []
+    for patch in patches:
+        variants = ((patch.old, patch.new), *patch.alternatives)
+        matches = [pair for pair in variants if pair[0] in originals[patch.path]]
+        if len(matches) > 1:
+            msg = f"ambiguous Unsloth patch variants in {patch.path}"
+            raise RuntimeError(msg)
+        old, new = matches[0] if matches else variants[0]
+        exact_patches.append(
+            ExactTextPatch(patch.path, old, new, patch.expected_matches)
+        )
+    return plan_exact_text_patches(
+        originals,
+        exact_patches,
+        mismatch_message=lambda patch, count: (
+            f"expected {patch.expected_count} Unsloth anchor(s) in "
+            f"{patch.path}, found {count}"
+        ),
+    )
 
 
-def _plan_desktop(source_root: Path) -> dict[Path, str]:
-    module_path = _validate_module_path(source_root)
-    planned = plan_patches(source_root, _PATCHES)
-    planned[module_path] = _NIX_MODULE_SOURCE
-    return planned
-
-
-def _plan_backend(backend_root: Path) -> dict[Path, str]:
-    _layout, patches = select_variant(backend_root, _BACKEND_LAYOUTS)
-    return plan_patches(backend_root, patches)
+def _write_replacements(source_root: Path, replacements: dict[Path, str]) -> None:
+    for relative_path, source in replacements.items():
+        (source_root / relative_path).write_text(source, encoding="utf-8")
 
 
 def patch_tree(source_root: Path) -> None:
     """Patch all desktop ownership surfaces after every upstream anchor validates."""
-    write_planned(_plan_desktop(source_root))
+    module_path = _validate_module_path(source_root)
+    patched = _validated_replacements(source_root, _PATCHES)
+
+    _write_replacements(source_root, patched)
+    module_path.write_text(_NIX_MODULE_SOURCE, encoding="utf-8")
 
 
 def patch_backend_tree(backend_root: Path) -> None:
     """Patch every audited backend mutation surface after all anchors validate."""
-    write_planned(_plan_backend(backend_root))
+    patched = _validated_replacements(backend_root, _BACKEND_PATCHES)
+    _write_replacements(backend_root, patched)
 
 
 def patch_all(source_root: Path, backend_root: Path) -> None:
     """Validate both source payloads before atomically beginning either patch pass."""
-    desktop = _plan_desktop(source_root)
-    backend = _plan_backend(backend_root)
-    write_planned(desktop)
-    write_planned(backend)
+    module_path = _validate_module_path(source_root)
+    desktop_patched = _validated_replacements(source_root, _PATCHES)
+    backend_patched = _validated_replacements(backend_root, _BACKEND_PATCHES)
+
+    _write_replacements(source_root, desktop_patched)
+    module_path.write_text(_NIX_MODULE_SOURCE, encoding="utf-8")
+    _write_replacements(backend_root, backend_patched)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Apply Nix ownership policy to one exact Unsloth source tree."""
-    parser = source_tree_parser(__doc__)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source_root", type=Path)
     parser.add_argument("--backend-root", type=Path)
+    parser.add_argument("--cargo-only", action="store_true")
+    parser.add_argument("--desktop-version")
     args = parser.parse_args(argv)
-    if args.backend_root is None:
+    if args.cargo_only:
+        if args.backend_root is not None:
+            parser.error("--cargo-only cannot be combined with --backend-root")
+        if args.desktop_version is None:
+            parser.error("--cargo-only requires --desktop-version")
+        patch_cargo_tree(args.source_root, args.desktop_version)
+    elif args.desktop_version is not None:
+        parser.error("--desktop-version requires --cargo-only")
+    elif args.backend_root is None:
         patch_tree(args.source_root)
     else:
         patch_all(args.source_root, args.backend_root)

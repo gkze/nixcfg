@@ -2,30 +2,44 @@
 
 The patch is deliberately anchor checked.  A new upstream release must still
 contain every audited mutation surface before the package can be rebuilt.
-Each surface is keyed by its audited name and grouped by the source tree that
-owns it; OpenChamber and its bundled OpenCode build from separate trees.
 """
 
+import argparse
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Literal
 
-from lib.codemods.source_patch import (
-    SourceAnchor,
-    SourcePatch,
-    plan_patches,
-    source_tree_parser,
-    write_planned,
-)
+from lib.exact_text_patch import ExactTextPatch, plan_exact_text_patches
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
 _MANAGED_MESSAGE = "Updates are managed by Nix."
 
-type Component = Literal["openchamber", "opencode"]
 
-_OPENCHAMBER_PATCHES: Final = {
-    "electron-auto-updater-setup": SourcePatch(
+@dataclass(frozen=True, slots=True)
+class _SourcePatch:
+    surface: str
+    component: Literal["openchamber", "opencode"]
+    relative_path: str
+    old: str
+    new: str
+    expected_count: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class _SourceAnchor:
+    surface: str
+    component: Literal["openchamber", "opencode"]
+    relative_path: str
+    text: str
+    expected_count: int = 1
+
+
+_PATCHES = (
+    _SourcePatch(
+        "electron-auto-updater-setup",
+        "openchamber",
         "packages/electron/main.mjs",
         """const setupAutoUpdater = () => {
   if (!app.isPackaged) {
@@ -38,7 +52,9 @@ _OPENCHAMBER_PATCHES: Final = {
   if (!app.isPackaged) {{
 """,
     ),
-    "electron-ipc-check": SourcePatch(
+    _SourcePatch(
+        "electron-ipc-check",
+        "openchamber",
         "packages/electron/main.mjs",
         """    case 'desktop_check_for_updates': {
       assertUpdaterCapability({ packaged: app.isPackaged });
@@ -56,7 +72,9 @@ _OPENCHAMBER_PATCHES: Final = {
       assertUpdaterCapability({{ packaged: app.isPackaged }});
 """,
     ),
-    "electron-ipc-download": SourcePatch(
+    _SourcePatch(
+        "electron-ipc-download",
+        "openchamber",
         "packages/electron/main.mjs",
         """    case 'desktop_download_and_install_update':
       assertUpdaterCapability({ packaged: app.isPackaged });
@@ -68,7 +86,9 @@ _OPENCHAMBER_PATCHES: Final = {
       assertUpdaterCapability({{ packaged: app.isPackaged }});
 """,
     ),
-    "electron-ipc-restart": SourcePatch(
+    _SourcePatch(
+        "electron-ipc-restart",
+        "openchamber",
         "packages/electron/main.mjs",
         """    case 'desktop_restart': {
       const applyUpdate = Boolean(state.pendingUpdate?.downloaded && app.isPackaged);
@@ -78,7 +98,9 @@ _OPENCHAMBER_PATCHES: Final = {
       const applyUpdate = false;
 """,
     ),
-    "electron-menu-check": SourcePatch(
+    _SourcePatch(
+        "electron-menu-check",
+        "openchamber",
         "packages/electron/main.mjs",
         """        {
           label: 'Check for Updates',
@@ -94,17 +116,23 @@ _OPENCHAMBER_PATCHES: Final = {
 """,
         expected_count=2,
     ),
-    "electron-asar-native-unpack": SourcePatch(
+    _SourcePatch(
+        "electron-asar-native-unpack",
+        "openchamber",
         "packages/electron/package.json",
         '    "npmRebuild": false,\n',
         '    "npmRebuild": false,\n    "asarUnpack": ["**/*.node", "**/*.dylib"],\n',
     ),
-    "electron-notarization": SourcePatch(
+    _SourcePatch(
+        "electron-notarization",
+        "openchamber",
         "packages/electron/package.json",
         '      "notarize": true,\n',
         '      "notarize": false,\n',
     ),
-    "electron-source-only-node-pty": SourcePatch(
+    _SourcePatch(
+        "electron-source-only-node-pty",
+        "openchamber",
         "packages/electron/scripts/rebuild-native.mjs",
         """    arch: targetArchitecture.electronBuilder,
     onlyModules: ['node-pty', 'bun-pty'],
@@ -114,7 +142,9 @@ _OPENCHAMBER_PATCHES: Final = {
     onlyModules: ['node-pty'],
 """,
     ),
-    "renderer-update-polling": SourcePatch(
+    _SourcePatch(
+        "renderer-update-polling",
+        "openchamber",
         "packages/ui/src/hooks/useUpdatePolling.ts",
         """  React.useEffect(() => {
     const initialDelayMs = 3000;
@@ -127,7 +157,9 @@ _OPENCHAMBER_PATCHES: Final = {
     const initialDelayMs = 3000;
 """,
     ),
-    "renderer-managed-state": SourcePatch(
+    _SourcePatch(
+        "renderer-managed-state",
+        "openchamber",
         "packages/ui/src/stores/useUpdateStore.ts",
         "declare const __APP_VERSION__: string | undefined;\n",
         """declare const __APP_VERSION__: string | undefined;
@@ -136,7 +168,9 @@ const NIX_MANAGED = import.meta.env.PROD;
 const NIX_MANAGED_MESSAGE = 'Updates are managed by Nix.';
 """,
     ),
-    "renderer-check": SourcePatch(
+    _SourcePatch(
+        "renderer-check",
+        "openchamber",
         "packages/ui/src/stores/useUpdateStore.ts",
         """  checkForUpdates: async () => {
     const runtime = detectRuntimeType();
@@ -158,7 +192,9 @@ const NIX_MANAGED_MESSAGE = 'Updates are managed by Nix.';
     const runtime = detectRuntimeType();
 """,
     ),
-    "renderer-download": SourcePatch(
+    _SourcePatch(
+        "renderer-download",
+        "openchamber",
         "packages/ui/src/stores/useUpdateStore.ts",
         """  downloadUpdate: async () => {
     const { available, runtimeType } = get();
@@ -172,7 +208,9 @@ const NIX_MANAGED_MESSAGE = 'Updates are managed by Nix.';
     const { available, runtimeType } = get();
 """,
     ),
-    "renderer-restart": SourcePatch(
+    _SourcePatch(
+        "renderer-restart",
+        "openchamber",
         "packages/ui/src/stores/useUpdateStore.ts",
         """  restartToUpdate: async () => {
     const { downloaded, runtimeType } = get();
@@ -186,7 +224,9 @@ const NIX_MANAGED_MESSAGE = 'Updates are managed by Nix.';
     const { downloaded, runtimeType } = get();
 """,
     ),
-    "web-update-check": SourcePatch(
+    _SourcePatch(
+        "web-update-check",
+        "openchamber",
         "packages/web/server/lib/opencode/openchamber-routes.js",
         """  app.get('/api/openchamber/update-check', async (req, res) => {
     try {
@@ -202,7 +242,9 @@ const NIX_MANAGED_MESSAGE = 'Updates are managed by Nix.';
     try {{
 """,
     ),
-    "web-update-install": SourcePatch(
+    _SourcePatch(
+        "web-update-install",
+        "openchamber",
         "packages/web/server/lib/opencode/openchamber-routes.js",
         """  app.post('/api/openchamber/update-install', async (_req, res) => {
     try {
@@ -214,7 +256,9 @@ const NIX_MANAGED_MESSAGE = 'Updates are managed by Nix.';
     try {{
 """,
     ),
-    "cli-update-command": SourcePatch(
+    _SourcePatch(
+        "cli-update-command",
+        "openchamber",
         "packages/web/bin/lib/commands-update.js",
         """  return async function updateCommand(options = {}) {
     const showOutput = shouldRenderHumanOutput(options);
@@ -225,7 +269,9 @@ const NIX_MANAGED_MESSAGE = 'Updates are managed by Nix.';
     const showOutput = shouldRenderHumanOutput(options);
 """,
     ),
-    "lifecycle-opencode-managed-env": SourcePatch(
+    _SourcePatch(
+        "lifecycle-opencode-managed-env",
+        "openchamber",
         "packages/web/server/lib/opencode/lifecycle.js",
         """          OPENCODE_SERVER_PASSWORD: openCodePassword,
 """,
@@ -234,27 +280,9 @@ const NIX_MANAGED_MESSAGE = 'Updates are managed by Nix.';
           OPENCODE_NIX_MANAGED: '1',
 """,
     ),
-}
-
-_OPENCHAMBER_ANCHORS: Final = {
-    "root-postinstall-download": SourceAnchor(
-        "package.json",
-        '    "postinstall": "node ./fix-deprecation.js && bun run --cwd packages/sdk '
-        "build && bun run extensions:build && "
-        'node ./packages/electron/scripts/ensure-electron.mjs --best-effort",\n',
-    ),
-    "electron-prepare-opencode-cli": SourceAnchor(
-        "packages/electron/package.json",
-        '    "prepare:opencode-cli": "node ./scripts/prepare-opencode-cli.mjs",\n',
-    ),
-    "electron-rebuild-native": SourceAnchor(
-        "packages/electron/package.json",
-        '    "rebuild:native": "node ./scripts/rebuild-native.mjs",\n',
-    ),
-}
-
-_OPENCODE_PATCHES: Final = {
-    "opencode-cli-upgrade": SourcePatch(
+    _SourcePatch(
+        "opencode-cli-upgrade",
+        "opencode",
         "packages/opencode/src/cli/cmd/upgrade.ts",
         "  handler: async (args: { target?: string; method?: string }) => {\n",
         f"""  handler: async (args: {{ target?: string; method?: string }}) => {{
@@ -263,21 +291,48 @@ _OPENCODE_PATCHES: Final = {
     }}
 """,
     ),
-}
+)
 
-_OPENCODE_ANCHORS: Final = {
-    "opencode-auto-updater": SourceAnchor(
+_ANCHORS = (
+    _SourceAnchor(
+        "root-postinstall-download",
+        "openchamber",
+        "package.json",
+        '    "postinstall": "node ./fix-deprecation.js && bun run --cwd packages/sdk '
+        "build && bun run extensions:build && "
+        'node ./packages/electron/scripts/ensure-electron.mjs --best-effort",\n',
+    ),
+    _SourceAnchor(
+        "electron-prepare-opencode-cli",
+        "openchamber",
+        "packages/electron/package.json",
+        '    "prepare:opencode-cli": "node ./scripts/prepare-opencode-cli.mjs",\n',
+    ),
+    _SourceAnchor(
+        "electron-rebuild-native",
+        "openchamber",
+        "packages/electron/package.json",
+        '    "rebuild:native": "node ./scripts/rebuild-native.mjs",\n',
+    ),
+    _SourceAnchor(
+        "opencode-auto-updater",
+        "opencode",
         "packages/opencode/src/cli/upgrade.ts",
         "  if (config.autoupdate === false || Flag.OPENCODE_DISABLE_AUTOUPDATE) return\n",
     ),
-    "opencode-auto-updater-flag": SourceAnchor(
+    _SourceAnchor(
+        "opencode-auto-updater-flag",
+        "opencode",
         "packages/core/src/flag/flag.ts",
         '  OPENCODE_DISABLE_AUTOUPDATE: truthy("OPENCODE_DISABLE_AUTOUPDATE"),\n',
     ),
-}
+)
 
-_OPENCODE_V2_PATCHES: Final = {
-    "opencode-cli-upgrade": SourcePatch(
+
+_OPENCODE_V2_PATCHES = (
+    _SourcePatch(
+        "opencode-cli-upgrade",
+        "opencode",
         "packages/cli/src/commands/handlers/upgrade.ts",
         '    function* (input) {\n      intro("Upgrade")\n',
         f"""    function* (input) {{
@@ -287,7 +342,9 @@ _OPENCODE_V2_PATCHES: Final = {
       intro("Upgrade")
 """,
     ),
-    "opencode-service-upgrade": SourcePatch(
+    _SourcePatch(
+        "opencode-service-upgrade",
+        "opencode",
         "packages/cli/src/services/updater.ts",
         "  const upgrade = Effect.fnUntraced(function* (method: Method, input: string) {\n",
         f"""  const upgrade = Effect.fnUntraced(function* (method: Method, input: string) {{
@@ -296,15 +353,27 @@ _OPENCODE_V2_PATCHES: Final = {
     }}
 """,
     ),
-}
-
-_OPENCODE_V2_ANCHORS: Final = {
-    "opencode-auto-updater": SourceAnchor(
+)
+_OPENCODE_V2_ANCHORS = (
+    _SourceAnchor(
+        "opencode-auto-updater",
+        "opencode",
         "packages/cli/src/services/updater.ts",
         '    if (OPENCODE_LOCAL || ["1", "true"].includes('
         'process.env.OPENCODE_DISABLE_AUTOUPDATE?.toLowerCase() ?? "")) {\n',
     ),
-}
+)
+
+
+def _roots(openchamber_root: Path, opencode_root: Path) -> dict[str, Path]:
+    return {"openchamber": openchamber_root, "opencode": opencode_root}
+
+
+def _validate_anchor(path: Path, text: str, expected_count: int) -> None:
+    count = path.read_text(encoding="utf-8").count(text)
+    if count != expected_count:
+        msg = f"expected {expected_count} managed-source anchor(s) in {path}, found {count}"
+        raise RuntimeError(msg)
 
 
 def _opencode_v2_layout(root: Path) -> bool:
@@ -317,34 +386,69 @@ def _opencode_v2_layout(root: Path) -> bool:
     return (root / "packages/cli/src/services/updater.ts").is_file()
 
 
-def _surfaces(
-    component: Component,
-    root: Path,
-) -> tuple[Mapping[str, SourcePatch], Mapping[str, SourceAnchor]]:
-    if component == "openchamber":
-        return _OPENCHAMBER_PATCHES, _OPENCHAMBER_ANCHORS
-    if _opencode_v2_layout(root):
-        return _OPENCODE_V2_PATCHES, _OPENCODE_V2_ANCHORS
-    return _OPENCODE_PATCHES, _OPENCODE_ANCHORS
+def _patch_selected(
+    roots: dict[str, Path],
+    components: frozenset[str],
+    *,
+    check: bool,
+) -> None:
+    patches = _PATCHES
+    anchors = _ANCHORS
+    if "opencode" in components and _opencode_v2_layout(roots["opencode"]):
+        patches = (
+            tuple(patch for patch in _PATCHES if patch.component != "opencode")
+            + _OPENCODE_V2_PATCHES
+        )
+        anchors = (
+            tuple(anchor for anchor in _ANCHORS if anchor.component != "opencode")
+            + _OPENCODE_V2_ANCHORS
+        )
 
+    for anchor in (item for item in anchors if item.component in components):
+        path = roots[anchor.component] / anchor.relative_path
+        _validate_anchor(path, anchor.text, anchor.expected_count)
 
-def _patch_selected(roots: Mapping[Component, Path], *, check: bool) -> None:
-    pending = {}
-    for component, root in roots.items():
-        patches, anchors = _surfaces(component, root)
-        pending |= plan_patches(root, patches.values(), anchors=anchors.values())
-    if not check:
-        write_planned(pending)
+    exact_patches = tuple(
+        ExactTextPatch(
+            roots[patch.component] / patch.relative_path,
+            patch.old,
+            patch.new,
+            patch.expected_count,
+        )
+        for patch in patches
+        if patch.component in components
+    )
+    originals = {
+        path: path.read_text(encoding="utf-8")
+        for path in dict.fromkeys(patch.path for patch in exact_patches)
+    }
+    pending = plan_exact_text_patches(
+        originals,
+        exact_patches,
+        mismatch_message=lambda patch, count: (
+            f"expected {patch.expected_count} managed-source patch anchor(s) "
+            f"in {patch.path}, found {count}"
+        ),
+    )
+
+    if check:
+        return
+    for path, source in pending.items():
+        path.write_text(source, encoding="utf-8")
 
 
 def patch_component(
-    component: Component,
+    component: Literal["openchamber", "opencode"],
     source_root: Path,
     *,
     check: bool = False,
 ) -> None:
     """Validate and patch one source tree for its package-local derivation."""
-    _patch_selected({component: source_root}, check=check)
+    _patch_selected(
+        {"openchamber": source_root, "opencode": source_root},
+        frozenset({component}),
+        check=check,
+    )
 
 
 def patch_trees(
@@ -355,14 +459,16 @@ def patch_trees(
 ) -> None:
     """Validate and patch both exact source trees, or only dry-run with ``check``."""
     _patch_selected(
-        {"openchamber": openchamber_root, "opencode": opencode_root},
+        _roots(openchamber_root, opencode_root),
+        frozenset({"openchamber", "opencode"}),
         check=check,
     )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Apply or dry-run the Nix ownership patch."""
-    parser = source_tree_parser(__doc__)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source_root", type=Path)
     parser.add_argument("opencode_root", nargs="?", type=Path)
     parser.add_argument("--component", choices=("openchamber", "opencode"))
     parser.add_argument("--check", action="store_true")

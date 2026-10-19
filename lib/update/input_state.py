@@ -8,9 +8,9 @@ from nix_manipulator import parse
 from nix_manipulator.expressions.binding import Binding
 from nix_manipulator.expressions.primitive import Primitive, StringPrimitive
 from nix_manipulator.expressions.set import AttributeSet
+from nix_manipulator.parser import parse_to_ast
 
 from lib.nix.models.flake_lock import FlakeLock, FlakeLockNode
-from lib.update.flake_inputs import root_input_bindings
 
 type FlakeInputState = tuple[bytes, bytes]
 
@@ -24,10 +24,43 @@ def _input_declarations(declarations: bytes) -> dict[str, object]:
     # Parse only input bindings into expression objects. The parser can reject
     # supported syntax inside outputs; those expressions cannot alter a literal
     # root attribute set's inputs and are outside this receipt's scope.
-    input_bindings = [
-        declarations[binding.start_byte : binding.end_byte]
-        for binding in root_input_bindings(declarations)
-    ]
+    syntax = parse_to_ast(declarations)
+    root = syntax.child_by_field_name("expression")
+    if (
+        root is None
+        or root.type != "attrset_expression"
+        or root.children[-1].is_missing
+        or any(
+            child != root and child.type != "comment" for child in syntax.named_children
+        )
+    ):
+        msg = "Flake declarations require a literal root attribute set"
+        raise ValueError(msg)
+    input_bindings = []
+    for binding_set in root.named_children:
+        if binding_set.type == "comment":
+            continue
+        if binding_set.type != "binding_set":
+            msg = "Unknown root declaration syntax"
+            raise ValueError(msg)
+        for binding in binding_set.named_children:
+            if binding.type == "comment":
+                continue
+            path = binding.child_by_field_name("attrpath")
+            if (
+                path is None
+                or path.has_error
+                or any(part.type != "identifier" for part in path.named_children)
+            ):
+                msg = "Root attribute name is ambiguous"
+                raise ValueError(msg)
+            if path.named_children[0].text == b"inputs":
+                if binding.has_error:
+                    msg = "Invalid input declaration"
+                    raise ValueError(msg)
+                input_bindings.append(
+                    declarations[binding.start_byte : binding.end_byte]
+                )
     parsed = parse(b"{" + b"\n".join(input_bindings) + b"}")
     return _bindings(_bindings(parsed.expr)["inputs"])
 

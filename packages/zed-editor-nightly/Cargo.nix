@@ -995,6 +995,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "gpui_ios" = rec {
+      packageId = "gpui_ios";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "gpui_ios";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "gpui_linux" = rec {
       packageId = "gpui_linux";
       build = internal.buildRustCrateWithFeatures {
@@ -2891,7 +2901,7 @@ rec {
           {
             name = "agent-client-protocol";
             packageId = "agent-client-protocol";
-            features = [ "unstable" "unstable_protocol_v2" ];
+            features = [ "schemars" "unstable" "unstable_protocol_v2" ];
           }
           {
             name = "agent_settings";
@@ -3121,7 +3131,7 @@ rec {
           {
             name = "agent-client-protocol";
             packageId = "agent-client-protocol";
-            features = [ "unstable" "unstable_protocol_v2" ];
+            features = [ "schemars" "unstable" "unstable_protocol_v2" ];
           }
           {
             name = "agent_servers";
@@ -3574,7 +3584,7 @@ rec {
           {
             name = "agent-client-protocol";
             packageId = "agent-client-protocol";
-            features = [ "unstable" "unstable_protocol_v2" ];
+            features = [ "schemars" "unstable" "unstable_protocol_v2" ];
           }
           {
             name = "agent_servers";
@@ -3969,9 +3979,9 @@ rec {
       };
       "agent-client-protocol" = rec {
         crateName = "agent-client-protocol";
-        version = "2.2.0";
+        version = "3.4.0";
         edition = "2024";
-        sha256 = "0qqpd7nmap730m0124pshqgpark3x31vq295s21sp21cgdcq1xqk";
+        sha256 = "12b24m86z4wdc5fiwif3cnfczsr45cwri95pz46kkl5hwq6arbbj";
         libName = "agent_client_protocol";
         authors = [
           "Zed <hi@zed.dev>"
@@ -3984,26 +3994,14 @@ rec {
           {
             name = "agent-client-protocol-schema";
             packageId = "agent-client-protocol-schema";
+            usesDefaultFeatures = false;
             features = [ "tracing" ];
-          }
-          {
-            name = "async-io";
-            packageId = "async-io";
-            target = { target, features }: (!(builtins.elem "wasm" target."family"));
-          }
-          {
-            name = "async-process";
-            packageId = "async-process";
-            target = { target, features }: (!(builtins.elem "wasm" target."family"));
-          }
-          {
-            name = "blocking";
-            packageId = "blocking";
-            target = { target, features }: (!(builtins.elem "wasm" target."family"));
           }
           {
             name = "futures";
             packageId = "futures";
+            usesDefaultFeatures = false;
+            features = [ "std" "async-await" ];
           }
           {
             name = "futures-concurrency";
@@ -4014,15 +4012,9 @@ rec {
             packageId = "rustc-hash 2.1.1";
           }
           {
-            name = "rustix";
-            packageId = "rustix";
-            usesDefaultFeatures = false;
-            target = { target, features }: ((target."unix" or false) && (!(builtins.elem "wasm" target."family")));
-            features = [ "std" "process" ];
-          }
-          {
             name = "schemars";
             packageId = "schemars 1.0.4";
+            optional = true;
             features = [ "derive" ];
           }
           {
@@ -4036,11 +4028,6 @@ rec {
             features = [ "preserve_order" "raw_value" ];
           }
           {
-            name = "shell-words";
-            packageId = "shell-words";
-            target = { target, features }: (!(builtins.elem "wasm" target."family"));
-          }
-          {
             name = "tracing";
             packageId = "tracing";
           }
@@ -4049,32 +4036,37 @@ rec {
             packageId = "uuid";
             features = [ "v4" ];
           }
+        ];
+        devDependencies = [
           {
-            name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
-            target = { target, features }: (target."windows" or false);
-            features = [ "Win32_System_Threading" ];
+            name = "futures";
+            packageId = "futures";
+            usesDefaultFeatures = false;
+            features = [ "std" "async-await" "executor" ];
           }
         ];
         features = {
-          "unstable" = [ "unstable_end_turn_token_usage" "unstable_llm_providers" "unstable_mcp_over_acp" "unstable_plan_operations" "unstable_session_compaction" "unstable_session_fork" "unstable_session_notices" ];
+          "process" = [ "dep:async-io" "dep:async-process" "dep:shell-words" "dep:rustix" "dep:windows-sys" ];
+          "schemars" = [ "dep:schemars" "agent-client-protocol-schema/schemars" ];
+          "stdio" = [ "dep:blocking" ];
+          "unstable" = [ "unstable_end_turn_token_usage" "unstable_llm_providers" "unstable_mcp_over_acp" "unstable_plan_operations" "unstable_session_fork" "unstable_session_system_prompt" "unstable_subagents" ];
           "unstable_end_turn_token_usage" = [ "agent-client-protocol-schema/unstable_end_turn_token_usage" ];
           "unstable_llm_providers" = [ "agent-client-protocol-schema/unstable_llm_providers" ];
           "unstable_mcp_over_acp" = [ "agent-client-protocol-schema/unstable_mcp_over_acp" ];
           "unstable_plan_operations" = [ "agent-client-protocol-schema/unstable_plan_operations" ];
           "unstable_protocol_v2" = [ "agent-client-protocol-schema/unstable_protocol_v2" ];
-          "unstable_session_compaction" = [ "agent-client-protocol-schema/unstable_session_compaction" ];
           "unstable_session_fork" = [ "agent-client-protocol-schema/unstable_session_fork" ];
-          "unstable_session_notices" = [ "agent-client-protocol-schema/unstable_session_notices" ];
+          "unstable_session_system_prompt" = [ "agent-client-protocol-schema/unstable_session_system_prompt" ];
+          "unstable_subagents" = [ "agent-client-protocol-schema/unstable_subagents" ];
           "wasm_js" = [ "uuid/js" ];
         };
-        resolvedDefaultFeatures = [ "default" "unstable" "unstable_end_turn_token_usage" "unstable_llm_providers" "unstable_mcp_over_acp" "unstable_plan_operations" "unstable_protocol_v2" "unstable_session_compaction" "unstable_session_fork" "unstable_session_notices" ];
+        resolvedDefaultFeatures = [ "default" "schemars" "unstable" "unstable_end_turn_token_usage" "unstable_llm_providers" "unstable_mcp_over_acp" "unstable_plan_operations" "unstable_protocol_v2" "unstable_session_fork" "unstable_session_system_prompt" "unstable_subagents" ];
       };
       "agent-client-protocol-derive" = rec {
         crateName = "agent-client-protocol-derive";
-        version = "2.2.0";
+        version = "3.4.0";
         edition = "2024";
-        sha256 = "1pi9ja4j49whki8md5c7n6n6fxg8dq91lqb4bam97qg027xkp2gl";
+        sha256 = "05l7sh3d6dx0386mkg46w5370grrcr8wpywizq5wpdqbhzqscbsk";
         procMacro = true;
         libName = "agent_client_protocol_derive";
         authors = [
@@ -4094,9 +4086,9 @@ rec {
       };
       "agent-client-protocol-schema" = rec {
         crateName = "agent-client-protocol-schema";
-        version = "1.9.1";
+        version = "1.12.0";
         edition = "2024";
-        sha256 = "038ybi6fql2i3djv3md3q1fff0c527fvxlbx3k4h4pb6w5wmln8x";
+        sha256 = "0gvcnahac7awl64hifgqk5kdk1g46h8mpn70lg0i3a20vc7r03j3";
         libName = "agent_client_protocol_schema";
         authors = [
           "Zed <hi@zed.dev>"
@@ -4136,20 +4128,13 @@ rec {
             packageId = "strum 0.28.0";
             features = [ "derive" ];
           }
-          {
-            name = "tracing";
-            packageId = "tracing";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
         ];
         features = {
           "default" = [ "schemars" ];
           "schemars" = [ "dep:schemars" "serde_with/schemars_1" ];
-          "tracing" = [ "dep:tracing" ];
-          "unstable" = [ "unstable_llm_providers" "unstable_mcp_over_acp" "unstable_nes" "unstable_plan_operations" "unstable_session_fork" "unstable_session_compaction" "unstable_session_notices" "unstable_end_turn_token_usage" ];
+          "unstable" = [ "unstable_llm_providers" "unstable_mcp_over_acp" "unstable_plan_operations" "unstable_session_fork" "unstable_session_system_prompt" "unstable_subagents" "unstable_end_turn_token_usage" ];
         };
-        resolvedDefaultFeatures = [ "default" "schemars" "tracing" "unstable_end_turn_token_usage" "unstable_llm_providers" "unstable_mcp_over_acp" "unstable_plan_operations" "unstable_protocol_v2" "unstable_session_compaction" "unstable_session_fork" "unstable_session_notices" ];
+        resolvedDefaultFeatures = [ "schemars" "tracing" "unstable_end_turn_token_usage" "unstable_llm_providers" "unstable_mcp_over_acp" "unstable_plan_operations" "unstable_protocol_v2" "unstable_session_fork" "unstable_session_system_prompt" "unstable_subagents" ];
       };
       "agent_servers" = rec {
         crateName = "agent_servers";
@@ -4169,7 +4154,7 @@ rec {
           {
             name = "agent-client-protocol";
             packageId = "agent-client-protocol";
-            features = [ "unstable" "unstable_protocol_v2" ];
+            features = [ "schemars" "unstable" "unstable_protocol_v2" ];
           }
           {
             name = "anyhow";
@@ -4202,10 +4187,6 @@ rec {
             name = "env_logger";
             packageId = "env_logger 0.11.8";
             optional = true;
-          }
-          {
-            name = "feature_flags";
-            packageId = "feature_flags";
           }
           {
             name = "fs";
@@ -4574,7 +4555,7 @@ rec {
           {
             name = "agent-client-protocol";
             packageId = "agent-client-protocol";
-            features = [ "unstable" "unstable_protocol_v2" ];
+            features = [ "schemars" "unstable" "unstable_protocol_v2" ];
           }
           {
             name = "agent_servers";
@@ -7117,9 +7098,9 @@ rec {
         edition = "2021";
         workspace_member = null;
         src = pkgs.fetchgit {
-          url = "https://github.com/smol-rs/async-task.git";
-          rev = "b4486cd71e4e94fbda54ce6302444de14f4d190e";
-          sha256 = "1c06r3nxw1s8wvidh9jyw6g5knl27njs6qvmic53ylkzlwrbirzr";
+          url = "https://github.com/zed-industries/async-task.git";
+          rev = "015845a19fc31752c02367567d3b8900a406f9da";
+          sha256 = "08khi768i86p0i60n2masbf4sr9j4245hi47cbnqbqxq11xxhkg7";
         };
         libName = "async_task";
         authors = [
@@ -7983,7 +7964,7 @@ rec {
           }
           {
             name = "pastey";
-            packageId = "pastey";
+            packageId = "pastey 0.1.1";
           }
           {
             name = "rayon";
@@ -9740,15 +9721,24 @@ rec {
       };
       "aws-smithy-json" = rec {
         crateName = "aws-smithy-json";
-        version = "0.62.5";
+        version = "0.62.7";
         edition = "2021";
-        sha256 = "0sl553j1frrnd3vgprfy7a71ybc238mavijj822dvvm2haxv0j4n";
+        sha256 = "1yigf0gp5cypmg8vnrx4xsgw6in7cy38jjhi3s8jmrcp8xzr86kh";
         libName = "aws_smithy_json";
         authors = [
           "AWS Rust SDK Team <aws-sdk-rust@amazon.com>"
           "John DiSanti <jdisanti@amazon.com>"
         ];
         dependencies = [
+          {
+            name = "aws-smithy-runtime-api";
+            packageId = "aws-smithy-runtime-api";
+            features = [ "client" ];
+          }
+          {
+            name = "aws-smithy-schema";
+            packageId = "aws-smithy-schema";
+          }
           {
             name = "aws-smithy-types";
             packageId = "aws-smithy-types";
@@ -9923,9 +9913,9 @@ rec {
       };
       "aws-smithy-runtime-api" = rec {
         crateName = "aws-smithy-runtime-api";
-        version = "1.11.4";
+        version = "1.12.3";
         edition = "2021";
-        sha256 = "1v0grgfwxsqibnfc0nrzhl7fgpldw6ggm6qbkvs2d1cvgs1y0mcc";
+        sha256 = "130fzrbh0y4j3bhlwfay0r9czaq7r54gbz5fw6ggp2mslvd7gccx";
         libName = "aws_smithy_runtime_api";
         authors = [
           "AWS Rust SDK Team <aws-sdk-rust@amazon.com>"
@@ -9935,6 +9925,10 @@ rec {
           {
             name = "aws-smithy-async";
             packageId = "aws-smithy-async";
+          }
+          {
+            name = "aws-smithy-runtime-api-macros";
+            packageId = "aws-smithy-runtime-api-macros";
           }
           {
             name = "aws-smithy-types";
@@ -9987,11 +9981,65 @@ rec {
         };
         resolvedDefaultFeatures = [ "client" "default" "http-02x" "http-1x" "http-auth" "test-util" ];
       };
+      "aws-smithy-runtime-api-macros" = rec {
+        crateName = "aws-smithy-runtime-api-macros";
+        version = "1.0.0";
+        edition = "2021";
+        sha256 = "1dx7m2lcg329bwxyqmafjdsd7fkinvn8gsb0wii9wn00jpyrcwwd";
+        procMacro = true;
+        libName = "aws_smithy_runtime_api_macros";
+        authors = [
+          "AWS Rust SDK Team <aws-sdk-rust@amazon.com>"
+        ];
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.117";
+            features = [ "full" ];
+          }
+        ];
+
+      };
+      "aws-smithy-schema" = rec {
+        crateName = "aws-smithy-schema";
+        version = "0.1.0";
+        edition = "2021";
+        sha256 = "1xclkkh4mlr8jvlzb3ix140slmk70iy102hlg21fpw1qhckcnhkl";
+        libName = "aws_smithy_schema";
+        authors = [
+          "AWS Rust SDK Team <aws-sdk-rust@amazon.com>"
+        ];
+        dependencies = [
+          {
+            name = "aws-smithy-runtime-api";
+            packageId = "aws-smithy-runtime-api";
+            features = [ "client" ];
+          }
+          {
+            name = "aws-smithy-types";
+            packageId = "aws-smithy-types";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "http";
+            packageId = "http 1.3.1";
+          }
+        ];
+
+      };
       "aws-smithy-types" = rec {
         crateName = "aws-smithy-types";
-        version = "1.4.7";
+        version = "1.4.9";
         edition = "2021";
-        sha256 = "0p69816m27cfznmn18q96n179ljqp607c4s5j1xwajwfmbxxnwwx";
+        sha256 = "0fvqsqcxa1dryacrmxgp643905xf8dqn1amr2w9y86qs29s31yak";
         libName = "aws_smithy_types";
         authors = [
           "AWS Rust SDK Team <aws-sdk-rust@amazon.com>"
@@ -10982,6 +11030,30 @@ rec {
         };
         resolvedDefaultFeatures = [ "runtime" ];
       };
+      "bit-set 0.11.1" = rec {
+        crateName = "bit-set";
+        version = "0.11.1";
+        edition = "2021";
+        sha256 = "0739d91jr6k2rbmbcsh26sx6srd40rcl7wkv9yj597r2wia77n2n";
+        libName = "bit_set";
+        authors = [
+          "Alexis Beingessner <a.beingessner@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "bit-vec";
+            packageId = "bit-vec 0.10.1";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "borsh" = [ "dep:borsh" "bit-vec/borsh" ];
+          "default" = [ "std" ];
+          "miniserde" = [ "dep:miniserde" "bit-vec/miniserde" ];
+          "serde" = [ "dep:serde" "bit-vec/serde" ];
+          "std" = [ "bit-vec/std" ];
+        };
+      };
       "bit-set 0.8.0" = rec {
         crateName = "bit-set";
         version = "0.8.0";
@@ -11005,31 +11077,21 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
-      "bit-set 0.9.1" = rec {
-        crateName = "bit-set";
-        version = "0.9.1";
+      "bit-vec 0.10.1" = rec {
+        crateName = "bit-vec";
+        version = "0.10.1";
         edition = "2021";
-        sha256 = "1pd32sbz8kszw2ldbnaadwh1bhbpxs0jqm3rqyjvc6j2jllyzp9l";
-        libName = "bit_set";
+        sha256 = "0s8jwc28d4fyi1ivh1wj69a9y9nh1raksz1v1bp4ykvxm5gv29sp";
+        libName = "bit_vec";
         authors = [
           "Alexis Beingessner <a.beingessner@gmail.com>"
         ];
-        dependencies = [
-          {
-            name = "bit-vec";
-            packageId = "bit-vec 0.9.1";
-            usesDefaultFeatures = false;
-          }
-        ];
         features = {
-          "borsh" = [ "dep:borsh" "bit-vec/borsh" ];
-          "borsh_std" = [ "borsh/std" ];
+          "borsh" = [ "dep:borsh" ];
           "default" = [ "std" ];
-          "miniserde" = [ "dep:miniserde" "bit-vec/miniserde" ];
-          "nanoserde" = [ "dep:nanoserde" "bit-vec/nanoserde" ];
-          "serde" = [ "dep:serde" "bit-vec/serde" ];
-          "serde_std" = [ "std" "serde/std" ];
-          "std" = [ "bit-vec/std" ];
+          "miniserde" = [ "dep:miniserde" ];
+          "serde" = [ "dep:serde" ];
+          "std" = [ "serde?/std" "borsh?/std" ];
         };
       };
       "bit-vec 0.8.0" = rec {
@@ -11052,26 +11114,6 @@ rec {
           "serde_std" = [ "std" "serde/std" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
-      };
-      "bit-vec 0.9.1" = rec {
-        crateName = "bit-vec";
-        version = "0.9.1";
-        edition = "2021";
-        sha256 = "0l9zc1dkjmqykbfx1j14rnfy9rl1pjj5hwjs8j311zn1lby9h5xp";
-        libName = "bit_vec";
-        authors = [
-          "Alexis Beingessner <a.beingessner@gmail.com>"
-        ];
-        features = {
-          "borsh" = [ "dep:borsh" ];
-          "borsh_std" = [ "borsh/std" ];
-          "default" = [ "std" ];
-          "miniserde" = [ "dep:miniserde" ];
-          "nanoserde" = [ "dep:nanoserde" ];
-          "serde" = [ "dep:serde" ];
-          "serde_std" = [ "std" "serde/std" ];
-          "std" = [ "serde?/std" ];
-        };
       };
       "bit_field" = rec {
         crateName = "bit_field";
@@ -12851,27 +12893,11 @@ rec {
       };
       "cfg_aliases" = rec {
         crateName = "cfg_aliases";
-        version = "0.2.1";
+        version = "0.2.2";
         edition = "2018";
-        sha256 = "092pxdc1dbgjb6qvh83gk56rkic2n2ybm4yvy76cgynmzi3zwfk1";
+        sha256 = "09rm3dv28gbsal7w6q76lg2nfyn8wp789ska9b8vr1w750xfhygh";
         authors = [
           "Zicklag <zicklag@katharostech.com>"
-        ];
-
-      };
-      "cgl" = rec {
-        crateName = "cgl";
-        version = "0.3.2";
-        edition = "2015";
-        sha256 = "1zs7skrsyrsm759vfy2cygkx52fx91b567a12bpaz1sf4d8hbv8c";
-        authors = [
-          "The Servo Project Developers"
-        ];
-        dependencies = [
-          {
-            name = "libc";
-            packageId = "libc";
-          }
         ];
 
       };
@@ -16692,47 +16718,6 @@ rec {
         };
         resolvedDefaultFeatures = [ "link" ];
       };
-      "core-graphics2" = rec {
-        crateName = "core-graphics2";
-        version = "0.5.2";
-        edition = "2021";
-        sha256 = "0in1jfcar8fivirdy38hrgzxxny1wgq4l88aimzn2vhjd5x1c5j4";
-        libName = "core_graphics2";
-        authors = [
-          "Zhou Wei <zhouwei@ehom.net>"
-        ];
-        dependencies = [
-          {
-            name = "bitflags";
-            packageId = "bitflags 2.13.1";
-          }
-          {
-            name = "block";
-            packageId = "block";
-          }
-          {
-            name = "cfg-if";
-            packageId = "cfg-if";
-          }
-          {
-            name = "core-foundation";
-            packageId = "core-foundation 0.10.0";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "libc";
-            packageId = "libc";
-          }
-        ];
-        features = {
-          "default" = [ "display" "display-stream" "event" "link" "window" ];
-          "display-stream" = [ "dep:dispatch2" "dep:io-surface" "display" "objc" ];
-          "link" = [ "core-foundation/link" ];
-          "metal" = [ "dep:metal" ];
-          "objc" = [ "dep:objc2" ];
-        };
-        resolvedDefaultFeatures = [ "display" "link" ];
-      };
       "core-services" = rec {
         crateName = "core-services";
         version = "1.0.0";
@@ -16784,54 +16769,6 @@ rec {
           "link" = [ "core-foundation/link" "core-graphics/link" ];
         };
         resolvedDefaultFeatures = [ "default" "link" "mountainlion" ];
-      };
-      "core-video" = rec {
-        crateName = "core-video";
-        version = "0.5.2";
-        edition = "2021";
-        sha256 = "0qps7a3907kqi22h1w2mfqbkcw94n1s7iqrppsyh95gbcg67k5hk";
-        libName = "core_video";
-        authors = [
-          "Zhou Wei <zhouwei@ehom.net>"
-        ];
-        dependencies = [
-          {
-            name = "block";
-            packageId = "block";
-          }
-          {
-            name = "core-foundation";
-            packageId = "core-foundation 0.10.0";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "core-graphics2";
-            packageId = "core-graphics2";
-            usesDefaultFeatures = false;
-            features = [ "display" ];
-          }
-          {
-            name = "io-surface";
-            packageId = "io-surface";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "libc";
-            packageId = "libc";
-          }
-          {
-            name = "metal";
-            packageId = "metal";
-            optional = true;
-          }
-        ];
-        features = {
-          "default" = [ "display-link" "link" ];
-          "link" = [ "core-foundation/link" "core-graphics2/link" ];
-          "metal" = [ "dep:metal" ];
-          "objc" = [ "dep:objc2" "core-graphics2/objc" ];
-        };
-        resolvedDefaultFeatures = [ "link" "metal" ];
       };
       "core2" = rec {
         crateName = "core2";
@@ -19794,6 +19731,10 @@ rec {
             packageId = "schemars 1.0.4";
             usesDefaultFeatures = false;
             features = [ "std" "indexmap2" ];
+          }
+          {
+            name = "search";
+            packageId = "search";
           }
           {
             name = "serde";
@@ -23913,7 +23854,7 @@ rec {
           {
             name = "agent-client-protocol";
             packageId = "agent-client-protocol";
-            features = [ "unstable" "unstable_protocol_v2" ];
+            features = [ "schemars" "unstable" "unstable_protocol_v2" ];
           }
           {
             name = "agent_ui";
@@ -28693,9 +28634,9 @@ rec {
       };
       "glow" = rec {
         crateName = "glow";
-        version = "0.17.0";
+        version = "0.18.0";
         edition = "2021";
-        sha256 = "1dddw6wh5lm4apn1w6ikgh92w00n33pgwy6gndmwqr1k90f8w0r9";
+        sha256 = "11hk5m3sir58y17wj8dmjhak7apqyms4dc0g6z1ia1rbpaq1hci6";
         authors = [
           "Joshua Groves <josh@joshgroves.com>"
           "Dzmitry Malyshau <kvarkus@gmail.com>"
@@ -28704,23 +28645,39 @@ rec {
           {
             name = "js-sys";
             packageId = "js-sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
+            target = { target, features }: (("wasm64" == target."arch" or null) && (!("emscripten" == target."os" or null)));
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
           }
           {
             name = "slotmap";
             packageId = "slotmap";
-            target = { target, features }: ("wasm32" == target."arch" or null);
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
           }
           {
             name = "wasm-bindgen";
             packageId = "wasm-bindgen";
-            target = { target, features }: ("wasm32" == target."arch" or null);
+            target = { target, features }: (("wasm64" == target."arch" or null) && (!("emscripten" == target."os" or null)));
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
           }
           {
             name = "web-sys";
             packageId = "web-sys";
             rename = "web_sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
+            target = { target, features }: (("wasm64" == target."arch" or null) && (!("emscripten" == target."os" or null)));
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            rename = "web_sys";
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
             features = [ "Document" "Element" "HtmlCanvasElement" "HtmlImageElement" "HtmlVideoElement" "ImageBitmap" "ImageData" "VideoFrame" "WebGlActiveInfo" "WebGlBuffer" "WebGlFramebuffer" "WebGlProgram" "WebGlQuery" "WebGlRenderbuffer" "WebGlRenderingContext" "WebGl2RenderingContext" "WebGlSampler" "WebGlShader" "WebGlShaderPrecisionFormat" "WebGlSync" "WebGlTexture" "WebGlTransformFeedback" "WebGlUniformLocation" "WebGlVertexArrayObject" "Window" "AngleInstancedArrays" "ExtBlendMinmax" "ExtColorBufferFloat" "ExtColorBufferHalfFloat" "ExtDisjointTimerQuery" "ExtFragDepth" "ExtShaderTextureLod" "ExtSRgb" "ExtTextureFilterAnisotropic" "OesElementIndexUint" "OesStandardDerivatives" "OesTextureFloat" "OesTextureFloatLinear" "OesTextureHalfFloat" "OesTextureHalfFloatLinear" "OesVertexArrayObject" "WebglColorBufferFloat" "WebglCompressedTextureAstc" "WebglCompressedTextureEtc" "WebglCompressedTextureEtc1" "WebglCompressedTexturePvrtc" "WebglCompressedTextureS3tc" "WebglCompressedTextureS3tcSrgb" "WebglDebugRendererInfo" "WebglDebugShaders" "WebglDepthTexture" "WebglDrawBuffers" "WebglLoseContext" "OvrMultiview2" ];
           }
         ];
@@ -28958,13 +28915,6 @@ rec {
             features = [ "std" ];
           }
           {
-            name = "schemars";
-            packageId = "schemars 1.0.4";
-            optional = true;
-            usesDefaultFeatures = false;
-            features = [ "std" "indexmap2" ];
-          }
-          {
             name = "serde";
             packageId = "serde";
             features = [ "rc" ];
@@ -28974,16 +28924,8 @@ rec {
             packageId = "serde_json";
             features = [ "preserve_order" "raw_value" ];
           }
-          {
-            name = "strum";
-            packageId = "strum 0.28.0";
-            features = [ "derive" ];
-          }
         ];
-        features = {
-          "schemars" = [ "dep:schemars" ];
-        };
-        resolvedDefaultFeatures = [ "schemars" ];
+
       };
       "gpu-allocator" = rec {
         crateName = "gpu-allocator";
@@ -29055,57 +28997,6 @@ rec {
         };
         resolvedDefaultFeatures = [ "d3d12" "hashbrown" "vulkan" ];
       };
-      "gpu-descriptor" = rec {
-        crateName = "gpu-descriptor";
-        version = "0.3.2";
-        edition = "2018";
-        sha256 = "1jm0acxkw9lrzzcbvjqynwdr53qsqz7vx5d8c8h77qq5j4s8775q";
-        libName = "gpu_descriptor";
-        authors = [
-          "Zakarum <zakarumych@ya.ru>"
-        ];
-        dependencies = [
-          {
-            name = "bitflags";
-            packageId = "bitflags 2.13.1";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "gpu-descriptor-types";
-            packageId = "gpu-descriptor-types";
-          }
-          {
-            name = "hashbrown";
-            packageId = "hashbrown 0.15.5";
-            usesDefaultFeatures = false;
-            features = [ "default-hasher" ];
-          }
-        ];
-        features = {
-          "default" = [ "std" ];
-          "serde" = [ "dep:serde" ];
-          "tracing" = [ "dep:tracing" ];
-        };
-        resolvedDefaultFeatures = [ "default" "std" ];
-      };
-      "gpu-descriptor-types" = rec {
-        crateName = "gpu-descriptor-types";
-        version = "0.2.0";
-        edition = "2018";
-        sha256 = "14ab90klss7w0ybj95fcnqxjsjya17xjhf576dpvi4zq5ml45wpx";
-        libName = "gpu_descriptor_types";
-        authors = [
-          "Zakarum <zakarumych@ya.ru>"
-        ];
-        dependencies = [
-          {
-            name = "bitflags";
-            packageId = "bitflags 2.13.1";
-            usesDefaultFeatures = false;
-          }
-        ];
-
-      };
       "gpui" = rec {
         crateName = "gpui";
         version = "0.2.2";
@@ -29163,13 +29054,6 @@ rec {
           {
             name = "collections";
             packageId = "collections";
-          }
-          {
-            name = "core-video";
-            packageId = "core-video";
-            usesDefaultFeatures = false;
-            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
-            features = [ "link" ];
           }
           {
             name = "criterion";
@@ -29274,17 +29158,15 @@ rec {
           {
             name = "objc2-core-foundation";
             packageId = "objc2-core-foundation";
-            optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: ("macos" == target."os" or null);
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
           }
           {
             name = "objc2-core-video";
             packageId = "objc2-core-video";
-            optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: ("macos" == target."os" or null);
-            features = [ "CVBuffer" "CVImageBuffer" ];
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+            features = [ "CVBuffer" "CVImageBuffer" "CVPixelBuffer" ];
           }
           {
             name = "parking";
@@ -29562,13 +29444,14 @@ rec {
           "bench" = [ "bench-support" ];
           "bench-support" = [ "profiler" "dep:criterion" "dep:bench_metrics" ];
           "default" = [ "font-kit" "wayland" "x11" "windows-manifest" ];
+          "hot-reload" = [ "dep:async-tungstenite" "dep:dioxus-cli-config" "dep:dioxus-devtools-types" "dep:smol" "dep:subsecond" ];
           "inspector" = [ "gpui_macros/inspector" ];
           "objc2" = [ "dep:objc2" ];
           "objc2-metal" = [ "dep:objc2-metal" ];
           "profiler" = [ "dep:hdrhistogram" ];
           "proptest" = [ "dep:proptest" ];
           "scap" = [ "dep:scap" ];
-          "screen-capture" = [ "scap" "dep:objc2-core-foundation" "dep:objc2-core-video" ];
+          "screen-capture" = [ "scap" ];
           "stacker" = [ "dep:stacksafe" ];
           "test-support" = [ "collections/test-support" "http_client/test-support" "wayland" "x11" "proptest" "dep:futures-concurrency" "dep:postage" "dep:web-time" ];
           "windows-manifest" = [ "dep:embed-resource" ];
@@ -29599,8 +29482,18 @@ rec {
             target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
           }
           {
+            name = "collections";
+            packageId = "collections";
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+          }
+          {
             name = "core-foundation";
             packageId = "core-foundation 0.10.0";
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+          }
+          {
+            name = "core-foundation-sys";
+            packageId = "core-foundation-sys";
             target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
           }
           {
@@ -29609,11 +29502,10 @@ rec {
             target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
           }
           {
-            name = "core-video";
-            packageId = "core-video";
-            usesDefaultFeatures = false;
+            name = "core-text";
+            packageId = "core-text";
+            optional = true;
             target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
-            features = [ "link" "metal" ];
           }
           {
             name = "derive_more";
@@ -29636,6 +29528,11 @@ rec {
           {
             name = "foreign-types";
             packageId = "foreign-types 0.5.0";
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+          }
+          {
+            name = "futures";
+            packageId = "futures";
             target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
           }
           {
@@ -29683,11 +29580,40 @@ rec {
             target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
           }
           {
+            name = "objc2-core-foundation";
+            packageId = "objc2-core-foundation";
+            usesDefaultFeatures = false;
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+            features = [ "std" "CFData" "CFDictionary" "CFString" "CFNumber" "CFBase" ];
+          }
+          {
+            name = "objc2-core-text";
+            packageId = "objc2-core-text";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+            features = [ "std" "CTFont" "CTFontDescriptor" ];
+          }
+          {
+            name = "objc2-core-video";
+            packageId = "objc2-core-video";
+            usesDefaultFeatures = false;
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+            features = [ "CVBuffer" "CVImageBuffer" "CVPixelBuffer" "CVMetalTexture" "CVMetalTextureCache" "CVReturn" "objc2" "objc2-metal" ];
+          }
+          {
             name = "objc2-foundation";
             packageId = "objc2-foundation 0.3.2";
             usesDefaultFeatures = false;
             target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
-            features = [ "NSArray" "NSAttributedString" "NSCoder" "NSData" "NSDate" "NSDictionary" "NSEnumerator" "NSError" "NSGeometry" "NSNull" "NSObjCRuntime" "NSObject" "NSProcessInfo" "NSRange" "NSRunLoop" "NSSet" "NSString" "NSURL" "NSValue" "objc2-core-foundation" "std" "NSThread" ];
+            features = [ "NSArray" "NSAttributedString" "NSCoder" "NSData" "NSDate" "NSDictionary" "NSEnumerator" "NSError" "NSGeometry" "NSNull" "NSObjCRuntime" "NSObject" "NSProcessInfo" "NSRange" "NSRunLoop" "NSSet" "NSString" "NSURL" "NSValue" "objc2-core-foundation" "std" "NSThread" "NSNotification" "NSOperation" "NSProcessInfo" "block2" ];
+          }
+          {
+            name = "objc2-metal";
+            packageId = "objc2-metal 0.3.2";
+            usesDefaultFeatures = false;
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+            features = [ "MTLDevice" "MTLPixelFormat" "MTLTexture" ];
           }
           {
             name = "objc2-quartz-core";
@@ -29697,9 +29623,42 @@ rec {
             features = [ "std" "CALayer" "CAMetalLayer" ];
           }
           {
+            name = "objc2-security";
+            packageId = "objc2-security";
+            usesDefaultFeatures = false;
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+            features = [ "std" "SecBase" "SecItem" ];
+          }
+          {
             name = "parking_lot";
             packageId = "parking_lot";
             target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+          }
+          {
+            name = "pathfinder_geometry";
+            packageId = "pathfinder_geometry";
+            optional = true;
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+          }
+          {
+            name = "smallvec";
+            packageId = "smallvec";
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+            features = [ "union" "const_new" ];
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.17";
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+          }
+          {
+            name = "zed-font-kit";
+            packageId = "zed-font-kit";
+            rename = "font-kit";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+            features = [ "source" ];
           }
         ];
         buildDependencies = [
@@ -29718,12 +29677,132 @@ rec {
             target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
             features = [ "test-support" ];
           }
+          {
+            name = "objc2-core-video";
+            packageId = "objc2-core-video";
+            usesDefaultFeatures = false;
+            target = { target, features }: (("macos" == target."os" or null) || ("ios" == target."os" or null));
+            features = [ "CVBuffer" "CVImageBuffer" "CVBase" ];
+          }
         ];
         features = {
           "bench-support" = [ "gpui/bench-support" ];
+          "font-kit" = [ "dep:font-kit" "dep:core-text" "dep:objc2-core-text" "dep:pathfinder_geometry" ];
           "test-support" = [ "gpui/test-support" ];
         };
-        resolvedDefaultFeatures = [ "bench-support" "default" "test-support" ];
+        resolvedDefaultFeatures = [ "bench-support" "default" "font-kit" "test-support" ];
+      };
+      "gpui_ios" = rec {
+        crateName = "gpui_ios";
+        version = "0.1.0";
+        edition = "2024";
+        src = crateSource sourceFilter "crates/gpui_ios";
+        libPath = "src/gpui_ios.rs";type = [ "staticlib" "rlib" ];
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+            target = { target, features }: ("ios" == target."os" or null);
+          }
+          {
+            name = "block2";
+            packageId = "block2 0.6.2";
+            target = { target, features }: ("ios" == target."os" or null);
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+            target = { target, features }: ("ios" == target."os" or null);
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "gpui_apple";
+            packageId = "gpui_apple";
+            target = { target, features }: ("ios" == target."os" or null);
+            features = [ "font-kit" ];
+          }
+          {
+            name = "log";
+            packageId = "log";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("ios" == target."os" or null);
+            features = [ "std" ];
+          }
+          {
+            name = "objc2";
+            packageId = "objc2 0.6.3";
+            target = { target, features }: ("ios" == target."os" or null);
+          }
+          {
+            name = "objc2-core-foundation";
+            packageId = "objc2-core-foundation";
+            target = { target, features }: ("ios" == target."os" or null);
+          }
+          {
+            name = "objc2-foundation";
+            packageId = "objc2-foundation 0.3.2";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("ios" == target."os" or null);
+            features = [ "NSArray" "NSAttributedString" "NSCoder" "NSData" "NSDate" "NSDictionary" "NSEnumerator" "NSError" "NSGeometry" "NSNull" "NSObjCRuntime" "NSObject" "NSProcessInfo" "NSRange" "NSRunLoop" "NSSet" "NSString" "NSURL" "NSValue" "objc2-core-foundation" "std" "NSThread" "NSOperation" "block2" ];
+          }
+          {
+            name = "objc2-quartz-core";
+            packageId = "objc2-quartz-core 0.3.2";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("ios" == target."os" or null);
+            features = [ "std" "CALayer" "CAMetalLayer" "CADisplayLink" ];
+          }
+          {
+            name = "objc2-ui-kit";
+            packageId = "objc2-ui-kit";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("ios" == target."os" or null);
+            features = [ "std" "block2" "objc2-quartz-core" "objc2-core-foundation" "NSText" "UIApplication" "UIEvent" "UIGeometry" "UIInterface" "UIOpenURLContext" "UIPasteboard" "UIResponder" "UIScene" "UISceneConfiguration" "UISceneDefinitions" "UISceneOptions" "UISceneSession" "UIScreen" "UITextInput" "UITextInputTraits" "UITouch" "UITraitCollection" "UIView" "UIViewController" "UIWindow" "UIWindowScene" ];
+          }
+          {
+            name = "parking_lot";
+            packageId = "parking_lot";
+            target = { target, features }: ("ios" == target."os" or null);
+          }
+          {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            target = { target, features }: ("ios" == target."os" or null);
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            target = { target, features }: ("ios" == target."os" or null);
+            features = [ "serde" "v5" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "gpui_platform";
+            packageId = "gpui_platform";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("ios" == target."os" or null);
+          }
+          {
+            name = "objc2-ui-kit";
+            packageId = "objc2-ui-kit";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("ios" == target."os" or null);
+            features = [ "std" "block2" "objc2-quartz-core" "objc2-core-foundation" "NSText" "UIApplication" "UIEvent" "UIGeometry" "UIInterface" "UIOpenURLContext" "UIPasteboard" "UIResponder" "UIScene" "UISceneConfiguration" "UISceneDefinitions" "UISceneOptions" "UISceneSession" "UIScreen" "UITextInput" "UITextInputTraits" "UITouch" "UITraitCollection" "UIView" "UIViewController" "UIWindow" "UIWindowScene" "UIConversationContext" ];
+          }
+          {
+            name = "slotmap";
+            packageId = "slotmap";
+            target = { target, features }: ("ios" == target."os" or null);
+          }
+        ];
+        features = {
+          "runtime_shaders" = [ "gpui_apple/runtime_shaders" ];
+        };
       };
       "gpui_linux" = rec {
         crateName = "gpui_linux";
@@ -30045,19 +30124,6 @@ rec {
             target = { target, features }: ("macos" == target."os" or null);
           }
           {
-            name = "core-text";
-            packageId = "core-text";
-            optional = true;
-            target = { target, features }: ("macos" == target."os" or null);
-          }
-          {
-            name = "core-video";
-            packageId = "core-video";
-            usesDefaultFeatures = false;
-            target = { target, features }: ("macos" == target."os" or null);
-            features = [ "link" ];
-          }
-          {
             name = "ctor";
             packageId = "ctor";
             target = { target, features }: ("macos" == target."os" or null);
@@ -30147,6 +30213,13 @@ rec {
             features = [ "CMSampleBuffer" "objc2-core-video" ];
           }
           {
+            name = "objc2-core-video";
+            packageId = "objc2-core-video";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("macos" == target."os" or null);
+            features = [ "CVBuffer" "CVImageBuffer" "CVHostTime" ];
+          }
+          {
             name = "objc2-foundation";
             packageId = "objc2-foundation 0.3.2";
             usesDefaultFeatures = false;
@@ -30171,12 +30244,6 @@ rec {
           {
             name = "parking_lot";
             packageId = "parking_lot";
-            target = { target, features }: ("macos" == target."os" or null);
-          }
-          {
-            name = "pathfinder_geometry";
-            packageId = "pathfinder_geometry";
-            optional = true;
             target = { target, features }: ("macos" == target."os" or null);
           }
           {
@@ -30213,15 +30280,6 @@ rec {
             target = { target, features }: ("macos" == target."os" or null);
             features = [ "serde" ];
           }
-          {
-            name = "zed-font-kit";
-            packageId = "zed-font-kit";
-            rename = "font-kit";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: ("macos" == target."os" or null);
-            features = [ "source" ];
-          }
         ];
         devDependencies = [
           {
@@ -30241,7 +30299,7 @@ rec {
         features = {
           "bench-support" = [ "gpui/bench-support" "gpui_apple/bench-support" ];
           "default" = [ "gpui/default" ];
-          "font-kit" = [ "dep:font-kit" "dep:core-text" "dep:pathfinder_geometry" ];
+          "font-kit" = [ "gpui_apple/font-kit" ];
           "runtime_shaders" = [ "gpui_apple/runtime_shaders" ];
           "screen-capture" = [ "gpui/screen-capture" "dep:objc2-core-graphics" "dep:objc2-core-media" "dep:objc2-screen-capture-kit" ];
           "test-support" = [ "gpui/test-support" "gpui_apple/test-support" ];
@@ -30315,6 +30373,11 @@ rec {
             features = [ "windows-manifest" ];
           }
           {
+            name = "gpui_ios";
+            packageId = "gpui_ios";
+            target = { target, features }: ("ios" == target."os" or null);
+          }
+          {
             name = "gpui_linux";
             packageId = "gpui_linux";
             usesDefaultFeatures = false;
@@ -30329,6 +30392,7 @@ rec {
           {
             name = "gpui_web";
             packageId = "gpui_web";
+            usesDefaultFeatures = false;
             target = { target, features }: (builtins.elem "wasm" target."family");
           }
           {
@@ -30357,16 +30421,18 @@ rec {
         ];
         features = {
           "bench-support" = [ "gpui/bench-support" "gpui_macos/bench-support" "gpui_wgpu/bench-support" ];
+          "default" = [ "multithreaded" ];
           "font-kit" = [ "gpui_macos/font-kit" ];
           "gpui_wgpu" = [ "dep:gpui_wgpu" ];
           "inspector" = [ "gpui/inspector" ];
-          "runtime_shaders" = [ "gpui_macos/runtime_shaders" ];
+          "multithreaded" = [ "gpui_web/multithreaded" ];
+          "runtime_shaders" = [ "gpui_macos/runtime_shaders" "gpui_ios/runtime_shaders" ];
           "screen-capture" = [ "gpui/screen-capture" "gpui_macos/screen-capture" "gpui_windows/screen-capture" "gpui_linux/screen-capture" ];
           "test-support" = [ "gpui/test-support" "gpui_macos/test-support" "gpui_windows/test-support" "gpui_wgpu/test-support" ];
           "wayland" = [ "gpui_linux/wayland" ];
           "x11" = [ "gpui_linux/x11" ];
         };
-        resolvedDefaultFeatures = [ "bench-support" "default" "font-kit" "gpui_wgpu" "screen-capture" "wayland" "x11" ];
+        resolvedDefaultFeatures = [ "bench-support" "default" "font-kit" "gpui_wgpu" "multithreaded" "screen-capture" "wayland" "x11" ];
       };
       "gpui_shared_string" = rec {
         crateName = "gpui_shared_string";
@@ -30457,6 +30523,12 @@ rec {
           {
             name = "anyhow";
             packageId = "anyhow";
+            target = { target, features }: (builtins.elem "wasm" target."family");
+          }
+          {
+            name = "async-channel";
+            packageId = "async-channel 2.5.0";
+            usesDefaultFeatures = false;
             target = { target, features }: (builtins.elem "wasm" target."family");
           }
           {
@@ -30683,7 +30755,7 @@ rec {
             packageId = "wgpu";
             usesDefaultFeatures = false;
             target = { target, features }: (("linux" == target."os" or null) || ("freebsd" == target."os" or null));
-            features = [ "std" "parking_lot" "metal" "gles" "vulkan" "wgsl" "webgpu" ];
+            features = [ "std" "metal" "gles" "vulkan" "wgsl" "webgpu" ];
           }
           {
             name = "wgpu";
@@ -31509,15 +31581,15 @@ rec {
             features = [ "profiler" ];
           }
           {
-            name = "hdrhistogram";
-            packageId = "hdrhistogram";
-            usesDefaultFeatures = false;
-          }
-          {
             name = "log";
             packageId = "log";
             usesDefaultFeatures = false;
             features = [ "std" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "rc" ];
           }
           {
             name = "serde_json";
@@ -32143,17 +32215,6 @@ rec {
         };
         resolvedDefaultFeatures = [ "alloc" "default" "std" ];
       };
-      "hexf-parse" = rec {
-        crateName = "hexf-parse";
-        version = "0.2.1";
-        edition = "2018";
-        sha256 = "1pr3a3sk66ddxdyxdxac7q6qaqjcn28v0njy22ghdpfn78l8d9nz";
-        libName = "hexf_parse";
-        authors = [
-          "Kang Seonghoon <public+rust@mearie.org>"
-        ];
-
-      };
       "hkdf" = rec {
         crateName = "hkdf";
         version = "0.12.4";
@@ -32303,7 +32364,7 @@ rec {
           }
           {
             name = "pastey";
-            packageId = "pastey";
+            packageId = "pastey 0.1.1";
           }
           {
             name = "phf";
@@ -34576,6 +34637,17 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "preserve_order" "raw_value" ];
+          }
+          {
+            name = "sysinfo";
+            packageId = "sysinfo 0.39.6";
+            usesDefaultFeatures = false;
+            features = [ "system" ];
+          }
+          {
             name = "telemetry";
             packageId = "telemetry";
           }
@@ -34896,40 +34968,6 @@ rec {
           "windows-sys" = [ "dep:windows-sys" ];
         };
         resolvedDefaultFeatures = [ "default" ];
-      };
-      "io-surface" = rec {
-        crateName = "io-surface";
-        version = "0.16.1";
-        edition = "2021";
-        sha256 = "13lbjvaayxs85biwpkcr53rhzq3kibaf8n7y42js62gccifqqjsm";
-        libName = "io_surface";
-        authors = [
-          "The Servo Project Developers"
-        ];
-        dependencies = [
-          {
-            name = "cgl";
-            packageId = "cgl";
-          }
-          {
-            name = "core-foundation";
-            packageId = "core-foundation 0.10.0";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "core-foundation-sys";
-            packageId = "core-foundation-sys";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "leaky-cow";
-            packageId = "leaky-cow";
-          }
-        ];
-        features = {
-          "default" = [ "link" ];
-          "link" = [ "core-foundation/link" "core-foundation-sys/link" ];
-        };
       };
       "ipc-channel" = rec {
         crateName = "ipc-channel";
@@ -35636,9 +35674,9 @@ rec {
       };
       "js-sys" = rec {
         crateName = "js-sys";
-        version = "0.3.97";
+        version = "0.3.106";
         edition = "2021";
-        sha256 = "1kyaxgn1sm5am98jb48aj5j7r7s98kdrab41la5wzys5q2a0r151";
+        sha256 = "1icwmpjw54lb7vg5926k5y4y5jbiih0zxhwgjwnzn475v90xk0vq";
         libName = "js_sys";
         authors = [
           "The wasm-bindgen Developers"
@@ -35653,12 +35691,6 @@ rec {
             packageId = "futures-util";
             optional = true;
             usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "once_cell";
-            packageId = "once_cell";
-            usesDefaultFeatures = false;
           }
           {
             name = "wasm-bindgen";
@@ -35669,7 +35701,7 @@ rec {
         features = {
           "default" = [ "std" "unsafe-eval" ];
           "futures-core-03-stream" = [ "dep:futures-util" "dep:futures-core" ];
-          "std" = [ "wasm-bindgen/std" "dep:futures-util" ];
+          "std" = [ "wasm-bindgen/std" "futures-util/std" ];
         };
         resolvedDefaultFeatures = [ "default" "std" "unsafe-eval" ];
       };
@@ -36334,7 +36366,12 @@ rec {
         crateName = "khronos-egl";
         version = "6.0.0";
         edition = "2021";
-        sha256 = "0xnzdx0n1bil06xmh8i1x6dbxvk7kd2m70bbm6nw1qzc43r1vbka";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/zed-industries/khronos-egl";
+          rev = "42214b36347b108fd9630ca6254b96dde59e04fe";
+          sha256 = "0xcj7xndr31qslsj2ppi8dmbs0yw922j0nl3widjzv28q48fvq2m";
+        };
         libName = "khronos_egl";
         authors = [
           "Timothée Haudebourg <author@haudebourg.net>"
@@ -37348,7 +37385,6 @@ rec {
           {
             name = "google_ai";
             packageId = "google_ai";
-            features = [ "schemars" ];
           }
           {
             name = "gpui";
@@ -37570,7 +37606,6 @@ rec {
           {
             name = "google_ai";
             packageId = "google_ai";
-            features = [ "schemars" ];
           }
           {
             name = "gpui";
@@ -38206,33 +38241,6 @@ rec {
           "spin_no_std" = [ "spin" ];
         };
         resolvedDefaultFeatures = [ "spin" "spin_no_std" ];
-      };
-      "leak" = rec {
-        crateName = "leak";
-        version = "0.1.2";
-        edition = "2015";
-        sha256 = "0wqcb8jlacif35j535gsqywx09dbmqcj5l57vw42jkqmy40hw45x";
-        authors = [
-          "Cody P Schafer <dev@codyps.com>"
-        ];
-
-      };
-      "leaky-cow" = rec {
-        crateName = "leaky-cow";
-        version = "0.1.1";
-        edition = "2015";
-        sha256 = "1z16b4gyfm7gydf4vpm7x6kwiiszcfx0ca5gm0jd67r48ifj5a20";
-        libName = "leaky_cow";
-        authors = [
-          "Michael Howell <michael@notriddle.com>"
-        ];
-        dependencies = [
-          {
-            name = "leak";
-            packageId = "leak";
-          }
-        ];
-
       };
       "leb128" = rec {
         crateName = "leb128";
@@ -39225,18 +39233,6 @@ rec {
             packageId = "collections";
           }
           {
-            name = "core-foundation";
-            packageId = "core-foundation 0.10.0";
-            target = { target, features }: ("macos" == target."os" or null);
-          }
-          {
-            name = "core-video";
-            packageId = "core-video";
-            usesDefaultFeatures = false;
-            target = { target, features }: ("macos" == target."os" or null);
-            features = [ "link" ];
-          }
-          {
             name = "coreaudio-rs";
             packageId = "coreaudio-rs 0.12.1";
             usesDefaultFeatures = false;
@@ -39313,6 +39309,14 @@ rec {
             packageId = "objc2-core-foundation";
             usesDefaultFeatures = false;
             target = { target, features }: ("macos" == target."os" or null);
+            features = [ "CFDictionary" "CFNumber" ];
+          }
+          {
+            name = "objc2-core-video";
+            packageId = "objc2-core-video";
+            usesDefaultFeatures = false;
+            target = { target, features }: ("macos" == target."os" or null);
+            features = [ "CVBuffer" "CVImageBuffer" "CVBase" "CVPixelBuffer" "CVPixelBufferIOSurface" "CVPixelBufferPool" "CVReturn" ];
           }
           {
             name = "parking_lot";
@@ -40568,6 +40572,43 @@ rec {
         features = {
         };
         resolvedDefaultFeatures = [ "default" ];
+      };
+      "macro_rules_attribute" = rec {
+        crateName = "macro_rules_attribute";
+        version = "0.2.3";
+        edition = "2018";
+        sha256 = "0g7dilhaav938fxgfi4fwp4bvpx2616k023680w5fyccc1nqzbmk";
+        authors = [
+          "Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "macro_rules_attribute-proc_macro";
+            packageId = "macro_rules_attribute-proc_macro";
+          }
+          {
+            name = "pastey";
+            packageId = "pastey 0.2.3";
+          }
+        ];
+        features = {
+          "verbose-expansions" = [ "macro_rules_attribute-proc_macro/verbose-expansions" ];
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "macro_rules_attribute-proc_macro" = rec {
+        crateName = "macro_rules_attribute-proc_macro";
+        version = "0.2.3";
+        edition = "2018";
+        sha256 = "0g5dfcskgss2w089qkh57952d1blm0zpvx2bl8q7km8jhb2s817w";
+        procMacro = true;
+        libName = "macro_rules_attribute_proc_macro";
+        libPath = "mod.rs";
+        authors = [
+          "Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>"
+        ];
+        features = {
+        };
       };
       "malloc_buf" = rec {
         crateName = "malloc_buf";
@@ -42616,12 +42657,14 @@ rec {
       };
       "naga" = rec {
         crateName = "naga";
-        version = "29.0.4";
+        version = "30.0.0";
         edition = "2021";
-        sha256 = "1py81ph72a97ws2nwi70r12hsglrzgibm0fq4z5mm5z746b93gxj";
-        authors = [
-          "gfx-rs developers"
-        ];
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/gfx-rs/wgpu";
+          rev = "3b3506ea31154edc04de64debda0e780cba2639c";
+          sha256 = "1kmh8ii70cz070dwp0c32gnxry84z444ackms1v878hd09qvmdb4";
+        };
         dependencies = [
           {
             name = "arrayvec";
@@ -42630,7 +42673,7 @@ rec {
           }
           {
             name = "bit-set";
-            packageId = "bit-set 0.9.1";
+            packageId = "bit-set 0.11.1";
             usesDefaultFeatures = false;
           }
           {
@@ -42654,14 +42697,9 @@ rec {
           }
           {
             name = "hashbrown";
-            packageId = "hashbrown 0.16.1";
+            packageId = "hashbrown 0.17.1";
             usesDefaultFeatures = false;
             features = [ "default-hasher" "inline-more" ];
-          }
-          {
-            name = "hexf-parse";
-            packageId = "hexf-parse";
-            optional = true;
           }
           {
             name = "indexmap";
@@ -42676,6 +42714,10 @@ rec {
           {
             name = "log";
             packageId = "log";
+          }
+          {
+            name = "naga-types";
+            packageId = "naga-types";
           }
           {
             name = "num-traits";
@@ -42718,7 +42760,7 @@ rec {
         devDependencies = [
           {
             name = "hashbrown";
-            packageId = "hashbrown 0.16.1";
+            packageId = "hashbrown 0.17.1";
             usesDefaultFeatures = false;
             features = [ "default-hasher" "inline-more" "serde" ];
           }
@@ -42728,17 +42770,58 @@ rec {
           }
         ];
         features = {
-          "arbitrary" = [ "dep:arbitrary" "bitflags/arbitrary" "indexmap/arbitrary" "half/arbitrary" "half/std" ];
-          "deserialize" = [ "dep:serde" "bitflags/serde" "half/serde" "hashbrown/serde" "indexmap/serde" ];
+          "arbitrary" = [ "dep:arbitrary" "bitflags/arbitrary" "half/arbitrary" "half/std" "naga-types/arbitrary" ];
+          "deserialize" = [ "dep:serde" "bitflags/serde" "half/serde" "hashbrown/serde" "naga-types/deserialize" ];
           "glsl-in" = [ "dep:pp-rs" ];
-          "serialize" = [ "dep:serde" "bitflags/serde" "half/serde" "hashbrown/serde" "indexmap/serde" ];
+          "serialize" = [ "dep:serde" "bitflags/serde" "half/serde" "hashbrown/serde" "naga-types/serialize" ];
           "spv-in" = [ "dep:petgraph" "petgraph/graphmap" "dep:spirv" ];
           "spv-out" = [ "dep:spirv" ];
           "stderr" = [ "codespan-reporting/std" ];
           "termcolor" = [ "codespan-reporting/termcolor" ];
-          "wgsl-in" = [ "dep:hexf-parse" "dep:unicode-ident" ];
+          "wgsl-in" = [ "dep:unicode-ident" ];
         };
         resolvedDefaultFeatures = [ "default" "glsl-out" "hlsl-out" "msl-out" "spv-out" "termcolor" "wgsl-in" "wgsl-out" ];
+      };
+      "naga-types" = rec {
+        crateName = "naga-types";
+        version = "30.0.0";
+        edition = "2021";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/gfx-rs/wgpu";
+          rev = "3b3506ea31154edc04de64debda0e780cba2639c";
+          sha256 = "1kmh8ii70cz070dwp0c32gnxry84z444ackms1v878hd09qvmdb4";
+        };
+        libName = "naga_types";
+        dependencies = [
+          {
+            name = "hashbrown";
+            packageId = "hashbrown 0.17.1";
+            usesDefaultFeatures = false;
+            features = [ "default-hasher" "inline-more" ];
+          }
+          {
+            name = "indexmap";
+            packageId = "indexmap 2.14.0";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "rustc-hash";
+            packageId = "rustc-hash 1.1.0";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.17";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "arbitrary" = [ "dep:arbitrary" "std" "indexmap/arbitrary" ];
+          "deserialize" = [ "dep:serde" "indexmap/serde" ];
+          "serialize" = [ "dep:serde" "indexmap/serde" ];
+        };
+        resolvedDefaultFeatures = [ "std" ];
       };
       "nanoid" = rec {
         crateName = "nanoid";
@@ -45540,7 +45623,7 @@ rec {
           "objc2-metal" = [ "dep:objc2-metal" ];
           "std" = [ "alloc" ];
         };
-        resolvedDefaultFeatures = [ "CGColor" "CGColorSpace" "CGDirectDisplay" "CGImage" "CGWindow" "bitflags" "objc2" ];
+        resolvedDefaultFeatures = [ "CGColor" "CGColorSpace" "CGContext" "CGDirectDisplay" "CGImage" "CGPath" "CGWindow" "alloc" "bitflags" "objc2" "std" ];
       };
       "objc2-core-image" = rec {
         crateName = "objc2-core-image";
@@ -45737,6 +45820,51 @@ rec {
         };
         resolvedDefaultFeatures = [ "FSEvents" "alloc" "libc" "std" ];
       };
+      "objc2-core-text" = rec {
+        crateName = "objc2-core-text";
+        version = "0.3.2";
+        edition = "2021";
+        sha256 = "0bfrzqxhgh4y1imk1bb9g0v28g0frigls6hnc942npfj93xhvphc";
+        libName = "objc2_core_text";
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.1";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "objc2-core-foundation";
+            packageId = "objc2-core-foundation";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "CTFont" = [ "bitflags" "objc2-core-foundation/CFArray" "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFCharacterSet" "objc2-core-foundation/CFData" "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFString" ];
+          "CTFontCollection" = [ "bitflags" "objc2-core-foundation/CFArray" "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFSet" ];
+          "CTFontDescriptor" = [ "objc2-core-foundation/CFArray" "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFNumber" "objc2-core-foundation/CFSet" ];
+          "CTFontManager" = [ "objc2-core-foundation/CFArray" "objc2-core-foundation/CFBundle" "objc2-core-foundation/CFData" "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFError" "objc2-core-foundation/CFRunLoop" "objc2-core-foundation/CFURL" ];
+          "CTFontTraits" = [ "bitflags" ];
+          "CTFrame" = [ "objc2-core-foundation/CFArray" "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFDictionary" ];
+          "CTFramesetter" = [ "objc2-core-foundation/CFAttributedString" "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFDictionary" ];
+          "CTLine" = [ "bitflags" "objc2-core-foundation/CFArray" "objc2-core-foundation/CFAttributedString" "objc2-core-foundation/CFCGTypes" ];
+          "CTRubyAnnotation" = [ "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFDictionary" ];
+          "CTRun" = [ "bitflags" "objc2-core-foundation/CFCGTypes" "objc2-core-foundation/CFDictionary" ];
+          "CTRunDelegate" = [ "objc2-core-foundation/CFCGTypes" ];
+          "CTStringAttributes" = [ "bitflags" ];
+          "CTTextTab" = [ "objc2-core-foundation/CFDictionary" ];
+          "CTTypesetter" = [ "objc2-core-foundation/CFAttributedString" "objc2-core-foundation/CFDictionary" ];
+          "bitflags" = [ "dep:bitflags" ];
+          "block2" = [ "dep:block2" ];
+          "default" = [ "std" "CTDefines" "CTFont" "CTFontCollection" "CTFontDescriptor" "CTFontManager" "CTFontManagerErrors" "CTFontTraits" "CTFrame" "CTFramesetter" "CTGlyphInfo" "CTLine" "CTParagraphStyle" "CTRubyAnnotation" "CTRun" "CTRunDelegate" "CTStringAttributes" "CTTextTab" "CTTypesetter" "SFNTLayoutTypes" "SFNTTypes" "bitflags" "block2" "libc" "objc2" "objc2-core-graphics" ];
+          "libc" = [ "dep:libc" ];
+          "objc2" = [ "dep:objc2" "objc2-core-foundation/objc2" "objc2-core-graphics?/objc2" ];
+          "objc2-core-graphics" = [ "dep:objc2-core-graphics" ];
+          "std" = [ "alloc" ];
+        };
+        resolvedDefaultFeatures = [ "CTFont" "CTFontDescriptor" "alloc" "bitflags" "std" ];
+      };
       "objc2-core-video" = rec {
         crateName = "objc2-core-video";
         version = "0.3.2";
@@ -45778,6 +45906,14 @@ rec {
             target = { target, features }: (!("watchos" == target."os" or null));
             features = [ "IOSurfaceRef" ];
           }
+          {
+            name = "objc2-metal";
+            packageId = "objc2-metal 0.3.2";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("watchos" == target."os" or null));
+            features = [ "MTLAllocation" "MTLBuffer" "MTLDevice" "MTLPixelFormat" "MTLResource" "MTLTexture" ];
+          }
         ];
         features = {
           "CVBase" = [ "bitflags" ];
@@ -45802,7 +45938,7 @@ rec {
           "objc2-open-gl" = [ "dep:objc2-open-gl" ];
           "std" = [ "alloc" ];
         };
-        resolvedDefaultFeatures = [ "CVBuffer" "CVImageBuffer" "CVPixelBuffer" "bitflags" "objc2" ];
+        resolvedDefaultFeatures = [ "CVBase" "CVBuffer" "CVHostTime" "CVImageBuffer" "CVMetalTexture" "CVMetalTextureCache" "CVPixelBuffer" "CVPixelBufferIOSurface" "CVPixelBufferPool" "CVReturn" "bitflags" "objc2" "objc2-metal" ];
       };
       "objc2-encode" = rec {
         crateName = "objc2-encode";
@@ -46397,6 +46533,13 @@ rec {
             features = [ "CFCGTypes" "CFDate" "objc2" ];
           }
           {
+            name = "objc2-core-graphics";
+            packageId = "objc2-core-graphics";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "CGColor" "CGColorSpace" "CGContext" "CGPath" "objc2" ];
+          }
+          {
             name = "objc2-foundation";
             packageId = "objc2-foundation 0.3.2";
             usesDefaultFeatures = false;
@@ -46445,7 +46588,7 @@ rec {
           "objc2-open-gl" = [ "dep:objc2-open-gl" ];
           "std" = [ "alloc" ];
         };
-        resolvedDefaultFeatures = [ "CALayer" "CAMetalLayer" "alloc" "bitflags" "objc2-core-foundation" "objc2-metal" "std" ];
+        resolvedDefaultFeatures = [ "CADisplayLink" "CAFrameRateRange" "CALayer" "CAMediaTiming" "CAMetalLayer" "CATransform3D" "alloc" "bitflags" "objc2-core-foundation" "objc2-core-graphics" "objc2-metal" "std" ];
       };
       "objc2-screen-capture-kit" = rec {
         crateName = "objc2-screen-capture-kit";
@@ -46515,6 +46658,494 @@ rec {
           "std" = [ "alloc" ];
         };
         resolvedDefaultFeatures = [ "SCShareableContent" "SCStream" "alloc" "block2" "dispatch2" "objc2-core-graphics" "objc2-core-media" "std" ];
+      };
+      "objc2-security" = rec {
+        crateName = "objc2-security";
+        version = "0.3.2";
+        edition = "2021";
+        sha256 = "0nl9dnnjj0z6yaw5s70szkd62acbgmxgg44km6syilcv20vy37vh";
+        libName = "objc2_security";
+        dependencies = [
+          {
+            name = "objc2-core-foundation";
+            packageId = "objc2-core-foundation";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "AuthSession" = [ "bitflags" ];
+          "Authorization" = [ "bitflags" ];
+          "AuthorizationDB" = [ "objc2-core-foundation/CFBundle" "objc2-core-foundation/CFDictionary" ];
+          "AuthorizationPlugin" = [ "bitflags" "objc2-core-foundation/CFArray" ];
+          "CMSDecoder" = [ "objc2-core-foundation/CFArray" "objc2-core-foundation/CFData" "objc2-core-foundation/CFDate" ];
+          "CMSEncoder" = [ "bitflags" "objc2-core-foundation/CFArray" "objc2-core-foundation/CFData" "objc2-core-foundation/CFDate" ];
+          "CSCommon" = [ "bitflags" ];
+          "SecACL" = [ "bitflags" "objc2-core-foundation/CFArray" ];
+          "SecAccess" = [ "objc2-core-foundation/CFArray" "objc2-core-foundation/CFError" ];
+          "SecAccessControl" = [ "bitflags" "objc2-core-foundation/CFError" ];
+          "SecCertificate" = [ "bitflags" "objc2-core-foundation/CFArray" "objc2-core-foundation/CFData" "objc2-core-foundation/CFDate" "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFError" ];
+          "SecCode" = [ "objc2-core-foundation/CFData" "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFError" "objc2-core-foundation/CFURL" ];
+          "SecCodeHost" = [ "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFURL" ];
+          "SecCustomTransform" = [ "objc2-core-foundation/CFError" ];
+          "SecDecodeTransform" = [ "objc2-core-foundation/CFError" ];
+          "SecDigestTransform" = [ "objc2-core-foundation/CFError" ];
+          "SecEncodeTransform" = [ "objc2-core-foundation/CFError" ];
+          "SecEncryptTransform" = [ "objc2-core-foundation/CFError" ];
+          "SecIdentity" = [ "objc2-core-foundation/CFArray" ];
+          "SecImportExport" = [ "bitflags" "objc2-core-foundation/CFArray" "objc2-core-foundation/CFData" "objc2-core-foundation/CFDictionary" ];
+          "SecItem" = [ "objc2-core-foundation/CFDictionary" ];
+          "SecKey" = [ "bitflags" "objc2-core-foundation/CFData" "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFError" ];
+          "SecKeychain" = [ "bitflags" "objc2-core-foundation/CFArray" ];
+          "SecKeychainItem" = [ "objc2-core-foundation/CFData" ];
+          "SecPolicy" = [ "objc2-core-foundation/CFDictionary" ];
+          "SecProtocolTypes" = [ "objc2-core-foundation/CFArray" ];
+          "SecRequirement" = [ "objc2-core-foundation/CFData" "objc2-core-foundation/CFError" ];
+          "SecSharedCredential" = [ "objc2-core-foundation/CFArray" "objc2-core-foundation/CFError" ];
+          "SecSignVerifyTransform" = [ "objc2-core-foundation/CFData" "objc2-core-foundation/CFError" ];
+          "SecStaticCode" = [ "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFError" "objc2-core-foundation/CFURL" ];
+          "SecTask" = [ "objc2-core-foundation/CFArray" "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFError" ];
+          "SecTransform" = [ "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFError" ];
+          "SecTransformReadTransform" = [ "objc2-core-foundation/CFStream" ];
+          "SecTrust" = [ "bitflags" "objc2-core-foundation/CFArray" "objc2-core-foundation/CFData" "objc2-core-foundation/CFDate" "objc2-core-foundation/CFDictionary" "objc2-core-foundation/CFError" ];
+          "SecTrustSettings" = [ "bitflags" "objc2-core-foundation/CFArray" "objc2-core-foundation/CFData" "objc2-core-foundation/CFDate" ];
+          "SecTrustedApplication" = [ "objc2-core-foundation/CFData" ];
+          "SecureDownload" = [ "objc2-core-foundation/CFArray" "objc2-core-foundation/CFData" "objc2-core-foundation/CFDate" "objc2-core-foundation/CFURL" ];
+          "SecureTransport" = [ "objc2-core-foundation/CFArray" "objc2-core-foundation/CFData" ];
+          "bitflags" = [ "dep:bitflags" ];
+          "block2" = [ "dep:block2" ];
+          "default" = [ "std" "AuthSession" "Authorization" "AuthorizationDB" "AuthorizationPlugin" "AuthorizationTags" "CMSDecoder" "CMSEncoder" "CSCommon" "CipherSuite" "CodeSigning" "SecACL" "SecAccess" "SecAccessControl" "SecAsn1Coder" "SecAsn1Templates" "SecAsn1Types" "SecBase" "SecCertificate" "SecCertificateOIDs" "SecCode" "SecCodeHost" "SecCustomTransform" "SecDecodeTransform" "SecDigestTransform" "SecEncodeTransform" "SecEncryptTransform" "SecIdentity" "SecIdentitySearch" "SecImportExport" "SecItem" "SecKey" "SecKeychain" "SecKeychainItem" "SecKeychainSearch" "SecPolicy" "SecPolicySearch" "SecProtocolMetadata" "SecProtocolObject" "SecProtocolOptions" "SecProtocolTypes" "SecRandom" "SecReadTransform" "SecRequirement" "SecSharedCredential" "SecSignVerifyTransform" "SecStaticCode" "SecTask" "SecTransform" "SecTransformReadTransform" "SecTrust" "SecTrustSettings" "SecTrustedApplication" "SecureDownload" "SecureTransport" "bitflags" "block2" "certextensions" "cssm" "cssmaci" "cssmapi" "cssmapple" "cssmcli" "cssmconfig" "cssmcspi" "cssmdli" "cssmerr" "cssmkrapi" "cssmkrspi" "cssmspi" "cssmtpi" "cssmtype" "eisl" "emmspi" "emmtype" "libc" "mds" "mds_schema" "objc2" "oids" "oidsalg" "oidsattr" "oidsbase" "oidscert" "oidscrl" "x509defs" ];
+          "libc" = [ "dep:libc" ];
+          "objc2" = [ "dep:objc2" "objc2-core-foundation/objc2" ];
+          "std" = [ "alloc" ];
+        };
+        resolvedDefaultFeatures = [ "SecBase" "SecItem" "alloc" "std" ];
+      };
+      "objc2-ui-kit" = rec {
+        crateName = "objc2-ui-kit";
+        version = "0.3.2";
+        edition = "2021";
+        sha256 = "08mbgqg8pffclyxpz2lr8r1fv8wn2i4m1k6bk1s5fvy06f766zfq";
+        libName = "objc2_ui_kit";
+        dependencies = [
+          {
+            name = "bitflags";
+            packageId = "bitflags 2.13.1";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "block2";
+            packageId = "block2 0.6.2";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "alloc" ];
+          }
+          {
+            name = "objc2";
+            packageId = "objc2 0.6.3";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "objc2-core-foundation";
+            packageId = "objc2-core-foundation";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "CFCGTypes" "CFDate" "objc2" ];
+          }
+          {
+            name = "objc2-foundation";
+            packageId = "objc2-foundation 0.3.2";
+            usesDefaultFeatures = false;
+            features = [ "alloc" ];
+          }
+          {
+            name = "objc2-quartz-core";
+            packageId = "objc2-quartz-core 0.3.2";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("watchos" == target."os" or null));
+            features = [ "CADisplayLink" "CAFrameRateRange" "CALayer" "CAMediaTiming" "CATransform3D" "objc2-core-foundation" ];
+          }
+        ];
+        features = {
+          "NSAdaptiveImageGlyph" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSAttributedString" = [ "bitflags" "objc2-foundation/NSAttributedString" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSFileWrapper" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "NSDataAsset" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSData" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSDiffableDataSourceSectionSnapshot" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSIndexPath_UIKitAdditions" = [ "objc2-foundation/NSIndexPath" ];
+          "NSItemProvider_UIKitAdditions" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSItemProvider" "objc2-foundation/NSString" ];
+          "NSLayoutAnchor" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSLayoutConstraint" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSString" ];
+          "NSLayoutManager" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "NSParagraphStyle" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCharacterSet" "objc2-foundation/NSDictionary" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSShadow" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "NSStringDrawing" = [ "bitflags" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSString" ];
+          "NSTextAttachment" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSFileWrapper" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSTextContainer" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "NSTextContentManager" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSError" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "NSTextElement" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" ];
+          "NSTextLayoutFragment" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSOperation" ];
+          "NSTextLayoutManager" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
+          "NSTextLineFragment" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "NSTextList" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSTextListElement" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSString" ];
+          "NSTextRange" = [ "objc2-foundation/NSObjCRuntime" ];
+          "NSTextSelection" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "NSTextSelectionNavigation" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
+          "NSTextStorage" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "UIAccelerometer" = [ "objc2-foundation/NSDate" ];
+          "UIAccessibility" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSNotification" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UIAccessibilityAdditions" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSString" ];
+          "UIAccessibilityConstants" = [ "bitflags" "objc2-foundation/NSAttributedString" "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
+          "UIAccessibilityContainer" = [ "objc2-foundation/NSArray" "objc2-foundation/NSRange" ];
+          "UIAccessibilityCustomAction" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSString" ];
+          "UIAccessibilityCustomRotor" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSString" ];
+          "UIAccessibilityElement" = [ "objc2-foundation/NSString" ];
+          "UIAccessibilityIdentification" = [ "objc2-foundation/NSString" ];
+          "UIAccessibilityLocationDescriptor" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSString" ];
+          "UIAction" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIActionSheet" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIActivity" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
+          "UIActivityCollaborationModeRestriction" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIActivityIndicatorView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIActivityItemProvider" = [ "objc2-foundation/NSOperation" "objc2-foundation/NSString" ];
+          "UIActivityItemsConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSItemProvider" "objc2-foundation/NSString" ];
+          "UIActivityItemsConfigurationReading" = [ "objc2-foundation/NSArray" "objc2-foundation/NSItemProvider" "objc2-foundation/NSString" ];
+          "UIActivityItemsConfigurationReading_ShareSheet" = [ "objc2-foundation/NSString" ];
+          "UIActivityViewController" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIAlertController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIAlertView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIAppearance" = [ "objc2-foundation/NSArray" ];
+          "UIApplication" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSUserActivity" ];
+          "UIApplicationShortcutItem" = [ "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIAttachmentBehavior" = [ "objc2-foundation/NSArray" ];
+          "UIBackgroundConfiguration" = [ "objc2-foundation/NSObject" ];
+          "UIBackgroundExtensionView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIBarAppearance" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIBarButtonItem" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UIBarButtonItemAppearance" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIBarButtonItemBadge" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIBarButtonItemGroup" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIBarItem" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIBezierPath" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIBlurEffect" = [ "objc2-foundation/NSObject" ];
+          "UIButton" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIButtonConfiguration" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UICalendarSelectionMultiDate" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCalendar" ];
+          "UICalendarSelectionSingleDate" = [ "objc2-foundation/NSCalendar" ];
+          "UICalendarSelectionWeekOfYear" = [ "objc2-foundation/NSCalendar" ];
+          "UICalendarView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCalendar" "objc2-foundation/NSCoder" "objc2-foundation/NSDateInterval" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSTimeZone" ];
+          "UICellAccessory" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UICellConfigurationState" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UICloudSharingController" = [ "bitflags" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UICollectionLayoutList" = [ "bitflags" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" ];
+          "UICollectionView" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSIndexPath" "objc2-foundation/NSIndexSet" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" "objc2-foundation/NSString" ];
+          "UICollectionViewCell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UICollectionViewCompositionalLayout" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UICollectionViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UICollectionViewFlowLayout" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" ];
+          "UICollectionViewItemRegistration" = [ "objc2-foundation/NSIndexPath" "objc2-foundation/NSString" ];
+          "UICollectionViewLayout" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UICollectionViewListCell" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UICollectionViewTransitionLayout" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UICollectionViewUpdateItem" = [ "objc2-foundation/NSIndexPath" ];
+          "UICollisionBehavior" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
+          "UIColor" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSItemProvider" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIColorPickerViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIColorWell" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UICommand" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIConfigurationState" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIContentConfiguration" = [ "objc2-foundation/NSObject" ];
+          "UIContentSizeCategory" = [ "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSString" ];
+          "UIContentUnavailableButtonProperties" = [ "objc2-foundation/NSObject" ];
+          "UIContentUnavailableConfiguration" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIContentUnavailableConfigurationState" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIContentUnavailableImageProperties" = [ "objc2-foundation/NSObject" ];
+          "UIContentUnavailableTextProperties" = [ "objc2-foundation/NSObject" ];
+          "UIContentUnavailableView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIContextMenuConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSSet" ];
+          "UIContextMenuInteraction" = [ "objc2-foundation/NSObject" ];
+          "UIContextualAction" = [ "objc2-foundation/NSString" ];
+          "UIControl" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UIConversationContext" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDictionary" "objc2-foundation/NSPersonNameComponents" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UIConversationEntry" = [ "objc2-foundation/NSDate" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UICornerConfiguration" = [ "objc2-foundation/NSObject" ];
+          "UICornerRadius" = [ "objc2-foundation/NSObject" ];
+          "UIDataDetectors" = [ "bitflags" ];
+          "UIDataSourceTranslating" = [ "objc2-foundation/NSIndexPath" ];
+          "UIDatePicker" = [ "objc2-foundation/NSCalendar" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSTimeZone" ];
+          "UIDeferredMenuElement" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIDevice" = [ "objc2-foundation/NSNotification" "objc2-foundation/NSString" "objc2-foundation/NSUUID" ];
+          "UIDiffableDataSource" = [ "objc2-foundation/NSArray" "objc2-foundation/NSIndexPath" "objc2-foundation/NSObject" "objc2-foundation/NSOrderedCollectionDifference" "objc2-foundation/NSString" ];
+          "UIDocument" = [ "bitflags" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSFilePresenter" "objc2-foundation/NSNotification" "objc2-foundation/NSProgress" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSUndoManager" "objc2-foundation/NSUserActivity" ];
+          "UIDocumentBrowserAction" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIDocumentBrowserViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIDocumentInteractionController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIDocumentMenuViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIDocumentPickerExtensionViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIDocumentPickerViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIDocumentProperties" = [ "objc2-foundation/NSArray" "objc2-foundation/NSURL" ];
+          "UIDocumentViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIDocumentViewControllerLaunchOptions" = [ "objc2-foundation/NSString" ];
+          "UIDragInteraction" = [ "objc2-foundation/NSArray" ];
+          "UIDragItem" = [ "objc2-foundation/NSItemProvider" ];
+          "UIDragPreview" = [ "objc2-foundation/NSObject" ];
+          "UIDragPreviewParameters" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSValue" ];
+          "UIDragSession" = [ "objc2-foundation/NSArray" "objc2-foundation/NSItemProvider" "objc2-foundation/NSProgress" "objc2-foundation/NSString" ];
+          "UIDropInteraction" = [ "objc2-foundation/NSObject" "objc2-foundation/NSProgress" ];
+          "UIDynamicAnimator" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDate" "objc2-foundation/NSIndexPath" "objc2-foundation/NSString" ];
+          "UIDynamicBehavior" = [ "objc2-foundation/NSArray" ];
+          "UIDynamicItemBehavior" = [ "objc2-foundation/NSArray" ];
+          "UIEditMenuInteraction" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
+          "UIEvent" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSDate" "objc2-foundation/NSSet" ];
+          "UIEventAttribution" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIEventAttributionView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIFieldBehavior" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDate" ];
+          "UIFindInteraction" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
+          "UIFindSession" = [ "objc2-foundation/NSString" ];
+          "UIFocus" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
+          "UIFocusAnimationCoordinator" = [ "objc2-foundation/NSDate" ];
+          "UIFocusEffect" = [ "objc2-foundation/NSObject" ];
+          "UIFocusGuide" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
+          "UIFocusMovementHint" = [ "objc2-foundation/NSObject" ];
+          "UIFocusSystem_UIKitAdditions" = [ "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIFont" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIFontDescriptor" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UIFontMetrics" = [ "objc2-foundation/NSString" ];
+          "UIFontPickerViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIFontPickerViewControllerConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSPredicate" "objc2-foundation/NSString" ];
+          "UIGeometry" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
+          "UIGestureRecognizer" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
+          "UIGestureRecognizerSubclass" = [ "objc2-foundation/NSSet" ];
+          "UIGlassEffect" = [ "objc2-foundation/NSObject" ];
+          "UIGraphics" = [ "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIGraphicsImageRenderer" = [ "objc2-foundation/NSData" "objc2-foundation/NSObject" ];
+          "UIGraphicsPDFRenderer" = [ "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIGraphicsRenderer" = [ "objc2-foundation/NSObject" ];
+          "UIGraphicsRendererSubclass" = [ "objc2-foundation/NSError" ];
+          "UIGravityBehavior" = [ "objc2-foundation/NSArray" ];
+          "UIGuidedAccess" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSString" ];
+          "UIHoverEffect" = [ "objc2-foundation/NSObject" ];
+          "UIHoverEffectLayer" = [ "objc2-foundation/NSObject" ];
+          "UIHoverGestureRecognizer" = [ "objc2-foundation/NSCoder" ];
+          "UIHoverStyle" = [ "objc2-foundation/NSObject" ];
+          "UIImage" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSData" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSItemProvider" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIImageAsset" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIImageConfiguration" = [ "objc2-foundation/NSLocale" "objc2-foundation/NSObject" ];
+          "UIImagePickerController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
+          "UIImageReader" = [ "objc2-foundation/NSData" "objc2-foundation/NSObject" "objc2-foundation/NSURL" ];
+          "UIImageSymbolConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSLocale" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIImageView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSObject" ];
+          "UIIndirectScribbleInteraction" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
+          "UIInputView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIInputViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSUUID" ];
+          "UIInteraction" = [ "objc2-foundation/NSArray" ];
+          "UIKey" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIKeyCommand" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIKeyboardLayoutGuide" = [ "objc2-foundation/NSObject" ];
+          "UILabel" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UILargeContentViewer" = [ "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
+          "UILayoutGuide" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UILexicon" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIListContentConfiguration" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIListContentImageProperties" = [ "objc2-foundation/NSObject" ];
+          "UIListContentTextProperties" = [ "objc2-foundation/NSObject" ];
+          "UIListSeparatorConfiguration" = [ "objc2-foundation/NSObject" ];
+          "UILocalNotification" = [ "objc2-foundation/NSCalendar" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSTimeZone" ];
+          "UILocalizedIndexedCollation" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
+          "UILongPressGestureRecognizer" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSDate" ];
+          "UIMailConversationContext" = [ "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UIMailConversationEntry" = [ "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UIMainMenuSystem" = [ "objc2-foundation/NSObject" ];
+          "UIManagedDocument" = [ "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSFilePresenter" "objc2-foundation/NSProgress" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIMenu" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIMenuBuilder" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
+          "UIMenuController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
+          "UIMenuDisplayPreferences" = [ "objc2-foundation/NSObject" ];
+          "UIMenuElement" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIMenuLeaf" = [ "objc2-foundation/NSString" ];
+          "UIMotionEffect" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UINavigationBar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UINavigationBarAppearance" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UINavigationController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UINavigationItem" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "UINib" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSData" "objc2-foundation/NSDictionary" "objc2-foundation/NSString" ];
+          "UINibLoading" = [ "objc2-foundation/NSString" ];
+          "UIOpenURLContext" = [ "objc2-foundation/NSURL" ];
+          "UIOrientation" = [ "bitflags" ];
+          "UIPageControl" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIPageControlProgress" = [ "objc2-foundation/NSDate" ];
+          "UIPageViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIPanGestureRecognizer" = [ "bitflags" "objc2-foundation/NSCoder" ];
+          "UIPasteConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSItemProvider" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIPasteConfigurationSupporting" = [ "objc2-foundation/NSArray" "objc2-foundation/NSItemProvider" ];
+          "UIPasteControl" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIPasteboard" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSDate" "objc2-foundation/NSDictionary" "objc2-foundation/NSError" "objc2-foundation/NSIndexSet" "objc2-foundation/NSItemProvider" "objc2-foundation/NSNotification" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIPencilInteraction" = [ "objc2-foundation/NSDate" ];
+          "UIPickerView" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIPinchGestureRecognizer" = [ "objc2-foundation/NSCoder" ];
+          "UIPointerAccessory" = [ "objc2-foundation/NSObject" ];
+          "UIPointerLockState" = [ "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
+          "UIPointerRegion" = [ "objc2-foundation/NSObject" ];
+          "UIPointerStyle" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
+          "UIPopoverBackgroundView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIPopoverController" = [ "objc2-foundation/NSArray" ];
+          "UIPopoverPresentationController" = [ "objc2-foundation/NSArray" ];
+          "UIPopoverSupport" = [ "bitflags" ];
+          "UIPress" = [ "objc2-foundation/NSArray" "objc2-foundation/NSDate" ];
+          "UIPressesEvent" = [ "objc2-foundation/NSSet" ];
+          "UIPreviewParameters" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSValue" ];
+          "UIPrintError" = [ "objc2-foundation/NSError" "objc2-foundation/NSString" ];
+          "UIPrintFormatter" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIPrintInfo" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIPrintInteractionController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIPrintPageRenderer" = [ "objc2-foundation/NSArray" "objc2-foundation/NSRange" ];
+          "UIPrintPaper" = [ "objc2-foundation/NSArray" ];
+          "UIPrintServiceExtension" = [ "objc2-foundation/NSArray" "objc2-foundation/NSData" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIPrinter" = [ "bitflags" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UIPrinterPickerController" = [ "objc2-foundation/NSError" ];
+          "UIProgressView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" ];
+          "UIPushBehavior" = [ "objc2-foundation/NSArray" ];
+          "UIReferenceLibraryViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIRefreshControl" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIRegion" = [ "objc2-foundation/NSObject" ];
+          "UIResponder" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSUndoManager" "objc2-foundation/NSUserActivity" ];
+          "UIRotationGestureRecognizer" = [ "objc2-foundation/NSCoder" ];
+          "UIScene" = [ "objc2-foundation/NSError" "objc2-foundation/NSNotification" "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSUserActivity" ];
+          "UISceneActivationConditions" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSPredicate" "objc2-foundation/NSString" "objc2-foundation/NSUserActivity" ];
+          "UISceneConfiguration" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UISceneDefinitions" = [ "objc2-foundation/NSError" "objc2-foundation/NSString" ];
+          "UISceneDestructionCondition" = [ "objc2-foundation/NSObject" ];
+          "UISceneOptions" = [ "objc2-foundation/NSSet" "objc2-foundation/NSString" "objc2-foundation/NSUserActivity" ];
+          "UISceneSession" = [ "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSUserActivity" "UISceneConfiguration" ];
+          "UISceneSessionActivationRequest" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSUserActivity" ];
+          "UISceneSystemProtectionManager" = [ "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
+          "UIScreen" = [ "objc2-foundation/NSArray" "objc2-foundation/NSNotification" "objc2-foundation/NSString" ];
+          "UIScreenEdgePanGestureRecognizer" = [ "objc2-foundation/NSCoder" ];
+          "UIScreenshotService" = [ "objc2-foundation/NSData" ];
+          "UIScrollView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSSet" ];
+          "UISearchBar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
+          "UISearchContainerViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UISearchController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UISearchDisplayController" = [ "objc2-foundation/NSString" ];
+          "UISearchSuggestion" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSString" ];
+          "UISearchTab" = [ "objc2-foundation/NSString" ];
+          "UISearchTextField" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSItemProvider" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UISegmentedControl" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIShadowProperties" = [ "objc2-foundation/NSObject" ];
+          "UIShape" = [ "objc2-foundation/NSObject" ];
+          "UISheetPresentationController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
+          "UISlider" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UISliderTrackConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UISmartReplySuggestion" = [ "objc2-foundation/NSString" ];
+          "UISplitViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIStackView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIStandardTextCursorView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIStateRestoration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSIndexPath" "objc2-foundation/NSString" ];
+          "UIStepper" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIStoryboard" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSString" ];
+          "UIStoryboardPopoverSegue" = [ "objc2-foundation/NSString" ];
+          "UIStoryboardSegue" = [ "objc2-foundation/NSString" ];
+          "UIStringDrawing" = [ "objc2-foundation/NSString" ];
+          "UISwipeActionsConfiguration" = [ "objc2-foundation/NSArray" ];
+          "UISwipeGestureRecognizer" = [ "bitflags" "objc2-foundation/NSCoder" ];
+          "UISwitch" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UISymbolContentTransition" = [ "objc2-foundation/NSObject" ];
+          "UITab" = [ "objc2-foundation/NSString" ];
+          "UITabBar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UITabBarAppearance" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITabBarController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" "objc2-foundation/NSString" ];
+          "UITabBarControllerSidebar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" ];
+          "UITabBarItem" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITabGroup" = [ "objc2-foundation/NSArray" "objc2-foundation/NSString" ];
+          "UITabSidebarItem" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
+          "UITableView" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSIndexPath" "objc2-foundation/NSIndexSet" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSProgress" "objc2-foundation/NSString" ];
+          "UITableViewCell" = [ "bitflags" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITableViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITableViewHeaderFooterView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITapGestureRecognizer" = [ "objc2-foundation/NSCoder" ];
+          "UITargetedDragPreview" = [ "objc2-foundation/NSObject" ];
+          "UITargetedPreview" = [ "objc2-foundation/NSObject" ];
+          "UITextChecker" = [ "objc2-foundation/NSArray" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "UITextDragPreviewRenderer" = [ "objc2-foundation/NSRange" ];
+          "UITextDragURLPreviews" = [ "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UITextDragging" = [ "bitflags" "objc2-foundation/NSArray" ];
+          "UITextDropProposal" = [ "objc2-foundation/NSObject" ];
+          "UITextDropping" = [ "objc2-foundation/NSProgress" ];
+          "UITextField" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
+          "UITextFormattingCoordinator" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSString" ];
+          "UITextFormattingViewController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITextFormattingViewControllerChangeValue" = [ "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSValue" ];
+          "UITextFormattingViewControllerComponent" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITextFormattingViewControllerConfiguration" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
+          "UITextFormattingViewControllerFormattingDescriptor" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UITextFormattingViewControllerFormattingStyle" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITextInput" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" ];
+          "UITextInputTraits" = [ "bitflags" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UITextInteraction" = [ "objc2-foundation/NSArray" ];
+          "UITextItem" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSURL" ];
+          "UITextPasteDelegate" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSDictionary" "objc2-foundation/NSItemProvider" "objc2-foundation/NSString" ];
+          "UITextSearching" = [ "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSOrderedSet" "objc2-foundation/NSString" ];
+          "UITextSelectionDisplayInteraction" = [ "objc2-foundation/NSArray" ];
+          "UITextSelectionHighlightView" = [ "objc2-foundation/NSArray" ];
+          "UITextView" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSValue" ];
+          "UITimingCurveProvider" = [ "objc2-foundation/NSObject" ];
+          "UITimingParameters" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSObject" ];
+          "UIToolTipInteraction" = [ "objc2-foundation/NSString" ];
+          "UIToolbar" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIToolbarAppearance" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UITouch" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSDate" "objc2-foundation/NSValue" ];
+          "UITrackingLayoutGuide" = [ "objc2-foundation/NSArray" "objc2-foundation/NSObject" ];
+          "UITrait" = [ "objc2-foundation/NSString" ];
+          "UITraitCollection" = [ "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIUpdateInfo" = [ "objc2-foundation/NSDate" ];
+          "UIUserActivity" = [ "objc2-foundation/NSUserActivity" ];
+          "UIUserNotificationSettings" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDictionary" "objc2-foundation/NSObject" "objc2-foundation/NSSet" "objc2-foundation/NSString" ];
+          "UIVibrancyEffect" = [ "objc2-foundation/NSObject" ];
+          "UIVideoEditorController" = [ "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIView" = [ "bitflags" "objc2-foundation/NSArray" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIViewAnimating" = [ "objc2-foundation/NSDate" "objc2-foundation/NSObject" ];
+          "UIViewConfigurationState" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIViewController" = [ "objc2-foundation/NSArray" "objc2-foundation/NSBundle" "objc2-foundation/NSCoder" "objc2-foundation/NSDate" "objc2-foundation/NSExtensionContext" "objc2-foundation/NSExtensionRequestHandling" "objc2-foundation/NSNotification" "objc2-foundation/NSObjCRuntime" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIViewControllerTransitionCoordinator" = [ "objc2-foundation/NSDate" "objc2-foundation/NSString" ];
+          "UIViewControllerTransitioning" = [ "objc2-foundation/NSDate" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIViewPropertyAnimator" = [ "objc2-foundation/NSDate" "objc2-foundation/NSObject" ];
+          "UIVisualEffect" = [ "objc2-foundation/NSObject" ];
+          "UIVisualEffectView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" ];
+          "UIWebView" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSData" "objc2-foundation/NSError" "objc2-foundation/NSObject" "objc2-foundation/NSString" "objc2-foundation/NSURL" "objc2-foundation/NSURLRequest" ];
+          "UIWindow" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSNotification" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIWindowScene" = [ "objc2-foundation/NSArray" "objc2-foundation/NSError" "objc2-foundation/NSString" "UISceneSizeRestrictions" ];
+          "UIWindowSceneActivationAction" = [ "objc2-foundation/NSCoder" "objc2-foundation/NSObject" "objc2-foundation/NSString" ];
+          "UIWindowSceneActivationConfiguration" = [ "objc2-foundation/NSUserActivity" ];
+          "UIWindowSceneActivationInteraction" = [ "objc2-foundation/NSError" ];
+          "UIWindowSceneGeometry" = [ "objc2-foundation/NSObject" ];
+          "UIWindowScenePlacement" = [ "objc2-foundation/NSObject" ];
+          "UIWindowSceneProminentPlacement" = [ "objc2-foundation/NSObject" ];
+          "UIWindowScenePushPlacement" = [ "objc2-foundation/NSObject" ];
+          "UIWindowSceneReplacePlacement" = [ "objc2-foundation/NSObject" ];
+          "UIWindowSceneStandardPlacement" = [ "objc2-foundation/NSObject" ];
+          "UIWritingToolsCoordinator" = [ "objc2-foundation/NSArray" "objc2-foundation/NSAttributedString" "objc2-foundation/NSRange" "objc2-foundation/NSString" "objc2-foundation/NSUUID" "objc2-foundation/NSValue" ];
+          "UIWritingToolsCoordinatorContext" = [ "objc2-foundation/NSAttributedString" "objc2-foundation/NSRange" "objc2-foundation/NSUUID" ];
+          "UIZoomTransitionOptions" = [ "objc2-foundation/NSObject" ];
+          "bitflags" = [ "dep:bitflags" ];
+          "block2" = [ "dep:block2" ];
+          "default" = [ "std" "DocumentManager" "NSAdaptiveImageGlyph" "NSAttributedString" "NSDataAsset" "NSDiffableDataSourceSectionSnapshot" "NSFileProviderExtension" "NSIndexPath_UIKitAdditions" "NSItemProvider_UIKitAdditions" "NSLayoutAnchor" "NSLayoutConstraint" "NSLayoutManager" "NSParagraphStyle" "NSShadow" "NSStringDrawing" "NSText" "NSTextAttachment" "NSTextContainer" "NSTextContentManager" "NSTextElement" "NSTextLayoutFragment" "NSTextLayoutManager" "NSTextLineFragment" "NSTextList" "NSTextListElement" "NSTextRange" "NSTextSelection" "NSTextSelectionNavigation" "NSTextStorage" "NSTextViewportLayoutController" "NSToolbar_UIKitAdditions" "NSTouchBar_UIKitAdditions" "NSUserActivity_NSItemProvider" "PrintKitUI" "ShareSheet" "UIAccelerometer" "UIAccessibility" "UIAccessibilityAdditions" "UIAccessibilityConstants" "UIAccessibilityContainer" "UIAccessibilityContentSizeCategoryImageAdjusting" "UIAccessibilityCustomAction" "UIAccessibilityCustomRotor" "UIAccessibilityElement" "UIAccessibilityIdentification" "UIAccessibilityLocationDescriptor" "UIAccessibilityZoom" "UIAction" "UIActionSheet" "UIActivity" "UIActivityCollaborationModeRestriction" "UIActivityIndicatorView" "UIActivityItemProvider" "UIActivityItemsConfiguration" "UIActivityItemsConfigurationReading" "UIActivityItemsConfigurationReading_ShareSheet" "UIActivityViewController" "UIAlert" "UIAlertController" "UIAlertView" "UIAppearance" "UIApplication" "UIApplicationShortcutItem" "UIAttachmentBehavior" "UIBackgroundConfiguration" "UIBackgroundExtensionView" "UIBandSelectionInteraction" "UIBarAppearance" "UIBarButtonItem" "UIBarButtonItemAppearance" "UIBarButtonItemBadge" "UIBarButtonItemGroup" "UIBarCommon" "UIBarItem" "UIBehavioralStyle" "UIBezierPath" "UIBlurEffect" "UIButton" "UIButtonConfiguration" "UICalendarSelection" "UICalendarSelectionMultiDate" "UICalendarSelectionSingleDate" "UICalendarSelectionWeekOfYear" "UICalendarView" "UICalendarViewDecoration" "UICanvasFeedbackGenerator" "UICellAccessory" "UICellConfigurationState" "UICloudSharingController" "UICollectionLayoutList" "UICollectionView" "UICollectionViewCell" "UICollectionViewCompositionalLayout" "UICollectionViewController" "UICollectionViewFlowLayout" "UICollectionViewItemRegistration" "UICollectionViewLayout" "UICollectionViewListCell" "UICollectionViewTransitionLayout" "UICollectionViewUpdateItem" "UICollisionBehavior" "UIColor" "UIColorPickerViewController" "UIColorWell" "UICommand" "UIConfigurationColorTransformer" "UIConfigurationState" "UIContentConfiguration" "UIContentSizeCategory" "UIContentSizeCategoryAdjusting" "UIContentUnavailableButtonProperties" "UIContentUnavailableConfiguration" "UIContentUnavailableConfigurationState" "UIContentUnavailableImageProperties" "UIContentUnavailableTextProperties" "UIContentUnavailableView" "UIContextMenuConfiguration" "UIContextMenuInteraction" "UIContextMenuSystem" "UIContextualAction" "UIControl" "UIConversationContext" "UIConversationEntry" "UICornerConfiguration" "UICornerRadius" "UIDataDetectors" "UIDataSourceTranslating" "UIDatePicker" "UIDeferredMenuElement" "UIDevice" "UIDiffableDataSource" "UIDocument" "UIDocumentBrowserAction" "UIDocumentBrowserViewController" "UIDocumentInteractionController" "UIDocumentMenuViewController" "UIDocumentPickerExtensionViewController" "UIDocumentPickerViewController" "UIDocumentProperties" "UIDocumentViewController" "UIDocumentViewControllerLaunchOptions" "UIDragInteraction" "UIDragItem" "UIDragPreview" "UIDragPreviewParameters" "UIDragSession" "UIDropInteraction" "UIDynamicAnimator" "UIDynamicBehavior" "UIDynamicItemBehavior" "UIEditMenuInteraction" "UIEvent" "UIEventAttribution" "UIEventAttributionView" "UIFeedbackGenerator" "UIFieldBehavior" "UIFindInteraction" "UIFindSession" "UIFocus" "UIFocusAnimationCoordinator" "UIFocusDebugger" "UIFocusDefines" "UIFocusEffect" "UIFocusGuide" "UIFocusMovementHint" "UIFocusSystem" "UIFocusSystem_UIKitAdditions" "UIFocusUpdateContext_UIKitAdditions" "UIFont" "UIFontDescriptor" "UIFontMetrics" "UIFontPickerViewController" "UIFontPickerViewControllerConfiguration" "UIFoundation" "UIGeometry" "UIGestureRecognizer" "UIGestureRecognizerSubclass" "UIGlassEffect" "UIGraphics" "UIGraphicsImageRenderer" "UIGraphicsPDFRenderer" "UIGraphicsRenderer" "UIGraphicsRendererSubclass" "UIGravityBehavior" "UIGuidedAccess" "UIGuidedAccessRestrictions" "UIHoverEffect" "UIHoverEffectLayer" "UIHoverGestureRecognizer" "UIHoverStyle" "UIImage" "UIImageAsset" "UIImageConfiguration" "UIImagePickerController" "UIImageReader" "UIImageSymbolConfiguration" "UIImageView" "UIImpactFeedbackGenerator" "UIIndirectScribbleInteraction" "UIInputSuggestion" "UIInputView" "UIInputViewController" "UIInteraction" "UIInterface" "UIKey" "UIKeyCommand" "UIKeyConstants" "UIKeyboardLayoutGuide" "UIKitCore" "UIKitDefines" "UILabel" "UILargeContentViewer" "UILayoutGuide" "UILetterformAwareAdjusting" "UILexicon" "UIListContentConfiguration" "UIListContentImageProperties" "UIListContentTextProperties" "UIListSeparatorConfiguration" "UILocalNotification" "UILocalizedIndexedCollation" "UILongPressGestureRecognizer" "UIMailConversationContext" "UIMailConversationEntry" "UIMainMenuSystem" "UIManagedDocument" "UIMenu" "UIMenuBuilder" "UIMenuController" "UIMenuDisplayPreferences" "UIMenuElement" "UIMenuLeaf" "UIMenuSystem" "UIMessageConversationContext" "UIMessageConversationEntry" "UIMotionEffect" "UINavigationBar" "UINavigationBarAppearance" "UINavigationController" "UINavigationItem" "UINib" "UINibDeclarations" "UINibLoading" "UINotificationFeedbackGenerator" "UIOpenURLContext" "UIOrientation" "UIPageControl" "UIPageControlProgress" "UIPageViewController" "UIPanGestureRecognizer" "UIPasteConfiguration" "UIPasteConfigurationSupporting" "UIPasteControl" "UIPasteboard" "UIPencilInteraction" "UIPickerView" "UIPinchGestureRecognizer" "UIPointerAccessory" "UIPointerInteraction" "UIPointerLockState" "UIPointerRegion" "UIPointerStyle" "UIPopoverBackgroundView" "UIPopoverController" "UIPopoverPresentationController" "UIPopoverPresentationControllerSourceItem" "UIPopoverSupport" "UIPresentationController" "UIPress" "UIPressesEvent" "UIPreviewInteraction" "UIPreviewParameters" "UIPrintError" "UIPrintFormatter" "UIPrintInfo" "UIPrintInteractionController" "UIPrintPageRenderer" "UIPrintPaper" "UIPrintServiceExtension" "UIPrinter" "UIPrinterPickerController" "UIProgressView" "UIPushBehavior" "UIReferenceLibraryViewController" "UIRefreshControl" "UIRegion" "UIResponder" "UIResponder_UIActivityItemsConfiguration" "UIRotationGestureRecognizer" "UIScene" "UISceneActivationConditions" "UISceneConfiguration" "UISceneDefinitions" "UISceneDestructionCondition" "UISceneEnhancedStateRestoration" "UISceneOptions" "UISceneSession" "UISceneSessionActivationRequest" "UISceneSizeRestrictions" "UISceneSystemProtectionManager" "UISceneWindowingBehaviors" "UISceneWindowingControlStyle" "UIScene_AVAudioSession" "UIScreen" "UIScreenEdgePanGestureRecognizer" "UIScreenMode" "UIScreenshotService" "UIScribbleInteraction" "UIScrollEdgeElementContainerInteraction" "UIScrollView" "UISearchBar" "UISearchContainerViewController" "UISearchController" "UISearchDisplayController" "UISearchSuggestion" "UISearchTab" "UISearchTextField" "UISegmentedControl" "UISelectionFeedbackGenerator" "UIShadowProperties" "UIShape" "UISheetPresentationController" "UISlider" "UISliderTrackConfiguration" "UISmartReplySuggestion" "UISnapBehavior" "UISplitViewController" "UISplitViewControllerLayoutEnvironment" "UISpringLoadedInteraction" "UISpringLoadedInteractionSupporting" "UIStackView" "UIStandardTextCursorView" "UIStateRestoration" "UIStatusBarManager" "UIStepper" "UIStoryboard" "UIStoryboardPopoverSegue" "UIStoryboardSegue" "UIStringDrawing" "UISwipeActionsConfiguration" "UISwipeGestureRecognizer" "UISwitch" "UISymbolContentTransition" "UISymbolEffectCompletion" "UITab" "UITabAccessory" "UITabBar" "UITabBarAppearance" "UITabBarController" "UITabBarControllerSidebar" "UITabBarItem" "UITabGroup" "UITabSidebarItem" "UITableView" "UITableViewCell" "UITableViewController" "UITableViewHeaderFooterView" "UITapGestureRecognizer" "UITargetedDragPreview" "UITargetedPreview" "UITextChecker" "UITextCursorDropPositionAnimator" "UITextCursorView" "UITextDragPreviewRenderer" "UITextDragURLPreviews" "UITextDragging" "UITextDropProposal" "UITextDropping" "UITextField" "UITextFormattingCoordinator" "UITextFormattingViewController" "UITextFormattingViewControllerChangeValue" "UITextFormattingViewControllerComponent" "UITextFormattingViewControllerConfiguration" "UITextFormattingViewControllerFormattingDescriptor" "UITextFormattingViewControllerFormattingStyle" "UITextInput" "UITextInputContext" "UITextInputTraits" "UITextInteraction" "UITextItem" "UITextItemInteraction" "UITextLoupeSession" "UITextPasteConfigurationSupporting" "UITextPasteDelegate" "UITextSearching" "UITextSelectionDisplayInteraction" "UITextSelectionHandleView" "UITextSelectionHighlightView" "UITextView" "UITimingCurveProvider" "UITimingParameters" "UIToolTipInteraction" "UIToolbar" "UIToolbarAppearance" "UITouch" "UITrackingLayoutGuide" "UITrait" "UITraitCollection" "UITraitListEnvironment" "UIUpdateActionPhase" "UIUpdateInfo" "UIUpdateLink" "UIUserActivity" "UIUserNotificationSettings" "UIVibrancyEffect" "UIVideoEditorController" "UIView" "UIViewAnimating" "UIViewConfigurationState" "UIViewController" "UIViewControllerTransition" "UIViewControllerTransitionCoordinator" "UIViewControllerTransitioning" "UIViewLayoutRegion" "UIViewPropertyAnimator" "UIVisualEffect" "UIVisualEffectView" "UIWebView" "UIWindow" "UIWindowScene" "UIWindowSceneActivationAction" "UIWindowSceneActivationConfiguration" "UIWindowSceneActivationInteraction" "UIWindowSceneActivationRequestOptions" "UIWindowSceneDragInteraction" "UIWindowSceneGeometry" "UIWindowSceneGeometryPreferences" "UIWindowSceneGeometryPreferencesIOS" "UIWindowSceneGeometryPreferencesMac" "UIWindowSceneGeometryPreferencesVision" "UIWindowScenePlacement" "UIWindowSceneProminentPlacement" "UIWindowScenePushPlacement" "UIWindowSceneReplacePlacement" "UIWindowSceneStandardPlacement" "UIWritingToolsCoordinator" "UIWritingToolsCoordinatorAnimationParameters" "UIWritingToolsCoordinatorContext" "UIZoomTransitionOptions" "UNNotificationResponse_UIKitAdditions" "bitflags" "block2" "objc2-cloud-kit" "objc2-core-data" "objc2-core-foundation" "objc2-core-graphics" "objc2-core-image" "objc2-core-location" "objc2-core-text" "objc2-quartz-core" "objc2-user-notifications" ];
+          "objc2-cloud-kit" = [ "dep:objc2-cloud-kit" ];
+          "objc2-core-data" = [ "dep:objc2-core-data" ];
+          "objc2-core-foundation" = [ "dep:objc2-core-foundation" ];
+          "objc2-core-graphics" = [ "dep:objc2-core-graphics" ];
+          "objc2-core-image" = [ "dep:objc2-core-image" ];
+          "objc2-core-location" = [ "dep:objc2-core-location" ];
+          "objc2-core-text" = [ "dep:objc2-core-text" ];
+          "objc2-quartz-core" = [ "dep:objc2-quartz-core" ];
+          "objc2-symbols" = [ "dep:objc2-symbols" ];
+          "objc2-uniform-type-identifiers" = [ "dep:objc2-uniform-type-identifiers" ];
+          "objc2-user-notifications" = [ "dep:objc2-user-notifications" ];
+          "std" = [ "alloc" ];
+        };
+        resolvedDefaultFeatures = [ "NSText" "UIApplication" "UIConversationContext" "UIEvent" "UIGeometry" "UIInterface" "UIOpenURLContext" "UIPasteboard" "UIResponder" "UIScene" "UISceneConfiguration" "UISceneDefinitions" "UISceneOptions" "UISceneSession" "UISceneSizeRestrictions" "UIScreen" "UITextInput" "UITextInputTraits" "UITouch" "UITraitCollection" "UIView" "UIViewController" "UIWindow" "UIWindowScene" "alloc" "bitflags" "block2" "objc2-core-foundation" "objc2-quartz-core" "std" ];
       };
       "objc2-user-notifications" = rec {
         crateName = "objc2-user-notifications";
@@ -48633,11 +49264,23 @@ rec {
         ];
 
       };
-      "pastey" = rec {
+      "pastey 0.1.1" = rec {
         crateName = "pastey";
         version = "0.1.1";
         edition = "2018";
         sha256 = "1v389jkifv757903flrrps67dvc6q6giwlyx3xi33hcfjmgjxyrm";
+        procMacro = true;
+        authors = [
+          "Aditya Kumar <git@adityais.dev>"
+          "David Tolnay <dtolnay@gmail.com>"
+        ];
+
+      };
+      "pastey 0.2.3" = rec {
+        crateName = "pastey";
+        version = "0.2.3";
+        edition = "2018";
+        sha256 = "1d1mk45ma9w54ppws8x096q96qhqirxmj9j3hchj7fmi1087zrif";
         procMacro = true;
         authors = [
           "Aditya Kumar <git@adityais.dev>"
@@ -48673,11 +49316,6 @@ rec {
           }
         ];
         devDependencies = [
-          {
-            name = "pretty_assertions";
-            packageId = "pretty_assertions";
-            features = [ "unstable" ];
-          }
           {
             name = "tempfile";
             packageId = "tempfile";
@@ -53263,6 +53901,10 @@ rec {
             features = [ "union" "const_new" ];
           }
           {
+            name = "svg_preview";
+            packageId = "svg_preview";
+          }
+          {
             name = "telemetry";
             packageId = "telemetry";
           }
@@ -56882,12 +57524,6 @@ rec {
             packageId = "watch";
           }
           {
-            name = "windows";
-            packageId = "windows 0.62.2";
-            target = { target, features }: (target."windows" or false);
-            features = [ "Win32_Foundation" "Win32_Graphics_Gdi" "Win32_Security" "Win32_Storage_FileSystem" "Win32_System_Com" "Win32_System_Com_StructuredStorage" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Ole" "Win32_System_Threading" "Win32_System_Variant" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_Shell_PropertiesSystem" "Win32_UI_WindowsAndMessaging" ];
-          }
-          {
             name = "worktree";
             packageId = "worktree";
           }
@@ -56917,7 +57553,7 @@ rec {
           {
             name = "agent-client-protocol";
             packageId = "agent-client-protocol";
-            features = [ "unstable" "unstable_protocol_v2" ];
+            features = [ "schemars" "unstable" "unstable_protocol_v2" ];
           }
           {
             name = "agent_servers";
@@ -62864,7 +63500,7 @@ rec {
           {
             name = "agent-client-protocol";
             packageId = "agent-client-protocol";
-            features = [ "unstable" "unstable_protocol_v2" ];
+            features = [ "schemars" "unstable" "unstable_protocol_v2" ];
           }
           {
             name = "agent_settings";
@@ -65955,6 +66591,10 @@ rec {
             packageId = "multi_buffer";
           }
           {
+            name = "project";
+            packageId = "project";
+          }
+          {
             name = "ui";
             packageId = "ui";
           }
@@ -66322,7 +66962,7 @@ rec {
           "proc-macro" = [ "proc-macro2/proc-macro" "quote?/proc-macro" ];
           "test" = [ "syn-test-suite/all-features" ];
         };
-        resolvedDefaultFeatures = [ "clone-impls" "default" "derive" "extra-traits" "full" "parsing" "printing" "proc-macro" ];
+        resolvedDefaultFeatures = [ "clone-impls" "default" "derive" "extra-traits" "full" "parsing" "printing" "proc-macro" "visit" "visit-mut" ];
       };
       "sync_wrapper 0.1.2" = rec {
         crateName = "sync_wrapper";
@@ -70459,9 +71099,9 @@ rec {
       };
       "tracing" = rec {
         crateName = "tracing";
-        version = "0.1.43";
+        version = "0.1.44";
         edition = "2018";
-        sha256 = "0iy6dyqk9ign880xw52snixrs507hj2xqyflaa4kf6aw1c5dj59d";
+        sha256 = "006ilqkg1lmfdh3xhg3z762izfwmxcvz0w7m4qx2qajbz9i1drv3";
         authors = [
           "Eliza Weisman <eliza@buoyant.io>"
           "Tokio Contributors <team@tokio.rs>"
@@ -70537,9 +71177,9 @@ rec {
       };
       "tracing-core" = rec {
         crateName = "tracing-core";
-        version = "0.1.35";
+        version = "0.1.36";
         edition = "2018";
-        sha256 = "0v0az9hivci6bysd796za7g823gkasb8qmdqdsiwd2awmd7y413s";
+        sha256 = "16mpbz6p8vd6j7sf925k9k8wzvm9vdfsjbynbmaxxyq6v7wwm5yv";
         libName = "tracing_core";
         authors = [
           "Tokio Contributors <team@tokio.rs>"
@@ -73670,9 +74310,9 @@ rec {
       };
       "wasm-bindgen" = rec {
         crateName = "wasm-bindgen";
-        version = "0.2.120";
+        version = "0.2.129";
         edition = "2021";
-        sha256 = "1cax9wy1n67sa2m16ia72lsxdrc5pzcv47psxp4p833yp3cvclnz";
+        sha256 = "02flhqld01jqb6vbfyx1gb8s78g1pnq2164daxad93y6mhrlzdcv";
         libName = "wasm_bindgen";
         authors = [
           "The wasm-bindgen Developers"
@@ -73703,12 +74343,6 @@ rec {
             rename = "rustversion-compat";
           }
         ];
-        devDependencies = [
-          {
-            name = "once_cell";
-            packageId = "once_cell";
-          }
-        ];
         features = {
           "default" = [ "std" ];
           "enable-interning" = [ "std" ];
@@ -73721,9 +74355,9 @@ rec {
       };
       "wasm-bindgen-futures" = rec {
         crateName = "wasm-bindgen-futures";
-        version = "0.4.70";
+        version = "0.4.79";
         edition = "2021";
-        sha256 = "1130a64yig0p10mk7rnq5l2jpwglbyxpnqg6h0nlqwzcmir4i4xg";
+        sha256 = "03k1wcg5j3wqk6vgy6gzcq868vsa9k81dlhqissfk0nrw96v7fiw";
         libName = "wasm_bindgen_futures";
         authors = [
           "The wasm-bindgen Developers"
@@ -73733,6 +74367,13 @@ rec {
             name = "js-sys";
             packageId = "js-sys";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            target = { target, features }: (("emscripten" == target."os" or null) && (target."wasm_bindgen_unstable_tokio" or false));
+            features = [ "rt" "time" ];
           }
           {
             name = "wasm-bindgen";
@@ -73749,9 +74390,9 @@ rec {
       };
       "wasm-bindgen-macro" = rec {
         crateName = "wasm-bindgen-macro";
-        version = "0.2.120";
+        version = "0.2.129";
         edition = "2021";
-        sha256 = "00xixpydzjd6y9knwdsrsiff6wi1ddszb1fa9bk25csz94gh9cbq";
+        sha256 = "0dc5xq09sy1v9ns1fhb0cnyqz5p1wcjjvkdmxskj9qhnbg1x0a9f";
         procMacro = true;
         libName = "wasm_bindgen_macro";
         authors = [
@@ -73773,9 +74414,9 @@ rec {
       };
       "wasm-bindgen-macro-support" = rec {
         crateName = "wasm-bindgen-macro-support";
-        version = "0.2.120";
+        version = "0.2.129";
         edition = "2021";
-        sha256 = "0h8v5aphaaq155fzz2d312zrxbka1x6lsvb8mhc8m60n0kr0zkcx";
+        sha256 = "1dx6w90f14avmhri7ss9lyz03060g6475r4axy3bm7biqf5ill3g";
         libName = "wasm_bindgen_macro_support";
         authors = [
           "The wasm-bindgen Developers"
@@ -73795,7 +74436,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 2.0.117";
+            packageId = "syn 3.0.3";
             features = [ "visit" "visit-mut" "full" "extra-traits" ];
           }
           {
@@ -73809,10 +74450,10 @@ rec {
       };
       "wasm-bindgen-shared" = rec {
         crateName = "wasm-bindgen-shared";
-        version = "0.2.120";
+        version = "0.2.129";
         edition = "2021";
         links = "wasm_bindgen";
-        sha256 = "1sjrac4f4j5pgw42mxadq9v42f0bji1a2rcksrbnrwgbh8y7nxa9";
+        sha256 = "1ilmp5d3sl8lrq9djhcs90gk66yvk8mgwk4sfrvpvkd75b2wkw13";
         libName = "wasm_bindgen_shared";
         authors = [
           "The wasm-bindgen Developers"
@@ -75889,9 +76530,9 @@ rec {
       };
       "web-sys" = rec {
         crateName = "web-sys";
-        version = "0.3.97";
+        version = "0.3.106";
         edition = "2021";
-        sha256 = "00knh8cizgb01bmh362f3f19b11f8zl1y3gj6h47pk95233vmb9f";
+        sha256 = "195bd1m14w3hsw5fg3sr938mh7y4cb260d0sq6a6brffxjfin9l8";
         libName = "web_sys";
         authors = [
           "The wasm-bindgen Developers"
@@ -75975,6 +76616,7 @@ rec {
           "CssStyleSheet" = [ "StyleSheet" ];
           "CssSupportsRule" = [ "CssConditionRule" "CssGroupingRule" "CssRule" ];
           "CssTransition" = [ "Animation" "EventTarget" ];
+          "CssViewTransitionRule" = [ "CssRule" ];
           "CustomEvent" = [ "Event" ];
           "DedicatedWorkerGlobalScope" = [ "EventTarget" "WorkerGlobalScope" ];
           "DelayNode" = [ "AudioNode" "EventTarget" ];
@@ -76146,6 +76788,10 @@ rec {
           "MouseEvent" = [ "Event" "UiEvent" ];
           "MouseScrollEvent" = [ "Event" "MouseEvent" "UiEvent" ];
           "MutationEvent" = [ "Event" ];
+          "NavigateEvent" = [ "Event" ];
+          "Navigation" = [ "EventTarget" ];
+          "NavigationCurrentEntryChangeEvent" = [ "Event" ];
+          "NavigationHistoryEntry" = [ "EventTarget" ];
           "NetworkInformation" = [ "EventTarget" ];
           "Node" = [ "EventTarget" ];
           "Notification" = [ "EventTarget" ];
@@ -76695,12 +77341,14 @@ rec {
       };
       "wgpu" = rec {
         crateName = "wgpu";
-        version = "29.0.4";
+        version = "30.0.0";
         edition = "2021";
-        sha256 = "01sx6b31110cxc0h8k06zwkg8sm54xv19lhqpd61v2523c789s3n";
-        authors = [
-          "gfx-rs developers"
-        ];
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/gfx-rs/wgpu";
+          rev = "3b3506ea31154edc04de64debda0e780cba2639c";
+          sha256 = "1kmh8ii70cz070dwp0c32gnxry84z444ackms1v878hd09qvmdb4";
+        };
         dependencies = [
           {
             name = "arrayvec";
@@ -76726,7 +77374,7 @@ rec {
           }
           {
             name = "hashbrown";
-            packageId = "hashbrown 0.16.1";
+            packageId = "hashbrown 0.17.1";
             usesDefaultFeatures = false;
             features = [ "default-hasher" "inline-more" ];
           }
@@ -76735,7 +77383,7 @@ rec {
             packageId = "js-sys";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
           }
           {
             name = "log";
@@ -76746,16 +77394,6 @@ rec {
             packageId = "naga";
             optional = true;
             features = [ "termcolor" ];
-          }
-          {
-            name = "parking_lot";
-            packageId = "parking_lot";
-            optional = true;
-          }
-          {
-            name = "portable-atomic";
-            packageId = "portable-atomic";
-            target = { target, features }: (!("64" == target."has_atomic" or null));
           }
           {
             name = "profiling";
@@ -76772,12 +77410,12 @@ rec {
             name = "smallvec";
             packageId = "smallvec";
             optional = true;
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
           }
           {
             name = "smallvec";
             packageId = "smallvec";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(builtins.elem "wasm" target."family"));
           }
           {
             name = "smallvec";
@@ -76793,38 +77431,33 @@ rec {
             packageId = "wasm-bindgen";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
           }
           {
             name = "wasm-bindgen-futures";
             packageId = "wasm-bindgen-futures";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
           }
           {
             name = "web-sys";
             packageId = "web-sys";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
             features = [ "HtmlCanvasElement" "OffscreenCanvas" ];
           }
           {
             name = "wgpu-core";
             packageId = "wgpu-core";
             optional = true;
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
           }
           {
             name = "wgpu-core";
             packageId = "wgpu-core";
-            optional = true;
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
-          }
-          {
-            name = "wgpu-core";
-            packageId = "wgpu-core";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(builtins.elem "wasm" target."family"));
             features = [ "renderdoc" "wgsl" "portable-atomic" ];
           }
           {
@@ -76836,17 +77469,26 @@ rec {
             name = "wgpu-hal";
             packageId = "wgpu-hal";
             optional = true;
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
+            features = [ "portable-atomic" ];
           }
           {
             name = "wgpu-hal";
             packageId = "wgpu-hal";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(builtins.elem "wasm" target."family"));
+            features = [ "portable-atomic" ];
           }
           {
             name = "wgpu-hal";
             packageId = "wgpu-hal";
             target = { target, features }: ("emscripten" == target."os" or null);
+            features = [ "portable-atomic" ];
+          }
+          {
+            name = "wgpu-sync";
+            packageId = "wgpu-sync";
+            usesDefaultFeatures = false;
+            features = [ "portable-atomic" ];
           }
           {
             name = "wgpu-types";
@@ -76870,40 +77512,43 @@ rec {
         features = {
           "angle" = [ "wgpu-core?/angle" ];
           "counters" = [ "wgpu-core?/counters" ];
-          "default" = [ "std" "parking_lot" "dx12" "metal" "gles" "vulkan" "wgsl" "webgpu" ];
+          "default" = [ "std" "dx12" "metal" "gles" "vulkan" "wgsl" "webgpu" ];
+          "drm" = [ "wgpu-core?/drm" ];
           "dx12" = [ "wgpu-core?/dx12" ];
+          "exhaust" = [ "wgpu-types/exhaust" ];
           "fragile-send-sync-non-atomic-wasm" = [ "wgpu-core?/fragile-send-sync-non-atomic-wasm" "wgpu-types/fragile-send-sync-non-atomic-wasm" ];
           "gles" = [ "wgpu-core?/gles" ];
           "glsl" = [ "naga/glsl-in" "wgpu-core?/glsl" ];
           "metal" = [ "wgpu-core?/metal" ];
           "naga-ir" = [ "dep:naga" ];
           "noop" = [ "wgpu-core/noop" "dep:wgpu-hal" "dep:smallvec" ];
-          "parking_lot" = [ "dep:parking_lot" ];
           "serde" = [ "wgpu-core?/serde" "wgpu-types/serde" ];
           "spirv" = [ "naga/spv-in" "wgpu-core?/spirv" ];
           "static-dxc" = [ "wgpu-core?/static-dxc" ];
-          "std" = [ "raw-window-handle/std" "wgpu-types/std" "wgpu-core?/std" "js-sys?/std" "web-sys?/std" "wasm-bindgen?/std" "wasm-bindgen-futures?/std" ];
+          "std" = [ "raw-window-handle/std" "wgpu-sync/std" "wgpu-types/std" "wgpu-core?/std" "js-sys?/std" "web-sys?/std" "wasm-bindgen?/std" "wasm-bindgen-futures?/std" ];
           "strict_asserts" = [ "wgpu-core?/strict_asserts" "wgpu-types/strict_asserts" ];
-          "trace" = [ "serde" "wgpu-core?/trace" ];
+          "trace" = [ "serde" "wgpu-core?/trace" "wgpu-types/trace" ];
           "vulkan" = [ "wgpu-core?/vulkan" ];
           "vulkan-portability" = [ "wgpu-core?/vulkan-portability" ];
           "web" = [ "dep:wasm-bindgen" "dep:js-sys" "dep:web-sys" "wgpu-types/web" ];
           "webgl" = [ "web" "wgpu-core/webgl" "dep:wgpu-hal" "dep:smallvec" ];
-          "webgpu" = [ "web" "naga?/wgsl-out" "dep:wasm-bindgen-futures" "web-sys/Document" "web-sys/Event" "web-sys/Navigator" "web-sys/NodeList" "web-sys/Window" "web-sys/WorkerGlobalScope" "web-sys/WorkerNavigator" ];
+          "webgpu" = [ "web" "naga?/wgsl-out" "dep:wasm-bindgen-futures" "web-sys/Document" "web-sys/Event" "web-sys/MediaQueryList" "web-sys/Navigator" "web-sys/NodeList" "web-sys/Window" "web-sys/WorkerGlobalScope" "web-sys/WorkerNavigator" ];
           "wgpu-core" = [ "dep:wgpu-core" ];
           "wgsl" = [ "wgpu-core?/wgsl" ];
         };
-        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "parking_lot" "std" "vulkan" "web" "webgl" "webgpu" "wgpu-core" "wgsl" ];
+        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "std" "vulkan" "web" "webgl" "webgpu" "wgpu-core" "wgsl" ];
       };
       "wgpu-core" = rec {
         crateName = "wgpu-core";
-        version = "29.0.4";
+        version = "30.0.0";
         edition = "2021";
-        sha256 = "1mx48dc3k1gnfaqs193gdwmp0pxpvibszi20k5d9cmjf4lr9hl9g";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/gfx-rs/wgpu";
+          rev = "3b3506ea31154edc04de64debda0e780cba2639c";
+          sha256 = "1kmh8ii70cz070dwp0c32gnxry84z444ackms1v878hd09qvmdb4";
+        };
         libName = "wgpu_core";
-        authors = [
-          "gfx-rs developers"
-        ];
         dependencies = [
           {
             name = "arrayvec";
@@ -76912,12 +77557,12 @@ rec {
           }
           {
             name = "bit-set";
-            packageId = "bit-set 0.9.1";
+            packageId = "bit-set 0.11.1";
             usesDefaultFeatures = false;
           }
           {
             name = "bit-vec";
-            packageId = "bit-vec 0.9.1";
+            packageId = "bit-vec 0.10.1";
             usesDefaultFeatures = false;
           }
           {
@@ -76935,7 +77580,7 @@ rec {
           }
           {
             name = "hashbrown";
-            packageId = "hashbrown 0.16.1";
+            packageId = "hashbrown 0.17.1";
             usesDefaultFeatures = false;
             features = [ "default-hasher" "inline-more" ];
           }
@@ -76953,20 +77598,13 @@ rec {
             packageId = "naga";
           }
           {
-            name = "once_cell";
-            packageId = "once_cell";
+            name = "naga-types";
+            packageId = "naga-types";
+          }
+          {
+            name = "num-traits";
+            packageId = "num-traits";
             usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "parking_lot";
-            packageId = "parking_lot";
-          }
-          {
-            name = "portable-atomic";
-            packageId = "portable-atomic";
-            optional = true;
-            target = { target, features }: (!("64" == target."has_atomic" or null));
           }
           {
             name = "profiling";
@@ -76981,6 +77619,11 @@ rec {
           {
             name = "rustc-hash";
             packageId = "rustc-hash 1.1.0";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "scopeguard";
+            packageId = "scopeguard";
             usesDefaultFeatures = false;
           }
           {
@@ -77005,16 +77648,22 @@ rec {
             target = { target, features }: ("emscripten" == target."os" or null);
           }
           {
+            name = "wgpu-core-deps-linux-android-bsd";
+            packageId = "wgpu-core-deps-linux-android-bsd";
+            optional = true;
+            target = { target, features }: (("linux" == target."os" or null) || ("android" == target."os" or null) || ("freebsd" == target."os" or null));
+          }
+          {
             name = "wgpu-core-deps-wasm";
             packageId = "wgpu-core-deps-wasm";
             optional = true;
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
           }
           {
-            name = "wgpu-core-deps-windows-linux-android";
-            packageId = "wgpu-core-deps-windows-linux-android";
+            name = "wgpu-core-deps-windows";
+            packageId = "wgpu-core-deps-windows";
             optional = true;
-            target = { target, features }: ((target."windows" or false) || ("linux" == target."os" or null) || ("android" == target."os" or null) || ("freebsd" == target."os" or null));
+            target = { target, features }: (target."windows" or false);
           }
           {
             name = "wgpu-hal";
@@ -77023,6 +77672,11 @@ rec {
           {
             name = "wgpu-naga-bridge";
             packageId = "wgpu-naga-bridge";
+          }
+          {
+            name = "wgpu-sync";
+            packageId = "wgpu-sync";
+            usesDefaultFeatures = false;
           }
           {
             name = "wgpu-types";
@@ -77040,41 +77694,46 @@ rec {
           "angle" = [ "wgpu-core-deps-apple/angle" ];
           "counters" = [ "wgpu-types/counters" ];
           "default" = [ "std" ];
-          "dx12" = [ "wgpu-core-deps-windows-linux-android/dx12" ];
+          "drm" = [ "wgpu-core-deps-windows/drm" "wgpu-core-deps-linux-android-bsd/drm" ];
+          "dx12" = [ "wgpu-core-deps-windows/dx12" ];
           "fragile-send-sync-non-atomic-wasm" = [ "wgpu-hal/fragile-send-sync-non-atomic-wasm" ];
-          "gles" = [ "wgpu-core-deps-windows-linux-android/gles" "wgpu-core-deps-emscripten/gles" ];
+          "gles" = [ "wgpu-core-deps-linux-android-bsd/gles" "wgpu-core-deps-windows/gles" "wgpu-core-deps-emscripten/gles" ];
           "glsl" = [ "naga/glsl-in" ];
           "macro_rules_attribute" = [ "dep:macro_rules_attribute" ];
           "metal" = [ "wgpu-core-deps-apple/metal" ];
           "observe_locks" = [ "std" "dep:ron" "serde/serde_derive" ];
-          "portable-atomic" = [ "dep:portable-atomic" "wgpu-hal/portable-atomic" ];
-          "renderdoc" = [ "wgpu-core-deps-windows-linux-android/renderdoc" ];
-          "replay" = [ "serde" "naga/deserialize" ];
+          "portable-atomic" = [ "wgpu-sync/portable-atomic" "wgpu-hal/portable-atomic" ];
+          "renderdoc" = [ "wgpu-core-deps-linux-android-bsd/renderdoc" "wgpu-core-deps-windows/renderdoc" ];
+          "replay" = [ "serde" "naga/deserialize" "std" ];
           "serde" = [ "dep:serde" "wgpu-types/serde" "arrayvec/serde" "hashbrown/serde" "smallvec/serde" "macro_rules_attribute" ];
           "spirv" = [ "naga/spv-in" ];
           "static-dxc" = [ "wgpu-hal/static-dxc" ];
+          "std" = [ "wgpu-sync/std" ];
           "strict_asserts" = [ "wgpu-types/strict_asserts" ];
           "trace" = [ "serde" "std" "dep:ron" "naga/serialize" "wgpu-types/trace" ];
-          "vulkan" = [ "wgpu-core-deps-windows-linux-android/vulkan" ];
+          "vulkan" = [ "wgpu-core-deps-linux-android-bsd/vulkan" "wgpu-core-deps-windows/vulkan" ];
           "vulkan-portability" = [ "wgpu-core-deps-apple/vulkan-portability" ];
           "webgl" = [ "wgpu-core-deps-wasm/webgl" "wgpu-types/web" ];
           "wgpu-core-deps-apple" = [ "dep:wgpu-core-deps-apple" ];
           "wgpu-core-deps-emscripten" = [ "dep:wgpu-core-deps-emscripten" ];
+          "wgpu-core-deps-linux-android-bsd" = [ "dep:wgpu-core-deps-linux-android-bsd" ];
           "wgpu-core-deps-wasm" = [ "dep:wgpu-core-deps-wasm" ];
-          "wgpu-core-deps-windows-linux-android" = [ "dep:wgpu-core-deps-windows-linux-android" ];
+          "wgpu-core-deps-windows" = [ "dep:wgpu-core-deps-windows" ];
           "wgsl" = [ "naga/wgsl-in" ];
         };
-        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "portable-atomic" "renderdoc" "std" "vulkan" "webgl" "wgpu-core-deps-apple" "wgpu-core-deps-emscripten" "wgpu-core-deps-wasm" "wgpu-core-deps-windows-linux-android" "wgsl" ];
+        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "portable-atomic" "renderdoc" "std" "vulkan" "webgl" "wgpu-core-deps-apple" "wgpu-core-deps-emscripten" "wgpu-core-deps-linux-android-bsd" "wgpu-core-deps-wasm" "wgpu-core-deps-windows" "wgsl" ];
       };
       "wgpu-core-deps-apple" = rec {
         crateName = "wgpu-core-deps-apple";
-        version = "29.0.4";
+        version = "30.0.0";
         edition = "2021";
-        sha256 = "1ws70f53b4yj9p52ziwzcn1m7x4zyxn5863xws4pbq60qhk9xqzm";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/gfx-rs/wgpu";
+          rev = "3b3506ea31154edc04de64debda0e780cba2639c";
+          sha256 = "1kmh8ii70cz070dwp0c32gnxry84z444ackms1v878hd09qvmdb4";
+        };
         libName = "wgpu_core_deps_apple";
-        authors = [
-          "gfx-rs developers"
-        ];
         dependencies = [
           {
             name = "wgpu-hal";
@@ -77091,13 +77750,15 @@ rec {
       };
       "wgpu-core-deps-emscripten" = rec {
         crateName = "wgpu-core-deps-emscripten";
-        version = "29.0.4";
+        version = "30.0.0";
         edition = "2021";
-        sha256 = "1bzhr47sh1c6l1km50i5mmfjgasmdv3b5xnmpnc994ywa7jrpq01";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/gfx-rs/wgpu";
+          rev = "3b3506ea31154edc04de64debda0e780cba2639c";
+          sha256 = "1kmh8ii70cz070dwp0c32gnxry84z444ackms1v878hd09qvmdb4";
+        };
         libName = "wgpu_core_deps_emscripten";
-        authors = [
-          "gfx-rs developers"
-        ];
         dependencies = [
           {
             name = "wgpu-hal";
@@ -77110,20 +77771,48 @@ rec {
         };
         resolvedDefaultFeatures = [ "gles" ];
       };
-      "wgpu-core-deps-wasm" = rec {
-        crateName = "wgpu-core-deps-wasm";
-        version = "29.0.4";
+      "wgpu-core-deps-linux-android-bsd" = rec {
+        crateName = "wgpu-core-deps-linux-android-bsd";
+        version = "30.0.0";
         edition = "2021";
-        sha256 = "0n9hjjf37g35k31brs2hmwscpc4vsdr4y8jcgm4i5ag2idwv27xg";
-        libName = "wgpu_core_deps_wasm";
-        authors = [
-          "gfx-rs developers"
-        ];
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/gfx-rs/wgpu";
+          rev = "3b3506ea31154edc04de64debda0e780cba2639c";
+          sha256 = "1kmh8ii70cz070dwp0c32gnxry84z444ackms1v878hd09qvmdb4";
+        };
+        libName = "wgpu_core_deps_linux_android_bsd";
         dependencies = [
           {
             name = "wgpu-hal";
             packageId = "wgpu-hal";
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
+            target = { target, features }: (("linux" == target."os" or null) || ("android" == target."os" or null) || ("freebsd" == target."os" or null) || ("netbsd" == target."os" or null));
+          }
+        ];
+        features = {
+          "drm" = [ "wgpu-hal/drm" ];
+          "gles" = [ "wgpu-hal/gles" ];
+          "renderdoc" = [ "wgpu-hal/renderdoc" ];
+          "vulkan" = [ "wgpu-hal/vulkan" ];
+        };
+        resolvedDefaultFeatures = [ "gles" "renderdoc" "vulkan" ];
+      };
+      "wgpu-core-deps-wasm" = rec {
+        crateName = "wgpu-core-deps-wasm";
+        version = "30.0.0";
+        edition = "2021";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/gfx-rs/wgpu";
+          rev = "3b3506ea31154edc04de64debda0e780cba2639c";
+          sha256 = "1kmh8ii70cz070dwp0c32gnxry84z444ackms1v878hd09qvmdb4";
+        };
+        libName = "wgpu_core_deps_wasm";
+        dependencies = [
+          {
+            name = "wgpu-hal";
+            packageId = "wgpu-hal";
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
           }
         ];
         features = {
@@ -77131,23 +77820,26 @@ rec {
         };
         resolvedDefaultFeatures = [ "webgl" ];
       };
-      "wgpu-core-deps-windows-linux-android" = rec {
-        crateName = "wgpu-core-deps-windows-linux-android";
-        version = "29.0.4";
+      "wgpu-core-deps-windows" = rec {
+        crateName = "wgpu-core-deps-windows";
+        version = "30.0.0";
         edition = "2021";
-        sha256 = "0mq24drvyv691rqdji25pcr7mvlcpmp6cvmf8xv09bgnpqdjqnaf";
-        libName = "wgpu_core_deps_windows_linux_android";
-        authors = [
-          "gfx-rs developers"
-        ];
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/gfx-rs/wgpu";
+          rev = "3b3506ea31154edc04de64debda0e780cba2639c";
+          sha256 = "1kmh8ii70cz070dwp0c32gnxry84z444ackms1v878hd09qvmdb4";
+        };
+        libName = "wgpu_core_deps_windows";
         dependencies = [
           {
             name = "wgpu-hal";
             packageId = "wgpu-hal";
-            target = { target, features }: ((target."windows" or false) || ("linux" == target."os" or null) || ("android" == target."os" or null) || ("freebsd" == target."os" or null) || ("netbsd" == target."os" or null));
+            target = { target, features }: (target."windows" or false);
           }
         ];
         features = {
+          "drm" = [ "wgpu-hal/drm" ];
           "dx12" = [ "wgpu-hal/dx12" ];
           "gles" = [ "wgpu-hal/gles" ];
           "renderdoc" = [ "wgpu-hal/renderdoc" ];
@@ -77157,13 +77849,15 @@ rec {
       };
       "wgpu-hal" = rec {
         crateName = "wgpu-hal";
-        version = "29.0.4";
+        version = "30.0.0";
         edition = "2021";
-        sha256 = "13a49nwmfj5mvydq7k4xz4dfhvgaaspkykkflhi1qc97fz0y3b4p";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/gfx-rs/wgpu";
+          rev = "3b3506ea31154edc04de64debda0e780cba2639c";
+          sha256 = "1kmh8ii70cz070dwp0c32gnxry84z444ackms1v878hd09qvmdb4";
+        };
         libName = "wgpu_hal";
-        authors = [
-          "gfx-rs developers"
-        ];
         dependencies = [
           {
             name = "android_system_properties";
@@ -77181,11 +77875,11 @@ rec {
             name = "ash";
             packageId = "ash";
             optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(builtins.elem "wasm" target."family"));
           }
           {
             name = "bit-set";
-            packageId = "bit-set 0.9.1";
+            packageId = "bit-set 0.11.1";
             optional = true;
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows" or false);
@@ -77233,19 +77927,12 @@ rec {
             packageId = "gpu-allocator";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(builtins.elem "wasm" target."family"));
             features = [ "hashbrown" ];
           }
           {
-            name = "gpu-descriptor";
-            packageId = "gpu-descriptor";
-            optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
             name = "hashbrown";
-            packageId = "hashbrown 0.16.1";
-            optional = true;
+            packageId = "hashbrown 0.17.1";
             usesDefaultFeatures = false;
             features = [ "default-hasher" "inline-more" ];
           }
@@ -77253,13 +77940,13 @@ rec {
             name = "js-sys";
             packageId = "js-sys";
             optional = true;
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
           }
           {
             name = "khronos-egl";
             packageId = "khronos-egl";
             optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(builtins.elem "wasm" target."family"));
             features = [ "dynamic" ];
           }
           {
@@ -77280,7 +77967,7 @@ rec {
             name = "libloading";
             packageId = "libloading";
             optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(builtins.elem "wasm" target."family"));
           }
           {
             name = "libloading";
@@ -77295,6 +77982,10 @@ rec {
           {
             name = "naga";
             packageId = "naga";
+          }
+          {
+            name = "naga-types";
+            packageId = "naga-types";
           }
           {
             name = "ndk-sys";
@@ -77315,6 +78006,14 @@ rec {
             usesDefaultFeatures = false;
             target = { target, features }: ("apple" == target."vendor" or null);
             features = [ "std" "CFCGTypes" ];
+          }
+          {
+            name = "objc2-core-graphics";
+            packageId = "objc2-core-graphics";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: ("apple" == target."vendor" or null);
+            features = [ "std" "CGColorSpace" ];
           }
           {
             name = "objc2-foundation";
@@ -77338,38 +78037,13 @@ rec {
             optional = true;
             usesDefaultFeatures = false;
             target = { target, features }: ("apple" == target."vendor" or null);
-            features = [ "std" "objc2-core-foundation" "CALayer" "CAMetalLayer" "objc2-metal" ];
-          }
-          {
-            name = "once_cell";
-            packageId = "once_cell";
-            optional = true;
-            usesDefaultFeatures = false;
-            target = { target, features }: (target."windows" or false);
+            features = [ "std" "objc2-core-foundation" "objc2-core-graphics" "CALayer" "CAMetalLayer" "objc2-metal" ];
           }
           {
             name = "ordered-float";
-            packageId = "ordered-float 5.5.0";
+            packageId = "ordered-float 4.6.0";
             optional = true;
             usesDefaultFeatures = false;
-          }
-          {
-            name = "parking_lot";
-            packageId = "parking_lot";
-            optional = true;
-          }
-          {
-            name = "portable-atomic";
-            packageId = "portable-atomic";
-            optional = true;
-            target = { target, features }: ((!("64" == target."has_atomic" or null)) || (!("ptr" == target."has_atomic" or null)));
-          }
-          {
-            name = "portable-atomic-util";
-            packageId = "portable-atomic-util";
-            optional = true;
-            target = { target, features }: (!("ptr" == target."has_atomic" or null));
-            features = [ "alloc" ];
           }
           {
             name = "profiling";
@@ -77398,14 +78072,18 @@ rec {
             name = "renderdoc-sys";
             packageId = "renderdoc-sys";
             optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(builtins.elem "wasm" target."family"));
           }
           {
             name = "smallvec";
             packageId = "smallvec";
             optional = true;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
+            target = { target, features }: (!(builtins.elem "wasm" target."family"));
             features = [ "union" ];
+          }
+          {
+            name = "static_assertions";
+            packageId = "static_assertions";
           }
           {
             name = "thiserror";
@@ -77417,7 +78095,7 @@ rec {
             packageId = "wasm-bindgen";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
           }
           {
             name = "wayland-sys";
@@ -77431,12 +78109,17 @@ rec {
             packageId = "web-sys";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
-            features = [ "default" "Window" "HtmlCanvasElement" "WebGl2RenderingContext" "OffscreenCanvas" ];
+            target = { target, features }: ((builtins.elem "wasm" target."family") && (!("emscripten" == target."os" or null)));
+            features = [ "default" "Window" "HtmlCanvasElement" "WebGl2RenderingContext" "OffscreenCanvas" "VideoFrame" ];
           }
           {
             name = "wgpu-naga-bridge";
             packageId = "wgpu-naga-bridge";
+          }
+          {
+            name = "wgpu-sync";
+            packageId = "wgpu-sync";
+            usesDefaultFeatures = false;
           }
           {
             name = "wgpu-types";
@@ -77479,27 +78162,30 @@ rec {
           }
         ];
         features = {
-          "dx12" = [ "dep:arrayvec" "dep:bit-set" "dep:bytemuck" "dep:gpu-allocator" "dep:hashbrown" "dep:libloading" "dep:once_cell" "dep:ordered-float" "dep:parking_lot" "dep:profiling" "dep:range-alloc" "dep:windows-core" "gpu-allocator/d3d12" "naga/hlsl-out" "once_cell/std" "windows/Win32_Devices_DeviceAndDriverInstallation" "windows/Win32_Graphics_Direct3D_Dxc" "windows/Win32_Graphics_Direct3D_Fxc" "windows/Win32_Graphics_Direct3D" "windows/Win32_Graphics_Direct3D12" "windows/Win32_Graphics_DirectComposition" "windows/Win32_Graphics_Dxgi_Common" "windows/Win32_Security" "windows/Win32_System_Diagnostics_Debug" "windows/Win32_System_Kernel" "windows/Win32_System_Performance" "windows/Win32_System_Threading" "windows/Win32_UI_WindowsAndMessaging" ];
+          "drm" = [ "dep:drm" ];
+          "dx12" = [ "dep:arrayvec" "dep:bit-set" "dep:bytemuck" "dep:gpu-allocator" "dep:libloading" "dep:ordered-float" "dep:profiling" "dep:range-alloc" "dep:windows-core" "gpu-allocator/d3d12" "naga/hlsl-out" "wgpu-sync/std" "windows/Win32_Devices_DeviceAndDriverInstallation" "windows/Win32_Devices_Display" "windows/Win32_Graphics_Direct3D_Dxc" "windows/Win32_Graphics_Direct3D_Fxc" "windows/Win32_Graphics_Direct3D" "windows/Win32_Graphics_Direct3D12" "windows/Win32_Graphics_DirectComposition" "windows/Win32_Graphics_Dxgi_Common" "windows/Win32_Graphics_Gdi" "windows/Win32_Security" "windows/Win32_System_Diagnostics_Debug" "windows/Win32_System_Kernel" "windows/Win32_System_Performance" "windows/Win32_System_Threading" "windows/Win32_UI_WindowsAndMessaging" ];
           "fragile-send-sync-non-atomic-wasm" = [ "wgpu-types/fragile-send-sync-non-atomic-wasm" ];
-          "gles" = [ "dep:arrayvec" "dep:bytemuck" "dep:glow" "dep:glutin_wgl_sys" "dep:hashbrown" "dep:js-sys" "dep:khronos-egl" "dep:libloading" "dep:ndk-sys" "dep:objc2" "dep:parking_lot" "dep:profiling" "dep:wasm-bindgen" "dep:wayland-sys" "dep:web-sys" "dep:windows-result" "naga/glsl-out" "wgpu-types/web" "windows-result/std" "windows/Win32_Graphics_Gdi" "windows/Win32_Graphics_OpenGL" "windows/Win32_System_LibraryLoader" "windows/Win32_UI_WindowsAndMessaging" ];
-          "metal" = [ "naga/msl-out" "dep:arrayvec" "dep:block2" "dep:bytemuck" "dep:hashbrown" "dep:libc" "dep:objc2" "dep:objc2-core-foundation" "dep:objc2-foundation" "dep:objc2-metal" "dep:objc2-quartz-core" "dep:parking_lot" "dep:profiling" "dep:smallvec" "dep:raw-window-metal" ];
-          "portable-atomic" = [ "dep:portable-atomic" "dep:portable-atomic-util" ];
+          "gles" = [ "dep:arrayvec" "dep:bytemuck" "dep:glow" "dep:glutin_wgl_sys" "dep:js-sys" "dep:khronos-egl" "dep:libloading" "dep:ndk-sys" "dep:objc2" "dep:profiling" "dep:wasm-bindgen" "dep:wayland-sys" "dep:web-sys" "dep:windows-result" "naga/glsl-out" "wgpu-sync/std" "wgpu-types/web" "windows-result/std" "windows/Win32_Graphics_Gdi" "windows/Win32_Graphics_OpenGL" "windows/Win32_System_LibraryLoader" "windows/Win32_UI_WindowsAndMessaging" ];
+          "metal" = [ "naga/msl-out" "wgpu-sync/std" "dep:arrayvec" "dep:block2" "dep:bytemuck" "dep:libloading" "dep:objc2" "dep:objc2-core-foundation" "dep:objc2-core-graphics" "dep:objc2-foundation" "dep:objc2-metal" "dep:objc2-quartz-core" "dep:profiling" "dep:smallvec" "dep:raw-window-metal" ];
+          "portable-atomic" = [ "wgpu-sync/portable-atomic" ];
           "renderdoc" = [ "dep:libloading" "dep:renderdoc-sys" ];
           "static-dxc" = [ "dep:mach-dxcompiler-rs" ];
-          "validation_canary" = [ "dep:parking_lot" ];
-          "vulkan" = [ "naga/spv-out" "dep:android_system_properties" "dep:arrayvec" "dep:ash" "dep:bytemuck" "dep:gpu-descriptor" "dep:hashbrown" "dep:libc" "dep:libloading" "dep:ordered-float" "dep:parking_lot" "dep:profiling" "dep:raw-window-metal" "dep:smallvec" "dep:windows" "gpu-allocator/vulkan" "windows/Win32" ];
+          "validation_canary" = [ "wgpu-sync/std" ];
+          "vulkan" = [ "naga/spv-out" "wgpu-sync/std" "dep:android_system_properties" "dep:arrayvec" "dep:ash" "dep:bytemuck" "dep:libc" "dep:libloading" "dep:ordered-float" "dep:profiling" "dep:raw-window-metal" "dep:smallvec" "dep:windows" "dep:windows-core" "gpu-allocator/vulkan" "windows/Win32" "windows/Win32_Devices_Display" "windows/Win32_Foundation" "windows/Win32_Graphics_Dxgi" "windows/Win32_Graphics_Dxgi_Common" "windows/Win32_Graphics_Gdi" ];
         };
         resolvedDefaultFeatures = [ "dx12" "gles" "metal" "portable-atomic" "renderdoc" "vulkan" ];
       };
       "wgpu-naga-bridge" = rec {
         crateName = "wgpu-naga-bridge";
-        version = "29.0.4";
+        version = "30.0.0";
         edition = "2021";
-        sha256 = "0qf1pgzp6k5fzahbvbb2npfak6jlzfj1dkc168i4nm27yl9n08lm";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/gfx-rs/wgpu";
+          rev = "3b3506ea31154edc04de64debda0e780cba2639c";
+          sha256 = "1kmh8ii70cz070dwp0c32gnxry84z444ackms1v878hd09qvmdb4";
+        };
         libName = "wgpu_naga_bridge";
-        authors = [
-          "gfx-rs developers"
-        ];
         dependencies = [
           {
             name = "naga";
@@ -77513,15 +78199,70 @@ rec {
         ];
 
       };
+      "wgpu-sync" = rec {
+        crateName = "wgpu-sync";
+        version = "30.0.0";
+        edition = "2021";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/gfx-rs/wgpu";
+          rev = "3b3506ea31154edc04de64debda0e780cba2639c";
+          sha256 = "1kmh8ii70cz070dwp0c32gnxry84z444ackms1v878hd09qvmdb4";
+        };
+        libName = "wgpu_sync";
+        dependencies = [
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "lock_api";
+            packageId = "lock_api";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "once_cell";
+            packageId = "once_cell";
+            usesDefaultFeatures = false;
+            features = [ "alloc" "race" ];
+          }
+          {
+            name = "parking_lot";
+            packageId = "parking_lot";
+            optional = true;
+          }
+          {
+            name = "portable-atomic";
+            packageId = "portable-atomic";
+            optional = true;
+            target = { target, features }: ((!("ptr" == target."has_atomic" or null)) || (!("64" == target."has_atomic" or null)) || (!("32" == target."has_atomic" or null)) || (!("16" == target."has_atomic" or null)) || (!("8" == target."has_atomic" or null)));
+          }
+          {
+            name = "portable-atomic-util";
+            packageId = "portable-atomic-util";
+            optional = true;
+            target = { target, features }: (!("ptr" == target."has_atomic" or null));
+            features = [ "alloc" ];
+          }
+        ];
+        features = {
+          "default" = [ "std" ];
+          "portable-atomic" = [ "dep:portable-atomic" "dep:portable-atomic-util" ];
+          "std" = [ "dep:parking_lot" "once_cell/std" ];
+        };
+        resolvedDefaultFeatures = [ "portable-atomic" "std" ];
+      };
       "wgpu-types" = rec {
         crateName = "wgpu-types";
-        version = "29.0.4";
+        version = "30.0.0";
         edition = "2021";
-        sha256 = "1xgqmpyl0zpffqp23b5fcq6gr6yz3a7qd8r3nbi4bjm8kk6q9gw4";
+        workspace_member = null;
+        src = pkgs.fetchgit {
+          url = "https://github.com/gfx-rs/wgpu";
+          rev = "3b3506ea31154edc04de64debda0e780cba2639c";
+          sha256 = "1kmh8ii70cz070dwp0c32gnxry84z444ackms1v878hd09qvmdb4";
+        };
         libName = "wgpu_types";
-        authors = [
-          "gfx-rs developers"
-        ];
         dependencies = [
           {
             name = "bitflags";
@@ -77537,11 +78278,19 @@ rec {
             packageId = "js-sys";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: ("wasm32" == target."arch" or null);
+            target = { target, features }: (builtins.elem "wasm" target."family");
           }
           {
             name = "log";
             packageId = "log";
+          }
+          {
+            name = "macro_rules_attribute";
+            packageId = "macro_rules_attribute";
+          }
+          {
+            name = "naga-types";
+            packageId = "naga-types";
           }
           {
             name = "raw-window-handle";
@@ -77549,19 +78298,24 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "static_assertions";
+            packageId = "static_assertions";
+          }
+          {
             name = "web-sys";
             packageId = "web-sys";
             optional = true;
             usesDefaultFeatures = false;
-            target = { target, features }: ("wasm32" == target."arch" or null);
+            target = { target, features }: (builtins.elem "wasm" target."family");
             features = [ "ImageBitmap" "ImageData" "HtmlImageElement" "HtmlVideoElement" "HtmlCanvasElement" "OffscreenCanvas" "VideoFrame" ];
           }
         ];
         features = {
           "default" = [ "std" ];
-          "serde" = [ "dep:serde" "bitflags/serde" ];
-          "std" = [ "js-sys?/std" "web-sys?/std" ];
-          "trace" = [ "std" ];
+          "exhaust" = [ "dep:exhaust" ];
+          "serde" = [ "dep:serde" "bitflags/serde" "naga-types/serialize" "naga-types/deserialize" ];
+          "std" = [ "js-sys?/std" "web-sys?/std" "naga-types/std" ];
+          "trace" = [ "std" "serde/std" ];
           "web" = [ "dep:js-sys" "dep:web-sys" ];
         };
         resolvedDefaultFeatures = [ "std" "web" ];
@@ -81295,7 +82049,7 @@ rec {
           "default" = [ "std" ];
           "std" = [ "windows-collections/std" "windows-core/std" "windows-future/std" "windows-numerics/std" ];
         };
-        resolvedDefaultFeatures = [ "Data" "Data_Xml" "Data_Xml_Dom" "Foundation" "Globalization" "Globalization_DateTimeFormatting" "UI" "UI_Notifications" "UI_ViewManagement" "Wdk" "Wdk_System" "Wdk_System_SystemInformation" "Wdk_System_SystemServices" "Wdk_System_Threading" "Win32" "Win32_Devices" "Win32_Devices_DeviceAndDriverInstallation" "Win32_Devices_Properties" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Direct3D" "Win32_Graphics_Direct3D11" "Win32_Graphics_Direct3D12" "Win32_Graphics_Direct3D_Dxc" "Win32_Graphics_Direct3D_Fxc" "Win32_Graphics_DirectComposition" "Win32_Graphics_DirectManipulation" "Win32_Graphics_DirectWrite" "Win32_Graphics_Dwm" "Win32_Graphics_Dxgi" "Win32_Graphics_Dxgi_Common" "Win32_Graphics_Gdi" "Win32_Graphics_Hlsl" "Win32_Graphics_OpenGL" "Win32_Media" "Win32_Media_Audio" "Win32_Media_KernelStreaming" "Win32_Media_Multimedia" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_Storage_Packaging" "Win32_Storage_Packaging_Appx" "Win32_System" "Win32_System_Com" "Win32_System_Com_StructuredStorage" "Win32_System_Console" "Win32_System_DataExchange" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_Diagnostics_ToolHelp" "Win32_System_IO" "Win32_System_JobObjects" "Win32_System_Kernel" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Ole" "Win32_System_Performance" "Win32_System_Pipes" "Win32_System_Power" "Win32_System_ProcessStatus" "Win32_System_Registry" "Win32_System_RemoteDesktop" "Win32_System_RestartManager" "Win32_System_StationsAndDesktops" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_Variant" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_Ime" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Input_Pointer" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_Shell_PropertiesSystem" "Win32_UI_WindowsAndMessaging" "default" "std" ];
+        resolvedDefaultFeatures = [ "Data" "Data_Xml" "Data_Xml_Dom" "Foundation" "Globalization" "Globalization_DateTimeFormatting" "UI" "UI_Notifications" "UI_ViewManagement" "Wdk" "Wdk_System" "Wdk_System_SystemInformation" "Wdk_System_SystemServices" "Wdk_System_Threading" "Win32" "Win32_Devices" "Win32_Devices_DeviceAndDriverInstallation" "Win32_Devices_Display" "Win32_Devices_Properties" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Direct3D" "Win32_Graphics_Direct3D11" "Win32_Graphics_Direct3D12" "Win32_Graphics_Direct3D_Dxc" "Win32_Graphics_Direct3D_Fxc" "Win32_Graphics_DirectComposition" "Win32_Graphics_DirectManipulation" "Win32_Graphics_DirectWrite" "Win32_Graphics_Dwm" "Win32_Graphics_Dxgi" "Win32_Graphics_Dxgi_Common" "Win32_Graphics_Gdi" "Win32_Graphics_Hlsl" "Win32_Graphics_OpenGL" "Win32_Media" "Win32_Media_Audio" "Win32_Media_KernelStreaming" "Win32_Media_Multimedia" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_Storage_Packaging" "Win32_Storage_Packaging_Appx" "Win32_System" "Win32_System_Com" "Win32_System_Com_StructuredStorage" "Win32_System_Console" "Win32_System_DataExchange" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_Diagnostics_ToolHelp" "Win32_System_IO" "Win32_System_JobObjects" "Win32_System_Kernel" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Ole" "Win32_System_Performance" "Win32_System_Pipes" "Win32_System_Power" "Win32_System_ProcessStatus" "Win32_System_Registry" "Win32_System_RemoteDesktop" "Win32_System_RestartManager" "Win32_System_StationsAndDesktops" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_Variant" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Accessibility" "Win32_UI_Controls" "Win32_UI_HiDpi" "Win32_UI_Input" "Win32_UI_Input_Ime" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Input_Pointer" "Win32_UI_Shell" "Win32_UI_Shell_Common" "Win32_UI_Shell_PropertiesSystem" "Win32_UI_WindowsAndMessaging" "default" "std" ];
       };
       "windows-bindgen" = rec {
         crateName = "windows-bindgen";
@@ -86827,9 +87581,9 @@ rec {
       };
       "xxhash-rust" = rec {
         crateName = "xxhash-rust";
-        version = "0.8.15";
+        version = "0.8.16";
         edition = "2018";
-        sha256 = "1lrmffpn45d967afw7f1p300rsx7ill66irrskxpcm1p41a0rlpx";
+        sha256 = "0xp5s74r1xyqwqpl1r58myg0dp0vjckfkzs8xk1n6fidvjfci4sd";
         libName = "xxhash_rust";
         authors = [
           "Douman <douman@gmx.se>"
@@ -87534,7 +88288,7 @@ rec {
       };
       "zed" = rec {
         crateName = "zed";
-        version = "1.25.0";
+        version = "1.26.0";
         edition = "2024";
         crateBin = [
           {
@@ -87572,7 +88326,7 @@ rec {
           {
             name = "agent-client-protocol";
             packageId = "agent-client-protocol";
-            features = [ "unstable" "unstable_protocol_v2" ];
+            features = [ "schemars" "unstable" "unstable_protocol_v2" ];
           }
           {
             name = "agent_settings";

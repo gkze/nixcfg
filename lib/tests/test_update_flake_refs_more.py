@@ -24,7 +24,7 @@ from lib.update.events import (
     ignore_event,
 )
 from lib.update.flake import (
-    flake_fetch_expression,
+    flake_fetch_expr,
     get_flake_input_node,
     get_flake_input_version,
     get_root_input_name,
@@ -33,6 +33,7 @@ from lib.update.flake import (
     resolve_root_input_node,
     update_flake_input,
 )
+from lib.update.paths import REPO_ROOT
 from lib.update.refs import (
     FlakeInputRef,
     RefTaskOptions,
@@ -44,6 +45,7 @@ from lib.update.refs import (
     _is_version_ref,
     _parse_github_git_url,
     _parse_tag_version,
+    _rewrite_git_input_ref,
     _run_checked_command,
     _select_tag,
     _select_tag_from_releases,
@@ -63,6 +65,8 @@ if TYPE_CHECKING:
 
     from lib.update.config import UpdateConfig
     from lib.update.process import RunCommandOptions
+
+_CACHED_RUST_OVERLAY = "4ca2963243427cb86bd6b4d9ca6010db0162a619"
 
 
 def _run_async[T](
@@ -106,10 +110,7 @@ def test_flake_helpers_and_fetch_expr_error_paths(
     assert version_from_ref == "v9.9.9"
 
     version_from_original_rev = get_flake_input_version(
-        FlakeLockNode.model_construct(
-            original=OriginalRef.model_construct(ref=None, rev="cafebabe"),
-            locked=None,
-        )
+        FlakeLockNode(original=OriginalRef(type="github", rev="cafebabe"))
     )
     assert version_from_original_rev == "cafebabe"
 
@@ -134,9 +135,9 @@ def test_flake_helpers_and_fetch_expr_error_paths(
         get_flake_input_node("missing")
 
     with pytest.raises(ValueError, match="no locked ref"):
-        flake_fetch_expression(FlakeLockNode())
+        flake_fetch_expr(FlakeLockNode())
     with pytest.raises(ValueError, match="Unsupported flake input type"):
-        flake_fetch_expression(
+        flake_fetch_expr(
             FlakeLockNode(
                 locked=LockedRef(
                     type="path",
@@ -148,7 +149,7 @@ def test_flake_helpers_and_fetch_expr_error_paths(
             )
         )
     with pytest.raises(ValueError, match="Incomplete locked ref"):
-        flake_fetch_expression(
+        flake_fetch_expr(
             FlakeLockNode(
                 locked=LockedRef(
                     type="github",
@@ -171,10 +172,10 @@ def test_update_flake_input_stream(
     args = ["nix", "--no-use-registries", "flake", "update", "demo"]
 
     async def stream(
-        command: list[str], *, command_timeout: float, **_kwargs: object
+        command: list[str], *, timeout: float, **_kwargs: object
     ) -> AsyncIterator[ProcessLine | ProcessDone]:
         assert command == args
-        assert command_timeout == 17
+        assert timeout == 17
         yield ProcessLine("stderr", "fetching upstream archive\n")
         assert events[-1].kind is UpdateEventKind.LINE
         assert events[-1].message == "fetching upstream archive"
@@ -281,6 +282,18 @@ def test_load_flake_lock_cache_can_be_invalidated(
     third = load_flake_lock()
     assert third.nodes["demo"] == "b"
     invalidate_flake_lock()
+
+
+def test_root_rust_overlay_is_rev_pinned_to_cached_nightly() -> None:
+    """#1265 floated rust-overlay nightly; keep the last substitutable rustc pin."""
+    lock = FlakeLock.from_file(REPO_ROOT / "flake.lock")
+    node, follows = resolve_root_input_node(lock, "rust-overlay")
+    assert follows is None
+    assert node is not None
+    assert node.original is not None
+    assert node.locked is not None
+    assert node.original.rev == _CACHED_RUST_OVERLAY
+    assert node.locked.rev == _CACHED_RUST_OVERLAY
 
 
 def test_refs_version_parsing_and_selection_helpers() -> None:
@@ -453,6 +466,78 @@ def test_get_flake_inputs_with_refs_empty_root_inputs(
     model = SimpleNamespace(root_node=SimpleNamespace(inputs=None), nodes={})
     monkeypatch.setattr("lib.update.refs.load_flake_lock", lambda: model)
     assert get_flake_inputs_with_refs() == []
+
+
+def test_rewrite_git_input_ref_preserves_submodule_attrset() -> None:
+    """Update only the generic git input ref while preserving input metadata."""
+    source = """{
+  inputs = {
+    github-desktop = {
+      type = "git";
+      url = "https://github.com/desktop/desktop.git";
+      ref = "refs/tags/release-3.5.9-beta1";
+      submodules = true;
+      flake = false;
+    };
+  };
+  outputs = { self, ... }: {};
+}
+"""
+
+    rewritten = _rewrite_git_input_ref(
+        source,
+        "github-desktop",
+        "refs/tags/release-3.5.9-beta2",
+    )
+
+    root = expect_instance(parse_nix_expr(rewritten), AttributeSet)
+    inputs = expect_instance(expect_binding(root.values, "inputs").value, AttributeSet)
+    github_desktop = expect_instance(
+        expect_binding(inputs.values, "github-desktop").value,
+        AttributeSet,
+    )
+    assert_nix_ast_equal(
+        expect_binding(github_desktop.values, "ref").value,
+        '"refs/tags/release-3.5.9-beta2"',
+    )
+    assert_nix_ast_equal(
+        expect_binding(github_desktop.values, "submodules").value, "true"
+    )
+    assert_nix_ast_equal(expect_binding(github_desktop.values, "flake").value, "false")
+
+
+def test_rewrite_git_input_ref_inserts_missing_ref_and_reports_absent_input() -> None:
+    """Insert refs into generic git inputs that only declare a URL."""
+    source = """{
+  inputs = {
+    github-desktop = {
+      type = "git";
+      url = "https://github.com/desktop/desktop.git";
+      submodules = true;
+    };
+  };
+  outputs = { self, ... }: {};
+}"""
+
+    rewritten = _rewrite_git_input_ref(
+        source,
+        "github-desktop",
+        "refs/tags/release-3.5.9-beta2",
+    )
+
+    root = expect_instance(parse_nix_expr(rewritten), AttributeSet)
+    inputs = expect_instance(expect_binding(root.values, "inputs").value, AttributeSet)
+    github_desktop = expect_instance(
+        expect_binding(inputs.values, "github-desktop").value,
+        AttributeSet,
+    )
+    assert_nix_ast_equal(
+        expect_binding(github_desktop.values, "ref").value,
+        '"refs/tags/release-3.5.9-beta2"',
+    )
+
+    with pytest.raises(RuntimeError, match="Could not find git flake input attrset"):
+        _rewrite_git_input_ref(source, "missing", "v2")
 
 
 def test_update_git_input_ref_in_flake_writes_changed_ref(

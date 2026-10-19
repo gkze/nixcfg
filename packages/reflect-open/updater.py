@@ -58,8 +58,6 @@ class ReflectOpenUpdater(GitHubReleaseUpdater):
             mode="build",
         ),
     )
-    # Recompute both dependency closures before accepting release metadata.
-    always_rehash = True
 
     @staticmethod
     def _manifest_pnpm_version(payload: object) -> str:
@@ -113,6 +111,15 @@ class ReflectOpenUpdater(GitHubReleaseUpdater):
                 "tag": tag,
             },
         )
+
+    async def _is_latest(
+        self,
+        context: UpdateContext,
+        info: VersionInfo,
+    ) -> bool:
+        """Recompute both dependency closures before accepting release metadata."""
+        _ = (context, info)
+        return False
 
     @classmethod
     def _src_expr(cls, commit: str) -> str:

@@ -113,7 +113,14 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     rust-overlay = {
-      url = "github:oxalica/rust-overlay";
+      # #1265 floated rust-overlay 8afee9fa→e90fafa7 (oxalica "manifest:
+      # update" for nightly 2026-10-10). Plan-darwin-closures jumped from
+      # warmup=4 / rustc-1.98.1 substitutable (#1264, 4ca29632) to
+      # warmup=7812 (6515 rust_* plus file_cmds/dummyBuild). rust-warmup
+      # then printed 529/634/1762 will-be-built on vendor-registry /
+      # vendor-cargo-deps / goose-cli. Unpin after that nightly rustc is
+      # in gkze.cachix.org.
+      url = "github:oxalica/rust-overlay/4ca2963243427cb86bd6b4d9ca6010db0162a619";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     scratch = {
@@ -146,7 +153,7 @@
       flake = false;
     };
     anthropic-cli = {
-      url = "github:anthropics/anthropic-cli/v1.38.0";
+      url = "github:anthropics/anthropic-cli/v1.42.0";
       flake = false;
     };
     base16-schemes-src = {
@@ -191,7 +198,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.161.0";
+      url = "github:openai/codex/rust-v0.163.0";
       flake = false;
     };
     curator = {
@@ -206,7 +213,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.43.0";
+      url = "github:steipete/gogcli/v0.45.0";
       flake = false;
     };
     openai-cli = {
@@ -415,11 +422,20 @@
           # Package discovery already instantiates this environment in the
           # package set. Reuse it for checks, apps, formatting and the shell.
           mkNixcfgPackage = pkgs: pkgs.nixcfg;
-          repoCheckSet = import ./lib/repo-checks.nix {
-            src = ./.;
-            inherit lib lintFiles;
-          };
-          inherit (repoCheckSet) mkCheckSource pytestFiles;
+          sharedRepoChecks =
+            (import ./lib/repo-checks.nix {
+              src = ./.;
+              inherit lib lintFiles;
+            }).checks;
+          mkCheckSource =
+            fileset:
+            lib.fileset.toSource {
+              root = ./.;
+              inherit fileset;
+            };
+          # A path: flake can contain ignored workspace dependencies. Pytest
+          # receives its TypeScript dependency explicitly below.
+          pytestFiles = lib.fileset.difference ./. (lib.fileset.maybeMissing ./node_modules);
           mkRepoCheck =
             {
               name,
@@ -458,8 +474,6 @@
               ${resolve afterCheck}
               touch $out
             '';
-          # An eval-only check passes when its assertion evaluates to true; the
-          # build output is only a stamp.
           mkEvalOnlyCheck =
             checkName: test:
             {
@@ -470,31 +484,11 @@
             pkgs.runCommand "check-${checkName}" { } ''
               touch $out
             '';
-          # Every check name exists on every check system. A check whose
-          # subject exists only on some platforms evaluates that subject only
-          # there and is an empty stamp elsewhere. `when` receives
-          # hostPlatform; `test` marks an eval-only check, `check` a builder.
-          mkPlatformCheck =
-            checkName:
-            {
-              when,
-              test ? null,
-              check ? null,
-            }:
-            { pkgs, ... }@context:
-            if !(when pkgs.stdenv.hostPlatform) then
-              pkgs.runCommand "check-${checkName}-skipped" { } ''
-                touch "$out"
-              ''
-            else if test != null then
-              mkEvalOnlyCheck checkName test context
-            else
-              check context;
-          isDarwin = platform: platform.isDarwin;
-          isLinux = platform: platform.isLinux;
-          # The Darwin hosts and the standalone Home Manager configuration are
-          # all aarch64-darwin; their evaluation belongs to that check system.
-          isConfigurationSystem = platform: platform.system == "aarch64-darwin";
+          # Evaluate the nixcfg package once per system and share it across
+          # every check below instead of re-deriving it per check.
+          nixcfgPackages = lib.genAttrs systems (
+            system: mkNixcfgPackage baseOutputs.legacyPackages.${system}
+          );
           # Repo checks, keyed by check name. Each spec is a mkRepoCheck
           # argument set; `nixcfg = true` additionally passes the shared
           # `nixcfgPkg`/`nixcfgVenv` for that system into the command.
@@ -508,7 +502,7 @@
                   if spec.nixcfg or false then
                     context:
                     let
-                      nixcfgPkg = mkNixcfgPackage context.pkgs;
+                      nixcfgPkg = nixcfgPackages.${context.pkgs.stdenv.hostPlatform.system};
                     in
                     spec.command (
                       context
@@ -521,7 +515,7 @@
                     spec.command;
               }
             );
-          repoCheckSpecs = repoCheckSet.checks // {
+          repoCheckSpecs = sharedRepoChecks // {
             "verify-runtime-package" = {
               nixcfg = true;
               source = null;
@@ -603,22 +597,24 @@
 
           outputs.lib.rootClosureManifest = rootClosureData.manifest;
 
-          outputs.checks = lib.genAttrs rootClosureData.rootSystems (system: {
-            root-closures = baseOutputs.legacyPackages.${system}.linkFarm "nixcfg-root-closures" (
-              rootClosureData.forSystem system
-            );
-          });
+          outputs.checks = lib.genAttrs rootClosureData.rootSystems (
+            system:
+            let
+              pkgs = baseOutputs.legacyPackages.${system};
+              roots = rootClosureData.forSystem system;
+            in
+            {
+              root-closures = pkgs.linkFarm "nixcfg-root-closures" roots;
+            }
+            // builtins.listToAttrs (
+              map (root: {
+                name = "root-closure-${root.name}";
+                value = root.path;
+              }) roots
+            )
+          );
 
-          # The single owner of Nixpkgs `config`. mkSystem passes the resulting
-          # `pkgsFor` instance to each configuration as `nixpkgs.pkgs`.
           nixpkgs.config = nixpkgsConfig;
-
-          # flakelight's propagation module would forward `nixpkgs.config` and
-          # the overlays into each configuration again. Next to an external
-          # `nixpkgs.pkgs` that trips nix-darwin's assertion and re-applies
-          # every overlay through `appendOverlays`. Its `flake` module
-          # argument has no readers.
-          propagationModule = lib.mkForce { };
 
           apps.nixcfg =
             pkgs:
@@ -869,235 +865,262 @@
               }
             );
 
-          checks =
-            builtins.mapAttrs mkEvalOnlyCheck {
-              "test-nix-default-api" = _: import ./tests/nix/default-api/default-api.nix { src = ./.; };
-
-              "test-nix-crate-cache-boundaries" =
-                { pkgs, ... }:
-                import ./tests/nix/crate-cache-boundaries.nix {
-                  inherit (pkgs) lib;
-                  system = pkgs.stdenv.hostPlatform.system;
-                };
-
-              "test-nix-zed-build-rust-crate-functor" =
-                { pkgs, ... }: import ./tests/nix/zed-build-rust-crate-functor.nix { inherit (pkgs) lib; };
-
-              "test-nix-dock-defaults" =
-                { pkgs, ... }:
-                import ./tests/nix/dock-defaults.nix {
-                  inherit (pkgs) lib;
-                  src = ./.;
-                };
-
-              "test-nix-language-path-modules" =
-                { pkgs, ... }:
-                import ./tests/nix/language-path-modules.nix {
-                  inherit (pkgs) lib;
-                  src = ./.;
-                };
-
-              "test-nix-common-maintenance" =
-                { pkgs, ... }:
-                import ./tests/nix/common-maintenance.nix {
-                  inherit (pkgs) lib;
-                  src = ./.;
-                };
-
-              "test-nix-opencode-desktop" =
-                { pkgs, ... }:
-                import ./packages/opencode-desktop/tests.nix {
-                  inherit self;
-                  system = pkgs.stdenv.hostPlatform.system;
-                };
-
-              "test-nix-opencode-mcp" =
-                { pkgs, ... }:
-                import ./tests/nix/opencode-mcp.nix {
-                  inherit (pkgs) lib;
-                  src = ./.;
-                };
-
-              "test-nix-opencode-profile" =
-                { pkgs, ... }:
-                import ./tests/nix/opencode-profile.nix {
-                  inherit (pkgs) lib;
-                  src = ./.;
-                };
-
-              "test-nix-jsonc" =
-                { pkgs, ... }:
-                import ./tests/nix/jsonc.nix {
-                  inherit (pkgs) lib;
-                  src = ./.;
-                };
-
-              "test-nix-repo-checks" =
-                { pkgs, ... }:
-                import ./tests/nix/repo-checks.nix {
-                  inherit (pkgs) lib;
-                  src = ./.;
-                };
-
-              "test-nix-package-helpers" =
-                { pkgs, ... }:
-                assert import ./tests/nix/t3code-workspace-source.nix { inherit (pkgs) lib; };
-                assert import ./tests/nix/opencode-desktop-source.nix { inherit (pkgs) lib; };
-                assert import ./tests/nix/package-probes.nix {
-                  inherit pkgs;
-                  src = ./.;
-                };
-                import ./tests/nix/package-helpers.nix { src = ./.; };
-
-              "test-nix-root-closures" =
-                _:
-                import ./tests/nix/root-closures.nix {
-                  actualManifest = rootClosureData.manifest;
-                  flakelight = inputs.flakelight.lib;
-                  inherit lib;
-                  src = ./.;
-                };
-
-              "test-nix-source-hashes" =
-                { pkgs, ... }:
-                import ./tests/nix/source-hashes.nix {
-                  inherit (pkgs) lib;
-                  src = ./.;
-                };
-
-              "test-nix-version-prefixes" = _: import ./tests/nix/version-prefixes.nix { inherit (self) lib; };
-
-              "test-nix-rio-overlay-platforms" = _: import ./tests/nix/rio-overlay-platforms { };
-
-              "test-nix-binary-darwin-apps-platforms" = _: import ./tests/nix/binary-darwin-apps-platforms { };
-
-              "test-nix-build-rust-crate-unique-drvs" =
-                { pkgs, ... }: import ./tests/nix/build-rust-crate-unique-drvs.nix { inherit pkgs; };
-
-              "test-nix-sign-and-verify-bundle" =
-                { pkgs, ... }: import ./tests/nix/sign-and-verify-bundle.nix { inherit pkgs; };
-            }
-            // builtins.mapAttrs mkPlatformCheck {
-              # Runtime launch check for the Linux desktop app. The bundle is
-              # repacked from OpenAI's Debian artifact, so only actually
-              # starting it proves the package works: this runs the app under
-              # a private Xvfb display and fails unless it presents a window
-              # and holds it.
-              "chatgpt-linux-launch" = {
-                when = isLinux;
-                check = { pkgs, ... }: pkgs.callPackage ./tests/nix/chatgpt-linux-launch.nix { };
-              };
-
-              "test-nix-buzz-export-readiness" = {
-                when = isConfigurationSystem;
-                test =
-                  { pkgs, ... }:
-                  import ./tests/nix/buzz-export-readiness.nix {
-                    inherit pkgs;
-                    src = ./.;
-                  };
-              };
-
-              "test-nix-gpg-session" = {
-                when = isConfigurationSystem;
-                test = _: import ./tests/nix/gpg-session { inherit self; };
-              };
-
-              "test-nix-nvim-keymaps" = {
-                when = isConfigurationSystem;
-                test =
-                  _:
-                  import ./tests/nix/nvim-keymaps.nix {
-                    config = self.homeConfigurations.george.config;
-                    src = ./.;
-                  };
-              };
-
-              "test-nix-codex-bundled-plugin-repair" = {
-                when = isDarwin;
-                check =
-                  { pkgs, ... }:
-                  import ./tests/nix/codex-bundled-plugin-repair.nix {
-                    inherit pkgs;
-                    inherit (pkgs) lib;
-                    src = ./.;
-                  };
-              };
-
-              "test-nix-execline-darwin-symlinks" = {
-                when = isDarwin;
-                check =
-                  { pkgs, ... }:
-                  pkgs.runCommand "check-execline-darwin-symlinks"
-                    {
-                      nativeBuildInputs = [ pkgs.findutils ];
-                    }
-                    ''
-                      # A separate builder is required because static evaluation
-                      # cannot reproduce Cachix's unprivileged readlink boundary.
-                      link_count=0
-                      while IFS= read -r link; do
-                        ${pkgs.coreutils}/bin/readlink "$link" >/dev/null
-                        link_count=$((link_count + 1))
-                      done < <(${pkgs.findutils}/bin/find ${pkgs.execline.bin}/bin -type l -print)
-
-                      if (( link_count == 0 )); then
-                        echo >&2 "execline installed no symlinks to validate"
-                        exit 1
-                      fi
-
-                      touch "$out"
-                    '';
-              };
-            }
-            // {
-              # Fails when any formatter would change a file. flakelight runs
-              # string checks in a writable copy of the flake source.
-              "format-repo" =
-                { lib, outputs', ... }:
-                ''
-                  ${lib.getExe outputs'.formatter} --ci .
+          checks = {
+            # Runtime launch check for the Linux desktop app. The bundle is
+            # repacked from OpenAI's Debian artifact, so only actually starting
+            # it proves the package works: this runs the app under a private
+            # Xvfb display and fails unless it presents a window and holds it.
+            # The check adds Chromium --no-sandbox flags because nix-daemon's
+            # sandbox cannot nest Chromium's (38553752589 validate-arm).
+            "chatgpt-linux-launch" =
+              { pkgs, ... }:
+              if pkgs.stdenv.hostPlatform.isLinux then
+                pkgs.callPackage ./tests/nix/chatgpt-linux-launch.nix { }
+              else
+                pkgs.runCommand "check-chatgpt-linux-launch-skipped" { } ''
+                  touch $out
                 '';
 
-              "test-nix-crate2nix-source-slice" =
-                { pkgs, ... }:
-                import ./tests/nix/crate2nix-source-slice.nix {
+            "format-repo" = lib.mkForce (
+              { lib, outputs', ... }:
+              ''
+                ${lib.getExe outputs'.formatter} .
+              ''
+            );
+
+            "test-nix-default-api" = mkEvalOnlyCheck "test-nix-default-api" (
+              _: import ./tests/nix/default-api/default-api.nix { src = ./.; }
+            );
+
+            "test-nix-buzz-export-readiness" = mkEvalOnlyCheck "test-nix-buzz-export-readiness" (
+              { pkgs, ... }:
+              if pkgs.stdenv.hostPlatform.system == "aarch64-darwin" then
+                import ./tests/nix/buzz-export-readiness.nix {
                   inherit pkgs;
                   src = ./.;
-                };
+                }
+              else
+                true
+            );
 
-              "test-nix-direnv-batched-gcroots" = { pkgs, ... }: pkgs.nix-direnv.tests.batchedFlakeInputGcRoots;
+            "test-nix-crate2nix-source-slice" =
+              { pkgs, ... }:
+              import ./tests/nix/crate2nix-source-slice.nix {
+                inherit pkgs;
+                src = ./.;
+              };
 
-              "test-nix-prefetch-git-darwin-heredoc" =
-                { pkgs, ... }: import ./tests/nix/nix-prefetch-git-darwin-heredoc { inherit pkgs; };
+            "test-nix-crate-cache-boundaries" = mkEvalOnlyCheck "test-nix-crate-cache-boundaries" (
+              { pkgs, ... }:
+              import ./tests/nix/crate-cache-boundaries.nix {
+                inherit (pkgs) lib;
+                system = pkgs.stdenv.hostPlatform.system;
+              }
+            );
 
-              "test-fetch-cargo-vendor-network" =
-                { pkgs, ... }: import ./tests/nix/fetch-cargo-vendor.nix { inherit pkgs; };
+            "test-nix-zed-build-rust-crate-functor" = mkEvalOnlyCheck "test-nix-zed-build-rust-crate-functor" (
+              { pkgs, ... }:
+              import ./tests/nix/zed-build-rust-crate-functor.nix {
+                inherit (pkgs) lib;
+              }
+            );
 
-              "test-zsh-gpg-tty" =
-                { pkgs, ... }:
-                import ./tests/nix/zsh-gpg-tty {
-                  inherit pkgs;
-                  src = ./.;
-                };
-
-              "test-nix-zsh-repo-plugins" =
-                { pkgs, ... }:
-                import ./tests/nix/zsh-repo-plugins.nix {
+            "test-nix-codex-bundled-plugin-repair" =
+              { pkgs, ... }:
+              if pkgs.stdenv.hostPlatform.isDarwin then
+                import ./tests/nix/codex-bundled-plugin-repair.nix {
                   inherit pkgs;
                   inherit (pkgs) lib;
                   src = ./.;
-                };
+                }
+              else
+                pkgs.runCommand "test-codex-bundled-plugin-repair-skipped" { } ''
+                  touch "$out"
+                '';
 
-              "package-codesnap-nvim" = { pkgs, ... }: pkgs.vimPlugins.codesnap-nvim;
+            "test-nix-dock-defaults" = mkEvalOnlyCheck "test-nix-dock-defaults" (
+              { pkgs, ... }:
+              import ./tests/nix/dock-defaults.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
 
-              "cache-electron-runtimes" = { pkgs, ... }: pkgs.electron-runtimes;
-            }
-            // builtins.mapAttrs mkNamedRepoCheck repoCheckSpecs;
+            "test-nix-language-path-modules" = mkEvalOnlyCheck "test-nix-language-path-modules" (
+              { pkgs, ... }:
+              import ./tests/nix/language-path-modules.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
+
+            "test-nix-common-maintenance" = mkEvalOnlyCheck "test-nix-common-maintenance" (
+              { pkgs, ... }:
+              import ./tests/nix/common-maintenance.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
+
+            "test-nix-gpg-session" = mkEvalOnlyCheck "test-nix-gpg-session" (
+              _: import ./tests/nix/gpg-session { inherit self; }
+            );
+
+            "test-nix-nvim-keymaps" = mkEvalOnlyCheck "test-nix-nvim-keymaps" (
+              _:
+              import ./tests/nix/nvim-keymaps.nix {
+                config = self.homeConfigurations.george.config;
+                src = ./.;
+              }
+            );
+
+            "test-nix-opencode-desktop" = mkEvalOnlyCheck "test-nix-opencode-desktop" (
+              { pkgs, ... }:
+              import ./packages/opencode-desktop/tests.nix {
+                inherit self;
+                system = pkgs.stdenv.hostPlatform.system;
+              }
+            );
+
+            "test-nix-opencode-mcp" = mkEvalOnlyCheck "test-nix-opencode-mcp" (
+              { pkgs, ... }:
+              import ./tests/nix/opencode-mcp.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
+
+            "test-nix-opencode-profile" = mkEvalOnlyCheck "test-nix-opencode-profile" (
+              { pkgs, ... }:
+              import ./tests/nix/opencode-profile.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
+
+            "test-nix-jsonc" = mkEvalOnlyCheck "test-nix-jsonc" (
+              { pkgs, ... }:
+              import ./tests/nix/jsonc.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
+
+            "test-nix-repo-checks" = mkEvalOnlyCheck "test-nix-repo-checks" (
+              { pkgs, ... }:
+              import ./tests/nix/repo-checks.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
+
+            "test-nix-package-helpers" = mkEvalOnlyCheck "test-nix-package-helpers" (
+              { pkgs, ... }:
+              assert import ./tests/nix/t3code-workspace-source.nix { inherit (pkgs) lib; };
+              assert import ./tests/nix/opencode-desktop-source.nix { inherit (pkgs) lib; };
+              assert import ./tests/nix/package-probes.nix {
+                inherit pkgs;
+                src = ./.;
+              };
+              import ./tests/nix/package-helpers.nix { src = ./.; }
+            );
+
+            "test-nix-root-closures" = mkEvalOnlyCheck "test-nix-root-closures" (
+              _:
+              import ./tests/nix/root-closures.nix {
+                actualManifest = rootClosureData.manifest;
+                flakelight = inputs.flakelight.lib;
+                inherit lib;
+                src = ./.;
+              }
+            );
+
+            "test-nix-source-hashes" = mkEvalOnlyCheck "test-nix-source-hashes" (
+              { pkgs, ... }:
+              import ./tests/nix/source-hashes.nix {
+                inherit (pkgs) lib;
+                src = ./.;
+              }
+            );
+
+            "test-nix-version-prefixes" = mkEvalOnlyCheck "test-nix-version-prefixes" (
+              _: import ./tests/nix/version-prefixes.nix { inherit (self) lib; }
+            );
+
+            "test-nix-direnv-batched-gcroots" = { pkgs, ... }: pkgs.nix-direnv.tests.batchedFlakeInputGcRoots;
+
+            "test-nix-execline-darwin-symlinks" =
+              { pkgs, ... }:
+              if !pkgs.stdenv.hostPlatform.isDarwin then
+                pkgs.runCommand "check-execline-darwin-symlinks-skipped" { } ''
+                  touch "$out"
+                ''
+              else
+                pkgs.runCommand "check-execline-darwin-symlinks"
+                  {
+                    nativeBuildInputs = [ pkgs.findutils ];
+                  }
+                  ''
+                    # A separate builder is required because static evaluation
+                    # cannot reproduce Cachix's unprivileged readlink boundary.
+                    link_count=0
+                    while IFS= read -r link; do
+                      ${pkgs.coreutils}/bin/readlink "$link" >/dev/null
+                      link_count=$((link_count + 1))
+                    done < <(${pkgs.findutils}/bin/find ${pkgs.execline.bin}/bin -type l -print)
+
+                    if (( link_count == 0 )); then
+                      echo >&2 "execline installed no symlinks to validate"
+                      exit 1
+                    fi
+
+                    touch "$out"
+                  '';
+
+            "test-nix-prefetch-git-darwin-heredoc" =
+              { pkgs, ... }: import ./tests/nix/nix-prefetch-git-darwin-heredoc { inherit pkgs; };
+
+            "test-fetch-cargo-vendor-network" =
+              { pkgs, ... }: import ./tests/nix/fetch-cargo-vendor.nix { inherit pkgs; };
+
+            "test-nix-rio-overlay-platforms" = mkEvalOnlyCheck "test-nix-rio-overlay-platforms" (
+              _: import ./tests/nix/rio-overlay-platforms { }
+            );
+
+            "test-nix-binary-darwin-apps-platforms" = mkEvalOnlyCheck "test-nix-binary-darwin-apps-platforms" (
+              _: import ./tests/nix/binary-darwin-apps-platforms { }
+            );
+
+            "test-zsh-gpg-tty" =
+              { pkgs, ... }:
+              import ./tests/nix/zsh-gpg-tty {
+                inherit pkgs;
+                src = ./.;
+              };
+
+            "test-nix-zsh-repo-plugins" =
+              { pkgs, ... }:
+              import ./tests/nix/zsh-repo-plugins.nix {
+                inherit pkgs;
+                inherit (pkgs) lib;
+                src = ./.;
+              };
+
+            "package-codesnap-nvim" = { pkgs, ... }: pkgs.vimPlugins.codesnap-nvim;
+
+            "cache-electron-runtimes" = { pkgs, ... }: pkgs.electron-runtimes;
+          }
+          // builtins.mapAttrs mkNamedRepoCheck repoCheckSpecs;
 
         }
       );
 
+      overlayDefault =
+        final: prev:
+        let
+          resolvedSystem = prev.system or (final.system or "x86_64-linux");
+        in
+        baseOutputs.overlays.default final (prev // { system = resolvedSystem; });
       mkStandaloneHomeConfiguration =
         name: cfg:
         inputs.home-manager.lib.homeManagerConfiguration (
@@ -1117,6 +1140,9 @@
               )
             ]
             ++ (cfg.modules or [ ]);
+            pkgs =
+              (import ./lib/pinned-input-platform-compat).withLegacyPlatformAttrs
+                baseOutputs.legacyPackages.${cfg.system};
           }
         );
       standaloneHomeEntries = inputs.nixpkgs.lib.filterAttrs (
@@ -1136,9 +1162,15 @@
 
       checks = builtins.mapAttrs (
         _system: systemChecks:
-        # format-repo replaces flakelight's in-place `formatting` check.
-        builtins.removeAttrs systemChecks [ "formatting" ]
+        inputs.nixpkgs.lib.filterAttrs (
+          name: _: name != "formatting" && !(inputs.nixpkgs.lib.hasPrefix "home-" name)
+        ) systemChecks
       ) baseOutputs.checks;
       pkgs = baseOutputs.legacyPackages;
+      interactivePkgs = baseOutputs.legacyPackages;
+
+      overlays = baseOutputs.overlays // {
+        default = overlayDefault;
+      };
     };
 }

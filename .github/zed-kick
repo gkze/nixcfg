@@ -1,0 +1,6 @@
+# Touch this file to queue one Zed-only Darwin family build.
+# Does not cancel Update (separate concurrency group).
+# Do not kick while validate-darwin-warm-rust owns all five macos-15 runners.
+# canary-crates stay on Update; this job realizes rust_zed + nightly + SVH family.
+# Feature-branch kicks restore the parent Update plan artifact.
+2026-10-11T07:11:00Z zed-family-cache-replay-after-61f0a136

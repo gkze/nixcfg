@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-4gwsZ4kzbmrKkefERsLOkNqLWzfmP4mMUIWCz9oUOqk="
+  },
+  "urls": {
+    "aarch64-darwin": "https://reasonmachines.com/api/desktop-download?arch=aarch64"
+  },
+  "version": "0.1.104"
+}

@@ -335,6 +335,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "codex-cloud-client" = rec {
+      packageId = "codex-cloud-client";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "codex-cloud-client";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "codex-cloud-config" = rec {
       packageId = "codex-cloud-config";
       build = internal.buildRustCrateWithFeatures {
@@ -1125,16 +1135,6 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "codex-shell-escalation" = rec {
-      packageId = "codex-shell-escalation";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "codex-shell-escalation";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
     "codex-skills" = rec {
       packageId = "codex-skills";
       build = internal.buildRustCrateWithFeatures {
@@ -1777,7 +1777,7 @@ rec {
           "rand_core" = [ "crypto-common/rand_core" ];
           "std" = [ "alloc" "crypto-common/std" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "getrandom" "rand_core" "std" ];
+        resolvedDefaultFeatures = [ "alloc" "default" "getrandom" "rand_core" "std" ];
       };
       "aes" = rec {
         crateName = "aes";
@@ -1876,9 +1876,9 @@ rec {
       };
       "age" = rec {
         crateName = "age";
-        version = "0.11.2";
+        version = "0.12.1";
         edition = "2021";
-        sha256 = "0jrww5srig0qila8xqd86sa8l2gnk2vslbqg3xpp8nc9cpkhnr5z";
+        sha256 = "09lzr0zy67zf8zfrx1fmdjiccllz1sp9c7bd1zvpj928q8rhcagx";
         authors = [
           "Jack Grigg <thestr4d@gmail.com>"
         ];
@@ -1889,7 +1889,7 @@ rec {
           }
           {
             name = "base64";
-            packageId = "base64 0.21.7";
+            packageId = "base64 0.22.1";
           }
           {
             name = "bech32";
@@ -1902,12 +1902,27 @@ rec {
             features = [ "alloc" ];
           }
           {
+            name = "cipher";
+            packageId = "cipher";
+            features = [ "alloc" ];
+          }
+          {
             name = "cookie-factory";
             packageId = "cookie-factory";
           }
           {
+            name = "hkdf";
+            packageId = "hkdf 0.12.4";
+          }
+          {
             name = "hmac";
             packageId = "hmac 0.12.1";
+          }
+          {
+            name = "hpke";
+            packageId = "hpke";
+            usesDefaultFeatures = false;
+            features = [ "alloc" "p256" ];
           }
           {
             name = "i18n-embed";
@@ -1923,10 +1938,21 @@ rec {
             packageId = "lazy_static";
           }
           {
+            name = "ml-kem";
+            packageId = "ml-kem";
+            features = [ "deterministic" ];
+          }
+          {
             name = "nom";
-            packageId = "nom 7.1.3";
+            packageId = "nom 8.0.0";
             usesDefaultFeatures = false;
             features = [ "alloc" ];
+          }
+          {
+            name = "p256";
+            packageId = "p256";
+            usesDefaultFeatures = false;
+            features = [ "arithmetic" ];
           }
           {
             name = "pin-project";
@@ -1948,6 +1974,10 @@ rec {
           {
             name = "sha2";
             packageId = "sha2 0.10.9";
+          }
+          {
+            name = "sha3";
+            packageId = "sha3";
           }
           {
             name = "subtle";
@@ -1976,7 +2006,6 @@ rec {
           "async" = [ "futures" "memchr" ];
           "bcrypt-pbkdf" = [ "dep:bcrypt-pbkdf" ];
           "cbc" = [ "dep:cbc" ];
-          "cipher" = [ "dep:cipher" ];
           "cli-common" = [ "console" "is-terminal" "pinentry" "rpassword" ];
           "console" = [ "dep:console" ];
           "ctr" = [ "dep:ctr" ];
@@ -1989,7 +2018,7 @@ rec {
           "plugin" = [ "age-core/plugin" "which" "wsl" ];
           "rpassword" = [ "dep:rpassword" ];
           "rsa" = [ "dep:rsa" ];
-          "ssh" = [ "aes" "aes-gcm" "bcrypt-pbkdf" "cbc" "cipher" "ctr" "curve25519-dalek" "num-traits" "rsa" ];
+          "ssh" = [ "aes" "aes-gcm" "bcrypt-pbkdf" "cbc" "ctr" "curve25519-dalek" "num-traits" "rsa" ];
           "unstable" = [ "age-core/unstable" ];
           "web-sys" = [ "dep:web-sys" ];
           "which" = [ "dep:which" ];
@@ -1999,9 +2028,9 @@ rec {
       };
       "age-core" = rec {
         crateName = "age-core";
-        version = "0.11.0";
+        version = "0.12.0";
         edition = "2021";
-        sha256 = "16fgb96fxgjkn81b150a7db01lp177df5v0k162rvjl4r64nmgz2";
+        sha256 = "0ml6h8nm5wgxx7a4i113zy9ki4bkspmg5bij3dgiwl6icickgm01";
         libName = "age_core";
         authors = [
           "Jack Grigg <thestr4d@gmail.com>"
@@ -2009,7 +2038,11 @@ rec {
         dependencies = [
           {
             name = "base64";
-            packageId = "base64 0.21.7";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "bech32";
+            packageId = "bech32";
           }
           {
             name = "chacha20poly1305";
@@ -2026,12 +2059,18 @@ rec {
             packageId = "hkdf 0.12.4";
           }
           {
+            name = "hpke";
+            packageId = "hpke";
+            usesDefaultFeatures = false;
+            features = [ "alloc" ];
+          }
+          {
             name = "io_tee";
             packageId = "io_tee";
           }
           {
             name = "nom";
-            packageId = "nom 7.1.3";
+            packageId = "nom 8.0.0";
             usesDefaultFeatures = false;
             features = [ "alloc" ];
           }
@@ -2046,6 +2085,14 @@ rec {
           {
             name = "sha2";
             packageId = "sha2 0.10.9";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "hpke";
+            packageId = "hpke";
+            usesDefaultFeatures = false;
+            features = [ "alloc" "p256" ];
           }
         ];
         features = {
@@ -2445,7 +2492,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_System_Console" "Win32_Foundation" ];
           }
@@ -2470,7 +2517,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_System_Console" "Win32_Foundation" ];
           }
@@ -2492,7 +2539,7 @@ rec {
       };
       "app_test_support" = rec {
         crateName = "app_test_support";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "app-server/tests/common";
         libPath = "lib.rs";
@@ -5830,21 +5877,6 @@ rec {
         };
         resolvedDefaultFeatures = [ "alloc" ];
       };
-      "base64 0.21.7" = rec {
-        crateName = "base64";
-        version = "0.21.7";
-        edition = "2018";
-        sha256 = "0rw52yvsk75kar9wgqfwgb414kvil1gn7mqkrhn9zf1537mpsacx";
-        authors = [
-          "Alice Maz <alice@alicemaz.com>"
-          "Marshall Pierce <marshall@mpierce.org>"
-        ];
-        features = {
-          "default" = [ "std" ];
-          "std" = [ "alloc" ];
-        };
-        resolvedDefaultFeatures = [ "alloc" "default" "std" ];
-      };
       "base64 0.22.1" = rec {
         crateName = "base64";
         version = "0.22.1";
@@ -5938,16 +5970,19 @@ rec {
       };
       "bech32" = rec {
         crateName = "bech32";
-        version = "0.9.1";
+        version = "0.11.1";
         edition = "2018";
-        sha256 = "0igl565rfpxwbh0g36cb7469sjkiap8yd21kcr0ppi2jfbwr6syq";
+        sha256 = "0zwfapdphq2fnd1f75hs6zfya75sgwzdwlbdih5b3ivz6xl74qrj";
         authors = [
           "Clark Moody"
+          "Andrew Poelstra"
+          "Tobin Harding"
         ];
         features = {
           "default" = [ "std" ];
+          "std" = [ "alloc" ];
         };
-        resolvedDefaultFeatures = [ "default" "std" ];
+        resolvedDefaultFeatures = [ "alloc" "default" "std" ];
       };
       "beef" = rec {
         crateName = "beef";
@@ -6042,7 +6077,7 @@ rec {
           }
           {
             name = "rustc-hash";
-            packageId = "rustc-hash 2.1.1";
+            packageId = "rustc-hash";
           }
           {
             name = "shlex";
@@ -7847,7 +7882,7 @@ rec {
       };
       "codex-agent-extension" = rec {
         crateName = "codex-agent-extension";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/agent";
         libName = "codex_agent_extension";
@@ -7884,7 +7919,7 @@ rec {
       };
       "codex-agent-graph-store" = rec {
         crateName = "codex-agent-graph-store";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "agent-graph-store";
         libName = "codex_agent_graph_store";
@@ -7934,7 +7969,7 @@ rec {
       };
       "codex-agent-identity" = rec {
         crateName = "codex-agent-identity";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "agent-identity";
         libName = "codex_agent_identity";
@@ -8005,7 +8040,7 @@ rec {
       };
       "codex-agent-message-board-client" = rec {
         crateName = "codex-agent-message-board-client";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "agent-message-board-client";
         libName = "codex_agent_message_board_client";
@@ -8094,7 +8129,7 @@ rec {
       };
       "codex-agent-message-board-extension" = rec {
         crateName = "codex-agent-message-board-extension";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/agent-message-board";
         libName = "codex_agent_message_board_extension";
@@ -8186,7 +8221,7 @@ rec {
       };
       "codex-agent-roles" = rec {
         crateName = "codex-agent-roles";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "agent-roles";
         libName = "codex_agent_roles";
@@ -8226,7 +8261,7 @@ rec {
       };
       "codex-analytics" = rec {
         crateName = "codex-analytics";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "analytics";
         libName = "codex_analytics";
@@ -8262,6 +8297,10 @@ rec {
           {
             name = "codex-state";
             packageId = "codex-state";
+          }
+          {
+            name = "codex-utils-path-uri";
+            packageId = "codex-utils-path-uri";
           }
           {
             name = "os_info";
@@ -8305,7 +8344,7 @@ rec {
       };
       "codex-ansi-escape" = rec {
         crateName = "codex-ansi-escape";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ansi-escape";
         libName = "codex_ansi_escape";
@@ -8340,7 +8379,7 @@ rec {
       };
       "codex-api" = rec {
         crateName = "codex-api";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "codex-api";
         libName = "codex_api";
@@ -8496,7 +8535,7 @@ rec {
       };
       "codex-app-server" = rec {
         crateName = "codex-app-server";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -8809,6 +8848,11 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "libc";
+            packageId = "libc";
+            target = { target, features }: (target."unix" or false);
+          }
+          {
             name = "serde";
             packageId = "serde";
             features = [ "rc" "derive" ];
@@ -8988,7 +9032,7 @@ rec {
       };
       "codex-app-server-client" = rec {
         crateName = "codex-app-server-client";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "app-server-client";
         libName = "codex_app_server_client";
@@ -9097,7 +9141,7 @@ rec {
       };
       "codex-app-server-daemon" = rec {
         crateName = "codex-app-server-daemon";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "app-server-daemon";
         libName = "codex_app_server_daemon";
@@ -9176,12 +9220,16 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_IO" "Win32_System_JobObjects" "Win32_Security" "Win32_Security_Authorization" "Win32_System_Threading" ];
           }
         ];
         devDependencies = [
+          {
+            name = "codex-utils-cargo-bin";
+            packageId = "codex-utils-cargo-bin";
+          }
           {
             name = "pretty_assertions";
             packageId = "pretty_assertions";
@@ -9191,7 +9239,7 @@ rec {
       };
       "codex-app-server-protocol" = rec {
         crateName = "codex-app-server-protocol";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "app-server-protocol";
         libName = "codex_app_server_protocol";
@@ -9329,7 +9377,7 @@ rec {
       };
       "codex-app-server-protocol-noop-macros" = rec {
         crateName = "codex-app-server-protocol-noop-macros";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "app-server-protocol-noop-macros";
         procMacro = true;
@@ -9338,7 +9386,7 @@ rec {
       };
       "codex-app-server-test-client" = rec {
         crateName = "codex-app-server-test-client";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -9426,7 +9474,7 @@ rec {
       };
       "codex-app-server-transport" = rec {
         crateName = "codex-app-server-transport";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "app-server-transport";
         libName = "codex_app_server_transport";
@@ -9598,7 +9646,7 @@ rec {
       };
       "codex-apply-patch" = rec {
         crateName = "codex-apply-patch";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -9674,7 +9722,7 @@ rec {
       };
       "codex-arg0" = rec {
         crateName = "codex-arg0";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "arg0";
         libName = "codex_arg0";
@@ -9706,10 +9754,6 @@ rec {
           {
             name = "codex-sandboxing";
             packageId = "codex-sandboxing";
-          }
-          {
-            name = "codex-shell-escalation";
-            packageId = "codex-shell-escalation";
           }
           {
             name = "codex-utils-absolute-path";
@@ -9749,6 +9793,10 @@ rec {
         ];
         devDependencies = [
           {
+            name = "codex-utils-cargo-bin";
+            packageId = "codex-utils-cargo-bin";
+          }
+          {
             name = "pretty_assertions";
             packageId = "pretty_assertions";
           }
@@ -9757,7 +9805,7 @@ rec {
       };
       "codex-async-utils" = rec {
         crateName = "codex-async-utils";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "async-utils";
         libName = "codex_async_utils";
@@ -9786,7 +9834,7 @@ rec {
       };
       "codex-attachment-store" = rec {
         crateName = "codex-attachment-store";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "attachment-store";
         libName = "codex_attachment_store";
@@ -9816,7 +9864,7 @@ rec {
       };
       "codex-aws-auth" = rec {
         crateName = "codex-aws-auth";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "aws-auth";
         libName = "codex_aws_auth";
@@ -9916,7 +9964,7 @@ rec {
       };
       "codex-backend-client" = rec {
         crateName = "codex-backend-client";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "backend-client";
         libName = "codex_backend_client";
@@ -9991,7 +10039,7 @@ rec {
       };
       "codex-backend-openapi-models" = rec {
         crateName = "codex-backend-openapi-models";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "codex-backend-openapi-models";
         libName = "codex_backend_openapi_models";
@@ -10014,7 +10062,7 @@ rec {
       };
       "codex-build-info" = rec {
         crateName = "codex-build-info";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "build-info";
         libName = "codex_build_info";
@@ -10056,7 +10104,7 @@ rec {
       };
       "codex-bwrap" = rec {
         crateName = "codex-bwrap";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -10087,7 +10135,7 @@ rec {
       };
       "codex-chatgpt" = rec {
         crateName = "codex-chatgpt";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "chatgpt";
         libName = "codex_chatgpt";
@@ -10166,7 +10214,7 @@ rec {
       };
       "codex-cli" = rec {
         crateName = "codex-cli";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -10501,7 +10549,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: ("windows" == target."os" or null);
             features = [ "Win32_Foundation" "Win32_Storage_Packaging_Appx" "Win32_System_Console" "Win32_System_Threading" ];
           }
@@ -10588,7 +10636,7 @@ rec {
       };
       "codex-client" = rec {
         crateName = "codex-client";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "codex-client";
         libName = "codex_client";
@@ -10630,9 +10678,105 @@ rec {
         ];
 
       };
+      "codex-cloud-client" = rec {
+        crateName = "codex-cloud-client";
+        version = "0.163.0";
+        edition = "2024";
+        src = crateSource sourceFilter "cloud-client";
+        libName = "codex_cloud_client";
+        dependencies = [
+          {
+            name = "async-stream";
+            packageId = "async-stream";
+          }
+          {
+            name = "bytes";
+            packageId = "bytes";
+          }
+          {
+            name = "codex-http-client";
+            packageId = "codex-http-client";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "http";
+            packageId = "http 1.4.0";
+          }
+          {
+            name = "http-body-util";
+            packageId = "http-body-util";
+          }
+          {
+            name = "prost";
+            packageId = "prost";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.18";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "time" ];
+          }
+          {
+            name = "tonic";
+            packageId = "tonic";
+            usesDefaultFeatures = false;
+            features = [ "channel" "codegen" ];
+          }
+          {
+            name = "tonic-prost";
+            packageId = "tonic-prost";
+          }
+          {
+            name = "tower";
+            packageId = "tower";
+            features = [ "util" ];
+          }
+          {
+            name = "url";
+            packageId = "url";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "hyper";
+            packageId = "hyper";
+            features = [ "server" "http2" ];
+          }
+          {
+            name = "hyper-util";
+            packageId = "hyper-util";
+            features = [ "tokio" ];
+          }
+          {
+            name = "pretty_assertions";
+            packageId = "pretty_assertions";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "macros" "rt-multi-thread" ];
+          }
+          {
+            name = "tokio-rustls";
+            packageId = "tokio-rustls";
+          }
+        ];
+
+      };
       "codex-cloud-config" = rec {
         crateName = "codex-cloud-config";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "cloud-config";
         libName = "codex_cloud_config";
@@ -10732,7 +10876,7 @@ rec {
       };
       "codex-cloud-tasks" = rec {
         crateName = "codex-cloud-tasks";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "cloud-tasks";
         libName = "codex_cloud_tasks";
@@ -10862,7 +11006,7 @@ rec {
       };
       "codex-cloud-tasks-client" = rec {
         crateName = "codex-cloud-tasks-client";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "cloud-tasks-client";
         libName = "codex_cloud_tasks_client";
@@ -10910,7 +11054,7 @@ rec {
       };
       "codex-cloud-tasks-mock-client" = rec {
         crateName = "codex-cloud-tasks-mock-client";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "cloud-tasks-mock-client";
         libName = "codex_cloud_tasks_mock_client";
@@ -10932,7 +11076,7 @@ rec {
       };
       "codex-code-mode" = rec {
         crateName = "codex-code-mode";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "code-mode";
         libName = "codex_code_mode";
@@ -10969,6 +11113,10 @@ rec {
           {
             name = "prost";
             packageId = "prost";
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.9.3";
           }
           {
             name = "reqwest";
@@ -11025,7 +11173,7 @@ rec {
       };
       "codex-code-mode-host" = rec {
         crateName = "codex-code-mode-host";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -11145,7 +11293,7 @@ rec {
       };
       "codex-code-mode-protocol" = rec {
         crateName = "codex-code-mode-protocol";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "code-mode-protocol";
         libName = "codex_code_mode_protocol";
@@ -11219,7 +11367,7 @@ rec {
       };
       "codex-code-mode-runtime" = rec {
         crateName = "codex-code-mode-runtime";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "code-mode-runtime";
         libName = "codex_code_mode_runtime";
@@ -11288,7 +11436,7 @@ rec {
       };
       "codex-collaboration-mode-templates" = rec {
         crateName = "codex-collaboration-mode-templates";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "collaboration-mode-templates";
         libName = "codex_collaboration_mode_templates";
@@ -11296,7 +11444,7 @@ rec {
       };
       "codex-config" = rec {
         crateName = "codex-config";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "config";
         libName = "codex_config";
@@ -11472,7 +11620,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: ("windows" == target."os" or null);
             features = [ "Win32_Foundation" "Win32_System_Com" "Win32_UI_Shell" ];
           }
@@ -11513,7 +11661,7 @@ rec {
       };
       "codex-config-schema" = rec {
         crateName = "codex-config-schema";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -11542,7 +11690,7 @@ rec {
       };
       "codex-connectors" = rec {
         crateName = "codex-connectors";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "connectors";
         libName = "codex_connectors";
@@ -11621,7 +11769,7 @@ rec {
       };
       "codex-connectors-extension" = rec {
         crateName = "codex-connectors-extension";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/connectors";
         libName = "codex_connectors_extension";
@@ -11663,7 +11811,7 @@ rec {
       };
       "codex-context-fragments" = rec {
         crateName = "codex-context-fragments";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "context-fragments";
         libName = "codex_context_fragments";
@@ -11691,7 +11839,7 @@ rec {
       };
       "codex-core" = rec {
         crateName = "codex-core";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "core";
         libName = "codex_core";
@@ -11914,11 +12062,6 @@ rec {
             packageId = "codex-shell-command";
           }
           {
-            name = "codex-shell-escalation";
-            packageId = "codex-shell-escalation";
-            target = { target, features }: (target."unix" or false);
-          }
-          {
             name = "codex-skills";
             packageId = "codex-skills";
           }
@@ -12025,6 +12168,11 @@ rec {
             packageId = "http 1.4.0";
           }
           {
+            name = "hyper-util";
+            packageId = "hyper-util";
+            features = [ "tokio" ];
+          }
+          {
             name = "iana-time-zone";
             packageId = "iana-time-zone";
           }
@@ -12125,6 +12273,17 @@ rec {
             packageId = "toml_edit 0.24.0+spec-1.1.0";
           }
           {
+            name = "tonic";
+            packageId = "tonic";
+            usesDefaultFeatures = false;
+            features = [ "channel" "codegen" ];
+          }
+          {
+            name = "tower";
+            packageId = "tower";
+            features = [ "util" ];
+          }
+          {
             name = "tracing";
             packageId = "tracing";
             features = [ "log" ];
@@ -12167,6 +12326,10 @@ rec {
           {
             name = "codex-image-generation-extension";
             packageId = "codex-image-generation-extension";
+          }
+          {
+            name = "codex-mcp-extension";
+            packageId = "codex-mcp-extension";
           }
           {
             name = "codex-otel";
@@ -12259,6 +12422,12 @@ rec {
             packageId = "walkdir";
           }
           {
+            name = "windows-sys";
+            packageId = "windows-sys 0.61.2";
+            target = { target, features }: (target."windows" or false);
+            features = [ "Win32_Foundation" "Win32_System_Threading" ];
+          }
+          {
             name = "wiremock";
             packageId = "wiremock";
           }
@@ -12271,7 +12440,7 @@ rec {
       };
       "codex-core-api" = rec {
         crateName = "codex-core-api";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "core-api";
         libName = "codex_core_api";
@@ -12349,7 +12518,7 @@ rec {
       };
       "codex-core-plugin-common" = rec {
         crateName = "codex-core-plugin-common";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "core-plugin-common";
         libName = "codex_core_plugin_common";
@@ -12380,7 +12549,7 @@ rec {
       };
       "codex-core-plugins" = rec {
         crateName = "codex-core-plugins";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "core-plugins";
         libName = "codex_core_plugins";
@@ -12573,6 +12742,10 @@ rec {
             packageId = "codex-exec-server-test-support";
           }
           {
+            name = "codex-utils-cargo-bin";
+            packageId = "codex-utils-cargo-bin";
+          }
+          {
             name = "libc";
             packageId = "libc";
           }
@@ -12602,7 +12775,7 @@ rec {
       };
       "codex-diagnostics" = rec {
         crateName = "codex-diagnostics";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "diagnostics";
         libName = "codex_diagnostics";
@@ -12622,7 +12795,7 @@ rec {
       };
       "codex-exec" = rec {
         crateName = "codex-exec";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -12787,6 +12960,10 @@ rec {
             packageId = "core_test_support";
           }
           {
+            name = "insta";
+            packageId = "insta";
+          }
+          {
             name = "libc";
             packageId = "libc";
           }
@@ -12835,7 +13012,7 @@ rec {
       };
       "codex-exec-server" = rec {
         crateName = "codex-exec-server";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "exec-server";
         libName = "codex_exec_server";
@@ -12895,6 +13072,16 @@ rec {
           {
             name = "codex-http-client";
             packageId = "codex-http-client";
+          }
+          {
+            name = "codex-linux-sandbox";
+            packageId = "codex-linux-sandbox";
+            target = { target, features }: ("linux" == target."os" or null);
+          }
+          {
+            name = "codex-mxc-sandbox";
+            packageId = "codex-mxc-sandbox";
+            target = { target, features }: (target."windows" or false);
           }
           {
             name = "codex-network-proxy";
@@ -13044,10 +13231,15 @@ rec {
             features = [ "v4" ];
           }
           {
-            name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            name = "which";
+            packageId = "which 8.0.0";
             target = { target, features }: (target."windows" or false);
-            features = [ "Win32_Foundation" "Win32_Security" "Win32_Storage_FileSystem" "Win32_System_IO" "Win32_System_Kernel" "Win32_System_Pipes" "Win32_System_Threading" ];
+          }
+          {
+            name = "windows-sys";
+            packageId = "windows-sys 0.61.2";
+            target = { target, features }: (target."windows" or false);
+            features = [ "Win32_Foundation" "Win32_Security" "Win32_Storage_FileSystem" "Win32_System_IO" "Win32_System_Pipes" "Win32_System_Threading" ];
           }
         ];
         devDependencies = [
@@ -13133,7 +13325,7 @@ rec {
       };
       "codex-exec-server-protocol" = rec {
         crateName = "codex-exec-server-protocol";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "exec-server-protocol";
         libName = "codex_exec_server_protocol";
@@ -13192,7 +13384,7 @@ rec {
       };
       "codex-exec-server-test-support" = rec {
         crateName = "codex-exec-server-test-support";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "exec-server/tests/support";
         libName = "codex_exec_server_test_support";
@@ -13242,7 +13434,7 @@ rec {
       };
       "codex-execpolicy" = rec {
         crateName = "codex-execpolicy";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -13313,7 +13505,7 @@ rec {
       };
       "codex-experimental-api-macros" = rec {
         crateName = "codex-experimental-api-macros";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "codex-experimental-api-macros";
         procMacro = true;
@@ -13337,7 +13529,7 @@ rec {
       };
       "codex-extension-api" = rec {
         crateName = "codex-extension-api";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/extension-api";
         libName = "codex_extension_api";
@@ -13415,7 +13607,7 @@ rec {
       };
       "codex-extension-items" = rec {
         crateName = "codex-extension-items";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/items";
         libName = "codex_extension_items";
@@ -13452,7 +13644,7 @@ rec {
       };
       "codex-external-agent-migration" = rec {
         crateName = "codex-external-agent-migration";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "external-agent-migration";
         libName = "codex_external_agent_migration";
@@ -13514,6 +13706,10 @@ rec {
             packageId = "codex-utils-output-truncation";
           }
           {
+            name = "linkify";
+            packageId = "linkify";
+          }
+          {
             name = "serde";
             packageId = "serde";
             features = [ "rc" "derive" ];
@@ -13567,7 +13763,7 @@ rec {
       };
       "codex-features" = rec {
         crateName = "codex-features";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "features";
         libName = "codex_features";
@@ -13613,7 +13809,7 @@ rec {
       };
       "codex-feedback" = rec {
         crateName = "codex-feedback";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "feedback";
         libName = "codex_feedback";
@@ -13672,6 +13868,15 @@ rec {
             packageId = "serde_json";
           }
           {
+            name = "tar";
+            packageId = "tar";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+          {
             name = "tokio";
             packageId = "tokio";
             features = [ "time" ];
@@ -13708,7 +13913,7 @@ rec {
       };
       "codex-file-search" = rec {
         crateName = "codex-file-search";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -13770,7 +13975,7 @@ rec {
       };
       "codex-file-system" = rec {
         crateName = "codex-file-system";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "file-system";
         libName = "codex_file_system";
@@ -13806,7 +14011,7 @@ rec {
       };
       "codex-file-watcher" = rec {
         crateName = "codex-file-watcher";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "file-watcher";
         libName = "codex_file_watcher";
@@ -13840,7 +14045,7 @@ rec {
       };
       "codex-git-attribution" = rec {
         crateName = "codex-git-attribution";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/git-attribution";
         libName = "codex_git_attribution";
@@ -13886,7 +14091,7 @@ rec {
       };
       "codex-git-utils" = rec {
         crateName = "codex-git-utils";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "git-utils";
         libName = "codex_git_utils";
@@ -13981,6 +14186,10 @@ rec {
         ];
         devDependencies = [
           {
+            name = "codex-utils-cargo-bin";
+            packageId = "codex-utils-cargo-bin";
+          }
+          {
             name = "pretty_assertions";
             packageId = "pretty_assertions";
           }
@@ -13989,7 +14198,7 @@ rec {
       };
       "codex-goal-extension" = rec {
         crateName = "codex-goal-extension";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/goal";
         libName = "codex_goal_extension";
@@ -14084,7 +14293,7 @@ rec {
       };
       "codex-guardian-context" = rec {
         crateName = "codex-guardian-context";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "guardian-context";
         libName = "codex_guardian_context";
@@ -14102,6 +14311,11 @@ rec {
             packageId = "codex-protocol";
           }
           {
+            name = "serde";
+            packageId = "serde";
+            features = [ "rc" "derive" ];
+          }
+          {
             name = "serde_json";
             packageId = "serde_json";
           }
@@ -14116,7 +14330,7 @@ rec {
       };
       "codex-guardian-reviewer" = rec {
         crateName = "codex-guardian-reviewer";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/guardian-reviewer";
         libName = "codex_guardian_reviewer";
@@ -14207,7 +14421,7 @@ rec {
       };
       "codex-guardian-v2" = rec {
         crateName = "codex-guardian-v2";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/guardian-v2";
         libName = "codex_guardian_v2";
@@ -14277,6 +14491,10 @@ rec {
             packageId = "codex-protocol";
           }
           {
+            name = "codex-websocket-client";
+            packageId = "codex-websocket-client";
+          }
+          {
             name = "dirs";
             packageId = "dirs";
           }
@@ -14320,6 +14538,10 @@ rec {
             packageId = "core_test_support";
           }
           {
+            name = "insta";
+            packageId = "insta";
+          }
+          {
             name = "pretty_assertions";
             packageId = "pretty_assertions";
           }
@@ -14345,7 +14567,7 @@ rec {
       };
       "codex-history" = rec {
         crateName = "codex-history";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "history";
         libName = "codex_history";
@@ -14382,7 +14604,7 @@ rec {
       };
       "codex-history-notes-extension" = rec {
         crateName = "codex-history-notes-extension";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/history-notes";
         libName = "codex_history_notes_extension";
@@ -14471,7 +14693,7 @@ rec {
       };
       "codex-home" = rec {
         crateName = "codex-home";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "codex-home";
         libName = "codex_home";
@@ -14513,7 +14735,7 @@ rec {
       };
       "codex-hooks" = rec {
         crateName = "codex-hooks";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -14632,7 +14854,7 @@ rec {
       };
       "codex-http-client" = rec {
         crateName = "codex-http-client";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -14742,7 +14964,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: ("windows" == target."os" or null);
             features = [ "Win32_Foundation" "Win32_Networking_WinHttp" ];
           }
@@ -14788,7 +15010,7 @@ rec {
       };
       "codex-image-generation-extension" = rec {
         crateName = "codex-image-generation-extension";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/image-generation";
         libName = "codex_image_generation_extension";
@@ -14890,7 +15112,7 @@ rec {
       };
       "codex-install-context" = rec {
         crateName = "codex-install-context";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "install-context";
         libName = "codex_install_context";
@@ -14932,7 +15154,7 @@ rec {
       };
       "codex-keyring-store" = rec {
         crateName = "codex-keyring-store";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "keyring-store";
         libName = "codex_keyring_store";
@@ -14996,7 +15218,7 @@ rec {
       };
       "codex-linux-sandbox" = rec {
         crateName = "codex-linux-sandbox";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -15134,7 +15356,7 @@ rec {
       };
       "codex-lmstudio" = rec {
         crateName = "codex-lmstudio";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "lmstudio";
         libName = "codex_lmstudio";
@@ -15185,7 +15407,7 @@ rec {
       };
       "codex-login" = rec {
         crateName = "codex-login";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "login";
         libName = "codex_login";
@@ -15312,6 +15534,10 @@ rec {
         ];
         devDependencies = [
           {
+            name = "codex-utils-cargo-bin";
+            packageId = "codex-utils-cargo-bin";
+          }
+          {
             name = "core_test_support";
             packageId = "core_test_support";
           }
@@ -15358,7 +15584,7 @@ rec {
       };
       "codex-mcp" = rec {
         crateName = "codex-mcp";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "codex-mcp";
         libName = "codex_mcp";
@@ -15420,12 +15646,20 @@ rec {
             packageId = "codex-rmcp-client";
           }
           {
+            name = "codex-utils-absolute-path";
+            packageId = "codex-utils-absolute-path";
+          }
+          {
             name = "codex-utils-path-uri";
             packageId = "codex-utils-path-uri";
           }
           {
             name = "codex-utils-plugins";
             packageId = "codex-utils-plugins";
+          }
+          {
+            name = "codex-utils-process";
+            packageId = "codex-utils-process";
           }
           {
             name = "futures";
@@ -15496,6 +15730,10 @@ rec {
             packageId = "codex-plugin";
           }
           {
+            name = "codex-utils-cargo-bin";
+            packageId = "codex-utils-cargo-bin";
+          }
+          {
             name = "insta";
             packageId = "insta";
           }
@@ -15518,7 +15756,7 @@ rec {
       };
       "codex-mcp-extension" = rec {
         crateName = "codex-mcp-extension";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/mcp";
         libName = "codex_mcp_extension";
@@ -15647,7 +15885,7 @@ rec {
       };
       "codex-memories-extension" = rec {
         crateName = "codex-memories-extension";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/memories";
         libName = "codex_memories_extension";
@@ -15730,7 +15968,7 @@ rec {
       };
       "codex-memories-read" = rec {
         crateName = "codex-memories-read";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "memories/read";
         libName = "codex_memories_read";
@@ -15758,7 +15996,7 @@ rec {
       };
       "codex-memories-write" = rec {
         crateName = "codex-memories-write";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "memories/write";
         libName = "codex_memories_write";
@@ -15904,7 +16142,7 @@ rec {
       };
       "codex-mermaid" = rec {
         crateName = "codex-mermaid";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "mermaid";
         libName = "codex_mermaid";
@@ -15928,7 +16166,7 @@ rec {
       };
       "codex-message-history" = rec {
         crateName = "codex-message-history";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "message-history";
         libName = "codex_message_history";
@@ -15980,7 +16218,7 @@ rec {
       };
       "codex-model-provider" = rec {
         crateName = "codex-model-provider";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "model-provider";
         libName = "codex_model_provider";
@@ -16083,6 +16321,10 @@ rec {
             packageId = "base64 0.22.1";
           }
           {
+            name = "codex-utils-cargo-bin";
+            packageId = "codex-utils-cargo-bin";
+          }
+          {
             name = "codex-utils-redacted-string";
             packageId = "codex-utils-redacted-string";
           }
@@ -16108,7 +16350,7 @@ rec {
       };
       "codex-model-provider-info" = rec {
         crateName = "codex-model-provider-info";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "model-provider-info";
         libName = "codex_model_provider_info";
@@ -16169,7 +16411,7 @@ rec {
       };
       "codex-models-manager" = rec {
         crateName = "codex-models-manager";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "models-manager";
         libName = "codex_models_manager";
@@ -16241,7 +16483,7 @@ rec {
       };
       "codex-mxc-sandbox" = rec {
         crateName = "codex-mxc-sandbox";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "mxc-sandbox";
         libName = "codex_mxc_sandbox";
@@ -16323,7 +16565,7 @@ rec {
       };
       "codex-network-proxy" = rec {
         crateName = "codex-network-proxy";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -16508,7 +16750,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_NetworkManagement_IpHelper" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authorization" "Win32_System_Threading" ];
           }
@@ -16532,7 +16774,7 @@ rec {
       };
       "codex-ollama" = rec {
         crateName = "codex-ollama";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ollama";
         libName = "codex_ollama";
@@ -16603,7 +16845,7 @@ rec {
       };
       "codex-otel" = rec {
         crateName = "codex-otel";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "otel";
         libName = "codex_otel";
@@ -16752,7 +16994,7 @@ rec {
       };
       "codex-otel-trace-websocket" = rec {
         crateName = "codex-otel-trace-websocket";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "otel-trace-websocket";
         libName = "codex_otel_trace_websocket";
@@ -16786,7 +17028,7 @@ rec {
       };
       "codex-plugin" = rec {
         crateName = "codex-plugin";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "plugin";
         libName = "codex_plugin";
@@ -16834,7 +17076,7 @@ rec {
       };
       "codex-process-hardening" = rec {
         crateName = "codex-process-hardening";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "process-hardening";
         libName = "codex_process_hardening";
@@ -16854,7 +17096,7 @@ rec {
       };
       "codex-prompts" = rec {
         crateName = "codex-prompts";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "prompts";
         libName = "codex_prompts";
@@ -16910,7 +17152,7 @@ rec {
       };
       "codex-protocol" = rec {
         crateName = "codex-protocol";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "protocol";
         libName = "codex_protocol";
@@ -17093,7 +17335,7 @@ rec {
       };
       "codex-queue-extension" = rec {
         crateName = "codex-queue-extension";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/queue";
         libName = "codex_queue_extension";
@@ -17172,7 +17414,7 @@ rec {
       };
       "codex-realtime-webrtc" = rec {
         crateName = "codex-realtime-webrtc";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "realtime-webrtc";
         libName = "codex_realtime_webrtc";
@@ -17220,6 +17462,10 @@ rec {
         ];
         devDependencies = [
           {
+            name = "codex-utils-cargo-bin";
+            packageId = "codex-utils-cargo-bin";
+          }
+          {
             name = "ctor";
             packageId = "ctor 0.6.3";
           }
@@ -17237,7 +17483,7 @@ rec {
       };
       "codex-response-debug-context" = rec {
         crateName = "codex-response-debug-context";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "response-debug-context";
         libName = "codex_response_debug_context";
@@ -17269,7 +17515,7 @@ rec {
       };
       "codex-responses-api-proxy" = rec {
         crateName = "codex-responses-api-proxy";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -17335,7 +17581,7 @@ rec {
       };
       "codex-rmcp-client" = rec {
         crateName = "codex-rmcp-client";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -17558,7 +17804,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: ("windows" == target."os" or null);
             features = [ "Win32_Storage_FileSystem" ];
           }
@@ -17603,7 +17849,7 @@ rec {
       };
       "codex-rollout" = rec {
         crateName = "codex-rollout";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "rollout";
         libName = "codex_rollout";
@@ -17650,12 +17896,20 @@ rec {
             packageId = "codex-utils-absolute-path";
           }
           {
+            name = "codex-utils-output-truncation";
+            packageId = "codex-utils-output-truncation";
+          }
+          {
             name = "codex-utils-path";
             packageId = "codex-utils-path";
           }
           {
             name = "codex-utils-process";
             packageId = "codex-utils-process";
+          }
+          {
+            name = "codex-utils-string";
+            packageId = "codex-utils-string";
           }
           {
             name = "memchr";
@@ -17715,7 +17969,7 @@ rec {
       };
       "codex-rollout-trace" = rec {
         crateName = "codex-rollout-trace";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "rollout-trace";
         libName = "codex_rollout_trace";
@@ -17769,7 +18023,7 @@ rec {
       };
       "codex-sandboxing" = rec {
         crateName = "codex-sandboxing";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "sandboxing";
         libName = "codex_sandboxing";
@@ -17861,6 +18115,10 @@ rec {
             packageId = "anyhow";
           }
           {
+            name = "codex-utils-cargo-bin";
+            packageId = "codex-utils-cargo-bin";
+          }
+          {
             name = "pretty_assertions";
             packageId = "pretty_assertions";
           }
@@ -17878,7 +18136,7 @@ rec {
       };
       "codex-secrets" = rec {
         crateName = "codex-secrets";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "secrets";
         libName = "codex_secrets";
@@ -17952,7 +18210,7 @@ rec {
       };
       "codex-shell-command" = rec {
         crateName = "codex-shell-command";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "shell-command";
         libName = "codex_shell_command";
@@ -18031,89 +18289,9 @@ rec {
         ];
 
       };
-      "codex-shell-escalation" = rec {
-        crateName = "codex-shell-escalation";
-        version = "0.161.0";
-        edition = "2024";
-        crateBin = [
-          {
-            name = "codex-execve-wrapper";
-            path = "src/bin/main_execve_wrapper.rs";
-            requiredFeatures = [ ];
-          }
-        ];
-        src = crateSource sourceFilter "shell-escalation";
-        libName = "codex_shell_escalation";
-        dependencies = [
-          {
-            name = "anyhow";
-            packageId = "anyhow";
-          }
-          {
-            name = "clap";
-            packageId = "clap";
-            features = [ "derive" ];
-          }
-          {
-            name = "codex-protocol";
-            packageId = "codex-protocol";
-          }
-          {
-            name = "codex-utils-absolute-path";
-            packageId = "codex-utils-absolute-path";
-          }
-          {
-            name = "libc";
-            packageId = "libc";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "rc" "derive" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "socket2";
-            packageId = "socket2 0.6.3";
-            features = [ "all" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            features = [ "io-std" "net" "macros" "process" "rt-multi-thread" "signal" "time" ];
-          }
-          {
-            name = "tokio-util";
-            packageId = "tokio-util";
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "tracing-subscriber";
-            packageId = "tracing-subscriber";
-            features = [ "env-filter" "fmt" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "pretty_assertions";
-            packageId = "pretty_assertions";
-          }
-          {
-            name = "tempfile";
-            packageId = "tempfile";
-          }
-        ];
-
-      };
       "codex-skills" = rec {
         crateName = "codex-skills";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "skills";
         libName = "codex_skills";
@@ -18170,7 +18348,7 @@ rec {
       };
       "codex-skills-extension" = rec {
         crateName = "codex-skills-extension";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/skills";
         libName = "codex_skills_extension";
@@ -18309,12 +18487,16 @@ rec {
             packageId = "tokio";
             features = [ "macros" "rt-multi-thread" ];
           }
+          {
+            name = "tracing-subscriber";
+            packageId = "tracing-subscriber";
+          }
         ];
 
       };
       "codex-state" = rec {
         crateName = "codex-state";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "state";
         libName = "codex_state";
@@ -18420,7 +18602,7 @@ rec {
       };
       "codex-stdio-to-uds" = rec {
         crateName = "codex-stdio-to-uds";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -18464,7 +18646,7 @@ rec {
       };
       "codex-tcp-tunnel" = rec {
         crateName = "codex-tcp-tunnel";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "tcp-tunnel";
         libName = "codex_tcp_tunnel";
@@ -18544,7 +18726,7 @@ rec {
       };
       "codex-terminal-detection" = rec {
         crateName = "codex-terminal-detection";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "terminal-detection";
         libName = "codex_terminal_detection";
@@ -18564,7 +18746,7 @@ rec {
       };
       "codex-test-binary-support" = rec {
         crateName = "codex-test-binary-support";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "test-binary-support";
         libName = "codex_test_binary_support";
@@ -18583,7 +18765,7 @@ rec {
       };
       "codex-thread-manager-sample" = rec {
         crateName = "codex-thread-manager-sample";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -18620,7 +18802,7 @@ rec {
       };
       "codex-thread-store" = rec {
         crateName = "codex-thread-store";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "thread-store";
         libName = "codex_thread_store";
@@ -18749,7 +18931,7 @@ rec {
       };
       "codex-tools" = rec {
         crateName = "codex-tools";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "tools";
         libName = "codex_tools";
@@ -18781,10 +18963,6 @@ rec {
           {
             name = "codex-protocol";
             packageId = "codex-protocol";
-          }
-          {
-            name = "codex-utils-absolute-path";
-            packageId = "codex-utils-absolute-path";
           }
           {
             name = "codex-utils-output-truncation";
@@ -18824,10 +19002,6 @@ rec {
             packageId = "thiserror 2.0.18";
           }
           {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
             name = "urlencoding";
             packageId = "urlencoding";
           }
@@ -18846,7 +19020,7 @@ rec {
       };
       "codex-tui" = rec {
         crateName = "codex-tui";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -19321,7 +19495,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Globalization" "Win32_Security" "Win32_Storage_FileSystem" "Win32_System_Console" "Win32_System_Diagnostics_ToolHelp" "Win32_System_RemoteDesktop" "Win32_System_IO" "Win32_System_Pipes" "Win32_System_Threading" "Win32_UI_WindowsAndMessaging" ];
           }
@@ -19376,6 +19550,10 @@ rec {
             packageId = "insta";
           }
           {
+            name = "opentelemetry_sdk";
+            packageId = "opentelemetry_sdk";
+          }
+          {
             name = "pretty_assertions";
             packageId = "pretty_assertions";
           }
@@ -19409,7 +19587,7 @@ rec {
       };
       "codex-uds" = rec {
         crateName = "codex-uds";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "uds";
         libName = "codex_uds";
@@ -19442,7 +19620,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Security" "Win32_Security_Authorization" "Win32_Storage_FileSystem" "Win32_System_Threading" "Win32_System_SystemServices" "Win32_Networking_WinSock" "Win32_System_IO" ];
           }
@@ -19466,7 +19644,7 @@ rec {
       };
       "codex-user-verification" = rec {
         crateName = "codex-user-verification";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "user-verification";
         libName = "codex_user_verification";
@@ -19553,7 +19731,7 @@ rec {
       };
       "codex-utils-absolute-path" = rec {
         crateName = "codex-utils-absolute-path";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/absolute-path";
         libName = "codex_utils_absolute_path";
@@ -19599,7 +19777,7 @@ rec {
       };
       "codex-utils-approval-presets" = rec {
         crateName = "codex-utils-approval-presets";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/approval-presets";
         libName = "codex_utils_approval_presets";
@@ -19613,7 +19791,7 @@ rec {
       };
       "codex-utils-audio" = rec {
         crateName = "codex-utils-audio";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/audio";
         libName = "codex_utils_audio";
@@ -19659,7 +19837,7 @@ rec {
       };
       "codex-utils-cache" = rec {
         crateName = "codex-utils-cache";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/cache";
         libName = "codex_utils_cache";
@@ -19689,7 +19867,7 @@ rec {
       };
       "codex-utils-cargo-bin" = rec {
         crateName = "codex-utils-cargo-bin";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/cargo-bin";
         libName = "codex_utils_cargo_bin";
@@ -19711,7 +19889,7 @@ rec {
       };
       "codex-utils-cli" = rec {
         crateName = "codex-utils-cli";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/cli";
         libName = "codex_utils_cli";
@@ -19749,7 +19927,7 @@ rec {
       };
       "codex-utils-elapsed" = rec {
         crateName = "codex-utils-elapsed";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/elapsed";
         libName = "codex_utils_elapsed";
@@ -19757,7 +19935,7 @@ rec {
       };
       "codex-utils-fuzzy-match" = rec {
         crateName = "codex-utils-fuzzy-match";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/fuzzy-match";
         libName = "codex_utils_fuzzy_match";
@@ -19765,7 +19943,7 @@ rec {
       };
       "codex-utils-git-discovery" = rec {
         crateName = "codex-utils-git-discovery";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/git-discovery";
         libName = "codex_utils_git_discovery";
@@ -19819,7 +19997,7 @@ rec {
       };
       "codex-utils-home-dir" = rec {
         crateName = "codex-utils-home-dir";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/home-dir";
         libName = "codex_utils_home_dir";
@@ -19847,7 +20025,7 @@ rec {
       };
       "codex-utils-image" = rec {
         crateName = "codex-utils-image";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/image";
         libName = "codex_utils_image";
@@ -19901,7 +20079,7 @@ rec {
       };
       "codex-utils-json-to-toml" = rec {
         crateName = "codex-utils-json-to-toml";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/json-to-toml";
         libName = "codex_utils_json_to_toml";
@@ -19925,7 +20103,7 @@ rec {
       };
       "codex-utils-oss" = rec {
         crateName = "codex-utils-oss";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/oss";
         libName = "codex_utils_oss";
@@ -19951,7 +20129,7 @@ rec {
       };
       "codex-utils-output-truncation" = rec {
         crateName = "codex-utils-output-truncation";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/output-truncation";
         libName = "codex_utils_output_truncation";
@@ -19964,6 +20142,10 @@ rec {
             name = "codex-utils-string";
             packageId = "codex-utils-string";
           }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
         ];
         devDependencies = [
           {
@@ -19975,7 +20157,7 @@ rec {
       };
       "codex-utils-path" = rec {
         crateName = "codex-utils-path";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/path-utils";
         libName = "codex_utils_path";
@@ -19994,7 +20176,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Com" "Win32_UI_Shell" ];
           }
@@ -20013,7 +20195,7 @@ rec {
       };
       "codex-utils-path-uri" = rec {
         crateName = "codex-utils-path-uri";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/path-uri";
         libName = "codex_utils_path_uri";
@@ -20067,7 +20249,7 @@ rec {
       };
       "codex-utils-plugins" = rec {
         crateName = "codex-utils-plugins";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/plugins";
         libName = "codex_utils_plugins";
@@ -20113,7 +20295,7 @@ rec {
       };
       "codex-utils-process" = rec {
         crateName = "codex-utils-process";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/process";
         libName = "codex_utils_process";
@@ -20132,7 +20314,7 @@ rec {
       };
       "codex-utils-pty" = rec {
         crateName = "codex-utils-pty";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/pty";
         libName = "codex_utils_pty";
@@ -20184,6 +20366,10 @@ rec {
         ];
         devDependencies = [
           {
+            name = "codex-utils-cargo-bin";
+            packageId = "codex-utils-cargo-bin";
+          }
+          {
             name = "ctor";
             packageId = "ctor 0.6.3";
           }
@@ -20200,7 +20386,7 @@ rec {
       };
       "codex-utils-readiness" = rec {
         crateName = "codex-utils-readiness";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/readiness";
         libName = "codex_utils_readiness";
@@ -20234,7 +20420,7 @@ rec {
       };
       "codex-utils-redacted-string" = rec {
         crateName = "codex-utils-redacted-string";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/redacted-string";
         libName = "codex_utils_redacted_string";
@@ -20253,7 +20439,7 @@ rec {
       };
       "codex-utils-rustls-provider" = rec {
         crateName = "codex-utils-rustls-provider";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/rustls-provider";
         libName = "codex_utils_rustls_provider";
@@ -20269,7 +20455,7 @@ rec {
       };
       "codex-utils-sandbox-summary" = rec {
         crateName = "codex-utils-sandbox-summary";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/sandbox-summary";
         libName = "codex_utils_sandbox_summary";
@@ -20297,7 +20483,7 @@ rec {
       };
       "codex-utils-sleep-inhibitor" = rec {
         crateName = "codex-utils-sleep-inhibitor";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/sleep-inhibitor";
         libName = "codex_utils_sleep_inhibitor";
@@ -20327,7 +20513,7 @@ rec {
       };
       "codex-utils-stream-parser" = rec {
         crateName = "codex-utils-stream-parser";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/stream-parser";
         libName = "codex_utils_stream_parser";
@@ -20341,7 +20527,7 @@ rec {
       };
       "codex-utils-string" = rec {
         crateName = "codex-utils-string";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/string";
         libName = "codex_utils_string";
@@ -20370,7 +20556,7 @@ rec {
       };
       "codex-utils-template" = rec {
         crateName = "codex-utils-template";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "utils/template";
         libName = "codex_utils_template";
@@ -20384,7 +20570,7 @@ rec {
       };
       "codex-v8-poc" = rec {
         crateName = "codex-v8-poc";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "v8-poc";
         libName = "codex_v8_poc";
@@ -20406,7 +20592,7 @@ rec {
       };
       "codex-voice-host" = rec {
         crateName = "codex-voice-host";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -20528,7 +20714,7 @@ rec {
       };
       "codex-web-search-extension" = rec {
         crateName = "codex-web-search-extension";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "ext/web-search";
         libName = "codex_web_search_extension";
@@ -20604,7 +20790,7 @@ rec {
       };
       "codex-websocket-auth" = rec {
         crateName = "codex-websocket-auth";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "websocket-auth";
         libName = "codex_websocket_auth";
@@ -20670,7 +20856,7 @@ rec {
       };
       "codex-websocket-client" = rec {
         crateName = "codex-websocket-client";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "websocket-client";
         libName = "codex_websocket_client";
@@ -20734,7 +20920,7 @@ rec {
       };
       "codex-windows-sandbox" = rec {
         crateName = "codex-windows-sandbox";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -20846,12 +21032,16 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
-            features = [ "Win32_Foundation" "Win32_System_Diagnostics_Debug" "Win32_Security" "Win32_Security_Authorization" "Win32_System_Threading" "Win32_System_JobObjects" "Win32_System_SystemServices" "Win32_System_Environment" "Win32_System_Pipes" "Win32_System_WindowsProgramming" "Win32_System_IO" "Win32_System_Memory" "Win32_System_Kernel" "Win32_System_Console" "Win32_System_RemoteDesktop" "Win32_Storage_FileSystem" "Win32_Storage_Packaging_Appx" "Win32_System_Diagnostics_ToolHelp" "Win32_NetworkManagement_NetManagement" "Win32_NetworkManagement_WindowsFilteringPlatform" "Win32_Networking_WinSock" "Win32_System_LibraryLoader" "Win32_System_Com" "Win32_Security_Cryptography" "Win32_Security_Authentication_Identity" "Win32_System_Rpc" "Win32_Graphics_Gdi" "Win32_System_StationsAndDesktops" "Win32_UI_WindowsAndMessaging" "Win32_UI_Shell" "Win32_System_Registry" "Win32_System_Services" ];
+            features = [ "Win32_Foundation" "Win32_System_Diagnostics_Debug" "Win32_Security" "Win32_Security_Authorization" "Win32_System_Threading" "Win32_System_JobObjects" "Win32_System_SystemServices" "Win32_System_Environment" "Win32_System_Pipes" "Win32_System_WindowsProgramming" "Win32_System_IO" "Win32_System_Memory" "Win32_System_Console" "Win32_System_RemoteDesktop" "Win32_Storage_FileSystem" "Win32_Storage_Packaging_Appx" "Win32_System_Diagnostics_ToolHelp" "Win32_NetworkManagement_NetManagement" "Win32_NetworkManagement_WindowsFilteringPlatform" "Win32_Networking_WinSock" "Win32_System_LibraryLoader" "Win32_System_Com" "Win32_Security_Cryptography" "Win32_Security_Authentication_Identity" "Win32_System_Rpc" "Win32_Graphics_Gdi" "Win32_System_StationsAndDesktops" "Win32_UI_WindowsAndMessaging" "Win32_UI_Shell" "Win32_System_Registry" "Win32_System_Services" ];
           }
         ];
         devDependencies = [
+          {
+            name = "codex-utils-cargo-bin";
+            packageId = "codex-utils-cargo-bin";
+          }
           {
             name = "codex-windows-sandbox-test-support";
             packageId = "codex-windows-sandbox-test-support";
@@ -20865,7 +21055,7 @@ rec {
       };
       "codex-windows-sandbox-service" = rec {
         crateName = "codex-windows-sandbox-service";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         crateBin = [
           {
@@ -20918,7 +21108,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.52.0";
+            packageId = "windows-sys 0.61.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_NetworkManagement_NetManagement" "Win32_Security" "Win32_Security_Authorization" "Win32_Storage_FileSystem" "Win32_Storage_Packaging_Appx" "Win32_System_Com" "Win32_System_Environment" "Win32_System_EventLog" "Win32_System_IO" "Win32_System_JobObjects" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_RemoteDesktop" "Win32_System_Services" "Win32_System_SystemServices" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_UI_Shell" ];
           }
@@ -20933,7 +21123,7 @@ rec {
       };
       "codex-windows-sandbox-test-support" = rec {
         crateName = "codex-windows-sandbox-test-support";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "windows-sandbox-rs/tests/support";
         libName = "codex_windows_sandbox_test_support";
@@ -20948,7 +21138,7 @@ rec {
       };
       "codex-workload-identity" = rec {
         crateName = "codex-workload-identity";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "workload-identity";
         libName = "codex_workload_identity";
@@ -21003,7 +21193,7 @@ rec {
       };
       "codex-worktree" = rec {
         crateName = "codex-worktree";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "worktree";
         libName = "codex_worktree";
@@ -21044,6 +21234,10 @@ rec {
           }
         ];
         devDependencies = [
+          {
+            name = "codex-utils-cargo-bin";
+            packageId = "codex-utils-cargo-bin";
+          }
           {
             name = "pretty_assertions";
             packageId = "pretty_assertions";
@@ -21720,7 +21914,7 @@ rec {
       };
       "core_test_support" = rec {
         crateName = "core_test_support";
-        version = "0.161.0";
+        version = "0.163.0";
         edition = "2024";
         src = crateSource sourceFilter "core/tests/common";
         libPath = "lib.rs";
@@ -22361,12 +22555,12 @@ rec {
       "crossterm" = rec {
         crateName = "crossterm";
         version = "0.29.0";
-        edition = "2021";
+        edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/openai-oss-forks/crossterm";
-          rev = "efa177859fd9623d57b9fe7ae9bf491ae1ac6ec4";
-          sha256 = "0m4jqnmcd5xv78s6yh2ic06xydp7xrrpbw2b6rjxwfcr681ngqfh";
+          rev = "ed1cdab335221515706178d68495bba2aed1924f";
+          sha256 = "0ila1wrsbnq7n0j9r76k5kh9l26qpkr3i1hhcyxlvf9slxkwb77d";
         };
         authors = [
           "T. Post"
@@ -22387,10 +22581,6 @@ rec {
             packageId = "derive_more 2.1.1";
             optional = true;
             features = [ "is_variant" ];
-          }
-          {
-            name = "document-features";
-            packageId = "document-features";
           }
           {
             name = "futures-core";
@@ -22438,8 +22628,9 @@ rec {
           }
         ];
         features = {
-          "default" = [ "bracketed-paste" "events" "windows" "derive-more" ];
+          "default" = [ "bracketed-paste" "derive-more" "events" "windows" ];
           "derive-more" = [ "dep:derive_more" ];
+          "document-features" = [ "dep:document-features" ];
           "event-stream" = [ "dep:futures-core" "events" ];
           "events" = [ "dep:mio" "dep:signal-hook" "dep:signal-hook-mio" ];
           "filedescriptor" = [ "dep:filedescriptor" ];
@@ -24399,7 +24590,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_UI_Shell" "Win32_Foundation" "Win32_Globalization" "Win32_System_Com" ];
           }
@@ -25448,7 +25639,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Diagnostics_Debug" ];
           }
@@ -26216,10 +26407,12 @@ rec {
       };
       "fluent" = rec {
         crateName = "fluent";
-        version = "0.16.1";
+        version = "0.17.0";
         edition = "2021";
-        sha256 = "0njmdpwz52yjzyp55iik9k6vrixqiy7190d98pk0rgdy0x3n6x5v";
+        sha256 = "0xq4cxw4mkdh1k9i5w850sky0m41la8sm6nbpw76n3f5lbascdw1";
         authors = [
+          "Caleb Maclennan <caleb@alerque.com>"
+          "Bruce Mitchener <bruce.mitchener@gmail.com"
           "Zibi Braniecki <zibi@unicode.org>"
           "Staś Małolepszy <stas@mozilla.com>"
         ];
@@ -26239,11 +26432,13 @@ rec {
       };
       "fluent-bundle" = rec {
         crateName = "fluent-bundle";
-        version = "0.15.3";
+        version = "0.16.0";
         edition = "2021";
-        sha256 = "14zl0cjn361is69pb1zry4k2zzh5nzsfv0iz05wccl00x0ga5q3z";
+        sha256 = "1x1v8bmym6x9pl87f82lbzwlc84kdn0lgcwi73ki2mwgj6w3q801";
         libName = "fluent_bundle";
         authors = [
+          "Caleb Maclennan <caleb@alerque.com>"
+          "Bruce Mitchener <bruce.mitchener@gmail.com"
           "Zibi Braniecki <zibi@unicode.org>"
           "Staś Małolepszy <stas@mozilla.com>"
         ];
@@ -26266,11 +26461,11 @@ rec {
           }
           {
             name = "rustc-hash";
-            packageId = "rustc-hash 1.1.0";
+            packageId = "rustc-hash";
           }
           {
             name = "self_cell";
-            packageId = "self_cell 0.10.3";
+            packageId = "self_cell";
           }
           {
             name = "smallvec";
@@ -26321,25 +26516,30 @@ rec {
       };
       "fluent-syntax" = rec {
         crateName = "fluent-syntax";
-        version = "0.11.1";
+        version = "0.12.0";
         edition = "2021";
         crateBin = [];
-        sha256 = "0gd3cdvsx9ymbb8hijcsc9wyf8h1pbcbpsafg4ldba56ji30qlra";
+        sha256 = "1661sp6kl268n445x7jjhnbkgiaa1xcpyryq0i6iiz9zqn3x5w2l";
         libName = "fluent_syntax";
         authors = [
+          "Caleb Maclennan <caleb@alerque.com>"
+          "Bruce Mitchener <bruce.mitchener@gmail.com"
           "Zibi Braniecki <zibi@unicode.org>"
           "Staś Małolepszy <stas@mozilla.com>"
         ];
         dependencies = [
           {
+            name = "memchr";
+            packageId = "memchr";
+          }
+          {
             name = "thiserror";
-            packageId = "thiserror 1.0.69";
+            packageId = "thiserror 2.0.18";
           }
         ];
         features = {
-          "json" = [ "serde" "serde_json" ];
+          "json" = [ "serde" "dep:serde_json" ];
           "serde" = [ "dep:serde" ];
-          "serde_json" = [ "dep:serde_json" ];
         };
         resolvedDefaultFeatures = [ "default" ];
       };
@@ -27183,6 +27383,13 @@ rec {
             packageId = "cfg-if";
           }
           {
+            name = "js-sys";
+            packageId = "js-sys";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: (("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null)) && (builtins.elem "atomics" targetFeatures));
+          }
+          {
             name = "libc";
             packageId = "libc";
             usesDefaultFeatures = false;
@@ -27252,12 +27459,19 @@ rec {
             packageId = "wasip3";
             target = { target, features }: (("wasm32" == target."arch" or null) && ("wasi" == target."os" or null) && ("p3" == target."env" or null));
           }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: (("wasm32" == target."arch" or null) && (("unknown" == target."os" or null) || ("none" == target."os" or null)));
+          }
         ];
         features = {
           "sys_rng" = [ "dep:rand_core" ];
           "wasm_js" = [ "dep:wasm-bindgen" "dep:js-sys" ];
         };
-        resolvedDefaultFeatures = [ "std" "sys_rng" ];
+        resolvedDefaultFeatures = [ "std" "sys_rng" "wasm_js" ];
       };
       "ghash" = rec {
         crateName = "ghash";
@@ -27348,7 +27562,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Networking_WinSock" ];
           }
@@ -32067,6 +32281,82 @@ rec {
         ];
 
       };
+      "hpke" = rec {
+        crateName = "hpke";
+        version = "0.12.0";
+        edition = "2021";
+        sha256 = "048bjvhcxwrwnmsc1lsiaiwk8mdd2nw5hl9c501kd30r2ix645s9";
+        authors = [
+          "Michael Rosenberg <michael@mrosenberg.pub>"
+        ];
+        dependencies = [
+          {
+            name = "aead";
+            packageId = "aead";
+          }
+          {
+            name = "aes-gcm";
+            packageId = "aes-gcm";
+          }
+          {
+            name = "chacha20poly1305";
+            packageId = "chacha20poly1305";
+          }
+          {
+            name = "digest";
+            packageId = "digest 0.10.7";
+          }
+          {
+            name = "generic-array";
+            packageId = "generic-array";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "hkdf";
+            packageId = "hkdf 0.12.4";
+          }
+          {
+            name = "hmac";
+            packageId = "hmac 0.12.1";
+          }
+          {
+            name = "p256";
+            packageId = "p256";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "arithmetic" "ecdh" ];
+          }
+          {
+            name = "rand_core";
+            packageId = "rand_core 0.6.4";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "sha2";
+            packageId = "sha2 0.10.9";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "subtle";
+            packageId = "subtle";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "zeroize";
+            packageId = "zeroize";
+            usesDefaultFeatures = false;
+            features = [ "zeroize_derive" ];
+          }
+        ];
+        features = {
+          "default" = [ "alloc" "p256" "x25519" ];
+          "p256" = [ "dep:p256" ];
+          "p384" = [ "dep:p384" ];
+          "p521" = [ "dep:p521" ];
+          "x25519" = [ "dep:x25519-dalek" ];
+        };
+        resolvedDefaultFeatures = [ "alloc" "p256" ];
+      };
       "http 0.2.12" = rec {
         crateName = "http";
         version = "0.2.12";
@@ -32290,9 +32580,9 @@ rec {
       };
       "hyper" = rec {
         crateName = "hyper";
-        version = "1.8.1";
+        version = "1.11.1";
         edition = "2021";
-        sha256 = "04cxr8j5y86bhxxlyqb8xkxjskpajk7cxwfzzk4v3my3a3rd9cia";
+        sha256 = "0hxyikj5livhmw5q3x3ifyhphh1g2cjsc32nsg1jcyhflpx03d97";
         authors = [
           "Sean McArthur <sean@seanmonstar.com>"
         ];
@@ -32350,11 +32640,6 @@ rec {
             optional = true;
           }
           {
-            name = "pin-utils";
-            packageId = "pin-utils";
-            optional = true;
-          }
-          {
             name = "smallvec";
             packageId = "smallvec";
             optional = true;
@@ -32391,8 +32676,8 @@ rec {
           "client" = [ "dep:want" "dep:pin-project-lite" "dep:smallvec" ];
           "ffi" = [ "dep:http-body-util" "dep:futures-util" ];
           "full" = [ "client" "http1" "http2" "server" ];
-          "http1" = [ "dep:atomic-waker" "dep:futures-channel" "dep:futures-core" "dep:httparse" "dep:itoa" "dep:pin-utils" ];
-          "http2" = [ "dep:futures-channel" "dep:futures-core" "dep:h2" ];
+          "http1" = [ "dep:atomic-waker" "dep:futures-channel" "dep:futures-core" "dep:httparse" "dep:itoa" ];
+          "http2" = [ "dep:atomic-waker" "dep:futures-channel" "dep:futures-core" "dep:h2" ];
           "server" = [ "dep:httpdate" "dep:pin-project-lite" "dep:smallvec" ];
           "tracing" = [ "dep:tracing" ];
         };
@@ -32782,9 +33067,9 @@ rec {
       };
       "i18n-embed" = rec {
         crateName = "i18n-embed";
-        version = "0.15.4";
+        version = "0.16.0";
         edition = "2018";
-        sha256 = "1i04hjbwg1y0sgvqbfvq54sf70k7rngrkgnx0vgnszprjcngr7v6";
+        sha256 = "0183rf7jchhy6lnd2rgjcz54b0k7q1zqjy7s5qlzpbnwfnqbn5x2";
         libName = "i18n_embed";
         authors = [
           "Luke Frisken <l.frisken@gmail.com>"
@@ -32850,17 +33135,17 @@ rec {
           "arc-swap" = [ "dep:arc-swap" ];
           "autoreload" = [ "notify" ];
           "default" = [ "rust-embed" ];
-          "desktop-requester" = [ "locale_config" ];
+          "desktop-requester" = [ "sys-locale" ];
           "filesystem-assets" = [ "walkdir" ];
           "fluent" = [ "dep:fluent" ];
           "fluent-syntax" = [ "dep:fluent-syntax" ];
           "fluent-system" = [ "fluent" "fluent-syntax" "parking_lot" "i18n-embed-impl" "i18n-embed-impl/fluent-system" "arc-swap" ];
           "gettext-system" = [ "tr" "tr/gettext" "dep:gettext" "parking_lot" "i18n-embed-impl" "i18n-embed-impl/gettext-system" ];
           "i18n-embed-impl" = [ "dep:i18n-embed-impl" ];
-          "locale_config" = [ "dep:locale_config" ];
           "notify" = [ "dep:notify" ];
           "parking_lot" = [ "dep:parking_lot" ];
           "rust-embed" = [ "dep:rust-embed" ];
+          "sys-locale" = [ "dep:sys-locale" ];
           "tr" = [ "dep:tr" ];
           "walkdir" = [ "dep:walkdir" ];
           "web-sys" = [ "dep:web-sys" ];
@@ -32870,9 +33155,9 @@ rec {
       };
       "i18n-embed-fl" = rec {
         crateName = "i18n-embed-fl";
-        version = "0.9.4";
+        version = "0.10.1";
         edition = "2018";
-        sha256 = "0b9wqnp8zy531xqjsr3a7ss3483j3561hdf5fqvi9iiz1ffrdch4";
+        sha256 = "1nkwni2rxdhvqdwpmpnqw4fx9ncq7lx3d2z32fg79cix1k9nnbk0";
         procMacro = true;
         libName = "i18n_embed_fl";
         authors = [
@@ -32901,8 +33186,8 @@ rec {
             features = [ "fluent-system" "filesystem-assets" ];
           }
           {
-            name = "proc-macro-error2";
-            packageId = "proc-macro-error2";
+            name = "proc-macro-error3";
+            packageId = "proc-macro-error3";
           }
           {
             name = "proc-macro2";
@@ -34466,7 +34751,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" ];
           }
@@ -34638,7 +34923,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             optional = true;
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows" or false);
@@ -35595,6 +35880,22 @@ rec {
           "proc_macro" = [ "dep:linktime-proc-macro" ];
         };
       };
+      "linkify" = rec {
+        crateName = "linkify";
+        version = "0.11.0";
+        edition = "2018";
+        sha256 = "1nys0fqpwnqpbkmzap5l6vk2fhcqzqh6608z66bpcs9i7lpsxycj";
+        authors = [
+          "Robin Stocker <robin@nibor.org>"
+        ];
+        dependencies = [
+          {
+            name = "memchr";
+            packageId = "memchr";
+          }
+        ];
+
+      };
       "linktime-proc-macro" = rec {
         crateName = "linktime-proc-macro";
         version = "0.1.0";
@@ -36485,7 +36786,7 @@ rec {
           "std" = [ "sha3/std" ];
           "zeroize" = [ "dep:zeroize" ];
         };
-        resolvedDefaultFeatures = [ "zeroize" ];
+        resolvedDefaultFeatures = [ "default" "deterministic" "std" "zeroize" ];
       };
       "moka" = rec {
         crateName = "moka";
@@ -37281,7 +37582,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             rename = "windows";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" "Win32_Storage_FileSystem" "Win32_Security" ];
@@ -40793,7 +41094,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.48.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Pipes" "Win32_Security" ];
           }
@@ -42485,16 +42786,17 @@ rec {
         ];
 
       };
-      "proc-macro-error-attr2" = rec {
-        crateName = "proc-macro-error-attr2";
-        version = "2.0.0";
+      "proc-macro-error-attr3" = rec {
+        crateName = "proc-macro-error-attr3";
+        version = "3.1.1";
         edition = "2021";
-        sha256 = "1ifzi763l7swl258d8ar4wbpxj4c9c2im7zy89avm6xv6vgl5pln";
+        sha256 = "1nlrfz115hhkay75nrk1faj5y6w84pdfbzcz2spf2q1k2ca4smly";
         procMacro = true;
-        libName = "proc_macro_error_attr2";
+        libName = "proc_macro_error_attr3";
         authors = [
           "CreepySkeleton <creepy-skeleton@yandex.ru>"
           "GnomedDev <david2005thomas@gmail.com>"
+          "gamma0987 <gamma0987@posteo.de>"
         ];
         dependencies = [
           {
@@ -42508,20 +42810,21 @@ rec {
         ];
 
       };
-      "proc-macro-error2" = rec {
-        crateName = "proc-macro-error2";
-        version = "2.0.1";
+      "proc-macro-error3" = rec {
+        crateName = "proc-macro-error3";
+        version = "3.1.1";
         edition = "2021";
-        sha256 = "00lq21vgh7mvyx51nwxwf822w2fpww1x0z8z0q47p8705g2hbv0i";
-        libName = "proc_macro_error2";
+        sha256 = "0cr2am1lpa4asmayrdz9ia8mh5akv8fkp491dc824v23ndql83cg";
+        libName = "proc_macro_error3";
         authors = [
           "CreepySkeleton <creepy-skeleton@yandex.ru>"
           "GnomedDev <david2005thomas@gmail.com>"
+          "gamma0987 <gamma0987@posteo.de>"
         ];
         dependencies = [
           {
-            name = "proc-macro-error-attr2";
-            packageId = "proc-macro-error-attr2";
+            name = "proc-macro-error-attr3";
+            packageId = "proc-macro-error-attr3";
           }
           {
             name = "proc-macro2";
@@ -42533,7 +42836,8 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 2.0.117";
+            packageId = "syn 3.0.3";
+            rename = "syn3";
             optional = true;
             usesDefaultFeatures = false;
           }
@@ -42541,15 +42845,18 @@ rec {
         devDependencies = [
           {
             name = "syn";
-            packageId = "syn 2.0.117";
+            packageId = "syn 3.0.3";
+            rename = "syn3";
             features = [ "full" ];
           }
         ];
         features = {
-          "default" = [ "syn-error" ];
-          "syn-error" = [ "dep:syn" ];
+          "default" = [ "syn3-error" ];
+          "syn-error" = [ "syn3-error" ];
+          "syn2-error" = [ "dep:syn2" ];
+          "syn3-error" = [ "dep:syn3" ];
         };
-        resolvedDefaultFeatures = [ "default" "syn-error" ];
+        resolvedDefaultFeatures = [ "default" "syn3-error" ];
       };
       "proc-macro2" = rec {
         crateName = "proc-macro2";
@@ -43391,7 +43698,7 @@ rec {
           }
           {
             name = "rustc-hash";
-            packageId = "rustc-hash 2.1.1";
+            packageId = "rustc-hash";
           }
           {
             name = "rustls";
@@ -43465,9 +43772,9 @@ rec {
       };
       "quinn-proto" = rec {
         crateName = "quinn-proto";
-        version = "0.11.15";
+        version = "0.11.18";
         edition = "2021";
-        sha256 = "0gknq1m2b9g3fsndka2gn7f2k45vb0zdssrh1qpkql7cbdf97jsg";
+        sha256 = "1z6931x1gn4mkhrbbbww3syb4c8awc229bqz5x7lyqvnw6ynsx59";
         libName = "quinn_proto";
         dependencies = [
           {
@@ -43476,7 +43783,7 @@ rec {
           }
           {
             name = "getrandom";
-            packageId = "getrandom 0.3.4";
+            packageId = "getrandom 0.4.2";
             usesDefaultFeatures = false;
             target = { target, features }: ((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null));
             features = [ "wasm_js" ];
@@ -43487,7 +43794,11 @@ rec {
           }
           {
             name = "rand";
-            packageId = "rand 0.9.3";
+            packageId = "rand 0.10.1";
+          }
+          {
+            name = "rand_pcg";
+            packageId = "rand_pcg";
           }
           {
             name = "ring";
@@ -43502,7 +43813,7 @@ rec {
           }
           {
             name = "rustc-hash";
-            packageId = "rustc-hash 2.1.1";
+            packageId = "rustc-hash";
           }
           {
             name = "rustls";
@@ -43632,7 +43943,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_IO" "Win32_Networking_WinSock" ];
           }
@@ -45086,6 +45397,24 @@ rec {
           "std" = [ "getrandom?/std" ];
         };
         resolvedDefaultFeatures = [ "os_rng" "std" ];
+      };
+      "rand_pcg" = rec {
+        crateName = "rand_pcg";
+        version = "0.10.2";
+        edition = "2024";
+        sha256 = "0sp817pvwb3d2nxb1ww1y0f8x3kc4w198j2iqvs742hwgq9z986a";
+        authors = [
+          "The Rand Project Developers"
+        ];
+        dependencies = [
+          {
+            name = "rand_core";
+            packageId = "rand_core 0.10.1";
+          }
+        ];
+        features = {
+          "serde" = [ "dep:serde" ];
+        };
       };
       "rand_regex" = rec {
         crateName = "rand_regex";
@@ -46809,13 +47138,13 @@ rec {
       };
       "rmcp" = rec {
         crateName = "rmcp";
-        version = "3.3.0";
+        version = "3.5.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/modelcontextprotocol/rust-sdk";
-          rev = "3e636cab26c013eca5131103c03d20237f12c4df";
-          sha256 = "0r3mv5hvkwf0s35c8s1hv83w1cx2drsdn7f0y6v4qafm0dpwwlzr";
+          rev = "4048ac40e958fb1a7d614617a2ae8d26666ee2fa";
+          sha256 = "1kqgg3j24b4gcky96r63ps6jf9n0810c52pab5v421bjwc9axca5";
         };
         dependencies = [
           {
@@ -46979,6 +47308,11 @@ rec {
             features = [ "chrono04" ];
           }
           {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "arbitrary_precision" ];
+          }
+          {
             name = "tokio";
             packageId = "tokio";
             features = [ "full" "test-util" ];
@@ -47028,13 +47362,13 @@ rec {
       };
       "rmcp-macros" = rec {
         crateName = "rmcp-macros";
-        version = "3.3.0";
+        version = "3.5.1";
         edition = "2024";
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/modelcontextprotocol/rust-sdk";
-          rev = "3e636cab26c013eca5131103c03d20237f12c4df";
-          sha256 = "0r3mv5hvkwf0s35c8s1hv83w1cx2drsdn7f0y6v4qafm0dpwwlzr";
+          rev = "4048ac40e958fb1a7d614617a2ae8d26666ee2fa";
+          sha256 = "1kqgg3j24b4gcky96r63ps6jf9n0810c52pab5v421bjwc9axca5";
         };
         procMacro = true;
         libName = "rmcp_macros";
@@ -47739,7 +48073,7 @@ rec {
           }
           {
             name = "rustc-hash";
-            packageId = "rustc-hash 2.1.1";
+            packageId = "rustc-hash";
           }
           {
             name = "slab";
@@ -48253,21 +48587,7 @@ rec {
           "rustc-dep-of-std" = [ "core" ];
         };
       };
-      "rustc-hash 1.1.0" = rec {
-        crateName = "rustc-hash";
-        version = "1.1.0";
-        edition = "2015";
-        sha256 = "1qkc5khrmv5pqi5l5ca9p5nl5hs742cagrndhbrlk3dhlrx3zm08";
-        libName = "rustc_hash";
-        authors = [
-          "The Rust Project Developers"
-        ];
-        features = {
-          "default" = [ "std" ];
-        };
-        resolvedDefaultFeatures = [ "default" "std" ];
-      };
-      "rustc-hash 2.1.1" = rec {
+      "rustc-hash" = rec {
         crateName = "rustc-hash";
         version = "2.1.1";
         edition = "2021";
@@ -48491,7 +48811,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" ];
           }
@@ -48763,7 +49083,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Security_Cryptography" ];
@@ -49819,26 +50139,7 @@ rec {
         };
         resolvedDefaultFeatures = [ "OSX_10_10" "OSX_10_11" "OSX_10_12" "OSX_10_13" "OSX_10_14" "OSX_10_15" "OSX_10_9" "default" ];
       };
-      "self_cell 0.10.3" = rec {
-        crateName = "self_cell";
-        version = "0.10.3";
-        edition = "2018";
-        sha256 = "0pci3zh23b7dg6jmlxbn8k4plb7hcg5jprd1qiz0rp04p1ilskp1";
-        authors = [
-          "Lukas Bergdoll <lukas.bergdoll@gmail.com>"
-        ];
-        dependencies = [
-          {
-            name = "self_cell";
-            packageId = "self_cell 1.2.2";
-            rename = "new_self_cell";
-          }
-        ];
-        features = {
-          "old_rust" = [ "new_self_cell/old_rust" ];
-        };
-      };
-      "self_cell 1.2.2" = rec {
+      "self_cell" = rec {
         crateName = "self_cell";
         version = "1.2.2";
         edition = "2018";
@@ -50947,6 +51248,7 @@ rec {
           "std" = [ "digest/std" ];
           "zeroize" = [ "dep:zeroize" ];
         };
+        resolvedDefaultFeatures = [ "default" "std" ];
       };
       "sharded-slab" = rec {
         crateName = "sharded-slab";
@@ -51403,7 +51705,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" "Win32_System_IO" "Win32_System_Threading" "Win32_System_WindowsProgramming" ];
           }
@@ -54144,7 +54446,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Storage_FileSystem" "Win32_Foundation" ];
           }
@@ -54322,7 +54624,7 @@ rec {
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             usesDefaultFeatures = false;
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_System_Console" "Win32_Storage_FileSystem" "Win32_System_IO" "Win32_System_Threading" "Win32_Security" ];
@@ -57659,7 +57961,7 @@ rec {
         dependencies = [
           {
             name = "rustc-hash";
-            packageId = "rustc-hash 2.1.1";
+            packageId = "rustc-hash";
           }
         ];
 
@@ -60269,7 +60571,7 @@ rec {
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.48.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" "Win32_System_SystemInformation" ];
           }
@@ -62382,7 +62684,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_Registry" "Win32_System_Time" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_Time" "default" ];
       };
       "windows-sys 0.52.0" = rec {
         crateName = "windows-sys";
@@ -62630,7 +62932,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_NetworkManagement_NetManagement" "Win32_NetworkManagement_WindowsFilteringPlatform" "Win32_Networking" "Win32_Networking_WinHttp" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_Storage_Packaging" "Win32_Storage_Packaging_Appx" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_Diagnostics_ToolHelp" "Win32_System_Environment" "Win32_System_EventLog" "Win32_System_IO" "Win32_System_JobObjects" "Win32_System_Kernel" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_RemoteDesktop" "Win32_System_Rpc" "Win32_System_Services" "Win32_System_StationsAndDesktops" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authorization" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Memory" "Win32_System_Threading" "Win32_System_Time" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "default" ];
       };
       "windows-sys 0.59.0" = rec {
         crateName = "windows-sys";
@@ -62889,7 +63191,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Registry" "Win32_System_Threading" "Win32_System_Time" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Registry" "Win32_System_Threading" "Win32_System_Time" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "default" ];
       };
       "windows-sys 0.60.2" = rec {
         crateName = "windows-sys";
@@ -63416,7 +63718,7 @@ rec {
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_Power" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_Time" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_NetworkManagement_NetManagement" "Win32_NetworkManagement_WindowsFilteringPlatform" "Win32_Networking" "Win32_Networking_WinHttp" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Security_Credentials" "Win32_Security_Cryptography" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_Storage_Packaging" "Win32_Storage_Packaging_Appx" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_Diagnostics_ToolHelp" "Win32_System_Environment" "Win32_System_EventLog" "Win32_System_IO" "Win32_System_JobObjects" "Win32_System_LibraryLoader" "Win32_System_Memory" "Win32_System_Pipes" "Win32_System_Power" "Win32_System_Registry" "Win32_System_RemoteDesktop" "Win32_System_Rpc" "Win32_System_Services" "Win32_System_StationsAndDesktops" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "Win32_UI_WindowsAndMessaging" "default" ];
       };
       "windows-targets 0.48.5" = rec {
         crateName = "windows-targets";

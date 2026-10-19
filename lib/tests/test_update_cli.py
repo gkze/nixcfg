@@ -15,7 +15,10 @@ from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._run_updates_helpers import drain_events, make_run_plan
 from lib.update.artifacts import GeneratedArtifact
 from lib.update.cli import (
+    OutputOptions,
     UpdateOptions,
+    UpdateSummary,
+    _emit_summary,
     run_updates,
 )
 from lib.update.cli_inventory import (
@@ -652,3 +655,39 @@ def test_run_updates_json_validation_failure_is_machine_readable(
         "candidateUpdatesDiscarded": ["demo"],
     }
     assert captured.err == ""
+
+
+def test_emit_summary_json_outputs_payload(capsys: _CaptureLike) -> None:
+    """Write summary payload to stdout in json mode."""
+    summary = UpdateSummary(statuses={"demo": "updated", "stable": "no_change"})
+
+    exit_code = _emit_summary(
+        summary,
+        had_errors=False,
+        out=OutputOptions(json_output=True, quiet=True),
+        dry_run=False,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "updated": ["demo"],
+        "dropped": [],
+        "errors": [],
+        "noChange": ["stable"],
+        "success": True,
+        "withheld": {},
+    }
+
+
+def test_emit_summary_json_uses_overall_failure_state(capsys: _CaptureLike) -> None:
+    """Do not report success when a non-source failure sets the exit status."""
+    exit_code = _emit_summary(
+        UpdateSummary(),
+        had_errors=True,
+        out=OutputOptions(json_output=True, quiet=True),
+        dry_run=False,
+    )
+
+    assert exit_code == 1
+    assert json.loads(capsys.readouterr().out)["success"] is False

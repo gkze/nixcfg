@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from .base import (
     CommandResult,
     NixCommandError,
+    _resolve_timeout_alias,
     run_nix,
     stream_nix,
 )
@@ -20,6 +21,7 @@ async def nix_store_realise(
     capture: bool = True,
     check: bool = True,
     command_timeout: float = 3600.0,
+    **kwargs: object,
 ) -> CommandResult:
     """Build derivations in the store.
 
@@ -42,12 +44,18 @@ async def nix_store_realise(
         (``stream_nix`` always raises on failure).
     command_timeout:
         Maximum wall-clock seconds before the process is killed.
+    **kwargs:
+        Supports legacy ``timeout=...`` alias.
 
     """
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
     cmd = ["nix-store", "--realise", *drv_paths]
 
     if on_line is not None:
-        async for line in stream_nix(cmd, command_timeout=command_timeout):
+        async for line in stream_nix(cmd, timeout=timeout_seconds):
             on_line(line)
         # stream_nix raises on non-zero exit, so reaching here means success.
         return CommandResult(args=cmd, returncode=0, stdout="", stderr="")
@@ -56,7 +64,7 @@ async def nix_store_realise(
         cmd,
         check=check,
         capture=capture,
-        command_timeout=command_timeout,
+        timeout=timeout_seconds,
     )
 
 
@@ -64,6 +72,7 @@ async def nix_store_query_deriver(
     path: str,
     *,
     command_timeout: float = 30.0,
+    **kwargs: object,
 ) -> str | None:
     """Return the derivation that produced a store path, if known.
 
@@ -73,6 +82,8 @@ async def nix_store_query_deriver(
         A Nix store path or realised profile symlink target.
     command_timeout:
         Maximum wall-clock seconds before the process is killed.
+    **kwargs:
+        Supports legacy ``timeout=...`` alias.
 
     Returns
     -------
@@ -81,10 +92,14 @@ async def nix_store_query_deriver(
         unknown deriver.
 
     """
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
     result = await run_nix(
         ["nix-store", "--query", "--deriver", path],
         check=False,
-        command_timeout=command_timeout,
+        timeout=timeout_seconds,
     )
     if result.returncode != 0:
         raise NixCommandError(result)
@@ -99,6 +114,7 @@ async def nix_store_query_references(
     path: str,
     *,
     command_timeout: float = 30.0,
+    **kwargs: object,
 ) -> list[str]:
     """Return the immediate references of a store path.
 
@@ -108,12 +124,18 @@ async def nix_store_query_references(
         A Nix store path (e.g. ``/nix/store/...-foo``).
     command_timeout:
         Maximum wall-clock seconds before the process is killed.
+    **kwargs:
+        Supports legacy ``timeout=...`` alias.
 
     """
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
     result = await run_nix(
         ["nix-store", "--query", "--references", path],
         check=True,
-        command_timeout=command_timeout,
+        timeout=timeout_seconds,
     )
     return [line for line in result.stdout.splitlines() if line]
 
@@ -122,6 +144,7 @@ async def nix_store_query_requisites(
     path: str,
     *,
     command_timeout: float = 30.0,
+    **kwargs: object,
 ) -> list[str]:
     """Return the full build-time requisites of a store path.
 
@@ -131,11 +154,17 @@ async def nix_store_query_requisites(
         A Nix store path, typically a ``.drv`` when tracing build provenance.
     command_timeout:
         Maximum wall-clock seconds before the process is killed.
+    **kwargs:
+        Supports legacy ``timeout=...`` alias.
 
     """
+    timeout_seconds = _resolve_timeout_alias(
+        command_timeout=command_timeout,
+        kwargs=kwargs,
+    )
     result = await run_nix(
         ["nix-store", "--query", "--requisites", path],
         check=True,
-        command_timeout=command_timeout,
+        timeout=timeout_seconds,
     )
     return [line for line in result.stdout.splitlines() if line]

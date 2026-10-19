@@ -27,19 +27,6 @@ if isDarwin then
     pname = "sculptor";
     info = selfSource;
     inherit meta;
-
-    # The fixup phase rewrites shebangs in the bundled backend scripts to Nix
-    # store paths. That invalidates Contents/_CodeSignature/CodeResources, so
-    # macOS Gatekeeper refuses the bundle and launchd SIGKILLs it on launch. It
-    # would also point scripts at /nix/store from inside the Docker containers
-    # Sculptor copies them into. Keep the extracted bundle byte-exact.
-    dontFixup = true;
-
-    # Fail the build instead of the launch if the sealed resources ever drift.
-    postInstallApp = ''
-      app_bundle="$out/Applications/Sculptor.app"
-      /usr/bin/codesign --verify --deep --strict "$app_bundle"
-    '';
   }
 else
   let

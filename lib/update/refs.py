@@ -12,7 +12,7 @@ from lib.update.events import EventSink, ignore_event
 
 if TYPE_CHECKING:
     import asyncio
-    from collections.abc import AsyncIterator, Callable, Iterable, Mapping
+    from collections.abc import AsyncIterator, Iterable, Mapping
 
     import aiohttp
 
@@ -32,7 +32,6 @@ from lib.update.flake import (
     read_flake_input_state,
     update_flake_input,
 )
-from lib.update.flake_inputs import has_input_ref, set_input_ref
 from lib.update.net import fetch_github_api_paginated
 from lib.update.paths import get_repo_root
 from lib.update.process import RunCommandOptions, run_command, run_queue_task
@@ -59,6 +58,11 @@ _GITHUB_GIT_URL_RE = re.compile(
 )
 _GITHUB_GIT_SCP_URL_RE = re.compile(
     r"^git@github\.com:(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/?$"
+)
+_INPUT_ATTRSET_START_RE_TEMPLATE = r"^(?P<indent>\s*){name}\s*=\s*\{{\s*$"
+_REF_BINDING_RE = re.compile(
+    r"^(?P<indent>\s*)ref\s*=\s*\"(?P<value>(?:\\.|[^\"])*)\"\s*;"
+    r"(?P<suffix>\s*(?:#.*)?)$"
 )
 
 
@@ -350,25 +354,82 @@ def _format_git_ref_update(current_ref: str, new_ref: str) -> str:
     return new_ref
 
 
-def _rewrite_flake_text(rewrite: Callable[[str], str]) -> None:
-    flake_path = Path(get_repo_root()) / "flake.nix"
-    text = flake_path.read_text(encoding="utf-8")
-    rewritten = rewrite(text)
-    if rewritten != text:
-        flake_path.write_text(rewritten, encoding="utf-8")
+def _quote_nix_string_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _rewrite_git_input_ref(text: str, input_name: str, new_ref: str) -> str:
+    start_re = re.compile(
+        _INPUT_ATTRSET_START_RE_TEMPLATE.format(name=re.escape(input_name))
+    )
+    lines = text.splitlines()
+    keep_trailing_newline = text.endswith("\n")
+    escaped_ref = _quote_nix_string_value(new_ref)
+    inside = False
+    updated = False
+    input_indent = ""
+
+    for index, line in enumerate(lines):
+        if not inside:
+            match = start_re.match(line)
+            if match:
+                inside = True
+                input_indent = match.group("indent")
+            continue
+
+        ref_match = _REF_BINDING_RE.match(line)
+        if ref_match:
+            lines[index] = (
+                f'{ref_match.group("indent")}ref = "{escaped_ref}";'
+                f"{ref_match.group('suffix')}"
+            )
+            updated = True
+            break
+
+        if re.match(rf"^{re.escape(input_indent)}\}};\s*$", line):
+            lines.insert(index, f'{input_indent}  ref = "{escaped_ref}";')
+            updated = True
+            break
+
+    if not updated:
+        msg = f"Could not find git flake input attrset for {input_name!r}"
+        raise RuntimeError(msg)
+
+    rewritten = "\n".join(lines)
+    return f"{rewritten}\n" if keep_trailing_newline else rewritten
 
 
 def _update_git_input_ref_in_flake(input_name: str, new_ref: str) -> None:
-    _rewrite_flake_text(lambda text: set_input_ref(text, input_name, new_ref))
+    flake_path = Path(get_repo_root()) / "flake.nix"
+    text = flake_path.read_text(encoding="utf-8")
+    rewritten = _rewrite_git_input_ref(text, input_name, new_ref)
+    if rewritten != text:
+        flake_path.write_text(rewritten, encoding="utf-8")
 
 
 def _update_explicit_input_ref_in_flake(input_name: str, new_ref: str) -> bool:
     """Update an existing split-form input ref and report whether it was found."""
     flake_path = Path(get_repo_root()) / "flake.nix"
-    if not has_input_ref(flake_path.read_text(encoding="utf-8"), input_name):
-        return False
-    _update_git_input_ref_in_flake(input_name, new_ref)
-    return True
+    text = flake_path.read_text(encoding="utf-8")
+    start_re = re.compile(
+        _INPUT_ATTRSET_START_RE_TEMPLATE.format(name=re.escape(input_name))
+    )
+    input_indent = ""
+    inside = False
+    for line in text.splitlines():
+        if not inside:
+            if match := start_re.match(line):
+                inside = True
+                input_indent = match.group("indent")
+            continue
+        if _REF_BINDING_RE.match(line):
+            rewritten = _rewrite_git_input_ref(text, input_name, new_ref)
+            if rewritten != text:
+                flake_path.write_text(rewritten, encoding="utf-8")
+            return True
+        if re.match(rf"^{re.escape(input_indent)}\}};\s*$", line):
+            return False
+    return False
 
 
 @dataclass(frozen=True)

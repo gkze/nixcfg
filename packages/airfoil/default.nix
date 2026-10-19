@@ -1,24 +1,59 @@
 {
   darwin,
-  mkSimpleDarwinApp,
-  mkZipApp,
+  fetchurl,
+  lib,
   selfSource,
+  stdenvNoCC,
+  system,
+  unzip,
   ...
 }:
-mkSimpleDarwinApp {
-  builder = mkZipApp;
+
+stdenvNoCC.mkDerivation {
   pname = "airfoil";
-  appName = "Airfoil";
-  info = selfSource;
-  sourceAppPath = "Airfoil/Airfoil.app";
-  # The archive ships the receiver companion beside the main app. It is part
-  # of the same product, so it is installed alongside rather than routed as a
-  # managed app of its own.
-  postInstallApp = ''
+  inherit (selfSource) version;
+
+  passthru.macApp = {
+    bundleName = "Airfoil.app";
+    bundleRelPath = "Applications/Airfoil.app";
+    installMode = "copy";
+  };
+
+  src = fetchurl {
+    url = selfSource.urls.${system};
+    hash = selfSource.hashes.${system};
+  };
+
+  dontFixup = true;
+
+  nativeBuildInputs = [
+    darwin.xattr
+    unzip
+  ];
+
+  dontUnpack = true;
+
+  installPhase = ''
+    runHook preInstall
+
+    unpack_dir="$TMPDIR/airfoil-unpack"
+    mkdir -p "$unpack_dir" "$out/Applications" "$out/bin"
+    unzip -qq "$src" -d "$unpack_dir"
+    cp -R "$unpack_dir/Airfoil/Airfoil.app" "$out/Applications/Airfoil.app"
     cp -R "$unpack_dir/Airfoil/Airfoil Satellite.app" "$out/Applications/Airfoil Satellite.app"
-    chmod -R u+w "$out/Applications/Airfoil Satellite.app"
+    ${darwin.xattr}/bin/xattr -cr "$out/Applications/Airfoil.app"
     ${darwin.xattr}/bin/xattr -cr "$out/Applications/Airfoil Satellite.app"
+    ln -s "$out/Applications/Airfoil.app/Contents/MacOS/Airfoil" "$out/bin/airfoil"
+
+    runHook postInstall
   '';
-  description = "Send audio from your Mac to compatible receivers";
-  homepage = "https://rogueamoeba.com/airfoil/mac/";
+
+  meta = with lib; {
+    description = "Send audio from your Mac to compatible receivers";
+    homepage = "https://rogueamoeba.com/airfoil/mac/";
+    license = licenses.unfree;
+    platforms = platforms.darwin;
+    sourceProvenance = with sourceTypes; [ binaryNativeCode ];
+    mainProgram = "airfoil";
+  };
 }

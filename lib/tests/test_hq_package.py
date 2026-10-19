@@ -22,14 +22,12 @@ from lib.tests._assertions import expect_instance
 from lib.tests._nix_ast import (
     assert_nix_ast_equal,
     binding_map,
+    darwin_guarded_exports,
     expect_binding,
     parse_nix_expr,
 )
 from lib.tests._nix_source import nix_file_expr, nix_source_fragment_expr
-from lib.tests._package_registry import (
-    is_darwin_overlay_export,
-    registry_override_metadata,
-)
+from lib.tests._package_registry import registry_override_metadata
 from lib.tests._shell_ast import (
     command_texts,
     indented_string_body,
@@ -465,7 +463,8 @@ _CURRENT_AUTOMATIC_MUTATION_PATHS = (
     bytes.fromhex(
         "ff 43 03 d1 f8 5f 09 a9 f6 57 0a a9 "
         "f4 4f 0b a9 fd 7b 0c a9 fd 03 03 91 "
-        "e8 23 01 91"
+        "e8 23 01 91 ae 97 01 94 e8 4b 40 b9 "
+        "a8 00 00 36 e8 2b 40 f9"
     ),
     bytes.fromhex(
         "48 8d bb 30 02 00 00 e8 3f 43 22 00 "
@@ -512,7 +511,8 @@ _CURRENT_DISABLED_MUTATION_PATHS = (
     bytes.fromhex(
         "00 00 80 52 c0 03 5f d6 1f 00 80 d2 "
         "3f 20 a0 f2 5f 40 c0 f2 7f 60 e0 f2 "
-        "1f 20 03 d5"
+        "9f 80 80 d2 bf a0 a0 f2 df c0 c0 f2 "
+        "ff e0 e0 f2 1f 20 03 d5"
     ),
     bytes.fromhex(
         "48 8d bb 30 02 00 00 e8 3f 43 22 00 "
@@ -559,7 +559,8 @@ _REBASED_AUTOMATIC_MUTATION_PATHS = (
     bytes.fromhex(
         "ff 43 03 d1 f8 5f 09 a9 f6 57 0a a9 "
         "f4 4f 0b a9 fd 7b 0c a9 fd 03 03 91 "
-        "e8 23 01 91"
+        "e8 23 01 91 85 6c 07 94 e8 4b 40 b9 "
+        "a8 00 00 36 e8 2b 40 f9"
     ),
     bytes.fromhex(
         "48 8d bb 41 13 11 11 e8 50 54 33 11 "
@@ -1321,11 +1322,16 @@ def test_hq_registry_exports_only_on_arm64_darwin() -> None:
 
 def test_hq_overlay_and_system_route_replace_the_unmanaged_app() -> None:
     """The completed package must own the existing system application path."""
-    registry = expect_instance(
-        nix_file_expr("packages/registry.nix"), FunctionDefinition
+    overlay = expect_instance(
+        nix_file_expr("overlays/binary-darwin-apps.nix"),
+        FunctionDefinition,
     )
-    assert is_darwin_overlay_export(
-        expect_instance(registry.output, AttributeSet), "hq"
+    # The fragment exports are the argument of the Darwin-only guard, so a
+    # non-Darwin system does not receive these attributes at all.
+    exports = darwin_guarded_exports(overlay)
+    assert_nix_ast_equal(
+        expect_binding(exports.values, "hq").value,
+        'callDarwinAppPackage "hq"',
     )
 
     routing = expect_instance(

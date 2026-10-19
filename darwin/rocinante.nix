@@ -1,10 +1,24 @@
 { outputs, ... }:
 let
-  profiles = import ./george/profiles.nix { slib = outputs.lib; };
+  inherit (outputs) lib;
 in
-profiles.mkHost [
-  profiles.georgeBase
-  {
-    extraHomeModules = [ ./george/dock-apps.nix ];
-  }
-]
+lib.mkDarwinHost {
+  user = "george";
+  rosettaBuilderLingerMinutes = 30;
+  brewAppsModule = "${lib.modulesPath}/darwin/george/brew-apps.nix";
+  extraHomeModules = [
+    "${lib.modulesPath}/home/darwin-closure-priority.nix"
+    "${lib.modulesPath}/darwin/george/dock-apps.nix"
+  ];
+  extraSystemModules = [
+    "${lib.modulesPath}/darwin/george/caches.nix"
+    {
+      # Home Manager initializes completion after adding plugin directories to fpath.
+      darwinDefaults.zsh.deferCompletionInitToHomeManager = true;
+      # Preserve any pre-existing app/editor settings the first time Home Manager
+      # takes over files like ~/.gemini/settings.json and VS Code Insiders
+      # settings.json.
+      home-manager.backupFileExtension = "backup";
+    }
+  ];
+}

@@ -4,19 +4,14 @@ Every replacement and structural seam is exact and count checked. Compatible
 upstream releases can advance without pinning unrelated provider source bytes.
 """
 
+import argparse
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lib.codemods.source_patch import (
-    SourceAnchor,
-    SourcePatch,
-    plan_patches,
-    source_tree_parser,
-    write_planned,
-)
-from lib.codemods.text import replace_exactly, replace_once
+from lib.exact_text_patch import ExactTextPatch, plan_exact_text_patches
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -112,14 +107,29 @@ _CLAUDE_BINARY_RESOLUTION = "    const claudeBinary = await this.resolveBinary()
 _CLAUDE_OPTIONS_HANDOFF = "      pathToClaudeCodeExecutable: claudeBinary,\n"
 
 
+@dataclass(frozen=True, slots=True)
+class _SourcePatch:
+    relative_path: str
+    old: str
+    new: str
+    expected_count: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class _SourceAnchor:
+    relative_path: str
+    text: str
+    expected_count: int = 1
+
+
 _PATCHES = (
-    SourcePatch(
+    _SourcePatch(
         "packages/desktop/src/features/auto-updater.ts",
         "  isPackaged: () => app.isPackaged,\n",
         "  // Nix owns the immutable application bundle and its update lifecycle.\n"
         "  isPackaged: () => false,\n",
     ),
-    SourcePatch(
+    _SourcePatch(
         "packages/desktop/src/daemon/daemon-manager.ts",
         """    check_app_update: async (args) => {
       const currentVersion = resolveDesktopAppVersion();
@@ -141,7 +151,7 @@ _PATCHES = (
       return checkForAppUpdate({{
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         "packages/desktop/src/daemon/daemon-manager.ts",
         """    install_app_update: async (args) => {
       const currentVersion = resolveDesktopAppVersion();
@@ -159,7 +169,7 @@ _PATCHES = (
       return downloadAndInstallUpdate(
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         "packages/desktop/src/daemon/daemon-manager.ts",
         "    install_cli: () => installCli(),\n",
         f"""    install_cli: () => {{
@@ -168,7 +178,7 @@ _PATCHES = (
     }},
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         "packages/desktop/src/main.ts",
         """  installAppUpdateOnQuit: async (signal) => {
     const settings = await getDesktopSettingsStore().get();
@@ -178,14 +188,14 @@ _PATCHES = (
     const settings = await getDesktopSettingsStore().get();
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         "packages/app/src/desktop/updates/use-desktop-app-updater.ts",
         "  const isDesktopApp = shouldShowDesktopUpdateSection();\n",
         """  // Nix-managed desktop bundles are immutable and cannot self-update.
   const isDesktopApp = false;
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         "packages/desktop/src/integrations/cli-install/install.ts",
         """export async function installCli(): Promise<InstallStatus> {
   const targetPath = getCliTargetPath();
@@ -195,7 +205,7 @@ _PATCHES = (
   const targetPath = getCliTargetPath();
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         "packages/server/src/server/session/daemon/daemon-self-updater.ts",
         """const DESKTOP_MANAGED_UPDATE_ERROR =
   "This daemon is managed by Paseo Desktop. Update Paseo Desktop on the host.";
@@ -209,7 +219,7 @@ function nixOwnsUpdates(): boolean {{
 }}
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         "packages/server/src/server/session/daemon/daemon-self-updater.ts",
         """  async update(input: DaemonSelfUpdateInput): Promise<DaemonSelfUpdateResult> {
     if (input.desktopManaged) {
@@ -221,12 +231,12 @@ function nixOwnsUpdates(): boolean {{
     if (input.desktopManaged) {
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         "packages/server/src/server/session/daemon/npm-global-cli.ts",
         "const NPM_INSTALL_TIMEOUT_MS = 300_000;\n",
         "",
     ),
-    SourcePatch(
+    _SourcePatch(
         "packages/server/src/server/session/daemon/npm-global-cli.ts",
         """  installLatest(): Promise<CommandResult> {
     return this.runCommand("npm", ["install", "-g", `${PASEO_CLI_PACKAGE}@latest`], {
@@ -244,7 +254,7 @@ function nixOwnsUpdates(): boolean {{
   }}
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         "packages/desktop/electron-builder.yml",
         """asarUnpack:
   - dist/daemon/node-entrypoint-runner.js
@@ -257,7 +267,7 @@ function nixOwnsUpdates(): boolean {{
   - node_modules/sherpa-onnx-darwin-arm64/**/*
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         "packages/desktop/electron-builder.yml",
         "  notarize: true\n",
         "  notarize: false\n",
@@ -265,24 +275,31 @@ function nixOwnsUpdates(): boolean {{
 )
 
 _ANCHORS = (
-    SourceAnchor(
+    _SourceAnchor(
         "packages/desktop/src/features/auto-updater.ts",
         "    autoUpdater.quitAndInstall(isSilent, isForceRunAfter);\n",
     ),
-    SourceAnchor(
+    _SourceAnchor(
         "packages/app/src/desktop/updates/use-desktop-app-updater.ts",
         '    void checkForUpdates({ intent: "automatic", silent: true });\n',
         expected_count=2,
     ),
-    SourceAnchor(
+    _SourceAnchor(
         "packages/desktop/src/integrations/cli-install/install.ts",
         "  const { shellUpdated } = await ensurePathInShellRc();\n",
     ),
-    SourceAnchor(
+    _SourceAnchor(
         "packages/server/src/server/session/daemon/npm-global-cli.ts",
         'export const PASEO_CLI_PACKAGE = "@getpaseo/cli";\n',
     ),
 )
+
+
+def _validate_anchor(path: Path, text: str, expected_count: int) -> None:
+    count = path.read_text(encoding="utf-8").count(text)
+    if count != expected_count:
+        msg = f"expected {expected_count} managed-source anchor(s) in {path}, found {count}"
+        raise RuntimeError(msg)
 
 
 def validate_claude_provider_source(source: str) -> None:
@@ -341,21 +358,15 @@ def _patch_claude_provider(source: str, executable: str) -> str:
         msg = "Claude Code executable must be an absolute path"
         raise ValueError(msg)
     validate_claude_provider_source(source)
-    patched_tail = replace_once(
-        _CLAUDE_BUILD_OPTIONS_TAIL,
+    patched_tail = _CLAUDE_BUILD_OPTIONS_TAIL.replace(
         _CLAUDE_BUILD_OPTIONS_RETURN,
         _CLAUDE_FINAL_EXECUTABLE_HANDOFF + _CLAUDE_BUILD_OPTIONS_RETURN,
     )
     package_default = f"defaultBinary: {json.dumps(executable)},"
-    return replace_once(
-        replace_exactly(
-            source,
-            _CLAUDE_DEFAULT_BINARY,
-            package_default,
-            expected_count=_CLAUDE_DEFAULT_BINARY_COUNT,
-        ),
+    return source.replace(_CLAUDE_DEFAULT_BINARY, package_default).replace(
         _CLAUDE_BUILD_OPTIONS_TAIL,
         patched_tail,
+        1,
     )
 
 
@@ -366,19 +377,53 @@ def patch_tree(
     check: bool = False,
 ) -> None:
     """Patch an exact Paseo source tree, or only validate with ``check``."""
-    pending = plan_patches(source_root, _PATCHES, anchors=_ANCHORS)
+    for anchor in _ANCHORS:
+        _validate_anchor(
+            source_root / anchor.relative_path,
+            anchor.text,
+            anchor.expected_count,
+        )
+
+    exact_patches = tuple(
+        ExactTextPatch(
+            Path(patch.relative_path),
+            patch.old,
+            patch.new,
+            patch.expected_count,
+        )
+        for patch in _PATCHES
+    )
+    originals = {
+        path: (source_root / path).read_text(encoding="utf-8")
+        for path in dict.fromkeys(patch.path for patch in exact_patches)
+    }
+    pending = plan_exact_text_patches(
+        originals,
+        exact_patches,
+        mismatch_message=lambda patch, count: (
+            f"expected {patch.expected_count} managed-source patch anchor(s) "
+            f"in {source_root / patch.path}, found {count}"
+        ),
+    )
+
     claude_provider = source_root / _CLAUDE_PROVIDER_PATH
+    provider_payload = claude_provider.read_bytes()
+    provider_source = provider_payload.decode("utf-8")
     pending[claude_provider] = _patch_claude_provider(
-        claude_provider.read_text(encoding="utf-8"),
+        provider_source,
         claude_code_executable,
     )
-    if not check:
-        write_planned(pending)
+
+    if check:
+        return
+    for path, source in pending.items():
+        (source_root / path).write_text(source, encoding="utf-8")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Apply or dry-run the Nix ownership patch."""
-    parser = source_tree_parser(__doc__)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source_root", type=Path)
     parser.add_argument("--claude-code-executable", required=True)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args(argv)

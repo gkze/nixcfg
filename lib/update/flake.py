@@ -174,6 +174,11 @@ def flake_fetch_expression(node: FlakeLockNode) -> NixExpression:
     raise ValueError(msg)
 
 
+def flake_fetch_expr(node: FlakeLockNode) -> str:
+    """Build a ``builtins.fetchTree`` expression from a locked flake node."""
+    return flake_fetch_expression(node).rebuild()
+
+
 def flake_source_path_expression(node: FlakeLockNode) -> NixExpression:
     """Build an expression resolving any locked ``fetchTree`` result to a path."""
     source = Identifier(name="src")

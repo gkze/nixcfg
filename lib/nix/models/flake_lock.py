@@ -93,6 +93,9 @@ class OriginalRef(BaseModel):
     path: str | None = None
     """Filesystem path (path type)."""
 
+    rev: str | None = None
+    """Pinned Git revision when the flake input URL includes a commit."""
+
 
 # ---------------------------------------------------------------------------
 # Node and lock-file models

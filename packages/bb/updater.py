@@ -30,6 +30,10 @@ class BbUpdater(GitHubReleaseUpdater):
 
     name = "bb"
     aggregate_into = ("electron-runtimes",)
+    # 38739788947: rematerializing npmDepsHash after a leftover GC produced
+    # Wap+; two independent Darwin cascade hosts then produced the original
+    # wb2d pin. Do not chase a single-host "got" hash. The dual Darwin
+    # fod-canary realizes bb.pnpmDeps before rust-warmup.
     GITHUB_OWNER = "get-bb"
     GITHUB_REPO = "bb"
     TAG_PREFIX = "desktop-v"
@@ -134,15 +138,6 @@ class BbUpdater(GitHubReleaseUpdater):
                 "tag": tag_name,
             },
         )
-
-    async def _is_latest(
-        self,
-        context: UpdateContext,
-        info: VersionInfo,
-    ) -> bool:
-        """Recompute the pnpm closure before deciding metadata is unchanged."""
-        _ = (context, info)
-        return False
 
     @classmethod
     def _src_expr(cls, commit: str) -> str:

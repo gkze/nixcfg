@@ -47,8 +47,6 @@ class CommanderUpdater(DownloadHashUpdater):
         "aarch64-darwin": "darwin",
         "x86_64-darwin": "darwin",
     }
-    # Recompute hashes for mutable Commander release artifacts.
-    always_rehash = True
 
     @staticmethod
     def _download_url_from_metadata(info: VersionInfo) -> str | None:
@@ -90,6 +88,15 @@ class CommanderUpdater(DownloadHashUpdater):
         return self._download_url_from_metadata(
             info
         ) or self.VERSIONED_URL_TEMPLATE.format(version=info.version)
+
+    async def _is_latest(
+        self,
+        context: UpdateContext,
+        info: VersionInfo,
+    ) -> bool:
+        """Recompute hashes for mutable Commander release artifacts."""
+        _ = (context, info)
+        return False
 
     async def fetch_latest(
         self, session: aiohttp.ClientSession, *, context: UpdateContext

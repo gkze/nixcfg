@@ -4,7 +4,6 @@
   mkSimpleDarwinApp,
   python3,
   selfSource,
-  signAndVerifyBundle,
   ...
 }:
 mkSimpleDarwinApp {
@@ -21,16 +20,14 @@ mkSimpleDarwinApp {
     main_executable="$app_bundle/Contents/MacOS/github"
     chmod -R u+w "$app_bundle"
     ${lib.getExe python3} ${./patch_updater.py} "$main_executable"
-    ${signAndVerifyBundle {
-      bundle = ''"$app_bundle"'';
-      preserveMetadata = [
-        "identifier"
-        "entitlements"
-        "flags"
-        "runtime"
-      ];
-    }}
+    /usr/bin/codesign \
+      --force \
+      --deep \
+      --sign - \
+      --preserve-metadata=identifier,entitlements,flags,runtime \
+      "$app_bundle"
     ${lib.getExe python3} ${./patch_updater.py} --check "$main_executable"
+    /usr/bin/codesign --verify --deep --strict "$app_bundle"
   '';
   platforms = [ "aarch64-darwin" ];
 }

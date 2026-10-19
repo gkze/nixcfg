@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-JvV+iv2DQU6LzRjd+s6jBmFutSJiS0T48FA/AilLJvY=",
-    "x86_64-darwin": "sha256-Mv1rB5PLCIQ/ygqGfDcGFe1JV+qDqPbBBvww8guo8u0="
+    "aarch64-darwin": "sha256-6OCIRcwiEcXlU6lfxLPsUEd5+WX7ijXH+fLQRDY5hjU=",
+    "x86_64-darwin": "sha256-yLQ0mJNCTBMjRbt5pJ9TXC98ENG5gfE5F/4+1ERh5eE="
   },
   "urls": {
-    "aarch64-darwin": "https://d1lfowv2t69uz0.cloudfront.net/stable/Capy-0.4.4-arm64.zip",
-    "x86_64-darwin": "https://d1lfowv2t69uz0.cloudfront.net/stable/Capy-0.4.4-x64.zip"
+    "aarch64-darwin": "https://d1lfowv2t69uz0.cloudfront.net/stable/Capy-0.4.7-arm64.zip",
+    "x86_64-darwin": "https://d1lfowv2t69uz0.cloudfront.net/stable/Capy-0.4.7-x64.zip"
   },
-  "version": "0.4.4"
+  "version": "0.4.7"
 }

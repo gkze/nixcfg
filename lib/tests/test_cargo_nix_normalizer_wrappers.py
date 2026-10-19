@@ -164,7 +164,7 @@ def test_central_normalizer_command_uses_registered_default_path(
             supported_platforms=("test",),
         ),
     )
-    monkeypatch.setenv("REPO_ROOT", str(tmp_path))
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", tmp_path)
 
     result = CliRunner().invoke(
         crate2nix_cli.app,

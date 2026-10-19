@@ -165,9 +165,10 @@ def test_filtered_crate_hash_seed_rejects_invalid_checked_hashes(
     (patched_src / "Cargo.lock").write_text(
         "version = 3\npackage = []\n", encoding="utf-8"
     )
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", repo)
 
     with pytest.raises(RuntimeError, match="Invalid crate hash cache"):
-        crate2nix._filtered_crate_hash_seed(_target(), patched_src, repo)
+        crate2nix._filtered_crate_hash_seed(_target(), patched_src)
 
 
 def test_filtered_crate_hash_seed_requires_the_checked_source_identity(
@@ -207,8 +208,6 @@ source = "git+https://example.test/demo?branch=main#new-revision"
 """,
         encoding="utf-8",
     )
+    monkeypatch.setattr(crate2nix, "REPO_ROOT", repo)
 
-    assert (
-        json.loads(crate2nix._filtered_crate_hash_seed(_target(), patched_src, repo))
-        == {}
-    )
+    assert json.loads(crate2nix._filtered_crate_hash_seed(_target(), patched_src)) == {}

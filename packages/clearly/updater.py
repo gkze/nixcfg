@@ -54,8 +54,6 @@ class ClearlyUpdater(GitHubReleaseUpdater):
         "cmark-gfm",
         "KeyboardShortcuts",
     )
-    # Recompute the source closure before accepting matching metadata.
-    always_rehash = True
 
     @staticmethod
     def _github_repo_from_url(url: str) -> tuple[str, str]:
@@ -201,6 +199,15 @@ class ClearlyUpdater(GitHubReleaseUpdater):
                 "tag": tag_name,
             },
         )
+
+    async def _is_latest(
+        self,
+        context: UpdateContext,
+        info: VersionInfo,
+    ) -> bool:
+        """Recompute the source closure before accepting matching metadata."""
+        _ = (context, info)
+        return False
 
     @classmethod
     def _dependency_urls_from_info(cls, info: VersionInfo) -> dict[str, str]:

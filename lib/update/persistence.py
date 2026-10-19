@@ -1781,8 +1781,14 @@ def persist_source_updates(
     sources: SourcesFile,
     source_updates: dict[str, SourceEntry],
     details: dict[str, SummaryStatus],
+    pins_only: bool = False,
 ) -> tuple[Path, ...]:
-    """Persist per-package sources.json updates from one update run."""
+    """Persist per-package sources.json updates from one update run.
+
+    ``pins_only`` writes the updater result as-is. Native merge onto HEAD
+    kept granola/ghostty/thorium/claude-code sha256s across version bumps
+    (38204580181 cascade slot 4).
+    """
     if not (do_sources and source_names):
         return ()
 
@@ -1795,11 +1801,16 @@ def persist_source_updates(
     if not successful_updates:
         return ()
 
-    if native_only:
+    if native_only and not pins_only:
         merged_updates = update_sources.save_source_updates(
             successful_updates,
             merge_existing=True,
             replace_pins=True,
+        )
+    elif pins_only:
+        merged_updates = update_sources.save_source_updates(
+            successful_updates,
+            merge_existing=False,
         )
     else:
         merged_updates = merge_source_updates(
@@ -1829,6 +1840,7 @@ def persist_materialized_updates(
     source_updates: dict[str, SourceEntry],
     artifact_updates: dict[str, tuple[GeneratedArtifact, ...]],
     details: dict[str, SummaryStatus],
+    pins_only: bool = False,
 ) -> tuple[Path, ...]:
     """Persist generated artifacts first, then per-package sources."""
     artifact_paths = persist_generated_artifacts(
@@ -1844,6 +1856,7 @@ def persist_materialized_updates(
         sources=sources,
         source_updates=source_updates,
         details=details,
+        pins_only=pins_only,
     )
     return (*artifact_paths, *source_paths)
 

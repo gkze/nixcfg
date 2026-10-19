@@ -198,7 +198,7 @@ See [Development](docs/development.md).
 ### Zen And Twilight Browser Work
 
 - `modules/home/zen.nix`
-- `modules/home/zen/zentool`
+- `home/george/bin/zentool`
 - `home/george/zen/`
 
 See [Appearance](docs/appearance.md).
@@ -483,7 +483,7 @@ back into the exported module set.
 Use the dedicated module and repo-managed Zen tooling:
 
 - `modules/home/zen.nix`
-- `modules/home/zen/zentool`
+- `home/george/bin/zentool`
 - `home/george/zen/folders.yaml`
 
 Remember that Zen folder reconciliation is stateful and interacts with a live

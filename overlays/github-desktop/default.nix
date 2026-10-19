@@ -81,9 +81,6 @@ in
           ]
           oldAttrs.postConfigure;
 
-      # Not mkDmgApp/mkZipApp: this bundle is built from source by
-      # electron-builder in buildPhase; the darwin-apps helpers unpack a fetched
-      # vendor archive and cannot install a build-tree bundle.
       installPhase =
         if prev.stdenv.hostPlatform.isDarwin then
           ''

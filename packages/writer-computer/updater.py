@@ -40,8 +40,15 @@ class WriterComputerUpdater(GitHubReleaseUpdater):
             systems=("aarch64-darwin",),
         ),
     )
-    # Recompute source closures before accepting release metadata.
-    always_rehash = True
+
+    async def _is_latest(
+        self,
+        context: UpdateContext,
+        info: VersionInfo,
+    ) -> bool:
+        """Recompute source closures before accepting release metadata."""
+        _ = (context, info)
+        return False
 
     @classmethod
     def _src_expr(cls, commit: str) -> str:

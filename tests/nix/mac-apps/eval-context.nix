@@ -37,10 +37,8 @@ let
     escapeShellArg = builtins.toJSON;
     getExe = value: builtins.toString value;
     literalExpression = value: value;
-    mapAttrsToList = f: set: builtins.map (name: f name set.${name}) (builtins.attrNames set);
     mkDefault = value: value;
     mkOption = value: value;
-    nameValuePair = name: value: { inherit name value; };
     optionalString = cond: value: if cond then value else "";
     types = rec {
       bool = "bool";
@@ -67,9 +65,6 @@ let
 
   pkgs = {
     rsync = rsyncPath;
-    # The real writer returns a store path. Returning the text keeps the shim
-    # contract observable to tests.
-    writeTextFile = args: args.text;
   };
 in
 {

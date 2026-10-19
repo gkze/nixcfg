@@ -1,23 +1,16 @@
 """Make Executor's updater and mutable service ownership fail closed under Nix."""
 
-from typing import TYPE_CHECKING
+import argparse
+from dataclasses import dataclass
+from pathlib import Path
 
-from lib.codemods.source_patch import (
-    SourcePatch,
-    apply_patches,
-    require_absent,
-    run_source_tree_cli,
-)
+from lib.exact_text_patch import ExactTextPatch, plan_exact_text_patches
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-    from pathlib import Path
-
-_MAIN_SOURCE = "apps/desktop/src/main/index.ts"
-_SERVICE_SOURCE = "apps/desktop/src/main/service.ts"
-_CRASH_SCREEN_SOURCE = "apps/desktop/src/main/crash-screen.ts"
-_CLI_SOURCE = "apps/cli/src/main.ts"
-_UPDATE_CHECK_SOURCE = "packages/core/api/src/update-check.ts"
+_MAIN_SOURCE = Path("apps/desktop/src/main/index.ts")
+_SERVICE_SOURCE = Path("apps/desktop/src/main/service.ts")
+_CRASH_SCREEN_SOURCE = Path("apps/desktop/src/main/crash-screen.ts")
+_CLI_SOURCE = Path("apps/cli/src/main.ts")
+_UPDATE_CHECK_SOURCE = Path("packages/core/api/src/update-check.ts")
 _PATCH_SENTINEL = 'const NIX_MANAGED_MESSAGE = "Updates are managed by Nix.";'
 _CLI_COMPILED_BINARY_MESSAGE = (
     r"            `\`${command}\` requires the compiled "
@@ -30,8 +23,15 @@ _CLI_DEV_CHECKOUT_MESSAGE = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _SourcePatch:
+    path: Path
+    old: str
+    new: str
+
+
 _PATCHES = (
-    SourcePatch(
+    _SourcePatch(
         _MAIN_SOURCE,
         """import updater from "electron-updater";
 const { autoUpdater } = updater;
@@ -42,7 +42,7 @@ const NIX_MANAGED = true;
 const NIX_MANAGED_MESSAGE = "Updates are managed by Nix.";
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _MAIN_SOURCE,
         """const ensureSupervisedConnection = async (): Promise<SidecarConnection | null> => {
   // 1. Already running → attach.
@@ -52,7 +52,7 @@ const NIX_MANAGED_MESSAGE = "Updates are managed by Nix.";
   // 1. Already running → attach.
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _MAIN_SOURCE,
         """    "executor:service:set-enabled",
     async (_evt, enabled: unknown): Promise<boolean> => {
@@ -64,7 +64,7 @@ const NIX_MANAGED_MESSAGE = "Updates are managed by Nix.";
       if (typeof enabled !== "boolean") return false;
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _MAIN_SOURCE,
         (
             '  ipcMain.handle("executor:server:rotate-token", '
@@ -108,7 +108,7 @@ const NIX_MANAGED_MESSAGE = "Updates are managed by Nix.";
 """
         ),
     ),
-    SourcePatch(
+    _SourcePatch(
         _MAIN_SOURCE,
         """  ipcMain.handle("executor:state:reset", async (): Promise<boolean> => {
     if (!(await confirmResetState())) return false;
@@ -138,14 +138,14 @@ const NIX_MANAGED_MESSAGE = "Updates are managed by Nix.";
   });
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _MAIN_SOURCE,
         """    buttons: ["Quit", "Reset data and retry…"],
 """,
         """    buttons: NIX_MANAGED ? ["Quit"] : ["Quit", "Reset data and retry…"],
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _MAIN_SOURCE,
         """  const retryAfterReset = response === 1 && (await confirmResetState());
 """,
@@ -153,7 +153,7 @@ const NIX_MANAGED_MESSAGE = "Updates are managed by Nix.";
     !NIX_MANAGED && response === 1 && (await confirmResetState());
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _MAIN_SOURCE,
         """  ipcMain.handle(UPDATE_INSTALL_CHANNEL, async (): Promise<void> => {
     const version = "version" in updateStatus ? updateStatus.version : "";
@@ -163,7 +163,7 @@ const NIX_MANAGED_MESSAGE = "Updates are managed by Nix.";
     const version = "version" in updateStatus ? updateStatus.version : "";
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _MAIN_SOURCE,
         """const applyFakeUpdateFromEnv = () => {
   // Never honor the fake seam in a packaged build: a stray env var would seed a
@@ -173,7 +173,7 @@ const NIX_MANAGED_MESSAGE = "Updates are managed by Nix.";
   // Never honor the fake seam in a packaged build: a stray env var would seed a
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _MAIN_SOURCE,
         """const promptInstallUpdate = async (version: string) => {
   if (updateDialogOpen) return;
@@ -183,7 +183,7 @@ const NIX_MANAGED_MESSAGE = "Updates are managed by Nix.";
   if (updateDialogOpen) return;
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _MAIN_SOURCE,
         """const setupAutoUpdater = () => {
   if (!app.isPackaged) return;
@@ -195,7 +195,7 @@ const NIX_MANAGED_MESSAGE = "Updates are managed by Nix.";
   if (!app.isPackaged) return;
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _MAIN_SOURCE,
         """const runUpdateCheck = async ({ alertOnFail, trigger }: UpdateCheckOptions) => {
   if (!app.isPackaged) {
@@ -214,7 +214,7 @@ const NIX_MANAGED_MESSAGE = "Updates are managed by Nix.";
   if (!app.isPackaged) {
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _MAIN_SOURCE,
         """const handleFatalSidecarFailure = async (error: unknown) => {
   showCrashScreen();
@@ -225,7 +225,7 @@ const NIX_MANAGED_MESSAGE = "Updates are managed by Nix.";
   if (app.isPackaged && !NIX_MANAGED) {
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _MAIN_SOURCE,
         """      {
         label: "Check for Updates…",
@@ -238,7 +238,7 @@ const NIX_MANAGED_MESSAGE = "Updates are managed by Nix.";
       },
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _SERVICE_SOURCE,
         """const serviceLog = log.scope("service");
 const execFileAsync = promisify(execFile);
@@ -248,7 +248,7 @@ const execFileAsync = promisify(execFile);
 const NIX_MANAGED = true;
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _SERVICE_SOURCE,
         """export const supervisedServiceStatus = async (): Promise<SupervisedServiceStatus> => {
   if (!executorAvailable()) return { supported: false, registered: false, running: false };
@@ -258,7 +258,7 @@ const NIX_MANAGED = true;
   if (!executorAvailable()) return { supported: false, registered: false, running: false };
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _SERVICE_SOURCE,
         """export const installSupervisedService = async (opts: InstallOptions): Promise<void> => {
   if (!executorAvailable()) {
@@ -270,7 +270,7 @@ const NIX_MANAGED = true;
   if (!executorAvailable()) {
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _CLI_SOURCE,
         """const supervisedServiceOrigin = (port: number): string => `http://127.0.0.1:${port}`;
 """,
@@ -279,7 +279,7 @@ const NIX_MANAGED = true;
 const supervisedServiceOrigin = (port: number): string => `http://127.0.0.1:${port}`;
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _CLI_SOURCE,
         (
             """const installService = (port: number, commandName: string, boot = false) =>
@@ -325,7 +325,7 @@ const supervisedServiceOrigin = (port: number): string => `http://127.0.0.1:${po
 """
         ),
     ),
-    SourcePatch(
+    _SourcePatch(
         _CLI_SOURCE,
         """const serviceUninstallCommand = Command.make("uninstall", {}, () =>
   Effect.gen(function* () {
@@ -341,7 +341,7 @@ const supervisedServiceOrigin = (port: number): string => `http://127.0.0.1:${po
     const backend = getServiceBackend();
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _CLI_SOURCE,
         """const serviceRestartCommand = Command.make("restart", {}, () =>
   Effect.gen(function* () {
@@ -357,14 +357,14 @@ const supervisedServiceOrigin = (port: number): string => `http://127.0.0.1:${po
     const backend = getServiceBackend();
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _CRASH_SCREEN_SOURCE,
         """        <button id="update" class="secondary">Check for updates</button>
 """,
         """        <span class="secondary">Updates are managed by Nix.</span>
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _CRASH_SCREEN_SOURCE,
         """      document.getElementById("update").addEventListener("click", async () => {
         status.textContent = "Checking for updates\\\\u2026";
@@ -379,7 +379,7 @@ const supervisedServiceOrigin = (port: number): string => `http://127.0.0.1:${po
 """,
         "",
     ),
-    SourcePatch(
+    _SourcePatch(
         _UPDATE_CHECK_SOURCE,
         """export const EXECUTOR_PACKAGE_NAME = "executor";
 
@@ -391,7 +391,7 @@ const NIX_MANAGED = true;
 /** Lightweight dist-tags-only registry endpoint (not the full packument). */
 """,
     ),
-    SourcePatch(
+    _SourcePatch(
         _UPDATE_CHECK_SOURCE,
         (
             "export const resolveDistTags = async (options?: ResolveDistTagsOptions): "
@@ -410,18 +410,34 @@ const NIX_MANAGED = true;
 
 def patch_tree(source_root: Path) -> None:
     """Disable all updater and app-owned mutable service paths atomically."""
-    require_absent(
-        source_root,
-        (patch.relative_path for patch in _PATCHES),
-        _PATCH_SENTINEL,
-        message="Executor source-policy patch was already applied",
+    sources: dict[Path, str] = {}
+    for relative in dict.fromkeys(patch.path for patch in _PATCHES):
+        path = source_root / relative
+        source = path.read_text(encoding="utf-8")
+        if _PATCH_SENTINEL in source:
+            msg = "Executor source-policy patch was already applied"
+            raise RuntimeError(msg)
+        sources[relative] = source
+
+    patched_sources = plan_exact_text_patches(
+        sources,
+        (ExactTextPatch(patch.path, patch.old, patch.new) for patch in _PATCHES),
+        mismatch_message=lambda _patch, count: (
+            f"expected one Executor source-policy anchor, found {count}"
+        ),
     )
-    apply_patches(source_root, _PATCHES)
+
+    for relative, patched in patched_sources.items():
+        (source_root / relative).write_text(patched, encoding="utf-8")
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Apply the Nix source-policy patch to one Executor source tree."""
-    return run_source_tree_cli(argv, description=__doc__, patch_tree=patch_tree)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source_root", type=Path)
+    args = parser.parse_args(argv)
+    patch_tree(args.source_root)
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover -- packaged CLI guard

@@ -45,9 +45,7 @@ rustPlatform.buildRustPackage {
   env.ZERON_NIX_MANAGED = "1";
 
   postPatch = ''
-    PYTHONPATH=${
-      import ../../lib/codemods-pythonpath.nix { inherit lib; }
-    } ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD"
+    ${lib.getExe python3} ${./patch_nix_managed.py} "$PWD"
   '';
 
   # The upstream workspace test matrix includes daemon, network, and Linux
