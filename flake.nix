@@ -153,7 +153,7 @@
       flake = false;
     };
     anthropic-cli = {
-      url = "github:anthropics/anthropic-cli/v1.38.0";
+      url = "github:anthropics/anthropic-cli/v1.42.0";
       flake = false;
     };
     base16-schemes-src = {
@@ -198,7 +198,7 @@
       flake = false;
     };
     codex = {
-      url = "github:openai/codex/rust-v0.161.0";
+      url = "github:openai/codex/rust-v0.163.0";
       flake = false;
     };
     curator = {
@@ -213,7 +213,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.43.0";
+      url = "github:steipete/gogcli/v0.45.0";
       flake = false;
     };
     openai-cli = {
