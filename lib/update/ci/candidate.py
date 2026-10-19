@@ -68,6 +68,7 @@ from lib.update.ci.warmup import (
     is_rust_zed_store_path,
     is_source_fetch_mirror_line,
     is_source_fetch_store_path,
+    is_source_fetch_transport_error,
     is_svh_sensitive_store_path,
     is_zed_editor_nightly_store_path,
     language_models_input_drvs,
@@ -97,6 +98,7 @@ from lib.update.ci.warmup import (
     skip_cached_warmup_paths,
     slot_cascade_paths,
     slot_warmup_paths,
+    source_fetch_retry_drvs,
     unique_drvs_for_outputs,
     write_warmup_plan,
     zed_family_realize_policy,
@@ -313,8 +315,10 @@ def _hosted_validation_progress(
                 and "will be built" in text.lower()
             )
             drv = command_store_drv(text)
-            if is_source_fetch_mirror_line(text) or (
-                "Cannot build" in text and drv and is_source_fetch_store_path(drv)
+            if (
+                is_source_fetch_mirror_line(text)
+                or is_source_fetch_transport_error(text)
+                or ("Cannot build" in text and drv and is_source_fetch_store_path(drv))
             ):
                 source_fetch_miss = True
             if not rust_substitute_miss:
@@ -1045,6 +1049,45 @@ def _slot_paths_with_gitbutler_canary(
     }
 
 
+def _realize_rust_warmup_others(
+    others: tuple[str, ...],
+    *,
+    flake_root: Path,
+) -> tuple[validation.DerivationValidationFailure, ...]:
+    """Realize rust-warmup others; DNS-retry source FODs after a tainted hash.
+
+    39217658040 slot 4: gitbutler others is family-scale (39 wbb) and
+    must use the 400-cap. 39234076105 slot 4: rust_v8-goose keep-going
+    hashed a 503-tainted rusty_v8 fetchgit tree. Retry the FOD, then the
+    parent crate once the source is in the store.
+    """
+    if not others:
+        return ()
+    progress = _hosted_validation_progress("rust-warmup", keep_going=True)
+    others_failures = realize_warmup_outputs(
+        others,
+        flake_root=flake_root,
+        progress=progress,
+        keep_going=True,
+    )
+    retry = source_fetch_retry_drvs(others_failures)
+    if not retry:
+        return others_failures
+    fod_failures = realize_source_fetch_drvs(
+        retry,
+        flake_root=flake_root,
+        progress=progress,
+    )
+    if fod_failures:
+        return fod_failures
+    return realize_warmup_outputs(
+        others,
+        flake_root=flake_root,
+        progress=progress,
+        keep_going=True,
+    )
+
+
 def _realize_rust_warmup(
     warmup_plan: Path,
     warmup_slot: int,
@@ -1148,14 +1191,7 @@ def _realize_rust_warmup(
         # (406-bootstrap / goose-cli umbrellas). partition already
         # deferred those leaves; gitbutler others is family-scale, the
         # same 400-cap as deferred rust_* / parent 38081612138's 37.
-        failures.extend(
-            realize_warmup_outputs(
-                others,
-                flake_root=flake_root,
-                progress=_hosted_validation_progress("rust-warmup", keep_going=True),
-                keep_going=True,
-            )
-        )
+        failures.extend(_realize_rust_warmup_others(others, flake_root=flake_root))
     if compiled:
         if agent_ui and not zed_slot:
             failures.extend(_realize_logged_warmup(agent_ui, flake_root=flake_root))

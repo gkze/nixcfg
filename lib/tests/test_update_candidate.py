@@ -1401,6 +1401,170 @@ def test_rust_warmup_defers_leaf_packages_from_others(
     assert vendor_drv not in realized[0]
 
 
+def test_realize_rust_warmup_others_is_noop_without_drvs(tmp_path: Path) -> None:
+    assert pipeline._realize_rust_warmup_others((), flake_root=tmp_path) == ()
+
+
+def test_rust_warmup_retries_rusty_v8_after_others_hash_mismatch(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """39234076105 slot 4: retry rusty_v8 FOD, then re-realize rust_v8-goose."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    rusty = "/nix/store/az1hmrm8app3kdcn79cxlad1z9zg7s6g-rusty_v8-dbb64c2.drv"
+    goose = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_v8-goose-145.0.0"
+    goose_drv = f"{goose}.drv"
+    mismatch = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{goose_drv}^*",
+        message=f"error: hash mismatch in fixed-output derivation '{rusty}':",
+    )
+    realized: list[tuple[str, object]] = []
+    warmup_calls = {"n": 0}
+
+    def warmup_realize(
+        paths: object, *_args: object, **_kwargs: object
+    ) -> tuple[object, ...]:
+        realized.append(("warmup", paths))
+        warmup_calls["n"] += 1
+        if warmup_calls["n"] == 1:
+            return (mismatch,)
+        return ()
+
+    def fod_realize(paths: object, *_args: object, **_kwargs: object) -> tuple[()]:
+        realized.append(("source", paths))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "realize_source_fetch_drvs", fod_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_args, **_kwargs: ())
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(goose,),
+            rustLayers=((goose,),),
+            outputDrvs={goose: goose_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == ()
+    assert realized == [
+        ("warmup", (goose_drv,)),
+        ("source", (rusty,)),
+        ("warmup", (goose_drv,)),
+    ]
+
+
+def test_rust_warmup_keeps_rusty_v8_failure_when_fod_retry_misses(
+    prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second tainted rusty_v8 hash must not proceed into rust_v8-goose."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: (),
+    )
+    rusty = "/nix/store/az1hmrm8app3kdcn79cxlad1z9zg7s6g-rusty_v8-dbb64c2.drv"
+    goose = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_v8-goose-145.0.0"
+    goose_drv = f"{goose}.drv"
+    mismatch = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{goose_drv}^*",
+        message=f"error: hash mismatch in fixed-output derivation '{rusty}':",
+    )
+    realized: list[tuple[str, object]] = []
+
+    def warmup_realize(
+        paths: object, *_args: object, **_kwargs: object
+    ) -> tuple[DerivationValidationFailure, ...]:
+        realized.append(("warmup", paths))
+        return (mismatch,)
+
+    def fod_realize(
+        paths: object, *_args: object, **_kwargs: object
+    ) -> tuple[DerivationValidationFailure, ...]:
+        realized.append(("source", paths))
+        return (mismatch,)
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "realize_source_fetch_drvs", fod_realize)
+    monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: False)
+    monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_args, **_kwargs: ())
+    from lib.update.ci.warmup import (
+        RootWarmupStats,
+        ShardLocalBuildReport,
+        WarmupPlan,
+        write_warmup_plan,
+    )
+
+    warmup_plan = tmp_path / "warmup-plan.json"
+    write_warmup_plan(
+        warmup_plan,
+        WarmupPlan(
+            schemaVersion=1,
+            system="aarch64-darwin",
+            substituters=("https://cache.nixos.org", "https://gkze.cachix.org"),
+            warmupOutputs=(goose,),
+            rustLayers=((goose,),),
+            outputDrvs={goose: goose_drv},
+            perRoot={
+                "darwin-argus": RootWarmupStats(
+                    outputs=1, missing=1, warmup=1, remaining=0
+                )
+            },
+            shards=(
+                ShardLocalBuildReport(
+                    shard="darwin-argus",
+                    roots=("darwin-argus",),
+                    remaining=0,
+                    remaining_rust_crates=0,
+                ),
+            ),
+            notes="fixture",
+        ),
+    )
+    report = pipeline.validate_candidate(
+        candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
+    )
+    assert report.failures == (mismatch,)
+    assert realized == [("warmup", (goose_drv,)), ("source", (rusty,))]
+
+
 def test_rust_warmup_settings_family_force_locals_content_cluster(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4770,6 +4934,44 @@ def test_hosted_warmup_skips_rust_cannot_build_after_source_fod_miss(
                 "nix build --no-link /nix/store/settings.drv",
                 "Cannot build "
                 "'/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0.drv'",
+            )
+        )
+
+
+def test_hosted_warmup_skips_rusty_v8_hash_mismatch_after_http_503(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """39234076105 slot 4: Chromium 503 then tainted rusty_v8 hash is retried."""
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
+    rusty = "/nix/store/az1hmrm8app3kdcn79cxlad1z9zg7s6g-rusty_v8-dbb64c2.drv"
+    goose = (
+        "nix build --no-link --keep-going --fallback "
+        "'/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_v8-goose-145.0.0.drv^*'"
+    )
+    progress = pipeline._hosted_validation_progress("rust-warmup", keep_going=True)
+    progress(ValidationCommandStarted(goose))
+    progress(
+        ValidationCommandOutput(
+            goose,
+            "error: RPC failed; HTTP 503 curl 22 The requested URL returned error: 503",
+        )
+    )
+    progress(
+        ValidationCommandOutput(
+            goose,
+            "error: hash mismatch in fixed-output derivation "
+            f"'{rusty}':",
+        )
+    )
+    assert "rusty_v8" in capsys.readouterr().err
+    cascade = pipeline._hosted_validation_progress("cascade-warmup", keep_going=True)
+    cascade(ValidationCommandStarted("nix build --keep-going /nix/store/bb.drv"))
+    with pytest.raises(WarmupFatalError, match="fixed-output hash mismatch"):
+        cascade(
+            ValidationCommandOutput(
+                "nix build --keep-going /nix/store/bb.drv",
+                "error: hash mismatch in fixed-output derivation "
+                "'/nix/store/qbvbj2w3qxhn5c0x43f929k28plr1r8s-bb-pnpm-deps.drv'",
             )
         )
 

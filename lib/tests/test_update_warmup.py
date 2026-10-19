@@ -74,6 +74,7 @@ from lib.update.ci.warmup import (
     is_settings_family_store_path,
     is_source_fetch_mirror_line,
     is_source_fetch_store_path,
+    is_source_fetch_transport_error,
     is_svh_sensitive_store_path,
     is_tree_sitter_family_store_path,
     is_zed_editor_nightly_store_path,
@@ -112,6 +113,7 @@ from lib.update.ci.warmup import (
     skip_cached_warmup_paths,
     slot_cascade_paths,
     slot_warmup_paths,
+    source_fetch_failure_drv,
     source_fetch_input_drvs,
     source_fetch_leftover_drvs,
     source_fetch_network_ready,
@@ -1782,6 +1784,14 @@ def test_1268_slot_others_defer_leaf_packages_with_dry_run_counts() -> None:
         ),
         ("/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-vendor-source", True),
         ("/nix/store/cccccccccccccccccccccccccccccccc-crate.crate.drv", True),
+        (
+            "/nix/store/az1hmrm8app3kdcn79cxlad1z9zg7s6g-rusty_v8-dbb64c2.drv",
+            True,
+        ),
+        (
+            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_v8-goose-145.0.0.drv",
+            False,
+        ),
         ("/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv", False),
         ("/nix/store/1gx3hvygaaaaaaaaaaaaaaaaaaaaaaaa-stdenv-darwin.drv", False),
         ("/nix/store/dddddddddddddddddddddddddddddddd-bmake-20260313.drv", False),
@@ -1903,6 +1913,10 @@ def test_source_fetch_retry_drvs_refuse_compiler_and_rust() -> None:
         "/nix/store/clbp5wbnz9r88lngchd67lpxkk7y6my9-libloading-0.8.9.tar.gz.drv"
     )
     clang_sys = "/nix/store/mfrnbrs6xyj0fz76nz31a3r028ip420p-clang-sys-1.9.1.tar.gz.drv"
+    rusty_v8 = "/nix/store/az1hmrm8app3kdcn79cxlad1z9zg7s6g-rusty_v8-dbb64c2.drv"
+    goose = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_v8-goose-145.0.0.drv"
+    pnpm = "/nix/store/qbvbj2w3qxhn5c0x43f929k28plr1r8s-bb-pnpm-deps.drv"
+    vendor_source = "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-vendor-source.drv"
     assert source_fetch_retry_drvs((
         DerivationValidationFailure(
             source="root-warmup",
@@ -1951,7 +1965,56 @@ def test_source_fetch_retry_drvs_refuse_compiler_and_rust() -> None:
             installable=f"{source}^*",
             message="error: Cannot build '/nix/store/...-source.drv'.",
         ),
-    )) == (source, convert_case, pin_project, libloading, clang_sys)
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{goose}^*",
+            message=(f"error: hash mismatch in fixed-output derivation '{rusty_v8}':"),
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{pnpm}^*",
+            message=(f"error: hash mismatch in fixed-output derivation '{pnpm}':"),
+        ),
+        DerivationValidationFailure(
+            source="root-warmup",
+            installable=f"{vendor_source}^*",
+            message="builder failed",
+        ),
+    )) == (source, convert_case, pin_project, libloading, clang_sys, rusty_v8)
+
+
+def test_source_fetch_failure_drv_prefers_message_fod() -> None:
+    """39234076105: parent rust_v8-goose named rusty_v8 in the hash line."""
+    rusty_v8 = "/nix/store/az1hmrm8app3kdcn79cxlad1z9zg7s6g-rusty_v8-dbb64c2.drv"
+    goose = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_v8-goose-145.0.0.drv"
+    settings = "/nix/store/dddddddddddddddddddddddddddddddd-rust_settings-0.1.0.drv"
+    wrapped = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{goose}^*",
+        message=f"error: hash mismatch in fixed-output derivation '{rusty_v8}':",
+    )
+    compile_miss = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{settings}^*",
+        message="error: Cannot build '/nix/store/...-rust_settings-0.1.0.drv'.",
+    )
+    assert source_fetch_failure_drv(wrapped) == rusty_v8
+    assert source_fetch_failure_drv(compile_miss) == ""
+    assert source_fetch_leftover_drvs((wrapped, compile_miss)) == (rusty_v8,)
+
+
+def test_is_source_fetch_transport_error_matches_chromium_503() -> None:
+    """39234076105 slot 4 streamed HTTP 503 / RPC failed from googlesource."""
+    assert is_source_fetch_transport_error("error: RPC failed; result=22")
+    assert is_source_fetch_transport_error("remote: HTTP 503 Service Unavailable")
+    assert is_source_fetch_transport_error(
+        "fatal: unable to access 'https://chromium.googlesource.com/libunwind.git/': "
+        "The requested URL returned error: 503"
+    )
+    assert not is_source_fetch_transport_error(
+        "error: Cannot build '/nix/store/x.drv'."
+    )
+    assert not is_source_fetch_transport_error("HTTP 404 Not Found")
 
 
 def test_source_fetch_network_ready_requires_both_hosts() -> None:
@@ -2316,6 +2379,28 @@ def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:
     )
 
 
+def test_warmup_fatal_skips_tainted_source_fod_hash_mismatch() -> None:
+    """39234076105: rusty_v8 after 503 retries; bb-pnpm-deps stays a pin error."""
+    rusty = (
+        "error: hash mismatch in fixed-output derivation "
+        "'/nix/store/az1hmrm8app3kdcn79cxlad1z9zg7s6g-rusty_v8-dbb64c2.drv':"
+    )
+    pnpm = (
+        "error: hash mismatch in fixed-output derivation "
+        "'/nix/store/qbvbj2w3qxhn5c0x43f929k28plr1r8s-bb-pnpm-deps.drv':"
+    )
+    assert warmup_fatal_line(rusty) == "fixed-output hash mismatch"
+    assert warmup_fatal_line(rusty, source_fetch_miss=True) is None
+    raise_if_warmup_fatal(rusty, source_fetch_miss=True)
+    assert warmup_fatal_line(pnpm, source_fetch_miss=True) == (
+        "fixed-output hash mismatch"
+    )
+    bare = "error: hash mismatch in fixed-output derivation"
+    assert warmup_fatal_line(bare, source_fetch_miss=True) == (
+        "fixed-output hash mismatch"
+    )
+
+
 def test_realize_source_fetch_drvs_is_noop_without_drvs(tmp_path: Path) -> None:
     assert realize_source_fetch_drvs((), flake_root=tmp_path) == ()
 
@@ -2395,6 +2480,40 @@ def test_realize_source_fetch_drvs_fails_closed_when_dns_stays_dead(
         resolve=lambda *_a: (_ for _ in ()).throw(OSError("dns")),
         sleep=lambda _seconds: None,
     ) == (cannot,)
+
+
+def test_realize_source_fetch_drvs_retries_tainted_hash_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """39234076105: 503-tainted rusty_v8 hash mismatch retries after DNS."""
+    rusty_v8 = "/nix/store/az1hmrm8app3kdcn79cxlad1z9zg7s6g-rusty_v8-dbb64c2.drv"
+    mismatch = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{rusty_v8}^*",
+        message=f"error: hash mismatch in fixed-output derivation '{rusty_v8}':",
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def realize(
+        paths: object, *_args: object, **_kwargs: object
+    ) -> tuple[DerivationValidationFailure, ...]:
+        ordered = tuple(paths)
+        calls.append(ordered)
+        if len(calls) == 1:
+            return (mismatch,)
+        return ()
+
+    monkeypatch.setattr("lib.update.ci.warmup.realize_warmup_outputs", realize)
+    assert (
+        realize_source_fetch_drvs(
+            (rusty_v8,),
+            flake_root=tmp_path,
+            resolve=lambda *_a: [("AF_INET", "ok")],
+            sleep=lambda _seconds: None,
+        )
+        == ()
+    )
+    assert calls == [(rusty_v8,), (rusty_v8,)]
 
 
 def test_realize_source_fetch_drvs_fails_closed_after_retry_miss(

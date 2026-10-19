@@ -276,7 +276,13 @@ def warmup_fatal_line(
     if is_fixed_output_hash_mismatch(line):
         # 38739788947: cascade --keep-going spent 19m after bb-pnpm-deps
         # mismatch. A FOD pin error cannot recover by building siblings.
-        return "fixed-output hash mismatch"
+        # 39234076105 slot 4: rusty_v8 fetchgit HTTP 503 then hashed a
+        # truncated Chromium tree. Retry that source FOD; do not treat a
+        # transport-tainted hash as a pin change (and never skip
+        # bb-pnpm-deps). Fall through to the terminal None when skipped.
+        drv = command_store_drv(line)
+        if not (source_fetch_miss and drv and is_source_fetch_store_path(drv)):
+            return "fixed-output hash mismatch"
     if "error[E04" in line:
         # Zed-only keep_going collects every crate error in one pass.
         return None if keep_going else "rustc SVH/crate mismatch"
@@ -1852,11 +1858,16 @@ def is_source_fetch_store_path(path: str) -> bool:
 
     ``#1264`` ``--max-jobs 0`` refused ``coreaudio-rs-0.14.2.tar.gz.drv``
     because a cache miss on a crate tarball is a download, not bootstrap.
+    39234076105 slot 4: ``rusty_v8-dbb64c2`` is fetchgit of Chromium
+    submodules, not crate2nix ``rust_v8-goose``. Plan leftover and Darwin
+    retry must treat it as a download.
     """
     name = _store_output_rest(path).removesuffix(".drv")
     if name.endswith(_SOURCE_FETCH_ARCHIVES):
         return True
-    return name == "source" or name.endswith(("-src", "-source"))
+    if name == "source" or name.endswith(("-src", "-source")):
+        return True
+    return name.startswith("rusty_v8-")
 
 
 # Known 1-drv Unix helpers that miss cache.nixos.org on the CVE-patched
@@ -1900,6 +1911,20 @@ def _compiler_must_substitute_name(name: str) -> bool:
         if prefix == "stdenv-" or (rest and rest[0].isdigit()):
             return True
     return False
+
+
+def is_source_fetch_transport_error(text: str) -> bool:
+    """Return whether Nix/git streamed a retryable source-fetch HTTP failure.
+
+    39234076105 slot 4: chromium.googlesource.com HTTP 503 during a
+    rusty_v8 submodule clone, then hash mismatch on the tainted tree.
+    """
+    lowered = text.lower()
+    return (
+        "http 503" in lowered
+        or "rpc failed" in lowered
+        or "returned error: 503" in lowered
+    )
 
 
 def is_source_fetch_mirror_line(line: str) -> bool:
@@ -2049,18 +2074,34 @@ def source_fetch_input_drvs(
     return tuple(drv for drv in fetches if is_source_fetch_store_path(drv))
 
 
+def source_fetch_failure_drv(failure: DerivationValidationFailure) -> str:
+    """Return the source-FOD ``.drv`` from a failure installable or message.
+
+    39234076105 slot 4 realized ``rust_v8-goose``; the hash-mismatch
+    line named ``rusty_v8-dbb64c2.drv``. Retry the FOD, not the crate.
+    """
+    for candidate in (
+        failure.installable.removesuffix("^*"),
+        command_store_drv(failure.message),
+    ):
+        if is_source_fetch_store_path(candidate):
+            return candidate
+    return ""
+
+
 def source_fetch_retry_drvs(
     failures: Sequence[DerivationValidationFailure],
 ) -> tuple[str, ...]:
     """Return streamed FOD Cannot-build installables; refuse rustc / rust_*."""
     retry: list[str] = []
     for failure in failures:
-        drv = failure.installable.removesuffix("^*")
-        if not is_source_fetch_store_path(drv):
+        drv = source_fetch_failure_drv(failure)
+        if not drv:
             continue
         if (
             "Cannot build" not in failure.message
             and "from any mirror" not in failure.message
+            and not is_fixed_output_hash_mismatch(failure.message)
         ):
             continue
         retry.append(drv)
@@ -2073,8 +2114,8 @@ def source_fetch_leftover_drvs(
     """Return source-FOD installables that missed substitute-only publish."""
     leftover: list[str] = []
     for failure in failures:
-        drv = failure.installable.removesuffix("^*")
-        if is_source_fetch_store_path(drv):
+        drv = source_fetch_failure_drv(failure)
+        if drv:
             leftover.append(drv)
     return tuple(dict.fromkeys(leftover))
 
