@@ -1014,6 +1014,38 @@ def import_warmup_drvs(
     _require_store_paths(ordered, run=run)
 
 
+def stripe_layer_paths(
+    layers: Sequence[Sequence[str]],
+    slot: int,
+    *,
+    width: int,
+    weight: Callable[[str], int] | None = None,
+) -> tuple[str, ...]:
+    """Assign each path to the current lightest slot, carrying load across layers.
+
+    Rust warmup keeps per-layer round-robin so crate2nix dependents stay on
+    the same slot as their inputs. Cascade uses this min-load assignment:
+    39166099302 packed 123 minutes of compile into slots 16/46/37/13/11m
+    because ``tuple(layer)[slot::width]`` stacked llvm/clang onto slot 1.
+    """
+    if width < 1:
+        msg = "warmup width must be at least 1"
+        raise WarmupError(msg)
+    if not 0 <= slot < width:
+        msg = f"warmup slot must be in 0..{width - 1}, got {slot}"
+        raise WarmupError(msg)
+    weigher = weight if weight is not None else (lambda _path: 1)
+    assigned: list[str] = []
+    loads = [0] * width
+    for layer in layers:
+        for path in layer:
+            target = min(range(width), key=lambda index: (loads[index], index))
+            loads[target] += max(int(weigher(path)), 1)
+            if target == slot:
+                assigned.append(path)
+    return tuple(assigned)
+
+
 def slot_warmup_paths(
     layers: Sequence[Sequence[str]],
     slot: int,
@@ -1030,20 +1062,55 @@ def slot_warmup_paths(
     return tuple(path for layer in layers for path in tuple(layer)[slot::width])
 
 
+# Relative compile cost for cascade min-load. Values are from 39166099302
+# slot imbalance (46m vs 11m) plus known Darwin C++/toolchain archives;
+# they are not minutes. Unlisted paths weigh 1.
+_CASCADE_PATH_WEIGHTS: tuple[tuple[str, int], ...] = (
+    ("WebKit", 12),
+    ("webkitgtk-", 12),
+    ("webkit-", 12),
+    ("qtwebengine-", 12),
+    ("chromium-", 12),
+    ("electron-", 10),
+    ("onnxruntime-", 10),
+    ("buzz-onnxruntime-", 10),
+    ("llvm-", 8),
+    ("clang-", 8),
+    ("compiler-rt-", 6),
+    ("swift-", 8),
+    ("ghc-", 8),
+    ("openjdk-", 6),
+    ("ffmpeg-", 6),
+    ("lld-", 4),
+    ("bun-", 5),
+    ("nodejs-", 4),
+    ("postgresql-", 4),
+)
+
+
+def cascade_path_weight(path: str) -> int:
+    """Return the relative cascade compile weight for min-load striping."""
+    rest = _store_output_rest(path)
+    for prefix, weight in _CASCADE_PATH_WEIGHTS:
+        if rest.startswith(prefix):
+            return weight
+    return 1
+
+
 def slot_cascade_paths(
     layers: Sequence[Sequence[str]],
     slot: int,
     *,
     width: int = CASCADE_WARMUP_SLOTS,
 ) -> tuple[str, ...]:
-    """Return this cascade-warmup slot's stripe of each cascade layer."""
+    """Return this cascade-warmup slot's min-load stripe of each cascade layer."""
     if width < 1:
         msg = "cascade warmup width must be at least 1"
         raise WarmupError(msg)
     if not 0 <= slot < width:
         msg = f"cascade warmup slot must be in 0..{width - 1}, got {slot}"
         raise WarmupError(msg)
-    return slot_warmup_paths(layers, slot, width=width)
+    return stripe_layer_paths(layers, slot, width=width, weight=cascade_path_weight)
 
 
 def is_cascade_canary_store_path(path: str) -> bool:
