@@ -98,6 +98,9 @@ _NIX_NETWORK_TRANSIENT_MARKERS = (
     "502 Bad Gateway",
     "503 Service Unavailable",
     "504 Gateway Time-out",
+    # 39292190782: zon2nix/zig fetch printed only ``err(default):
+    # BadHttpStatus`` for a Zig package 5xx, with no numeric HTTP status.
+    "BadHttpStatus",
     "Could not resolve host",
     "Failure when receiving data from the peer",
     "Failed to connect",

@@ -80,6 +80,7 @@ class NeutilsUpdater(GitHubReleaseUpdater):
     _ZON2NIX_TIMEOUT_SECONDS = 180
     _ZON2NIX_TRANSIENT_MARKERS: ClassVar[tuple[str, ...]] = (
         "502 Bad Gateway",
+        "BadHttpStatus",
         "Could not resolve host",
         "ConnectionTimedOut",
         "HttpConnectionClosing",

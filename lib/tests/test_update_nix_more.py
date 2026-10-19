@@ -306,6 +306,15 @@ def test_retryable_fixed_output_hash_failure_classification() -> None:
     )
 
 
+def test_zig_bad_http_status_is_retryable_network_failure() -> None:
+    """39292190782: zon2nix/zig printed BadHttpStatus with no numeric HTTP status."""
+    stderr = (
+        "warn(zig): cache_path: /tmp/neutils-zon2nix/.cache/zig/p/zigdown-1.2.1\n"
+        "err(default): BadHttpStatus"
+    )
+    assert is_retryable_nix_network_failure(stdout="", stderr=stderr)
+
+
 def test_ranlib_write_eio_is_retryable_store_fault() -> None:
     """38394692516: ranlib EIO is a host storage fault; last-25 omits it."""
     drv = "/nix/store/4jjnjbsw4a0ysny10x9p57r057k25nhz-buzz-onnxruntime-1.27.0.drv"

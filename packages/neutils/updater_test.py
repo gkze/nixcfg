@@ -747,6 +747,22 @@ _CODEBERG_ZIG_OVERLAY_503 = (
 )
 
 
+_ZON2NIX_BAD_HTTP_STATUS = (
+    "warn(zig): cache_path: /tmp/neutils-zon2nix/.cache/zig/p/"
+    "zigdown-1.2.1-M06JT5IzFgDTiRC66WcjynfIDs36nQocT40xNfys-wuq\n"
+    "warn(zig): cache_path: /tmp/neutils-zon2nix/.cache/zig/p/"
+    "kewpie-0.1.0-PG0ir0IzAABsQr2dPBazNu4Okyt7MX2b2cjbVGP76NkH\n"
+    "err(default): BadHttpStatus\n"
+)
+
+
+def test_zig_bad_http_status_is_a_transient_zon2nix_failure() -> None:
+    """39292190782 prepare-x86: zig fetch of zigdown/kewpie/cli returned BadHttpStatus."""
+    module = _load_module("neutils_bad_http_status_is_transient")
+    updater = module.NeutilsUpdater()
+    assert updater._is_transient_zon2nix_text(_ZON2NIX_BAD_HTTP_STATUS)
+
+
 def test_codeberg_zig_overlay_503_is_a_transient_zon2nix_failure() -> None:
     """Update 37162169861 died resolving zon2nix when Codeberg returned 503."""
     module = _load_module("neutils_codeberg_503_is_transient")
