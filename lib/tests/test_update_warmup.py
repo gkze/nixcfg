@@ -34,6 +34,7 @@ from lib.update.ci.warmup import (
     assert_zed_family_realize_set,
     canary_crate_warmup_paths,
     cascade_canary_paths,
+    cascade_path_weight,
     classify_slot_warmup_will_be_built,
     command_store_drv,
     compiler_input_drvs,
@@ -117,6 +118,7 @@ from lib.update.ci.warmup import (
     source_fetch_network_ready,
     source_fetch_publish_leftover_line,
     source_fetch_retry_drvs,
+    stripe_layer_paths,
     substitutable_paths,
     unique_drvs_for_outputs,
     wait_for_source_fetch_network,
@@ -1352,6 +1354,10 @@ def test_rust_warmup_layers_and_slots_keep_dependency_order() -> None:
         slot_cascade_paths(layers, 5)
     with pytest.raises(WarmupError, match="cascade warmup width"):
         slot_cascade_paths(layers, 0, width=0)
+    with pytest.raises(WarmupError, match="warmup width must be"):
+        stripe_layer_paths(layers, 0, width=0)
+    with pytest.raises(WarmupError, match="warmup slot must be"):
+        stripe_layer_paths(layers, 5, width=5)
     cycle = _graph(rust_a, rust_b, edges={rust_a: (rust_b,), rust_b: (rust_a,)})
     with pytest.raises(WarmupError, match="dependency cycle"):
         rust_warmup_layers(frozenset({rust_a, rust_b}), (cycle,))
@@ -1361,6 +1367,38 @@ def test_rust_warmup_layers_and_slots_keep_dependency_order() -> None:
     assert rust_warmup_layers(frozenset({shared}), (_graph(shared),)) == ((shared,),)
     assert rust_warmup_layers(frozenset({leaf}), (_graph(leaf),)) == ()
     assert rust_warmup_layers(frozenset(), (_graph(shared),)) == ()
+
+
+def test_unit_weight_stripe_matches_round_robin_in_one_layer() -> None:
+    """A fresh layer with unit weights is round-robin; rust slots stay per-layer."""
+    paths = tuple(
+        f"/nix/store/{index:032x}-rust_serde-1.0.{index}" for index in range(10)
+    )
+    layers = (paths,)
+    for slot in range(5):
+        assert slot_warmup_paths(layers, slot, width=5) == paths[slot::5]
+        assert stripe_layer_paths(layers, slot, width=5) == paths[slot::5]
+        assert (
+            stripe_layer_paths(layers, slot, width=5, weight=lambda _path: 0)
+            == paths[slot::5]
+        )
+
+
+def test_cascade_stripes_spread_heavy_paths_instead_of_round_robin() -> None:
+    """39166099302: round-robin stacked llvm/clang onto slot 0 (46m vs 11m)."""
+    llvm = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-llvm-20.1.0"
+    clang = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-clang-20.1.0"
+    lights = tuple(f"/nix/store/{index:032x}-coreutils-9.{index}" for index in range(4))
+    layers = ((llvm, *lights, clang),)
+    assert cascade_path_weight(llvm) > cascade_path_weight(lights[0])
+    assert cascade_path_weight(clang) > 1
+    assert cascade_path_weight(lights[0]) == 1
+    # Round-robin would put llvm and clang on slot 0 (indices 0 and 5).
+    assert llvm in slot_cascade_paths(layers, 0)
+    assert clang not in slot_cascade_paths(layers, 0)
+    striped = [slot_cascade_paths(layers, slot) for slot in range(CASCADE_WARMUP_SLOTS)]
+    assert {llvm, clang, *lights} == {path for slot in striped for path in slot}
+    assert sum(1 for slot in striped if llvm in slot or clang in slot) == 2
 
 
 def test_cascade_canary_paths_select_buzz_onnxruntime() -> None:
