@@ -40,6 +40,7 @@ from lib.update.ci.shard_plan import (
     write_github_actions_output,
 )
 from lib.update.ci.warmup import (
+    CRANE_DEP_CHUNK,
     SETTINGS_MEMBER_CRATES,
     TREE_SITTER_MEMBER_CRATES,
     WARMUP_DRVS_NAME,
@@ -78,6 +79,7 @@ from lib.update.ci.warmup import (
     parse_canary_slots,
     partition_agent_ui_drvs,
     partition_compiler_input_drvs,
+    partition_crane_dep_drvs,
     partition_rust_warmup_others,
     partition_rust_zed_drvs,
     partition_settings_family_drvs,
@@ -1133,7 +1135,21 @@ def _realize_rust_warmup(
             raise WarmupError(msg)
     family = _expand_svh_family_from_stripe(family, settings, stripe_svh, others, plan)
     failures: list[validation.DerivationValidationFailure] = []
-    # Force-local SVH first. 38121661811 slots 1/2 built feature_flags /
+    others, crane_deps = partition_crane_dep_drvs(others)
+    # Crane-style: crates.io rust_* into the store first so force-local
+    # SVH family substitutes them instead of rebuilding under
+    # --no-substitute. Chunk 8 bounds macos-15 RSS.
+    if crane_deps:
+        failures.extend(
+            realize_warmup_outputs(
+                crane_deps,
+                flake_root=flake_root,
+                progress=_hosted_validation_progress("rust-warmup"),
+                keep_going=True,
+                chunk=CRANE_DEP_CHUNK,
+            )
+        )
+    # Force-local SVH next. 38121661811 slots 1/2 built feature_flags /
     # git_hosting_providers before settings and fatal'd Cannot build
     # rust_settings after fetching Cachix content/json.
     family_failures, compiled = _realize_svh_family(

@@ -183,6 +183,11 @@ def canary_crate_warmup_paths(
 
 
 _WARMUP_REALIZE_CHUNK = 128
+# Crane builds crates.io deps before the workspace. crate2nix already has
+# per-crate drvs; realize those first in small batches so force-local SVH
+# family finds them in the store instead of rebuilding under --no-substitute.
+# macos-15 is 7 GiB; 128-wide rustc would OOM a cold stripe.
+CRANE_DEP_CHUNK = 8
 _STORE_COPY_CHUNK = 128
 _SUBSTITUTER_WORKERS = 16
 _NIXOS_CACHE = "https://cache.nixos.org"
@@ -1448,6 +1453,31 @@ def partition_settings_family_drvs(
         else:
             others.append(drv)
     return tuple(others), tuple(settings)
+
+
+def is_crane_dep_store_path(path: str) -> bool:
+    """Return whether *path* is a crates.io rust_* crane would vendor first.
+
+    Workspace rust_*-0.1.0, settings, extension_host, and zed leaves stay
+    in the SVH family. crates.io rust_* (serde-1.0.x, lsp-types-0.95.1)
+    populate the store before force-local so --no-substitute does not
+    rebuild them.
+    """
+    return is_crate2nix_rust_output(path) and not is_svh_sensitive_store_path(path)
+
+
+def partition_crane_dep_drvs(
+    drvs: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Peel crates.io rust_* out of others so they realize before SVH family."""
+    others: list[str] = []
+    deps: list[str] = []
+    for drv in dict.fromkeys(drvs):
+        if is_crane_dep_store_path(drv):
+            deps.append(drv)
+        else:
+            others.append(drv)
+    return tuple(others), tuple(deps)
 
 
 def partition_svh_sensitive_drvs(
