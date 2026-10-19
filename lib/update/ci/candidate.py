@@ -934,7 +934,7 @@ def _realize_logged_warmup(
     return realize_warmup_outputs(
         paths,
         flake_root=flake_root,
-        progress=_hosted_validation_progress(progress_source),
+        progress=_hosted_validation_progress(progress_source, keep_going=keep_going),
         print_build_logs=True,
         keep_going=keep_going,
     )
@@ -1141,11 +1141,19 @@ def _realize_rust_warmup(
     )
     failures.extend(family_failures)
     if others:
+        # 39217658040 slot 4: rust_but-agentlog --keep-going --fallback
+        # streamed 39 wbb after helper retries compiled the uncached
+        # overlay bash / nix-prefetch-git / fetch-cargo-vendor-util.
+        # Default rust-warmup progress still 32-caps argv --keep-going
+        # (406-bootstrap / goose-cli umbrellas). partition already
+        # deferred those leaves; gitbutler others is family-scale, the
+        # same 400-cap as deferred rust_* / parent 38081612138's 37.
         failures.extend(
             realize_warmup_outputs(
                 others,
                 flake_root=flake_root,
-                progress=_hosted_validation_progress("rust-warmup"),
+                progress=_hosted_validation_progress("rust-warmup", keep_going=True),
+                keep_going=True,
             )
         )
     if compiled:

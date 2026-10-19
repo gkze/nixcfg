@@ -859,20 +859,31 @@ def test_rust_warmup_scope_realizes_slot_and_rejects_bad_args(
 def test_rust_warmup_realizes_gitbutler_family_even_when_path_info_says_cached(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """38867194218: path-info said rust_but-* was in gkze; roots compiled it."""
+    """38867194218: path-info said rust_but-* was in gkze; roots compiled it.
+
+    39217658040: that others compile is keep_going so family-sized 39
+    will-be-built does not abort at the default 32-drv bootstrap guard.
+    """
     candidate = _candidate_for_scope(prepared_run)
     monkeypatch.setattr(
         pipeline.validation,
         "validate_derivations",
         lambda *_args, **_kwargs: (),
     )
-    realized: list[object] = []
+    realized: list[tuple[object, bool]] = []
+    progress_calls: list[tuple[str, bool]] = []
+    real_progress = pipeline._hosted_validation_progress
 
-    def warmup_realize(paths: object, *_args: object, **_kwargs: object) -> tuple[()]:
-        realized.append(paths)
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> tuple[()]:
+        realized.append((paths, bool(kwargs.get("keep_going"))))
         return ()
 
+    def spy_progress(source: str, *, keep_going: bool = False) -> object:
+        progress_calls.append((source, keep_going))
+        return real_progress(source, keep_going=keep_going)
+
     monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    monkeypatch.setattr(pipeline, "_hosted_validation_progress", spy_progress)
     monkeypatch.setattr(pipeline, "import_warmup_drvs", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(pipeline, "check_path_in_cachix", lambda _path: True)
     monkeypatch.setattr(pipeline, "rust_crate_input_drvs", lambda *_a, **_k: ())
@@ -917,7 +928,8 @@ def test_rust_warmup_realizes_gitbutler_family_even_when_path_info_says_cached(
         candidate, scope="rust-warmup", warmup_plan=warmup_plan, warmup_slot=0
     )
     assert result.failures == ()
-    assert realized == [(but_drv,)]
+    assert realized == [((but_drv,), True)]
+    assert ("rust-warmup", True) in progress_calls
 
 
 def test_rust_warmup_empty_plan_canaries_gitbutler_package_graph(
@@ -4026,10 +4038,14 @@ def test_hosted_zed_warmup_progress_keeps_going_past_workspace_family(
 ) -> None:
     """38126388469: --max-jobs 0 cranelift 40 must defer, not abort at 32.
 
-    rust-warmup others still fail closed at 32. Family keep_going and
-    zed-warmup use the 400-drv ceiling so the 37-crate workspace compiles.
-    Bootstrap-scale 406 still aborts on substitute-only rustc/bmake.
-    rust_* 406 (38231309175 rust_xet-client) defers like cranelift 40.
+    Default rust-warmup progress still 32-caps argv --keep-going so an
+    accidental flag cannot lift the ceiling. The others realize path
+    (39217658040 rust_but-agentlog 39) must pass keep_going=True; that
+    is family-scale, not #1263's 406-drv bootstrap. Family keep_going
+    and zed-warmup use the 400-drv ceiling so the 37-crate workspace
+    compiles. Bootstrap-scale 406 still aborts on substitute-only
+    rustc/bmake. rust_* 406 (38231309175 rust_xet-client) defers like
+    cranelift 40.
     """
     monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
     rust = pipeline._hosted_validation_progress("rust-warmup")
@@ -4102,6 +4118,19 @@ def test_hosted_zed_warmup_progress_keeps_going_past_workspace_family(
             "these 37 derivations will be built:",
         )
     )
+    agentlog = (
+        "nix build --no-link --keep-going --fallback "
+        "'/nix/store/9i3im1cyff56yk1zkliqg7vhg53k845k-rust_but-agentlog-0.0.0.drv^*'"
+    )
+    others_keep = pipeline._hosted_validation_progress("rust-warmup", keep_going=True)
+    others_keep(ValidationCommandStarted(agentlog))
+    others_keep(
+        ValidationCommandOutput(agentlog, "these 39 derivations will be built:")
+    )
+    with pytest.raises(WarmupFatalError, match="will-be-built"):
+        others_keep(
+            ValidationCommandOutput(agentlog, "these 406 derivations will be built:")
+        )
     zed = pipeline._hosted_validation_progress("zed-warmup")
     zed(ValidationCommandStarted("nix build --max-jobs 0 /nix/store/git_ui.drv"))
     zed(
@@ -4131,6 +4160,24 @@ def test_realize_svh_family_keeps_going_on_hosted_progress(
     settings = "/nix/store/2y7vj1wq5nz030asgn7rhipbcx5aya89-rust_settings-0.1.0.drv"
     pipeline._realize_svh_family((settings,), flake_root=tmp_path, keep_going=True)
     assert ("rust-warmup", True) in seen
+
+
+def test_realize_logged_warmup_forwards_keep_going_to_hosted_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Streamed ceiling must match the realize keep_going flag, not argv alone."""
+    seen: list[tuple[str, bool]] = []
+    real = pipeline._hosted_validation_progress
+
+    def spy(source: str, *, keep_going: bool = False) -> object:
+        seen.append((source, keep_going))
+        return real(source, keep_going=keep_going)
+
+    monkeypatch.setattr(pipeline, "_hosted_validation_progress", spy)
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", lambda *_a, **_k: ())
+    but = "/nix/store/9i3im1cyff56yk1zkliqg7vhg53k845k-rust_but-agentlog-0.0.0.drv"
+    pipeline._realize_logged_warmup((but,), flake_root=tmp_path, keep_going=True)
+    assert seen == [("rust-warmup", True)]
 
 
 def test_realize_svh_family_retries_source_fods_not_helpers(

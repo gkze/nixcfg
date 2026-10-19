@@ -2290,6 +2290,11 @@ def test_warmup_fatal_skips_cannot_build_during_substitute_only() -> None:
     assert warmup_fatal_line(family) is not None
     assert warmup_fatal_line(family, keep_going=True) is None
     raise_if_warmup_fatal(family, keep_going=True)
+    # 39217658040: gitbutler others 39 is family-scale, not 406 bootstrap.
+    agentlog = "these 39 derivations will be built:"
+    assert warmup_fatal_line(agentlog) is not None
+    assert warmup_fatal_line(agentlog, keep_going=True) is None
+    raise_if_warmup_fatal(agentlog, keep_going=True)
     assert warmup_fatal_line(huge, keep_going=True) is not None
     # 38506525442: Darwin root-closures streamed 470 wbb; that line is
     # not a rust-warmup abort when the caller turns the ceiling off.

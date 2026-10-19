@@ -315,8 +315,10 @@ def warmup_fatal_line(
         # --max-jobs 0 rust_* misses (38126388469 canary: cranelift 40)
         # must reach _is_deferred_compiler_rust_miss, not abort here.
         # keep_going builds the whole rust_* family on one runner
-        # (parent 38081612138 died at 37). Still fail closed at the
-        # packages-scale shard ceiling.
+        # (parent 38081612138 died at 37). 39217658040 slot 4 others
+        # rust_but-agentlog 39 is that class; realize must pass
+        # keep_going=True instead of raising at the 32 default.
+        # Still fail closed at the packages-scale shard ceiling.
         # 38506525442: Darwin root-closure installables turn this off.
         # After rust+cascade the 2-wide rocinante+zeus shard streamed
         # 470 wbb (CVE-stdenv vs hydra / gkze miss). That is the host
