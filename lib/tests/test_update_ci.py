@@ -1350,7 +1350,9 @@ def test_flush_does_not_fail_closed_on_warmup_fod_remote_miss(
     monkeypatch.setenv("GITHUB_ENV", str(github_env))
     _allow_hosted_github_env(monkeypatch)
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path in {fod, root})
-    monkeypatch.setattr(jobs, "_realized_root_path_in_cachix", lambda path: path == root)
+    monkeypatch.setattr(
+        jobs, "_realized_root_path_in_cachix", lambda path: path == root
+    )
     monkeypatch.chdir(checkout)
     assert jobs.main("flush-cachix") == 0
     flush_log = (artifacts / "cachix-flush.log").read_text()
@@ -1420,7 +1422,9 @@ def test_flush_still_fails_closed_when_darwin_root_misses_among_fods(
     monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path in {fod, root})
     monkeypatch.setattr(jobs, "_realized_root_path_in_cachix", lambda _path: False)
     monkeypatch.chdir(checkout)
-    with pytest.raises(jobs.CachixFlushError, match="missing from gkze.cachix.org") as caught:
+    with pytest.raises(
+        jobs.CachixFlushError, match="missing from gkze.cachix.org"
+    ) as caught:
         jobs.main("flush-cachix")
     message = str(caught.value)
     assert root in message
