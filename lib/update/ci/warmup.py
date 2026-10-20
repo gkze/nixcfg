@@ -41,6 +41,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from lib.update.ci.coverage import (
     check_path_in_cachix,
     check_path_on_nixos,
+    nixos_cache_store,
+    paths_on_store,
 )
 from lib.update.ci.jobs import remember_realized_store_paths
 from lib.update.ci.shard_plan import (
@@ -1148,10 +1150,21 @@ def cascade_canary_paths(layers: Sequence[Sequence[str]]) -> tuple[str, ...]:
 def skip_cached_warmup_paths(
     paths: Sequence[str],
     *,
-    present: Callable[[str], bool],
+    present: Callable[[str], bool] | None = None,
+    run: Callable[..., object] | None = None,
 ) -> tuple[str, ...]:
-    """Drop paths already in gkze so a later run resumes the same stripe."""
-    return tuple(path for path in dict.fromkeys(paths) if not present(path))
+    """Drop paths already in gkze so a later run resumes the same stripe.
+
+    The default checker batches ``nix path-info --json --store gkze``. Tests
+    and GitButler probes that pass a custom *present* stay per-path.
+    """
+    unique = tuple(dict.fromkeys(paths))
+    if not unique:
+        return ()
+    if present is None or present is check_path_in_cachix:
+        found = paths_on_store(unique, _GKZE_CACHE, run=run)
+        return tuple(path for path in unique if path not in found)
+    return tuple(path for path in unique if not present(path))
 
 
 def rust_warmup_probe_paths(
@@ -1197,12 +1210,19 @@ def rust_warmup_realize_paths(
 def substitutable_paths(
     paths: Iterable[str],
     *,
-    present: Callable[[str], bool],
+    present: Callable[[str], bool] | None = None,
+    run: Callable[..., object] | None = None,
 ) -> frozenset[str]:
-    """Return the subset of *paths* a substituter already has."""
+    """Return the subset of *paths* a substituter already has.
+
+    The default checker batches gkze, then cache.nixos.org for the remainder,
+    so rust_* do not pay a hydra miss each. A custom *present* stays 16-wide.
+    """
     unique = tuple(dict.fromkeys(paths))
     if not unique:
         return frozenset()
+    if present is None:
+        return default_cache_present_many(unique, run=run)
     found: set[str] = set()
     with ThreadPoolExecutor(max_workers=_SUBSTITUTER_WORKERS) as pool:
         for path, ok in zip(unique, pool.map(present, unique), strict=True):
@@ -1220,6 +1240,22 @@ def default_cache_present(
     return check_path_on_nixos(store_path, run=run) or check_path_in_cachix(
         store_path, run=run
     )
+
+
+def default_cache_present_many(
+    store_paths: Iterable[str],
+    *,
+    run: Callable[..., object] | None = None,
+) -> frozenset[str]:
+    """Return paths on gkze or hydra, gkze first, batched ``path-info --json``."""
+    unique = tuple(dict.fromkeys(store_paths))
+    if not unique:
+        return frozenset()
+    gkze = paths_on_store(unique, _GKZE_CACHE, run=run)
+    rest = tuple(path for path in unique if path not in gkze)
+    if not rest:
+        return gkze
+    return gkze | paths_on_store(rest, nixos_cache_store(), run=run)
 
 
 def _eval_root_darwin_graphs(
@@ -1288,7 +1324,7 @@ def plan_darwin_warmup(
     )
     all_outputs = frozenset().union(*per_root.values()) if per_root else frozenset()
     checker = present if present is not None else default_cache_present
-    substitutable = substitutable_paths(all_outputs, present=checker)
+    substitutable = substitutable_paths(all_outputs, present=present)
     missing_shared = intersect_missing(per_root, substitutable)
     warmup = frozenset(
         path for path in missing_shared if is_planned_rust_warmup_output(path)
@@ -2162,6 +2198,39 @@ def partition_compiler_input_drvs(
         else:
             substitute.append(drv)
     return tuple(substitute), tuple(fetches)
+
+
+def is_deferred_compiler_rust_drv(path: str) -> bool:
+    """Return whether a compiler-input rust_* may compile after rustc is local.
+
+    rustc/bmake/stdenv stay ``--max-jobs 0``. crates.io rust_* (cranelift,
+    serde, gix) substitute-or-compile under ``--keep-going --fallback``.
+    """
+    return is_crate2nix_rust_output(
+        path
+    ) and not is_compiler_must_substitute_store_path(path)
+
+
+def partition_compiler_substitute_probe_drvs(
+    drvs: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Peel crate2nix rust_* out of mixed ``--max-jobs 0`` compiler substitutes.
+
+    ``validate_derivation_requests`` batches 128, then when both bisection
+    halves fail it individually ``--max-jobs 0``s every drv. 39387963366
+    rust canary spent 1069 one-drv probes and slot 2 spent 2441 for ~119
+    rustc compiles, because cranelift/serde misses sat in the same window
+    as rustc. Fail-closed-probe rustc/stdenv/helpers only; rust_* leaves
+    keep-going after the toolchain is on the store.
+    """
+    probe: list[str] = []
+    rust_leaves: list[str] = []
+    for drv in dict.fromkeys(drvs):
+        if is_deferred_compiler_rust_drv(drv):
+            rust_leaves.append(drv)
+        else:
+            probe.append(drv)
+    return tuple(probe), tuple(rust_leaves)
 
 
 SOURCE_FETCH_DNS_HOSTS = ("github.com", "static.crates.io")

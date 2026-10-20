@@ -76,6 +76,11 @@ _NIX_MAX_FREE_BYTES = 68719476736
 # 37740898487 storage.jsonl exists. macos-15 starts at ~43 GiB free, so
 # the skip path does not fire until that peak is known and lower than 96 GiB.
 _IMAGE_HEADROOM_BYTES = _NIX_MAX_FREE_BYTES + _NIX_MIN_FREE_BYTES
+# Publish/coverage/repair do not compile Darwin closures. 8 GiB is enough
+# for certify pytest plus Nix GC; skip the 3.3-4.6m Xcode/Android purge.
+_LIGHT_IMAGE_RECLAIM_ENV = "NIXCFG_LIGHT_IMAGE_RECLAIM"
+_LIGHT_IMAGE_HEADROOM_BYTES = 8 * 1024 * 1024 * 1024
+_DETERMINATE_NIX_BIN = Path("/nix/var/nix/profiles/default/bin")
 _STORAGE_FAULT_LOG_SECONDS = 90
 _STORAGE_FAULT_PREDICATE = (
     'eventMessage CONTAINS[c] "Input/output error" OR '
@@ -277,8 +282,15 @@ class ImageCleanupError(RuntimeError):
     """Hosted Darwin still lacks closure headroom after image reclaim."""
 
 
+def _light_image_reclaim() -> bool:
+    """Return whether this job skips Xcode/Android purge."""
+    return os.environ.get(_LIGHT_IMAGE_RECLAIM_ENV) == "true"
+
+
 def image_headroom_required_bytes() -> int:
     """Free bytes hosted Darwin must keep so min-free cannot fire mid-rustc."""
+    if _light_image_reclaim():
+        return _LIGHT_IMAGE_HEADROOM_BYTES
     return _IMAGE_HEADROOM_BYTES
 
 
@@ -305,7 +317,16 @@ def _log_runner_disk(label: str) -> None:
 def _is_darwin_heavy_reclaim_path(path: Path) -> bool:
     if path.name.startswith("Xcode") and path.suffix == ".app":
         return True
-    return path.name == "sdk" and "Android" in path.parts
+    if path.name == "sdk" and "Android" in path.parts:
+        return True
+    if path == _DARWIN_SYSTEM_SIMULATORS:
+        return True
+    return path.name in {
+        "CoreSimulator",
+        "iOS DeviceSupport",
+        "watchOS DeviceSupport",
+        "tvOS DeviceSupport",
+    }
 
 
 def clean_runner_image() -> None:
@@ -365,7 +386,13 @@ def clean_runner_image() -> None:
     if sys.platform == "darwin" and need > 0:
         heavy = [path for path in to_remove if _is_darwin_heavy_reclaim_path(path)]
         light = [path for path in to_remove if path not in heavy]
-        if before >= need:
+        if _light_image_reclaim():
+            sys.stdout.write(
+                f"Skipping Xcode/Android reclaim; light job headroom "
+                f"{need} bytes, free {before} bytes\n"
+            )
+            to_remove = light
+        elif before >= need:
             sys.stdout.write(
                 f"Skipping Xcode/Android reclaim; free {before} bytes "
                 f"already meets headroom {need} bytes\n"
@@ -428,6 +455,7 @@ def _remove_unused_image_path_timed(path: Path) -> None:
         f"Removed unused runner image tool: {path} in "
         f"{time.perf_counter() - started:.1f}s"
     )
+    _log_runner_disk(f"df after removing {path}")
 
 
 def _reclaim_unused_image_paths(paths: list[Path]) -> None:
@@ -1021,6 +1049,25 @@ def _coverage_native_args(args: list[str], previous: str, stage: str) -> list[st
     return args
 
 
+def _native_updater_env(artifacts: Path, receipts: Path) -> dict[str, str]:
+    """Return the updater env; prefer Determinate Nix over the devshell nixpkgs nix.
+
+    ``nix develop`` puts ``pkgs.nix`` on PATH via the format-repo hook. That
+    binary warns ``unknown setting 'eval-cores'`` and ignores Determinate
+    parallel eval. Graph eval still uses ``DARWIN_GRAPH_EVAL_WORKERS = 1``.
+    """
+    env = os.environ | {
+        "REPO_ROOT": str(Path.cwd()),
+        "UPDATE_RUN_LOG": "1",
+        "UPDATE_RUN_LOG_DIR": str(artifacts / "runs"),
+        "UPDATE_PREFETCH_RECEIPTS": str(receipts),
+    }
+    nix = _DETERMINATE_NIX_BIN / "nix"
+    if os.environ.get("GITHUB_ACTIONS") == "true" and nix.is_file():
+        env["PATH"] = f"{_DETERMINATE_NIX_BIN}{os.pathsep}{env.get('PATH', '')}"
+    return env
+
+
 def native(stage: str) -> int:
     """Prepare or validate with immutable inputs and retained failure evidence."""
     artifacts = _temp() / "update-artifacts"
@@ -1039,13 +1086,7 @@ def native(stage: str) -> int:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
-            env=os.environ
-            | {
-                "REPO_ROOT": str(Path.cwd()),
-                "UPDATE_RUN_LOG": "1",
-                "UPDATE_RUN_LOG_DIR": str(artifacts / "runs"),
-                "UPDATE_PREFETCH_RECEIPTS": str(receipts),
-            },
+            env=_native_updater_env(artifacts, receipts),
         ) as process:
             returncode = _wait_for_diagnostics(process, log, stage, artifacts, args)
         _write_diagnostic(

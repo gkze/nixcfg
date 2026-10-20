@@ -37,11 +37,12 @@ from lib.update.io import atomic_write_text
 from lib.update.nix import get_current_nix_platform
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Iterable, Mapping, Sequence
     from pathlib import Path
 
 _BINARY_CACHE_STORE = "https://gkze.cachix.org"
 _NIXOS_CACHE_STORE = "https://cache.nixos.org"
+_PATH_INFO_CHUNK = 128
 ROOT_OUT_PATHS_NAME = "root-out-paths.json"
 CACHE_ROOT_DEPS_NAME = "cache-root-deps.json"
 REALIZED_ROOT_PATHS_NAME = "realized-root-paths.json"
@@ -442,6 +443,76 @@ def _path_on_store(
         text=True,
     )
     return getattr(result, "returncode", 1) == 0
+
+
+def _present_paths_from_path_info_json(payload: object) -> frozenset[str]:
+    """Return store paths reported present in ``nix path-info --json`` output.
+
+    Determinate Nix 3.22.5 V1 JSON still includes missing paths as keys
+    whose value is ``null`` (``InvalidPath`` in ``path-info.cc``). Only a
+    JSON object is a hit. Treating every key as present would skip rust
+    and cascade warmup and let Darwin roots compile those outputs.
+    """
+    if isinstance(payload, dict):
+        return frozenset(
+            str(key) for key, info in payload.items() if isinstance(info, dict)
+        )
+    if not isinstance(payload, list):
+        return frozenset()
+    found: set[str] = set()
+    for item in payload:
+        if isinstance(item, dict) and isinstance(item.get("path"), str):
+            found.add(item["path"])
+    return frozenset(found)
+
+
+def paths_on_store(
+    store_paths: Iterable[str],
+    store: str,
+    *,
+    run: Callable[..., object] | None = None,
+    chunk: int = _PATH_INFO_CHUNK,
+) -> frozenset[str]:
+    """Return the subset of *store_paths* one HTTP cache already has.
+
+    ``nix path-info --json --store`` is one process per chunk. Missing paths
+    are ``null`` values (Determinate) or omitted keys, never a presence
+    claim. A batch that is not JSON falls back to one query per path so a
+    mixed cache never looks fully present.
+    """
+    ordered = tuple(dict.fromkeys(store_paths))
+    if not ordered:
+        return frozenset()
+    found: set[str] = set()
+    for start in range(0, len(ordered), chunk):
+        batch = ordered[start : start + chunk]
+        found.update(_paths_on_store_batch(batch, store, run=run))
+    return frozenset(found)
+
+
+def _paths_on_store_batch(
+    batch: Sequence[str],
+    store: str,
+    *,
+    run: Callable[..., object] | None = None,
+) -> frozenset[str]:
+    """Query one ``path-info --json`` chunk; fall back per path on bad JSON."""
+    runner = subprocess.run if run is None else run
+    result = runner(
+        ["nix", "path-info", "--json", "--store", store, *batch],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    stdout = str(getattr(result, "stdout", "") or "").strip()
+    if stdout:
+        try:
+            reported = _present_paths_from_path_info_json(json.loads(stdout))
+        except json.JSONDecodeError:
+            reported = None
+        else:
+            return frozenset(path for path in batch if path in reported)
+    return frozenset(path for path in batch if _path_on_store(path, store, run=run))
 
 
 def check_path_in_cachix(

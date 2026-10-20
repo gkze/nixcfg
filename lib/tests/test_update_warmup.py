@@ -6,7 +6,12 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import pytest
+from nix_manipulator.expressions.function.definition import FunctionDefinition
+from nix_manipulator.expressions.identifier import Identifier
 
+from lib.tests._assertions import expect_instance
+from lib.tests._nix_ast import parse_nix_expr
+from lib.update.ci.coverage import check_path_in_cachix
 from lib.update.ci.shard_plan import ClosureShard
 from lib.update.ci.warmup import (
     CASCADE_WARMUP_SLOTS,
@@ -43,6 +48,7 @@ from lib.update.ci.warmup import (
     darwin_output_paths,
     darwin_package_installable,
     default_cache_present,
+    default_cache_present_many,
     drv_input_references,
     dry_run_will_be_built_count,
     eval_darwin_package_graph,
@@ -61,6 +67,7 @@ from lib.update.ci.warmup import (
     is_compiler_must_substitute_store_path,
     is_crane_dep_store_path,
     is_crate2nix_rust_output,
+    is_deferred_compiler_rust_drv,
     is_extension_host_family_store_path,
     is_fixed_output_hash_mismatch,
     is_force_local_allowed_build,
@@ -93,6 +100,7 @@ from lib.update.ci.warmup import (
     parse_kick_canary_slots,
     partition_agent_ui_drvs,
     partition_compiler_input_drvs,
+    partition_compiler_substitute_probe_drvs,
     partition_crane_dep_drvs,
     partition_rust_warmup_others,
     partition_rust_zed_drvs,
@@ -884,6 +892,7 @@ def test_eval_root_darwin_outputs_and_substituters_fail_closed(
         ["/nix/store/hit", "/nix/store/miss", "/nix/store/hit"],
         present=lambda path: path.endswith("hit"),
     ) == frozenset({"/nix/store/hit"})
+    assert skip_cached_warmup_paths(()) == ()
 
     def nixos(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         store = args[args.index("--store") + 1]
@@ -920,10 +929,6 @@ def test_plan_defaults_to_subprocess_and_cache_helpers(
         "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
         "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-cached",
     })
-    monkeypatch.setattr(
-        "lib.update.ci.warmup.default_cache_present",
-        lambda path: path.endswith("cached"),
-    )
     shards = (
         ClosureShard(
             shard="darwin-argus",
@@ -937,6 +942,7 @@ def test_plan_defaults_to_subprocess_and_cache_helpers(
         shards=shards,
         run=run,
         package_graphs={},
+        present=lambda path: path.endswith("cached"),
     )
     assert plan.warmup_outputs == (
         "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
@@ -1378,6 +1384,57 @@ def test_rust_warmup_layers_and_slots_keep_dependency_order() -> None:
     assert rust_warmup_layers(frozenset(), (_graph(shared),)) == ()
 
 
+def test_skip_cached_warmup_paths_batches_gkze_path_info() -> None:
+    """Stripe skip-if-in-gkze is one path-info --json, not one process per path."""
+    hit = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_a-1"
+    miss = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_b-1"
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        assert args[:4] == ["nix", "path-info", "--json", "--store"]
+        assert "gkze" in args[4]
+        payload = {path: ({} if path == hit else None) for path in args[5:]}
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    assert skip_cached_warmup_paths(
+        (hit, miss, hit), present=check_path_in_cachix, run=run
+    ) == (miss,)
+    assert skip_cached_warmup_paths((hit, miss), run=run) == (miss,)
+    assert len(calls) == 2
+
+
+def test_substitutable_paths_query_gkze_before_nixos() -> None:
+    """Planner path-info hits gkze first so rust_* skip a hydra miss each."""
+    gkze = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_settings-1"
+    hydra = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-coreutils-9.5"
+    miss = "/nix/store/cccccccccccccccccccccccccccccccc-local-1"
+    stores: list[str] = []
+    queried: list[tuple[str, ...]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        store = args[args.index("--store") + 1]
+        stores.append(store)
+        queried.append(tuple(args[args.index("--store") + 2 :]))
+        payload = {gkze: {}} if "gkze" in store else {hydra: {}}
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    found = substitutable_paths((gkze, hydra, miss), run=run)
+    assert found == frozenset({gkze, hydra})
+    assert len(stores) == 2
+    assert "gkze" in stores[0]
+    assert stores[1] == "https://cache.nixos.org"
+    assert queried[0] == (gkze, hydra, miss)
+    assert queried[1] == (hydra, miss)
+    stores.clear()
+    queried.clear()
+    assert substitutable_paths((gkze,), run=run) == frozenset({gkze})
+    assert len(stores) == 1
+    assert "gkze" in stores[0]
+    assert substitutable_paths(()) == frozenset()
+    assert default_cache_present_many(()) == frozenset()
+
+
 def test_unit_weight_stripe_matches_round_robin_in_one_layer() -> None:
     """A fresh layer with unit weights is round-robin; rust slots stay per-layer."""
     paths = tuple(
@@ -1437,6 +1494,38 @@ def test_cascade_canary_paths_select_versioned_hq() -> None:
     assert not is_cascade_canary_store_path(other)
     assert cascade_canary_paths(((other, hq), (hq_drv, helper))) == (hq, hq_drv)
     assert cascade_canary_paths(((other, helper),)) == ()
+
+
+def test_cascade_canary_packages_are_not_rust_warmup_outputs() -> None:
+    """Cascade canary may occupy a freed rust slot; packages must not need rust_*."""
+    rust = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-0.1.0"
+    crate = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_regex-1.0.0"
+    assert not is_cascade_canary_store_path(rust)
+    assert not is_cascade_canary_store_path(crate)
+    assert is_crate2nix_rust_output(rust)
+    root = Path(__file__).resolve().parents[2]
+    rust_inputs = frozenset({
+        "cargo",
+        "crane",
+        "crate2nix",
+        "fenix",
+        "rustPlatform",
+        "rustc",
+    })
+    for relative in (
+        "packages/buzz/native/onnxruntime.nix",
+        "packages/hq/default.nix",
+    ):
+        package = expect_instance(
+            parse_nix_expr((root / relative).read_text(encoding="utf-8")),
+            FunctionDefinition,
+        )
+        names = {
+            argument.name
+            for argument in package.argument_set
+            if isinstance(argument, Identifier)
+        }
+        assert names.isdisjoint(rust_inputs), relative
 
 
 def test_rust_agent_ui_partition_and_realize_print_logs(tmp_path: Path) -> None:
@@ -1636,6 +1725,31 @@ def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
                 args, 1, "", "nix-store: dead"
             ),
         )
+
+
+def test_partition_compiler_substitute_probe_peels_rust_leaves() -> None:
+    """39387963366: rustc stays --max-jobs 0; cranelift/serde keep-going."""
+    rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    stdenv = "/nix/store/1gx3hvygaaaaaaaaaaaaaaaaaaaaaaaa-stdenv-darwin.drv"
+    cranelift = (
+        "/nix/store/2nlfdbacyjxij6mbskq39pp97z528q33-"
+        "rust_cranelift-codegen-shared-0.135.1.drv"
+    )
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229.drv"
+    assert is_deferred_compiler_rust_drv(cranelift)
+    assert is_deferred_compiler_rust_drv(serde)
+    assert not is_deferred_compiler_rust_drv(rustc)
+    assert not is_deferred_compiler_rust_drv(stdenv)
+    assert partition_compiler_substitute_probe_drvs((
+        rustc,
+        cranelift,
+        serde,
+        rustc,
+        stdenv,
+    )) == ((rustc, stdenv), (cranelift, serde))
+    assert partition_compiler_substitute_probe_drvs(()) == ((), ())
+    assert partition_compiler_substitute_probe_drvs((rustc,)) == ((rustc,), ())
+    assert partition_compiler_substitute_probe_drvs((serde,)) == ((), (serde,))
 
 
 def test_parse_canary_slots_and_crates() -> None:

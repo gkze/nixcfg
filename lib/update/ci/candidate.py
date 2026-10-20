@@ -61,6 +61,7 @@ from lib.update.ci.warmup import (
     import_warmup_drvs,
     is_compiler_must_substitute_store_path,
     is_crate2nix_rust_output,
+    is_deferred_compiler_rust_drv,
     is_extension_host_family_store_path,
     is_fixed_output_hash_mismatch,
     is_linux_builder_image_command,
@@ -80,6 +81,7 @@ from lib.update.ci.warmup import (
     parse_canary_slots,
     partition_agent_ui_drvs,
     partition_compiler_input_drvs,
+    partition_compiler_substitute_probe_drvs,
     partition_crane_dep_drvs,
     partition_rust_warmup_others,
     partition_rust_zed_drvs,
@@ -316,6 +318,16 @@ def _hosted_validation_progress(
                 and is_crate2nix_rust_output(current_drv)
                 and "will be built" in text.lower()
             )
+            # 39387963366 slot 0: rust_gpui-0.2.2 --keep-going --fallback
+            # streamed 415 wbb (crate graph, not rustc/bmake bootstrap)
+            # and the 400-cap aborted before Cachix could receive it.
+            rust_keep_going_crate = (
+                stream_keep_going
+                and not substitute_only
+                and is_crate2nix_rust_output(current_drv)
+                and not is_compiler_must_substitute_store_path(current_drv)
+                and "will be built" in text.lower()
+            )
             drv = command_store_drv(text)
             if (
                 is_source_fetch_mirror_line(text)
@@ -323,7 +335,7 @@ def _hosted_validation_progress(
                 or ("Cannot build" in text and drv and is_source_fetch_store_path(drv))
             ):
                 source_fetch_miss = True
-            if not rust_substitute_miss:
+            if not rust_substitute_miss and not rust_keep_going_crate:
                 raise_if_warmup_fatal(
                     text,
                     substitute_only=substitute_only,
@@ -774,10 +786,7 @@ def _is_deferred_compiler_rust_miss(
     slot 3: rust_xet-client printed 406 will-be-built for that same
     uncompiled sibling graph. rustc / stdenv misses stay fatal.
     """
-    drv = failure.installable.removesuffix("^*")
-    if is_compiler_must_substitute_store_path(drv):
-        return False
-    return is_crate2nix_rust_output(drv)
+    return is_deferred_compiler_rust_drv(failure.installable.removesuffix("^*"))
 
 
 def _deferred_compiler_rust_drvs(
@@ -799,22 +808,33 @@ def _realize_compiler_substitutes(
     flake_root: Path,
     progress_source: str = "rust-warmup",
 ) -> tuple[validation.DerivationValidationFailure, ...]:
-    """``--max-jobs 0`` first; retry helpers; compile deferred rust_* leaves.
+    """``--max-jobs 0`` toolchain; keep-going rust_* leaves; retry helpers.
 
     Keep rustc/stdenv failures. 38231309175 slot 3: rust_xet-client's
     406 will-be-built was the uncompiled sibling rust_* graph, not
-    rustc bootstrap. Compile those rust_* one drv at a time so the
-    umbrella drops under 400 before force-local extension_host. Do not
-    overwrite a rustc miss with a successful helper retry.
+    rustc bootstrap. 39387963366 mixed those rust_* into the same
+    ``--max-jobs 0`` window as rustc; both bisection halves failed and
+    every drv was probed one-by-one (1069 canary / 2441 slot 2) for
+    ~119 compiles. Peel rust_* first. ``--keep-going --fallback`` still
+    substitutes gkze/hydra hits, then compiles misses in crane chunks
+    so the umbrella stays under the 400-cap before force-local
+    extension_host. Do not overwrite a rustc miss with a helper retry.
     """
-    failures = realize_warmup_outputs(
-        substitute,
-        flake_root=flake_root,
-        progress=_hosted_validation_progress(progress_source),
-        substitute_only=True,
+    probe, rust_leaves = partition_compiler_substitute_probe_drvs(substitute)
+    failures = (
+        realize_warmup_outputs(
+            probe,
+            flake_root=flake_root,
+            progress=_hosted_validation_progress(progress_source),
+            substitute_only=True,
+        )
+        if probe
+        else ()
     )
     retry = _retry_substitute_only_helpers(failures)
-    deferred = _deferred_compiler_rust_drvs(failures)
+    deferred = tuple(
+        dict.fromkeys((*_deferred_compiler_rust_drvs(failures), *rust_leaves))
+    )
     stubborn = tuple(
         failure
         for failure in failures
@@ -840,7 +860,7 @@ def _realize_compiler_substitutes(
                 progress=_hosted_validation_progress(progress_source, keep_going=True),
                 print_build_logs=True,
                 keep_going=True,
-                chunk=1,
+                chunk=CRANE_DEP_CHUNK,
             )
         )
     return tuple(compiled)
@@ -1274,8 +1294,9 @@ def _realize_rust_warmup_compile(
         # overlay bash / nix-prefetch-git / fetch-cargo-vendor-util.
         # Default rust-warmup progress still 32-caps argv --keep-going
         # (406-bootstrap / goose-cli umbrellas). partition already
-        # deferred those leaves; gitbutler others is family-scale, the
-        # same 400-cap as deferred rust_* / parent 38081612138's 37.
+        # deferred those leaves. crate2nix rust_* keep_going (rust_gpui
+        # 415 on 39387963366 slot 0) must compile; rustc/bmake 406
+        # still fail closed.
         failures.extend(_realize_rust_warmup_others(others, flake_root=flake_root))
     if compiled:
         if agent_ui and not zed_slot:

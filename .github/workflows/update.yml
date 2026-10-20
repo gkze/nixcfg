@@ -376,16 +376,26 @@ jobs:
   # once here, push via the Cachix hook, then the 5-wide stripe
   # substitutes. Cascade still runs if this job fails so a canary EIO
   # after retry does not skip the rest of the intersection.
+  # buzz-onnxruntime is a C++ ONNX Runtime archive; hq is a vendor
+  # HQ.app plus a C launcher. Neither depends on rust_* warmup
+  # outputs. Wait for the rust canary so this job takes the slot that
+  # canary frees, not a 7th macos-15 against the overlapping rust
+  # 5-wide (39166099302: rust canary 8m, rust slots 21-30m, cascade
+  # canary 6.8m for 17s of work). Do not wait for the rust 5-wide.
   canary-warm-cascade:
     needs:
       - prepare-merge
       - plan-darwin-closures
-      - validate-darwin-warm-rust
+      - canary-darwin-fods
+      - canary-warm-rust
     if: |-
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
       needs.plan-darwin-closures.result == 'success' &&
-      needs.validate-darwin-warm-rust.result == 'success'
+      needs.canary-darwin-fods.result == 'success' &&
+      (needs.canary-warm-rust.result == 'success' ||
+      needs.canary-warm-rust.result == 'skipped' ||
+      needs.canary-warm-rust.result == 'failure')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -497,58 +507,8 @@ jobs:
   # 39006154683: linux-deps substituted nixos-disk-image from gkze
   # (no post-build hook) and Darwin closures --max-jobs 0 then spent
   # 5h after 50 wbb. Path-info the recached VM and one Darwin root
-  # before occupying macos-15 for the aggregate.
-  canary-darwin-cache:
-    needs:
-      - prepare-merge
-      - cache-darwin-linux-deps-arm
-      - cache-darwin-linux-deps-x86
-      - plan-darwin-closures
-      - validate-darwin-roots
-    if: |-
-      always() && !cancelled() &&
-      needs.prepare-merge.result == 'success' &&
-      needs.cache-darwin-linux-deps-arm.result == 'success' &&
-      needs.cache-darwin-linux-deps-x86.result == 'success' &&
-      needs.plan-darwin-closures.result == 'success' &&
-      needs.validate-darwin-roots.result == 'success'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/update-runtime
-        id: runtime
-        with:
-          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
-          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: prepare-x86_64-linux
-          path: ${{ runner.temp }}/previous
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          path: ${{ runner.temp }}/evidence
-      - name: Assert linux-builder and one Darwin root in Cachix
-        env:
-          NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
-          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
-          NIXCFG_CI_STAGE: assert-cached-boundary
-          NIXCFG_PREVIOUS_CANDIDATE: ${{ runner.temp }}/previous/candidate.json
-          NIXCFG_COVERAGE_EVIDENCE: ${{ runner.temp }}/evidence
-        run: |
-          import runpy
-          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
-        shell: python
-      - name: Flush Cachix daemon
-        if: always()
-        env:
-          NIXCFG_CI_STAGE: flush-cachix
-        run: |
-          import runpy
-          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
-        shell: python
+  # as the first step of the aggregate macos job (39166099302: a
+  # dedicated ubuntu canary was 4m before closures).
   # Aggregate proof. Mostly substitution of the per-root checks.
   validate-darwin-closures:
     needs:
@@ -556,14 +516,12 @@ jobs:
       - cache-darwin-linux-deps-arm
       - cache-darwin-linux-deps-x86
       - validate-darwin-roots
-      - canary-darwin-cache
     if: |-
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
       needs.cache-darwin-linux-deps-arm.result == 'success' &&
       needs.cache-darwin-linux-deps-x86.result == 'success' &&
-      needs.validate-darwin-roots.result == 'success' &&
-      needs.canary-darwin-cache.result == 'success'
+      needs.validate-darwin-roots.result == 'success'
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15
@@ -577,7 +535,9 @@ jobs:
   # every planned shard ran, Linux + Darwin package inventories intact.
   # Job results are checked first. Root outPaths come from the
   # plan-darwin-closures artifact, not a second Darwin eval.
-  assert-coverage:
+  # Coverage is the first publish step (39166099302: 7.2m macos job for
+  # <30s of work). Write token is blanked until after that gate.
+  publish:
     needs:
       - prepare-merge
       - plan-darwin-closures
@@ -593,8 +553,12 @@ jobs:
       (github.event_name != 'workflow_dispatch' ||
       (inputs.canary_warm_rust != true && inputs.canary_warm_rust != 'true' &&
       inputs.canary_slots == '' && inputs.canary_crates == ''))
+    # The Python suite and its 100% coverage floor are maintained on Darwin.
     runs-on: macos-15
     timeout-minutes: 120
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -604,6 +568,7 @@ jobs:
         with:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          light-image-reclaim: "true"
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: prepare-x86_64-linux
@@ -613,6 +578,8 @@ jobs:
           path: ${{ runner.temp }}/evidence
       - name: Assert root and package coverage
         env:
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
           NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
           NIXCFG_CI_STAGE: assert-coverage
@@ -631,54 +598,17 @@ jobs:
           import runpy
           runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
         shell: python
-      - name: Flush Cachix daemon
-        if: always()
-        env:
-          NIXCFG_CI_STAGE: flush-cachix
-        run: |
-          import runpy
-          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
-        shell: python
-  publish:
-    needs:
-      - validate-arm
-      - validate-x86
-      - validate-darwin-warm-rust
-      - validate-darwin-cascade-warmup
-      - validate-darwin-packages
-      - validate-darwin-roots
-      - validate-darwin-closures
-      - assert-coverage
-    if: |-
-      always() && !cancelled() &&
-      needs.validate-arm.result == 'success' &&
-      needs.validate-x86.result == 'success' &&
-      needs.validate-darwin-warm-rust.result == 'success' &&
-      needs.validate-darwin-cascade-warmup.result == 'success' &&
-      needs.validate-darwin-packages.result == 'success' &&
-      needs.validate-darwin-roots.result == 'success' &&
-      needs.validate-darwin-closures.result == 'success' &&
-      needs.assert-coverage.result == 'success'
-    # The Python suite and its 100% coverage floor are maintained on Darwin.
-    runs-on: macos-15
-    timeout-minutes: 120
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/update-runtime
-        id: runtime
-        with:
-          github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
-          cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          path: ${{ runner.temp }}/evidence
       - name: Certify and check final tree
         id: candidate
+        if: |-
+          success() &&
+          needs.validate-arm.result == 'success' &&
+          needs.validate-x86.result == 'success' &&
+          needs.validate-darwin-warm-rust.result == 'success' &&
+          needs.validate-darwin-cascade-warmup.result == 'success' &&
+          needs.validate-darwin-packages.result == 'success' &&
+          needs.validate-darwin-roots.result == 'success' &&
+          needs.validate-darwin-closures.result == 'success'
         env:
           NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
           NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
@@ -731,9 +661,7 @@ jobs:
       - validate-darwin-packages
       - plan-darwin-closures
       - validate-darwin-roots
-      - canary-darwin-cache
       - validate-darwin-closures
-      - assert-coverage
       - publish
     if: |-
       always() && !cancelled() && contains(needs.*.result, 'failure') &&
@@ -758,6 +686,7 @@ jobs:
           github-token: ${{ secrets.UPDATE_SELF_HEAL_GITHUB_TOKEN }}
           cachix-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cache-generators: "true"
+          light-image-reclaim: "true"
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           path: ${{ runner.temp }}/repair-evidence
