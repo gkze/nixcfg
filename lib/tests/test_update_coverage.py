@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -360,6 +361,125 @@ def test_cachix_and_eval_helpers_fail_closed(tmp_path: Path) -> None:
     payload = tmp_path / "doc.json"
     payload.write_text("[]")
     assert read_json(payload) == []
+
+
+def test_paths_on_store_retries_then_treats_timeout_as_miss() -> None:
+    """A hung 128-wide path-info is not a presence claim and is not sequential."""
+    hit = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hit"
+    miss = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-miss"
+    calls: list[list[str]] = []
+
+    def hung(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        assert kwargs.get("timeout") == 0.2
+        raise subprocess.TimeoutExpired(args, 0.2)
+
+    assert (
+        paths_on_store(
+            (hit, miss),
+            binary_cache_store(),
+            run=hung,
+            timeout=0.2,
+            retries=1,
+        )
+        == frozenset()
+    )
+    assert len(calls) == 2
+    assert all("--json" in args for args in calls)
+
+
+def test_paths_on_store_retries_hung_batch_then_uses_json() -> None:
+    """One timeout is retried; a later JSON batch still reports only real hits."""
+    hit = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hit"
+    miss = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-miss"
+    calls: list[list[str]] = []
+
+    def flaky(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        assert kwargs.get("timeout") == 0.2
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(args, 0.2)
+        payload = {path: {"narSize": 1} for path in args[5:] if path == hit}
+        return subprocess.CompletedProcess(args, 1, json.dumps(payload), "")
+
+    assert paths_on_store(
+        (hit, miss),
+        binary_cache_store(),
+        run=flaky,
+        timeout=0.2,
+        retries=1,
+    ) == frozenset({hit})
+    assert len(calls) == 2
+    assert all("--json" in args for args in calls)
+
+
+def test_paths_on_store_fallback_is_bounded_parallel() -> None:
+    """Empty JSON retries the batch, then probes paths 16-wide, not one-by-one."""
+    hit = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hit"
+    miss = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-miss"
+    json_calls = 0
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+    gate = threading.Barrier(2)
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal json_calls, active, max_active
+        if "--json" in args:
+            json_calls += 1
+            assert kwargs.get("timeout") == 0.2
+            return subprocess.CompletedProcess(args, 1, "", "")
+        assert kwargs.get("timeout") == 0.1
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        try:
+            gate.wait(timeout=2)
+        finally:
+            with lock:
+                active -= 1
+        return subprocess.CompletedProcess(args, 0 if args[-1] == hit else 1, "", "")
+
+    assert paths_on_store(
+        (hit, miss),
+        binary_cache_store(),
+        run=run,
+        timeout=0.2,
+        path_timeout=0.1,
+        retries=1,
+        workers=2,
+    ) == frozenset({hit})
+    assert json_calls == 2
+    assert max_active == 2
+
+
+def test_path_on_store_timeout_is_a_miss() -> None:
+    """Single-path coverage queries fail closed when path-info hangs."""
+
+    def hung(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert kwargs.get("timeout") == 0.1
+        raise subprocess.TimeoutExpired(args, 0.1)
+
+    assert not check_path_in_cachix("/nix/store/hit", run=hung, timeout=0.1)
+    assert not check_path_on_nixos("/nix/store/hit", run=hung, timeout=0.1)
+
+
+def test_paths_on_store_oserror_is_a_miss() -> None:
+    """An unreachable store is not a presence claim."""
+
+    def dead(_args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise OSError("cachix down")
+
+    assert (
+        paths_on_store(
+            ("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hit",),
+            binary_cache_store(),
+            run=dead,
+            retries=0,
+        )
+        == frozenset()
+    )
+    assert not check_path_in_cachix("/nix/store/hit", run=dead)
 
 
 def test_planned_root_out_path_cache_is_fail_closed(tmp_path: Path) -> None:

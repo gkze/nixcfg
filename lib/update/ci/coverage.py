@@ -13,6 +13,7 @@ planner hashes. Coverage never re-evaluates Darwin out paths.
 
 import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -43,6 +44,10 @@ if TYPE_CHECKING:
 _BINARY_CACHE_STORE = "https://gkze.cachix.org"
 _NIXOS_CACHE_STORE = "https://cache.nixos.org"
 _PATH_INFO_CHUNK = 128
+_PATH_INFO_TIMEOUT_SECONDS = 30.0
+_PATH_INFO_PER_PATH_TIMEOUT_SECONDS = 10.0
+_PATH_INFO_BATCH_RETRIES = 1
+_PATH_INFO_FALLBACK_WORKERS = 16
 ROOT_OUT_PATHS_NAME = "root-out-paths.json"
 CACHE_ROOT_DEPS_NAME = "cache-root-deps.json"
 REALIZED_ROOT_PATHS_NAME = "realized-root-paths.json"
@@ -427,21 +432,30 @@ def _path_on_store(
     store: str,
     *,
     run: Callable[..., object] | None = None,
+    timeout: float = _PATH_INFO_PER_PATH_TIMEOUT_SECONDS,
 ) -> bool:
-    """Return whether *store_path* is present on one Nix HTTP binary cache."""
+    """Return whether *store_path* is present on one Nix HTTP binary cache.
+
+    Timeout or an unreachable store is a miss. Coverage and skip-cached
+    warmup must not treat a hung query as present.
+    """
     runner = subprocess.run if run is None else run
-    result = runner(
-        [
-            "nix",
-            "path-info",
-            "--store",
-            store,
-            store_path,
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = runner(
+            [
+                "nix",
+                "path-info",
+                "--store",
+                store,
+                store_path,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except OSError, subprocess.TimeoutExpired:
+        return False
     return getattr(result, "returncode", 1) == 0
 
 
@@ -472,13 +486,19 @@ def paths_on_store(
     *,
     run: Callable[..., object] | None = None,
     chunk: int = _PATH_INFO_CHUNK,
+    timeout: float = _PATH_INFO_TIMEOUT_SECONDS,
+    path_timeout: float = _PATH_INFO_PER_PATH_TIMEOUT_SECONDS,
+    retries: int = _PATH_INFO_BATCH_RETRIES,
+    workers: int = _PATH_INFO_FALLBACK_WORKERS,
 ) -> frozenset[str]:
     """Return the subset of *store_paths* one HTTP cache already has.
 
     ``nix path-info --json --store`` is one process per chunk. Missing paths
     are ``null`` values (Determinate) or omitted keys, never a presence
-    claim. A batch that is not JSON falls back to one query per path so a
-    mixed cache never looks fully present.
+    claim. A hung or empty batch is retried once. Timeout after that retry
+    is a miss for the whole chunk. Non-JSON still falls back, but per-path
+    and bounded-parallel, never a silent sequential scan of thousands of
+    rust_* paths.
     """
     ordered = tuple(dict.fromkeys(store_paths))
     if not ordered:
@@ -486,8 +506,67 @@ def paths_on_store(
     found: set[str] = set()
     for start in range(0, len(ordered), chunk):
         batch = ordered[start : start + chunk]
-        found.update(_paths_on_store_batch(batch, store, run=run))
+        found.update(
+            _paths_on_store_batch(
+                batch,
+                store,
+                run=run,
+                timeout=timeout,
+                path_timeout=path_timeout,
+                retries=retries,
+                workers=workers,
+            )
+        )
     return frozenset(found)
+
+
+def _try_paths_on_store_batch(
+    batch: Sequence[str],
+    store: str,
+    *,
+    run: Callable[..., object] | None,
+    timeout: float,
+) -> tuple[str, frozenset[str]]:
+    """Return ``ok`` plus hits, or ``timeout`` / ``invalid`` plus no hits."""
+    runner = subprocess.run if run is None else run
+    try:
+        result = runner(
+            ["nix", "path-info", "--json", "--store", store, *batch],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except OSError, subprocess.TimeoutExpired:
+        return "timeout", frozenset()
+    stdout = str(getattr(result, "stdout", "") or "").strip()
+    if not stdout:
+        return "invalid", frozenset()
+    try:
+        reported = _present_paths_from_path_info_json(json.loads(stdout))
+    except json.JSONDecodeError:
+        return "invalid", frozenset()
+    return "ok", frozenset(path for path in batch if path in reported)
+
+
+def _paths_on_store_parallel(
+    batch: Sequence[str],
+    store: str,
+    *,
+    run: Callable[..., object] | None,
+    timeout: float,
+    workers: int,
+) -> frozenset[str]:
+    """Query one path per process, at most *workers* at a time."""
+    worker_count = min(max(1, workers), len(batch))
+
+    def present(path: str) -> str | None:
+        if _path_on_store(path, store, run=run, timeout=timeout):
+            return path
+        return None
+
+    with ThreadPoolExecutor(max_workers=worker_count) as pool:
+        return frozenset(path for path in pool.map(present, batch) if path is not None)
 
 
 def _paths_on_store_batch(
@@ -495,42 +574,43 @@ def _paths_on_store_batch(
     store: str,
     *,
     run: Callable[..., object] | None = None,
+    timeout: float = _PATH_INFO_TIMEOUT_SECONDS,
+    path_timeout: float = _PATH_INFO_PER_PATH_TIMEOUT_SECONDS,
+    retries: int = _PATH_INFO_BATCH_RETRIES,
+    workers: int = _PATH_INFO_FALLBACK_WORKERS,
 ) -> frozenset[str]:
-    """Query one ``path-info --json`` chunk; fall back per path on bad JSON."""
-    runner = subprocess.run if run is None else run
-    result = runner(
-        ["nix", "path-info", "--json", "--store", store, *batch],
-        check=False,
-        capture_output=True,
-        text=True,
+    """Query one ``path-info --json`` chunk; retry, then parallel per path."""
+    last_kind = "invalid"
+    for _ in range(1 + max(0, retries)):
+        kind, found = _try_paths_on_store_batch(batch, store, run=run, timeout=timeout)
+        if kind == "ok":
+            return found
+        last_kind = kind
+    if last_kind == "timeout":
+        return frozenset()
+    return _paths_on_store_parallel(
+        batch, store, run=run, timeout=path_timeout, workers=workers
     )
-    stdout = str(getattr(result, "stdout", "") or "").strip()
-    if stdout:
-        try:
-            reported = _present_paths_from_path_info_json(json.loads(stdout))
-        except json.JSONDecodeError:
-            reported = None
-        else:
-            return frozenset(path for path in batch if path in reported)
-    return frozenset(path for path in batch if _path_on_store(path, store, run=run))
 
 
 def check_path_in_cachix(
     store_path: str,
     *,
     run: Callable[..., object] | None = None,
+    timeout: float = _PATH_INFO_PER_PATH_TIMEOUT_SECONDS,
 ) -> bool:
     """Return whether *store_path* is present in the gkze binary cache."""
-    return _path_on_store(store_path, _BINARY_CACHE_STORE, run=run)
+    return _path_on_store(store_path, _BINARY_CACHE_STORE, run=run, timeout=timeout)
 
 
 def check_path_on_nixos(
     store_path: str,
     *,
     run: Callable[..., object] | None = None,
+    timeout: float = _PATH_INFO_PER_PATH_TIMEOUT_SECONDS,
 ) -> bool:
     """Return whether *store_path* is present on cache.nixos.org."""
-    return _path_on_store(store_path, _NIXOS_CACHE_STORE, run=run)
+    return _path_on_store(store_path, _NIXOS_CACHE_STORE, run=run, timeout=timeout)
 
 
 def eval_check_out_path(
