@@ -378,19 +378,24 @@ jobs:
   # after retry does not skip the rest of the intersection.
   # buzz-onnxruntime is a C++ ONNX Runtime archive; hq is a vendor
   # HQ.app plus a C launcher. Neither depends on rust_* warmup
-  # outputs. Start after FOD canary (same as rust) so this job queues
-  # as the 6th macos-15 and occupies a freed rust slot (39166099302:
-  # rust 21-30m, canary 6.8m for 17s of work).
+  # outputs. Wait for the rust canary so this job takes the slot that
+  # canary frees, not a 7th macos-15 against the overlapping rust
+  # 5-wide (39166099302: rust canary 8m, rust slots 21-30m, cascade
+  # canary 6.8m for 17s of work). Do not wait for the rust 5-wide.
   canary-warm-cascade:
     needs:
       - prepare-merge
       - plan-darwin-closures
       - canary-darwin-fods
+      - canary-warm-rust
     if: |-
       always() && !cancelled() &&
       needs.prepare-merge.result == 'success' &&
       needs.plan-darwin-closures.result == 'success' &&
-      needs.canary-darwin-fods.result == 'success'
+      needs.canary-darwin-fods.result == 'success' &&
+      (needs.canary-warm-rust.result == 'success' ||
+      needs.canary-warm-rust.result == 'skipped' ||
+      needs.canary-warm-rust.result == 'failure')
     uses: ./.github/workflows/update-native.yml
     with:
       runner: macos-15

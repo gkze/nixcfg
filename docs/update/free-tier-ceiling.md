@@ -137,7 +137,7 @@ on setup (~56m total); Xcode/Android purge was 3.3–4.6m of that.
 | Fold assert-coverage into publish (first step, blank write token) | 7.2m macos job for <30s of work | ~7m |
 | Skip Xcode/Android on publish/repair; 8 GiB fail-closed floor | 3.3–4.6m purge on that job | ~4m |
 | Fold canary-darwin-cache into closures as a pre-build step | 4m ubuntu path-info after roots | ~3m |
-| Start cascade canary after FOD canary, not after all rust slots | 6.8m canary for 17s of work; rust slots 21–30m | 0–7m |
+| Start cascade canary in the slot rust canary frees, not after all rust slots | 6.8m canary for 17s of work; rust canary 8m, rust slots 21–30m | 0–7m |
 | Batch `nix path-info --json` (gkze first, then hydra remainder) | plan-shards 50m includes serial path-info of 31.6k outputs | a few minutes of plan-shards |
 | Determinate `eval-cores = 2` plus host nix on PATH | `unknown setting 'eval-cores'` from devshell `pkgs.nix` | 0m until `derivation show` is measured parallel |
 

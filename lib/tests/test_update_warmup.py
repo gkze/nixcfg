@@ -6,7 +6,11 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import pytest
+from nix_manipulator.expressions.function.definition import FunctionDefinition
+from nix_manipulator.expressions.identifier import Identifier
 
+from lib.tests._assertions import expect_instance
+from lib.tests._nix_ast import parse_nix_expr
 from lib.update.ci.coverage import check_path_in_cachix
 from lib.update.ci.shard_plan import ClosureShard
 from lib.update.ci.warmup import (
@@ -1488,6 +1492,38 @@ def test_cascade_canary_paths_select_versioned_hq() -> None:
     assert not is_cascade_canary_store_path(other)
     assert cascade_canary_paths(((other, hq), (hq_drv, helper))) == (hq, hq_drv)
     assert cascade_canary_paths(((other, helper),)) == ()
+
+
+def test_cascade_canary_packages_are_not_rust_warmup_outputs() -> None:
+    """Cascade canary may occupy a freed rust slot; packages must not need rust_*."""
+    rust = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_zed-0.1.0"
+    crate = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_regex-1.0.0"
+    assert not is_cascade_canary_store_path(rust)
+    assert not is_cascade_canary_store_path(crate)
+    assert is_crate2nix_rust_output(rust)
+    root = Path(__file__).resolve().parents[2]
+    rust_inputs = frozenset({
+        "cargo",
+        "crane",
+        "crate2nix",
+        "fenix",
+        "rustPlatform",
+        "rustc",
+    })
+    for relative in (
+        "packages/buzz/native/onnxruntime.nix",
+        "packages/hq/default.nix",
+    ):
+        package = expect_instance(
+            parse_nix_expr((root / relative).read_text(encoding="utf-8")),
+            FunctionDefinition,
+        )
+        names = {
+            argument.name
+            for argument in package.argument_set
+            if isinstance(argument, Identifier)
+        }
+        assert names.isdisjoint(rust_inputs), relative
 
 
 def test_rust_agent_ui_partition_and_realize_print_logs(tmp_path: Path) -> None:

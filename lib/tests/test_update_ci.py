@@ -2055,9 +2055,13 @@ def _assert_cascade_warmup_job(workflow_jobs: dict) -> None:
         "prepare-merge",
         "plan-darwin-closures",
         "canary-darwin-fods",
+        "canary-warm-rust",
     }
     assert "validate-darwin-warm-rust" not in canary["needs"]
-    assert "canary-darwin-fods.result == 'success'" in " ".join(canary["if"].split())
+    canary_if = " ".join(canary["if"].split())
+    assert "canary-darwin-fods.result == 'success'" in canary_if
+    assert "canary-warm-rust.result == 'skipped'" in canary_if
+    assert "canary-warm-rust.result == 'failure'" in canary_if
     assert canary["with"]["scope"] == "cascade-canary"
     assert canary["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"
     assert canary["with"]["shard"] == "cascade-canary"
