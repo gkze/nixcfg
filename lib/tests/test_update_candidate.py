@@ -4428,11 +4428,12 @@ def test_hosted_zed_warmup_progress_keeps_going_past_workspace_family(
     Default rust-warmup progress still 32-caps argv --keep-going so an
     accidental flag cannot lift the ceiling. The others realize path
     (39217658040 rust_but-agentlog 39) must pass keep_going=True; that
-    is family-scale, not #1263's 406-drv bootstrap. Family keep_going
+    is family-scale, not #1263's 406-drv bootstrap.     Family keep_going
     and zed-warmup use the 400-drv ceiling so the 37-crate workspace
     compiles. Bootstrap-scale 406 still aborts on substitute-only
-    rustc/bmake. rust_* 406 (38231309175 rust_xet-client) defers like
-    cranelift 40.
+    rustc/bmake and on keep_going umbrellas. rust_* 406
+    (38231309175 rust_xet-client) defers like cranelift 40; keep_going
+    rust_gpui 415 (39387963366 slot 0) must compile.
     """
     monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
     rust = pipeline._hosted_validation_progress("rust-warmup")
@@ -4514,9 +4515,23 @@ def test_hosted_zed_warmup_progress_keeps_going_past_workspace_family(
     others_keep(
         ValidationCommandOutput(agentlog, "these 39 derivations will be built:")
     )
+    others_keep(
+        ValidationCommandOutput(agentlog, "these 406 derivations will be built:")
+    )
+    gpui = (
+        "nix build --no-link --keep-going --fallback "
+        "'/nix/store/031nw7v3w2gxx42wm290ivmg1ip6b16z-rust_gpui-0.2.2.drv^*'"
+    )
+    others_keep(ValidationCommandStarted(gpui))
+    others_keep(ValidationCommandOutput(gpui, "these 415 derivations will be built:"))
+    umbrella = (
+        "nix build --no-link --keep-going --fallback "
+        "'/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-goose-cli-1.51.0.drv^*'"
+    )
+    others_keep(ValidationCommandStarted(umbrella))
     with pytest.raises(WarmupFatalError, match="will-be-built"):
         others_keep(
-            ValidationCommandOutput(agentlog, "these 406 derivations will be built:")
+            ValidationCommandOutput(umbrella, "these 406 derivations will be built:")
         )
     zed = pipeline._hosted_validation_progress("zed-warmup")
     zed(ValidationCommandStarted("nix build --max-jobs 0 /nix/store/git_ui.drv"))

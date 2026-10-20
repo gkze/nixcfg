@@ -316,6 +316,16 @@ def _hosted_validation_progress(
                 and is_crate2nix_rust_output(current_drv)
                 and "will be built" in text.lower()
             )
+            # 39387963366 slot 0: rust_gpui-0.2.2 --keep-going --fallback
+            # streamed 415 wbb (crate graph, not rustc/bmake bootstrap)
+            # and the 400-cap aborted before Cachix could receive it.
+            rust_keep_going_crate = (
+                stream_keep_going
+                and not substitute_only
+                and is_crate2nix_rust_output(current_drv)
+                and not is_compiler_must_substitute_store_path(current_drv)
+                and "will be built" in text.lower()
+            )
             drv = command_store_drv(text)
             if (
                 is_source_fetch_mirror_line(text)
@@ -323,7 +333,7 @@ def _hosted_validation_progress(
                 or ("Cannot build" in text and drv and is_source_fetch_store_path(drv))
             ):
                 source_fetch_miss = True
-            if not rust_substitute_miss:
+            if not rust_substitute_miss and not rust_keep_going_crate:
                 raise_if_warmup_fatal(
                     text,
                     substitute_only=substitute_only,
@@ -1274,8 +1284,9 @@ def _realize_rust_warmup_compile(
         # overlay bash / nix-prefetch-git / fetch-cargo-vendor-util.
         # Default rust-warmup progress still 32-caps argv --keep-going
         # (406-bootstrap / goose-cli umbrellas). partition already
-        # deferred those leaves; gitbutler others is family-scale, the
-        # same 400-cap as deferred rust_* / parent 38081612138's 37.
+        # deferred those leaves. crate2nix rust_* keep_going (rust_gpui
+        # 415 on 39387963366 slot 0) must compile; rustc/bmake 406
+        # still fail closed.
         failures.extend(_realize_rust_warmup_others(others, flake_root=flake_root))
     if compiled:
         if agent_ui and not zed_slot:
