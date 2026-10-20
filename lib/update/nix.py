@@ -111,6 +111,11 @@ _NIX_NETWORK_TRANSIENT_MARKERS = (
     "HTTP protocol violation",
     "HTTP/2 framing layer",
     "HTTP/2 stream",
+    # 39435878398 prepare-x86: go vendor prefetch printed Go's http2
+    # framing error (proxy.golang.org INTERNAL_ERROR), not curl's
+    # "HTTP/2 stream".
+    "stream error: stream ID",
+    "INTERNAL_ERROR; received from peer",
     "HttpConnectionClosing",
     "NameServerFailure",
     "Operation too slow",
@@ -813,9 +818,10 @@ def _nix_output_has_permanent_build_failure(output: str) -> bool:
 def is_retryable_nix_network_failure(*, stdout: str, stderr: str) -> bool:
     """Return whether Nix reported a transient network or substituter failure.
 
-    Shared owner for updater FOD prefetch, zon2nix/zig fetch, and rusty_v8
-    git 503. HTTP 5xx, Zig ``BadHttpStatus``, and git ``RPC failed`` / 503
-    retry here instead of per-package marker lists.
+    Shared owner for updater FOD prefetch, zon2nix/zig fetch, rusty_v8
+    git 503, and GOPROXY HTTP/2 ``INTERNAL_ERROR``. HTTP 5xx, Zig
+    ``BadHttpStatus``, git ``RPC failed`` / 503, and Go ``stream error:
+    stream ID`` retry here instead of per-package marker lists.
     """
     output = f"{stderr}\n{stdout}"
     if _has_hash_mismatch_signal(output):

@@ -316,6 +316,28 @@ def test_zig_bad_http_status_is_retryable_network_failure() -> None:
     assert is_retryable_nix_network_failure(stdout="", stderr=stderr)
 
 
+def test_goproxy_http2_internal_error_is_retryable_network_failure() -> None:
+    """39435878398 prepare-x86: Go GOPROXY printed stream INTERNAL_ERROR, not curl HTTP/2."""
+    stderr = (
+        "go: github.com/openai/openai-cli/internal/autocomplete imports\n"
+        "    golang.org/x/sys/unix: golang.org/x/sys@v0.49.0: read "
+        '"https://proxy.golang.org/golang.org/x/sys/@v/v0.49.0.zip": '
+        "stream error: stream ID 7; INTERNAL_ERROR; received from peer"
+    )
+    result = CommandResult(args=["nix"], returncode=1, stdout="", stderr=stderr)
+    assert is_retryable_nix_network_failure(stdout="", stderr=stderr)
+    assert _is_retryable_fixed_output_hash_failure(result)
+    assert is_retryable_nix_network_failure(
+        stdout="", stderr="stream error: stream ID 3; PROTOCOL_ERROR"
+    )
+    assert is_retryable_nix_network_failure(
+        stdout="", stderr="read zip: INTERNAL_ERROR; received from peer"
+    )
+    assert not is_retryable_nix_network_failure(
+        stdout="", stderr="compiler INTERNAL_ERROR in rustc"
+    )
+
+
 def test_http_5xx_and_git_rpc_are_retryable_network_failures() -> None:
     """Shared FOD/updater retry covers HTTP 5xx and git 503, not 4xx."""
     assert is_retryable_nix_network_failure(
