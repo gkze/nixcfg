@@ -30,6 +30,7 @@ from lib.update.ci.coverage import (
     nixos_cache_store,
     one_darwin_root_store_path,
     parse_job_results,
+    paths_on_store,
     read_json,
     realized_darwin_root_store_paths,
     require_cachix_paths,
@@ -262,6 +263,56 @@ def test_cachix_and_eval_helpers_fail_closed(tmp_path: Path) -> None:
     assert not check_path_on_nixos(
         "/nix/store/miss",
         run=lambda args, **_k: subprocess.CompletedProcess(args, 1, "", "gone"),
+    )
+
+    hit = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hit"
+    miss = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-miss"
+    calls: list[list[str]] = []
+
+    def batched(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        assert args[:4] == ["nix", "path-info", "--json", "--store"]
+        payload = {path: {"narSize": 1} for path in args[5:] if path == hit}
+        return subprocess.CompletedProcess(args, 1, json.dumps(payload), "missing")
+
+    assert paths_on_store((hit, miss, hit), binary_cache_store(), run=batched) == (
+        frozenset({hit})
+    )
+    assert len(calls) == 1
+    assert paths_on_store((), binary_cache_store(), run=batched) == frozenset()
+
+    def garbage(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "--json" in args:
+            return subprocess.CompletedProcess(args, 1, "not-json", "")
+        return subprocess.CompletedProcess(args, 0 if args[-1] == hit else 1, "", "")
+
+    assert paths_on_store((hit, miss), binary_cache_store(), run=garbage) == (
+        frozenset({hit})
+    )
+
+    def empty(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "--json" in args:
+            return subprocess.CompletedProcess(args, 1, "", "")
+        return subprocess.CompletedProcess(args, 0 if args[-1] == hit else 1, "", "")
+
+    assert paths_on_store((hit, miss), binary_cache_store(), run=empty) == (
+        frozenset({hit})
+    )
+
+    def listed(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        payload = [{"path": hit}, {"narSize": 1}, "nope"]
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    assert paths_on_store((hit, miss), binary_cache_store(), run=listed) == (
+        frozenset({hit})
+    )
+    assert (
+        paths_on_store(
+            (hit,),
+            binary_cache_store(),
+            run=lambda args, **_k: subprocess.CompletedProcess(args, 0, "1", ""),
+        )
+        == frozenset()
     )
     with pytest.raises(CoverageError, match="could not evaluate"):
         eval_check_out_path(

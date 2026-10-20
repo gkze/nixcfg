@@ -11,6 +11,9 @@ inputs:
   cache-generators:
     description: Restore generator downloads for preparation or repair
     default: "false"
+  light-image-reclaim:
+    description: Skip Xcode/Android purge; keep a smaller fail-closed disk check
+    default: "false"
 outputs:
   runtime:
     description: Pinned nixcfg package
@@ -25,6 +28,7 @@ runs:
       shell: python
       env:
         NIXCFG_CI_STAGE: clean-image
+        NIXCFG_LIGHT_IMAGE_RECLAIM: ${{ inputs.light-image-reclaim }}
       run: |
         import runpy
         runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
@@ -35,6 +39,7 @@ runs:
         extra-conf: |
           max-jobs = 2
           cores = 2
+          eval-cores = 2
           min-free = 34359738368
           max-free = 68719476736
     - name: Record disk after Nix install

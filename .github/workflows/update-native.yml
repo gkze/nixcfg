@@ -110,6 +110,22 @@ jobs:
         with:
           name: ${{ inputs.warmup_artifact }}
           path: ${{ runner.temp }}/warmup
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        if: inputs.scope == 'closures'
+        with:
+          path: ${{ runner.temp }}/evidence
+      - name: Assert linux-builder and one Darwin root in Cachix
+        if: inputs.scope == 'closures'
+        env:
+          NIXCFG_RUNTIME: ${{ steps.runtime.outputs.runtime }}
+          NIXCFG_DEVSHELL: ${{ steps.runtime.outputs.devshell }}
+          NIXCFG_CI_STAGE: assert-cached-boundary
+          NIXCFG_PREVIOUS_CANDIDATE: ${{ runner.temp }}/previous/candidate.json
+          NIXCFG_COVERAGE_EVIDENCE: ${{ runner.temp }}/evidence
+        run: |
+          import runpy
+          runpy.run_path("lib/update/ci/jobs.py", run_name="__main__")
+        shell: python
       - name: Prepare or validate candidate
         id: candidate
         env:

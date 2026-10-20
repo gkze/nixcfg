@@ -126,14 +126,38 @@ Paid large Macs could cut rust 30m→~18m, balanced cascade 25m→~15m,
 roots 36m→~22m. That is ~30–40m off a **cold** run and almost nothing
 off a **warm** run that only substitutes. Not enabled.
 
+## 39166099302 follow-on speedups (no skipped work)
+
+Measured on the 306m no-skip run. No queue time; the cap is 5 macos-15
+jobs plus serialized steps. Each critical-path Mac job spent 5.7–9.2m
+on setup (~56m total); Xcode/Android purge was 3.3–4.6m of that.
+
+| Change | Measured basis | Expected wall |
+| --- | --- | ---: |
+| Fold assert-coverage into publish (first step, blank write token) | 7.2m macos job for <30s of work | ~7m |
+| Skip Xcode/Android on publish/repair; 8 GiB fail-closed floor | 3.3–4.6m purge on that job | ~4m |
+| Fold canary-darwin-cache into closures as a pre-build step | 4m ubuntu path-info after roots | ~3m |
+| Start cascade canary after FOD canary, not after all rust slots | 6.8m canary for 17s of work; rust slots 21–30m | 0–7m |
+| Batch `nix path-info --json` (gkze first, then hydra remainder) | plan-shards 50m includes serial path-info of 31.6k outputs | a few minutes of plan-shards |
+| Determinate `eval-cores = 2` plus host nix on PATH | `unknown setting 'eval-cores'` from devshell `pkgs.nix` | 0m until `derivation show` is measured parallel |
+
+Expected additional cut on a similarly shaped cold run: **about 14–21m**.
+`nix derivation show` is not in Determinate's parallel-eval command list,
+so eval-cores is a warning fix, not a claimed 27m win. Per-path df after
+each purge is diagnostic only.
+
 ## What not to do
 
 - Do not skip Darwin shards, rust-warmup, cascade, coverage, or
   certify to chase 2h54m.
 - Do not raise `DARWIN_GRAPH_EVAL_WORKERS` without a passing 2-wide
-  plan-shards measurement; 4-wide already SIGTERM'd.
+  plan-shards measurement; 4-wide already SIGTERM'd. Do not set
+  `eval-cores = 0` (all cores) on the 16 GiB ubuntu planner.
 - Do not pin every rust_* (thousands of pins, still churns on the next
   crate bump). Pin the four Darwin roots and the linux-builder image.
 - Do not `workflow_dispatch` or `gh run cancel` from the Cursor GitHub
   App token (403). Kick remains a `lib/update/**` push, and these
   speed-up branches are **not** `cursor/no-skip-darwin-shards-6614`.
+- Do not buy `macos-15-xlarge`. Do not drop the combined closures proof.
+- Do not remove canaries. Do not overlap cascade canary with the cascade
+  5-wide stripe (duplicate buzz compile / 6 macos vs a 5 pool).

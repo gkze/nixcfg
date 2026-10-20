@@ -1928,6 +1928,7 @@ def test_repair_validation_mode_reaches_first_native_preparation() -> None:
         if str(step.get("uses", "")).startswith("actions/download-artifact@")
     ]
     assert any(step.get("if") == "inputs.warmup_artifact != ''" for step in downloads)
+    assert any(step.get("if") == "inputs.scope == 'closures'" for step in downloads)
     assert native["on"]["workflow_call"]["inputs"]["scope"]["default"] == "all"
     assert "closure_yield" not in native["on"]["workflow_call"]["inputs"]
     assert "closure_complete" not in native["on"]["workflow_call"]["outputs"]
@@ -2053,13 +2054,15 @@ def _assert_cascade_warmup_job(workflow_jobs: dict) -> None:
     assert set(canary["needs"]) == {
         "prepare-merge",
         "plan-darwin-closures",
-        "validate-darwin-warm-rust",
+        "canary-darwin-fods",
     }
+    assert "validate-darwin-warm-rust" not in canary["needs"]
+    assert "canary-darwin-fods.result == 'success'" in " ".join(canary["if"].split())
     assert canary["with"]["scope"] == "cascade-canary"
     assert canary["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"
     assert canary["with"]["shard"] == "cascade-canary"
     assert "warmup_slot" not in canary["with"]
-    assert "canary-warm-cascade" not in workflow_jobs["assert-coverage"]["needs"]
+    assert "canary-warm-cascade" not in workflow_jobs["publish"]["needs"]
     cascade = workflow_jobs["validate-darwin-cascade-warmup"]
     assert set(cascade["needs"]) == {
         "prepare-merge",
@@ -2159,42 +2162,49 @@ def _assert_linux_builder_cache_canary(workflow_jobs: dict) -> None:
         "cache-darwin-linux-deps-arm",
         "cache-darwin-linux-deps-x86",
         "validate-darwin-roots",
-        "canary-darwin-cache",
     }
     closures_if = " ".join(closures["if"].split())
     assert "always() && !cancelled()" in closures_if
     assert "needs.validate-darwin-roots.result == 'success'" in closures_if
-    assert "needs.canary-darwin-cache.result == 'success'" in closures_if
+    assert "canary-darwin-cache" not in workflow_jobs
     assert closures["with"]["scope"] == "closures"
     assert "closure_yield" not in closures["with"]
-    canary = workflow_jobs["canary-darwin-cache"]
-    assert set(canary["needs"]) == {
-        "prepare-merge",
-        "cache-darwin-linux-deps-arm",
-        "cache-darwin-linux-deps-x86",
-        "plan-darwin-closures",
-        "validate-darwin-roots",
-    }
-    canary_if = " ".join(canary["if"].split())
-    assert "always() && !cancelled()" in canary_if
-    assert "needs.validate-darwin-roots.result == 'success'" in canary_if
-    assert canary["runs-on"] == "ubuntu-24.04"
-    assert canary["timeout-minutes"] == "20"
-    canary_step = next(
+    native = yaml.load(
+        (ROOT / ".github/workflows/update-native.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    boundary = next(
         step
-        for step in canary["steps"]
+        for step in native["jobs"]["native"]["steps"]
         if step.get("name") == "Assert linux-builder and one Darwin root in Cachix"
     )
-    assert canary_step["env"]["NIXCFG_CI_STAGE"] == "assert-cached-boundary"
+    assert boundary["if"] == "inputs.scope == 'closures'"
+    assert boundary["env"]["NIXCFG_CI_STAGE"] == "assert-cached-boundary"
+    evidence = next(
+        step
+        for step in native["jobs"]["native"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/download-artifact@")
+        and step.get("if") == "inputs.scope == 'closures'"
+    )
+    assert evidence["with"]["path"] == "${{ runner.temp }}/evidence"
+    candidate = next(
+        step
+        for step in native["jobs"]["native"]["steps"]
+        if step.get("name") == "Prepare or validate candidate"
+    )
+    assert native["jobs"]["native"]["steps"].index(boundary) < native["jobs"]["native"][
+        "steps"
+    ].index(candidate)
 
 
 def _assert_coverage_and_publish(workflow_jobs: dict) -> None:
     """Coverage stays the done-bar; it does not run on a rust-warmup canary."""
-    coverage = workflow_jobs["assert-coverage"]
-    coverage_if = " ".join(coverage["if"].split())
+    assert "assert-coverage" not in workflow_jobs
+    publish = workflow_jobs["publish"]
+    coverage_if = " ".join(publish["if"].split())
     assert "always() && !cancelled()" in coverage_if
     assert "inputs.canary_warm_rust" in coverage_if
-    assert set(coverage["needs"]) == {
+    assert set(publish["needs"]) == {
         "prepare-merge",
         "plan-darwin-closures",
         "validate-arm",
@@ -2207,14 +2217,28 @@ def _assert_coverage_and_publish(workflow_jobs: dict) -> None:
     }
     evidence = next(
         step
-        for step in coverage["steps"]
+        for step in publish["steps"]
         if str(step.get("uses", "")).startswith("actions/download-artifact@")
         and step.get("with", {}).get("path") == "${{ runner.temp }}/evidence"
     )
     assert "name" not in evidence["with"]
-    publish_if = " ".join(workflow_jobs["publish"]["if"].split())
-    assert "always() && !cancelled()" in publish_if
-    assert "closure_complete" not in publish_if
+    coverage = next(
+        step
+        for step in publish["steps"]
+        if step.get("name") == "Assert root and package coverage"
+    )
+    assert coverage["env"]["NIXCFG_CI_STAGE"] == "assert-coverage"
+    assert coverage["env"]["GITHUB_TOKEN"] == ""
+    assert coverage["env"]["GH_TOKEN"] == ""
+    certify = next(
+        step
+        for step in publish["steps"]
+        if step.get("name") == "Certify and check final tree"
+    )
+    certify_if = " ".join(str(certify.get("if", "")).split())
+    assert "success()" in certify_if
+    runtime = next(step for step in publish["steps"] if step.get("id") == "runtime")
+    assert runtime["with"]["light-image-reclaim"] == "true"
     for name in (
         "validate-arm",
         "validate-x86",
@@ -2223,9 +2247,12 @@ def _assert_coverage_and_publish(workflow_jobs: dict) -> None:
         "validate-darwin-packages",
         "validate-darwin-roots",
         "validate-darwin-closures",
-        "assert-coverage",
     ):
-        assert f"needs.{name}.result == 'success'" in publish_if
+        assert f"needs.{name}.result == 'success'" in certify_if
+    publish_if = " ".join(publish["if"].split())
+    assert "always() && !cancelled()" in publish_if
+    assert "closure_complete" not in publish_if
+    assert publish["steps"].index(coverage) < publish["steps"].index(certify)
 
 
 def test_cachix_flush_proof_requires_partial_presence_after_designed_failure() -> None:
@@ -2321,8 +2348,6 @@ def test_cachix_flush_is_last_step_of_every_update_runtime_cachix_job() -> None:
         "cachix-flush-proof.yml:assert-partial",
         "cachix-flush-proof.yml:fail-after-push",
         "update-native.yml:native",
-        "update.yml:assert-coverage",
-        "update.yml:canary-darwin-cache",
         "update.yml:publish",
         "update.yml:repair",
     ]
@@ -2389,13 +2414,12 @@ def test_workflow_builds_linux_dependencies_before_darwin_roots() -> None:
     assert jobs["validate-arm"]["needs"] == "prepare-merge"
     assert jobs["validate-x86"]["needs"] == "prepare-merge"
     _assert_darwin_closure_shards(jobs)
-    assert set(jobs["publish"]["needs"]) == set(validators) | {"assert-coverage"}
+    assert set(validators) <= set(jobs["publish"]["needs"])
     assert set(validators) <= set(jobs["repair"]["needs"])
     assert {
         "plan-darwin-closures",
-        "assert-coverage",
         "prepare-pins",
-        "canary-darwin-cache",
+        "publish",
     } <= set(jobs["repair"]["needs"])
     assert set(cache_jobs) <= set(jobs["repair"]["needs"])
     assert set(cache_jobs).isdisjoint(jobs["publish"]["needs"])
@@ -2671,6 +2695,7 @@ def test_generator_cache_is_scoped_to_disposable_accelerators() -> None:
         if step.get("id") == "runtime"
     )
     assert repair["with"]["cache-generators"] == "true"
+    assert repair["with"]["light-image-reclaim"] == "true"
 
 
 @pytest.mark.parametrize(
@@ -3180,6 +3205,41 @@ def test_cleanup_preserves_active_xcode_aliases_and_unselected_data(
         assert not any(call[:2] == ("xcrun", "simctl") for call in calls)
 
 
+def test_image_cleanup_skips_xcode_for_light_non_building_jobs(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """Publish/coverage skip the 3.3-4.6m Xcode purge; keep an 8 GiB floor."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setenv("NIXCFG_LIGHT_IMAGE_RECLAIM", "true")
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    tree = _cleanup_image_tree(tmp_path)
+    monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
+    monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
+    monkeypatch.setattr(jobs, "_DARWIN_SYSTEM_SIMULATORS", tree["system_simulators"])
+    monkeypatch.setattr(jobs, "_UNUSED_IMAGE_PATHS", {"darwin": (tree["unused"],)})
+    monkeypatch.setattr(jobs, "runner_free_bytes", lambda: 9 * 1024 * 1024 * 1024)
+
+    def run(*args, capture=False, check=True):
+        if args[0] == "sudo":
+            assert Path(args[-1]).is_relative_to(tmp_path)
+            return subprocess.CompletedProcess(args, 0, stdout="")
+        return subprocess.CompletedProcess(args, 0, stdout=str(tree["selected"]))
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs.image_headroom_required_bytes() == jobs._LIGHT_IMAGE_HEADROOM_BYTES
+    assert jobs.main("clean-image") == 0
+    assert tree["old"].is_dir()
+    assert tree["android"].is_dir()
+    assert tree["simulators"].is_dir()
+    assert tree["system_simulators"].is_dir()
+    output = capsys.readouterr().out
+    assert "Skipping Xcode/Android reclaim; light job headroom" in output
+    assert f"Removing unused runner image tool: {tree['unused']}" in output
+    assert f"Removing unused runner image tool: {tree['old']}" not in output
+
+
 def test_image_cleanup_skips_xcode_when_free_already_meets_headroom(
     tmp_path, monkeypatch, capsys
 ) -> None:
@@ -3305,6 +3365,7 @@ def test_image_cleanup_reports_elapsed_seconds_per_tree(
     suffix = output.split(removed, 1)[1].splitlines()[0]
     assert suffix.endswith("s")
     assert float(suffix[:-1]) >= 0
+    assert f"df after removing {tree['unused']} /:" in output
 
 
 def test_image_cleanup_raises_first_failure_after_other_trees_finish(
@@ -3522,12 +3583,42 @@ def test_hosted_update_runtime_reserves_store_headroom_for_root_closures() -> No
     )
     assert "min-free = 34359738368" in extra_conf
     assert "max-free = 68719476736" in extra_conf
+    assert "eval-cores = 2" in extra_conf
+    assert "eval-cores = 0" not in extra_conf
     assert jobs._NIX_MIN_FREE_BYTES == 34359738368
     assert jobs._NIX_MAX_FREE_BYTES == 68719476736
     assert jobs._IMAGE_HEADROOM_BYTES == (
         jobs._NIX_MAX_FREE_BYTES + jobs._NIX_MIN_FREE_BYTES
     )
     assert jobs.image_headroom_required_bytes() == jobs._IMAGE_HEADROOM_BYTES
+    assert action["inputs"]["light-image-reclaim"]["default"] == "false"
+    reclaim = next(
+        step
+        for step in action["runs"]["steps"]
+        if step.get("env", {}).get("NIXCFG_CI_STAGE") == "clean-image"
+    )
+    assert reclaim["env"]["NIXCFG_LIGHT_IMAGE_RECLAIM"] == (
+        "${{ inputs.light-image-reclaim }}"
+    )
+
+
+def test_native_updater_env_prefers_determinate_nix(tmp_path, monkeypatch) -> None:
+    """Devshell pkgs.nix warns on eval-cores; hosted jobs use Determinate first."""
+    nix = tmp_path / "bin"
+    nix.mkdir()
+    (nix / "nix").write_text("#!/bin/sh\n")
+    monkeypatch.setattr(jobs, "_DETERMINATE_NIX_BIN", nix)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("PATH", "/usr/bin")
+    env = jobs._native_updater_env(tmp_path, tmp_path / "receipts.jsonl")
+    assert env["PATH"].startswith(f"{nix}{os.pathsep}")
+    monkeypatch.setenv("GITHUB_ACTIONS", "false")
+    env = jobs._native_updater_env(tmp_path, tmp_path / "receipts.jsonl")
+    assert not env["PATH"].startswith(f"{nix}{os.pathsep}")
+    monkeypatch.setattr(jobs, "_DETERMINATE_NIX_BIN", tmp_path / "missing-bin")
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    env = jobs._native_updater_env(tmp_path, tmp_path / "receipts.jsonl")
+    assert "missing-bin" not in env["PATH"].split(os.pathsep)[0]
 
 
 def test_record_named_storage_requires_a_label(monkeypatch) -> None:

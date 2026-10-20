@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from lib.update.ci.coverage import check_path_in_cachix
 from lib.update.ci.shard_plan import ClosureShard
 from lib.update.ci.warmup import (
     CASCADE_WARMUP_SLOTS,
@@ -43,6 +44,7 @@ from lib.update.ci.warmup import (
     darwin_output_paths,
     darwin_package_installable,
     default_cache_present,
+    default_cache_present_many,
     drv_input_references,
     dry_run_will_be_built_count,
     eval_darwin_package_graph,
@@ -884,6 +886,7 @@ def test_eval_root_darwin_outputs_and_substituters_fail_closed(
         ["/nix/store/hit", "/nix/store/miss", "/nix/store/hit"],
         present=lambda path: path.endswith("hit"),
     ) == frozenset({"/nix/store/hit"})
+    assert skip_cached_warmup_paths(()) == ()
 
     def nixos(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         store = args[args.index("--store") + 1]
@@ -920,10 +923,6 @@ def test_plan_defaults_to_subprocess_and_cache_helpers(
         "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
         "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-cached",
     })
-    monkeypatch.setattr(
-        "lib.update.ci.warmup.default_cache_present",
-        lambda path: path.endswith("cached"),
-    )
     shards = (
         ClosureShard(
             shard="darwin-argus",
@@ -937,6 +936,7 @@ def test_plan_defaults_to_subprocess_and_cache_helpers(
         shards=shards,
         run=run,
         package_graphs={},
+        present=lambda path: path.endswith("cached"),
     )
     assert plan.warmup_outputs == (
         "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cargo-package-sha2-0.10.9",
@@ -1376,6 +1376,57 @@ def test_rust_warmup_layers_and_slots_keep_dependency_order() -> None:
     assert rust_warmup_layers(frozenset({shared}), (_graph(shared),)) == ((shared,),)
     assert rust_warmup_layers(frozenset({leaf}), (_graph(leaf),)) == ()
     assert rust_warmup_layers(frozenset(), (_graph(shared),)) == ()
+
+
+def test_skip_cached_warmup_paths_batches_gkze_path_info() -> None:
+    """Stripe skip-if-in-gkze is one path-info --json, not one process per path."""
+    hit = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_a-1"
+    miss = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-rust_b-1"
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        assert args[:4] == ["nix", "path-info", "--json", "--store"]
+        assert "gkze" in args[4]
+        payload = {path: {} for path in args[5:] if path == hit}
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    assert skip_cached_warmup_paths(
+        (hit, miss, hit), present=check_path_in_cachix, run=run
+    ) == (miss,)
+    assert skip_cached_warmup_paths((hit, miss), run=run) == (miss,)
+    assert len(calls) == 2
+
+
+def test_substitutable_paths_query_gkze_before_nixos() -> None:
+    """Planner path-info hits gkze first so rust_* skip a hydra miss each."""
+    gkze = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_settings-1"
+    hydra = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-coreutils-9.5"
+    miss = "/nix/store/cccccccccccccccccccccccccccccccc-local-1"
+    stores: list[str] = []
+    queried: list[tuple[str, ...]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        store = args[args.index("--store") + 1]
+        stores.append(store)
+        queried.append(tuple(args[args.index("--store") + 2 :]))
+        payload = {gkze: {}} if "gkze" in store else {hydra: {}}
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    found = substitutable_paths((gkze, hydra, miss), run=run)
+    assert found == frozenset({gkze, hydra})
+    assert len(stores) == 2
+    assert "gkze" in stores[0]
+    assert stores[1] == "https://cache.nixos.org"
+    assert queried[0] == (gkze, hydra, miss)
+    assert queried[1] == (hydra, miss)
+    stores.clear()
+    queried.clear()
+    assert substitutable_paths((gkze,), run=run) == frozenset({gkze})
+    assert len(stores) == 1
+    assert "gkze" in stores[0]
+    assert substitutable_paths(()) == frozenset()
+    assert default_cache_present_many(()) == frozenset()
 
 
 def test_unit_weight_stripe_matches_round_robin_in_one_layer() -> None:
