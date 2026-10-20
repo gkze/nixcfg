@@ -1392,7 +1392,7 @@ def test_skip_cached_warmup_paths_batches_gkze_path_info() -> None:
         calls.append(args)
         assert args[:4] == ["nix", "path-info", "--json", "--store"]
         assert "gkze" in args[4]
-        payload = {path: {} for path in args[5:] if path == hit}
+        payload = {path: ({} if path == hit else None) for path in args[5:]}
         return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
 
     assert skip_cached_warmup_paths(

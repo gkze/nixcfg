@@ -281,6 +281,16 @@ def test_cachix_and_eval_helpers_fail_closed(tmp_path: Path) -> None:
     assert len(calls) == 1
     assert paths_on_store((), binary_cache_store(), run=batched) == frozenset()
 
+    def determinate_nulls(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        payload = {path: {"narSize": 1} if path == hit else None for path in args[5:]}
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    assert paths_on_store((hit, miss), binary_cache_store(), run=determinate_nulls) == (
+        frozenset({hit})
+    )
+
     def garbage(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         if "--json" in args:
             return subprocess.CompletedProcess(args, 1, "not-json", "")

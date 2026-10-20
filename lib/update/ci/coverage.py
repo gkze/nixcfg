@@ -446,9 +446,17 @@ def _path_on_store(
 
 
 def _present_paths_from_path_info_json(payload: object) -> frozenset[str]:
-    """Return store paths reported present in ``nix path-info --json`` output."""
+    """Return store paths reported present in ``nix path-info --json`` output.
+
+    Determinate Nix 3.22.5 V1 JSON still includes missing paths as keys
+    whose value is ``null`` (``InvalidPath`` in ``path-info.cc``). Only a
+    JSON object is a hit. Treating every key as present would skip rust
+    and cascade warmup and let Darwin roots compile those outputs.
+    """
     if isinstance(payload, dict):
-        return frozenset(str(key) for key in payload)
+        return frozenset(
+            str(key) for key, info in payload.items() if isinstance(info, dict)
+        )
     if not isinstance(payload, list):
         return frozenset()
     found: set[str] = set()
@@ -468,8 +476,9 @@ def paths_on_store(
     """Return the subset of *store_paths* one HTTP cache already has.
 
     ``nix path-info --json --store`` is one process per chunk. Missing paths
-    are omitted, not a presence claim. A batch that is not JSON falls back to
-    one query per path so a mixed cache never looks fully present.
+    are ``null`` values (Determinate) or omitted keys, never a presence
+    claim. A batch that is not JSON falls back to one query per path so a
+    mixed cache never looks fully present.
     """
     ordered = tuple(dict.fromkeys(store_paths))
     if not ordered:
