@@ -2231,7 +2231,7 @@ def test_deferred_compiler_rust_drvs_keep_probe_order() -> None:
 def test_realize_compiler_substitutes_compiles_deferred_rust_leaves(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """38231309175 slot 3: probe rust_xet-client 406, then compile leaves."""
+    """39387963366: probe rustc only; keep-going rust_* leaves in crane chunks."""
     monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
     runtime = "/nix/store/r9pr51ll4a8b9m5yavl6njzanbvbilmq-rust_xet-runtime-1.6.0.drv"
     client = "/nix/store/i60xdbbjfssbgmc8vv9pi2zrv21mk5l7-rust_xet-client-1.6.0.drv"
@@ -2246,18 +2246,7 @@ def test_realize_compiler_substitutes_compiles_deferred_rust_leaves(
             kwargs.get("chunk"),
         ))
         if kwargs.get("substitute_only"):
-            return (
-                DerivationValidationFailure(
-                    source="root-warmup",
-                    installable=f"{runtime}^*",
-                    message="error: Cannot build rust_xet-runtime.",
-                ),
-                DerivationValidationFailure(
-                    source="root-warmup",
-                    installable=f"{client}^*",
-                    message="these 406 derivations will be built:",
-                ),
-            )
+            return ()
         return ()
 
     monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
@@ -2267,8 +2256,56 @@ def test_realize_compiler_substitutes_compiles_deferred_rust_leaves(
         )
         == ()
     )
-    assert calls[0] == ((rustc, runtime, client), True, False, None)
-    assert calls[1] == ((runtime, client), False, True, 1)
+    assert calls[0] == ((rustc,), True, False, None)
+    assert calls[1] == ((runtime, client), False, True, pipeline.CRANE_DEP_CHUNK)
+
+
+def test_realize_compiler_substitutes_keep_going_only_rust_leaves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No rustc in the substitute set means skip --max-jobs 0 entirely."""
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229.drv"
+    calls: list[tuple[object, bool]] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> object:
+        calls.append((paths, bool(kwargs.get("substitute_only"))))
+        return ()
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    assert pipeline._realize_compiler_substitutes((serde,), flake_root=tmp_path) == ()
+    assert calls == [((serde,), False)]
+
+
+def test_realize_compiler_substitutes_keeps_rustc_miss_without_compiling_leaves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rustc --max-jobs 0 miss must not keep-going cranelift leaves."""
+    monkeypatch.setattr(pipeline.jobs, "record_runner_storage", lambda *_a, **_k: {})
+    rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    cranelift = (
+        "/nix/store/2nlfdbacyjxij6mbskq39pp97z528q33-"
+        "rust_cranelift-codegen-shared-0.135.1.drv"
+    )
+    rustc_fail = DerivationValidationFailure(
+        source="root-warmup",
+        installable=f"{rustc}^*",
+        message="error: Cannot build '/nix/store/...-rustc-1.98.1.drv'.",
+    )
+    calls: list[object] = []
+
+    def warmup_realize(paths: object, *_args: object, **kwargs: object) -> object:
+        calls.append((paths, bool(kwargs.get("substitute_only"))))
+        if kwargs.get("substitute_only"):
+            return (rustc_fail,)
+        msg = "must not compile rust leaves after a rustc miss"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(pipeline, "realize_warmup_outputs", warmup_realize)
+    assert pipeline._realize_compiler_substitutes(
+        (rustc, cranelift), flake_root=tmp_path
+    ) == (rustc_fail,)
+    assert calls == [((rustc,), True)]
 
 
 def test_rust_warmup_retries_unknown_1drv_helper_after_max_jobs_zero(
@@ -2526,7 +2563,7 @@ def test_compiler_rust_cache_miss_still_force_locals_family(
     )
     assert report.failures == ()
     assert realized == [
-        ((rustc_drv, lsp_drv), False, False, True),
+        ((rustc_drv,), False, False, True),
         ((lsp_drv,), True, False, False),
         ((settings_drv,), True, True, False),
     ]

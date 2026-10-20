@@ -67,6 +67,7 @@ from lib.update.ci.warmup import (
     is_compiler_must_substitute_store_path,
     is_crane_dep_store_path,
     is_crate2nix_rust_output,
+    is_deferred_compiler_rust_drv,
     is_extension_host_family_store_path,
     is_fixed_output_hash_mismatch,
     is_force_local_allowed_build,
@@ -99,6 +100,7 @@ from lib.update.ci.warmup import (
     parse_kick_canary_slots,
     partition_agent_ui_drvs,
     partition_compiler_input_drvs,
+    partition_compiler_substitute_probe_drvs,
     partition_crane_dep_drvs,
     partition_rust_warmup_others,
     partition_rust_zed_drvs,
@@ -1723,6 +1725,31 @@ def test_compiler_input_drvs_uses_requisites_and_keeps_src() -> None:
                 args, 1, "", "nix-store: dead"
             ),
         )
+
+
+def test_partition_compiler_substitute_probe_peels_rust_leaves() -> None:
+    """39387963366: rustc stays --max-jobs 0; cranelift/serde keep-going."""
+    rustc = "/nix/store/xbq69m0caaaaaaaaaaaaaaaaaaaaaaaa-rustc-1.98.1.drv"
+    stdenv = "/nix/store/1gx3hvygaaaaaaaaaaaaaaaaaaaaaaaa-stdenv-darwin.drv"
+    cranelift = (
+        "/nix/store/2nlfdbacyjxij6mbskq39pp97z528q33-"
+        "rust_cranelift-codegen-shared-0.135.1.drv"
+    )
+    serde = "/nix/store/serdeaaaaaaaaaaaaaaaaaaaaaaaaaaaa-rust_serde-1.0.229.drv"
+    assert is_deferred_compiler_rust_drv(cranelift)
+    assert is_deferred_compiler_rust_drv(serde)
+    assert not is_deferred_compiler_rust_drv(rustc)
+    assert not is_deferred_compiler_rust_drv(stdenv)
+    assert partition_compiler_substitute_probe_drvs((
+        rustc,
+        cranelift,
+        serde,
+        rustc,
+        stdenv,
+    )) == ((rustc, stdenv), (cranelift, serde))
+    assert partition_compiler_substitute_probe_drvs(()) == ((), ())
+    assert partition_compiler_substitute_probe_drvs((rustc,)) == ((rustc,), ())
+    assert partition_compiler_substitute_probe_drvs((serde,)) == ((), (serde,))
 
 
 def test_parse_canary_slots_and_crates() -> None:

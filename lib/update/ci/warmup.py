@@ -2200,6 +2200,39 @@ def partition_compiler_input_drvs(
     return tuple(substitute), tuple(fetches)
 
 
+def is_deferred_compiler_rust_drv(path: str) -> bool:
+    """Return whether a compiler-input rust_* may compile after rustc is local.
+
+    rustc/bmake/stdenv stay ``--max-jobs 0``. crates.io rust_* (cranelift,
+    serde, gix) substitute-or-compile under ``--keep-going --fallback``.
+    """
+    return is_crate2nix_rust_output(
+        path
+    ) and not is_compiler_must_substitute_store_path(path)
+
+
+def partition_compiler_substitute_probe_drvs(
+    drvs: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Peel crate2nix rust_* out of mixed ``--max-jobs 0`` compiler substitutes.
+
+    ``validate_derivation_requests`` batches 128, then when both bisection
+    halves fail it individually ``--max-jobs 0``s every drv. 39387963366
+    rust canary spent 1069 one-drv probes and slot 2 spent 2441 for ~119
+    rustc compiles, because cranelift/serde misses sat in the same window
+    as rustc. Fail-closed-probe rustc/stdenv/helpers only; rust_* leaves
+    keep-going after the toolchain is on the store.
+    """
+    probe: list[str] = []
+    rust_leaves: list[str] = []
+    for drv in dict.fromkeys(drvs):
+        if is_deferred_compiler_rust_drv(drv):
+            rust_leaves.append(drv)
+        else:
+            probe.append(drv)
+    return tuple(probe), tuple(rust_leaves)
+
+
 SOURCE_FETCH_DNS_HOSTS = ("github.com", "static.crates.io")
 SOURCE_FETCH_RETRY_BACKOFF_SECONDS = 15.0
 
