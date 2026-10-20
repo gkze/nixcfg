@@ -12,6 +12,7 @@ from lib.tests._updater_helpers import (
     load_repo_module,
 )
 from lib.tests._updater_helpers import run_async as _run
+from lib.update.constants import placeholder_hash_for
 from lib.update.nix import _build_overlay_expr
 from lib.update.updaters import UpdateContext, VersionInfo
 
@@ -383,13 +384,16 @@ def test_fetch_hashes_computes_src_and_vendor_hashes(
                         commit=COMMIT,
                         hashes=[
                             HashEntry.create("srcHash", "sha256-src"),
-                            HashEntry.create("vendorHash", updater.config.fake_hash),
+                            HashEntry.create(
+                                "vendorHash", placeholder_hash_for("vendorHash")
+                            ),
                         ],
                     )
                 },
             ),
             "env": None,
             "config": updater.config,
+            "isolate_by_drv_hash": True,
         },
     ]
     assert events.result == [

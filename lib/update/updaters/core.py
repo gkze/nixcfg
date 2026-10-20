@@ -18,6 +18,7 @@ from lib.update import net as update_net
 from lib.update import nix as update_nix
 from lib.update import process as update_process
 from lib.update.config import UpdateConfig, resolve_active_config
+from lib.update.constants import placeholder_hash_for
 from lib.update.events import (
     EventSink,
     StatusInfo,
@@ -49,6 +50,7 @@ class FixedOutputHashStep:
 
     hash_type: HashType
     expr: Callable[[dict[str, str]], str]
+    isolate_by_drv_hash: bool = False
 
 
 def verify_platform_versions(versions: dict[str, str], *, context: str) -> str:
@@ -198,9 +200,19 @@ async def stream_fixed_output_hashes(
     entries: list[HashEntry] = []
 
     for step in steps:
-        hash_value = await update_nix.compute_fixed_output_hash(
-            source_name, step.expr(resolved_hashes), config=config, emit=emit
-        )
+        expression = step.expr(resolved_hashes)
+        if step.isolate_by_drv_hash:
+            hash_value = await update_nix.compute_fixed_output_hash(
+                source_name,
+                expression,
+                isolate_by_drv_hash=True,
+                config=config,
+                emit=emit,
+            )
+        else:
+            hash_value = await update_nix.compute_fixed_output_hash(
+                source_name, expression, config=config, emit=emit
+            )
         resolved_hashes[step.hash_type] = hash_value
         entries.append(HashEntry.create(step.hash_type, hash_value))
 
@@ -261,11 +273,12 @@ async def stream_source_then_overlay_hashes(
                             commit=commit,
                             src_hash=resolved["srcHash"],
                             dependency_hash_type=dependency_hash_type,
-                            dependency_hash=config.fake_hash,
+                            dependency_hash=placeholder_hash_for(dependency_hash_type),
                             source_pins=source_pins,
                         )
                     },
                 ),
+                isolate_by_drv_hash=True,
             ),
         ),
         config=config,

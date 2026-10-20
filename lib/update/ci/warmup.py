@@ -42,6 +42,7 @@ from lib.update.ci.coverage import (
     check_path_in_cachix,
     check_path_on_nixos,
 )
+from lib.update.ci.jobs import remember_realized_store_paths
 from lib.update.ci.shard_plan import (
     ClosureShard,
     composed_root_name,
@@ -56,6 +57,7 @@ from lib.update.derivation_validation import (
     validate_derivation_requests,
 )
 from lib.update.io import atomic_write_text
+from lib.update.nix import is_retryable_nix_network_failure
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -2034,13 +2036,10 @@ def is_source_fetch_transport_error(text: str) -> bool:
 
     39234076105 slot 4: chromium.googlesource.com HTTP 503 during a
     rusty_v8 submodule clone, then hash mismatch on the tainted tree.
+    Delegates to the shared updater/FOD classifier so git 503, HTTP 5xx,
+    and Zig ``BadHttpStatus`` retry through one owner.
     """
-    lowered = text.lower()
-    return (
-        "http 503" in lowered
-        or "rpc failed" in lowered
-        or "returned error: 503" in lowered
-    )
+    return is_retryable_nix_network_failure(stdout="", stderr=text)
 
 
 def is_source_fetch_mirror_line(line: str) -> bool:
@@ -2597,9 +2596,44 @@ def realize_warmup_outputs(
             print_build_logs=print_build_logs,
         )
         failures.extend(window_failures)
+        _remember_realized_warmup_outputs(window, window_failures, run=run)
         if any(
             is_fixed_output_hash_mismatch(failure.message)
             for failure in window_failures
         ):
             return tuple(failures)
     return tuple(failures)
+
+
+def _remember_realized_warmup_outputs(
+    window: Sequence[str],
+    window_failures: Sequence[DerivationValidationFailure],
+    *,
+    run: _StoreRun | None,
+) -> None:
+    """Record successful warmup outputs so flush can ``cachix push`` after a fail.
+
+    Cascade/rust-warmup jobs that later fail used to drain the daemon and
+    clear ``CACHIX_DAEMON_DIR``, then the action post hook logged
+    ``Cachix Daemon not started. Skipping push``. Receipts keep the
+    already-built paths even when that skip happens.
+    """
+    failed = {failure.installable for failure in window_failures}
+    recorded: list[str] = []
+    for path in window:
+        if warmup_build_installable(path) in failed:
+            continue
+        if path.endswith(".drv"):
+            if not Path(path).exists():
+                continue
+            recorded.extend(query_drv_outputs(path, run=run))
+        elif Path(path).exists():
+            recorded.append(path)
+    present = tuple(
+        item
+        for item in dict.fromkeys(recorded)
+        if item.startswith("/nix/store/") and Path(item).exists()
+    )
+    if not present:
+        return
+    remember_realized_store_paths(present)

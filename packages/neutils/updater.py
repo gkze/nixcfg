@@ -78,18 +78,10 @@ class NeutilsUpdater(GitHubReleaseUpdater):
 
     _ZON2NIX_MAX_ATTEMPTS = 3
     _ZON2NIX_TIMEOUT_SECONDS = 180
-    _ZON2NIX_TRANSIENT_MARKERS: ClassVar[tuple[str, ...]] = (
-        "502 Bad Gateway",
-        "BadHttpStatus",
-        "Could not resolve host",
-        "ConnectionTimedOut",
-        "HttpConnectionClosing",
-        "NameServerFailure",
-        "ReadFailed",
-        "Temporary failure in name resolution",
-        "TlsInitializationFailed",
-        "UnknownHostName",
-        "connection reset",
+    # Command-timeout wording is not a Nix network 5xx. HTTP 5xx,
+    # BadHttpStatus, and git 503 live on is_retryable_nix_network_failure.
+    _ZON2NIX_TIMEOUT_MARKERS: ClassVar[tuple[str, ...]] = (
+        "Command timed out",
         "timed out",
     )
 
@@ -306,10 +298,8 @@ class NeutilsUpdater(GitHubReleaseUpdater):
 
     @classmethod
     def _is_transient_zon2nix_text(cls, output: str) -> bool:
-        if any(
-            marker.casefold() in output.casefold()
-            for marker in cls._ZON2NIX_TRANSIENT_MARKERS
-        ):
+        folded = output.casefold()
+        if any(marker.casefold() in folded for marker in cls._ZON2NIX_TIMEOUT_MARKERS):
             return True
         return is_retryable_nix_network_failure(stdout="", stderr=output)
 

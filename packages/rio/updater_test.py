@@ -10,6 +10,7 @@ from lib.tests._updater_helpers import (
     load_repo_module,
     run_async,
 )
+from lib.update.constants import placeholder_hash_for
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.events import UpdateEventKind
 from lib.update.nix import _build_fetch_from_github_call, _build_overlay_expr
@@ -103,7 +104,9 @@ def test_rio_update_uses_latest_source_when_release_has_no_rio_dmg(
                     commit=COMMIT,
                     hashes=[
                         HashEntry.create("srcHash", SRC_HASH),
-                        HashEntry.create("cargoHash", updater.config.fake_hash),
+                        HashEntry.create(
+                            "cargoHash", placeholder_hash_for("cargoHash")
+                        ),
                     ],
                 )
             },

@@ -1286,11 +1286,13 @@ def test_cascade_warmup_realizes_uncached_stripe_per_derivation(
         candidate, scope="cascade-warmup", warmup_plan=warmup_plan, warmup_slot=0
     )
     assert report.gates == ()
-    assert realized == [((f"{missing}.drv",), 1, True)]
-    skipped = pipeline.validate_candidate(
+    # Min-load (#243): unit-weight cached path takes slot 0 and is skipped
+    # in gkze; the missing path goes to slot 1 instead of stacking on 0.
+    assert realized == []
+    assigned = pipeline.validate_candidate(
         candidate, scope="cascade-warmup", warmup_plan=warmup_plan, warmup_slot=1
     )
-    assert skipped.failures == ()
+    assert assigned.failures == ()
     assert realized == [((f"{missing}.drv",), 1, True)]
     with pytest.raises(ValueError, match="cascade-warmup requires a warmup plan"):
         pipeline.validate_candidate(candidate, scope="cascade-warmup")
@@ -5180,8 +5182,7 @@ def test_hosted_warmup_skips_rusty_v8_hash_mismatch_after_http_503(
     progress(
         ValidationCommandOutput(
             goose,
-            "error: hash mismatch in fixed-output derivation "
-            f"'{rusty}':",
+            f"error: hash mismatch in fixed-output derivation '{rusty}':",
         )
     )
     assert "rusty_v8" in capsys.readouterr().err

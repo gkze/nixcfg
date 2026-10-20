@@ -1462,6 +1462,36 @@ def _push_unfinished_cachix_paths(
     return _run("cachix", "push", _BINARY_CACHE, *leftover, check=False, capture=True)
 
 
+def _publish_unpushed_warm_paths(daemon_log: str, log: TextIO) -> bool:
+    """``cachix push`` leftovers and realized receipts after any job outcome.
+
+    Failed cascade/rust-warmup jobs still built paths the post-build hook
+    queued. Flush then stops the daemon and clears ``CACHIX_DAEMON_DIR``
+    so the action post logs ``Cachix Daemon not started. Skipping push``.
+    Direct ``cachix push`` of leftovers plus ``realized-root-paths.json``
+    keeps that warm work even when the daemon is already gone.
+
+    Return whether leftover recovery succeeded (or was unneeded).
+    """
+    leftover = unfinished_cachix_daemon_paths(daemon_log)
+    leftover_ok = True
+    if leftover:
+        push = _push_unfinished_cachix_paths(leftover, log)
+        _write_diagnostic(
+            log,
+            f"cachix push leftover returncode={push.returncode} "
+            f"paths={' '.join(leftover)} stderr={push.stderr.strip()}",
+        )
+        leftover_ok = push.returncode == 0
+        if not leftover_ok:
+            _write_diagnostic(
+                log,
+                "leftover warmup push failed; continuing with recorded receipts",
+            )
+    _push_realized_root_paths(log)
+    return leftover_ok
+
+
 def _eval_installable_out_path(
     installable: str,
     *,
@@ -1525,7 +1555,11 @@ def drv_output_store_paths(
 
 
 def remember_realized_store_paths(paths: tuple[str, ...]) -> tuple[str, ...]:
-    """Record already-resolved store paths so flush can ``cachix push`` them."""
+    """Record already-resolved store paths so flush can ``cachix push`` them.
+
+    Later windows append. Cascade/rust-warmup realize one drv at a time;
+    overwriting would drop earlier successes when a later drv fails.
+    """
     if not paths:
         return ()
     bad = [path for path in paths if not path.startswith("/nix/store/")]
@@ -1534,11 +1568,16 @@ def remember_realized_store_paths(paths: tuple[str, ...]) -> tuple[str, ...]:
         raise CachixFlushError(msg)
     artifacts = _temp() / "update-artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
-    (artifacts / _REALIZED_ROOT_PATHS_NAME).write_text(
-        json.dumps({"storePaths": list(paths)}, indent=2) + "\n",
+    existing = ()
+    receipt = artifacts / _REALIZED_ROOT_PATHS_NAME
+    if receipt.is_file():
+        existing = load_realized_root_paths(artifacts)
+    merged = tuple(dict.fromkeys((*existing, *paths)))
+    receipt.write_text(
+        json.dumps({"storePaths": list(merged)}, indent=2) + "\n",
         encoding="utf-8",
     )
-    return paths
+    return merged
 
 
 def remember_realized_installable_paths(
@@ -1778,6 +1817,10 @@ def flush_cachix() -> None:
       closures compiling for 40m if Starter evicted the wrappers.
       Flush ``cachix pin --keep-days 14``s each darwin-system /
       home-manager-generation after the push.
+    - Failed warmup (39301503361 cascade slot 3): the action post hook
+      then logs ``Cachix Daemon not started. Skipping push``. Flush still
+      ``cachix push``es leftovers and ``realized-root-paths.json`` so the
+      successful stripe members reach gkze.
     """
     os.environ["NIXCFG_CI_STAGE"] = "flush-cachix"
     artifacts = _temp() / "update-artifacts"
@@ -1789,6 +1832,12 @@ def flush_cachix() -> None:
         _retain_cachix_daemon_evidence(artifacts, log)
         if receipts.exists():
             _publish_prefetched_receipts(receipts, log, artifacts, 0)
+        daemon_log = artifacts / "cachix-daemon" / "daemon.log"
+        daemon_log_text = (
+            daemon_log.read_text(encoding="utf-8", errors="replace")
+            if daemon_log.is_file()
+            else ""
+        )
         socket = cachix_daemon_socket()
         if socket is None:
             msg = (
@@ -1797,10 +1846,12 @@ def flush_cachix() -> None:
                 "are unset. useDaemon wiring did not export the socket."
             )
             _write_diagnostic(log, msg)
+            _publish_unpushed_warm_paths(daemon_log_text, log)
             raise CachixFlushError(msg)
         if not socket.exists():
             msg = f"Cachix daemon socket missing: {socket}"
             _write_diagnostic(log, msg)
+            _publish_unpushed_warm_paths(daemon_log_text, log)
             raise CachixFlushError(msg)
         stop = _run(
             "cachix",
@@ -1818,25 +1869,17 @@ def flush_cachix() -> None:
             f"stderr={stop.stderr.strip()}",
         )
         _retain_cachix_daemon_evidence(artifacts, log)
-        daemon_log = artifacts / "cachix-daemon" / "daemon.log"
         daemon_log_text = (
             daemon_log.read_text(encoding="utf-8", errors="replace")
             if daemon_log.is_file()
-            else ""
+            else daemon_log_text
         )
         if stop.returncode:
             leftover = unfinished_cachix_daemon_paths(daemon_log_text)
             if leftover and _cachix_stop_left_unpushed_paths(
                 stderr=stop.stderr, daemon_log=daemon_log_text
             ):
-                push = _push_unfinished_cachix_paths(leftover, log)
-                _write_diagnostic(
-                    log,
-                    f"cachix push leftover returncode={push.returncode} "
-                    f"paths={' '.join(leftover)} stderr={push.stderr.strip()}",
-                )
-                if push.returncode == 0:
-                    _push_realized_root_paths(log)
+                if _publish_unpushed_warm_paths(daemon_log_text, log):
                     _release_cachix_daemon_dir()
                     _write_diagnostic(
                         log,
@@ -1845,6 +1888,13 @@ def flush_cachix() -> None:
                     )
                     record_runner_storage("flush-end", log)
                     return
+            else:
+                _write_diagnostic(
+                    log,
+                    "Cachix daemon stop failed; pushing recorded warmup paths "
+                    "before hiding the daemon from the action post hook",
+                )
+                _publish_unpushed_warm_paths(daemon_log_text, log)
             msg = (
                 "Cachix daemon stop failed; cannot confirm a clean drain "
                 f"socket={socket} returncode={stop.returncode} "
@@ -1856,7 +1906,7 @@ def flush_cachix() -> None:
             # (38577749898 post hook exit 1 after this flush).
             _clear_cachix_daemon_env()
             raise CachixFlushError(msg)
-        _push_realized_root_paths(log)
+        _publish_unpushed_warm_paths(daemon_log_text, log)
         _release_cachix_daemon_dir()
         _write_diagnostic(
             log,

@@ -797,6 +797,38 @@ def test_flush_cachix_fails_closed_without_action_socket(
     assert "socket is unknown" in flush_log
 
 
+def test_flush_cachix_pushes_recorded_paths_when_daemon_is_gone(
+    native_job, monkeypatch
+) -> None:
+    """Failed warmup still ``cachix push``es realized receipts after daemon skip."""
+    env, checkout = native_job
+    store = "/nix/store/dddddddddddddddddddddddddddddddd-libiconv-1"
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "realized-root-paths.json").write_text(
+        json.dumps({"storePaths": [store]}) + "\n"
+    )
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("CACHIX_DAEMON_DIR", raising=False)
+    monkeypatch.delenv("CACHIX_DAEMON_SOCKET", raising=False)
+    monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == store)
+    monkeypatch.setattr(
+        jobs, "_realized_root_path_in_cachix", lambda path: path == store
+    )
+    monkeypatch.chdir(checkout)
+    with pytest.raises(jobs.CachixFlushError, match="socket is unknown"):
+        jobs.main("flush-cachix")
+    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
+        "push",
+        "gkze",
+        store,
+    ]
+    flush_log = (artifacts / "cachix-flush.log").read_text()
+    assert "pushing 1 realized root paths after daemon drain" in flush_log
+    assert "cachix push realized-roots returncode=0" in flush_log
+
+
 def test_flush_cachix_fails_closed_when_socket_is_missing_or_stop_fails(
     native_job, monkeypatch
 ) -> None:
@@ -998,6 +1030,13 @@ def test_remember_realized_store_paths_writes_receipt(native_job, monkeypatch) -
         ).read_text()
     )
     assert payload["storePaths"] == [store]
+    other = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-libiconv-1"
+    assert jobs.remember_realized_store_paths((other,)) == (store, other)
+    assert json.loads(
+        (
+            Path(env["RUNNER_TEMP"]) / "update-artifacts" / "realized-root-paths.json"
+        ).read_text()
+    )["storePaths"] == [store, other]
     assert jobs.remember_realized_store_paths(()) == ()
     with pytest.raises(jobs.CachixFlushError, match="not Nix store paths"):
         jobs.remember_realized_store_paths(("relative",))

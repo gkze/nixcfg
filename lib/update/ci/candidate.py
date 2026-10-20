@@ -1055,23 +1055,34 @@ def _realize_rust_warmup_others(
     others: tuple[str, ...],
     *,
     flake_root: Path,
+    chunk: int | None = None,
 ) -> tuple[validation.DerivationValidationFailure, ...]:
     """Realize rust-warmup others; DNS-retry source FODs after a tainted hash.
 
     39217658040 slot 4: gitbutler others is family-scale (39 wbb) and
     must use the 400-cap. 39234076105 slot 4: rust_v8-goose keep-going
     hashed a 503-tainted rusty_v8 fetchgit tree. Retry the FOD, then the
-    parent crate once the source is in the store.
+    parent crate once the source is in the store. Crane-dep rust_* use
+    the same retry; they are crates.io FODs too.
     """
     if not others:
         return ()
     progress = _hosted_validation_progress("rust-warmup", keep_going=True)
-    others_failures = realize_warmup_outputs(
-        others,
-        flake_root=flake_root,
-        progress=progress,
-        keep_going=True,
-    )
+    if chunk is None:
+        others_failures = realize_warmup_outputs(
+            others,
+            flake_root=flake_root,
+            progress=progress,
+            keep_going=True,
+        )
+    else:
+        others_failures = realize_warmup_outputs(
+            others,
+            flake_root=flake_root,
+            progress=progress,
+            keep_going=True,
+            chunk=chunk,
+        )
     retry = source_fetch_retry_drvs(others_failures)
     if not retry:
         return others_failures
@@ -1117,7 +1128,7 @@ def _compile_drvs_after_gitbutler_probe(
     probe_failures = realize_warmup_outputs(
         probe_drvs,
         flake_root=flake_root,
-        progress=_hosted_validation_progress("rust-warmup"),
+        progress=_hosted_validation_progress("rust-warmup", keep_going=True),
         substitute_only=True,
         keep_going=True,
     )
@@ -1217,6 +1228,28 @@ def _realize_rust_warmup(
             msg = "agent_ui drv has no rust_language_models input"
             raise WarmupError(msg)
     family = _expand_svh_family_from_stripe(family, settings, stripe_svh, others, plan)
+    return _realize_rust_warmup_compile(
+        others,
+        family,
+        flake_root=flake_root,
+        agent_ui=agent_ui,
+        rust_zed=rust_zed,
+        zed_nightly=zed_nightly,
+        zed_slot=zed_slot,
+    )
+
+
+def _realize_rust_warmup_compile(
+    others: tuple[str, ...],
+    family: tuple[str, ...],
+    *,
+    flake_root: Path,
+    agent_ui: tuple[str, ...],
+    rust_zed: tuple[str, ...],
+    zed_nightly: tuple[str, ...],
+    zed_slot: bool,
+) -> tuple[validation.DerivationValidationFailure, ...]:
+    """Realize crane deps, SVH family, others, then compiled leaves."""
     failures: list[validation.DerivationValidationFailure] = []
     others, crane_deps = partition_crane_dep_drvs(others)
     # Crane-style: crates.io rust_* into the store first so force-local
@@ -1224,12 +1257,8 @@ def _realize_rust_warmup(
     # --no-substitute. Chunk 8 bounds macos-15 RSS.
     if crane_deps:
         failures.extend(
-            realize_warmup_outputs(
-                crane_deps,
-                flake_root=flake_root,
-                progress=_hosted_validation_progress("rust-warmup"),
-                keep_going=True,
-                chunk=CRANE_DEP_CHUNK,
+            _realize_rust_warmup_others(
+                crane_deps, flake_root=flake_root, chunk=CRANE_DEP_CHUNK
             )
         )
     # Force-local SVH next. 38121661811 slots 1/2 built feature_flags /

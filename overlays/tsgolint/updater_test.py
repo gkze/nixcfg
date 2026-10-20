@@ -7,6 +7,7 @@ from lib.tests._nix_ast import assert_nix_ast_equal
 from lib.tests._updater_helpers import collect_events as _collect
 from lib.tests._updater_helpers import install_fixed_hash_stream, load_repo_module
 from lib.tests._updater_helpers import run_async as _run
+from lib.update.constants import placeholder_hash_for
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.nix import _build_fetch_from_github_call, _build_overlay_expr
 from lib.update.updaters import UpdateContext, VersionInfo
@@ -181,7 +182,9 @@ def test_tsgolint_fetch_hashes_computes_src_and_vendor_hashes(
                             "srcHash",
                             "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
                         ),
-                        HashEntry.create("vendorHash", updater.config.fake_hash),
+                        HashEntry.create(
+                            "vendorHash", placeholder_hash_for("vendorHash")
+                        ),
                     ],
                 )
             },

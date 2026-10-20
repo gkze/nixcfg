@@ -1393,12 +1393,18 @@ def test_source_then_overlay_hashes_carries_candidate_source_pins() -> None:
         return "dependency-expression"
 
     async def _fixed_hash(
-        source: str, expr: str, *, config: object, emit: EventSink = ignore_event
+        source: str,
+        expr: str,
+        *,
+        isolate_by_drv_hash: bool = False,
+        config: object,
+        emit: EventSink = ignore_event,
     ) -> object:
         nonlocal hash_calls
         hash_calls += 1
         assert source == "pinned-two-pass"
         assert expr in {"source-expression", "dependency-expression"}
+        assert isolate_by_drv_hash is (expr == "dependency-expression")
         _ = config
         return (
             "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="

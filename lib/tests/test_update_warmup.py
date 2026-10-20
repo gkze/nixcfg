@@ -2060,6 +2060,10 @@ def test_is_source_fetch_transport_error_matches_chromium_503() -> None:
         "error: Cannot build '/nix/store/x.drv'."
     )
     assert not is_source_fetch_transport_error("HTTP 404 Not Found")
+    assert is_source_fetch_transport_error("err(default): BadHttpStatus")
+    assert is_source_fetch_transport_error(
+        "curl: (22) The requested URL returned error: 502"
+    )
 
 
 def test_source_fetch_network_ready_requires_both_hosts() -> None:

@@ -11,6 +11,7 @@ from lib.tests._updater_helpers import (
     load_repo_module,
     run_async,
 )
+from lib.update.constants import placeholder_hash_for
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.nix import _build_fetch_from_github_call, _build_overlay_expr
 from lib.update.updaters import UpdateContext, VersionInfo
@@ -85,14 +86,18 @@ def test_turso_cli_computes_source_then_vendor_hash(
                     commit=COMMIT,
                     hashes=[
                         HashEntry.create("srcHash", SRC_HASH),
-                        HashEntry.create("vendorHash", updater.config.fake_hash),
+                        HashEntry.create(
+                            "vendorHash", placeholder_hash_for("vendorHash")
+                        ),
                     ],
                 )
             },
         ),
     )
     assert calls[0]["env"] is None
+    assert "isolate_by_drv_hash" not in calls[0]
     assert calls[1]["env"] is None
+    assert calls[1]["isolate_by_drv_hash"] is True
     assert events.result == [
         HashEntry.create("srcHash", SRC_HASH),
         HashEntry.create("vendorHash", VENDOR_HASH),

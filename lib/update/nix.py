@@ -101,6 +101,7 @@ _NIX_NETWORK_TRANSIENT_MARKERS = (
     # 39292190782: zon2nix/zig fetch printed only ``err(default):
     # BadHttpStatus`` for a Zig package 5xx, with no numeric HTTP status.
     "BadHttpStatus",
+    "ConnectionTimedOut",
     "Could not resolve host",
     "Failure when receiving data from the peer",
     "Failed to connect",
@@ -110,13 +111,24 @@ _NIX_NETWORK_TRANSIENT_MARKERS = (
     "HTTP protocol violation",
     "HTTP/2 framing layer",
     "HTTP/2 stream",
+    "HttpConnectionClosing",
     "NameServerFailure",
     "Operation too slow",
+    "RPC failed",
+    "ReadFailed",
     "Temporary failure in name resolution",
+    "TlsInitializationFailed",
+    "UnknownHostName",
     "connection reset",
     "returned error: 502",
     "returned error: 503",
     "returned error: 504",
+)
+# curl/git/Nix print HTTP 5xx in several spellings. Do not match HTTP/2
+# or 4xx; those are protocol framing and permanent client errors.
+_NIX_NETWORK_HTTP_5XX = re.compile(
+    r"(?:http(?:\s+error)?\s+5\d\d|returned error:\s*5\d\d)",
+    re.IGNORECASE,
 )
 
 _FIXED_OUTPUT_ONLY_TRANSIENT_MARKERS = (
@@ -799,12 +811,19 @@ def _nix_output_has_permanent_build_failure(output: str) -> bool:
 
 
 def is_retryable_nix_network_failure(*, stdout: str, stderr: str) -> bool:
-    """Return whether Nix reported a transient network or substituter failure."""
+    """Return whether Nix reported a transient network or substituter failure.
+
+    Shared owner for updater FOD prefetch, zon2nix/zig fetch, and rusty_v8
+    git 503. HTTP 5xx, Zig ``BadHttpStatus``, and git ``RPC failed`` / 503
+    retry here instead of per-package marker lists.
+    """
     output = f"{stderr}\n{stdout}"
     if _has_hash_mismatch_signal(output):
         return False
     folded = output.casefold()
     if _CANNOT_DOWNLOAD_FROM_MIRROR.search(folded):
+        return True
+    if _NIX_NETWORK_HTTP_5XX.search(output):
         return True
     return any(marker.casefold() in folded for marker in _NIX_NETWORK_TRANSIENT_MARKERS)
 

@@ -9,6 +9,7 @@ import pytest
 
 from lib.tests._updater_helpers import collect_events
 from lib.update.config import resolve_config
+from lib.update.constants import FAKE_HASH, placeholder_hash_for
 from lib.update.events import (
     CommandResult,
     EventSink,
@@ -313,6 +314,32 @@ def test_zig_bad_http_status_is_retryable_network_failure() -> None:
         "err(default): BadHttpStatus"
     )
     assert is_retryable_nix_network_failure(stdout="", stderr=stderr)
+
+
+def test_http_5xx_and_git_rpc_are_retryable_network_failures() -> None:
+    """Shared FOD/updater retry covers HTTP 5xx and git 503, not 4xx."""
+    assert is_retryable_nix_network_failure(
+        stdout="", stderr="curl: (22) The requested URL returned error: 500"
+    )
+    assert is_retryable_nix_network_failure(
+        stdout="", stderr="remote: HTTP 502 Bad Gateway"
+    )
+    assert is_retryable_nix_network_failure(
+        stdout="", stderr="error: RPC failed; result=22"
+    )
+    assert not is_retryable_nix_network_failure(stdout="", stderr="HTTP 404 Not Found")
+
+
+def test_placeholder_hashes_are_unique_per_hash_type() -> None:
+    """turso-cli srcHash+vendorHash both as lib.fakeHash cannot be rewritten."""
+    src = placeholder_hash_for("srcHash")
+    vendor = placeholder_hash_for("vendorHash")
+    assert src != vendor
+    assert src != FAKE_HASH
+    assert vendor != FAKE_HASH
+    assert src.startswith("sha256-")
+    assert vendor.startswith("sha256-")
+    assert placeholder_hash_for("vendorHash") == vendor
 
 
 def test_ranlib_write_eio_is_retryable_store_fault() -> None:
