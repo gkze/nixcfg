@@ -1680,6 +1680,22 @@ def _darwin_root_pin_name(path: str) -> str | None:
     return None
 
 
+def _coverage_critical_store_path(path: str) -> bool:
+    """Return whether flush must fail-closed if gkze 404s *path*.
+
+    Darwin wrappers and the Rosetta VM must be on gkze. Source FODs
+    (stdenv tarballs, crate2nix, bootstrap-tools) often live on hydra
+    and need not. 39375722862 plan-shards recorded 1727 rust-warmup
+    source FODs into ``realized-root-paths.json``, ``cachix push``
+    exited 0, then ``nix path-info --store gkze`` 404'd hydra-backed
+    tarballs and skipped every Darwin shard. Source FOD publish must
+    never fail the plan.
+    """
+    if _LINUX_BUILDER_OUTPUT in path:
+        return True
+    return _darwin_root_pin_name(path) is not None
+
+
 def _cachix_pin(name: str, path: str, log: TextIO) -> None:
     """Pin *path* on gkze for ``_CACHIX_PIN_KEEP_DAYS`` and fail closed."""
     pin = _run(
@@ -1737,25 +1753,62 @@ def _pin_realized_darwin_roots(paths: tuple[str, ...], log: TextIO) -> None:
         _cachix_pin(name, path, log)
 
 
+def _push_warmup_leftovers(paths: tuple[str, ...], log: TextIO) -> None:
+    """Best-effort ``cachix push`` of recorded warmup FODs; never fail-close."""
+    present = tuple(path for path in paths if _store_path_exists(path))
+    skipped = [path for path in paths if path not in present]
+    if skipped:
+        _write_diagnostic(
+            log,
+            "warmup leftovers missing locally; skipping push: " + ", ".join(skipped),
+        )
+    if not present:
+        return
+    _write_diagnostic(
+        log,
+        f"pushing {len(present)} warmup leftovers without gkze fail-close",
+    )
+    push = _run("cachix", "push", _BINARY_CACHE, *present, check=False, capture=True)
+    _write_diagnostic(
+        log,
+        f"cachix push warmup-leftovers returncode={push.returncode} "
+        f"paths={' '.join(present)} stderr={push.stderr.strip()}",
+    )
+    if push.returncode:
+        _write_diagnostic(
+            log,
+            "warmup leftover push failed; continuing without fail-close "
+            f"returncode={push.returncode} stderr={push.stderr.strip()}",
+        )
+
+
 def _push_realized_root_paths(log: TextIO) -> None:
     """Publish locally realized Darwin roots that the daemon hook missed."""
     recorded = load_realized_root_paths()
     if not recorded:
         return
-    missing = [path for path in recorded if not _store_path_exists(path)]
+    leftovers = tuple(
+        path for path in recorded if not _coverage_critical_store_path(path)
+    )
+    critical = tuple(path for path in recorded if _coverage_critical_store_path(path))
+    if leftovers:
+        _push_warmup_leftovers(leftovers, log)
+    if not critical:
+        return
+    missing = [path for path in critical if not _store_path_exists(path)]
     if missing:
         msg = f"realized root paths missing locally: {', '.join(missing)}"
         _write_diagnostic(log, msg)
         raise CachixFlushError(msg)
     _write_diagnostic(
         log,
-        f"pushing {len(recorded)} realized root paths after daemon drain",
+        f"pushing {len(critical)} realized root paths after daemon drain",
     )
-    push = _run("cachix", "push", _BINARY_CACHE, *recorded, check=False, capture=True)
+    push = _run("cachix", "push", _BINARY_CACHE, *critical, check=False, capture=True)
     _write_diagnostic(
         log,
         f"cachix push realized-roots returncode={push.returncode} "
-        f"paths={' '.join(recorded)} stderr={push.stderr.strip()}",
+        f"paths={' '.join(critical)} stderr={push.stderr.strip()}",
     )
     if push.returncode:
         msg = (
@@ -1763,12 +1816,12 @@ def _push_realized_root_paths(log: TextIO) -> None:
             f"returncode={push.returncode} stderr={push.stderr.strip()}"
         )
         raise CachixFlushError(msg)
-    _pin_linux_builder_paths(recorded, log)
-    _pin_realized_darwin_roots(recorded, log)
+    _pin_linux_builder_paths(critical, log)
+    _pin_realized_darwin_roots(critical, log)
     # 38934724529: cachix exit 0 + "Nothing to push" meant the *wrong*
     # stale path was already on gkze. Coverage still 404'd the eval path.
     missing_remote = [
-        path for path in recorded if not _realized_root_path_in_cachix(path)
+        path for path in critical if not _realized_root_path_in_cachix(path)
     ]
     if missing_remote:
         msg = (

@@ -1309,6 +1309,124 @@ def test_flush_fails_closed_when_nothing_to_push_but_remote_misses(
     assert store in flush_log
 
 
+def test_coverage_critical_store_path_is_roots_and_linux_builder() -> None:
+    """plan-shards FODs are leftovers; Darwin wrappers still fail-closed."""
+    assert jobs._coverage_critical_store_path(
+        "/nix/store/98bwk8gpzhmr12navdg9knjscv09k2nm-darwin-system-26.11.57a3171"
+    )
+    assert jobs._coverage_critical_store_path(
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-home-manager-generation"
+    )
+    assert jobs._coverage_critical_store_path(
+        "/nix/store/wy15yizd3i7z6bmg3llr43a2pflg9yyb-nixos-disk-image"
+    )
+    assert not jobs._coverage_critical_store_path(
+        "/nix/store/acnz9f1wxmml7im22675w8rkgfyywaxi-bootstrap-tools.tar.xz"
+    )
+    assert not jobs._coverage_critical_store_path(
+        "/nix/store/rjla2n2jag8m7n8f2515s3rb74g985af-rustc-1.98.1-src.tar.gz"
+    )
+
+
+def test_flush_does_not_fail_closed_on_warmup_fod_remote_miss(
+    native_job, monkeypatch
+) -> None:
+    """39375722862: 1727 plan-shards FODs 404 on gkze must not skip Darwin."""
+    env, checkout = native_job
+    root = "/nix/store/5a5dpbxqyvvhpnrhs4p3a0f4i48dn3ia-darwin-system-26.11.57a3171"
+    fod = "/nix/store/acnz9f1wxmml7im22675w8rkgfyywaxi-bootstrap-tools.tar.xz"
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "realized-root-paths.json").write_text(
+        json.dumps({"storePaths": [fod, root]}) + "\n"
+    )
+    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
+    github_env = Path(env["RUNNER_TEMP"]) / "github-env"
+    github_env.write_text("KEEP=1\n")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
+    monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    _allow_hosted_github_env(monkeypatch)
+    monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path in {fod, root})
+    monkeypatch.setattr(jobs, "_realized_root_path_in_cachix", lambda path: path == root)
+    monkeypatch.chdir(checkout)
+    assert jobs.main("flush-cachix") == 0
+    flush_log = (artifacts / "cachix-flush.log").read_text()
+    assert "pushing 1 warmup leftovers without gkze fail-close" in flush_log
+    assert "pushing 1 realized root paths after daemon drain" in flush_log
+    assert fod in flush_log
+    assert root in flush_log
+    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
+        "pin",
+        "gkze",
+        "darwin-system-5a5dpbxq",
+        root,
+        "--keep-days",
+        "14",
+    ]
+
+
+def test_flush_continues_when_warmup_leftover_push_fails(
+    native_job, monkeypatch
+) -> None:
+    env, checkout = native_job
+    fod = "/nix/store/acnz9f1wxmml7im22675w8rkgfyywaxi-bootstrap-tools.tar.xz"
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "realized-root-paths.json").write_text(
+        json.dumps({"storePaths": [fod]}) + "\n"
+    )
+    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
+    github_env = Path(env["RUNNER_TEMP"]) / "github-env"
+    github_env.write_text("KEEP=1\n")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
+    monkeypatch.setenv("GITHUB_ENV", str(github_env))
+    monkeypatch.setenv("TEST_CACHE_STOP_EXIT", "0")
+    monkeypatch.setenv("TEST_CACHE_EXIT", "1")
+    _allow_hosted_github_env(monkeypatch)
+    monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path == fod)
+    monkeypatch.chdir(checkout)
+    assert jobs.main("flush-cachix") == 0
+    flush_log = (artifacts / "cachix-flush.log").read_text()
+    assert "warmup leftover push failed; continuing without fail-close" in flush_log
+    assert json.loads(Path(env["TEST_CACHE_LOG"]).read_text()) == [
+        "push",
+        "gkze",
+        fod,
+    ]
+
+
+def test_flush_still_fails_closed_when_darwin_root_misses_among_fods(
+    native_job, monkeypatch
+) -> None:
+    env, checkout = native_job
+    root = "/nix/store/5a5dpbxqyvvhpnrhs4p3a0f4i48dn3ia-darwin-system-26.11.57a3171"
+    fod = "/nix/store/acnz9f1wxmml7im22675w8rkgfyywaxi-bootstrap-tools.tar.xz"
+    artifacts = Path(env["RUNNER_TEMP"]) / "update-artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "realized-root-paths.json").write_text(
+        json.dumps({"storePaths": [fod, root]}) + "\n"
+    )
+    daemon_dir = _cachix_daemon_dir(Path(env["RUNNER_TEMP"]))
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("CACHIX_DAEMON_DIR", str(daemon_dir))
+    monkeypatch.setenv("CACHIX_DAEMON_SOCKET", str(daemon_dir / "daemon.sock"))
+    monkeypatch.setattr(jobs, "_store_path_exists", lambda path: path in {fod, root})
+    monkeypatch.setattr(jobs, "_realized_root_path_in_cachix", lambda _path: False)
+    monkeypatch.chdir(checkout)
+    with pytest.raises(jobs.CachixFlushError, match="missing from gkze.cachix.org") as caught:
+        jobs.main("flush-cachix")
+    message = str(caught.value)
+    assert root in message
+    assert fod not in message
+
+
 def test_cachix_daemon_socket_reads_action_env_only(
     tmp_path: Path, monkeypatch
 ) -> None:
