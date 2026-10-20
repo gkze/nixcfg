@@ -825,8 +825,8 @@ def test_flush_cachix_pushes_recorded_paths_when_daemon_is_gone(
         store,
     ]
     flush_log = (artifacts / "cachix-flush.log").read_text()
-    assert "pushing 1 realized root paths after daemon drain" in flush_log
-    assert "cachix push realized-roots returncode=0" in flush_log
+    assert "pushing 1 warmup leftovers without gkze fail-close" in flush_log
+    assert "cachix push warmup-leftovers returncode=0" in flush_log
 
 
 def test_flush_cachix_fails_closed_when_socket_is_missing_or_stop_fails(
