@@ -39,6 +39,7 @@ def test_repair_agent_prompt_encodes_checkphase_skip_policy() -> None:
     prompt = repair.repair_agent_prompt(Path("/tmp/evidence"))
     assert "/tmp/evidence" in prompt
     assert "doCheck = false" in prompt
+    assert "python3/pgrep" in prompt
     assert "checkPhase" in prompt
     assert "XCTest" in prompt
     assert "never waive Darwin" in prompt
