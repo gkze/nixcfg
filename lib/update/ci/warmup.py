@@ -1268,8 +1268,13 @@ def _eval_root_darwin_graphs(
     names = tuple(composed_root_name(root) for root in roots)
 
     def one(name: str) -> tuple[str, dict[str, object], frozenset[str]]:
+        sys.stderr.write(f"plan-shards eval-graph start {name}\n")
+        sys.stderr.flush()
         payload = eval_root_darwin_graph(flake_root, name, run=run)
-        return name, payload, darwin_output_paths(payload)
+        outputs = darwin_output_paths(payload)
+        sys.stderr.write(f"plan-shards eval-graph done {name} outputs={len(outputs)}\n")
+        sys.stderr.flush()
+        return name, payload, outputs
 
     graphs: dict[str, dict[str, object]] = {}
     per_root: dict[str, frozenset[str]] = {}
@@ -1324,7 +1329,14 @@ def plan_darwin_warmup(
     )
     all_outputs = frozenset().union(*per_root.values()) if per_root else frozenset()
     checker = present if present is not None else default_cache_present
+    sys.stderr.write(f"plan-shards path-info start outputs={len(all_outputs)}\n")
+    sys.stderr.flush()
     substitutable = substitutable_paths(all_outputs, present=present)
+    sys.stderr.write(
+        f"plan-shards path-info done present={len(substitutable)} "
+        f"outputs={len(all_outputs)}\n"
+    )
+    sys.stderr.flush()
     missing_shared = intersect_missing(per_root, substitutable)
     warmup = frozenset(
         path for path in missing_shared if is_planned_rust_warmup_output(path)
