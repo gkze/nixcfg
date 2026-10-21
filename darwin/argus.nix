@@ -43,6 +43,27 @@ lib.mkDarwinHost {
         ];
       }
     )
+    (
+      _:
+      {
+        # Second aarch64-darwin build machine. Rocinante shares argus's system
+        # but has more RAM, so darwin builds can spread over both hosts instead
+        # of queueing locally. The daemon connects as root, so root's
+        # known_hosts must pin rocinante's host key; the sshKey below is the
+        # same restricted-purpose key the substituter above already uses.
+        nix.buildMachines = [
+          {
+            hostName = "rocinante";
+            protocol = "ssh-ng";
+            sshUser = "george";
+            sshKey = "/Users/george/.ssh/rocinante-nix-substituter";
+            systems = [ "aarch64-darwin" ];
+            maxJobs = 4;
+            speedFactor = 1;
+          }
+        ];
+      }
+    )
     {
       # Home Manager initializes completion after adding plugin directories to fpath.
       darwinDefaults.zsh.deferCompletionInitToHomeManager = true;
