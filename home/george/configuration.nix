@@ -431,7 +431,13 @@
         }) (builtins.attrValues config.theme.appearances ++ [ config.theme ])
       );
       config = {
-        theme = if pkgs.stdenv.hostPlatform.isDarwin then "auto:system" else "auto";
+        # `auto` follows the terminal background (OSC 11), and the terminal
+        # already follows system appearance via its own light/dark theme pair.
+        # Do not use `auto:system` on Darwin: it reads the persisted
+        # AppleInterfaceStyle preference, which macOS 26 no longer writes, so
+        # bat resolves to the light theme (Latte) even in dark mode. The
+        # appearance sync uses AppleIconAppearanceTheme for the same reason.
+        theme = "auto";
         theme-light = config.theme.appearances.light.displayName;
         theme-dark = config.theme.appearances.dark.displayName;
       };
