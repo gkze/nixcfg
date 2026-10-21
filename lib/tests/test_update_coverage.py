@@ -464,6 +464,44 @@ def test_path_on_store_timeout_is_a_miss() -> None:
     assert not check_path_on_nixos("/nix/store/hit", run=hung, timeout=0.1)
 
 
+def test_paths_on_store_chunks_run_in_parallel(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A full Darwin output set cannot serialize one 128-wide query at a time."""
+    first = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-one"
+    second = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-two"
+    json_active = 0
+    max_json = 0
+    lock = threading.Lock()
+    gate = threading.Barrier(2)
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal json_active, max_json
+        assert "--json" in args
+        with lock:
+            json_active += 1
+            max_json = max(max_json, json_active)
+        try:
+            gate.wait(timeout=2)
+        finally:
+            with lock:
+                json_active -= 1
+        payload = {path: {"narSize": 1} for path in args[5:]}
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    assert paths_on_store(
+        (first, second),
+        binary_cache_store(),
+        run=run,
+        chunk=1,
+        chunk_workers=2,
+    ) == frozenset({first, second})
+    assert max_json == 2
+    err = capsys.readouterr().err
+    assert "chunk=2/2" in err
+    assert "total=2" in err
+
+
 def test_paths_on_store_oserror_is_a_miss() -> None:
     """An unreachable store is not a presence claim."""
 

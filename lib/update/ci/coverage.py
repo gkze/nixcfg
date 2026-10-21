@@ -13,6 +13,8 @@ planner hashes. Coverage never re-evaluates Darwin out paths.
 
 import json
 import subprocess
+import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
@@ -47,6 +49,7 @@ _PATH_INFO_CHUNK = 128
 _PATH_INFO_TIMEOUT_SECONDS = 30.0
 _PATH_INFO_PER_PATH_TIMEOUT_SECONDS = 10.0
 _PATH_INFO_BATCH_RETRIES = 1
+_PATH_INFO_CHUNK_WORKERS = 8
 _PATH_INFO_FALLBACK_WORKERS = 16
 ROOT_OUT_PATHS_NAME = "root-out-paths.json"
 CACHE_ROOT_DEPS_NAME = "cache-root-deps.json"
@@ -490,6 +493,7 @@ def paths_on_store(
     path_timeout: float = _PATH_INFO_PER_PATH_TIMEOUT_SECONDS,
     retries: int = _PATH_INFO_BATCH_RETRIES,
     workers: int = _PATH_INFO_FALLBACK_WORKERS,
+    chunk_workers: int = _PATH_INFO_CHUNK_WORKERS,
 ) -> frozenset[str]:
     """Return the subset of *store_paths* one HTTP cache already has.
 
@@ -498,25 +502,44 @@ def paths_on_store(
     claim. A hung or empty batch is retried once. Timeout after that retry
     is a miss for the whole chunk. Non-JSON still falls back, but per-path
     and bounded-parallel, never a silent sequential scan of thousands of
-    rust_* paths.
+    rust_* paths. Chunks themselves run *chunk_workers* wide so a full
+    Darwin output set cannot serialize for an hour on successful 10s
+    queries.
     """
     ordered = tuple(dict.fromkeys(store_paths))
     if not ordered:
         return frozenset()
+    batches = tuple(
+        ordered[start : start + chunk] for start in range(0, len(ordered), chunk)
+    )
+    worker_count = min(max(1, chunk_workers), len(batches))
     found: set[str] = set()
-    for start in range(0, len(ordered), chunk):
-        batch = ordered[start : start + chunk]
-        found.update(
-            _paths_on_store_batch(
-                batch,
-                store,
-                run=run,
-                timeout=timeout,
-                path_timeout=path_timeout,
-                retries=retries,
-                workers=workers,
-            )
+    done = 0
+    lock = threading.Lock()
+
+    def one(batch: Sequence[str]) -> frozenset[str]:
+        nonlocal done
+        hits = _paths_on_store_batch(
+            batch,
+            store,
+            run=run,
+            timeout=timeout,
+            path_timeout=path_timeout,
+            retries=retries,
+            workers=workers,
         )
+        with lock:
+            done += 1
+            found.update(hits)
+            sys.stderr.write(
+                f"path-info store={store} chunk={done}/{len(batches)} "
+                f"batch={len(batch)} hits={len(hits)} total={len(found)}\n"
+            )
+            sys.stderr.flush()
+        return hits
+
+    with ThreadPoolExecutor(max_workers=worker_count) as pool:
+        list(pool.map(one, batches))
     return frozenset(found)
 
 
