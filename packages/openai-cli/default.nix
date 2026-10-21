@@ -23,5 +23,10 @@
     # cascade-warmup slot 3). TestMainBatches* fail with
     # exec: "python3": executable file not found in $PATH (and pgrep for
     # TestMainBatchesProgressWorkerPreservesAPIExit).
-    doCheck = old.version != "1.38.0" && old.version != "1.39.0";
+    #
+    # v1.39.1 Darwin checkPhase, after buildPhase succeeded (39538011102
+    # cascade-warmup slot 1). The same TestMainBatches* suite still requires
+    # python3 (and pgrep) on the Darwin builder PATH.
+    doCheck =
+      old.version != "1.38.0" && old.version != "1.39.0" && old.version != "1.39.1";
   })
