@@ -87,7 +87,7 @@
     crane.url = "github:ipetkov/crane";
     opencode = {
       # Temporary fork while upstream absorbs the desktop session/theme DB fixes.
-      url = "github:gkze/opencode?ref=gkze/fixes";
+      url = "github:gkze/opencode?ref=gkze/patches";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hermes-agent = {
