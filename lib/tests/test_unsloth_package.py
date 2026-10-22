@@ -5,6 +5,7 @@ import importlib.metadata
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -1357,7 +1358,8 @@ def _runtime_processes(validator: ModuleType) -> dict[int, object]:
         ("groups-missing", "process group was not captured"),
         ("sentinel-loss", "sentinel listener identity changed"),
         ("health-pending", "timed out"),
-        ("no-listener", "timed out"),
+        ("no-listener", "app session processes: python, unsloth-studio$"),
+        ("never-polled", "app session processes: none$"),
     ],
 )
 def test_unsloth_runtime_wait_rejects_invalid_listener_evidence(
@@ -1410,7 +1412,7 @@ def test_unsloth_runtime_wait_rejects_invalid_listener_evidence(
     elif scenario == "no-listener":
         listeners.pop()
 
-    times = iter((0.0, 0.0, 2.0))
+    times = iter((0.0, 2.0) if scenario == "never-polled" else (0.0, 0.0, 2.0))
     monkeypatch.setattr(validator.time, "monotonic", lambda: next(times))
     monkeypatch.setattr(validator.time, "sleep", lambda _delay: None)
     monkeypatch.setattr(validator, "_listeners", lambda: tuple(listeners))
@@ -2327,14 +2329,25 @@ def test_unsloth_contained_runtime_preserves_failure_precedence(
 @pytest.mark.parametrize(
     ("output", "message"),
     [
-        (b"", "timed out; the app wrote no output$"),
+        (b"\n  \n", "timed out; the app wrote no output\n"),
         (
-            b"x" * 5000 + b"\nbackend: ModuleNotFoundError: torch\n",
-            "timed out; app output tail:\nx+\nbackend: ModuleNotFoundError: torch\n$",
+            b"10:00:00 [INFO] starting\n"
+            + b"Could not create a 'com.apple.fonts' sandbox extension\n" * 40
+            + b"10:05:00 [INFO] SIGTERM\n",
+            "timed out; app output \\(distinct lines, first seen first\\):\n"
+            "10:00:00 \\[INFO\\] starting\n"
+            "Could not create a 'com.apple.fonts' sandbox extension \\[x40\\]\n"
+            "10:05:00 \\[INFO\\] SIGTERM\n",
+        ),
+        (
+            b"".join(f"line {index:05d}\n".encode() for index in range(2000)),
+            "(?s)app output .*\nline 00000\n.*\n\\.\\.\\.\n.*\nline 01999\n",
         ),
     ],
+    ids=["empty", "repeated", "bounded"],
 )
 def test_unsloth_contained_runtime_reports_the_app_output_on_failure(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     output: bytes,
     message: str,
@@ -2342,9 +2355,19 @@ def test_unsloth_contained_runtime_reports_the_app_output_on_failure(
     """A failed launch carries the app log, which is deleted with its temp dir."""
     validator = _runtime_validator_module()
 
+    reports = tmp_path / "DiagnosticReports"
+    reports.mkdir()
+    stale = reports / "stale.ips"
+    stale.write_text("old", encoding="utf-8")
+    os.utime(stale, (0, 0))
+    monkeypatch.setattr(validator, "_CRASH_REPORT_DIRECTORY", reports)
+
     def launch(*, log, **_kwargs):
         log.write(output)
         log.flush()
+        (reports / "com.apple.WebKit.WebContent-1.ips").write_text(
+            "crash", encoding="utf-8"
+        )
         return SimpleNamespace(pid=100)
 
     def wait(**_kwargs):
@@ -2361,7 +2384,33 @@ def test_unsloth_contained_runtime_reports_the_app_output_on_failure(
             startup_timeout=1,
             teardown_timeout=1,
         )
-    assert len(str(raised.value).encode()) < 4096 + 64
+    assert str(raised.value).endswith(
+        "\ncrash reports during launch: com.apple.WebKit.WebContent-1.ips"
+    )
+    assert len(str(raised.value).encode()) < 4096 + 192
+
+
+@pytest.mark.parametrize(
+    ("present", "message"),
+    [
+        (True, "crash reports during launch: none"),
+        (False, "crash reports unavailable: "),
+    ],
+)
+def test_unsloth_crash_report_listing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    present: bool,
+    message: str,
+) -> None:
+    """A missing or empty report directory still yields a readable note."""
+    validator = _runtime_validator_module()
+    reports = tmp_path / "DiagnosticReports"
+    if present:
+        reports.mkdir()
+    monkeypatch.setattr(validator, "_CRASH_REPORT_DIRECTORY", reports)
+
+    assert validator._crash_reports_since(0).startswith(f"\n{message}")
 
 
 @pytest.mark.parametrize(
