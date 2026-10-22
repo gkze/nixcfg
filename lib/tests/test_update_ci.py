@@ -3613,6 +3613,29 @@ def test_hosted_darwin_store_gc_skips_when_free_covers_max_and_min_free(
     assert f"headroom {skip_free} bytes" in output
 
 
+# (after-image-cleanup free, lowest free) bytes from heavy hosted Darwin jobs.
+_MEASURED_DARWIN_JOB_FREE = {
+    "prepare-darwin 39811796194": (156303638528, 52460609536),
+    "prepare-darwin 39774011035": (156171067392, 53941039104),
+    "prepare-darwin 39760093470": (156262494208, 60112695296),
+}
+
+
+def test_darwin_image_headroom_keeps_min_free_through_measured_peak() -> None:
+    """Auto-GC must not fire mid-job; it deletes unrooted updater .drv files.
+
+    39850402233 started prepare-darwin at the old 96 GiB floor, fell below
+    min-free, and auto-GC deleted the t3code-desktop node_modules .drv
+    between its eval and build ("failed to obtain derivation").
+    """
+    need = jobs.image_headroom_required_bytes()
+    for job, (start, lowest) in _MEASURED_DARWIN_JOB_FREE.items():
+        growth = start - lowest
+        assert need - growth >= jobs._NIX_MIN_FREE_BYTES, job
+    # Full reclaim on macos-15 leaves ~155.7 GB; the gate must stay reachable.
+    assert need < 155_689_705_472
+
+
 def test_hosted_update_runtime_reserves_store_headroom_for_root_closures() -> None:
     """Nix must GC before unpacking a Darwin root that can exceed 60 GiB."""
     action = yaml.load(
@@ -3632,7 +3655,7 @@ def test_hosted_update_runtime_reserves_store_headroom_for_root_closures() -> No
     assert "eval-cores = 0" not in extra_conf
     assert jobs._NIX_MIN_FREE_BYTES == 34359738368
     assert jobs._NIX_MAX_FREE_BYTES == 68719476736
-    assert jobs._IMAGE_HEADROOM_BYTES == (
+    assert jobs._STORE_GC_SKIP_BYTES == (
         jobs._NIX_MAX_FREE_BYTES + jobs._NIX_MIN_FREE_BYTES
     )
     assert jobs.image_headroom_required_bytes() == jobs._IMAGE_HEADROOM_BYTES
