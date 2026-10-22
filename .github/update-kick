@@ -18,3 +18,4 @@ canary-slots: 0
 2026-10-12T20:55:45Z best-effort leftover FOD publish after 38296208698 plan-shards 562 fail-close
 2026-10-14T12:29:49Z nest-safe ChatGPT Linux launch-check sandbox after 38553752589 validate-arm No usable sandbox
 2026-10-14T14:07:36Z ignore ChatGPT musl patchelf after 38564429681 validate-x86 libc.musl-x86_64.so.1
+2026-10-22T07:10:00Z one Update run after ea9279e8 (openai-cli v1.40.0 Darwin checks run natively) following 39538011102 cascade-warmup slot 1
