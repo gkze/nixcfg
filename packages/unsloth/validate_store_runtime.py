@@ -567,6 +567,7 @@ def _wait_for_runtime(
     timeout: float,
 ) -> RuntimeEvidence:
     deadline = time.monotonic() + timeout
+    processes: Mapping[int, Process] = {}
     while time.monotonic() < deadline:
         listeners = _listeners()
         _require_sentinel_listener(listeners, sentinel)
@@ -634,8 +635,25 @@ def _wait_for_runtime(
                     session_id=session_id,
                 )
         time.sleep(0.25)
-    msg = "timed out waiting for the contained Unsloth backend"
+    msg = (
+        "timed out waiting for the contained Unsloth backend; "
+        f"app session processes: {_session_commands(processes, session_id)}"
+    )
     raise ValidationError(msg)
+
+
+def _session_commands(processes: Mapping[int, Process], session_id: int) -> str:
+    """Name what the app session was running when the gate gave up.
+
+    Whether a backend process existed at all separates "never spawned" from
+    "spawned but never listened" (Update run 39774011035).
+    """
+    commands = sorted(
+        process.command.split(" ", 1)[0].rsplit("/", 1)[-1]
+        for process in processes.values()
+        if process.sid == session_id
+    )
+    return ", ".join(commands) or "none"
 
 
 def _groups_in_session(
@@ -937,15 +955,47 @@ _APP_LOG_EXCERPT_BYTES = 4096
 
 
 def _app_log_excerpt(log_path: Path) -> str:
-    """Return the app's last output so a failed launch explains itself.
+    """Summarize the app's output so a failed launch explains itself.
 
-    Update run 39760093470 timed out with no evidence of what the app or
-    backend was doing, because the log lived only in the deleted temp dir.
+    The log lives only in the deleted temp dir. Update run 39774011035 showed
+    that a plain tail is useless: WebKit repeated the same sandbox-extension
+    warnings until they filled it. Distinct lines in first-seen order, with
+    repeat counts, keep the startup messages and the repetition visible.
     """
-    tail = log_path.read_bytes()[-_APP_LOG_EXCERPT_BYTES:]
-    if not tail.strip():
+    counts: dict[str, int] = {}
+    for raw in log_path.read_bytes().decode("utf-8", errors="replace").splitlines():
+        line = raw.rstrip()
+        if line:
+            counts[line] = counts.get(line, 0) + 1
+    if not counts:
         return "; the app wrote no output"
-    return "; app output tail:\n" + tail.decode("utf-8", errors="replace")
+    summary = "\n".join(
+        line if count == 1 else f"{line} [x{count}]" for line, count in counts.items()
+    )
+    if len(summary) > _APP_LOG_EXCERPT_BYTES:
+        half = _APP_LOG_EXCERPT_BYTES // 2
+        summary = f"{summary[:half]}\n...\n{summary[-half:]}"
+    return "; app output (distinct lines, first seen first):\n" + summary
+
+
+_CRASH_REPORT_DIRECTORY = Path.home() / "Library" / "Logs" / "DiagnosticReports"
+
+
+def _crash_reports_since(launched_at: float) -> str:
+    """Name crash reports written during the launch, such as a WebKit helper's.
+
+    WebKit helpers are launchd services outside the app's session and log, so
+    a crash shows up only as a report here.
+    """
+    try:
+        reports = sorted(
+            path.name
+            for path in _CRASH_REPORT_DIRECTORY.iterdir()
+            if path.stat().st_mtime >= launched_at
+        )
+    except OSError as error:
+        return f"\ncrash reports unavailable: {error.strerror or error}"
+    return "\ncrash reports during launch: " + (", ".join(reports) or "none")
 
 
 def _run_contained_runtime(
@@ -965,6 +1015,8 @@ def _run_contained_runtime(
         profile = root / "containment.sb"
         profile.write_text(sandbox_profile(root), encoding="utf-8")
         log_path = root / "app.log"
+        # Whole seconds: file timestamps can trail the clock by a tick.
+        launched_at = float(int(time.time()))
         with log_path.open("wb") as log:
             app = _launch_direct_app(
                 store=store,
@@ -998,6 +1050,7 @@ def _run_contained_runtime(
         if validation_error is not None:
             validation_error = ValidationError(
                 f"{validation_error}{_app_log_excerpt(log_path)}"
+                f"{_crash_reports_since(launched_at)}"
             )
 
     if validation_error is not None:

@@ -22,3 +22,4 @@ canary-slots: 0
 2026-10-22T09:55:00Z one Update run after opencode flake ref gkze/fixes -> gkze/patches (branch renamed 2026-10-10; 39745667831 prepare-pins HTTP 422)
 2026-10-22T11:10:00Z one Update run after prepare fixes for 39760093470 (opencode ghostty-web pin, mux pin bun hashes, zed crate2nix-src selfSource, github-desktop yarn 303)
 2026-10-22T11:44:00Z one Update run after darwin prepare fixes for 39760093470 (electron pin inventory, gh-current overlay, t3code catalog/pnpmfile/tarballs, paseo 0.12.0 seam, zo mac feed, unsloth gate output, mux coverage)
+2026-10-22T13:45:00Z one Update run after darwin fixes for 39774011035 (t3code-desktop dev workspace members, gh-current after go-toolchain, unsloth gate evidence)
