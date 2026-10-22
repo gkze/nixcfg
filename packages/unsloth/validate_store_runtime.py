@@ -933,6 +933,21 @@ def _isolated_session_id(app: subprocess.Popen[bytes]) -> int:
     raise ValidationError(msg)
 
 
+_APP_LOG_EXCERPT_BYTES = 4096
+
+
+def _app_log_excerpt(log_path: Path) -> str:
+    """Return the app's last output so a failed launch explains itself.
+
+    Update run 39760093470 timed out with no evidence of what the app or
+    backend was doing, because the log lived only in the deleted temp dir.
+    """
+    tail = log_path.read_bytes()[-_APP_LOG_EXCERPT_BYTES:]
+    if not tail.strip():
+        return "; the app wrote no output"
+    return "; app output tail:\n" + tail.decode("utf-8", errors="replace")
+
+
 def _run_contained_runtime(
     *,
     store: StoreEvidence,
@@ -980,6 +995,10 @@ def _run_contained_runtime(
                     )
                 except ValidationError as error:
                     teardown_error = error
+        if validation_error is not None:
+            validation_error = ValidationError(
+                f"{validation_error}{_app_log_excerpt(log_path)}"
+            )
 
     if validation_error is not None:
         if teardown_error is not None:
