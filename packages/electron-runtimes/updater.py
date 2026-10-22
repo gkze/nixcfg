@@ -94,6 +94,12 @@ class ElectronRuntimesUpdater(Updater):
     materialize_when_current = True
     generated_artifact_files = ("versions.json",)
     PLATFORMS: ClassVar[dict[str, str]] = electron_artifact_tags()
+    # Only Darwin prepare refreshes every consumer natively. Darwin-only
+    # consumers (openchamber, t3code-desktop) derive electronVersion there, so
+    # Linux prepare derived a stale inventory and prepare-merge rejected the
+    # conflicting versions.json (Update run 39811796194). The artifacts are
+    # pinned by URL for every platform, so one owner hashes them all.
+    supported_platforms = ("aarch64-darwin",)
 
     @classmethod
     def _consumer_versions(

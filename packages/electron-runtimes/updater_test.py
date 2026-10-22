@@ -12,12 +12,15 @@ from lib.tests._updater_helpers import load_repo_module
 from lib.tests._updater_helpers import run_async as _run
 from lib.update.events import (
     EventSink,
+    StatusInfo,
+    StatusKind,
     UpdateEvent,
     UpdateEventKind,
     expect_artifact_updates,
     ignore_event,
 )
-from lib.update.updaters import UpdateContext
+from lib.update.planner import aggregate_source_members
+from lib.update.updaters import UpdateContext, ensure_updaters_loaded
 
 _BINARY_HASH = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
 _REFRESHED_BINARY_HASH = "sha256-EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE="
@@ -676,3 +679,56 @@ def test_pin_stage_without_a_current_inventory_leaves_hashes_unset() -> None:
         hashes={},
         urls=_runtime_urls(module, "42.0.1"),
     )
+
+
+def test_inventory_runs_only_where_every_consumer_refreshes_natively() -> None:
+    """Each inventory platform must natively refresh every consumer's version."""
+    registry = ensure_updaters_loaded()
+    inventory = registry["electron-runtimes"]
+    platforms = inventory.supported_platforms
+    assert platforms
+
+    stale = {
+        name: registry[name].supported_platforms
+        for name in aggregate_source_members(registry, inventory.name)
+        if registry[name].supported_platforms is not None
+        and not set(platforms) <= set(registry[name].supported_platforms)
+    }
+
+    assert stale == {}
+
+
+def test_foreign_prepare_leaves_the_inventory_to_its_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Linux prepare must not rewrite the inventory from stale consumers."""
+    module = _load_module("electron_runtimes_updater_foreign_test")
+    monkeypatch.setattr(
+        "lib.update.nix.get_current_nix_platform",
+        lambda: "aarch64-linux",
+    )
+
+    captured = _run(
+        _collect_events(
+            lambda emit: module.ElectronRuntimesUpdater().update_stream(
+                None,
+                object(),
+                context=UpdateContext(current=None, preparing=True),
+                emit=emit,
+            )
+        )
+    )
+
+    assert captured.result is None
+    assert list(captured) == [
+        UpdateEvent.status(
+            "electron-runtimes",
+            "Unsupported platform aarch64-linux, skipping update",
+            operation="check_version",
+            status=StatusInfo(
+                kind=StatusKind.UNSUPPORTED_PLATFORM,
+                value="aarch64-linux",
+            ),
+        ),
+        UpdateEvent.result("electron-runtimes"),
+    ]

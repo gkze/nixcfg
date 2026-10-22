@@ -24,3 +24,4 @@ canary-slots: 0
 2026-10-22T11:44:00Z one Update run after darwin prepare fixes for 39760093470 (electron pin inventory, gh-current overlay, t3code catalog/pnpmfile/tarballs, paseo 0.12.0 seam, zo mac feed, unsloth gate output, mux coverage)
 2026-10-22T13:45:00Z one Update run after darwin fixes for 39774011035 (t3code-desktop dev workspace members, gh-current after go-toolchain, unsloth gate evidence)
 2026-10-22T16:02:00Z one Update run after 39791273689 darwin fixes (gh-current probe reads go-toolchain run result, unsloth WebKit helper grants)
+2026-10-22T17:58:00Z one Update run after 39811796194 prepare-merge fix (electron-runtimes inventory owned by Darwin prepare)
