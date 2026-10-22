@@ -1,0 +1,6 @@
+lockfileVersion: '9.0'
+
+packages:
+
+  local@file:apps/mobile/deps/local-1.0.0.tgz:
+    resolution: {integrity: sha512-AAAA, tarball: file:apps/mobile/deps/local-1.0.0.tgz}

@@ -2325,6 +2325,46 @@ def test_unsloth_contained_runtime_preserves_failure_precedence(
 
 
 @pytest.mark.parametrize(
+    ("output", "message"),
+    [
+        (b"", "timed out; the app wrote no output$"),
+        (
+            b"x" * 5000 + b"\nbackend: ModuleNotFoundError: torch\n",
+            "timed out; app output tail:\nx+\nbackend: ModuleNotFoundError: torch\n$",
+        ),
+    ],
+)
+def test_unsloth_contained_runtime_reports_the_app_output_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    output: bytes,
+    message: str,
+) -> None:
+    """A failed launch carries the app log, which is deleted with its temp dir."""
+    validator = _runtime_validator_module()
+
+    def launch(*, log, **_kwargs):
+        log.write(output)
+        log.flush()
+        return SimpleNamespace(pid=100)
+
+    def wait(**_kwargs):
+        raise validator.ValidationError("timed out")
+
+    monkeypatch.setattr(validator, "_launch_direct_app", launch)
+    monkeypatch.setattr(validator, "_isolated_session_id", lambda _app: 100)
+    monkeypatch.setattr(validator, "_wait_for_runtime", wait)
+    monkeypatch.setattr(validator, "_teardown_session", lambda **_kwargs: None)
+    with pytest.raises(validator.ValidationError, match=message) as raised:
+        validator._run_contained_runtime(
+            store=_contained_store(validator),
+            sentinel=_sentinel_baseline(validator),
+            startup_timeout=1,
+            teardown_timeout=1,
+        )
+    assert len(str(raised.value).encode()) < 4096 + 64
+
+
+@pytest.mark.parametrize(
     ("candidate_survives", "session_survives", "message"),
     [
         (True, False, "candidate listener survived"),

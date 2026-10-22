@@ -218,16 +218,55 @@ def _archive_sentry_payload(
     return read_packed_file(asar_path, module.SENTRY_SDK_PATH)
 
 
-def _release_payload(*, url: str = _ARTIFACT_URL) -> dict[str, object]:
+_FEED_URL = "https://github.com/zocomputer/Zo/releases/download/v1.5.14/latest-mac.yml"
+_FEED = (
+    f"version: {_VERSION}\nfiles:\n  - url: {_ARTIFACT_NAME}\npath: {_ARTIFACT_NAME}\n"
+)
+
+
+def _release_payload(
+    *, url: str = _ARTIFACT_URL, tag: str = f"v{_VERSION}"
+) -> dict[str, object]:
     return {
-        "tag_name": f"v{_VERSION}",
+        "tag_name": tag,
         "assets": [
             {
                 "name": _ARTIFACT_NAME,
                 "browser_download_url": url,
-            }
+            },
+            {"name": "latest-mac.yml", "browser_download_url": _FEED_URL},
         ],
     }
+
+
+def _install_release_api(
+    monkeypatch: pytest.MonkeyPatch,
+    module: ModuleType,
+    *,
+    latest: object,
+    tagged: object | None = None,
+    feed: str = _FEED,
+) -> list[str]:
+    calls: list[str] = []
+
+    async def _fetch_github_api(
+        _session: object, path: str, *, config: object
+    ) -> object:
+        _ = config
+        calls.append(path)
+        return latest if path.endswith("/releases/latest") else tagged
+
+    async def _fetch_url(_session: object, url: str, *, config: object) -> bytes:
+        _ = config
+        calls.append(url)
+        return feed.encode()
+
+    monkeypatch.setattr(
+        "lib.update.updaters.github_release.fetch_github_api", _fetch_github_api
+    )
+    monkeypatch.setattr(module, "fetch_github_api", _fetch_github_api)
+    monkeypatch.setattr(module, "fetch_url", _fetch_url)
+    return calls
 
 
 def test_zo_resolves_one_canonical_immutable_universal_zip(
@@ -236,21 +275,7 @@ def test_zo_resolves_one_canonical_immutable_universal_zip(
     """The GitHub release API must resolve the exact versioned universal ZIP."""
     module = _load_updater_module()
     updater = module.ZoUpdater()
-    calls: list[tuple[str, object]] = []
-
-    async def _fetch_github_api(
-        _session: object,
-        path: str,
-        *,
-        config: object,
-    ) -> object:
-        calls.append((path, config))
-        return _release_payload()
-
-    monkeypatch.setattr(
-        "lib.update.updaters.github_release.fetch_github_api",
-        _fetch_github_api,
-    )
+    calls = _install_release_api(monkeypatch, module, latest=_release_payload())
 
     info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
     result = updater.build_result(info, dict.fromkeys(_PLATFORMS, _HASH))
@@ -264,7 +289,75 @@ def test_zo_resolves_one_canonical_immutable_universal_zip(
     )
     assert result.urls == dict.fromkeys(_PLATFORMS, _ARTIFACT_URL)
     assert result.hashes.to_json() == dict.fromkeys(_PLATFORMS, _HASH)
-    assert calls == [("repos/zocomputer/Zo/releases/latest", updater.config)]
+    assert calls == ["repos/zocomputer/Zo/releases/latest", _FEED_URL]
+
+
+def test_zo_follows_the_macos_feed_to_an_older_release_tag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A newer tag without a Mac build keeps the feed's Mac release (v1.5.14)."""
+    module = _load_updater_module()
+    updater = module.ZoUpdater()
+    latest = _release_payload(tag="v1.5.14")
+    latest["assets"] = [latest["assets"][1]]
+    calls = _install_release_api(
+        monkeypatch, module, latest=latest, tagged=_release_payload()
+    )
+
+    info = _run(updater.fetch_latest(object(), context=UpdateContext(current=None)))
+
+    assert info == VersionInfo(
+        version=_VERSION,
+        metadata=AssetURLsMetadata(dict.fromkeys(_PLATFORMS, _ARTIFACT_URL)),
+    )
+    assert calls == [
+        "repos/zocomputer/Zo/releases/latest",
+        _FEED_URL,
+        f"repos/zocomputer/Zo/releases/tags/v{_VERSION}",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("latest", "tagged", "feed", "error", "match"),
+    [
+        ({"tag_name": "v1.5.14"}, None, _FEED, RuntimeError, "latest-mac.yml"),
+        (
+            {"tag_name": "v1.5.14", "assets": []},
+            None,
+            _FEED,
+            RuntimeError,
+            "latest-mac.yml",
+        ),
+        (_release_payload(), None, "version: latest\n", RuntimeError, "exact"),
+        (
+            _release_payload(),
+            None,
+            f"version: {_VERSION}\npath: Zo.dmg\n",
+            RuntimeError,
+            "unexpected macOS asset",
+        ),
+        (_release_payload(tag="v1.5.14"), [], _FEED, TypeError, "payload type"),
+    ],
+    ids=("no-assets", "no-feed", "no-version", "wrong-path", "bad-tag-payload"),
+)
+def test_zo_rejects_untrustworthy_macos_feeds(
+    monkeypatch: pytest.MonkeyPatch,
+    latest: object,
+    tagged: object,
+    feed: str,
+    error: type[Exception],
+    match: str,
+) -> None:
+    """The Mac feed must name one exact versioned universal ZIP."""
+    module = _load_updater_module()
+    _install_release_api(monkeypatch, module, latest=latest, tagged=tagged, feed=feed)
+
+    with pytest.raises(error, match=match):
+        _run(
+            module.ZoUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
 
 
 def test_zo_rejects_missing_or_noncanonical_release_assets() -> None:

@@ -814,3 +814,47 @@ def test_patch_info_plist_main_guard_executes_as_script(
         payload = plistlib.load(handle)
 
     assert payload["CFBundleIdentifier"] == "com.t3tools.t3code"
+
+
+def test_render_runtime_package_json_resolves_catalog_for_nested_overrides(
+    tmp_path: Path,
+) -> None:
+    """A bare ``catalog:`` on ``parent>child`` resolves the child's catalog entry."""
+    module = _runtime_manifest_module()
+
+    source_root = _runtime_source(
+        tmp_path,
+        root_package={"packageManager": "pnpm@11.27.0"},
+        pnpm_workspace="\n".join((
+            "packages:",
+            '  - "packages/*"',
+            "catalog:",
+            "  effect: 4.0.5",
+            "  '@electron-webauthn/macos': 1.2.3",
+            "overrides:",
+            "  effect: 'catalog:'",
+            "  '@opencode/protocol>effect': 'catalog:'",
+            "  '@opencode/schema>effect@4': 'catalog:'",
+            "  'electron-webauthn>@electron-webauthn/macos': 'catalog:'",
+            "  'unrelated>effect': 'catalog:'",
+        ))
+        + "\n",
+        server_package={
+            "version": "0.0.25",
+            "dependencies": {
+                "effect": "catalog:",
+                "@opencode/protocol": "2.0.0",
+                "@opencode/schema": "2.0.0",
+                "electron-webauthn": "1.0.0",
+            },
+        },
+    )
+
+    payload = module.build_runtime_manifest(source_root, include_desktop_runtime=False)
+
+    assert payload["overrides"] == {
+        "effect": "4.0.5",
+        "@opencode/protocol>effect": "4.0.5",
+        "@opencode/schema>effect@4": "4.0.5",
+        "electron-webauthn>@electron-webauthn/macos": "1.2.3",
+    }

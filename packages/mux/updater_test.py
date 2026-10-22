@@ -609,3 +609,31 @@ def test_finalize_does_not_rehash_present_or_native_runtimes(
     )
 
     assert received == [candidate]
+
+
+def test_pin_finalize_rejects_mapping_hashes(
+    updater_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prepending Bun runtimes needs structured entries, never a hash mapping."""
+    received = _record_parent_finalize(monkeypatch)
+    updater = updater_module.MuxUpdater()
+    info = _release_info(updater_module)
+    candidate = updater.build_result(info, []).model_copy(
+        update={
+            "hashes": HashCollection.from_value({
+                "x86_64-linux": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            })
+        }
+    )
+
+    with pytest.raises(TypeError, match="structured hash entries"):
+        run_async(
+            updater._finalize_result(
+                candidate,
+                info=info,
+                context=UpdateContext(current=None, pins_only=True),
+            )
+        )
+
+    assert received == []

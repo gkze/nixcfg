@@ -599,3 +599,80 @@ def test_build_result_persists_updater_owned_artifact_identity() -> None:
         hashes=hashes,
         urls=_runtime_urls(module, "42.0.1"),
     )
+
+
+def test_pin_stage_keeps_complete_unchanged_runtimes_when_versions_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adding consumer versions must not empty runtimes other packages assert."""
+    module = _load_module("electron_runtimes_updater_pin_stage_test")
+    updater = module.ElectronRuntimesUpdater()
+    artifacts = ("headers", *updater.PLATFORMS)
+    kept = [_runtime_hash(module, "42.0.1", artifact) for artifact in artifacts]
+    partial = [_runtime_hash(module, "41.0.0", artifact) for artifact in artifacts[1:]]
+    fake = [
+        _runtime_hash(
+            module,
+            "43.0.0",
+            artifact,
+            "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        )
+        for artifact in artifacts
+    ]
+    moved = [_runtime_hash(module, "40.0.0", artifact) for artifact in artifacts]
+    urls = _runtime_urls(module, "40.0.0", "41.0.0", "42.0.1", "43.0.0")
+    urls["40.0.0:headers"] = "https://example.invalid/moved-headers.tar.gz"
+    current = SourceEntry(
+        version="inventory-v1",
+        hashes=[*moved, *partial, *kept, *fake],
+        urls=urls,
+    )
+
+    async def _no_hashing(*_args: object, **_kwargs: object) -> object:
+        msg = "the pin stage must not hash Electron artifacts"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(module.update_process, "compute_url_hashes", _no_hashing)
+    monkeypatch.setattr(module.update_nix, "compute_fixed_output_hash", _no_hashing)
+    info = module.VersionInfo(
+        version="inventory-v1",
+        metadata={"versions": ["40.0.0", "41.0.0", "42.0.1", "43.0.0", "44.0.0"]},
+    )
+
+    result = _run(
+        updater._candidate_update_stream(
+            info,
+            object(),
+            context=UpdateContext(current=current, pins_only=True),
+        )
+    )
+
+    assert result == SourceEntry(
+        version="inventory-v1",
+        hashes=kept,
+        urls=_runtime_urls(module, "40.0.0", "41.0.0", "42.0.1", "43.0.0", "44.0.0"),
+    )
+
+
+def test_pin_stage_without_a_current_inventory_leaves_hashes_unset() -> None:
+    """A first pin has nothing to preserve and keeps the generic empty mapping."""
+    module = _load_module("electron_runtimes_updater_first_pin_test")
+    updater = module.ElectronRuntimesUpdater()
+    info = module.VersionInfo(
+        version="inventory-v1",
+        metadata={"versions": ["42.0.1"]},
+    )
+
+    result = _run(
+        updater._candidate_update_stream(
+            info,
+            object(),
+            context=UpdateContext(current=None, pins_only=True),
+        )
+    )
+
+    assert result == SourceEntry(
+        version="inventory-v1",
+        hashes={},
+        urls=_runtime_urls(module, "42.0.1"),
+    )

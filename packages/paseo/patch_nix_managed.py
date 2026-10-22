@@ -70,6 +70,11 @@ _CLAUDE_SESSION_RESOLVER_WIRING = """\
     this.resolveBinary = options.resolveBinary;
 """
 _CLAUDE_RESOLVER_FORWARDING = "      resolveBinary: this.resolveBinary,\n"
+# 0.12.0 model discovery launches through the same resolver with a literal
+# option set, so it reaches the Nix-provided executable like the sessions do.
+_CLAUDE_DISCOVERY_RESOLVER_FORWARDING = (
+    "        this.discoverModels({\n          resolveBinary: this.resolveBinary,\n"
+)
 _CLAUDE_AVAILABILITY_LAUNCH = """\
   async isAvailable(): Promise<boolean> {
     const launch = await resolveProviderLaunch({
@@ -101,7 +106,8 @@ export async function resolveClaudeCodeVersion(
   const availability = await checkProviderLaunchAvailable(launch);
 """
 _CLAUDE_BUILD_OPTIONS_SIGNATURE = (
-    "\n\n  private async buildOptions(): Promise<ClaudeOptions> {"
+    "\n\n  private async buildOptions(permissionMode: PermissionMode): "
+    "Promise<ClaudeOptions> {"
 )
 _CLAUDE_BINARY_RESOLUTION = "    const claudeBinary = await this.resolveBinary();\n"
 _CLAUDE_OPTIONS_HANDOFF = "      pathToClaudeCodeExecutable: claudeBinary,\n"
@@ -238,14 +244,15 @@ function nixOwnsUpdates(): boolean {{
     ),
     _SourcePatch(
         "packages/server/src/server/session/daemon/npm-global-cli.ts",
-        """  installLatest(): Promise<CommandResult> {
-    return this.runCommand("npm", ["install", "-g", `${PASEO_CLI_PACKAGE}@latest`], {
+        """  installLatest(options: NpmGlobalOptions = {}): Promise<CommandResult> {
+    const prefixArgs = options.prefix ? ["--prefix", options.prefix] : [];
+    return this.runCommand("npm", ["install", "-g", `${PASEO_CLI_PACKAGE}@latest`, ...prefixArgs], {
       timeout: NPM_INSTALL_TIMEOUT_MS,
       maxBuffer: NPM_MAX_BUFFER_BYTES,
     });
   }
 """,
-        f"""  installLatest(): Promise<CommandResult> {{
+        f"""  installLatest(_options: NpmGlobalOptions = {{}}): Promise<CommandResult> {{
     return Promise.resolve({{
       exitCode: 1,
       stdout: \"\",
@@ -325,7 +332,8 @@ def validate_claude_provider_source(source: str) -> None:
         (_CLAUDE_CLIENT_RESOLVER_WIRING, 1),
         (_CLAUDE_SESSION_CLASS, 1),
         (_CLAUDE_SESSION_RESOLVER_WIRING, 1),
-        (_CLAUDE_RESOLVER_FORWARDING, 2),
+        (_CLAUDE_RESOLVER_FORWARDING, 3),
+        (_CLAUDE_DISCOVERY_RESOLVER_FORWARDING, 1),
         (_CLAUDE_AVAILABILITY_LAUNCH, 1),
         (_CLAUDE_DIAGNOSTIC_LAUNCH, 1),
         (_CLAUDE_VERSION_LAUNCH, 1),
