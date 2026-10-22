@@ -149,13 +149,6 @@ let
 
   node_modules = opencode.node_modules.overrideAttrs (old: {
     pname = "${sourceHashPackageName}-node_modules";
-    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ python3 ];
-    preBuild = (old.preBuild or "") + ''
-      # Bun re-resolves the branch-based ghostty-web dependency and mutates
-      # bun.lock even under --frozen-lockfile. Pin the workspace manifest to the
-      # commit already recorded in bun.lock so the install stays reproducible.
-      ${lib.getExe python3} ${ghosttyWebPin} .
-    '';
     outputHash = slib.sourceHashForPlatform sourceHashPackageName "nodeModulesHash" system;
     buildPhase = ''
             runHook preBuild
@@ -202,7 +195,6 @@ let
   });
 
   packageManagerSync = opencodeOverlayDir + "/sync_package_manager_bun_version.py";
-  ghosttyWebPin = opencodeOverlayDir + "/pin_ghostty_web_ref.py";
   hoistedOpentuiLinker = opencodeOverlayDir + "/link-hoisted-opentui-packages.sh";
   patchDesktopSource = ./patch_desktop_source.sh;
   desktopCli =
@@ -270,7 +262,6 @@ stdenv.mkDerivation {
   postPatch = ''
     bunVersion="$(bun -v | tr -d '\n')"
     ${lib.getExe python3} ${packageManagerSync} . "$bunVersion"
-    ${lib.getExe python3} ${ghosttyWebPin} .
 
     if [ ! -f .github/TEAM_MEMBERS ]; then
       mkdir -p .github

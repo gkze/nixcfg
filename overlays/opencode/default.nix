@@ -55,15 +55,7 @@
       + final.lib.optionalString (old.meta.mainProgram == "opencode2") ''
         ln -s opencode2 "$out/bin/opencode"
       '';
-    node_modules = old.node_modules.overrideAttrs (nodeOld: {
-      nativeBuildInputs = (nodeOld.nativeBuildInputs or [ ]) ++ [ final.python3 ];
-      preBuild = (nodeOld.preBuild or "") + ''
-        # Bun re-resolves the branch-based ghostty-web dependency and mutates
-        # bun.lock even under --frozen-lockfile. Pin the workspace manifest to
-        # the commit already recorded in bun.lock so the install stays
-        # reproducible during hash computation.
-        ${final.lib.getExe final.python3} ${./pin_ghostty_web_ref.py} .
-      '';
+    node_modules = old.node_modules.overrideAttrs (_: {
       outputHash = slib.sourceHashForPlatform "opencode" "nodeModulesHash" system;
     });
   });
