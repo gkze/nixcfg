@@ -9,7 +9,8 @@ from lib.nix.models.flake_lock import (
     FlakeLockNode,  # noqa: TC001 -- candidate metadata is validated at runtime
 )
 from lib.nix.models.sources import (
-    HashEntry,  # noqa: TC001 -- candidate metadata is validated at runtime
+    HashCollection,
+    HashEntry,
 )
 from lib.system_policy import supported_systems
 from lib.update import process as update_process
@@ -286,6 +287,27 @@ class MuxUpdater(BunNodeModulesHashUpdater):
             _with_bun_runtime_hashes(info, bun_hashes),
         )
 
+    async def _fetch_bun_runtime_hashes(
+        self,
+        info: VersionInfo,
+        *,
+        emit: EventSink,
+    ) -> list[HashEntry]:
+        """Hash the exact Bun release archives for every supported system.
+
+        The archives are fixed URLs, so any builder can hash every system.
+        """
+        bun_version = _require_metadata(info).bun_version
+        bun_urls = bun_release_urls(bun_version, _SUPPORTED_SYSTEMS)
+        hashes_by_url = await update_process.compute_url_hashes(
+            self.name, bun_urls.values(), config=self.config, emit=emit
+        )
+        return bun_runtime_hash_entries(
+            bun_version,
+            _SUPPORTED_SYSTEMS,
+            hashes_by_url,
+        )
+
     async def fetch_hashes(
         self,
         info: VersionInfo,
@@ -295,16 +317,7 @@ class MuxUpdater(BunNodeModulesHashUpdater):
         emit: EventSink = ignore_event,
     ) -> SourceHashes:
         """Hash exact Bun runtimes before probing Bun's node_modules cache."""
-        bun_version = _require_metadata(info).bun_version
-        bun_urls = bun_release_urls(bun_version, _SUPPORTED_SYSTEMS)
-        hashes_by_url = await update_process.compute_url_hashes(
-            self.name, bun_urls.values(), config=self.config, emit=emit
-        )
-        bun_hashes = bun_runtime_hash_entries(
-            bun_version,
-            _SUPPORTED_SYSTEMS,
-            hashes_by_url,
-        )
+        bun_hashes = await self._fetch_bun_runtime_hashes(info, emit=emit)
         node_hashes = await super().fetch_hashes(
             _with_bun_runtime_hashes(info, bun_hashes),
             session,
@@ -315,6 +328,40 @@ class MuxUpdater(BunNodeModulesHashUpdater):
             msg = "Mux node_modules hashes must use structured hash entries"
             raise TypeError(msg)
         return [*bun_hashes, *node_hashes]
+
+    @override
+    async def _finalize_result(
+        self,
+        result: SourceEntry,
+        *,
+        info: VersionInfo | None = None,
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceEntry:
+        """Give a bumped pin its exact Bun runtimes before fingerprinting.
+
+        The pin stage drops hashes on a version bump, but lib/exact-bun.nix
+        cannot evaluate mux without one bunRuntimeHash per system. Without
+        them the pin persisted no drvHash, and every partial native prepare
+        then refused to preserve one (Update run 39760093470). The archives
+        are platform-independent, so the pin stage hashes them here; native
+        jobs still re-hash them alongside node_modules.
+        """
+        if context.pins_only and info is not None:
+            if result.hashes.mapping:
+                msg = "Mux candidate hashes must use structured hash entries"
+                raise TypeError(msg)
+            entries = list(result.hashes.entries or ())
+            if not any(entry.hash_type == "bunRuntimeHash" for entry in entries):
+                bun_hashes = await self._fetch_bun_runtime_hashes(info, emit=emit)
+                result = result.model_copy(
+                    update={
+                        "hashes": HashCollection.from_value([*bun_hashes, *entries])
+                    }
+                )
+        return await super()._finalize_result(
+            result, info=info, context=context, emit=emit
+        )
 
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist the lockfile-resolved Electron runtime as source identity."""

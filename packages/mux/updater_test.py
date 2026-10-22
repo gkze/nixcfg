@@ -517,3 +517,95 @@ def test_candidate_hashes_cannot_replace_or_duplicate_resolved_runtime_hashes(
     else:
         with pytest.raises(TypeError, match="structured hash entries"):
             updater_module.MuxUpdater().build_result(info, {"aarch64-darwin": _HASH_B})
+
+
+def _record_parent_finalize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[SourceEntry]:
+    received: list[SourceEntry] = []
+
+    async def finalize(
+        _self: object,
+        result: SourceEntry,
+        **_kwargs: object,
+    ) -> SourceEntry:
+        received.append(result)
+        return result
+
+    monkeypatch.setattr(BunNodeModulesHashUpdater, "_finalize_result", finalize)
+    return received
+
+
+def test_bumped_pin_hashes_exact_bun_runtimes_before_fingerprinting(
+    updater_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bumped pin keeps exact-bun.nix evaluable so it can certify a drvHash.
+
+    Update run 39760093470: the pin stage dropped hashes on v0.30.0 -> v0.31.0,
+    fingerprint evaluation threw for the missing bunRuntimeHash, and every
+    native prepare then refused to preserve the absent drvHash.
+    """
+    received = _record_parent_finalize(monkeypatch)
+    hashed: list[tuple[str, ...]] = []
+
+    async def compute_url_hashes(_source, urls, **_kwargs):
+        hashed.append(tuple(urls))
+        return dict.fromkeys(hashed[-1], _HASH_A)
+
+    monkeypatch.setattr(
+        updater_module.update_process, "compute_url_hashes", compute_url_hashes
+    )
+    updater = updater_module.MuxUpdater()
+    info = _release_info(updater_module)
+
+    run_async(
+        updater._finalize_result(
+            updater.build_result(info, []),
+            info=info,
+            context=UpdateContext(current=None, pins_only=True),
+        )
+    )
+
+    assert len(hashed) == 1
+    assert len(received) == 1
+    assert received[0].hashes.entries == _runtime_hashes(updater_module)
+
+
+@pytest.mark.parametrize(
+    ("pins_only", "hashes"),
+    [
+        (True, "runtime"),
+        (False, "none"),
+    ],
+)
+def test_finalize_does_not_rehash_present_or_native_runtimes(
+    updater_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    pins_only: bool,
+    hashes: str,
+) -> None:
+    """Unchanged pins keep their runtimes; native jobs hash in fetch_hashes."""
+    received = _record_parent_finalize(monkeypatch)
+
+    async def compute_url_hashes(*_args, **_kwargs):
+        msg = "finalize must not hash Bun runtimes here"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(
+        updater_module.update_process, "compute_url_hashes", compute_url_hashes
+    )
+    updater = updater_module.MuxUpdater()
+    info = _release_info(updater_module)
+    entries = _runtime_hashes(updater_module) if hashes == "runtime" else []
+    candidate = updater.build_result(info, entries)
+
+    run_async(
+        updater._finalize_result(
+            candidate,
+            info=info,
+            context=UpdateContext(current=None, pins_only=pins_only),
+        )
+    )
+
+    assert received == [candidate]
