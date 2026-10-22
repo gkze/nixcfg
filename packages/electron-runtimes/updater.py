@@ -286,19 +286,13 @@ class ElectronRuntimesUpdater(Updater):
         version whose URLs are unchanged is still valid. New or partial
         versions stay unhashed for the native stage.
         """
-        if (
-            context.pins_only
-            and info is not None
-            and result.hashes.entries == []
-            and result.hashes.mapping is None
-        ):
+        if context.pins_only and info is not None and result.hashes.entries == []:
             preserved = self._complete_reusable_hashes(
                 context, self._require_versions(info)
             )
-            if preserved:
-                result = result.model_copy(
-                    update={"hashes": HashCollection.from_value(preserved)}
-                )
+            result = result.model_copy(
+                update={"hashes": HashCollection.from_value(preserved)}
+            )
         return await super()._finalize_result(
             result, info=info, context=context, emit=emit
         )

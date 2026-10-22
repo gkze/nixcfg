@@ -652,3 +652,27 @@ def test_pin_stage_keeps_complete_unchanged_runtimes_when_versions_change(
         hashes=kept,
         urls=_runtime_urls(module, "40.0.0", "41.0.0", "42.0.1", "43.0.0", "44.0.0"),
     )
+
+
+def test_pin_stage_without_a_current_inventory_leaves_hashes_unset() -> None:
+    """A first pin has nothing to preserve and keeps the generic empty mapping."""
+    module = _load_module("electron_runtimes_updater_first_pin_test")
+    updater = module.ElectronRuntimesUpdater()
+    info = module.VersionInfo(
+        version="inventory-v1",
+        metadata={"versions": ["42.0.1"]},
+    )
+
+    result = _run(
+        updater._candidate_update_stream(
+            info,
+            object(),
+            context=UpdateContext(current=None, pins_only=True),
+        )
+    )
+
+    assert result == SourceEntry(
+        version="inventory-v1",
+        hashes={},
+        urls=_runtime_urls(module, "42.0.1"),
+    )
