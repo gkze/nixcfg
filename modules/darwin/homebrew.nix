@@ -34,6 +34,8 @@ let
     else
       "HEAD";
 
+  rubyBootstrap = import ./homebrew-ruby-bootstrap.nix { ruby = pkgs.ruby_4_0; };
+
   patchedBrewPackage =
     if brewSource == null then
       null
@@ -56,13 +58,7 @@ let
                 fi
                 chmod u+w "$ruby_sh"
                 cat >>"$ruby_sh" <<'EOF'
-        # nixcfg: use the Nix-provided Ruby while preserving Homebrew's setup-ruby-path
-        # bookkeeping (GEM_HOME, BUNDLE_GEMFILE, bootsnap path, etc.).  Nix's Ruby 4.0
-        # ships fiddle as a bundled gem, so keep gems enabled. The final Ruby
-        # exec preloads it before Homebrew Bundler restricts the gem set.
-        export HOMEBREW_RUBY_DISABLE_OPTIONS="--disable=rubyopt"
-        system_ruby_supported() { return 0; }
-        find_ruby() { echo "${pkgs.ruby_4_0}/bin/ruby"; }
+        ${rubyBootstrap}
         EOF
 
                 brew_sh="$out/Library/Homebrew/brew.sh"

@@ -1,0 +1,10 @@
+{
+  "hashes": [
+    {
+      "hash": "sha256-bndJA1zzYPBrJXXRYup535/ajvZxiJ5cN1+OUHd/Jrs=",
+      "hashType": "sha256",
+      "url": "https://go.dev/dl/go1.27.3.src.tar.gz"
+    }
+  ],
+  "version": "1.27.3"
+}

@@ -65,4 +65,5 @@ let
   };
 in
 # A source/AST assertion cannot establish whether the unused default branch is lazy.
+assert evaluated.config.home.pointerCursor.enable == false;
 builtins.toString evaluated.config.stylix.base16Scheme

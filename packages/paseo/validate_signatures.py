@@ -6,6 +6,7 @@ import plistlib
 import re
 import subprocess
 from collections.abc import Callable
+from hashlib import sha256
 from pathlib import Path
 
 type CommandRunner = Callable[[list[str]], subprocess.CompletedProcess[bytes]]
@@ -16,9 +17,12 @@ EXPECTED_ENTITLEMENTS = {
     "com.apple.security.cs.disable-library-validation": True,
     "com.apple.security.device.audio-input": True,
 }
-# Paseo 0.9.0 dropped the Electron Framework libEGL/libGLESv2 fallback
-# dylibs, so the app-bundle non-executable Mach-O count shrank by two.
-EXPECTED_NONEXECUTABLE_COUNT = 95
+# Only these reviewed whole-bundle inventories may choose the signature shape.
+# Protobuf's dynamic Abseil 20260817 closure adds one non-executable Mach-O.
+EXPECTED_NONEXECUTABLE_COUNTS = {
+    "c95f41c50d4b47704abcfa91a9f52b3bda6a288bd085c43cf0d82cfe6d22a4d0": 95,
+    "5d0fa899e4a7bcc347e6e5a0217d5420bc50b0924715d12aaf0a19529a340ef5": 96,
+}
 EXPECTED_FRAMEWORKS = (
     "Contents/Frameworks/Electron Framework.framework",
     "Contents/Frameworks/Mantle.framework",
@@ -50,9 +54,17 @@ EXPECTED_EXECUTABLE_MACHOS = (
     "Contents/Resources/app.asar.unpacked/node_modules/node-pty/build/Release/spawn-helper",
 )
 EXPECTED_EXECUTABLE_COUNT = len(EXPECTED_EXECUTABLE_MACHOS)
-EXPECTED_MACHO_COUNT = EXPECTED_EXECUTABLE_COUNT + EXPECTED_NONEXECUTABLE_COUNT
 EXPECTED_ENTITLED_MACHO_COUNT = len(EXPECTED_ENTITLED_MACHOS)
-EXPECTED_UNENTITLED_MACHO_COUNT = EXPECTED_MACHO_COUNT - EXPECTED_ENTITLED_MACHO_COUNT
+
+
+def expected_nonexecutable_count(native_manifest: Path) -> int:
+    """Bind the exact signature inventory to the already selected native manifest."""
+    digest = sha256(native_manifest.read_bytes()).hexdigest()
+    try:
+        return EXPECTED_NONEXECUTABLE_COUNTS[digest]
+    except KeyError:
+        msg = f"Paseo native manifest is not reviewed for signatures: {digest}"
+        raise ValueError(msg) from None
 
 
 def validate_signature_evidence(
@@ -181,12 +193,16 @@ def _relative_inventory(app: Path, pattern: str) -> tuple[str, ...]:
 def validate_bundle(
     app: Path,
     *,
+    native_manifest: Path,
     runner: CommandRunner = _default_runner,
 ) -> None:
     """Validate Paseo's complete reviewed Mach-O and nested-bundle inventory."""
     if not app.is_dir():
         msg = f"Paseo app is not a directory: {app}"
         raise ValueError(msg)
+
+    expected_nonexecutable = expected_nonexecutable_count(native_manifest)
+    expected_macho = EXPECTED_EXECUTABLE_COUNT + expected_nonexecutable
 
     machos: list[tuple[Path, bool]] = []
     candidates = sorted(
@@ -209,9 +225,9 @@ def validate_bundle(
     nonexecutable_count = len(machos) - executable_count
     actual_counts = (len(machos), executable_count, nonexecutable_count)
     expected_counts = (
-        EXPECTED_MACHO_COUNT,
+        expected_macho,
         EXPECTED_EXECUTABLE_COUNT,
-        EXPECTED_NONEXECUTABLE_COUNT,
+        expected_nonexecutable,
     )
     if actual_counts != expected_counts:
         msg = (
@@ -229,7 +245,7 @@ def validate_bundle(
     entitlement_counts = (len(entitled_machos), len(machos) - len(entitled_machos))
     expected_entitlement_counts = (
         EXPECTED_ENTITLED_MACHO_COUNT,
-        EXPECTED_UNENTITLED_MACHO_COUNT,
+        expected_macho - EXPECTED_ENTITLED_MACHO_COUNT,
     )
     if (
         entitlement_counts != expected_entitlement_counts
@@ -292,8 +308,9 @@ def main() -> None:
     """Validate one realized Paseo application bundle."""
     parser = argparse.ArgumentParser()
     parser.add_argument("app", type=Path)
+    parser.add_argument("--native-manifest", type=Path, required=True)
     arguments = parser.parse_args()
-    validate_bundle(arguments.app)
+    validate_bundle(arguments.app, native_manifest=arguments.native_manifest)
 
 
 if __name__ == "__main__":  # pragma: no cover -- package-build entry point

@@ -64,6 +64,7 @@ def test_goose_cli_reviews_every_bitcoin_internals_version() -> None:
     )
 
     source = json.loads((REPO_ROOT / "overlays/goose-cli/sources.json").read_text())
-    assert versions
+    # Upstream may remove this dependency; every remaining version needs a pin.
+    assert isinstance(versions, list)
     for version in versions:
         assert source["pins"][f"bitcoinInternals.{version}"]

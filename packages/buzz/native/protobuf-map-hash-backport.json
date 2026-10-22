@@ -1,0 +1,6 @@
+{
+  "affectedVersion": "36.2",
+  "upstreamCommit": "b067e70a049179152f68434600552b1b16d9c8c5",
+  "upstreamPatchSha256": "040fce40ac9d5c3f50af829700c7fbc6fab155ccd64d029e0a34842b2791837c",
+  "upstreamPatchUrl": "https://github.com/protocolbuffers/protobuf/commit/b067e70a049179152f68434600552b1b16d9c8c5.patch"
+}

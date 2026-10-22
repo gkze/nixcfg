@@ -36,6 +36,7 @@ from lib.tests._nix_ast import (
     expect_binding,
     parse_nix_expr,
 )
+from lib.tests._nix_eval import nix_eval_json, nix_import
 from lib.tests._package_registry import registry_override_metadata
 from lib.tests._shell_ast import (
     command_texts,
@@ -63,6 +64,20 @@ from lib.update.paths import REPO_ROOT
 from lib.update.updaters import UpdateContext, VersionInfo
 
 _PACKAGE_DIR = REPO_ROOT / "packages/paseo"
+_NATIVE_MANIFEST_CASES = [
+    (
+        "native-manifest.txt",
+        "c95f41c50d4b47704abcfa91a9f52b3bda6a288bd085c43cf0d82cfe6d22a4d0",
+        199,
+        "2601.0.0",
+    ),
+    (
+        "native-manifest-abseil-20260817.txt",
+        "5d0fa899e4a7bcc347e6e5a0217d5420bc50b0924715d12aaf0a19529a340ef5",
+        201,
+        "2608.0.0",
+    ),
+]
 _VERSION = "0.6.1"
 _TAG = f"v{_VERSION}"
 _COMMIT = "20d7efc46a316f5a274b9943a5c43b0322269825"
@@ -2238,7 +2253,8 @@ def test_paseo_source_metadata_is_complete_and_the_manifest_is_default() -> None
         """
         {
           callPackage,
-          expectedNativeManifest ? ./native-manifest.txt,
+          protobuf_32,
+          expectedNativeManifest ? import ./native-manifest.nix { protobuf = protobuf_32; },
           selfSource ? builtins.fromJSON (builtins.readFile ./sources.json),
           ...
         }:
@@ -2276,17 +2292,21 @@ def test_paseo_registry_exports_only_on_arm64_darwin() -> None:
     }
 
 
-def test_paseo_reviewed_native_manifest_matches_the_realized_inventory() -> None:
+@pytest.mark.parametrize(
+    ("name", "expected_hash", "row_count", "abseil_abi"),
+    _NATIVE_MANIFEST_CASES,
+)
+def test_paseo_reviewed_native_manifest_matches_the_realized_inventory(
+    name: str, expected_hash: str, row_count: int, abseil_abi: str
+) -> None:
     """The realized package must retain the exact reviewed native inventory."""
-    manifest = (_PACKAGE_DIR / "native-manifest.txt").read_bytes()
+    manifest = (_PACKAGE_DIR / name).read_bytes()
 
     assert manifest.endswith(b"\n")
     assert not manifest.endswith(b"\n\n")
-    assert sha256(manifest).hexdigest() == (
-        "c95f41c50d4b47704abcfa91a9f52b3bda6a288bd085c43cf0d82cfe6d22a4d0"
-    )
+    assert sha256(manifest).hexdigest() == expected_hash
     rows = manifest.decode("utf-8").splitlines()
-    assert len(rows) == 199
+    assert len(rows) == row_count
     assert rows == sorted(rows, key=str.encode)
     assert len(rows) == len(set(rows))
     assert all(
@@ -2294,6 +2314,7 @@ def test_paseo_reviewed_native_manifest_matches_the_realized_inventory() -> None
         for count, path in (row.split("\t", maxsplit=1) for row in rows)
     )
     assert "0\t__PASEO_NATIVE_MANIFEST_PENDING__" not in rows
+    assert all(f".{abseil_abi}.dylib" in row for row in rows if "/libabsl_" in row)
     assert (
         "1\tContents/Resources/app.asar.unpacked/node_modules/@esbuild/"
         "darwin-arm64/bin/esbuild"
@@ -2307,6 +2328,45 @@ def test_paseo_reviewed_native_manifest_matches_the_realized_inventory() -> None
         "1\tContents/Resources/app.asar.unpacked/node_modules/node-pty/"
         "build/Release/spawn-helper"
     ) in rows
+
+
+def test_paseo_every_selected_native_manifest_is_reviewed() -> None:
+    """Adding a tuple must also add its exact inventory to native contract tests."""
+    selector = expect_instance(
+        parse_nix_expr((_PACKAGE_DIR / "native-manifest.nix").read_text()),
+        FunctionDefinition,
+    )
+    manifests = expect_instance(
+        expect_binding(selector.output.scope, "manifests").value,
+        AttributeSet,
+    )
+    selected = {
+        Path(expect_instance(binding.value, NixPath).path).name
+        for binding in binding_map(manifests.values).values()
+    }
+    assert selected == {case[0] for case in _NATIVE_MANIFEST_CASES}
+    assert selected == {path.name for path in _PACKAGE_DIR.glob("native-manifest*.txt")}
+
+
+@pytest.mark.nix_eval(
+    reason="Only Nix evaluation tests lazy default selection and rejection of dependency tuples"
+)
+def test_paseo_selects_only_reviewed_protobuf_abseil_inventories() -> None:
+    """Evaluate the small selector alone, without a package build or host graph."""
+    assert nix_eval_json(
+        nix_import(REPO_ROOT / "tests/nix/paseo-native-manifest.nix")
+    ) == {
+        "current": "native-manifest.txt",
+        "latest": "native-manifest-abseil-20260817.txt",
+        "unrelatedDependency": "native-manifest-abseil-20260817.txt",
+        "missingDependencies": True,
+        "emptyDependencies": True,
+        "duplicateDependencies": True,
+        "unknownAbseil": True,
+        "unknownProtobuf": True,
+        "missingAbseilVersion": True,
+        "missingProtobufVersion": True,
+    }
 
 
 def test_paseo_native_validator_uses_safe_otool_aliases(

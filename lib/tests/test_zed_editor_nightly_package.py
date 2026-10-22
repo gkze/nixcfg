@@ -1,5 +1,6 @@
 """Structural tests for the Zed nightly package contracts."""
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -243,4 +244,13 @@ def test_zed_wasmtime_cache_coherence_is_bounded_to_affected_darwin_version() ->
             "darwin-${selfSource.pins.wasmtimeCApiCoherenceVersion}-v1";
         }
         """,
+    )
+
+
+def test_zed_wasmtime_source_pin_keeps_exact_affected_identity() -> None:
+    """Source-managed compatibility data must retain the reviewed version."""
+    source = REPO_ROOT / "packages/zed-editor-nightly/sources.json"
+    assert (
+        json.loads(source.read_text())["pins"]["wasmtimeCApiCoherenceVersion"]
+        == "48.0.1"
     )

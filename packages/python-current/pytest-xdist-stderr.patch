@@ -1,0 +1,166 @@
+--- a/src/xdist/remote.py
++++ b/src/xdist/remote.py
+@@ -8,6 +8,7 @@
+ 
+ from __future__ import annotations
+ 
++import atexit
+ import collections
+ from collections.abc import Generator
+ from collections.abc import Iterable
+@@ -19,6 +20,7 @@
+ import time
+ from typing import Any
+ from typing import Literal
++from typing import TextIO
+ from typing import TypedDict
+ from typing import Union
+ import warnings
+@@ -44,19 +46,36 @@
+     to have the other way around.
+     """
+ 
+-    def __init__(self, name: str, *, enabled: bool = True) -> None:
++    def __init__(
++        self, name: str, *, enabled: bool = True, file: TextIO | None = None
++    ) -> None:
+         self.name = name
+         self.enabled = enabled
++        self.file = file
+ 
+     def __repr__(self) -> str:
+         return f"{type(self).__name__}({self.name!r}, enabled={self.enabled})"
+ 
+     def __call__(self, *a: Any, **k: Any) -> None:
+         if self.enabled:
+-            print(f"[{self.name}]", *a, **k, file=sys.stderr)
++            print(
++                f"[{self.name}]",
++                *a,
++                **k,
++                file=self.file if self.file is not None else sys.stderr,
++            )
+ 
+     def __getattr__(self, name: str) -> Producer:
+-        return type(self)(name, enabled=self.enabled)
++        return type(self)(name, enabled=self.enabled, file=self.file)
++
++
++def worker_debug_stderr() -> TextIO:
++    """Keep the original stderr alive through capture and late execnet callbacks."""
++    stream = os.fdopen(
++        os.dup(2), "w", buffering=1, encoding="utf-8", errors="backslashreplace"
++    )
++    atexit.register(stream.close)
++    return stream
+ 
+ 
+ def worker_title(title: str) -> None:
+@@ -110,12 +129,20 @@
+ 
+ 
+ class WorkerInteractor:
+-    def __init__(self, config: pytest.Config, channel: execnet.Channel) -> None:
++    def __init__(
++        self,
++        config: pytest.Config,
++        channel: execnet.Channel,
++        *,
++        debug_stderr: TextIO | None = None,
++    ) -> None:
+         self.config = config
+         workerinput: dict[str, Any] = config.workerinput  # type: ignore[attr-defined]
+         self.workerid = workerinput.get("workerid", "?")
+         self.testrunuid = workerinput["testrunuid"]
+-        self.log = Producer(f"worker-{self.workerid}", enabled=config.option.debug)
++        self.log = Producer(
++            f"worker-{self.workerid}", enabled=config.option.debug, file=debug_stderr
++        )
+         self.channel = channel
+         self.torun = TestQueue(self.channel.gateway.execmodel)
+         self.nextitem_index: int | None | Literal[Marker.SHUTDOWN] = None
+@@ -417,11 +444,14 @@
+     os.environ["PYTEST_XDIST_WORKER"] = workerinput["workerid"]
+     os.environ["PYTEST_XDIST_WORKER_COUNT"] = str(workerinput["workercount"])
+ 
++    # Duplicate before _prepareconfig starts fd capture. Closing at process exit
++    # also covers receive callbacks that outlive pytest_cmdline_main.
++    debug_stderr = worker_debug_stderr()
+     config = _prepareconfig(args, None)
+ 
+     setup_config(config, option_dict.get("basetemp"))
+     config._parser.prog = os.path.basename(workerinput["mainargv"][0])
+     config.workerinput = workerinput  # type: ignore[attr-defined]
+     config.workeroutput = {}  # type: ignore[attr-defined]
+-    interactor = WorkerInteractor(config, channel)  # type: ignore[name-defined]
++    interactor = WorkerInteractor(config, channel, debug_stderr=debug_stderr)  # type: ignore[name-defined]
+     config.hook.pytest_cmdline_main(config=config)
+--- a/testing/test_remote.py
++++ b/testing/test_remote.py
+@@ -1,9 +1,13 @@
+ from __future__ import annotations
+ 
++import atexit
++import io
+ import marshal
++import os
+ import pprint
+ from queue import Queue
+ import sys
++import tempfile
+ from typing import Any
+ from typing import Callable
+ from typing import cast
+@@ -13,11 +17,41 @@
+ import execnet
+ import pytest
+ 
++from xdist.remote import Producer
++from xdist.remote import worker_debug_stderr
+ from xdist.workermanage import NodeManager
+ from xdist.workermanage import WorkerController
+ 
+ 
+ WAIT_TIMEOUT = 10.0
++
++
++def test_worker_debug_stderr_survives_capture(
++    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
++) -> None:
++    callbacks: list[Callable[[], None]] = []
++    with monkeypatch.context() as patcher:
++        patcher.setattr(atexit, "register", callbacks.append)
++        stream = worker_debug_stderr()
++    assert len(callbacks) == 1
++    capture = io.StringIO()
++    capture.close()
++    with stream, tempfile.TemporaryFile() as redirected:
++        saved_stderr = os.dup(2)
++        try:
++            with monkeypatch.context() as patcher:
++                patcher.setattr(sys, "stderr", capture)
++                os.dup2(redirected.fileno(), 2)
++                Producer("worker", file=stream)("received command", "shutdown")
++        finally:
++            os.dup2(saved_stderr, 2)
++            os.close(saved_stderr)
++        assert capfd.readouterr().err == "[worker] received command shutdown\n"
++        redirected.seek(0)
++        assert redirected.read() == b""
++        assert not stream.closed
++        callbacks[0]()
++        assert stream.closed
+ 
+ 
+ def check_marshallable(d: object) -> None:
+--- a/testing/acceptance_test.py
++++ b/testing/acceptance_test.py
+@@ -383,6 +383,8 @@
+         )
+         result = pytester.runpytest_subprocess("--debug", "--dist=each", "--tx=2*popen")
+         assert not result.ret
++        assert "[worker-gw0]" in result.stderr.str()
++        assert "[worker-gw1]" in result.stderr.str()
+         result.stdout.fnmatch_lines(["*2 pass*"])
+ 
+     @pytest.mark.xfail(

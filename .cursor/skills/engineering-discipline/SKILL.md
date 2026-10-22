@@ -21,14 +21,14 @@ ask what work to apply it to.
 
 1. Read `references/engineering-discipline.md` completely before working.
    The standard lives in this skill's references/.
-2. Apply the authority order defined in that standard. An explicit task
+1. Apply the authority order defined in that standard. An explicit task
    contract or repository instruction can narrow the applicable approach; it
    does not silently erase a relevant engineering risk.
-3. Preserve the task's authorization boundary. Analysis, planning, and review
+1. Preserve the task's authorization boundary. Analysis, planning, and review
    are read-only unless changes are requested. For implementation, make only
    authorized changes; invoking this skill does not authorize external
    comments, issue changes, commits, pushes, or other additional actions.
-4. If the standard cannot be read, do not reconstruct it from memory. Identify
+1. If the standard cannot be read, do not reconstruct it from memory. Identify
    the missing source and the resulting limitation; for a review, use an
    `inconclusive` verdict.
 
@@ -37,13 +37,13 @@ ask what work to apply it to.
 1. Identify the requested outcome, target, and boundary. For a change review,
    establish the exact change set and comparison base; do not assume a branch
    or default base when it can be discovered.
-2. When inspecting a working tree, include staged, unstaged, and untracked files.
+1. When inspecting a working tree, include staged, unstaged, and untracked files.
    Record pre-existing changes and do not attribute them to the current task
    without evidence.
-3. Read the applicable repository instructions, task or specification,
+1. Read the applicable repository instructions, task or specification,
    implementation, tests, contract-bearing documentation, and generated-source
    authorities needed to understand the change.
-4. State material exclusions and evidence gaps. Bound the work and its claims
+1. State material exclusions and evidence gaps. Bound the work and its claims
    accordingly. For a review, use the `inconclusive` verdict when those gaps
    prevent a responsible conformance judgment.
 
@@ -65,18 +65,18 @@ interpretation you are using before acting on it.
    data and trust boundaries, state transitions, side effects, failure paths, recovery,
    supported consumers, and generated projections far enough to identify the
    owning invariant.
-2. Select the `ED-*` rules relevant to the affected risks. Mark a final-check
+1. Select the `ED-*` rules relevant to the affected risks. Mark a final-check
    item not applicable when appropriate; do not manufacture findings merely to
    mention every rule. When implementing or reviewing code, explicitly apply
    the factoring pass in `ED-2.8` and the evidence check in `ED-F.10`.
-3. Challenge the design or implementation with concrete scenarios and likely
+1. Challenge the design or implementation with concrete scenarios and likely
    counterexamples. A finding requires a reachable or contract-relevant
    violation or a concrete maintainability defect, not a stylistic preference
    or unsupported speculation. A factoring finding can establish demonstrable
    maintenance cost or duplicated semantic authority without an existing
    runtime failure. Support it with specific ownership, call-site, or
    capability evidence as required by `ED-2.8` and `ED-F.10`.
-4. Do not introduce, recommend, or accept new backward-compatibility
+1. Do not introduce, recommend, or accept new backward-compatibility
    machinery, such as shims, aliases, legacy fallbacks, dual read/write paths,
    version-specific branches, or silent coercions, unless an explicit task
    requirement or supported contract requires it. A credible risk of material
@@ -85,15 +85,15 @@ interpretation you are using before acting on it.
    disclosed to the user before or when the compatibility path was introduced.
    Hypothetical consumers, generic caution, and disclosure made only after the
    fact are not sufficient. Cite `ED-2.1`, `ED-2.5`, or `ED-10.4` as applicable.
-5. During implementation, resolve material defects within the authorized scope.
+1. During implementation, resolve material defects within the authorized scope.
    During analysis or review, report them with evidence and repair directions.
    Run proportionate checks at the cheapest faithful layers that can falsify
    the material risks, keeping checks non-mutating for read-only tasks.
    Reinspect the workspace afterward and report any validation side effects.
-6. For a large or high-risk change, use an independent fresh review when that
+1. For a large or high-risk change, use an independent fresh review when that
    capability is available. Give it the exact scope and canonical standard,
    then independently verify its findings before including them.
-7. Recognize documented deviations required by a higher-authority contract.
+1. Recognize documented deviations required by a higher-authority contract.
    Record the deviation and its evidence separately from violations.
 
 ## Evidence and verification claims
@@ -158,16 +158,16 @@ For a requested conformance review, report in this order:
 
 1. **Reviewed scope:** target, comparison base, included change types, and
    material exclusions.
-2. **Verdict:** exactly one of `conforms on reviewed scope`, `does not conform`,
+1. **Verdict:** exactly one of `conforms on reviewed scope`, `does not conform`,
    or `inconclusive`.
-3. **Findings:** ordered P0 through P3. Start each with
+1. **Findings:** ordered P0 through P3. Start each with
    `[severity] [rule ID] location` and then give the scenario, impact, and
    repair. If there are none, say so explicitly.
-4. **Documented deviations:** higher-authority exceptions and their evidence,
+1. **Documented deviations:** higher-authority exceptions and their evidence,
    or `none`.
-5. **Validation and workspace effects:** checks run, meaningful results, and
+1. **Validation and workspace effects:** checks run, meaningful results, and
    any files or state changed by validation.
-6. **Residual risk and limitations:** untested boundaries, unavailable
+1. **Residual risk and limitations:** untested boundaries, unavailable
    evidence, and uncertainty that remains.
 
 Never claim universal or repository-wide compliance from a bounded review.

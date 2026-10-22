@@ -3,9 +3,12 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    # Pinned nixpkgs with working Swift build (before clang-21.1.8 broke it)
-    # Tracking: https://github.com/NixOS/nixpkgs/issues/483584
-    nixpkgs-swift.url = "github:NixOS/nixpkgs/70801e06d9730c4f1704fbd3bbf5b8e11c03a2a7";
+    # OpenChamber's source-built addon requires exactly Sherpa 1.13.3 and its
+    # validated ONNX runtime tuple. Keep this ABI pin local to that application.
+    nixpkgs-openchamber-compat = {
+      url = "github:NixOS/nixpkgs/ef34387ddd751e1ab8857adf4676492d32eb24ec";
+      flake = false;
+    };
     nix-homebrew = {
       url = "github:Yeradon/nix-homebrew";
       # Homebrew 7.0.10 supports brew bundle --force-cleanup,
@@ -231,7 +234,7 @@
       type = "github";
       owner = "aaif-goose";
       repo = "goose";
-      ref = "v1.51.0";
+      ref = "v1.55.0";
       flake = false;
     };
     goose-v8 = {

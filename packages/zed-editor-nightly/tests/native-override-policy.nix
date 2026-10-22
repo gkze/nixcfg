@@ -36,9 +36,8 @@ let
 
   overrideAttrsFor = crateName: overrideAttrsForVersion crateName "0.0.0";
 
-  wasmtimeCApiAttrs =
-    overrideAttrsForVersion "wasmtime-c-api-impl" zedSource.pins.wasmtimeCApiCoherenceVersion;
-  otherWasmtimeCApiAttrs = overrideAttrsForVersion "wasmtime-c-api-impl" "0.0.1";
+  wasmtimeCApiAttrs = overrideAttrsForVersion "wasmtime-c-api-impl" zedSource.pins.wasmtimeCApiCoherenceVersion;
+  otherWasmtimeCApiAttrs = overrideAttrsForVersion "wasmtime-c-api-impl" "48.0.2";
 
   hasInput =
     expected: inputs: builtins.any (input: (input.drvPath or null) == expected.drvPath) inputs;
@@ -76,8 +75,7 @@ in
 # or whether project inputs are limited to their audited consumers.
 assert builtins.elem system supportedSystems;
 assert lib.assertMsg (
-  (wasmtimeCApiAttrs.NIXCFG_WASMTIME_C_API_COHERENCE or null)
-  == (
+  (wasmtimeCApiAttrs.NIXCFG_WASMTIME_C_API_COHERENCE or null) == (
     if pkgs.stdenv.hostPlatform.isDarwin then
       "darwin-${zedSource.pins.wasmtimeCApiCoherenceVersion}-v1"
     else

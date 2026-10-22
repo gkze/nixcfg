@@ -337,7 +337,7 @@ in
               debugpy = pythonPrev.debugpy.overridePythonAttrs (old: {
                 patches = (old.patches or [ ]) ++ [
                   (prev.replaceVars ./patches/debugpy-lldb-test.patch {
-                    lldb = prev.lldb;
+                    inherit (prev) lldb;
                   })
                 ];
               });

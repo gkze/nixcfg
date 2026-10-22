@@ -12,6 +12,6 @@ for command in linear linear-cli; do
   words=("$command" issue lis)
   CURRENT=3
   autoload -Uz "_$command"
-  "_$command" > "$TMPDIR/linear-zsh-candidates"
+  "_$command" >"$TMPDIR/linear-zsh-candidates"
   grep -E '^list(:|$)' "$TMPDIR/linear-zsh-candidates"
 done

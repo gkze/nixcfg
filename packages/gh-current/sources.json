@@ -1,0 +1,17 @@
+{
+  "commit": "7948e8056e45ac3c729b829e0eafe2d0797a95c6",
+  "hashes": [
+    {
+      "hash": "sha256-A3nfTjmEmbKHU4OOv510Ylc9L5dvfQQuDpboJHW/PMs=",
+      "hashType": "srcHash"
+    },
+    {
+      "hash": "sha256-o4p/SBVzlj+Qf3XNt5UzAbQUFrJHHOEjTCCE03+kvJs=",
+      "hashType": "vendorHash"
+    }
+  ],
+  "pins": {
+    "sourceDateEpoch": "1792595308"
+  },
+  "version": "2.103.0"
+}

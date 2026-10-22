@@ -143,6 +143,11 @@ in
   catppuccin.alacritty.enable = false;
   catppuccin.helix.enable = false;
   catppuccin.starship.enable = false;
+  # rofi is not installed here, yet stylix's rofi target still writes the
+  # pre-rename `programs.rofi.font`, which home-manager reports as renamed to
+  # `programs.rofi.settings.font` on every evaluation. Re-enable this target
+  # once stylix uses the new name, or if rofi is actually added.
+  stylix.targets.rofi.enable = false;
   programs.alacritty.settings = {
     general.import = [ "${state}/alacritty.toml" ];
     font = {

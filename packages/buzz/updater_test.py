@@ -3085,6 +3085,29 @@ def test_buzz_sherpa_slot_selects_only_its_url_scoped_promoted_hash() -> None:
     )
 
 
+def test_buzz_protobuf_backport_keeps_exact_merged_upstream_patch() -> None:
+    """The scoped backport is the reviewed upstream commit, not a local test skip."""
+    metadata = json.loads(
+        (_PACKAGE_DIR / "native/protobuf-map-hash-backport.json").read_text()
+    )
+    assert metadata == {
+        "affectedVersion": "36.2",
+        "upstreamCommit": "b067e70a049179152f68434600552b1b16d9c8c5",
+        "upstreamPatchSha256": (
+            "040fce40ac9d5c3f50af829700c7fbc6fab155ccd64d029e0a34842b2791837c"
+        ),
+        "upstreamPatchUrl": (
+            "https://github.com/protocolbuffers/protobuf/commit/"
+            "b067e70a049179152f68434600552b1b16d9c8c5.patch"
+        ),
+    }
+    patch = _PACKAGE_DIR / "native/protobuf-map-hash-b067e70.patch"
+    assert (
+        hashlib.sha256(patch.read_bytes()).hexdigest()
+        == metadata["upstreamPatchSha256"]
+    )
+
+
 def test_buzz_onnxruntime_native_slot_is_static_cpu_only_darwin() -> None:
     """Apple framework assembly must deliver one static CPU-only archive."""
     native_path = _PACKAGE_DIR / "native/onnxruntime.nix"
@@ -3141,11 +3164,18 @@ def test_buzz_onnxruntime_native_slot_is_static_cpu_only_darwin() -> None:
         "normalizeStaticDependency (abseil-cpp_202601.override { static = true; })",
     )
     assert_nix_ast_equal(
+        expect_binding(scope, "protobufMapHashBackport").value,
+        "builtins.fromJSON (builtins.readFile ./protobuf-map-hash-backport.json)",
+    )
+    assert_nix_ast_equal(
         expect_binding(scope, "staticProtobuf").value,
-        """normalizeStaticDependency (protobuf.override {
+        """normalizeStaticDependency ((protobuf.override {
           abseil-cpp = staticAbseil;
           enableShared = false;
-        })""",
+        }).overrideAttrs (old: {
+          patches = (old.patches or [ ]) ++ lib.optional (old.version == protobufMapHashBackport.affectedVersion)
+            ./protobuf-map-hash-b067e70.patch;
+        }))""",
     )
     assert_nix_ast_equal(
         expect_binding(scope, "base").value,
@@ -3262,7 +3292,7 @@ def test_buzz_onnxruntime_native_slot_is_static_cpu_only_darwin() -> None:
     assert_old_expression_equal(
         "preConfigure",
         r"""(old.preConfigure or "") + ''
-          sourcePrefixMaps="-ffile-prefix-map=$NIX_BUILD_TOP=/build -ffile-prefix-map=${cmakeSourcePath "ONNX"}=/source/onnx -ffile-prefix-map=${cmakeSourcePath "ABSEIL_CPP"}=/source/abseil -ffile-prefix-map=${cmakeSourcePath "RE2"}=/source/re2 -ffile-prefix-map=${staticProtobuf}=/source/protobuf"
+          sourcePrefixMaps="-ffile-prefix-map=$NIX_BUILD_TOP=/build -ffile-prefix-map=${cmakeSourcePath "ONNX"}=/source/onnx -ffile-prefix-map=${cmakeSourcePath "ABSEIL_CPP"}=/source/abseil -ffile-prefix-map=${cmakeSourcePath "RE2"}=/source/re2 -ffile-prefix-map=${staticProtobuf}=/source/protobuf -ffile-prefix-map=${lib.getDev staticProtobuf}=/source/protobuf"
           export NIX_CFLAGS_COMPILE="$sourcePrefixMaps ''${NIX_CFLAGS_COMPILE-}"
           export NIX_CXXFLAGS_COMPILE="$sourcePrefixMaps ''${NIX_CXXFLAGS_COMPILE-}"
         ''""",

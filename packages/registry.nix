@@ -112,6 +112,8 @@ let
         "zo"
       ];
       aarch64DarwinPackages = [
+        "awscli2-current"
+        "gh-current"
         "agentastic-dev"
         "agentlog"
         "antigravity"

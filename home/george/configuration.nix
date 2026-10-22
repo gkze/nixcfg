@@ -309,7 +309,10 @@
       languages = {
         bun.enable = true;
         go.enable = true;
-        python.enable = true;
+        python = {
+          enable = true;
+          interpreter = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin pkgs.python-current;
+        };
         rust.enable = true;
       };
       packageSets = {
@@ -474,6 +477,7 @@
       enableZshIntegration = true;
     };
     gh = {
+      package = if pkgs.stdenv.hostPlatform.system == "aarch64-darwin" then pkgs.gh-current else pkgs.gh;
       enable = true;
       settings = {
         git_protocol = "ssh";
@@ -682,7 +686,11 @@
 
     # Simple enable-only programs (alphabetical)
     antigravity-cli.enable = true;
-    awscli.enable = true;
+    awscli = {
+      enable = true;
+      package =
+        if pkgs.stdenv.hostPlatform.system == "aarch64-darwin" then pkgs.awscli2-current else pkgs.awscli2;
+    };
     bottom.enable = true;
     # Keep the standalone derivation available without adding it to any profile.
     codex.enable = false;
@@ -706,6 +714,9 @@
     };
     eza.enable = true;
     fd.enable = true;
+    go = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin {
+      package = pkgs.go-toolchain;
+    };
     home-manager.enable = true;
     jq.enable = true;
     jujutsu.enable = true;
@@ -719,6 +730,11 @@
     nushell.enable = true;
     ripgrep.enable = true;
     superfile.enable = true;
-    uv.enable = true;
+    uv = {
+      enable = true;
+    }
+    // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+      package = pkgs.uv-cli;
+    };
   };
 }

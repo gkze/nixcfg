@@ -1,5 +1,5 @@
 {
-  "drvHash": "platforms-v1:c88583abc2494d0253245717e6366c69c0531fa26111861db56cd572bdc92205",
+  "drvHash": "platforms-v1:8ffb2f995e3af3782466c4f995d62e109900fb7e6f43d28963fba624e8156a3b",
   "electronVersion": "40.10.2",
   "hashes": [
     {
@@ -22,16 +22,16 @@
   "pins": {
     "nodeEngine": ">=24.0.0",
     "nodejsAttr": "nodejs_24",
-    "nodejsVersion": "24.20.0",
+    "nodejsVersion": "24.21.0",
     "packageManager": "pnpm@10.28.2",
     "pnpmAttr": "pnpm_10",
     "pnpmEngine": ">=10.28.0",
     "pnpmVersion": "10.34.5"
   },
   "platformDrvHashes": {
-    "aarch64-darwin": "bcykhfb3asn6ymvgx406fkr2z9srqq77",
-    "aarch64-linux": "0cf8dbkn05ac2bgvmv9s9vk5aq5pmkvd",
-    "x86_64-linux": "xwm6ydsy61y2b5a37l5cag8sdr62v99d"
+    "aarch64-darwin": "sdk3922d7mzl2iwkfxacd0xxwiczg5j3",
+    "aarch64-linux": "syjdmhs1gdgqngsng5ahbjwxaj1fiicq",
+    "x86_64-linux": "njh146x62dxxgdbnkccgcf0lsj90hfls"
   },
   "version": "v1.2.6"
 }

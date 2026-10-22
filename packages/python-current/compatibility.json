@@ -1,0 +1,8 @@
+{
+  "series": "3.14",
+  "reason": "Parso and Jedi support grammar through Python3.14; current upstream misclassifies valid Python3.15 unpacking comprehensions.",
+  "evidence": [
+    "https://github.com/davidhalter/parso/blob/b26da16316da46e4770d589ed5f8d404531a22af/parso/grammar.py",
+    "https://github.com/davidhalter/jedi/blob/65112c72c7d8984500c91361cfb74e781090530c/jedi/api/environment.py"
+  ]
+}

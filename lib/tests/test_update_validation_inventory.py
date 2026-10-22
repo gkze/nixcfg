@@ -47,12 +47,14 @@ def test_full_inventory_respects_package_platforms(
     }
     darwin = {
         "antigravity",
+        "awscli2-current",
         "baseten-switch",
         "bb",
         "buzz",
         "clearly",
         "energy",
         "executor",
+        "gh-current",
         "github-copilot-app",
         "hermes-desktop",
         "hq",

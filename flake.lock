@@ -1158,16 +1158,16 @@
     "goose": {
       "flake": false,
       "locked": {
-        "lastModified": 1789502634,
-        "narHash": "sha256-S4GPCEbcCsDyI+P8tCuc4/5WNQDGjqjmi1atOdScsxE=",
+        "lastModified": 1792163926,
+        "narHash": "sha256-2OoRbVAzo7oVWFbdtRvHAoPCLjPXen89di7dewADXTI=",
         "owner": "aaif-goose",
         "repo": "goose",
-        "rev": "1a4249ac9f23c6e6e2526d4b54dbbf3bb09ba204",
+        "rev": "2bcb8583a18a0623eb78c9ed845d597ed99fae48",
         "type": "github"
       },
       "original": {
         "owner": "aaif-goose",
-        "ref": "v1.51.0",
+        "ref": "v1.55.0",
         "repo": "goose",
         "type": "github"
       }
@@ -1625,19 +1625,20 @@
         "type": "github"
       }
     },
-    "nixpkgs-swift": {
+    "nixpkgs-openchamber-compat": {
+      "flake": false,
       "locked": {
-        "lastModified": 1769105483,
-        "narHash": "sha256-cC4W6KDq3942hk4zyoDWYOvb/9lvlsPZbrdlTj9hsxw=",
+        "lastModified": 1789286504,
+        "narHash": "sha256-eiEK7cKZORNEvX0GeF3RtNEF/JXhgf2RqSp3230q13E=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "70801e06d9730c4f1704fbd3bbf5b8e11c03a2a7",
+        "rev": "ef34387ddd751e1ab8857adf4676492d32eb24ec",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "70801e06d9730c4f1704fbd3bbf5b8e11c03a2a7",
+        "rev": "ef34387ddd751e1ab8857adf4676492d32eb24ec",
         "type": "github"
       }
     },
@@ -1675,11 +1676,11 @@
     },
     "nixpkgs_4": {
       "locked": {
-        "lastModified": 1789286504,
-        "narHash": "sha256-eiEK7cKZORNEvX0GeF3RtNEF/JXhgf2RqSp3230q13E=",
+        "lastModified": 1792502884,
+        "narHash": "sha256-IoNisKcGbUjdd45qCqywGMCYmZ5EnkxezvLII0FWwNA=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "ef34387ddd751e1ab8857adf4676492d32eb24ec",
+        "rev": "02c087f3fe673c9e317f206a627cb6b910336dbe",
         "type": "github"
       },
       "original": {
@@ -2047,7 +2048,7 @@
         "nix-manipulator": "nix-manipulator",
         "nix-rosetta-builder": "nix-rosetta-builder",
         "nixpkgs": "nixpkgs_4",
-        "nixpkgs-swift": "nixpkgs-swift",
+        "nixpkgs-openchamber-compat": "nixpkgs-openchamber-compat",
         "nixvim": "nixvim",
         "openai-cli": "openai-cli",
         "opencode": "opencode",

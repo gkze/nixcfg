@@ -1,0 +1,10 @@
+{
+  "hashes": [
+    {
+      "hash": "sha256-4C2awhzr2m5GQ1NpdEqSxlzHzYZpaXaUEiz5f/rNHlM=",
+      "hashType": "sha256",
+      "url": "https://www.python.org/ftp/python/3.14.9/Python-3.14.9.tar.xz"
+    }
+  ],
+  "version": "3.14.9"
+}
