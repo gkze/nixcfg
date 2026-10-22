@@ -2,6 +2,7 @@
 
 import asyncio
 import dataclasses
+import hashlib
 import json
 import os
 import platform
@@ -94,6 +95,21 @@ _HASH_MISMATCH_INDICATORS = (
 )
 
 _FIXED_OUTPUT_HASH_MAX_ATTEMPTS = 3
+# prefetch-yarn-deps checks each tarball against yarn.lock and prints
+#   Error: hash mismatch, expected <hex>, got <hex> for <url>
+# The digest is the tarball's, never a fixed-output hash. 39760093470
+# prepare-x86/arm: the npm feed answered 303, which prefetch-yarn-deps does
+# not follow, so it hashed the empty redirect body (sha1(b"")).
+_YARN_TARBALL_MISMATCH = re.compile(
+    r"hash mismatch,\s*expected\s+(?P<expected>[0-9a-f]{40,128}),"
+    r"\s*got\s+(?P<got>[0-9a-f]{40,128})\s+for\s+(?P<url>\S+)",
+    re.IGNORECASE,
+)
+_EMPTY_CONTENT_DIGESTS = frozenset(
+    hashlib.new(name, b"").hexdigest() for name in ("sha1", "sha256", "sha512")
+)
+
+
 _NIX_NETWORK_TRANSIENT_MARKERS = (
     "502 Bad Gateway",
     "503 Service Unavailable",
@@ -598,6 +614,22 @@ def _extract_nix_hash(
     if err is not None:
         return err.hash
     config = resolve_active_config(config)
+    yarn_mismatches = list(_YARN_TARBALL_MISMATCH.finditer(output))
+    if yarn_mismatches:
+        mismatch = yarn_mismatches[-1]
+        empty = (
+            " (empty response body)"
+            if mismatch.group("got").casefold() in _EMPTY_CONTENT_DIGESTS
+            else ""
+        )
+        msg = (
+            "prefetch-yarn-deps fetched a tarball that does not match yarn.lock "
+            f"({mismatch.group('url')}: expected {mismatch.group('expected')}, "
+            f"got {mismatch.group('got')}{empty}). This is a fetch failure, not "
+            "a fixed-output hash. Output tail:\n"
+            f"{_tail_output_excerpt(output, max_lines=config.default_log_tail_lines)}"
+        )
+        raise RuntimeError(msg)
     has_mismatch_signal = _has_hash_mismatch_signal(output)
     if has_mismatch_signal:
         msg = (

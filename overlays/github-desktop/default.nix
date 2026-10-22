@@ -12,6 +12,26 @@ let
   electronZipName = "electron-v${electronRuntime.version}-${prev.stdenv.hostPlatform.node.platform}-${prev.stdenv.hostPlatform.node.arch}.zip";
   src = inputs.github-desktop;
   srcRev = inputs.github-desktop.rev;
+
+  # prefetch-yarn-deps follows only 301/302 and hashes whatever body any other
+  # status returns. github-desktop's yarn.lock resolves some tarballs through
+  # Microsoft's npm feed, which answers 303, so the fetcher hashed the empty
+  # redirect body (Update run 39760093470). Follow every redirect status and
+  # reject other non-2xx responses so a failed fetch is reported as one.
+  prefetchYarnDeps = prev.prefetch-yarn-deps.overrideAttrs (old: {
+    postInstall = (old.postInstall or "") + ''
+      patch -p1 -d $out/libexec < ${./prefetch-yarn-deps-redirects.patch}
+    '';
+  });
+  fetchYarnDeps =
+    args:
+    (prev.fetchYarnDeps args).overrideAttrs (old: {
+      nativeBuildInputs =
+        assert builtins.elem prev.prefetch-yarn-deps old.nativeBuildInputs;
+        map (
+          input: if input == prev.prefetch-yarn-deps then prefetchYarnDeps else input
+        ) old.nativeBuildInputs;
+    });
 in
 {
   github-desktop = (prev.github-desktop.override { electron = electronRuntime; }).overrideAttrs (
@@ -32,13 +52,13 @@ in
         else
           oldAttrs.nativeBuildInputs;
 
-      cacheRoot = prev.fetchYarnDeps {
+      cacheRoot = fetchYarnDeps {
         name = "${finalAttrs.pname}-cache-root";
         yarnLock = finalAttrs.src + "/yarn.lock";
         hash = slib.sourceHash "github-desktop" "yarnRootHash";
       };
 
-      cacheApp = prev.fetchYarnDeps {
+      cacheApp = fetchYarnDeps {
         name = "${finalAttrs.pname}-cache-app";
         yarnLock = finalAttrs.src + "/app/yarn.lock";
         hash = slib.sourceHash "github-desktop" "yarnAppHash";

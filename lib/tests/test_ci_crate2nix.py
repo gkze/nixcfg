@@ -1163,15 +1163,20 @@ def test_zed_crate2nix_companion_builds_source_only_workspace() -> None:
     Depending on zed-editor-nightly.patchedSrc fails under materialization with
     sourceOverrides: the injected package may not expose passthru.patchedSrc.
     Match codex/gitbutler and return patchedSrc directly via crate2nixSourceOnly.
+    The registry injects selfSource only into zed-editor-nightly itself, so the
+    companion passes the parent's entry (Update run 39760093470).
     """
     assert_nix_ast_equal(
         (
             crate2nix.REPO_ROOT / "packages/zed-editor-nightly/crate2nix-src.nix"
         ).read_text(encoding="utf-8"),
         """
-        { callPackage, inputs, ... }:
+        { callPackage, inputs, outputs, ... }:
+        # The registry injects selfSource only into the package named after the
+        # sources.json entry, not into this companion, so pass the parent's entry.
         callPackage ./default.nix {
           inherit inputs;
+          selfSource = outputs.lib.sourceEntry "zed-editor-nightly";
           crate2nixSourceOnly = true;
         }
         """,

@@ -1057,3 +1057,37 @@ def test_compute_drv_fingerprint_paths(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _run_async[T](awaitable: asyncio.Future[T] | asyncio.Task[T] | object) -> T:
     return asyncio.run(awaitable)  # type: ignore[arg-type]
+
+
+_EMPTY_SHA1 = "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+_YARN_URL = (
+    "https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/"
+    "npm/registry/@electron-internal/extract-zip/-/extract-zip-1.0.5.tgz"
+)
+
+
+def _yarn_mismatch(got: str) -> str:
+    return (
+        "github-desktop-cache-root> Error: hash mismatch, expected "
+        f"6782c0f6066e60b7fd286fe7a5c7600f7650d420, got {got} for {_YARN_URL}\n"
+        "error: Cannot build '/nix/store/x-github-desktop-cache-root.drv'.\n"
+    )
+
+
+def test_yarn_tarball_mismatch_is_not_retried_as_a_transient_fetch() -> None:
+    """39760093470: the feed's unfollowed 303 empties the body on every attempt."""
+    for got in (_EMPTY_SHA1, "b" * 40):
+        result = CommandResult(
+            args=["nix"], returncode=1, stdout="", stderr=_yarn_mismatch(got)
+        )
+        assert not _is_retryable_fixed_output_hash_failure(result)
+
+
+@pytest.mark.parametrize("got", [_EMPTY_SHA1, "b" * 40])
+def test_extract_nix_hash_rejects_yarn_tarball_digests(got: str) -> None:
+    """A tarball digest never becomes the persisted fixed-output hash."""
+    with pytest.raises(RuntimeError, match="does not match yarn.lock") as exc_info:
+        _extract_nix_hash(_yarn_mismatch(got))
+    message = str(exc_info.value)
+    assert _YARN_URL in message
+    assert ("empty response body" in message) == (got == _EMPTY_SHA1)

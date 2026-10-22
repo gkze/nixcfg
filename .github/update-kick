@@ -20,3 +20,4 @@ canary-slots: 0
 2026-10-14T14:07:36Z ignore ChatGPT musl patchelf after 38564429681 validate-x86 libc.musl-x86_64.so.1
 2026-10-22T07:10:00Z one Update run after ea9279e8 (openai-cli v1.40.0 Darwin checks run natively) following 39538011102 cascade-warmup slot 1
 2026-10-22T09:55:00Z one Update run after opencode flake ref gkze/fixes -> gkze/patches (branch renamed 2026-10-10; 39745667831 prepare-pins HTTP 422)
+2026-10-22T11:10:00Z one Update run after prepare fixes for 39760093470 (opencode ghostty-web pin, mux pin bun hashes, zed crate2nix-src selfSource, github-desktop yarn 303)
