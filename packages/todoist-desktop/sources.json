@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-2EM1a0IBDcpMw99RRZxq7VJWjBnE4onPP29HbJo+KLI="
+    "aarch64-darwin": "sha256-Oby3Ul7ojygqg6VuqtNqM7CVb/ty7Mq4lnI+wCV3kww="
   },
   "urls": {
-    "aarch64-darwin": "https://electron-dl.todoist.net/mac/Todoist-darwin-9.28.0-arm64-latest.dmg"
+    "aarch64-darwin": "https://electron-dl.todoist.net/mac/Todoist-darwin-9.31.0-arm64-latest.dmg"
   },
-  "version": "9.28.0"
+  "version": "9.31.0"
 }

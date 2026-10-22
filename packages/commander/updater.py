@@ -1,119 +1,32 @@
-"""Updater for Commander DMG releases."""
+"""Updater for Commander's signed Sparkle release channel."""
 
-import re
 from typing import TYPE_CHECKING, ClassVar
 
+from lib.update.updaters import SparkleAppcastUrlUpdater, VersionInfo, register_updater
+
 if TYPE_CHECKING:
-    import aiohttp
-
     from lib.update.updaters import UpdateContext
-
-from lib.update.net import fetch_headers, fetch_url
-from lib.update.updaters import DownloadHashUpdater, VersionInfo, register_updater
-from lib.update.updaters.metadata import (
-    NO_METADATA,
-    DownloadUrlMetadata,
-    metadata_get_str,
-)
-
-_MARKDOWN_CHANGELOG_VERSION_RE = re.compile(
-    r"^##\s+([0-9]+(?:\.[0-9]+)+)\s+-\s+", re.MULTILINE
-)
-_HTML_CHANGELOG_VERSION_RE = re.compile(
-    r"<h2\b[^>]*>\s*([0-9]+(?:\.[0-9]+)+)\s+-\s+[^<]+</h2>",
-    re.IGNORECASE,
-)
-
-
-def _extract_latest_version(content: str) -> str | None:
-    for pattern in (_MARKDOWN_CHANGELOG_VERSION_RE, _HTML_CHANGELOG_VERSION_RE):
-        match = pattern.search(content)
-        if match is not None:
-            return match.group(1)
-    return None
 
 
 @register_updater
-class CommanderUpdater(DownloadHashUpdater):
-    """Resolve Commander version from the public changelog."""
+class CommanderUpdater(SparkleAppcastUrlUpdater):
+    """Use the same release feed and archive as the installed Commander app."""
 
     name = "commander"
-    VERSIONED_URL_TEMPLATE = (
-        "https://download.thecommander.app/release/Commander-{version}.dmg"
+    APPCAST_URL = (
+        "https://softwareupdate.thecommander.app/appcast/commanderai-appcast.xml"
     )
-    LATEST_URL = "https://download.thecommander.app/release/Commander.dmg"
-    CHANGELOG_URL = "https://thecommander.app/changelog.html"
+    VERSION_FIELD = "short_version"
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "darwin",
         "x86_64-darwin": "darwin",
     }
-
-    @staticmethod
-    def _download_url_from_metadata(info: VersionInfo) -> str | None:
-        return metadata_get_str(info.metadata, "url", context="Commander metadata")
-
-    @staticmethod
-    def _is_missing_release_error(exc: RuntimeError) -> bool:
-        return re.search(r"\b404\b", str(exc)) is not None
-
-    async def _resolve_download_metadata(
-        self,
-        session: aiohttp.ClientSession,
-        *,
-        version: str,
-    ) -> DownloadUrlMetadata | None:
-        versioned_url = self.VERSIONED_URL_TEMPLATE.format(version=version)
-        try:
-            await fetch_headers(
-                session,
-                versioned_url,
-                request_timeout=self.config.default_timeout,
-                config=self.config,
-            )
-        except RuntimeError as exc:
-            if not self._is_missing_release_error(exc):
-                raise
-            await fetch_headers(
-                session,
-                self.LATEST_URL,
-                request_timeout=self.config.default_timeout,
-                config=self.config,
-            )
-            return DownloadUrlMetadata(url=self.LATEST_URL)
-        return None
-
-    def get_download_url(self, platform: str, info: VersionInfo) -> str:
-        """Return a Commander DMG URL for ``platform``."""
-        _ = platform
-        return self._download_url_from_metadata(
-            info
-        ) or self.VERSIONED_URL_TEMPLATE.format(version=info.version)
 
     async def _is_latest(
         self,
         context: UpdateContext,
         info: VersionInfo,
     ) -> bool:
-        """Recompute hashes for mutable Commander release artifacts."""
+        """Recompute hashes because release artifacts may change in place."""
         _ = (context, info)
         return False
-
-    async def fetch_latest(
-        self, session: aiohttp.ClientSession, *, context: UpdateContext
-    ) -> VersionInfo:
-        """Parse the latest release version from the changelog page."""
-        _ = context
-        payload = await fetch_url(
-            session,
-            self.CHANGELOG_URL,
-            request_timeout=self.config.default_timeout,
-            config=self.config,
-            user_agent=self.config.default_user_agent,
-        )
-        content = payload.decode(errors="replace")
-        version = _extract_latest_version(content)
-        if version is None:
-            msg = "Could not parse latest Commander version from changelog"
-            raise RuntimeError(msg)
-        metadata = await self._resolve_download_metadata(session, version=version)
-        return VersionInfo(version=version, metadata=metadata or NO_METADATA)

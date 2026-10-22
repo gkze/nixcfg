@@ -176,11 +176,17 @@
         antigravity.package = pkgs.antigravity;
         appcleaner.package = pkgs.appcleaner;
         arc.package = pkgs.arc;
-        betterdisplay.package = pkgs.betterdisplay;
+        betterdisplay = {
+          package = pkgs.betterdisplay;
+          preventDowngrade = true;
+        };
         capy.package = pkgs.capy;
         claude.package = pkgs.claude;
         codeedit.package = pkgs.codeedit;
-        "code-cursor".package = pkgs.code-cursor;
+        "code-cursor" = {
+          package = pkgs.code-cursor;
+          preventDowngrade = true;
+        };
         codex.package = pkgs.chatgpt;
         cogito.package = pkgs.cogito;
         comet.package = pkgs.comet;
@@ -193,7 +199,10 @@
         docker.package = pkgs.docker-desktop;
         element.package = pkgs.element-desktop;
         emdash.package = pkgs.emdash;
-        figma.package = pkgs.figma;
+        figma = {
+          package = pkgs.figma;
+          preventDowngrade = true;
+        };
         framer.package = pkgs.framer;
         "github-desktop".package = pkgs.github-desktop;
         ghostty.package = pkgs.ghostty-tip;
@@ -214,7 +223,10 @@
           package = pkgs.nordvpn;
           scope = "system";
         };
-        notion.package = pkgs.notion-app;
+        notion = {
+          package = pkgs.notion-app;
+          preventDowngrade = true;
+        };
         orbstack = {
           package = pkgs.orbstack;
           scope = "system";
@@ -229,7 +241,10 @@
           package = pkgs.signal-beta;
           preventDowngrade = true;
         };
-        slack.package = pkgs.slack;
+        slack = {
+          package = pkgs.slack;
+          preventDowngrade = true;
+        };
         sloth.package = pkgs.sloth-app;
         solo.package = pkgs.solo;
         spacedrive.package = pkgs.spacedrive;
@@ -355,6 +370,9 @@
       {
         source = ./openchamber-frappe.json;
       };
+
+  # The dedicated Catppuccin Bottom theme below owns its complete color map.
+  stylix.targets.bottom.enable = lib.mkIf (config.theme.name == "catppuccin") false;
 
   catppuccin = lib.mkIf (config.theme.name == "catppuccin") {
     # catppuccin/nix now gates every per-program module on the global enable;

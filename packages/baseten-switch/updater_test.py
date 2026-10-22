@@ -39,8 +39,8 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def test_compatibility_pin_skips_checkphase_for_the_hosted_sigtrap() -> None:
-    """The skip stays in updater-owned metadata, not a handwritten version literal."""
+def test_current_release_runs_checks_with_the_historical_skip_pin() -> None:
+    """Retaining a historical exception must not disable checks for the current app."""
     module = _load_module()
     updater = module.BasetenSwitchUpdater()
     assert updater.compatibility_pins == {"checkSkipVersion": "0.5.1"}
@@ -49,18 +49,12 @@ def test_compatibility_pin_skips_checkphase_for_the_hosted_sigtrap() -> None:
     )
     assert source.pins == updater.compatibility_pins
     assert source.pins is not None
-    assert source.version == source.pins["checkSkipVersion"]
+    assert source.version != source.pins["checkSkipVersion"]
 
 
-def test_bulk_update_hold_keeps_the_last_hosted_darwin_green_release() -> None:
-    """0.6.0 XCTest SIGTRAPs on hosted macos-15; do not bump until a headed runner owns it."""
-    module = _load_module()
-    hold = module.BasetenSwitchUpdater.bulk_update_hold
-    assert hold is not None
-    assert "macos-15" in hold
-    assert "0.6.0" in hold
-    assert "testUnsupportedStatusFallsBackWithoutRepeatedProbe" in hold
-    assert "doCheck" in hold
+def test_bulk_updates_resume_after_current_darwin_suite_passes() -> None:
+    """The 0.7.2 native release passed the full headed-Darwin Go and Swift suites."""
+    assert _load_module().BasetenSwitchUpdater.bulk_update_hold is None
 
 
 def test_source_expression_tracks_the_immutable_upstream_commit() -> None:

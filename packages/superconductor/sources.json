@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-JRacYQi4+l692ts7claol2rsKQCZZetQO6urty2O7Eo="
+    "aarch64-darwin": "sha256-N3pIsN+Wyh05BduCHxVVeBzkL83lS9eLGq66Eo+sy8A="
   },
   "urls": {
-    "aarch64-darwin": "https://releases.super.engineering/nightly/super.engineering-nightly-15aae8f8-arm64.dmg"
+    "aarch64-darwin": "https://releases.super.engineering/nightly/super.engineering-nightly-762aba48-arm64.dmg"
   },
-  "version": "2026-10-16-15aae8f8"
+  "version": "2026-10-21-762aba48"
 }

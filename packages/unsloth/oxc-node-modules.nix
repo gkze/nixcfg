@@ -44,11 +44,25 @@ buildNpmPackage {
     /usr/bin/lipo \
       node_modules/@oxlint/binding-darwin-arm64/oxlint.darwin-arm64.node \
       -verify_arch arm64
+    if [ -d node_modules/oxc-transform ]; then
+      /usr/bin/lipo \
+        node_modules/@oxc-transform/binding-darwin-arm64/transform.darwin-arm64.node \
+        -verify_arch arm64
+    fi
     node --input-type=module - <<'JS'
+    import { existsSync } from "node:fs";
     import { parseSync } from "oxc-parser";
     const valid = parseSync("input.js", "const value = 1;");
     const invalid = parseSync("input.js", "const = ;");
     if (valid.errors.length !== 0 || invalid.errors.length === 0) process.exit(1);
+    if (existsSync("node_modules/oxc-transform")) {
+      const { transformSync } = await import("oxc-transform");
+      const transformed = transformSync("input.ts", "const value: number = 1;");
+      if (transformed.errors.length !== 0 || transformed.code.includes(": number")) {
+        process.exit(1);
+      }
+      if (parseSync("input.js", transformed.code).errors.length !== 0) process.exit(1);
+    }
     JS
     node node_modules/oxlint/bin/oxlint --version
 

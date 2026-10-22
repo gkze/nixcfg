@@ -175,6 +175,55 @@ def test_ghostty_tip_requires_commit_url(monkeypatch: pytest.MonkeyPatch) -> Non
         )
 
 
+@pytest.mark.parametrize("order", [(9999, 10000, 9000), (10000, 9999, 9000)])
+def test_ghostty_tip_selects_greatest_numeric_build(
+    monkeypatch: pytest.MonkeyPatch, order: tuple[int, ...]
+) -> None:
+    module = _load("packages/ghostty-tip/updater.py")
+
+    async def fake_fetch(
+        *args: object, **kwargs: object
+    ) -> tuple[SparkleAppcastItem, ...]:
+        _ = (args, kwargs)
+        return tuple(
+            SparkleAppcastItem(
+                str(build),
+                None,
+                f"https://tip.files.ghostty.org/{build:040x}/Ghostty.dmg",
+            )
+            for build in order
+        )
+
+    _patch_dependency(monkeypatch, module, "fetch_sparkle_appcast_items", fake_fetch)
+    updater = _updater(module)
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
+    )
+    assert info.version == f"10000-{10000:040x}"
+    assert updater.get_download_url("aarch64-darwin", info) == (
+        f"https://tip.files.ghostty.org/{10000:040x}/Ghostty.dmg"
+    )
+
+
+@pytest.mark.parametrize("build", [None, "latest", "123x"])
+def test_ghostty_tip_rejects_invalid_build_number(
+    monkeypatch: pytest.MonkeyPatch, build: str | None
+) -> None:
+    module = _load("packages/ghostty-tip/updater.py")
+
+    async def fake_fetch(
+        *args: object, **kwargs: object
+    ) -> tuple[SparkleAppcastItem, ...]:
+        _ = (args, kwargs)
+        return (SparkleAppcastItem(build, None, "https://example.test/Ghostty.dmg"),)
+
+    _patch_dependency(monkeypatch, module, "fetch_sparkle_appcast_items", fake_fetch)
+    with pytest.raises(RuntimeError, match="version|build number"):
+        run_async(
+            _updater(module).fetch_latest(object(), context=UpdateContext(current=None))
+        )
+
+
 @pytest.mark.parametrize(
     ("path", "payload", "expected_version", "expected_url"),
     [
@@ -535,22 +584,20 @@ def test_electron_builder_asset_url_package_updaters(
     ).endswith(expected_fallback)
 
 
-def test_mole_app_pinned_version_and_urls(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mole_app_latest_release_and_urls(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load("packages/mole-app/updater.py")
-    _patch_dependency(
-        monkeypatch,
-        module,
-        "read_pinned_source_version",
-        lambda _name: "1.2.3",
-    )
     updater = _updater(module)
     commit = "a" * 40
 
-    async def _resolve_commit(_session: object, tag: str) -> str:
+    async def latest_release(_session: object):
+        return {"tag_name": "V1.2.3"}
+
+    async def resolve_commit(_session: object, tag: str) -> str:
         assert tag == "V1.2.3"
         return commit
 
-    monkeypatch.setattr(updater, "_resolve_release_tag_commit", _resolve_commit)
+    monkeypatch.setattr(updater, "_fetch_latest_release_payload", latest_release)
+    monkeypatch.setattr(updater, "_resolve_release_tag_commit", resolve_commit)
     info = run_async(
         updater.fetch_latest(object(), context=UpdateContext(current=None))
     )

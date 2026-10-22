@@ -1,6 +1,9 @@
 {
-  "commit": "56934ec0560bce8929025497411de7f5322fb6ca",
+  "commit": "544780422affd11699fb531c49af5cc6e82a3fd7",
   "hashes": [],
   "input": "zed",
-  "version": "1.26.0"
+  "pins": {
+    "wasmtimeCApiCoherenceVersion": "48.0.1"
+  },
+  "version": "1.27.0"
 }

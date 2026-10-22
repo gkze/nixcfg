@@ -1,25 +1,25 @@
 {
-  "commit": "5d02d5d378163f3f167c96b6be2b40bebde66b69",
+  "commit": "91a7bf44f96995361b10b5a0e9efae36a1490bf9",
   "hashes": [
     {
-      "hash": "sha256-mVeDNRw7iUYZHvQPKIr7MUdimvEDJjhf23wFmoeh/UY=",
+      "hash": "sha256-+G7FGA7qKxaZdVW5zGOuNpRd3h7sUn9NExmn1pJR6E0=",
       "hashType": "sha256",
       "platform": "aarch64-darwin"
     },
     {
-      "hash": "sha256-MzDtV+EsY3bRPX2ROaJXiUU/YukYwR2IAQceQ8NMLEU=",
+      "hash": "sha256-eGg9+RhYrSAnNRVajgQiV8+xzfgVcM4W1b/R7dK54+Q=",
       "hashType": "sha256",
       "platform": "x86_64-darwin"
     },
     {
-      "hash": "sha256-ft/JTWXj+IhdKEPZhsUsxGRyrYoPmuR2vCgoFQYs738=",
+      "hash": "sha256-JHekMYWoFXZVVzwTTBUvuyrSeScNTWFgXc0tZq3gXVM=",
       "hashType": "srcHash",
-      "url": "https://github.com/tw93/Mole/archive/5d02d5d378163f3f167c96b6be2b40bebde66b69.tar.gz"
+      "url": "https://github.com/tw93/Mole/archive/91a7bf44f96995361b10b5a0e9efae36a1490bf9.tar.gz"
     }
   ],
   "urls": {
-    "aarch64-darwin": "https://github.com/tw93/Mole/releases/download/V1.39.0/binaries-darwin-arm64.tar.gz",
-    "x86_64-darwin": "https://github.com/tw93/Mole/releases/download/V1.39.0/binaries-darwin-amd64.tar.gz"
+    "aarch64-darwin": "https://github.com/tw93/Mole/releases/download/V1.62.0/binaries-darwin-arm64.tar.gz",
+    "x86_64-darwin": "https://github.com/tw93/Mole/releases/download/V1.62.0/binaries-darwin-amd64.tar.gz"
   },
-  "version": "1.39.0"
+  "version": "1.62.0"
 }

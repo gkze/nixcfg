@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     import pytest
 
 _PACKAGE_DIR = REPO_ROOT / "packages/mole-app"
-_VERSION = "1.39.0"
+_VERSION = "1.62.0"
 _COMMIT = "a" * 40
 _OLD_COMMIT = "b" * 40
 _SOURCE_URL = f"https://github.com/tw93/Mole/archive/{_COMMIT}.tar.gz"
@@ -40,14 +40,17 @@ def _candidate_info() -> VersionInfo:
     )
 
 
-def test_mole_resolves_the_pinned_tag_to_an_immutable_commit(
+def test_mole_resolves_the_latest_release_to_an_immutable_commit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A recreated pinned tag must produce fresh candidate source identity."""
+    """Release discovery advances the version and keeps its immutable commit."""
     module = _load_updater_module()
     updater = module.MoleAppUpdater()
 
-    monkeypatch.setattr(module, "read_pinned_source_version", lambda name: _VERSION)
+    async def latest_release(_session: object):
+        return {"tag_name": f"V{_VERSION}"}
+
+    monkeypatch.setattr(updater, "_fetch_latest_release_payload", latest_release)
 
     async def resolve_release_tag_commit(session: object, tag: str) -> str:
         assert session is not None

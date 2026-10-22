@@ -226,3 +226,21 @@ def test_zed_scoped_crates_include_linux_pkgconfig_leaf_consumers() -> None:
         )
         """,
     )
+
+
+def test_zed_wasmtime_cache_coherence_is_bounded_to_affected_darwin_version() -> None:
+    """A fresh C API identity rebuilds its dependent metadata without purging stores."""
+    assert_nix_ast_equal(
+        nix_file_binding_expr(_PACKAGE, "wasmtimeCApiImplOverride"),
+        """
+        attrs:
+        { nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [ cmake ]; }
+        // lib.optionalAttrs (
+          pkgs.stdenv.hostPlatform.isDarwin
+          && attrs.version == selfSource.pins.wasmtimeCApiCoherenceVersion
+        ) {
+          NIXCFG_WASMTIME_C_API_COHERENCE =
+            "darwin-${selfSource.pins.wasmtimeCApiCoherenceVersion}-v1";
+        }
+        """,
+    )

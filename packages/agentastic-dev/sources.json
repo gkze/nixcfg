@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-U9qIvY1ddYqtZduB8dQT4eYAYQ/tPEs7rUYOeqIwwWg="
+    "aarch64-darwin": "sha256-V8xlLx5ZBw7rSR7wzG82A3j8CfLJ+oLX3nulLTRJHIE="
   },
   "urls": {
-    "aarch64-darwin": "https://releases.agentastic.ai/agentasticdev/Agentastic.dev-0.8.0.dmg"
+    "aarch64-darwin": "https://releases.agentastic.ai/agentasticdev/Agentastic.dev-0.14.dmg"
   },
-  "version": "0.8.0"
+  "version": "0.14"
 }

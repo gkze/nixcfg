@@ -195,12 +195,17 @@ def _unique_lock_package(
 def _fix_path_env_revision(
     manifest: Mapping[str, object],
     packages: list[Mapping[str, object]],
-) -> str:
+) -> str | None:
     """Derive and cross-check the locked fix-path-env commit."""
     dependencies = manifest.get("dependencies")
     if not isinstance(dependencies, Mapping):
         msg = "Cargo.toml must contain object dependencies"
         raise TypeError(msg)
+    if _FIX_PATH_ENV_PACKAGE not in dependencies:
+        if any(package.get("name") == _FIX_PATH_ENV_PACKAGE for package in packages):
+            msg = "Cargo.lock retains fix-path-env absent from Cargo.toml"
+            raise RuntimeError(msg)
+        return None
     fix_path_env = dependencies.get(_FIX_PATH_ENV_PACKAGE)
     if not isinstance(fix_path_env, Mapping):
         msg = "Cargo.toml fix-path-env dependency must be an inline table"
@@ -270,26 +275,28 @@ def _cargo_consistency_replacements(
         key="version",
         rendered_value=json.dumps(desktop_version),
     )
-    manifest_source = _replace_table_assignment(
-        manifest_source,
-        header="dependencies",
-        key=_FIX_PATH_ENV_PACKAGE,
-        rendered_value=(
-            f"{{ git = {json.dumps(_FIX_PATH_ENV_URL)}, rev = {json.dumps(revision)} }}"
-        ),
-    )
+    if revision is not None:
+        manifest_source = _replace_table_assignment(
+            manifest_source,
+            header="dependencies",
+            key=_FIX_PATH_ENV_PACKAGE,
+            rendered_value=(
+                f"{{ git = {json.dumps(_FIX_PATH_ENV_URL)}, rev = {json.dumps(revision)} }}"
+            ),
+        )
     lock_source = _replace_lock_package_assignment(
         lock_source,
         package_name=_DESKTOP_PACKAGE,
         key="version",
         rendered_value=json.dumps(desktop_version),
     )
-    lock_source = _replace_lock_package_assignment(
-        lock_source,
-        package_name=_FIX_PATH_ENV_PACKAGE,
-        key="source",
-        rendered_value=json.dumps(f"git+{_FIX_PATH_ENV_URL}?rev={revision}#{revision}"),
-    )
+    if revision is not None:
+        lock_source = _replace_lock_package_assignment(
+            lock_source,
+            package_name=_FIX_PATH_ENV_PACKAGE,
+            key="source",
+            rendered_value=json.dumps(f"git+{_FIX_PATH_ENV_URL}?rev={revision}#{revision}"),
+        )
     return {_CARGO_MANIFEST: manifest_source, _CARGO_LOCK: lock_source}
 
 
@@ -462,6 +469,31 @@ _PATCHES = (
     crate::nix_managed::require_mutable("install the backend")?;
     if has_owned_backend(&backend_state)? {
 """,
+        alternatives=(
+            (
+                """pub async fn start_install(
+    app: AppHandle,
+    state: tauri::State<'_, install::InstallState>,
+    backend_state: tauri::State<'_, BackendState>,
+    update_state: tauri::State<'_, update::UpdateState>,
+    diagnostics: tauri::State<'_, DiagnosticsState>,
+    skip_long_paths: Option<bool>,
+) -> Result<(), String> {
+    if has_owned_backend(&backend_state)? {
+""",
+                """pub async fn start_install(
+    app: AppHandle,
+    state: tauri::State<'_, install::InstallState>,
+    backend_state: tauri::State<'_, BackendState>,
+    update_state: tauri::State<'_, update::UpdateState>,
+    diagnostics: tauri::State<'_, DiagnosticsState>,
+    skip_long_paths: Option<bool>,
+) -> Result<(), String> {
+    crate::nix_managed::require_mutable("install the backend")?;
+    if has_owned_backend(&backend_state)? {
+""",
+            ),
+        ),
     ),
     _SourcePatch(
         Path("studio/src-tauri/src/commands.rs"),
@@ -518,6 +550,31 @@ _PATCHES = (
     crate::nix_managed::require_mutable("install or repair the backend")?;
     let attempt = match repair_group_id.as_deref() {
 """,
+        alternatives=(
+            (
+                """fn run_install_with_event_mode(
+    app: AppHandle,
+    state: InstallState,
+    diagnostics: DiagnosticsState,
+    event_mode: InstallEventMode,
+    repair_group_id: Option<String>,
+    env: InstallerEnv,
+) -> Result<(), String> {
+    let attempt = match repair_group_id.as_deref() {
+""",
+                """fn run_install_with_event_mode(
+    app: AppHandle,
+    state: InstallState,
+    diagnostics: DiagnosticsState,
+    event_mode: InstallEventMode,
+    repair_group_id: Option<String>,
+    env: InstallerEnv,
+) -> Result<(), String> {
+    crate::nix_managed::require_mutable("install or repair the backend")?;
+    let attempt = match repair_group_id.as_deref() {
+""",
+            ),
+        ),
     ),
     _SourcePatch(
         Path("studio/src-tauri/src/update.rs"),
@@ -540,6 +597,21 @@ _PATCHES = (
     }
     let home = dirs::home_dir()?;
 """,
+        alternatives=(
+            (
+                """pub fn find_unsloth_binary() -> Option<std::path::PathBuf> {
+    find_unsloth_binary_in_studio_dir(&crate::studio_home::studio_root()?)
+}
+""",
+                """pub fn find_unsloth_binary() -> Option<std::path::PathBuf> {
+    if crate::nix_managed::enabled() {
+        return crate::nix_managed::backend_binary().ok();
+    }
+    find_unsloth_binary_in_studio_dir(&crate::studio_home::studio_root()?)
+}
+""",
+            ),
+        ),
     ),
     _SourcePatch(
         Path("studio/src-tauri/src/process.rs"),
@@ -798,6 +870,28 @@ _BACKEND_PATCHES = (
         raise RuntimeError("Cannot install package-owned stable-diffusion.cpp: {_MANAGED_ERROR}.")
     target = install_dir or default_install_dir()
 """,
+        alternatives=((
+            """def install(
+    *,
+    install_dir: Optional[Path] = None,
+    accelerator: str = "auto",
+    token: Optional[str] = None,
+    cuda_major: Optional[str] = None,
+) -> Path:
+    \"\"\"Download and extract the prebuilt for this host, returning the sd-cli path. Resolves against the Unsloth mirror (``DEFAULT_REPO``) first; if the mirror cannot serve this host AND the default repo is in use, falls back to leejet upstream so native install still works. Raises ``RuntimeError`` only when neither source has an asset for the host, or the archive has no ``sd-cli``.\"\"\"
+""",
+            """def install(
+    *,
+    install_dir: Optional[Path] = None,
+    accelerator: str = "auto",
+    token: Optional[str] = None,
+    cuda_major: Optional[str] = None,
+) -> Path:
+    \"\"\"Download and extract the prebuilt for this host, returning the sd-cli path. Resolves against the Unsloth mirror (``DEFAULT_REPO``) first; if the mirror cannot serve this host AND the default repo is in use, falls back to leejet upstream so native install still works. Raises ``RuntimeError`` only when neither source has an asset for the host, or the archive has no ``sd-cli``.\"\"\"
+    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+        raise RuntimeError("Cannot install package-owned stable-diffusion.cpp: this Unsloth installation is managed by Nix.")
+""",
+        ),),
     ),
     _SourcePatch(
         Path("studio/install_node_prebuilt.py"),
@@ -956,6 +1050,19 @@ _BACKEND_PATCHES = (
         return False
     if shutil.which("uv"):
 """,
+        alternatives=((
+            """def _uninstall_package(pypi_name: str, display_name: str) -> bool:
+    \"\"\"Remove a distribution. True iff it is gone afterwards.\"\"\"
+    result = _sp.run(
+""",
+            """def _uninstall_package(pypi_name: str, display_name: str) -> bool:
+    \"\"\"Remove a distribution. True iff it is gone afterwards.\"\"\"
+    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+        logger.warning("Cannot uninstall %s from the Nix-managed backend", display_name)
+        return False
+    result = _sp.run(
+""",
+        ),),
     ),
     _SourcePatch(
         Path("studio/backend/core/training/worker.py"),
@@ -981,6 +1088,52 @@ _BACKEND_PATCHES = (
 
     if _model_offline_mode_enabled():
 """,
+        alternatives=((
+            """def _install_package_wheel_first(
+    *,
+    event_queue: Any,
+    import_name: str,
+    display_name: str,
+    pypi_name: str,
+    required: bool = False,
+    **kwargs: Any,
+) -> bool:
+    \"\"\"Install a fast-path package, wheel first, and never leave an unusable one behind. The two
+    "touch nothing" guards run here, outside the cleanup: an already-working package returns
+    before any subprocess, and offline changes nothing. Everything after them is an install
+    attempt, so ANY unsuccessful exit -- timeout, failed install, bad import -- discards what is
+    left rather than leaving metadata the in-process import would pick up. Enforced here rather
+    than at each return because four separate exits have now been found that forgot to clean up.\"\"\"
+    if _is_importable(import_name):
+        logger.info("%s already installed", display_name)
+        return True
+
+""",
+            """def _install_package_wheel_first(
+    *,
+    event_queue: Any,
+    import_name: str,
+    display_name: str,
+    pypi_name: str,
+    required: bool = False,
+    **kwargs: Any,
+) -> bool:
+    \"\"\"Install a fast-path package, wheel first, and never leave an unusable one behind. The two
+    "touch nothing" guards run here, outside the cleanup: an already-working package returns
+    before any subprocess, and offline changes nothing. Everything after them is an install
+    attempt, so ANY unsuccessful exit -- timeout, failed install, bad import -- discards what is
+    left rather than leaving metadata the in-process import would pick up. Enforced here rather
+    than at each return because four separate exits have now been found that forgot to clean up.\"\"\"
+    if _is_importable(import_name):
+        logger.info("%s already installed", display_name)
+        return True
+
+    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+        logger.info("Skipping %s installation in the Nix-managed backend", display_name)
+        return False
+
+""",
+        ),),
     ),
     _SourcePatch(
         Path("studio/backend/core/training/worker.py"),
@@ -1021,6 +1174,45 @@ _BACKEND_PATCHES = (
         return False
     # Set when a wheel installed but would not import; see the uninstall before the fallback.
 """,
+        alternatives=((
+            """def _attempt_package_install(
+    *,
+    event_queue: Any,
+    import_name: str,
+    display_name: str,
+    pypi_name: str,
+    pypi_version: str | None = None,
+    filename_prefix: str | None = None,
+    release_tag: str | None = None,
+    release_base_url: str | None = None,
+    wheel_url_builder: Callable[[dict[str, str] | None], str | None] | None = None,
+    pypi_spec: str | None = None,
+    pypi_status_message: str | None = None,
+    allow_source_build: bool = True,
+) -> bool:
+    \"\"\"The install itself. Call it through _install_package_wheel_first, never directly.\"\"\"
+""",
+            """def _attempt_package_install(
+    *,
+    event_queue: Any,
+    import_name: str,
+    display_name: str,
+    pypi_name: str,
+    pypi_version: str | None = None,
+    filename_prefix: str | None = None,
+    release_tag: str | None = None,
+    release_base_url: str | None = None,
+    wheel_url_builder: Callable[[dict[str, str] | None], str | None] | None = None,
+    pypi_spec: str | None = None,
+    pypi_status_message: str | None = None,
+    allow_source_build: bool = True,
+) -> bool:
+    \"\"\"The install itself. Call it through _install_package_wheel_first, never directly.\"\"\"
+    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+        logger.info("Skipping %s installation in the Nix-managed backend", display_name)
+        return False
+""",
+        ),),
     ),
     _SourcePatch(
         Path("studio/backend/utils/transformers_version.py"),
@@ -1035,6 +1227,19 @@ _BACKEND_PATCHES = (
         return False
     # Try uv first (faster) if on PATH -- do NOT install uv at runtime.
 """,
+        alternatives=((
+            """def _install_to_dir(pkg: str, target_dir: str) -> bool:
+    \"\"\"Install a single package into *target_dir*, preferring uv then pip.\"\"\"
+    pkg = _install_source(pkg)
+""",
+            """def _install_to_dir(pkg: str, target_dir: str) -> bool:
+    \"\"\"Install a single package into *target_dir*, preferring uv then pip.\"\"\"
+    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+        logger.warning("Cannot install %s into the Nix-managed backend", pkg)
+        return False
+    pkg = _install_source(pkg)
+""",
+        ),),
     ),
     _SourcePatch(
         Path("studio/backend/utils/transformers_version.py"),
@@ -1081,6 +1286,31 @@ _BACKEND_PATCHES = (
         return []
     attempts: list[tuple[str, subprocess.CompletedProcess[str]]] = []
 """,
+        alternatives=((
+            """def install_wheel(
+    wheel_url: str,
+    *,
+    python_executable: str,
+    use_uv: bool,
+    uv_needs_system: bool = False,
+    reinstall: bool = False,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> list[tuple[str, subprocess.CompletedProcess[str]]]:
+""",
+            """def install_wheel(
+    wheel_url: str,
+    *,
+    python_executable: str,
+    use_uv: bool,
+    uv_needs_system: bool = False,
+    reinstall: bool = False,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> list[tuple[str, subprocess.CompletedProcess[str]]]:
+    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+        _logger.warning("Cannot install wheel into the Nix-managed backend: %s", wheel_url)
+        return []
+""",
+        ),),
     ),
     _SourcePatch(
         Path("studio/backend/utils/ssm_runtime.py"),
@@ -1121,6 +1351,58 @@ _BACKEND_PATCHES = (
 
     from utils.utils import hf_env_offline
 """,
+        alternatives=((
+            """def _install_kernel(
+    *,
+    import_name: str,
+    display_name: str,
+    pypi_name: str,
+    package_version: str,
+    release_tag: str,
+    release_base_url: str,
+    status_cb: StatusCb,
+    run: Callable[..., Any],
+    newly_installed: list[str] | None = None,
+    allow_source_build: bool = True,
+    required: bool = False,
+) -> bool:
+    \"\"\"Install one kernel wheel-first, then (when *allow_source_build*) a HIP-aware PyPI source build
+    (never on Windows). Returns True iff importable afterwards; idempotent (no-op when already
+    installed). An install this call made is appended to *newly_installed*. One install per kernel
+    runs at a time across processes; a failed one is not retried in this process.\"\"\"
+    if _is_importable(import_name):
+        logger.info("%s already installed", display_name)
+        return True
+
+""",
+            """def _install_kernel(
+    *,
+    import_name: str,
+    display_name: str,
+    pypi_name: str,
+    package_version: str,
+    release_tag: str,
+    release_base_url: str,
+    status_cb: StatusCb,
+    run: Callable[..., Any],
+    newly_installed: list[str] | None = None,
+    allow_source_build: bool = True,
+    required: bool = False,
+) -> bool:
+    \"\"\"Install one kernel wheel-first, then (when *allow_source_build*) a HIP-aware PyPI source build
+    (never on Windows). Returns True iff importable afterwards; idempotent (no-op when already
+    installed). An install this call made is appended to *newly_installed*. One install per kernel
+    runs at a time across processes; a failed one is not retried in this process.\"\"\"
+    if _is_importable(import_name):
+        logger.info("%s already installed", display_name)
+        return True
+
+    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+        logger.info("Skipping %s installation in the Nix-managed backend", display_name)
+        return False
+
+""",
+        ),),
     ),
     _SourcePatch(
         Path("studio/backend/utils/ssm_runtime.py"),
@@ -1133,6 +1415,15 @@ _BACKEND_PATCHES = (
     wants_causal_conv1d = model_wants_causal_conv1d(model_name)
     is_ssm = model_is_ssm(model_name)
 """,
+        alternatives=((
+            """    # The caller's config-resolved answers win; the name match is the default.
+""",
+            """    if os.environ.get("UNSLOTH_NIX_MANAGED") == "1":
+        logger.info("SSM runtime auto-install is disabled for the Nix-managed backend")
+        return []
+    # The caller's config-resolved answers win; the name match is the default.
+""",
+        ),),
     ),
     _SourcePatch(
         Path("studio/backend/utils/whisper_cpp_update.py"),

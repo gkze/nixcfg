@@ -1,11 +1,11 @@
 {
-  "drvHash": "4zll2qrzv1xrjcxx2iwcs5wz9xa5jhv4",
+  "drvHash": "wxz9cbknkhh6hka9ym2d6sngj86ck53f",
   "hashes": [
     {
-      "hash": "sha256-V7ZBn8uZ+oMF9HOT8Upao2rUDFpb7+bk77w7ODBdiO4=",
+      "hash": "sha256-42WoLjA8ldkkddx+8fAoAPvHB0L51A1aD+4MbCtg2Uc=",
       "hashType": "vendorHash"
     }
   ],
   "input": "openai-cli",
-  "version": "v1.38.0"
+  "version": "v1.40.0"
 }

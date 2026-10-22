@@ -134,12 +134,10 @@ refresh also skips the flake inputs that back the whole hold closure, so
 an overlay that asserts input identity stays coherent. An explicit target
 selection still allows updates.
 
-Unsloth is temporarily held at the existing source pin. Desktop
-`v0.1.811-beta` requests backend `2026.9.7`, the GitHub source of the
-project declares `2026.9.6`, and PyPI publishes no source archive.
-`nixcfg update unsloth` retries the update explicitly.
-`UnslothUpdater.bulk_update_hold` can be removed after a matching source
-is published and the candidate passes validation.
+Unsloth participates in bulk updates after desktop `v0.1.909-beta` and
+backend `2026.10.7` passed matched-source, native build, and contained
+runtime validation. Its updater still requires exact source provenance,
+closure hashes, and fresh runtime evidence before exporting a candidate.
 
 Goose CLI, desktop, and V8 are held at the existing pins. An untargeted
 goose bump rebuilds `goose-cli-v8-native` from source on hosted macos-15

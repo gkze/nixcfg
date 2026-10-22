@@ -1,402 +1,70 @@
-"""Tests for the linear-cli updater."""
+"""Linear CLI's native release selection preserves platform coverage."""
 
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 
 import pytest
 
-from lib.nix.models.sources import HashEntry, SourceEntry
-from lib.tests._updater_helpers import collect_events as _collect_events
-from lib.tests._updater_helpers import load_repo_module
-from lib.tests._updater_helpers import run_async as _run
-from lib.update.events import EventSink, UpdateEvent, UpdateEventKind, ignore_event
-from lib.update.updaters import UpdateContext, VersionInfo
+from lib.tests._updater_helpers import load_repo_module, run_async
+from lib.update.planner import held_bulk_update_input_names
+from lib.update.updaters import UpdateContext
 
 
-def _load_module() -> ModuleType:
-    return load_repo_module("packages/linear-cli/updater.py", "linear_cli_updater_test")
+def _module() -> ModuleType:
+    return load_repo_module("packages/linear-cli/updater.py", "linear_native_test")
 
 
-def test_bulk_update_hold_keeps_deno_v2_until_rust_packaging() -> None:
-    """v3 dropped deno.lock; do not rematerialize until a crate2nix package exists."""
-    from lib.update.planner import held_bulk_update_input_names
-
-    module = _load_module()
-    hold = module.LinearCliUpdater.bulk_update_hold
-    assert hold is not None
-    assert "v2.6.0" in hold
-    assert "Rust" in hold
-    assert "crate2nix" in hold
-    assert "deno.lock" in hold
-    assert held_bulk_update_input_names({"linear-cli": module.LinearCliUpdater}) == {
-        "linear-cli"
+def _release() -> dict[str, object]:
+    triples = (
+        "aarch64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+    )
+    return {
+        "tag_name": "v4.5.6",
+        "assets": [
+            {
+                "name": f"linear-{triple}.tar.xz",
+                "browser_download_url": f"https://example.test/v4.5.6/linear-{triple}.tar.xz",
+            }
+            for triple in triples
+        ],
     }
 
 
-def _current_source_entry(*entries: HashEntry) -> SourceEntry:
-    return SourceEntry.model_validate({
-        "version": "1.2.3",
-        "hashes": [entry.to_dict() for entry in entries],
-    })
-
-
-def test_linear_cli_resolve_deno_version_returns_trimmed_eval_output(
+def test_latest_release_selects_native_archives_for_all_existing_platforms(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Read the current Deno version from nix eval output."""
-    module = _load_module()
-    updater = module.LinearCliUpdater()
+    updater = _module().LinearCliUpdater()
 
-    monkeypatch.setattr(
-        "lib.update.nix.get_current_nix_platform", lambda: "aarch64-darwin"
+    async def payload(_session: object):
+        return _release()
+
+    monkeypatch.setattr(updater, "_fetch_latest_release_payload", payload)
+    info = run_async(
+        updater.fetch_latest(object(), context=UpdateContext(current=None))
     )
-
-    async def _run_nix(args: list[str], *, check: bool):
-        assert args == [
-            "nix",
-            "eval",
-            "--impure",
-            "--raw",
-            "--expr",
-            updater._deno_version_expr("aarch64-darwin"),
-        ]
-        assert check is False
-        return SimpleNamespace(returncode=0, stdout="2.3.4\n", stderr="")
-
-    monkeypatch.setattr(module, "run_nix", _run_nix)
-
-    assert _run(updater._resolve_deno_version()) == "2.3.4"
+    assert info.version == "4.5.6"
+    assert {
+        platform: updater.get_download_url(platform, info)
+        for platform in updater.PLATFORMS
+    } == {
+        "aarch64-darwin": "https://example.test/v4.5.6/linear-aarch64-apple-darwin.tar.xz",
+        "aarch64-linux": "https://example.test/v4.5.6/linear-aarch64-unknown-linux-gnu.tar.xz",
+        "x86_64-darwin": "https://example.test/v4.5.6/linear-x86_64-apple-darwin.tar.xz",
+        "x86_64-linux": "https://example.test/v4.5.6/linear-x86_64-unknown-linux-gnu.tar.xz",
+    }
+    assert held_bulk_update_input_names({"linear-cli": type(updater)}) == set()
 
 
-@pytest.mark.parametrize(
-    ("result", "match"),
-    [
-        (
-            SimpleNamespace(returncode=1, stdout="", stderr="deno lookup failed"),
-            "Failed to evaluate deno.version for linear-cli: deno lookup failed",
-        ),
-        (
-            SimpleNamespace(returncode=0, stdout="\n", stderr=""),
-            "Failed to evaluate deno.version for linear-cli: nix eval failed",
-        ),
-    ],
-)
-def test_linear_cli_resolve_deno_version_rejects_failed_or_empty_eval(
-    monkeypatch: pytest.MonkeyPatch,
-    result: SimpleNamespace,
-    match: str,
-) -> None:
-    """Raise a useful error when nix eval fails or returns no version."""
-    module = _load_module()
-    updater = module.LinearCliUpdater()
+def test_missing_platform_asset_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    updater = _module().LinearCliUpdater()
 
-    monkeypatch.setattr(
-        "lib.update.nix.get_current_nix_platform", lambda: "x86_64-linux"
-    )
+    async def payload(_session: object):
+        release = _release()
+        release["assets"] = []
+        return release
 
-    async def _run_nix(_args: list[str], *, check: bool):
-        assert check is False
-        return result
-
-    monkeypatch.setattr(module, "run_nix", _run_nix)
-
-    with pytest.raises(RuntimeError, match=match):
-        _run(updater._resolve_deno_version())
-
-
-def test_linear_cli_is_latest_requires_superclass_match(monkeypatch) -> None:
-    """Skip URL comparison when the base version check already failed."""
-    module = _load_module()
-    updater = module.LinearCliUpdater()
-
-    async def _not_latest(self, context, info):
-        _ = (self, context, info)
-        return False
-
-    monkeypatch.setattr(module.DenoManifestUpdater, "_is_latest", _not_latest)
-
-    assert (
-        _run(
-            updater._is_latest(
-                UpdateContext(current=None),
-                VersionInfo(version="1.2.3"),
-            )
-        )
-        is False
-    )
-
-
-def test_linear_cli_is_latest_compares_expected_denort_urls(monkeypatch) -> None:
-    """Treat the source as current only when persisted denort URLs still match."""
-    module = _load_module()
-    updater = module.LinearCliUpdater()
-
-    async def _latest(self, context, info):
-        _ = (self, context, info)
-        return True
-
-    async def _resolve_deno_version() -> str:
-        return "2.3.4"
-
-    monkeypatch.setattr(module.DenoManifestUpdater, "_is_latest", _latest)
-    monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
-
-    matching = _current_source_entry(
-        *[
-            HashEntry.create(
-                "sha256",
-                "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-                platform=platform,
-                url=updater._denort_url(target, "2.3.4"),
-            )
-            for platform, target in updater.PLATFORMS.items()
-        ],
-        HashEntry.create(
-            "srcHash",
-            "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
-        ),
-    )
-    mismatched = _current_source_entry(
-        HashEntry.create(
-            "sha256",
-            "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
-            platform="aarch64-darwin",
-            url="https://example.invalid/wrong.zip",
-        )
-    )
-
-    assert (
-        _run(
-            updater._is_latest(
-                UpdateContext(current=matching), VersionInfo(version="1.2.3")
-            )
-        )
-        is True
-    )
-    assert (
-        _run(
-            updater._is_latest(
-                UpdateContext(current=mismatched), VersionInfo(version="1.2.3")
-            )
-        )
-        is False
-    )
-
-
-def test_linear_cli_is_latest_rejects_missing_current_hash_entries(
-    monkeypatch,
-) -> None:
-    """Require persisted per-platform hash entries before comparing URLs."""
-    module = _load_module()
-    updater = module.LinearCliUpdater()
-
-    async def _latest(self, context, info):
-        _ = (self, context, info)
-        return True
-
-    async def _resolve_deno_version() -> str:
-        raise AssertionError("should not resolve deno version")
-
-    monkeypatch.setattr(module.DenoManifestUpdater, "_is_latest", _latest)
-    monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
-
-    current = SourceEntry.model_validate({
-        "version": "1.2.3",
-        "hashes": {
-            "x86_64-linux": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-        },
-    })
-
-    assert (
-        _run(
-            updater._is_latest(
-                UpdateContext(current=current), VersionInfo(version="1.2.3")
-            )
-        )
-        is False
-    )
-
-
-def test_linear_cli_fetch_hashes_forwards_events_and_emits_sorted_entries(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Forward superclass/hash events and emit one sha256 entry per platform."""
-    module = _load_module()
-    updater = module.LinearCliUpdater()
-
-    async def _manifest_fetch(
-        self, info, session, *, context=None, emit: EventSink = ignore_event
-    ) -> object:
-        _ = (self, info, session, context)
-        await emit(UpdateEvent.status("linear-cli", "manifest ready"))
-        return []
-
-    async def _resolve_deno_version() -> str:
-        return "2.3.4"
-
-    async def _compute_url_hashes(
-        name: str, urls, *, config: object, emit: EventSink = ignore_event
-    ) -> object:
-        assert config is updater.config
-        url_list = list(urls)
-        assert name == "linear-cli"
-        assert url_list == [
-            updater._denort_url(target, "2.3.4")
-            for target in updater.PLATFORMS.values()
-        ]
-        await emit(UpdateEvent.status(name, "hashing denort"))
-        return {
-            url: f"sha256-{index:0<43}=" for index, url in enumerate(url_list, start=1)
-        }
-
-    monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)
-    monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
-    monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
-
-    events = _run(
-        _collect_events(
-            lambda emit: updater.fetch_hashes(
-                VersionInfo(version="1.2.3"),
-                object(),
-                emit=emit,
-                context=UpdateContext(current=None),
-            )
-        )
-    )
-
-    assert [event.kind for event in events] == [
-        UpdateEventKind.STATUS,
-        UpdateEventKind.STATUS,
-        UpdateEventKind.STATUS,
-    ]
-    assert [event.message for event in events] == [
-        "manifest ready",
-        "Fetching denort runtime hashes for Deno v2.3.4...",
-        "hashing denort",
-    ]
-    assert [entry.platform for entry in events.result] == sorted(updater.PLATFORMS)
-    assert all(entry.hash_type == "sha256" for entry in events.result)
-
-
-def test_linear_cli_fetch_hashes_retries_transient_manifest_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Retry installed-core Deno manifest resolution timeouts before failing."""
-    module = _load_module()
-    updater = module.LinearCliUpdater()
-    calls = 0
-    sleeps: list[float] = []
-
-    async def _sleep(delay: float) -> None:
-        sleeps.append(delay)
-
-    async def _manifest_fetch(
-        self, info, session, *, context=None, emit: EventSink = ignore_event
-    ) -> object:
-        nonlocal calls
-        _ = (self, info, session, context)
-        calls += 1
-        if calls == 1:
-            await emit(UpdateEvent.status("linear-cli", "manifest pending"))
-            raise TimeoutError
-        await emit(UpdateEvent.status("linear-cli", "manifest ready"))
-        return []
-
-    async def _resolve_deno_version() -> str:
-        return "2.3.4"
-
-    async def _compute_url_hashes(
-        name: str, urls, *, config: object, emit: EventSink = ignore_event
-    ) -> object:
-        assert config is updater.config
-        url_list = list(urls)
-        return {url: f"sha256-{index:0<43}=" for index, url in enumerate(url_list)}
-
-    monkeypatch.setattr(module.asyncio, "sleep", _sleep)
-    monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)
-    monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
-    monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
-
-    events = _run(
-        _collect_events(
-            lambda emit: updater.fetch_hashes(
-                VersionInfo(version="1.2.3"),
-                object(),
-                emit=emit,
-                context=UpdateContext(current=None),
-            )
-        )
-    )
-
-    assert calls == 2
-    assert sleeps == [0.5]
-    assert [event.message for event in events] == [
-        "manifest pending",
-        "Retrying Deno manifest resolution after transient TimeoutError (1/3)",
-        "manifest ready",
-        "Fetching denort runtime hashes for Deno v2.3.4...",
-    ]
-
-
-def test_linear_cli_fetch_hashes_propagates_manifest_failure(monkeypatch) -> None:
-    """Propagate manifest failures before runtime resolution."""
-    module = _load_module()
-    updater = module.LinearCliUpdater()
-
-    async def _manifest_fetch(
-        self, info, session, *, context=None, emit: EventSink = ignore_event
-    ) -> object:
-        _ = (self, info, session, context)
-        await emit(UpdateEvent.status("linear-cli", "manifest pending"))
-        raise RuntimeError("manifest probe failed")
-
-    monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)
-
-    with pytest.raises(RuntimeError, match="manifest probe failed"):
-        _run(
-            _collect_events(
-                lambda emit: updater.fetch_hashes(
-                    VersionInfo(version="1.2.3"),
-                    object(),
-                    emit=emit,
-                    context=UpdateContext(current=None),
-                )
-            )
-        )
-
-
-def test_linear_cli_fetch_hashes_propagates_runtime_hash_failure(monkeypatch) -> None:
-    """Propagate runtime hash failures without a candidate."""
-    module = _load_module()
-    updater = module.LinearCliUpdater()
-
-    async def _manifest_fetch(
-        self, info, session, *, context=None, emit: EventSink = ignore_event
-    ) -> object:
-        _ = (self, info, session, context)
-        return []
-
-    async def _resolve_deno_version() -> str:
-        return "2.3.4"
-
-    async def _compute_url_hashes(
-        name: str, urls, *, config: object, emit: EventSink = ignore_event
-    ) -> object:
-        _ = (name, list(urls), config)
-        await emit(UpdateEvent.status("linear-cli", "hashing denort"))
-        raise RuntimeError("runtime hash probe failed")
-
-    monkeypatch.setattr(module.DenoManifestUpdater, "fetch_hashes", _manifest_fetch)
-    monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
-    monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
-
-    with pytest.raises(RuntimeError, match="runtime hash probe failed"):
-        _run(
-            _collect_events(
-                lambda emit: updater.fetch_hashes(
-                    VersionInfo(version="1.2.3"),
-                    object(),
-                    emit=emit,
-                    context=UpdateContext(current=None),
-                )
-            )
-        )
+    monkeypatch.setattr(updater, "_fetch_latest_release_payload", payload)
+    with pytest.raises(RuntimeError, match="linear-aarch64-apple-darwin.tar.xz"):
+        run_async(updater.fetch_latest(object(), context=UpdateContext(current=None)))

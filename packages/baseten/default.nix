@@ -1,5 +1,5 @@
 {
-  buildGoModule,
+  buildGo127Module,
   fetchFromGitHub,
   lib,
   outputs,
@@ -10,7 +10,7 @@ let
   pname = "baseten";
   inherit (selfSource) commit version;
 in
-buildGoModule {
+buildGo127Module {
   inherit pname version;
 
   src = fetchFromGitHub {

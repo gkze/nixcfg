@@ -12,7 +12,6 @@ import pytest
 
 from lib.nix.commands.base import CommandResult as LibCommandResult
 from lib.nix.commands.base import NixCommandError, ProcessDone, ProcessLine
-from lib.nix.models.sources import HashEntry
 from lib.tests._updater_helpers import collect_events
 from lib.update.events import (
     CommandResult,
@@ -579,59 +578,12 @@ def test_update_cli_reexec_and_entrypoint_short_circuit(
     assert update_cli.run_update_command() == 42
 
 
-def test_linear_cli_and_superconductor_branch_edges(
+def test_superconductor_branch_edges(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cover package updater retry classification and zero-attempt branches."""
+    """Cover Superconductor's current-source guard and transient retries."""
     from lib.tests._updater_helpers import load_repo_module
     from lib.update.updaters import VersionInfo
-
-    linear = load_repo_module(
-        "packages/linear-cli/updater.py",
-        "linear_cli_updater_branch_more",
-    )
-    fake_aiohttp_error = type(
-        "FakeAiohttpError",
-        (Exception,),
-        {"__module__": "aiohttp.client_exceptions"},
-    )
-    assert linear._is_transient_deno_manifest_error(fake_aiohttp_error("temporary"))
-
-    updater = linear.LinearCliUpdater()
-    monkeypatch.setattr(linear, "DENO_MANIFEST_ATTEMPTS", 0)
-    monkeypatch.setattr(linear.LinearCliUpdater, "PLATFORMS", {"x86_64-linux": "x64"})
-
-    async def _resolve_deno_version() -> str:
-        return "2.3.4"
-
-    async def _compute_url_hashes(
-        name: str, urls: object, *, config: object, emit: EventSink = ignore_event
-    ) -> object:
-        _ = config
-        url_list = list(cast("Any", urls))
-        return {url_list[0]: "sha256-demo"}
-
-    monkeypatch.setattr(updater, "_resolve_deno_version", _resolve_deno_version)
-    monkeypatch.setattr("lib.update.process.compute_url_hashes", _compute_url_hashes)
-
-    events = _collect(
-        lambda emit: updater.fetch_hashes(
-            VersionInfo("1.0.0"),
-            object(),
-            emit=emit,
-            context=UpdateContext(current=None),
-        )
-    )
-    assert events.result is not None
-    entries = cast("list[HashEntry]", events.result)
-    assert entries == [
-        HashEntry.create(
-            "sha256",
-            "sha256-demo",
-            platform="x86_64-linux",
-            url="https://dl.deno.land/release/v2.3.4/denort-x64.zip",
-        )
-    ]
 
     superconductor = load_repo_module(
         "packages/superconductor/updater.py",

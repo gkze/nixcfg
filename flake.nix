@@ -8,9 +8,9 @@
     nixpkgs-swift.url = "github:NixOS/nixpkgs/70801e06d9730c4f1704fbd3bbf5b8e11c03a2a7";
     nix-homebrew = {
       url = "github:Yeradon/nix-homebrew";
-      # Homebrew 5.1.15 is the minimum release with brew bundle --force-cleanup,
+      # Homebrew 7.0.10 supports brew bundle --force-cleanup,
       # required by current nix-darwin. Keep the brew/tap pins tested as a tuple.
-      inputs.brew-src.url = "github:Homebrew/brew/863696a47f8d9292cb25084b6f8228e003084101";
+      inputs.brew-src.url = "github:Homebrew/brew/8f10429b56be28a25032b87463fffc95e556b5bc";
     };
     neovim-nightly-overlay = {
       url = "github:nix-community/neovim-nightly-overlay";
@@ -145,7 +145,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     worktrunk = {
-      url = "github:max-sixty/worktrunk/v0.80.0";
+      url = "github:max-sixty/worktrunk/v0.81.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     axiom-cli = {
@@ -153,7 +153,7 @@
       flake = false;
     };
     anthropic-cli = {
-      url = "github:anthropics/anthropic-cli/v1.42.0";
+      url = "github:anthropics/anthropic-cli/v2.0.0";
       flake = false;
     };
     base16-schemes-src = {
@@ -213,11 +213,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     gogcli = {
-      url = "github:steipete/gogcli/v0.45.0";
+      url = "github:steipete/gogcli/v0.46.0";
       flake = false;
     };
     openai-cli = {
-      url = "github:openai/openai-cli/v1.38.0";
+      url = "github:openai/openai-cli/v1.40.0";
       flake = false;
     };
     github-desktop = {
@@ -252,20 +252,16 @@
     };
     homebrew-cask = {
       # Retained tap snapshot; revalidate with brew-src changes.
-      url = "github:homebrew/homebrew-cask/b40e0b0c4faa6b0d7e458b67bb96820621411bde";
+      url = "github:homebrew/homebrew-cask/37fbcfab1af565ebcf88a94611baac797681f2fa";
       flake = false;
     };
     homebrew-core = {
       # Retained tap snapshot; revalidate with brew-src changes.
-      url = "github:homebrew/homebrew-core/d1b066427e859ac2820238300a3a49fa2880fe1b";
+      url = "github:homebrew/homebrew-core/36566489f7c7e828252cea8bcc303b4a7fc352de";
       flake = false;
     };
     hwatch = {
       url = "github:blacknon/hwatch/0.4.2";
-      flake = false;
-    };
-    linear-cli = {
-      url = "github:schpet/linear-cli/v2.6.0";
       flake = false;
     };
     macfuse = {

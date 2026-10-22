@@ -930,7 +930,7 @@ _ALLOWED_NIX_SUBSTITUTE_SITES: Final = (
     ),
     *_nix_sites(
         "packages/mole-app/default.nix",
-        r'''substituteInPlace "$out/bin/mole" --replace-fail 'SCRIPT_DIR="$(cd "$(dirname "''${BASH_SOURCE[0]}")" && pwd)"' "SCRIPT_DIR='$out/libexec/mole'"''',
+        r'''substituteInPlace "$out/bin/mole" --replace-fail 'SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"' "SCRIPT_DIR='$out/libexec/mole'"''',
     ),
     # These exact anchors must interpolate the realized derivation output path;
     # a static patch cannot know `$out`, while --replace-fail keeps drift fail-closed.

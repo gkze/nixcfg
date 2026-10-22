@@ -1012,6 +1012,51 @@ def test_shared_darwin_app_helpers_default_to_copy_mode_metadata() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("name", "next_name"),
+    [
+        ("mkSimpleDarwinApp", "mkDmgApp"),
+        ("mkDmgApp", "mkDmgApp7zz"),
+        ("mkZipApp", "mkPkgApp"),
+    ],
+)
+def test_prebuilt_app_helpers_preserve_signed_resources_by_default(
+    name: str,
+    next_name: str,
+) -> None:
+    """Stdenv fixup must not rewrite scripts covered by a vendor signature."""
+    helper = _darwin_app_builder(name, next_name)
+    fixup_argument = next(
+        argument
+        for argument in helper.argument_set
+        if isinstance(argument, Identifier) and argument.name == "dontFixup"
+    )
+    assert_nix_ast_equal(fixup_argument.default_value, "true")
+
+
+@pytest.mark.parametrize("package", ["granola", "wispr-flow"])
+def test_signed_app_packages_retain_the_preserving_helper_default(package: str) -> None:
+    """Package overrides must not re-enable the shebang-changing fixup phase."""
+    package_function = expect_instance(
+        nix_file_expr(f"packages/{package}/default.nix"),
+        FunctionDefinition,
+    )
+    call = expect_instance(package_function.output, FunctionCall)
+    assert_nix_ast_equal(call.name, "mkSimpleDarwinApp")
+    attrs = expect_instance(call.argument, AttributeSet)
+    fixup_override = binding_map(attrs.values).get("dontFixup")
+    if fixup_override is not None:
+        assert_nix_ast_equal(fixup_override.value, "true")
+
+
+def test_commander_preserves_its_signed_resource_scripts() -> None:
+    """The standalone Commander derivation must preserve cmdr and ssh-askpass."""
+    assert_nix_ast_equal(
+        nix_file_binding_expr("packages/commander/default.nix", "dontFixup"),
+        "true",
+    )
+
+
 def test_dmg_app_helper_forwards_custom_stdenv_to_derivation() -> None:
     """A custom DMG stdenv should reach the shared derivation constructor."""
     mk_unpacked_app = expect_instance(
@@ -3758,8 +3803,8 @@ def test_george_config_manages_mutable_gui_apps_via_scoped_applications() -> Non
     )
 
 
-def test_george_config_enables_signal_beta_downgrade_protection_opt_in() -> None:
-    """Signal Beta should opt in while ordinary managed apps retain the default."""
+def test_george_config_enables_evidenced_app_downgrade_protection() -> None:
+    """Protect self-updated apps while leaving other managed apps at the default."""
     root = _module_output("home/george/configuration.nix")
     nixcfg = expect_instance(expect_binding(root.values, "nixcfg").value, AttributeSet)
     routing = expect_instance(
@@ -3767,18 +3812,26 @@ def test_george_config_enables_signal_beta_downgrade_protection_opt_in() -> None
         AttributeSet,
     )
     entries = binding_map(routing.values)
-    signal_entry = expect_instance(entries['"signal-beta"'].value, AttributeSet)
-    slack_entry = expect_instance(entries["slack"].value, AttributeSet)
-
-    assert_nix_ast_equal(
-        expect_binding(signal_entry.values, "package").value,
-        identifier_attr_path("pkgs", "signal-beta"),
-    )
-    assert_nix_ast_equal(
-        expect_binding(signal_entry.values, "preventDowngrade").value,
-        Primitive(value=True),
-    )
-    assert "preventDowngrade" not in binding_map(slack_entry.values)
+    protected = {
+        '"signal-beta"': "signal-beta",
+        "betterdisplay": "betterdisplay",
+        '"code-cursor"': "code-cursor",
+        "figma": "figma",
+        "notion": "notion-app",
+        "slack": "slack",
+    }
+    for name, package in protected.items():
+        entry = expect_instance(entries[name].value, AttributeSet)
+        assert_nix_ast_equal(
+            expect_binding(entry.values, "package").value,
+            identifier_attr_path("pkgs", package),
+        )
+        assert_nix_ast_equal(
+            expect_binding(entry.values, "preventDowngrade").value,
+            Primitive(value=True),
+        )
+    airfoil_entry = expect_instance(entries["airfoil"].value, AttributeSet)
+    assert "preventDowngrade" not in binding_map(airfoil_entry.values)
 
 
 @pytest.mark.nix_eval(

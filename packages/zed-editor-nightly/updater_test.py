@@ -189,6 +189,7 @@ def test_zed_editor_nightly_updater_tracks_manifest_version(
         hashes=[],
         input="zed",
         commit="a" * 40,
+        pins={"wasmtimeCApiCoherenceVersion": "48.0.1"},
     )
 
 

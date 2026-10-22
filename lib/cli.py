@@ -1,6 +1,7 @@
 """Shared CLI defaults for Typer/Click applications."""
 
 import importlib
+import os
 import sys
 from typing import TYPE_CHECKING, Final, cast
 
@@ -17,6 +18,24 @@ if TYPE_CHECKING:
 HELP_CONTEXT_SETTINGS: Final[dict[str, list[str]]] = {
     "help_option_names": ["-h", "--help"],
 }
+
+NIX_CONFIG_ENV: Final[str] = "NIX_CONFIG"
+
+
+def apply_nix_options(options: Sequence[str]) -> None:
+    """Mirror ``KEY=VALUE`` Nix settings into ``NIX_CONFIG`` for child Nix calls.
+
+    Settings are appended to any inherited ``NIX_CONFIG`` so user-provided
+    values are preserved and CLI values win, matching Nix's own
+    last-definition-wins parsing. Empty entries are ignored, which keeps
+    ``--nix-option ""`` harmless.
+    """
+    additions = [option.strip() for option in options if option.strip()]
+    if not additions:
+        return
+    inherited = os.environ.get(NIX_CONFIG_ENV, "").strip()
+    lines = [inherited, *additions] if inherited else additions
+    os.environ[NIX_CONFIG_ENV] = "\n".join(lines)
 
 
 def _lazy_typer_group(module_name: str, attribute_name: str) -> type[TyperGroup]:

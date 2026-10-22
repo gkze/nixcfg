@@ -37,7 +37,12 @@
 
       tinyOverlays = {
         appcleaner = withManagedMacApp prev.appcleaner "AppCleaner.app";
-        betterdisplay = withManagedMacApp prev.betterdisplay "BetterDisplay.app";
+        betterdisplay = withManagedMacApp (
+          if prev.stdenv.hostPlatform.isDarwin then
+            final.mkSourceOverride "betterdisplay" prev.betterdisplay
+          else
+            prev.betterdisplay
+        ) "BetterDisplay.app";
         code-cursor = withManagedMacApp (final.mkSourceOverride "code-cursor" prev.code-cursor) "Cursor.app";
         commander = withManagedMacApp (final.callPackage ../packages/commander {
           selfSource = sources.commander;
@@ -63,11 +68,25 @@
               ];
           }
         );
-        notion-app = withManagedMacApp prev.notion-app "Notion.app";
+        notion-app = withManagedMacApp (
+          if system == "aarch64-darwin" then
+            (final.mkSourceOverride "notion-app" prev.notion-app).overrideAttrs {
+              dontFixup = true;
+            }
+          else
+            prev.notion-app
+        ) "Notion.app";
         orbstack = withManagedMacApp (final.mkSourceOverride "orbstack" prev.orbstack) "OrbStack.app";
         postman = withManagedMacApp prev.postman "Postman.app";
         rectangle = withManagedMacApp prev.rectangle "Rectangle.app";
-        slack = withManagedMacApp prev.slack "Slack.app";
+        slack = withManagedMacApp (
+          if system == "aarch64-darwin" then
+            (final.mkSourceOverride "slack" prev.slack).overrideAttrs {
+              dontFixup = true;
+            }
+          else
+            prev.slack
+        ) "Slack.app";
         sloth-app = withManagedMacApp prev.sloth-app "Sloth.app";
         # Nixpkgs marks the shared package broken for a Linux xdotool ABI issue;
         # the separately packaged Darwin DMG is unaffected.

@@ -205,7 +205,8 @@ tree) is still split and still in gkze:
    argus+home-george). `curl: (6) Could not resolve host: jsr.io` then
    `cannot download _std_collections-1.1.6-sum_of_test.ts from any
    mirror`. The URL `https://jsr.io/@std/collections/1.1.6/sum_of_test.ts`
-   is HTTP 200 and its sha256 matches `packages/linear-cli/deno-deps.json`.
+   returned HTTP 200 and its sha256 matched the then-current Linear 2.x
+   manifest at `packages/linear-cli/deno-deps.json`.
    The retry list only matched the literal `cannot download source from
    any mirror`; Deno `fetchurl` names the file. Match `cannot download
    \\S+ from any mirror` on the validation network path.

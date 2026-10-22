@@ -1,16 +1,15 @@
-"""Updater for the pinned Agentastic.dev macOS app archive."""
+"""Updater for the Agentastic.dev signed release channel."""
 
 from typing import ClassVar
 
-from lib.update.updaters import PinnedSourceDownloadUpdater, register_updater
+from lib.update.updaters import SparkleAppcastUrlUpdater, register_updater
 
 
 @register_updater
-class AgentasticDevUpdater(PinnedSourceDownloadUpdater):
-    """Pinned download updater for the Agentastic.dev macOS app archive."""
+class AgentasticDevUpdater(SparkleAppcastUrlUpdater):
+    """Track the release feed used by the installed Agentastic.dev app."""
 
     name = "agentastic-dev"
+    APPCAST_URL = "https://releases.agentastic.ai/agentasticdev/appcast.xml"
+    VERSION_FIELD = "short_version"
     PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": "arm64"}
-    DOWNLOAD_URL_TEMPLATE = (
-        "https://releases.agentastic.ai/agentasticdev/Agentastic.dev-{version}.dmg"
-    )

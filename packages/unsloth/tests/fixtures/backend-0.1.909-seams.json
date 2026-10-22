@@ -1,0 +1,37 @@
+{
+  "commit": "e680e303ea5374372aa4d66b1f02b747899740bb",
+  "variants": {
+    "9": {
+      "path": "studio/install_sd_cpp_prebuilt.py",
+      "original": "def install(\n    *,\n    install_dir: Optional[Path] = None,\n    accelerator: str = \"auto\",\n    token: Optional[str] = None,\n    cuda_major: Optional[str] = None,\n) -> Path:\n    \"\"\"Download and extract the prebuilt for this host, returning the sd-cli path. Resolves against the Unsloth mirror (``DEFAULT_REPO``) first; if the mirror cannot serve this host AND the default repo is in use, falls back to leejet upstream so native install still works. Raises ``RuntimeError`` only when neither source has an asset for the host, or the archive has no ``sd-cli``.\"\"\"\n"
+    },
+    "17": {
+      "path": "studio/backend/core/training/worker.py",
+      "original": "def _uninstall_package(pypi_name: str, display_name: str) -> bool:\n    \"\"\"Remove a distribution. True iff it is gone afterwards.\"\"\"\n    result = _sp.run(\n"
+    },
+    "18": {
+      "path": "studio/backend/core/training/worker.py",
+      "original": "def _install_package_wheel_first(\n    *,\n    event_queue: Any,\n    import_name: str,\n    display_name: str,\n    pypi_name: str,\n    required: bool = False,\n    **kwargs: Any,\n) -> bool:\n    \"\"\"Install a fast-path package, wheel first, and never leave an unusable one behind. The two\n    \"touch nothing\" guards run here, outside the cleanup: an already-working package returns\n    before any subprocess, and offline changes nothing. Everything after them is an install\n    attempt, so ANY unsuccessful exit -- timeout, failed install, bad import -- discards what is\n    left rather than leaving metadata the in-process import would pick up. Enforced here rather\n    than at each return because four separate exits have now been found that forgot to clean up.\"\"\"\n    if _is_importable(import_name):\n        logger.info(\"%s already installed\", display_name)\n        return True\n\n"
+    },
+    "19": {
+      "path": "studio/backend/core/training/worker.py",
+      "original": "def _attempt_package_install(\n    *,\n    event_queue: Any,\n    import_name: str,\n    display_name: str,\n    pypi_name: str,\n    pypi_version: str | None = None,\n    filename_prefix: str | None = None,\n    release_tag: str | None = None,\n    release_base_url: str | None = None,\n    wheel_url_builder: Callable[[dict[str, str] | None], str | None] | None = None,\n    pypi_spec: str | None = None,\n    pypi_status_message: str | None = None,\n    allow_source_build: bool = True,\n) -> bool:\n    \"\"\"The install itself. Call it through _install_package_wheel_first, never directly.\"\"\"\n"
+    },
+    "20": {
+      "path": "studio/backend/utils/transformers_version.py",
+      "original": "def _install_to_dir(pkg: str, target_dir: str) -> bool:\n    \"\"\"Install a single package into *target_dir*, preferring uv then pip.\"\"\"\n    pkg = _install_source(pkg)\n"
+    },
+    "22": {
+      "path": "studio/backend/utils/wheel_utils.py",
+      "original": "def install_wheel(\n    wheel_url: str,\n    *,\n    python_executable: str,\n    use_uv: bool,\n    uv_needs_system: bool = False,\n    reinstall: bool = False,\n    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,\n) -> list[tuple[str, subprocess.CompletedProcess[str]]]:\n"
+    },
+    "23": {
+      "path": "studio/backend/utils/ssm_runtime.py",
+      "original": "def _install_kernel(\n    *,\n    import_name: str,\n    display_name: str,\n    pypi_name: str,\n    package_version: str,\n    release_tag: str,\n    release_base_url: str,\n    status_cb: StatusCb,\n    run: Callable[..., Any],\n    newly_installed: list[str] | None = None,\n    allow_source_build: bool = True,\n    required: bool = False,\n) -> bool:\n    \"\"\"Install one kernel wheel-first, then (when *allow_source_build*) a HIP-aware PyPI source build\n    (never on Windows). Returns True iff importable afterwards; idempotent (no-op when already\n    installed). An install this call made is appended to *newly_installed*. One install per kernel\n    runs at a time across processes; a failed one is not retried in this process.\"\"\"\n    if _is_importable(import_name):\n        logger.info(\"%s already installed\", display_name)\n        return True\n\n"
+    },
+    "24": {
+      "path": "studio/backend/utils/ssm_runtime.py",
+      "original": "    # The caller's config-resolved answers win; the name match is the default.\n"
+    }
+  }
+}

@@ -17,6 +17,10 @@ let
         stdenv = {
           isDarwin = true;
           isLinux = false;
+          hostPlatform = {
+            isDarwin = true;
+            isLinux = false;
+          };
         };
         base16-schemes.src = {
           rev = if metadataMatches then "input-revision" else "different-nixpkgs-revision";
@@ -31,6 +35,10 @@ let
         {
           options = {
             fonts = lib.mkOption { type = lib.types.attrs; };
+            home.pointerCursor.enable = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+            };
             stylix = lib.mkOption { type = lib.types.attrs; };
             theme = lib.mkOption { type = lib.types.attrs; };
           };

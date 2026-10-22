@@ -1,0 +1,48 @@
+--- a/apple-catalog-parsing/native/swift/AssetCatalogParser/Sources/AssetCatalogParser/AssetCatalogReader.swift
++++ b/apple-catalog-parsing/native/swift/AssetCatalogParser/Sources/AssetCatalogParser/AssetCatalogReader.swift
+@@ -12,7 +12,7 @@
+     let pathString = String(cString: path)
+     let outputPathString = String(cString: outputPath)
+     if #available(macOS 13.0, *) {
+-        let supportedVersions = [13, 14, 15, 26]
++        let supportedVersions = [13, 14, 15, 26, 27]
+         let version = ProcessInfo.processInfo.operatingSystemVersion
+         if supportedVersions.contains(version.majorVersion) {
+             AssetUtil.disect(file: URL(filePath: pathString), outputURL: URL(filePath: outputPathString))
+--- a/src/commands/build/upload.rs
++++ b/src/commands/build/upload.rs
+@@ -613,6 +613,34 @@
+             has_parsed_assets,
+             "XCArchive upload should include parsed asset catalogs"
+         );
++        let asset_path = archive
++            .file_names()
++            .find(|name| name.ends_with("/Assets.json"))
++            .expect("IPA upload should contain parsed asset JSON")
++            .to_owned();
++        let assets: Vec<serde_json::Value> =
++            serde_json::from_reader(archive.by_name(&asset_path)?)?;
++        assert!(
++            assets.iter().all(|asset| {
++                asset["imageId"].is_string()
++                    && asset["name"].is_string()
++                    && asset["size"].is_u64()
++                    && asset["vector"].is_boolean()
++            }),
++            "parsed assets must preserve their schema: {assets:#?}"
++        );
++        assert!(
++            assets.iter().any(|asset| {
++                asset["name"]
++                    .as_str()
++                    .is_some_and(|name| name.contains("AppIcon"))
++                    && asset["filename"] == "Primary-Light@2x.png"
++                    && asset["width"] == 1024
++                    && asset["height"] == 1024
++                    && asset["size"].as_u64().is_some_and(|size| size > 0)
++            }),
++            "IPA upload should parse the fixture's AppIcon image: {assets:#?}"
++        );
+         Ok(())
+     }
+ 

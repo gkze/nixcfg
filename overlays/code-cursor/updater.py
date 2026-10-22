@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urljoin
 
 import aiohttp
+from packaging.version import Version
 
 from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.net import fetch_url
@@ -22,7 +23,13 @@ _CURSOR_API_URL_RE = re.compile(
     r"https://api2\.cursor\.sh/updates/download/golden/"
     r"(?P<api_platform>[^/\\\"']+)/cursor/(?P<version>[^\\\"']+)"
 )
-_CURSOR_PRODUCTION_COMMIT_RE = re.compile(r"/production/(?P<commit>[0-9a-f]{40})/")
+# Cursor's CDN has served production paths whose commit segment is longer than
+# 40 characters (the 3.27.6 DMG lives under a 41-character path). Only the
+# leading 40 hex characters identify the build, so the segment length must not
+# be part of the match. Requiring an exact 40-character segment made those
+# releases invisible: the commit never resolved, so the updater fell back to
+# the older build that the golden channel still advertises.
+_CURSOR_PRODUCTION_COMMIT_RE = re.compile(r"/production/(?P<commit>[0-9a-f]{40})")
 _CURSOR_APPIMAGE_VERSION_RE = re.compile(r"Cursor-(?P<version>\d+\.\d+\.\d+)-")
 
 
@@ -130,12 +137,21 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
             raise RuntimeError(msg)
         return value
 
-    def _pinned_version_for_incomplete_rollout(
+    def _keep_current_pin(
         self,
         context: UpdateContext,
         *,
         resolved_urls: dict[str, str],
     ) -> VersionInfo:
+        """Return the existing pin instead of adopting ``resolved_urls``.
+
+        Two situations keep the pin. Cursor has not staged one version and
+        commit for every platform yet. And the golden channel sometimes
+        resolves to a build *older* than the pin, either because Cursor rolled
+        a release back or because the channel still lags an already deployed
+        series. Rewriting the pin backwards would then fail activation on hosts
+        that already run the newer bundle, so the pin is preserved.
+        """
         current = context.current
         pinned_urls = None if current is None else current.urls
         if (
@@ -169,6 +185,15 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
             await fetch_url(session, self.DOWNLOAD_PAGE, config=self.config)
         ).decode(errors="replace")
         api_urls = self._extract_download_api_urls(page)
+        # The download page can lag an already deployed stable series. Keep
+        # checking that series rather than reinstalling the page's older one.
+        if context.current is not None and context.current.version is not None:
+            current_series = Version(context.current.version).release[:2]
+            for api_platform, api_url in api_urls.items():
+                advertised = api_url.rsplit("/", maxsplit=1)[1]
+                if current_series > Version(advertised).release[:2]:
+                    series = ".".join(map(str, current_series))
+                    api_urls[api_platform] = self._api_url(api_platform, series)
         resolved_by_api_platform = dict(
             zip(
                 api_urls,
@@ -200,10 +225,17 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
         # was still 3.22.12 / 3a929743. Keep the complete pin until every
         # platform names one version and commit.
         if version is None or commit is None:
-            return self._pinned_version_for_incomplete_rollout(
-                context,
-                resolved_urls=resolved_urls,
-            )
+            return self._keep_current_pin(context, resolved_urls=resolved_urls)
+        if (
+            context.current is not None
+            and context.current.version is not None
+            and Version(version) < Version(context.current.version)
+        ):
+            # The golden channel keeps serving a rolled-back (or lagging)
+            # build, so a fully resolved version can still be older than the
+            # pin. Never rewrite the pin downwards: hosts that already run the
+            # newer bundle would then refuse to activate.
+            return self._keep_current_pin(context, resolved_urls=resolved_urls)
         return VersionInfo(
             version=version,
             metadata=PlatformAPIMetadata(
