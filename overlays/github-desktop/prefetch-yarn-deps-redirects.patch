@@ -1,0 +1,21 @@
+--- a/index.js
++++ b/index.js
+@@ -40,11 +40,17 @@
+         reject('Too many redirects!');
+         return;
+       }
+-      if(res.statusCode === 301 || res.statusCode === 302) {
++      if([301, 302, 303, 307, 308].includes(res.statusCode)) {
++        res.resume();
+         const location = new URL(res.headers.location, registryUrl);
+         if (verbose) console.log('following redirect to ' + location);
+         return get(location, redirects + 1);
+       }
++      if (res.statusCode < 200 || res.statusCode >= 300) {
++        res.resume();
++        reject(new Error(`HTTP ${res.statusCode} for ${registryUrl}`));
++        return;
++      }
+       const file = fs.createWriteStream(fileName)
+       const hash = crypto.createHash(hashType)
+       res.pipe(file)
