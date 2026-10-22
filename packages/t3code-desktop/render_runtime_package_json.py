@@ -223,6 +223,18 @@ def _runtime_overrides(
     }
 
 
+def _catalog_entry_name(name: str) -> str:
+    """Return the package a bare ``catalog:`` spec names.
+
+    A pnpm override key such as ``@opencode/protocol>effect`` targets the
+    package after the last ``>``, optionally with a version selector, and that
+    package name is the catalog key.
+    """
+    target = name.rsplit(">", maxsplit=1)[-1]
+    package, separator, _selector = target.rpartition("@")
+    return package if separator and package else target
+
+
 def resolve_catalog_dependencies(
     dependencies: JsonStringMap,
     catalog: JsonStringMap,
@@ -236,7 +248,7 @@ def resolve_catalog_dependencies(
             resolved[name] = spec
             continue
 
-        lookup_key = spec.removeprefix("catalog:").strip() or name
+        lookup_key = spec.removeprefix("catalog:").strip() or _catalog_entry_name(name)
         try:
             resolved[name] = catalog[lookup_key]
         except KeyError as exc:
