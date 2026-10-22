@@ -267,6 +267,69 @@ class ElectronRuntimesUpdater(Updater):
         )
 
     @override
+    async def _finalize_result(
+        self,
+        result: SourceEntry,
+        *,
+        info: VersionInfo | None = None,
+        context: UpdateContext,
+        emit: EventSink = ignore_event,
+    ) -> SourceEntry:
+        """Keep complete, unchanged runtimes when the pin stage adds versions.
+
+        The generic pin stage drops every hash when the inventory is not
+        current, which emptied the whole inventory when consumers moved to new
+        Electron versions. Every package that asserts its runtime then failed
+        to evaluate on Darwin (executor and openchamber in Update run
+        39760093470), before electron-runtimes could run. Records are keyed by
+        exact version and artifact and pinned to their URL, so a complete
+        version whose URLs are unchanged is still valid. New or partial
+        versions stay unhashed for the native stage.
+        """
+        if (
+            context.pins_only
+            and info is not None
+            and result.hashes.entries == []
+            and result.hashes.mapping is None
+        ):
+            preserved = self._complete_reusable_hashes(
+                context, self._require_versions(info)
+            )
+            if preserved:
+                result = result.model_copy(
+                    update={"hashes": HashCollection.from_value(preserved)}
+                )
+        return await super()._finalize_result(
+            result, info=info, context=context, emit=emit
+        )
+
+    @classmethod
+    def _complete_reusable_hashes(
+        cls,
+        context: UpdateContext,
+        versions: tuple[str, ...],
+    ) -> list[HashEntry]:
+        """Return current records for versions whose every artifact is reusable."""
+        current_hashes = cls._current_hashes(context)
+        current_urls = cls._current_urls(context)
+        preserved: list[HashEntry] = []
+        for version in versions:
+            keys = [
+                cls._runtime_key(version, artifact)
+                for artifact in ("headers", *cls.PLATFORMS)
+            ]
+            entries = [current_hashes.get(key) for key in keys]
+            if all(
+                entry is not None
+                and current_urls.get(key)
+                == cls._artifact_url(version, key.partition(":")[2])
+                and not entry.hash.startswith(HashCollection.FAKE_HASH_PREFIX)
+                for key, entry in zip(keys, entries, strict=True)
+            ):
+                preserved.extend(entry for entry in entries if entry is not None)
+        return preserved
+
+    @override
     def build_result(self, info: VersionInfo, hashes: SourceHashes) -> SourceEntry:
         """Persist the exact URL mapping that owns every artifact hash."""
         return self._build_result_with_urls(
