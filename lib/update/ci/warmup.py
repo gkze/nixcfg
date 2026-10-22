@@ -59,7 +59,7 @@ from lib.update.derivation_validation import (
     validate_derivation_requests,
 )
 from lib.update.io import atomic_write_text
-from lib.update.nix import is_retryable_nix_network_failure
+from lib.update.nix import get_current_nix_platform, is_retryable_nix_network_failure
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -2388,6 +2388,115 @@ def source_fetch_publish_leftover_line(
     )
 
 
+_LOCAL_FETCH_SYSTEMS = frozenset({"builtin"})
+
+
+def source_fetch_drv_systems(
+    drvs: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> dict[str, str]:
+    """Return each ``.drv``'s ``system`` from one ``nix derivation show``."""
+    ordered = tuple(dict.fromkeys(drvs))
+    if not ordered:
+        return {}
+    runner = subprocess.run if run is None else run
+    result = runner(
+        ["nix", "derivation", "show", *ordered],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode:
+        detail = _store_command_detail(result, fallback="nix derivation show failed")
+        msg = f"failed to read source FOD systems: {detail}"
+        raise WarmupError(msg)
+    stdout = result.stdout
+    text = stdout.decode() if isinstance(stdout, bytes) else stdout
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as error:
+        msg = "source FOD derivation show is not JSON"
+        raise WarmupError(msg) from error
+    derivations = payload.get("derivations") if isinstance(payload, dict) else None
+    if not isinstance(derivations, dict):
+        msg = "source FOD derivation show missing derivations"
+        raise WarmupError(msg)
+    systems: dict[str, str] = {}
+    for key, drv in derivations.items():
+        path = _absolute_store_path(key) if isinstance(key, str) else None
+        system = drv.get("system") if isinstance(drv, dict) else None
+        if path is not None and isinstance(system, str):
+            systems[path] = system
+    return systems
+
+
+def unpublished_source_fetches(
+    fods: Sequence[str],
+    *,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return source FODs with an output gkze does not already serve.
+
+    39538011102 plan-shards spent ~31 min substituting 2284 FOD hits
+    onto the planner; the flush then pushed 2225 paths in 2 s because
+    gkze already had them. A gkze hit needs no publish. A path-info
+    timeout is a miss, so it still substitutes as before.
+    """
+    ordered = tuple(dict.fromkeys(fods))
+    if not ordered:
+        return ()
+    with ThreadPoolExecutor(max_workers=_SUBSTITUTER_WORKERS) as pool:
+        outputs = dict(
+            zip(
+                ordered,
+                pool.map(lambda drv: query_drv_outputs(drv, run=run), ordered),
+                strict=True,
+            )
+        )
+    published = paths_on_store(
+        tuple(dict.fromkeys(path for paths in outputs.values() for path in paths)),
+        _GKZE_CACHE,
+        run=run,
+    )
+    return tuple(
+        drv
+        for drv, paths in outputs.items()
+        if not paths or any(path not in published for path in paths)
+    )
+
+
+def locally_fetchable_source_drvs(
+    drvs: Sequence[str],
+    *,
+    system: str,
+    run: _StoreRun | None = None,
+) -> tuple[str, ...]:
+    """Return FODs this host can realize: ``builtin`` or *system*.
+
+    39538011102: 2463 of 2464 rust-warmup FODs are ``aarch64-darwin``
+    ``stdenv`` fetchurl. On x86_64-linux every one fails ``platform
+    mismatch``; Darwin rust-warmup fetches them after its DNS gate.
+    """
+    ordered = tuple(dict.fromkeys(drvs))
+    try:
+        systems = source_fetch_drv_systems(ordered, run=run)
+    except WarmupError as error:
+        # Best-effort publish: an unreadable system keeps the old attempt.
+        sys.stderr.write(f"source FOD systems unknown, fetching all: {error}\n")
+        return ordered
+    allowed = _LOCAL_FETCH_SYSTEMS | {system}
+    return tuple(drv for drv in ordered if systems.get(drv) in allowed)
+
+
+def _foreign_source_fetch_failure(drv: str, system: str) -> DerivationValidationFailure:
+    return DerivationValidationFailure(
+        source="root-warmup",
+        installable=warmup_build_installable(drv),
+        message=f"not fetched on {system}: derivation system cannot build here",
+    )
+
+
 def publish_warmup_source_fetches(
     plan: WarmupPlan,
     *,
@@ -2395,32 +2504,36 @@ def publish_warmup_source_fetches(
     progress: ValidationProgress | None = None,
     run: _StoreRun | None = None,
     realize: Callable[..., tuple[DerivationValidationFailure, ...]] | None = None,
+    system: str | None = None,
 ) -> tuple[DerivationValidationFailure, ...]:
-    """Substitute rust-warmup source FODs on plan-shards; never fail the plan.
+    """Publish rust-warmup source FODs gkze lacks; never fail the plan.
 
     Compiled ``rust_*`` outputs do not retain source tarballs in their
     runtime closure. 38258066093 substituted ``rust_convert_case-0.11.0``
     from gkze, then had to fetch ``convert_case-0.11.0.tar.gz`` and
     sphinx ``source.drv`` from upstream. Push cache hits from the
-    planner (post-build-hook) so warmup can substitute them.
+    planner so warmup can substitute them from gkze.
 
     38296208698 then fail-closed plan-shards on 562 leftover crate2nix
     FODs after ~50 min of Linux fetch. ``--max-jobs 0 --keep-going``
-    still pushes hits. 38307411499 then died on
-    ``pin-project-1.1.13.tar.gz`` / ``libloading-0.8.9.tar.gz`` because
-    crate2nix FOD names miss hydra/gkze, substitute-only never fetched
-    them, and Darwin aborted on the mirror line before DNS retry.
+    still pushes hits. Never fail-close the plan; Darwin still
+    DNS-gates and fail-closes a needed miss.
 
-    Fetch leftover source FODs with keep-going so those tarballs land
-    in gkze before rust-warmup. Never fail-close the plan; Darwin
-    still DNS-gates and fail-closes a needed miss.
+    39538011102: FODs gkze already serves are skipped, and the local
+    fetch pass only gets FODs this host can build (``builtin`` or the
+    host system). Darwin-system misses are reported, not attempted.
     """
     fods = source_fetch_input_drvs(rust_warmup_output_drvs(plan), run=run)
-    if not fods:
+    pending = unpublished_source_fetches(fods, run=run)
+    sys.stderr.write(
+        f"plan-shards source-fods total={len(fods)} unpublished={len(pending)}\n"
+    )
+    sys.stderr.flush()
+    if not pending:
         return ()
     builder = realize_warmup_outputs if realize is None else realize
     failures = builder(
-        fods,
+        pending,
         flake_root=flake_root,
         progress=progress,
         substitute_only=True,
@@ -2428,12 +2541,19 @@ def publish_warmup_source_fetches(
     )
     leftovers = source_fetch_leftover_drvs(failures)
     if leftovers:
-        failures = builder(
-            leftovers,
-            flake_root=flake_root,
-            progress=progress,
-            keep_going=True,
+        host = get_current_nix_platform() if system is None else system
+        local = locally_fetchable_source_drvs(leftovers, system=host, run=run)
+        foreign = tuple(
+            _foreign_source_fetch_failure(drv, host)
+            for drv in leftovers
+            if drv not in local
         )
+        fetched = (
+            builder(local, flake_root=flake_root, progress=progress, keep_going=True)
+            if local
+            else ()
+        )
+        failures = (*fetched, *foreign)
     if failures:
         sys.stderr.write(source_fetch_publish_leftover_line(failures) + "\n")
         sys.stderr.flush()

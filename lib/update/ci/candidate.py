@@ -5,10 +5,12 @@ import json
 import math
 import os
 import sys
-from contextlib import redirect_stdout
+import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, redirect_stdout
 from dataclasses import replace
 from pathlib import Path
-from typing import Annotated, Literal, NamedTuple
+from typing import TYPE_CHECKING, Annotated, Literal, NamedTuple
 
 import typer
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -116,6 +118,9 @@ from lib.update.paths import get_repo_root
 from lib.update.persistence import IsolatedUpdateWorkspace, planned_update_paths
 from lib.update.repair import propose_repair
 from lib.update.updaters import ensure_updaters_loaded
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
 app = typer.Typer(
     help="Prepare portable candidates and validate them on native builders."
@@ -1961,6 +1966,46 @@ def matrix() -> None:
     )
 
 
+@contextmanager
+def _plan_phase(name: str) -> Iterator[None]:
+    """Log one plan-shards phase's wall time so the tail is attributable."""
+    start = time.monotonic()
+    try:
+        yield
+    finally:
+        sys.stderr.write(
+            f"plan-shards phase {name} secs={time.monotonic() - start:.1f}\n"
+        )
+        sys.stderr.flush()
+
+
+def _timed_phase[T](name: str, work: Callable[[], T]) -> T:
+    with _plan_phase(name):
+        return work()
+
+
+def _export_and_publish_warmup(warmup: WarmupPlan, drvs_cache: Path) -> None:
+    """Export the warmup ``.drv`` cache while publishing source FODs.
+
+    The export is local ``nix copy`` + xz; the publish is substituter
+    network I/O. Neither reads the other's output, so they overlap.
+    Both results are awaited, so either failure surfaces as before.
+    """
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        exported = pool.submit(
+            _timed_phase,
+            "export-drvs",
+            lambda: export_warmup_drvs(tuple(warmup.output_drvs.values()), drvs_cache),
+        )
+        published = pool.submit(
+            _timed_phase,
+            "source-fods",
+            lambda: publish_warmup_source_fetches(warmup, flake_root=get_repo_root()),
+        )
+        exported.result()
+        published.result()
+
+
 @app.command("plan-shards")
 def plan_shards(
     candidate: Annotated[Path, typer.Option(help="Final prepared candidate JSON.")],
@@ -1987,11 +2032,17 @@ def plan_shards(
         )
         workspace.validate_changes(allowed)
         with workspace.validation_snapshot() as snapshot:
-            costs = costs_for_tree(snapshot.root)
-            manifest = eval_root_closure_manifest(snapshot.root)
+            root = snapshot.root
+            costs = _timed_phase("costs", lambda: costs_for_tree(root))
+            manifest = _timed_phase(
+                "manifest", lambda: eval_root_closure_manifest(root)
+            )
             shards = plan_darwin_closure_shards(manifest, costs=costs)
-            paths = root_store_paths(snapshot.root, manifest)
-            warmup = plan_darwin_warmup(snapshot.root, manifest=manifest, shards=shards)
+            paths = _timed_phase("root-paths", lambda: root_store_paths(root, manifest))
+            warmup = _timed_phase(
+                "warmup-plan",
+                lambda: plan_darwin_warmup(root, manifest=manifest, shards=shards),
+            )
     write_root_out_path_cache(
         output.with_name(ROOT_OUT_PATHS_NAME),
         tree=prepared.tree,
@@ -1999,10 +2050,7 @@ def plan_shards(
         manifest=manifest,
     )
     write_warmup_plan(output.with_name(WARMUP_PLAN_NAME), warmup)
-    export_warmup_drvs(
-        tuple(warmup.output_drvs.values()), output.with_name(WARMUP_DRVS_NAME)
-    )
-    publish_warmup_source_fetches(warmup, flake_root=get_repo_root())
+    _export_and_publish_warmup(warmup, output.with_name(WARMUP_DRVS_NAME))
     matrix = github_actions_matrix(shards)
     atomic_write_text(output, json.dumps(matrix, indent=2) + "\n")
     target = github_output
