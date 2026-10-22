@@ -1,18 +1,21 @@
 """Updater for Aside browser macOS releases."""
 
+import asyncio
 import re
 from typing import TYPE_CHECKING, ClassVar
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import aiohttp
 
 from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.updaters import (
-    DownloadUrlMetadataUpdater,
+    AssetURLsMetadataUpdater,
     VersionInfo,
     register_updater,
 )
-from lib.update.updaters.metadata import DownloadUrlMetadata
+from lib.update.updaters.core import verify_platform_versions
+from lib.update.updaters.metadata import AssetURLsMetadata
+from lib.update.updaters.strategies import ResolvedArtifact
 
 if TYPE_CHECKING:
     from lib.update.updaters.core import UpdateContext
@@ -20,24 +23,36 @@ if TYPE_CHECKING:
 _HTTP_REDIRECT_MIN = 300
 _DOWNLOAD_URL = "https://aside.com/api/download/macos"
 _ARTIFACT_HOST = "releases.aside.com"
-_ARTIFACT_PATH = re.compile(r"/dev-updater/Aside-(?P<version>[0-9]+(?:\.[0-9]+)+)\.dmg")
+_VERSION_PATTERN = r"[0-9]+(?:\.[0-9]+)+"
 
 
 @register_updater
-class AsideUpdater(DownloadUrlMetadataUpdater):
-    """Resolve Aside's versioned DMG from its canonical download redirect."""
+class AsideUpdater(AssetURLsMetadataUpdater):
+    """Resolve Aside's versioned per-architecture DMGs from its download redirect.
+
+    Aside now ships separate ``-arm64`` / ``-x64`` DMGs (the unsuffixed DMG is
+    gone), and the bare endpoint redirects to the HTML download page (Update
+    run 39829870830). An explicit ``arch`` query redirects to the immutable
+    DMG for that architecture.
+    """
 
     name = "aside"
     PLATFORMS: ClassVar[dict[str, str]] = {
-        "aarch64-darwin": "darwin",
-        "x86_64-darwin": "darwin",
+        "aarch64-darwin": "arm64",
+        "x86_64-darwin": "x64",
     }
-    URL_METADATA_CONTEXT = "Aside download redirect"
+    ASSET_URLS_METADATA_CONTEXT = "Aside download redirects"
 
-    @staticmethod
-    def _parse_artifact_url(url: str) -> tuple[str, str]:
+    @classmethod
+    def _download_url(cls, platform: str) -> str:
+        return f"{_DOWNLOAD_URL}?{urlencode({'arch': cls.PLATFORMS[platform]})}"
+
+    @classmethod
+    def _parse_artifact_url(cls, platform: str, url: str) -> ResolvedArtifact:
+        arch = re.escape(cls.PLATFORMS[platform])
+        pattern = rf"/dev-updater/Aside-(?P<version>{_VERSION_PATTERN})-{arch}\.dmg"
         parsed = urlsplit(url)
-        match = _ARTIFACT_PATH.fullmatch(parsed.path)
+        match = re.fullmatch(pattern, parsed.path)
         if (
             parsed.scheme != "https"
             or parsed.netloc != _ARTIFACT_HOST
@@ -45,34 +60,60 @@ class AsideUpdater(DownloadUrlMetadataUpdater):
             or parsed.fragment
             or match is None
         ):
-            msg = f"Could not extract Aside version from download redirect: {url}"
+            msg = (
+                f"Could not extract Aside {platform} version from download "
+                f"redirect: {url}"
+            )
             raise RuntimeError(msg)
-        return match.group("version"), url
+        return ResolvedArtifact(version=match.group("version"), url=url)
 
-    async def fetch_latest(
-        self, session: aiohttp.ClientSession, *, context: UpdateContext
-    ) -> VersionInfo:
-        """Resolve the latest immutable Aside artifact without downloading it."""
-        _ = context
+    async def _fetch_artifact(
+        self,
+        session: aiohttp.ClientSession,
+        platform: str,
+    ) -> ResolvedArtifact:
+        download_url = self._download_url(platform)
         timeout = aiohttp.ClientTimeout(total=self.config.default_timeout)
         async with session.head(
-            _DOWNLOAD_URL,
+            download_url,
             allow_redirects=False,
             timeout=timeout,
         ) as response:
             if not _HTTP_REDIRECT_MIN <= response.status < HTTP_BAD_REQUEST:
                 msg = (
-                    f"Expected Aside download redirect from {_DOWNLOAD_URL}, "
+                    f"Expected Aside download redirect from {download_url}, "
                     f"got HTTP {response.status} {response.reason}"
                 )
                 raise RuntimeError(msg)
             location = response.headers.get("Location")
             if not location:
-                msg = f"Aside download redirect from {_DOWNLOAD_URL} omitted Location"
+                msg = f"Aside download redirect from {download_url} omitted Location"
                 raise RuntimeError(msg)
+        return self._parse_artifact_url(platform, location)
 
-        version, artifact_url = self._parse_artifact_url(location)
+    async def fetch_latest(
+        self, session: aiohttp.ClientSession, *, context: UpdateContext
+    ) -> VersionInfo:
+        """Resolve one Aside version and its immutable per-architecture DMGs."""
+        _ = context
+        artifacts = dict(
+            zip(
+                self.PLATFORMS,
+                await asyncio.gather(
+                    *(
+                        self._fetch_artifact(session, platform)
+                        for platform in self.PLATFORMS
+                    )
+                ),
+                strict=True,
+            )
+        )
         return VersionInfo(
-            version=version,
-            metadata=DownloadUrlMetadata(url=artifact_url),
+            version=verify_platform_versions(
+                {platform: a.version for platform, a in artifacts.items()},
+                context="Aside download redirects returned mismatched versions",
+            ),
+            metadata=AssetURLsMetadata({
+                platform: artifact.url for platform, artifact in artifacts.items()
+            }),
         )

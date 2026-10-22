@@ -26,3 +26,4 @@ canary-slots: 0
 2026-10-22T16:02:00Z one Update run after 39791273689 darwin fixes (gh-current probe reads go-toolchain run result, unsloth WebKit helper grants)
 2026-10-22T17:58:00Z one Update run after 39811796194 prepare-merge fix (electron-runtimes inventory owned by Darwin prepare)
 2026-10-22T18:20:00Z one Update run after publish prek fix (t3code lockfile fixture yamlfmt-clean, tolerant tarball parse)
+2026-10-22T18:45:00Z one Update run after 39829870830 prepare-pins fix (aside per-architecture DMG redirects)
