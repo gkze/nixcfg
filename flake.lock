@@ -1834,7 +1834,7 @@
       },
       "original": {
         "owner": "gkze",
-        "ref": "gkze/fixes",
+        "ref": "gkze/patches",
         "repo": "opencode",
         "type": "github"
       }
