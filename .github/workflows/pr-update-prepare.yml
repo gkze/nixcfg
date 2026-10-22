@@ -1,0 +1,116 @@
+---
+name: PR update prepare
+# Run the Update pipeline's native prepare stages (pins, Darwin, both
+# Linux, merge-candidates) before merge, scoped to the updater targets a
+# PR touches. 39791273689 / 39832195356 only failed prepare-darwin or
+# prepare-pins 30-95 min after an updater fix merged; this check fails
+# the PR instead. It runs the same update-native.yml stages, so nothing
+# in Update is skipped or weakened.
+on:
+  pull_request:
+    paths:
+      - packages/**
+      - overlays/**
+permissions:
+  contents: read
+concurrency:
+  group: pr-update-prepare-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  targets:
+    # Secrets are unavailable to fork PRs. codex/update-* branches are
+    # publish/repair output that a full Update run already certified.
+    if: |-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !startsWith(github.head_ref, 'codex/update-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
+      - name: Map changed files to updater targets
+        id: targets
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: python
+        run: |-
+          import os
+          import subprocess
+          import sys
+
+          span = f"{os.environ['BASE_SHA']}...{os.environ['HEAD_SHA']}"
+          changed = subprocess.run(
+              ["git", "diff", "--name-only", span],
+              check=True,
+              capture_output=True,
+              text=True,
+          ).stdout
+          result = subprocess.run(
+              [sys.executable, "-m", "lib.pr_update_targets"],
+              input=changed,
+              check=True,
+              capture_output=True,
+              text=True,
+          )
+          print(result.stdout, end="")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(result.stdout)
+  prepare-pins:
+    needs: targets
+    if: needs.targets.outputs.targets != ''
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: prepare-pins
+      targets: ${{ needs.targets.outputs.targets }}
+    secrets: inherit
+  prepare-darwin:
+    needs: [targets, prepare-pins]
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: macos-15
+      system: aarch64-darwin
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ needs.targets.outputs.targets }}
+    secrets: inherit
+  prepare-arm:
+    needs: [targets, prepare-pins]
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04-arm
+      system: aarch64-linux
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ needs.targets.outputs.targets }}
+    secrets: inherit
+  prepare-x86:
+    needs: [targets, prepare-pins]
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: prepare
+      previous: prepare-pins
+      targets: ${{ needs.targets.outputs.targets }}
+    secrets: inherit
+  prepare-merge:
+    needs: [prepare-darwin, prepare-arm, prepare-x86]
+    uses: ./.github/workflows/update-native.yml
+    with:
+      runner: ubuntu-24.04
+      system: x86_64-linux
+      stage: merge-candidates
+      previous: prepare-aarch64-darwin
+      previous_extra: prepare-aarch64-linux
+      previous_third: prepare-x86_64-linux
+    secrets: inherit
