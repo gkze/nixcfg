@@ -43,9 +43,29 @@ let
     workspaceParentDirs ++ explicitRootWorkspaceDirs ++ topLevelWorkspaceDirs
   );
   workspaceBuildShellDirs = lib.escapeShellArgs workspaceBuildDirectories;
+  lockfileText =
+    if builtins.pathExists (src + "/pnpm-lock.yaml") then
+      builtins.readFile (src + "/pnpm-lock.yaml")
+    else
+      "";
+  # pnpm installs `file:` tarball dependencies from the checkout, so the
+  # dependency source must carry exactly the tarballs the lockfile resolves.
+  localTarballs = lib.unique (
+    map builtins.head (
+      builtins.filter builtins.isList (builtins.split "tarball: file:([^,} ]+)" lockfileText)
+    )
+  );
+  ancestorDirs =
+    path:
+    let
+      parts = lib.init (lib.splitString "/" path);
+    in
+    lib.genList (count: lib.concatStringsSep "/" (lib.take (count + 1) parts)) (builtins.length parts);
+  localTarballDirs = lib.unique (lib.concatMap ancestorDirs localTarballs);
   dependencySourceDirectories = [
     ""
   ]
+  ++ localTarballDirs
   ++ workspaceParentDirs
   ++ workspaceDirs
   ++ lib.optional (builtins.pathExists (src + "/${mobileModuleRoot}")) mobileModuleRoot
@@ -65,10 +85,14 @@ let
       || lib.hasPrefix "patches/" relativePath
       || builtins.elem relativePath (
         [
+          # pnpm records the hook file's checksum in the lockfile and refuses a
+          # frozen install without it.
+          ".pnpmfile.cjs"
           "package.json"
           "pnpm-lock.yaml"
           "pnpm-workspace.yaml"
         ]
+        ++ localTarballs
         ++ map (dir: "${dir}/package.json") workspaceDirs
         ++ map (dir: "${dir}/package.json") mobileModulePackageDirs
       );

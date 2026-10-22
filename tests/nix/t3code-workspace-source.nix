@@ -3,6 +3,13 @@
 let
   sourceA = ./t3code-workspace-source/a;
   sourceB = ./t3code-workspace-source/b;
+  # pnpm reads the hook file and the lockfile's `file:` tarballs during a
+  # frozen install; nothing else outside the manifests belongs in the input.
+  lockedInputs =
+    (import ../../packages/t3code/_source.nix {
+      src = ./t3code-workspace-source/c;
+      inherit lib;
+    }).dependencySource;
   sharedSource =
     (import ../../packages/t3code/_source.nix {
       src = sourceA;
@@ -47,6 +54,10 @@ let
     };
   };
 in
+assert builtins.pathExists (lockedInputs + "/.pnpmfile.cjs");
+assert builtins.pathExists (lockedInputs + "/apps/mobile/deps/local-1.0.0.tgz");
+assert !builtins.pathExists (lockedInputs + "/apps/mobile/deps/unlisted-2.0.0.tgz");
+assert !builtins.pathExists (lockedInputs + "/README.md");
 assert shared.version == "cached-main-abcdef0";
 assert changedSource.version == "2.0.0-main-abcdef0";
 assert changedSource.node_modules.src != shared.node_modules.src;
