@@ -6229,3 +6229,57 @@ def test_incomplete_native_validation_cannot_issue_report(
     assert not report.exists()
     with pytest.raises(ValueError, match="Validation reports"):
         pipeline.certified_patch(candidate, [])
+
+
+def test_export_and_publish_warmup_overlaps(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """39538011102 ran ~10 min export, then ~31 min FOD publish, serially.
+
+    The export blocks until the publish has started; a serial plan-shards
+    would time out here. Both phases log wall time, and an export failure
+    still fails the plan.
+    """
+    import threading
+
+    from lib.update.ci.warmup import WarmupError, WarmupPlan
+
+    plan = WarmupPlan.model_validate({
+        "schemaVersion": 1,
+        "system": "aarch64-darwin",
+        "substituters": [],
+        "warmupOutputs": [],
+        "outputDrvs": {"/nix/store/out": "/nix/store/out.drv"},
+        "perRoot": {},
+        "shards": [],
+        "notes": "fixture",
+    })
+    publishing = threading.Event()
+    exported: list[tuple[tuple[str, ...], Path]] = []
+
+    def export(drvs: tuple[str, ...], dest: Path) -> None:
+        assert publishing.wait(timeout=10), "export did not overlap publish"
+        exported.append((drvs, dest))
+
+    def publish(warmup: object, *, flake_root: Path) -> tuple[()]:
+        assert warmup is plan
+        publishing.set()
+        return ()
+
+    monkeypatch.setattr(pipeline, "export_warmup_drvs", export)
+    monkeypatch.setattr(pipeline, "publish_warmup_source_fetches", publish)
+    pipeline._export_and_publish_warmup(plan, tmp_path / "drvs")
+    assert exported == [(("/nix/store/out.drv",), tmp_path / "drvs")]
+    err = capsys.readouterr().err
+    assert "plan-shards phase export-drvs secs=" in err
+    assert "plan-shards phase source-fods secs=" in err
+
+    def fail_export(_drvs: object, _dest: object) -> None:
+        msg = "planner is missing warmup .drv"
+        raise WarmupError(msg)
+
+    monkeypatch.setattr(pipeline, "export_warmup_drvs", fail_export)
+    with pytest.raises(WarmupError, match="missing warmup"):
+        pipeline._export_and_publish_warmup(plan, tmp_path / "drvs")

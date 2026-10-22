@@ -93,6 +93,7 @@ from lib.update.ci.warmup import (
     language_models_warmup_outputs,
     linux_builder_substitute_miss_reason,
     load_warmup_plan,
+    locally_fetchable_source_drvs,
     nix_store_argv_has_operation,
     parse_canary_crates,
     parse_canary_slots,
@@ -126,6 +127,7 @@ from lib.update.ci.warmup import (
     skip_cached_warmup_paths,
     slot_cascade_paths,
     slot_warmup_paths,
+    source_fetch_drv_systems,
     source_fetch_failure_drv,
     source_fetch_input_drvs,
     source_fetch_leftover_drvs,
@@ -135,6 +137,7 @@ from lib.update.ci.warmup import (
     stripe_layer_paths,
     substitutable_paths,
     unique_drvs_for_outputs,
+    unpublished_source_fetches,
     wait_for_source_fetch_network,
     warmup_build_installable,
     warmup_drv_root_args,
@@ -2726,14 +2729,13 @@ def test_publish_warmup_source_fetches_realizes_rust_fods(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """plan-shards substitutes hits, then fetches leftover crate FODs.
+    """plan-shards substitutes gkze-missing hits, then fetches local FODs.
 
     38296208698 fail-closed plan-shards on 562 leftover crate2nix FODs
-    after ~50 min of Linux fetch and skipped every Darwin job. Hits
-    still push via the post-build-hook. 38307411499 then missed
-    pin-project-1.1.13 / libloading-0.8.9 because substitute-only
-    never fetched crate2nix-named tarballs. Fetch leftovers; never
-    fail-close the plan. Darwin still fail-closes a needed miss.
+    after ~50 min of Linux fetch and skipped every Darwin job. Never
+    fail-close the plan; Darwin still fail-closes a needed miss.
+    39538011102: aarch64-darwin crate FODs always fail ``platform
+    mismatch`` on x86_64-linux, so only host/builtin leftovers fetch.
     """
     from lib.update.ci.warmup import RootWarmupStats, WarmupPlan
 
@@ -2777,6 +2779,10 @@ def test_publish_warmup_source_fetches_realizes_rust_fods(
 
     monkeypatch.setattr(
         "lib.update.ci.warmup.source_fetch_input_drvs", lambda *_a, **_k: ()
+    )
+    monkeypatch.setattr(
+        "lib.update.ci.warmup.unpublished_source_fetches",
+        lambda fods, **_k: tuple(fods),
     )
     assert (
         publish_warmup_source_fetches(plan, flake_root=tmp_path, realize=refuse_realize)
@@ -2832,14 +2838,27 @@ def test_publish_warmup_source_fetches_realizes_rust_fods(
             return substitute_misses
         return ()
 
+    monkeypatch.setattr(
+        "lib.update.ci.warmup.source_fetch_drv_systems",
+        lambda drvs, **_k: {
+            source: "x86_64-linux",
+            pin_project: "aarch64-darwin",
+            libloading: "aarch64-darwin",
+            clang_sys: "builtin",
+        },
+    )
     published = publish_warmup_source_fetches(
-        plan, flake_root=tmp_path, realize=realize
+        plan, flake_root=tmp_path, realize=realize, system="x86_64-linux"
     )
     assert seen == [
         ((source, convert_case, pin_project, libloading, clang_sys), True, True),
-        ((source, pin_project, libloading, clang_sys), False, True),
+        ((source, clang_sys), False, True),
     ]
-    assert published == ()
+    assert [failure.installable for failure in published] == [
+        f"{pin_project}^*",
+        f"{libloading}^*",
+    ]
+    assert all("cannot build here" in failure.message for failure in published)
 
     def realize_still_missing(
         paths: object, *_args: object, **kwargs: object
@@ -2848,8 +2867,12 @@ def test_publish_warmup_source_fetches_realizes_rust_fods(
             return substitute_misses
         return (pin_miss, lib_miss, clang_miss)
 
+    monkeypatch.setattr(
+        "lib.update.ci.warmup.source_fetch_drv_systems",
+        lambda drvs, **_k: dict.fromkeys(drvs, "x86_64-linux"),
+    )
     stubborn = publish_warmup_source_fetches(
-        plan, flake_root=tmp_path, realize=realize_still_missing
+        plan, flake_root=tmp_path, realize=realize_still_missing, system="x86_64-linux"
     )
     assert stubborn == (pin_miss, lib_miss, clang_miss)
     assert source_fetch_publish_leftover_line(stubborn) in capsys.readouterr().err
@@ -2859,6 +2882,109 @@ def test_publish_warmup_source_fetches_realizes_rust_fods(
         )
         == ()
     )
+    monkeypatch.setattr(
+        "lib.update.ci.warmup.source_fetch_drv_systems",
+        lambda drvs, **_k: dict.fromkeys(drvs, "aarch64-darwin"),
+    )
+    monkeypatch.setattr(
+        "lib.update.ci.warmup.get_current_nix_platform", lambda: "x86_64-linux"
+    )
+    seen.clear()
+    foreign = publish_warmup_source_fetches(plan, flake_root=tmp_path, realize=realize)
+    assert seen == [
+        ((source, convert_case, pin_project, libloading, clang_sys), True, True)
+    ]
+    assert len(foreign) == 4
+    monkeypatch.setattr(
+        "lib.update.ci.warmup.unpublished_source_fetches", lambda *_a, **_k: ()
+    )
+    assert (
+        publish_warmup_source_fetches(plan, flake_root=tmp_path, realize=refuse_realize)
+        == ()
+    )
+
+
+def test_unpublished_source_fetches_skips_gkze_hits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """39538011102 substituted 2284 FODs gkze already had; skip those."""
+    hit = "/nix/store/jpbxlpf8c33hg7aa0jzlrqdq5ia13zq7-brotli-8.0.4.tar.gz.drv"
+    miss = (
+        "/nix/store/rys8l14n4riv0mxbl85858x3ng06qhcd-alloc-no-stdlib-2.0.4.tar.gz.drv"
+    )
+    odd = "/nix/store/xqqq8im19pic597cz80gshipmpghab98-alloc-stdlib-0.2.4.tar.gz.drv"
+    outputs = {
+        hit: ("/nix/store/j53pjz0hky6ykj41gam5jsm4rym07151-brotli-8.0.4.tar.gz",),
+        miss: ("/nix/store/vmp7cly0rgdsj95hbwwczsriqbaba5sf-alloc-no-stdlib.tar.gz",),
+        odd: (),
+    }
+    stores: list[tuple[tuple[str, ...], str]] = []
+
+    def on_store(paths: object, store: str, **_kwargs: object) -> frozenset[str]:
+        stores.append((tuple(paths), store))
+        return frozenset(outputs[hit])
+
+    monkeypatch.setattr(
+        "lib.update.ci.warmup.query_drv_outputs", lambda drv, **_k: outputs[drv]
+    )
+    monkeypatch.setattr("lib.update.ci.warmup.paths_on_store", on_store)
+    assert unpublished_source_fetches((hit, miss, odd, hit)) == (miss, odd)
+    assert stores == [((*outputs[hit], *outputs[miss]), "https://gkze.cachix.org")]
+    assert unpublished_source_fetches(()) == ()
+
+
+def test_locally_fetchable_source_drvs_reads_derivation_system(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Only ``builtin`` and host-system FODs can be fetched on the planner."""
+    darwin = "/nix/store/jpbxlpf8c33hg7aa0jzlrqdq5ia13zq7-brotli-8.0.4.tar.gz.drv"
+    builtin = "/nix/store/26q4hp11s3rbgj9xnk1xhv7b56xzlhan-bootstrap-tools.tar.xz.drv"
+    linux = "/nix/store/1hm4jss2dwiz4sii2z00qgwwasflxghy-source.drv"
+    payload = {
+        "version": 4,
+        "derivations": {
+            darwin.removeprefix("/nix/store/"): {"system": "aarch64-darwin"},
+            builtin: {"system": "builtin"},
+            linux.removeprefix("/nix/store/"): {"system": "x86_64-linux"},
+            "not-a-store-path": {"system": "x86_64-linux"},
+            "/nix/store/ffffffffffffffffffffffffffffffff-x.drv": "bad",
+        },
+    }
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    drvs = (darwin, builtin, linux)
+    assert locally_fetchable_source_drvs(drvs, system="x86_64-linux", run=run) == (
+        builtin,
+        linux,
+    )
+    assert calls == [["nix", "derivation", "show", *drvs]]
+    assert source_fetch_drv_systems((), run=run) == {}
+
+    def run_bytes(
+        args: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload).encode(), b"")
+
+    assert (
+        source_fetch_drv_systems((darwin,), run=run_bytes)[darwin] == "aarch64-darwin"
+    )
+    for stdout, code in (("boom", 1), ("not json", 0), ("[]", 0), ("{}", 0)):
+
+        def broken(
+            args: list[str], *, _out: str = stdout, _code: int = code, **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(args, _code, _out, "")
+
+        with pytest.raises(WarmupError):
+            source_fetch_drv_systems((darwin,), run=broken)
+        assert locally_fetchable_source_drvs(
+            (darwin,), system="x86_64-linux", run=broken
+        ) == (darwin,)
+    assert "source FOD systems unknown" in capsys.readouterr().err
 
 
 def test_realize_warmup_substitute_only_is_max_jobs_zero(tmp_path: Path) -> None:
