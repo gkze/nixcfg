@@ -47,6 +47,9 @@ class GhCurrentUpdater(SourceThenOverlayHashMixin, GitHubReleaseUpdater):
     """Refresh immutable source and vendor hashes together."""
 
     name = "gh-current"
+    # The overlay builds with the pinned Go toolchain, whose sources.json is
+    # unhashed until its own update finishes (Update run 39774011035).
+    companion_of = "go-toolchain"
     GITHUB_OWNER = "cli"
     GITHUB_REPO = "cli"
     dependency_hash_type = "vendorHash"
