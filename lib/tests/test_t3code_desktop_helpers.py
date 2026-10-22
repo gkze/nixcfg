@@ -392,6 +392,47 @@ def test_render_runtime_package_json_preserves_runtime_workspace_dependencies(
     assert "electron" not in payload["dependencies"]
 
 
+def test_render_runtime_package_json_keeps_dev_workspace_references_resolvable(
+    tmp_path: Path,
+) -> None:
+    """Bun installs member devDependencies, so dev workspace refs join the set."""
+    module = _runtime_manifest_module()
+
+    source_root = _runtime_source(
+        tmp_path,
+        root_package={
+            "workspaces": {"packages": ["packages/*"], "catalog": {}},
+            "overrides": {},
+        },
+        server_package={"version": "0.0.25", "dependencies": {}},
+        desktop_package={"dependencies": {"@t3tools/ssh": "workspace:*"}},
+        package_jsons={
+            "packages/ssh": {
+                "name": "@t3tools/ssh",
+                "devDependencies": {
+                    "@t3tools/ssh-testing": "workspace:*",
+                    "vitest": "4.0.0",
+                },
+            },
+            "packages/ssh-testing": {
+                "name": "@t3tools/ssh-testing",
+                "devDependencies": {"@t3tools/fixtures": "workspace:*"},
+            },
+            "packages/fixtures": {"name": "@t3tools/fixtures"},
+            "packages/unused": {"name": "@t3tools/unused"},
+        },
+    )
+
+    payload = module.build_runtime_manifest(source_root)
+
+    assert payload["workspaces"]["packages"] == [
+        "packages/fixtures",
+        "packages/ssh",
+        "packages/ssh-testing",
+    ]
+    assert payload["dependencies"] == {"@t3tools/ssh": "workspace:*"}
+
+
 def test_render_runtime_package_json_promotes_workspace_runtime_dependencies(
     tmp_path: Path,
 ) -> None:

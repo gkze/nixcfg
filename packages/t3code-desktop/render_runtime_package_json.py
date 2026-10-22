@@ -149,6 +149,9 @@ def _workspace_metadata(
     return workspaces, overrides
 
 
+_WORKSPACE_MEMBER_SECTIONS = ("dependencies", "devDependencies", "optionalDependencies")
+
+
 def _workspace_dependency_names(dependencies: JsonStringMap) -> set[str]:
     return {
         name for name, spec in dependencies.items() if spec.startswith("workspace:")
@@ -173,7 +176,10 @@ def _runtime_workspace_dirs(
             raise RuntimeError(msg) from exc
         selected.add(package_name)
         package_json = _load_json(source_root / rel_dir / "package.json")
-        for section in ("dependencies", "optionalDependencies"):
+        # Bun installs every workspace member's devDependencies, so a member's
+        # dev-only ``workspace:*`` reference must be a member too or the
+        # install cannot resolve it (Update run 39774011035).
+        for section in _WORKSPACE_MEMBER_SECTIONS:
             pending.extend(
                 _workspace_dependency_names(
                     _string_map(
