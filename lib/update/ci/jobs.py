@@ -359,6 +359,21 @@ def clean_runner_image() -> None:
             msg = "Cannot identify the active Xcode; refusing image cleanup"
             raise ValueError(msg)
         selected = selected.resolve()
+        # Reclaim stops at headroom, so order trees by bytes freed per second.
+        # macos-15 (39791273689, 39774011035, 39538011102): system simulators
+        # free ~55 GB in <1 s, Android ~15 GB in 19-37 s, each Xcode ~5 GB in
+        # 23-44 s. Xcode-first spent ~4 min on eight Xcodes before reaching
+        # the simulators; this order meets the same headroom in under a minute.
+        # iOS simulators are unused by Nix Darwin roots.
+        paths.append(_DARWIN_SYSTEM_SIMULATORS)
+        paths.append(Path.home() / "Library/Developer/CoreSimulator")
+        paths.append(Path.home() / "Library/Android/sdk")
+        xcode = Path.home() / "Library/Developer/Xcode"
+        paths.extend((
+            xcode / "iOS DeviceSupport",
+            xcode / "watchOS DeviceSupport",
+            xcode / "tvOS DeviceSupport",
+        ))
         # Keep the active developer tools and their aliases. Nix supplies its
         # language toolchains; the updater does not need mobile SDKs.
         paths.extend(
@@ -366,17 +381,7 @@ def clean_runner_image() -> None:
             for path in _APPLICATIONS.glob("Xcode*.app")
             if not path.is_symlink() and not selected.is_relative_to(path.resolve())
         )
-        paths.append(Path.home() / "Library/Android/sdk")
-        # iOS simulators are unused by Nix Darwin roots and occupy tens of GB.
-        paths.append(Path.home() / "Library/Developer/CoreSimulator")
-        paths.append(_DARWIN_SYSTEM_SIMULATORS)
-        xcode = Path.home() / "Library/Developer/Xcode"
-        paths.extend((
-            xcode / "iOS DeviceSupport",
-            xcode / "watchOS DeviceSupport",
-            xcode / "tvOS DeviceSupport",
-            xcode / "DerivedData",
-        ))
+        paths.append(xcode / "DerivedData")
         paths.append(Path.home() / "Library/Caches")
         paths.append(Path.home() / "hostedtoolcache")
         tool_cache = os.environ.get("RUNNER_TOOL_CACHE")

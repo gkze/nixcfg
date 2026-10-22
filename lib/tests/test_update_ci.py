@@ -3306,13 +3306,54 @@ def test_image_cleanup_stops_when_reclaim_crosses_headroom(
 
     monkeypatch.setattr(jobs, "_run", run)
     assert jobs.main("clean-image") == 0
-    assert removed == [tree["old"]]
+    assert removed == [tree["system_simulators"]]
+    assert tree["old"].is_dir()
     assert tree["android"].is_dir()
     output = capsys.readouterr().out
     assert (
         f"Stopped image reclaim; free {need} bytes meets headroom {need} bytes"
         in output
     )
+
+
+def test_image_cleanup_reclaims_highest_yield_trees_before_xcode(
+    tmp_path, monkeypatch
+) -> None:
+    """Reclaim simulators, Android and device support before any Xcode.
+
+    39791273689 deleted eight Xcodes (~4 min, ~38 GB) before the 55 GB
+    system simulators (<1 s), so headroom usually holds before any Xcode.
+    """
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    tree = _cleanup_image_tree(tmp_path)
+    derived = tmp_path / "Library/Developer/Xcode/DerivedData"
+    derived.mkdir(parents=True)
+    monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tree["tool_cache"]))
+    monkeypatch.setattr(jobs, "_APPLICATIONS", tree["apps"])
+    monkeypatch.setattr(jobs, "_DARWIN_SYSTEM_SIMULATORS", tree["system_simulators"])
+    monkeypatch.setattr(jobs, "_UNUSED_IMAGE_PATHS", {"darwin": (tree["unused"],)})
+    need = jobs.image_headroom_required_bytes()
+    removed: list[Path] = []
+    monkeypatch.setattr(
+        jobs, "runner_free_bytes", lambda: need if tree["old"] in removed else 0
+    )
+    monkeypatch.setattr(jobs, "_remove_unused_image_path", removed.append)
+
+    def run(*args, capture=False, check=True):
+        return subprocess.CompletedProcess(args, 0, stdout=str(tree["selected"]))
+
+    monkeypatch.setattr(jobs, "_run", run)
+    assert jobs.main("clean-image") == 0
+    assert removed == [
+        tree["system_simulators"],
+        tree["simulators"],
+        tree["android"],
+        tree["device_support"],
+        tree["old"],
+    ]
 
 
 def test_image_cleanup_fails_closed_when_headroom_still_missing(
