@@ -76,7 +76,7 @@ _UPSTREAM_PATCH_SOURCES = {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDREQ0RBRkJBN0ZDODdDMzkKUldRNWZNaC91cS9OVFhtTHdrSWVOV3p2cEdhc3RZbmtXM0g0bnpxUnZXVjlQMjZRNXFlWUdPNWMK",
       "endpoints": [
-        "https://github.com/team-reflect/reflect-open/releases/download/updater-beta/latest.json"
+        "https://github.com/team-reflect/reflect-open/releases/latest/download/latest.json"
       ]
     }
   }
@@ -113,8 +113,8 @@ _UPSTREAM_PATCH_SOURCES = {
 }
 """,
     "apps/desktop/src-tauri/Cargo.toml": """[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-updater = "2.11.0"
-tauri-plugin-process = "2.3.1"
+tauri-plugin-updater = "2.13.2"
+tauri-plugin-process = "2.4.0"
 tauri-plugin-window-state = "2.4.1"
 trash = "5.2.6"
 """,
@@ -137,13 +137,9 @@ def _load_updater_module() -> ModuleType:
     )
 
 
-def test_bulk_update_hold_skips_pnpm_fod_package_manager_drift() -> None:
-    """0.14.0's packageManager and pnpm FOD diverged; do not bump until they match."""
-    hold = _load_updater_module().ReflectOpenUpdater.bulk_update_hold
-    assert hold is not None
-    assert "0.14.0" in hold
-    assert "11.27.1" in hold
-    assert "11.24.0" in hold
+def test_bulk_updates_resume_with_the_validated_pnpm_toolchain() -> None:
+    """0.15.0's source-owned pnpm version and computed dependency closure agree."""
+    assert _load_updater_module().ReflectOpenUpdater.bulk_update_hold is None
 
 
 def _load_patch_module() -> ModuleType:
@@ -704,6 +700,31 @@ def test_reflect_nix_policy_rejects_drift_before_patching_any_source(
         module.patch_sources(drifted, package_manager=_PACKAGE_MANAGER)
 
     assert drifted == before
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "anchor"),
+    [
+        (
+            "apps/desktop/src-tauri/tauri.conf.json",
+            "releases/latest/download/latest.json",
+        ),
+        (
+            "apps/desktop/src-tauri/Cargo.toml",
+            'tauri-plugin-updater = "2.13.2"',
+        ),
+    ],
+)
+def test_reflect_nix_policy_rejects_unaudited_updater_changes(
+    relative_path: str,
+    anchor: str,
+) -> None:
+    """A new endpoint or native updater version requires another source audit."""
+    drifted = dict(_UPSTREAM_PATCH_SOURCES)
+    drifted[relative_path] = drifted[relative_path].replace(anchor, "unaudited")
+
+    with pytest.raises(RuntimeError, match="expected one Reflect source anchor"):
+        _load_patch_module().patch_sources(drifted, package_manager=_PACKAGE_MANAGER)
 
 
 def test_reflect_nix_policy_requires_every_source_file() -> None:

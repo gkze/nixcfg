@@ -71,7 +71,9 @@ let
   # a thin wrapper that resolves its naming defaults and supplies an `unpack`
   # strategy: the unpack tooling, any strategy-specific derivation attributes
   # (`dontUnpack` for manual unpackers, `sourceRoot`/`unpackCmd` for stdenv
-  # unpacking), and the installPhase built around that strategy.
+  # unpacking), and the installPhase built around that strategy. Prebuilt app
+  # builders disable fixup by default: rewriting a bundled script invalidates
+  # the signature's resource seal, even when the main executable is unchanged.
   mkUnpackedApp =
     {
       pname,
@@ -170,7 +172,7 @@ in
       makeBinary ? true,
       postInstallApp ? "",
       codesignApp ? false,
-      dontFixup ? false,
+      dontFixup ? true,
       macApp ? { },
       meta ? { },
       sourceName ? null,
@@ -455,7 +457,7 @@ in
       makeBinary ? true,
       sourceName ? null,
       sourceAppPath ? null,
-      dontFixup ? false,
+      dontFixup ? true,
       postInstallApp ? "",
       macApp ? { },
       meta ? { },

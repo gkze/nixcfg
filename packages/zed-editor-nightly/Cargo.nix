@@ -135,6 +135,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "agent_ui_benchmarks" = rec {
+      packageId = "agent_ui_benchmarks";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "agent_ui_benchmarks";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ai_onboarding" = rec {
       packageId = "ai_onboarding";
       build = internal.buildRustCrateWithFeatures {
@@ -3129,6 +3139,10 @@ rec {
         libPath = "src/acp_tools.rs";
         dependencies = [
           {
+            name = "acp_thread";
+            packageId = "acp_thread";
+          }
+          {
             name = "agent-client-protocol";
             packageId = "agent-client-protocol";
             features = [ "schemars" "unstable" "unstable_protocol_v2" ];
@@ -4189,6 +4203,10 @@ rec {
             optional = true;
           }
           {
+            name = "feature_flags";
+            packageId = "feature_flags";
+          }
+          {
             name = "fs";
             packageId = "fs";
           }
@@ -4671,6 +4689,10 @@ rec {
             packageId = "fuzzy";
           }
           {
+            name = "fuzzy_nucleo";
+            packageId = "fuzzy_nucleo";
+          }
+          {
             name = "git";
             packageId = "git";
           }
@@ -5060,6 +5082,48 @@ rec {
           "test-support" = [ "acp_thread/test-support" "eval_utils" "gpui/test-support" "language/test-support" "reqwest_client" "workspace/test-support" "agent/test-support" ];
         };
         resolvedDefaultFeatures = [ "audio" "eval_utils" "reqwest_client" "test-support" ];
+      };
+      "agent_ui_benchmarks" = rec {
+        crateName = "agent_ui_benchmarks";
+        version = "0.1.0";
+        edition = "2024";
+        src = crateSource sourceFilter "crates/agent_ui_benchmarks";
+        devDependencies = [
+          {
+            name = "collections";
+            packageId = "collections";
+          }
+          {
+            name = "criterion";
+            packageId = "criterion";
+            features = [ "html_reports" ];
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "fuzzy_nucleo";
+            packageId = "fuzzy_nucleo";
+          }
+          {
+            name = "gpui";
+            packageId = "gpui";
+            usesDefaultFeatures = false;
+            features = [ "bench-support" ];
+          }
+          {
+            name = "gpui_platform";
+            packageId = "gpui_platform";
+            usesDefaultFeatures = false;
+            features = [ "bench-support" ];
+          }
+          {
+            name = "ordered-float";
+            packageId = "ordered-float 5.5.0";
+          }
+        ];
+
       };
       "ahash" = rec {
         crateName = "ahash";
@@ -11053,6 +11117,7 @@ rec {
           "serde" = [ "dep:serde" "bit-vec/serde" ];
           "std" = [ "bit-vec/std" ];
         };
+        resolvedDefaultFeatures = [ "default" "std" ];
       };
       "bit-set 0.8.0" = rec {
         crateName = "bit-set";
@@ -11075,7 +11140,7 @@ rec {
           "serde" = [ "dep:serde" "bit-vec/serde" ];
           "std" = [ "bit-vec/std" ];
         };
-        resolvedDefaultFeatures = [ "default" "std" ];
+        resolvedDefaultFeatures = [ "std" ];
       };
       "bit-vec 0.10.1" = rec {
         crateName = "bit-vec";
@@ -11086,6 +11151,22 @@ rec {
         authors = [
           "Alexis Beingessner <a.beingessner@gmail.com>"
         ];
+        dependencies = [
+          {
+            name = "borsh";
+            packageId = "borsh";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "derive" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "derive" "alloc" ];
+          }
+        ];
         features = {
           "borsh" = [ "dep:borsh" ];
           "default" = [ "std" ];
@@ -11093,6 +11174,7 @@ rec {
           "serde" = [ "dep:serde" ];
           "std" = [ "serde?/std" "borsh?/std" ];
         };
+        resolvedDefaultFeatures = [ "default" "std" ];
       };
       "bit-vec 0.8.0" = rec {
         crateName = "bit-vec";
@@ -11113,7 +11195,7 @@ rec {
           "serde_no_std" = [ "serde/alloc" ];
           "serde_std" = [ "std" "serde/std" ];
         };
-        resolvedDefaultFeatures = [ "default" "std" ];
+        resolvedDefaultFeatures = [ "std" ];
       };
       "bit_field" = rec {
         crateName = "bit_field";
@@ -11443,6 +11525,93 @@ rec {
           "std" = [ "alloc" ];
         };
         resolvedDefaultFeatures = [ "alloc" ];
+      };
+      "borsh" = rec {
+        crateName = "borsh";
+        version = "1.8.1";
+        edition = "2018";
+        crateBin = [];
+        sha256 = "02p2lhz49944wc6j5dzr42y1mkrv0znbicg3cl61b9bbda25sg2m";
+        authors = [
+          "Near Inc <hello@near.org>"
+        ];
+        dependencies = [
+          {
+            name = "borsh-derive";
+            packageId = "borsh-derive";
+            optional = true;
+          }
+          {
+            name = "bytes";
+            packageId = "bytes";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "cfg_aliases";
+            packageId = "cfg_aliases";
+          }
+        ];
+        features = {
+          "ascii" = [ "dep:ascii" ];
+          "borsh-derive" = [ "dep:borsh-derive" ];
+          "bson" = [ "dep:bson" ];
+          "bytes" = [ "dep:bytes" ];
+          "default" = [ "std" ];
+          "derive" = [ "borsh-derive" ];
+          "hashbrown" = [ "dep:hashbrown" ];
+          "indexmap" = [ "dep:indexmap" ];
+          "std" = [ "bytes?/std" ];
+          "unstable__schema" = [ "derive" "borsh-derive/schema" ];
+          "uuid" = [ "dep:uuid" ];
+        };
+        resolvedDefaultFeatures = [ "borsh-derive" "derive" "std" ];
+      };
+      "borsh-derive" = rec {
+        crateName = "borsh-derive";
+        version = "1.8.1";
+        edition = "2018";
+        sha256 = "0mlzrbwzcr7qaky1iap09m0nrzp6crjd79sinj4iz808cxjzxk8j";
+        procMacro = true;
+        libName = "borsh_derive";
+        authors = [
+          "Near Inc <hello@nearprotocol.com>"
+        ];
+        dependencies = [
+          {
+            name = "once_cell";
+            packageId = "once_cell";
+          }
+          {
+            name = "proc-macro-crate";
+            packageId = "proc-macro-crate";
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.3";
+            features = [ "full" "fold" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "syn";
+            packageId = "syn 3.0.3";
+            features = [ "full" "fold" "parsing" ];
+          }
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "default" ];
       };
       "breadcrumbs" = rec {
         crateName = "breadcrumbs";
@@ -16790,6 +16959,18 @@ rec {
           "std" = [ "alloc" ];
         };
         resolvedDefaultFeatures = [ "alloc" "std" ];
+      };
+      "core_detect" = rec {
+        crateName = "core_detect";
+        version = "1.0.0";
+        edition = "2018";
+        sha256 = "0j0xp1j6f9lrp4ybylc3d0zdg8jq2hkmr1122qyil14qk84q13vz";
+        authors = [
+          "Thom Chiovoloni <chiovolonit@gmail.com>"
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "default" ];
       };
       "core_maths" = rec {
         crateName = "core_maths";
@@ -24303,7 +24484,7 @@ rec {
             name = "toml";
             packageId = "toml 0.9.8";
             usesDefaultFeatures = false;
-            features = [ "std" "serde" "parse" ];
+            features = [ "std" "serde" "parse" "display" ];
           }
           {
             name = "tracing";
@@ -24466,7 +24647,7 @@ rec {
             name = "toml";
             packageId = "toml 0.9.8";
             usesDefaultFeatures = false;
-            features = [ "std" "serde" "parse" "display" ];
+            features = [ "std" "serde" "parse" ];
           }
           {
             name = "tree-sitter";
@@ -25434,6 +25615,20 @@ rec {
             features = [ "unstable" ];
           }
           {
+            name = "release_channel";
+            packageId = "release_channel";
+          }
+          {
+            name = "remote";
+            packageId = "remote";
+            features = [ "test-support" ];
+          }
+          {
+            name = "remote_server";
+            packageId = "remote_server";
+            features = [ "test-support" ];
+          }
+          {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "preserve_order" "raw_value" ];
@@ -26188,10 +26383,6 @@ rec {
           {
             name = "parking_lot";
             packageId = "parking_lot";
-          }
-          {
-            name = "path";
-            packageId = "path";
           }
           {
             name = "paths";
@@ -29747,7 +29938,7 @@ rec {
             packageId = "objc2-foundation 0.3.2";
             usesDefaultFeatures = false;
             target = { target, features }: ("ios" == target."os" or null);
-            features = [ "NSArray" "NSAttributedString" "NSCoder" "NSData" "NSDate" "NSDictionary" "NSEnumerator" "NSError" "NSGeometry" "NSNull" "NSObjCRuntime" "NSObject" "NSProcessInfo" "NSRange" "NSRunLoop" "NSSet" "NSString" "NSURL" "NSValue" "objc2-core-foundation" "std" "NSThread" "NSOperation" "block2" ];
+            features = [ "NSArray" "NSAttributedString" "NSCoder" "NSData" "NSDate" "NSDictionary" "NSEnumerator" "NSError" "NSGeometry" "NSNull" "NSObjCRuntime" "NSObject" "NSProcessInfo" "NSRange" "NSRunLoop" "NSSet" "NSString" "NSURL" "NSValue" "objc2-core-foundation" "std" "NSThread" "NSOperation" "NSUserActivity" "block2" ];
           }
           {
             name = "objc2-quartz-core";
@@ -29761,7 +29952,7 @@ rec {
             packageId = "objc2-ui-kit";
             usesDefaultFeatures = false;
             target = { target, features }: ("ios" == target."os" or null);
-            features = [ "std" "block2" "objc2-quartz-core" "objc2-core-foundation" "NSText" "UIApplication" "UIEvent" "UIGeometry" "UIInterface" "UIOpenURLContext" "UIPasteboard" "UIResponder" "UIScene" "UISceneConfiguration" "UISceneDefinitions" "UISceneOptions" "UISceneSession" "UIScreen" "UITextInput" "UITextInputTraits" "UITouch" "UITraitCollection" "UIView" "UIViewController" "UIWindow" "UIWindowScene" ];
+            features = [ "std" "block2" "objc2-quartz-core" "objc2-core-foundation" "NSText" "UIApplication" "UICommand" "UICornerConfiguration" "UICornerRadius" "UIEvent" "UIGeometry" "UIGestureRecognizer" "UIPanGestureRecognizer" "UIScreenEdgePanGestureRecognizer" "UIInterface" "UIOpenURLContext" "UIPasteboard" "UIResponder" "UIScene" "UISceneConfiguration" "UISceneDefinitions" "UISceneOptions" "UISceneSession" "UIScreen" "UITextInput" "UITextInputTraits" "UITouch" "UITraitCollection" "UIView" "UIViewController" "UIWindow" "UIWindowScene" ];
           }
           {
             name = "parking_lot";
@@ -29792,7 +29983,7 @@ rec {
             packageId = "objc2-ui-kit";
             usesDefaultFeatures = false;
             target = { target, features }: ("ios" == target."os" or null);
-            features = [ "std" "block2" "objc2-quartz-core" "objc2-core-foundation" "NSText" "UIApplication" "UIEvent" "UIGeometry" "UIInterface" "UIOpenURLContext" "UIPasteboard" "UIResponder" "UIScene" "UISceneConfiguration" "UISceneDefinitions" "UISceneOptions" "UISceneSession" "UIScreen" "UITextInput" "UITextInputTraits" "UITouch" "UITraitCollection" "UIView" "UIViewController" "UIWindow" "UIWindowScene" "UIConversationContext" ];
+            features = [ "std" "block2" "objc2-quartz-core" "objc2-core-foundation" "NSText" "UIApplication" "UICommand" "UICornerConfiguration" "UICornerRadius" "UIEvent" "UIGeometry" "UIGestureRecognizer" "UIPanGestureRecognizer" "UIScreenEdgePanGestureRecognizer" "UIInterface" "UIOpenURLContext" "UIPasteboard" "UIResponder" "UIScene" "UISceneConfiguration" "UISceneDefinitions" "UISceneOptions" "UISceneSession" "UIScreen" "UITextInput" "UITextInputTraits" "UITouch" "UITraitCollection" "UIView" "UIViewController" "UIWindow" "UIWindowScene" "UIConversationContext" ];
           }
           {
             name = "slotmap";
@@ -30194,7 +30385,7 @@ rec {
             packageId = "objc2-app-kit 0.3.2";
             usesDefaultFeatures = false;
             target = { target, features }: ("macos" == target."os" or null);
-            features = [ "NSAlert" "NSApplication" "NSButton" "NSControl" "NSDraggingItem" "NSGraphics" "NSImage" "NSOpenPanel" "NSPanel" "NSPasteboard" "NSResponder" "NSSavePanel" "NSScreen" "NSTrackingArea" "NSView" "NSWindow" "NSWorkspace" "block2" "objc2-core-foundation" ];
+            features = [ "NSAlert" "NSApplication" "NSButton" "NSControl" "NSDraggingItem" "NSEvent" "NSGraphics" "NSImage" "NSOpenPanel" "NSPanel" "NSPasteboard" "NSResponder" "NSSavePanel" "NSScreen" "NSTrackingArea" "NSView" "NSWindow" "NSWorkspace" "block2" "objc2-core-foundation" ];
           }
           {
             name = "objc2-core-graphics";
@@ -40073,8 +40264,8 @@ rec {
         workspace_member = null;
         src = pkgs.fetchgit {
           url = "https://github.com/zed-industries/lsp-types";
-          rev = "f1783e63a7f4eb4397bf51d4148b4895a1f7ab16";
-          sha256 = "0impk53n1k5abp7srh060nyzjwps7vqcbzill5cqg55aksqcajbp";
+          rev = "82d7fc66ebdfabcfeb26ba16bbed9f3d26211fc3";
+          sha256 = "1bmjxz7g1fl707as0d1ip8by1fhbh2x6rj07hcd0g4f5ma763b0v";
         };
         libName = "lsp_types";
         authors = [
@@ -45129,7 +45320,7 @@ rec {
           "objc2-uniform-type-identifiers" = [ "dep:objc2-uniform-type-identifiers" ];
           "std" = [ "alloc" ];
         };
-        resolvedDefaultFeatures = [ "NSAlert" "NSApplication" "NSButton" "NSControl" "NSDraggingItem" "NSGraphics" "NSImage" "NSOpenPanel" "NSPanel" "NSPasteboard" "NSResponder" "NSSavePanel" "NSScreen" "NSTrackingArea" "NSView" "NSWindow" "NSWorkspace" "bitflags" "block2" "objc2-core-foundation" ];
+        resolvedDefaultFeatures = [ "NSAlert" "NSApplication" "NSButton" "NSControl" "NSDraggingItem" "NSEvent" "NSGraphics" "NSImage" "NSOpenPanel" "NSPanel" "NSPasteboard" "NSResponder" "NSSavePanel" "NSScreen" "NSTrackingArea" "NSView" "NSWindow" "NSWorkspace" "bitflags" "block2" "objc2-core-foundation" ];
       };
       "objc2-audio-toolbox" = rec {
         crateName = "objc2-audio-toolbox";
@@ -47145,7 +47336,7 @@ rec {
           "objc2-user-notifications" = [ "dep:objc2-user-notifications" ];
           "std" = [ "alloc" ];
         };
-        resolvedDefaultFeatures = [ "NSText" "UIApplication" "UIConversationContext" "UIEvent" "UIGeometry" "UIInterface" "UIOpenURLContext" "UIPasteboard" "UIResponder" "UIScene" "UISceneConfiguration" "UISceneDefinitions" "UISceneOptions" "UISceneSession" "UISceneSizeRestrictions" "UIScreen" "UITextInput" "UITextInputTraits" "UITouch" "UITraitCollection" "UIView" "UIViewController" "UIWindow" "UIWindowScene" "alloc" "bitflags" "block2" "objc2-core-foundation" "objc2-quartz-core" "std" ];
+        resolvedDefaultFeatures = [ "NSText" "UIApplication" "UICommand" "UIConversationContext" "UICornerConfiguration" "UICornerRadius" "UIEvent" "UIGeometry" "UIGestureRecognizer" "UIInterface" "UIOpenURLContext" "UIPanGestureRecognizer" "UIPasteboard" "UIResponder" "UIScene" "UISceneConfiguration" "UISceneDefinitions" "UISceneOptions" "UISceneSession" "UISceneSizeRestrictions" "UIScreen" "UIScreenEdgePanGestureRecognizer" "UITextInput" "UITextInputTraits" "UITouch" "UITraitCollection" "UIView" "UIViewController" "UIWindow" "UIWindowScene" "alloc" "bitflags" "block2" "objc2-core-foundation" "objc2-quartz-core" "std" ];
       };
       "objc2-user-notifications" = rec {
         crateName = "objc2-user-notifications";
@@ -48271,6 +48462,10 @@ rec {
         libPath = "src/opencode.rs";
         dependencies = [
           {
+            name = "anthropic";
+            packageId = "anthropic";
+          }
+          {
             name = "anyhow";
             packageId = "anyhow";
           }
@@ -48291,6 +48486,16 @@ rec {
             packageId = "language_model_core";
           }
           {
+            name = "log";
+            packageId = "log";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "open_ai";
+            packageId = "open_ai";
+          }
+          {
             name = "schemars";
             packageId = "schemars 1.0.4";
             optional = true;
@@ -48306,6 +48511,13 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "preserve_order" "raw_value" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "http_client";
+            packageId = "http_client";
+            features = [ "test-support" ];
           }
         ];
         features = {
@@ -54294,31 +54506,36 @@ rec {
       };
       "proptest" = rec {
         crateName = "proptest";
-        version = "1.10.0";
+        version = "1.12.0";
         edition = "2021";
-        workspace_member = null;
-        src = pkgs.fetchgit {
-          url = "https://github.com/proptest-rs/proptest";
-          rev = "3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b";
-          sha256 = "0sk91zzzpbdq6hv1n6xgdcv5bi007hl003gh8888zf3bg1q574x7";
-        };
+        sha256 = "186g52z5077c7q1xqm6v0kw43wqpwgxhj074qx8swpmirh200lxq";
         authors = [
           "Jason Lingle"
         ];
         dependencies = [
           {
             name = "bit-set";
-            packageId = "bit-set 0.8.0";
+            packageId = "bit-set 0.11.1";
             optional = true;
           }
           {
             name = "bit-vec";
-            packageId = "bit-vec 0.8.0";
+            packageId = "bit-vec 0.10.1";
             optional = true;
           }
           {
             name = "bitflags";
             packageId = "bitflags 2.13.1";
+          }
+          {
+            name = "chacha20";
+            packageId = "chacha20";
+            usesDefaultFeatures = false;
+            features = [ "rng" ];
+          }
+          {
+            name = "core_detect";
+            packageId = "core_detect";
           }
           {
             name = "num-traits";
@@ -54332,14 +54549,9 @@ rec {
           }
           {
             name = "rand";
-            packageId = "rand 0.9.4";
+            packageId = "rand 0.10.2";
             usesDefaultFeatures = false;
             features = [ "alloc" ];
-          }
-          {
-            name = "rand_chacha";
-            packageId = "rand_chacha 0.9.0";
-            usesDefaultFeatures = false;
           }
           {
             name = "rand_xorshift";
@@ -54378,9 +54590,10 @@ rec {
           "proptest-macro" = [ "dep:proptest-macro" ];
           "regex-syntax" = [ "dep:regex-syntax" ];
           "rusty-fork" = [ "dep:rusty-fork" ];
-          "std" = [ "rand/std" "rand/os_rng" "regex-syntax" "num-traits/std" ];
+          "std" = [ "rand/std" "rand/sys_rng" "regex-syntax" "num-traits/std" ];
           "tempfile" = [ "dep:tempfile" ];
           "timeout" = [ "fork" "rusty-fork/timeout" ];
+          "unstable" = [ "f16" ];
           "x86" = [ "dep:x86" ];
         };
         resolvedDefaultFeatures = [ "attr-macro" "bit-set" "default" "fork" "proptest-macro" "regex-syntax" "rusty-fork" "std" "tempfile" "timeout" ];
@@ -54415,14 +54628,9 @@ rec {
       };
       "proptest-macro" = rec {
         crateName = "proptest-macro";
-        version = "0.5.0";
+        version = "0.6.0";
         edition = "2021";
-        workspace_member = null;
-        src = pkgs.fetchgit {
-          url = "https://github.com/proptest-rs/proptest";
-          rev = "3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b";
-          sha256 = "0sk91zzzpbdq6hv1n6xgdcv5bi007hl003gh8888zf3bg1q574x7";
-        };
+        sha256 = "04n21cr7bwbwdmdyrfbcqa8v557ms8h14z48qq32533967m855z9";
         procMacro = true;
         libName = "proptest_macro";
         authors = [
@@ -54443,7 +54651,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 2.0.117";
+            packageId = "syn 3.0.3";
             features = [ "full" ];
           }
         ];
@@ -55904,9 +56112,9 @@ rec {
       };
       "rand_xorshift" = rec {
         crateName = "rand_xorshift";
-        version = "0.4.0";
-        edition = "2021";
-        sha256 = "0njsn25pis742gb6b89cpq7jp48v9n23a9fvks10yczwks8n4fai";
+        version = "0.5.0";
+        edition = "2024";
+        sha256 = "1krcvzh8zb8ps8hy86lkj1wcr9zqcmp2xq0j60r72a731gw6mak0";
         authors = [
           "The Rand Project Developers"
           "The Rust Project Developers"
@@ -55914,7 +56122,7 @@ rec {
         dependencies = [
           {
             name = "rand_core";
-            packageId = "rand_core 0.9.3";
+            packageId = "rand_core 0.10.1";
           }
         ];
         features = {
@@ -57153,10 +57361,6 @@ rec {
           {
             name = "thiserror";
             packageId = "thiserror 2.0.17";
-          }
-          {
-            name = "urlencoding";
-            packageId = "urlencoding";
           }
           {
             name = "util";
@@ -66962,7 +67166,7 @@ rec {
           "proc-macro" = [ "proc-macro2/proc-macro" "quote?/proc-macro" ];
           "test" = [ "syn-test-suite/all-features" ];
         };
-        resolvedDefaultFeatures = [ "clone-impls" "default" "derive" "extra-traits" "full" "parsing" "printing" "proc-macro" "visit" "visit-mut" ];
+        resolvedDefaultFeatures = [ "clone-impls" "default" "derive" "extra-traits" "fold" "full" "parsing" "printing" "proc-macro" "visit" "visit-mut" ];
       };
       "sync_wrapper 0.1.2" = rec {
         crateName = "sync_wrapper";
@@ -88288,7 +88492,7 @@ rec {
       };
       "zed" = rec {
         crateName = "zed";
-        version = "1.26.0";
+        version = "1.27.0";
         edition = "2024";
         crateBin = [
           {

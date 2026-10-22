@@ -1,0 +1,34 @@
+# ── oxc-validator runtime ──
+_install_oxc_runtime() {
+# Skip when the user opted out of Node (NODE_SOURCE=skip): there is no suitable
+# Node, so do not run npm install against an unsuitable/absent system Node.
+if [ -d "$_OXC_DIR" ] && [ "${NODE_SOURCE:-}" != skip ] && command -v npm &>/dev/null; then
+    cd "$_OXC_DIR"
+    _OXC_INSTALL_LOG=$(mktemp)
+    _CAPTURE_LOG="$_OXC_INSTALL_LOG"
+    # `|| _oxc_install_rc=$?` keeps this off `set -e`'s exit path so the hint branch
+    # below is reachable; it also captures the exact exit code.
+    _oxc_install_rc=0
+    _NPM_INSTALL=install
+    [ -f package-lock.json ] && _NPM_INSTALL=ci
+    run_quiet_no_exit "npm $_NPM_INSTALL (oxc validator runtime)" npm "$_NPM_INSTALL" --no-fund --no-audit --loglevel=error "${_NPM_REGISTRY_ARGS[@]+"${_NPM_REGISTRY_ARGS[@]}"}" || _oxc_install_rc=$?
+    if [ "$_oxc_install_rc" -ne 0 ] && _npm_mirror_retry "npm $_NPM_INSTALL (oxc validator runtime)"; then
+        _oxc_install_rc=0
+    fi
+    _CAPTURE_LOG=""
+    if [ "$_oxc_install_rc" -ne 0 ]; then
+        _suggest_npm_registry "$_OXC_INSTALL_LOG"
+        rm -f "$_OXC_INSTALL_LOG"
+        setup_fail "$_oxc_install_rc" "OXC validator dependency installation failed (exit code $_oxc_install_rc)"
+    fi
+    rm -f "$_OXC_INSTALL_LOG"
+    cd "$SCRIPT_DIR"
+elif [ -d "$_OXC_DIR" ] && [ "${NODE_SOURCE:-}" != skip ]; then
+    # No npm on PATH: skip rather than abort; the backend Node resolver degrades
+    # the validator gracefully. Mirrors setup.ps1's elseif on this block.
+    substep "OXC validator runtime skipped (no npm found); code validation degrades until Node is available" "$C_WARN"
+fi
+}
+
+if [ "$_LLAMA_ONLY" != "1" ]; then
+# ── Detect whether frontend needs building ──

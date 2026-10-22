@@ -5,11 +5,14 @@ let
   dynamicPipeHeredocPatch = builtins.toFile "bash-darwin-dynamic-pipe-heredoc.patch" (
     builtins.readFile ./bash-darwin-dynamic-pipe-heredoc.patch
   );
-  # Backport GNU Bash devel commit 03e7298 while nixpkgs' released Bash still
-  # assumes Darwin's pipe capacity is constant. Keep this as a separately named
-  # Bash so only consumers that need the workaround use it.
+  # GNU Bash 5.3 patch 16 includes this fix. Earlier releases need the
+  # backport; applying it again to the fixed source fails during patchPhase.
+  # Keep the private alias for consumers on both sides of that boundary.
   bashWithDynamicPipeHeredocFix =
-    if prev.stdenv.hostPlatform.isDarwin then
+    if
+      prev.stdenv.hostPlatform.isDarwin
+      && builtins.compareVersions prev.bashNonInteractive.version "5.3p16" < 0
+    then
       prev.bashNonInteractive.overrideAttrs (old: {
         # The builder still runs under nixpkgs' unpatched Bash. Force its pre-5.1
         # tempfile behavior so configure cannot hit the same heredoc deadlock while

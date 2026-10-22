@@ -15,22 +15,29 @@ let
   pkgs = outputs.pkgs.${system};
   inherit (pkgs) lib;
 
+  zedSource = outputs.lib.sourceEntry "zed-editor-nightly";
+
   package = lib.callPackageWith (pkgs // { inherit pkgs; }) ../default.nix {
     inherit (outputs) inputs;
     inherit outputs;
+    selfSource = zedSource;
   };
 
-  overrideAttrsFor =
-    crateName:
+  overrideAttrsForVersion =
+    crateName: version:
     let
       override = package.passthru.crateOverrides.${crateName} or (_attrs: { });
     in
     override {
-      inherit crateName;
-      version = "0.0.0";
+      inherit crateName version;
       buildInputs = [ ];
       nativeBuildInputs = [ ];
     };
+
+  overrideAttrsFor = crateName: overrideAttrsForVersion crateName "0.0.0";
+
+  wasmtimeCApiAttrs = overrideAttrsForVersion "wasmtime-c-api-impl" zedSource.pins.wasmtimeCApiCoherenceVersion;
+  otherWasmtimeCApiAttrs = overrideAttrsForVersion "wasmtime-c-api-impl" "48.0.2";
 
   hasInput =
     expected: inputs: builtins.any (input: (input.drvPath or null) == expected.drvPath) inputs;
@@ -67,6 +74,17 @@ in
 # inspection cannot establish which nixpkgs inputs survive override composition
 # or whether project inputs are limited to their audited consumers.
 assert builtins.elem system supportedSystems;
+assert lib.assertMsg (
+  (wasmtimeCApiAttrs.NIXCFG_WASMTIME_C_API_COHERENCE or null) == (
+    if pkgs.stdenv.hostPlatform.isDarwin then
+      "darwin-${zedSource.pins.wasmtimeCApiCoherenceVersion}-v1"
+    else
+      null
+  )
+  && !(otherWasmtimeCApiAttrs ? NIXCFG_WASMTIME_C_API_COHERENCE)
+  && hasInput pkgs.cmake wasmtimeCApiAttrs.nativeBuildInputs
+  && hasInput pkgs.cmake otherWasmtimeCApiAttrs.nativeBuildInputs
+) "the C API coherence identity escaped its affected Darwin version or lost cmake";
 assert lib.assertMsg
   (builtins.all (input: !(hasInput input (neutralAttrs.nativeBuildInputs or [ ]))) broadNativeInputs)
   ''
@@ -164,6 +182,7 @@ assert lib.assertMsg
   '';
 {
   check = true;
+  wasmtimeCApiCoherence = wasmtimeCApiAttrs.NIXCFG_WASMTIME_C_API_COHERENCE or null;
   consumers = {
     gpuiApple = inputNames (gpuiAppleAttrs.nativeBuildInputs or [ ]);
     livekitApi = inputNames (livekitApiAttrs.nativeBuildInputs or [ ]);

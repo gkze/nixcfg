@@ -104,6 +104,7 @@ _MAX_OXC_SOURCE_BYTES = 1024 * 1024
 # reaches it.
 _RUST_TOOLCHAIN_BUILD_OVERRIDES: dict[str, str] = {
     "0.1.902-beta": "1.90.0",
+    "0.1.909-beta": "1.90.0",
 }
 _OXC_PACKAGE_PATH = "studio/backend/core/data_recipe/oxc-validator/package.json"
 _OXC_LOCK_PATH = "studio/backend/core/data_recipe/oxc-validator/package-lock.json"
@@ -140,6 +141,7 @@ _SETUP_SH_PATH = "studio/setup.sh"
 _SETUP_PS1_PATH = "studio/setup.ps1"
 _SETUP_SH_OXC_START = "# ── oxc-validator runtime ──"
 _SETUP_SH_OXC_END = "# ── Python venv + deps ──"
+_SETUP_SH_OXC_FUNCTION_END = "# ── Detect whether frontend needs building ──"
 _SETUP_SH_OXC_INSTALL = (
     'run_quiet_no_exit "npm install (oxc validator runtime)" '
     "npm install --no-fund --no-audit --loglevel=error "
@@ -228,8 +230,10 @@ _OXC_SOURCE_PATHS = (
 )
 _OXC_DARWIN_BINDINGS = {
     "oxc-parser": "@oxc-parser/binding-darwin-arm64",
+    "oxc-transform": "@oxc-transform/binding-darwin-arm64",
     "oxlint": "@oxlint/binding-darwin-arm64",
 }
+_OXC_REQUIRED_RUNTIMES = frozenset({"oxc-parser", "oxlint"})
 
 
 def _require_string(mapping: dict[str, object], key: str, *, context: str) -> str:
@@ -377,6 +381,8 @@ def _audit_oxc_lock(
         raise RuntimeError(msg)
 
     for runtime, darwin_binding in _OXC_DARWIN_BINDINGS.items():
+        if runtime not in dependencies:
+            continue
         runtime_path = f"node_modules/{runtime}"
         locked_runtime, _runtime_version = _audit_locked_npm_package(
             locked_packages,
@@ -449,7 +455,8 @@ def _audit_oxc_runtime_sources(payloads: dict[str, bytes]) -> None:
     setup_sh = payloads[_SETUP_SH_PATH].decode("utf-8")
     setup_sh_blocks = re.findall(
         rf"(?ms)^{re.escape(_SETUP_SH_OXC_START)}$\n"
-        rf"(.*?)^{re.escape(_SETUP_SH_OXC_END)}$",
+        rf"(.*?)^(?:{re.escape(_SETUP_SH_OXC_END)}|"
+        rf"{re.escape(_SETUP_SH_OXC_FUNCTION_END)})$",
         setup_sh,
     )
     if len(setup_sh_blocks) != 1:
@@ -568,9 +575,11 @@ def _audit_oxc_sources(payloads: dict[str, bytes]) -> None:
         package.get("dependencies"),
         context="OXC validator dependencies",
     )
-    if set(dependencies) != set(_OXC_DARWIN_BINDINGS) or not all(
-        isinstance(value, str) and value for value in dependencies.values()
-    ):
+    # 0.1.909-beta adds the source-owned transformer runtime. Older releases
+    # retain the parser/linter pair; both shapes keep every binding audited.
+    if not _OXC_REQUIRED_RUNTIMES <= set(dependencies) <= set(
+        _OXC_DARWIN_BINDINGS
+    ) or not all(isinstance(value, str) and value for value in dependencies.values()):
         msg = "Unsloth OXC validator dependencies drifted"
         raise RuntimeError(msg)
     if "scripts" in package:
@@ -1032,10 +1041,6 @@ class UnslothUpdater(MaterializesArtifactsMixin, GitHubReleaseUpdater):
     """Track exact public desktop and backend sources behind closure gates."""
 
     name = "unsloth"
-    bulk_update_hold = (
-        "v0.1.811-beta requires backend 2026.9.7, but its source declares "
-        "2026.9.6 and PyPI has no sdist. Remove after matching source is published."
-    )
     GITHUB_OWNER = "unslothai"
     GITHUB_REPO = "unsloth"
     DARWIN_PLATFORM: ClassVar[str] = "aarch64-darwin"

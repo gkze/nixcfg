@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-mosuCpME9tKCMNdbZsBNl2SbKFYmFgGanPtLNGL2k68=",
-    "x86_64-darwin": "sha256-mosuCpME9tKCMNdbZsBNl2SbKFYmFgGanPtLNGL2k68="
+    "aarch64-darwin": "sha256-FbhP8WIQKQ5hHuC5nmSiA8H7Gstq5yTzskYjn1Xh5YA=",
+    "x86_64-darwin": "sha256-FbhP8WIQKQ5hHuC5nmSiA8H7Gstq5yTzskYjn1Xh5YA="
   },
   "urls": {
-    "aarch64-darwin": "https://voiceos-staging-releases.s3.amazonaws.com/releases/VoiceOS-0.1.39-universal-mac.zip",
-    "x86_64-darwin": "https://voiceos-staging-releases.s3.amazonaws.com/releases/VoiceOS-0.1.39-universal-mac.zip"
+    "aarch64-darwin": "https://voiceos-staging-releases.s3.amazonaws.com/releases/VoiceOS-0.1.40-universal-mac.zip",
+    "x86_64-darwin": "https://voiceos-staging-releases.s3.amazonaws.com/releases/VoiceOS-0.1.40-universal-mac.zip"
   },
-  "version": "0.1.39"
+  "version": "0.1.40"
 }

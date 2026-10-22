@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-FFm7fjoqXGvlTflaKrFzNSg7HBJoX64AW9jz67fvM3c="
+    "aarch64-darwin": "sha256-Wj42sUq8dKWgl6KN4n398OpJQfVBTDYtDeJp4FWy6Bs="
   },
   "urls": {
-    "aarch64-darwin": "https://releases.soloterm.com/darwin/universal/Solo_0.7.1_universal.app.tar.gz"
+    "aarch64-darwin": "https://releases.soloterm.com/darwin/universal/Solo_0.10.1_universal.app.tar.gz"
   },
-  "version": "0.7.1"
+  "version": "0.10.1"
 }

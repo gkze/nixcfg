@@ -1,11 +1,11 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-cr5aJ9UgqeycFWPbRwINiocntYiCn3lh21LbmeWDH/I=",
-    "x86_64-darwin": "sha256-v85CpAMa0RMZoi3TANDhXLXvzmPBK3QiooE2+rGcMwg="
+    "aarch64-darwin": "sha256-SwIJaVDMv0g+y1tulEUL1taL12h5sceUTMez744E2mI=",
+    "x86_64-darwin": "sha256-32Jj+xH8SmcmIRY7srI6UNXww3ynjmjRaQPE7+3rdGU="
   },
   "urls": {
-    "aarch64-darwin": "https://screenstudioassets.com/releases/4.0.4-4926/Screen%20Studio-4.0.4-4926-arm64-mac.zip",
-    "x86_64-darwin": "https://screenstudioassets.com/releases/4.0.4-4926/Screen%20Studio-4.0.4-4926-mac.zip"
+    "aarch64-darwin": "https://screenstudioassets.com/releases/4.1.0-5005/Screen%20Studio-4.1.0-5005-arm64-mac.zip",
+    "x86_64-darwin": "https://screenstudioassets.com/releases/4.1.0-5005/Screen%20Studio-4.1.0-5005-mac.zip"
   },
-  "version": "4.0.4-4926"
+  "version": "4.1.0-5005"
 }

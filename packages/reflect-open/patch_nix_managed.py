@@ -31,8 +31,8 @@ _UPDATER_CONFIG_ANCHOR = (
     '    "updater": {\n'
     f'      "pubkey": "{_UPDATER_PUBKEY}",\n'
     '      "endpoints": [\n'
-    '        "https://github.com/team-reflect/reflect-open/releases/download/'
-    'updater-beta/latest.json"\n'
+    '        "https://github.com/team-reflect/reflect-open/releases/latest/download/'
+    'latest.json"\n'
     "      ]\n"
     "    }\n"
 )
@@ -84,7 +84,7 @@ _PATCHES = (
     ),
     SourcePatch(
         "apps/desktop/src-tauri/Cargo.toml",
-        'tauri-plugin-updater = "2.11.0"\ntauri-plugin-process = "2.3.1"\n',
+        'tauri-plugin-updater = "2.13.2"\ntauri-plugin-process = "2.4.0"\n',
         "",
     ),
     SourcePatch(

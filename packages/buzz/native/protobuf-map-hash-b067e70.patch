@@ -1,0 +1,76 @@
+From b067e70a049179152f68434600552b1b16d9c8c5 Mon Sep 17 00:00:00 2001
+From: Evan Brown <ezb@google.com>
+Date: Wed, 22 Jul 2026 12:34:34 -0700
+Subject: [PATCH] Rollback using CRC for hashing in proto map and use
+ absl::HashOf again.
+
+The performance win doesn't justify the complexity of maintaining a separate hash function.
+
+We also rotate the salt for more random iteration order (RandomOrdering tests didn't pass otherwise).
+
+PiperOrigin-RevId: 952270605
+---
+ src/google/protobuf/map.h  | 16 ++++++----------
+ src/google/protobuf/port.h | 19 -------------------
+ 2 files changed, 6 insertions(+), 29 deletions(-)
+
+diff --git a/src/google/protobuf/map.h b/src/google/protobuf/map.h
+index 3f10ee8b6f66b..fb5e33cbea87e 100644
+--- a/src/google/protobuf/map.h
++++ b/src/google/protobuf/map.h
+@@ -694,19 +694,15 @@ struct KeyNode : NodeBase {
+   decltype(auto) key() const { return ReadKey<Key>(GetVoidKey()); }
+ };
+ 
++// Note: salt has very low entropy from the allocator so rotate to get more
++// random iteration order.
+ inline map_index_t Hash(absl::string_view k, void* salt) {
+-  // Note: we could potentially also use CRC32-based hashing here.
+-  return absl::HashOf(k, salt);
++  const uintptr_t salt_int = reinterpret_cast<uintptr_t>(salt);
++  return absl::HashOf(k, absl::rotr(salt_int, k.size()));
+ }
+ inline map_index_t Hash(uint64_t k, void* salt) {
+-  if constexpr (!HasCrc32()) {
+-    return absl::HashOf(k, salt);
+-  } else {
+-    uintptr_t salt_int = reinterpret_cast<uintptr_t>(salt);
+-    // Note: Crc32(salt_int, k) causes the random iteration order test to fail
+-    // so we also rotate.
+-    return Crc32(salt_int, absl::rotr(k, salt_int & 0x3f));
+-  }
++  const uintptr_t salt_int = reinterpret_cast<uintptr_t>(salt);
++  return absl::HashOf(k, absl::rotr(salt_int, k));
+ }
+ 
+ // KeyMapBase is a chaining hash map.
+diff --git a/src/google/protobuf/port.h b/src/google/protobuf/port.h
+index 472baf7249dca..72ca677c785fd 100644
+--- a/src/google/protobuf/port.h
++++ b/src/google/protobuf/port.h
+@@ -969,25 +969,6 @@ PROTOBUF_EXPORT constexpr BoundsCheckMode GetBoundsCheckMode() {
+ }
+ 
+ 
+-#if defined(__x86_64__) && defined(__SSE4_2__)
+-
+-constexpr bool HasCrc32() { return true; }
+-inline uint32_t Crc32(uint32_t crc, uint64_t v) {
+-  return __builtin_ia32_crc32di(crc, v);
+-}
+-
+-#elif defined(__ARM_FEATURE_CRC32)
+-
+-constexpr bool HasCrc32() { return true; }
+-inline uint32_t Crc32(uint32_t crc, uint64_t v) { return __crc32cd(crc, v); }
+-
+-#else
+-
+-constexpr bool HasCrc32() { return false; }
+-inline uint32_t Crc32(uint32_t, uint64_t) { return 0; }
+-
+-#endif
+-
+ // Check minimum Protobuf support defined at:
+ // https://github.com/google/oss-policies-info/blob/main/foundational-cxx-support-matrix.md
+ #ifdef __clang__

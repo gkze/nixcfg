@@ -38,6 +38,7 @@ from lib.update.events import (
 )
 from lib.update.nix import _build_fetch_from_github_call, _build_package_path_attr_expr
 from lib.update.paths import REPO_ROOT
+from lib.update.planner import select_target_source_names
 from lib.update.updaters import UpdateContext, VersionInfo
 
 if TYPE_CHECKING:
@@ -82,6 +83,14 @@ _OXC_SOURCE_PATHS = (
     _SETUP_SH_PATH,
     _SETUP_PS1_PATH,
 )
+
+
+def test_validated_unsloth_release_is_admitted_to_bulk_updates() -> None:
+    """Matched desktop/backend sources must not retain an obsolete release hold."""
+    module = _load_updater_module()
+    assert select_target_source_names((), {"unsloth": module.UnslothUpdater}) == [
+        "unsloth"
+    ]
 
 
 def test_unsloth_updater_python_target_matches_nix_backend_selection() -> None:
@@ -908,6 +917,63 @@ def test_unsloth_cargo_transform_derives_release_and_git_identities(
     )
 
 
+def test_unsloth_cargo_transform_accepts_removed_fix_path_env(
+    tmp_path: Path,
+) -> None:
+    """New releases without this Git dependency still need release stamping."""
+    module = _load_patch_module()
+    cargo_root = _write_cargo_identity_fixture(tmp_path)
+    manifest_path = cargo_root / "Cargo.toml"
+    lock_path = cargo_root / "Cargo.lock"
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8").replace(
+            'fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs" }\n',
+            "",
+        ),
+        encoding="utf-8",
+    )
+    lock = lock_path.read_text(encoding="utf-8")
+    lock = lock[: lock.index('\n[[package]]\nname = "fix-path-env"')]
+    lock_path.write_text(lock.replace(' "fix-path-env",\n', ""), encoding="utf-8")
+
+    module.patch_cargo_tree(tmp_path, "0.1.909-beta")
+
+    manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+    packages = tomllib.loads(lock_path.read_text(encoding="utf-8"))["package"]
+    assert manifest["package"]["version"] == "0.1.909-beta"
+    assert "fix-path-env" not in manifest["dependencies"]
+    assert packages[0]["version"] == "0.1.909-beta"
+    assert not any(package["name"] == "fix-path-env" for package in packages)
+
+
+def test_unsloth_cargo_transform_rejects_orphaned_fix_path_env(
+    tmp_path: Path,
+) -> None:
+    """A partially removed dependency must fail without changing either file."""
+    module = _load_patch_module()
+    cargo_root = _write_cargo_identity_fixture(tmp_path)
+    manifest_path = cargo_root / "Cargo.toml"
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8").replace(
+            'fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs" }\n',
+            "",
+        ),
+        encoding="utf-8",
+    )
+    original = {
+        name: (cargo_root / name).read_text(encoding="utf-8")
+        for name in ("Cargo.toml", "Cargo.lock")
+    }
+
+    with pytest.raises(RuntimeError, match="retains fix-path-env absent"):
+        module.patch_cargo_tree(tmp_path, "0.1.909-beta")
+
+    assert {
+        name: (cargo_root / name).read_text(encoding="utf-8")
+        for name in ("Cargo.toml", "Cargo.lock")
+    } == original
+
+
 def test_unsloth_cargo_transform_rejects_incoherent_release_identity(
     tmp_path: Path,
 ) -> None:
@@ -1648,6 +1714,48 @@ def test_unsloth_rejects_oversized_backend_sdist_metadata() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("binding_cpu", "binding_integrity", "error"),
+    [
+        (["arm64"], True, None),
+        (["x64"], True, "OXC darwin-arm64 binding"),
+        (["arm64"], False, "invalid integrity"),
+    ],
+)
+def test_unsloth_audits_source_owned_transformer(
+    binding_cpu: list[str], binding_integrity: bool, error: str | None
+) -> None:
+    """The added transformer must satisfy the same native lock checks."""
+    payloads = _oxc_source_payloads()
+    package = json.loads(payloads[_OXC_PACKAGE_PATH])
+    lock = json.loads(payloads[_OXC_LOCK_PATH])
+    package["dependencies"]["oxc-transform"] = "0.152.0"
+    lock["packages"][""]["dependencies"] = package["dependencies"]
+    integrity = f"sha512-{base64.b64encode(b'x' * 64).decode()}"
+    binding = "@oxc-transform/binding-darwin-arm64"
+    lock["packages"]["node_modules/oxc-transform"] = {
+        "version": "0.152.0",
+        "resolved": "https://registry.npmjs.org/oxc-transform/-/oxc-transform-0.152.0.tgz",
+        "integrity": integrity,
+        "optionalDependencies": {binding: "0.152.0"},
+    }
+    lock["packages"][f"node_modules/{binding}"] = {
+        "version": "0.152.0",
+        "resolved": (
+            "https://registry.npmjs.org/@oxc-transform/binding-darwin-arm64/-/"
+            "binding-darwin-arm64-0.152.0.tgz"
+        ),
+        "integrity": integrity if binding_integrity else "invalid",
+        "optional": True,
+        "os": ["darwin"],
+        "cpu": binding_cpu,
+    }
+    payloads[_OXC_PACKAGE_PATH] = json.dumps(package).encode()
+    payloads[_OXC_LOCK_PATH] = json.dumps(lock).encode()
+    with pytest.raises(RuntimeError, match=error) if error else nullcontext():
+        _load_updater_module()._audit_oxc_sources(payloads)
+
+
 def test_unsloth_rejects_re_pinned_oxc_darwin_binding_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1876,6 +1984,25 @@ def _locked_oxc_source_payloads() -> dict[str, bytes]:
 def test_unsloth_accepts_locked_oxc_setup() -> None:
     """Both setup paths may use npm ci with the reviewed mirror retry."""
     _load_updater_module()._audit_oxc_runtime_sources(_locked_oxc_source_payloads())
+
+
+@pytest.mark.parametrize("unreviewed_install", [False, True])
+def test_unsloth_audits_function_scoped_oxc_setup(unreviewed_install: bool) -> None:
+    """0.1.909-beta moves the unchanged install block into a function."""
+    payloads = _locked_oxc_source_payloads()
+    fixture = _PACKAGE_DIR / "tests/fixtures/oxc-0.1.909-beta-setup.sh.txt"
+    payloads[_SETUP_SH_PATH] = fixture.read_bytes()
+    if unreviewed_install:
+        payloads[_SETUP_SH_PATH] = payloads[_SETUP_SH_PATH].replace(
+            b"_NPM_INSTALL=install", b"npm install unreviewed\n_NPM_INSTALL=install"
+        )
+    context = (
+        pytest.raises(RuntimeError, match="OXC setup.sh npm install mutation drifted")
+        if unreviewed_install
+        else nullcontext()
+    )
+    with context:
+        _load_updater_module()._audit_oxc_runtime_sources(payloads)
 
 
 @pytest.mark.parametrize(
@@ -2977,14 +3104,15 @@ def test_unsloth_rejects_invalid_backend_upload_time(value: str) -> None:
         module._canonical_pypi_upload_time(value)
 
 
-def test_unsloth_build_toolchain_override_is_updater_owned() -> None:
+@pytest.mark.parametrize("version", ["0.1.902-beta", "0.1.909-beta"])
+def test_unsloth_build_toolchain_override_is_updater_owned(version: str) -> None:
     """A release whose own lockfile needs a newer compiler is recorded, not restated in Nix."""
     module = _load_updater_module()
     source = _candidate_source(module)
     metadata = {**_metadata(), "rustToolchainVersion": "1.89.0"}
 
     overridden = module._closure_plan_payload(
-        VersionInfo("0.1.902-beta", metadata),
+        VersionInfo(version, metadata),
         source,
         metadata,
     )
@@ -4338,11 +4466,122 @@ def test_unsloth_rejects_mixed_studio_venv_contracts(tmp_path: Path) -> None:
     """A partially migrated CLI must not silently receive only half the policy."""
     module = _load_patch_module()
     _write_backend_patch_fixture(tmp_path, module)
-    patch = next(patch for patch in module._BACKEND_PATCHES if patch.alternatives)
+    patch = next(
+        patch
+        for patch in module._BACKEND_PATCHES
+        if patch.path == Path("unsloth_cli/commands/studio.py")
+        and "studio_venv_dir" in patch.old
+    )
     path = tmp_path / patch.path
     path.write_text(path.read_text().replace(patch.old, patch.alternatives[0][0], 1))
     with pytest.raises(RuntimeError, match="ambiguous Unsloth patch variants"):
         module.patch_backend_tree(tmp_path)
+
+
+@pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize(
+    ("index", "args", "kwargs", "managed_result"),
+    [
+        (9, (), {}, "raises"),
+        (17, ("package", "Package"), {}, False),
+        (
+            18,
+            (),
+            {
+                "event_queue": None,
+                "import_name": "package",
+                "display_name": "Package",
+                "pypi_name": "package",
+                "required": True,
+            },
+            False,
+        ),
+        (
+            19,
+            (),
+            {
+                "event_queue": None,
+                "import_name": "package",
+                "display_name": "Package",
+                "pypi_name": "package",
+                "allow_source_build": False,
+            },
+            False,
+        ),
+        (20, ("package", "/unused"), {}, False),
+        (
+            22,
+            ("https://example.invalid/wheel",),
+            {"python_executable": "python", "use_uv": True, "reinstall": True},
+            [],
+        ),
+        (
+            23,
+            (),
+            {
+                "import_name": "package",
+                "display_name": "Package",
+                "pypi_name": "package",
+                "package_version": "1",
+                "release_tag": "v1",
+                "release_base_url": "https://example.invalid",
+                "status_cb": None,
+                "run": None,
+                "newly_installed": [],
+                "required": True,
+            },
+            False,
+        ),
+        (24, ("model",), {}, []),
+    ],
+)
+def test_unsloth_current_backend_seams_preserve_managed_boundaries(
+    index: int,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+    managed_result: object,
+    managed: bool,
+) -> None:
+    """The locked 0.909 entry points stop before installer work in managed mode."""
+    module = _load_patch_module()
+    fixture = json.loads(
+        (_PACKAGE_DIR / "tests/fixtures/backend-0.1.909-seams.json").read_text()
+    )
+    patch = module._BACKEND_PATCHES[index]
+    original, replacement = patch.alternatives[-1]
+    assert fixture["variants"][str(index)]["original"] == original
+    prefix = "def ensure_ssm_runtime(model_name):\n" if index == 24 else ""
+    source = (
+        "from __future__ import annotations\n"
+        + prefix
+        + replacement
+        + ("    )\n" if index == 17 else "")
+        + '    return "upstream"\n'
+    )
+    tree = ast.parse(source)
+    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef))
+    logger = SimpleNamespace(info=lambda *_: None, warning=lambda *_: None)
+    namespace: dict[str, object] = {
+        "os": SimpleNamespace(environ={"UNSLOTH_NIX_MANAGED": "1"} if managed else {}),
+        "logger": logger,
+        "_logger": logger,
+        "_is_importable": lambda _: False,
+        "_install_source": lambda value: value,
+        "_sp": SimpleNamespace(run=lambda: None),
+        "subprocess": SimpleNamespace(run=None),
+    }
+    exec(  # noqa: S102 -- exercises fixed source snippets with inert dependencies
+        compile(tree, "<current-backend-policy>", "exec"), namespace
+    )
+    call = cast("Callable[..., object]", namespace[function.name])
+    if managed and managed_result == "raises":
+        with pytest.raises(RuntimeError, match="managed by Nix"):
+            call(*args, **kwargs)
+    else:
+        assert call(*args, **kwargs) == (managed_result if managed else "upstream")
+    if index in {18, 23}:
+        namespace["_is_importable"] = lambda _: True
+        assert call(*args, **kwargs) is True
 
 
 @pytest.mark.parametrize("managed", [False, True])

@@ -182,6 +182,50 @@ _ENGINE_WHEEL_SHAPES = (
     _FAIL_OPEN_ENGINE_INSTALL_WHEEL_171,
 )
 
+# 0.1.204 unifies source and wheel installs and returns an explicit failed state.
+# Keep that state/cancellation protocol; validate source imports before ready.
+_CURRENT_ENABLED_GATE = (
+    b"let t=e.disabled===!0||e.app.isPackaged===!1,"
+    b"n=!t&&e.unsupportedInstallFormat===!0;"
+)
+_CURRENT_DISABLED_GATE = b"let t=!0,n=!1/* Nix */;"
+_UNIFIED_ENGINE_OPEN = (
+    b"async provisionLocalMoeEngine(e,t){if(!eB(`local-moe`,this.options.machi"
+    b"neProfile??Dz()))return{state:`unsupported-machine`};try{let n=await u0e"
+    b"({context:this.context,environment:this.options.environment??process.env"
+    b"}),r=n?.enginePath??await LH(e.managedRoot);if(r===null)return{state:`no"
+    b"t-configured`};if(!await AB(r))throw Error(`Mach engine source is missin"
+    b"g at ${r}.`);let i=await MH({context:this.context,cwd:e.managedRoot,envi"
+    b"ronment:this.options.environment,onLog:this.options.onLog,candidatesOver"
+    b"ride:this.options.uvCandidatesOverride});if(await this.runCommand(i.bina"
+    b"ryPath,[`pip`,`install`,`--python`,e.pythonExecutable,...n===null?[`${r}"
+    b"[dflash]`]:[`--editable`,`${r}[dev,dflash]`],i0e],e.managedRoot,void 0,t"
+    b"),!await AB(e.localMoeServeExecutable))throw Error(`Mach installation di"
+    b"d not create ${e.localMoeServeExecutable}.`);return{state:`ready`}}catch"
+    b"(e){if(f0e(e))throw e;let t=`Mach engine installation failed: ${e instan"
+    b"ceof Error?e.message:String(e)}`;return this.options.onLog?.(`[local-moe"
+    b"] ${t}\\n`),{state:`failed`,message:t}}}"
+)
+
+_UNIFIED_ENGINE_CLOSED = (
+    b"async provisionLocalMoeEngine(e,t){let o=this.options;if(!eB(`local-moe`"
+    b",o.machineProfile??Dz()))return{state:`unsupported-machine`};try{let n=a"
+    b"wait u0e({context:this.context,environment:o.environment??process.env}),"
+    b"r=n?.enginePath??await LH(e.managedRoot);if(r===null)return{state:`not-c"
+    b"onfigured`};if(!await AB(r))throw Error(`Missing Mach source: ${r}`);let"
+    b" i=await MH({context:this.context,cwd:e.managedRoot,environment:o.enviro"
+    b"nment,onLog:o.onLog,candidatesOverride:o.uvCandidatesOverride});await th"
+    b"is.runCommand(i.binaryPath,[`pip`,`install`,`--python`,e.pythonExecutabl"
+    b"e,...n===null?[`${r}[dflash]`]:[`--editable`,`${r}[dev,dflash]`],i0e],e."
+    b"managedRoot,void 0,t);if(!await AB(e.localMoeServeExecutable))throw Erro"
+    b"r(`Missing mach-serve: ${e.localMoeServeExecutable}`);if(n!==null)await "
+    b"this.runCommand(e.pythonExecutable,[`-c`,`import mach,pathlib,sys;sys.ex"
+    b"it(not pathlib.Path(mach.__file__).resolve().is_relative_to(pathlib.Path"
+    b"(sys.argv[1]).resolve()))`,r],e.managedRoot,void 0,t);return{state:`read"
+    b"y`}}catch(e){if(f0e(e))throw e;let t=String(e);return o.onLog?.(t),{stat"
+    b"e:`failed`,message:t}}}"
+)
+
 _WHEEL_REINSTALL_DESCRIPTION = (
     b"Wipes the `.venv/` directory and rebuilds it from the bundled lockfile and "
     b"wheel. Use this when local models fail to start with an engine-unavailable "
@@ -204,6 +248,11 @@ _RENDERER_VENDOR_INVENTORY = (
     (_WHEEL_REINSTALL_DESCRIPTION, 1),
     (_WHEEL_MISSING_DESCRIPTION, 1),
     (_WHEEL_TITLE, 3),
+)
+_RENDERER_SOURCE_INVENTORY = (
+    (_SOURCE_REINSTALL_DESCRIPTION, 1),
+    (_SOURCE_READY_DESCRIPTION, 1),
+    (_SOURCE_TITLE, 3),
 )
 _RENDERER_PATH_PATTERN = re.compile(r"^dist/assets/index-[^/]+\.js$")
 _MAIN_POLICY_DIRECTORY = "dist-electron"
@@ -228,8 +277,29 @@ def _replace_exact(
     return payload.replace(old, new)
 
 
+def _patch_unified_main(payload: bytes) -> bytes:
+    """Patch the exact current gate/provisioner pair without changing ASAR size."""
+    open_gate = payload.count(_CURRENT_ENABLED_GATE)
+    closed_gate = payload.count(_CURRENT_DISABLED_GATE)
+    open_engine = payload.count(_UNIFIED_ENGINE_OPEN)
+    closed_engine = payload.count(_UNIFIED_ENGINE_CLOSED)
+    if (open_gate, closed_gate, open_engine, closed_engine) == (0, 1, 0, 1):
+        return payload
+    if (open_gate, closed_gate, open_engine, closed_engine) != (1, 0, 1, 0):
+        msg = "expected one matching Mach Studio unified updater/provisioner pair"
+        raise PatchError(msg)
+    patched = payload.replace(_CURRENT_ENABLED_GATE, _CURRENT_DISABLED_GATE, 1)
+    patched = patched.replace(_UNIFIED_ENGINE_OPEN, _UNIFIED_ENGINE_CLOSED, 1)
+    if len(patched) > len(payload):
+        msg = "Mach Studio unified policy exceeds its audited ASAR byte budget"
+        raise PatchError(msg)
+    return patched.ljust(len(payload), b" ")
+
+
 def patch_main(payload: bytes) -> bytes:
     """Fail closed on updater or local-engine provisioning drift."""
+    if _CURRENT_ENABLED_GATE in payload or _CURRENT_DISABLED_GATE in payload:
+        return _patch_unified_main(payload)
     patched = _replace_exact(
         payload,
         _ENABLED_GATE,
@@ -269,6 +339,15 @@ def patch_main(payload: bytes) -> bytes:
 
 def patch_renderer(payload: bytes) -> bytes:
     """Describe the reviewed release's source-backed local engine."""
+    source_present = any(anchor in payload for anchor, _ in _RENDERER_SOURCE_INVENTORY)
+    vendor_present = any(anchor in payload for anchor, _ in _RENDERER_VENDOR_INVENTORY)
+    if source_present and vendor_present:
+        msg = "mixed Mach Studio source and wheel renderer inventory"
+        raise PatchError(msg)
+    if all(
+        payload.count(anchor) == count for anchor, count in _RENDERER_SOURCE_INVENTORY
+    ):
+        return payload
     patched = _replace_exact(
         payload,
         _WHEEL_REINSTALL_DESCRIPTION,
@@ -297,7 +376,11 @@ def resolve_main_policy_path(asar_path: Path) -> str:
         directory, _, file_name = relative_path.rpartition("/")
         if directory != _MAIN_POLICY_DIRECTORY or not file_name.endswith(".js"):
             continue
-        if _ENABLED_GATE in read_packed_file(asar_path, relative_path):
+        payload = read_packed_file(asar_path, relative_path)
+        if any(
+            gate in payload
+            for gate in (_ENABLED_GATE, _CURRENT_ENABLED_GATE, _CURRENT_DISABLED_GATE)
+        ):
             matches.append(relative_path)
     if len(matches) != 1:
         rendered = ", ".join(matches) if matches else "none"
@@ -316,9 +399,9 @@ def resolve_renderer_path(asar_path: Path) -> str:
         if _RENDERER_PATH_PATTERN.fullmatch(relative_path) is None:
             continue
         payload = read_packed_file(asar_path, relative_path)
-        if all(
-            payload.count(anchor) == expected_count
-            for anchor, expected_count in _RENDERER_VENDOR_INVENTORY
+        if any(
+            all(payload.count(anchor) == count for anchor, count in inventory)
+            for inventory in (_RENDERER_VENDOR_INVENTORY, _RENDERER_SOURCE_INVENTORY)
         ):
             matches.append(relative_path)
     if len(matches) != 1:

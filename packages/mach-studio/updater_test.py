@@ -8,6 +8,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from nix_manipulator.expressions.expression import NixExpression
 from nix_manipulator.expressions.function.call import FunctionCall
 from nix_manipulator.expressions.function.definition import FunctionDefinition
 from nix_manipulator.expressions.identifier import Identifier
@@ -52,15 +53,6 @@ def _load_module() -> ModuleType:
         "packages/mach-studio/updater.py",
         "mach_studio_updater_dedicated_test",
     )
-
-
-def test_bulk_update_hold_skips_unaudited_local_engine_generation() -> None:
-    """0.1.172 matched no audited anchors; do not bump until that DMG is reviewed."""
-    module = _load_module()
-    hold = module.MachStudioUpdater.bulk_update_hold
-    assert hold is not None
-    assert "0.1.172" in hold
-    assert "found 0" in hold
 
 
 def _load_policy_module() -> ModuleType:
@@ -679,23 +671,31 @@ def test_mach_studio_package_patches_updates_and_resigns_the_bundle() -> None:
     assert url.endswith("-arm64.dmg")
     assert_nix_ast_equal(derivation.name, Identifier(name="mkSimpleDarwinApp"))
     assert_nix_ast_equal(
-        expect_binding(arguments.values, "builder").value,
+        expect_instance(
+            expect_binding(arguments.values, "builder").value, NixExpression
+        ),
         Identifier(name="mkDmgApp"),
     )
     assert_nix_ast_equal(
-        expect_binding(arguments.values, "pname").value,
+        expect_instance(expect_binding(arguments.values, "pname").value, NixExpression),
         StringPrimitive(value="mach-studio"),
     )
     assert_nix_ast_equal(
-        expect_binding(arguments.values, "appName").value,
+        expect_instance(
+            expect_binding(arguments.values, "appName").value, NixExpression
+        ),
         StringPrimitive(value="Mach Studio"),
     )
     assert_nix_ast_equal(
-        expect_binding(arguments.values, "sourceName").value,
+        expect_instance(
+            expect_binding(arguments.values, "sourceName").value, NixExpression
+        ),
         '"Mach-Studio-${selfSource.version}-arm64.dmg"',
     )
     assert_nix_ast_equal(
-        expect_binding(arguments.values, "platforms").value,
+        expect_instance(
+            expect_binding(arguments.values, "platforms").value, NixExpression
+        ),
         '[ "aarch64-darwin" ]',
     )
     assert "codesignApp" not in bindings
@@ -737,3 +737,126 @@ def test_policy_handles_independent_engine_provisioning_shapes(kind: str) -> Non
         patched = module.patch_main(payload)
         assert len(patched) == len(payload)
         assert patched != payload
+
+
+def test_current_unified_policy_is_idempotent_and_preserves_asar_size() -> None:
+    """The current pair patches atomically and rejects partial or duplicate state."""
+    module = _load_policy_module()
+    payload = module._CURRENT_ENABLED_GATE + module._UNIFIED_ENGINE_OPEN
+    patched = module.patch_main(payload)
+    assert len(patched) == len(payload)
+    assert module.patch_main(patched) == patched
+    for malformed in (
+        module._CURRENT_DISABLED_GATE + module._UNIFIED_ENGINE_OPEN,
+        module._CURRENT_ENABLED_GATE + module._UNIFIED_ENGINE_CLOSED,
+        payload + module._CURRENT_ENABLED_GATE,
+        payload + module._UNIFIED_ENGINE_OPEN,
+        module._CURRENT_ENABLED_GATE + b"unknown engine",
+    ):
+        with pytest.raises(module.PatchError, match="matching Mach Studio unified"):
+            module.patch_main(malformed)
+
+
+def test_current_policy_rejects_exceeding_its_asar_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A future source check cannot silently alter ASAR file offsets."""
+    module = _load_policy_module()
+    monkeypatch.setattr(module, "_UNIFIED_ENGINE_CLOSED", b"x" * 4096)
+    with pytest.raises(module.PatchError, match="ASAR byte budget"):
+        module.patch_main(module._CURRENT_ENABLED_GATE + module._UNIFIED_ENGINE_OPEN)
+
+
+def test_current_bundle_policy_is_idempotent(tmp_path: Path) -> None:
+    """A second build-time patch retains both archive bytes and verified plist hash."""
+    module = _load_policy_module()
+    payload = module._CURRENT_ENABLED_GATE + module._UNIFIED_ENGINE_OPEN
+    renderer = (
+        module._WHEEL_REINSTALL_DESCRIPTION
+        + module._WHEEL_MISSING_DESCRIPTION
+        + module._WHEEL_TITLE * 3
+    )
+    asar_path, plist_path = _write_policy_bundle(tmp_path, payload, renderer)
+    (tmp_path / "vendor/local_moe_engine").mkdir(parents=True)
+    first = module.patch_bundle(asar_path, plist_path)
+    original_archive, original_plist = asar_path.read_bytes(), plist_path.read_bytes()
+    assert module.patch_bundle(asar_path, plist_path) == first
+    assert asar_path.read_bytes() == original_archive
+    assert plist_path.read_bytes() == original_plist
+    check_info_plist_hash(plist_path, asar_path)
+
+
+def test_current_unified_engine_semantics_in_node(tmp_path: Path) -> None:
+    """Native JS proves source containment, wheel behavior, failure and cancellation."""
+    import shutil
+    import subprocess
+    import sys
+
+    module = _load_policy_module()
+    node = shutil.which("node")
+    assert node is not None
+    harness = REPO_ROOT / "packages/mach-studio/tests/unified-engine-policy.mjs"
+    result = subprocess.run(  # noqa: S603 -- fixed repository-owned native fixture
+        [node, str(harness)],
+        input=json.dumps({
+            "method": module._UNIFIED_ENGINE_CLOSED.decode(),
+            "gate": module._CURRENT_DISABLED_GATE.decode(),
+        }),
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    validation = json.loads(result.stdout)["validationScript"]
+    expected_root = tmp_path / "bundle"
+    expected_root.mkdir()
+    other_root = tmp_path / "bundle-neighbor"
+    other_root.mkdir()
+    (expected_root / "mach.py").write_text("# package-owned module\n")
+    (other_root / "mach.py").write_text("# unrelated module\n")
+    for module_root, success, optimized in (
+        (expected_root, True, "0"),
+        (other_root, False, "0"),
+        (expected_root, True, "1"),
+        (other_root, False, "1"),
+    ):
+        imported = subprocess.run(  # noqa: S603 -- executes the emitted validation with local fixtures
+            [sys.executable, "-c", validation, str(expected_root)],
+            env={"PYTHONPATH": str(module_root), "PYTHONOPTIMIZE": optimized},
+            cwd=tmp_path,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        assert (imported.returncode == 0) is success
+    (expected_root / "mach.py").unlink()
+    (expected_root / "mach.py").symlink_to(other_root / "mach.py")
+    escaped = subprocess.run(  # noqa: S603 -- tests realpath containment of a local symlink fixture
+        [sys.executable, "-c", validation, str(expected_root)],
+        env={"PYTHONPATH": str(expected_root), "PYTHONOPTIMIZE": "1"},
+        cwd=tmp_path,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    assert escaped.returncode != 0
+
+
+@pytest.mark.parametrize("complete", ["source", "vendor", "neither"])
+def test_renderer_rejects_mixed_source_and_vendor_inventory(complete: str) -> None:
+    """Idempotence must not accept a partially patched or ambiguous renderer."""
+    module = _load_policy_module()
+    source = b"".join(
+        anchor * count for anchor, count in module._RENDERER_SOURCE_INVENTORY
+    )
+    vendor = b"".join(
+        anchor * count for anchor, count in module._RENDERER_VENDOR_INVENTORY
+    )
+    payloads = {
+        "source": source + module._WHEEL_TITLE,
+        "vendor": vendor + module._SOURCE_TITLE,
+        "neither": module._WHEEL_TITLE + module._SOURCE_TITLE,
+    }
+    with pytest.raises(module.PatchError, match="mixed Mach Studio"):
+        module.patch_renderer(payloads[complete])

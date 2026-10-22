@@ -4,6 +4,7 @@ These tests focus on argument parsing/dispatch glue, not the update pipeline
 implementation (which is covered elsewhere).
 """
 
+import os
 import runpy
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ from typer.testing import CliRunner
 
 import nixcfg
 from lib import http_utils
+from lib.cli import apply_nix_options
 from lib.github_actions.client import Workflow, WorkflowListRow, WorkflowRun
 from lib.schema_codegen import cli as schema_cli
 from lib.schema_codegen.runner import SchemaTargetSummary
@@ -1202,3 +1204,63 @@ def test_trailing_option_registries_cover_every_declared_option() -> None:
         cli._TRAILING_TARGET_VALUE_OPTIONS
     )
     assert declared - covered == set()
+
+
+def test_apply_nix_options_appends_to_inherited_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI Nix settings must extend, not replace, an inherited NIX_CONFIG."""
+    monkeypatch.setenv("NIX_CONFIG", "experimental-features = nix-command")
+
+    apply_nix_options(["builders = ssh-ng://rocinante"])
+
+    assert os.environ["NIX_CONFIG"] == (
+        "experimental-features = nix-command\nbuilders = ssh-ng://rocinante"
+    )
+
+
+def test_apply_nix_options_sets_config_without_inherited_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unset NIX_CONFIG is populated from the CLI settings alone."""
+    monkeypatch.delenv("NIX_CONFIG", raising=False)
+
+    apply_nix_options(["builders = ssh-ng://rocinante"])
+
+    assert os.environ["NIX_CONFIG"] == "builders = ssh-ng://rocinante"
+
+
+def test_apply_nix_options_ignores_blank_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Blank --nix-option values must not touch the environment."""
+    monkeypatch.delenv("NIX_CONFIG", raising=False)
+
+    apply_nix_options(["", "   "])
+
+    assert "NIX_CONFIG" not in os.environ
+
+
+def test_nixcfg_root_mirrors_nix_options_into_child_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`--nix-option` must reach the environment every Nix subprocess inherits."""
+    monkeypatch.delenv("NIX_CONFIG", raising=False)
+    monkeypatch.setattr("lib.update.cli.check_required_tools", lambda **_kw: [])
+
+    async def _fake_run_updates(
+        _opts: UpdateOptions,
+        _root: object,
+        _config: object,
+    ) -> int:
+        return 0
+
+    monkeypatch.setattr("lib.update.durable.execute", _fake_run_updates)
+
+    result = CliRunner().invoke(
+        nixcfg.app,
+        ["--nix-option", "builders = ssh-ng://rocinante", "update", "emdash"],
+    )
+
+    assert result.exit_code == 0
+    assert os.environ["NIX_CONFIG"] == "builders = ssh-ng://rocinante"

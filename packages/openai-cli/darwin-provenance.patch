@@ -1,0 +1,89 @@
+--- a/internal/autocomplete/picker_install_metadata_darwin.go
++++ b/internal/autocomplete/picker_install_metadata_darwin.go
+@@ -12,7 +12,7 @@
+ 	"golang.org/x/sys/unix"
+ )
+ 
+-// Darwin metadata checks already refuse all attributes on both files.
++// Darwin metadata checks allow only the OS-maintained provenance attribute.
+ func checkPickerReplacementLabels(*os.File, *os.File) error { return nil }
+ 
+ // Replacing a startup file with a new inode must not discard its extended
+@@ -25,8 +25,21 @@
+ 		return err
+ 	}
+ 	count, err := unix.Flistxattr(int(file.Fd()), nil)
+-	if err != nil || count != 0 {
++	if err != nil {
+ 		return errors.New("shell startup file has protected or unreadable extended metadata")
++	}
++	if count != 0 {
++		// macOS adds provenance to new files and directories. It records their
++		// origin without granting access; every other attribute remains protected.
++		const provenance = "com.apple.provenance\x00"
++		if count != len(provenance) {
++			return errors.New("shell startup file has protected or unreadable extended metadata")
++		}
++		var names [len(provenance)]byte
++		count, err = unix.Flistxattr(int(file.Fd()), names[:])
++		if err != nil || count != len(names) || string(names[:]) != provenance {
++			return errors.New("shell startup file has protected or unreadable extended metadata")
++		}
+ 	}
+ 	var info unix.Stat_t
+ 	if err := unix.Fstat(int(file.Fd()), &info); err != nil || info.Flags != 0 {
+--- /dev/null
++++ b/internal/autocomplete/picker_install_metadata_provenance_darwin_test.go
+@@ -0,0 +1,52 @@
++//go:build darwin
++
++package autocomplete
++
++import (
++	"os"
++	"path/filepath"
++	"testing"
++
++	"github.com/stretchr/testify/require"
++	"golang.org/x/sys/unix"
++)
++
++func TestPickerDarwinProvenancePreservesMetadataBoundaries(t *testing.T) {
++	for _, kind := range []string{"clean", "unknown", "quarantine", "BSD flag", "writable mode"} {
++		t.Run(kind, func(t *testing.T) {
++			path := filepath.Join(t.TempDir(), "startup")
++			require.NoError(t, os.WriteFile(path, []byte("# preserved\n"), 0600))
++			file, err := os.Open(path)
++			require.NoError(t, err)
++			defer file.Close()
++			count, err := unix.Flistxattr(int(file.Fd()), nil)
++			require.NoError(t, err)
++			names := make([]byte, count)
++			_, err = unix.Flistxattr(int(file.Fd()), names)
++			require.NoError(t, err)
++			t.Logf("OS-created extended attributes: %q", names)
++			switch kind {
++			case "unknown":
++				require.NoError(t, unix.Setxattr(path, "com.example.openai-picker-test", []byte("keep"), 0))
++			case "quarantine":
++				require.NoError(t, unix.Setxattr(path, "com.apple.quarantine", []byte("0081;00000000;OpenAI CLI test;"), 0))
++			case "BSD flag":
++				require.NoError(t, unix.Chflags(path, unix.UF_HIDDEN))
++			case "writable mode":
++				require.NoError(t, os.Chmod(path, 0660))
++			}
++			root, err := os.OpenRoot(filepath.Dir(path))
++			require.NoError(t, err)
++			defer root.Close()
++			_, err = readPickerFile(t.Context(), root, filepath.Base(path))
++			if kind == "clean" {
++				require.NoError(t, err)
++			} else {
++				require.Error(t, err)
++			}
++			data, readErr := os.ReadFile(path)
++			require.NoError(t, readErr)
++			require.Equal(t, "# preserved\n", string(data))
++		})
++	}
++}

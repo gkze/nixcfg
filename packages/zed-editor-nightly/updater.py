@@ -1,7 +1,7 @@
 """Updater for Zed nightly flake input metadata."""
 
 import tomllib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from lib.update.derivation_validation import DerivationValidation
 from lib.update.net import fetch_url
@@ -28,6 +28,18 @@ class ZedEditorNightlyUpdater(Crate2NixMetadataUpdater):
     # that nightly rustc is in gkze.cachix.org and the flake.nix pin lifts.
     additional_input_names = ("rust-overlay",)
     _MANIFEST_PATH = "crates/zed/Cargo.toml"
+    # A shared Darwin cache can pair this C API leaf with incompatible Rust
+    # metadata for its tree-sitter consumers (rustc E0460). Recording the one
+    # affected crate version here lets Nix rebuild that leaf and its dependents
+    # coherently, and keeps the mitigation removable once the version retires.
+    compatibility_pins: ClassVar[dict[str, str]] = {
+        "wasmtimeCApiCoherenceVersion": "48.0.1"
+    }
+    compatibility_pin_rationale: ClassVar[str] = (
+        "wasmtime-c-api-impl 48.0.1 resolves against a Darwin cache whose Rust "
+        "metadata disagrees with the cached tree-sitter consumers, so the "
+        "package gives that crate a version-bounded rebuild identity."
+    )
 
     @classmethod
     def get_derivation_validations(cls) -> tuple[DerivationValidation, ...]:

@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-eLSdOkJt+UsM558OBtd9dq1jt91Rlw2LHgrdrrEmlBE="
+    "aarch64-darwin": "sha256-p25x7N35qp+mIHw/jQ/ovY0V2B8Qe0uMG/TPsQMNCUE="
   },
   "urls": {
-    "aarch64-darwin": "https://f6n9fvfeuhzxxji6.public.blob.vercel-storage.com/Pica-1.0.10.dmg"
+    "aarch64-darwin": "https://f6n9fvfeuhzxxji6.public.blob.vercel-storage.com/Pica-1.9.15.dmg"
   },
-  "version": "1.0.10"
+  "version": "1.9.15"
 }

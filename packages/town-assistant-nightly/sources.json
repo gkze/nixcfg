@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-wUbgI45kqCzELu1y/MWzjG5MFBXCVVf3bYFpSXghUJk="
+    "aarch64-darwin": "sha256-3oP7O6aUjMb35PKpkhv+k0Wu0ggepgjlqFWBtadW9uE="
   },
   "urls": {
-    "aarch64-darwin": "https://town-macos-app.s3.us-east-1.amazonaws.com/desktop/nightly/releases/Town%20Assistant-1.52-133.dmg"
+    "aarch64-darwin": "https://town-macos-app.s3.us-east-1.amazonaws.com/desktop/nightly/releases/Town%20Assistant-1.53-134.dmg"
   },
-  "version": "1.52-133"
+  "version": "1.53-134"
 }

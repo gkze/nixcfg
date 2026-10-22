@@ -1,10 +1,10 @@
 {
-  "commit": "1a4249ac9f23c6e6e2526d4b54dbbf3bb09ba204",
+  "commit": "2bcb8583a18a0623eb78c9ed845d597ed99fae48",
   "hashes": [],
   "input": "goose",
   "pins": {
     "bitcoinInternals.0.5.0": "1.74.0",
     "bitcoinInternals.0.6.0": "1.74.0"
   },
-  "version": "1.51.0"
+  "version": "1.55.0"
 }

@@ -34,22 +34,22 @@ that pool; packages wait so they do not steal a slot.
 
 Wall clock was **306 minutes**. Additive critical path:
 
-| Phase | Wall | Notes |
-| --- | ---: | --- |
-| prepare-pins | 4m | ubuntu |
-| prepare-darwin | 39m | longest of the three native prepares |
-| prepare-merge | 3m | waits Darwin + arm + x86 |
-| plan-darwin-closures | 50m | serial graph eval; **blocks rust warmup** |
-| canary-warm-rust | 8m | serial before the 5-wide stripe |
-| validate-darwin-warm-rust | 30m | slots 21–30m, already fairly even |
-| canary-warm-cascade | 7m | serial before cascade 5-wide |
-| cascade-warmup | 47m | slots **16 / 46 / 37 / 13 / 11m** |
-| linux-deps | 15m | waits for cascade today |
-| Darwin roots (4-wide) | 36m | argus longest; none skipped |
-| canary-darwin-cache | 4m | ubuntu path-info |
-| validate-darwin-closures | 40m | aggregate proof, mostly substitute |
-| assert-coverage | 7m | |
-| publish certify | 16m | `5996 passed`, coverage 100% |
+| Phase                     | Wall | Notes                                     |
+| ------------------------- | ---: | ----------------------------------------- |
+| prepare-pins              |   4m | ubuntu                                    |
+| prepare-darwin            |  39m | longest of the three native prepares      |
+| prepare-merge             |   3m | waits Darwin + arm + x86                  |
+| plan-darwin-closures      |  50m | serial graph eval; **blocks rust warmup** |
+| canary-warm-rust          |   8m | serial before the 5-wide stripe           |
+| validate-darwin-warm-rust |  30m | slots 21–30m, already fairly even         |
+| canary-warm-cascade       |   7m | serial before cascade 5-wide              |
+| cascade-warmup            |  47m | slots **16 / 46 / 37 / 13 / 11m**         |
+| linux-deps                |  15m | waits for cascade today                   |
+| Darwin roots (4-wide)     |  36m | argus longest; none skipped               |
+| canary-darwin-cache       |   4m | ubuntu path-info                          |
+| validate-darwin-closures  |  40m | aggregate proof, mostly substitute        |
+| assert-coverage           |   7m |                                           |
+| publish certify           |  16m | `5996 passed`, coverage 100%              |
 
 Linux validate and FOD canary ran beside plan-shards and were not on
 the critical path.
@@ -62,15 +62,15 @@ queueing, not the builds:
 
 1. **Cascade slot imbalance (22m on the wall).** 123 minutes of cascade
    compile packed 5-wide would be ~25m if even; slot 1 ran 46m.
-2. **linux-deps after cascade (15m).** Recaching `nixos-disk-image` does
+1. **linux-deps after cascade (15m).** Recaching `nixos-disk-image` does
    not need cascade outputs; it only needs rust-warmup and the merged
    tree.
-3. **Serial rust canary (8m).** Default push still runs settings-family
+1. **Serial rust canary (8m).** Default push still runs settings-family
    canary on one macos-15, then starts five validate slots. Canary
    failure currently does not even fail-close the 5-wide job.
-4. **plan-shards 50m** is eval, not compile. Serial on purpose. Not
+1. **plan-shards 50m** is eval, not compile. Serial on purpose. Not
    lowered here (2-wide/4-wide SIGTERM'd 16 GiB ubuntu).
-5. **Aggregate closures 40m** after four green roots. If gkze LRU
+1. **Aggregate closures 40m** after four green roots. If gkze LRU
    dropped a root NAR, this job compiles; pinning roots is the free
    fix. If it is pure substitute I/O, bigger Macs would help and we
    will not buy them.
@@ -96,7 +96,7 @@ Expected cold wall: **about 4h05m–4h20m** (down from 5h06m). Still
 above 2h54m because no-skip actually builds four roots and the shared
 warmup.
 
-**Warm incremental** (gkze already holds rust_*, cascade, and the four
+**Warm incremental** (gkze already holds rust\_\*, cascade, and the four
 roots from the previous green run):
 
 - rust-warmup and cascade become skip-if-in-gkze no-ops (~5–10m each
@@ -117,10 +117,10 @@ always re-prepares and re-plans so it is not the operational ceiling.
 
 ## Bigger Mac runners (report only)
 
-| SKU | Cores / RAM | Money | Expected compile speedup |
-| --- | --- | --- | --- |
-| `macos-15` (current) | 3 / 7 GiB | free | 1.0× (39166099302) |
-| `macos-15-xlarge` | 6 / 14 GiB | paid | ~1.5–2× rust/cascade/roots |
+| SKU                  | Cores / RAM | Money | Expected compile speedup   |
+| -------------------- | ----------- | ----- | -------------------------- |
+| `macos-15` (current) | 3 / 7 GiB   | free  | 1.0× (39166099302)         |
+| `macos-15-xlarge`    | 6 / 14 GiB  | paid  | ~1.5–2× rust/cascade/roots |
 
 Paid large Macs could cut rust 30m→~18m, balanced cascade 25m→~15m,
 roots 36m→~22m. That is ~30–40m off a **cold** run and almost nothing
@@ -132,14 +132,14 @@ Measured on the 306m no-skip run. No queue time; the cap is 5 macos-15
 jobs plus serialized steps. Each critical-path Mac job spent 5.7–9.2m
 on setup (~56m total); Xcode/Android purge was 3.3–4.6m of that.
 
-| Change | Measured basis | Expected wall |
-| --- | --- | ---: |
-| Fold assert-coverage into publish (first step, blank write token) | 7.2m macos job for <30s of work | ~7m |
-| Skip Xcode/Android on publish/repair; 8 GiB fail-closed floor | 3.3–4.6m purge on that job | ~4m |
-| Fold canary-darwin-cache into closures as a pre-build step | 4m ubuntu path-info after roots | ~3m |
-| Start cascade canary in the slot rust canary frees, not after all rust slots | 6.8m canary for 17s of work; rust canary 8m, rust slots 21–30m | 0–7m |
-| Batch `nix path-info --json` (gkze first, then hydra remainder) | plan-shards 50m includes serial path-info of 31.6k outputs | a few minutes of plan-shards |
-| Determinate `eval-cores = 2` plus host nix on PATH | `unknown setting 'eval-cores'` from devshell `pkgs.nix` | 0m until `derivation show` is measured parallel |
+| Change                                                                       | Measured basis                                                 |                                   Expected wall |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------: |
+| Fold assert-coverage into publish (first step, blank write token)            | 7.2m macos job for \<30s of work                               |                                             ~7m |
+| Skip Xcode/Android on publish/repair; 8 GiB fail-closed floor                | 3.3–4.6m purge on that job                                     |                                             ~4m |
+| Fold canary-darwin-cache into closures as a pre-build step                   | 4m ubuntu path-info after roots                                |                                             ~3m |
+| Start cascade canary in the slot rust canary frees, not after all rust slots | 6.8m canary for 17s of work; rust canary 8m, rust slots 21–30m |                                            0–7m |
+| Batch `nix path-info --json` (gkze first, then hydra remainder)              | plan-shards 50m includes serial path-info of 31.6k outputs     |                    a few minutes of plan-shards |
+| Determinate `eval-cores = 2` plus host nix on PATH                           | `unknown setting 'eval-cores'` from devshell `pkgs.nix`        | 0m until `derivation show` is measured parallel |
 
 Expected additional cut on a similarly shaped cold run: **about 14–21m**.
 `nix derivation show` is not in Determinate's parallel-eval command list,
@@ -153,7 +153,7 @@ each purge is diagnostic only.
 - Do not raise `DARWIN_GRAPH_EVAL_WORKERS` without a passing 2-wide
   plan-shards measurement; 4-wide already SIGTERM'd. Do not set
   `eval-cores = 0` (all cores) on the 16 GiB ubuntu planner.
-- Do not pin every rust_* (thousands of pins, still churns on the next
+- Do not pin every rust\_\* (thousands of pins, still churns on the next
   crate bump). Pin the four Darwin roots and the linux-builder image.
 - Do not `workflow_dispatch` or `gh run cancel` from the Cursor GitHub
   App token (403). Kick remains a `lib/update/**` push, and these

@@ -2,14 +2,14 @@
 """Unified CLI for nixcfg project tasks."""
 
 import sys
-from typing import Protocol, cast
+from typing import Annotated, Protocol, cast
 
 import typer
 from rich.console import Console
 from rich.tree import Tree
 from typer.main import get_command
 
-from lib.cli import HELP_CONTEXT_SETTINGS, make_lazy_typer_app
+from lib.cli import HELP_CONTEXT_SETTINGS, apply_nix_options, make_lazy_typer_app
 
 _is_tty = sys.stdout.isatty()
 
@@ -32,6 +32,27 @@ app = typer.Typer(
     rich_markup_mode="rich" if _is_tty else None,
     context_settings=dict(HELP_CONTEXT_SETTINGS),
 )
+
+
+@app.callback()
+def _mirror_nix_options(
+    nix_option: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--nix-option",
+            "-N",
+            metavar="KEY=VALUE",
+            help=(
+                "Nix setting mirrored into NIX_CONFIG for every Nix process this "
+                "command starts, e.g. --nix-option 'builders = ssh-ng://builder'. "
+                "Repeatable."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Apply CLI-provided Nix settings before any subcommand runs."""
+    apply_nix_options(nix_option or [])
+
 
 app.add_typer(
     make_lazy_typer_app(

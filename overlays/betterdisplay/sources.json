@@ -1,0 +1,11 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-UzzgjJGgLg/corwORhQEloqxjTK72f0zFCGOGo1Rwd4=",
+    "x86_64-darwin": "sha256-UzzgjJGgLg/corwORhQEloqxjTK72f0zFCGOGo1Rwd4="
+  },
+  "urls": {
+    "aarch64-darwin": "https://github.com/waydabber/BetterDisplay/releases/download/v5.1.1/BetterDisplay-v5.1.1.dmg",
+    "x86_64-darwin": "https://github.com/waydabber/BetterDisplay/releases/download/v5.1.1/BetterDisplay-v5.1.1.dmg"
+  },
+  "version": "5.1.1"
+}

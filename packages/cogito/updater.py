@@ -1,16 +1,15 @@
-"""Updater for the pinned Cogito macOS app archive."""
+"""Updater for the Cogito signed macOS releases."""
 
 from typing import ClassVar
 
-from lib.update.updaters import PinnedSourceDownloadUpdater, register_updater
+from lib.update.updaters import SparkleAppcastUrlUpdater, register_updater
 
 
 @register_updater
-class CogitoUpdater(PinnedSourceDownloadUpdater):
-    """Pinned download updater for the Cogito macOS app archive."""
+class CogitoUpdater(SparkleAppcastUrlUpdater):
+    """Follow the installed app's release feed."""
 
     name = "cogito"
     PLATFORMS: ClassVar[dict[str, str]] = {"aarch64-darwin": "arm64"}
-    DOWNLOAD_URL_TEMPLATE = (
-        "https://downloads.cogito.md/releases/{version}/1/Cogito-{version}-1-mac.zip"
-    )
+    APPCAST_URL = "https://cogito.md/updates/appcast.xml"
+    VERSION_FIELD = "short_version"

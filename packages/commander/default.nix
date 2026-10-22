@@ -1,54 +1,17 @@
 {
-  stdenvNoCC,
-  fetchurl,
+  mkZipApp,
   selfSource,
   lib,
   ...
 }:
-let
-  appName = "Commander";
-in
-stdenvNoCC.mkDerivation {
+mkZipApp {
   pname = "commander";
-  inherit (selfSource) version;
+  appName = "Commander";
+  info = selfSource;
 
-  src = fetchurl {
-    url = selfSource.urls.${stdenvNoCC.hostPlatform.system};
-    hash = selfSource.hashes.${stdenvNoCC.hostPlatform.system};
-  };
-
-  dontUnpack = true;
-
-  installPhase = ''
-    runHook preInstall
-
-    mount_dir="$TMPDIR/${appName}-mount"
-    mkdir -p "$mount_dir" "$out/Applications" "$out/bin"
-
-    cleanup() {
-      /usr/bin/hdiutil detach "$mount_dir" -quiet >/dev/null 2>&1 || true
-    }
-    trap cleanup EXIT
-
-    /usr/bin/hdiutil attach "$src" \
-      -nobrowse \
-      -readonly \
-      -mountpoint "$mount_dir" \
-      -quiet
-
-    cp -a "$mount_dir/${appName}.app" "$out/Applications/"
-    /usr/bin/xattr -cr "$out/Applications/${appName}.app"
-    ln -s "$out/Applications/${appName}.app/Contents/MacOS/${appName}" "$out/bin/commander"
-
-    cleanup
-    trap - EXIT
-
-    runHook postInstall
-  '';
-
-  passthru.macApp = {
-    bundleName = "${appName}.app";
-    bundleRelPath = "Applications/${appName}.app";
+  # Preserve the upstream code signature, including bundled shell scripts.
+  dontFixup = true;
+  macApp = {
     installMode = "copy";
   };
 

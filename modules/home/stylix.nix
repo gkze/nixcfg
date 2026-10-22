@@ -61,6 +61,9 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    # Home Manager can auto-enable conditional cursor definitions on Darwin.
+    # Its cursor integration is Linux-only, so keep macOS explicitly disabled.
+    home.pointerCursor.enable = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin false;
     stylix =
       (with pkgs; {
         enable = true;

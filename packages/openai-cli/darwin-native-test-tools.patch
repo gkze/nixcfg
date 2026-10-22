@@ -1,0 +1,58 @@
+--- a/cmd/openai/batches_output_test.go
++++ b/cmd/openai/batches_output_test.go
+@@ -697,7 +697,7 @@
+ 
+ const batchesStoppedWorkerPTY = `
+ import errno, json, os, pathlib, pty, selectors, signal, subprocess, sys, time
+-directory, pgrep, argv = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3:]
++directory, process_list, argv = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3:]
+ masters, slaves = zip(pty.openpty(), pty.openpty())
+ child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=slaves[0], stderr=slaves[1], start_new_session=True)
+ for slave in slaves:
+@@ -707,9 +707,16 @@
+     while not (directory / "requested").exists() and time.monotonic() < limit:
+         time.sleep(.005)
+     assert (directory / "requested").exists(), "second batch request never started"
+-    found = subprocess.run([pgrep, "-P", str(child.pid)], capture_output=True, text=True)
+-    assert found.returncode == 0, found.stderr
+-    workers = [int(value) for value in found.stdout.split()]
++    if sys.platform == "darwin":
++        # Nix's Darwin procps has ps but no pgrep. Read the same live child
++        # relationship from native PID/PPID fields without matching names.
++        found = subprocess.run([process_list, "-axo", "pid=,ppid="], capture_output=True, text=True)
++        assert found.returncode == 0, found.stderr
++        workers = [int(pid) for pid, parent in (line.split() for line in found.stdout.splitlines()) if int(parent) == child.pid]
++    else:
++        found = subprocess.run([process_list, "-P", str(child.pid)], capture_output=True, text=True)
++        assert found.returncode == 0, found.stderr
++        workers = [int(value) for value in found.stdout.split()]
+     assert len(workers) == 1, workers
+     worker = workers[0]
+     os.kill(worker, signal.SIGSTOP)
+@@ -753,10 +760,14 @@
+ 		t.Skip("POSIX worker suspension does not establish native Windows error behavior")
+ 	}
+ 	python, pythonErr := exec.LookPath("python3")
+-	pgrep, pgrepErr := exec.LookPath("pgrep")
+-	if pythonErr != nil || pgrepErr != nil {
++	processListName := "pgrep"
++	if runtime.GOOS == "darwin" {
++		processListName = "ps"
++	}
++	processList, processListErr := exec.LookPath(processListName)
++	if pythonErr != nil || processListErr != nil {
+ 		if runtime.GOOS == "darwin" {
+-			t.Fatalf("native macOS worker regression requires python3 and pgrep: %v %v", pythonErr, pgrepErr)
++			t.Fatalf("native macOS worker regression requires python3 and %s: %v %v", processListName, pythonErr, processListErr)
+ 		}
+ 		t.Skip("native worker regression requires python3 and pgrep")
+ 	}
+@@ -797,7 +808,7 @@
+ 			ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
+ 			defer cancel()
+ 			process := batchesWorkflowProcess(t, ctx, server, "batches", "retrieve", "batch_synthetic", "--wait", "--poll-interval", "1ms")
+-			probe := exec.CommandContext(ctx, python, append([]string{"-c", batchesStoppedWorkerPTY, directory, pgrep}, process.Args...)...)
++			probe := exec.CommandContext(ctx, python, append([]string{"-c", batchesStoppedWorkerPTY, directory, processList}, process.Args...)...)
+ 			probe.Env = process.Env
+ 			output, err := probe.CombinedOutput()
+ 			if err != nil {

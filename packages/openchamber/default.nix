@@ -7,24 +7,29 @@
   cmake,
   fetchFromGitHub,
   fetchurl,
+  inputs,
   lib,
   libiconv,
   makeWrapper,
   models-dev,
   nixcfgElectron,
   nodejs_24,
-  onnxruntime,
   pkg-config,
   python3,
   ripgrep,
   selfSource,
-  sherpa-onnx,
   stdenv,
   stdenvNoCC,
   sysctl,
   ...
 }:
 let
+  # The addon is compiled from the app's exact locked Sherpa source. Its C ABI
+  # must match the runtime libraries, independently of the root package set.
+  nativeRuntimePkgs = import inputs.nixpkgs-openchamber-compat {
+    system = stdenv.hostPlatform.system;
+  };
+  inherit (nativeRuntimePkgs) onnxruntime sherpa-onnx;
   pname = "openchamber";
   appName = "OpenChamber";
   appBundleName = "${appName}.app";
@@ -255,7 +260,7 @@ let
   };
 
   sherpaNodeAddon = callPackage ./sherpa-node-addon.nix {
-    inherit nodeAddonApiSrc;
+    inherit nodeAddonApiSrc onnxruntime sherpa-onnx;
     src = sherpaSrc;
     version = sherpaVersion;
     wrapperVersion = sherpaWrapperVersion;

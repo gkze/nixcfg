@@ -143,7 +143,7 @@ def test_baseten_switch_separates_the_cli_from_its_managed_app() -> None:
         AttributeSet,
     )
 
-    assert_nix_ast_equal(derivation.name, Identifier(name="buildGoModule"))
+    assert_nix_ast_equal(derivation.name, Identifier(name="buildGo127Module"))
     cli_package = expect_binding(passthru.values, "cliPackage").value
     assert_nix_ast_equal(
         "{ runCommand, pname, version, meta, package }: " + cli_package.rebuild(),

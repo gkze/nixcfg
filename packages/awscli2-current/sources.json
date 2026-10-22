@@ -1,0 +1,24 @@
+{
+  "commit": "8ec9935315e00e3ce674a865cd08f519eee1baaf",
+  "hashes": [
+    {
+      "hash": "sha256-SoQjxKdjkMblxPOG4+Nn3M3PZ9bRoLwcWXdrsUzcKtk=",
+      "hashType": "sha256",
+      "url": "https://files.pythonhosted.org/packages/source/a/awscrt/awscrt-0.38.0.tar.gz"
+    },
+    {
+      "hash": "sha256-2zzfZ2kRd9jmwnoa+bIgWCaZYomtM5ykx8S81G2qExA=",
+      "hashType": "sha256",
+      "url": "https://files.pythonhosted.org/packages/source/l/localstub/localstub-0.0.3.tar.gz"
+    },
+    {
+      "hash": "sha256-vwMHHNj3Qtf3oJmZTX9eMU9pZ5jSVuyX0DxPzQfpd7Y=",
+      "hashType": "srcHash"
+    }
+  ],
+  "pins": {
+    "awscrtVersion": "0.38.0",
+    "localstubVersion": "0.0.3"
+  },
+  "version": "2.38.4"
+}

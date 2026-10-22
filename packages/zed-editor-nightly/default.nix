@@ -2,6 +2,7 @@
   pkgs,
   inputs,
   lib,
+  selfSource,
   bash-dynamic-pipe-heredoc,
   symlinkJoin,
   makeFontsConf,
@@ -525,9 +526,21 @@ let
       CARGO_PKG_VERSION = attrs.version;
     };
 
-  wasmtimeCApiImplOverride = attrs: {
-    nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [ cmake ];
-  };
+  wasmtimeCApiImplOverride =
+    attrs:
+    {
+      nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [ cmake ];
+    }
+    //
+      lib.optionalAttrs
+        (pkgs.stdenv.hostPlatform.isDarwin && attrs.version == selfSource.pins.wasmtimeCApiCoherenceVersion)
+        {
+          # The available Darwin cache contains incompatible Rust metadata for this
+          # C API and its tree-sitter consumers (E0460). Give this one native leaf a
+          # fresh identity so Nix rebuilds its dependent chain coherently. Remove
+          # this bounded cache mitigation after the affected version is retired.
+          NIXCFG_WASMTIME_C_API_COHERENCE = "darwin-${selfSource.pins.wasmtimeCApiCoherenceVersion}-v1";
+        };
 
   treeSitterOverride =
     attrs:

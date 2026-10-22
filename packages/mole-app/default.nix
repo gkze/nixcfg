@@ -39,7 +39,7 @@ stdenvNoCC.mkDerivation {
     mkdir -p "$out/bin" "$out/libexec/mole"
     cp -R bin lib "$out/libexec/mole/"
     install -m755 mole "$out/bin/mole"
-    substituteInPlace "$out/bin/mole" --replace-fail 'SCRIPT_DIR="$(cd "$(dirname "''${BASH_SOURCE[0]}")" && pwd)"' "SCRIPT_DIR='$out/libexec/mole'"
+    substituteInPlace "$out/bin/mole" --replace-fail 'SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"' "SCRIPT_DIR='$out/libexec/mole'"
 
     tar -xzf ${binaryArchive} -C "$out/libexec/mole/bin"
     mv "$out/libexec/mole/bin/analyze-${releaseAsset}" "$out/libexec/mole/bin/analyze-go"
@@ -48,6 +48,17 @@ stdenvNoCC.mkDerivation {
     ln -s "$out/bin/mole" "$out/bin/mo"
 
     runHook postInstall
+  '';
+
+  doInstallCheck = true;
+  installCheckPhase = ''
+    runHook preInstallCheck
+    mkdir -p "$TMPDIR/mole-check-home"
+    HOME="$TMPDIR/mole-check-home" "$out/bin/mole" --version | grep -F '${selfSource.version}'
+    HOME="$TMPDIR/mole-check-home" "$out/bin/mole" --help > /dev/null
+    test -x "$out/libexec/mole/bin/analyze-go"
+    test -x "$out/libexec/mole/bin/status-go"
+    runHook postInstallCheck
   '';
 
   meta = with lib; {

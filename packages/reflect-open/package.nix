@@ -248,7 +248,8 @@ rustPlatform.buildRustPackage {
 
           /usr/bin/codesign --verify --deep --strict --verbose=2 "$appBundle"
           if grep -R -a -F \
-            'releases/download/updater-beta/latest.json' "$appBundle"
+            -e 'releases/download/updater-beta/latest.json' \
+            -e 'releases/latest/download/latest.json' "$appBundle"
           then
             echo "Nix-owned Reflect still contains its mutable updater endpoint" >&2
             exit 1

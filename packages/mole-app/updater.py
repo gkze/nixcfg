@@ -9,11 +9,10 @@ from lib.update.events import (
     ignore_event,
 )
 from lib.update.updaters import (
+    DownloadHashUpdater,
     GitHubReleaseUpdater,
-    PinnedSourceDownloadUpdater,
     UpdateContext,
     VersionInfo,
-    read_pinned_source_version,
     register_updater,
 )
 
@@ -22,14 +21,15 @@ if TYPE_CHECKING:
 
 
 @register_updater
-class MoleAppUpdater(GitHubReleaseUpdater, PinnedSourceDownloadUpdater):
-    """Pinned updater for Mole's script source and helper binaries."""
+class MoleAppUpdater(GitHubReleaseUpdater, DownloadHashUpdater):
+    """Track stable Mole releases with their script source and helper binaries."""
 
     name = "mole-app"
     GITHUB_OWNER = "tw93"
     GITHUB_REPO = "Mole"
     TAG_PREFIX = "V"
     RESOLVE_TAG_COMMIT = True
+    materialize_when_current = True
     PLATFORMS: ClassVar[dict[str, str]] = {
         "aarch64-darwin": "darwin-arm64",
         "x86_64-darwin": "darwin-amd64",
@@ -38,19 +38,6 @@ class MoleAppUpdater(GitHubReleaseUpdater, PinnedSourceDownloadUpdater):
         "https://github.com/tw93/Mole/releases/download/"
         "V{version}/binaries-{platform_value}.tar.gz"
     )
-
-    async def fetch_latest(
-        self, session: aiohttp.ClientSession, *, context: UpdateContext
-    ) -> VersionInfo:
-        """Resolve the pinned release tag to its current immutable commit."""
-        _ = context
-        version = read_pinned_source_version(self.name)
-        tag = f"{self.TAG_PREFIX}{version}"
-        commit = await self._resolve_release_tag_commit(session, tag)
-        return VersionInfo(
-            version=version,
-            metadata={"commit": commit, "tag": tag},
-        )
 
     def _source_url(self, info: VersionInfo) -> str:
         commit = self._require_commit(info)

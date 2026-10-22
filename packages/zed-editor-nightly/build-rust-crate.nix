@@ -33,9 +33,7 @@
           outputDev = [ "out" ];
         };
       wrap = inner: {
-        __functor =
-          _self: args:
-          applyDarwinRlibMetadata (inner (linuxZedUnsplit args));
+        __functor = _self: args: applyDarwinRlibMetadata (inner (linuxZedUnsplit args));
         override = f: wrap (inner.override f);
       };
     in

@@ -1954,3 +1954,27 @@ def test_openchamber_async_helpers_do_not_leak_tasks() -> None:
         }
 
     assert run_async(pending()) == set()
+
+
+def test_openchamber_native_addon_uses_one_compatible_runtime_tuple() -> None:
+    """Root upgrades must not pair the locked addon with a different Sherpa ABI."""
+    package = expect_instance(
+        parse_nix_expr((_PACKAGE_DIR / "default.nix").read_text(encoding="utf-8")),
+        FunctionDefinition,
+    )
+    final = expect_instance(package.output, IfExpression)
+    assert_nix_ast_equal(
+        expect_binding(final.scope, "nativeRuntimePkgs").value,
+        "import inputs.nixpkgs-openchamber-compat { system = stdenv.hostPlatform.system; }",
+    )
+    assert_nix_ast_equal(
+        expect_binding(final.scope, "sherpaNodeAddon").value,
+        """callPackage ./sherpa-node-addon.nix {
+          inherit nodeAddonApiSrc onnxruntime sherpa-onnx;
+          src = sherpaSrc;
+          version = sherpaVersion;
+          wrapperVersion = sherpaWrapperVersion;
+          wrapperSrc = sherpaWrapperSrc;
+          electronHeaders = electronBuild.headers;
+        }""",
+    )

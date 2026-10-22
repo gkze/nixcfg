@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urljoin
 
 import aiohttp
+from packaging.version import Version
 
 from lib.http_utils import HTTP_BAD_REQUEST
 from lib.update.net import fetch_url
@@ -22,6 +23,7 @@ _CURSOR_API_URL_RE = re.compile(
     r"https://api2\.cursor\.sh/updates/download/golden/"
     r"(?P<api_platform>[^/\\\"']+)/cursor/(?P<version>[^\\\"']+)"
 )
+# Match the complete production path segment; never truncate a malformed commit.
 _CURSOR_PRODUCTION_COMMIT_RE = re.compile(r"/production/(?P<commit>[0-9a-f]{40})/")
 _CURSOR_APPIMAGE_VERSION_RE = re.compile(r"Cursor-(?P<version>\d+\.\d+\.\d+)-")
 
@@ -106,11 +108,12 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
         pattern: re.Pattern[str],
         group: str,
     ) -> str | None:
-        values = {
-            match.group(group)
-            for url in urls.values()
-            if (match := pattern.search(url)) is not None
-        }
+        values = set()
+        for url in urls.values():
+            match = pattern.search(url)
+            if match is None:
+                return None
+            values.add(match.group(group))
         if len(values) != 1:
             return None
         return values.pop()
@@ -130,12 +133,13 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
             raise RuntimeError(msg)
         return value
 
-    def _pinned_version_for_incomplete_rollout(
+    def _retain_verified_pin(
         self,
         context: UpdateContext,
         *,
         resolved_urls: dict[str, str],
     ) -> VersionInfo:
+        """Keep a coherent pin while platforms stage or a channel offers an older build."""
         current = context.current
         pinned_urls = None if current is None else current.urls
         if (
@@ -143,6 +147,18 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
             or current.version is None
             or current.commit is None
             or not pinned_urls
+            or set(pinned_urls) != set(self.PLATFORMS)
+            or any(
+                (match := _CURSOR_PRODUCTION_COMMIT_RE.search(url)) is None
+                or match.group("commit") != current.commit
+                for url in pinned_urls.values()
+            )
+            or any(
+                (match := _CURSOR_APPIMAGE_VERSION_RE.search(url)) is None
+                or match.group("version") != current.version
+                for platform, url in pinned_urls.items()
+                if platform.endswith("-linux")
+            )
         ):
             msg = (
                 "Unable to resolve one Cursor version/commit from URLs: "
@@ -169,6 +185,15 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
             await fetch_url(session, self.DOWNLOAD_PAGE, config=self.config)
         ).decode(errors="replace")
         api_urls = self._extract_download_api_urls(page)
+        # The download page can lag an already deployed stable series. Keep
+        # checking that series rather than reinstalling the page's older one.
+        if context.current is not None and context.current.version is not None:
+            current_series = Version(context.current.version).release[:2]
+            for api_platform, api_url in api_urls.items():
+                advertised = api_url.rsplit("/", maxsplit=1)[1]
+                if current_series > Version(advertised).release[:2]:
+                    series = ".".join(map(str, current_series))
+                    api_urls[api_platform] = self._api_url(api_platform, series)
         resolved_by_api_platform = dict(
             zip(
                 api_urls,
@@ -186,7 +211,11 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
             for nix_platform, api_platform in self.PLATFORMS.items()
         }
         version = self._uniform_regex_value(
-            resolved_urls,
+            {
+                platform: url
+                for platform, url in resolved_urls.items()
+                if platform.endswith("-linux")
+            },
             _CURSOR_APPIMAGE_VERSION_RE,
             "version",
         )
@@ -200,7 +229,18 @@ class CodeCursorUpdater(DownloadingPlatformAPIUpdater):
         # was still 3.22.12 / 3a929743. Keep the complete pin until every
         # platform names one version and commit.
         if version is None or commit is None:
-            return self._pinned_version_for_incomplete_rollout(
+            return self._retain_verified_pin(
+                context,
+                resolved_urls=resolved_urls,
+            )
+        # Golden can lag a release already delivered through the in-app stable
+        # cohort. Keep that verified source pin, not the feed's older artifacts.
+        if (
+            context.current is not None
+            and context.current.version is not None
+            and Version(version) < Version(context.current.version)
+        ):
+            return self._retain_verified_pin(
                 context,
                 resolved_urls=resolved_urls,
             )

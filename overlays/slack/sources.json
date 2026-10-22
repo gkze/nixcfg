@@ -1,0 +1,9 @@
+{
+  "hashes": {
+    "aarch64-darwin": "sha256-wGnzop7pYtbAOSlJqdtlOeLrnZWd06T+15b+g846suM="
+  },
+  "urls": {
+    "aarch64-darwin": "https://downloads.slack-edge.com/desktop-releases/mac/arm64/4.52.182/Slack-4.52.182-macOS.dmg"
+  },
+  "version": "4.52.182"
+}

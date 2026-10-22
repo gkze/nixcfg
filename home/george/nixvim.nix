@@ -328,6 +328,23 @@ in
       # Nixvim evaluates plugins through its own nixpkgs instance, which does
       # not inherit the flake-level allowUnfree; mirror it here.
       nixpkgs.config.allowUnfree = true;
+      # nixpkgs pins LLDB's executable but upstream tests still expect PATH lookup.
+      # Apply the matching expectation only inside Nixvim's own Darwin package set.
+      nixpkgs.overlays = lib.optional pkgs.stdenv.hostPlatform.isDarwin (
+        _final: prev: {
+          pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
+            (_pythonFinal: pythonPrev: {
+              debugpy = pythonPrev.debugpy.overridePythonAttrs (old: {
+                patches = (old.patches or [ ]) ++ [
+                  (prev.replaceVars ./patches/debugpy-lldb-test.patch {
+                    inherit (prev) lldb;
+                  })
+                ];
+              });
+            })
+          ];
+        }
+      );
       files."ftplugin/json.lua".opts.shiftwidth = 2;
       globals.mapleader = " ";
       opts = {

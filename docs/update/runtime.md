@@ -134,22 +134,20 @@ refresh also skips the flake inputs that back the whole hold closure, so
 an overlay that asserts input identity stays coherent. An explicit target
 selection still allows updates.
 
-Unsloth is temporarily held at the existing source pin. Desktop
-`v0.1.811-beta` requests backend `2026.9.7`, the GitHub source of the
-project declares `2026.9.6`, and PyPI publishes no source archive.
-`nixcfg update unsloth` retries the update explicitly.
-`UnslothUpdater.bulk_update_hold` can be removed after a matching source
-is published and the candidate passes validation.
+Unsloth participates in bulk updates after desktop `v0.1.909-beta` and
+backend `2026.10.7` passed matched-source, native build, and contained
+runtime validation. Its updater still requires exact source provenance,
+closure hashes, and fresh runtime evidence before exporting a candidate.
 
-Goose CLI, desktop, and V8 are held at the existing pins. An untargeted
-goose bump rebuilds `goose-cli-v8-native` from source on hosted macos-15
-(~2300 CXX units) and exhausts the runner after image cleanup (~100 GB
-free). `nixcfg update goose-cli` retries the update explicitly. The holds
-can be removed after that derivation is in the `gkze` cache.
+Goose CLI and desktop 1.55.0 participate in bulk updates after matching
+native CLI and desktop validation, plus signed-cache verification of the
+exact `goose-cli-v8-native` output for the current package configuration.
+That proof must track the required V8 derivation, including its compiler,
+GN, and stdenv inputs, whenever the package configuration changes.
 
 Run 36672202468 failed Darwin closure builds that a later shard still had
 to rebuild. Those pins stay in the closure, and the build correction is
-in tree. Comet rematerializes the mutable ``comet_latest.dmg`` hashes on
+in tree. Comet rematerializes the mutable `comet_latest.dmg` hashes on
 Darwin prepare; Linux ARM reuses those hashes instead of prefetching R2.
 
 The app executable of Superconductor is `super.engineering`. The
@@ -157,9 +155,11 @@ The app executable of Superconductor is `super.engineering`. The
 `packages/cli/package.json` without the Effect updater service, so
 OpenChamber keeps the 1.x upgrade patch.
 
-Baseten Switch stays on 0.5.1.
-`testUnusableSecondaryReceiptRetainsRecoveryGate` SIGTRAPs on headless
-macos-15 and is skipped there. Version 0.6.0 stays held.
+Baseten Switch 0.7.2 participates in bulk updates after native Darwin Go
+and Swift validation passed. The earlier 0.6.0 hold followed headless
+macos-15 Swift SIGTRAP failures. The package keeps its historical 0.5.1
+check-phase exception and named headless-test skips; those exceptions do
+not place the current release on hold.
 
 Hosted Darwin validation builds native `root-closures` in continuation
 shards. Run 36672202468 showed why one job cannot do that work. After a

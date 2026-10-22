@@ -1,0 +1,238 @@
+--- a/tests/blackbox/utils.py
++++ b/tests/blackbox/utils.py
+@@ -15,6 +15,7 @@
+     return {
+         "PATH": os.environ.get("PATH", ""),
+         "HOME": os.environ.get("HOME", "/tmp"),
++        **({"TZ": os.environ["TZ"]} if "TZ" in os.environ else {}),
+         "AWS_ACCESS_KEY_ID": "test",
+         "AWS_SECRET_ACCESS_KEY": "test",
+         "AWS_REGION": "us-east-1",
+--- a/tests/blackbox/test_cp_command.py
++++ b/tests/blackbox/test_cp_command.py
+@@ -6383,50 +6383,49 @@
+ @pytest.mark.asyncio
+ async def test_download_content_length_mismatch_fails(aws_cli, tmp_path):
+     """cp download fails when body is shorter than Content-Length header."""
+-    async with mock_server(on_headers_received=handle_expect_header) as (
++    async def inject_fault(headers, send):
++        # Arm the fault only when GET arrives; observing HEAD in the request
++        # queue can race with its response and close the wrong TLS exchange.
++        if headers.method == "GET":
++            server.set_transmission_strategy(
++                FaultyTransmission([DropConnection(after_bytes=3)])
++            )
++        return await handle_expect_header(headers, send)
++
++    async with mock_server(on_headers_received=inject_fault) as (
+         server,
+         proxy,
+     ):
++        # S3 transfer retries have their own default budget of five attempts,
++        # independent of AWS_MAX_ATTEMPTS, which controls SDK request retries.
++        short_response = HTTPResponse.raw(
++            b"foo",
++            status=200,
++            headers={
++                "Content-Length": "100",
++                "ETag": '"foo-1"',
++                "Connection": "close",
++            },
++        )
+         setup_responses(
+             server,
+-            [
+-                head_object_response(content_length=100),
+-                # Content-Length says 100 but body is only 3 bytes
+-                HTTPResponse.raw(
+-                    b"foo",
+-                    status=200,
+-                    headers={
+-                        "Content-Length": "100",
+-                        "ETag": '"foo-1"',
+-                    },
+-                ),
+-            ],
+-        )
+-
+-        async def inject_fault():
+-            # HeadObject completes
+-            await server.next_request()
+-            # Drop connection after sending the short body so the
+-            # CLI sees EOF instead of blocking for remaining bytes.
+-            server.set_transmission_strategy(
+-                FaultyTransmission([DropConnection(after_bytes=3)])
+-            )
+-
+-        (stdout, stderr, rc), _ = await asyncio.gather(
+-            run_cli(
+-                aws_cli,
+-                ["s3", "cp", "s3://bucket/key.txt", str(tmp_path)],
+-                cli_env(proxy),
+-            ),
+-            inject_fault(),
++            [head_object_response(content_length=100)] + [short_response] * 5,
++        )
++
++        stdout, stderr, rc = await run_cli(
++            aws_cli,
++            ["s3", "cp", "s3://bucket/key.txt", str(tmp_path)],
++            cli_env(proxy),
+         )
+ 
+     assert rc == 1
+-    assert len(server.requests) == 2, format_requests(server)
+-    assert (
+-        b"download failed" in stderr
+-        and b"Connection broken: IncompleteRead" in stderr
+-    )
++    assert [request.method for request in server.requests] == ["HEAD"] + ["GET"] * 5
++    assert b"download failed" in stderr
++    assert b"Max Retries Exceeded" in stderr
++    assert not (tmp_path / "key.txt").exists()
++    for response in server.responses[1:]:
++        assert response.headers.get("Content-Length") == "100"
++        assert response.wire_raw_bytes.partition(b"\r\n\r\n")[2] == b"foo"
+ 
+ 
+ @pytest.mark.asyncio
+@@ -6541,6 +6540,7 @@
+         else:
+             body, cr = part2_body, f"bytes {part_size}-{total_size - 1}/{total_size}"
+         if get_count == 1:
++            server.set_transmission_strategy(ImmediateTransmission())
+             # First GET completes normally; arm truncation for the next.
+             truncate_next_get = True
+             return get_object_response(
+@@ -6554,6 +6554,7 @@
+         if truncate_next_get:
+             # Second GET: truncate to trigger IncompleteReadError + retry.
+             truncate_next_get = False
++            server.set_transmission_strategy(FaultyTransmission([TruncateBody(5)]))
+             return HTTPResponse.raw(
+                 body,
+                 status=200,
+@@ -6566,6 +6567,7 @@
+                 },
+             )
+         # Third GET (retry): full response.
++        server.set_transmission_strategy(ImmediateTransmission())
+         return get_object_response(
+             body,
+             **{
+@@ -6584,28 +6586,16 @@
+         env["AWS_CONFIG_FILE"] = config_path
+         server.handler = range_aware_handler
+ 
+-        async def arm_truncation_at_right_time():
+-            # HeadObject
+-            await server.next_request()
+-            # First GET: normal
+-            await server.next_request()
+-            # Second GET: truncate it
+-            server.set_transmission_strategy(FaultyTransmission([TruncateBody(5)]))
+-            await server.next_request()
+-            # Retry GET: normal
+-            server.set_transmission_strategy(ImmediateTransmission())
+-
+-        (stdout, stderr, rc), _ = await asyncio.gather(
+-            run_cli(
+-                aws_cli,
+-                ["s3", "cp", "s3://bucket/key.txt", "-"],
+-                env,
+-            ),
+-            arm_truncation_at_right_time(),
++        stdout, stderr, rc = await run_cli(
++            aws_cli,
++            ["s3", "cp", "s3://bucket/key.txt", "-"],
++            env,
+         )
+ 
+     assert rc == 0, stderr.decode()
+     assert len(server.requests) == 4, format_requests(server)
++
++    assert stdout == part1_body + part2_body
+ 
+ 
+ @pytest.mark.asyncio
+--- a/tests/blackbox/test_mv_command.py
++++ b/tests/blackbox/test_mv_command.py
+@@ -1061,44 +1061,49 @@
+ @pytest.mark.asyncio
+ async def test_mv_download_content_length_mismatch_fails(aws_cli, tmp_path):
+     """mv download fails when body is shorter than Content-Length header."""
+-    async with mock_server(on_headers_received=handle_expect_header) as (
++    async def inject_fault(headers, send):
++        # Arm the fault only when GET arrives; observing HEAD in the request
++        # queue can race with its response and close the wrong TLS exchange.
++        if headers.method == "GET":
++            server.set_transmission_strategy(
++                FaultyTransmission([DropConnection(after_bytes=3)])
++            )
++        return await handle_expect_header(headers, send)
++
++    async with mock_server(on_headers_received=inject_fault) as (
+         server,
+         proxy,
+     ):
++        # S3 transfer retries have their own default budget of five attempts,
++        # independent of AWS_MAX_ATTEMPTS, which controls SDK request retries.
++        short_response = HTTPResponse.raw(
++            b"foo",
++            status=200,
++            headers={
++                "Content-Length": "100",
++                "ETag": '"foo-1"',
++                "Connection": "close",
++            },
++        )
+         setup_responses(
+             server,
+-            [
+-                head_object_response(content_length=100),
+-                HTTPResponse.raw(
+-                    b"foo",
+-                    status=200,
+-                    headers={
+-                        "Content-Length": "100",
+-                        "ETag": '"foo-1"',
+-                    },
+-                ),
+-            ],
+-        )
+-
+-        async def inject_fault():
+-            # HeadObject completes
+-            await server.next_request()
+-            server.set_transmission_strategy(
+-                FaultyTransmission([DropConnection(after_bytes=3)])
+-            )
+-
+-        (stdout, stderr, rc), _ = await asyncio.gather(
+-            run_cli(
+-                aws_cli,
+-                ["s3", "mv", "s3://bucket/key.txt", str(tmp_path)],
+-                cli_env(proxy),
+-            ),
+-            inject_fault(),
++            [head_object_response(content_length=100)] + [short_response] * 5,
++        )
++
++        stdout, stderr, rc = await run_cli(
++            aws_cli,
++            ["s3", "mv", "s3://bucket/key.txt", str(tmp_path)],
++            cli_env(proxy),
+         )
+ 
+     assert rc == 1
+-    assert len(server.requests) == 2, format_requests(server)
++    assert [request.method for request in server.requests] == ["HEAD"] + ["GET"] * 5
+     assert b"move failed" in stderr
++    assert b"Max Retries Exceeded" in stderr
++    assert not (tmp_path / "key.txt").exists()
++    for response in server.responses[1:]:
++        assert response.headers.get("Content-Length") == "100"
++        assert response.wire_raw_bytes.partition(b"\r\n\r\n")[2] == b"foo"
+ 
+ 
+ @pytest.mark.asyncio

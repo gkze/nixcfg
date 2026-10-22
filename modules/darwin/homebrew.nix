@@ -34,6 +34,8 @@ let
     else
       "HEAD";
 
+  rubyBootstrap = import ./homebrew-ruby-bootstrap.nix { ruby = pkgs.ruby_4_0; };
+
   patchedBrewPackage =
     if brewSource == null then
       null
@@ -56,18 +58,17 @@ let
                 fi
                 chmod u+w "$ruby_sh"
                 cat >>"$ruby_sh" <<'EOF'
-        # nixcfg: use the Nix-provided Ruby while preserving Homebrew's setup-ruby-path
-        # bookkeeping (GEM_HOME, BUNDLE_GEMFILE, bootsnap path, etc.).  Nix's Ruby 4.0
-        # packages fiddle as a default gem, so Homebrew's default --disable=gems would
-        # hide it from linkage_checker.rb.
-        export HOMEBREW_RUBY_DISABLE_OPTIONS="--disable=rubyopt"
-        system_ruby_supported() { return 0; }
-        find_ruby() { echo "${pkgs.ruby_4_0}/bin/ruby"; }
+        ${rubyBootstrap}
         EOF
 
                 brew_sh="$out/Library/Homebrew/brew.sh"
                 chmod u+w "$brew_sh"
-                sed -i -e 's/^HOMEBREW_VERSION=.*/HOMEBREW_VERSION="${brewVersion}"/g' "$brew_sh"
+                # Homebrew's sandbox requires Ruby's bundled Fiddle gem before
+                # Bundler narrows the available gems. Preserve rubyopt isolation.
+                substituteInPlace "$brew_sh" \
+                  --replace-fail '"''${HOMEBREW_RUBY_DISABLE_OPTIONS}" \' \
+                    '"''${HOMEBREW_RUBY_DISABLE_OPTIONS}" -rfiddle \'
+                sed -i -e 's/^[[:space:]]*HOMEBREW_VERSION=.*/HOMEBREW_VERSION="${brewVersion}"/g' "$brew_sh"
                 sed -i -e 's/^GIT_REVISION=.*/GIT_REVISION=""; HOMEBREW_VERSION="${brewVersion}"/g' "$brew_sh"
       '';
 

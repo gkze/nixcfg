@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-RXln+TU1Xi4rVAfEyLD3t6M5GevZFHkFQCMW3fdrpw4="
+    "aarch64-darwin": "sha256-pl5wWwoyo4nih4UzeyUkX8pMWr3VbeSRfruOydM4wy8="
   },
   "urls": {
-    "aarch64-darwin": "https://pkgs.tailscale.com/unstable/Tailscale-1.105.59-macos.pkg"
+    "aarch64-darwin": "https://pkgs.tailscale.com/unstable/Tailscale-1.105.78-macos.pkg"
   },
-  "version": "1.105.59"
+  "version": "1.105.78"
 }

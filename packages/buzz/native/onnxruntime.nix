@@ -30,11 +30,23 @@ let
       '';
     });
   staticAbseil = normalizeStaticDependency (abseil-cpp_202601.override { static = true; });
+  protobufMapHashBackport = builtins.fromJSON (builtins.readFile ./protobuf-map-hash-backport.json);
   staticProtobuf = normalizeStaticDependency (
-    protobuf.override {
+    (protobuf.override {
       abseil-cpp = staticAbseil;
       enableShared = false;
-    }
+    }).overrideAttrs
+      (old: {
+        # Upstream b067e70a049179152f68434600552b1b16d9c8c5 (PR #28693)
+        # replaces allocator-sensitive CRC map hashing. Keep the complete test
+        # suite and scope this backport to the affected Buzz-local 36.2 build.
+        # https://github.com/protocolbuffers/protobuf/pull/28693
+        patches =
+          (old.patches or [ ])
+          ++ lib.optional (
+            old.version == protobufMapHashBackport.affectedVersion
+          ) ./protobuf-map-hash-b067e70.patch;
+      })
   );
 
   base = onnxruntime.override {
@@ -108,7 +120,7 @@ base.overrideAttrs (old: {
   # __FILE__ is retained in the final relocatable object. Normalize both the
   # randomized build root and fetched-source store roots before compilation.
   preConfigure = (old.preConfigure or "") + ''
-    sourcePrefixMaps="-ffile-prefix-map=$NIX_BUILD_TOP=/build -ffile-prefix-map=${cmakeSourcePath "ONNX"}=/source/onnx -ffile-prefix-map=${cmakeSourcePath "ABSEIL_CPP"}=/source/abseil -ffile-prefix-map=${cmakeSourcePath "RE2"}=/source/re2 -ffile-prefix-map=${staticProtobuf}=/source/protobuf"
+    sourcePrefixMaps="-ffile-prefix-map=$NIX_BUILD_TOP=/build -ffile-prefix-map=${cmakeSourcePath "ONNX"}=/source/onnx -ffile-prefix-map=${cmakeSourcePath "ABSEIL_CPP"}=/source/abseil -ffile-prefix-map=${cmakeSourcePath "RE2"}=/source/re2 -ffile-prefix-map=${staticProtobuf}=/source/protobuf -ffile-prefix-map=${lib.getDev staticProtobuf}=/source/protobuf"
     export NIX_CFLAGS_COMPILE="$sourcePrefixMaps ''${NIX_CFLAGS_COMPILE-}"
     export NIX_CXXFLAGS_COMPILE="$sourcePrefixMaps ''${NIX_CXXFLAGS_COMPILE-}"
   '';

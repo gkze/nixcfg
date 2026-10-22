@@ -1,9 +1,9 @@
 {
   "hashes": {
-    "aarch64-darwin": "sha256-eFciLTwAnXh+f4NHsS4kv+5E5Jpoz0VctLYSmR0kksE="
+    "aarch64-darwin": "sha256-f5nwv9kh8UH03HoUZhe1ZmakFW9LxbDRnyZxyCkMP/A="
   },
   "urls": {
-    "aarch64-darwin": "https://desktop.docker.com/mac/main/arm64/242831/Docker.dmg"
+    "aarch64-darwin": "https://desktop.docker.com/mac/main/arm64/244132/Docker.dmg"
   },
-  "version": "4.95.0-242831"
+  "version": "4.96.1-244132"
 }

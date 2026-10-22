@@ -20,9 +20,13 @@
     prev.sentry-cli.overrideAttrs (old: {
       inherit (selfSource) version;
       src = filteredSrc;
+      # CoreUI asset parsing is validated on macOS 27 by the bundled IPA test.
+      patches = (old.patches or [ ]) ++ [ ./macos27-assets.patch ];
       buildInputs = (old.buildInputs or [ ]) ++ [ prev.curl ];
       cargoDeps = prev.rustPlatform.fetchCargoVendor {
         src = filteredSrc;
+        # CoreUI asset parsing is validated on macOS 27 by the bundled IPA test.
+        patches = (old.patches or [ ]) ++ [ ./macos27-assets.patch ];
         hash = slib.sourceHash "sentry-cli" "cargoHash";
       };
       # postFetch strips .xcarchive bundles (macOS code-signed), which
