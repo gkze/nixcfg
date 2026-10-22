@@ -27,3 +27,4 @@ canary-slots: 0
 2026-10-22T17:58:00Z one Update run after 39811796194 prepare-merge fix (electron-runtimes inventory owned by Darwin prepare)
 2026-10-22T18:20:00Z one Update run after publish prek fix (t3code lockfile fixture yamlfmt-clean, tolerant tarball parse)
 2026-10-22T18:45:00Z one Update run after 39829870830 prepare-pins fix (aside per-architecture DMG redirects)
+2026-10-22T22:39:00Z one Update run after 39850402233 prepare-darwin fix (image reclaim keeps min-free through measured peak; auto-GC deleted t3code-desktop drv)
