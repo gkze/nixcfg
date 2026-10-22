@@ -168,6 +168,20 @@ def direct_app_argv(app_bundle: Path) -> tuple[str, ...]:
     return (str(app_bundle / "Contents/MacOS/unsloth-studio"),)
 
 
+# WebKit's UI process hands its launchd-run WebContent helper these grants.
+# The helper's own WebKit profile admits CARenderServer, fonts and bootstrap
+# messages only with them. Without them, on the macOS 15 runner WebContent
+# crashed and relaunched about 5,200 times in five minutes, the page never
+# loaded, and the frontend never started the backend (Update run 39791273689).
+# Issuing them gives the app itself no new file, network or process reach.
+_WEBKIT_HELPER_SERVICES = (
+    "com.apple.CARenderServer",
+    "com.apple.MTLCompilerService",
+    "com.apple.coreservices.launchservicesd",
+    "com.apple.fonts",
+)
+
+
 def sandbox_profile(root: Path) -> str:
     """Build a macOS profile limited to the isolated root and candidate loopback."""
     root_literal = json.dumps(str(root.resolve()))
@@ -177,6 +191,7 @@ def sandbox_profile(root: Path) -> str:
     remote_filters = "\n".join(
         f'    (remote ip "{_SANDBOX_LOOPBACK_HOST}:{port}")' for port in CANDIDATE_PORTS
     )
+    webkit_services = " ".join(json.dumps(name) for name in _WEBKIT_HELPER_SERVICES)
     return f"""(version 1)
 (deny default)
 (allow file-read*)
@@ -188,6 +203,12 @@ def sandbox_profile(root: Path) -> str:
 (allow ipc-sysv*)
 (allow file-write* (subpath {root_literal}))
 (allow file-write* (literal "/dev/null"))
+(allow mach-issue-extension
+    (require-all
+        (extension-class "com.apple.webkit.extension.mach")
+        (global-name {webkit_services})))
+(allow generic-issue-extension
+    (extension-class "com.apple.webkit.mach-bootstrap"))
 (allow network-bind
 {local_filters})
 (allow network-inbound

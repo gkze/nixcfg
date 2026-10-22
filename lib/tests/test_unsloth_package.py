@@ -844,6 +844,32 @@ def test_unsloth_store_smoke_drops_sandbox_certificate_sentinels() -> None:
     assert {"SSL_CERT_DIR", "SSL_CERT_FILE"} <= removed_environment_variables
 
 
+def test_unsloth_runtime_sandbox_profile_issues_only_webkit_helper_grants() -> None:
+    """The app may pass WebKit's helper grants on, and nothing broader.
+
+    On macOS 27 the old profile denied exactly these issues (probe of
+    ``sandbox_extension_issue_*``), and the new one allows them while a
+    read-write class or another Mach service stays denied.
+    """
+    validator = _runtime_validator_module()
+    profile = validator.sandbox_profile(Path("/tmp/runtime-root"))
+
+    assert profile.count("issue-extension") == 2
+    assert (
+        "(allow mach-issue-extension\n"
+        "    (require-all\n"
+        '        (extension-class "com.apple.webkit.extension.mach")\n'
+        '        (global-name "com.apple.CARenderServer" '
+        '"com.apple.MTLCompilerService" '
+        '"com.apple.coreservices.launchservicesd" "com.apple.fonts")))\n'
+    ) in profile
+    assert (
+        "(allow generic-issue-extension\n"
+        '    (extension-class "com.apple.webkit.mach-bootstrap"))\n'
+    ) in profile
+    assert "file-issue-extension" not in profile
+
+
 def test_unsloth_runtime_sandbox_profile_is_accepted_by_macos(
     tmp_path: Path,
 ) -> None:

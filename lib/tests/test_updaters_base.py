@@ -1412,6 +1412,8 @@ def test_source_then_overlay_hashes_carries_candidate_source_pins() -> None:
             else "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
         )
 
+    parent = SourceEntry(version="2.0.0", hashes=HashCollection.from_value([]))
+
     async def _collect() -> list[UpdateEvent]:
         return await collect_events(
             lambda emit: stream_source_then_overlay_hashes(
@@ -1421,6 +1423,7 @@ def test_source_then_overlay_hashes_carries_candidate_source_pins() -> None:
                 src_expr="source-expression",
                 dependency_hash_type="npmDepsHash",
                 source_pins={"electronVersion": "42.0.1"},
+                prerequisite_sources={"parent": parent},
                 emit=emit,
             )
         )
@@ -1437,6 +1440,7 @@ def test_source_then_overlay_hashes_carries_candidate_source_pins() -> None:
     assert source_overrides is not None
     assert source_overrides["pinned-two-pass"].pins == {"electronVersion": "42.0.1"}
     assert source_overrides["pinned-two-pass"].commit == "a" * 40
+    assert source_overrides["parent"] is parent
 
 
 def test_package_flake_input_updater_hashes_discovered_package_expression() -> None:

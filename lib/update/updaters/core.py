@@ -250,10 +250,15 @@ async def stream_source_then_overlay_hashes(
     src_expr: str,
     dependency_hash_type: HashType,
     source_pins: dict[str, str] | None = None,
+    prerequisite_sources: Mapping[str, SourceEntry] | None = None,
     config: UpdateConfig | None = None,
     emit: EventSink = ignore_event,
 ) -> list[HashEntry]:
-    """Compute srcHash, then an overlay dependency hash using source overrides."""
+    """Compute srcHash, then an overlay dependency hash using source overrides.
+
+    *prerequisite_sources* are this run's results for sources the overlay
+    reads; the workspace files still hold their pre-update state.
+    """
     config = resolve_active_config(config)
     return await stream_fixed_output_hashes(
         source_name,
@@ -267,6 +272,7 @@ async def stream_source_then_overlay_hashes(
                 expr=lambda resolved: _build_overlay_expr(
                     source_name,
                     source_overrides={
+                        **(prerequisite_sources or {}),
                         source_name: _source_override(
                             source_name,
                             version=version,
@@ -275,7 +281,7 @@ async def stream_source_then_overlay_hashes(
                             dependency_hash_type=dependency_hash_type,
                             dependency_hash=placeholder_hash_for(dependency_hash_type),
                             source_pins=source_pins,
-                        )
+                        ),
                     },
                 ),
                 isolate_by_drv_hash=True,
@@ -389,8 +395,17 @@ class SourceThenOverlayHashMixin:
         emit: EventSink = ignore_event,
     ) -> SourceHashes:
         """Compute source and dependency fixed-output hashes."""
-        _ = (session, context)
+        _ = session
         commit = self._source_commit(info)
+        # A companion parent finished earlier in this run, but only its result,
+        # not the workspace file, carries its new hashes (Update run
+        # 39791273689: gh-current read go-toolchain's emptied pin-stage hashes).
+        parent = getattr(self, "companion_of", None)
+        prerequisite_sources = (
+            {parent: context.effective_sources[parent]}
+            if parent is not None and parent in context.effective_sources
+            else None
+        )
 
         return await stream_source_then_overlay_hashes(
             self.name,
@@ -399,6 +414,7 @@ class SourceThenOverlayHashMixin:
             src_expr=self._src_expr(commit),
             dependency_hash_type=self.dependency_hash_type,
             source_pins=self.source_pins_for(info),
+            prerequisite_sources=prerequisite_sources,
             config=self.config,
             emit=emit,
         )
