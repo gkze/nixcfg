@@ -218,21 +218,15 @@ def test_hash_mismatch_parsing_and_properties() -> None:
     assert parsed.is_sri
 
 
-def test_hash_mismatch_parses_prefetch_yarn_deps_expected_got_format() -> None:
-    """Yarn FOD probes report expected/got without Nix's colon labels."""
-    expected = "a" * 128
-    got = "b" * 128
+def test_hash_mismatch_ignores_prefetch_yarn_deps_tarball_digests() -> None:
+    """A yarn tarball digest is not a fixed-output hash and must not be parsed."""
     output = (
         "Error: hash mismatch, expected "
-        f"{expected}, got {got} for "
+        f"{'a' * 40}, got da39a3ee5e6b4b0d3255bfef95601890afd80709 for "
         "https://registry.yarnpkg.com/@esbuild/android-x64/-/android-x64-0.25.1.tgz\n"
     )
     result = CommandResult(args=["nix"], returncode=1, stdout="", stderr=output)
-    parsed = expect_not_none(HashMismatchError.from_output(output, result))
-    assert parsed.hash == got
-    assert parsed.specified == expected
-    assert parsed.drv_path is None
-    assert not parsed.is_sri
+    assert HashMismatchError.from_output(output, result) is None
 
 
 def test_hash_mismatch_fallback_parsing_and_none() -> None:
