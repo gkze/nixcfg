@@ -72,10 +72,20 @@ _VOLATILE_IMAGE_LEAVES = frozenset({"Caches", "hostedtoolcache"})
 # Must match .github/actions/update-runtime/action.yml extra-conf.
 _NIX_MIN_FREE_BYTES = 34359738368
 _NIX_MAX_FREE_BYTES = 68719476736
-# Floor: max-free + min-free. Raise to measured zeus peak + margin once
-# 37740898487 storage.jsonl exists. macos-15 starts at ~43 GiB free, so
-# the skip path does not fire until that peak is known and lower than 96 GiB.
-_IMAGE_HEADROOM_BYTES = _NIX_MAX_FREE_BYTES + _NIX_MIN_FREE_BYTES
+# Store GC before root closures is skipped once free covers max-free + min-free.
+_STORE_GC_SKIP_BYTES = _NIX_MAX_FREE_BYTES + _NIX_MIN_FREE_BYTES
+# Peak store growth of one heavy hosted Darwin job, measured as free bytes
+# after image cleanup minus the job's lowest free bytes (flush-end):
+# prepare-darwin 39811796194 103.8 GB, 39774011035 102.2 GB, 39760093470
+# 96.2 GB; validate-darwin-roots 39166099302 ~83 GB. Rounded up to 104 GiB.
+_DARWIN_PEAK_STORE_GROWTH_BYTES = 104 * 1024 * 1024 * 1024
+# Image cleanup must leave peak growth + min-free so auto-GC never fires
+# mid-job. Auto-GC deletes unrooted .drv files between an updater's eval and
+# its build: 39850402233 started prepare-darwin at 103 GB (the old 96 GiB
+# max-free + min-free floor), fell below min-free, and GC deleted the
+# t3code-desktop node_modules .drv ("failed to obtain derivation").
+# Full reclaim leaves ~155.7 GB (145 GiB) on macos-15, above this 136 GiB.
+_IMAGE_HEADROOM_BYTES = _DARWIN_PEAK_STORE_GROWTH_BYTES + _NIX_MIN_FREE_BYTES
 # Publish/coverage/repair do not compile Darwin closures. 8 GiB is enough
 # for certify pytest plus Nix GC; skip the 3.3-4.6m Xcode/Android purge.
 _LIGHT_IMAGE_RECLAIM_ENV = "NIXCFG_LIGHT_IMAGE_RECLAIM"
@@ -621,8 +631,8 @@ def reclaim_hosted_store() -> None:
     # already covers max-free plus min-free; otherwise a 60+ GiB fetch can
     # still trip min-free mid-rustc. Combined packages+closures on a tight
     # disk still GCs unused outputs first.
-    skip_free = image_headroom_required_bytes()
-    if skip_free > 0 and free >= skip_free:
+    skip_free = _STORE_GC_SKIP_BYTES
+    if free >= skip_free:
         sys.stdout.write(
             f"Skipping store GC; free {free} bytes already meets "
             f"headroom {skip_free} bytes\n"
