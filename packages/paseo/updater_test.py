@@ -251,6 +251,16 @@ export class ClaudeAgentClient implements AgentClient {
       resolveBinary: this.resolveBinary,
     });
   }
+
+  async fetchCatalog(): Promise<ProviderCatalog> {
+    const advertisedModels = await runProviderRefreshActivity(context, "models", () =>
+        this.discoverModels({
+          resolveBinary: this.resolveBinary,
+          runtimeSettings: this.runtimeSettings,
+        }),
+    );
+    return { models: advertisedModels };
+  }
 }
 
 class ClaudeAgentSession implements AgentSession {
@@ -262,7 +272,7 @@ class ClaudeAgentSession implements AgentSession {
     );
   }
 
-  private async buildOptions(): Promise<ClaudeOptions> {
+  private async buildOptions(permissionMode: PermissionMode): Promise<ClaudeOptions> {
     const claudeBinary = await this.resolveBinary();
     const base: ClaudeOptions = {
       pathToClaudeCodeExecutable: claudeBinary,
@@ -395,9 +405,10 @@ _PINNED_SOURCE_FIXTURES = {
     "packages/server/src/server/session/daemon/npm-global-cli.ts": (
         'export const PASEO_CLI_PACKAGE = "@getpaseo/cli";\n'
         "const NPM_INSTALL_TIMEOUT_MS = 300_000;\n"
-        "  installLatest(): Promise<CommandResult> {\n"
+        "  installLatest(options: NpmGlobalOptions = {}): Promise<CommandResult> {\n"
+        '    const prefixArgs = options.prefix ? ["--prefix", options.prefix] : [];\n'
         '    return this.runCommand("npm", ["install", "-g", '
-        "`${PASEO_CLI_PACKAGE}@latest`], {\n"
+        "`${PASEO_CLI_PACKAGE}@latest`, ...prefixArgs], {\n"
         "      timeout: NPM_INSTALL_TIMEOUT_MS,\n"
         "      maxBuffer: NPM_MAX_BUFFER_BYTES,\n"
         "    });\n"
@@ -437,9 +448,10 @@ _ORIGINAL_MUTATION_FRAGMENTS = {
     ),
     "packages/server/src/server/session/daemon/npm-global-cli.ts": (
         "const NPM_INSTALL_TIMEOUT_MS = 300_000;\n",
-        "  installLatest(): Promise<CommandResult> {\n"
+        "  installLatest(options: NpmGlobalOptions = {}): Promise<CommandResult> {\n"
+        '    const prefixArgs = options.prefix ? ["--prefix", options.prefix] : [];\n'
         '    return this.runCommand("npm", ["install", "-g", '
-        "`${PASEO_CLI_PACKAGE}@latest`], {\n"
+        "`${PASEO_CLI_PACKAGE}@latest`, ...prefixArgs], {\n"
         "      timeout: NPM_INSTALL_TIMEOUT_MS,\n"
         "      maxBuffer: NPM_MAX_BUFFER_BYTES,\n"
         "    });\n"
@@ -1998,6 +2010,10 @@ async function unreviewedLaunch(): Promise<void> {
             b"  private async buildOptions",
             b"  @disabled\n  private async buildOptions",
         ),
+        (
+            b"          resolveBinary: this.resolveBinary,\n",
+            b"          resolveBinary: () => bundledSdkBinary,\n",
+        ),
     ],
     ids=(
         "short-circuited-client-owner",
@@ -2008,6 +2024,7 @@ async function unreviewedLaunch(): Promise<void> {
         "later-spread-override",
         "client-class-decorator",
         "method-decorator",
+        "discovery-resolver-overridden",
     ),
 )
 def test_paseo_patcher_rejects_claude_control_flow_drift(
