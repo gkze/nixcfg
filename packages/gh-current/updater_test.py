@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from lib.nix.models.sources import HashEntry
+from lib.nix.models.sources import HashCollection, HashEntry, SourceEntry
 from lib.tests._updater_helpers import load_repo_module, run_async
 from lib.update.updaters import UpdateContext, VersionInfo, core
 
@@ -40,6 +40,39 @@ def test_source_and_vendor_hashes_share_release(
     assert result.hashes.entries == hashes
     assert result.pins == {"sourceDateEpoch": "1792595308"}
     assert stream.await_args.kwargs["source_pins"] == result.pins
+    assert stream.await_args.kwargs["prerequisite_sources"] is None
+
+
+def test_vendor_probe_reads_this_runs_go_toolchain_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The workspace still holds go-toolchain's emptied pin-stage hashes."""
+    stream = AsyncMock(return_value=[])
+    monkeypatch.setattr(core, "stream_source_then_overlay_hashes", stream)
+    go_toolchain = SourceEntry(
+        version="1.27.3",
+        hashes=HashCollection.from_value([
+            HashEntry.create(
+                "sha256",
+                "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                url="https://go.dev/dl/go1.27.3.src.tar.gz",
+            )
+        ]),
+    )
+    context = UpdateContext(
+        current=None,
+        effective_sources={"go-toolchain": go_toolchain, "unrelated": go_toolchain},
+    )
+    info = VersionInfo(
+        version="2.103.0",
+        metadata={"commit": "b" * 40, "sourceDateEpoch": "1792595308"},
+    )
+
+    run_async(MODULE.GhCurrentUpdater().fetch_hashes(info, None, context=context))
+
+    assert stream.await_args.kwargs["prerequisite_sources"] == {
+        "go-toolchain": go_toolchain
+    }
 
 
 def test_fetch_latest_pins_exact_commit_time(monkeypatch: pytest.MonkeyPatch) -> None:
