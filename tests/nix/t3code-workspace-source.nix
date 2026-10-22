@@ -56,6 +56,7 @@ let
 in
 assert builtins.pathExists (lockedInputs + "/.pnpmfile.cjs");
 assert builtins.pathExists (lockedInputs + "/apps/mobile/deps/local-1.0.0.tgz");
+assert builtins.pathExists (lockedInputs + "/apps/mobile/deps/block-1.0.0.tgz");
 assert !builtins.pathExists (lockedInputs + "/apps/mobile/deps/unlisted-2.0.0.tgz");
 assert !builtins.pathExists (lockedInputs + "/README.md");
 assert shared.version == "cached-main-abcdef0";

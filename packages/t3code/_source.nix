@@ -50,9 +50,11 @@ let
       "";
   # pnpm installs `file:` tarball dependencies from the checkout, so the
   # dependency source must carry exactly the tarballs the lockfile resolves.
+  # The value may be plain or single-quoted in flow or block style; pnpm
+  # writes plain flow, and yamlfmt quotes the same value in the fixture.
   localTarballs = lib.unique (
     map builtins.head (
-      builtins.filter builtins.isList (builtins.split "tarball: file:([^,} ]+)" lockfileText)
+      builtins.filter builtins.isList (builtins.split "tarball: '?file:([^,}'[:space:]]+)" lockfileText)
     )
   );
   ancestorDirs =
