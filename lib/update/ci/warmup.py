@@ -34,7 +34,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -62,7 +62,7 @@ from lib.update.io import atomic_write_text
 from lib.update.nix import get_current_nix_platform, is_retryable_nix_network_failure
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping, Sequence
+    from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 
     from lib.update.derivation_validation import ValidationProgress
 
@@ -414,6 +414,7 @@ class WarmupPlan(BaseModel):
     substituters: tuple[str, ...]
     warmup_outputs: tuple[str, ...] = Field(alias="warmupOutputs")
     rust_layers: tuple[tuple[str, ...], ...] = Field(alias="rustLayers", default=())
+    rusty_v8_family: tuple[str, ...] = Field(alias="rustyV8Family", default=())
     cascade_outputs: tuple[str, ...] = Field(alias="cascadeOutputs", default=())
     cascade_layers: tuple[tuple[str, ...], ...] = Field(
         alias="cascadeLayers", default=()
@@ -648,18 +649,17 @@ def _input_drv_keys(drv: Mapping[str, object]) -> frozenset[str]:
     return frozenset()
 
 
-def output_dependency_layers(
-    outputs: frozenset[str],
-    payloads: Sequence[Mapping[str, object]],
-    *,
-    kind: str,
-) -> tuple[tuple[str, ...], ...]:
-    """Layer *outputs* by Darwin ``inputDrvs`` so later paths can substitute."""
-    if not outputs:
-        return ()
-    path_to_drv: dict[str, str] = {}
-    drv_outputs: dict[str, set[str]] = {}
-    drv_inputs: dict[str, set[str]] = {}
+class _DarwinDrvGraph(NamedTuple):
+    """Darwin drv basenames mapped to their input drvs and output paths."""
+
+    inputs: dict[str, frozenset[str]]
+    outputs: dict[str, frozenset[str]]
+
+
+def _darwin_drv_graph(payloads: Sequence[Mapping[str, object]]) -> _DarwinDrvGraph:
+    """Index every aarch64-darwin drv in ``nix derivation show`` payloads."""
+    inputs: dict[str, set[str]] = {}
+    outputs: dict[str, set[str]] = {}
     for payload in payloads:
         derivations = payload.get("derivations")
         if not isinstance(derivations, dict):
@@ -674,6 +674,7 @@ def output_dependency_layers(
             if not isinstance(output_map, dict):
                 continue
             key = _drv_basename(raw_name)
+            paths = outputs.setdefault(key, set())
             for output in output_map.values():
                 if not isinstance(output, dict):
                     continue
@@ -681,21 +682,35 @@ def output_dependency_layers(
                 if not isinstance(raw, str):
                     continue
                 path = _absolute_store_path(raw)
-                if path is None or path not in outputs:
-                    continue
-                path_to_drv[path] = key
-                drv_outputs.setdefault(key, set()).add(path)
-            drv_inputs.setdefault(key, set()).update(_input_drv_keys(drv))
-    missing = outputs - frozenset(path_to_drv)
+                if path is not None:
+                    paths.add(path)
+            inputs.setdefault(key, set()).update(_input_drv_keys(drv))
+    return _DarwinDrvGraph(
+        inputs={key: frozenset(deps) for key, deps in inputs.items()},
+        outputs={key: frozenset(paths) for key, paths in outputs.items()},
+    )
+
+
+def output_dependency_layers(
+    outputs: frozenset[str],
+    payloads: Sequence[Mapping[str, object]],
+    *,
+    kind: str,
+) -> tuple[tuple[str, ...], ...]:
+    """Layer *outputs* by Darwin ``inputDrvs`` so later paths can substitute."""
+    if not outputs:
+        return ()
+    graph = _darwin_drv_graph(payloads)
+    drv_outputs = {
+        key: owned for key, paths in graph.outputs.items() if (owned := paths & outputs)
+    }
+    missing = outputs - frozenset().union(*drv_outputs.values())
     if missing:
         sample = ", ".join(sorted(missing)[:8])
         msg = f"{kind} warmup paths missing from Darwin graphs: {sample}"
         raise WarmupError(msg)
     owned = frozenset(drv_outputs)
-    deps = {
-        drv: frozenset(dep for dep in drv_inputs.get(drv, set()) if dep in owned)
-        for drv in owned
-    }
+    deps = {drv: graph.inputs[drv] & owned for drv in owned}
     remaining = set(owned)
     layers: list[tuple[str, ...]] = []
     while remaining:
@@ -730,6 +745,50 @@ def rust_warmup_layers(
     if prelude:
         return (prelude, *layers)
     return layers
+
+
+# lib/rusty-v8.nix names its GN/Ninja librusty_v8 build ``<name>-native-<v>``
+# (goose-cli-v8-native-dbb64c2…). 39912925016: two warm-rust slots each built
+# that drv and rust_pctx_code_execution_runtime, whose build.rs embeds a V8
+# startup snapshot with include_bytes!. The copies had different SVHs, so
+# rust_goose E0463'd on slot 0 against Cachix rust_pctx_executor / _code_mode.
+_RUSTY_V8_NATIVE_MARKER = "-v8-native-"
+
+
+def is_rusty_v8_native_store_path(path: str) -> bool:
+    """Return whether *path* is a lib/rusty-v8.nix source build of librusty_v8."""
+    return _RUSTY_V8_NATIVE_MARKER in _store_output_rest(path)
+
+
+def rusty_v8_family_outputs(
+    outputs: frozenset[str],
+    payloads: Sequence[Mapping[str, object]],
+) -> frozenset[str]:
+    """Return *outputs* of a source-built librusty_v8 or of drvs that depend on it.
+
+    The family has no stable crate identity across hosts, so one runner must
+    build all of it. Nothing outside the family depends on a member.
+    """
+    graph = _darwin_drv_graph(payloads)
+    anchors = {
+        key
+        for key, paths in graph.outputs.items()
+        if any(is_rusty_v8_native_store_path(path) for path in paths)
+    }
+    dependents: dict[str, set[str]] = {}
+    for key, deps in graph.inputs.items():
+        for dep in deps:
+            dependents.setdefault(dep, set()).add(key)
+    family = set(anchors)
+    frontier = list(anchors)
+    while frontier:
+        for key in dependents.get(frontier.pop(), ()):
+            if key not in family:
+                family.add(key)
+                frontier.append(key)
+    return frozenset(
+        path for key in family for path in graph.outputs[key] if path in outputs
+    )
 
 
 def cascade_warmup_layers(
@@ -1069,15 +1128,34 @@ def slot_warmup_paths(
     slot: int,
     *,
     width: int = RUST_WARMUP_SLOTS,
+    pinned: Collection[str] = (),
 ) -> tuple[str, ...]:
-    """Return this matrix slot's stripe of each warmup layer, in layer order."""
+    """Return this matrix slot's stripe of each warmup layer, in layer order.
+
+    *pinned* outputs (``WarmupPlan.rusty_v8_family``) all go to the slot with
+    the fewest round-robin paths, so concurrent slots never compile competing
+    copies. Every other path keeps per-layer round-robin.
+    """
     if width < 1:
         msg = "rust warmup width must be at least 1"
         raise WarmupError(msg)
     if not 0 <= slot < width:
         msg = f"rust warmup slot must be in 0..{width - 1}, got {slot}"
         raise WarmupError(msg)
-    return tuple(path for layer in layers for path in tuple(layer)[slot::width])
+    family = frozenset(pinned)
+    free = tuple(
+        tuple(path for path in layer if path not in family) for layer in layers
+    )
+    loads = [sum(len(layer[index::width]) for layer in free) for index in range(width)]
+    owner = loads.index(min(loads))
+    return tuple(
+        path
+        for layer, rest in zip(layers, free, strict=True)
+        for path in (
+            *rest[slot::width],
+            *(member for member in layer if slot == owner and member in family),
+        )
+    )
 
 
 # Relative compile cost for cascade min-load. Values are from 39166099302
@@ -1385,6 +1463,9 @@ def plan_darwin_warmup(
         warmup = warmup | family_rust | family_fods
     payloads = (*graphs.values(), *extra_payloads)
     rust_layers = rust_warmup_layers(warmup, payloads)
+    rusty_v8_family = rusty_v8_family_outputs(
+        frozenset(path for layer in rust_layers for path in layer), payloads
+    )
     cascade_layers = cascade_warmup_layers(cascade, payloads)
     output_drvs = warmup_output_drvs(warmup | cascade, payloads)
     covered = warmup | cascade
@@ -1441,6 +1522,7 @@ def plan_darwin_warmup(
         substituters=(_NIXOS_CACHE, _GKZE_CACHE),
         warmupOutputs=ordered,
         rustLayers=rust_layers,
+        rustyV8Family=tuple(sorted(rusty_v8_family)),
         cascadeOutputs=ordered_cascade,
         cascadeLayers=cascade_layers,
         outputDrvs=output_drvs,
@@ -1458,7 +1540,10 @@ def plan_darwin_warmup(
             "38867194218: also peel rust_gitbutler-* / rust_but-* / "
             "rust_sqlx-* / rust_gix-* from packages.aarch64-darwin.gitbutler "
             "even when two-plus is empty or path-info says cached. "
+            "rustyV8Family (a source-built librusty_v8 and every planned "
+            "output that depends on it) stays on one rust-warmup slot. "
             f"warmup={len(ordered)} rustLayers={len(rust_layers)} "
+            f"rustyV8Family={len(rusty_v8_family)} "
             f"cascade={len(ordered_cascade)} cascadeLayers={len(cascade_layers)} "
             f"slots={RUST_WARMUP_SLOTS} cascadeSlots={CASCADE_WARMUP_SLOTS} "
             f"threshold={threshold} "

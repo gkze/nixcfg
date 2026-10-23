@@ -1207,6 +1207,9 @@ def test_validate_derivations_applies_timeout_to_each_request() -> None:
         "HTTP/2 stream was reset while querying the substituter",
         "Failure when receiving data from the peer",
         "Operation too slow. Less than 1 bytes/sec transferred the last 5 seconds",
+        "warning: you don't have Internet access; disabling some network-dependent"
+        " features\nerror: Cannot build '/nix/store/demo.drv'.\n"
+        "       Reason: local builds are disabled (max-jobs = 0)",
     ],
 )
 def test_validate_derivations_retries_transient_failure_then_succeeds(

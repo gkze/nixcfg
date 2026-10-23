@@ -384,8 +384,11 @@ jobs:
   # does not steal a slot. Each slot skip-if-in-gkze resumes. A rust_zed
   # stripe force-locals every SVH-sensitive rust_zed input (workspace
   # rust_*-0.1.0, 38151215158 collab_ui E0463), not only named
-  # extension_host members. Root shards still build full closures after
-  # this job succeeds; the 400-local-drv gate is unchanged.
+  # extension_host members. The planner's rustyV8Family (a source-built
+  # librusty_v8 and every planned dependent, e.g. the goose pctx snapshot
+  # crates) stays on one slot (39912925016 rust_goose E0463). Root shards
+  # still build full closures after this job succeeds; the 400-local-drv
+  # gate is unchanged.
   # Overlap the settings-family canary (one macos-15, kick-file slot 0)
   # with the 5-wide stripe. #1269 starved the pool by holding two canary
   # slots for 80+ min; the kick file is one slot, so at most one extra

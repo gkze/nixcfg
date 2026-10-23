@@ -144,6 +144,10 @@ _NIX_NETWORK_TRANSIENT_MARKERS = (
     "returned error: 502",
     "returned error: 503",
     "returned error: 504",
+    # 39912925016 warm-rust 0: the nix CLI found no usable network interface,
+    # turned substituters off for that invocation, and reported cache.nixos.org
+    # llvm outputs as builds that ``--max-jobs 0`` then refused.
+    "you don't have Internet access",
 )
 # curl/git/Nix print HTTP 5xx in several spellings. Do not match HTTP/2
 # or 4xx; those are protocol framing and permanent client errors.

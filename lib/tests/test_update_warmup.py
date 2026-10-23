@@ -81,6 +81,7 @@ from lib.update.ci.warmup import (
     is_rust_language_models_store_path,
     is_rust_overlay_binary_component,
     is_rust_zed_store_path,
+    is_rusty_v8_native_store_path,
     is_safe_rust_warmup_other,
     is_settings_family_store_path,
     is_source_fetch_mirror_line,
@@ -123,6 +124,7 @@ from lib.update.ci.warmup import (
     rust_warmup_realize_paths,
     rust_zed_member_warmup_outputs,
     rustc_generation_ids,
+    rusty_v8_family_outputs,
     settings_family_warmup_outputs,
     shard_remaining_outputs,
     skip_cached_warmup_paths,
@@ -1386,6 +1388,151 @@ def test_rust_warmup_layers_and_slots_keep_dependency_order() -> None:
     assert rust_warmup_layers(frozenset({shared}), (_graph(shared),)) == ((shared,),)
     assert rust_warmup_layers(frozenset({leaf}), (_graph(leaf),)) == ()
     assert rust_warmup_layers(frozenset(), (_graph(shared),)) == ()
+
+
+_V8_TOOLCHAIN = (
+    "/nix/store/00000000000000000000000000000000-goose-cli-v8-toolchain-dbb64c2"
+)
+_V8_NATIVE = "/nix/store/11111111111111111111111111111111-goose-cli-v8-native-dbb64c2"
+_V8_GOOSE = "/nix/store/22222222222222222222222222222222-rust_v8-goose-145.0.0"
+_V8_GOOSE_LIB = "/nix/store/33333333333333333333333333333333-rust_v8-goose-145.0.0-lib"
+_PCTX_RUNTIME = (
+    "/nix/store/44444444444444444444444444444444-rust_pctx_code_execution_runtime-0.2.2"
+)
+_PCTX_EXECUTOR = "/nix/store/55555555555555555555555555555555-rust_pctx_executor-0.2.2"
+_GOOSE = "/nix/store/66666666666666666666666666666666-rust_goose-1.55.0"
+_SERDE = "/nix/store/77777777777777777777777777777777-rust_serde-1.0.229"
+_GIX = "/nix/store/88888888888888888888888888888888-rust_gix-0.70.0"
+
+
+def _goose_v8_graph() -> dict[str, object]:
+    """39912925016 shape: snapshot crates sit between librusty_v8 and goose."""
+    payload = _graph(
+        _V8_TOOLCHAIN,
+        _V8_NATIVE,
+        _V8_GOOSE,
+        _PCTX_RUNTIME,
+        _PCTX_EXECUTOR,
+        _GOOSE,
+        _SERDE,
+        _GIX,
+        edges={
+            _V8_NATIVE: (_V8_TOOLCHAIN,),
+            _V8_GOOSE: (_V8_NATIVE, _SERDE),
+            _PCTX_RUNTIME: (_V8_GOOSE, _SERDE),
+            _PCTX_EXECUTOR: (_PCTX_RUNTIME,),
+            # Diamond: rust_goose reaches librusty_v8 through two paths.
+            _GOOSE: (_PCTX_EXECUTOR, _V8_GOOSE, _SERDE),
+            _GIX: (_SERDE,),
+        },
+    )
+    derivations = payload["derivations"]
+    assert isinstance(derivations, dict)
+    v8_goose = derivations[f"{_V8_GOOSE.rsplit('/', 1)[-1]}.drv"]
+    assert isinstance(v8_goose, dict)
+    v8_goose["outputs"] = {
+        "out": {"path": _V8_GOOSE},
+        "lib": {"path": _V8_GOOSE_LIB},
+        "doc": {"path": "not-a-store-path"},
+    }
+    return payload
+
+
+def test_rusty_v8_family_is_librusty_v8_and_every_dependent() -> None:
+    """Snapshot crates and their consumers share one librusty_v8 build."""
+    payload = _goose_v8_graph()
+    everything = frozenset({
+        _V8_TOOLCHAIN,
+        _V8_NATIVE,
+        _V8_GOOSE,
+        _V8_GOOSE_LIB,
+        _PCTX_RUNTIME,
+        _PCTX_EXECUTOR,
+        _GOOSE,
+        _SERDE,
+        _GIX,
+    })
+    assert rusty_v8_family_outputs(everything, (payload,)) == frozenset({
+        _V8_NATIVE,
+        _V8_GOOSE,
+        _V8_GOOSE_LIB,
+        _PCTX_RUNTIME,
+        _PCTX_EXECUTOR,
+        _GOOSE,
+    })
+    # A cached librusty_v8 still anchors the planned dependents.
+    assert rusty_v8_family_outputs(
+        frozenset({_PCTX_RUNTIME, _GOOSE, _SERDE}), (payload,)
+    ) == frozenset({_PCTX_RUNTIME, _GOOSE})
+    assert rusty_v8_family_outputs(everything, (_graph(_SERDE, _GIX),)) == frozenset()
+    assert is_rusty_v8_native_store_path(f"{_V8_NATIVE}.drv")
+    assert not is_rusty_v8_native_store_path(_V8_TOOLCHAIN)
+    assert not is_rusty_v8_native_store_path(_V8_GOOSE)
+
+
+def test_slot_warmup_paths_pins_rusty_v8_family_to_one_slot() -> None:
+    """39912925016: slots 0 and k each compiled rust_pctx_code_execution_runtime."""
+    filler = tuple(f"/nix/store/{index:032x}-rust_filler-{index}" for index in range(7))
+    layers = (
+        (_V8_NATIVE, *filler[:5]),
+        (_V8_GOOSE, filler[5]),
+        (_PCTX_RUNTIME, filler[6]),
+        (_PCTX_EXECUTOR,),
+        (_GOOSE,),
+    )
+    family = (_GOOSE, _PCTX_EXECUTOR, _PCTX_RUNTIME, _V8_GOOSE, _V8_NATIVE)
+    stripes = [slot_warmup_paths(layers, slot, pinned=family) for slot in range(5)]
+    owners = [slot for slot, stripe in enumerate(stripes) if set(family) & set(stripe)]
+    # Round-robin leaves slot 0 three fillers; slot 1 is the first lightest.
+    assert owners == [1]
+    assert stripes[1] == (
+        filler[1],
+        _V8_NATIVE,
+        _V8_GOOSE,
+        _PCTX_RUNTIME,
+        _PCTX_EXECUTOR,
+        _GOOSE,
+    )
+    assert stripes[0] == (filler[0], filler[5], filler[6])
+    assert stripes[2:] == [(filler[2],), (filler[3],), (filler[4],)]
+    assert sorted(path for stripe in stripes for path in stripe) == sorted(
+        path for layer in layers for path in layer
+    )
+    assert slot_warmup_paths(layers, 0) == (
+        _V8_NATIVE,
+        filler[4],
+        _V8_GOOSE,
+        _PCTX_RUNTIME,
+        _PCTX_EXECUTOR,
+        _GOOSE,
+    )
+
+
+def test_plan_darwin_warmup_records_rusty_v8_family(tmp_path: Path) -> None:
+    """The planner owns family membership; slots only read rustyV8Family."""
+    payload = _goose_v8_graph()
+
+    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args, 0, stdout=json.dumps(payload), stderr=""
+        )
+
+    plan = plan_darwin_warmup(
+        tmp_path,
+        manifest=_manifest(),
+        shards=(),
+        run=run,
+        package_graphs={},
+        present={_V8_TOOLCHAIN, _V8_NATIVE}.__contains__,
+    )
+    assert plan.rusty_v8_family == tuple(
+        sorted((_V8_GOOSE, _V8_GOOSE_LIB, _PCTX_RUNTIME, _PCTX_EXECUTOR, _GOOSE))
+    )
+    assert _GIX in plan.warmup_outputs
+    assert _GIX not in plan.rusty_v8_family
+    path = tmp_path / WARMUP_PLAN_NAME
+    write_warmup_plan(path, plan)
+    assert load_warmup_plan(path).rusty_v8_family == plan.rusty_v8_family
 
 
 def test_skip_cached_warmup_paths_batches_gkze_path_info() -> None:
