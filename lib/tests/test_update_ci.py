@@ -1687,9 +1687,24 @@ def test_plan_shards_and_coverage_native_stages(native_job, monkeypatch) -> None
     )
     assert shard_args[shard_args.index("--shard") + 1] == "darwin-argus"
     _assert_warmup_scope_native_args(monkeypatch, artifacts)
+    _assert_leaf_prebuild_native_args(monkeypatch, artifacts)
     monkeypatch.delenv("NIXCFG_PREVIOUS_CANDIDATE")
     with pytest.raises(ValueError, match="Unknown native stage"):
         jobs._native_args("unexpected", artifacts)
+
+
+def _assert_leaf_prebuild_native_args(
+    monkeypatch: pytest.MonkeyPatch, artifacts: Path
+) -> None:
+    """leaf-prebuild runs from the merged candidate alone, before any plan."""
+    monkeypatch.setenv("NIXCFG_VALIDATE_SCOPE", "leaf-prebuild")
+    monkeypatch.setenv("NIXCFG_CLOSURE_SHARD", "leaves")
+    monkeypatch.delenv("NIXCFG_WARMUP_PLAN", raising=False)
+    monkeypatch.delenv("NIXCFG_WARMUP_SLOT", raising=False)
+    leaf_args = jobs._native_args("validate", artifacts)
+    assert leaf_args[leaf_args.index("--scope") + 1] == "leaf-prebuild"
+    assert "--warmup-plan" not in leaf_args
+    assert "--warmup-slot" not in leaf_args
 
 
 def _assert_warmup_scope_native_args(
@@ -2073,10 +2088,26 @@ def _assert_cascade_warmup_job(workflow_jobs: dict) -> None:
         "plan-darwin-closures",
         "validate-darwin-warm-rust",
         "canary-warm-cascade",
+        "prebuild-darwin-leaves",
     }
     cascade_if = " ".join(cascade["if"].split())
     assert "canary-warm-cascade.result == 'skipped'" in cascade_if
     assert "canary-warm-cascade.result == 'failure'" in cascade_if
+    assert "prebuild-darwin-leaves.result == 'skipped'" in cascade_if
+    assert "prebuild-darwin-leaves.result == 'failure'" in cascade_if
+    leaves = workflow_jobs["prebuild-darwin-leaves"]
+    assert set(leaves["needs"]) == {"prepare-merge"}
+    assert "prepare-merge.result == 'success'" in leaves["if"]
+    assert leaves["with"]["runner"] == "macos-15"
+    assert leaves["with"]["scope"] == "leaf-prebuild"
+    assert leaves["with"]["previous"] == "prepare-x86_64-linux"
+    assert leaves["with"]["shard"] == "leaves"
+    assert "warmup_artifact" not in leaves["with"]
+    assert "prebuild-darwin-leaves" not in workflow_jobs["publish"]["needs"]
+    assert (
+        "prebuild-darwin-leaves"
+        not in workflow_jobs["validate-darwin-warm-rust"]["needs"]
+    )
     assert cascade["with"]["scope"] == "cascade-warmup"
     assert cascade["with"]["warmup_artifact"] == "plan-shards-x86_64-linux"
     assert cascade["with"]["warmup_slot"] == "${{ matrix.slot }}"

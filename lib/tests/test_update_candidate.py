@@ -1489,6 +1489,40 @@ def test_fod_canary_realizes_darwin_fods_and_stops_on_hash_mismatch(
     ]
 
 
+def test_leaf_prebuild_realizes_heavy_darwin_leaves_without_gates(
+    prepared_run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """39166099302: cascade slots 1 and 2 both compiled zeron; build it once early."""
+    candidate = _candidate_for_scope(prepared_run)
+    monkeypatch.setattr(
+        pipeline.validation,
+        "validate_derivations",
+        lambda *_args, **_kwargs: pytest.fail("leaf-prebuild is not a package gate"),
+    )
+    failure = DerivationValidationFailure(
+        source="leaf-prebuild",
+        installable="path:.#pkgs.aarch64-darwin.zeron",
+        message="builder for zeron failed",
+    )
+    seen: list[tuple[str, str, str]] = []
+
+    def realize(
+        requests: Iterable[DerivationValidationRequest],
+        *_args: object,
+        **_kwargs: object,
+    ) -> tuple[DerivationValidationFailure, ...]:
+        seen.extend(
+            (request.source, request.installable, request.mode) for request in requests
+        )
+        return (failure,)
+
+    monkeypatch.setattr(pipeline.validation, "validate_derivation_requests", realize)
+    report = pipeline.validate_candidate(candidate, scope="leaf-prebuild")
+    assert report.gates == ()
+    assert report.failures == (failure,)
+    assert seen == [("leaf-prebuild", "path:.#pkgs.aarch64-darwin.zeron", "build")]
+
+
 def test_cascade_warmup_skips_umbrella_over_shard_ceiling(
     prepared_run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
