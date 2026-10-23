@@ -32,3 +32,4 @@ canary-slots: 0
 2026-10-23T04:30:00Z one Update run after 39883371442 prepare-darwin fix (hosted VM block-device I/O fault: quarantine the runner, rerun prepare on a fresh VM)
 2026-10-23T06:18:00Z one Update run after 39901201318 prebuild-darwin-leaves fix (Zeron 0.2.115+ restart_service anchor group; pins stage now rejects anchor drift)
 2026-10-23T17:30:00Z one Update run after 39912925016 warm-rust 0 fix (rustyV8Family on one slot: rust_goose E0463 vs Cachix pctx SVH; nix offline warning retries)
+2026-10-23T20:30:00Z one Update run after 40008899683 prepare-x86 fix (goose 1.56.0 dropped vendor/v8 for Boa: V8 wiring keyed on the upstream [patch.crates-io] v8 entry; crate2nix exemption only when injected)
