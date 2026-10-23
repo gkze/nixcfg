@@ -3678,15 +3678,45 @@ def test_native_updater_env_prefers_determinate_nix(tmp_path, monkeypatch) -> No
     monkeypatch.setattr(jobs, "_DETERMINATE_NIX_BIN", nix)
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("PATH", "/usr/bin")
-    env = jobs._native_updater_env(tmp_path, tmp_path / "receipts.jsonl")
+    env = jobs._native_updater_env(tmp_path, tmp_path / "receipts.jsonl", "validate")
     assert env["PATH"].startswith(f"{nix}{os.pathsep}")
     monkeypatch.setenv("GITHUB_ACTIONS", "false")
-    env = jobs._native_updater_env(tmp_path, tmp_path / "receipts.jsonl")
+    env = jobs._native_updater_env(tmp_path, tmp_path / "receipts.jsonl", "validate")
     assert not env["PATH"].startswith(f"{nix}{os.pathsep}")
     monkeypatch.setattr(jobs, "_DETERMINATE_NIX_BIN", tmp_path / "missing-bin")
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    env = jobs._native_updater_env(tmp_path, tmp_path / "receipts.jsonl")
+    env = jobs._native_updater_env(tmp_path, tmp_path / "receipts.jsonl", "validate")
     assert "missing-bin" not in env["PATH"].split(os.pathsep)[0]
+
+
+def test_native_updater_env_runs_one_prepare_build_per_hosted_core(
+    tmp_path, monkeypatch
+) -> None:
+    """Hosted prepare overlaps hash builds; other stages and local runs do not."""
+    monkeypatch.setattr(jobs.os, "cpu_count", lambda: 3)
+    monkeypatch.delenv("UPDATE_MAX_NIX_BUILDS", raising=False)
+    receipts = tmp_path / "receipts.jsonl"
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    for stage in ("prepare", "prepare-pins"):
+        env = jobs._native_updater_env(tmp_path, receipts, stage)
+        assert env["UPDATE_MAX_NIX_BUILDS"] == "3"
+    for stage in ("validate", "merge-candidates", ""):
+        env = jobs._native_updater_env(tmp_path, receipts, stage)
+        assert "UPDATE_MAX_NIX_BUILDS" not in env
+    monkeypatch.setattr(jobs.os, "cpu_count", lambda: None)
+    assert (
+        jobs._native_updater_env(tmp_path, receipts, "prepare")["UPDATE_MAX_NIX_BUILDS"]
+        == "1"
+    )
+    monkeypatch.setenv("UPDATE_MAX_NIX_BUILDS", "2")
+    assert (
+        jobs._native_updater_env(tmp_path, receipts, "prepare")["UPDATE_MAX_NIX_BUILDS"]
+        == "2"
+    )
+    monkeypatch.delenv("UPDATE_MAX_NIX_BUILDS")
+    monkeypatch.setenv("GITHUB_ACTIONS", "false")
+    env = jobs._native_updater_env(tmp_path, receipts, "prepare")
+    assert "UPDATE_MAX_NIX_BUILDS" not in env
 
 
 def test_record_named_storage_requires_a_label(monkeypatch) -> None:
