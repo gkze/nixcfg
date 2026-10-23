@@ -978,13 +978,16 @@ def _validate_native_args(args: list[str], artifacts: Path, previous: str) -> li
     return args
 
 
+_PREPARE_STAGES = frozenset({"prepare", "prepare-pins"})
+
+
 def _native_args(stage: str, artifacts: Path) -> list[str]:
     """Return the updater argv for one hosted native stage."""
     if stage == "merge-candidates":
         return _merge_candidate_args(artifacts)
     args = [_runtime(), "ci", "update", stage]
     previous = os.environ.get("NIXCFG_PREVIOUS_CANDIDATE", "")
-    if stage in {"prepare", "prepare-pins"}:
+    if stage in _PREPARE_STAGES:
         args[-1] = "prepare"
         args.extend(("--output", str(artifacts / "candidate.json")))
         if previous:
@@ -1064,12 +1067,20 @@ def _coverage_native_args(args: list[str], previous: str, stage: str) -> list[st
     return args
 
 
-def _native_updater_env(artifacts: Path, receipts: Path) -> dict[str, str]:
+def _native_updater_env(artifacts: Path, receipts: Path, stage: str) -> dict[str, str]:
     """Return the updater env; prefer Determinate Nix over the devshell nixpkgs nix.
 
     ``nix develop`` puts ``pkgs.nix`` on PATH via the format-repo hook. That
     binary warns ``unknown setting 'eval-cores'`` and ignores Determinate
     parallel eval. Graph eval still uses ``DARWIN_GRAPH_EVAL_WORKERS = 1``.
+
+    Hosted prepare stages run one updater build per runner core. The
+    updater's default of one build exists for a shared, memory-constrained
+    remote builder; a hosted runner builds locally and alone. 39867887491
+    prepare-darwin ran 126 hash builds back to back (77.2 of 79.9 min busy,
+    zero overlap) while Linux prepares took 8-15 min, so Darwin prepare was
+    the critical path. Every build and hash check still runs; only their
+    overlap changes. An explicit ``UPDATE_MAX_NIX_BUILDS`` wins.
     """
     env = os.environ | {
         "REPO_ROOT": str(Path.cwd()),
@@ -1077,9 +1088,12 @@ def _native_updater_env(artifacts: Path, receipts: Path) -> dict[str, str]:
         "UPDATE_RUN_LOG_DIR": str(artifacts / "runs"),
         "UPDATE_PREFETCH_RECEIPTS": str(receipts),
     }
+    hosted = os.environ.get("GITHUB_ACTIONS") == "true"
     nix = _DETERMINATE_NIX_BIN / "nix"
-    if os.environ.get("GITHUB_ACTIONS") == "true" and nix.is_file():
+    if hosted and nix.is_file():
         env["PATH"] = f"{_DETERMINATE_NIX_BIN}{os.pathsep}{env.get('PATH', '')}"
+    if hosted and stage in _PREPARE_STAGES and "UPDATE_MAX_NIX_BUILDS" not in env:
+        env["UPDATE_MAX_NIX_BUILDS"] = str(os.cpu_count() or 1)
     return env
 
 
@@ -1101,7 +1115,7 @@ def native(stage: str) -> int:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
-            env=_native_updater_env(artifacts, receipts),
+            env=_native_updater_env(artifacts, receipts, stage),
         ) as process:
             returncode = _wait_for_diagnostics(process, log, stage, artifacts, args)
         _write_diagnostic(
