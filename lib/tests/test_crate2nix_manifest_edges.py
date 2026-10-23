@@ -325,3 +325,74 @@ def test_stream_drains_progress_queued_by_an_already_completed_worker(
     ]
     assert events[1].message == "queued at completion"
     assert events[1].stream == "crate2nix"
+
+
+@pytest.mark.parametrize(
+    ("inject_fork", "expected_exemptions"),
+    [(True, ("vendor/v8-goose-src",)), (False, ())],
+    ids=("vendored-v8", "v8-free"),
+)
+def test_refresh_renders_manifest_with_layout_exemptions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    inject_fork: bool,
+    expected_exemptions: tuple[str, ...],
+) -> None:
+    """The manifest sees only exemptions the built patched source injected."""
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable="path:.#demo-crate2nix-src",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("test-system",),
+        source_input="demo",
+        crate_sources=Path("demo/crate-sources.json"),
+        externally_overridden_source_paths=("vendor/v8-goose-src",),
+    )
+    patched_src = tmp_path / "patched-src"
+    patched_src.mkdir()
+    if inject_fork:
+        (patched_src / "vendor/v8-goose-src").mkdir(parents=True)
+    rendered_exemptions: list[tuple[str, ...]] = []
+
+    def generate(
+        args: list[str],
+        *,
+        generated_outputs: tuple[Path, ...],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        generated_cargo, generated_hashes = generated_outputs
+        generated_cargo.write_text("{}\n", encoding="utf-8")
+        generated_hashes.write_text("{}\n", encoding="utf-8")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    def render(
+        actual_target: crate2nix.Crate2NixTarget,
+        _source_paths: tuple[str, ...],
+        *,
+        cargo_nix: Path,
+    ) -> str:
+        del cargo_nix
+        rendered_exemptions.append(actual_target.externally_overridden_source_paths)
+        return '{"source": {}, "slices": {}}\n'
+
+    monkeypatch.setattr(crate2nix, "_build_patched_src", lambda _target: patched_src)
+    monkeypatch.setattr(
+        crate2nix,
+        "_crate2nix_cargo_home",
+        lambda: tmp_path / "cargo-home",
+    )
+    monkeypatch.setattr(crate2nix, "_filtered_crate_hash_seed", lambda *_args: None)
+    monkeypatch.setattr(
+        crate2nix,
+        "load_normalizer",
+        lambda _path: lambda text: (text, 0, False),
+    )
+    monkeypatch.setattr(crate2nix, "_run_crate2nix_generate", generate)
+    monkeypatch.setattr(crate2nix, "_render_crate_source_manifest", render)
+
+    crate2nix._refresh_target_impl(target)
+
+    assert rendered_exemptions == [expected_exemptions]

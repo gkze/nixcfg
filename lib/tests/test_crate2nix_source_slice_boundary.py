@@ -584,3 +584,68 @@ def test_manifest_rejects_an_obsolete_external_source_exemption(
             ("crates/demo",),
             cargo_nix=tmp_path / "Cargo.nix",
         )
+
+
+def test_injected_exemptions_keep_paths_the_patched_source_injects(
+    tmp_path: Path,
+) -> None:
+    """An injected override path still has to appear in the generated Cargo.nix."""
+    target = _target(externally_overridden_source_paths=("vendor/v8-goose-src",))
+    (tmp_path / "vendor/v8-goose-src").mkdir(parents=True)
+
+    narrowed = crate2nix._injected_source_exemptions(target, tmp_path)
+
+    assert narrowed is target
+    with pytest.raises(
+        RuntimeError,
+        match="Externally overridden crate source paths are absent",
+    ):
+        crate2nix._render_crate_source_manifest(
+            narrowed,
+            ("crates/demo",),
+            cargo_nix=tmp_path / "Cargo.nix",
+        )
+
+
+def test_injected_exemptions_drop_paths_this_layout_does_not_inject(
+    tmp_path: Path,
+) -> None:
+    """Goose >= 1.56.0 has no vendored V8, so its override exemption is inapplicable."""
+    target = _target(
+        externally_overridden_source_paths=("vendor/v8-goose-src", "vendor/other"),
+    )
+    (tmp_path / "vendor/other").mkdir(parents=True)
+    (tmp_path / "vendor/v8-goose-src").write_text("not a crate\n", encoding="utf-8")
+
+    narrowed = crate2nix._injected_source_exemptions(target, tmp_path)
+
+    assert narrowed == _target(externally_overridden_source_paths=("vendor/other",))
+
+
+def test_injected_exemptions_resolve_against_the_cargo_workspace(
+    tmp_path: Path,
+) -> None:
+    """Exempt paths are relative to the manifest directory, like Cargo.nix sources."""
+    target = crate2nix.Crate2NixTarget(
+        name="demo",
+        patched_src_installable="path:.#demo-crate2nix-src",
+        cargo_nix=Path("demo/Cargo.nix"),
+        crate_hashes=Path("demo/crate-hashes.json"),
+        normalizer_path=Path("demo/normalize.py"),
+        supported_platforms=("linux",),
+        cargo_manifest_relpath=Path("workspace/Cargo.toml"),
+        externally_overridden_source_paths=("vendor/fork",),
+    )
+    (tmp_path / "vendor/fork").mkdir(parents=True)
+
+    assert crate2nix._injected_source_exemptions(target, tmp_path) == (
+        crate2nix.Crate2NixTarget(
+            name="demo",
+            patched_src_installable="path:.#demo-crate2nix-src",
+            cargo_nix=Path("demo/Cargo.nix"),
+            crate_hashes=Path("demo/crate-hashes.json"),
+            normalizer_path=Path("demo/normalize.py"),
+            supported_platforms=("linux",),
+            cargo_manifest_relpath=Path("workspace/Cargo.toml"),
+        )
+    )

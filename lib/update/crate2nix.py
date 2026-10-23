@@ -20,7 +20,7 @@ import time
 import tomllib
 from collections import deque
 from contextlib import nullcontext, suppress
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypedDict, cast
@@ -599,6 +599,27 @@ def _materialize_source_slices(
             "name": source_names[relative_path],
         }
     return slices
+
+
+def _injected_source_exemptions(
+    target: Crate2NixTarget, patched_src: Path
+) -> Crate2NixTarget:
+    """Narrow source exemptions to the paths this patched source injects.
+
+    An overlay may inject an externally overridden crate only for some upstream
+    layouts: goose-cli adds ``vendor/v8-goose-src`` only while Goose vendors
+    V8. An injected exemption must still name a generated ``Cargo.nix`` source;
+    one the patched source does not contain does not apply to this layout.
+    """
+    workspace = patched_src / target.cargo_manifest_relpath.parent
+    injected = tuple(
+        path
+        for path in target.externally_overridden_source_paths
+        if (workspace / path).is_dir()
+    )
+    if injected == target.externally_overridden_source_paths:
+        return target
+    return replace(target, externally_overridden_source_paths=injected)
 
 
 def _render_crate_source_manifest(
@@ -1675,15 +1696,16 @@ def _refresh_target_impl(
         crate_sources = None
         if target.crate_sources is not None:
             generated_cargo.write_text(cargo_text, encoding="utf-8")
+            manifest_target = _injected_source_exemptions(target, patched_src)
             crate_sources = (
                 _render_crate_source_manifest(
-                    target,
+                    manifest_target,
                     source_paths,
                     cargo_nix=generated_cargo,
                 )
                 if cancel_event is None and progress is None
                 else _render_crate_source_manifest(
-                    target,
+                    manifest_target,
                     source_paths,
                     cargo_nix=generated_cargo,
                     cancel_event=cancel_event,
