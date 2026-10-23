@@ -4,7 +4,7 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
-_UPDATE_SOURCE = Path("crates/update/src/lib.rs")
+UPDATE_SOURCE = Path("crates/update/src/lib.rs")
 _PATCH_SENTINEL = (
     'const NIX_MANAGED: bool = option_env!("ZERON_NIX_MANAGED").is_some();'
 )
@@ -360,11 +360,36 @@ _PATCHES_097 = (
 )
 
 
+# 0.2.115 routes restart_service through the desktop engine's registered
+# MANAGED_RESTART before the platform guard. Nix owns that relaunch too, so the
+# ownership guard precedes the dispatch rather than the platform check.
+_PATCHES_115 = (
+    *_PATCHES_097[:5],
+    _SourcePatch(
+        """pub fn restart_service() -> anyhow::Result<()> {
+    if let Some(restart) = MANAGED_RESTART.get() {
+        return restart();
+    }
+    require_managed_update_platform()?;
+""",
+        """pub fn restart_service() -> anyhow::Result<()> {
+    ensure_updates_mutable()?;
+    if let Some(restart) = MANAGED_RESTART.get() {
+        return restart();
+    }
+    require_managed_update_platform()?;
+""",
+    ),
+    *_PATCHES_097[6:],
+)
+
+
 def _matching_patch_group(
     source: str,
 ) -> tuple[str, tuple[_SourcePatch, ...]]:
     """Return the first anchor group whose anchors each match exactly once."""
     groups = (
+        ("0.2.115", _PATCHES_115),
         ("0.2.97", _PATCHES_097),
         ("0.2.94", _PATCHES_094),
         ("primary", _PATCHES),
@@ -377,9 +402,14 @@ def _matching_patch_group(
     raise RuntimeError(msg)
 
 
+def validate_update_source(source: str) -> str:
+    """Return the anchor group label ``patch_tree`` would apply to ``source``."""
+    return _matching_patch_group(source)[0]
+
+
 def patch_tree(source_root: Path) -> None:
     """Disable every update network, staging, apply, and relaunch surface."""
-    update_path = source_root / _UPDATE_SOURCE
+    update_path = source_root / UPDATE_SOURCE
     source = update_path.read_text(encoding="utf-8")
     if _PATCH_SENTINEL in source:
         msg = "Zeron update ownership patch was already applied"

@@ -30,3 +30,4 @@ canary-slots: 0
 2026-10-22T22:39:00Z one Update run after 39850402233 prepare-darwin fix (image reclaim keeps min-free through measured peak; auto-GC deleted t3code-desktop drv)
 2026-10-23T01:13:00Z one Update run after 39867887491 eval fix (OpenChamber 2.5.0 needs Sherpa 1.13.8: bump nixpkgs-openchamber-compat; carry 2.5.0 sources + Electron 44.9.0 runtime)
 2026-10-23T04:30:00Z one Update run after 39883371442 prepare-darwin fix (hosted VM block-device I/O fault: quarantine the runner, rerun prepare on a fresh VM)
+2026-10-23T06:18:00Z one Update run after 39901201318 prebuild-darwin-leaves fix (Zeron 0.2.115+ restart_service anchor group; pins stage now rejects anchor drift)

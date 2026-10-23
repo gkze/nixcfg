@@ -84,6 +84,13 @@ helpers from `lib.codemods.text`. State the expected replacement count
 explicitly. A missing or duplicate anchor is an upstream-shape failure, not a
 silent no-op.
 
+When an updater-owned package anchors a build-time rewrite on upstream source,
+have the updater check that the rewrite still matches the release it resolves.
+Do this in `fetch_latest`, against the pinned commit. The Linux `prepare-pins`
+stage then rejects only that target, before a native builder spends a build
+reaching the patch phase. Examples: `packages/paseo/updater.py` and
+`packages/zeron/updater.py`.
+
 ## Related
 
 - [packaging.md](packaging.md): package discovery and crate2nix packages

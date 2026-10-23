@@ -80,6 +80,22 @@ def _write_patch_fixture(root: Path, patches: Iterable[_Patch]) -> Path:
     return update_path
 
 
+def _install_release_source(
+    monkeypatch: pytest.MonkeyPatch,
+    module: ModuleType,
+    source: str,
+) -> list[str]:
+    urls: list[str] = []
+
+    async def source_payload(_session: object, url: str, *, config: object) -> bytes:
+        assert config == module.ZeronUpdater().config
+        urls.append(url)
+        return source.encode()
+
+    monkeypatch.setattr(module, "fetch_url", source_payload)
+    return urls
+
+
 def test_zeron_resolves_the_release_tag_to_an_immutable_public_commit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -87,6 +103,11 @@ def test_zeron_resolves_the_release_tag_to_an_immutable_public_commit(
     module = _load_updater_module()
     updater = module.ZeronUpdater()
     api_paths: list[str] = []
+    source_urls = _install_release_source(
+        monkeypatch,
+        module,
+        "\n".join(patch.old for patch in _load_patch_module()._PATCHES_115),
+    )
 
     async def github_payload(
         _session: object,
@@ -115,6 +136,40 @@ def test_zeron_resolves_the_release_tag_to_an_immutable_public_commit(
         "repos/zeronsh/comet/releases/latest",
         f"repos/zeronsh/comet/commits/v{_VERSION}",
     ]
+    assert source_urls == [
+        f"https://raw.githubusercontent.com/zeronsh/comet/{_COMMIT}/crates/update/src/lib.rs"
+    ]
+
+
+def test_zeron_rejects_a_release_the_ownership_patch_cannot_anchor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Anchor drift must fail the pins stage, not the Darwin patchPhase."""
+    module = _load_updater_module()
+    responses = iter(({"tag_name": f"v{_VERSION}"}, {"sha": _COMMIT}))
+    monkeypatch.setattr(
+        "lib.update.updaters.github_release.fetch_github_api",
+        lambda *_args, **_kwargs: asyncio.sleep(0, result=next(responses)),
+    )
+    group = _load_patch_module()._PATCHES_115
+    _install_release_source(
+        monkeypatch,
+        module,
+        "\n".join(patch.old for patch in group[:-1]),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=f"Zeron {_VERSION} updater seam drifted",
+    ) as raised:
+        run_async(
+            module.ZeronUpdater().fetch_latest(
+                object(), context=UpdateContext(current=None)
+            )
+        )
+    assert str(raised.value.__cause__) == (
+        "no Zeron updater anchor set matches this source tree"
+    )
 
 
 @pytest.mark.parametrize(
@@ -243,6 +298,7 @@ def test_zeron_validates_the_materialized_bootstrap_source() -> None:
         ("fallback", "_PATCHES_FALLBACK"),
         ("0.2.94", "_PATCHES_094"),
         ("0.2.97", "_PATCHES_097"),
+        ("0.2.115", "_PATCHES_115"),
     ],
 )
 def test_zeron_nix_policy_patch_disables_every_update_path(
@@ -259,7 +315,7 @@ def test_zeron_nix_policy_patch_disables_every_update_path(
     for patch in patches:
         expected = expected.replace(patch.old, patch.new)
 
-    assert module._matching_patch_group(original)[0] == group_name
+    assert module.validate_update_source(original) == group_name
     assert module.main([str(tmp_path)]) == 0
     assert update_path.read_text(encoding="utf-8") == expected
     assert module._PATCH_SENTINEL in expected
@@ -294,14 +350,16 @@ def test_zeron_nix_policy_patch_rejects_source_drift_atomically(
 
 @pytest.mark.parametrize("copies", [0, 2])
 @pytest.mark.parametrize("anchor_index", range(13))
-def test_zeron_097_rejects_drift_in_every_ownership_guard(
+@pytest.mark.parametrize("group_attr", ["_PATCHES_097", "_PATCHES_115"])
+def test_zeron_desktop_layouts_reject_drift_in_every_ownership_guard(
     tmp_path: Path,
     copies: int,
     anchor_index: int,
+    group_attr: str,
 ) -> None:
     """New desktop and shared-checker paths must not escape atomic admission."""
     module = _load_patch_module()
-    group = module._PATCHES_097
+    group = getattr(module, group_attr)
     assert len(group) == 13
     target = group[anchor_index]
     patches = [
