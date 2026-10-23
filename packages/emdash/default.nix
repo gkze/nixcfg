@@ -579,3 +579,4 @@ stdenv.mkDerivation {
     mainProgram = pname;
   };
 }
+# pr-update-prepare timing probe (demo, do not merge)
