@@ -13,14 +13,20 @@ from typing import TYPE_CHECKING
 
 from AppKit import NSRunningApplication  # ty: ignore[unresolved-import]
 
-# pyobjc resolves framework symbols dynamically, so static analysis cannot see
-# these members; each suppression is scoped to its own import line.
-from ApplicationServices import (
-    AXUIElementCopyAttributeValue,  # ty: ignore[unresolved-import]
-    AXUIElementCreateApplication,  # ty: ignore[unresolved-import]
-    AXUIElementPerformAction,  # ty: ignore[unresolved-import]
-    AXUIElementSetAttributeValue,  # ty: ignore[unresolved-import]
-)
+# pyobjc is Darwin-only and resolves framework symbols dynamically. ty reports
+# the module unresolved on Linux and each member unresolved on Darwin, so keep
+# every pyobjc import on the single line that carries its suppression; the
+# isort splits stop these from being merged into one parenthesized import.
+from ApplicationServices import AXUIElementCopyAttributeValue  # ty: ignore[unresolved-import]
+
+# isort: split
+from ApplicationServices import AXUIElementCreateApplication  # ty: ignore[unresolved-import]
+
+# isort: split
+from ApplicationServices import AXUIElementPerformAction  # ty: ignore[unresolved-import]
+
+# isort: split
+from ApplicationServices import AXUIElementSetAttributeValue  # ty: ignore[unresolved-import]
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

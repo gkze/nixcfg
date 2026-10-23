@@ -70,7 +70,8 @@ plus the source-preparation helpers shared with the other V8 overlays:
 Three causes give the complexity:
 
 1. Goose is a large Rust workspace.
-1. Goose vendors a custom V8 integration that needs in-place patches.
+1. Goose 1.55.0 and earlier vendor a custom V8 integration that needs in-place
+   patches.
 1. crate2nix and `buildRustCrate` expose a few incompatibilities that Cargo
    normally hides.
 
@@ -133,29 +134,62 @@ flowchart TD
     `overlays/goose-v8/sources.json`. Darwin builds V8 natively with
     `v8NativeDrv`.
 - `patchedSrc`
-  - prepares the Goose workspace, then copies in `patchedV8Src` under
-    `vendor/v8-goose-src`
+  - prepares the Goose workspace. For the vendored-V8 layout, it also copies
+    in `patchedV8Src` under `vendor/v8-goose-src`
   - keeps Goose-only path rewrites, manifest edits, lockfile updates, and
     crate2nix inputs
   - serves crate2nix regeneration only. Production evaluation never inspects
     the tree.
 
+#### Vendored V8 is layout-dependent
+
+Goose 1.55.0 and earlier patch crates.io `v8` to a `vendor/v8` shim over the
+`v8-goose` fork, through `[patch.crates-io] v8 = { path = "vendor/v8" }`.
+Goose 1.56.0
+([aaif-goose/goose#12952](https://github.com/aaif-goose/goose/pull/12952))
+replaced the V8-based PCTX code mode with the pure-Rust Boa engine. It deleted
+`vendor/v8` and that patch entry, and its `Cargo.lock` has no `v8` or
+`v8-goose` package.
+
+That root-manifest patch entry is the single switch for the V8 wiring. Both
+`default.nix` and `patch_source.py` read it from the upstream source:
+
+- With the entry, the overlay injects the pinned fork, applies the V8
+  rewrites below, adds the `v8-goose` crate override, and checks that
+  `Cargo.nix` locks the fork's manifest version. The entry must be exactly
+  `{ path = "vendor/v8" }`.
+- Without the entry, none of the V8 wiring applies. `Cargo.nix` must not
+  contain `v8-goose`. Any `vendor/v8` or `vendor/v8-goose-src` directory, or any
+  `v8` or `v8-goose` package in `Cargo.lock`, fails `patch_source.py`. An
+  unreviewed V8 layout cannot build against an unpinned V8.
+
+The crate2nix target lists `vendor/v8-goose-src` as an externally overridden
+source path. The pipeline applies that exemption only when the built patched
+source contains the directory. When the directory exists, the path must still
+appear in the generated `Cargo.nix`.
+
+The `goose-v8` input, `overlays/goose-v8`, and `goose-cli-v8-native` still
+exist while the checked-in artifacts are on the vendored layout. Once every
+supported Goose release is V8-free, they are dead and can be removed together
+with the vendored branch.
+
 `patchedSrc` also does the non-negotiable update-time Goose-side surgery:
 
 - copy Goose from the locked non-flake `goose` input
-- fetch the Goose-specific `rusty_v8` fork from
-  `overlays/goose-v8/sources.json`
-- inject that fork under `vendor/v8-goose-src`
 - rewrite any Goose source files that still reference
   `documentation/static/img/logo_{dark,light}.png`, so those files read
   crate-local copies instead. Stage the copied logo assets only when
   necessary.
-- rewrite `vendor/v8/Cargo.toml`, so `v8-goose` uses the local path dependency
-- strip vendored `v8-goose-src` sections that matter only for work on
-  `rusty_v8` itself. These sections include `[workspace]`, `[profile.dev]`, dev
-  dependencies, examples/tests/benches. Cargo then sees a clean library
-  dependency inside the Goose workspace
-- rewrite the `v8-goose` entry in `Cargo.lock`
+- for the vendored-V8 layout only:
+  - fetch the Goose-specific `rusty_v8` fork from
+    `overlays/goose-v8/sources.json` and inject it under `vendor/v8-goose-src`
+  - rewrite `vendor/v8/Cargo.toml`, so `v8-goose` uses the local path
+    dependency
+  - strip vendored `v8-goose-src` sections that matter only for work on
+    `rusty_v8` itself. These sections include `[workspace]`, `[profile.dev]`,
+    dev dependencies, examples/tests/benches. Cargo then sees a clean library
+    dependency inside the Goose workspace
+  - rewrite the `v8-goose` entry in `Cargo.lock`
 - reconcile local `Cargo.lock` entries for workspace members that inherit
   `workspace.package.version`. Respect `workspace.members` and
   `workspace.exclude`. Leave explicitly versioned packages and registry
@@ -205,6 +239,7 @@ The overrides are intentionally centralized in `crateOverrides` inside
   - fixes `llama-cpp-sys-2`, which expects a Cargo env var that
     `buildRustCrate` does not currently export
 - `v8GooseOverride`
+  - applies only to the vendored-V8 layout
   - `v8GooseOverride = v8Build.mkCrateOverride`. The shared builder owns this
     override.
   - points the `v8-goose` crate directly at `patchedV8Src`

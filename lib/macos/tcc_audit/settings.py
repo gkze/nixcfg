@@ -9,12 +9,10 @@ outcome that prompt gates, which needs no SecurityAgent window list.
 import time
 from typing import TYPE_CHECKING, Protocol
 
-# pyobjc resolves framework symbols dynamically, so static analysis cannot see
-# these members; each suppression is scoped to its own import line.
-from AppKit import (
-    NSRunningApplication,  # ty: ignore[unresolved-import]
-    NSWorkspace,  # ty: ignore[unresolved-import]
-)
+# pyobjc is Darwin-only and resolves framework symbols dynamically. ty reports
+# the module unresolved on Linux and each member unresolved on Darwin, so keep
+# every pyobjc import on the single line that carries its suppression.
+from AppKit import NSRunningApplication, NSWorkspace  # ty: ignore[unresolved-import]
 from Foundation import NSURL  # ty: ignore[unresolved-import]
 
 from lib.macos.tcc_audit.model import pane_label
