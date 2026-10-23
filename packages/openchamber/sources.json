@@ -1,23 +1,18 @@
 {
-  "commit": "614d7f76e581a132a86575c03d3fa9aad5e624b6",
-  "electronVersion": "43.7.0",
+  "commit": "ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd",
+  "electronVersion": "44.9.0",
   "hashes": [
     {
-      "hash": "sha256-/njY2BbhqncqQ+gODoTmhBJKTT22VCFAhh8L3kwgHfU=",
+      "hash": "sha256-zQ26uuI0p+2tf7KYzcKLnPF+ERTumGz4uqezO9pObNg=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin",
-      "url": "https://github.com/anomalyco/opencode/archive/014614d35b397775e5d397a490fc72368c894ec2.tar.gz"
+      "url": "https://github.com/anomalyco/opencode/archive/843a6c514e606b436a7fe713422ace0a93ad3d61.tar.gz"
     },
     {
-      "hash": "sha256-E6McbIh+s0LBIZBtU52HU4Msh++QLqabYFUdXLnygo8=",
+      "hash": "sha256-DcwcWfg5rR3ZNgl0DrrCw1jtjnb+FT8wkAo1MGRTJKE=",
       "hashType": "nodeModulesHash",
       "platform": "aarch64-darwin",
-      "url": "https://github.com/openchamber/openchamber/archive/614d7f76e581a132a86575c03d3fa9aad5e624b6.tar.gz"
-    },
-    {
-      "hash": "sha256-2LliIYKK1vl6x6wKt+lYcjQa92MAHogD6CZ2UsJlJiA=",
-      "hashType": "sha256",
-      "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-darwin-aarch64.zip"
+      "url": "https://github.com/openchamber/openchamber/archive/ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd.tar.gz"
     },
     {
       "hash": "sha256-kJh6OhbX21VtiGrD1VHnttPt8KHPQ6yu1iLoZ2vh0S8=",
@@ -25,48 +20,53 @@
       "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-darwin-aarch64.zip"
     },
     {
+      "hash": "sha256-gK/UwGm0am+o8+xSC+vHUKeEPkqNW5WD0prUNsAKNAM=",
+      "hashType": "sha256",
+      "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.3/bun-darwin-aarch64.zip"
+    },
+    {
       "hash": "sha256-oM5nZTolH1bqQNLqsIeXk0ts/J201IdmeV2Xu5tNlg0=",
       "hashType": "sha256",
       "url": "https://registry.npmjs.org/node-addon-api/-/node-addon-api-8.3.0.tgz"
     },
     {
-      "hash": "sha256-YN10TB8kR8u1ekFfu6ZZTFo3RpT6j7fou/mLgveVlHE=",
+      "hash": "sha256-2yp7ixjZULbpylwckZr+wz/T3Sv+8areC+pan+eh8PE=",
       "hashType": "sha256",
-      "url": "https://registry.npmjs.org/sherpa-onnx-node/-/sherpa-onnx-node-1.12.28.tgz"
+      "url": "https://registry.npmjs.org/sherpa-onnx-node/-/sherpa-onnx-node-1.13.8.tgz"
     },
     {
-      "hash": "sha256-Q0DYH5GHQGZ6ICyMR5rWq86DvfWpQERGZeLYTJb7cj0=",
+      "hash": "sha256-KATNzF7z3PoUo30KC13Gm8uC6HA2a9bmJCZRfqY5D44=",
       "hashType": "srcHash",
-      "url": "https://github.com/anomalyco/opencode/archive/014614d35b397775e5d397a490fc72368c894ec2.tar.gz"
+      "url": "https://github.com/anomalyco/opencode/archive/843a6c514e606b436a7fe713422ace0a93ad3d61.tar.gz"
     },
     {
-      "hash": "sha256-xwu45dJOT1yUdU0P6Vjr8XexSeGOOfQ/zt1lhcASm/8=",
+      "hash": "sha256-yAkjeRJXSiGW7Pr6cmHKUeYiWZyd88raEMdaJvYhQLM=",
       "hashType": "srcHash",
-      "url": "https://github.com/k2-fsa/sherpa-onnx/archive/330609dab49be6ee8b30702918ca7abbbad1286a.tar.gz"
+      "url": "https://github.com/k2-fsa/sherpa-onnx/archive/11afbd009a7f8c08f4bcf2fc1b265d0df4670fbf.tar.gz"
     },
     {
-      "hash": "sha256-89hKIXndRBfLOzFPmeYA/Hnl7mUIFGB3hlpjdUcmhLI=",
+      "hash": "sha256-XBWaVb/OOAApl+llhDHw+lU6r7pMEJY+C25EYBymoPU=",
       "hashType": "srcHash",
-      "url": "https://github.com/openchamber/openchamber/archive/614d7f76e581a132a86575c03d3fa9aad5e624b6.tar.gz"
+      "url": "https://github.com/openchamber/openchamber/archive/ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd.tar.gz"
     }
   ],
   "pins": {
-    "bunVersion": "1.4.2",
-    "opencodeBunVersion": "1.3.14",
-    "opencodeCommit": "014614d35b397775e5d397a490fc72368c894ec2",
-    "opencodeVersion": "1.18.31",
-    "sherpaCommit": "330609dab49be6ee8b30702918ca7abbbad1286a",
-    "sherpaVersion": "1.13.3",
-    "sherpaWrapperVersion": "1.12.28"
+    "bunVersion": "1.4.3",
+    "opencodeBunVersion": "1.4.2",
+    "opencodeCommit": "843a6c514e606b436a7fe713422ace0a93ad3d61",
+    "opencodeVersion": "2.0.32",
+    "sherpaCommit": "11afbd009a7f8c08f4bcf2fc1b265d0df4670fbf",
+    "sherpaVersion": "1.13.8",
+    "sherpaWrapperVersion": "1.13.8"
   },
   "urls": {
-    "bun": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-darwin-aarch64.zip",
+    "bun": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.3/bun-darwin-aarch64.zip",
     "nodeAddonApi": "https://registry.npmjs.org/node-addon-api/-/node-addon-api-8.3.0.tgz",
-    "openchamber": "https://github.com/openchamber/openchamber/archive/614d7f76e581a132a86575c03d3fa9aad5e624b6.tar.gz",
-    "opencode": "https://github.com/anomalyco/opencode/archive/014614d35b397775e5d397a490fc72368c894ec2.tar.gz",
-    "opencodeBun": "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-darwin-aarch64.zip",
-    "sherpaOnnx": "https://github.com/k2-fsa/sherpa-onnx/archive/330609dab49be6ee8b30702918ca7abbbad1286a.tar.gz",
-    "sherpaOnnxNode": "https://registry.npmjs.org/sherpa-onnx-node/-/sherpa-onnx-node-1.12.28.tgz"
+    "openchamber": "https://github.com/openchamber/openchamber/archive/ad73d11a6e7cafa0880e238f92ba7cf5cf2cb1fd.tar.gz",
+    "opencode": "https://github.com/anomalyco/opencode/archive/843a6c514e606b436a7fe713422ace0a93ad3d61.tar.gz",
+    "opencodeBun": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-darwin-aarch64.zip",
+    "sherpaOnnx": "https://github.com/k2-fsa/sherpa-onnx/archive/11afbd009a7f8c08f4bcf2fc1b265d0df4670fbf.tar.gz",
+    "sherpaOnnxNode": "https://registry.npmjs.org/sherpa-onnx-node/-/sherpa-onnx-node-1.13.8.tgz"
   },
-  "version": "1.24.2"
+  "version": "2.5.0"
 }

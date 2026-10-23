@@ -28,3 +28,4 @@ canary-slots: 0
 2026-10-22T18:20:00Z one Update run after publish prek fix (t3code lockfile fixture yamlfmt-clean, tolerant tarball parse)
 2026-10-22T18:45:00Z one Update run after 39829870830 prepare-pins fix (aside per-architecture DMG redirects)
 2026-10-22T22:39:00Z one Update run after 39850402233 prepare-darwin fix (image reclaim keeps min-free through measured peak; auto-GC deleted t3code-desktop drv)
+2026-10-23T01:13:00Z one Update run after 39867887491 eval fix (OpenChamber 2.5.0 needs Sherpa 1.13.8: bump nixpkgs-openchamber-compat; carry 2.5.0 sources + Electron 44.9.0 runtime)
