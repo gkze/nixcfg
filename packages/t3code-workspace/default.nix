@@ -26,3 +26,4 @@
   inherit t3codeWorkspaceSource;
   sourceHashPackageName = "t3code-workspace";
 }).node_modules
+# pr-update-prepare timing probe (demo, do not merge)

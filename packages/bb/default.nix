@@ -306,3 +306,4 @@ stdenv.mkDerivation {
     sourceProvenance = with sourceTypes; [ fromSource ];
   };
 }
+# pr-update-prepare timing probe (demo, do not merge)
