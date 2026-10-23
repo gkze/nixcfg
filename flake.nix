@@ -3,10 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    # OpenChamber's source-built addon requires exactly Sherpa 1.13.3 and its
+    # OpenChamber's source-built addon requires exactly Sherpa 1.13.8 and its
     # validated ONNX runtime tuple. Keep this ABI pin local to that application.
     nixpkgs-openchamber-compat = {
-      url = "github:NixOS/nixpkgs/ef34387ddd751e1ab8857adf4676492d32eb24ec";
+      url = "github:NixOS/nixpkgs/5adc50831c259f87faeb09ddf930d43597197473";
       flake = false;
     };
     nix-homebrew = {
